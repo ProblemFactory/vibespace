@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.404 — 2026-11-16
+
+### Changed
+- Website logins: in a named browser profile, chats point to a field and the vault fills it or makes a signup password.
+- Allowing a website login says plainly what it means: that chat can sign in as you there, and our fence stops accidental reads and wrong sites.
+
 ## 2.369.403 — 2026-11-15
 
 ### Changed

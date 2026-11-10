@@ -190,6 +190,20 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
 const chromeArg = (() => { const i = process.argv.indexOf('--chrome'); return i > 0 ? process.argv[i + 1] : null; })();
 const CHROME = chromeArg || [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has — as the pairing-ui harness reads it)
 const CHROME_HOME = path.join(ROOT, 'chrome-home'); fs.mkdirSync(path.join(CHROME_HOME, 'Downloads'), { recursive: true });
+if (!CHROME || !fs.existsSync(CHROME)) { console.error('SKIPPED: no chrome/chromium on this box'); cleanup(); process.exit(2); }
+let AB = null;
+{
+  let abSkipWhy = 'no agent-browser on PATH';
+  try {
+    const v = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: { ...BASE_ENV, HOME } }).trim();
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(v);
+    if (m && (Number(m[1]) > 0 || Number(m[2]) >= 32)) AB = v;
+    else abSkipWhy = `agent-browser ${v} is below the 0.32 floor`;
+  } catch (e) {
+    abSkipWhy = `no agent-browser on PATH (${String(e.message).slice(0, 80)})`;
+  }
+  if (!AB) { console.error(`SKIPPED: ${abSkipWhy}`); cleanup(); process.exit(2); }
+}
 async function launchChrome() {
   const port = await freePort();
   const dir = path.join(ROOT, 'chrome'); fs.mkdirSync(dir, { recursive: true });
@@ -323,12 +337,14 @@ else {
   for (const m of cmp.unclassified) { const r = await c6.call(m, {}, s6); if (!(codeOf(r) === 'method_unclassified' && r.error.message.includes(m) && r.error.message.includes(C.CENSUS_CHROMES.join(' + ')))) extraWrong.push(`${m}: ${JSON.stringify(r).slice(0, 160)}`); }
   ok(extraWrong.length === 0 && (await oracle('document.title')) === 'census', `⑥ PAUSED · Chrome ${cv}'s ${cmp.unclassified.length} method(s) without a row${cmp.unclassified.length ? ` (${cmp.unclassified.join(', ')})` : ''} + the synthetic one: each method_unclassified BY NAME (the words name the censused Chromes ${C.CENSUS_CHROMES.join(' + ')}) — the page unchanged`, extraWrong.join('\n    '));
   // lane-cdp-154: Chrome 154's two READS answer while the user drives (forwarded — the browser answers, never our refusal)
+  const cvMajor = Number(String(cv).split('.')[0]) || 0;
   const lists = (m) => proto.json.domains.some((d) => d.domain === m.split('.')[0] && (d.commands || []).some((c) => c.name === m.split('.')[1]));
   if (lists('Ads.getAdScripts') && lists('Browser.getGlobalPrivacyControl')) {
     const ads = await c6.call('Ads.getAdScripts', {}, s6);
     const gpc = await c6.call('Browser.getGlobalPrivacyControl', {});
     ok(codeOf(ads) === null && ads.result && Array.isArray(ads.result.newScripts) && codeOf(gpc) === null && ((gpc.result && typeof gpc.result.gpc === 'boolean') || (gpc.error && /Global Privacy Control/.test(gpc.error.message))), `⑥ PAUSED · read (Chrome ${cv}): Ads.getAdScripts answers (${ads.result ? ads.result.newScripts.length : '?'} scripts) and Browser.getGlobalPrivacyControl is FORWARDED (Chrome's own answer: ${JSON.stringify(gpc.result || gpc.error).slice(0, 80)})`);
-  } else skip(`⑥ Chrome ${cv} lists no Ads.getAdScripts / Browser.getGlobalPrivacyControl — the Chrome 154 read legs need 154+`);
+  } else if (cvMajor >= 154) ok(false, `⑥ Chrome ${cv} (>= 154) lists no Ads.getAdScripts / Browser.getGlobalPrivacyControl`);
+  else console.log(`  · ⑥ Chrome ${cv} predates Ads.getAdScripts / Browser.getGlobalPrivacyControl (154+)`);
   // lane mediation-chrome-155: Chrome 155's three DOM methods on the paused lease — the forced spelling / grammar marker
   // (a VIEW act: measured, it changes the picture and the page sees nothing) is refused and the marked paragraph's
   // PICTURE is unchanged (a PNG clip read through the raw endpoint); the popover-invoker read and the release of the
@@ -352,7 +368,8 @@ else {
     const ia = await c6.call('DOM.getImplicitAnchorCandidates', { nodeId: POP }, s6);
     const cl = await c6.call('DOM.clearTextMarkers', {}, s6);
     ok(codeOf(ia) === null && ia.result && String(ia.result.backendNodeIds) === String(btnB) && codeOf(cl) === null && cl.result !== undefined && (await oracle('document.getElementById("pop").matches(":popover-open")')) === false, `⑥ PAUSED · read + harmless (Chrome ${cv}): DOM.getImplicitAnchorCandidates answers with the popover's button (backend node ${btnB}) and the popover stays closed; DOM.clearTextMarkers is FORWARDED (Chrome's own answer)`, JSON.stringify({ ia, cl }).slice(0, 240));
-  } else skip(`⑥ Chrome ${cv} lists no DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates — the Chrome 155 legs need 155+`);
+  } else if (cvMajor >= 155) ok(false, `⑥ Chrome ${cv} (>= 155) lists no DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates`);
+  else console.log(`  · ⑥ Chrome ${cv} predates DOM.setTextMarker / clearTextMarkers / getImplicitAnchorCandidates (155+)`);
   // lane chrome-156-drift: Chrome 156's new FindInPage domain on the paused lease — a VIEW act all through (measured on
   // 156.0.8078.47: the page scrolls to the match, the match is highlighted and the user's focused field is blurred) is
   // refused, and the page neither scrolled nor lost its focused field (the oracle reads the raw endpoint); the sub-app
@@ -368,7 +385,8 @@ else {
     ok(codeOf(ff) === 'browser_interrupted' && codeOf(st) === 'browser_interrupted' && (await at()) === before && JSON.parse(before)[0] === 0, `⑥ PAUSED · view (Chrome ${cv}): FindInPage.findFirst and FindInPage.stop are browser_interrupted — the page did not scroll and its focused field kept the focus (${before})`, JSON.stringify({ ff, st }).slice(0, 240));
     const sa = await c6.call('Page.getSubApps', {}, s6);
     ok(codeOf(sa) === null && sa.result && Array.isArray(sa.result.subApps), `⑥ PAUSED · read (Chrome ${cv}): Page.getSubApps answers (${sa.result ? sa.result.subApps.length : '?'} sub-apps — a plain page is no Isolated Web App)`, JSON.stringify(sa).slice(0, 200));
-  } else skip(`⑥ Chrome ${cv} lists no FindInPage domain / Page.getSubApps — the Chrome 156 legs need 156+`);
+  } else if (cvMajor >= 156) ok(false, `⑥ Chrome ${cv} (>= 156) lists no FindInPage domain / Page.getSubApps`);
+  else console.log(`  · ⑥ Chrome ${cv} predates FindInPage domain / Page.getSubApps (156+)`);
   ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
   const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
   ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
@@ -416,7 +434,8 @@ else {
     ok(codeOf(sg) === 'method_refused' && /Global Privacy Control/.test(sg.error.message), `⑥ handed back, Chrome ${cv}: Browser.setGlobalPrivacyControl is method_refused on the lease — the mediator's refusal, never Chrome's own answer`, sg.error && sg.error.message);
     try { await raw.call('Target.closeTarget', { targetId: camT }); } catch { /* gone */ }
     camSrv.close();
-  } else skip(`⑥ Chrome ${cv} lists no Browser.addMockCamera / setGlobalPrivacyControl — the Chrome 154 setter legs need 154+`);
+  } else if (cvMajor >= 154) ok(false, `⑥ Chrome ${cv} (>= 154) lists no Browser.addMockCamera / setGlobalPrivacyControl`);
+  else console.log(`  · ⑥ Chrome ${cv} predates Browser.addMockCamera / setGlobalPrivacyControl (154+)`);
   // lane mediation-chrome-155: handed back, the marker goes through and the picture CHANGES (the oracle sees a marker when
   // one is set — the paused leg's positive control) while the page's own DOM stays as it was (a view act, never a page
   // mutation); the lease's release of its own markers puts the picture back byte-identical
@@ -448,8 +467,6 @@ else {
 
 // ═══ ② the real agent-browser as two sessions through two mediated urls ═════
 console.log('— ② the real agent-browser: two sessions, two urls, one chrome — each sees only its own tabs; a takeover is a typed refusal in the CLI\'s own JSON');
-let AB = null;
-try { const v = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: { ...BASE_ENV, HOME } }).trim(); const m = /(\d+)\.(\d+)\.(\d+)/.exec(v); if (m && (Number(m[1]) > 0 || Number(m[2]) >= 32)) AB = v; else skip(`agent-browser ${v} is below the 0.32 floor`); } catch (e) { skip(`no agent-browser on PATH (${String(e.message).slice(0, 80)})`); }
 // r3 (finding 1): the router's flag tables are a MEASUREMENT of the binary, not of its --help — re-measured
 // here on the INSTALLED binary (launch-free: `<flag> zzq9 session list` for every flag-shaped string in it).
 // An upgrade that adds or re-types a global flag fails this leg by name until the tables follow it.
@@ -1436,13 +1453,13 @@ console.log('— ⑨b lane engine-spi-egress: the real agent-browser on the fake
   })();
 }
 
-// ═══ ⑩ lane browser-login (design-custom-browser-plugin §4): A WEB LOGIN THROUGH THE REAL CLI ═══
+// ═══ ⑩ lane browser-login (r22 pivot: «agent locates, hub fills»): `fill <target> --vault` THROUGH THE REAL CLI ON THE KERNEL ═══
 // ⑨'s world + a REAL vault engine (its own data dir), a memory grants store and the REAL logins module wired into the REAL watch
-// and routes: the fake kernel — launched by the REAL agent-browser as the profile's browser — reports a login form on a
-// navigation (`#vs-login=`), `vibespace-browser login` fills it from the vault (VibeSpace.fillCredential on the watch's own page
-// session — 2 fields, the entry's origin expected; the agent's output holds no value), a signup through the vault is saved
-// automatically (vault-minted, ONE notice) and a submission the page typed itself (`#vs-typed=`) is saved as agent-typed.
-console.log('— ⑩ lane browser-login: the real agent-browser on the FAKE KERNEL — `vibespace-browser login` fills a vault login, a signup is saved as vault-minted, an agent-typed one as agent-typed');
+// and routes: the fake kernel — launched by the REAL agent-browser as the profile's browser — runs the IDENTICAL isolated-world
+// CDP primitive as standard Chrome: `vibespace-browser login` is retired (`[login_retired]`), `fill #u/#pw --vault <entry>/<field>`
+// types on the watch's own session with zero secret in agent output, and `fill #npw --vault new:<site>#bob/password --generate`
+// seals a 24-char `pending:"register"` slot + files ONE human-only Confirm/Discard For-you card.
+console.log('— ⑩ lane browser-login (r22): the real agent-browser on the FAKE KERNEL — `login` is retired, `fill <target> --vault` fills saved & generated pending slots with human-only promotion');
 {
   const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js');
   const D10 = require('../src/server/browser-dialogs.js'), BL10 = require('../src/browser-login.js'), VE10 = require('../src/server/vault-engine.js');
@@ -1467,8 +1484,7 @@ console.log('— ⑩ lane browser-login: the real agent-browser on the FAKE KERN
     const until10 = async (fn, ms = 8000) => { const t0 = Date.now(); for (;;) { let v; try { v = fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(25); } };
     const KEY10 = 'bk-0000f10a', TOKEN10 = 'vsst_mc10_login', SID10 = 'sess-mc10', CID10 = 'conv-mc10';
     const SITE10 = 'https://shop.example.test';
-    const PW10 = ['mc10', crypto.randomBytes(6).toString('hex'), 'Kx', String(crypto.randomInt(10, 99))].join('-');   // built at run time, never a literal
-    const TYPED10 = ['typed', crypto.randomBytes(5).toString('hex'), 'Qa9'].join('-');
+    const PW10 = ['mc10', crypto.randomBytes(6).toString('hex'), 'Kx', String(crypto.randomInt(10, 99))].join('-');
     const eng10 = VE10.create({ dataDir: VD, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
     const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY10]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG10 });
     let srv10 = null, dw10 = null;
@@ -1497,32 +1513,36 @@ console.log('— ⑩ lane browser-login: the real agent-browser on the FAKE KERN
         c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err }); });
       });
       const kcalls = () => { try { return fs.readFileSync(path.join(pk.dir, 'fake-kernel-calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
-      const formsNow = () => dw10.loginForms(pk.id);
       let r = await cli10(['open', `${SITE10}/login#vs-login=login`]);
+      await until10(() => (dw10.stats()[0] || {}).kernel);
       const st10 = dw10.stats()[0] || {};
-      await until10(() => formsNow().length === 1);
-      ok(r.code === 0 && st10.kernel && st10.kernel.features.includes('credentials') && formsNow().length === 1 && formsNow()[0].origin === SITE10 && formsNow()[0].kind === 'login', `⑩ the REAL ${ver10} drives the kernel; its credentialFormDetected reaches the watch — a login form of ${SITE10} on the tab`, JSON.stringify({ r, forms: formsNow(), kernel: st10.kernel }));
+      ok(r.code === 0 && st10.kernel && st10.kernel.protocol === 1, `⑩ the REAL ${ver10} drives the kernel on ${SITE10}`, JSON.stringify({ r, kernel: st10.kernel }));
       ok(logins10.addOwn({ origin: SITE10, username: 'alice', password: PW10 }).ok && logins10.grant(`web-login:${SITE10}#alice`, 'this-account', `session:${CID10}`).ok, '⑩ the owner keeps a login for the site in the vault and grants this account to the conversation');
-      r = await cli10(['login']);
-      const fills = kcalls().filter((c) => c.method === 'VibeSpace.fillCredential');
+      const ret10 = await cli10(['login']);
+      ok(ret10.code === 1 && /\[login_retired\]/.test(ret10.err), '⑩ `vibespace-browser login` is refused [login_retired] on the kernel too');
+      const ru = await cli10(['fill', '#u', '--vault', `${SITE10}#alice/user`]);
+      const rp = await cli10(['fill', '#pw', '--vault', `${SITE10}#alice/password`]);
+      const inserts = kcalls().filter((c) => c.method === 'Input.insertText');
       const watchSess = new Set(kcalls().filter((c) => c.method === 'VibeSpace.enable').map((c) => c.session));
-      ok(r.code === 0 && /^Filled the user name and the password on https:\/\/shop\.example\.test \(alice\) from the vault/.test(r.out) && fills.length === 1 && Object.keys(fills[0].params.values || {}).length === 2 && fills[0].params.expectedOrigin === SITE10 && watchSess.has(fills[0].session), '⑩ `vibespace-browser login` = ONE VibeSpace.fillCredential on the watch\'s own page session: the kernel counts 2 filled fields, the entry\'s origin expected', JSON.stringify({ r, fills: fills.map((f) => ({ n: Object.keys(f.params.values || {}).length, expectedOrigin: f.params.expectedOrigin, submit: f.params.submit })) }));
-      ok(!r.out.includes(PW10) && !r.err.includes(PW10) && /Receipt vr-[0-9a-f]{12}\./.test(r.out), '⑩ the agent\'s answer (stdout + stderr) carries no value — what was filled and a receipt');
-      // a signup THROUGH the vault — saved automatically, ONE notice
+      ok(ru.code === 0 && rp.code === 0 && inserts.some((c) => c.params?.textLen === PW10.length && watchSess.has(c.session)),
+        '⑩ `fill #u/#pw --vault` runs Hub isolated-world fill + Input.insertText on the watch\'s own page session over the kernel',
+        JSON.stringify({ ru, rp, inserts }));
+      ok(!rp.out.includes(PW10) && !rp.err.includes(PW10) && /Receipt vr-[0-9a-f]{12}\./.test(rp.out), '⑩ the agent\'s answer (stdout + stderr) carries no value — what was filled and a receipt');
+      // `new:<site>#bob/password --generate` — sealed into `pending: "register"` (24 chars) + ONE human-only Confirm/Discard card
       r = await cli10(['open', `${SITE10}/signup#vs-login=signup`]);
-      await until10(() => formsNow().some((f) => f.kind === 'signup'));
       logins10.grant(`web-login:${SITE10}#alice`, 'any-account', `session:${CID10}`);
-      r = await cli10(['login', '--new-user', 'bob', '--generate', '--submit']);
-      await until10(() => notices10.length >= 1);
+      r = await cli10(['fill', '#npw', '--vault', `new:${SITE10}#bob/password`, '--generate']);
       const bob = eng10.secretGet(`web-login:${SITE10}#bob`);
       const bobRec = bob.ok && bob.value ? BL10.recordOf(bob.value.toString('utf8')) : null;
-      ok(r.code === 0 && /the vault made a 20-character password/.test(r.out) && bobRec && bobRec.source === 'vault-minted' && bobRec.strength === 'generated' && !bobRec.pending && bobRec.submittedAt && !r.out.includes(bobRec.password) && notices10.length === 1 && notices10[0].kind === 'notice' && /registered bob/.test(notices10[0].text), '⑩ `login --new-user bob --generate --submit`: the kernel submits, the vault SAVED it automatically (source vault-minted, confirmed) and ONE notice tells the owner — the agent never saw the password', JSON.stringify({ r: r.out.slice(0, 300), rec: bobRec && { source: bobRec.source, pending: bobRec.pending || null }, notices10 }));
-      // a submission the page typed itself (the agent bypassed --generate) — saved as agent-typed
-      r = await cli10(['open', `${SITE10}/welcome#vs-typed=carol:${encodeURIComponent(TYPED10)}`]);
-      await until10(() => notices10.length >= 2);
-      const carol = eng10.secretGet(`web-login:${SITE10}#carol`);
-      const carolRec = carol.ok && carol.value ? BL10.recordOf(carol.value.toString('utf8')) : null;
-      ok(carolRec && carolRec.source === 'agent-typed' && carolRec.strength === 'unknown' && carolRec.password === TYPED10 && carolRec.createdIn && carolRec.createdIn.conversation === 'Chat kernel' && notices10.length === 2 && /typed itself/.test(notices10[1].text), '⑩ a credential the agent typed itself (credentialSubmitted with a password the vault never minted) is saved automatically, marked agent-typed — never discarded', JSON.stringify({ rec: carolRec && { source: carolRec.source, strength: carolRec.strength }, notices10 }));
+      const bobPw = bobRec?.pending?.password || '';
+      ok(r.code === 0 && bobRec && bobRec.current === null && bobRec.pending?.kind === 'register' && bobPw.length === 24
+        && !r.out.includes(bobPw) && !r.err.includes(bobPw)
+        && notices10.length === 1 && notices10[0].action?.type === 'save-login' && notices10[0].action?.pending === 'register',
+        '⑩ `fill #npw --vault new:...#bob/password --generate`: seals 24-char pending:"register" (current===null) and files ONE human-only Confirm/Discard For-you card',
+        JSON.stringify({ out: r.out.slice(0, 300), pending: bobRec?.pending?.kind, len: bobPw.length, notices10 }));
+      ok(logins10.confirmOwn(`web-login:${SITE10}#bob`, { who: 'owner' }).ok
+        && BL10.recordOf(eng10.secretGet(`web-login:${SITE10}#bob`).value.toString('utf8')).current?.password === bobPw,
+        '⑩ owner Confirm promotes bob\'s pending password to current («只有人能转正»)');
       await kk.stop(pk.id, { why: 'user' });
       LD10.shutdown();
       await sleep(600);
@@ -1544,5 +1564,7 @@ console.log('— ⑩ lane browser-login: the real agent-browser on the FAKE KERN
 if (med) med.shutdown();
 if (raw) raw.ws.close();
 cleanup();
-console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`);
-process.exit(fail ? 1 : 0);
+if (fail) { console.log(`\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})`); process.exit(1); }
+if (skipped) { console.error(`\nSKIPPED (${skipped} skipped, ${pass} passed — a skip is never green)`); process.exit(2); }
+console.log(`\nALL PASS (${pass})`);
+process.exit(0);

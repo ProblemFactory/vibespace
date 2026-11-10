@@ -378,31 +378,22 @@ each answer as a command:
   (`vibespace-browser permission <kind> allow [origin]`), downloads are saved, opening another program is refused, a
   payment request is cancelled.
 
-### Signing in on the custom kernel — `vibespace-browser login`
+### Signing in and registering — `vibespace-browser fill <@ref|selector> --vault <entry>/<field>`
 
-On the custom kernel the password manager is the owner's vault (lane browser-login): the kernel reports each login form a page
-shows, and `login` has the kernel fill it with a login the vault keeps — you never see the password or the two-step code, so
-never ask the owner for one.
+Website logins live in the owner's vault (`web-login:<origin>#<user>`). **Vault login filling (and `vibespace-vault request --kind login`) runs ONLY on a local mediated named browser profile (`vibespace-browser use <profile>`).** It is refused by name (`[login_channel_unmediated]`) on your conversation's own temporary browser (and helper child browsers), on a profile running on a paired machine, on an external raw-CDP browser (`--provider cdp`), or from a remote session — a temporary browser runs unmediated CDP and loses the sign-in as soon as it closes. When refused, VibeSpace lists the local named profiles your conversation is already authorized to use (`vibespace-browser use <profile>`), or explains how to ask the owner for access when none are authorized (`vibespace-vault request --kind login` refuses at the request step too, before filing a For-you card). On a local named profile (both standard Chrome and custom browser kernels) you locate the form inputs yourself (`snapshot -i`), have VibeSpace type each field from the vault into that exact site's input (VibeSpace's own responses, logs, and agent APIs never hand back the password or two-step code), and submit the form yourself (`click @submit` or `press Enter`). `vibespace-browser login` is retired (`[login_retired]`).
 
-On standard Chrome `login` is WITHDRAWN in 2.369.364: it answers `login_fill_withdrawn` before anything is read from the
-vault, and nothing is typed (a page could claim another site's origin; a fallback put the secret in a script). Ask the
-owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host <site>` — one card,
-the login lands as a web login; vault-manual.md) or ask a person to take over
-(`vibespace-browser ask-human "<what you need>"`) — never retry `login` there; it returns when its fix is accepted.
-
-* `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
-  your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
-  The answer names what was filled and a receipt. Refusals by name: `login_no_form` (open the sign-in page first),
-  `login_fill_withdrawn` (standard Chrome — above), `login_phishing` (a login is filled only on its own site: exact origin
-  and port, https, never a frame of another site), `login_not_granted` (the owner grants it in the Vault window — tell
-  them which site), `login_no_entry`, `login_ambiguous`, `vault_locked` (the owner already knows — do not ask them to unlock).
-* `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
-  vault makes a strong password that fits the site's rules (`password_rules_unsupported` when none can), the kernel fills it,
-  and when the page takes the form the login is saved for the owner automatically (they get one notice). Use this instead of
-  typing a password yourself — a password you type is saved too, but marked as one you know.
-* `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault makes the new one.
-* A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the kernel is answered by `login`
-  the same way.
+* **Standard sign-in flow (on a local named profile: `vibespace-browser use <profile>` first):**
+  1. `vibespace-browser snapshot -i` — inspect the sign-in page and read the `@ref` handles of the username, password, OTP, and submit elements.
+  2. `vibespace-browser fill @e1 --vault example.com/user` — fill the username (add `#<user>` or `--user <name>` if the vault holds multiple accounts on that site).
+  3. `vibespace-browser fill @e2 --vault example.com/password` — fill the password from the vault (VibeSpace returns a `vault-use` receipt, never the secret value). If the page also asks for a paired two-step code: `vibespace-browser fill @e3 --vault example.com/otp` (prefer an input declaring `autocomplete="one-time-code"` when the page has one; otherwise locate the single-line code input yourself).
+  4. `vibespace-browser click @e4` (or `press Enter`) — submit the form.
+* **Accidental-leak read fence (`[login_fill_live]`):** from the moment `fill --vault` enters the tab until the secret leaves the page, VibeSpace's read commands (`snapshot`, `eval`, `screenshot`, `get`, `wait --fn/--text`, and inbound CDP read calls on the local mediated profile channel) are refused with `[login_fill_live]` as an accidental-read guard (wait for the fill and login submission to finish before reading; if a fill fails with nothing left on the page, reads work immediately). You can still `fill --vault` another field (such as `/otp`), `click`, `press`, `wait <ms>`, or navigate; once the form submits (navigating away or completing its same-origin request, which automatically wipes the password box — and re-arms `[login_fill_live]` if a site script re-populates that value onto the same document), read commands work again.
+* **Registering a new account or changing a password (`--generate`):**
+  * New account: `vibespace-browser fill @e2 --vault new:example.com#alice/password --generate` (requires the owner's «Any account on this site» or «Any site» grant under Vault → Web logins → Use for…).
+  * Password change on an existing entry: `vibespace-browser fill @e1 --vault example.com#alice/password` (current password), then `vibespace-browser fill @e2 --vault example.com#alice/password --generate` (new password), and `vibespace-browser fill @e3 --vault example.com#alice/pending` if the form has a confirm-password box.
+  * `--generate` always mints a 24-character password with uppercase, lowercase, digits, and symbols into the entry's `pending` slot; only the owner promotes `pending` to `current` (Confirm / Discard in For you or Vault → Web logins). Before confirmation, `/password` fills `current` when `current` exists (so `/previous`, `/password`, and `/pending` stay addressable during a password change) and fills `pending` on an unconfirmed new registration.
+  * If a site rejects the default 24-character generated password (for example, a 6-digit PIN rule) or no vault login exists yet, attach to your local named profile first and ask the owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host <site>` — one card, the login lands as a web login; `vault-manual.md`) or ask a person to take over in live view (`vibespace-browser ask-human "<what you need>"`).
+* **Named refusals:** `login_channel_unmediated` (current browser is temporary/ephemeral, on a paired machine, external raw CDP, or remote — switch to an authorized local named profile with `vibespace-browser use <profile>` first), `login_phishing` (tab origin does not match the entry's exact https origin, or localhost http), `login_in_frame` (target is an `<iframe>`/`<frame>` or inside a child frame — open the frame's own URL in a top-level tab), `login_form_changed` (page script stole focus away from the target input or mutated it during fill), `login_fence_unavailable` (browser request interception could not be confirmed active on the tab — nothing was filled), `login_bad_field` (secret slot pointed at a non-password input), `target_not_found` (`@ref` is not in the current tab's latest `snapshot -i`, or selector matched nothing), `login_not_granted`, `login_no_entry`, `login_ambiguous`, `login_pending_exists` (already has an unconfirmed `pending` password), `login_no_previous`, `login_not_pending`, `login_no_otp`, `code_paced` (two-step code pace limit reached — wait up to a minute), `vault_locked` (the owner already knows — do not ask them to unlock).
 
 ### A page waiting for a passkey — `[passkey_open]` / `[passkey_ask]`; the passkeys your browser holds
 
@@ -978,7 +969,7 @@ Browsing: `vibespace-browser <verb>` — open <url> / snapshot / click @ref / fi
 ## When the page asks for a file or a sign-in
 
 - **A file chooser** (an upload button): no file window ever shows in your browser and nothing is picked. Your next command's result says so (`[page_prompt]`). Upload with `vibespace-browser upload <selector of the file input> <path>` (a file in your conversation's folder). The page keeps running meanwhile.
-- **An HTTP sign-in** (the browser's own username/password box, basic or digest): only the user can answer it — they type it in the live view, and you never see it. (On the custom kernel a login the vault keeps answers it: `vibespace-browser login`.) Tell the user which site asks; do not retry the page in a loop. After 60 s it also shows in their For you tray.
+- **An HTTP sign-in** (the browser's own username/password box, basic or digest, on both standard Chrome and the custom kernel): only the user can answer it — they type it in the live view (or on the custom kernel, you can only dismiss it with `vibespace-browser answer <id> cancel`; `fill --vault` is for page elements only), and you never see the password. Tell the user which site asks; do not retry the page in a loop. After 60 s it also shows in their For you tray.
 - A sign-in also ends the command that ran into it AT ONCE with that sentence (`[page_prompt]`) — never after its timeout.
 - **A permission** (location, notifications, camera, microphone, …): every kind is DENIED ahead, so a page asking is answered at once. To allow one for your tab's site: `vibespace-browser permission <kind> allow [origin] [<lat>,<lon>]` (geolocation needs the position to answer with one); `deny` puts it back. The user sees the line in the live view.
 - **Print** (`window.print()`): the print window is closed by VibeSpace (in the hidden window it froze the page) and your next result says so once. For a printout: `vibespace-browser pdf <path>`.

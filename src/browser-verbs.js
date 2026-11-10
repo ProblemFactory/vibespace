@@ -56,9 +56,8 @@ const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'st
 // watch — every kind is denied ahead; 0.38.1 has no `permission` verb, so no help fixture names it)
 // lane browser-surfaces (2026-10-25): + `answer <id> <answerId> [--value k=v] [--file p]` and `surfaces` (a browser kernel's prompts —
 // VibeSpace.answerSurface through the watch; 0.38.1 has neither verb)
-// lane browser-login (2026-10-25): + `login [<origin>] [--user <u>] [--submit] | --new-user <u> --generate` (a login the vault keeps,
-// filled by a custom browser kernel through VibeSpace.fillCredential — the agent never sees a value; 0.38.1 has no such verb)
-const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey', 'permission', 'answer', 'surfaces', 'login']);
+// lane vault-login r22 (2026-11-04): `login` retired to REFUSED_VERBS (`login_retired`) — replaced by `fill <@ref|selector> --vault <entry>/<field>`
+const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey', 'permission', 'answer', 'surfaces']);
 
 /** Page verbs (the browser CLI 0.32.0's `--help` + `skills get core --full`
  *  census, design §3.2 rows 1–2 + `close` + D4/D5's pass-throughs). `profiles`
@@ -100,6 +99,10 @@ const REFUSED_VERBS = Object.freeze({
   // 0.38.1 (lane H re-measure): WebMCP (experimental) invokes tools the PAGE declares — a channel this CLI neither
   // mediates nor records in the action trace the user reviews, so it is not offered until it can be both
   webmcp: NOT_OFFERED('WebMCP runs tools the PAGE declares — an experimental channel VibeSpace neither mediates nor records in the action trace the user reviews', 'drive the page through its own UI: `vibespace-browser snapshot`, then `click` / `fill` its @refs'),
+  // lane vault-login r22 (owner 2026-11-04): automatic form login retired in favor of agent-targeted element fill
+  login: R('login_retired',
+    'automatic form login (`vibespace-browser login`) was retired — VibeSpace no longer guesses form fields or landed pages',
+    'run `vibespace-browser snapshot -i` to find the fields, then `vibespace-browser fill @ref --vault <entry>/user` and `vibespace-browser fill @ref --vault <entry>/password` (or `--vault new:<site>[#<user>]/password --generate` to register)'),
 });
 
 /** Flags that decide WHICH browser a command lands on — the lease decides. */
@@ -591,6 +594,9 @@ function judgeAt(body, vi, ni, { escape = false, profile = null, inBatch = false
     const li = body.indexOf('load', vi + 1);
     const files = li >= 0 ? body.slice(li + 1).filter((t) => !isFlag(t)) : [];
     return { kind: 'page', verb, sub, argv: body, profile, escape, ...(files.length ? { stateFiles: files } : {}) };
+  }
+  if (inBatch && verb === 'fill' && hasVaultFillFlag(body)) {
+    return refused(base, R('vault_fill_in_batch', '`fill --vault` cannot run inside a batch — each vault fill resolves its element and arms its live-fill fence one command at a time', 'run `vibespace-browser fill <@ref|selector> --vault <entry>/<field>` on its own'));
   }
   if (PAGE_SET.has(verb)) return { kind: 'page', verb, sub, argv: body, profile, escape };
   if (escape && !inBatch) return { kind: 'escape', verb, sub, argv: body, profile, escape: true };
@@ -1333,6 +1339,122 @@ function browserCell(b) {
   if (b.state === 'stopped' && typeof b.note === 'string' && b.note) return b.note.startsWith('stopped') ? b.note : `stopped — ${b.note}`; // lane browser-daemon-survives-update: an ended daemon is never a silent exit — the row's words
   return `${b.state || 'unknown'}${chrome ? ' pid ' + chrome : ''}`;
 }
+
+// ── lane vault-login r22: `fill <@ref|selector> --vault <entry>/<field>` + `snapshot` @ref extraction ──
+function hasVaultFillFlag(argv) {
+  for (const raw of Array.isArray(argv) ? argv : []) {
+    const t = String(raw ?? '');
+    if (t === '--') break;
+    if (t === '--vault' || t.startsWith('--vault=') || t === '--generate') return true;
+  }
+  return false;
+}
+
+function parseFillVaultArgs(argv) {
+  const remedy = 'vibespace-browser fill @ref --vault <entry>/<field>   (or --vault new:<site>[#<user>]/password --generate; if a site rejects the 24-character generated password, ask the owner to set one via vibespace-vault request)';
+  const bad = (error) => ({ ok: false, code: 'bad-request', error, remedy });
+  const a = (Array.isArray(argv) ? argv : []).map((x) => String(x ?? ''));
+  const pos = [];
+  let spec = null;
+  let generate = false;
+  let user = null;
+  let wantsJson = false;
+  for (let i = 0; i < a.length; i++) {
+    const tok = a[i];
+    if (tok === '--') { pos.push(...a.slice(i + 1)); break; }
+    if (tok === '--json') {
+      if (a[i + 1] === 'true' || a[i + 1] === 'false') wantsJson = a[++i] === 'true';
+      else wantsJson = true;
+      continue;
+    }
+    if (tok.startsWith('--json=')) { wantsJson = tok.slice(7) !== 'false'; continue; }
+    if (tok === '--pin-tab') { if (a[i + 1] === 'true' || a[i + 1] === 'false') i++; continue; }
+    if (tok.startsWith('--pin-tab=')) continue;
+    if (tok === '--generate') { generate = true; continue; }
+    if (tok === '--vault') {
+      const v = a[++i];
+      if (v === undefined || (isFlag(v) && v !== '--') || !v.trim()) return bad('`--vault` takes `<entry>/<field>` (field = user | password | previous | pending | otp)');
+      spec = v.trim();
+      continue;
+    }
+    if (tok.startsWith('--vault=')) {
+      const v = tok.slice('--vault='.length).trim();
+      if (!v) return bad('`--vault` takes `<entry>/<field>` (field = user | password | previous | pending | otp)');
+      spec = v;
+      continue;
+    }
+    if (tok === '--user') {
+      const v = a[++i];
+      if (v === undefined || (isFlag(v) && v !== '--') || !v.trim()) return bad('`--user` takes an account user name');
+      user = v.trim();
+      continue;
+    }
+    if (tok.startsWith('--user=')) {
+      const v = tok.slice('--user='.length).trim();
+      if (!v) return bad('`--user` takes an account user name');
+      user = v;
+      continue;
+    }
+    if (isFlag(tok)) {
+      return bad(`\`fill --vault\` does not take \`${clip(tok, 40)}\` — generated passwords use the default 24-character 4-class policy; if a site rejects it, ask the owner to set one via \`vibespace-vault request\``);
+    }
+    pos.push(tok);
+  }
+  if (pos[0] !== 'fill') return bad('expected `fill <@ref|selector> --vault <entry>/<field>`');
+  if (pos.length < 2 || !pos[1].trim()) return bad('`fill --vault` needs a target element (`@ref` from `snapshot -i`, or a top-frame CSS selector)');
+  if (pos.length > 2) return bad('`fill --vault` takes `<@ref|selector>` and `--vault <entry>/<field>` — never a literal value on the command line');
+  if (!spec) return bad('`--generate` requires `--vault new:<site>[#<user>]/password` (to register) or `--vault <entry>/password` (to change a password)');
+  return { ok: true, target: pos[1].trim(), spec, generate, user, wantsJson };
+}
+
+function parseSnapshotRefs(outText) {
+  const raw = String(outText == null ? '' : outText);
+  if (!raw.trim()) return [];
+  const out = [];
+  const seen = new Map();
+  const pushRef = (refId, roleRaw, nameRaw, explicitNth = null) => {
+    if (out.length >= 16384) return;
+    const cleanRef = String(refId || '').replace(/^@/, '').trim();
+    const role = String(roleRaw || '').trim().toLowerCase();
+    if (!cleanRef || !role) return;
+    const name = String(nameRaw == null ? '' : nameRaw).replace(/\s+/g, ' ').trim().slice(0, 2048);
+    const key = `${role}\0${name}`;
+    const prev = seen.get(key) || 0;
+    const nth = Number.isInteger(explicitNth) && explicitNth >= 0 ? explicitNth : prev;
+    seen.set(key, Math.max(prev, nth + 1));
+    out.push({ ref: `@${cleanRef}`, role, name, nth });
+  };
+  let body = raw;
+  if (/^\s*\{/.test(raw)) {
+    try {
+      const j = JSON.parse(raw);
+      const data = j && typeof j.data === 'object' && j.data ? j.data : j;
+      if (data && data.refs && typeof data.refs === 'object' && !Array.isArray(data.refs)) {
+        for (const [k, v] of Object.entries(data.refs)) {
+          if (!v || typeof v !== 'object') continue;
+          pushRef(k, v.role, v.name, Number.isInteger(v.nth) ? v.nth : null);
+        }
+        if (out.length) return out;
+      }
+      if (data && typeof data.snapshot === 'string') body = data.snapshot;
+    } catch { /* fall through to line scan */ }
+  }
+  for (const line of body.split(/\r?\n/)) {
+    const rm = /\[ref=([A-Za-z0-9_-]+)\]/.exec(line);
+    if (!rm) continue;
+    const nm = /\[nth=(\d+)\]/.exec(line);
+    const head = line.replace(/^\s*-\s*/, '');
+    const roleM = /^([A-Za-z][A-Za-z0-9_-]*)/.exec(head);
+    if (!roleM) continue;
+    const role = roleM[1];
+    const afterRole = head.slice(role.length);
+    const qm = /^\s+"((?:\\.|[^"\\])*)"/.exec(afterRole);
+    const name = qm ? qm[1].replace(/\\(["\\])/g, '$1') : '';
+    pushRef(rm[1], role, name, nm ? Number(nm[1]) : null);
+  }
+  return out;
+}
+
 module.exports = {
   browserCell, REAL_BINARY, SHIM_MARKER, OURS, OURS_PAGE, PAGE_VERBS, REFUSED_VERBS, IDENTITY_FLAGS, RAW_CDP_FLAGS, LAUNCH_FLAGS, OPEN_FLAGS,
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
@@ -1351,4 +1473,6 @@ module.exports = {
   WRITE_VERBS, WRITE_FLAGS, READ_FLAGS, PATH_OPTION_ALLOW, writeTargetsAt, writePathVerdict,
   // lane L r5: the frame rule (exact path slots, the physical path, the daemon's directory)
   SECRET_COMPONENTS, IMAGE_PATH_RE, pathSlots, rewriteSlots, physicalPath, DAEMON_CWD_PREFIX, daemonCwdVerdict, ensureDaemonCwd, verbAt,
+  // lane vault-login r22
+  hasVaultFillFlag, parseFillVaultArgs, parseSnapshotRefs,
 };

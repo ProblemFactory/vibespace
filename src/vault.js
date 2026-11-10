@@ -38,7 +38,9 @@ const CODES = Object.freeze(['vault_locked', 'vault_not_set_up', 'already_set_up
   'password_too_long', 'password_not_text', 'same_as_sign_in', 'same_password', 'migration_failed', 'human_only', 'cross_site']);
 
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
-const isBox = (b) => !!b && typeof b === 'object' && [b.iv, b.tag, b.ct].every((s) => typeof s === 'string' && B64.test(s));
+const isBox = (b) => !!b && typeof b === 'object'
+  && [b.iv, b.tag, b.ct].every((s) => typeof s === 'string' && B64.test(s))
+  && (b.rev === undefined || (Number.isInteger(b.rev) && b.rev >= 1));
 
 /** Fill a Buffer with zeros (a no-op on anything else). */
 function zero(...bufs) { for (const b of bufs) if (Buffer.isBuffer(b)) b.fill(0); }
@@ -93,6 +95,7 @@ function recordShapeOk(rec) {
   if (typeof k.salt !== 'string' || !B64.test(k.salt)) return false;
   if (typeof rec.check !== 'string' || typeof rec.verifier !== 'string' || !isBox(rec.wrapped)) return false;
   if (!rec.entries || typeof rec.entries !== 'object' || Array.isArray(rec.entries)) return false;
+  if (rec.loginRevFloor !== undefined && (!Number.isInteger(rec.loginRevFloor) || rec.loginRevFloor < 0)) return false;
   return Object.values(rec.entries).every(isBox);
 }
 

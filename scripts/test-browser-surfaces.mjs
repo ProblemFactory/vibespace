@@ -162,12 +162,12 @@ function censusOf(mod) {
   const sinks = Object.entries(SF.KIND_TABLE).filter(([, r]) => r.sink).map(([k, r]) => `${k}:${r.sink}`);
   ok(sinks.join() === 'webauthn:webauthn,credential:credentials' && SF.sinkOf('webauthn', { features: ['surfaces', 'webauthn'] }) === 'webauthn' && SF.sinkOf('webauthn', { features: ['surfaces'] }) === null && SF.sinkOf('webauthn', null) === null && SF.sinkOf('js-dialog', { features: ['surfaces', 'webauthn', 'credentials'] }) === null && SF.sinkOf('no-such-kind', { features: ['webauthn'] }) === null,
     'the webauthn row\'s new answerer (lane passkey-sink): `sink: \'webauthn\'` — sinkOf answers it only on a kernel whose features list webauthn (else P1\'s held card, unchanged); lane browser-login: the credential row\'s is `credentials`; no other row has one', sinks);
-  // lane browser-login (P3): the credential row's ANSWERER — on a kernel whose features list `credentials` the web login road fills the form
-  // (`vibespace-browser login`, the vault's values through VibeSpace.fillCredential); the surface stays NOTED (the agent may only dismiss it)
-  // and its line names the verb
+  // lane browser-login (P3, r22 pivot): the credential row's ANSWERER — on a kernel whose features list `credentials` the web login road fills
+  // fields (`vibespace-browser fill @ref --vault <entry>/<field>`); the surface stays NOTED (the agent may only dismiss it)
+  // and its line names the primitive
   ok(SF.sinkOf('credential', { features: ['surfaces', 'credentials'] }) === 'credentials' && SF.sinkOf('credential', { features: ['surfaces', 'webauthn'] }) === null && SF.KIND_TABLE.credential.cls === 'noted' && SF.KIND_TABLE.credential.agent === 'dismiss'
-    && /A login the vault keeps fills it: vibespace-browser login/.test(SF.surfaceNote({ state: 'open', block: { ...SF.surfaceBlock({ surfaceId: 'surf-cred-9', kind: 'credential', origin: 'https://x.example', answers: [{ id: 'dismiss', label: 'Not now', kind: 'dismiss' }] }, { now: 1, pageText: pt }), sink: 'credentials' } })),
-    'the credential row\'s answerer (lane browser-login): `sink: \'credentials\'` on a kernel that lists it — still NOTED, the agent dismisses only, and its line names `vibespace-browser login` (the vault fills — never a value to the agent)');
+    && /A login the vault keeps fills it: vibespace-browser fill @ref --vault/.test(SF.surfaceNote({ state: 'open', block: { ...SF.surfaceBlock({ surfaceId: 'surf-cred-9', kind: 'credential', origin: 'https://x.example', answers: [{ id: 'dismiss', label: 'Not now', kind: 'dismiss' }] }, { now: 1, pageText: pt }), sink: 'credentials' } })),
+    'the credential row\'s answerer (lane browser-login): `sink: \'credentials\'` on a kernel that lists it — still NOTED, the agent dismisses only, and its line names `vibespace-browser fill @ref --vault` (the vault fills — never a value to the agent)');
   ok(bad.length === 0, `THE CENSUS: ${SF.SURFACE_KINDS.length} kinds × (class · who answers · the policy's rule · the detail keys · the kernel's specialised answer ids) ≡ the design table — every kind a row, every row a kind`, bad);
   const gone = sfMutant("  fullscreen: { cls: 'noted', agent: 'all', policy: null, modality: 'non-modal', detail: { origin: 'origin' } },\n", '', 'no-row');
   ok(gone && censusOf(gone).some((x) => /fullscreen: no row/.test(x)), 'CONTROL: a module with the fullscreen row deleted is RED by name (a missing row = red)');

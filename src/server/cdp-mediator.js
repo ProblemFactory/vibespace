@@ -92,7 +92,7 @@ const VERSION_RETRY_MS = 5000;
  *  the close reason the grant's live connections get (verify r3 M3). */
 const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
-function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS, windowAnswerMs = FETCH_MS } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
+function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS, windowAnswerMs = FETCH_MS, loginFence: initLoginFence = null } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
   /** lane chrome-157: the methods an unclassified refusal was said for in the journal, this RUN of this mediator (the hub makes
    *  ONE a run) — once a method, never per call; r2: at most UNCLASSIFIED_SAY of them, the rest counted (`unsaid`) */
   const unclassifiedSaid = new Set();
@@ -106,6 +106,8 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   const grants = new Map();   // token → grant
   const byKey = new Map();    // grantKey → token
   let server = null, wss = null, port = null, listening = null, closed = false;
+  let loginFence = initLoginFence && typeof initLoginFence === 'object' ? initLoginFence : null;
+  function setLoginFence(f) { loginFence = f && typeof f === 'object' ? f : null; }
 
   const view = (g) => M.grantView(g);
   function mintToken() { for (;;) { const t = crypto.randomBytes(24).toString('base64url'); if (M.isToken(t) && !grants.has(t)) return t; } }
@@ -197,8 +199,29 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       wss.handleUpgrade(req, socket, head, (ws) => wire(g, p, ws, up));
     });
   }
+  function epochFor(profileId, tid, scope) {
+    if (!loginFence || typeof loginFence.fillEpochOf !== 'function') return 0;
+    if (tid) return Number(loginFence.fillEpochOf(profileId, tid)) || 0;
+    if (scope && scope.targets && scope.targets.size) {
+      let sum = 0;
+      for (const st of scope.targets) sum += Number(loginFence.fillEpochOf(profileId, st)) || 0;
+      return sum;
+    }
+    return Number(loginFence.fillEpochOf(profileId, null)) || 0;
+  }
+  function liveFillFor(profileId, tid, scope) {
+    if (!loginFence || typeof loginFence.liveFillTarget !== 'function') return null;
+    if (tid) return loginFence.liveFillTarget(profileId, tid) || null;
+    if (scope && scope.targets) {
+      for (const st of scope.targets) {
+        const lf = loginFence.liveFillTarget(profileId, st);
+        if (lf) return lf;
+      }
+    }
+    return null;
+  }
   function wire(g, p, ws, up) {
-    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null };
+    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null };
     askVersion(g, conn);   // (lane chrome-157 r2: the browser of THIS connection — a restart / relaunch closes it, the reconnect reads the new one)
     g.conns.add(conn);
     g.lastUsedAt = now();
@@ -252,37 +275,106 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
-      if (credit) {
-        conn.credits = conn.credits || new Map(); conn.credits.set(msg.id, credit);
-        // verify r3: a SPENT credit waits for the browser's own answer — measured: a mouse dispatch on a HIDDEN tab never
-        // answers, and the 1.3 s expiry then said "never asked" for a call that WAS forwarded. The expiry is re-armed as
-        // `no_reply` (bounded: the entry leaves conn.credits with it; a close settles it `upstream_gone` first)
-        credit.spent = true; if (credit.timer) clearTimeout(credit.timer);
-        credit.timer = setTimeout(() => { if (conn.credits && conn.credits.get(msg.id) === credit) conn.credits.delete(msg.id); settleCredit(credit, M.creditExpiryReceipt(credit)); }, SPENT_CREDIT_REPLY_MS);
-        if (credit.timer.unref) credit.timer.unref();
-      }
-      if (msg.method === 'Browser.setDownloadBehavior') {   // (lane chrome-157: THE WINDOW — the act, whatever its wire shape: no session, a browser-target session, a page session)
-        const prm = msg.params && typeof msg.params === 'object' ? msg.params : {};
-        // the closure list S3 / S4: what THIS lease asked on THIS channel (a page session, or the connection itself) — the events the
-        // mediator forwards are exactly the ones it asked for, wherever it asked; never more because the window needed to see them
-        conn.asked = conn.asked || new Map(); conn.asked.set(msg.sessionId == null ? '' : String(msg.sessionId), prm.eventsEnabled === true);
-        if (prm.browserContextId == null) {   // (a context of the lease's own was forwarded as it is by the verdict; another's was refused)
-          const r = stepWindow(g.profileId, { kind: 'set', by: g.key, behavior: prm.behavior, now: now(), paused, boundMs: windowBoundMs }, { g, conn, sid: msg.sessionId == null ? null : String(msg.sessionId) });
-          if (r.refuse) {
+      const sid = msg.sessionId == null || msg.sessionId === '' ? null : String(msg.sessionId);
+      const tid = p.kind === 'page' ? p.targetId : (sid ? g.scope.sessions.get(sid) || null : null);
+      const forwardAfterFence = () => {
+        if (loginFence && !credit) {
+          if (msg.method === 'Network.getRequestPostData' || msg.method === 'Fetch.getRequestPostData' || msg.method === 'Network.replayXHR') {
+            const reqId = msg.params && msg.params.requestId ? String(msg.params.requestId) : '';
+            if (reqId && typeof loginFence.isCredRequestId === 'function' && loginFence.isCredRequestId(g.profileId, reqId)) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${msg.method} is refused because that request carried a vault login credential`, sid))); } catch { /* gone */ }
+              return;
+            }
+          }
+          if (msg.method === 'IO.read') {
+            const handle = msg.params && msg.params.handle ? String(msg.params.handle) : '';
+            if (handle && conn.taintedStreams && conn.taintedStreams.has(handle)) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'IO.read is refused because that trace overlapped a vault login fill — start a fresh trace after signing in', sid))); } catch { /* gone */ }
+              return;
+            }
+          } else if (msg.method === 'IO.close') {
+            const handle = msg.params && msg.params.handle ? String(msg.params.handle) : '';
+            if (handle && conn.taintedStreams) conn.taintedStreams.delete(handle);
+          }
+          if (typeof loginFence.noteActiveTarget === 'function') {
+            const actTid = msg.method === 'Target.activateTarget' && msg.params && msg.params.targetId ? String(msg.params.targetId) : (msg.method === 'Page.bringToFront' && tid ? tid : null);
+            if (actTid && (!g.scope || !g.scope.targets || g.scope.targets.has(actTid))) {
+              try { loginFence.noteActiveTarget(g.profileId, g.browserKey, actTid); } catch { /* optional */ }
+            }
+          }
+          const lf = liveFillFor(g.profileId, tid, g.scope);
+          const profileFenced = !lf && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId);
+          if (msg.method === 'Target.sendMessageToTarget' && (lf || profileFenced)) {
             g.refusals = (g.refusals || 0) + 1;
-            const words = r.refuse.code === M.INTERRUPTED_CODE ? M.pausedWords(msg.method, M.pausedVerdict(msg.method)) : `${msg.method} ${r.refuse.words}`;
-            if (credit) settleCredit(credit, { ok: false, code: r.refuse.code, error: words });
-            try { ws.send(JSON.stringify(M.refusal(msg.id, r.refuse.code, words, v.pending.sessionId))); } catch { /* gone */ }
+            try { ws.send(JSON.stringify(M.refusal(msg.id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', sid))); } catch { /* gone */ }
             return;
           }
-          if (prm.behavior !== 'default') v.rewrite = { ...prm, eventsEnabled: true };   // (the mediator must SEE its download begin and end on the channel it set; the lease is told only what it asked for, and only its own)
+          if (lf) {
+            const allowVerb = typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
+            const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null });
+            if (lfv.refuse) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
+              return;
+            }
+          }
+          if (msg.method === 'Tracing.start') {
+            conn.tracingActive = true;
+            conn.traceTainted = Boolean(lf || profileFenced);
+          }
         }
+        if (credit) {
+          conn.credits = conn.credits || new Map(); conn.credits.set(msg.id, credit);
+          // verify r3: a SPENT credit waits for the browser's own answer — measured: a mouse dispatch on a HIDDEN tab never
+          // answers, and the 1.3 s expiry then said "never asked" for a call that WAS forwarded. The expiry is re-armed as
+          // `no_reply` (bounded: the entry leaves conn.credits with it; a close settles it `upstream_gone` first)
+          credit.spent = true; if (credit.timer) clearTimeout(credit.timer);
+          credit.timer = setTimeout(() => { if (conn.credits && conn.credits.get(msg.id) === credit) conn.credits.delete(msg.id); settleCredit(credit, M.creditExpiryReceipt(credit)); }, SPENT_CREDIT_REPLY_MS);
+          if (credit.timer.unref) credit.timer.unref();
+        }
+        v.pending.targetId = tid;
+        v.pending.hadCredit = Boolean(credit);
+        v.pending.fillEpoch = loginFence && !credit ? epochFor(g.profileId, tid, g.scope) : 0;
+        if (msg.method === 'Browser.setDownloadBehavior') {   // (lane chrome-157: THE WINDOW — the act, whatever its wire shape: no session, a browser-target session, a page session)
+          const prm = msg.params && typeof msg.params === 'object' ? msg.params : {};
+          // the closure list S3 / S4: what THIS lease asked on THIS channel (a page session, or the connection itself) — the events the
+          // mediator forwards are exactly the ones it asked for, wherever it asked; never more because the window needed to see them
+          conn.asked = conn.asked || new Map(); conn.asked.set(msg.sessionId == null ? '' : String(msg.sessionId), prm.eventsEnabled === true);
+          if (prm.browserContextId == null) {   // (a context of the lease's own was forwarded as it is by the verdict; another's was refused)
+            const r = stepWindow(g.profileId, { kind: 'set', by: g.key, behavior: prm.behavior, now: now(), paused, boundMs: windowBoundMs }, { g, conn, sid: msg.sessionId == null ? null : String(msg.sessionId) });
+            if (r.refuse) {
+              g.refusals = (g.refusals || 0) + 1;
+              const words = r.refuse.code === M.INTERRUPTED_CODE ? M.pausedWords(msg.method, M.pausedVerdict(msg.method)) : `${msg.method} ${r.refuse.words}`;
+              if (credit) settleCredit(credit, { ok: false, code: r.refuse.code, error: words });
+              try { ws.send(JSON.stringify(M.refusal(msg.id, r.refuse.code, words, v.pending.sessionId))); } catch { /* gone */ }
+              return;
+            }
+            if (prm.behavior !== 'default') v.rewrite = { ...prm, eventsEnabled: true };   // (the mediator must SEE its download begin and end on the channel it set; the lease is told only what it asked for, and only its own)
+          }
+        }
+        conn.pending.set(msg.id, v.pending);
+        if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
+        if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
+        try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
+      };
+      if (loginFence && !credit && typeof loginFence.hasPostLiftGuard === 'function' && loginFence.hasPostLiftGuard(g.profileId, tid, g.scope)
+        && M.liveFillCdpVerdict(msg.method, { allowVerb: null, params: msg.params || null }).refuse) {
+        conn.postLiftChain = Promise.resolve(conn.postLiftChain)
+          .then(() => loginFence.recheckPostLift(g.profileId, tid, g.scope))
+          .catch(() => {})
+          .then(() => { if (ws.readyState === WebSocket.OPEN) forwardAfterFence(); });
+        return;
       }
-      conn.pending.set(msg.id, v.pending);
-      if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
-      if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
-      try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
+      forwardAfterFence();
     }
+    const sendClient = (str) => {
+      const out = loginFence && typeof loginFence.scrubCdpFrame === 'function'
+        ? loginFence.scrubCdpFrame(g.profileId, str)
+        : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
+      ws.send(out);
+    };
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
@@ -309,7 +401,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         // S3: heard ONCE per channel it asked on — a copy on a channel it never asked for (the window's own) is the mediator's alone
         const deliver = !!(guid && g.scope.downloads.has(guid) && conn.asked && conn.asked.get(msg.sessionId == null ? '' : String(msg.sessionId)) === true);
         const ended = msg.method === 'Browser.downloadProgress' && (p0.state === 'completed' || p0.state === 'canceled');
-        if (deliver) { try { ws.send(String(data)); } catch { /* gone */ } } else g.dropped = (g.dropped || 0) + 1;
+        if (deliver) { try { sendClient(String(data)); } catch { /* gone */ } } else g.dropped = (g.dropped || 0) + 1;   // (lane chrome-157, the vault-login rebase: a download's frames pass the scrub by value too, as every frame the agent receives)
         if (ended && guid) {
           if (mine) stepWindow(g.profileId, { kind: 'end', guid }, { g, conn });
           const rec = g.scope.downloads.get(guid);
@@ -325,13 +417,72 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         // verify r6: a SUCCESS reply means the call had reached Chrome and TOOK EFFECT (a fill's insertText, a click): the takeover's
         // record counts it as `landed` so the agent is told "cut short — but this reached the page" rather than a plain "cut"
         if (pend.aborted) { const rec = g.lastInterrupt && pend.interruptAt === g.lastInterrupt.at ? g.lastInterrupt : null; if (rec && !msg.error) { rec.landed = (rec.landed || 0) + 1; if (!rec.landedMethods.includes(pend.method)) rec.landedMethods.push(pend.method); } return; }
-        try { for (const ev of out.emit) ws.send(JSON.stringify(ev)); ws.send(JSON.stringify(out.reply)); } catch { /* gone */ }
+        if (loginFence && !pend.hadCredit) {
+          const rTid = pend.targetId || (conn.kind === 'page' ? conn.targetId : (pend.sessionId && g.scope ? g.scope.sessions.get(String(pend.sessionId)) || null : null));
+          const curEpoch = epochFor(g.profileId, rTid, g.scope);
+          const epochMoved = pend.fillEpoch !== undefined && curEpoch !== pend.fillEpoch;
+          const lfNow = liveFillFor(g.profileId, rTid, g.scope);
+          if (lfNow || epochMoved) {
+            const allowVerb = !epochMoved && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
+            const lfv = M.liveFillCdpVerdict(pend.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: pend.params || null });
+            if (lfv.refuse) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, pend.sessionId))); } catch { /* gone */ }
+              return;
+            }
+          }
+          if (pend.method === 'Network.getRequestPostData' || pend.method === 'Fetch.getRequestPostData') {
+            const reqId = pend.params && pend.params.requestId ? String(pend.params.requestId) : '';
+            const postBody = msg.result && typeof msg.result.postData === 'string' ? msg.result.postData : '';
+            const credHit = (reqId && typeof loginFence.isCredRequestId === 'function' && loginFence.isCredRequestId(g.profileId, reqId))
+              || (postBody && typeof loginFence.bodyCarriesCred === 'function' && loginFence.bodyCarriesCred(g.profileId, postBody, reqId));
+            if (credHit) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, `${pend.method} is refused because that request carried a vault login credential`, pend.sessionId))); } catch { /* gone */ }
+              return;
+            }
+          }
+        }
+        try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); sendClient(JSON.stringify(out.reply)); } catch { /* gone */ }
         return;
       }
       if (msg.id != null) return; // a reply to nothing we forwarded
       const ev = M.filterEvent(msg, g.scope);
       if (!ev) { g.dropped = (g.dropped || 0) + 1; return; }
-      try { ws.send(ev === msg ? String(data) : JSON.stringify(ev)); } catch { /* gone */ }
+      if (loginFence) {
+        const evSid = ev.sessionId == null ? null : String(ev.sessionId);
+        const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
+        if (M.LIVE_FILL_DROPPED_EVENTS.has(ev.method) && liveFillFor(g.profileId, evTid, g.scope)) {
+          g.dropped = (g.dropped || 0) + 1;
+          return;
+        }
+        if (ev.method === 'Target.receivedMessageFromTarget' && ev.params && typeof ev.params.message === 'string') {
+          const innerSid = ev.params.sessionId ? String(ev.params.sessionId) : null;
+          const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : null;
+          if (liveFillFor(g.profileId, innerTid, g.scope)) {
+            let inner = null;
+            try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
+            if (!inner || M.LIVE_FILL_DROPPED_EVENTS.has(inner.method)) { g.dropped = (g.dropped || 0) + 1; return; }
+          }
+        }
+        if (ev.method === 'Tracing.dataCollected') {
+          if (conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId))) {
+            conn.traceTainted = true;
+            g.dropped = (g.dropped || 0) + 1;
+            return;
+          }
+        } else if (ev.method === 'Tracing.tracingComplete') {
+          const wasTainted = Boolean(conn.traceTainted || (typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId)));
+          conn.tracingActive = false;
+          conn.traceTainted = false;
+          if (wasTainted && ev.params && ev.params.stream) {
+            conn.taintedStreams = conn.taintedStreams || new Set();
+            conn.taintedStreams.add(String(ev.params.stream));
+            while (conn.taintedStreams.size > 64) conn.taintedStreams.delete(conn.taintedStreams.values().next().value);
+          }
+        }
+      }
+      try { sendClient(ev === msg ? String(data) : JSON.stringify(ev)); } catch { /* gone */ }
     });
     ws.on('close', () => closeBoth(1000, ''));
     ws.on('error', () => closeBoth(1011, 'client error'));
@@ -411,6 +562,39 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     rec.aborted = out.aborted.length; rec.methods = [...new Set(out.aborted.map((a) => a.method))]; rec.terminated = out.terminated;
     g.lastInterrupt = rec;
     if (out.aborted.length) log.log?.(`[cdp-mediator] ${g.browserKey} on ${g.profileId}: the user took over — ${out.aborted.length} call(s) in flight interrupted (${rec.methods.join(', ')}; browser_interrupted)${out.terminated ? `, Runtime.terminateExecution on ${out.terminated} session(s)` : ''}`);
+    return out;
+  }
+  /** lane vault-login r28 (Rule 2): when a login fill starts or arms on `(profileId, targetId)`, abort every in-flight
+   *  read/refused CDP call on that tab across all grants (both `mediated` and `scope` modes) with `login_fill_live`,
+   *  swallow the browser's late reply, and taint any active `Tracing` session — WITHOUT sending `Runtime.terminateExecution`,
+   *  so the login page's own scripts and form submission continue undisturbed. */
+  function interruptForFill({ profileId, targetId = null } = {}) {
+    const pid = String(profileId || '');
+    const wantTid = targetId ? String(targetId) : null;
+    const out = { aborted: [], at: now() };
+    if (!pid) return out;
+    for (const g of grants.values()) {
+      if (g.profileId !== pid) continue;
+      const inGrantScope = !wantTid || (g.scope && g.scope.targets && g.scope.targets.has(wantTid));
+      for (const conn of g.conns) {
+        if (!inGrantScope && !(conn.kind === 'page' && conn.targetId === wantTid)) continue;
+        if (conn.tracingActive && (!wantTid || conn.kind !== 'page' || conn.targetId === wantTid)) {
+          conn.traceTainted = true;
+        }
+        for (const [id, p] of conn.pending) {
+          if (!p || p.aborted || p.hadCredit || id === undefined || id === null) continue;
+          const pTid = p.targetId || (conn.kind === 'page' ? conn.targetId : (p.sessionId && g.scope ? g.scope.sessions.get(String(p.sessionId)) || null : null));
+          if (wantTid && pTid && pTid !== wantTid) continue;
+          const lfv = M.liveFillCdpVerdict(p.method, { allowVerb: null, params: p.params || null });
+          if (!lfv.refuse) continue;
+          p.aborted = true;
+          p.fillAborted = true;
+          g.refusals = (g.refusals || 0) + 1;
+          try { conn.ws.send(JSON.stringify(M.refusal(id, lfv.code, lfv.error, p.sessionId))); } catch { /* gone */ }
+          out.aborted.push({ method: p.method, sessionId: p.sessionId || null, browserKey: g.browserKey });
+        }
+      }
+    }
     return out;
   }
   /** lane S2: settle a credit's waiter once (the bridge's input receipt). */
@@ -654,7 +838,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     for (const conn of g.conns) for (const p of conn.pending.values()) if (p && p.aborted && p.interruptAt === g.lastInterrupt.at) unsettled++;
     return { ...g.lastInterrupt, methods: [...g.lastInterrupt.methods], landedMethods: [...(g.lastInterrupt.landedMethods || [])], terminateAnswers: [...g.lastInterrupt.terminateAnswers], unsettled };
   }
-  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, putBackDownloads, adopt, onTold: (fn) => { if (typeof fn !== 'function') return () => { }; toldListeners.add(fn); return () => toldListeners.delete(fn); }, windowToldOf: (profileId, browserKey) => { const g = grantOf(profileId, browserKey); return g && g.windowTold ? { ...g.windowTold } : null; }, downloadWindowOf: (profileId) => { const w = windows.get(String(profileId)); return w && w.st ? { phase: w.st.phase, browserKey: w.browserKey, began: w.st.began ? w.st.began.length : 0, pending: !!w.st.pending, ordered: !!w.st.ordered, then: w.st.then || null, deadline: w.st.deadline || null } : null; }, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
+  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, putBackDownloads, adopt, onTold: (fn) => { if (typeof fn !== 'function') return () => { }; toldListeners.add(fn); return () => toldListeners.delete(fn); }, windowToldOf: (profileId, browserKey) => { const g = grantOf(profileId, browserKey); return g && g.windowTold ? { ...g.windowTold } : null; }, downloadWindowOf: (profileId) => { const w = windows.get(String(profileId)); return w && w.st ? { phase: w.st.phase, browserKey: w.browserKey, began: w.st.began ? w.st.began.length : 0, pending: !!w.st.pending, ordered: !!w.st.ordered, then: w.st.then || null, deadline: w.st.deadline || null } : null; }, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptForFill, interruptionOf, setLoginFence, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
 module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS, FETCH_MS, ADOPT_TRIES, ADOPT_GAP_MS, ADOPT_WAIT_MS };

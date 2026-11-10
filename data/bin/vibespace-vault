@@ -33,7 +33,7 @@ CC.cliStart({ tool: 'vibespace-vault', flags: ['--call-timeout'] });
 // lane vault-agent-own (the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): what THIS conversation stored itself (mint / put,
 // `totp add`, `login add`) is its own to use — no switch, no grant, no card (a minted value going to another host than its
 // `--for` asks the user once per host). A seed or a password you hold goes in as ITS KIND: `totp add` (the vault computes the
-// code) and `login add` (the browser kernel fills it) — never a free `put`; you never need the value again.
+// code) and `login add` (`vibespace-browser fill <@ref> --vault` types it onto that site) — never a free `put`; VibeSpace never hands it back.
 // lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): `request "<what>" --purpose
 // "<why>" [--into <row>.<field> | --kind api-key|password|secret|login] [--name <label>]` — the SAME verb's second shape (the first
 // argument is words, not a vault:// reference): ONE item in the user's For you tray with a masked box; the user pastes the
@@ -58,8 +58,8 @@ const USAGE = [
   '                             the vault computes its code (`totp <name>`, no grant for this conversation) — you never read it back',
   '  vibespace-vault login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]',
   '                             store a website login you hold (its password) as a web-login entry, optionally paired with a two-step',
-  '                             entry YOU added (totp add): `vibespace-browser login <origin> --user <name>` fills it (the kernel; no grant for this',
-  '                             conversation) — you never see the password again',
+  '                             entry YOU added (totp add): `vibespace-browser fill <@ref> --vault <origin>#<name>/password` types it (no grant',
+  '                             needed for this conversation) — VibeSpace never returns the password again',
   '                             A seed or a password goes in as ITS KIND (totp add / login add), never as a free `put`.',
   '  vibespace-vault list       the stored secrets you may use in a run (the ones this conversation stored, the ones the user',
   '                             opened, or granted to you) — a reference each with its name and description (what it is for —',
@@ -85,8 +85,8 @@ const USAGE = [
   '  vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host https://<site>',
   '                             ask the user for a WEBSITE LOGIN on ONE site (lane login-request-card): they type the user name,',
   '                             the password and an optional two-step code into the card; it lands as a web login only that site',
-  '                             is ever filled with — you never see it. Your next turn says stored (and whether this conversation',
-  '                             may sign in with it: vibespace-browser login <site>) or refused.',
+  '                             is ever filled with — VibeSpace never hands you the password. Your next turn says stored (and whether',
+  '                             this conversation may sign in with it: vibespace-browser fill <@ref> --vault <site>/password) or refused.',
   '  vibespace-vault request "<what you need>" --purpose "<why>" --kind totp [--name <name>]',
   '                             ask the user for a TWO-STEP CODE (TOTP) — a CLI, an SSH jump or an API console that prompts for',
   '                             one (lane totp-request-card): ONE card with the Vault\'s own two-step fields — they paste its',
@@ -232,7 +232,7 @@ async function pasteCmd(words, out) {
   const d = await callCoded('POST', '/api/agent/vault/secret-request', body, 'request');
   const t = d.target || {};
   const isTotp = Object.prototype.hasOwnProperty.call(t, 'totp');   // lane totp-request-card
-  const where = isTotp ? `a two-step code${t.totp ? ` named «${t.totp}» (the user may change it)` : ' the user names'} — you read its current code, never the seed` : t.login ? `a website login on ${t.login} — only that site is ever filled with it; you never see it` : t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})${t.hosts && t.hosts.length ? ` for ${t.hosts.join(', ')}` : ''}`;   // login: lane login-request-card
+  const where = isTotp ? `a two-step code${t.totp ? ` named «${t.totp}» (the user may change it)` : ' the user names'} — you read its current code, never the seed` : t.login ? `a website login on ${t.login} — only that site is ever filled with it; VibeSpace never hands it to you` : t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})${t.hosts && t.hosts.length ? ` for ${t.hosts.join(', ')}` : ''}`;   // login: lane login-request-card
   const tray = (d.tray && (d.tray.phrase || d.tray.name)) || 'their For you tray';
   if (d.already === 'open') console.log(isTotp ? `already asked (${d.requestId}) — the two-step card still waits in ${tray}; nothing waits on it` : t.login ? `already asked (${d.requestId}) — the login card for ${t.login} still waits in ${tray}; nothing waits on it` : `already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
   else if (d.filed) { console.log(isTotp ? 'asked the user for a two-step code — one card with the Vault\'s own two-step fields; nothing waits on it' : t.login ? `asked the user for a website login on ${t.login} — one card with the Vault's own login form; nothing waits on it` : `asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray) · lane login-request-card r3: a login's card said as what it is
@@ -358,14 +358,14 @@ async function totpAdd(rest) {
   console.log(`  its code: vibespace-vault totp ${d.name}   (no grant: this conversation stored it)`);
 }
 /** lane vault-agent-own: `login add <origin> --user <name> --from-file | --stdin [--totp <name>]` — a website login this
- *  conversation holds becomes a web-login entry it owns: the kernel fills it (`vibespace-browser login`), no grant here. */
+ *  conversation holds becomes a web-login entry it owns: Hub types it (`vibespace-browser fill --vault`), no grant here. */
 async function loginAdd(rest) {
   const { out, positional } = parseFlags(rest, { '--user': 'value', '--from-file': 'value', '--stdin': 'bool', '--totp': 'value' });
   if (positional.length !== 1 || out['--user'] === undefined) { console.error('vibespace-vault: login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <totpname>]   (the password — never on the command line)'); process.exit(2); }
   const pw = secretIn(out, 'login add');
   const d = await callCoded('POST', '/api/agent/vault/login', { origin: positional[0], username: out['--user'], loginPassword: pw, ...(out['--totp'] !== undefined ? { totpName: out['--totp'] } : {}) }, 'login add');
   console.log(`stored the login ${d.user} on ${d.origin} — the password is sealed; you never read it back`);
-  console.log(`  sign in with it: vibespace-browser login ${d.origin} --user ${d.user}   (the kernel fills it; no grant: this conversation stored it)`);
+  console.log(`  sign in with it: vibespace-browser fill <@ref> --vault ${d.origin}#${d.user}/user  (+ /password; no grant: this conversation stored it)`);
 }
 
 async function put(rest) {

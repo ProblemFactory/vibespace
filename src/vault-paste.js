@@ -339,7 +339,7 @@ function loginCardOf({ who, words, purpose, target, site = null }) {
     { key: i18nKey('What: {words}'), params: { words } },
     { key: PURPOSE_LINE, params: { purpose } },
     { key: LOGIN_ONLY },
-    { key: i18nKey('Type its user name and password below — they go straight into the vault. The agent is told that it is stored and for which site, never the password.') },
+    { key: i18nKey('Type its user name and password below — they go straight into the vault. VibeSpace tells the agent only that it is stored and for which site, never handing over the password.') },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : String(v); });
   return {
@@ -467,10 +467,9 @@ function receiptText(o = {}) {
   return `${head}: REFUSED — ${REFUSED_WHY[o.why] || REFUSED_WHY.denied} («${piece(o.words)}»). Do not ask for it again in the next ${QUIET_MS / 60e3} minutes; carry on without it, or ask the user in the chat what they prefer.`;
 }
 
-/** lane login-request-card: HOW AN AGENT USES A STORED WEBSITE LOGIN — today's words in ONE constant (the pivot chain «vault-login
- *  r24» changes it when its fill lands): a custom-kernel profile signs in with it; on standard Chrome the vault sign-in is paused
- *  since 2.369.364 (src/browser-login.js ROADS), so the next road is a person in the live view. {origin} / {user} filled per receipt. */
-const LOGIN_USE = 'On a custom-kernel browser profile: vibespace-browser login {origin}{user} signs in (the browser types it — you never see it). On standard Chrome the vault sign-in is paused since 2.369.364: ask a person to sign in in the live view — vibespace-browser ask-human "<what you need>".';
+/** lane login-request-card + vault-login r25: HOW AN AGENT USES A STORED WEBSITE LOGIN — ONE constant across standard Chrome and
+ *  custom browser kernels (`vibespace-browser fill <@ref|selector> --vault <entry>/<field>`). {origin} / {user} filled per receipt. */
+const LOGIN_USE = 'Sign in by opening {origin}, running vibespace-browser snapshot -i, then vibespace-browser fill <@ref> --vault {origin}{user}/user and vibespace-browser fill <@ref> --vault {origin}{user}/password (--vault {origin}{user}/otp if two-step is asked), and submitting the form — works on standard Chrome and custom browser kernels alike (VibeSpace never hands you the password).';
 /** lane login-request-card: the STORED receipt of a login — the site, the user name ONLY when this conversation may sign in with it
  *  (an agent that may fill a login reads its user in the login answer; one that may not never learns it), the grant in words
  *  (standing — master's browser-login grant has no end), and LOGIN_USE. `o.login` = { user, updated, allowed, asked } (the door's;
@@ -481,14 +480,14 @@ function loginReceiptText(head, o, piece) {
   const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
   const on = `${origin}${user ? ` (user ${user})` : ''}`;
   const what = l.updated ? `UPDATED — the website login for ${on} in the vault now has the password the user typed (the old one is kept one revision)` : `STORED — a website login for ${on} is in the vault`;
-  const use = LOGIN_USE.replace('{origin}', () => origin).replace('{user}', () => (user ? ` --user ${user}` : ''));
+  const use = LOGIN_USE.replace(/\{origin\}/g, () => origin).replace(/\{user\}/g, () => (user ? `#${user}` : ''));
   // r3 (law D): THREE outcomes, three sentences — granted · not ticked · ticked but the permission could not be written
   const may = l.allowed
     ? `The user allowed THIS conversation to sign in with it on ${origin} — standing, until they remove it in Vault ▸ Web logins ▸ Use for…. ${use}`
     : l.asked
-      ? `The user ticked «Let this conversation sign in with it», but the permission could not be written — the login is stored, and they can allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser login answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`
-      : `The user did not let this conversation sign in with it — they allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser login answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`;
-  return `${head}: ${what} for: ${piece(o.purpose)}. You never see the password. ${may}${rc}`;
+      ? `The user ticked «Let this conversation sign in with it», but the permission could not be written — the login is stored, and they can allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser fill --vault answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`
+      : `The user did not let this conversation sign in with it — they allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser fill --vault answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`;
+  return `${head}: ${what} for: ${piece(o.purpose)}. VibeSpace never hands you the password. ${may}${rc}`;
 }
 /** lane totp-request-card: HOW AN AGENT USES A STORED TWO-STEP CODE — ONE constant: the current code (never the seed), read
  *  through the agent door (GET /api/agent/vault/totp/:name — the entry's «Use for…» grant decides). {name} filled per receipt. */

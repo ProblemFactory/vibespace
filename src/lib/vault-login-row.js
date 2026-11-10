@@ -1,9 +1,9 @@
 // WEB LOGINS IN THE VAULT WINDOW (lane browser-login, P3 of the custom browser kernel — the hub's half: src/server/browser-logins.js
 // over PURE src/browser-login.js). A website login's row (kind 'login', purpose Web logins) gets:
 //   · its provenance line (the owner's own · registered by an agent through the vault · typed by an agent itself) — the row's detail;
-//   · 「用于…」: who may have the custom browser kernel fill it — THIS account, ANY account on this site, or ANY site — to running
+//   · 「用于…」: who may have Hub fill it on that site — THIS account, ANY account on this site, or ANY site — to running
 //     conversations, Task Groups or everyone (POST /api/vault/web-logins/grants; one row of the ONE grants store per scope); the
-//     chips list the grants that reach this login, ✕ takes one back. An agent never sees the password: the kernel fills it;
+//     chips list the grants that reach this login, ✕ takes one back. VibeSpace never hands the password to an agent: Hub types it;
 //   · 显示 = the password (the window's reveal door — the second password again), 删除 = its own door (its own grant row goes too).
 // 添加 → 「网站登录…」: the owner's own login (the site's address, the user name, the password, an optional paired two-step entry).
 import { t } from './i18n.js';
@@ -33,12 +33,17 @@ function principalName(e, data) {
   return hit ? hit.name : e.name || (e.kind === 'group' ? `${t('Task group')} ${e.id}` : String(e.key || ''));
 }
 
-/** A web login's row extras: `box` (the grant chips, for the main column), `doors` (用于…). `show` = the row's 显示. */
+/** A web login's row extras: `box` (pending notice + grant chips, for the main column), `doors` (Confirm / Discard / 用于…). `show` = the row's 显示. */
 export function loginExtras(row, data, { refresh, show } = {}) {
   const entry = ((data && data.entries) || []).find((e) => e.name === row.entry) || { name: row.entry, grants: [] };
-  if (show) show.title = t('Shows the password — after the second password. An agent never sees it: the custom browser kernel fills it');
+  if (show) show.title = t('Shows the password — after the second password. VibeSpace never hands it to an agent: Hub types it only on the matching site into the field the agent names');
   const box = el('div', 'vw-ak vw-login');
   box.dataset.login = row.entry;
+  if (entry.pending === 'register' || entry.pending === 'change') {
+    box.append(el('div', 'vw-desc-pending vw-login-pending', entry.pending === 'register'
+      ? t('Pending your confirmation — registered by an agent (Confirm promotes it to current; Discard removes it)')
+      : t('Pending your confirmation — generated replacement password (Confirm promotes it to current and keeps the old password in previous; Discard drops the candidate)')));
+  }
   const chips = el('div', 'vw-ak-grants');
   const grants = (entry.grants || []).filter((g) => !g.unknown);
   if (grants.length) {
@@ -55,11 +60,34 @@ export function loginExtras(row, data, { refresh, show } = {}) {
     }
     box.append(chips);
   }
+  const doors = [];
+  if (entry.pending === 'register' || entry.pending === 'change') {
+    const confirmB = el('button', 'vw-btn vw-login-confirm', t('Confirm'));
+    confirmB.type = 'button';
+    confirmB.title = t('Promotes the pending password to current in the vault');
+    confirmB.onclick = async () => {
+      const r = await post('/api/vault/web-logins/confirm', { name: entry.name, ...(entry.rev != null ? { rev: entry.rev } : {}) });
+      if (!r || !r.ok) showToast(failWords(r), { type: 'error' });
+      else showToast(t('Confirmed the password in the vault'));
+      refresh?.();
+    };
+    const discardB = el('button', 'vw-btn vw-login-discard', t('Discard'));
+    discardB.type = 'button';
+    discardB.title = t('Discards the pending password without changing current');
+    discardB.onclick = async () => {
+      const r = await post('/api/vault/web-logins/discard', { name: entry.name, ...(entry.rev != null ? { rev: entry.rev } : {}) });
+      if (!r || !r.ok) showToast(failWords(r), { type: 'error' });
+      else showToast(t('Discarded the pending password'));
+      refresh?.();
+    };
+    doors.push(confirmB, discardB);
+  }
   const useB = el('button', 'vw-btn vw-login-grant', t('Use for…'));
   useB.type = 'button';
-  useB.title = t('Let the custom browser kernel fill this login for a conversation, a task group or everyone — they never see the password');
+  useB.title = t('Choose who may sign in with this login — VibeSpace never hands them the password');
   useB.onclick = () => showLoginGrantPicker(entry, data, { refresh });
-  return { box, doors: [useB] };
+  doors.push(useB);
+  return { box, doors };
 }
 
 /** 用于…: the scope (this account / any account on this site / any site) and who — checked = granted at that scope. */
@@ -104,7 +132,7 @@ export function showLoginGrantPicker(entry, data, { refresh } = {}) {
   body.append(pick);
   const paint = () => { const had = hadAt(scope); for (const b of boxes) b.checked = had.has(b.value); };
   paint();
-  body.append(el('div', 'vw-ak-hint', t('The custom browser kernel fills the user name and password into the site\'s own form — the conversation never sees them. «Any account on this site» also lets an agent register new accounts there, through the vault.')));
+  body.append(el('div', 'vw-ak-hint', t('Allowed conversations can sign in as you on this site. VibeSpace never hands them the password and types it only on the matching site into a password or code field; our fence stops accidental reads and wrong sites, and we do not promise to stop an agent that deliberately digs into a page it controls. «Any account on this site» also lets an agent register new accounts there through the vault.')));
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create vw-login-save', t('Save'));

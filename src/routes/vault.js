@@ -55,6 +55,7 @@ const STATUS = Object.freeze({
   name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
   login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
+  login_no_entry: 404, login_not_pending: 409, login_pending_exists: 409, card_changed: 409, // lane vault-login r22/r23: human-only Confirm / Discard of pending web-login slots
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -123,6 +124,10 @@ const WORDS = Object.freeze({
   name_required: 'give it a name', name_too_long: 'the name is at most 80 characters', note_too_long: 'the note is at most 400 characters',
   bad_kind: 'the kind is API key, password or secret', hidden_chars: 'the words hold a hidden or direction character',
   entry_unknown_id: 'that stored value is not there any more',
+  login_no_entry: 'that website login is not in the vault any more',
+  login_not_pending: 'that website login has no pending password waiting for your confirmation',
+  login_pending_exists: 'that website login already has a pending password — confirm or discard it first',
+  card_changed: 'that website login changed after it was shown — nothing was changed; read it again',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -263,10 +268,11 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     });
   }
   // ── WEB LOGINS (lane browser-login — src/server/browser-logins.js over PURE src/browser-login.js). PEOPLE only: the list (names,
-  //    provenance, the grants that reach each — never a password), 添加 (the owner's own login: origin, user name, the password
-  //    taken off the body, an optional paired two-step entry), 删除 (its own grant row with it), 用于… (grant / take back: this
-  //    account, any account on this site, any site). The password itself shows only through /api/vault/reveal. An agent has NO
-  //    door here: its own is `vibespace-browser login` (the kernel fills; it never sees a value). Never cached by a proxy. ──
+  //    provenance, pending state, the grants that reach each — never a password), 添加 (the owner's own login: origin, user name,
+  //    the password taken off the body, an optional paired two-step entry), 确认 / 丢弃 (human-only promotion or discard of an
+  //    agent-generated pending password), 删除 (its own grant row with it), 用于… (grant / take back: this account, any account on
+  //    this site, any site). The password itself shows only through /api/vault/reveal. An agent has NO door here: its own is
+  //    `vibespace-browser fill @ref --vault <entry>/password` (Hub types; VibeSpace never returns a value). Never cached by a proxy. ──
   if (logins) {
     const whoL = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
     const noStoreL = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
@@ -277,6 +283,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       const b = bodyL(req);
       return logins.addOwn({ origin: b.origin, username: b.username, password: typeof pw === 'string' ? pw : '', totpName: b.totpName || null }, { who: whoL(req) });
     })));
+    app.post('/api/vault/web-logins/confirm', noStoreL(person((req) => { const b = bodyL(req); return logins.confirmOwn(String(b.name || ''), { rev: b.rev, who: whoL(req) }); })));
+    app.post('/api/vault/web-logins/discard', noStoreL(person((req) => { const b = bodyL(req); return logins.discardPending(String(b.name || ''), { rev: b.rev, who: whoL(req) }); })));
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
     app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
     app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));

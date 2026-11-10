@@ -49,7 +49,7 @@ for (const sg of ['SIGINT', 'SIGTERM']) process.on(sg, () => { cleanup(); proces
 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
-if (!ver) { skip(`no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); console.log(`\nALL PASS (${pass}, ${skipped} skipped)`); process.exit(0); }
+if (!ver) { console.error(`SKIPPED: no real agent-browser resolves on PATH past the shim (PATH=${BASE_ENV.PATH || ''})`); cleanup(); process.exit(2); }
 console.log(`agent-browser: ${REAL_AB} (${ver})`);
 
 // ── the fixture (loopback): the always-pending sign-in loop, gated on a stale cookie ──
@@ -406,5 +406,7 @@ try {
     }
   }
 } finally { pages.close(); cleanup(); }
-console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);
-process.exit(fail ? 1 : 0);
+if (fail) { console.log(`\nFAILED (${pass} passed, ${fail} failed, ${skipped} skipped)`); process.exit(1); }
+if (skipped) { console.error(`\nSKIPPED (${skipped} skipped, ${pass} passed — a skip is never green)`); process.exit(2); }
+console.log(`\nALL PASS (${pass})`);
+process.exit(0);

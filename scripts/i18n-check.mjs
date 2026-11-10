@@ -31,10 +31,10 @@ import { dictEntries } from './i18n-extract.mjs';
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 // the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
-const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js', 'src/server/browser-dialogs.js', 'src/server/browser-logins.js', 'src/browser-login.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
 // …and the server's key TABLES (each value a key the client words with t()): the jobs engine's For-you templates
 export const noticeKeyTables = () => {
-  const req = createRequire(import.meta.url), RT = req('../src/relay-token.js');
+  const req = createRequire(import.meta.url), RT = req('../src/relay-token.js'), BL = req('../src/browser-login.js');
   return [
     { name: 'src/job-model.js FOR_YOU_WORDS', keys: Object.values(req('../src/job-model.js').FOR_YOU_WORDS) },
     // lane frp-token-proof: the frp plugin's For-you words (the dropped login, the retirement) are constants in src/relay-token.js
@@ -45,13 +45,15 @@ export const noticeKeyTables = () => {
     { name: 'src/server/migrations.js CLOAK_PLUGIN_WORDS', keys: Object.values(req('../src/server/migrations.js').CLOAK_PLUGIN_WORDS) },
     // lane hub-loop-stalls round 3: why a profile stopped / why samples were not taken — ONE table the journal line and ⚙ Diagnostics both say
     { name: 'src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED', keys: (() => { const LH = req('../src/loop-hold.js'); return [...Object.values(LH.PROFILE_STOPPED), LH.PROFILE_STOPPED_ANY, ...Object.values(LH.PROFILE_UNSAMPLED), LH.PROFILE_UNSAMPLED_ANY, ...Object.values(LH.PROFILE_REFUSED), LH.PROFILE_REFUSED_ANY]; })() },
+    // lane browser-login r23 (M2): every For-you notice template in src/browser-login.js NOTICE
+    { name: 'src/browser-login.js NOTICE', keys: Object.values(BL.NOTICE || {}).flatMap((v) => [v.text, v.detail]) },
   ];
 };
 
 /** every `key:` / `detail:` sentence-shaped string literal in server source — single/double/backtick-quoted; a `${…}` template
  *  (a key built at run time) is skipped, a short identifier is skipped. Round 19: `detail:` and backtick quotes are now seen. */
 export function noticeKeyLiterals(src) {
-  const keys = new Set(); const re = /\b(?:key|detail):\s*(['"`])((?:\\.|(?!\1)[^])*?)\1/g; let m;
+  const keys = new Set(); const re = /(?<![-'"`])\b(?:key|detail):\s*(['"`])((?:\\.|(?!\1)[^])*?)\1/g; let m;
   while ((m = re.exec(String(src)))) { if (m[1] === '`' && /\$\{/.test(m[2])) continue; const k = m[2].replace(/\\(.)/g, '$1'); if (/[{\s]/.test(k) && k.length > 8) keys.add(k); }
   return [...keys];
 }
