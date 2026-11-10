@@ -69,10 +69,16 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   // launder a builder that marks nothing.
   const DELEGATE = /this\._swapMessageEl\(/;
   const MARKED = /this\._applyElementMarks\(/;
-  // 2000 chars: the known sites sit 636–1165 chars from their mark call and the
-  // two nearest builders are 5191 apart, so the window can never borrow the
-  // NEXT builder's call and pass a site that has none of its own.
-  const WIN = 2000;
+  // THE LAW this census holds: every path that builds a message element marks it (_applyElementMarks, directly or
+  // through _swapMessageEl) BEFORE the element is stored or drawn. What was read on the .388 tree (主开发's ruling A,
+  // 2026-11-10): in chat-view's _onCreateMessage the role switch builds the element, and this._applyElementMarks(el, msg)
+  // runs in the SAME method before this._elements.set and the list insert; the only exits between them («default: return»,
+  // «if (!el) { … return; }») carry no element. midturn-order's counted-card lines sit between builder and mark (2056 chars;
+  // 1573 before), so the window is 3000 chars (.388, the train's seam; was 2000). The other sites sit 195–411 chars from
+  // their mark. The window stays under every same-file gap between two builders (20 251 / 160 630 now) — ASSERTED below —
+  // so it cannot borrow the NEXT builder's mark; the NEGATIVE CONTROL (a builder with no mark call is reported) is
+  // unchanged. Judging by method scope and order instead of a distance is backlog B-8f7a.
+  const WIN = 3000;
   const scan = (src) => {
     const out = { builders: 0, marks: (src.match(MARK) || []).length, unmarked: [] };
     for (const b of src.matchAll(BUILDER)) {
@@ -95,6 +101,11 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
     builders += r.builders; marks += r.marks;
     for (const line of r.unmarked) unmarked.push(`${f}:${line}`);
   }
+  // THE WINDOW'S PREMISE (.388): no two builders in one file sit closer than WIN — else a site with no mark of its own
+  // could pass on the NEXT builder's call
+  const gaps = files.flatMap((f) => { const at = [...fs.readFileSync(path.join(repo, f), 'utf8').matchAll(BUILDER)].map((m) => m.index); return at.slice(1).map((x, i) => ({ f, gap: x - at[i] })); });
+  check(`…the window (${WIN} chars) is under every same-file gap between two builders, so it cannot borrow the next builder's mark`,
+    gaps.every((g) => g.gap > WIN), JSON.stringify(gaps));
   check(`every path that BUILDS an element for a message re-derives its marks, directly or through the ONE swap method (${builders} builders, ${marks} direct call sites)`,
     builders >= 4 && marks >= 1 && unmarked.length === 0,
     unmarked.length ? 'unmarked builders: ' + unmarked.join(', ') : `builders=${builders} marks=${marks}`);
