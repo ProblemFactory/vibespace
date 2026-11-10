@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-claude-update-needs-nothing — THE DRILL (lane cli-update-needs-nothing, 2.369.389). The owner's founding requirement
+// test-claude-update-needs-nothing — THE DRILL (lane cli-update-needs-nothing, 2.369.390). The owner's founding requirement
 // (2026-03-22, item 7): «使用原生claude code，确保claude code更新不需要重新更新本项目代码（除非claude code有breaking change）».
 // A hub on THIS release is handed a Claude Code it has never seen — an unknown version, a new binary, a catalog with a model
 // id and an alias target no table of ours names, a new family — and, with no release of ours:

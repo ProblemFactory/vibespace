@@ -1,6 +1,6 @@
 'use strict';
 /**
- * THE INSTALLED CLAUDE CODE STATES ITS OWN MODELS (lane cli-update-needs-nothing, 2.369.389). The owner's founding
+ * THE INSTALLED CLAUDE CODE STATES ITS OWN MODELS (lane cli-update-needs-nothing, 2.369.390). The owner's founding
  * requirement (2026-03-22, item 7): use the native Claude Code, so that a Claude Code update needs no update of this
  * project unless Claude Code itself broke something. A new model used to need a release (a price row, a picker row, a
  * family word); the binary on the box already states every one of those facts. This module:

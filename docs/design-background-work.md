@@ -225,7 +225,7 @@ no silent skip exists anywhere.
 
 ### 6.3b Passive context injection (replaces wake; owner decision)
 
-Job events reach a conversation only when they are ADDRESSED to it (2.369.389; the owner's yes of 2026-11-10 replaced
+Job events reach a conversation only when they are ADDRESSED to it (2.369.390; the owner's yes of 2026-11-10 replaced
 2.348.0's «viewers may see announces passively»): the conversation can VIEW the job AND is its owner lineage or a subscriber
 of it or of its cron parent — ONE pure predicate, `job-model.js addressedTo` (a lineage-less job's creator is its owner through
 the subscription its own session made). Those events — finished, failed, parked, awaiting-user — queue per conversation and

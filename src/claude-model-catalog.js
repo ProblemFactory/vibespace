@@ -1,5 +1,5 @@
 'use strict';
-// THE INSTALLED CLAUDE CODE'S OWN MODEL CATALOG, READ AS DATA (lane cli-update-needs-nothing, 2.369.389 — the owner's founding
+// THE INSTALLED CLAUDE CODE'S OWN MODEL CATALOG, READ AS DATA (lane cli-update-needs-nothing, 2.369.390 — the owner's founding
 // requirement, 2026-03-22 item 7: an ordinary Claude Code update needs no update of this project). PURE: no I/O; the hub's
 // reader (src/server/cli-model-catalog.js) hands in the bytes. Every Claude Code build carries ONE baked catalog literal
 // (measured on 2.1.312 / .314 / .319 / .321: `var X={"//":"Hand-maintained baked-in model catalog …",schema_version:1,

@@ -43,7 +43,7 @@ Three independent audiences:
    The OWNER subscribing to its own job: the filter shapes its auto-notify
    too — mute one kind of message without `notify off` (which would silence
    a real failure as well).
-3. **Everyone else who can view** — no line (since 2.369.389): view is a
+3. **Everyone else who can view** — no line (since 2.369.390): view is a
    right to LOOK — `list` / `show` / `poll` / `logs` — and to `subscribe`.
    The job lines in your turns (`<vibespace-jobs-update>`, the «Background
    jobs» list at a start) are your own jobs and ones you subscribed to (a
