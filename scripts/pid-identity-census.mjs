@@ -52,6 +52,11 @@ export const ROWS = [
   ['src/browser-serve.js', "try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }", 'starttime', 'same\\(\\)', 'a daemon with no browser the hub named by pid+starttime (end-daemon)', 8],
   ['src/browser-serve.js', "if (same()) { try { process.kill(pid, 'SIGKILL')", 'starttime', 'same\\(\\)', 'the same, 5 s later'],
   ['src/codex-reset-helper.js', 'process.kill(-child.pid, sig)', 'handle', '-child.pid', 'its own reset child\'s group'],
+  // lane cli-self-measure: the long-lived-token measurement moved from the script into src/claude-oat-probe.js — every kill is a
+  // CLI process group THIS process spawned under strace (detached: its own group), by the spawn handle
+  ['src/claude-oat-probe.js', "process.kill(-c.pid, 'SIGKILL')", 'handle', '-c.pid', 'killAll: the tracer groups it spawned (LIVE: added at spawn, dropped at exit) — the hub gone (IPC disconnect), a SIGTERM, the deadline; the kernel ends their tracees (strace --kill-on-exit = PTRACE_O_EXITKILL)'],
+  ['src/claude-oat-probe.js', "process.kill(-child.pid, 'SIGKILL'); } catch { }", 'handle', '-child.pid', 'the tracer group it spawned — at the belt\'s first escape, and at a variant\'s end (only while its handle has not exited); the kernel ends the tracees with it (acceptance r2 item 4: no pid is ever read from the trace)', 12, 2],
+  ['src/claude-oat-probe.js', "process.kill(-vc.pid, 'SIGKILL')", 'handle', '-vc.pid', 'the --version run\'s tracer group (law D: through the one launcher) — at its 60 s cap, and after it if its handle has not exited', 12, 2],
   ['src/server/cli-cmd.js', "process.kill(-child.pid, 'SIGKILL')", 'handle', '-child.pid', 'its own login-shell ask\'s group (spawned detached, lane cli-shell-truth): the 10 s bound, the answer in, the shell gone — what its rc left in the probe\'s own session'],
   ['src/server/vault-run-door.js', 'process.kill(-child.pid, sig)', 'handle', '-child.pid', 'its own vibespace-vault run child\'s group (spawned detached): its timeout, a vault lock, the caller gone, the hub\'s exit'],
   ['src/server/cli-models-door.js', "process.kill(-child.pid, 'SIGKILL')", 'handle', '-child.pid', 'its own `agy models` listing\'s group BEFORE the leader\'s exit is seen (spawned detached; lane agy-models-report round 3 law 1): the 20 s timeout or the 64 KiB cap — the leader is unreaped, the group is ours'],

@@ -36,7 +36,10 @@ const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== 
 const tOf = (d) => (s, p) => fill(d ? (d[s] || s) : s, p);
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const NEWEST = R.SCHEMA_CLI_VERSION;
-const LINE = (v) => `claude ${v} is not registered — records may show as new fields until the next release`;
+// lane cli-self-measure (ruling R8 — the founding requirement, 2026-03-22 item 7: an ordinary Claude Code update needs no release of
+// VibeSpace): the line says the fact quietly, never «not registered … until the next release»; the journal keeps its own spelling
+const LINE = (v) => `Claude Code ${v} is newer than this VibeSpace’s record table — a record kind it adds is listed in Diagnostics; conversations are not affected`;
+const JLINE = (v) => `claude ${v} is newer than this release's record table — a record kind it adds is listed in Diagnostics, conversations are not affected`;
 
 console.log('① the PURE words — the line, the row, the Diagnostics section');
 {
@@ -51,13 +54,13 @@ console.log('① the PURE words — the line, the row, the Diagnostics section')
   const row2 = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [{ ...u, draft: taken }]), { t });
   ok('…once the draft is taken: its words (file, changes, against which build) and NO button', !!row2 && row2.button === null && row2.draft === `Record draft taken: data/claude-cli-dumps/2.1.399.json — 2 changes against claude ${NEWEST}`, row2);
   const zr = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(zh) }), jr = W.hubRegistrationRow(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(ja) });
-  ok('zh: the button is 「生成记录草稿」, the line names the build; ja too', zr.button.label === '生成记录草稿' && zr.line.startsWith('claude 2.1.399 尚未登记') && jr.button.label === '記録の下書きを作成' && jr.line.startsWith('claude 2.1.399 は未登録です'), [zr, jr]);
+  ok('zh: the button is 「生成记录草稿」, the line names the build; ja too', zr.button.label === '生成记录草稿' && zr.line.startsWith('Claude Code 2.1.399 比这个 VibeSpace 的记录表新') && jr.button.label === '記録の下書きを作成' && jr.line.startsWith('Claude Code 2.1.399 はこの VibeSpace の記録表より新しい'), [zr, jr]);
   ok('Diagnostics: NO section while every build seen is registered', W.diagnosticsSection(reg({ version: NEWEST, registered: true }), { t, esc }) === '' && W.diagnosticsSection(null, { t, esc }) === '');
   const sec = W.diagnosticsSection(reg({ version: '2.1.399', registered: false }, [u, { version: '2.1.401', sources: ['conversation'], firstSeen: null, draft: null }]), { t, esc, when: () => 'WHEN' });
   ok('Diagnostics: ONE section, a row per unregistered build — the line, where it was seen, and what to do (the hub\'s: the button / the road; another machine\'s: the road there)', (sec.match(/<h2>/g) || []).length === 1 && sec.includes(esc(LINE('2.1.399'))) && sec.includes(esc(LINE('2.1.401'))) && sec.includes('seen as the hub&#39;s claude'.replace('&#39;', "'")) && sec.includes("a conversation's records".replace("'", "'")) && sec.includes('Manage agents ▸ claude ▸ Draft the record table') && sec.includes('on the machine whose claude this is') && sec.includes(`it knows ${NEWEST} and older`), sec);
   ok('…escaped: a version string can never write markup', !W.diagnosticsSection(reg(null, [{ version: '<b>2.1.399</b>', sources: ['hub'], draft: null }]), { t, esc }).includes('<b>2.1.399'));
   const zsec = W.diagnosticsSection(reg({ version: '2.1.399', registered: false }, [u]), { t: tOf(zh), esc, when: () => 'WHEN' });
-  ok('Diagnostics in zh: the heading and the line in Chinese', zsec.includes('没有记录表的 claude 版本') && zsec.includes('claude 2.1.399 尚未登记'), zsec.slice(0, 300));
+  ok('Diagnostics in zh: the heading and the line in Chinese', zsec.includes('没有记录表的 claude 版本') && zsec.includes('Claude Code 2.1.399 比这个 VibeSpace 的记录表新'), zsec.slice(0, 300));
   const src = read('src/lib/cli-registration-words.js');
   const lits = [...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
   const ma = read('src/lib/manage-agents.js'), maCut = ma.slice(ma.indexOf('THE UNREGISTERED BUILD (lane cli-2-1-308-records'), ma.indexOf('row.append(left, actions);', ma.indexOf('THE UNREGISTERED BUILD (lane cli-2-1-308-records')));
@@ -76,7 +79,7 @@ console.log('② the registry — said ONCE per build, kept across a restart');
   const r0 = reg.note(NEWEST + ' (Claude Code)', 'hub');
   ok(`a registered build (${NEWEST}, the CLI's own words) is never said; the status names it`, r0.registered === true && r0.said === false && lines.length === 0 && events.length === 0 && reg.status().hub.version === NEWEST && reg.status().hub.registered === true && reg.status().unregistered.length === 0, { r0, lines });
   const r1 = reg.note('2.1.399 (Claude Code)', 'hub');
-  ok('an unregistered build seen as the hub\'s CLI ⇒ ONE journal line (the brief\'s sentence + where the draft is) and ONE telemetry event cli-unknown-version (Diagnostics\' «Harness drift» lists cli-unknown-*)', r1.said === true && r1.registered === false && lines.length === 1 && lines[0].startsWith('[cli-registration] ' + LINE('2.1.399')) && /生成记录草稿/.test(lines[0]) && /claude-cli-dump\.mjs --auto/.test(lines[0]) && events.length === 1 && events[0][0] === 'cli-unknown-version' && events[0][1] === 'claude 2.1.399 · hub' && /^cli-unknown-/.test(events[0][0]), { lines, events });
+  ok('an unregistered build seen as the hub\'s CLI ⇒ ONE journal line (the brief\'s sentence + where the draft is) and ONE telemetry event cli-unknown-version (Diagnostics\' «Harness drift» lists cli-unknown-*)', r1.said === true && r1.registered === false && lines.length === 1 && lines[0].startsWith('[cli-registration] ' + JLINE('2.1.399')) && /生成记录草稿/.test(lines[0]) && /claude-cli-dump\.mjs --auto/.test(lines[0]) && events.length === 1 && events[0][0] === 'cli-unknown-version' && events[0][1] === 'claude 2.1.399 · hub' && /^cli-unknown-/.test(events[0][0]), { lines, events });
   reg.note('2.1.399', 'hub'); reg.note('2.1.399', 'conversation'); reg.note('2.1.399', 'conversation');
   const st = reg.status();
   ok('…every later sighting — the 15-min tick again, a conversation\'s drift card — adds no line and no event; the build lists both sources', lines.length === 1 && events.length === 1 && st.unregistered.length === 1 && st.unregistered[0].version === '2.1.399' && st.unregistered[0].sources.join() === 'hub,conversation' && st.unregistered[0].firstSeen === 1792652400000 && st.unregistered[0].draft === null, { lines, st });
@@ -100,7 +103,7 @@ console.log('②b THE LINE STOPS (lane cli-2-1-319-records): this release regist
   ok('…and its tracked dump stays beside the newer pinned build (2.1.321, lane fable-52-cli-321 — the road the registry\'s draft diffs against next)', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.319.json')) && R.SCHEMA_CLI_VERSIONS.indexOf('2.1.319') === R.SCHEMA_CLI_VERSIONS.length - 2);
   const off = REG.create({ dataDir: path.join(tmp, 'data-319-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.319'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.319 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.319 is not registered/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
+  ok('RED CONTROL: over the .383 list (8b3fdb6ab) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.319 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.319', { lines });
 }
 
 console.log('②c MEASURED BEFORE THE BOX RUNS IT (lane fable-52-cli-321): this release registers 2.1.321 — the box\'s claude since 12:54 PT 11-09');
@@ -112,7 +115,7 @@ console.log('②c MEASURED BEFORE THE BOX RUNS IT (lane fable-52-cli-321): this 
   ok('…its tracked dump is the newest pinned build, the road the registry\'s draft diffs against next', fs.existsSync(path.join(REPO, 'scripts/fixtures/claude-cli/2.1.321.json')) && R.SCHEMA_CLI_VERSION === '2.1.321');
   const off = REG.create({ dataDir: path.join(tmp, 'data-321-base'), rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS.filter((v) => v !== '2.1.321'), log: (...a) => lines.push(a.join(' ')), event: (n, d) => events.push([n, d]), now: () => 1792652400000 });
   off.note('2.1.321 (Claude Code)', 'hub');
-  ok('RED CONTROL: over the .386 list (f5e087bb5) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.321 is not registered/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.321', { lines });
+  ok('RED CONTROL: over the .386 list (f5e087bb5) the same sighting says the journal\'s line, by name, and Diagnostics lists the build', lines.length === 1 && /2\.1\.321 is newer than this release's record table/.test(lines[0]) && events.length === 1 && off.status().unregistered.map((u) => u.version).join() === '2.1.321', { lines });
 }
 
 console.log('③ THE DRAFT ROAD — over a FIXTURE binary (0644, built from the tracked dump); the binary is never run');

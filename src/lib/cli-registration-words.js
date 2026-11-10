@@ -4,9 +4,10 @@
 // words, and the row offers the build's record draft (「生成记录草稿」: its static dump — the binary is never run).
 // PURE — imports nothing, touches no DOM (node-imported by scripts/test-cli-registration.mjs); the caller passes t / esc.
 
-/** «claude <v> is not registered — records may show as new fields until the next release» */
+/** «Claude Code <v> is newer than this VibeSpace's record table — …» (lane cli-self-measure, ruling R8: an ordinary update needs
+ *  no release of ours — the founding requirement, 2026-03-22 item 7 — so the line says the fact, never «until the next release») */
 export function unregisteredLine(version, t) {
-  return t('claude {v} is not registered — records may show as new fields until the next release', { v: version });
+  return t('Claude Code {v} is newer than this VibeSpace’s record table — a record kind it adds is listed in Diagnostics; conversations are not affected', { v: version });
 }
 
 /** a draft taken ({file, changes, against}) in words */

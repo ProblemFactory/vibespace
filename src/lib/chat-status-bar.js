@@ -1038,8 +1038,12 @@ export class ChatStatusBar {
       // one-shade opacity change. Icon is clock+play — the hourglass belongs
       // to the style chip next door (pending pick) and two adjacent
       // hourglasses meaning different things read as one broken widget.
+      // lane cli-self-measure (law G4): the hub's own check of a new Claude Code holds members of this pool — the check and its
+      // minutes, never a reset days away (the server drops the facet the moment that check ends)
+      const ck = a.armed && a.cause && a.cause.checking ? a.cause.checking : null;
+      if (ck) title = t('Claude Code {v} is being checked on this machine (about {n} min) — this session continues by itself when it passes, if those accounts can take it. Click to cancel.', { v: String(ck.cli || '?'), n: String(ck.typicalMin || 5) });
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
-      const arLabel = a.armed ? (a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(when)) : (a.enabled ? ' ' + escHtml(t('auto')) : '');
+      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(when)) : (a.enabled ? ' ' + escHtml(t('auto')) : '');
       chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
     }
 

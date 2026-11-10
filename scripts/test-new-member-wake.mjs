@@ -390,6 +390,26 @@ console.log('\n§2 "no reading" is a refusal to act, never a verdict of 0%');
       r.acted === false && r.reason === 'stale-reading' && w.fired.length === 0, JSON.stringify(r));
   }
   {
+    // lane cli-self-measure (acceptance r1 law G3): a member HELD while the hub checked a new Claude Code comes back when the check
+    // PASSES — its ELIGIBILITY changed, not its reading (the last one may be hours old). The edge is fired PLACEABLE: the freshness
+    // gate is skipped, the same re-decision runs, and half ② still reads that reading before it continues anybody
+    const w = await base();
+    w.writeCache(w.NEW, { ...w.healthy(), fetchedAt: Date.now() - 5 * 3600e3 });
+    const r = w.eng.onMemberReadingFresh(w.NEW, 'cli-measured', { placeable: true });
+    ok('PLACEABLE (the hub\'s own check of a new Claude Code passed): a reading 5 h old still re-decides, and the 2 parked conversations continue',
+      r.acted === true && r.fired.length === 2, JSON.stringify(r));
+    const w2 = await base();
+    w2.writeCache(w2.NEW, { ...w2.healthy(), fetchedAt: Date.now() - 5 * 3600e3 });
+    const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'cli-measured');
+    ok('RED CONTROL: the same edge WITHOUT placeable refuses on that 5 h reading (stale-reading) — the promise r1 made and did not keep',
+      r2.acted === false && r2.reason === 'stale-reading' && w2.fired.length === 0, JSON.stringify(r2));
+    const w3 = await base();
+    w3.writeCache(w3.NEW, { ...w3.spent(), fetchedAt: Date.now() - 5 * 3600e3 });
+    const r3 = w3.eng.onMemberReadingFresh(w3.NEW, 'cli-measured', { placeable: true });
+    ok('…and PLACEABLE never continues a conversation onto a member whose last reading is SPENT (half ② reads it)',
+      r3.fired.length === 0 && w3.fired.length === 0, JSON.stringify(r3));
+  }
+  {
     const w = await base();
     w.writeCache(w.NEW, { ...w.spent(), fetchedAt: Date.now() }); // fresh, and still spent
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh');

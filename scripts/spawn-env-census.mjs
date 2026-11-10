@@ -290,6 +290,7 @@ export const SSH_ROWS = Object.freeze([
 ]);
 export const ROWS = Object.freeze([
   ['data/bin/acp-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
+  ['src/claude-oat-trampoline.js', 'bin', 'upstream', 1, 'lane cli-self-measure (acceptance r3 item 1): the measurement\'s trampoline — its own env is the one the launcher built and checked against the allowlist (assertEnv) before strace started it; the binary inherits exactly that, and gets its OWN stderr (never the tracer\'s record)'],
   ['data/bin/chat-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
   ['data/bin/codex-chat-wrapper.js', 'cmd', 'upstream', 1, WRAPPER],
   ['data/bin/pty-wrapper.js', 'cmd', 'upstream', 1, WRAPPER + ' — a terminal session'],

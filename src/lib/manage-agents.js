@@ -166,7 +166,7 @@ const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefin
 /** Why a member's long-lived token is NOT in its folder (lane pool-oat-materialize) —
  *  what to do, in words; '' when there is no refusal to name. */
 function oatFileRefusedText(reason, code = '') {
-  if (reason === 'cli-unmeasured') return t('this CLI version is not measured');
+  if (reason === 'cli-unmeasured') return t('this Claude Code version is not cleared on this machine yet'); // lane cli-self-measure: never «not measured»
   if (reason === 'no-scopes') return t('mint again to record the subscription type');
   if (reason === 'write-failed') return code === 'symlink' ? t('the credential file is a symlink — nothing written') : t('could not write it to the account folder');
   // pool-oat-materialize verify r1: a READ that failed (F2), a symlinked folder (F8), a token that no longer decrypts (F4)
@@ -217,9 +217,16 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
       const label = near ? t('long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
         : t('Long-lived token');
       const date = escHtml(loginWhenText(ls.oatValidUntil));
-      const title = held ? t('Written to this account’s folder, but this CLI version ({cli}) is not measured: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.', { date, cli })
+      // lane cli-self-measure: the hub checks a new Claude Code itself — the hover follows its state (never «not measured»)
+      const lst = held && a.oatFile.local && a.oatFile.local.state;
+      const title = !held ? null
+        : lst === 'checking' ? t('Written to this account’s folder. Claude Code {cli} is new on this machine and VibeSpace is checking it (about {typ} min): running sessions continue, new ones are placed here once it passes. The long-lived token is valid until {date}.', { date, cli, typ: String(a.oatFile.local.typicalMin || 5) })
+        : lst === 'fail' ? t('Written to this account’s folder, but Claude Code {cli} uses long-lived tokens differently: running sessions continue, no new ones are placed here — For you says what differed and what to do. The long-lived token is valid until {date}.', { date, cli })
+        : lst === 'cannot-run' || lst === 'aborted' ? t('Written to this account’s folder, but VibeSpace could not check Claude Code {cli} on this machine: running sessions continue, no new ones are placed here — For you says why and has Check again. The long-lived token is valid until {date}.', { date, cli })
+        : t('Written to this account’s folder, but Claude Code {cli} is not in this VibeSpace’s records yet: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.', { date, cli });
+      const titleOk = held ? title
         : t('Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date, cli });
-      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
+      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${titleOk}${tail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
     }
     // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it
     const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code) : '';
@@ -307,7 +314,7 @@ export function acctProbeNote(a) {
   if (!a || typeof a !== 'object') return null;
   const el = a.probeEligibility;
   if (el === 'unprobeable:oat-no-profile') return { text: t('Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it'), at: 0 };
-  if (el === 'unprobeable:cli-unmeasured') return { text: t('Long-lived token only, and claude {cli} isn’t measured with it: can’t be probed — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };
+  if (el === 'unprobeable:cli-unmeasured') return { text: t('Long-lived token only, and Claude Code {cli} isn’t cleared for it on this machine yet: can’t be probed — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };
   if (el === 'unprobeable:oat-not-in-folder') return { text: t('Long-lived token only, not in its folder: can’t be probed — refreshes when a session uses it'), at: 0 };
   // lane pool-silent-members R3: the token IS in its folder, but the panel prints no quota line for it (measured 10-26 → 10-28)
   if (el === 'unprobeable:oat-folder-no-panel') return { text: t('Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };

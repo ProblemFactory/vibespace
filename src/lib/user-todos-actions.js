@@ -378,6 +378,19 @@ export function inboxModel(app) {
       showToast((r && r.error) || t('Could not restart the browser'), { type: 'error' });
       return false;
     }
+    // A «CHECK AGAIN» ROW THAT DECLARES ITS DOOR (lane cli-self-measure, ruling R6 — the held Claude Code's: the hub runs its own
+    // check once more NOW, whatever the pacing; cookie route, attended): the registry row names the route and the words, so the
+    // model reads the row and never branches on its type; the item resolves itself while it runs and comes back only on a FAIL
+    const checkRow = rec && rec.action ? FORYOU_ROW_OF[rec.action.type] : null;
+    if (checkRow && typeof checkRow.checkRoute === 'string') {
+      const r = await fetchJson(checkRow.checkRoute, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const said = checkRow.checkSaid || {};
+      // what the press did, said as it is (small 1): a check already running is NOT restarted — it says how long is left
+      if (r && r.ok && r.already) { showToast(t(said.already, { n: String(Number(r.leftMin) || 1) })); return true; }
+      if (r && r.ok) { showToast(t(r.state === 'pass' || r.state === 'fixture' ? said.done : r.state === 'checking' ? said.started : r.state === 'off' ? said.off : said.none)); return true; }
+      showToast((r && r.error) || t(said.failed), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'browser-floor-check') {
       // B-0b8c (lane browser-probe-transient): the browser-version notice's Check again — ONE probe now (cookie route); an
       // answer withdraws the item server-side, a miss is said and the item stays

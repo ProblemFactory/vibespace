@@ -34,8 +34,10 @@ FROM node:22-bookworm-slim
 # tini = pid 1 (see ENTRYPOINT below): a real init that REAPS every orphan.
 # sudo (with visudo — the app system's boot install checks its drop-in with `visudo -cf` before installing it) +
 # debootstrap = the app system's rung B (a userland built on the PVC when no tarball is baked; found in /usr/sbin).
+# strace: the hub's own check of a new Claude Code (src/claude-oat-probe.js) proves nothing leaves the machine — without it
+# a new version's long-lived-token accounts wait for a VibeSpace update (lane cli-self-measure)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      dtach procps psmisc zip unzip tar git curl ca-certificates \
+      dtach procps psmisc zip unzip tar git curl ca-certificates strace \
       python3 make g++ fontconfig openssh-client rclone fuse3 sudo ceph-common kmod \
       tini debootstrap \
     && rm -rf /var/lib/apt/lists/*

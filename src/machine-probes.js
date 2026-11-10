@@ -21,6 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
@@ -182,4 +183,29 @@ async function cliVersion(cmd) {
   return v.split('\n').map((l) => l.trim()).find((l) => cliVersionOf(l)) || 'unparsed';
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion };
+/** THE BYTES THAT RUN (lane cli-self-measure, law 1): the realpath of `cmd` (what a session spawns) + its sha256 — the hub's
+ *  own measurement is keyed by version + this hash. Streamed in 1 MiB chunks (342 MB = 340 ms wall, the loop's worst gap 1 ms
+ *  — measured 2026-11-09) and memoized by the file's stat identity (dev:ino:size:mtime:CHANGE time — an in-place rewrite that restores the mtime still moves the ctime, which no ordinary process can set back), so a tick re-hashes only a CHANGED
+ *  file. → {path, cmd, sha256, size, identity} — sha256 null when the hash read failed — or null (not found / no stat). */
+const _binMemo = { identity: null, out: null };
+async function cliBinary(cmd) {
+  const id = await cliBinaryIdentity(cmd);
+  if (!id) return null;
+  if (_binMemo.identity === id.identity && _binMemo.out) return { ..._binMemo.out };
+  const sha256 = await new Promise((resolve) => {
+    const h = crypto.createHash('sha256');
+    try { fs.createReadStream(id.path, { highWaterMark: 1 << 20 }).on('data', (b) => h.update(b)).on('error', () => resolve(null)).on('end', () => resolve(h.digest('hex'))); } catch { resolve(null); }
+  });
+  if (!sha256) return { path: id.path, cmd: id.cmd, sha256: null, size: id.size, identity: id.identity }; // law B: the file is known, its bytes are not
+  const out = { path: id.path, cmd: id.cmd, sha256, size: id.size, identity: id.identity };
+  _binMemo.identity = id.identity; _binMemo.out = out;
+  return { ...out };
+}
+/** …the cheap half (no hash): {path, cmd, size, identity} — the hub's 60 s check that the file the sessions spawn is the same */
+async function cliBinaryIdentity(cmd) {
+  const p = which(cmd);
+  if (!p) return null;
+  try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
+}
+
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity };

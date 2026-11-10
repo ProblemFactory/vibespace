@@ -57,7 +57,7 @@
   "src/lib/chat-view.js": 1,
   "src/lib/desktop-app-window.js": 1,
   "src/lib/inbox-window-layout.js": 13,
-  "src/lib/inbox-window.js": 18,
+  "src/lib/inbox-window.js": 16,
   "src/lib/user-todos-actions.js": 26,
   "src/lib/user-todos-row.js": 16,
   "src/lib/vault-window.js": 2,

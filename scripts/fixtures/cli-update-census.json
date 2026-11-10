@@ -1,5 +1,5 @@
 {
- "//": "THE CENSUS of every place in src/ that keys behaviour or words on a Claude CLI version or a model id (lane cli-update-needs-nothing R7). One row per site: {id, file, keyedOn: version | model, needsReleaseOnOrdinaryUpdate: false, road, suite} (+ `match`: the grep kind the site is found by, and `sites`: how many lines of that kind the file holds — scripts/test-claude-update-needs-nothing.mjs §M re-runs it: a hit with no row is RED, a row with no hit is DEAD, a row whose count moved is RED (a new site in an already-rowed file is judged again)). Model rows here; cli-self-measure's version rows join this file at the train (an append union).",
+ "//": "THE CENSUS of every place in src/ that keys behaviour or words on a Claude CLI version or a model id (lane cli-update-needs-nothing R7). One row per site: {id, file, keyedOn: version | model, needsReleaseOnOrdinaryUpdate: false, road, suite} (+ `match`: the grep kind the site is found by, and `sites`: how many lines of that kind the file holds — scripts/test-claude-update-needs-nothing.mjs §M re-runs it: a hit with no row is RED, a row with no hit is DEAD, a row whose count moved is RED (a new site in an already-rowed file is judged again)). Model rows (lane cli-update-needs-nothing, read by scripts/test-claude-update-needs-nothing.mjs §M over keyedOn 'model') and version rows (lane cli-self-measure, read by scripts/test-cli-self-measure.mjs §8 over keyedOn 'version') — joined at the rebase onto 2.369.390 (an append union; each leg reads its own keyedOn).",
  "schema": 1,
  "rows": [
   {
@@ -385,6 +385,234 @@
    "suite": "test-claude-update-needs-nothing",
    "match": "family-key",
    "sites": 17
+  },
+  {
+   "id": "oat-in-file",
+   "file": "src/cli-caps.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "oatInFile = the long-lived-token gate over a record; a build the shipped fixture does not name is measured by the hub itself (src/server/cli-self-measure.js, about 5 min) — the fixture only short-circuits known builds",
+   "suite": "test-cli-self-measure",
+   "match": "oat-gate",
+   "sites": 1
+  },
+  {
+   "id": "oat-measured-list",
+   "file": "src/cli-caps.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "measuredVersions lists the builds a record names — words only («measured on …»), it gates nothing",
+   "suite": "test-cli-self-measure",
+   "match": "measured-versions",
+   "sites": 1
+  },
+  {
+   "id": "oat-record-own-build",
+   "file": "src/cli-caps.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a record is read only for the build it names (cliVersionOf(rec.cliVersion) === v) — a new build is a record the hub writes, no release",
+   "suite": "test-cli-self-measure",
+   "match": "version-compare",
+   "sites": 2
+  },
+  {
+   "id": "oat-file-caps",
+   "file": "src/accounts.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "oatFileCaps = the fixture OR this hub's PASS for the exact bytes (version + sha256, law 2 stays) — placement, the roster, the spawn refusal, the item",
+   "suite": "test-cli-self-measure",
+   "match": "oat-gate",
+   "sites": 1
+  },
+  {
+   "id": "oat-file-caps-words",
+   "file": "src/accounts.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the held why names the measured builds — words only",
+   "suite": "test-cli-self-measure",
+   "match": "measured-versions",
+   "sites": 1
+  },
+  {
+   "id": "oat-fixture-table",
+   "file": "src/accounts.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "reads scripts/fixtures/oat-in-file.json (a table keyed by build): the release road's SEED; the hub's own ledger (data/cli-self-measure.json) answers every build it does not name",
+   "suite": "test-cli-self-measure",
+   "match": "json-table",
+   "sites": 1
+  },
+  {
+   "id": "record-oracle",
+   "file": "src/record-shape.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "SCHEMA_CLI_VERSIONS / SCHEMA_CLI_VERSION: an unknown record kind is never drawn as a red card (a quiet chip); the pins are test oracles",
+   "suite": "test-record-shape",
+   "match": "schema-versions",
+   "sites": 3
+  },
+  {
+   "id": "record-oracle-since",
+   "file": "src/record-shape.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "SHAPE_SINCE / the per-field notes name the build each shape was read on — labels; a field a new build adds is passed through quietly",
+   "suite": "test-record-shape",
+   "match": "version-literal",
+   "sites": 23
+  },
+  {
+   "id": "record-kind-count",
+   "file": "src/message-window.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "a record kind a build added is counted once per build (cli-record-kind); the surprise only for a REGISTERED build (R8)",
+   "suite": "test-cli-self-measure",
+   "match": "schema-versions",
+   "sites": 1
+  },
+  {
+   "id": "cli-registration",
+   "file": "src/server/cli-registration.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "«newer than this record table» — a quiet fact said once, a record draft on request, never «until the next release» (R8)",
+   "suite": "test-cli-registration",
+   "match": "schema-versions",
+   "sites": 2
+  },
+  {
+   "id": "permission-outcome-pin",
+   "file": "src/permission-outcome.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "PERMISSION_OUTCOME_CLI_VERSION is a test pin; the lookup matches the sentence's text — an unknown sentence is outcome «unknown» + a quiet chip",
+   "suite": "test-helper-ask",
+   "match": "cli-version-const",
+   "sites": 2
+  },
+  {
+   "id": "permission-outcome-rows",
+   "file": "src/permission-outcome.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "each row names the build its sentence was read on (a label); matching is by text, never by build",
+   "suite": "test-helper-ask",
+   "match": "version-literal",
+   "sites": 8
+  },
+  {
+   "id": "safety-stop-pin",
+   "file": "src/safety-stop.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "SAFETY_STOP_CLI_VERSION is a test pin; a new wording is the generic dim card",
+   "suite": "test-unknown-records",
+   "match": "cli-version-const",
+   "sites": 2
+  },
+  {
+   "id": "safety-stop-literal",
+   "file": "src/safety-stop.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the pin's value — the build the rows were read on",
+   "suite": "test-unknown-records",
+   "match": "version-literal",
+   "sites": 1
+  },
+  {
+   "id": "hot-switch-evidence",
+   "file": "src/backend-caps.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "hotSwitchEvidence (2.1.281) has no version key: every build is trusted; oat-file-switch re-measures the link-follow on each new build the hub checks",
+   "suite": "test-claude-hot-switch",
+   "match": "hot-switch-evidence",
+   "sites": 7
+  },
+  {
+   "id": "hot-switch-measured-on",
+   "file": "src/backend-caps.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the evidence's own label (cli: the build it was measured on) — nothing reads it as a gate",
+   "suite": "test-claude-hot-switch",
+   "match": "version-literal",
+   "sites": 1
+  },
+  {
+   "id": "acp-no-hot-switch",
+   "file": "src/harnesses/acp.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "hotSwitchEvidence: null — the ACP harness declares it has no hot switch; another harness, nothing gated",
+   "suite": "test-cli-self-measure",
+   "match": "hot-switch-evidence",
+   "sites": 1
+  },
+  {
+   "id": "lapsed-sentences-read-on",
+   "file": "src/harnesses/claude-quota.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "each lapsed sentence names the build it was read on (a label); the needle matches text on any build",
+   "suite": "test-pool-serve-lapsed",
+   "match": "version-literal",
+   "sites": 2
+  },
+  {
+   "id": "hub-judge",
+   "file": "src/server/cli-self-measure.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the hub places on the SAME judge the fixture uses (oatInFile over the child's gate), never on the child's boolean (law I)",
+   "suite": "test-cli-self-measure",
+   "match": "oat-gate",
+   "sites": 1
+  },
+  {
+   "id": "hub-same-binary",
+   "file": "src/server/cli-self-measure.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the ledger keeps only well-formed builds, and a result for other bytes than the ones running is refused — the road that needs no release",
+   "suite": "test-cli-self-measure",
+   "match": "version-compare",
+   "sites": 2
+  },
+  {
+   "id": "unmeasured-notice-build",
+   "file": "src/server/cli-unmeasured-notice.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the notice is about the build running now; a note for another build is dropped — words only",
+   "suite": "test-cli-self-measure",
+   "match": "version-compare",
+   "sites": 1
+  },
+  {
+   "id": "codex-wrapper-version-label",
+   "file": "data/bin/codex-chat-wrapper.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "CODEX_WEBUI_CLI_VERSION labels the codex wrapper's records with the codex build — another harness, nothing gated",
+   "suite": "test-cli-self-measure",
+   "match": "cli-version-const",
+   "sites": 1
+  },
+  {
+   "id": "cli-version-clock",
+   "file": "src/server/oat-file-sync.js",
+   "keyedOn": "version",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "the version clock (--version + the binary sha256): it gates nothing itself; a changed binary drops the hub's own PASS for the old bytes (law B)",
+   "suite": "test-oat-materialize"
   }
  ]
 }

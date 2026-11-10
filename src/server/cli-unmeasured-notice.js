@@ -1,5 +1,9 @@
 'use strict';
 /**
+ * (lane cli-self-measure, 2026-11-09: the hub CHECKS a new build itself — src/server/cli-self-measure.js — so this item is
+ * filed only when that check runs late, fails, cannot run or was stopped, or the switch is off; accounts.cliUnmeasuredNotice
+ * answers null while a check runs inside its bound (ruling R2). Its words name what differed and carry the «check again»
+ * press; a new state of the check is a new read at once, never paced by RECHECK_MS.)
  * THE UNMEASURED CLAUDE CLI'S ONE FOR-YOU ITEM (lane pool-silent-members R1, the owner's hub inc-mvsjhna7, 2026-10-28).
  * The box's claude auto-updated to a version scripts/fixtures/oat-in-file.json never measured, and the pool lost every
  * member it reaches only through our long-lived-token file — on 10-27 that was one journal line and six silent members
@@ -153,8 +157,9 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
         if (x.id !== id) return false;
         let changed = false;
         if (x[FACT] !== v) { x[FACT] = v; changed = true; }
-        if (it && x.status === 'open' && !x.clearedAt && (x.text !== it.text || x.detail !== it.detail || JSON.stringify(x.i18n || null) !== JSON.stringify(it.i18n || null))) {
+        if (it && x.status === 'open' && !x.clearedAt && (x.text !== it.text || x.detail !== it.detail || JSON.stringify(x.i18n || null) !== JSON.stringify(it.i18n || null) || JSON.stringify(x.action || null) !== JSON.stringify(it.action || null))) {
           x.text = it.text; x.detail = it.detail; x.i18n = it.i18n;
+          if (it.action) x.action = it.action; else delete x.action; // lane cli-self-measure: the «check again» press rides a FAIL / cannot-run / stopped item
           delete x.judged; // new words, no old verdict (the store's F2 rule)
           changed = true;
         }
@@ -184,8 +189,11 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
     if (caps.ok) { for (const x of open) resolveAgent(todos, x, t); readFor = null; return null; }
     for (const x of open) if (x[FACT] !== v) resolveAgent(todos, x, t); // the CLI moved on: that version's item is over
     if (inUse !== v) { inUse = v; if (memory.versions[v]) setRec(v, { usedAt: t }); }
-    if (readFor === v && t - readAt < RECHECK_MS) return null;
-    readFor = v; readAt = t;
+    // the hub's own check moves the words (lane cli-self-measure): a new state of it is a new read, never 15 min later
+    const lc = caps.local && typeof caps.local.state === 'string' ? caps.local : null;
+    const key = `${v}|${lc ? lc.state + (lc.state === 'checking' && Number(lc.lateAt) && t >= Number(lc.lateAt) ? ':late' : '') : '-'}`;
+    if (readFor === key && t - readAt < RECHECK_MS) return null;
+    readFor = key; readAt = t;
     let n = null;
     try { n = acc.cliUnmeasuredNotice(); } catch { n = null; }
     if (n && cliVersionOf(n.cli) !== v) n = null;
@@ -219,7 +227,7 @@ function create({ accounts = () => null, todos: getTodos = () => null, file = nu
       return null;
     }
     let id = null;
-    try { const r = todos.add(ITEM_KEY, { origin: 'pool', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Manage Agents', text: it.text, detail: it.detail, i18n: it.i18n }); id = (r && (r.id || (r.item && r.item.id))) || null; }
+    try { const r = todos.add(ITEM_KEY, { origin: 'pool', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Manage Agents', text: it.text, detail: it.detail, i18n: it.i18n, ...(it.action ? { action: it.action } : {}) }); id = (r && (r.id || (r.item && r.item.id))) || null; }
     catch (e) { log(`[oat-file] the unmeasured-CLI For-you item was not filed — ${e && e.message}`); }
     if (id) { patch(todos, id, v, null); setRec(v, { filedAt: t, itemId: id, count, resolvedBy: null, resolvedAt: null, usedAt: t }); }
     log(`[oat-file] claude CLI ${n.cli} is not measured: ${count} pool member(s) cannot be placed until it is (their token files are kept) — For-you item ${id ? 'filed' : 'NOT filed'}`); // never the item's words (record-clear census)

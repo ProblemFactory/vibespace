@@ -486,10 +486,10 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   ok(M.memberState({ loggedIn: true, loginState: { state: 'oat-only', oatFile: true } }).code !== 'login-expired' && M.memberState({ loggedIn: true, loginState: { state: 'oat-only' } }).code === 'login-expired', 'the Members… dialog: oat-only WITH the file is not "login expired"; without it, unchanged');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   // the chip is a NOUN (lane oat-chip-words, 2026-10-15); the sentence it carried leads the hover (K[5]; HELD = K[6])
-  const K = ['Long-lived token', 'this CLI version is not measured', 'mint again to record the subscription type', 'could not write it to the account folder', 'long-lived token ends in {left}',
+  const K = ['Long-lived token', 'this Claude Code version is not cleared on this machine yet', 'mint again to record the subscription type', 'could not write it to the account folder', 'long-lived token ends in {left}',
     'Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.',
-    'Written to this account’s folder, but this CLI version ({cli}) is not measured: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.'];
-  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '此 CLI 版本未测量' && zh[K[2]] === '重新铸造一次以记录订阅类型' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入此账号目录，但此 CLI 版本（{cli}）未测量'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 此 CLI 版本未测量 / 重新铸造一次以记录订阅类型');
+    'Written to this account’s folder, but Claude Code {cli} is not in this VibeSpace’s records yet: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.'];
+  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '这个 Claude Code 版本还没有在本机确认通过' && zh[K[2]] === '重新铸造一次以记录订阅类型' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入这个账号的文件夹，但 Claude Code {cli} 还不在这个 VibeSpace 的记录里'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 这个 Claude Code 版本还没有在本机确认通过 (lane cli-self-measure: never «未测量») / 重新铸造一次以记录订阅类型');
   ok(K.every((k) => zh[k] && ja[k] && zh[k].includes('{cli}') === k.includes('{cli}') && ja[k].includes('{left}') === k.includes('{left}')), 'every new door word has zh + ja with its placeholders');
   // the chip itself, rendered by the real manage-agents module (esbuild, a fake DOM)
   let MA = null, why = null;
@@ -511,13 +511,13 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
     const chip = MA.loginExpiryChipHtml(ls);
     ok(/>Long-lived token<\/span>$/.test(chip) && /title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip) && !/written to this account’s folder \(CLI/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip: the noun "Long-lived token"; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
     const heldChip = MA.loginExpiryChipHtml({ ...ls, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.999' } });
-    ok(/>Long-lived token<\/span>$/.test(heldChip) && /title="Written to this account’s folder, but this CLI version \(2\.1\.999\) is not measured: running sessions continue/.test(heldChip) && !/verified/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as unmeasured, never "verified"', heldChip.slice(0, 300));
+    ok(/>Long-lived token<\/span>$/.test(heldChip) && /title="Written to this account’s folder, but Claude Code 2\.1\.999 is not in this VibeSpace’s records yet: running sessions continue/.test(heldChip) && !/verified|not measured/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «not measured»), never "verified"', heldChip.slice(0, 300));
     const poolRow = amP.list().accounts.find((a) => a.id === P);
     ok(MA.loginExpiryChipHtml(poolRow) === '', 'the POOL row whose worst member is the token slot says nothing (the escape sentence is gone; a slot that serves is not a warning)', MA.loginExpiryChipHtml(poolRow));
     const nearPool = { ...poolRow, loginState: { ...poolRow.loginState, state: 'oat-only', oatFile: true, msLeft: 5 * H, worstId: O, worstName: 'Token O' } };
     ok(/Token O: long-lived token ends in/.test(MA.loginExpiryChipHtml(nearPool)), '…until the token\'s last day: "Token O: long-lived token ends in …"');
     const escRow = { id: 'pool-x', name: 'P', type: 'pooled', pooled: true, loginState: { state: 'expired', msLeft: -H, refreshExpiresAt: NOW - H, worstId: 'sub-1', worstName: 'Old', worstOatValidUntil: NOW + 99 * DAY, worstOatFileRefused: 'cli-unmeasured' } };
-    ok(/the pool can’t use its long-lived token · this CLI version is not measured/.test(MA.loginExpiryChipHtml(escRow)), 'gate shut: the pool row keeps 「池用不了它的长期 token」 and adds 「此 CLI 版本未测量」 (en words here)', MA.loginExpiryChipHtml(escRow).slice(0, 300));
+    ok(/the pool can’t use its long-lived token · this Claude Code version is not cleared on this machine yet/.test(MA.loginExpiryChipHtml(escRow)), 'gate shut: the pool row keeps 「池用不了它的长期 token」 and adds 「这个 Claude Code 版本还没有在本机确认通过」 (en words here)', MA.loginExpiryChipHtml(escRow).slice(0, 300));
     const noSc = { ...escRow, loginState: { ...escRow.loginState, worstOatFileRefused: 'no-scopes' } };
     ok(/mint again to record the subscription type/.test(MA.loginExpiryChipHtml(noSc)), '…no shape known: 「重新铸造一次以记录订阅类型」 names what to do');
   }
@@ -544,7 +544,7 @@ console.log('§6 oat-file-sync — the spawned claude\'s --version gates it');
   ver = null; // the probe times out on a loaded box
   const c0 = await h.tick();
   ok(c0.ok && amY.oatFileCaps().cli === '2.1.296' && fs.existsSync(credsOf(amY, y)) && logs.some((l) => /gave no answer — keeping CLI 2\.1\.296/.test(l)), 'a probe that FAILS keeps the last known version — no file is taken back from running sessions on a hiccup', logs.slice(-1));
-  const mutY = compileWith('src/server/oat-file-sync.js', "if (!v) { caps", "if (false) { caps");
+  const mutY = compileWith('src/server/oat-file-sync.js', "if (!v) { if (binFacts", "if (false) { if (binFacts"); // (lane cli-self-measure: the silent-version branch first notes the bytes — law B)
   if (mutY) {
     const amR = new AccountManager({ dataDir: path.join(tmp, 'data-sync-red') });
     const q = amR.createSubscription({ name: 'R' }).id;
@@ -558,7 +558,7 @@ console.log('§6 oat-file-sync — the spawned claude\'s --version gates it');
   } else ok(false, 'RED control anchor present (oat-file-sync)');
   ver = '2.1.300';
   const c2 = await h.tick();
-  ok(!c2.ok && fs.existsSync(credsOf(amY, y)) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && logs.some((l) => /2\.1\.300 — not measured/.test(l)), 'the CLI upgrades to an unmeasured version ⇒ the next tick KEEPS the files and says the version (R1 — 90c995a3 took them back in silence)', logs.slice(-1));
+  ok(!c2.ok && fs.existsSync(credsOf(amY, y)) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && logs.some((l) => /2\.1\.300 — held — no PASS on record/.test(l)), 'the CLI upgrades to an unmeasured version ⇒ the next tick KEEPS the files and says the version (R1 — 90c995a3 took them back in silence)', logs.slice(-1));
   h.stop();
   ok(!logs.join('\n').includes(OAT.slice(14, 40)), 'nothing it logged carries token bytes');
   const P2 = require(path.join(REPO, 'src/machine-probes.js'));
@@ -605,17 +605,17 @@ console.log('§6b R1 (lane pool-silent-members, inc-mvsjhna7) — a CLI update n
   const rD = roster && roster.find((r) => r.id === D1);
   ok(!amI.poolMembers(PI).some((m) => m.id === D1) && !!rD && rD.placeable === false && rD.why && rD.why.code === 'cli-unmeasured' && rD.why.cli === '2.1.312' && rD.why.file === true,
     'R1: …the pool places nothing NEW on it, and its ROSTER still lists it — unplaceable WITH its reason (cli-unmeasured · CLI 2.1.312 · the file there)', roster);
-  ok(!!rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why) === 'long-lived token only (CLI 2.1.312 unmeasured) — re-login or wait for the measurement', 'R1: …in words: «long-lived token only (CLI 2.1.312 unmeasured) — re-login or wait for the measurement»', rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why));
+  ok(!!rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why) === 'long-lived token only, and Claude Code 2.1.312 is not in this VibeSpace\'s records yet — re-login, or a VibeSpace update places it', 'R1: …in words (lane cli-self-measure: never «unmeasured», never «wait for the measurement»): «long-lived token only, and Claude Code 2.1.312 is not in this VibeSpace\'s records yet — re-login, or a VibeSpace update places it»', rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why));
   const rowI = amI.list().accounts.find((a) => a.id === D1);
   ok(rowI.loginState && rowI.loginState.state === 'oat-only' && rowI.oatFile && rowI.oatFile.state === 'held' && rowI.oatFile.cli === '2.1.312', 'R1: …the row reads «long-lived token only» (held · cli-unmeasured · CLI 2.1.312), never «not logged in»', { ls: rowI.loginState && rowI.loginState.state, door: rowI.oatFile });
   const it1 = ITEMS();
-  ok(it1.length === 1 && it1[0].text === 'The Claude CLI updated to 2.1.312; 1 account cannot be placed by the pool until this version is measured — its login is kept' && /Accounts: acct-1\./.test(it1[0].detail) && it1[0].origin === 'pool' && it1[0].i18n && it1[0].i18n.text.params.v === '2.1.312',
-    'R1: …ONE For-you item: «The Claude CLI updated to 2.1.312; 1 account cannot be placed by the pool until this version is measured — its login is kept», naming acct-1 (origin pool, zh/ja params)', it1.map((i) => ({ text: i.text, detail: i.detail, origin: i.origin })));
+  ok(it1.length === 1 && it1[0].text === 'Claude Code updated to 2.1.312; 1 account cannot be placed by the pool yet — its login is kept' && /Accounts: acct-1\./.test(it1[0].detail) && it1[0].origin === 'pool' && it1[0].i18n && it1[0].i18n.text.params.v === '2.1.312',
+    'R1: …ONE For-you item (no hub check here: no binary hash): «Claude Code updated to 2.1.312; 1 account cannot be placed by the pool yet — its login is kept», naming acct-1 (origin pool, zh/ja params)', it1.map((i) => ({ text: i.text, detail: i.detail, origin: i.origin })));
   ok(logs.some((l) => /claude CLI 2\.1\.312 is not measured: 1 pool member\(s\) cannot be placed until it is \(their token files are kept\) — For-you item filed/.test(l)) && !logs.some((l) => l.includes('acct-1')), 'R1: …the journal says the version, the count and that the item was filed — never the item\'s words', logs.slice(-2));
   await h.tick();
   ok(ITEMS().length === 1, 'R1: …a second sweep files nothing more (one item per version)', ITEMS().length);
   const engSrc = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
-  ok(/const cliUnmeasuredNotice = require\('\.\/cli-unmeasured-notice\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), file: path\.join\(rootDir, 'data', 'cli-unmeasured-notice\.json'\) \}\);[^\n]*\nsetInterval\(\(\) => \{ try \{ sweepUsageAnchors\(\); \} catch \{\} try \{ cliUnmeasuredNotice\.tick\(\); \} catch \{\} \}, 60000\);/.test(engSrc), 'R1 WIRING: the pool engine creates the notice with the store, the For-you store and its OWN memory file (data/cli-unmeasured-notice.json), and ticks it every 60 s (oat-file-sync itself still requires nothing)');
+  ok(/const cliUnmeasuredNotice = require\('\.\/cli-unmeasured-notice\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), file: path\.join\(rootDir, 'data', 'cli-unmeasured-notice\.json'\) \}\);[^\n]*[\s\S]{0,1200}?\nsetInterval\(\(\) => \{ try \{ sweepUsageAnchors\(\); \} catch \{\} try \{ cliUnmeasuredNotice\.tick\(\); \} catch \{\} try \{ cliSelfMeasure\.tick\(\)\.catch\(\(\) => \{\}\); \} catch \{\} \}, 60000\);/.test(engSrc), 'R1 WIRING: the pool engine creates the notice with the store, the For-you store and its OWN memory file (data/cli-unmeasured-notice.json), and ticks it every 60 s (oat-file-sync itself still requires nothing)');
   ver = '2.1.308'; await h.tick();
   ok(ITEMS().length === 0 && amI.poolMembers(PI).some((m) => m.id === D1), 'R1: the version is measured again ⇒ the item resolves itself and acct-1 is a candidate again (its file never left)', { open: ITEMS().length });
   const told = todos.idsWhere((i) => i.sessionKey === 'pool:cli-unmeasured');
@@ -706,12 +706,12 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
   {
     const w = world(); const n1 = w.mk();
     const id = n1.tick();
-    ok(!!id && w.todos.get(id).text.startsWith('The Claude CLI updated to 2.1.312; 6 accounts') && w.reads === 1, 'r2 (2): filed once for 2.1.312 — «6 accounts cannot be placed …»', w.mine().map((i) => i.text));
+    ok(!!id && w.todos.get(id).text.startsWith('Claude Code updated to 2.1.312; 6 accounts') && w.reads === 1, 'r2 (2): filed once for 2.1.312 — «6 accounts cannot be placed …»', w.mine().map((i) => i.text));
     const r0 = w.reads; w.wait(60e3); n1.tick(); w.wait(60e3); n1.tick();
     ok(w.reads === r0, 'r2 (2) THROTTLE: inside the 15-min recheck the roster is NOT read again (every pool member\'s credential files, on the main thread)', { reads: w.reads });
     w.names = w.names.slice(0, 4); w.wait(16 * 60e3); n1.tick(); // two members re-logged
     const p = w.todos.get(id);
-    ok(p.id === id && p.status === 'open' && p.text === 'The Claude CLI updated to 2.1.312; 4 accounts cannot be placed by the pool until this version is measured — their logins are kept' && p.detail.split('\n')[0] === 'Accounts: acct-7, acct-8, acct-9, acct-10.' && p.i18n.text.params.n === 4 && w.mine().length === 1,
+    ok(p.id === id && p.status === 'open' && p.text === 'Claude Code updated to 2.1.312; 4 accounts cannot be placed by the pool yet — their logins are kept' && p.detail.split('\n')[0] === 'Accounts: acct-7, acct-8, acct-9, acct-10.' && p.i18n.text.params.n === 4 && w.mine().length === 1,
       'r2 (2) PATCH: two members re-logged ⇒ the OPEN item is patched IN PLACE — the same id, «4 accounts», the four names, the zh/ja params — never a second filing (9d53db09: «6 accounts … acct-7 … acct-12» for as long as it stayed open)', { text: p.text, detail: p.detail.split('\n')[0], items: w.mine().length });
     ok(w.logs.some((l) => /claude CLI 2\.1\.312 is not measured: the For-you item now counts 4 pool member\(s\) \(was 6\)/.test(l)) && !w.logs.some((l) => /acct-/.test(l)), 'r2 (2) PATCH: …the journal says the new count — never the item\'s words', w.logs);
     w.todos.setStatus(id, 'dismissed', 'user'); // THE OWNER dismisses it
@@ -729,7 +729,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     w.wait(16 * 60e3); w.mk().tick();
     ok(w.mine().length === 0, 'r2 (2) FINAL: …and once the store\'s ledger has PRUNED the item, its memory alone keeps the owner\'s word — nothing filed again for 2.1.312', w.mine().map((i) => i.status));
     w.cli = '2.1.313'; w.wait(16 * 60e3); const id13 = w.mk().tick();
-    ok(!!id13 && w.todos.get(id13).text.startsWith('The Claude CLI updated to 2.1.313; 4 accounts'), 'r2 (2): …a NEW version is a new key — 2.1.313 files its own item', w.mine().map((i) => i.text));
+    ok(!!id13 && w.todos.get(id13).text.startsWith('Claude Code updated to 2.1.313; 4 accounts'), 'r2 (2): …a NEW version is a new key — 2.1.313 files its own item', w.mine().map((i) => i.text));
   }
   {
     // RED CONTROL (2): the same owner's dismissal with the module's memory taken out (the rec never read) — `add` re-opens it
@@ -745,7 +745,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     const closed = { ...w.todos.get(id) }; // the store hands its live record: copied now
     w.names = names.slice(0, 2); w.wait(16 * 60e3); n1.tick();
     const back = { ...w.todos.get(id) };
-    ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && back.text.startsWith('The Claude CLI updated to 2.1.312; 2 accounts') && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
+    ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && back.text.startsWith('Claude Code updated to 2.1.312; 2 accounts') && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
     const r0 = w.reads; w.ok = true; w.wait(60e3); n1.tick(); w.wait(16 * 60e3); n1.tick();
     ok(w.todos.get(id).status === 'done' && w.todos.get(id).resolvedBy === 'agent' && w.reads === r0, 'r2 (3): the version MEASURED ⇒ the item resolves itself, and a measured CLI reads no roster at all', { status: w.todos.get(id).status, reads: w.reads - r0 });
   }
@@ -786,7 +786,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (7): an item filed without its fact is lost to the belt once cleared (its words are gone) — re-filed', rr); }
   }
   { // (8) the owner's LATER word: a hand reopen / the Mark-all-read Undo — learned, and the open item patched again
-    const leg = (M, undo) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^The Claude CLI updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
+    const leg = (M, undo) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^Claude Code updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
     const a = leg(NOTICE, false), b = leg(NOTICE, true);
     ok(a.st === 'open' && a.text === '1 account' && b.st === 'open' && b.text === '1 account', 'r3 (8) the owner REOPENS the dismissed item by hand / presses Mark-all-read\'s Undo, five members re-log ⇒ the open item reads «1 account» (the last transition is learned in both directions — b552c972: frozen at «6 accounts»)', { a, b });
     const M = red('(8)', '      const by = lastWord(it);\n', '      const by = r && ownerWord(r.resolvedBy) ? r.resolvedBy : lastWord(it);\n');
