@@ -52,9 +52,15 @@ try {
   }
   const md = path.join(D, 'markers'); fs.mkdirSync(md);
   const two = heavy.slice(0, 2).map((s) => s.name);
-  fs.writeFileSync(path.join(md, 'abcdef1.green'), JSON.stringify({ sha: 'abcdef1', endedAt: 1, timings: [{ name: two[0], ms: 5 }, { name: two[1], ms: 9000 }] }));
+  // a marker in the box writer's shape (sha, result, failed, endedAt): the timings reader goes through readMarkers, and LAW A
+  // (ci-heavy-verdict r4) drops a marker that is not a record of its kind — the int389 cut found this fixture written bare
+  fs.writeFileSync(path.join(md, 'abcdef1.green'), JSON.stringify({ sha: 'abcdef1', result: 'green', failed: [], endedAt: 1, timings: [{ name: two[0], ms: 5 }, { name: two[1], ms: 9000 }] }));
   const ord = R.selectSlice(CI, { tree: REPO, only: two, timingDirs: [md] });
   ok(ord.names.join() === [two[1], two[0]].join() && ord.measured === 2, '③ longest-first by the marker\'s timings (9000 ms before 5 ms)');
+  const bare = path.join(D, 'markers-bare'); fs.mkdirSync(bare);   // CONTROL: the old bare body — no result, no failed
+  fs.writeFileSync(path.join(bare, 'abcdef1.green'), JSON.stringify({ sha: 'abcdef1', endedAt: 1, timings: [{ name: two[0], ms: 5 }, { name: two[1], ms: 9000 }] }));
+  const bareOrd = R.selectSlice(CI, { tree: REPO, only: two, timingDirs: [bare] });
+  ok(bareOrd.measured === 0, `③ a marker without result / failed gives NO timings (measured ${bareOrd.measured}, the unmeasured order) — this reader obeys LAW A too`);
   const un = R.selectSlice(CI, { tree: REPO, only: two, timingDirs: [] });
   ok(un.names.join() === [two[1], two[0]].join(), '③ unmeasured: late-in-table first (the table runs cheap → expensive)');
   ok(throws(() => R.selectSlice(CI, { tree: REPO, only: ['test-not-a-suite'] }), /not a heavy suite/), '③ an unknown --only name refused before any rsync');
