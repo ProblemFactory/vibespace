@@ -1385,6 +1385,12 @@ console.log('\nstatusBar: every harness declares what its status bar shows');
   const ag = HARNESSES.antigravity, agRow = ag.ui.statusBar;
   ok(ag.models().filter((m) => m.id).every((m) => SB.windowOf(agRow, m.id) === 1048576) && SB.windowOf(agRow, 'claude-opus-5-5-max') === 0 && SB.windowOf(agRow, 'gemini-4-argonaut') === 0 && agRow.windows === ag.AGY_CONTEXT_WINDOWS,
     "antigravity: every slug it offers has a documented window (1,048,576 — Google's model pages, named in the descriptor); an unknown slug ⇒ 0 = «window unknown», never a guess");
+  // Gemini 4 Carbon (agy 1.5.5, 2026-11-10, generally available that day): offered first in agy's own order, its window from
+  // Google's model page; Argon and 3.8 Flash gain «low». RED CONTROL: the Carbon window row removed ⇒ «window unknown»
+  ok(ag.models().map((m) => m.id).slice(1, 4).join() === 'gemini-4-carbon-medium,gemini-4-carbon-high,gemini-4-carbon-low' && SB.windowOf(agRow, 'gemini-4-carbon-low') === 1048576 && ['gemini-4-argon-low', 'gemini-3.8-flash-low'].every((id) => ag.models().some((m) => m.id === id)),
+    "antigravity: Gemini 4 Carbon (medium, high, low — agy 1.5.5's own order) leads the picker with its 1,048,576 window; Argon and 3.8 Flash gain «low»");
+  ok(SB.windowOf({ ...agRow, windows: agRow.windows.filter((w) => w.prefix !== 'gemini-4-carbon') }, 'gemini-4-carbon-medium') === 0,
+    'RED CONTROL: the Carbon window row removed ⇒ a Carbon chat\'s bar says «window unknown» (0) — the leg above names the row it needs');
   // gated on the row, never the name: the bar reads the facts row for every fact chip
   const bar = fs.readFileSync(path.join(REPO, 'src/lib/chat-status-bar.js'), 'utf8');
   ok(/const facts = statusBarRow\(this\._backend\);/.test(bar) && ['facts.context && !ctxWindow', 'facts.context && ctxWindow', 'facts.cache &&', 'facts.odometer &&', 'facts.duration &&'].every((n) => bar.includes(n)) && /unreportedRows\(facts\)/.test(bar),

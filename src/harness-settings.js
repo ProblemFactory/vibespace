@@ -432,6 +432,9 @@ const HARNESS_SETTINGS = {
       type: "enum", default: "", combobox: true,
       options: [
         { value: "", label: t("Default") },
+        { value: "gemini-4-carbon-medium", label: "gemini-4-carbon-medium" },
+        { value: "gemini-4-carbon-high", label: "gemini-4-carbon-high" },
+        { value: "gemini-4-carbon-low", label: "gemini-4-carbon-low" },
         { value: "gemini-4-argon-high", label: "gemini-4-argon-high" },
         { value: "gemini-4-argon-medium", label: "gemini-4-argon-medium" },
         { value: "gemini-3.8-flash-high", label: "gemini-3.8-flash-high" },

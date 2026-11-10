@@ -28,12 +28,23 @@ const AS = require('../agy-store');
 const AGY_ARTIFACTS = require('./artifacts-of.js').antigravity; // lane agy-status-bar-facts: reads agy's own write_file/edit_file (abs Path), else the ACP reader
 const AGY_BACKFILL = require('../agy-backfill'); // a sub that ALREADY RAN under an older wrapper: its card from the store
 
-/** The model slugs the headless docs list (`agy models` needs a sign-in — measured), provenance 'docs'; the
- *  dropdown keeps a Custom… row, and agy refuses an unknown slug by name (headless never falls back). */
-const AGY_MODELS = Object.freeze([
-  'gemini-4-argon-high', 'gemini-4-argon-medium', 'gemini-3.8-flash-high', 'gemini-3.8-flash-medium',
-  'gemini-3.7-flash-high', 'gemini-3.7-flash-medium', 'gemini-3.6-flash-high', 'gemini-3.6-flash-medium', 'gemini-3.1-pro-high',
-].map((id) => Object.freeze({ id, label: id })));
+/** The model slugs, each with its PROVENANCE. «measured»: `agy models` under a signed-in account on agy 1.5.5, 2026-11-10
+ *  (Gemini 4 Carbon, generally available that day, first as agy orders it; the «low» level of Argon and 3.8 Flash).
+ *  «docs»: the headless docs' list (`agy models` needs a sign-in — measured). The rows agy 1.5.5 no longer listed for that
+ *  account (3.7 / 3.6 Flash, 3.1 Pro) STAY: another plan may still list them, and agy refuses an unknown slug by name
+ *  (headless never falls back), so a stale row costs a refusal with words while dropping it costs a person on an older plan
+ *  a row. The non-Gemini slugs agy offers (claude-opus-5-5-*, claude-sonnet-5-5-*, gpt-oss-120b-medium) are NOT rows —
+ *  their windows through agy are not documented, and the bar may never guess — but they are typeable through Custom…
+ *  (no validator on the way refuses them: test-agy-harness pins the road). THE ROOT, named not built: this list is a copy
+ *  of what `agy models` answers for a signed-in account; reading it from the CLI at a person's press (never a timer — it is
+ *  a vendor call under a subscription sign-in) is a later lane. */
+const AGY_MODEL_ROWS = [
+  ['gemini-4-carbon-medium', 'measured'], ['gemini-4-carbon-high', 'measured'], ['gemini-4-carbon-low', 'measured'],
+  ['gemini-4-argon-high', 'docs'], ['gemini-4-argon-medium', 'docs'], ['gemini-4-argon-low', 'measured'],
+  ['gemini-3.8-flash-high', 'docs'], ['gemini-3.8-flash-medium', 'docs'], ['gemini-3.8-flash-low', 'measured'],
+  ['gemini-3.7-flash-high', 'docs'], ['gemini-3.7-flash-medium', 'docs'], ['gemini-3.6-flash-high', 'docs'], ['gemini-3.6-flash-medium', 'docs'], ['gemini-3.1-pro-high', 'docs'],
+];
+const AGY_MODELS = Object.freeze(AGY_MODEL_ROWS.map(([id]) => Object.freeze({ id, label: id })));
 const models = () => [{ id: '', label: 'Default' }, ...AGY_MODELS];
 /** THE CONTEXT WINDOW PER MODEL (lane agy-status-bar-facts, 2026-10-21) — agy's stream names no window, so the status bar
  *  reads it from this table (`ui.statusBar.windows`, context 'table'). DOCUMENTED, not measured: Google's Gemini API model
@@ -44,7 +55,9 @@ const models = () => [{ id: '', label: 'Default' }, ...AGY_MODELS];
  *  not here (agy's other models, a newer one) ⇒ the bar says «window unknown» with the token count — never a guess. agy
  *  may checkpoint a long conversation before the model's window; the bar measures against the MODEL's window, as for
  *  claude and codex. The client META (src/lib/agent-meta.js) carries the same rows (test-harness-contract deep-compares). */
-const AGY_CONTEXT_WINDOWS = Object.freeze([{ prefix: 'gemini-4-argon', tokens: 1048576 }, { prefix: 'gemini-3.8-flash', tokens: 1048576 }, { prefix: 'gemini-3.7-flash', tokens: 1048576 }, { prefix: 'gemini-3.6-flash', tokens: 1048576 }, { prefix: 'gemini-3.1-pro', tokens: 1048576 }].map(Object.freeze));
+// gemini-4-carbon (2026-11-10): «Context window (unified input and output token limit) 1,048,576», thinking «Supported (low,
+// medium, high)» — aistudio.google.com/docs/models/gemini-4-carbon («Latest update November 2026»), read 2026-11-10.
+const AGY_CONTEXT_WINDOWS = Object.freeze([{ prefix: 'gemini-4-carbon', tokens: 1048576 }, { prefix: 'gemini-4-argon', tokens: 1048576 }, { prefix: 'gemini-3.8-flash', tokens: 1048576 }, { prefix: 'gemini-3.7-flash', tokens: 1048576 }, { prefix: 'gemini-3.6-flash', tokens: 1048576 }, { prefix: 'gemini-3.1-pro', tokens: 1048576 }].map(Object.freeze));
 
 // ── NAMED ACCOUNTS = A HOME ROOT EACH (commit 2; 主开发's ruling 2026-10-20 11:29Z) ──
 // MEASURED on agy 1.4.3 offline (bwrap --unshare-net, strace, no sign-in): agy keeps EVERYTHING under $HOME and
@@ -283,6 +296,7 @@ module.exports = {
   brand: '/brand/antigravity.svg',
 };
 module.exports.AGY_MODELS = AGY_MODELS;
+module.exports.AGY_MODEL_ROWS = Object.freeze(AGY_MODEL_ROWS.map((r) => Object.freeze([...r]))); // [slug, provenance] — test-agy-harness pins both halves
 module.exports.AGY_QUOTA = AGY_QUOTA;
 module.exports.AGY_SLASH_COMMANDS = AGY_SLASH_COMMANDS;   // the commands agy answers itself — the wrapper keeps exactly these out of its stream
 module.exports.AGY_CONTEXT_WINDOWS = AGY_CONTEXT_WINDOWS;

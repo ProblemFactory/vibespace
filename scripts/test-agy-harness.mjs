@@ -92,9 +92,30 @@ console.log('— ① the descriptor, re-derived from what agy 1.4.3 measured');
   const ad = new AgyAdapter(g.adapterConfig({ acpCommands: { antigravity: '/opt/agy' }, acpWrapper: '/w/acp-wrapper.js', ptyWrapper: '/w/pty' }));
   const term = ad.buildSessionArgs({ mode: 'terminal', model: 'gemini-4-argon-high', effort: 'high', permissionMode: 'auto', resumeId: 'c-9' });
   ok('terminal = agy\'s TUI: --model / --effort / --mode / --conversation', term.cmd === '/opt/agy' && JSON.stringify(term.args) === JSON.stringify(['--model', 'gemini-4-argon-high', '--effort', 'high', '--mode', 'auto', '--conversation', 'c-9']) && term.wrapper === '/w/pty', term);
+  // Gemini 4 Carbon (agy 1.5.5, 2026-11-10) rides both roads as typed
+  const carbC = ad.buildSessionArgs({ mode: 'chat', model: 'gemini-4-carbon-medium', permissionMode: 'auto' }), carbT = ad.buildSessionArgs({ mode: 'terminal', model: 'gemini-4-carbon-high', permissionMode: 'auto' });
+  ok('Gemini 4 Carbon: the wrapper env (chat) and --model (terminal), as typed', carbC.env.AGY_WEBUI_MODEL === 'gemini-4-carbon-medium' && carbT.args.join(' ').includes('--model gemini-4-carbon-high'));
+  // A SLUG AGY OFFERS THAT IS NOT GEMINI is typeable through Custom… TODAY (the question of 2026-11-10): no provider record
+  // serves the antigravity harness (accountProviderId → null ⇒ the menu is OPEN: the harness judges its own spellings),
+  // resolvePick passes the id as typed, the descriptor carries it; the wrapper leg below runs it to agy's argv
+  {
+    const MPx = require(path.join(REPO, 'src/model-providers.js'));
+    const pick = MPx.resolvePick(null, 'claude-opus-5-5-low'), menu = MPx.menuOf(null, [{ id: '', label: 'Default' }, { id: 'gemini-4-carbon-medium', label: 'x' }]);
+    const nonG = ad.buildSessionArgs({ mode: 'chat', model: 'gpt-oss-120b-medium', permissionMode: 'auto' });
+    ok('a non-Gemini slug agy offers (claude-opus-5-5-low, gpt-oss-120b-medium) passes every door on the way: no provider for the harness, an open menu, resolvePick as typed, the wrapper env',
+      MPx.accountProviderId({ backend: 'antigravity' }) === null && menu.open === true && pick.ok === true && pick.model === 'claude-opus-5-5-low' && nonG.env.AGY_WEBUI_MODEL === 'gpt-oss-120b-medium', JSON.stringify({ pick, open: menu.open }));
+  }
   const chat = ad.buildSessionArgs({ mode: 'chat', model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', resumeId: 'c-9' });
   ok('chat = the agy wrapper with the facts in AGY_WEBUI_* (never argv)', chat.wrapper === '/w/agy-wrapper.js' && chat.env.AGY_WEBUI_MODEL === 'gemini-4-argon-high' && chat.env.AGY_WEBUI_MODE === 'bypassPermissions' && chat.env.AGY_WEBUI_RESUME_ID === 'c-9' && chat.args.length === 0, chat);
-  ok('the model table = the docs\' slugs (agy models needs a sign-in — measured)', g.models().slice(1).map((m) => m.id).join() === FX.models.slugs.join() && /sign in/i.test(FX.unauthenticated.models));
+  { // lane agy-gemini-4-carbon: the table = the docs' slugs (provenance «docs», in the docs' order) + the rows agy 1.5.5 listed
+    // for a signed-in account (provenance «measured», 2026-11-10), each once — nothing else
+    const AR = require(path.join(REPO, 'src/harnesses/antigravity.js')).AGY_MODEL_ROWS;
+    const prov = (p) => AR.filter((r) => r[1] === p).map((r) => r[0]).join();
+    const MEASURED = ['gemini-4-carbon-medium', 'gemini-4-carbon-high', 'gemini-4-carbon-low', 'gemini-4-argon-low', 'gemini-3.8-flash-low'];
+    ok('the model table = the docs\' slugs (provenance «docs», their order) + the rows agy 1.5.5 listed signed in (provenance «measured») — each once, nothing else (agy models needs a sign-in — measured)',
+      g.models().slice(1).map((m) => m.id).join() === AR.map((r) => r[0]).join() && prov('docs') === FX.models.slugs.join() && prov('measured') === MEASURED.join()
+      && AR.every((r) => r[1] === 'docs' || r[1] === 'measured') && new Set(AR.map((r) => r[0])).size === AR.length && /sign in/i.test(FX.unauthenticated.models));
+  }
   const tbl = HARNESS_SETTINGS.antigravity;
   ok('settings: the table IS the descriptor\'s; its effort / mode options are agy\'s own values', g.settings === tbl && tbl.rows.find((r) => r.key === 'defaultEffort').options.filter((o) => o.value).every((o) => AGY_EFFORTS.includes(o.value))
     && tbl.rows.find((r) => r.key === 'defaultPermissionMode').options.filter((o) => o.value).every((o) => AGY_MODES.includes(o.value)));
@@ -820,6 +841,15 @@ console.log('— ⑦ resume, an agent error, text only');
   } finally { await w2.stop(); }
   // r4: TWO PROCESSES — a model, then a set-model to Default (agy restarts; its init names none): the stamp is cleared,
   // never the previous process's model
+  // …and the WRAPPER puts a non-Gemini slug on agy's own argv as typed (the 2026-11-10 question, end to end)
+  {
+    const wn = startWrapper({ env: { AGY_WEBUI_MODEL: 'claude-opus-5-5-low' } });
+    try {
+      await wn.until(() => wn.find('session'), 8000, 'session');
+      const stn = await wn.until(() => wn.stub().find((x) => x.argv && x.argv.includes('--input-format')), 5000, 'stream start');
+      ok('a non-Gemini slug reaches agy as typed: --model claude-opus-5-5-low (no validator refuses it; agy itself judges the slug)', stn.argv.join(' ').endsWith('--model claude-opus-5-5-low'), stn.argv);
+    } finally { await wn.stop(); }
+  }
   const w3 = startWrapper({ env: { AGY_WEBUI_MODEL: 'claude-sonnet-4-6' } });
   try {
     await w3.until(() => w3.find('session'), 8000, 'session');
