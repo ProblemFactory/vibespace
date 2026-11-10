@@ -4,9 +4,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.390 — 2026-11-10
 
+### Added
+- On a phone, the chat's + menu has a Take photo row that opens the camera; the other rows now read Photos, File and Folder.
+
 ### Changed
 - An agent no longer mistakes another conversation's scheduled reminder for its own: it is told only of its own background jobs and ones it subscribed to.
 - When another conversation's background job fails, an agent sees one line saying it is not its own; looking up that job shows whose words it reads.
+- A phone's window list, and the desktop's window lists, show each conversation with the icon of what runs it: Claude Code, Codex, OpenCode or Antigravity.
 
 ## 2.369.389 — 2026-11-10
 
