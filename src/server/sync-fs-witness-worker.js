@@ -82,7 +82,7 @@ const dec = new TextDecoder(), enc = new TextEncoder();
 function kernelWords(wchan, syscall, arch = process.arch) {
   const w = String(wchan || '').trim() || '?';
   const s = String(syscall || '').trim();
-  if (s === 'running') return 'on the CPU (JavaScript or native work)';
+  if (s === 'running') return LH.RUNNING_KERNEL_WORDS;   // B-1409: the ONE spelling an ask's «asleep at the ask, on the CPU a moment later» is judged by
   const nr = s.split(/\s+/)[0];
   const name = arch === 'x64' && SYSCALLS[nr] ? SYSCALLS[nr] : nr ? `syscall ${nr}` : '?';
   return `${w === '0' ? 'not sleeping' : w} in ${name}`;

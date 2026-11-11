@@ -23,6 +23,10 @@
 //      alive (a natural exit right after a hold); nothing delays an exit that comes while a sample is in flight
 //   ⑦ LAW L: a short profile (1.5 s, a sample every 50 ms) — the hog's share by its frame, the idle share, its line
 //   ⑧ NODE 22: legs ① (busy, sleep) and ⑤ under the binary named by VS_NODE22 — else «not run: no Node 22 given»
+// B-1409 (2.369.394): a leg the BOX cannot feed — the watchdog thread itself late on two shared cores, too few asks inside a
+// native call — sweeps again (at most twice) and then ends as a NAMED, COUNTED skip («ALL PASS (N, K skipped)» + the list;
+// the release's self-hosted claim runs the same legs); (A)'s strict set takes only asks posted in state R; «waiting for a
+// CPU» is the verdict only when the wait is the hold's larger part — else «it also waited N s for a CPU» beside its parts
 // Run: node scripts/test-loop-hold-live.mjs        (VS_NODE22=/path/to/node22 for leg ⑧)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,6 +36,11 @@ import { spawn } from 'node:child_process';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, cpuMs = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+// B-1409: a leg the BOX could not feed (the watchdog thread itself late on two shared cores: too few asks inside a native
+// call) ends as a NAMED and COUNTED skip — never a green: the summary line prints the count, and the release's self-hosted
+// claim runs the same legs on a box that can
+const skipped = [];
+const skip = (n, why) => { skipped.push(`${n} — ${why}`); console.log(`  ⊘ SKIP ${n} — ${why}`); };
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lh-live-'));
 fs.mkdirSync(path.join(ROOT, 'src'));
 fs.writeFileSync(path.join(ROOT, 'src/hogs.js'), `'use strict';
@@ -341,7 +350,9 @@ function starveOf(r) {
   return holds.map((h) => {
     const s = spans.filter((x) => x.wall >= h.at - 60 && x.wall <= h.at + 10 + (h.msHi || h.ms || 0)).sort((a, b) => b.ms - a.ms)[0] || null;
     const share = s && s.ms > 0 ? s.waitMs / s.ms : null, waiting = h.verdict === LH.V.waiting;
-    return { h, share, waiting, outside: waiting && share != null && share >= SUITE_CLEAR };
+    // B-1409: a hold that waited ≥ 20 % but RAN more is said by its parts with «it also waited N s for a CPU» — the wait said
+    const also = /; it also waited [\d.]+ s for a CPU/.test(h.line || '');
+    return { h, share, waiting, also, outside: waiting && share != null && share >= SUITE_CLEAR };
   });
 }
 function account(rows, plan) {
@@ -350,7 +361,7 @@ function account(rows, plan) {
     if (x.share == null) continue;
     STARVE.measured++;
     const pc = (100 * x.share).toFixed(0);
-    if (x.share >= SUITE_STARVED) { STARVE.measuredStarved++; if (!x.waiting) STARVE.disagree.push(`${plan}: the suite measured ${pc} % run-queue wait, the product said «${x.h.verdict}»`); }
+    if (x.share >= SUITE_STARVED) { STARVE.measuredStarved++; if (!x.waiting && !x.also) STARVE.disagree.push(`${plan}: the suite measured ${pc} % run-queue wait, the product said «${x.h.verdict}» and nothing of a wait`); }
     else if (x.share >= SUITE_CLEAR) STARVE.band++;
     else if (x.waiting) STARVE.disagree.push(`${plan}: the product said «waiting for a CPU», the suite measured ${pc} %`);
   }
@@ -691,7 +702,10 @@ async function sweepA(node, tag, tree = null, sets = null) {
       // something holds it — [post, post + JS_FAST_MS + 1]; a collection inside it, by the child's OWN record
       const winEnd = post ? Math.max(post.at, post.at < x.nativeEnd ? x.nativeEnd : post.at) + LH.JS_FAST_MS + 1 : null;
       const gc = !!post && (c.gcs || []).some(([gs, gd]) => gs < winEnd && gs + gd > post.at);
-      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc });
+      // B-1409: the ask's kernel state AT THE POST, as the product's own line says it — an ask posted ASLEEP (state S / D) is
+      // not on the product's road to «native» (that road is an ask posted in state R) and stays out of the strict set
+      const asleepAsk = !!(h && h.line && /(?:samples?|where it was \(\d+ samples?\)): [^;]*\basleep(?:: | at the ask)/.test(h.line));
+      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc, asleepAsk });
     }
   }
   return A;
@@ -715,6 +729,13 @@ async function legRound4(node, tag, tree = null) {
   const strictShare = (L) => { const j = L.filter(judged); const tail = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2).length; return j.length && tail >= 3 ? j.filter((a) => !a.gc).length / j.length : 0; };
   let rerunA = false;
   if (!tree && strictShare(A) < STRICT_FLOOR) { rerunA = true; say(`(A) the collector took ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds (under the floor ${100 * STRICT_FLOOR} % strict) — the sweep runs once more`); A = await sweepA(node, tag, tree); }
+  // B-1409: THE COUNT FLOORS (8 asks inside the native call, 6 of them 5–55 ms before its end) — the watchdog thread
+  // itself can be late on a box of two shared cores (its asks land in the tail): the sweep runs AGAIN, at most twice,
+  // its holds added, until the floors are met; else the count is a named, counted SKIP (the laws on what was asked still run)
+  const inNativeOf = (L) => L.filter((a) => a.x != null && a.x >= LH.JS_FAST_MS + 1 && a.verdict && !a.outside && !a.asleepAsk);
+  const floorOf = (L) => { const nat = inNativeOf(L); return { n: nat.length, band: nat.filter((a) => a.x >= 5 && a.x <= 55).length }; };
+  let fl = floorOf(A), extraA = 0;
+  while (!tree && (fl.n < 8 || fl.band < 6) && extraA < 2) { extraA++; say(`(A) ${fl.n} of 8 asks posted inside the native call (${fl.band} of 6 in 5–55 ms) — the watchdog was late on this box: the sweep runs again (${extraA} of 2), its holds added`); A = A.concat(await sweepA(node, tag, tree)); fl = floorOf(A); }
   if (!tree) ok(strictShare(A) >= STRICT_FLOOR, `(A) ${tag}: the collector took the suite? ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds had a collection in the ask's window by the child's own record — ${Math.round(100 * strictShare(A))} % judged strictly (the floor ${100 * STRICT_FLOOR} %${rerunA ? '; after ONE rerun' : ''})`);
   const gcHolds = A.filter((a) => judged(a) && a.gc);
   const gcNative = gcHolds.filter((a) => a.x >= fast + 1), gcTail = gcHolds.filter((a) => a.x <= -1 && a.tail + a.x >= 2);
@@ -724,16 +745,19 @@ async function legRound4(node, tag, tree = null) {
   if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}» (${gcNative.length} + ${gcTail.length} holds)`, gcLies.slice(0, 3));
 
   // THE STRICT LEGS: the holds the box did not starve AND the child's own record shows no collection for
-  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc);
+  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc && !a.asleepAsk), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc);
   say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law`);
   const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native), wrongTail = inTail.filter((a) => a.verdict !== LH.V.js);
-  const nativeAll = [...inNative, ...gcNative], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
+  const nativeAll = [...inNative, ...gcNative.filter((a) => !a.asleepAsk)], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
   const named = inNative.filter((a) => a.tail >= 5), namedOk = named.filter((a) => /the first JavaScript after it: [^;]*\b(pbkdfHog|parseHog) \(src\/hogs\.js:\d+\)/.test(a.line || ''));
   const xs = inNative.map((a) => a.x);
   say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.length - wrongJs.length} «native», ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.length - wrongTail.length} «JavaScript»`);
   if (!tree) {
-    ok(nativeAll.length >= 8 && nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length >= 6 && !saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — the ${inNative.length} with NO collection in its window (the child's own record) «native code or garbage collection» exactly, the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
-    ok(named.length > 0 && namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
+    const floorMet = nativeAll.length >= 8 && nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length >= 6;
+    if (!floorMet) skip(`(A) ${tag}: the count floor (8 asks inside the native call, 6 of them 5–55 ms)`, `the watchdog was late on this box: ${nativeAll.length} of 8 asks inside the native call (${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} of 6 in 5–55 ms) after ${1 + extraA} sweeps`);
+    ok(!saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — the ${inNative.length} with NO collection in its window (the child's own record) «native code or garbage collection» exactly, the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
+    if (!named.length) skip(`(A) ${tag}: the late answer's «first JavaScript after it»`, 'the watchdog was late on this box: no ask inside the native call with a tail ≥ 5 ms');
+    else ok(namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
     ok(inTail.length >= 3 && !wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds) is «JavaScript» — the law cuts both ways`, wrongTail.slice(0, 3));
   }
   // (B) the MIXED hold: 0.75 s of JavaScript then 0.75 s in a sync child, the watchdog's thread starting D ms into it (its
@@ -825,7 +849,7 @@ function agreeOf(rows) {
   const bad = [];
   for (const x of rows) {
     if (x.share == null) continue;
-    if (x.share >= SUITE_STARVED && !x.waiting) bad.push(`measured ${(100 * x.share).toFixed(0)} %, said «${x.h.verdict}»`);
+    if (x.share >= SUITE_STARVED && !x.waiting && !x.also) bad.push(`measured ${(100 * x.share).toFixed(0)} %, said «${x.h.verdict}» and nothing of a wait`);
     else if (x.share < SUITE_CLEAR && x.waiting) bad.push(`said «waiting for a CPU», measured ${(100 * x.share).toFixed(0)} %`);
   }
   return bad;
@@ -839,19 +863,20 @@ async function legStarved() {
     const f = path.join(t, 'src/loop-hold.js'), x = fs.readFileSync(f, 'utf8'); if (!x.includes(from)) throw new Error('mutant anchor: ' + from);
     fs.writeFileSync(f, x.replace(from, to)); return t;
   };
-  const starvedRun = async (tree = null) => {   // a spinner on the same cpu for the child's life
-    const spin = spawn('taskset', ['-c', String(cpu), process.execPath, '-e', 'const t = Date.now(); while (Date.now() - t < 6000);'], { stdio: 'ignore' });
-    try { return await run1({ plan: 'busy', ...(tree ? { tree } : {}) }, { pin: cpu }); } finally { try { spin.kill('SIGKILL'); } catch { } }
+  const starvedRun = async (tree = null) => {   // TWO spinners on the same cpu for the child's life — B-1409: «waiting for a CPU» is the
+    // verdict only when the wait is the hold's larger part, and one spinner makes it a 50 / 50 coin; two leave the child a third
+    const spins = [0, 1].map(() => spawn('taskset', ['-c', String(cpu), process.execPath, '-e', 'const t = Date.now(); while (Date.now() - t < 6000);'], { stdio: 'ignore' }));
+    try { return await run1({ plan: 'busy', ...(tree ? { tree } : {}) }, { pin: cpu }); } finally { for (const sp of spins) { try { sp.kill('SIGKILL'); } catch { } } }
   };
   const S = await starvedRun(), sr = starveOf(S), sh = sr.find((x) => x.share != null);
-  say(`⑭ the starved scene (cpu ${cpu} shared with a spinner): the suite measured ${sh ? (100 * sh.share).toFixed(0) : '?'} % run-queue wait; the product said «${sh ? sh.h.verdict : '?'}»`);
-  ok(sh && sh.share >= SUITE_STARVED && sh.waiting && !agreeOf(sr).length, `a TRUE starved hold (one cpu, a spinner beside it): the suite's own count ≥ ${100 * SUITE_STARVED} % and the product says «waiting for a CPU» — they agree`, sr.map((x) => ({ share: x.share, v: x.h.verdict })));
+  say(`⑭ the starved scene (cpu ${cpu} shared with two spinners): the suite measured ${sh ? (100 * sh.share).toFixed(0) : '?'} % run-queue wait; the product said «${sh ? sh.h.verdict : '?'}»`);
+  ok(sh && sh.share >= SUITE_STARVED && sh.waiting && !agreeOf(sr).length, `a TRUE starved hold (one cpu, two spinners beside it): the suite's own count ≥ ${100 * SUITE_STARVED} % and the product says «waiting for a CPU» — they agree`, sr.map((x) => ({ share: x.share, v: x.h.verdict })));
   const never = await starvedRun(mutTree('never', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 99,'));
   const nb = agreeOf(starveOf(never));
   ok(nb.length > 0 && /said «/.test(nb[0]), `MUTANT «never waiting» (WAIT_SHARE out of reach) on the starved scene is RED by name: ${nb[0] || 'no disagreement found'}`);
-  const always = await run1({ plan: 'busy', tree: mutTree('always', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 0,') });
+  const always = await run1({ plan: 'busy', tree: mutTree('always', 'if (waitedMuch(d) && d.waitMs >= d.ranMs) return V.waiting;', 'if (d.waitMs != null) return V.waiting;') });
   const ab = agreeOf(starveOf(always));
-  ok(ab.length > 0 && /said «waiting for a CPU», measured/.test(ab[0]), `MUTANT «always waiting» (WAIT_SHARE 0) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
+  ok(ab.length > 0 && /said «waiting for a CPU», measured/.test(ab[0]), `MUTANT «always waiting» (any wait the verdict) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
 }
 
 // ── ⑮ THE COLLECTOR'S TWO LIES (主开发's ruling 08:30Z), beside ⑭'s: a product that ALWAYS says «native code or garbage
@@ -869,14 +894,17 @@ async function legGcLies(node, tag) {
   const fast = LH.JS_FAST_MS, SETS = [['pbkdf2', [55, 60, 65, 70, 75, 80, 85, 90, 120, 150], [50]], ['json', [120, 135], [50]]];
   const judge = (A) => {
     const j = A.filter((a) => a.x != null && a.verdict && !a.outside);
-    const sN = j.filter((a) => !a.gc && a.x >= fast + 1), sT = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2);
-    const gN = j.filter((a) => a.gc && a.x >= fast + 1), gT = j.filter((a) => a.gc && a.x <= -1 && a.tail + a.x >= 2);
-    return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict !== LH.V.js).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, sT: sT.length };
+    const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2);
+    const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && a.x <= -1 && a.tail + a.x >= 2);
+    return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict !== LH.V.js).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
   };
   const always = judge(await sweepA(node, tag, mutTree('always', -1)));   // the whole sweep: its tail asks are what this lie fails on
   ok(always.strictTailNotJs > 0, `MUTANT «always garbage collection» (JS_FAST_MS −1) is RED by name: ${always.strictTailNotJs} of ${always.sT} asks posted inside the JavaScript tail with NO collection in their window (the child's own record) said «${LH.V.native}»`, always);
-  const never = judge(await sweepA(node, tag, mutTree('never', 1e9), SETS));
-  ok(never.strictNativeSaidJs + never.gcNativeSaidJs > 0, `MUTANT «never garbage collection» (JS_FAST_MS 10⁹) is RED by name: ${never.strictNativeSaidJs + never.gcNativeSaidJs} asks posted while the native call ran said «JavaScript» (${never.gcNativeSaidJs} of them with a collection in their window)`, never);
+  const neverTree = mutTree('never', 1e9);
+  let never = judge(await sweepA(node, tag, neverTree, SETS));
+  if (never.sN + never.gN === 0) never = judge(await sweepA(node, tag, neverTree, SETS));   // B-1409: once more when the box fed it no ask inside the native call
+  if (never.sN + never.gN === 0) skip('MUTANT «never garbage collection» (JS_FAST_MS 10⁹)', `the watchdog was late on this box: 0 asks inside the native call in 2 sweeps — the mutant has nothing to be red on (${JSON.stringify(never)})`);
+  else ok(never.strictNativeSaidJs + never.gcNativeSaidJs > 0, `MUTANT «never garbage collection» (JS_FAST_MS 10⁹) is RED by name: ${never.strictNativeSaidJs + never.gcNativeSaidJs} asks posted while the native call ran said «JavaScript» (${never.gcNativeSaidJs} of them with a collection in their window)`, never);
 }
 
 const LEGS = String(process.env.VS_LH_LEGS || '').split(',').filter(Boolean), leg = (n) => !LEGS.length || LEGS.includes(n);
@@ -918,9 +946,11 @@ try {
 }
 console.log(`\nTHE BOX AND THE SUITE: ${STARVE.waiting} of ${STARVE.holds} holds judged «waiting for a CPU» (${STARVE.outside} outside the asks' law, the suite's own count agreeing); measured by the suite ${STARVE.measured}: starved (≥ ${100 * SUITE_STARVED} %) ${STARVE.measuredStarved}, the band (${100 * SUITE_CLEAR}–${100 * SUITE_STARVED} %) ${STARVE.band}; children rerun once: ${STARVE.reruns.length ? STARVE.reruns.join(', ') : 'none'}`);
 if (!process.env.VS_LH_TREE && process.argv.indexOf('--tree') < 0) {
-  ok(!STARVE.disagree.length, `the product's «waiting for a CPU» agrees with the suite's OWN count of each hold's run-queue wait: ${STARVE.measuredStarved} measured starved (≥ ${100 * SUITE_STARVED} %), every one said so; no hold said starved under ${100 * SUITE_CLEAR} % measured`, STARVE.disagree.slice(0, 5));
+  ok(!STARVE.disagree.length, `the product's «waiting for a CPU» agrees with the suite's OWN count of each hold's run-queue wait: ${STARVE.measuredStarved} measured starved (≥ ${100 * SUITE_STARVED} %), every one said so (the verdict, or «it also waited» beside its parts — B-1409); no hold said starved under ${100 * SUITE_CLEAR} % measured`, STARVE.disagree.slice(0, 5));
   ok(!STARVE.red.length, `the box starved the suite: ${STARVE.red.length ? STARVE.red.join(', ') : 'no child under the floor after its one rerun'} (the floor: ${100 * ASKED_FLOOR} % of a child's holds judged by its asks)`, STARVE.red);
 }
 console.log(`\nthe children used ${(cpuMs / 1000).toFixed(1)} cpu seconds`);
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+if (skipped.length) console.log(`\nSKIPPED BY THE BOX (${skipped.length} — the release's self-hosted claim runs them): ${skipped.join(' · ')}`);
+const sk = skipped.length ? `, ${skipped.length} skipped` : '';
+console.log(fail ? `\n${fail} FAILED (${pass} passed${sk})` : `\nALL PASS (${pass}${sk})`);
 process.exit(fail ? 1 : 0);

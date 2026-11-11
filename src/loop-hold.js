@@ -23,7 +23,9 @@
  * and never system-wide pressure (both are printed as facts, never judged by):
  *   not running (stopped or frozen)  the watchdog's own timer late ≥ STOPPED_LATE_SHARE W and run + wait < STOPPED_RUN_SHARE W
  *                                    (a stopped process, a paused container or VM: nothing of it ran, the watchdog neither)
- *   waiting for a CPU                run-queue wait ≥ WAIT_SHARE W (starved measured 0.50, every other case ≤ 0.006)
+ *   waiting for a CPU                run-queue wait ≥ WAIT_SHARE W AND the wait is the hold's LARGER part (wait ≥ run) —
+ *                                    starved measured 0.50, every other case ≤ 0.006 (B-1409: a hold that ran JavaScript
+ *                                    0.9 s and waited 0.3 s is said by its parts, with «it also waited 0.3 s for a CPU»)
  *   in the kernel (blocked)          run < RAN_SHARE W (a syscall, a child waited on, Atomics.wait)
  *   in the kernel (on the CPU)       stime ≥ KERNEL_SHARE of utime + stime
  * — then, ROUND 5 (law B): THE WINDOW SAYS HOW MUCH, A SAMPLE SAYS WHERE (`partsOf`): with a window covering the hold, its
@@ -399,11 +401,14 @@ function partsOf({ d = null, n = {}, gc = false, order = null, spanMs = null } =
  *  speed; an ask posted while ASLEEP names its wait channel — and, round 5 (law B), names the hold only when the window's
  *  larger part is asleep too (or as the asleep one of two real parts). */
 const ASK_ORDER = ['kernel', 'stopped', 'js', 'native', 'runnable', 'notJs'];
+/** PURE (B-1409): the window's run-queue wait reached WAIT_SHARE of it — said: as THE verdict when it is the hold's larger
+ *  part, else beside the hold's own parts («it also waited N s for a CPU») — a congested box never hides the function */
+const waitedMuch = (d) => !!d && d.wallMs > 0 && d.waitMs != null && d.waitMs >= WAIT_SHARE * d.wallMs;
 function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null, spanMs = null } = {}) {
   const W = d && d.wallMs > 0 ? d.wallMs : 0;
   if (W && d.ranMs != null) {
     if (lateMs >= STOPPED_LATE_SHARE * W && d.ranMs + (d.waitMs || 0) < STOPPED_RUN_SHARE * W) return V.notRunning;
-    if (d.waitMs != null && d.waitMs >= WAIT_SHARE * W) return V.waiting;
+    if (waitedMuch(d) && d.waitMs >= d.ranMs) return V.waiting;   // B-1409: only when the wait is its larger part
     if (d.ranMs < RAN_SHARE * W) return V.blocked;
     if (d.userMs != null && d.kernelMs != null && d.userMs + d.kernelMs > 0 && d.kernelMs >= KERNEL_SHARE * (d.userMs + d.kernelMs)) return V.kernel;
     // round 5 (law B): the window's split by time decides; the samples name each part (never the count of samples)
@@ -429,6 +434,9 @@ function stateOf(statText) {
 }
 const ASK_WORDS = { native: 'on the CPU, not in JavaScript (native code or a collection)', notJs: 'not in JavaScript (its kernel state unread)', stopped: 'stopped',
   runnable: 'running or waiting for a CPU, not in JavaScript (native code, a collection, or no CPU free)' };
+/** the watchdog's words for a syscall read that said «running» (src/server/sync-fs-witness-worker.js kernelWords), and
+ *  what an ask says when its stat read said asleep and that read, a moment later, said running (B-1409) */
+const RUNNING_KERNEL_WORDS = 'on the CPU (JavaScript or native work)', WOKE_WORDS = 'asleep at the ask, on the CPU a moment later';
 /** PURE: ONE ASK, judged by where the thread was WHEN IT WAS ASKED (round 4). In: `postedAt` (monotonic ms, the post),
  *  `answeredAt` (the sample's own FIRST instruction; null = no answer), `state` at the post (`stateOf`), `kernel` (its wait
  *  channel in words, asleep only), `answer` ({kind: 'js', words, key, keyWords, empty, deep} | null), `beat` (the main
@@ -450,7 +458,9 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
   const ranInside = Number.isInteger(beat) && beat !== -1 && beat === beat0;
   const framed = !!(answer && answer.kind === 'js' && !answer.empty);
   const after = framed && ranInside && !answer.deep && !answer.failed && answer.key !== KEYS.unreadable ? { words: answer.words, key: answer.key, keyWords: answer.keyWords } : null;
-  if (state === 'asleep') { const w = `asleep: ${kernel || 'in a call'}`; return { cls: 'kernel', words: w, key: `(${w})`, keyWords: `(${w})`, after }; }
+  // B-1409: the stat read said asleep and the syscall read, a moment later, «running» — two reads that disagree say so,
+  // never the self-contradicting «asleep: on the CPU»
+  if (state === 'asleep') { const w = kernel === RUNNING_KERNEL_WORDS ? WOKE_WORDS : `asleep: ${kernel || 'in a call'}`; return { cls: 'kernel', words: w, key: `(${w})`, keyWords: `(${w})`, after }; }
   if (state === 'stopped') return { cls: 'stopped', words: ASK_WORDS.stopped, key: '(stopped)', keyWords: '(stopped)', after };
   const fast = !!answer && answer.kind === 'js' && (answer.deep === true || (Number.isFinite(answeredAt) && Number.isFinite(postedAt) && answeredAt - postedAt <= jsFastMs));
   if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords };
@@ -636,7 +646,8 @@ function holdLine(h) {
   const f = h.fold || foldHold(h);
   // round 5 (law B): a hold with two real parts says both, in time order, with the window's seconds
   const vw = f.parts && f.parts.length === 2 ? (f.interleaved ? `${f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(' and ')}, interleaved` : f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(', then ')) : f.verdict;
-  const head = h.boot ? `[loop-hold] the boot held the main loop ${heldWords(h)} before its first turn — ${vw}` : `[loop-hold] the main loop was held ${heldWords(h)} — ${vw}`;
+  const also = f.verdict !== V.waiting && waitedMuch(h.d) ? `; it also waited ${secs(h.d.waitMs)} s for a CPU` : '';   // B-1409
+  const head = h.boot ? `[loop-hold] the boot held the main loop ${heldWords(h)} before its first turn — ${vw}${also}` : `[loop-hold] the main loop was held ${heldWords(h)} — ${vw}${also}`;
   const parts = [schedWords(h.d)];
   if (!h.d && !h.boot && insideOf(h).length) parts.push('no scheduler window covered it — the samples alone say where it was');   // the boot has no window by construction
   const inside = insideOf(h), asked = inside.length + Object.values(h.outside || {}).reduce((a, b) => a + (b || 0), 0);
@@ -818,7 +829,7 @@ function profileLine(p) {
     (p.notSampledPct && p.notSampledWords ? ` — ${p.notSampledWords}` : '') + (p.tooLarge ? ' — its frames could not be kept (too large)' : '');
 }
 
-module.exports = { partsOf, PART_SHARE, unseenWhy, unsampledWords, cutWords,
+module.exports = { partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_WORDS, unseenWhy, unsampledWords, cutWords,
   profileOf, profileLine, foldProfileBy, sharesOf, heapFillOf, nodeArgv, PROFILE_MS, PROFILE_EVERY_MS, PROFILE_NOTE, PROFILE_HEAP_SHARE, PROFILE_KEEP, PROFILE_TOP, PROFILE_WORD_MAX,
   PROFILE_STOPPED, PROFILE_STOPPED_ANY, PROFILE_UNSAMPLED, PROFILE_UNSAMPLED_ANY, PROFILE_REFUSED, PROFILE_REFUSED_ANY, STOPPED_LATE_SHARE, STOPPED_RUN_SHARE, HOOK_KEY, ASK_WORDS, OUTSIDE_WORDS,
   frameOf, frameText, frameLoc, parseSample, sampleOf, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,

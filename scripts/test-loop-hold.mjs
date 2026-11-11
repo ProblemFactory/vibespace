@@ -247,6 +247,18 @@ console.log('④ the lines');
   ok(line === want, 'THE resume line: verdict, the scheduler\'s numbers, the samples ×count, the first JavaScript after it, the collections INSIDE the hold (one before it is not), memory, utilization, the starved watchdog', line);
   const f = LH.foldHold(h);
   ok(f.verdict === 'JavaScript' && f.frame === 'busyHog (src/x.js:38)' && f.js === 4 && f.none === 2 && Math.round(f.gc.ms) === 3180, 'the fold: verdict, the table\'s frame, the counts, the collections inside', f);
+  // B-1409 (主开发 18:12Z): «waiting for a CPU» names a hold only when the wait is its LARGER part — a hold of 1.2 s that ran
+  // JavaScript 0.9 s and waited 0.3 s is named by its function, the wait beside it; one that waited 0.9 s of 1.2 s is
+  // «waiting for a CPU»; an ask whose stat read said asleep and whose syscall read said running says so, never «asleep: on the CPU»
+  { const fn = 'parseHog (src/hogs.js:25)', js = [...Array(3)].map(() => ({ kind: 'js', words: `${fn} ← tick (src/server/y.js:52)`, key: fn }));
+    const mixed = LH.holdLine({ from: at0, to: at0 + 1200, ms: 1200, d: LH.schedDelta(R(at0, { ut: 0, st: 0, run: 0, wait: 0 }), R(at0 + 1200, { ut: 90, st: 0, run: 900, wait: 300 })), samples: js });
+    const starved = LH.holdLine({ from: at0, to: at0 + 1200, ms: 1200, d: LH.schedDelta(R(at0, { ut: 0, st: 0, run: 0, wait: 0 }), R(at0 + 1200, { ut: 30, st: 0, run: 300, wait: 900 })), samples: js.slice(0, 1) });
+    ok(/^\[loop-hold\] the main loop was held 1\.2 s — JavaScript; it also waited 0\.3 s for a CPU: /.test(mixed) && mixed.includes(fn) && !/— waiting for a CPU/.test(mixed),
+      'B-1409: a hold of 1.2 s that ran JavaScript 0.9 s and waited 0.3 s is named by its FUNCTION, with «it also waited 0.3 s for a CPU» beside it', mixed);
+    ok(/^\[loop-hold\] the main loop was held 1\.2 s — waiting for a CPU: /.test(starved) && !/it also waited/.test(starved), 'B-1409: a hold that waited 0.9 s of 1.2 s is «waiting for a CPU» (the wait is its larger part)', starved);
+    const woke = LH.askOf({ state: 'asleep', kernel: LH.RUNNING_KERNEL_WORDS }), asleep = LH.askOf({ state: 'asleep', kernel: 'futex_wait_queue in futex' });
+    ok(woke.words === 'asleep at the ask, on the CPU a moment later' && !/asleep: on the CPU/.test(woke.words) && asleep.words === 'asleep: futex_wait_queue in futex',
+      'B-1409: an ask whose stat read said asleep and whose syscall read, a moment later, said running says «asleep at the ask, on the CPU a moment later» — never «asleep: on the CPU»', { woke, asleep }); }
   const boot = LH.holdLine({ boot: true, from: 0, to: 69591, ms: 69591, samples: [{ kind: 'js', words: 'restoreSessions (server.js:1760)', key: 'restoreSessions (server.js:1760)' }], d: null });
   ok(boot.startsWith('[loop-hold] the boot held the main loop 69.6 s before its first turn — JavaScript: 1 sample: restoreSessions (server.js:1760) ×1'), 'the boot\'s own words', boot);
   for (const [why, words] of [['off', 'sampling is off in Settings'], ['debugger', 'a debugger is attached'], ['cap', '20 holds were sampled in the last hour'], ['inspector', 'this Node has no inspector']]) {
