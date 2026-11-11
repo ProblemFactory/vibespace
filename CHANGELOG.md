@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.393 — 2026-11-11
+
+### Fixed
+- The model chip no longer turns amber with ⚠ when Claude Code's alias moves to a newer model, or after you change the model with /model or on another device.
+- Locking the model locks the model your conversation uses, never an older one; a chat set to an exact model version shows ⚠ when another version answers.
+- A model you pick or lock shows ⏳ until the conversation has taken it; opencode and Antigravity chats no longer offer a lock that could not hold.
+- A /model you type becomes your model once Claude Code takes it, even mid-reply or edited in the queue; if Stop or ✕ removes it, nothing changes.
+- Resuming a conversation starts it on the model you chose for it, even if you changed it with every tab closed; opening one no longer changes its saved model.
+- If the AI provider refuses a model you typed with /model, the model chip turns amber, names it, and its menu is where to pick another.
+- On a remote conversation, a /model sent while the connection was down, or unanswered when it dropped, stays said in the chat, with where to pick the model.
+- When a model's own price row takes over from a price you set (Haiku 5.5's, for one), Diagnostics names your row and where to change it.
+
 ## 2.369.392 — 2026-11-11
 
 ### Fixed
