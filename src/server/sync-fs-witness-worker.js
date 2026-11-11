@@ -123,6 +123,15 @@ async function readSource(rel) {
   if (ok && st.size <= SOURCE_MAX) { try { lines = (await fs.promises.readFile(p, 'utf8')).split('\n'); } catch { lines = null; } }
   remember(realFiles, rel, ok, 4096); remember(sources, rel, lines, SOURCE_FILES);
 }
+/** THE ONE READ IN FLIGHT, WHOEVER STARTS IT (a hold's names or a CPU capture's): `naming` is cleared only when the read
+ *  ITSELF returns — a read past its caller's budget is STILL IN FLIGHT (a hung network read holds one threadpool thread,
+ *  never more, and no hold or capture starts another behind it); a read that took SLOW_READ_MS or more starts the slow
+ *  hold when it returns, whoever waited for it → its time (ms) */
+function readOne(rel) {
+  const a = mono();
+  naming = rel;
+  return readSource(rel).catch(() => { }).then(() => { naming = null; const took = mono() - a; if (took >= SLOW_READ_MS) slowUntil = Math.max(slowUntil, mono() + SLOW_HOLD_MS); return took; });
+}
 /** the files these answers' frames need, read off the check's path → `done(why, unread)`: why null (all read) | 'budget' |
  *  'slow'; `unread` = the files left by location alone */
 function namesFor(texts, done) {
@@ -137,11 +146,9 @@ function namesFor(texts, done) {
   const timer = setTimeout(() => end('budget'), NAME_BUDGET_MS); timer.unref?.();
   (async () => {
     while (left.length && !over) {
-      naming = left[0]; const a = mono();
-      try { await readSource(left[0]); } catch { }
-      naming = null;
+      const took = await readOne(left[0]);
       left.shift();
-      if (mono() - a >= SLOW_READ_MS) { slowUntil = mono() + SLOW_HOLD_MS; return end('slow'); }
+      if (took >= SLOW_READ_MS) return end('slow');
     }
     end(null);
   })();
@@ -556,18 +563,20 @@ async function nameRaws(c) {
   let why = null;
   for (const [rel, idx] of byFile) {   // ONE read at a time; each file's frames classed right after it (its lines are then cached)
     if (!why && mono() >= deadline) why = 'budget';
-    if (!why && (mono() < slowUntil || naming)) why = 'slow';
+    if (!why && naming) why = 'pending';   // a read that has not returned is still in flight — one hung read, never more
+    if (!why && mono() < slowUntil) why = 'slow';
     if (!why) {
-      naming = rel; const a = mono();
-      const done = await within(readSource(rel).then(() => true), deadline - mono(), false);
-      naming = null;
-      if (!done) why = 'budget';
-      else if (mono() - a >= SLOW_READ_MS) { slowUntil = mono() + SLOW_HOLD_MS; why = 'slow'; }
+      const took = await within(readOne(rel), deadline - mono(), null);
+      if (took == null) why = 'budget';   // past the budget the read is STILL IN FLIGHT: `naming` stays until it returns
+      else if (took >= SLOW_READ_MS) why = 'slow';
     }
     for (const i of idx) classify(i);   // unread: its location alone
   }
   return { frames, why };
 }
+// THE CAPTURE'S FILE: ONE WRITE IN FLIGHT. A write past its 10 s is still in flight (a hung disk holds one threadpool
+// thread, never more): a capture that ends while it is pending writes nothing and says so
+let writing = null;   // the file name of the write in flight
 async function finishCapture(c) {
   if (c.finished) return;
   c.finished = true;
@@ -578,17 +587,21 @@ async function finishCapture(c) {
     const prof = CC.profileOf({ ticks: c.ticks, stacks: c.stacks, frames, startedM: c.startedM, endedM: c.endedM, everyMs: c.everyMs, finalEveryMs: c.curEveryMs });
     const agg = CC.aggregate(prof);
     let file = null, fileError = null;
-    if (c.dir) {
-      const name = CC.fileName(toWall(c.startedM), c.auto), tmp = path.join(c.dir, `.${name}.${process.pid}.tmp`);
+    if (c.dir && writing) fileError = CC.writePendingWords(writing);
+    else if (c.dir) {
+      const name = CC.fileName(toWall(c.startedM), c.auto), tmp = path.join(c.dir, CC.tmpName(name, process.pid));
+      writing = name;
       const wrote = await within((async () => {
         await fs.promises.mkdir(c.dir, { recursive: true });
         await fs.promises.writeFile(tmp, JSON.stringify(prof));
         await fs.promises.rename(tmp, path.join(c.dir, name));
         return true;
-      })().catch((e) => { fs.promises.unlink(tmp).catch(() => {}); return (e && e.code) || 'error'; }), 10000, 'the disk did not answer in 10 s');
+      })().catch((e) => { fs.promises.unlink(tmp).catch(() => {}); return (e && e.code) || 'error'; }).finally(() => { writing = null; }), 10000, 'the disk did not answer in 10 s');
       if (wrote === true) {
         file = name;
-        try { const { drop } = CC.keptFiles(await within(fs.promises.readdir(c.dir), 5000, [])); for (const d of drop) fs.promises.unlink(path.join(c.dir, d.name)).catch(() => {}); } catch { }
+        // the newest KEEP_FILES kept; a «.<name>.<pid>.tmp» left by a process killed inside its write is removed (this
+        // thread's own write has returned — no tmp of ours is in flight here)
+        try { const { drop } = CC.keptFiles(await within(fs.promises.readdir(c.dir), 5000, []), CC.KEEP_FILES, { writing }); for (const d of drop) fs.promises.unlink(path.join(c.dir, d.name)).catch(() => {}); } catch { }
       } else fileError = String(wrote);
     }
     out = { id: c.id, auto: c.auto, cause: c.cause, startedM: c.startedM, endedM: c.endedM, startedAt: toWall(c.startedM), endedAt: toWall(c.endedM), windowMs: c.endedM - c.startedM,

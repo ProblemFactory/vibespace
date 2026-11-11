@@ -356,6 +356,7 @@ function blockLines(c, { maxLines = BLOCK_LINES } = {}) {
   const cost = [`${a.samples} samples, the asks themselves took ${Math.round(c.costMs || 0)} ms of the main thread (${pct1((c.costMs || 0) / Math.max(1, c.windowMs || 1))})`];
   if (c.halved) cost.push(`the rate halved${c.halved.times > 1 ? ` ${c.halved.times} times` : ''} to every ${c.finalEveryMs} ms — an ask took ${(c.halved.askMs || 0).toFixed(2)} ms of the main thread (the bound ${c.askBoundMs != null ? c.askBoundMs : ASK_BOUND_MS} ms)`);
   if (c.stopped) cost.push(`it stopped early at ${secs1(c.windowMs)} s: ${STOPPED[c.stopped] || c.stopped}`);
+  if (c.namesWhy && NAMES_WHY[c.namesWhy]) cost.push(`some functions are said by their location alone: ${NAMES_WHY[c.namesWhy]}`);
   if (c.file) cost.push(`kept as data/${PROFILE_DIR}/${c.file}`);
   else if (c.fileError) cost.push(`its .cpuprofile was not kept (${c.fileError})`);
   const tail = [
@@ -405,11 +406,25 @@ function fileOf(name) {
   const at = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`);
   return Number.isFinite(at) ? { name: String(name), at, auto: m[6] === 'auto' } : null;
 }
-/** PURE: the files to keep (the newest `keep`) and to remove, of a directory's names (other names are never touched) */
-function keptFiles(names, keep = KEEP_FILES) {
+/** PURE: a capture file's temp name while it is written («.<name>.<pid>.tmp»: hidden from the list, renamed when whole) */
+const tmpName = (name, pid) => `.${name}.${pid}.tmp`;
+const TMP_RE = /^\.(.+)\.(\d+)\.tmp$/;
+/** PURE: the files to keep (the newest `keep`) and to remove, of a directory's names (other names are never touched).
+ *  A capture's temp file is removed too — one left by a process killed inside its write is never renamed — except the
+ *  one of the write in flight (`writing`: its capture file's name) */
+function keptFiles(names, keep = KEEP_FILES, { writing = null } = {}) {
   const ours = (names || []).map(fileOf).filter(Boolean).sort((a, b) => b.at - a.at || (a.name < b.name ? 1 : -1));
-  return { keep: ours.slice(0, keep), drop: ours.slice(keep) };
+  const left = (names || []).map((n) => { const m = TMP_RE.exec(String(n || '')); return m && fileOf(m[1]) && m[1] !== writing ? { name: String(n), tmp: true } : null; }).filter(Boolean);
+  return { keep: ours.slice(0, keep), drop: [...ours.slice(keep), ...left] };
 }
+/** PURE: the words of a capture that ended while the last one's file was still being written */
+const writePendingWords = (name) => `the last capture's file ${name} has not been written yet — the disk has not answered; one write waits, no other starts`;
+/** PURE: why some functions are said by their location alone (the capture's names) */
+const NAMES_WHY = {
+  budget: 'the install\'s files did not answer within the capture\'s reading time',
+  slow: 'the install\'s files read slowly (a read took 100 ms or more)',
+  pending: 'a read of the install\'s files has not returned — one read waits, no other starts',
+};
 
 /** PURE: what a capture's result says to a person and to the bundle (bounded: the listed rows, the split, the lines) */
 function publicCapture(c) {
@@ -428,7 +443,7 @@ function publicCapture(c) {
 
 module.exports = {
   tickOf, rawFramesOf, readLen, callFrameOf, profileOf, relOf, packageOf, aggregate, rowWords, gcSplit, gcWords, causeWords, blockLines,
-  triggerVerdict, FAILS, fileName, fileOf, keptFiles, FILE_RE, publicCapture,
+  triggerVerdict, FAILS, fileName, fileOf, keptFiles, FILE_RE, publicCapture, tmpName, writePendingWords, NAMES_WHY,
   CAPTURE_MS, CAPTURE_EVERY_MS, INTERVAL_MS, PER_DAY, DAY_MS, LAG_LEVEL, HOLDS_RATE, TRIGGER_EVERY_MS, FLOOR_SHARE, BLOCK_LINES, ASK_BOUND_MS,
   RATE_FLOOR_MS, COST_SHARE_MAX, MEM_BYTES, NODES_MAX, KEEP_FILES, PROFILE_DIR, NAME_BUDGET_MS, ANSWER_WAIT_MS, OUTSIDE_URL, N, NATIVE_NOTE, NOT_RUN, STOPPED, CAUSES,
 };

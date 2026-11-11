@@ -17,6 +17,11 @@
 //   Ⓖ THE CAPTURE'S OWN COST: a busy child's work done with and without a capture, interleaved — measured and printed
 //   Ⓗ A DEBUGGER: a port open ⇒ the door refused by name, nothing automatic; opened mid-capture ⇒ it stops early, said
 //   Ⓘ NODE 22: Ⓐ Ⓒ Ⓓ under the binary named by VS_NODE22 — else «not run: no Node 22 given»
+//   Ⓙ A READ, A WRITE THAT NEVER RETURNS (the follow-up, heading .394): the watchdog thread's stat of the install's files
+//      never answers (a preload in that thread stands for the hung kernel call and counts it) — four captures START ONE
+//      read, the later three say why their functions go by location alone; the capture file's write never answers —
+//      three captures start ONE write, the later two say it is not kept. Two MUTANTS (a scratch copy of src/: the read's
+//      guard cleared at the budget; the write's guard removed) are RED by name
 // Run: node scripts/test-cpu-capture-live.mjs        (VS_NODE22=/path/to/node22 for Ⓘ; VS_CC_LEGS=A,C… a maintainer's subset)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -90,14 +95,26 @@ setTimeout(() => {
   if (cfg.inspectAt != null) setTimeout(() => { require('inspector').open(0, '127.0.0.1'); out.inspected = true; }, cfg.inspectAt);
   if (cfg.doorAt != null) setTimeout(() => { out.door = W.holds().startCapture({ auto: false }); }, cfg.doorAt);
   if (cfg.doorAt2 != null) setTimeout(() => { out.door2 = W.holds().startCapture({ auto: false }); }, cfg.doorAt2);
+  for (const at of cfg.doors || []) setTimeout(() => { (out.doors = out.doors || []).push(W.holds().startCapture({ auto: false })); }, at);
   if (cfg.untilMs) setTimeout(finish, cfg.untilMs);
   else { const iv = setInterval(() => { const r = W.holds().report().capture; if (r.last) { clearInterval(iv); setTimeout(finish, cfg.afterMs || 0); } }, 100); }
 }, cfg.startMs || 600);
 setTimeout(finish, cfg.timeoutMs || 60000);
 `);
-function run(cfg, { node = process.execPath, timeoutMs = 90000 } = {}) {
+// Ⓙ's preload: in the watchdog THREAD only, a stat of the install's .js files / a write under the child's data dir never
+// answers — each call is logged (one line) and left pending for the child's life (the hung kernel call it stands for)
+const HANG = path.join(ROOT, 'hang.cjs');
+fs.writeFileSync(HANG, `'use strict';
+if (!require('worker_threads').isMainThread && process.env.VS_CC_HANG) {
+  const fs = require('fs'), h = JSON.parse(process.env.VS_CC_HANG);
+  const hang = (fn, test) => { const orig = fs.promises[fn]; fs.promises[fn] = function (p, ...rest) { if (test(String(p))) { fs.appendFileSync(h.log, fn + ' ' + p + '\\n'); return new Promise(() => {}); } return orig.call(this, p, ...rest); }; };
+  if (h.stat) hang('stat', (p) => p.startsWith(h.stat) && /\\.c?js$/.test(p));
+  if (h.write) hang('writeFile', (p) => p.startsWith(h.write));
+}
+`);
+function run(cfg, { node = process.execPath, timeoutMs = 90000, pre = null, env = {} } = {}) {
   return new Promise((resolve) => {
-    const c = spawn(node, [KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir() } });
+    const c = spawn(node, [...(pre ? ['-r', pre] : []), KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), ...env } });
     let out = '', err = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
     const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, timeoutMs);
@@ -198,6 +215,40 @@ async function legDebugger() {
   ok(L && L.stopped === 'debugger' && L.windowMs < 5000 && L.lines.some((l) => /it stopped early at \d+\.\d s: a debugger was attached/.test(l)), `a debugger opened mid-capture: it stops early, said (at ${L ? (L.windowMs / 1000).toFixed(1) : '?'} s)`, L && L.lines);
 }
 
+// ── Ⓙ A READ, A WRITE THAT NEVER RETURNS ──────────────────────────────────────────────────────────────────────────
+const blocksOf = (r) => (r.out ? r.out.lines.filter((l) => l.startsWith('[cpu-profile] captured on request')) : []);
+async function legHungRead(tree = null) {
+  const log = path.join(ROOT, `hang-read-${Date.now()}.log`); fs.writeFileSync(log, '');
+  // four door captures of 1.2 s, 4 s apart (each ends within its 2 s reading time on any tree)
+  const r = await run({ plan: 'ten', auto: false, captureMs: 1200, doors: [300, 4300, 8300, 12300], untilMs: 16500, ...(tree ? { tree } : {}) },
+    { pre: HANG, env: { VS_CC_HANG: JSON.stringify({ log, stat: ROOT + '/' }) } });
+  const stats = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean), b = blocksOf(r);
+  return { r, stats, b, ok: stats.length === 1 && b.length === 4 && (r.out.doors || []).every((d) => d && d.ok) && b.slice(1).every((x) => /some functions are said by their location alone: a read of the install's files has not returned — one read waits, no other starts/.test(x)) };
+}
+async function legHungWrite(tree = null) {
+  const log = path.join(ROOT, `hang-write-${Date.now()}.log`); fs.writeFileSync(log, '');
+  // three door captures of 1.2 s: the first's write never answers (its 10 s spent), the next two end while it is pending
+  const r = await run({ plan: 'ten', auto: false, captureMs: 1200, doors: [300, 13000, 15500], untilMs: 18000, ...(tree ? { tree } : {}) },
+    { pre: HANG, env: { VS_CC_HANG: JSON.stringify({ log, write: ROOT + '/data-' }) } });
+  const writes = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean), b = blocksOf(r);
+  return { r, writes, b, ok: writes.length === 1 && b.length === 3 && (r.out.doors || []).every((d) => d && d.ok) && /its \.cpuprofile was not kept \(the disk did not answer in 10 s\)/.test(b[0] || '') && b.slice(1).every((x) => /its \.cpuprofile was not kept \(the last capture's file \S+ has not been written yet — the disk has not answered; one write waits, no other starts\)/.test(x)) };
+}
+async function legHung() {
+  console.log('Ⓙ a read, a write that never returns: ONE in flight, whoever starts it');
+  const a = await legHungRead();
+  ok(a.ok, `four captures against a stat that never answers: ${a.stats.length} read started (ONE); ${a.b.length} blocks, the later three say a read has not returned`, { stats: a.stats, doors: a.r.out && a.r.out.doors, b: a.b.map((x) => x.split('\n').slice(-1)[0]) });
+  const w = await legHungWrite();
+  ok(w.ok, `three captures against a write that never answers: ${w.writes.length} write started (ONE); the first «the disk did not answer in 10 s», the next two «has not been written yet»`, { writes: w.writes, doors: w.r.out && w.r.out.doors, b: w.b.map((x) => x.split('\n').slice(-1)[0]) });
+  // THE MUTANTS: a scratch copy of src/, one text swap each in the watchdog thread
+  const mut = (name, from, to) => { const dir = path.join(ROOT, name); fs.cpSync(path.join(REPO, 'src'), path.join(dir, 'src'), { recursive: true }); const p = path.join(dir, 'src/server/sync-fs-witness-worker.js'), t = fs.readFileSync(p, 'utf8'); if (!t.includes(from)) return null; fs.writeFileSync(p, t.replace(from, to)); return dir; };
+  const m1 = mut('mut-read', "if (took == null) why = 'budget';", "if (took == null) { why = 'budget'; naming = null; }");
+  const ma = m1 ? await legHungRead(m1) : { ok: true, stats: [] };
+  ok(!ma.ok && ma.stats.length > 1, `MUTANT «the read's guard cleared at its budget» is RED by name: ${ma.stats.length} reads started`, ma.stats);
+  const m2 = mut('mut-write', 'if (c.dir && writing) fileError = CC.writePendingWords(writing);\n    else if (c.dir) {', 'if (c.dir) {');
+  const mw = m2 ? await legHungWrite(m2) : { ok: true, writes: [] };
+  ok(!mw.ok && mw.writes.length > 1, `MUTANT «no guard on the capture's write» is RED by name: ${mw.writes.length} writes started`, mw.writes);
+}
+
 const LEGS = String(process.env.VS_CC_LEGS || '').split(',').filter(Boolean), leg = (n) => !LEGS.length || LEGS.includes(n);
 if (LEGS.length) console.log(`(only the legs ${LEGS.join(', ')} — VS_CC_LEGS; the gate runs every leg)`);
 const report = {};
@@ -219,6 +270,7 @@ try {
   if (leg('F')) await legCost();
   if (leg('G')) report.ownCost = await legOwnCost();
   if (leg('H')) await legDebugger();
+  if (leg('J')) await legHung();
   const n22 = process.env.VS_NODE22;
   if (!leg('node22')) { }
   else if (n22 && fs.existsSync(n22)) {

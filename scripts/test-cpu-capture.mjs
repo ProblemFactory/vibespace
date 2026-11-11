@@ -177,6 +177,18 @@ ok(fname === '2026-11-11T05-42-01-123Z-auto.cpuprofile' && C.fileOf(fname).at ==
 const names = [...Array.from({ length: 13 }, (_, i) => C.fileName(now - i * 3600000, i % 2 === 0)), 'notes.txt', '.tmp'];
 const kf = C.keptFiles(names);
 ok(kf.keep.length === 10 && kf.drop.length === 3 && kf.keep[0].at === now && kf.drop.every((d) => d.at < kf.keep[9].at) && ![...kf.keep, ...kf.drop].some((f) => /notes|tmp/.test(f.name)), 'the newest 10 kept, the 3 oldest removed, nothing else in the directory touched');
+// THE LEFTOVER TEMP FILE (the follow-up, heading .394): a process killed inside its write leaves «.<name>.<pid>.tmp»,
+// never renamed — removed at the next kept write; the write in flight's own is kept; no other name is touched
+const liveF = C.fileName(now, true), deadF = C.fileName(now - 7200000, false);
+const kt = C.keptFiles([liveF, C.tmpName(liveF, 4242), C.tmpName(deadF, 999), '.notes.1.tmp', 'x.cpuprofile.3.tmp', '.' + deadF], C.KEEP_FILES, { writing: liveF });
+ok(C.tmpName(deadF, 999) === `.${deadF}.999.tmp` && kt.keep.length === 1 && kt.drop.length === 1 && kt.drop[0].name === C.tmpName(deadF, 999),
+  'a capture\'s temp file left by a killed write is removed; the write in flight\'s kept; «.notes.1.tmp», «x.cpuprofile.3.tmp», «.<name>» untouched', kt);
+ok(C.keptFiles([C.tmpName(liveF, process.pid), C.tmpName(deadF, 1)]).drop.length === 2, 'no write in flight: every capture temp file in the directory is a leftover, whatever its pid (a reused pid too)');
+const nw = (why, extra = {}) => C.blockLines({ cause: 'door', agg: few, windowMs: few.totalMs, everyMs: 50, costMs: 9, gc: { split: false, why: 'x' }, namesWhy: why, ...extra }).join('\n');
+ok(/some functions are said by their location alone: a read of the install's files has not returned — one read waits, no other starts/.test(nw('pending')) && /within the capture's reading time/.test(nw('budget')) && /read slowly/.test(nw('slow')) && !/location alone/.test(nw(null)),
+  'why a function is said by its location alone is said: a read still in flight, the reading time spent, a slow read — nothing when every name was read');
+ok(/its \.cpuprofile was not kept \(the last capture's file 2026-[^ ]+ has not been written yet — the disk has not answered; one write waits, no other starts\)/.test(nw(null, { fileError: C.writePendingWords(liveF) })),
+  'a capture ending while the last one\'s file is still being written: not kept, said — one write waits, no other starts');
 let answer = null;
 globalThis[LH.HOOK_KEY] = { dbg: () => false, note: (out) => { answer = out; }, now: () => 0, z: new Int32Array(2), b: new Int32Array(8) };
 function realCaller() { return (0, eval)(LH.SAMPLE_EXPR); }   // eslint-disable-line no-eval
