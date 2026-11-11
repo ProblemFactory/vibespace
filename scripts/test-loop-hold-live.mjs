@@ -27,6 +27,8 @@
 // native call — sweeps again (at most twice) and then ends as a NAMED, COUNTED skip («ALL PASS (N, K skipped)» + the list;
 // the release's self-hosted claim runs the same legs); (A)'s strict set takes only asks posted in state R; «waiting for a
 // CPU» is the verdict only when the wait is the hold's larger part — else «it also waited N s for a CPU» beside its parts
+// B-1409 follow-up: (B) judges only the runs whose asks ALL landed inside the sync child's own start / end stamps (an ask
+// within JS_FAST_MS of its end counts as outside) — the rest a NAMED, COUNTED skip, with the asks and the child's stamps
 // Run: node scripts/test-loop-hold-live.mjs        (VS_NODE22=/path/to/node22 for leg ⑧)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -69,7 +71,7 @@ function anonHog(ms) { return (function () { const t = process.hrtime.bigint(); 
 function pbkdfHog(iters, tailMs) { require('crypto').pbkdf2Sync('a', 'b', iters, 32, 'sha256'); const e = process.hrtime(), end = e[0] * 1e3 + e[1] / 1e6; const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < tailMs) x += Math.sqrt(x + 1); return end + 0 * x; }
 function parseHog(s, tailMs) { const v = JSON.parse(s); const e = process.hrtime(), end = e[0] * 1e3 + e[1] / 1e6; const t = process.hrtime.bigint(); let x = v.length; while (Number(process.hrtime.bigint() - t) / 1e6 < tailMs) x += Math.sqrt(x + 1); return end + 0 * x; }
 const strNamed = { ['strHog']: function (ms) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < ms) x += Math.sqrt(x + 1); return x; } };
-function mixedHog(jsMs, childS) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < jsMs) x += Math.sqrt(x + 1); require('child_process').execFileSync('sleep', [String(childS)]); return x; }
+function mixedHog(jsMs, childS, st) { const t = process.hrtime.bigint(); let x = 0; while (Number(process.hrtime.bigint() - t) / 1e6 < jsMs) x += Math.sqrt(x + 1); const ms = () => Number(process.hrtime.bigint()) / 1e6; if (st) st.c0 = ms(); require('child_process').execFileSync('sleep', [String(childS)]); if (st) st.c1 = ms(); return x; }
 async function awaitWorkHog(n) { let s = 0; for (let i = 0; i < n; i++) { s += await i; for (let j = 0; j < 200; j++) s = (s * 31 + j) | 0; } return s; }
 module.exports = { awaitWorkHog, busyHog, bootHog, jsonHog, zlibHog, regexHog, sleepHog, gcHog, spinChecked, deepHog, awaitHog, slowPrep, deepSoak, monoHog, computedSelf, Hogs, arrowHog, hogObj, anonHog, pbkdfHog, parseHog, mixedHog, strNamed };
 `);
@@ -214,8 +216,12 @@ else if (plan === 'heapFill') {   // round 4 (3): a REAL small old generation fi
   later(400, () => { const r = W.holds().startProfile(1000); out.checks.heap = { usedMb: Math.round(fill().used / 1048576), limitMb: Math.round(fill().limit / 1048576), heapSizeLimitMb: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576), press: r }; keep.length = 0; done(200); });
 }
 else if (plan === 'mixedLate') {   // round 4 (B): JavaScript then a sync child, the watchdog's thread starting late inside it
+  // B-1409 follow-up: node builds a channel's FIRST MessageEvent by loading undici (Node 22 and 24) — on this collector that
+  // load ran in the mixed hold's tail, and a late watchdog's asks met it (the release gate's D 921: «JavaScript» 2 : 1, both
+  // answers undici frames); loaded here, before the hold, the tail runs only the plan's own lines
+  void globalThis.MessageEvent;
   const { BroadcastChannel } = require('worker_threads'); const evs = [], bc = new BroadcastChannel('lh-posts'); bc.onmessage = (e) => evs.push(e.data);
-  later(150, () => { const wall = Date.now(), holdStart = kmono(); H.mixedHog(cfg.jsMs, cfg.childS); const end = kmono(); later(500, () => { bc.close(); out.checks.run = { wall, holdStart, end }; out.checks.evs = evs; done(300); }); });
+  later(150, () => { const wall = Date.now(), holdStart = kmono(), st = {}; H.mixedHog(cfg.jsMs, cfg.childS, st); const end = kmono(); later(500, () => { bc.close(); out.checks.run = { wall, holdStart, end, childStart: st.c0, childEnd: st.c1 }; out.checks.evs = evs; done(300); }); });
 }
 else if (plan === 'late') setTimeout(() => { W = make(); H.busyHog(300); done(); }, 2000);   // started AFTER the loop's first turn, then held at once
 else if (plan === 'lateWatchdog') { let last = Date.now(), maxGap = 0; const t = setInterval(() => { const n = Date.now(); maxGap = Math.max(maxGap, n - last); last = n; }, 20); setTimeout(() => { clearInterval(t); out.checks.mainMaxGap = maxGap; done(300); }, (cfg.blockS || 1.6) * 1000 + 1200); }
@@ -764,17 +770,28 @@ async function legRound4(node, tag, tree = null) {
   //     scheduler window then covers less than half the hold from D = 750 on — round 3's regression said «native» there)
   const B = [];
   for (const D of [400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300]) {
-    const r = await run({ plan: 'mixedLate', jsMs: 750, childS: 0.75, tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_WORKER_DELAY_MS: String(D + 150) }, timeoutMs: 30000 });
+    const r = await run({ plan: 'mixedLate', jsMs: 750, childS: 0.75, tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_WORKER_DELAY_MS: String(D + 150), LH_POSTWATCH: '1' }, timeoutMs: 30000 });
     const c = r.out && r.out.checks;
     if (!c || !c.run) { ok(false, `(B) D = ${D}: the child answered (${tag})`, r.err.slice(-800)); continue; }
     const st = (c.evs || []).find((e) => e.ev === 'workerStart'), h = (r.out.report.holds || []).find((y) => y.at >= c.run.wall - 60 && y.at <= c.run.wall + 10);
-    B.push({ D, measured: st ? Math.round(st.at - c.run.holdStart) : null, verdict: h ? h.verdict : null, line: h ? h.line : null });
+    // B-1409 follow-up: the hold's asks (posted from its start to its end) against the sync child's OWN stamps — an ask
+    // posted before the child began, or within JS_FAST_MS of its end, can be answered by the JavaScript around it
+    const { holdStart, end, childStart: c0, childEnd: c1 } = c.run;
+    const asks = (c.evs || []).filter((e) => e.ev === 'post' && e.at >= holdStart && e.at <= end + 50).map((e) => Math.round(e.at - holdStart));
+    const outside = c0 == null || c1 == null ? asks : asks.filter((x) => x + holdStart < c0 || x + holdStart > c1 - LH.JS_FAST_MS);
+    B.push({ D, measured: st ? Math.round(st.at - holdStart) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, asks, outside, child: c0 == null ? null : [Math.round(c0 - holdStart), Math.round(c1 - holdStart)] });
   }
-  say(`(B) ${B.map((b) => `D ${b.measured}: ${b.verdict || 'no hold'}`).join(' · ')}`);
+  say(`(B) ${B.map((b) => `D ${b.measured}: ${b.verdict || 'no hold'} (asks ${b.asks.join('/') || 'none'}, the child ${b.child ? b.child.join('–') : '?'} ms)`).join(' · ')}`);
   if (!tree) {
-    const child = B.filter((b) => b.measured != null && b.measured >= 800 && b.measured <= 1400);
+    const started = B.filter((b) => b.measured != null && b.measured >= 800 && b.measured <= 1400);
+    // B-1409 follow-up: the leg judges only the runs whose asks ALL landed inside the child's own stamps — a late watchdog
+    // on a loaded box also asks after the child ended, where node's own JavaScript answers (a release gate's D 921 on
+    // Node 24: two asks answered by undici's lazy load, «JavaScript» 2 : 1) — the rest a NAMED, COUNTED skip like (A)'s
+    const child = started.filter((b) => b.asks.length && !b.outside.length), unjudged = started.filter((b) => !child.includes(b));
     ok(B.length === 10 && B.every((b) => b.verdict && b.verdict !== LH.V.native), `(B) ${tag}: the mixed hold is never «native code or garbage collection», wherever the watchdog started (D = 400…1300 ms)`, B.filter((b) => !b.verdict || b.verdict === LH.V.native).slice(0, 2));
-    ok(child.length >= 4 && child.every((b) => b.verdict === LH.V.blocked && /asleep: \S/.test(b.line || '')), `(B) ${tag}: the watchdog started inside the sync child (${child.length} runs, its window covering less than half the hold) ⇒ «in the kernel (blocked)» with the wait channel the ask found`, child.filter((b) => b.verdict !== LH.V.blocked || !/asleep: \S/.test(b.line || '')).slice(0, 2));
+    if (unjudged.length) skip(`(B) ${tag}: ${unjudged.length} of ${started.length} runs whose watchdog started inside the sync child`, `the watchdog was late on this box: an ask outside the child's own stamps — ${unjudged.map((b) => `D ${b.measured}: asks at ${b.asks.join('/') || 'none'} ms, the child ${b.child ? b.child.join('–') : '?'} ms`).join('; ')}`);
+    if (child.length < 4) skip(`(B) ${tag}: the count floor (4 runs with every ask inside the sync child)`, `the watchdog was late on this box: ${child.length} of 4`);
+    if (child.length) ok(child.every((b) => b.verdict === LH.V.blocked && /asleep: \S/.test(b.line || '')), `(B) ${tag}: the watchdog started inside the sync child (${child.length} runs, every ask inside the child's own stamps, its window covering less than half the hold) ⇒ «in the kernel (blocked)» with the wait channel the ask found`, child.filter((b) => b.verdict !== LH.V.blocked || !/asleep: \S/.test(b.line || '')).slice(0, 2));
   }
   // (C) MUST 2 — THE WATCHDOG'S OWN FILE READS NEVER DELAY A CHECK: every read of a repo source takes 300 ms (sync or async,
   //     in the watchdog's own thread); a 700 ms hold is asked at held ≈ 100, 200, 400 ms ON TIME, the next hold too, and
