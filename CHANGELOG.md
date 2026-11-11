@@ -4,6 +4,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.393 — 2026-11-11
 
+### Added
+- An agent can ask you for a two-step code: its card in For you has the fields of Vault ▸ Add ▸ Two-step code…, and the agent may suggest its name.
+- Its tick lets that conversation read the current code while it runs — never the seed. After a restart, Vault ▸ Two-step codes ▸ Use for… gives it again.
+
 ### Fixed
 - The model chip no longer turns amber with ⚠ when Claude Code's alias moves to a newer model, or after you change the model with /model or on another device.
 - Locking the model locks the model your conversation uses, never an older one; a chat set to an exact model version shows ⚠ when another version answers.

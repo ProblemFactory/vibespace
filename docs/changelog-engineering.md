@@ -76,6 +76,26 @@ This file is the engineers' record of every release: the lanes, the verification
   - THE SEEDED WALK (test-status-bar-chips ⑧): 300 seeds × 24 steps over the real modules (ws-handler's set-model text, model-ask, session-brain's gate, the engine's repin text, two real bars and a reload; a stub CLI + wrapper; both feeds at random lags with duplicates; lost answers; restarts) — six invariants at every rest point. It found five orderings of its own while being written (an earlier typed /model overwritten by a later refused one; a pick not superseding a typed arm; a stale queue snapshot from the lagging feed releasing a hold; a turn's records in flight across the arm; a restart) — each fixed. On b7ac5058b it reds by itself: (iii) ×240 (finding 1), (vi) ×21.
   - Smaller: dispose clears the pending timer; the three refusals and a dropped saved model are said in zh / ja; a dated id spelled with «@» is a dated snapshot in modelHeld.
 
+### totp-request-card — an agent asks the person for a TWO-STEP CODE on one card; what they type lands as ONE two-step entry (fb-251bb41646; the owner said yes 2026-11-11 04:55Z)
+- **The gap.** An agent that meets a two-step prompt OUTSIDE a browser login (a CLI, an SSH jump, an API console) had no road. The totp row's `request` was NONE, and `--kind totp` was refused; a free secret could hold a seed, but nothing turns it into codes.
+- **The fourth target on the SAME road.** `vibespace-vault request "<what>" --purpose "<why>" --kind totp [--name <name>]` files the same `secret-request` item (its record, limits, quiet period and receipt road).
+  - The proposed name is judged by THE two-step name rule (src/totp.js `entryOf` — the 两步验证… dialog's own). A bad one, a `--host`, a `--note` or an `--into` is refused by name before any card.
+  - The refusal of an unknown kind names every kind the road takes.
+  - The card's FIRST line is «<who> asks you for a two-step code (TOTP) for: <purpose>».
+- **The card is the dialog.** src/lib/vault-totp-row.js `totpFields` — the 两步验证… dialog's field set (its two ways, the name, the hub's preview with Save drawn only after it, the words) — is extracted ONCE. It is drawn by the dialog (`showTotpAddDialog` = a shell + the field set + its footer) and by the card (src/lib/vault-paste-box.js `totpBoxEl`). The agent's proposed name is pre-filled, and the person's edit wins.
+- **ONE writer, ONE door.**
+  - The answer (the link and the seed taken off the body as `totpLink` / `totpSeed`) goes to src/server/vault-totp.js `addEntry` — THE person's two-step writer (`totp:<name>`, by: human, «exists» never overwrites). Never `agentAdd` (the agent-owned road), never a free `secret:` entry.
+  - The tick («Let <who> read its current code — never the seed — while it runs», default `vault.requestGrantsRequester`) writes ONE grant through the same engine's `grant` — the entry's «Use for…» — for THIS conversation, held for its CURRENT RUN.
+  - A conversation not running at the press: stored, not given (`not_running`), said in the toast and the receipt.
+  - No new grant grain. No use line: storing a seed is the person's act; the asker's first use is its first `vibespace-vault totp`.
+- **The receipt.** STORED, the name, the grant in words (three outcomes: given · ticked but not given · not ticked) and ONE constant TOTP_USE. Never the seed, never a code.
+- **The table.** src/vault-kinds.js: the totp row's `request` is `REQUEST({ lands: 'totp', kinds: ['totp'] })`. test-vault-kinds-census CHECK.request takes the `totp` landing.
+- **A new cross-check:** every kind the paste road takes is ONE family's request. RED controls: the totp row back to NONE; `--kind totp` gone from the usage. `src/totp.js` joins test-architecture's PURE set (it imports nothing; vault-paste reads its name rule).
+- **Gates.**
+  - test-vault-paste ⑩d (the ask, the card, the writer, the run grant, the receipt, `exists`, the link way, not running) and ⑫ mutants (agentAdd, the grant without the tick, the branch gone — each RED). The ⑪ sweep finds none of the typed seeds.
+  - test-vault-kinds-census, test-vault-law, test-vault-words, test-approval-census (the action and route pins widened, the writer pinned, the agentAdd mutant a gate).
+  - Heavy: test-vault-paste-chrome ⑩ (the real card on the desk and the phone) and test-vault-totp-add-chrome (the dialog on the extracted field set).
+
 ## 2.369.392 — 2026-11-11
 
 ### usage-ledger-walk — the ledger is walked by what is NEW (hotfix; the owner's hub and a fleet hub froze 5–6 s every half minute)
