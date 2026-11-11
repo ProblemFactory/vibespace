@@ -10,7 +10,8 @@
 //   ④ a ledger row alone (an end for a conversation in no live group) ⇒ written, nothing announced;
 //   ⑤ a lifted archive announces only the member's groups; nothing to lift ⇒ nothing written;
 //   ⑥ THE SIGNATURE'S OTHER TWO PARTS: a member added to an unarchived group, nothing else moving ⇒ the next write sweeps;
-//     an ended-ledger row written ⇒ the next write sweeps;
+//     a SWAP (one member leaves, another joins — the count equal) ⇒ the next write sweeps; an ended-ledger row written ⇒
+//     the next write sweeps;
 //   ⑦ A «GONE» IS STILL SAID WITHIN MINUTES: a transcript removed ⇒ 50 quiet writes inside ten minutes start no sweep; at
 //     eleven minutes of virtual time ONE quiet write sweeps once and the waiting sender is told (the pair closes);
 //   ⑧ THE BENCH at the owner's shape (358 groups, 724 member rows, 561 ended ids): ms per user-state write, before / after.
@@ -194,6 +195,21 @@ const LEGS = {
     const c = x.counts(), row = (x.w.channels.store.groups.live().ended || {})[N];
     return { ok: c.sweeps === 1 && !!row && row.why === 'archived', detail: `a member added to an unarchived group, then one quiet write: ${c.sweeps} sweep; the joiner's end said: ${row ? row.why : 'no'}` };
   },
+  // ⑥ a SWAP at an equal count (主开发's green mutant on 4f63129ce: the members out of the hash, their count kept in the
+  //   prefix — a join moves the count, a swap does not): the joiner was archived before it joined, only a sweep says it
+  async 'member-swap-sweeps'(T) {
+    gidN = 0;
+    const L1 = U(81), L2 = U(82), M = U(83), N = U(84);
+    const multi = group([L1, L2, M]);
+    const x = await world(T, { groups: [multi], live: [L1, L2], transcripts: [M, N], archived: [N] });
+    await x.write(); await x.settle(); x.reset();
+    await x.w.channels.store.groups.update((gr) => { const g = gr.groups[multi.id]; g.members = g.members.filter((m) => m.member !== M).concat([{ member: N, name: 'm3', notify: 'next-turn', joinedAt: Date.now() }]); });
+    x.reset();
+    await x.write((s) => ({ ...s, starred: [...(s.starred || []), 'claude:' + U(180)] }));
+    await x.settle();
+    const c = x.counts(), row = (x.w.channels.store.groups.live().ended || {})[N];
+    return { ok: c.sweeps === 1 && !!row && row.why === 'archived', detail: `a swap at an equal count (one member out, another in), then one quiet write: ${c.sweeps} sweep; the joiner's end said: ${row ? row.why : 'no'}` };
+  },
   // ⑥ an ended-ledger row written by another path (the store alone, the user state untouched): the next write must sweep —
   //   here the row says «archived» for a conversation that is not, so the sweep lifts it
   async 'ledger-row-sweeps'(T) {
@@ -259,6 +275,7 @@ const PATCHES = {
   // the bench's «before»: the gate taken out (every user-state write sweeps, as on the roster commit under it)
   gateless: ["    if (!force && sig !== null && lastSig !== null && sig === lastSig && !gapWait && now() - lastEnd <= SWEEP_STALE_MS) { counts.skipped++; return Promise.resolve(null); }   // nothing it judges moved, the last sweep < 10 min ago\n", ''],
   'no-members': ["      for (const g of Object.values(gr.groups || {})) if (g && !g.archivedAt) for (const m of g.members || []) mem.push(m.member);\n", ''],
+  'no-members-hash': ["h.update(mem.sort().join('\\n')); ", ''],   // 主开发's mutant: the members out of the hash, `mem.length` kept in the prefix
   'no-ledger': ["h.update('\\u0000'); h.update(Object.keys(gr.ended || {}).sort().join('\\n'));", ''],
   'no-bound': [' && now() - lastEnd <= SWEEP_STALE_MS', ''],
 };
@@ -273,7 +290,7 @@ function patched(tag) {
   return M;
 }
 say('RED CONTROLS — patches this suite carries on this tree (each leg RED with its part out)');
-for (const [tag, leg, what] of [['no-members', 'member-joins-sweeps', 'the members of the unarchived groups out of the signature'], ['no-ledger', 'ledger-row-sweeps', 'the ended ledger out of the signature'], ['no-bound', 'gone-within-minutes', 'the ten-minute bound out']]) {
+for (const [tag, leg, what] of [['no-members', 'member-joins-sweeps', 'the members of the unarchived groups out of the signature'], ['no-members-hash', 'member-swap-sweeps', 'the members out of the hash, their count kept'], ['no-ledger', 'ledger-row-sweeps', 'the ended ledger out of the signature'], ['no-bound', 'gone-within-minutes', 'the ten-minute bound out']]) {
   const M = patched(tag);
   if (!ok(!!M, `the patch «${tag}» applies to this tree's channels-wiring.js (its anchor is there once)`)) continue;
   const r = await run(leg, M); ok(!r.ok, `${what} ⇒ RED at ${leg}: ${r.detail}`);
