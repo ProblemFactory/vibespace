@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.391 — 2026-11-10
+
+### Fixed
+- After you cancel a passkey sign-in, the passkey VibeSpace lent to that tab is always taken back. Before, it could stay on the tab.
+
 ## 2.369.390 — 2026-11-10
 
 ### Added

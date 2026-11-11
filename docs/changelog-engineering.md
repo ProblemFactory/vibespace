@@ -4,6 +4,50 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.391 — 2026-11-10
+
+### passkey-lend-cleanup — the kept passkey leaves with its ceremony however it ends (B-97ae, HIGH; the HOTFIX commit)
+- **The defect (measured).** test-browser-passkey-chrome S11b was red 6 of 10 on .390 (2 of 8 on .389, seen since .370). The person's Cancel was answered ok (AbortError), yet nothing went out after it — not in 10 s, on the SAME socket (int361's probe, wsSame=true). The page's own record still named the virtual authenticator at +10 s: a key with user-verified set stayed on the tab after the person said «no».
+- **The cause (traced).** `cancelPasskey` awaited the hook's `cancel`, then marked every pending record of that context ended itself (`rec.outcome = 'cancelled'`) and never called `pkEnd`. The page's own end report (`Runtime.bindingCalled`, ev `end`) was the only road to `pkEnd`, and `PK.applyEvent` matches only a PENDING record. So the order decided:
+  - the page's report first ⇒ pkEnd → the drain → pkUnload (the green, +4–5 ms);
+  - the cancel's answer first ⇒ the report matched nothing ⇒ the cleanup NEVER started.
+  - The trace, the real module over the fast suite's fake CDP: answer-first — `cancel-answered k=1 [[1,7,pending]]` → `binding end matched=false [[1,7,cancelled]]` → no pkEnd.
+- **The fix.** A ceremony `cancelPasskey` ends goes through the ONE end, `pkEnd` (the tab's drain → `pkUnload`: its keys, its UV, the once-authenticator). The page's later report finds no pending record, so there is never a second end.
+- **Pinned.** test-browser-passkey (fast) «B-97ae the person's Cancel takes the lent passkey back in EVERY order» — the answer first, the report never coming, the report first.
+  - The fake loads the key for real (Chromium's model with `keys`), and the leg checks it went in.
+  - Each order is judged AT REST: every call answered and the link quiet for 20 ms (≥ 5 loop turns). At rest the key is removed once (`removeCredential`), UV is off and the authenticator is removed exactly once.
+  - Not one line may be said from the lend on (the lines the watch says while opening on the fake are named).
+  - RED on 05082bbd0 in the answer-first and never-reported orders and in «never their NEXT sign-in's»: there the key left only with the authenticator, when the next sign-in's belt removed it.
+  - test-browser-passkey-chrome S11b on real Chrome: int361's six runs on 869d6ac7b.
+- **The census (every place in browser-dialogs.js that ends a person's-browsing ceremony):**
+  - the page's own end report (`Runtime.bindingCalled` ev `end` → `PK.applyEvent` → `pkEnd`) — THE ONE END;
+  - `cancelPasskey` — the banner's Cancel (browser-stream.js `passkey-cancel`, by 'user'), the CLI's verb (routes/browser.js, by 'agent') — marked the record ended itself: NOW each ended record goes to `pkEnd` (the fix);
+  - the tab closed (`Target.targetDestroyed` → `PK.endPending`) — cannot hold a lent key: the target and its session, which own the virtual authenticator, are gone (nothing to send on);
+  - a frame's context destroyed / the page's contexts cleared (`PK.endPending` → `pkPageGone`) — the person's once-authenticator (the person's key and its UV live in it) is removed through a drain — goes;
+  - a refusal after the lend (`outranked`) — the person's road removes the once-authenticator before the release; the agent's road refuses and the page's report reaches `pkEnd` — goes;
+  - a gate step that threw (`pkFailed` → release) and the page's hold running out (`pkHold`, bounded) — the page's own end report → `pkEnd` — goes;
+  - the session detached / the socket down (`Target.detachedFromTarget`, `down`) — the record is not ended there; what Chrome keeps on a detached session is the walk's measurement;
+  - the kernel road (`pkKernelCancel`) — VibeSpace signs, no authenticator — cannot hold a lent key.
+  So, in the person's browsing, `cancelPasskey` was the one place that ended a ceremony past the cleanup and could leave the person's key lent. (On the agent road, a document gone mid-ceremony leaves the loaded key in the tab's authenticator — «Not closed», (a) below.)
+- **Exactly once.** The report first then the cancel's answer: the cancel finds no pending record (nothing more). The answer first then a late report: the report matches nothing (`PK.applyEvent`). Over a fake that behaves as Chromium does (a second remove is an error, said): one `removeCredential`, one UV off and one authenticator removal, with nothing said, in every order.
+- **Never the next ceremony's key.** A sign-in started at once after the Cancel waits for the clean-up (the tab's drain), pairs its OWN authenticator, loads its key, sets its UV and keeps all three; only the cancelled one's go. (The base's r5 belt already removed a stale once-authenticator at the person's next hooked sign-in — so before this the lent key stayed until then, and any request Chrome met without the hook met it.)
+- **The controls and the mutants.**
+  - «B-97ae RED CONTROL»: `cancelPasskey` without the `pkEnd` it hands each ended ceremony (05082bbd0's) — red by name.
+  - «B-97ae TIMER CONTROL» (the acceptance's): the one end reached 50 ms late — the key, its UV and the authenticator still lent at rest, in both the answer-first and never-reported orders.
+  - On a copy of the tree, the whole suite against browser-dialogs.js mutants:
+    - no end at all, or the end 50 ms or 1000 ms late ⇒ answer-first, never-reported and «next» red by behaviour;
+    - 25 ms late ⇒ never-reported and «next»;
+    - 10 ms late ⇒ «next» (the next sign-in's belt removes the authenticator first: the cancelled key is never removed by its own end).
+    - Below the at-rest window the order legs alone cannot see a delay.
+- **The acceptance (2026-11-11 03:18Z) and its tidy.** The product change was accepted. The verifier's own walk ran 2 000 seeds over the order of the cancel's answer, the page's report, each of pkEnd's replies, a 2 s late answer, a double press, and both Cancels at once. The fix was at rest every time; master left the key in 1 144 of 2 000. The tidy touched only the suite and the docs (src byte-identical):
+  - the first legs' fake refused the load (no `keys`; the product said «a stored passkey was not loaded», and the legs' word filter missed it), so only the authenticator's removal was pinned;
+  - a pkEnd 50 ms late passed every leg that waited until clean.
+- **Not closed (the second commit, after .391 — each pre-existing on master, none in ordinary use):**
+  - (a) the agent road: a document gone mid-ceremony (context destroyed or cleared between the lend and the assertion, under 0.2 s) leaves the loaded key and UV in the agent tab's authenticator until that tab's next ceremony ends — `pkPageGone` unloads only the person's once-authenticator; one line by the same law (each ended record through the one end);
+  - (b) a cleanup step that fails is never said: if `removeCredential`, `removeVirtualAuthenticator` and `disable` all fail on a live session, the key stays while VibeSpace believes it gone — say it by name, and name the tab to the person;
+  - (c) `cancelPasskey` marks every pending record of the context, also one that arrived in the same socket read as the cancel's answer and that the hook did not cancel (never released; the page waits out its hold) — mark what was pending before the await;
+  - (d) UNMEASURED, needs real Chrome: what a tab keeps when the watch's socket closes or the hub restarts during a lent ceremony — measure it first; it decides whether a re-arm needs a sweep.
+
 ## 2.369.390 — 2026-11-10
 
 ### jobs-addressed-push — a job's lines reach only the conversations they are addressed to (the owner's yes, 2026-11-10)
