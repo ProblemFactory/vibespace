@@ -37,6 +37,8 @@ vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
 vibespace-vault request "<what you need>" --purpose "<why>" --kind login --host https://<site>
                                     ask the user for a WEBSITE LOGIN on ONE site — the Vault's own login form on one card
+vibespace-vault request "<what you need>" --purpose "<why>" --kind totp [--name <name>]
+                                    ask the user for a TWO-STEP CODE — the Vault's own two-step fields on one card
 vibespace-vault uses                your grants (standing ones too), your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
 
@@ -204,6 +206,28 @@ and an optional two-step code's name.
   - Unticked, it says the user has not allowed it yet. Never ask for the login in the chat.
 - **REFUSED and WITHDRAWN** work as for a paste box: do not ask again for 10 minutes after a refusal; after a withdrawal,
   ask again once the vault is unlocked.
+
+## A two-step code you do not have — `request "<what>" --kind totp`
+
+When a CLI, an SSH jump or an API console asks for a two-step code (TOTP) and the vault holds none for it:
+
+    vibespace-vault request "the CI box two-step code" --purpose "sign the release on the CI box" --kind totp --name ci-two-step
+
+**One** card in the user's For you tray. Its first line says who asks and for what. Its fields are the Vault window's own
+两步验证… dialog: they paste the site's otpauth link or type its seed, preview the code it makes, and save it.
+
+- **The name.** `--name` proposes one (1–120 letters, digits, «.», «_» or «-» — the Vault's own rule; a bad one is refused
+  by name before any card). The user may change it; your receipt names the one stored. A name already in the vault is
+  never overwritten — the user picks another. A two-step code has no `--host` or `--note`.
+- **What lands.** One two-step entry, `totp:<name>`, and nothing else.
+- **The tick.** «Let <this conversation> read its current code — never the seed — while it runs» is ticked unless the user
+  turned `vault.requestGrantsRequester` off. With it ticked, this conversation may read the CURRENT code while it runs; a
+  restart of this conversation ends it, and the user gives it again in Vault ▸ Two-step codes ▸ Use for….
+- **The receipt** at your next turn says STORED, under which name, and whether you may read its code:
+  `vibespace-vault totp <name>` answers the current code (never the seed) — type it at once: a code lasts its step
+  (30 s for most). Unticked (or this conversation was not running when they saved), it says so: it answers
+  `not_granted` until they give it. Never ask for the seed or a code in the chat.
+- **REFUSED and WITHDRAWN** work as for a paste box.
 
 ## Using a stored secret in a command — `run`
 

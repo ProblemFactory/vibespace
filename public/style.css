@@ -9545,3 +9545,16 @@ button.vw-chip { cursor: pointer; }
      card's ROOT at 16 px carries every text inside it to 16 through that same floor */
   :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-login { font-size: 16px !important; }
 }
+/* lane totp-request-card (fb-251bb41646): THE TWO-STEP CARD — the 两步验证… dialog's own field set (totpFields) in a For-you row */
+.ut-secret-totp-ask { display: flex; flex-direction: column; gap: 6px; }
+.ut-secret-totp-ask .vault-secret-field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+.ut-secret-totp-ask .vault-secret-label { color: var(--text-dim); }
+.ut-secret-totp-ask .vault-pw { width: auto; min-width: 0; padding: 4px 8px; font-size: 12px; }
+.ut-secret-totp-ask .vw-ak-hint { font-size: 11px; color: var(--text-dim); }
+.ut-secret-totp-ask .ut-secret-save[hidden] { display: none; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.vault-secret-field, .vault-secret-label, .vw-ak-hint, .ut-secret-note, .ut-secret-state, .ut-secret-words, .ut-login-allow, .ut-login-allow > span, .vt-facts, .vt-facts *, .vt-same, .vt-err, .vt-adv > summary, .vw-code-digits, .vw-code-left) { font-size: 16px; }
+  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.vault-pw, .vt-set) { min-height: 44px; font-size: 16px; }
+  :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.ut-act, .vt-way, .vt-reveal, .vt-preview-b, .vt-unlock, .ut-secret-state button) { min-height: 44px; height: auto; font-size: 16px; }
+  :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-totp-ask { font-size: 16px !important; }
+}

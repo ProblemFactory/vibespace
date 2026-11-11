@@ -274,7 +274,7 @@ const CHECK = {
   // --purpose "<why>" …`): the ask's door and the owner's answer door mounted, each kind's shape in the CLI's usage, and the PURE
   // verdict landing THIS family's target (a free entry · an Integrations field · a website login)
   request(f, v, { facts, mounted }) {
-    if (!v || typeof v.route !== 'string' || typeof v.answer !== 'string' || !['entry', 'field', 'login'].includes(v.lands)) return 'request is { route, answer, lands, kinds? | into? } or NONE(why)';
+    if (!v || typeof v.route !== 'string' || typeof v.answer !== 'string' || !['entry', 'field', 'login', 'totp'].includes(v.lands)) return 'request is { route, answer, lands, kinds? | into? } or NONE(why)';   // totp: lane totp-request-card
     const gone = [v.route, v.answer].find((r) => !routeParts(r) || !mounted(r));
     if (gone) return `the request door «${gone}» is not mounted`;
     const usage = facts.read('data/bin/vibespace-vault') || '';
@@ -405,14 +405,35 @@ console.log('④ RED CONTROLS (in memory)');
   const usage = realRead('data/bin/vibespace-vault');
   // lane login-request-card: THE REQUEST surface — its doors mounted, its kind in the CLI's usage, the verdict landing the family's own target
   const noAnswer = census(VK.FAMILIES, factsOf(treeOf({ 'src/routes/vault.js': routes.replace("app.post('/api/vault/secret-requests/:id/answer',", "app.post('/api/vault/secret-requests/:id/answer-gone',") })));
-  ok(noAnswer.problems.length === 3 && noAnswer.problems.every((p) => /^(free-secret|integration|web-login)·request: the request door «POST \/api\/vault\/secret-requests\/:id\/answer» is not mounted$/.test(p)), 'the owner\'s answer door unmounted ⇒ RED on every kind an agent may ask for (free entry, Integrations field, website login)', noAnswer.problems);
-  const noLoginKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind login').join('--kind site').split('|login]').join(']') })));
+  ok(noAnswer.problems.length === 4 && noAnswer.problems.every((p) => /^(free-secret|integration|web-login|totp)·request: the request door «POST \/api\/vault\/secret-requests\/:id\/answer» is not mounted$/.test(p)), 'the owner\'s answer door unmounted ⇒ RED on every kind an agent may ask for (free entry, Integrations field, website login)', noAnswer.problems);
+  const noLoginKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind login').join('--kind site').split('|login]').join(']').split('|login|').join('|') })));
   ok(noLoginKind.problems.length === 1 && /^web-login·request: vibespace-vault's usage names no «--kind login»$/.test(noLoginKind.problems[0]), 'the login kind gone from the CLI\'s usage ⇒ RED naming web-login·request', noLoginKind.problems);
   const wlf = VK.FAMILIES.find((f) => f.id === 'web-login');
   const misLanded = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: { ...wlf.surfaces, request: { ...wlf.surfaces.request, kinds: ['password'], site: undefined } } } : f)), real);
   ok(misLanded.problems.length === 1 && /^web-login·request: a request of .* lands «entry», not «login»$/.test(misLanded.problems[0]), 'a family whose request lands another kind\'s target (web-login asking for a password lands a free entry) ⇒ RED', misLanded.problems);
   const noRequest = census(VK.FAMILIES.map((f) => (f.id === 'web-login' ? { ...wlf, surfaces: Object.fromEntries(Object.entries(wlf.surfaces).filter(([k]) => k !== 'request')) } : f)), real);
   ok(noRequest.problems.some((p) => /^web-login·request: not declared/.test(p)), 'a family that leaves the request surface undeclared ⇒ RED', noRequest.problems);
+  // lane totp-request-card (fb-251bb41646): EVERY KIND THE PASTE ROAD TAKES IS ONE FAMILY'S REQUEST — the kinds the PURE verdict
+  // accepts (a free entry's three, a website login, a two-step code) each declared by exactly ONE family's `request.kinds`: a kind
+  // the road takes with no family that declares it (the totp row left at NONE) is RED by name, and so is a kind two families claim
+  const roadKinds = [...PASTE.ENTRY_KINDS, PASTE.LOGIN_KIND, PASTE.TOTP_KIND];
+  const kindsCross = (families) => {
+    const problems = [];
+    for (const k of roadKinds) {
+      const r = PASTE.requestVerdict({ words: 'census', purpose: 'census', kind: k, ...(k === PASTE.LOGIN_KIND ? { hosts: 'https://census.example.test' } : {}) });
+      if (!r.ok) { problems.push(`the paste road refuses its own --kind ${k} (${r.code})`); continue; }
+      const by = families.filter((f) => { const q = f.surfaces && f.surfaces.request; return q && typeof q === 'object' && Array.isArray(q.kinds) && q.kinds.includes(k); }).map((f) => f.id);
+      if (by.length !== 1) problems.push(by.length ? `--kind ${k} is declared by ${by.length} families (${by.join(', ')})` : `the paste road takes --kind ${k} but no family's request declares it`);
+    }
+    return problems;
+  };
+  const cross = kindsCross(VK.FAMILIES);
+  ok(cross.length === 0 && roadKinds.length === 5, `every kind the paste road takes is ONE family's request (${roadKinds.join(' · ')})`, cross);
+  const totpRow = VK.FAMILIES.find((f) => f.id === 'totp');
+  const totpNone = kindsCross(VK.FAMILIES.map((f) => (f.id === 'totp' ? { ...totpRow, surfaces: { ...totpRow.surfaces, request: { none: 'a two-step seed is added in 添加… ▸ 两步验证…' } } } : f)));
+  ok(totpNone.length === 1 && /^the paste road takes --kind totp but no family's request declares it$/.test(totpNone[0]), 'RED CONTROL: the totp row\'s request back to NONE (as it stood before the owner\'s yes, fb-251bb41646) ⇒ RED naming --kind totp', totpNone);
+  const noTotpKind = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('--kind totp').join('--kind two-step-gone').split('|totp]').join(']') })));
+  ok(noTotpKind.problems.length === 1 && /^totp·request: vibespace-vault's usage names no «--kind totp»$/.test(noTotpKind.problems[0]), 'RED CONTROL: the totp kind gone from the CLI\'s usage ⇒ RED naming totp·request', noTotpKind.problems);
   const noVerb = census(VK.FAMILIES, factsOf(treeOf({ 'data/bin/vibespace-vault': usage.split('vibespace-vault describe').join('vibespace-vault propose') })));
   ok(noVerb.problems.some((p) => /^free-secret·words: vibespace-vault's usage names no «describe»$/.test(p)), 'the agent\'s verb gone from the usage ⇒ RED', noVerb.problems);
   const wordsLess = census(swap({ ...totp, surfaces: { ...totp.surfaces, words: { create: ['totp'], propose: 'POST /api/agent/vault/words', owner: 'POST /api/vault/entry-words' } } }), real);

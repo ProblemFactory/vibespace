@@ -67,11 +67,17 @@ const KIND_ALIASES = Object.freeze({ apikey: 'api-key', 'api-key': 'api-key', ke
 /** lane login-request-card: A WEBSITE LOGIN — the request's third target (the action's `kind`; its site rides the action's `hosts`). */
 const LOGIN_KIND = 'login';
 const LOGIN_ALIASES = Object.freeze({ login: LOGIN_KIND, 'web-login': LOGIN_KIND });
+/** lane totp-request-card (fb-251bb41646 — the owner 2026-11-11): A TWO-STEP CODE — the request's fourth target (the action's
+ *  `kind`; a name the agent proposes rides the action's `totpName`, judged by THE two-step name rule — src/totp.js entryOf). */
+const TOTP_KIND = 'totp';
+const TOTP_ALIASES = Object.freeze({ totp: TOTP_KIND, 'two-step': TOTP_KIND, '2fa': TOTP_KIND });
+const T = require('./totp.js');   // PURE: the two-step model (its name rule — the 两步验证… dialog's own)
 /** A DECLARED human-visible string is a KEY (the registry's rule — scripts/i18n-extract.mjs collects i18nKey(…) beside t(…)):
  *  the card's lines are filed as `{key, params}` and the client says them in its language. */
 const i18nKey = (s) => s;
 /** The two card lines the request's purpose and a new entry's label ride (wordsOfItem reads them back by their keys). */
 const PURPOSE_LINE = i18nKey('What for, in the agent\'s words: {purpose}');
+const WHAT_LINE = i18nKey('What: {words}');
 const ENTRY_LINE = i18nKey('Where it goes: a new vault entry «{label}» ({kind})');
 /** lane vault-entry-description: the new entry's DESCRIPTION as the agent wrote it (read back by its key). */
 const NOTE_LINE = i18nKey('Its description, in the agent\'s words: {note}');
@@ -89,13 +95,17 @@ const WORDS = Object.freeze({
   name_too_long: `the label is at most ${LIMITS.name} characters`,
   note_too_long: `the note is at most ${LIMITS.note} characters`,
   hidden_chars: 'the request holds a hidden or direction character — the user would read something else than you wrote',
-  bad_target: 'name ONE place: --into <row>.<field> (an Integrations field) or --kind api-key|password|secret (a new vault entry) — not both',
+  bad_target: 'name ONE place: --into <row>.<field> (an Integrations field) or --kind api-key|password|secret (a new vault entry), login (a website login) or totp (a two-step code) — not both',
   unknown_row: 'no Integrations card has that id — the ids are the Integrations window\'s rows (e.g. llm, dropline, cloud:browserbase)',
   row_per_account: 'that row\'s OAuth client is chosen per account where the account is added — it is not a field you can ask for',
   row_per_machine: 'that row is kept per paired machine on the machine\'s own card — it is not a field you can ask for',
   unknown_field: 'that card has no such field',
   field_not_secret: 'that field is not a secret — the user types it on its card; a paste request is for a secret field',
-  bad_kind: 'the kind is api-key, password or secret',
+  bad_kind: 'the kind is api-key, password or secret (a new vault entry), login (a website login — --host <site>) or totp (a two-step code)',
+  // lane totp-request-card: a two-step code's ask
+  totp_bad_name: 'a two-step code\'s name is 1–120 letters, digits, ".", "_" or "-" (the Vault\'s own rule) — e.g. --name github-ci',
+  totp_words: 'a two-step code has no description of its own — its name says what it is; drop --note',
+  totp_host: 'a two-step code is not used toward a host — drop --host (a website login\'s code: ask for the login, --kind login)',
   name_with_into: '--name labels a NEW vault entry; an Integrations field already has its name — drop --name or --into',
   value_required: 'paste the value first',
   value_too_long: `a value is at most ${LIMITS.value} characters`,
@@ -180,6 +190,7 @@ function targetOf({ into = null, kind = null, name = null, words = '', hosts = n
   const hasInto = into != null && String(into).trim() !== '', hasKind = kind != null && String(kind).trim() !== '';
   if (hasInto && hasKind) return refuse('bad_target');
   if (hasKind && LOGIN_ALIASES[String(kind).trim().toLowerCase()]) return loginTargetOf({ name, hosts });   // lane login-request-card
+  if (hasKind && TOTP_ALIASES[String(kind).trim().toLowerCase()]) return totpTargetOf({ name, hosts, words });   // lane totp-request-card
   const hs = hostsOf(hosts);   // lane vault-use-grants
   if (hs === false) return refuse('bad_host');
   if (hasInto && hs) return refuse('hosts_with_into');
@@ -220,6 +231,19 @@ function loginTargetOf({ name = null, hosts = null } = {}) {
   return { ok: true, target: { kind: LOGIN_KIND, origin } };
 }
 
+/** lane totp-request-card: A TWO-STEP CODE's target — a name the agent PROPOSES (`--name`, judged by THE two-step name rule:
+ *  src/totp.js entryOf — the 两步验证… dialog's own; a bad one is refused by name before any card exists), else none (the person
+ *  names it on the card: the link's issuer / account, or typed). `label` = the name, else the agent's words (the place the
+ *  request dedupes on). A two-step code is used toward no host — a --host is refused by name. → { ok, target } | a refusal. */
+function totpTargetOf({ name = null, hosts = null, words = '' } = {}) {
+  const hs = Array.isArray(hosts) ? hosts.filter((h) => String(h == null ? '' : h).trim() !== '') : String(hosts == null ? '' : hosts).trim();
+  if (hs.length) return refuse('totp_host');
+  const n = name != null ? String(name).trim() : '';
+  if (n && !T.entryOf(n)) return refuse('totp_bad_name');
+  const label = n || String(words || '').replace(/\s+/g, ' ').trim().slice(0, LIMITS.name);
+  return { ok: true, target: { kind: TOTP_KIND, name: n, label } };
+}
+
 /** THE ASK as the agent sent it → { ok, words, purpose, target } | a refusal (its code + its words). */
 function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) {
   const w = lineOf(words, LIMITS.words, 'words');
@@ -232,6 +256,7 @@ function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) 
   const hasNote = note != null && String(note).trim() !== '';
   if (hasNote && t.target.kind === 'field') return refuse('note_with_into');
   if (hasNote && t.target.kind === LOGIN_KIND) return refuse('login_words');   // lane login-request-card
+  if (hasNote && t.target.kind === TOTP_KIND) return refuse('totp_words');   // lane totp-request-card
   const n = hasNote ? wordsOf({ note }) : { ok: true };
   if (!n.ok) return n;
   return { ok: true, words: w.text, purpose: p.text, target: hasNote ? { ...t.target, note: n.note } : t.target };
@@ -245,14 +270,16 @@ const intoOf = (target) => (target && target.kind === 'field' ? `${target.row}.$
 function wordsOfItem(it) {
   const i = it && it.i18n, lines = (i && Array.isArray(i.detail)) ? i.detail : [];
   const param = (key, name) => { const l = lines.find((x) => x && x.key === key); const v = l && l.params && l.params[name]; return typeof v === 'string' ? v : ''; };
-  const w = i && i.text && i.text.params && i.text.params.words;
-  return { words: typeof w === 'string' ? w : '', purpose: param(PURPOSE_LINE, 'purpose'), label: param(ENTRY_LINE, 'label'), note: param(NOTE_LINE, 'note') };
+  const tp = (k) => { const v = i && i.text && i.text.params && i.text.params[k]; return typeof v === 'string' ? v : ''; };
+  // lane totp-request-card: a two-step card's head carries the purpose; its words ride «What: {words}»
+  return { words: tp('words') || param(WHAT_LINE, 'words'), purpose: param(PURPOSE_LINE, 'purpose') || tp('purpose'), label: param(ENTRY_LINE, 'label'), note: param(NOTE_LINE, 'note') };
 }
 /** The target back from an item (the ITEM is the record): its action's { into } ⇒ the field (re-judged against today's
  *  registry — a row that left the registry is no target), else { kind } + the label its words carry ⇒ the entry.
  *  → target | null (a cleared entry request has no label left: no target). */
-function targetOfAction(a, { label = '' } = {}) {
+function targetOfAction(a, { label = '', words = '' } = {}) {
   if (!a || a.type !== ACTION_TYPE || !REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
+  if (a.kind === TOTP_KIND) { const tt = targetOf({ kind: TOTP_KIND, name: a.totpName || null, words }); return tt.ok ? tt.target : null; }   // lane totp-request-card
   const t = a.into ? targetOf({ into: a.into }) : a.kind === LOGIN_KIND ? targetOf({ kind: LOGIN_KIND, hosts: a.hosts || '' }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar) — lane login-request-card: a login's ONE site, re-judged by today's rule
   return t.ok ? t.target : null;
 }
@@ -264,6 +291,7 @@ const withNote = (target, note) => (target && target.kind === 'entry' && note ? 
  *  owner's now (the paste replaces it — said). */
 function cardOf({ who, words, purpose, target, replaces = false, grant = null, site = null }) {
   if (target.kind === LOGIN_KIND) return loginCardOf({ who, words, purpose, target, site });   // lane login-request-card
+  if (target.kind === TOTP_KIND) return totpCardOf({ who, words, purpose, target });   // lane totp-request-card
   const where = target.kind === 'field'
     ? { key: i18nKey('Where it goes: {row} › {field} on the Integrations card ({id})'), params: { row: { key: target.rowLabel }, field: { key: target.fieldLabel }, id: intoOf(target) } }
     : { key: ENTRY_LINE, params: { label: target.label, kind: { key: KIND_WORDS[target.entryKind] || 'Secret' } } };
@@ -318,6 +346,25 @@ function loginCardOf({ who, words, purpose, target, site = null }) {
     text: `${who} asks you for a website login on ${s} — it is typed only on that site`,
     detail: lines.map(fill).join('\n'),
     i18n: { text: { key: LOGIN_HEAD, params: { who, site: s } }, detail: lines },
+  };
+}
+
+/** lane totp-request-card: THE TWO-STEP CARD — its FIRST line says who asks and for what (the conversation's name + the agent's
+ *  purpose, belted); the lines below: the agent's words, the name it proposes (the person may change it), what Save does. The
+ *  fields are the 两步验证… dialog's OWN (src/lib/vault-totp-row.js totpFields) in the box. */
+const TOTP_HEAD = i18nKey('{who} asks you for a two-step code (TOTP) for: {purpose}');
+const TOTP_NAME_LINE = i18nKey('The name it proposes: «{name}» — you may change it');
+function totpCardOf({ who, words, purpose, target }) {
+  const lines = [
+    { key: WHAT_LINE, params: { words } },
+    ...(target.name ? [{ key: TOTP_NAME_LINE, params: { name: target.name } }] : []),
+    { key: i18nKey('Paste its otpauth link or type its seed below, preview it, then save — it goes straight into the vault. The agent is told that it is stored and under which name — never the seed, never a code.') },
+  ];
+  const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : String(v); });
+  return {
+    text: `${who} asks you for a two-step code (TOTP) for: ${purpose}`,
+    detail: lines.map(fill).join('\n'),
+    i18n: { text: { key: TOTP_HEAD, params: { who, purpose } }, detail: lines },
   };
 }
 
@@ -402,6 +449,7 @@ function receiptText(o = {}) {
   const head = `[Vault] Your request ${piece(o.requestId, 20)} (vibespace-vault request)`;
   const t = o.target || {};
   if (o.outcome === 'stored' && t.kind === LOGIN_KIND) return loginReceiptText(head, o, piece);   // lane login-request-card
+  if (o.outcome === 'stored' && t.kind === TOTP_KIND) return totpReceiptText(head, o, piece);   // lane totp-request-card
   if (o.outcome === 'stored') {
     const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
     if (t.kind === 'field') return `${head}: STORED — «${piece(o.words)}» is saved in ${piece(intoOf(t), 200)} (${piece(t.rowLabel, 80)} › ${piece(t.fieldLabel, 80)}) for: ${piece(o.purpose)}. VibeSpace uses it there itself; you never see the value — never ask for it in the chat.${rc}`;
@@ -442,6 +490,26 @@ function loginReceiptText(head, o, piece) {
       : `The user did not let this conversation sign in with it — they allow it in Vault ▸ Web logins ▸ Use for… (this account); until then vibespace-browser login answers login_not_granted. Never ask for the login in the chat. Once it is allowed: ${use}`;
   return `${head}: ${what} for: ${piece(o.purpose)}. You never see the password. ${may}${rc}`;
 }
+/** lane totp-request-card: HOW AN AGENT USES A STORED TWO-STEP CODE — ONE constant: the current code (never the seed), read
+ *  through the agent door (GET /api/agent/vault/totp/:name — the entry's «Use for…» grant decides). {name} filled per receipt. */
+const TOTP_USE = 'vibespace-vault totp {name} answers its current code (never the seed) — type it where the prompt asks, at once: a code lasts its step (30 s for most).';
+/** lane totp-request-card: the STORED receipt of a two-step code — its name, the person's press in words (THE door's grant:
+ *  the entry's «Use for…», held for THIS conversation's current RUN — a restart ends it), and TOTP_USE. Three outcomes, three
+ *  sentences: given · ticked but not given (the conversation was not running, or the grant could not be written) · not ticked.
+ *  `o.totp` = { name, allowed, asked, whyNot } (the door's). Never the seed, never a code. */
+function totpReceiptText(head, o, piece) {
+  const tt = o.totp || {};
+  const name = piece(tt.name, 120);
+  const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
+  const use = TOTP_USE.replace('{name}', () => name);
+  const may = tt.allowed
+    ? `The user allowed THIS conversation to read its current code while it runs — a restart of this conversation ends that; they give it again in Vault ▸ Two-step codes ▸ Use for…. ${use}`
+    : tt.asked
+      ? `The user ticked «Let this conversation read its code», but it was not given (${tt.whyNot === 'not_running' ? 'this conversation was not running at that moment' : 'the permission could not be written'}) — the code is stored; they give it in Vault ▸ Two-step codes ▸ Use for…; until then vibespace-vault totp ${name} answers not_granted. Never ask for the seed or a code in the chat.`
+      : `The user did not let this conversation read its code — they give it in Vault ▸ Two-step codes ▸ Use for…; until then vibespace-vault totp ${name} answers not_granted. Never ask for the seed or a code in the chat. Once it is given: ${use}`;
+  return `${head}: STORED — a two-step code «${name}» is in the vault for: ${piece(o.purpose)}. You never see the seed. ${may}${rc}`;
+}
+
 /** lane login-request-card: THE OWNER'S ANSWER to a login ask, BEFORE the web-login door's own validator (addOwn — the site, the
  *  user name, the password's bound, the two-step name's shape): the password is required and holds NO line break — a copied
  *  line's newline is refused BY NAME, never stripped silently (a page's password input cannot hold one: only a non-DOM client
@@ -482,4 +550,5 @@ module.exports = {
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
   WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
   LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf,   // lane login-request-card
+  TOTP_KIND, TOTP_USE,   // lane totp-request-card
 };

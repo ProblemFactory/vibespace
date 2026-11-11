@@ -207,19 +207,14 @@ const addWords = (r, x = {}) => (ADD_WORDS[r && r.code] ? ADD_WORDS[r.code](x) :
  *  standard's defaults). 「预览」 asks the hub for the code the seed makes NOW (POST /api/vault/totp `preview` — nothing stored),
  *  with its ring and seconds, to compare with the authenticator; 「保存」 is drawn only once a preview worked, and goes again
  *  at any change. Every refusal says its words here (locked ⇒ 「解锁…」 first — nothing greyed). The seed and the link are
- *  masked fields (显示 toggles them), wiped at EVERY close; the page keeps nothing of either after it. */
-export function showTotpAddDialog({ refresh = () => {} } = {}) {
+ *  masked fields (显示 toggles them), wiped at EVERY close; the page keeps nothing of either after it.
+ *  lane totp-request-card (fb-251bb41646): THE FIELD SET is this function — drawn by the 两步验证… dialog (showTotpAddDialog
+ *  below) AND by an agent's two-step ask card (src/lib/vault-paste-box.js): one set of fields, one preview, one set of words.
+ *  `name` = a name proposed to it (the card's: the agent's `--name`; a person's edit wins); `onReady(on)` = Save may be drawn
+ *  (a preview worked) or not; `onSaving(on)` = a save is on the wire; `onSaved(answer, plan)` = the hub stored it. `doSave(send)`
+ *  saves what the preview showed through `send(body)` (the dialog: POST /api/vault/totp; the card: the request's answer). */
+export function totpFields({ name: proposed = '', autofocus = true, onReady = () => {}, onSaving = () => {}, onSaved = () => {} } = {}) {
   const st = { way: 'link', shown: null, saved: false, tick: null, until: 0, period: 30, auto: 0, inflight: null, nameTouched: false, closed: false };
-  const wipe = () => {
-    st.closed = true; st.shown = null;
-    clearInterval(st.tick); st.tick = null;
-    try { link.value = ''; seed.value = ''; digitsEl.textContent = ''; } catch { /* a raised re-open built no fields of its own */ }
-  };
-  // one subject: one two-step code being added (lane dialog-yield r4 — a FORM; master's call had no kind, §103 RED on the rebase)
-  const { dialog, body, close, raised } = createModalShell({ id: 'vault-totp-add', kind: 'form', title: t('Add a two-step code'), dialogClass: 'vault-dialog-box vault-totp-add-dialog', escapeToClose: true,
-    onClose: () => wipe(),
-    unsaved: { isDirty: () => !st.saved && !!(link.value || seed.value), save: () => doSave(), discard: () => wipe() } });
-  if (raised) return;   // raised: the one being added, as it was
   const field = (label, ...controls) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), ...controls); return l; };
   const masked = (cls, ph) => {
     const i = el('input', `vault-pw ${cls}`);
@@ -285,22 +280,20 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
   unlockB.onclick = () => showUnlock();
   const errRow = el('div', 'vt-err-row');
   errRow.append(err, unlockB);
-  body.append(ways, paneLink, paneSeed, field(t('Name'), name), prev, errRow,
-    el('div', 'vw-ak-hint', t('After saving, the window shows its current code; the seed shows only behind Show (the second password again). Clear the link from your clipboard.')));
-  const foot = el('div', 'dialog-footer');
-  const cancel = el('button', 'btn-cancel', t('Cancel'));
-  const save = el('button', 'btn-create vt-save', t('Save to vault'));
-  cancel.type = save.type = 'button';
-  save.hidden = true;   // drawn once a preview worked (never a greyed button)
-  foot.append(cancel, save);
-  dialog.append(foot);
-  cancel.onclick = () => close();
+  if (proposed) { name.value = name.dataset.was = String(proposed); st.nameTouched = true; }   // lane totp-request-card: the agent's proposal — the person's edit wins (data-was: no typing of the person's — the unsaved question)
+  const nodes = [ways, paneLink, paneSeed, field(t('Name'), name), prev, errRow,
+    el('div', 'vw-ak-hint', t('After saving, the window shows its current code; the seed shows only behind Show (the second password again). Clear the link from your clipboard.'))];
+  const wipe = () => {
+    st.closed = true; st.shown = null;
+    clearInterval(st.tick); st.tick = null;
+    try { link.value = ''; seed.value = ''; digitsEl.textContent = ''; } catch { /* never built */ }
+  };
 
   const planNow = () => addPlanOf({ way: st.way, uri: link.value, seed: seed.value, name: name.value, digits: digitsSel.value, period: periodSel.value, algorithm: algoSel.value }, { now: Date.now() });
   const say = (r, x) => { err.textContent = r ? addWords(r, x) : ''; unlockB.hidden = !(r && r.code === 'vault_locked'); };
   function stopCode() { clearInterval(st.tick); st.tick = null; code.hidden = true; same.hidden = true; digitsEl.textContent = ''; }
   /** Any change: the preview no longer speaks for what the dialog holds — 保存 goes until the next one. */
-  function stale() { st.shown = null; st.auto = 0; stopCode(); save.hidden = true; say(null); }
+  function stale() { st.shown = null; st.auto = 0; stopCode(); onReady(false); say(null); }
   function drawFacts(p) {
     const f = p && p.facts;
     facts.hidden = !(f && st.way === 'link');
@@ -309,12 +302,12 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
     const who = [f.issuer, f.account].filter(Boolean).join(' · ') || t('No issuer or account in the link');
     facts.append(el('b', 'vt-who', who), el('span', 'vt-set-words', t('{digits} digits · every {period} s · {algorithm}', { digits: f.digits, period: f.period, algorithm: f.algorithm })));
   }
-  function pickWay(id) {
+  function pickWay(id, { focus = true } = {}) {
     st.way = id;
     for (const b of [linkB, seedB]) { const on = b.dataset.way === id; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); }
     paneLink.hidden = id !== 'link'; paneSeed.hidden = id !== 'seed';
     stale(); drawFacts(id === 'link' && link.value ? planNow() : null);
-    setTimeout(() => (id === 'link' ? link : seed).focus(), 0);
+    if (focus) setTimeout(() => (id === 'link' ? link : seed).focus(), 0);
   }
   link.addEventListener('input', () => {
     stale();
@@ -371,10 +364,11 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
       st.period = Number(r.period) || p.facts.period || 30;
       st.until = Date.now() + (Number(r.secondsLeft) || 0) * 1000;
       digitsEl.textContent = grouped(r.code);
-      code.hidden = false; same.hidden = false; save.hidden = false;
+      code.hidden = false; same.hidden = false; onReady(true);
       drawCode();
       if (!st.tick) {
         st.tick = setInterval(() => {
+          if (!code.isConnected) { clearInterval(st.tick); st.tick = null; return; }   // lane totp-request-card: a card's box that left the page ticks no more
           if (st.closed || st.inflight || !st.shown) return;
           if (drawCode() > 0) return;
           // the step is over: the next code — while this page is visible, at most 10 times (then 预览 again)
@@ -386,35 +380,59 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
     });
   }
   prevB.onclick = () => preview();
-  async function doSave() {
+  async function doSave(send) {
     if (st.closed) return false;
     if (st.inflight) {
-      save.textContent = t('Saving…');   // the click waits for the ask on the wire — said on its button — then saves what it showed
+      onSaving(true);   // the click waits for the ask on the wire — said on its button — then saves what it showed
       while (st.inflight) { const w = st.inflight; if (w.kind === 'save') return w.done; await w.done; }   // a save on the wire IS this click's
-      save.textContent = t('Save to vault');
+      onSaving(false);
       if (st.closed) return false;
       if (!st.shown) { if (!err.textContent) say({ code: 'preview_first' }); return false; }   // the preview it waited for refused: its words stand
     }
     const p = planNow();
     if (!p.ok) { stale(); say(p); return false; }
     if (!st.shown || JSON.stringify(p.body) !== st.shown) { stale(); say({ code: 'preview_first' }); return false; }
-    save.textContent = t('Saving…');
+    onSaving(true);
     return onWire('save', st.shown, async () => {
-      const r = await post('/api/vault/totp', p.body).catch(() => null);
-      save.textContent = t('Save to vault');
-      if (r && r.ok) {
-        st.saved = true;
-        close();
-        showToast(t('Added “{name}” — View code shows its current code', { name: p.name }));   // the name the dialog sent (the hub stored it under exactly that)
-        try { refresh({ name: p.name }); } catch { /* the window is gone */ }   // lane login-request-card: the name it saved (a login card fills its field with it)
-        return true;
-      }
+      const r = await Promise.resolve().then(() => send(p.body, p)).catch(() => null);
+      onSaving(false);
+      if (r && r.ok) { st.saved = true; try { onSaved(r, p); } catch { /* the caller's own */ } return true; }
       if (r && r.code === 'exists') { stale(); say(r, { name: p.name }); return false; }
       say(r || {});
       return false;
     });
   }
+  pickWay('link', { focus: autofocus });
+  return { nodes, st, planNow, preview, doSave, stale, wipe, say, isDirty: () => !st.saved && !!(link.value || seed.value), fields: { link, seed, name, digitsSel, periodSel, algoSel } };
+}
+/** 添加… ▸ 两步验证…: the dialog — a form shell, THE field set (totpFields), its footer (取消 · 保存到保险库, drawn once a preview
+ *  worked). Saved ⇒ it closes, says the name, and hands it to `refresh({name})` (a login card fills its field with it). */
+export function showTotpAddDialog({ refresh = () => {} } = {}) {
+  let f = null;
+  // one subject: one two-step code being added (lane dialog-yield r4 — a FORM; master's call had no kind, §103 RED on the rebase)
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-totp-add', kind: 'form', title: t('Add a two-step code'), dialogClass: 'vault-dialog-box vault-totp-add-dialog', escapeToClose: true,
+    onClose: () => { if (f) f.wipe(); },
+    unsaved: { isDirty: () => !!f && f.isDirty(), save: () => doSave(), discard: () => { if (f) f.wipe(); } } });
+  if (raised) return;   // raised: the one being added, as it was
+  const foot = el('div', 'dialog-footer');
+  const cancel = el('button', 'btn-cancel', t('Cancel'));
+  const save = el('button', 'btn-create vt-save', t('Save to vault'));
+  cancel.type = save.type = 'button';
+  save.hidden = true;   // drawn once a preview worked (never a greyed button)
+  f = totpFields({
+    onReady: (on) => { save.hidden = !on; },
+    onSaving: (on) => { save.textContent = on ? t('Saving…') : t('Save to vault'); },
+    onSaved: (r, p) => {
+      close();
+      showToast(t('Added “{name}” — View code shows its current code', { name: p.name }));   // the name the dialog sent (the hub stored it under exactly that)
+      try { refresh({ name: p.name }); } catch { /* the window is gone */ }   // lane login-request-card: the name it saved (a login card fills its field with it)
+    },
+  });
+  body.append(...f.nodes);
+  foot.append(cancel, save);
+  dialog.append(foot);
+  cancel.onclick = () => close();
+  const doSave = () => f.doSave((b) => post('/api/vault/totp', b));
   save.onclick = () => { doSave(); };
-  pickWay('link');
   return { dialog, close };
 }
