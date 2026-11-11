@@ -105,7 +105,7 @@ let one = null;
 function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = process.cwd(), log = console, record = () => {},
   readMountinfo = () => fs.readFileSync('/proc/self/mountinfo', 'utf8'), registry = () => [], guardOn = () => true,
   now = mono, armed = null, live = true, liveMs = LIVE_MS, ringMs = RING_MS, heldMs = HELD_MS, fresh = false,
-  beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, capPerHour = LH.CAP_PER_HOUR, samplesPerHold = LH.SAMPLES_PER_HOLD,
+  beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD,
   samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc' } = {}) {
   if (one && !fresh) return one;
   let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed;
@@ -300,7 +300,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     if (live) {
       try { Object.defineProperty(globalThis, LH.HOOK_KEY, { value: hookObject, configurable: true, enumerable: false, writable: false }); } catch { }
       try {
-        const st = () => { const f = Atomics.load(I, 6); return { known: (f & FLAG_KNOWN) !== 0, on: (f & FLAG_SAMPLING) !== 0, debugger: (f & FLAG_DEBUGGER) !== 0, heapHigh: (f & FLAG_HEAP_HIGH) !== 0, capPerHour, holdMs, watchdog: !!worker && !workerGone }; };
+        const st = () => { const f = Atomics.load(I, 6); return { known: (f & FLAG_KNOWN) !== 0, on: (f & FLAG_SAMPLING) !== 0, debugger: (f & FLAG_DEBUGGER) !== 0, heapHigh: (f & FLAG_HEAP_HIGH) !== 0, askBudgetMs, holdMs, watchdog: !!worker && !workerGone }; };
         holds = require('./loop-holds.js').create({ log, record: (ev) => record(ev), askProfile: (ms) => worker.postMessage({ ev: 'profile', ms, everyMs: profileEveryMs }), samplingState: st, readProfile, debuggerNow: () => debuggerOpen() === true,
           // commit 3: the CPU capture — asked of the watchdog thread, its file under data/cpu-profiles
           askCapture: (m) => worker.postMessage({ ...m, ev: 'capture' }), profileDir: typeof dataDir === 'string' && dataDir ? path.join(dataDir, 'cpu-profiles') : null, ...holdsOptions });
@@ -316,7 +316,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         // ordinary hold timed from now — never minutes of «boot» a process spent before the witness existed
         const beforeLoop = (() => { try { return require('perf_hooks').performance.nodeTiming.loopStart < 0; } catch { return false; } })();
         const startedAt = now(), bootAt = beforeLoop ? startedAt - process.uptime() * 1000 : null;
-        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, noteSab, profileSab, gapSab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir, beatMs, holdMs, noAnswerMs, capPerHour, samplesPerHold, bootAt, startedAt, procRoot, internals: (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)) }, env: process.env, stdout: false, stderr: false });
+        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, noteSab, profileSab, gapSab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir, beatMs, holdMs, noAnswerMs, askBudgetMs, samplesPerHold, bootAt, startedAt, procRoot, internals: (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)) }, env: process.env, stdout: false, stderr: false });
         require('../worker-memory').trackWorker('sync-fs-witness', worker);
         worker.on('message', (m) => {   // the census's answer, or a hold the watchdog measured (one turn later: the collections are in)
           if (m && m.ev === 'memory') return;
@@ -356,9 +356,33 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     slot: sab,
     /** the book of holds (src/server/loop-holds.js) — null without the watchdog thread */
     holds: () => holds,
+    /** the main loop's held time inside [fromM, toM] (monotonic ms): the beat's own gap ring + the gap open now */
+    loopHeld: (fromM, toM = now()) => {
+      const pairs = []; const n = Math.min(GAPS, Atomics.load(GI, 0));
+      for (let k = 0; k < n; k++) pairs.push([GF[2 * k], GF[2 * k + 1]]);
+      return heldWithin(pairs, T[1] || null, fromM, toM, { beatMs, holdMs });
+    },
   };
   if (!fresh) one = api;
   return api;
+}
+
+/** PURE: the main loop's held time inside [fromM, toM] (monotonic ms): `pairs` [[end, gap]] its beat gaps that were holds
+ *  (each held its gap less one beat), `lastBeatM` its last beat (a gap still open past a hold's size is held up to `toM`).
+ *  What a line that blames a disk asks first (src/server/local-index.js): the owner's «that disk is not answering» at the
+ *  ends of 12.5 s / 6.5 s / 14 s LOOP holds on a local home was a callback that could not run. */
+function heldWithin(pairs, lastBeatM, fromM, toM, { beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS } = {}) {
+  let ms = 0;
+  const add = (a, b) => { const x = Math.max(a, fromM), y = Math.min(b, toM); if (y > x) ms += y - x; };
+  for (const [end, gap] of pairs || []) if (gap > beatMs) add(end - gap + beatMs, end);
+  if (Number.isFinite(lastBeatM) && LH.isGapHold(toM - lastBeatM, beatMs, holdMs)) add(lastBeatM + beatMs, toM);
+  return Math.round(ms);
+}
+/** the boot's witness's answer for a WALL-clock window (null: no witness in this process) */
+function loopHeldMs(fromWallMs, toWallMs = Date.now()) {
+  if (!one || typeof one.loopHeld !== 'function') return null;
+  const nowW = Date.now(), nowM = mono();
+  try { return one.loopHeld(nowM - (nowW - fromWallMs), nowM - (nowW - toWallMs)); } catch { return null; }
 }
 
 /** the setting as the boot can read it BEFORE anything may be asked (boot-trace's start, the main module's own first lines):
@@ -370,4 +394,4 @@ function bootSetting(dataDir, readFile = (p) => fs.readFileSync(p, 'utf8')) {
   try { const v = JSON.parse(text)[SAMPLING_SETTING]; return v === false ? false : true; } catch { return null; }
 }
 
-module.exports = { create, bootSetting, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };
+module.exports = { create, bootSetting, heldWithin, loopHeldMs, callWords, heldLine, guardError, REFUSAL, SETTING, SAMPLING_SETTING, RING_KEEP, RING_MS, HELD_MS, EPISODE_MS, LIVE_MS, ROOTS_EVERY_MS, SLOT_INTS, SLOT_FLOATS, SLOT_PATH, FLAG_SAMPLING, FLAG_DEBUGGER, FLAG_HEAP_HIGH, FLAG_KNOWN };

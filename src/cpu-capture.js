@@ -140,6 +140,7 @@ function callFrameOf(f, raw = {}) {
   const own = Number.isInteger(raw.encl) && raw.encl > 0 ? raw.encl : Number.isInteger(raw.line) && raw.line > 0 ? raw.line : 0;
   if (!f || f.cls === 'builtin') return { functionName: '', url: '', lineNumber: -1, columnNumber: -1 };
   if (f.cls === 'outside') return { functionName: '', url: OUTSIDE_URL, lineNumber: -1, columnNumber: -1 };
+  if (f.cls === 'syncfs') return { functionName: f.fn || '', url: LH.SYNC_FS_URL, lineNumber: -1, columnNumber: -1 };   // asleep in a wrapped sync fs call
   return { functionName: f.fn || '', url: f.file, lineNumber: own - 1, columnNumber: -1 };
 }
 
@@ -196,6 +197,7 @@ function relOf(url, root) {
   let u = String(url || '');
   if (u.startsWith('file://')) { try { u = decodeURIComponent(u.slice(7)); } catch { u = u.slice(7); } }
   if (!u) return { kind: 'builtin' };
+  if (u === LH.SYNC_FS_URL) return { kind: 'syncfs' };
   if (u.startsWith('node:')) return { kind: 'internals', rel: u };
   if (u === OUTSIDE_URL) return { kind: 'outside' };
   const r = typeof root === 'string' && root ? root.replace(/\/+$/, '') + '/' : null;
@@ -257,7 +259,10 @@ function aggregate(profile, { root = null, floor = FLOOR_SHARE, rowsMax = BLOCK_
       else {
         const cf = n.callFrame, r = relOf(cf.url, root), line = Number.isInteger(cf.lineNumber) && cf.lineNumber >= 0 ? cf.lineNumber + 1 : null;
         const fnName = String(cf.functionName || '');
-        if (r.kind === 'internals') out = { cls: 'js', row: { kind: 'internals', key: 'internals', fn: 'Node.js internals', module: r.rel, fnKey: `${r.rel}:${line}:${fnName}` }, via: viaOf(n) };
+        // THE TIME OF A SYNC FS CALL ON THE CALL (the owner's .393 capture read «Node.js internals — 72 % through hr ·
+        // src/server/loop-blame.js:51»: asleep in the wrapped calls, booked on the wrapper's first line after them)
+        if (r.kind === 'syncfs') out = { cls: 'native', row: { kind: 'syncfs', key: 'syncfs:' + fnName, fn: `asleep in ${fnName || 'a synchronous fs call'}`, loc: '', fnKey: 'syncfs:' + fnName }, via: viaOf(n) };
+        else if (r.kind === 'internals') out = { cls: 'js', row: { kind: 'internals', key: 'internals', fn: 'Node.js internals', module: r.rel, fnKey: `${r.rel}:${line}:${fnName}` }, via: viaOf(n) };
         else if (r.kind === 'outside' || r.kind === 'builtin') out = { cls: 'js', row: { kind: 'outside', key: 'outside', fn: '(outside the install)', fnKey: `${cf.url}:${line}:${fnName}` }, via: viaOf(n) };
         else {
           const pkg = packageOf(r.rel);
@@ -302,6 +307,7 @@ function rowWords(r) {
   const via = r.via ? ` — ${r.viaShare >= 0.995 ? 'all' : `${Math.round(100 * r.viaShare)} %`} through ${r.via}` : '';
   if (r.kind === 'package' || r.kind === 'internals') return `${s} · ${r.fn} · ${r.loc} (${fns})${via}`;
   if (r.kind === 'outside') return `${s} · ${r.fn} · ${fns}${via}`;
+  if (r.kind === 'syncfs') return `${s} · ${r.fn}${via}`;   // «asleep in readFileSync — 72 % through _loadArchive · src/jobs.js:291»
   return `${s} · ${r.fn} · ${r.loc || '?'}`;
 }
 

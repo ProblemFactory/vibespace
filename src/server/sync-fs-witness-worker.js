@@ -28,7 +28,7 @@
  *     held ⇒ «no JavaScript frame» INSIDE (the only road to «native»); the ask then runs at the first JavaScript after the
  *     native stretch — «the first JavaScript after it». A debugger port (the sample checks it ON the main thread: 'D') or
  *     an accessor on the stack hook ('A') stands the sampler down for the hold. A repo frame must be a REAL file of the
- *     repo, its name kept only where the file's own line spells it (read HERE, remembered). ≤ capPerHour sampled holds an
+ *     repo, its name kept only where the file's own line spells it (read HERE, remembered). every hold its first sample (later ones within the hour's time budget) an
  *     hour; off by the setting (read before the first ask — unknown ⇒ nothing is asked), while a debugger port is open,
  *     without an inspector.
  *   · the watchdog judges itself: its own check running late is summed per hold; ≥ STARVED_MS = «starved N s too».
@@ -58,7 +58,7 @@ const SYSCALLS = { 0: 'read', 1: 'write', 2: 'open', 3: 'close', 4: 'stat', 5: '
   262: 'newfstatat', 263: 'unlinkat', 264: 'renameat', 267: 'readlinkat', 269: 'faccessat', 271: 'ppoll', 281: 'epoll_pwait', 316: 'renameat2', 332: 'statx', 439: 'faccessat2' };
 
 const { sab, noteSab = null, profileSab = null, gapSab = null, fns = [], stores = [], pid, liveMs = LH.LIVE_MS, rootDir = null, beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS,
-  noAnswerMs = LH.NO_ANSWER_MS, capPerHour = LH.CAP_PER_HOUR, samplesPerHold = LH.SAMPLES_PER_HOLD, bootAt = null, startedAt = null, procRoot = '/proc' } = workerData || {};
+  noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD, bootAt = null, startedAt = null, procRoot = '/proc' } = workerData || {};
 /** EVERY LENGTH FROM A CLOCK THAT CANNOT STEP: the process's monotonic clock (uv_hrtime — ONE clock for both threads); the
  *  wall clock only dates a hold once, when it is said (a +2 s or −1 h step of the date invents no hold and moves none). */
 const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
@@ -210,11 +210,17 @@ function readNote() {
   return { count, beat, at, text, ownUs };   // ownUs (commit 3): the sample's own run on the main thread, its first instruction → its note
 }
 /** one ask for `asker` ({kind: 'hold', h} | {kind: 'profile', pr, pq}) — null when one is in flight or it cannot post */
+/** the wrapped synchronous fs call the main thread is IN at this instant (the live slot, read under its seqlock), or null */
+function syncNow() {
+  if (!I || Atomics.load(I, 4) !== 1) return null;
+  const s1 = Atomics.load(I, 0), fn = fns[I[1]] || null, s2 = Atomics.load(I, 0);
+  return s1 === s2 && !(s1 % 2) && Atomics.load(I, 4) === 1 ? fn : null;
+}
 function ask(asker) {
   if (inflight || !I) return null;
   // THE THREAD'S KERNEL STATE AT THE POST (round 4): read just before it — running / asleep (its wait channel) / stopped
   const state = LH.stateOf(readProc(task('stat')));
-  const q = { asker, at: mono(), postedAt: null, state, kernel: state === 'asleep' ? kernel() : null, notes0: NI[1], entered0: NI[4], beat0: Atomics.load(I, 3), late: false, enteredSeenAt: 0, result: null, answer: null, text: null, answeredAt: null, beat: null, sess: null, responded: false, threw: false, deep: false };
+  const q = { asker, at: mono(), postedAt: null, state, sync: asker && asker.kind === 'capture' ? syncNow() : null, kernel: state === 'asleep' ? kernel() : null, notes0: NI[1], entered0: NI[4], beat0: Atomics.load(I, 3), late: false, enteredSeenAt: 0, result: null, answer: null, text: null, answeredAt: null, beat: null, sess: null, responded: false, threw: false, deep: false };
   if (!post(q, state === 'running')) return null;
   inflight = q;
   try {   // read the answer the moment the main thread writes it (its note wakes this wait), else at noAnswerMs
@@ -256,6 +262,7 @@ function textAnswer(text, readers = NO_READ) {
   return { kind: 'js', words: LH.chainWords(sm.frames), key: LH.keyFrame(sm.frames), keyWords: LH.keyWords(sm.frames), form: sm.form };
 }
 function answered(q, a, beat, at) {
+  if (q.asker && q.asker.kind === 'hold' && Number.isInteger(q.ownUs) && q.ownUs >= 0) { askSpent.push({ at: mono(), ms: q.ownUs / 1000 }); if (askSpent.length > 20000) askSpent.shift(); }   // the budget: what this ask cost the main thread
   if (q.asker.kind === 'capture') return captureAnswered(q, a);
   if (q.asker.kind === 'profile') {
     const latency = at != null && q.postedAt != null ? at - q.postedAt : null;
@@ -284,7 +291,7 @@ let saidSeq = -1, saidAt = 0, outSaidAt = 0, lastCheckAt = mono(), base = null, 
 // baseline taken before it began, with the lateness inside it)
 const bases = [], lates = [];
 const keepBase = (b) => { bases.push(b); if (bases.length > 32) bases.shift(); };
-const sampledAt = [];   // the starts of the sampled holds in the rolling hour (the cap)
+const askSpent = [];    // the hold samples' own main-thread runs in the rolling hour [{at, ms}] — the TIME budget of the later samples
 
 function startHold(now, first) {   // first = no beat came yet
   const flags = Atomics.load(I, 6), boot = first && bootAt != null;
@@ -293,12 +300,9 @@ function startHold(now, first) {   // first = no beat came yet
   h.a = withGlobals(b0 || base, fullReading(now));
   h.last = h.a;
   for (const x of lates) if (x.at > h.fromM && x.at < now) { h.lateMs += x.late; if (x.late >= LH.STARVED_MS) h.starvedMs = Math.max(h.starvedMs, x.late); }
-  if (!(flags & FLAG_KNOWN)) h.unsampled = 'unknown';   // the setting not read yet: nothing is asked
-  else if (!(flags & FLAG_SAMPLING)) h.unsampled = 'off';
-  else if (flags & FLAG_DEBUGGER) h.unsampled = 'debugger';
-  else if (!inspector) h.unsampled = 'inspector';
-  else if (!boot && !LH.capAllows(sampledAt, now, capPerHour)) h.unsampled = 'cap';
-  else if (!boot) sampledAt.push(now);
+  // EVERY HOLD GETS ITS FIRST SAMPLE — no count stops it (src/loop-hold.js ASK_BUDGET_MS): the setting, a debugger, the heap
+  // gate and the inspector refuse it; the time budget bounds only the samples after the first (stepHold)
+  h.unsampled = LH.holdRefusalOf(flags, { inspector: !!inspector });
   return h;
 }
 const mine = (h) => inflight && inflight.asker.kind === 'hold' && inflight.asker.h === h;
@@ -346,7 +350,7 @@ function tell(h, named, why, unread) {
   const samples = J.samples.map((x) => ({ cls: x.cls, kind: x.cls === 'js' ? 'js' : 'none', words: x.words, key: x.key, keyWords: x.keyWords, ...(Number.isFinite(x.at) ? { at: x.at } : {}) }));
   const facts = { boot: h.boot, from: toWall(h.fromM), to: toWall(h.toM), fromM: h.fromM, toM: h.toM, ms: h.ms, msHi: h.msHi, samples, outside: J.outside,
     after: J.after ? J.after.words : null, afterKey: J.after ? J.after.key : null, afterKeyWords: J.after ? J.after.keyWords : null,
-    unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, ...(Number.isFinite(h.unseenLateMs) ? { unseenLateMs: h.unseenLateMs } : {}), d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };
+    unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, ...(Number.isFinite(h.unseenLateMs) ? { unseenLateMs: h.unseenLateMs } : {}), d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(h.budgetSpent ? { budgetSpent: true } : {}), ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };
   try { parentPort && parentPort.postMessage({ ev: 'hold', hold: facts }); } catch { }
 }
 function stepHold(h, now) {
@@ -354,7 +358,9 @@ function stepHold(h, now) {
   // round 4: the switch and a debugger are RE-READ at every step — sampling turned off mid-hold asks nothing more
   const why = LH.stepRefusalOf(Atomics.load(I, 6));   // FLAG_SAMPLING 1, FLAG_DEBUGGER 2, FLAG_KNOWN 8
   if (why) { if (!h.asks.length) h.unsampled = why; else h.standDown = why; return; }
-  if (LH.sampleDue(h.k, now - h.fromM, holdMs, samplesPerHold)) { h.k++; const q = ask({ kind: 'hold', h }); if (q) h.asks.push(q); else if (!inspector) h.unsampled = 'inspector'; else if (!h.asks.length) h.unsampled = 'failed'; else h.standDown = 'failed'; }
+  if (LH.sampleDue(h.k, now - h.fromM, holdMs, samplesPerHold)) {
+    if (h.k >= 1 && !LH.budgetAllows(askSpent, now, askBudgetMs)) { h.budgetSpent = true; return; }   // the first sample is always asked; the later ones within the hour's budget
+    h.k++; const q = ask({ kind: 'hold', h }); if (q) h.asks.push(q); else if (!inspector) h.unsampled = 'inspector'; else if (!h.asks.length) h.unsampled = 'failed'; else h.standDown = 'failed'; }
 }
 /** the main thread's gap entries since the last read, oldest first (a ring of GAPS: more than that unread ⇒ the oldest are
  *  counted lost, never invented) */
@@ -490,8 +496,12 @@ function internRaw(c, raw) {
   c.bytes += cost; id = c.raws.length; c.raws.push(raw); c.rawIds.set(key, id);
   return id;
 }
-function stackOf(c, text) {
+function stackOf(c, text, sync = null) {
   const r = CC.rawFramesOf(text);
+  // the instrument's own lines after a wrapped sync call are never the time's owner: the call is (asleep in `sync`, read
+  // from the live slot at the post), under the caller that made it
+  const t = LH.instrumentTrim(r.frames, rootDir);
+  if (t !== r.frames) r.frames = sync ? [{ fn: sync, file: LH.SYNC_FS_URL, line: 0, encl: 0, evalish: false }, ...t] : t;
   if (r.form === 'debugger') return { stand: 'debugger' };
   if (r.form === 'accessor' || r.form === 'formatting' || r.form === 'none') return { k: 'unsampled' };
   if (!r.frames.length) return { k: 'native' };   // no JavaScript frame on its stack: on the CPU outside JavaScript
@@ -513,7 +523,7 @@ function captureAnswered(q, a) {
   c.asks++;
   const own = Number.isInteger(q.ownUs) && q.ownUs >= 0 ? q.ownUs : null;
   if (own != null) c.costUs += own;
-  const s = q.text != null ? stackOf(c, q.text) : { k: a && a.kind === 'js' && !a.empty ? 'unsampled' : 'native' };
+  const s = q.text != null ? stackOf(c, q.text, q.sync) : { k: a && a.kind === 'js' && !a.empty ? 'unsampled' : 'native' };
   if (s.stand) { for (const tk of pending) tk.k = 'unsampled'; if (!c.ending) { c.stopped = 'debugger'; endCapture(c, mono()); } }
   else for (const tk of pending) tk.k = s.k;
   // THE ASK'S OWN COST, bounded: one ask past its bound halves the rate (no further than one per rateFloorMs) — said

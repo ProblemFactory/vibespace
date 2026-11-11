@@ -63,7 +63,13 @@ const JS_FAST_MS = 2;          // ROUND 4: a thread RUNNING JavaScript enters a 
 const NO_ANSWER_MS = 50;       // the watchdog waits this long before its live line says «no JavaScript answered» (the VERDICT
                                // is the ask's own latency against JS_FAST_MS, never this wait)
 const SESSION_MS = 20;         // an ask of a main thread ON THE CPU keeps its session this long at most (asleep in a call: none)
-const CAP_PER_HOUR = 20;       // sampled holds per rolling hour (the boot is outside it)
+// EVERY HOLD GETS ITS FIRST SAMPLE (lane hub-loop-stalls, the owner's .393 hub: 54 of 74 holds — 214 of ~300 s — «not
+// sampled (20 holds were sampled in the last hour)»: a COUNT of 20 an hour ran out in the minutes after a boot and left the
+// steady state with no name). What bounds the asks now is what the count protected: no ask at 85 % of the heap limit or
+// more (holdRefusalOf), one ask in flight, no ask on a free loop (a hold is ≥ HOLD_MS — its first sample, ≤ ~2 ms, is ≤ 0.2 %
+// of it by construction), and a TIME budget for the samples after the first: their own main-thread run, measured per ask,
+// summed over the rolling hour — under ASK_BUDGET_MS (1 % of the hour) a hold takes its later samples, past it only its first
+const ASK_BUDGET_MS = 36000;
 const LIVE_MS = 10000;         // the watchdog's «has been held» line (src/server/sync-fs-witness-worker.js)
 const RING_KEEP = 50;          // the main thread's last holds
 const TABLE_KEYS = 200;        // the since-start table's keys; the rest fold into «other»
@@ -71,7 +77,7 @@ const GC_MIN_MS = 50;          // a collection kept by the main thread's ring
 const RAN_SHARE = 0.2, WAIT_SHARE = 0.2, KERNEL_SHARE = 0.6, GC_SHARE = 0.5, STOPPED_LATE_SHARE = 0.5, STOPPED_RUN_SHARE = 0.05;
 // THE RATE IS A SAFETY BOUND (the check: periodic main-thread evaluates of a FREE loop near the heap limit made Node 24
 // abort out of memory with a third less data — they keep incremental marking running into the next allocation burst;
-// samples DURING a hold do not): a hold's samples ≥ HOLD_MS apart, ≤ SAMPLES_PER_HOLD, ≤ CAP_PER_HOUR holds; the
+// samples DURING a hold do not): a hold's samples ≥ HOLD_MS apart, ≤ SAMPLES_PER_HOLD, none at ≥ 85 % of the heap; the
 // profile one a second, refused (and stopped) while heap used ≥ PROFILE_HEAP_SHARE of the limit. test-loop-hold ⑤ pins them.
 const PROFILE_HEAP_SHARE = 0.85;
 /** the young generation's reserve inside heap_size_limit, in semi-spaces of its largest size (three: two semi-spaces and
@@ -173,6 +179,7 @@ function frameOf(raw, root, isRepoFile = null, lineOf = null, isInternal = null)
   const fn = raw && raw.fn === null ? null : fn0 && fn0.length <= NAME_MAX && NAME_RE.test(fn0) ? fn0 : '(anonymous)';
   const line = Number.isInteger(raw && raw.line) && raw.line > 0 ? raw.line : 0;
   if (!file0) return raw && raw.evalish ? { cls: 'outside' } : { cls: 'builtin' };
+  if (file0 === SYNC_FS_URL) return { cls: 'syncfs', fn: fn0 && /^[A-Za-z][\w.]{0,40}$/.test(fn0) ? fn0 : 'a synchronous fs call', file: SYNC_FS_URL, line: 0 };
   // node:internal/streams/end-of-stream, node:v8 — its NAME only when that id is one of Node's own loaded modules (round 4:
   // a vm script may call itself «node:…»; it is then said by its location alone)
   if (/^node:[\w/-]+$/.test(file0)) return { cls: 'node', fn: typeof isInternal !== 'function' || isInternal(file0.slice(5)) === true ? fn : null, file: file0, line };
@@ -231,6 +238,26 @@ function readLen(t, i) {
  *  'formatting' (the string form did not read line for line as V8's own: the whole sample is «frames unreadable (inside
  *  the program's own stack formatting)», never a frame from it). A call-site text that does not read EXACTLY as the
  *  encoding gives the frames read before the fault, never a guess. */
+/** THE INSTRUMENT IS TRANSPARENT (lane hub-loop-stalls, the owner's .393 boot capture: «12.4 % · Node.js internals … — 72 %
+ *  through hr · src/server/loop-blame.js:51»): an ask posted while a WRAPPED synchronous fs call ran is answered at the first
+ *  JavaScript after it — the wrapper's own lines (its clock read, the witness's hook), never the time's owner. PURE: raw
+ *  frames (innermost first, {file, …}) → the same frames without the innermost run of the instrument's own frames
+ *  (src/server/loop-blame.js, src/server/sync-fs-witness.js) and the node frames among them, so the time lands on the
+ *  JavaScript CALLER that made the call, as for any native call. A stack that is the instrument's alone (its own work, a
+ *  timer of the witness) is kept whole: that time IS the instrument's. */
+const INSTRUMENT_FILES = Object.freeze(['src/server/loop-blame.js', 'src/server/sync-fs-witness.js']);
+/** the capture's frame for time ASLEEP in a wrapped synchronous fs call (the watchdog read the call from the live slot at
+ *  its post): `fn` = the call (one of loop-blame's SYNC_FNS), never a path */
+const SYNC_FS_URL = 'vibespace:sync-fs';
+function instrumentTrim(raw, root) {
+  const r = typeof root === 'string' && root.startsWith('/') ? root.replace(/\/+$/, '') + '/' : null;
+  if (!r || !Array.isArray(raw)) return raw;
+  const fileOf = (x) => String((x && x.file) || '').replace(/^file:\/\//, '');
+  const ours = (f) => f.startsWith(r) && INSTRUMENT_FILES.includes(f.slice(r.length));
+  let i = 0, n = 0;
+  for (; i < raw.length; i++) { const f = fileOf(raw[i]); if (ours(f)) n++; else if (!/^node:/.test(f)) break; }
+  return n && i < raw.length ? raw.slice(i) : raw;
+}
 function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = null) {
   if (typeof text !== 'string') return { form: 'none', frames: [] };
   if (text === 'A') return { form: 'accessor', frames: [] };
@@ -242,19 +269,19 @@ function sampleOf(text, root, isRepoFile = null, lineOf = null, isInternal = nul
     if (lines[0] !== 'Error' || lines.length < 2) return { form: 'formatting', frames: [] };   // V8's own header for `new Error()`, exactly
     const raw = lines.slice(1).map(stringFrame);
     if (raw.some((x) => x === null)) return { form: 'formatting', frames: [] };   // ONE line not in V8's format ⇒ the whole sample is unreadable
-    return { form: 'string', frames: raw.slice(1, 32).map((x) => frameOf(x, root, isRepoFile, null, isInternal)) };   // its own frame skipped
+    return { form: 'string', frames: instrumentTrim(raw.slice(1, 32), root).map((x) => frameOf(x, root, isRepoFile, null, isInternal)) };   // its own frame skipped
   }
   if (text[0] !== 'C') return { form: 'none', frames: [] };
-  const frames = [];
+  const raws = [];
   let i = 1;
-  while (i < text.length && frames.length < 32) {
+  while (i < text.length && raws.length < 32) {
     const a = readLen(text, i); if (!a) break;
     const b = readLen(text, a[1]); if (!b) break;
     const m = /^(\d{1,9}),(\d{1,9})([en])/.exec(text.slice(b[1], b[1] + 21)); if (!m) break;
-    frames.push(frameOf({ fn: a[0], file: b[0], line: Number(m[1]), encl: Number(m[2]), evalish: m[3] === 'e' }, root, isRepoFile, lineOf, isInternal));
+    raws.push({ fn: a[0], file: b[0], line: Number(m[1]), encl: Number(m[2]), evalish: m[3] === 'e' });
     i = b[1] + m[0].length;
   }
-  return { form: 'calls', frames };
+  return { form: 'calls', frames: instrumentTrim(raws, root).map((x) => frameOf(x, root, isRepoFile, lineOf, isInternal)) };
 }
 /** PURE: the call-site form's frames (sampleOf's, for a caller that wants frames only). */
 const parseSample = (text, root, isRepoFile = null, lineOf = null) => { const s = sampleOf(text, root, isRepoFile, lineOf); return s.form === 'calls' || s.form === 'string' ? s.frames : []; };
@@ -561,7 +588,7 @@ function samplesWords(samples) {
   for (const s of samples || []) { const w = s.words || (s.kind === 'js' ? '(no frame)' : 'no JavaScript frame'); by.set(w, (by.get(w) || 0) + 1); }
   return [...by].sort((a, b) => b[1] - a[1]).map(([w, n]) => `${w} ×${n}`).join(', ');
 }
-const UNSAMPLED = { off: 'sampling is off in Settings', debugger: 'a debugger is attached', cap: `${CAP_PER_HOUR} holds were sampled in the last hour`, inspector: 'this Node has no inspector', failed: 'the sampler could not connect',
+const UNSAMPLED = { off: 'sampling is off in Settings', debugger: 'a debugger is attached', inspector: 'this Node has no inspector', failed: 'the sampler could not connect',
   unseen: 'the watchdog was not running either', between: 'the watchdog ran on time, but none of its checks came after the hold\u2019s first second — it asks only from then', accessor: 'Error.prepareStackTrace is an accessor here — the sampler stands down', heap: `the heap is above ${PROFILE_HEAP_SHARE * 100} % of its limit`,
   unknown: 'the setting was not read yet', lost: 'the watchdog thread stopped', inside: 'no sample landed inside it' };
 /** PURE: where an answer ran against the hold's own beats: 'end' — inside the beat itself; 'after' — a later beat;
@@ -595,7 +622,7 @@ function thrownOf({ err = null, className = null, description = '', text = '' } 
 }
 /** PURE (round 4 (4)): may a live hold ask again? The switch and a debugger are re-read at EVERY step (bits of the main
  *  thread's flag word: 1 sampling on, 2 a debugger, 8 the setting known) → null (ask) | 'off' | 'debugger' | 'unknown' */
-const stepRefusalOf = (flags) => (!(flags & 8) ? 'unknown' : !(flags & 1) ? 'off' : flags & 2 ? 'debugger' : null);
+const stepRefusalOf = (flags) => (!(flags & 8) ? 'unknown' : !(flags & 1) ? 'off' : flags & 2 ? 'debugger' : flags & 4 ? 'heap' : null);   // + the heap gate (≥ 85 % of the limit), re-read at every step
 /** PURE: the samples that spoke for an instant INSIDE the hold (judged by `judgeAsks`: each carries its class) */
 const insideOf = (h) => (h.samples || []).filter((x) => !x.landed || x.landed === 'inside');
 /** PURE: a sample's class (a PURE caller's own fixture without one: a framed JavaScript sample is 'js', any other 'notJs') */
@@ -654,6 +681,7 @@ function holdLine(h) {
   if (inside.length) {
     const n = `${inside.length} sample${inside.length === 1 ? '' : 's'}`;
     parts.push(`${SCHED_FIRST.has(f.verdict) && f.js ? `where it was (${n})` : n}: ${samplesWords(inside)}${h.standDown ? ` — then ${UNSAMPLED[h.standDown] || h.standDown}: the sampler stood down` : ''}`);
+    if (h.budgetSpent) parts.push(BUDGET_WORDS);
   } else if (h.unsampled) parts.push(`not sampled (${unsampledWords(h)})`);
   else if (asked) parts.push(`not sampled (${notInsideWords(h)})`);
   if (h.after) parts.push(`the first JavaScript after it: ${h.after}`);
@@ -683,11 +711,26 @@ function liveWords({ samples = [], pendingMs = 0, pendingState = null, pendingKe
 const sampleDue = (k, heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD) => k < max && heldMs >= holdMs * 2 ** k;
 /** PURE: the most samples a hold of `heldMs` may carry under the schedule (the live suite's upper bound). */
 const samplesBound = (heldMs, holdMs = HOLD_MS, max = SAMPLES_PER_HOLD) => { let k = 0; while (sampleDue(k, heldMs, holdMs, max)) k++; return k; };
-/** PURE: may one more hold be sampled at `now`? `times` = the starts of the sampled holds (pruned in place to the hour). */
-function capAllows(times, now, cap = CAP_PER_HOUR, windowMs = 3600000) {
-  while (times.length && times[0] <= now - windowMs) times.shift();
-  return times.length < cap;
+/** PURE: may a hold be sampled at all? `flags` = the main thread's (SAMPLING 1, DEBUGGER 2, HEAP_HIGH 4, KNOWN 8) → null
+ *  (its FIRST sample is asked — no count stops it) or the reason it is not: the setting not read, off, a debugger, the heap
+ *  at ≥ 85 % of its limit (the evaluate's allocation must not meet a full heap), no inspector. */
+function holdRefusalOf(flags, { inspector = true } = {}) {
+  if (!(flags & 8)) return 'unknown';
+  if (!(flags & 1)) return 'off';
+  if (flags & 2) return 'debugger';
+  if (flags & 4) return 'heap';
+  if (!inspector) return 'inspector';
+  return null;
 }
+/** PURE: may a hold already sampled take ONE MORE sample at `now`? `spent` = [{at, ms}] the samples' own main-thread runs
+ *  (pruned in place to the rolling hour) — their sum under `budgetMs`. */
+function budgetAllows(spent, now, budgetMs = ASK_BUDGET_MS, windowMs = 3600000) {
+  while (spent.length && spent[0].at <= now - windowMs) spent.shift();
+  let sum = 0;
+  for (const x of spent) sum += x.ms;
+  return sum < budgetMs;
+}
+const BUDGET_WORDS = `later samples not asked: the samples used their time budget (${ASK_BUDGET_MS / 1000} s of the main thread in the hour)`;
 /** PURE: the since-start table — keyed by (verdict, frame LOCATION), bounded: a new key past `max` folds into «other»;
  *  the row shows the frame's display words (a named one wins over a location-only one). */
 function tableAdd(table, { verdict: v, frame, frameKey }, ms, max = TABLE_KEYS) {
@@ -832,10 +875,10 @@ function profileLine(p) {
 module.exports = { partsOf, PART_SHARE, waitedMuch, RUNNING_KERNEL_WORDS, WOKE_WORDS, unseenWhy, unsampledWords, cutWords,
   profileOf, profileLine, foldProfileBy, sharesOf, heapFillOf, nodeArgv, PROFILE_MS, PROFILE_EVERY_MS, PROFILE_NOTE, PROFILE_HEAP_SHARE, PROFILE_KEEP, PROFILE_TOP, PROFILE_WORD_MAX,
   PROFILE_STOPPED, PROFILE_STOPPED_ANY, PROFILE_UNSAMPLED, PROFILE_UNSAMPLED_ANY, PROFILE_REFUSED, PROFILE_REFUSED_ANY, STOPPED_LATE_SHARE, STOPPED_RUN_SHARE, HOOK_KEY, ASK_WORDS, OUTSIDE_WORDS,
-  frameOf, frameText, frameLoc, parseSample, sampleOf, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
+  frameOf, frameText, frameLoc, parseSample, sampleOf, instrumentTrim, INSTRUMENT_FILES, SYNC_FS_URL, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
   parseTaskStat, parseSchedstat, parseCpuStat, cpuStatPaths, parsePressure, parseRss, readingOf, schedDelta, coveredDelta, verdict, stateOf, askOf, judgeAsks, clsOf, UNREAD, V, KEYS, WORDS,
   schedWords, heldWords, gcOf, memWords, samplesWords, foldHold, holdLine, liveWords, publicHold, boundReport,
-  sampleDue, samplesBound, capAllows, tableAdd, tableRows, secs, pct,
+  sampleDue, samplesBound, holdRefusalOf, budgetAllows, BUDGET_WORDS, tableAdd, tableRows, secs, pct,
   SAMPLE_EXPR, UNSAMPLED, GC_KINDS,
-  HOLD_MS, BEAT_MS, SAMPLES_PER_HOLD, NO_ANSWER_MS, JS_FAST_MS, SESSION_MS, CAP_PER_HOUR, LIVE_MS, RING_KEEP, TABLE_KEYS, GC_MIN_MS, RAN_SHARE, WAIT_SHARE, KERNEL_SHARE, GC_SHARE, STARVED_MS,
+  HOLD_MS, BEAT_MS, SAMPLES_PER_HOLD, NO_ANSWER_MS, JS_FAST_MS, SESSION_MS, ASK_BUDGET_MS, LIVE_MS, RING_KEEP, TABLE_KEYS, GC_MIN_MS, RAN_SHARE, WAIT_SHARE, KERNEL_SHARE, GC_SHARE, STARVED_MS,
 };

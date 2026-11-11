@@ -258,7 +258,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
     const rep = {
       elu: eluNow(), heap: mem, counts: { ...counts }, sampling: samplingState(),
       holds: ring.slice().reverse(), table: LH.tableRows(table),
-      law: { holdMs: LH.HOLD_MS, samplesPerHold: LH.SAMPLES_PER_HOLD, capPerHour: LH.CAP_PER_HOUR, gcMinMs },
+      law: { holdMs: LH.HOLD_MS, samplesPerHold: LH.SAMPLES_PER_HOLD, askBudgetMs: LH.ASK_BUDGET_MS, gcMinMs },
       profile: { running: profile.running ? { startedAt: profile.running.startedAt, until: profile.running.until } : null, last: profile.last, note: LH.PROFILE_NOTE },
       capture: (settleCapture(), captureReport()),
     };

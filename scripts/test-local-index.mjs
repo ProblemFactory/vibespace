@@ -412,6 +412,20 @@ ok('M5 a pick that takes a number from a script is caught by ⑨', M5 && M5.pick
 ok('M6 a union matching a person\'s words anywhere is caught by ⑫ (the «continue» typed again later dropped)', M6 && shownU(M6.unionOf(JU(sU('continue', { uuid: 'p0' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sU('continue')), kU)) === 'continue,H0');
 ok('M7 a union anchored on the FIRST record the two share is caught by ⑫ (a record the transcript holds added twice)', M7 && shownU(M7.unionOf(JU(sA('X', { uuid: 'x' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sA('X', { uuid: 'x' }), sA('R1', { uuid: 'r' })), kU)) === 'X,H0,X,R1');
 
+// THE LOOP FIRST (lane hub-loop-stalls, the owner's .393 hub: «[local-index] the write … has not returned in 5 s — that disk is
+// not answering» at 12:10:19 / 12:11:14 / 12:12:16 — the exact ends of 12.5 s, 6.5 s and 14 s LOOP holds on a local ext4 home:
+// the write's answer waited on the held loop). The words ask the witness first; the writer asks it before it blames a disk
+{ const SWW = W && typeof W.slowWriteWords === 'function' ? W.slowWriteWords : null, f = '/h/.vibespace/local/sessions.x.json';
+  const loop = SWW && SWW(f, 12700, 12400), disk = SWW && SWW(f, 6000, 0), both = SWW && SWW(f, 19000, 12500), none = SWW && SWW(f, 6000, null);
+  ok('a write whose answer waited on a HELD LOOP says the loop, not the disk: «the write … has waited 12.7 s — the main loop was held 12.4 s of it, so its answer could not run: the loop, not the disk»',
+    !!loop && loop.kind === 'loop' && loop.line === `[local-index] the write to ${f} has waited 12.7 s — the main loop was held 12.4 s of it, so its answer could not run: the loop, not the disk`, loop);
+  ok('a write the loop did not hold (or no witness to ask) keeps the disk\'s words; one the loop held only part of says the hold beside them',
+    !!disk && disk.kind === 'disk' && disk.line === `[local-index] the write to ${f} has not returned in 5 s — the next waits for it (that disk is not answering)` && none.line === disk.line
+    && both.kind === 'disk' && both.line === `${disk.line}; the main loop was held 12.5 s of the 19.0 s`, { disk, both, none });
+  const SRC_W = fs.readFileSync(path.join(REPO, 'src/server/local-index.js'), 'utf8');
+  ok('the writer asks the witness (its loop-held time over the write\'s own span) BEFORE it says a disk is not answering — the disk line comes only from those words',
+    /held = \(cfg\.loopHeld \|\| loopHeldOf\(\)\)\(inFlight\.at, Date\.now\(\)\)/.test(SRC_W) && /const w = slowWriteWords\(file, waited, held\);/.test(SRC_W) && (SRC_W.match(/that disk is not answering/g) || []).length === 1, null); }
+
 fs.rmSync(DIR, { recursive: true, force: true });
 console.log(`\ntest-local-index: ${pass} passed, ${fail} failed`);
 console.log(fail ? `${fail} FAILED` : `ALL PASS (${pass})`);

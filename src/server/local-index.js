@@ -164,12 +164,29 @@ function rowsNow() {
   return rows;
 }
 
+// the boot's witness (src/server/sync-fs-witness.js): how long the main loop was held in a window — asked before a disk is blamed
+const loopHeldOf = () => { try { return require('./sync-fs-witness.js').loopHeldMs; } catch { return () => null; } };
+const secsOf = (ms) => `${(ms / 1000).toFixed(ms < 100000 ? 1 : 0)} s`;
+/** PURE: the words for a write still in flight after `waitedMs`, the main loop held `heldMs` of it (null: not known) —
+ *  {kind: 'loop' | 'disk', line}. The owner's hub blamed its disk at the exact ends of 12.5 s, 6.5 s and 14 s
+ *  LOOP holds on a local ext4 home: the write's answer waited on the held loop. Under the bound once the hold is taken out ⇒
+ *  the loop's line; else the disk's, the hold beside it. */
+function slowWriteWords(file, waitedMs, heldMs, boundMs = WRITE_BOUND_MS) {
+  if (Number.isFinite(heldMs) && heldMs > 0 && waitedMs - heldMs < boundMs) return { kind: 'loop', line: `[local-index] the write to ${file} has waited ${secsOf(waitedMs)} — the main loop was held ${secsOf(heldMs)} of it, so its answer could not run: the loop, not the disk` };
+  return { kind: 'disk', line: `[local-index] the write to ${file} has not returned in ${boundMs / 1000} s — the next waits for it (that disk is not answering)${Number.isFinite(heldMs) && heldMs >= 1000 ? `; the main loop was held ${secsOf(heldMs)} of the ${secsOf(waitedMs)}` : ''}` };
+}
+
 /** ONE write at a time, async (tmp + rename): a note during a write is carried by the next. → Promise<boolean>. */
 function write(reason) {
   if (!cfg || !file || stopped) return Promise.resolve(false);
   if (inFlight) {
     pending = pending || reason;
-    if (!slowSaid && Date.now() - inFlight.at > WRITE_BOUND_MS) { slowSaid = true; say('warn', `[local-index] the write to ${file} has not returned in ${WRITE_BOUND_MS / 1000} s — the next waits for it (that disk is not answering)`); }
+    if (!slowSaid && Date.now() - inFlight.at > WRITE_BOUND_MS) {   // THE LOOP FIRST: a callback that could not run is not a disk that did not answer
+      const waited = Date.now() - inFlight.at;
+      let held = null; try { held = (cfg.loopHeld || loopHeldOf())(inFlight.at, Date.now()); } catch { held = null; }
+      const w = slowWriteWords(file, waited, held);
+      if (w.kind === 'disk') { slowSaid = true; say('warn', w.line); } else if (!inFlight.loopSaid) { inFlight.loopSaid = true; say('warn', w.line); }
+    }
     return inFlight.p.then(() => false);
   }
   const rows = rowsNow();
@@ -247,5 +264,6 @@ function _reset() { if (timer) clearTimeout(timer); if (beat) clearInterval(beat
 const api = {
   configure, note, stop, placeOf: () => place, fileOf: () => file, hubFactsOf: () => hubFacts, ready: () => bootP || Promise.resolve(false),
   flush: (reason = 'flush') => { if (timer) { clearTimeout(timer); timer = null; } return write(reason); }, _reset,
+  slowWriteWords,
 };
 module.exports = api;

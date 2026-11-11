@@ -261,10 +261,32 @@ console.log('④ the lines');
       'B-1409: an ask whose stat read said asleep and whose syscall read, a moment later, said running says «asleep at the ask, on the CPU a moment later» — never «asleep: on the CPU»', { woke, asleep }); }
   const boot = LH.holdLine({ boot: true, from: 0, to: 69591, ms: 69591, samples: [{ kind: 'js', words: 'restoreSessions (server.js:1760)', key: 'restoreSessions (server.js:1760)' }], d: null });
   ok(boot.startsWith('[loop-hold] the boot held the main loop 69.6 s before its first turn — JavaScript: 1 sample: restoreSessions (server.js:1760) ×1'), 'the boot\'s own words', boot);
-  for (const [why, words] of [['off', 'sampling is off in Settings'], ['debugger', 'a debugger is attached'], ['cap', '20 holds were sampled in the last hour'], ['inspector', 'this Node has no inspector']]) {
+  for (const [why, words] of [['off', 'sampling is off in Settings'], ['debugger', 'a debugger is attached'], ['heap', 'the heap is above 85 % of its limit'], ['inspector', 'this Node has no inspector']]) {
     const l = LH.holdLine({ from: 0, to: 2000, ms: 2000, unsampled: why, d: LH.schedDelta(R(at0, { ut: 0, st: 0, run: 0, wait: 0 }), R(at0 + 2000, { ut: 190, st: 5, run: 1950, wait: 0 })) });
     ok(l.includes(`not sampled (${words})`) && /ran \d\.\d s of the 2\.0 s measured \(user/.test(l) && / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(l), `unsampled (${why}): said, law A's numbers still printed, and the VERDICT says it was not sampled — never «native»`, l);
   }
+  // THE INSTRUMENT IS TRANSPARENT (the owner's .393 boot capture: «12.4 % · Node.js internals … — 72 % through hr ·
+  // src/server/loop-blame.js:51» — 34 of its 395 samples, each under a src caller of a sync fs call): an ask posted while a
+  // wrapped call slept is answered at the wrapper's first line after it; those frames name the CALLER, never the instrument
+  { const ROOT = '/srv/hub', at = (fn, f, line) => ({ fn, file: f.startsWith('node:') ? f : `${ROOT}/${f}`, line, encl: line, evalish: false });
+    const owner = [at('hrtimeBigInt', 'node:internal/bootstrap/node', 436), at('hr', 'src/server/loop-blame.js', 51), at('wrapped', 'src/server/loop-blame.js', 58), at('_loadArchive', 'src/jobs.js', 291), at('listOnTimeout', 'node:internal/timers', 594)];
+    const hook = [at('encodeInto', 'node:internal/encoding', 360), at('liveBegin', 'src/server/sync-fs-witness.js', 139), at('before', 'src/server/sync-fs-witness.js', 161), at('wrapped', 'src/server/loop-blame.js', 58), at('readJson', 'src/harnesses/helper-transcripts.js', 22)];
+    const own = [at('hr', 'src/server/loop-blame.js', 51), at('wrapped', 'src/server/loop-blame.js', 58), at('refresh', 'src/server/sync-fs-witness.js', 129), at('listOnTimeout', 'node:internal/timers', 594)];
+    const plain = [at('busyHog', 'src/x.js', 38)];
+    const T = typeof LH.instrumentTrim === 'function' ? LH.instrumentTrim : (x) => x;
+    ok(T(owner, ROOT)[0].fn === '_loadArchive' && T(owner, ROOT).length === 2 && T(hook, ROOT)[0].fn === 'readJson' && T(own, ROOT) === own && T(plain, ROOT) === plain,
+      'the instrument\'s innermost frames (loop-blame, the witness\'s hook, the node frames among them) are dropped — the owner\'s sample lands on _loadArchive (src/jobs.js:291), a hook frame on readJson; the witness\'s OWN work (its timer) and a stack with no instrument frame are kept whole');
+    const enc = (frames) => 'C' + frames.map((f) => `${f.fn.length}:${f.fn}${f.file.length}:${f.file}${f.line},${f.encl}n`).join('');
+    const sm = LH.sampleOf(enc(owner), ROOT, () => true);
+    ok(sm.form === 'calls' && sm.frames[0] && sm.frames[0].cls === 'repo' && sm.frames[0].file === 'src/jobs.js' && !sm.frames.some((f) => /loop-blame/.test(f.file || '')),
+      `a hold's sample of that shape names its caller — «${LH.chainWords(sm.frames)}» (2.369.395: hr (src/server/loop-blame.js:51) first)`, sm.frames.slice(0, 3)); }
+  // THE LOOP FIRST (the owner's «[local-index] … that disk is not answering» at the exact ends of 12.5 / 6.5 / 14 s LOOP
+  // holds on a local home): the witness says how long the main loop was held in a window — its beat's gap ring + the gap open now
+  { const SW = require(path.join(REPO, 'src/server/sync-fs-witness.js')), H = SW.heldWithin, o = { beatMs: 250, holdMs: 1000 };
+    ok(typeof H === 'function' && H([[10000, 5000]], null, 0, 20000, o) === 4750 && H([], 15000, 0, 27000, o) === 11750 && H([[10000, 5000]], 15000, 0, 27000, o) === 16500
+      && H([], 3100, 3000, 15700, o) === 12350 && H([], 15600, 3000, 15700, o) === 0 && H([[10000, 600]], null, 0, 20000, o) === 350 && H([[10000, 5000]], null, 8000, 9000, o) === 1000,
+      'the main loop\'s held time in a window: a recorded gap held its gap less one beat (clipped to the window), a gap OPEN past a hold\'s size held to the window\'s end, a fresh beat holds nothing; the owner\'s 12.5 s hold under a write begun 0.1 s before it ⇒ 12.35 s');
+    ok(typeof SW.loopHeldMs === 'function' && /loopHeld: \(fromM, toM = now\(\)\) => \{/.test(fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8')), 'the boot\'s witness answers it for a wall-clock window (loopHeldMs) from the beat\'s own ring (loopHeld)'); }
   // condition 3: three answers with their own words — never «native / kernel», never «idle»
   const deep = LH.holdLine({ from: 0, to: 1500, ms: 1500, samples: [{ kind: 'js', words: LH.WORDS.deep, key: LH.KEYS.deep }, { kind: 'js', words: LH.WORDS.deep, key: LH.KEYS.deep }], d: null });
   const betw = LH.holdLine({ from: 0, to: 1500, ms: 1500, samples: [{ kind: 'js', words: LH.WORDS.between, key: LH.KEYS.between }], d: null });
@@ -278,7 +300,7 @@ console.log('④ the lines');
   ok(LH.liveWords({ samples: [{ kind: 'js', words: 'busyHog (src/x.js:38)' }, { kind: 'js', words: 'busyHog (src/x.js:38)' }], d: null }) === 'JavaScript: busyHog (src/x.js:38) [2 of 2 samples]'
     && LH.liveWords({ samples: [], pendingMs: 9000, pendingState: 'running' }) === 'no JavaScript answered for 9.0 s (on the CPU: native code or a collection)'
     && LH.liveWords({ samples: [], pendingMs: 9000, pendingState: 'asleep', pendingKernel: 'pipe_read in read' }) === 'asleep in the kernel since it was asked 9.0 s ago (pipe_read in read)'
-    && LH.liveWords({ samples: [], pendingMs: 9000 }) === 'no JavaScript answered for 9.0 s (not in JavaScript)' && LH.liveWords({ unsampled: 'cap' }) === 'not sampled (20 holds were sampled in the last hour)',
+    && LH.liveWords({ samples: [], pendingMs: 9000 }) === 'no JavaScript answered for 9.0 s (not in JavaScript)' && LH.liveWords({ unsampled: 'heap' }) === 'not sampled (the heap is above 85 % of its limit)',
     'the live words: the latest frames with the count, an ask unanswered by the thread\'s state at the post (on the CPU / asleep with its wait channel / unread), unsampled');
   ok(LH.heldWords({ ms: 1750, msHi: 2000 }) === '1.8–2.0 s' && LH.heldWords({ ms: 1800, msHi: 1820 }) === '1.8 s' && LH.heldWords({ ms: 69591 }) === '69.6 s'
     && LH.holdLine({ from: 0, ms: 1750, msHi: 2000, d: null, samples: [] }).startsWith('[loop-hold] the main loop was held 1.8–2.0 s — '),
@@ -297,19 +319,34 @@ console.log('⑤ the schedule, the cap, the table');
   ok(LH.sampleDue(0, 100, 100) && LH.sampleDue(1, 200, 100) && !LH.sampleDue(1, 199, 100), 'the schedule follows an injected hold length (the live suite\'s 100 ms)');
   // condition 6: THE RATE IS A SAFETY BOUND — periodic samples of a free loop near the heap limit ran Node 24 out of memory
   // with a third less data; a change that samples faster goes RED here: a hold's samples ≥ 1 s apart from its first
-  // second on, ≤ 7, ≤ 20 sampled holds an hour, the profile ≥ 1 s apart and refused / stopped past 85 % of the heap
+  // second on, ≤ 7, the later ones within the hour's time budget (≤ 1 % of the main thread), none past 85 % of the heap,
+  // the profile ≥ 1 s apart and refused / stopped past 85 % of the heap
   { const due = []; for (let ms = 0, k = 0; ms <= 200000; ms += 10) if (LH.sampleDue(k, ms)) { due.push(ms); k++; }
     const gaps = due.slice(1).map((x, i) => x - due[i]);
-    ok(LH.HOLD_MS >= 1000 && due[0] >= 1000 && gaps.every((g) => g >= 1000) && due.length <= 7 && LH.CAP_PER_HOUR <= 20 && LH.PROFILE_EVERY_MS >= 1000 && LH.PROFILE_HEAP_SHARE <= 0.85,
-      `the sampling rate stays within the measured safe bound (samples at ${due.map((x) => x / 1000).join(', ')} s; cap ${LH.CAP_PER_HOUR}/h; profile every ${LH.PROFILE_EVERY_MS} ms, refused past ${LH.PROFILE_HEAP_SHARE * 100} % of the heap)`); }
+    ok(LH.HOLD_MS >= 1000 && due[0] >= 1000 && gaps.every((g) => g >= 1000) && due.length <= 7 && LH.ASK_BUDGET_MS <= 36000 && LH.PROFILE_EVERY_MS >= 1000 && LH.PROFILE_HEAP_SHARE <= 0.85,
+      `the sampling rate stays within the measured safe bound (samples at ${due.map((x) => x / 1000).join(', ')} s; the later samples' budget ${LH.ASK_BUDGET_MS / 1000} s of the main thread an hour; profile every ${LH.PROFILE_EVERY_MS} ms, refused past ${LH.PROFILE_HEAP_SHARE * 100} % of the heap)`); }
   ok(LH.samplesBound(1900) === 1 && LH.samplesBound(2000) === 2 && LH.samplesBound(70000) === 7 && LH.samplesBound(300, 100) === 2 && LH.samplesBound(99, 100) === 0, 'the most samples a hold may carry under the schedule (the live suite bounds each hold by it)');
   { const big = { holds: [...Array(50)].map((_, i) => ({ at: i, line: 'x'.repeat(6000) })), table: [...Array(201)].map((_, i) => ({ verdict: 'JavaScript', frame: 'f'.repeat(1500) + i, count: 1, totalMs: 1, worstMs: 1 })) };
     const b = LH.boundReport(big, 64 * 1024), n = new TextEncoder().encode(JSON.stringify(b)).length;
     ok(n <= 64 * 1024 && b.truncated && b.truncated.maxBytes === 65536 && JSON.stringify(LH.boundReport({ holds: [], table: [] }, 1024)) === '{"holds":[],"table":[]}', `the incident bundle's share has an explicit byte bound (a 10 000-hold book: ${n} bytes ≤ 64 KB, the cut said); a small report is unchanged`); }
-  const times = []; let t = 5e12, allowed = 0;
-  for (let i = 0; i < 25; i++) { if (LH.capAllows(times, t)) { times.push(t); allowed++; } t += 60000; }
-  ok(allowed === 20, `the cap: 20 sampled holds in a rolling hour (25 holds a minute apart ⇒ ${allowed})`);
-  ok(!LH.capAllows(times, t) && LH.capAllows(times, times[0] + 3600000 + 1) && times.length === 19, 'the 21st is refused; an hour after the first, one more is allowed (the window rolls)');
+  // EVERY HOLD GETS ITS FIRST SAMPLE (lane hub-loop-stalls, the owner's .393 hub: 54 of 74 holds — 214 of ~300 s — «not
+  // sampled (20 holds were sampled in the last hour)»): the decision of the tree as it stands (2.369.395's count, when that
+  // is what it has) over 30 holds in a row a minute apart — every one sampled
+  { const ON = 8 | 1, times = []; let t = 5e12, named = 0;
+    const decide = (flags) => (typeof LH.holdRefusalOf === 'function' ? LH.holdRefusalOf(flags) : LH.capAllows(times, t) ? (times.push(t), null) : 'cap');
+    for (let i = 0; i < 30; i++) { if (decide(ON) === null) named++; t += 60000; }
+    ok(named === 30, `EVERY HOLD GETS ITS FIRST SAMPLE: 30 holds in a row a minute apart ⇒ ${named} sampled — no count stops it (2.369.395: 20, then «20 holds were sampled in the last hour»)`);
+    const R = typeof LH.holdRefusalOf === 'function' ? LH.holdRefusalOf : () => null;
+    ok(R(ON | 4) === 'heap' && LH.stepRefusalOf(ON | 4) === 'heap' && R(ON | 2) === 'debugger' && R(8) === 'off' && R(0) === 'unknown' && R(ON, { inspector: false }) === 'inspector' && R(ON) === null,
+      'the gates that stay: the heap at ≥ 85 % of its limit refuses the first sample AND every later step, a debugger, sampling off, the setting not read, no inspector');
+    const spent = [], B = LH.ASK_BUDGET_MS;
+    const bOk = typeof LH.budgetAllows === 'function' && LH.budgetAllows(spent, t) && (spent.push({ at: t, ms: B - 1 }), LH.budgetAllows(spent, t + 1)) && (spent.push({ at: t + 2, ms: 2 }), !LH.budgetAllows(spent, t + 3)) && LH.budgetAllows(spent, t + 2 + 3600000 + 1) && spent.length === 0;
+    ok(bOk && B === 36000, `the later samples' TIME budget: their own main-thread runs summed over the rolling hour under ${B / 1000} s (1 % of it) — past it a hold takes only its first; the window rolls`);
+    const lb = LH.holdLine({ from: 0, to: 2000, ms: 2000, samples: [{ kind: 'js', words: 'busyHog (src/x.js:38)', key: 'busyHog (src/x.js:38)' }], budgetSpent: true, d: null });
+    ok(lb.includes('later samples not asked: the samples used their time budget (36 s of the main thread in the hour)') && lb.includes('busyHog (src/x.js:38)'), 'a hold past the budget says its first sample AND that the later ones were not asked', lb);
+    const W = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
+    ok(/h\.unsampled = LH\.holdRefusalOf\(flags, \{ inspector: !!inspector \}\)/.test(W) && !/capAllows/.test(W) && /if \(h\.k >= 1 && !LH\.budgetAllows\(askSpent, now, askBudgetMs\)\) \{ h\.budgetSpent = true; return; \}/.test(W) && /askSpent\.push\(\{ at: mono\(\), ms: q\.ownUs \/ 1000 \}\)/.test(W),
+      'the watchdog: startHold takes the pure gates (no count), stepHold asks a LATER sample only within the budget, each answered hold ask books its own run'); }
   const tbl = new Map();
   for (let i = 0; i < 205; i++) LH.tableAdd(tbl, { verdict: 'JavaScript', frame: `f${i} (src/x.js:${i})` }, 1000 + i);
   LH.tableAdd(tbl, { verdict: 'JavaScript', frame: 'f3 (src/x.js:3)' }, 5000);
@@ -612,7 +649,7 @@ console.log('⑫ round 5 — the monotonic clock, by behaviour (a date step insi
 {
   const SFW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
   const said = [];
-  const W = SFW.create({ rootDir: REPO, armed: true, readMountinfo: () => '', fresh: true, beatMs: 20, holdMs: 100, noAnswerMs: 50, liveMs: 60000, capPerHour: 20,
+  const W = SFW.create({ rootDir: REPO, armed: true, readMountinfo: () => '', fresh: true, beatMs: 20, holdMs: 100, noAnswerMs: 50, liveMs: 60000,
     log: { warn: (l) => said.push(String(l)), log() {}, error() {}, info() {} }, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500 } }).start({ installHook: false });
   await new Promise((r) => setTimeout(r, 800));   // the watchdog's thread up, its first checks done
   const realNow = Date.now; let truth = 0;

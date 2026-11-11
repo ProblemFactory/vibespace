@@ -10,7 +10,8 @@
 //      and the loop's utilization on every line; the while-held line of the watchdog thread carries the frames
 //   ② THE BOOT is a hold: a main module busy before its first loop turn is sampled and said as the boot's — even with a
 //      cap of 0 (outside the cap)
-//   ③ THE CAP: a cap of 2 ⇒ 2 holds sampled, the rest «not sampled» and STILL measured (law A's numbers)
+//   ③ EVERY HOLD GETS ITS FIRST SAMPLE: 30 holds in a row ⇒ 30 named; a time budget of 0 ⇒ each its first sample only,
+//      the later ones said as not asked (lane hub-loop-stalls: the count of 20 an hour is gone)
 //   ④ THE OFF SWITCH and THE DEBUGGER: sampling off ⇒ «not sampled (sampling is off in Settings)» and NO inspector
 //      session ever connects (an exit inside a hold prints Node's «Waiting for the debugger to disconnect…» only when one
 //      is connected: present with sampling on — the control — absent off); a debugger port open ⇒ said once, stood down
@@ -158,7 +159,7 @@ for (const k of ['busyHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibH
   H[k] = function (...a) { const s0 = SS0(), w0 = Date.now(), m0 = kmono0(); try { return f.apply(this, a); } finally { const s1 = SS0(); SPANS.push({ fn: k, wall: w0, ms: kmono0() - m0, waitMs: (s1[1] - s0[1]) / 1e6, ranMs: (s1[0] - s0[0]) / 1e6 }); } };
 }
 const make = () => require((cfg.tree || ${JSON.stringify(REPO)}) + '/src/server/sync-fs-witness.js').create({ rootDir: ${JSON.stringify(ROOT)}, armed: true, readMountinfo: () => '', fresh: true,
-  beatMs: cfg.beatMs || 20, holdMs: 100, noAnswerMs: 50, liveMs: cfg.liveMs || 250, capPerHour: cfg.cap == null ? 20 : cfg.cap, samplingOn: () => cfg.sampling !== false, ...(cfg.samplesPerHold ? { samplesPerHold: cfg.samplesPerHold } : {}),
+  beatMs: cfg.beatMs || 20, holdMs: 100, noAnswerMs: 50, liveMs: cfg.liveMs || 250, askBudgetMs: cfg.budget == null ? 36000 : cfg.budget, samplingOn: () => cfg.sampling !== false, ...(cfg.samplesPerHold ? { samplesPerHold: cfg.samplesPerHold } : {}),
   ...(fproc ? { procRoot: fproc } : {}),
   profileEveryMs: cfg.profileEveryMs || 50, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500, profileMs: cfg.profileMs || 1500, gcMinMs: cfg.gcMinMs || 50, observeGc: !!cfg.observeGc, lostAfterMs: cfg.lostAfterMs || 30000,
     ...(cfg.fakeHeap ? { heap: () => ({ heapUsed: cfg.fakeHeap * 1e9, heapLimit: 1e9, external: 0 }) } : {}) },
@@ -262,7 +263,7 @@ else if (plan === 'zlib') { const b = Buffer.alloc(40 << 20); for (let i = 0; i 
 else if (plan === 'regex') later(600, () => { H.regexHog(cfg.n || 23); done(); });
 else if (plan === 'sleep') later(600, () => { H.sleepHog(0.35); done(); });
 else if (plan === 'gc') { const keep = []; for (let i = 0; i < 1500; i++) { const a = new Array(1000); for (let j = 0; j < a.length; j++) a[j] = { j, s: 'x' + j }; keep.push(a); } global.__keep = keep; later(700, () => { H.busyHog(120); H.gcHog(); H.gcHog(); H.busyHog(120); done(); }); }
-else if (plan === 'cap') { let k = 0; const one = () => { H.busyHog(260); if (++k < 4) later(250, one); else done(); }; later(500, one); }
+else if (plan === 'cap') { let k = 0; const one = () => { H.busyHog(260); if (++k < (cfg.n || 4)) later(250, one); else done(); }; later(500, one); }
 else if (plan === 'exit-in-hold') later(500, () => { H.busyHog(cfg.ms || 350); process.stderr.write('[kid] exiting inside the hold\\n'); process.exit(0); });
 else if (plan === 'natural') later(500, () => { H.busyHog(300); process.stderr.write('[kid] hold over at ' + Date.now() + '\\n'); W.stop = () => {}; });
 else if (plan === 'exit-inflight') later(500, () => { H.sleepHog(0.35); process.stderr.write('[kid] exit at ' + Date.now() + '\\n'); process.exit(0); });
@@ -437,16 +438,22 @@ async function legNamed(tag, node) {
 // ── ② – ④ ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 async function legBootCapSwitch() {
   console.log('② the boot is a hold (outside the cap)');
-  const b = await run({ plan: 'boot', boot: 350, cap: 0 });
+  const b = await run({ plan: 'boot', boot: 350, budget: 0 });
   const bl = holdLines(b).find((l) => l.startsWith('[loop-hold] the boot held the main loop'));
-  ok(bl && /before its first turn — JavaScript: /.test(bl) && /bootHog \(src\/hogs\.js:3\)/.test(bl) && b.out && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a cap of 0: ${bl}`, b.lines);
+  ok(bl && /before its first turn — JavaScript: /.test(bl) && /bootHog \(src\/hogs\.js:3\)/.test(bl) && b.out && b.out.report.counts.boot === 1, `the main module busy before its first turn is sampled and said as the boot's, with a time budget of 0: ${bl}`, b.lines);
   const late = await run({ plan: 'late' });
   const ll = holdLines(late);
   ok(ll.length === 1 && /^\[loop-hold\] the main loop was held 0\.[2-4] s — JavaScript: /.test(ll[0]) && late.out && late.out.report.counts.boot === 0, `a witness started AFTER the loop's first turn (2 s into the process) then held at once: an ordinary hold timed from its own start, never «the boot» of the process's age: ${ll[0]}`, late.lines);
-  console.log('③ the cap (2 an hour here) — the rest still measured');
-  const c = await run({ plan: 'cap', cap: 2 });
-  const hl = holdLines(c), sampled = hl.filter((l) => / \d samples?: /.test(l)), capped = hl.filter((l) => /not sampled \(\d+ holds were sampled in the last hour\)/.test(l));
-  ok(hl.length === 4 && sampled.length === 2 && capped.length === 2 && capped.every((l) => /ran \d+\.\d s of the \d+\.\d s measured/.test(l) && / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(l)), `4 holds: 2 sampled, 2 «not sampled» past the cap, every one with law A's numbers`, hl);
+  // lane hub-loop-stalls (the owner's .393 hub: 54 of 74 holds «not sampled (20 holds were sampled in the last hour)»):
+  // EVERY HOLD GETS ITS FIRST SAMPLE — 30 holds in a row, every one named (2.369.395: 20, the rest past its count); a time
+  // budget of 0 ⇒ each hold its FIRST sample only, the later ones said as not asked
+  console.log('③ every hold gets its first sample — 30 holds in a row; a budget of 0');
+  const c = await run({ plan: 'cap', n: 30 }, { timeoutMs: 90000 });
+  const hl = holdLines(c), named = hl.filter((l) => / \d samples?: [^;]*busyHog \(src\/hogs\.js:\d+\)/.test(l));
+  ok(hl.length === 30 && named.length === 30 && !hl.some((l) => /not sampled/.test(l)), `30 holds in a row: ${named.length} of ${hl.length} named by their function (busyHog), none «not sampled»`, hl.filter((l) => !named.includes(l)).slice(0, 2));
+  const c0 = await run({ plan: 'cap', budget: 0 });
+  const h0 = holdLines(c0);
+  ok(h0.length === 4 && h0.every((l) => / 1 sample: busyHog \(src\/hogs\.js:\d+\)/.test(l) && /later samples not asked: the samples used their time budget/.test(l)), `a budget of 0: each of the 4 holds its FIRST sample only, the later ones said as not asked`, h0);
   console.log('④ the off switch, the debugger');
   // the off switch asks NOTHING: the real evaluates that reached the main thread, counted (a session is now connected only
   // for one ask at a time, so an exit no longer shows one — the count is the evidence)
@@ -511,8 +518,8 @@ async function legAcceptance() {
   const nl = holdLines(ns)[0];
   ok(nl && / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(nl) && /not sampled \(sampling is off in Settings\)/.test(nl) && ns.out.report.table[0].verdict === LH.V.unsampled,
     `2 — a JavaScript loop nobody sampled: the verdict says «not sampled» (the line, the table key) — never «native code or garbage collection»: ${nl}`, ns.lines);
-  const cap = await run({ plan: 'cap', cap: 0 });
-  ok(holdLines(cap).length === 4 && holdLines(cap).every((l) => / — on the CPU in user mode — JavaScript or native code, not sampled: /.test(l)), '2 — past the hourly cap: every JavaScript hold says «not sampled», none «native»', holdLines(cap));
+  const cap = await run({ plan: 'cap', budget: 0 });
+  ok(holdLines(cap).length === 4 && holdLines(cap).every((l) => /^\[loop-hold\] the main loop was held [\d.]+ s — JavaScript/.test(l) && !/native code or garbage collection/.test(l)), '2 — past the time budget: every JavaScript hold still says «JavaScript» from its first sample, none «native»', holdLines(cap));
   // 3. no name forges a frame; a vm script with a repo-looking name is not a repo frame
   const fg = await run({ plan: 'forge', record: true });
   const fl = holdLines(fg), sinks = JSON.stringify({ lines: fl, table: fg.out && fg.out.report.table, recs: fg.out && fg.out.checks.recs });

@@ -128,6 +128,20 @@ ok(nodeOf('mid').length === 1 && nodeOf('leafA').length === 1 && nodeOf('leafA')
 ok(P.$vibespace && P.$vibespace.sampledEveryMs === 50 && /^sampled every 50 ms on average \(each interval drawn between 25 and 75 ms\) from the watchdog thread, no V8 profiler/.test(P.$vibespace.how) && ['(idle)', '(program)', '(held a second or more)', '(not sampled)'].every((n) => nodeOf(n).length === 1),
   'its header says it was sampled every 50 ms (each interval drawn between 25 and 75 ms); idle / outside JavaScript / held / not sampled are their own nodes');
 const PA = C.aggregate(P);
+// THE TIME OF A SYNC FS CALL ON THE CALL (the owner's .393 boot capture: «12.4 % · Node.js internals … — 72 % through hr ·
+// src/server/loop-blame.js:51», read as the instrument's cost): a sample answered at the wrapper's first line after a call
+// that slept is booked «asleep in <the call>» (the watchdog read the call from the live slot at its post) under its caller
+{ const ROOT = '/srv/hub', at = (fn, f, line) => ({ fn, file: f.startsWith('node:') ? f : `${ROOT}/${f}`, line, encl: line, evalish: false });
+  const owner = [at('hrtimeBigInt', 'node:internal/bootstrap/node', 436), at('hr', 'src/server/loop-blame.js', 51), at('wrapped', 'src/server/loop-blame.js', 58), at('_loadArchive', 'src/jobs.js', 291), at('listOnTimeout', 'node:internal/timers', 594)];
+  const asWorker = (raw, sync) => { const t = typeof LH.instrumentTrim === 'function' ? LH.instrumentTrim(raw, ROOT) : raw; return t !== raw && sync && LH.SYNC_FS_URL ? [{ fn: sync, file: LH.SYNC_FS_URL, line: 0, encl: 0, evalish: false }, ...t] : t; };
+  const tableOf = (raw) => { const fr = raw.map((x) => C.callFrameOf(LH.frameOf(x, ROOT, () => true, null, () => true), x)); const tk = [...Array(10)].map((_, i) => ({ t: i * 50, k: 0 }));
+    return C.aggregate(C.profileOf({ ticks: tk, stacks: [fr.map((_, i) => i)], frames: fr, startedM: 0, endedM: 500, everyMs: 50 }), { root: ROOT }); };
+  const wA = C.rowWords(tableOf(asWorker(owner, 'readFileSync')).rows[0]).trim(), wB = C.rowWords(tableOf(owner).rows[0]).trim();
+  ok(/· asleep in readFileSync — all through _loadArchive · src\/jobs\.js:291$/.test(wA) && !/loop-blame/.test(wA) && /through hr · src\/server\/loop-blame\.js:51$/.test(wB),
+    `a sample asleep in a wrapped readFileSync is booked on the call: «${wA}» — the CONTROL, the frames as they came: «${wB}»`, { wA, wB });
+  const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
+  ok(/sync: asker && asker\.kind === 'capture' \? syncNow\(\) : null/.test(WK) && /const t = LH\.instrumentTrim\(r\.frames, rootDir\);/.test(WK) && /\{ fn: sync, file: LH\.SYNC_FS_URL/.test(WK) && /stackOf\(c, q\.text, q\.sync\)/.test(WK),
+    'the watchdog: a capture ask reads the live slot\'s call at its post (syncNow), and its answer\'s stack drops the instrument\'s frames and names that call'); }
 ok(near(PA.share.js, 4 / 8) && PA.rows.find((r) => r.fn === 'leafA').share === 3 / 8 && near(PA.share.held, 1 / 8) && near(PA.share.idle, 1 / 8), 'a built-in leaf (no script) books its tick on its caller (leafA 3 of 8); the classes keep their shares', PA.rows);
 const capped = C.profileOf({ ticks: Array.from({ length: 50 }, (_, i) => ({ t: i * 50, k: i })), stacks: Array.from({ length: 50 }, (_, i) => [i]), frames: Array.from({ length: 50 }, (_, i) => ({ functionName: 'g' + i, url: 'src/g.js', lineNumber: i, columnNumber: -1 })), startedM: 0, everyMs: 50, nodesMax: 20 });
 ok(capped.nodes.length === 21 && capped.nodes.some((n) => n.callFrame.functionName === '(past the node cap)') && capped.samples.length === 50, `the node cap (here 20): the rest of the paths are ONE «(past the node cap)» node, no sample dropped (${capped.nodes.length} nodes)`);
