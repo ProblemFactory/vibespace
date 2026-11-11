@@ -10,6 +10,11 @@
    "sha256": "030217ba27774f3e584dbad08c31447ecfd4ef735ca4b290124301cd8e9c44dd",
    "retired": [
     {
+     "head": "cb286271fe",
+     "why": "lane hub-sync-holds rank 12a (2.369.397, the owner «去掉吧»): src/server/auto-update.js DELETED — no boot runs an update; the one update road is scripts/update.sh",
+     "at": "2026-11-11"
+    },
+    {
      "head": "432a5bdcdf",
      "why": "lane path-field: src/lib/autocomplete.js DELETED — THE path field (src/lib/path-field.js) replaced setupDirAutocomplete at every door",
      "at": "2026-10-23"

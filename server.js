@@ -56,16 +56,14 @@ if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
 // installed EARLY so the console tee captures the whole boot narrative.
 try { require('./src/opslog').setupOpslog(require('./package.json').version); } catch (e) { console.warn('[opslog] init failed:', e.message); }
 
-// Auto-update: pull latest + rebuild on startup (skip with NO_AUTO_UPDATE=1).
-// A THROWAWAY server — its code under the OS temp dir, i.e. every suite's
-// scratch worktree — never pulls (the hookRegistrationSafe rule): `git pull`
-// in a worktree FETCHES into the SHARED .git and costs a network round trip
-// before listen (measured 2026-09-24: 0.5-0.9 s boot without it, 2.5-15 s with
-// it — past the 10 s boot window many scratch suites wait: five went red).
+// NO UPDATE RUNS INSIDE THE BOOT (lane hub-sync-holds, rank 12a; the owner 2026-11-11: «去掉吧»): a restart of ANY cause — the
+// unit's respawn, a reboot, run.sh's loop — keeps the version it has. An update has ONE road: ⚙ → Update VibeSpace…
+// (scripts/update.sh: pull, install, build, then the restart). The boot pull held the owner's hub 5.5 s before its first loop
+// turn, right after update.sh had pulled; it is gone with its module. NO_AUTO_UPDATE (the images) still turns off the boot's
+// runtime check (src/server/runtime-boot.js, a child 20 s after listen); «a newer version exists» is GET /api/version (the gear
+// menu's vX → vY), which never applies anything.
+// A THROWAWAY server — its code under the OS temp dir, i.e. every suite's scratch worktree (the hookRegistrationSafe rule)
 const throwawayRoot = [os.tmpdir(), '/tmp'].some((t) => (path.resolve(__dirname) + path.sep).startsWith(path.resolve(t) + path.sep));
-if (throwawayRoot && !process.env.NO_AUTO_UPDATE) console.log('[auto-update] skipped: throwaway/temp server root');
-// the pull / install / build + the reset of the tracked files a build rewrites (the checkout stays clean): src/server/auto-update.js
-if (!process.env.NO_AUTO_UPDATE && !throwawayRoot) require('./src/server/auto-update.js').autoUpdate({ repoDir: __dirname });
 
 const PORT = process.env.PORT || 3456;
 const CLAUDE_CMD_RAW = process.env.CLAUDE_CMD || 'claude';

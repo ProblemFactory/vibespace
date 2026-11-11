@@ -173,11 +173,11 @@ ARG VIBESPACE_REF=master
 # THE SEED IS CLEAN BY ASSERTION (lane cluster-presets P6): the build's own
 # tracked rewrites (package-lock.json under an npm that reformats it,
 # src/agentd/version.js stamped by build:agentd — THE SAME LIST as
-# src/server/auto-update.js BUILD_REWRITTEN_TRACKED and scripts/update.sh) go
+# scripts/update.sh's, derived from package.json's build by scripts/test-fleet-image-seed.mjs) go
 # back to the commit's, then `git status --porcelain` must be EMPTY or the
 # image build fails naming the file: a fresh pod's first bare
 # `git pull --ff-only` must never meet a modified tree. A tracked file a build
-# rewrites is a bug to name (add it to the three lists), never to tolerate.
+# rewrites is a bug to name (add it to both lists), never to tolerate.
 RUN git clone https://github.com/ProblemFactory/vibespace /opt/vibespace-dist \
     && cd /opt/vibespace-dist \
     && git reset --hard "$VIBESPACE_REF" \

@@ -60,8 +60,9 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'] };
 // src/server/cli-model-catalog.js saveLedger ×2 (cli-update-needs-nothing) — 455; round 2: + 65 the census could NOT
 // SEE before — writes through an fs alias or a destructured name, a derived helper's callers, and six main-process
 // directories never scanned (src/channels, src/harnesses, src/adapters, src/spawn, src/plugins, src/agentd/client.js) —
-// the true count: 520; it falls from here)
-const DEBT_MAX = 520;
+// the true count: 520; it falls from here; − 2 with lane hub-sync-holds rank 12a: src/server/auto-update.js DELETED — no boot
+// runs an update — 518)
+const DEBT_MAX = 518;
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/adapters/codex.js","*",2,"debt","—","—","round 2 (newly scanned): the codex adapter's plain copy of a transcript — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
@@ -126,7 +127,6 @@ const ROWS = [
   ["src/server/apps-engine.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/auto-cli-loop.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/auto-resume.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/auto-update.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/automation-engine.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","automation keys (authority) — must be on disk before the answer"],
   ["src/server/boot-restore.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched. ROUND 4 (item 7), NAMED DEBT with its measured cost: the .json.stopped copies of dead conversations at a boot — 25 dead = 60 s of main-thread hold at 1.2 s a call (master's code, unchanged here)"],
   ["src/server/browser-bindings.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

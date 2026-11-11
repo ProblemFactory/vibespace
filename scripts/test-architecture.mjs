@@ -1697,9 +1697,9 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'src/cli-identity.js', needle: "execImpl('ps', ['-eo', 'pid=,ppid=']", why: 'NO-/proc FALLBACK ONLY, ONE per sweep for the whole table — see (a).' },
     { file: 'src/cli-identity.js', needle: "execFile('pgrep', ['-f', String(needle)]", why: 'NO-/proc FALLBACK ONLY (pidsMatchingCmdline), ONE per question — see (a).' },
     { file: 'src/discovery-facts.js', needle: "spawnSync('lsof', ['-Fpn', '+D', root]", why: 'NO-/proc FALLBACK ONLY (macOS/BSD codex liveness), ONE per scan — see (a).' },
-    // (lane cluster-presets P6: server.js's three BOOT-ONLY spawns — the auto-update's
-    // git pull / npm install / npm run build — moved to src/server/auto-update.js,
-    // which defines no sweep fact; their rows went with them.)
+    // (lane cluster-presets P6 moved server.js's three BOOT-ONLY spawns — the boot pull's git pull / npm install / npm run
+    // build — to src/server/auto-update.js; lane hub-sync-holds rank 12a deleted it: no boot pulls, the update's one road is
+    // scripts/update.sh.)
   ];
   const swWalked = [], swStray = [], swHit = new Set();
   for (const f of [...sweepFiles].sort()) {

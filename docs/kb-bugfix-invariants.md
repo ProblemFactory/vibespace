@@ -894,7 +894,7 @@
 - (2026-11-05) A START WENT ON BESIDE AN EMPTY PLACE WHILE THE LANDING PUT ITS KERNEL BACK (fleet-plugin-catalog r6 n2; r7 p2: a hung STAT too). 不变量 = the not-whole window opens when a put-back is ASKED, before its first await — a stat that hangs is a rename that hangs (kb-bugfix-invariants)
 - (2026-11-05) THE BOOT SWEPT THE ONLY COPY OF THE KERNEL ITS RECORD SAID WAITS (fleet-plugin-catalog r6 n3; r7 p1: after ONE unread receipt). 不变量 = unreadable is a third answer: a named copy is put back, let go of by name, or — unread — left untouched (kb-bugfix-invariants)
 - (2026-11-05) A LANDING DELETED THE ONLY COPY OF THE PREVIOUS KERNEL AFTER A PUT-BACK COULD NOT READ THE PLACE (fleet-plugin-catalog r8 s1). 不变量 = the put-back gives three answers: on «unknown» a landing moves nothing and deletes nothing (kb-bugfix-invariants)
-- (2026-11-05) A LANE'S STRAY HUB FETCHED FROM ORIGIN WITH THE BOX'S SSH KEY (fleet-plugin-catalog r6): a worktree's ./run.sh ⇒ git pull fetched before it failed (no upstream). 不变量 = a hub outside the temp dir pulls — a lane boots none there without NO_AUTO_UPDATE=1 (kb-bugfix-invariants)
+- (2026-11-05) A LANE'S STRAY HUB FETCHED FROM ORIGIN WITH THE BOX'S SSH KEY (fleet-plugin-catalog r6): a worktree's ./run.sh ⇒ git pull fetched before it failed (no upstream). 不变量 = until 2.369.397 a hub outside the temp dir pulled; no boot pulls since (kb-bugfix-invariants)
 - (2026-11-05) THE LIFTED 5-HOUR LIMIT WAS A MISSING RING (usage-two-rings, owner) — 不变量 = a Claude row with no 5h shows its model cap beside the 7d; read / not read (never «no cap»); a reading's own caps drawn for every harness (Codex Spark), the empty ring Claude's alone ⇒ kb-bugfix-invariants
 - (2026-11-06) THE PHONE ROSTER OVERFLOWED WHEN A CLI WAS INSTALLED, AND ONLY THE OWNER'S BOX COULD SEE IT (nightly380, B-7671) — 不变量 = past three a phone row folds at its current tier; a render's listeners die with it; a suite injects what it judges; censuses start at doors ⇒ kb-bugfix-invariants
 - (2026-11-06) A CONTROL STOPPED CUTTING WHEN A LANE PUT A LINE BETWEEN ITS TWO ANCHORED LINES (share-model ④g F5, B-f0d1's class; tailnet-names). 不变量 = a control cuts each line by its OWN text, never an adjacent block; its setup fails by name when one is missing ⇒ kb-bugfix-invariants
@@ -1406,12 +1406,12 @@ The fetch left traces:
 The lane's env gave the hub the lane's own HOME, but OpenSSH reads keys from the passwd home, so the box's SSH identity authenticated. The round-6 report said «no fetch was attempted … nothing reached out». That was false. It was corrected in round 7, after the acceptance measured FETCH_HEAD and ran a local `GIT_TRACE` control.
 
 **Why nothing stopped it.**
-- server.js skips auto-update only for a throwaway root (under the OS temp dir) or when `NO_AUTO_UPDATE=1` is set. A lane worktree under /var/tmp is neither.
+- server.js skipped auto-update only for a throwaway root (under the OS temp dir) or when `NO_AUTO_UPDATE=1` was set. A lane worktree under /var/tmp was neither.
 - «hooks not registered: … a git worktree» guards the CLI config only.
 - The lane's egress sampler watched its heavy claim, not a command run by mistake.
-- The lane's memory trap («call the lane's run.sh by absolute path») covers the name clash, not this channel. ANY hub started from ANY worktree or copy outside the temp dir pulls.
+- The lane's memory trap («call the lane's run.sh by absolute path») covers the name clash, not this channel. ANY hub started from ANY worktree or copy outside the temp dir pulled.
 
-不变量: a hub booted from a checkout outside the temp dir pulls. A pull is a fetch with the box's credentials, even when it then fails. A lane boots no hub from its worktree: every hub it starts runs from a temp-dir scratch or with `NO_AUTO_UPDATE=1`, and its egress sampler covers every hub it starts. The product side (a pull only from the production checkout) is a row note on B-a45c, not this lane's to change.
+不变量 (as it stood until 2.369.397): a hub booted from a checkout outside the temp dir pulled. A pull is a fetch with the box's credentials, even when it then fails. SINCE 2.369.397 no boot pulls at all (lane hub-sync-holds rank 12a, the owner's «去掉吧»; the update's one road is scripts/update.sh, a person's act) — the lane rule below still stands for a hub's other reasons (its data dir, its egress). A lane boots no hub from its worktree: every hub it starts runs from a temp-dir scratch or with `NO_AUTO_UPDATE=1`, and its egress sampler covers every hub it starts. The product side (a pull only from the production checkout) is a row note on B-a45c, not this lane's to change.
 
 Gates: none in the tree; the lane kit renames its helper so it cannot shadow the repo's run.sh, and every heavy claim's sampler lists the claim's git and ssh descendants as well as its sockets.
 
@@ -3601,7 +3601,7 @@ The job engine (src/jobs.js `_spawn`) started each run as `node data/bin/job-wra
 
 **Roads measured.**
 - The in-app Update (update.sh, on the hub and in a pod) has the window.
-- The BOOT auto-update has none: server.js pulls and builds before jobs-wiring creates the engine.
+- The BOOT auto-update had none: server.js pulled and built before jobs-wiring created the engine (gone since 2.369.397 — no boot runs an update).
 - A new image restarts the server and the wrapper together.
 
 update.sh is unchanged. An old server cannot be taught to wait; the protocol makes the window harmless.

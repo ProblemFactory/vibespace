@@ -3,7 +3,8 @@
 // replace the process with the instance's own node (src/node-runtime.js reexecOnOwnRuntime — `switched`); then:
 //   · line()        the boot's verdict line: `[runtime] node vX below the floor vY — the next update provisions it` /
 //                   at or above the floor / switched from the base node / a major the table names no floor for;
-//   · afterListen() the owner's auto-update road (the boot pull ran) runs the update's check too: below the floor ⇒
+//   · afterListen() the boot's runtime check (an install not under NO_AUTO_UPDATE — the boot pull itself is gone since lane
+//                   hub-sync-holds rank 12a: an update's one road is scripts/update.sh): below the floor ⇒
 //                   `node scripts/runtime-check.mjs --provision` as a CHILD after the port is open (never the boot's
 //                   loop); its lines join this server's log, and the next restart runs on what it provisioned;
 //   · answer()      GET /api/runtime — what the Diagnostics window says: the node running, the base it switched from,
@@ -27,7 +28,7 @@ function create({ rootDir, switched = { state: 'none' }, version = process.versi
     if (v.state === 'unknown-major') return `[runtime] node ${v.version} — the floor table (src/runtime-floor.js) names no line for v${v.major}${from}`;
     return `[runtime] node ${version} — not a version the floor table reads`;
   }
-  /** The boot pull's check: provision below the floor, in a child, once per start. */
+  /** The boot's runtime check: provision below the floor, in a child, once per start (the boot pull it once shared a timer with is gone). */
   function afterListen({ autoUpdate = false } = {}) {
     const v = verdictNow();
     if (!autoUpdate || v.state !== 'below-floor' || check) return null;
@@ -62,8 +63,8 @@ function create({ rootDir, switched = { state: 'none' }, version = process.versi
 let booted = null;
 /** server.js's ONE line, its first: the switch (src/node-runtime.js reexecOnOwnRuntime — on success it never returns),
  *  the mark dropped before any child sees it, the verdict line once the boot's narrative is captured (setImmediate:
- *  after the opslog tee), and the boot pull's check 20 s in (an unref'd timer; never in a throwaway / suite root or
- *  with NO_AUTO_UPDATE — the same rule as the pull). GET /api/runtime (src/server/ops-routes.js) answers `answer()`. */
+ *  after the opslog tee), and the boot's runtime check 20 s in (an unref'd timer; never in a throwaway / suite root or
+ *  with NO_AUTO_UPDATE; the boot pull that once shared this rule is gone — lane hub-sync-holds rank 12a). GET /api/runtime (src/server/ops-routes.js) answers `answer()`. */
 function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) {
   if (booted) return booted;
   const switched = NR.reexecOnOwnRuntime({ root: path.join(rootDir, 'data'), env, log });

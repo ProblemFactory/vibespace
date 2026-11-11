@@ -44,6 +44,25 @@ if [ -n "$BADF" ]; then
   echo "Fix once with:  sudo chown -R $(id -un): ."
   exit 1
 fi
+# The tracked files THIS update rewrites (npm install → package-lock.json, npm run build → src/agentd/version.js) are put
+# back on EVERY exit from here on — a failed install or build never leaves the checkout dirty, so the next run of this script
+# or an admin's bare `git pull --ff-only` is not refused (lane hub-sync-holds rank 12a round 2: no boot heals the tree any
+# more — no boot runs an update — and the acceptance panel drove a failed build leaving both modified). A failure is SAID.
+# Installed only now, AFTER the single-flight lock: an «Another update is already running» exit must never touch the tree
+# the running one is building.
+put_back_rewrites() {
+  git checkout HEAD -- package-lock.json 2>/dev/null || true
+  git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
+}
+on_exit() {
+  rc=$?
+  put_back_rewrites
+  if [ "$rc" -ne 0 ]; then
+    echo "✗ The update stopped (exit $rc). The files it rewrites (package-lock.json, src/agentd/version.js) were put back, so the checkout is clean for the next update."
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
 # pull. package-lock.json: an in-container npm (different version) rewrites it.
@@ -104,10 +123,11 @@ echo "== build"
 npm run build
 # lane cluster-presets P6: put the build's OWN tracked rewrites back, so the
 # checkout is clean BETWEEN updates — an admin's bare `git pull --ff-only` (or
-# the server's boot auto-update) must never find package-lock.json /
-# src/agentd/version.js modified. THE SAME LIST as src/server/auto-update.js
-# BUILD_REWRITTEN_TRACKED and deploy/docker/Dockerfile's seed step
-# (scripts/test-fleet-image-seed.mjs keeps the three equal). Per path, like the
+# the next run of this script; no boot pulls since lane hub-sync-holds rank 12a:
+# this script is the ONE update road) must never find package-lock.json /
+# src/agentd/version.js modified. THE SAME LIST as deploy/docker/Dockerfile's
+# seed step (scripts/test-fleet-image-seed.mjs keeps the two equal, derived from
+# package.json's build). Per path, like the
 # pre-pull reset above. The installed tree and the built bundles are unchanged.
 git checkout HEAD -- package-lock.json 2>/dev/null || true
 git checkout HEAD -- src/agentd/version.js 2>/dev/null || true

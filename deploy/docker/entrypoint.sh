@@ -12,12 +12,12 @@ DIST="/opt/vibespace-dist"
 # FILES and sets VIBESPACE_PRESETS_DIR — and passes NO preset env any more. A
 # VibeSpace older than 2.369.200 has no reader for the directory, so a pod on
 # the new chart with an old app has NO company presets at all, silently. Say
-# it, on every (re)spawn, until the checkout carries the reader (the server's
-# own boot auto-update normally brings it with the first pull).
+# it, on every (re)spawn, until the checkout carries the reader (⚙ → Update
+# VibeSpace… brings it: since 2.369.397 no boot pulls — a restart keeps its version).
 presets_reader_check() {
   if [ -n "${VIBESPACE_PRESETS_DIR:-}" ] && [ ! -f "$1/src/server/cluster-presets.js" ]; then
     local v; v="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$1/package.json" 2>/dev/null | head -1)"
-    echo "[entrypoint] WARNING: company presets are mounted at $VIBESPACE_PRESETS_DIR but this VibeSpace (${v:-unknown}) predates the presets reader (2.369.200) and the chart passes them as env no more — the instance has NO company presets until the app updates (the boot auto-update pulls it; if that cannot run, update by hand, or set presets.volume=false on the release)" >&2
+    echo "[entrypoint] WARNING: company presets are mounted at $VIBESPACE_PRESETS_DIR but this VibeSpace (${v:-unknown}) predates the presets reader (2.369.200) and the chart passes them as env no more — the instance has NO company presets until the app updates (⚙ → Update VibeSpace…, or by hand — a restart updates nothing), or set presets.volume=false on the release" >&2
   fi
 }
 

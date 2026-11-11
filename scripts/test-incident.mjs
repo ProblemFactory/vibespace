@@ -30,9 +30,9 @@ if (!up) { console.error(`  ✗ the scratch server never answered /api/home in 6
 // 2026-09-24 (the 2.369.163 heavy RED): every scratch server ran the boot
 // auto-update's `git pull` — a network fetch into the SHARED .git before
 // listen, 2.5-15 s — and this suite's old 10 s window fell through to
-// ECONNREFUSED. A server whose root is under the OS temp dir never pulls.
-check('a throwaway (temp-dir) server root skips the boot auto-update — no `git pull` into the shared .git before listen',
-  /\[auto-update\] skipped: throwaway\/temp server root/.test(bootLog) && !/git pull|pull --ff-only/.test(bootLog), bootLog.split('\n').filter((l) => /auto-update/.test(l)).join(' | ') || '(no auto-update line)');
+// ECONNREFUSED. Since 2.369.397 (lane hub-sync-holds rank 12a) NO boot pulls — a throwaway root or not.
+check('the boot runs no update — no `git pull` into the shared .git before listen (no boot pulls since 2.369.397)',
+  !/git pull|pull --ff-only|\[auto-update\]/.test(bootLog), bootLog.split('\n').filter((l) => /auto-update|git pull/.test(l)).join(' | ') || '(no update line)');
 console.log(`    (scratch server up in ${Date.now() - bootStart} ms)`);
 
 const post = async (url, body) => (await fetch(`http://127.0.0.1:${PORT}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();

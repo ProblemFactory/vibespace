@@ -6,6 +6,8 @@
 //       refresh with timeouts (tailscale ran pgrep + sudo -n + `tailscale status --json` on every snapshot: 4.7–4.9 s)
 //   §16 rank 16 — the mail folder IS the index: every pass reads it ONCE, async, a failed walk never an answer (each 300 s pass re-listed
 //       the whole tree with readdirSync: 1.5–1.7 s per mailbox, growing with it)
+//   §12a rank 12a — no update runs inside the boot (a synchronous `git pull` held 5.5 s before the first loop turn, right
+//       after scripts/update.sh had pulled): the update's ONE road is scripts/update.sh
 // Run: node scripts/test-hub-sync-holds.mjs
 import fs from 'node:fs';
 import { spawn as spawnChild } from 'node:child_process';
@@ -297,6 +299,17 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
   }
   const SB = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
   ok('§16 the sidebar SAYS a failed pass («Sync stopped: … — it tries again in 2 minutes», the server\'s words) — never «Synced — N emails» over a failure', /m\.gmailState === 'error'\) \{[\s\S]{0,400}tr\('Sync stopped: \{error\} — it tries again in 2 minutes', \{ error: m\.gmailError/.test(SB) && SB.indexOf("m.gmailState === 'error'") < SB.indexOf("tr('Synced — {n} emails'"));
+}
+
+console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPDATE) runs no update before its first loop turn');
+{
+  const SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const code = SJ.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  const boot = code.slice(0, code.indexOf('hub.listen(PORT'));   // everything the boot runs before it listens
+  const pull = /autoUpdate\(|'git',\s*\[[^\]]*'pull'|'npm',\s*\['(?:install|ci|run)'/.exec(boot);
+  ok('§12a server.js runs NO update before it listens — no autoUpdate(), no `git pull`, no npm install / build: a restart (systemd\'s, a crash, update.sh\'s own) serves at once; the update\'s one road is scripts/update.sh', boot.length > 1000 && !pull, pull && pull[0]);
+  const US = fs.readFileSync(path.join(REPO, 'scripts/update.sh'), 'utf8');
+  ok('§12a …and the update road still pulls, installs, builds and THEN restarts (scripts/update.sh), so nothing is lost by the boot not pulling', /git pull --ff-only/.test(US) && /npm install --no-audit --no-fund/.test(US) && /npm run build/.test(US) && US.indexOf('npm run build') < US.indexOf('systemctl --user restart vibespace'));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

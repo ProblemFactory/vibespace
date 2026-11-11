@@ -244,7 +244,7 @@ update first or keep `presets.volume=false` (the env form, rendered exactly as
 before) until it does. The pod's entrypoint says it on every start (a
 `WARNING: company presets are mounted at … but this VibeSpace (…) predates the
 presets reader` line in the pod log) until the checkout carries the reader —
-the boot auto-update normally brings it with the first pull. Create `vibespace-cluster-presets` first so the
+⚙ → Update VibeSpace… (scripts/update.sh) brings it — a pod never pulls at boot (NO_AUTO_UPDATE=1 in the image). Create `vibespace-cluster-presets` first so the
 switched instances have the company's clients from their first boot.
 
 **Drop the blocks the cluster Secret now carries.** After the switch a
@@ -360,7 +360,7 @@ minute — no helm upgrade, no restart.** The server logs
   a relay change never does. With `presets.volume=false` no relay page reaches
   the pod (the NOTES say so). An app older than 2.369.348 reads only the env,
   which this chart no longer renders: upgrade the chart once that release is
-  out (the roll's boot auto-update brings it), or keep a `relayUrl` on the
+  out (each instance's ⚙ → Update VibeSpace… brings it — a pod never pulls at boot), or keep a `relayUrl` on the
   company's preset entries until then — a preset's own page wins anyway.
 - `"relayUrl": ""` in an override = that release has no relay page.
 - The fleet admin (vibespace-admin ≥ 2.11.0) serves the page at `/relay/`,

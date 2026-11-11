@@ -114,7 +114,7 @@ docker exec -it vibespace claude    # then /login in the TUI, exit after
 
 **Notes:**
 - The container runs as non-root user `vibe` (uid 1000) — required because Claude blocks `bypassPermissions` for root, and it keeps bind-mount ownership sane.
-- Auto-update is disabled in the container (`NO_AUTO_UPDATE=1`); update by rebuilding the image.
+- A restart never updates VibeSpace (since 2.369.397, on any install) — the one thing a restart may still change is the Node runtime it runs on, when the runtime check provisioned a fixed release below the floor (data/runtime/current); in the container `NO_AUTO_UPDATE=1` also turns off the boot's runtime check — update by rebuilding the image.
 - Codex CLI isn't bundled; add `RUN npm install -g @openai/codex` to the Dockerfile if you need Codex sessions.
 - Clipboard image paste requires an X display and is unavailable in the container.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // THE UPDATE ROAD'S RUNTIME CHECK (lane runtime-floor, 2026-10-22). scripts/update.sh (the hub AND a pod — ⚙ Update
 // VibeSpace… runs it) calls this after the pull and the build, before the restart; the server's boot runs the same
-// check after its auto-update. The node the NEXT start runs on — the instance's own (data/runtime/current, when it is
+// check 20 s after listen (an install not under NO_AUTO_UPDATE — no boot pulls since 2.369.397). The node the NEXT start runs on — the instance's own (data/runtime/current, when it is
 // newer) or the base one (the node running this script: the unit's / the image's) — against THE floor table
 // (src/runtime-floor.js); below it, with --provision, the product downloads the fixed release for itself
 // (src/node-runtime.js: sha256 against the mirror's SHASUMS256.txt, then current flips) and the restart runs on it.
