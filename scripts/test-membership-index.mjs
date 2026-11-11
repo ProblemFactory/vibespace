@@ -13,7 +13,12 @@
 //   ④ THE RESULT MAP'S BOUND: 5 000 distinct asks between two rebuilds ⇒ never more than MEMBER_RESULTS_MAX entries;
 //   ⑤ THE DOUBTS, each the walk's answer, said nowhere, never a throw: a stat that throws (EACCES), a symlink loop as a cwd,
 //     a cwd that no longer exists, a record whose createdAt is not a number, the index itself throwing;
-//   ⑥ THE BENCH at the owner's shape (7 Task Groups of ~200 conversations, 6 discover rows, 36 live): µs per ask.
+//   ⑥ THE REAL PATH (主开发's two green mutants on 5ae1677c9): a cwd that EXISTS through a symlink into a discover folder
+//     belongs by its real path only; the remote shape — one cwd asked with two different given real paths, one inside a
+//     folder and one outside — answers each by its own real path; both ≡ the walk, asked in both orders;
+//   ⑦ THE RESOLVER'S CACHE HOLDS WHAT THE STORE HAS: at 260 and 600 groups (each its own discover + notes row) a warm ask
+//     stats nothing (a fixed 256 cleared whole: ~780 / ~1 800 stats an ask);
+//   ⑧ THE BENCH at the owner's shape (7 Task Groups of ~200 conversations, 6 discover rows, 36 live): µs per ask.
 // Red controls: PATCHES THIS SUITE CARRIES on this tree's src/task-groups.js (master has no index to be red on) — the
 // signature check out (a rev change keeps a stale index), the identity check out, the 4 s bound out, the cap out, the
 // doubt's fallback out — each RED at its own leg; an anchor no longer in the file is a RED, never a skip.
@@ -213,6 +218,47 @@ const LEGS = {
     try { fs.chmodSync(lockedDir, 0o755); } catch { }
     return { ok: statThrows && res.every((r) => r.ok) && said.length === 0, detail: `${res.map((r) => r.said).join(' · ')} · said: ${said.length ? said.join(' | ') : 'nothing'}${statThrows ? '' : ' · (the EACCES stat did not throw here — running as root?)'}` };
   },
+  async 'real-path'(T) {
+    const base = path.join(ROOT, 'real' + (++mn)), D = path.join(base, 'folder'), out = path.join(base, 'outside');
+    fs.mkdirSync(path.join(D, 'sub', 'w'), { recursive: true }); fs.mkdirSync(out, { recursive: true });
+    fs.symlinkSync(path.join(D, 'sub'), path.join(base, 'via'));   // base/via → folder/sub: a cwd outside the folder by its path
+    const tasks = () => ({ 'T-rp': { id: 'T-rp', title: 'rp', kind: 'task', createdAt: 1, sessions: [], ctx: [{ path: D, tags: ['discover'] }], progress: [] } });
+    const said = [];
+    const ask = (tg, a) => { const i = tg.groupsForSession(a), w = tg._groupsForSessionWalk(a); said.push(`${JSON.stringify(a.realCwd ? { cwd: a.cwd, realCwd: a.realCwd } : a.cwd)} → index [${ids(i)}] walk [${ids(w)}]`); return same(i, w) ? ids(i) : 'DIFFERS'; };
+    // (i) a cwd that exists THROUGH a symlink: it belongs by its real path only
+    const t1 = manager(T).tg; t1._state.tasks = tasks(); t1._save();
+    const viaCwd = path.join(base, 'via', 'w');
+    const i1 = ask(t1, { sessionKey: 'claude:rp', cwd: viaCwd });
+    // (ii) the remote shape: one cwd, two given real paths — inside, then outside; and outside, then inside
+    const remote = '/remote-host/home/proj';
+    const t2 = manager(T).tg; t2._state.tasks = tasks(); t2._save();
+    const a1 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') }), a2 = ask(t2, { sessionKey: 'claude:rp', cwd: remote, realCwd: out });
+    const t3 = manager(T).tg; t3._state.tasks = tasks(); t3._save();
+    const b1 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: out }), b2 = ask(t3, { sessionKey: 'claude:rp', cwd: remote, realCwd: path.join(D, 'x') });
+    const okv = i1 === 'T-rp' && a1 === 'T-rp' && a2 === '' && b1 === '' && b2 === 'T-rp';
+    return { ok: okv, detail: said.join(' · ') };
+  },
+  async 'cache-cliff'(T) {
+    const out = [];
+    let okAll = true;
+    for (const N of [260, 600]) {
+      const { tg } = manager(T);
+      const base = path.join(ROOT, 'cliff' + N + '-' + (++mn));
+      const tasks = {};
+      for (let i = 0; i < N; i++) { const d = path.join(base, 'g' + i); fs.mkdirSync(d, { recursive: true }); tasks['T-c' + i] = { id: 'T-c' + i, title: 'g' + i, kind: 'task', createdAt: i + 1, sessions: [], ctx: [{ path: d, tags: ['discover'] }, { path: d, tags: ['notes'] }], progress: [] }; }
+      tg._state.tasks = tasks; tg._save();
+      let stats = 0; const kindOf = tg._kindOf.bind(tg); tg._kindOf = (a) => { stats++; return kindOf(a); };
+      const asks = Array.from({ length: 40 }, (_, i) => ({ sessionKey: 'claude:c' + i, cwd: path.join(base, 'g' + ((i * 7) % N), 'w') }));
+      tg.groupsForSession(asks[0]);   // warm
+      stats = 0;
+      let bad = 0;
+      for (const a of asks) { const i = tg.groupsForSession(a); if (i.length !== 1) bad++; }
+      const per = stats / asks.length;
+      if (!(per === 0 && bad === 0)) okAll = false;
+      out.push(`${N} groups: ${per.toFixed(0)} stats per warm ask${bad ? `, ${bad} wrong` : ''}`);
+    }
+    return { ok: okAll, detail: out.join(' · ') + ' (each group its own discover + notes row)' };
+  },
 };
 
 // ── the bench at the owner's shape ────────────────────────────────────────────────────────────────────────────────────
@@ -244,6 +290,9 @@ const PATCHES = {
   'no-identity': [" && ix.groups.every((g) => tasks[g.key] === g.t)", '', 'writers', 'an equal copy keeps the old record (the identity check out)'],
   'no-bound': ["      if (e !== undefined && e === g.resEntry && now - e.at < 4000) continue;\n", "      if (g.resKey !== null) continue;\n", 'folder-bound', 'the folders never re-derived (the 4 s bound out)'],
   'no-cap': ["if (ix.results.size >= MEMBER_RESULTS_MAX) {", 'if (false) {', 'result-bound', 'the result map unbounded (the cap out)'],
+  'no-real-path': ["    const real = this._realOf(cwd, realCwd);\n    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);\n    const key = ", "    const real = this._realOf(cwd, realCwd);\n    const cwds = [cwd].filter(Boolean);\n    const key = ", 'real-path', 'the cwds reduced to the cwd alone (主开发\'s mutant a)'],
+  'no-real-in-key': ["const key = JSON.stringify([sessionKey || '', cwds, spawned]);", "const key = JSON.stringify([sessionKey || '', [cwd || ''], spawned]);", 'real-path', 'the result key built without the real path (主开发\'s mutant b)'],
+  'cache-256': ["if (this._resCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._resCache.clear();", "if (this._resCache.size > 256) this._resCache.clear();", 'cache-cliff', 'the resolver\'s cache back at a fixed 256 cleared whole'],
   'no-fallback': ["try { ans = this._memberAnswer(args || {}); } catch { ans = null; }", 'ans = this._memberAnswer(args || {});', 'doubts', 'a throw of the index reaches the caller (the fallback out)'],
 };
 function patched(tag) {

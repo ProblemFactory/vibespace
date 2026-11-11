@@ -665,7 +665,10 @@ class TaskGroupManager {
     const hit = this._resCache.get(key);
     if (hit && Date.now() - hit.at < 4000) return hit.res;
     const res = TC.resolveRows(list, { home: this._home, kindOf: (a) => this._kindOf(a) });
-    if (this._resCache.size > 256) this._resCache.clear();
+    // THE CACHE HOLDS WHAT THE STORE HAS (lane groups-sweep-on-change commit 2, 主开发's cliff 2026-11-11): a fixed 256
+    // cleared whole, so past 256 groups with Context rows every membership ask re-statted every row of every group
+    // (260 groups: ~780 stats an ask) — its bound grows with the store's groups (+ room for a render's probes)
+    if (this._resCache.size > Math.max(256, 2 * Object.keys(this._state.tasks || {}).length + 64)) this._resCache.clear();
     this._resCache.set(key, { res, at: Date.now() });
     return res;
   }
