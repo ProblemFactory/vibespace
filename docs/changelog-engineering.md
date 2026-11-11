@@ -4,6 +4,25 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.394 — 2026-11-11
+
+### B-1409 — a hold that also waited for a CPU is still named by its function (lane hub-loop-stalls; the .393 mirror's test-loop-hold-live red, read 18:05Z)
+- **The reading.** test-loop-hold-live went red on the .393 release mirror (two shared cores, ci 43067119641 heavy 2/6), on both tries, in different legs. Three of the legs were THE RUNNER: the watchdog thread itself was late, so its asks landed in the tail and (A)'s count floors went unmet — 5 of 8 asks, sN 0 for the «never gc» mutant. In one more, an ask caught the main thread asleep at the stat read and running at the syscall read. The fourth leg was THE PRODUCT'S RULE ORDER: «waiting for a CPU» at 20 % of the window took the WHOLE hold before law B's parts. So on a congested hub, a hold that ran JavaScript 0.9 s of 1.2 s and waited 0.3 s printed «waiting for a CPU» alone, with its function unnamed.
+- **The product (src/loop-hold.js).**
+  - «waiting for a CPU» is the verdict only when the window's wait is at least 20 % of it AND its larger part (wait ≥ run). Otherwise the hold is said by its parts, with «it also waited N s for a CPU» beside them (`waitedMuch`).
+  - An ask whose stat read said asleep, and whose syscall read a moment later said running, says «asleep at the ask, on the CPU a moment later» — never the self-contradicting «asleep: on the CPU (…)» (`RUNNING_KERNEL_WORDS`, `WOKE_WORDS`).
+- **The suite (scripts/test-loop-hold-live.mjs).**
+  - (A)'s sweep runs again, at most twice, adding its holds, until its floors are met (8 asks inside the native call, 6 of them 5–55 ms). Otherwise the count is a NAMED and COUNTED skip: «the watchdog was late on this box: N of 8 asks inside the native call». The laws on what was asked still run.
+  - The strict set takes only asks posted in state R (the product's own road to «native»).
+  - The «never gc» mutant sweeps once more, then is skipped by name when the box fed it no ask.
+  - The summary prints the skips: «ALL PASS (N, K skipped)» and the list. A skip is not a green: the release's self-hosted claim runs the same legs on the box.
+  - The starved judge takes «it also waited» as the wait said.
+  - ⑭'s starved scene has TWO spinners on the child's cpu (68 % wait measured; one spinner makes the new rule a 50 / 50 coin). Its «always waiting» mutant becomes «any wait the verdict».
+- **Pins (test-loop-hold, fast, 144 → 147).**
+  - A hold of 1.2 s that ran JavaScript 0.9 s and waited 0.3 s is named by its function, «it also waited 0.3 s for a CPU» beside it (RED on 8fad60fd1: «waiting for a CPU»).
+  - A hold that waited 0.9 s of 1.2 s is «waiting for a CPU» (the control, green on both).
+  - The woke ask's words (red on 8fad60fd1).
+
 ## 2.369.393 — 2026-11-11
 
 ### totp-request-card — an agent asks the person for a TWO-STEP CODE on one card; what they type lands as ONE two-step entry (fb-251bb41646; the owner said yes 2026-11-11 04:55Z)

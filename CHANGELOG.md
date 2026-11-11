@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.394 — 2026-11-11
+
+### Fixed
+- When the server was held while it also waited for a processor, the Diagnostics report still names the code that held it and says how long it waited.
+
 ## 2.369.393 — 2026-11-11
 
 ### Added
