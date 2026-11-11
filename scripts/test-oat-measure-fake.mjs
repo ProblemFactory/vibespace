@@ -245,6 +245,30 @@ if (!haveStrace) {
   console.log(`    · link-in: the fake hard-linked ${path.basename(lsrc)} (under the data dir) into its HOME and read the new name → record: void=${hubK.rec && hubK.rec.void} reads=${JSON.stringify((k0 && k0.guardedReads) || [])}`);
   ok('ROUND 5 PIN 3 (the real tracer): a hard link of a data-dir file into the scratch, then an open of the new name ⇒ VOID guarded-read naming the SOURCE', !!k0 && hubK.rec.void === 'guarded-read' && k0.guardedReads.includes(lsrc), JSON.stringify(hubK.rec && { void: hubK.rec.void, reads: k0 && k0.guardedReads }));
 
+  // ── THE INCIDENT OF 2026-11-11 on the REAL tracer — the cell nobody drove: the hub's data dir under a home that is a git checkout
+  // (package.json, CLAUDE.md, .claude/, .git). Where 5c77612ef put the run (data/cli-self-measure/run-…) every run voided on the
+  // checkout's package.json (node's walk up from the trampoline); where the run lives now (a private folder outside the home and the
+  // data dir) the fake that walks up like 2.1.321 (CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/, .mcp.json, .git to /) PASSES.
+  // `home` ADDS the stand-in home as a deny root (never replaces the real one); the same through a symlinked parent ──
+  const HC = fs.mkdtempSync(path.join(tmp, 'home-cell-')), CO = path.join(HC, 'checkout'), DD = path.join(CO, 'data');
+  for (const d of [DD, path.join(CO, '.claude'), path.join(CO, '.git')]) fs.mkdirSync(d, { recursive: true });
+  for (const [f, t] of [['package.json', '{"name":"stand-in"}'], ['CLAUDE.md', '# stand-in'], ['.claude/settings.json', '{}'], ['.git/HEAD', 'ref: refs/heads/master']]) fs.writeFileSync(path.join(CO, f), t);
+  const LINKED = path.join(tmp, 'home-cell-link'); fs.symlinkSync(CO, LINKED);
+  const cellRun = (dataDir, root) => hubRun(wrap('walk'), { variants: ['oat-file'], dataDir, home: HC, root });
+  const outside = (tag) => path.join(fs.mkdtempSync(path.join(tmp, 'base-')), `cli-self-measure-cell-run-${tag}`, 'm');
+  const cells = [
+    ['the run where 5c77612ef put it', await cellRun(DD, path.join(DD, 'cli-self-measure', 'run-old', 'm'))],
+    ['the run outside the home and the data dir', await cellRun(DD, outside('a'))],
+    ['through a symlinked parent, where 5c77612ef put it', await cellRun(path.join(LINKED, 'data'), path.join(LINKED, 'data', 'cli-self-measure', 'run-old', 'm'))],
+    ['through a symlinked parent, outside', await cellRun(path.join(LINKED, 'data'), outside('b'))],
+  ];
+  const cellSaid = (r) => (r.rec ? `void=${r.rec.void || 'none'} · the --version run read ${JSON.stringify((r.rec.versionRun && r.rec.versionRun.guardedReads) || [])} · oat-file ${((r.rec.results || [])[0] || {}).verdict || '(not run)'}` : `no record (${(r.msgs.find((m) => m.type === 'refused') || {}).code || r.code})`);
+  for (const [what, r] of cells) console.log(`    · incident cell — ${what}: ${cellSaid(r)}`);
+  const pkg = path.join(CO, 'package.json');
+  const voidOn = (r) => !!r.rec && r.rec.void === 'guarded-read' && ((r.rec.versionRun && r.rec.versionRun.guardedReads) || []).includes(pkg);
+  const passes = (r) => !!r.rec && !r.rec.void && ((r.rec.results || [])[0] || {}).verdict === 'PASS';
+  ok('INCIDENT (the real tracer): data/ under a home that is a git checkout — where 5c77612ef put the run it VOIDS on the checkout\'s package.json before any variant; outside the home and the data dir the fake that walks up like 2.1.321 PASSES — and the same through a symlinked parent (the real path is judged)', voidOn(cells[0][1]) && passes(cells[1][1]) && voidOn(cells[2][1]) && passes(cells[3][1]), JSON.stringify(cells.map(([w, r]) => [w, cellSaid(r)])));
+
   // ── round 3 (acceptance r2) on the REAL tracer ──
   const fakeWrap = (tag, mode) => { const d = path.join(tmp, 'w3-' + tag); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, 'claude'); fs.writeFileSync(f, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' '${mode}' "$@"\n`, { mode: 0o755 }); return f; };
   // ITEM 1: a THREADED read — forty opens at once on libuv's worker threads, which the tracer prints split in two — of a canary

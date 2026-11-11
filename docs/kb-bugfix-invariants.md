@@ -919,6 +919,20 @@
 - (2026-11-10) A FLEET USER'S HUB WAS HELD 10–70 S AND ITS WATCHDOG SAID ONLY «ON THE CPU» (hub-loop-stalls) — 不变量 = a held loop says what held it, from the main thread's own beats and scheduler facts and its own frames — a wrong cause is worse than none ⇒ kb-bugfix-invariants
 - (2026-11-09) A CLAUDE CODE UPDATE IDLED THE POOL UNTIL A RELEASE SHIPPED (11 token members held on 2.1.321; cli-self-measure). 不变量 = the hub checks a new CLI itself (release road's code, fake token, loopback, deny-by-default fences); a PASS is the judge's for those bytes (kb-bugfix-invariants)
 - (2026-11-10) THE PHONE NEVER SAID A CONVERSATION WAITED (owner, phone) — 不变量 = a waiting conversation is said at every door that lists it and at the closed door that leads to it; ONE fact (windowWaits) shared with the taskbar, live in place, never the one on show ⇒ kb-bugfix-invariants
+- (2026-11-11) EVERY CHECK OF A NEW CLAUDE CODE VOIDED IN HALF A SECOND ON A HUB WHOSE CHECKOUT LIVES IN THE HOME (cli-self-measure) — 不变量 = a run lives in a private folder outside the home and the data dir, or refuses by name; a void keeps what it read (kb-bugfix-invariants)
+
+## EVERY CHECK OF A NEW CLAUDE CODE VOIDED IN HALF A SECOND ON A HUB WHOSE CHECKOUT LIVES IN THE HOME (the owner's hub, 2026-11-11; lane cli-self-measure, 2.369.395)
+
+**What happened.** The owner's hub was updated to 2.369.393 for the hub's own check of a new Claude Code. Every check of 2.1.322 ended `cannot-run (guarded-read)` in 473 ms, before any variant, and nothing kept which path had been read. The pool kept 11 long-lived-token accounts held; a conversation had to be started on an account picked by hand.
+
+**Why.** The hub's data dir lives under the home (its checkout lives there), so the run's scratch did too (`data/cli-self-measure/run-…`). The first traced process is the trampoline, copied into that scratch; node, starting it, walks UP from the script's folder for a package.json and opened the checkout's — inside the fence's deny root (the real home), outside its allow roots. Next in line was the CLI's own walk up from its cwd (CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/, .mcp.json, .git at every ancestor — the clean 2.1.321 trace). Every gate before had its data dir under /tmp or /var/tmp: the cell «under a home that is a git checkout» was never driven. Reproduced in the lane with a stand-in checkout under ~/.cache, the fake CLI and the hub road (the installed binary never run), also through a symlinked parent.
+
+**The fix.** A run lives in a fresh private folder (0700, a non-recursive mkdir, named for this hub) under the first base whose REAL path is outside the home and the data dir — the runtime dir, then the system temp; none ⇒ cannot-run `scratch`, said by name. The data dir keeps only the record. A void's guarded paths (≤ 8, the home as ~) are the record's observation, the journal's first and For you's «What it read: …». PROBE_VERSION 2: a FAIL or cannot-run by an older probe measures again at once.
+
+**Invariants.**
+1. The hub's own choice of where a run lives can never void it: a run lives where none of the walks a tracee makes (node's package.json, the CLI's project files to /) can reach a deny root — or it does not run and says so.
+2. Every cell of «where the data dir lives» is a pin, the one nobody drove first (test-cli-self-measure §12 in the fast tier; test-oat-measure-fake on the real tracer).
+3. A void keeps WHAT it read — a verdict nobody can trace back to a path is not a finding.
 
 ## THE PERSON SAID NO AND THEIR PASSKEY STAYED ON THE TAB (B-97ae, raised to HIGH 2026-11-10; lane passkey-lend-cleanup, the hotfix on .390)
 

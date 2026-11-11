@@ -12119,6 +12119,8 @@ export default {
   "the check needs strace 6.6 or newer, which takes everything it traces with it when it stops — update strace to 6.6 or newer (the strace on this machine did not say its version)": "確認には strace 6.6 以降が必要です（止まるときに追跡中のものをすべて一緒に終了させます）。strace を 6.6 以降に更新してください（このマシンの strace はバージョンを答えませんでした）",
   "the trace of the check grew past the size the check keeps for one run, so the check proves nothing": "確認のトレースが 1 回の実行で確認が保持できるサイズを超えたため、この確認では何も証明できません",
   "the file the check starts Claude Code through was changed between two of its runs, so the check proves nothing": "確認が Claude Code を起動するためのファイルが実行の合間に書き換えられたため、この確認では何も証明できません",
+  "this machine has no private folder outside your home and VibeSpace’s data folder for the check to run in — Claude Code reads the folders above the one it runs in": "このマシンには、確認を実行するための、ホームと VibeSpace のデータフォルダーの外にある専用フォルダーがありません。Claude Code は実行しているフォルダーの上位フォルダーを読みます",
+  "What it read: {paths}.": "読み取ったもの：{paths}。",
   "Claude Code used a way to reach files that the check cannot watch (such as io_uring), so the check proves nothing": "Claude Code が確認から見えない方法（io_uring など）でファイルにアクセスしたため、この確認では何も証明できません",
   "the check’s own process was killed before it reached a verdict (something on this machine stopped it — memory, or a person); everything it had started ended with it": "確認のプロセスが結論の前に強制終了されました（このマシンの何か——メモリ不足や人の操作——が止めました）。それが起動したものはすべて一緒に終了しています",
   "the check needs strace 6.6 or newer, which takes everything it traces with it when it stops — update strace to 6.6 or newer (this one is {version})": "確認には strace 6.6 以降が必要です（止まるときに追跡中のものをすべて一緒に終了させます）。strace を 6.6 以降に更新してください（このマシンは {version}）",

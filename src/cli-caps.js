@@ -113,6 +113,7 @@ const OBSERVATIONS = Object.freeze({
 });
 // why the check could not run here, by code (src/claude-oat-probe.js refusals + the hub's own)
 const REASONS = Object.freeze({
+  'scratch': i18nKey('this machine has no private folder outside your home and VibeSpace’s data folder for the check to run in — Claude Code reads the folders above the one it runs in'),
   'no-strace': i18nKey('this machine has no strace, which the check needs to prove nothing leaves the machine — install it (apt install strace)'),
   'strace-denied': i18nKey('this machine does not let strace trace a program (a security setting), which the check needs to prove nothing leaves the machine'),
   'managed-settings': i18nKey('/etc/claude-code exists — settings there can point Claude Code at other servers, so the check does not run here'),
@@ -173,6 +174,8 @@ function cliUnmeasuredItem({ cli, names = [], local = null } = {}) {
     // this machine's version; in a VibeSpace image, that the next image brings it and what places the accounts meanwhile
     const rw = reasonWords(local, v);
     say(fill(i18nKey('Why: {why}.'), { why: fill(rw.key, rw.params) }), i18nKey('Why: {why}.'), { why: rw.params ? { key: rw.key, params: rw.params } : { key: rw.key } });
+    // WHAT WAS READ (the incident of 2026-11-11: the item said why in general and nothing of what) — the paths the record kept
+    if (local && local.reason === 'guarded-read' && local.observation) say(fill(i18nKey('What it read: {paths}.'), { paths: String(local.observation).slice(0, 600) }), i18nKey('What it read: {paths}.'), { paths: String(local.observation).slice(0, 600) });
     action = { type: 'cli-check-again', cli: v };
   } else if (st === 'aborted') {
     h = n === 1 ? head(i18nKey('Claude Code {v} tried to connect outside this machine during the check: 1 account stays out of the pool'), { v })

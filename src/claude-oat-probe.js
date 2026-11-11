@@ -48,7 +48,7 @@ const { spawn, execFileSync } = require('child_process');
 const { OAT_VARIANTS, OAT_IN_FILE_GATE, cliVersionOf } = require('./cli-caps.js');
 
 // the measurement's own version: a change to what it measures bumps it, and a hub re-runs a FAIL once (a PASS stays)
-const PROBE_VERSION = 1;
+const PROBE_VERSION = 2; // 2 (the incident of 2026-11-11): the hub's run lives outside every guarded root — a cannot-run measured by 1 runs again
 // the gate first, then the rest (oat-env after oat-file: it is a diff against it)
 const RUN_ORDER = Object.freeze([...OAT_IN_FILE_GATE, ...OAT_VARIANTS.filter((v) => !OAT_IN_FILE_GATE.includes(v))]);
 // G7: the paths outside HOME the CLI reads (measured, 2.1.321 strace) — present ⇒ refused before start; read ⇒ void
@@ -460,7 +460,8 @@ async function measure(o = {}) {
   const SHIPPED_TRAMP = fs.readFileSync(path.join(__dirname, 'claude-oat-trampoline.js'));
   fs.writeFileSync(TRAMP, SHIPPED_TRAMP, { mode: 0o600 });
   const launcherAsShipped = () => { try { return fs.readFileSync(TRAMP).equals(SHIPPED_TRAMP); } catch { return false; } };
-  const DENY = [REAL_HOME, o.dataDir].filter(Boolean).map(realOr);
+  // `o.home` ADDS a deny root (a suite's scratch stand-in for a person's home — the incident's cell, driven); it never replaces REAL_HOME
+  const DENY = [REAL_HOME, o.home, o.dataDir].filter(Boolean).map(realOr);
   const INSTALL = path.dirname(realOr(CLAUDE));
   const ALLOW = [realOr(ROOT), DENY.some((d) => inside(d, INSTALL)) ? realOr(CLAUDE) : INSTALL, realOr(process.execPath)];
   // the namespace's lo addresses (127/8, ::1 and the resolver the outer rung pinned there) and the resolver the CLI asks
@@ -1066,7 +1067,7 @@ async function runChild() {
   // (IPC disconnect), a SIGTERM, or its own deadline (never a timer in a hub that may be gone)
   const bye = (code) => {
     killAll();
-    const rd = job && typeof job.runDir === 'string' && /[\\/]cli-self-measure[\\/]run-[^\\/]+$/.test(job.runDir) ? job.runDir : null;
+    const rd = job && typeof job.runDir === 'string' && /[\\/]cli-self-measure(?:-[0-9a-f]{8}-run-|[\\/]run-)[^\\/]+$/.test(job.runDir) ? job.runDir : null; // the hub's run folder only (its private one, or .393's in data/)
     if (rd) { try { fs.rmSync(rd, { recursive: true, force: true }); } catch { } }
     process.exit(code);
   };
@@ -1077,7 +1078,7 @@ async function runChild() {
     if (Number.isFinite(j.deadline)) { const dl = setTimeout(() => bye(0), Math.max(0, j.deadline - Date.now())); void dl; }
     try {
       const record = await measure({ claude: j.claude, rung: 'loopback-real', variants: Array.isArray(j.variants) ? j.variants : [...RUN_ORDER], root: j.root, gapMs: j.gapMs, flushMs: j.flushMs, nearMs: j.nearMs,
-        guarded: Array.isArray(j.guarded) ? j.guarded : GUARDED, forbid: Array.isArray(j.forbid) ? j.forbid : [], strace: j.strace || 'strace', dataDir: typeof j.dataDir === 'string' ? j.dataDir : null, onGate: (g) => { send({ type: 'gate', gate: g }); } });
+        guarded: Array.isArray(j.guarded) ? j.guarded : GUARDED, forbid: Array.isArray(j.forbid) ? j.forbid : [], strace: j.strace || 'strace', dataDir: typeof j.dataDir === 'string' ? j.dataDir : null, home: typeof j.home === 'string' ? j.home : null, onGate: (g) => { send({ type: 'gate', gate: g }); } });
       await send({ type: 'record', record });
     } catch (e) {
       await send(e && e.refusal ? { type: 'refused', code: e.refusal, detail: e.detail, ...(e.version ? { version: String(e.version) } : {}), ...(e.machine ? { machine: e.machine } : {}) } : { type: 'error', message: String((e && e.message) || e).slice(0, 300) });

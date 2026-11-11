@@ -1460,7 +1460,7 @@ class AccountManager {
     // the hub's own PASS counts for EXACTLY the version and the bytes it measured (law 2: never another build)
     const bin = this._oatCliBin, lm = this._cliMeasured;
     const own = !fixtureOk && lm && cli && lm.cli === cli && bin && lm.sha256 === bin.sha256 ? lm : null;
-    const local = own ? { state: own.state, startedAt: Number(own.startedAt) || null, lateAt: Number(own.lateAt) || null, killAt: Number(own.killAt) || null, typicalMs: Number(own.typicalMs) || null, ...(own.reason ? { reason: { code: String(own.reason.code || ''), observation: String(own.reason.observation || '').slice(0, 200), ...(typeof own.reason.version === 'string' && own.reason.version ? { version: own.reason.version.slice(0, 20) } : {}), ...(own.reason.machine === 'image' || own.reason.machine === 'managed' ? { machine: own.reason.machine } : {}) } } : {}) } : null;
+    const local = own ? { state: own.state, startedAt: Number(own.startedAt) || null, lateAt: Number(own.lateAt) || null, killAt: Number(own.killAt) || null, typicalMs: Number(own.typicalMs) || null, ...(own.reason ? { reason: { code: String(own.reason.code || ''), observation: String(own.reason.observation || '').slice(0, 600), ...(typeof own.reason.version === 'string' && own.reason.version ? { version: own.reason.version.slice(0, 20) } : {}), ...(own.reason.machine === 'image' || own.reason.machine === 'managed' ? { machine: own.reason.machine } : {}) } } : {}) } : null;
     return { ok: platformOk && (fixtureOk || (!!local && local.state === 'pass')), known: !!cli, cli, measured: cliCaps.measuredVersions(fx).join(', ') || null, ...(local ? { local } : {}) };
   }
   /** ONE QUEUE for every act on a member's credential file (F13 + F7): a setOat, a clearOat and a sweep row

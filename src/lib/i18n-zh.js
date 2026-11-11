@@ -12120,6 +12120,8 @@ export default {
   "the check needs strace 6.6 or newer, which takes everything it traces with it when it stops — update strace to 6.6 or newer (the strace on this machine did not say its version)": "确认需要 strace 6.6 或更新的版本——它停下时会把自己跟踪的一切一起带走。请把 strace 更新到 6.6 或更新（本机的 strace 没有说出自己的版本）",
   "the trace of the check grew past the size the check keeps for one run, so the check proves nothing": "确认的跟踪记录超过了确认为一次运行保留的大小，所以这次确认什么也证明不了",
   "the file the check starts Claude Code through was changed between two of its runs, so the check proves nothing": "确认用来启动 Claude Code 的文件在两次运行之间被改动了，所以这次确认什么也证明不了",
+  "this machine has no private folder outside your home and VibeSpace’s data folder for the check to run in — Claude Code reads the folders above the one it runs in": "这台机器上没有一个在你的主目录和 VibeSpace 数据文件夹之外的私有文件夹可供确认运行——Claude Code 会读取它运行所在文件夹的上层文件夹",
+  "What it read: {paths}.": "它读取了：{paths}。",
   "Claude Code used a way to reach files that the check cannot watch (such as io_uring), so the check proves nothing": "Claude Code 用了确认看不到的方式去访问文件（例如 io_uring），所以这次确认什么也证明不了",
   "the check’s own process was killed before it reached a verdict (something on this machine stopped it — memory, or a person); everything it had started ended with it": "确认自己的进程在得出结论前被杀掉了（本机上有东西让它停下——内存不足，或者有人）；它启动的一切都随之结束了",
   "the check needs strace 6.6 or newer, which takes everything it traces with it when it stops — update strace to 6.6 or newer (this one is {version})": "确认需要 strace 6.6 或更新的版本——它停下时会把自己跟踪的一切一起带走。请把 strace 更新到 6.6 或更新（本机的是 {version}）",

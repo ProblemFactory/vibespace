@@ -39,6 +39,7 @@
  * `literal` site of the spawn-env census (test-architecture §94; RED with its env removed — test-cli-self-measure).
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { fork } = require('child_process');
@@ -58,7 +59,7 @@ const LIVE_CHILDREN = new Set();
 process.on('exit', () => { for (const c of LIVE_CHILDREN) { try { c.kill('SIGTERM'); } catch { } } }); // law C: SIGTERM — the child's own cleanup runs (killAll of its groups and tracked pids, its scratch removed); a SIGKILL skipped it
 const STATES = Object.freeze(['pass', 'fail', 'cannot-run', 'aborted']);
 // the probe's refusals the person can act on keep their name; the rest are «could not set itself up»
-const OWN_REASONS = new Set(['no-strace', 'strace-denied', 'strace-old', 'no-setpriv', 'managed-settings', 'remote-token', 'foreign-token', 'guarded-read', 'trace-unparsed', 'trace-unfinished', 'trace-oversize', 'launcher-changed', 'door', 'child-killed', 'timeout']);
+const OWN_REASONS = new Set(['scratch', 'no-strace', 'strace-denied', 'strace-old', 'no-setpriv', 'managed-settings', 'remote-token', 'foreign-token', 'guarded-read', 'trace-unparsed', 'trace-unfinished', 'trace-oversize', 'launcher-changed', 'door', 'child-killed', 'timeout']);
 const reasonOf = (code) => (OWN_REASONS.has(code) ? code : 'setup');
 /** what the failing gate variant SAW, as a code (cli-caps OBSERVATIONS words it) */
 function observationOf(gate) {
@@ -74,14 +75,44 @@ function observationOf(gate) {
   }
   return 'not-the-token';
 }
+// THE RUN LIVES OUTSIDE EVERY GUARDED ROOT (the incident of 2026-11-11 on the owner's hub: a hub whose checkout lives in the home has its data/ there, so the run's
+// scratch was too — node, starting the trampoline there, walked up for a package.json and opened the checkout's own, inside the
+// fence's deny root, and every run voided `guarded-read` in half a second, before the binary did anything; the CLI's own walk up
+// from its cwd — CLAUDE.md, AGENTS.md, .claude/, .mcp.json, .git at every ancestor, measured in the clean 2.1.321 trace — was next).
+// The hub's own choice of where a run lives can never void it: a fresh private directory (0700, its name this hub's) under the
+// first base whose REAL path lies outside the person's home and the data dir — the runtime dir, then the system temp — and none ⇒
+// cannot-run `scratch`, said by name. The data dir keeps only the record. A credential store the CLI reads still voids
+const inside = (p, d) => { const a = path.resolve(p), b = path.resolve(d); return a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep); };
+const realOrP = async (p) => { try { return await fs.promises.realpath(p); } catch { return path.resolve(p); } };
+const READS_MAX = 8;
+/** the guarded paths a void record names (the version run's and every variant's), at most 8, the home said as ~ */
+function readsOf(record, home = PROBE.REAL_HOME) {
+  const all = [...((record && record.versionRun && record.versionRun.guardedReads) || []), ...((record && Array.isArray(record.results) ? record.results : []).flatMap((r) => (r && r.guardedReads) || []))];
+  const tilde = (p) => (home && inside(p, home) ? '~' + String(p).slice(path.resolve(home).length) : String(p));
+  return [...new Set(all.map((p) => tilde(String(p)).slice(0, 160)))].slice(0, READS_MAX);
+}
 const verdictCodes = (gate) => OAT_IN_FILE_GATE.map((g) => `${g} ${(gate && gate[g] && gate[g].verdict) || 'MISSING'}`).join(' · ');
 
 function create({ accounts = () => null, dataDir, enabled = () => true, onMembersBack = () => { }, onCheckEnded = () => { }, app = null, log = (...a) => console.log(...a),
   event = (n, d) => global.__vsEvent?.(n, d), now = () => Date.now(), forkFn = null, probePath = require.resolve('../claude-oat-probe.js'),
-  statIdentity = (cmd) => require('../machine-probes.js').cliBinaryIdentity(cmd), platform = process.platform, job = {}, bounds = {} } = {}) {
+  statIdentity = (cmd) => require('../machine-probes.js').cliBinaryIdentity(cmd), platform = process.platform, job = {}, bounds = {},
+  scratchBases = () => [process.env.XDG_RUNTIME_DIR, os.tmpdir(), '/tmp', '/var/tmp'].filter(Boolean), home = PROBE.REAL_HOME } = {}) {
   if (!dataDir) throw new Error('cli-self-measure: dataDir is required');
   const file = path.join(dataDir, 'cli-self-measure.json');
-  const scratchRoot = path.join(dataDir, 'cli-self-measure');
+  const scratchRoot = path.join(dataDir, 'cli-self-measure'); // .393's run dirs (swept); a run lives under scratchBase() now
+  const HUBTAG = crypto.createHash('sha256').update(path.resolve(dataDir)).digest('hex').slice(0, 8); // two hubs never sweep each other's runs
+  const RUN_PREFIX = `cli-self-measure-${HUBTAG}-run-`;
+  /** the first base whose real path lies outside the person's home and the data dir, or null (above) */
+  async function scratchBase() {
+    const deny = await Promise.all([...new Set([PROBE.REAL_HOME, home, dataDir].filter(Boolean))].map(realOrP));
+    for (const b of scratchBases()) {
+      const rb = await realOrP(b);
+      try { if (!(await fs.promises.stat(rb)).isDirectory()) continue; } catch { continue; }
+      if (deny.some((d) => inside(rb, d))) continue;
+      return rb;
+    }
+    return null;
+  }
   const B = { late: LATE_MS, kill: KILL_MS, record: RECORD_MS, retry: RETRY_MS, typical: TYPICAL_MS, tick: TICK_MS, ...bounds };
   const lifeStart = now();
   // law G4: the live answer every reader of an arm's `checking` facet asks (auto-resume liveCause) — this run, still checking, or null
@@ -163,7 +194,7 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     const rec = stale ? null : onFile;
     if (rec && rec.state === 'pass') { setView(viewOfRec(v, sha, rec)); return { state: 'pass' }; }
     const due = attended || !rec
-      || (rec.state === 'fail' && Number(rec.probe) < PROBE.PROBE_VERSION)
+      || ((rec.state === 'fail' || rec.state === 'cannot-run') && Number(rec.probe) < PROBE.PROBE_VERSION) // a probe that changed measures again at once — a cannot-run of the hub's own setup too (the incident)
       || (rec.state === 'cannot-run' && (Number(rec.endedAt) < lifeStart || now() - Number(rec.endedAt) >= B.retry));
     if (!due) { setView(viewOfRec(v, sha, rec)); return { state: rec.state }; }
     // nothing to place ⇒ nothing to measure: a hub holding no long-lived token never forks the check (a token added later is seen by the next tick)
@@ -179,15 +210,18 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
   // ── one run ──
   function start(v, sha, binPath, attended) {
     const startedAt = now();
-    const root = path.join(scratchRoot, `run-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-    run = { cli: v, sha, path: binPath, startedAt, gateAt: null, attended, root, child: null, timer: null, err: '', gate: null };
+    const runName = `${RUN_PREFIX}${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+    run = { cli: v, sha, path: binPath, startedAt, gateAt: null, attended, root: null, child: null, timer: null, err: '', gate: null };
     setView(checkingView(run));
     log(`[cli-self-measure] Claude Code ${v} (sha256 ${sha.slice(0, 12)}…) has no PASS on record — checking it on this machine${attended ? ' (asked by the owner)' : ''}: the gate in about ${Math.round(B.typical / 60e3)} min, at most ${Math.round(B.kill / 60e3)}`);
     const me = run;
-    sweepScratch(root).then(() => {
+    sweepScratch(runName).then(() => scratchBase()).then((base) => {
       if (run !== me) return;
+      if (!base) { finish(me, { state: 'cannot-run', reason: { code: 'scratch', observation: `no private folder outside the home and the data dir among ${scratchBases().join(', ')}` } }); return; }
+      const root = path.join(base, runName); me.root = root;
       try {
-        for (const d of [root, path.join(root, 'home0'), path.join(root, 'tmp')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+        fs.mkdirSync(root, { mode: 0o700 }); // NOT recursive: it throws when anything is already there — the run's folder is always one it made
+        for (const d of [path.join(root, 'home0'), path.join(root, 'tmp')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
         // THE CHILD'S ENV IS A LITERAL (law 3 — the spawn-env census, test-architecture §94, reads this fork as a `literal` site; the
         // suite's forkFn is a parameter, never an alias of it): the node dir + /usr/bin + /bin, a scratch HOME — nothing
         // of the hub's own env (its proxies, its tokens, its CLAUDE_* names) reaches the measurement
@@ -200,16 +234,25 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
         if (child.stderr) child.stderr.on('data', (d) => { me.err = (me.err + d).slice(-4000); });
         child.on('message', (m) => { try { onMessage(me, m); } catch (e) { log('[cli-self-measure] a message from the check failed:', (e && e.message) || e); } });
         child.on('exit', (code, sig) => onExit(me, code, sig));
-        child.send({ claude: binPath, root: path.join(root, 'm'), runDir: root, dataDir, deadline: startedAt + B.record + 30e3, variants: [...PROBE.RUN_ORDER], forbid: forbidDirs(), ...job }); // law C: the child's own deadline
+        child.send({ claude: binPath, root: path.join(root, 'm'), runDir: root, dataDir, ...(home && home !== PROBE.REAL_HOME ? { home } : {}), deadline: startedAt + B.record + 30e3, variants: [...PROBE.RUN_ORDER], forbid: forbidDirs(), ...job }); // law C: the child's own deadline
         me.timer = setTimeout(() => timeUp(me), B.kill); if (me.timer.unref) me.timer.unref();
       } catch (e) { finish(me, { state: 'cannot-run', reason: { code: 'setup', observation: String((e && e.message) || e).slice(0, 200) } }); }
     });
   }
   // the person's ~/.claude, the members' folders, the vault: the scratch may never meet them (law 3 G2 / P4)
   const forbidDirs = () => PROBE.credentialRoots({ dataDir }); // law E: the credential stores under the REAL home and the data dir (data/vault.json, codex-subs, … — the module's one list)
-  async function sweepScratch(keepRoot) {
-    let names = []; try { names = await fs.promises.readdir(scratchRoot); } catch { return; }
-    for (const n of names) { const p = path.join(scratchRoot, n); if (/^run-/.test(n) && p !== keepRoot) { try { await fs.promises.rm(p, { recursive: true, force: true }); } catch { } } }
+  async function sweepScratch(keepName) {
+    // .393's run dirs in data/, then this hub's own leftovers under every base — a directory it made (its uid, never a link)
+    let names = []; try { names = await fs.promises.readdir(scratchRoot); } catch { names = []; }
+    for (const n of names) { if (/^run-/.test(n)) { try { await fs.promises.rm(path.join(scratchRoot, n), { recursive: true, force: true }); } catch { } } }
+    for (const b of scratchBases()) {
+      let here = []; try { here = await fs.promises.readdir(b); } catch { continue; }
+      for (const n of here) {
+        if (!n.startsWith(RUN_PREFIX) || n === keepName) continue;
+        const p = path.join(b, n);
+        try { const st = await fs.promises.lstat(p); if (st.isDirectory() && !st.isSymbolicLink() && st.uid === process.getuid()) await fs.promises.rm(p, { recursive: true, force: true }); } catch { }
+      }
+    }
   }
   function timeUp(me) {
     if (run !== me) return;
@@ -257,7 +300,8 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     const was = recOf(me.cli, me.sha);
     // a later variant that VOIDS the run or reaches off loopback revokes even a PASS (the fences did not hold: nothing is proven)
     if (record.aborted || record.void) {
-      settle(me, { state: record.aborted ? 'aborted' : 'cannot-run', gate: (me.gate && me.gate.gate) || null, variants: six, evidence, ms: Number(record.ms) || null, reason: record.aborted ? { code: 'aborted', observation: '' } : { code: reasonOf(record.void), observation: '' } });
+      // THE RECORD KEEPS WHAT WAS READ (the incident: nothing kept which path voided the run): the guarded paths, ≤ 8, ~ for the home
+      settle(me, { state: record.aborted ? 'aborted' : 'cannot-run', gate: (me.gate && me.gate.gate) || null, variants: six, evidence, ms: Number(record.ms) || null, reason: record.aborted ? { code: 'aborted', observation: '' } : { code: reasonOf(record.void), observation: readsOf(record, home).join(', ') } });
       return;
     }
     if (was && was.state === 'pass') { keep(me.cli, me.sha, { ...was, variants: six, evidence, ms: Number(record.ms) || null, endedAt: now() }); stopRun(null); return; }
@@ -270,7 +314,8 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     const full = recordBase(me, rec);
     keep(me.cli, me.sha, full);
     try { event('cli-oat-measure-fail', `claude ${me.cli} · sha256 ${me.sha} · ${full.state}${full.reason ? ` ${full.reason.code}` : ''}${full.gate ? ` · ${verdictCodes(full.gate)}` : ''}`); } catch { }
-    log(`[cli-self-measure] Claude Code ${me.cli}: ${full.state}${full.reason ? ` (${full.reason.code})` : ''} — the members it would place stay held; For you says what differed and has Check again`);
+    const first = full.reason && full.reason.observation ? String(full.reason.observation).split(', ')[0] : '';
+    log(`[cli-self-measure] Claude Code ${me.cli}: ${full.state}${full.reason ? ` (${full.reason.code}${first ? `: ${first}` : ''})` : ''} — the members it would place stay held; For you says what differed and has Check again`);
     setView(viewOfRec(me.cli, me.sha, full));
     try { onCheckEnded(full.state); } catch { } // law G4: every armed conversation's chip drops «checking» now
     if (full.state !== 'fail' || !me.child) stopRun(null); // a FAIL lets the record complete behind it (the lane it opens reads it)
@@ -290,7 +335,7 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     const c = me.child;
     if (c && c.exitCode == null && !c.killed) { try { c.kill('SIGTERM'); } catch { } const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 5000); if (t.unref) t.unref(); }
     if (why && why !== 'record-timeout') log(`[cli-self-measure] the check of Claude Code ${me.cli} stopped: ${why}`);
-    setTimeout(() => { fs.promises.rm(me.root, { recursive: true, force: true }).catch(() => { }); }, 6000).unref?.();
+    if (me.root) setTimeout(() => { fs.promises.rm(me.root, { recursive: true, force: true }).catch(() => { }); }, 6000).unref?.();
   }
   async function placeBack(view) {
     const acc = accounts(); if (!acc) return;

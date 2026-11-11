@@ -28,6 +28,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-csm-'));
+process.env.XDG_RUNTIME_DIR = fs.mkdtempSync(path.join(tmp, 'xdg-')); // every ORCH here puts its runs' folders in the suite's own temp — never the box's runtime dir
 process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const code = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
@@ -86,7 +87,7 @@ const dny = { deny: ['/home/u', '/srv/vs/data'], allow: ['/srv/vs/data/cli-self-
 const dr = P.guardedReadsOf([Ly('/home/u/proj', '../.config/x/token', 7, '/home/u/.config/x/token'), Ly('/', 'srv/vs/data/vault.json', 8, '/srv/vs/data/vault.json'), Ly('/srv/vs/data/cli-self-measure/run-1', 'home0/.claude.json', 9, '/srv/vs/data/cli-self-measure/run-1/home0/.claude.json'), Ly('/', '/home/u/.local/share/claude/versions/2.1.399', 10, '/home/u/.local/share/claude/versions/2.1.399'), Ly('/', '/home/u/.nvm/v24/bin/node', 11, '/home/u/.nvm/v24/bin/node'), Ly('/', '/home/u/.nvm/v24/lib/node_modules/x/cli.js', 12, '/home/u/.nvm/v24/lib/node_modules/x/cli.js')], [], dny);
 ok(JSON.stringify(dr) === JSON.stringify(['/home/u/.config/x/token', '/srv/vs/data/vault.json', '/home/u/.nvm/v24/lib/node_modules/x/cli.js']), 'LAW E: deny by default — a RELATIVE open landing under the real home and an open of the data dir void the run; the scratch, the binary\'s install and the interpreter FILE pass; a file beside the interpreter does not', dr);
 const PSRC = code(read('src/claude-oat-probe.js'));
-ok(/const DENY = \[REAL_HOME, o\.dataDir\]\.filter\(Boolean\)\.map\(realOr\);/.test(PSRC) && /const REAL_HOME = \(\(\) => \{ try \{ return os\.userInfo\(\)\.homedir \|\| os\.homedir\(\); \} catch \{ return os\.homedir\(\); \} \}\)\(\);/.test(PSRC) && /const INSTALL = path\.dirname\(realOr\(CLAUDE\)\);/.test(PSRC) && /const ALLOW = \[realOr\(ROOT\), DENY\.some\(\(d\) => inside\(d, INSTALL\)\) \? realOr\(CLAUDE\) : INSTALL, realOr\(process\.execPath\)\];/.test(PSRC) && /guardedReadsOf\(lines, .*\{ deny: DENY, allow: ALLOW \}\)/.test(PSRC), 'LAW E: the measurement judges every variant with those roots — the REAL home (getpwuid, never $HOME) and the hub\'s data dir; the install DIR is allowed only when it holds no deny root (a claude dropped straight into the home allows only its own file)');
+ok(/const DENY = \[REAL_HOME, o\.home, o\.dataDir\]\.filter\(Boolean\)\.map\(realOr\);/.test(PSRC) && /const REAL_HOME = \(\(\) => \{ try \{ return os\.userInfo\(\)\.homedir \|\| os\.homedir\(\); \} catch \{ return os\.homedir\(\); \} \}\)\(\);/.test(PSRC) && /const INSTALL = path\.dirname\(realOr\(CLAUDE\)\);/.test(PSRC) && /const ALLOW = \[realOr\(ROOT\), DENY\.some\(\(d\) => inside\(d, INSTALL\)\) \? realOr\(CLAUDE\) : INSTALL, realOr\(process\.execPath\)\];/.test(PSRC) && /guardedReadsOf\(lines, .*\{ deny: DENY, allow: ALLOW \}\)/.test(PSRC), 'LAW E: the measurement judges every variant with those roots — the REAL home (getpwuid, never $HOME) and the hub\'s data dir; the install DIR is allowed only when it holds no deny root (a claude dropped straight into the home allows only its own file)');
 // ROUND 3 (acceptance r2): the chain's two new links refused by name; the trace's grammar; another process's /proc; the address
 // argument; the kill proof; the version run fenced; netlink once — each over the module itself
 const straceOld = stub('strace-old', 'case "$1" in -V) echo "strace -- version 6.1"; exit 0;; esac\nexit 0'), straceMute = stub('strace-mute', 'case "$1" in -V) echo "no idea"; exit 0;; esac\nexit 0');
@@ -211,13 +212,15 @@ const ENG_SRC = read('src/server/usage-pool-engine.js');
 // ── §4 the ORCH over the real store, a stub fork ──
 console.log('§4 the ORCH: one child per unseen (version, sha256), the ledger, the pacing');
 class FakeChild extends EventEmitter { constructor() { super(); this.stderr = new EventEmitter(); this.exitCode = null; this.killed = false; this.sent = []; } send(m) { this.sent.push(m); } kill(sig) { this.killed = true; this.exitCode = 0; setImmediate(() => this.emit('exit', null, sig)); return true; } }
+// the runs' folders live under a base the suite owns (never the box's runtime dir); §12 drives the real choice of bases
+const SCRATCH_BASE = fs.mkdtempSync(path.join(tmp, 'run-base-'));
 const world = async (tag, extra = {}) => {
   const dir = path.join(tmp, 'orch-' + tag);
   const h = await mkHub(dir);
   const forks = [], events = [], lines = [], back = [];
   let clock = Date.now(), rechecks = 0, ident = 'i-399';
   h.am.setCliRecheck(() => { rechecks++; return null; });
-  const o = ORCH.create({ accounts: () => h.am, dataDir: dir, forkFn: (file, args, opts) => { const c = new FakeChild(); forks.push({ file, opts, c }); return c; }, event: (n, d) => events.push([n, d]), log: (...a) => lines.push(a.join(' ')), onMembersBack: (ids) => back.push(ids), now: () => clock, statIdentity: async () => ({ identity: ident }), ...extra });
+  const o = ORCH.create({ accounts: () => h.am, dataDir: dir, scratchBases: () => [SCRATCH_BASE], forkFn: (file, args, opts) => { const c = new FakeChild(); forks.push({ file, opts, c }); return c; }, event: (n, d) => events.push([n, d]), log: (...a) => lines.push(a.join(' ')), onMembersBack: (ids) => back.push(ids), now: () => clock, statIdentity: async () => ({ identity: ident }), ...extra });
   await o.tick();
   return { h, o, dir, forks, events, lines, back, adv: (ms) => { clock += ms; }, setIdent: (i) => { ident = i; }, rechecks: () => rechecks };
 };
@@ -231,7 +234,7 @@ const ledgerOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(di
   const f = W.forks[0];
   ok(W.forks.length === 1 && f.file === require.resolve(path.join(REPO, 'src/claude-oat-probe.js')), 'the first sight of (2.1.399, sha-399) forks the module\'s child entry ONCE');
   ok(Array.isArray(f.opts.execArgv) && f.opts.execArgv.length === 0, 'the child never inherits the hub\'s node flags (execArgv: [] — a hub run as `node -r <hook>` once handed its preload to the measurement)', f.opts.execArgv);
-  ok(JSON.stringify(Object.keys(f.opts.env).sort()) === '["HOME","LANG","PATH","TMPDIR"]' && /\/usr\/bin:\/bin$/.test(f.opts.env.PATH) && f.opts.env.HOME.startsWith(path.join(W.dir, 'cli-self-measure', 'run-')), 'LAW 3: the child\'s env is a LITERAL (PATH = node dir + /usr/bin + /bin, a scratch HOME / TMPDIR under data/cli-self-measure) — nothing of the hub\'s own', f.opts.env);
+  ok(JSON.stringify(Object.keys(f.opts.env).sort()) === '["HOME","LANG","PATH","TMPDIR"]' && /\/usr\/bin:\/bin$/.test(f.opts.env.PATH) && (() => { const rd = String(((f.c && f.c.sent && f.c.sent[0]) || {}).runDir || ''); return !!rd && f.opts.env.HOME === path.join(rd, 'home0') && f.opts.env.TMPDIR === path.join(rd, 'tmp') && !(rd + '/').startsWith(W.dir + '/') && path.basename(rd).startsWith('cli-self-measure-'); })(), 'LAW 3: the child\'s env is a LITERAL (PATH = node dir + /usr/bin + /bin, a scratch HOME / TMPDIR in the run\'s own folder — outside the data dir since the incident of 2026-11-11) — nothing of the hub\'s own', f.opts.env);
   await until(() => f.c.sent.length === 1);
   const job = f.c.sent[0];
   ok(job && job.claude === '/opt/claude' && JSON.stringify(job.variants) === JSON.stringify(P.RUN_ORDER) && job.forbid.includes(path.join(W.dir, 'subs')) && job.forbid.includes(path.join(P.REAL_HOME, '.claude')) && JSON.stringify(job.forbid) === JSON.stringify(P.credentialRoots({ dataDir: W.dir })) && job.forbid.includes(path.join(W.dir, 'vault.json')) && job.forbid.includes(path.join(W.dir, 'codex-subs')) && job.runDir && job.root.startsWith(job.runDir) && job.dataDir === W.dir && job.deadline > Date.now() && !('gapMs' in job), 'the job: the binary the sessions spawn, the release road\'s six in the gate-first order, its own parameters, the forbidden dirs (the person\'s ~/.claude under the REAL home, data/subs, codex-subs, the vault), its run dir and its own deadline (law C)', job);
@@ -723,6 +726,71 @@ console.log('§10 ROUND 5: a clean build can pass; the launcher as shipped; a li
   const again = reads(rec(T(300, 'execve("/x", ["x"], 0x1 /* 1 vars */) = 0'), T(300, 'clone(child_stack=NULL, flags=SIGCHLD) = 301'), T(301, '+++ exited with 0 +++'), T(300, 'clone(child_stack=NULL, flags=SIGCHLD) = 301'), T(300, 'openat(AT_FDCWD</x>, "/proc/301/environ", O_RDONLY) = 5</proc/301/environ>'), T(300, '+++ exited with 0 +++')), []);
   ok(JSON.stringify(gone) === '["/proc/301/environ"]' && again.length === 0, '8: a pid LEAVES the run at its death line (the number reused after it is someone else\'s ⇒ VOID); a clone of the run that names it again makes it the run\'s', { gone, again });
   ok(/its EXISTENCE only/.test(read('scripts/mount-reader-census.mjs')) && !/image\.json and \/\.dockerenv/.test(read('scripts/mount-reader-census.mjs')), '8: the census row says the image rule as it is (the stamp\'s existence; /.dockerenv gone)');
+}
+
+// ── §12 THE INCIDENT OF 2026-11-11 (the owner's hub: a data directory under the home, in a git checkout with package.json / CLAUDE.md / .claude/):
+// every run voided `guarded-read` in half a second — node, starting the trampoline in the scratch, walked up to the checkout's
+// package.json, inside the deny root. THE CELL NOBODY DROVE, as a FAST pin: the hub road's PLACEMENT (the real ORCH) and the
+// fence's verdict (the real judge) over the exact walks a run makes from where it is placed — node's package.json walk from the
+// trampoline and 2.1.321's walk up from its cwd (CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/, .mcp.json, .git at every
+// ancestor, its clean trace). The real tracer drives the same cell in test-oat-measure-fake (this tier cannot run one: the hosted
+// runner's strace is refused) ──
+console.log('§12 the incident: a hub whose data dir is under a home that is a git checkout');
+{
+  const H = fs.mkdtempSync(path.join(tmp, 'home-cell-')), CO = path.join(H, 'checkout'), D = path.join(CO, 'data');
+  for (const d of [D, path.join(CO, '.claude'), path.join(CO, '.git')]) fs.mkdirSync(d, { recursive: true });
+  for (const [f, t] of [['package.json', '{"name":"stand-in"}'], ['CLAUDE.md', '# stand-in'], ['.claude/settings.json', '{}'], ['.git/HEAD', 'ref: refs/heads/master']]) fs.writeFileSync(path.join(CO, f), t);
+  const BASE = fs.mkdtempSync(path.join(tmp, 'base-'));                   // a runtime dir / system temp OUTSIDE the home
+  const HOMERUN = path.join(H, 'run'); fs.mkdirSync(HOMERUN);              // a runtime dir that sits UNDER the home (a home-mounted one)
+  const T = (pid, l) => `${pid} 12:00:00.000001 ${l}`;
+  // the walks a run makes from ROOT (the probe's `root`): node's package.json walk from the trampoline, then the CLI's from its cwd
+  const walkOf = (root) => {
+    const lines = [T(100, 'execve("/usr/bin/node", ["node"], 0x7ffd /* 9 vars */) = 0')];
+    const open = (p) => lines.push(T(100, `openat(AT_FDCWD</x>, "${p}", O_RDONLY|O_CLOEXEC) = ${fs.existsSync(p) ? `3<${p}>` : '-1 ENOENT (No such file or directory)'}`));
+    for (let d = root; ; d = path.dirname(d)) { open(path.join(d, 'package.json')); if (d === path.dirname(d)) break; }
+    for (let d = path.join(root, 'oat-file', 'cwd'); ; d = path.dirname(d)) { for (const f of ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', '.claude', '.claude/CLAUDE.md', '.claude/AGENTS.md', '.git', '.git/HEAD']) open(path.join(d, f)); if (d === path.dirname(d)) break; }
+    lines.push(T(100, '+++ exited with 0 +++'));
+    return P.guardedReadsOf(P.parseTrace(lines.join('\n') + '\n').lines, P.GUARDED.map((g) => g.path), { deny: [P.REAL_HOME, H, D], allow: [root] });
+  };
+  const Wc = await world('cell', { dataDir: D, home: H, scratchBases: () => [BASE] });
+  note(Wc.h); await until(() => Wc.forks.length === 1);
+  const job = (Wc.forks[0] && Wc.forks[0].c.sent[0]) || {};
+  const runDir = String(job.runDir || ''), inH = (p) => (p + '/').startsWith(H + '/');
+  const hits = runDir ? walkOf(job.root) : ['(no run)'];
+  const old = walkOf(path.join(D, 'cli-self-measure', 'run-old', 'm'));     // where 5c77612ef put it
+  ok(!!runDir && !inH(runDir) && (runDir + '/').startsWith(BASE + '/') && path.basename(runDir).startsWith('cli-self-measure-') && (fs.statSync(runDir).mode & 0o777) === 0o700 && job.home === H && hits.length === 0, '§12 THE CELL: a hub whose data dir is under a home that is a git checkout runs its check in a fresh 0700 folder OUTSIDE the home and the data dir — and the walks a run makes from there (node\'s package.json, the CLI\'s CLAUDE.md / AGENTS.md / .claude / .mcp.json / .git to /) read nothing a deny root holds', { runDir, hits });
+  ok(old.some((p) => p.endsWith('/checkout/package.json')) && old.some((p) => p.endsWith('/checkout/CLAUDE.md')) && old.some((p) => p.endsWith('/checkout/.git/HEAD')), '§12 RED CONTROL (the incident): the same walks from where 5c77612ef put the run (data/cli-self-measure/run-…) read the checkout\'s package.json, CLAUDE.md and .git — the fence voids every run', old);
+  Wc.o.stop();
+  // a runtime dir UNDER the home (a home-mounted XDG_RUNTIME_DIR): skipped — the next base; none left ⇒ cannot-run `scratch`, by name
+  const Wf = await world('fallback', { dataDir: D, home: H, scratchBases: () => [HOMERUN, BASE] });
+  note(Wf.h); await until(() => Wf.forks.length === 1);
+  const fdir = String(((Wf.forks[0] && Wf.forks[0].c.sent[0]) || {}).runDir || '');
+  Wf.o.stop();
+  const Wn = await world('no-base', { dataDir: D, home: H, scratchBases: () => [HOMERUN] });
+  note(Wn.h); await until(() => !!ledgerOf(D)?.binaries?.['2.1.399']?.['sha-399']);
+  const rn = (ledgerOf(D)?.binaries?.['2.1.399'] || {})['sha-399'] || {};
+  const itn = Wn.h.am.cliUnmeasuredNotice()?.item;
+  ok((fdir + '/').startsWith(BASE + '/') && Wn.forks.length === 0 && rn.state === 'cannot-run' && rn.reason && rn.reason.code === 'scratch' && !!itn && /no private folder outside your home and VibeSpace’s data folder/.test(itn.detail), '§12 a runtime dir that sits under the home is SKIPPED (the next base is taken); with no base left the check refuses BY NAME (`scratch`) and For you says why — nothing forked', { fdir, rn, detail: itn && itn.detail });
+  Wn.o.stop();
+  try { fs.rmSync(path.join(D, 'cli-self-measure.json'), { force: true }); } catch { }
+  // THE RECORD KEEPS WHAT WAS READ: the version run's guarded path is in the ledger (~ for the home), the journal line, For you
+  const Wr = await world('reads');
+  note(Wr.h); await until(() => Wr.forks.length === 1);
+  const readPath = path.join(P.REAL_HOME, 'workspace', 'stand-in', 'package.json');
+  Wr.forks[0].c.emit('message', { type: 'record', record: { cli: '2.1.399', void: 'guarded-read', versionRun: { void: 'guarded-read', guardedReads: [readPath] }, results: [], ms: 473 } });
+  await until(() => !!ledgerOf(Wr.dir)?.binaries?.['2.1.399']);
+  const rr = ledgerOf(Wr.dir).binaries['2.1.399']['sha-399'];
+  const itr = Wr.h.am.cliUnmeasuredNotice()?.item;
+  ok(rr.state === 'cannot-run' && rr.reason.code === 'guarded-read' && rr.reason.observation === '~/workspace/stand-in/package.json' && Wr.lines.some((l) => /cannot-run \(guarded-read: ~\/workspace\/stand-in\/package\.json\)/.test(l)) && !!itr && /What it read: ~\/workspace\/stand-in\/package\.json\./.test(itr.detail), '§12 the record keeps WHAT was read (≤ 8 paths, the home as ~): the ledger\'s observation, the journal line and the For-you item name it', { obs: rr.reason, line: Wr.lines.find((l) => /cannot-run/.test(l)), detail: itr && itr.detail });
+  Wr.o.stop();
+  // A PROBE THAT CHANGED MEASURES AGAIN AT ONCE: a cannot-run measured by probe 1 (this hub life, minutes ago) is due under probe 2
+  const dP = path.join(tmp, 'orch-probe-bump'); fs.mkdirSync(dP, { recursive: true });
+  fs.writeFileSync(path.join(dP, 'cli-self-measure.json'), JSON.stringify({ schema: 1, binaries: { '2.1.399': { 'sha-399': { cli: '2.1.399', sha256: 'sha-399', probe: 1, state: 'cannot-run', reason: { code: 'guarded-read', observation: '' }, startedAt: Date.now() - 60e3, endedAt: Date.now() + 5e3 } } } }));
+  const Wp = await world('probe-bump');
+  note(Wp.h); await until(() => Wp.forks.length === 1);
+  ok(P.PROBE_VERSION === 2 && Wp.forks.length === 1, '§12 a cannot-run measured by probe 1 — the hub\'s own setup, minutes ago in this life — runs again AT ONCE under probe 2 (no 6-hour wait, no restart)', { probe: P.PROBE_VERSION, forks: Wp.forks.length });
+  Wp.o.stop();
+  ok(/\/\[\\\\\/\]cli-self-measure\(\?:-\[0-9a-f\]\{8\}-run-\|\[\\\\\/\]run-\)\[\^\\\\\/\]\+\$\/\.test\(job\.runDir\)/.test(read('src/claude-oat-probe.js')), '§12 the child removes its run folder by the new name (or .393\'s in data/) — never another path');
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

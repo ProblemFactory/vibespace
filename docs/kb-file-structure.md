@@ -14190,6 +14190,8 @@ The measurement's fence run on a trace of a reader's own — no binary, stdin or
 ### src/server/cli-self-measure.js
 ORCH (lane cli-self-measure). The hub checks a new Claude Code itself. The pool engine creates it (its 60 s interval ticks it; `app` mounts `POST /api/accounts/cli-check-again`, cookie only).
 
+WHERE A RUN LIVES (2.369.395, the incident of 2026-11-11): never under the data dir. `scratchBase()` takes the first of `scratchBases` ($XDG_RUNTIME_DIR, the system temp, /tmp, /var/tmp) whose REAL path lies outside the person's home (`PROBE.REAL_HOME`, plus a suite's `home`) and the data dir; the run's folder `cli-self-measure-<hubtag>-run-<pid>-<rand>` is made there by a non-recursive mkdir (0700 — it refuses anything already there); none ⇒ cannot-run `scratch`. `sweepScratch` removes .393's `data/cli-self-measure/run-*` and this hub's own leftovers (its uid, never a link). A void record's guarded paths (`readsOf`, ≤ 8, ~ for the home) are the reason's observation, the journal line's first and the For-you «What it read: …». A FAIL or cannot-run by an older PROBE_VERSION is due at once.
+
 `decide(caps)` runs synchronously in the store's note hook (`accounts.setCliNoteHook`), so the words never lag the hold:
 - the ledger did not READ (EISDIR / EACCES / EIO) ⇒ said ONCE, read again no faster than the 60 s tick; no PASS of its own trusted, nothing forked (law A);
 - the fixture names the build ⇒ nothing;

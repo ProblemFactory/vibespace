@@ -339,6 +339,8 @@ It IS NOT:
 
 A machine where the fences cannot be proven does not run it; the members stay held (fail closed), and For you says why.
 
+Where a run lives (2.369.395, the incident of 2026-11-11): the CLI and node walk UP from where they run (package.json; CLAUDE.md, AGENTS.md, .claude/, .mcp.json, .git at every ancestor) — so a run placed under the person's home reads the home's files and voids. A run lives in a fresh private folder whose real path is outside the home and the data dir (the runtime dir, else the system temp); none ⇒ it does not run and says so by name.
+
 ### 10. Settings System (Global + Per-Terminal)
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
 

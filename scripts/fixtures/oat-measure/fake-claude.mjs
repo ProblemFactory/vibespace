@@ -42,6 +42,10 @@
 // build, not a sandbox), once, then `good`:
 //   rewrite-launcher    appends a line to the launcher copy in the scratch (<ROOT>/.trampoline.js) — the next variant must not start
 //   link-in:<p>         hard-links <p> (a file under the data dir) into its HOME and reads the new name — the link's SOURCE voids
+// …and the incident of 2026-11-11 (the owner's hub: a data directory under the home), behaving `good` otherwise:
+//   walk                at its start (never for --version) walks UP from its cwd to / the way 2.1.321 does (its clean trace):
+//                       CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json read, .claude/ listed (+ its CLAUDE.md, AGENTS.md), .git
+//                       looked at (+ its HEAD read) at EVERY ancestor — what a run's place puts in reach
 // `--version` says 9.9.9 (Fake Claude), so a fixture it produces never names a real CLI.
 // It talks only to $ANTHROPIC_BASE_URL (the measurement's loopback mock).
 import fs from 'node:fs';
@@ -133,6 +137,13 @@ const MISBEHAVE = {
   'thread-read': () => Promise.all(Array.from({ length: 40 }, () => fs.promises.readFile(ARG).catch(() => null))),
   'connect-rst-early': () => raw(proxy.hostname, proxy.port, (s, done) => s.write('CONNECT api.anthropic.com:443 HTTP/1.1\r\nhost: api.anthropic.com:443\r\n\r\n', () => { s.resetAndDestroy(); setTimeout(done, 100); })),
 };
+if (KIND === 'walk' && !process.argv.includes('--version')) {
+  for (let d = process.cwd(); ; d = path.dirname(d)) {
+    for (const f of ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.mcp.json', path.join('.claude', 'CLAUDE.md'), path.join('.claude', 'AGENTS.md'), path.join('.git', 'HEAD')]) { try { fs.readFileSync(path.join(d, f)); } catch { } }
+    for (const dir of ['.claude', '.git']) { try { fs.readdirSync(path.join(d, dir)); } catch { } }
+    if (d === path.dirname(d)) break;
+  }
+}
 let misbehaved = false, dropped = false;
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 
