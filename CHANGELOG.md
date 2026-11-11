@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.391 — 2026-11-10
+
+### Changed
+- After a Claude Code update, accounts with a long-lived token pause for about five minutes while VibeSpace checks the new version, then continue.
+- No VibeSpace update is needed for that check, and a chat waiting on those accounts continues by itself when it passes.
+- While it runs, the pool's notice says what is being checked, instead of a reset date days away.
+- If the check cannot run or finds a difference, For you says why and offers Check again.
+- In VibeSpace's Docker images the check does not run yet; there, those accounts wait for a VibeSpace release, as before.
+
+### Fixed
+- A newer Claude Code's records no longer say "not registered … until the next release"; Diagnostics lists them quietly.
+
 ## 2.369.390 — 2026-11-10
 
 ### Added
