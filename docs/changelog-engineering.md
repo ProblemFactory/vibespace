@@ -22,6 +22,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - A hold of 1.2 s that ran JavaScript 0.9 s and waited 0.3 s is named by its function, «it also waited 0.3 s for a CPU» beside it (RED on 8fad60fd1: «waiting for a CPU»).
   - A hold that waited 0.9 s of 1.2 s is «waiting for a CPU» (the control, green on both).
   - The woke ask's words (red on 8fad60fd1).
+- **The follow-up — (B)'s fourth case (the .393 cut's self-hosted gate, Node 24, load 9.5; green on its retry and on Node 22).**
+  - The red: with the watchdog started 921 ms into the mixed hold, no window covered half of it, so the samples decided by count. One ask found execFileSync's own wait («asleep: ep_poll in epoll_pwait»); two were answered at JavaScript speed with only undici frames ⇒ «JavaScript» 2 : 1.
+  - The cause, measured: node builds a BroadcastChannel's FIRST MessageEvent by loading undici (Node 22 and 24 alike: `process.moduleLoadList` has no undici before the first message, has it after). The leg's own collector got its first message right after the sync child ended, so that load ran in the hold's tail. The late watchdog's asks, posted after the child ended, met it.
+  - The suite: the plan loads it before the hold (`void globalThis.MessageEvent`). `mixedHog` stamps the sync child's own start and end, and the run records the hold's asks (`LH_POSTWATCH`). (B) judges only the runs whose asks ALL landed inside the child's stamps (an ask within JS_FAST_MS of its end counts as outside). The rest are a NAMED, COUNTED skip with each run's asks and stamps; fewer than 4 judged runs is the count floor's skip. The «(B) …» line prints every run's asks and the child's stamps.
+  - The product part — what an answer made only of node:internal frames says — is a row (B-fe0b), not this commit.
 
 ## 2.369.393 — 2026-11-11
 
