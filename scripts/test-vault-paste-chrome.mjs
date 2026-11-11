@@ -50,6 +50,12 @@
 //      nothing off the screen; by taps, unticked ⇒ «Save only» ⇒ stored, the receipt says it was not given
 //   ⑦ RED CONTROL (saved by Enter in the box): a mutant hub whose paste door logs the value and files it on an item ⇒ the same checks find it in the server
 //      log, the DOM and a WebSocket frame (they see a leak when there is one)
+// THE RELOAD (lane vp393 — the .393 prep mirror's ⑥b red, 3 of 6 runs on the runner's Node 22 at 2 cores, with fable and without):
+//   `Page.navigate` + «no splash» passed on the NEW document before its parser reached the splash (readyState 'loading', no app),
+//   and a vault door pressed then was never heard. A reload (reload()) is over only when a NEW document (its performance.timeOrigin
+//   moved) is complete with no splash, the window holds the vault door's listener (vault-unlock.js initVault — run in /api/home's
+//   then: nothing orders it before app.ready, B-6f65), every GET /api/vault/state of that document has answered (the facts the door
+//   acts on), and app.ready has resolved; then the door is pressed ONCE, and a door that opens nothing is red by name
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -125,11 +131,15 @@ if (!target) { console.error('  ✗ boot: no chrome page'); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
+const VAULT_READS = new Map();   // lane vp393: the page's GET /api/vault/state — requestId → {loaderId, answered, done} (reload())
 const WS_FRAMES = [];   // every WebSocket frame the PAGE saw (received and sent) — the multi-client broadcasts included
 ws.on('message', (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
   if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') WS_FRAMES.push(String((m.params.response && m.params.response.payloadData) || ''));
+  if (m.method === 'Network.requestWillBeSent' && /\/api\/vault\/state(\?|$)/.test(String(m.params.request && m.params.request.url))) VAULT_READS.set(m.params.requestId, { loaderId: m.params.loaderId, answered: false, done: false });
+  if (m.method === 'Network.responseReceived' && VAULT_READS.has(m.params.requestId)) VAULT_READS.get(m.params.requestId).answered = true;
+  if ((m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') && VAULT_READS.has(m.params.requestId)) VAULT_READS.get(m.params.requestId).done = m.method === 'Network.loadingFinished' ? 'finished' : 'failed';
 });
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
@@ -156,6 +166,30 @@ try {
   startServer();
   check('the hub boots (sign-in password on)', await ready());
   const URL = `http://127.0.0.1:${PORT}/`;
+  /** THE RELOAD (lane vp393 — see the header): navigate, then wait for ① a NEW document (timeOrigin moved), complete, no splash;
+   *  ② the window holds the vault door's listener (DOMDebugger.getEventListeners — the listener's own fact); ③ every GET
+   *  /api/vault/state of THAT document answered (responseReceived + loadingFinished on its loaderId — the facts the door acts on);
+   *  ④ app.ready resolved (the product's own word, the promise the splash waits for). → { ok, why, ms } — `why` names the first
+   *  wait that did not end */
+  const reload = async (url = URL, { timeout = 30000 } = {}) => {
+    const t0 = Date.now(), was = await evalJs('performance.timeOrigin');
+    const nav = await cdp('Page.navigate', { url });
+    const loader = nav.loaderId;
+    const left = () => Math.max(500, timeout - (Date.now() - t0));
+    if (!(await until(`performance.timeOrigin !== ${was} && document.readyState === 'complete' && !document.getElementById('loading-screen') && !!window.app`, { timeout: left() }))) return { ok: false, why: 'no new complete document without the splash', ms: Date.now() - t0 };
+    const listening = async () => { let id = null; try { const w = await cdp('Runtime.evaluate', { expression: 'window' }); id = w.result.objectId; const l = await cdp('DOMDebugger.getEventListeners', { objectId: id }); return (l.listeners || []).some((x) => x.type === 'vs-vault-door'); } catch { return false; } finally { if (id) cdp('Runtime.releaseObject', { objectId: id }).catch(() => {}); } };
+    for (;;) { if (await listening()) break; if (Date.now() - t0 > timeout) return { ok: false, why: 'the vault door is not listening (no vs-vault-door listener on the window)', ms: Date.now() - t0 }; await sleep(120); }
+    for (;;) {
+      const reads = [...VAULT_READS.values()].filter((r) => r.loaderId === loader);
+      if (reads.length && reads.every((r) => r.answered && r.done === 'finished')) break;
+      if (reads.some((r) => r.done === 'failed')) return { ok: false, why: 'a GET /api/vault/state of the new document failed', ms: Date.now() - t0 };
+      if (Date.now() - t0 > timeout) return { ok: false, why: `GET /api/vault/state of the new document not answered (${reads.length} asked)`, ms: Date.now() - t0 };
+      await sleep(60);
+    }
+    if (!(await until(`Promise.race([app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 1000))])`, { timeout: left() }))) return { ok: false, why: 'app.ready did not resolve', ms: Date.now() - t0 };
+    return { ok: true, why: null, ms: Date.now() - t0 };
+  };
+  const RELOADED = 'the reload is over: a NEW document, complete, no splash; the vault door listening; its GET /api/vault/state answered; app.ready';
 
   console.log('① sign in, the second password, a live conversation');
   await cdp('Page.navigate', { url: URL + 'login' });
@@ -274,13 +308,15 @@ try {
   const REF3 = (/vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret/.exec(turn3) || [])[0] || '';
   const ROWID3 = REF3 ? `secrets:${REF3.slice('vault://secrets/'.length, -'/secret'.length)}#secret` : '';
   const NEW3 = 'The home router admin login (192.168.1.1, user admin): DNS, DHCP and port forwards — never the Wi-Fi password.';
-  await cdp('Page.navigate', { url: URL }); await splashGone();
+  const rl6 = await reload();
+  check(`⑥b ${RELOADED} (${rl6.ms} ms)`, rl6.ok, rl6);
   const lst0 = await cli(['list'], TOKEN);
   check('`list` names it by the OWNER\'s name and says what it is for (the agent\'s description)', lst0.code === 0 && !!REF3 && lst0.out.includes(REF3) && lst0.out.includes('Home router admin') && lst0.out.includes('what it is: ' + NOTE3), lst0);
   const dsc = await cli(['describe', REF3, '--note', NEW3], TOKEN);
   const tid = (/\((ut-[0-9a-z]+)\)/.exec(dsc.out) || [])[1] || '';
   check('`vibespace-vault describe` ⇒ proposed, nothing changed yet (its filed line names the item)', dsc.code === 0 && /proposed \(ew-[0-9a-f]{12}\)/.test(dsc.out) && /nothing changes until the user allows it/.test(dsc.out) && !!tid, dsc);
-  await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
+  await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);   // ONCE (lane vp393): a door the app said is ready must open
+  check('ONE press of the vault door (vs-vault-door) after the reload said ready ⇒ the Vault window opens (else: a door a person could press too early)', !!(await until(`!!document.querySelector('.vw-row')`, { timeout: 10000 })));
   const ROWSEL = `.vw-row[data-id=${JSON.stringify(ROWID3)}]`;
   const mark = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROWSEL)}); if (!r) return null; const d = r.querySelector('.vw-desc'), p = r.querySelector('.vw-desc-pending'); return p && !p.hidden && p.getBoundingClientRect().height > 0 ? { desc: d && d.textContent, pend: p.textContent, edit: !!r.querySelector('.vw-words-edit'), band: !!document.querySelector('.vw-band-row .vw-band-allow') } : null; })()`, { timeout: 15000 });
   check('the Vault row: its description under the name, «An agent proposes new words» while the card waits, its Edit…; the band offers 允许', !!mark && mark.desc === NOTE3 && /proposes new words/.test(mark.pend) && mark.edit && mark.band, mark);
@@ -321,7 +357,8 @@ try {
     const typeInto = (sel, text) => evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); if (!i) return false; i.focus(); i.value = ${JSON.stringify(text)}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     const focusType = async (sel, text) => { await evalJs(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.focus(); i.select && i.select(); return true; })()`); await cdp('Input.insertText', { text }); };
     const C = (id, sel = boxOf(id)) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; const it = b.closest('.ut-item'); const q = (s) => b.querySelector(s); return { text: it ? it.querySelector('.ut-text').textContent : '', plan: it ? (it.querySelector('.ut-secret-plan') || {}).textContent || '' : '', target: b.dataset.target, site: q('input.vault-login-site').value, ro: q('input.vault-login-site').readOnly, user: q('input.vault-login-user').value, pw: q('input.vault-login-pass').value, pwType: q('input.vault-login-pass').type, otp: q('input.vault-login-otp').value, list: !!q('input.vault-login-otp').list, two: (q('.ut-secret-totp') || {}).textContent, tick: q('input.ut-login-allow-box').checked, says: q('.ut-login-says').textContent, kept: q('.ut-login-kept').textContent, save: q('.ut-secret-save').textContent, words: q('.ut-secret-words').textContent, state: b.dataset.state, labels: [...b.querySelectorAll('.vault-secret-label')].map((x) => x.textContent), hint: /Only the site itself/.test(b.textContent), reply: !!(it && it.querySelector('.ut-reply-btn')), inRow: !!it && !b.closest('[role=dialog]') }; })()`;   // a box moved into its own window has no row
-    await cdp('Page.navigate', { url: URL }); await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone();
+    const rl8 = await reload();
+    check(`⑧ ${RELOADED} (${rl8.ms} ms)`, rl8.ok, rl8);
     const bad8 = await cli(['request', 'the wiki login', '--purpose', 'read the wiki', '--kind', 'login', '--host', 'http://wiki.example.test'], TOKEN);
     check('a site the add door refuses (plain http) ⇒ refused at the CLI by name, before any card', bad8.code !== 0 && /https site/.test(bad8.out), bad8);
     const long8 = 'the parts shop login so I can order the replacement parts you listed this morning — '.repeat(4).slice(0, 200);
@@ -611,7 +648,8 @@ try {
     const cr = await until(`(() => { const c = ${C(l2.id)}; return c && c.state === 'ready' ? c : null; })()`, { timeout: 15000 });
     check('unlocked ⇒ the box is ready, its fields as typed', !!cr && cr.user === 'forum-user' && cr.pw === V_LOGIN2, cr);
     check('a tap on Save only', (await tap(boxOf(l2.id) + ' .ut-secret-save')) === true);
-    check('stored ⇒ the phone\'s card resolved', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, { timeout: 10000 })));
+    const gone9 = await until(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, { timeout: 10000 });   // lane vp393: on a red, what the card held when the wait ended (the password as its length only) — hosted try 1 of the .393 prep mirror
+    check('stored ⇒ the phone\'s card resolved', !!gone9, gone9 ? undefined : await evalJs(`(() => { let c = null; try { c = ${C(l2.id)}; } catch (e) { c = { err: String(e) }; } if (c && 'pw' in c) c.pw = 'len ' + String(c.pw || '').length; const b = document.querySelector(${JSON.stringify(boxOf(l2.id))}); const sv = b && b.querySelector('.ut-secret-save'); return { at: new Date().toISOString(), card: c, save: sv ? { text: sv.textContent, disabled: sv.disabled, hidden: sv.hidden } : null, busy: b ? b.dataset.busy || null : null, error: b ? b.dataset.error || null : null, toasts: [...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).slice(-6) }; })()`));
     check('…and the SECOND client\'s card resolved LIVE (no reload)', !!(await until2(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, 10000)));
     const wl2 = await pageApi('GET', '/api/vault/web-logins');
     const e2 = ((wl2.json && wl2.json.entries) || []).find((e) => e.name === 'web-login:https://forum.example.test#forum-user');
@@ -677,8 +715,8 @@ try {
   fs.writeFileSync(doorFile, src.replace(anchor, "log('stored ' + vv.value); try { userTodos.add(q.sessionKey || 'vault', { origin: 'vault', kind: 'notice', text: 'stored ' + vv.value }); } catch { } " + anchor));
   await stopServer(); startServer();
   check('the mutant hub is up', await ready());
-  await cdp('Page.navigate', { url: URL });
-  await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone();
+  const rl7 = await reload();
+  check(`⑦ ${RELOADED} (${rl7.ms} ms)`, rl7.ok, rl7);
   if (await evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await evalJs(`(() => { const i = document.getElementById('vault-unlock-pw'); i.focus(); i.value = ${JSON.stringify(SECOND)}; document.querySelector('#vault-unlock-dialog .vault-unlock-go').click(); return true; })()`); await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 15000 }); }
   else await pageApi('POST', '/api/vault/unlock', { password: SECOND });
   const a4 = await ask(['a mutant key', '--purpose', 'the red control', '--kind', 'secret'], TOKEN);
