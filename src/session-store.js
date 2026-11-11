@@ -389,6 +389,63 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
   return null;
 }
 
+/** lane roster-per-pass: what `findSessionJsonlPath(id)` (no cwd) would find, read ONCE for a liveness sweep — the TOP
+ *  LEVEL of every project directory under ~/.claude/projects and of every remote-cache host directory
+ *  (data/remote-jsonl/<host>/), never deeper (the subagents / workflows trees are not read), through fs.promises (the
+ *  reads in libuv, the JS a few µs per directory), one directory at a time. A directory that fails (EACCES, EMFILE, one that
+ *  vanished), or a walk past `boundMs`, leaves the index UNKNOWN (`ok: false`) — its caller then judges nobody gone on it.
+ *  A missing ~/.claude/projects or data/remote-jsonl is not a failure: there is nothing there (as the per-id lookup finds).
+ *  → { ok, topReadable, has(id) → boolean, dirs, entries } — `topReadable` = the projects directory itself was read (the
+ *  liveness reader's `dirReadable`). */
+async function claudeTranscriptIndex({ boundMs = 10000, fsp = fs.promises, projectsRoot = path.join(os.homedir(), '.claude', 'projects'), remoteRoot = path.join(__dirname, '..', 'data', 'remote-jsonl') } = {}) {
+  const names = new Set();
+  const st = { ok: true, topReadable: false, dirs: 0, entries: 0 };
+  const listOf = async (dir, { top = false } = {}) => {
+    try { st.dirs++; const ents = await fsp.readdir(dir, { withFileTypes: true }); st.entries += ents.length; return ents; }
+    catch (e) {
+      if (top && e && e.code === 'ENOENT') return [];        // nothing there: as the per-id lookup finds
+      if (!top && e && e.code === 'ENOTDIR') return [];      // a file beside the project dirs: the per-id lookup finds nothing in it
+      st.ok = false; return [];
+    }
+  };
+  const addJsonl = async (dir, ents) => {
+    for (const e of ents) {
+      if (!e.name.endsWith('.jsonl')) continue;
+      if (e.isSymbolicLink()) { try { await fsp.stat(path.join(dir, e.name)); } catch { continue; } } // existsSync follows a link: a dangling one finds nothing
+      names.add(e.name);
+    }
+  };
+  // a walk still out from an earlier sweep (it passed its bound: storage not answering) is not joined and not doubled —
+  // this sweep is UNKNOWN on the tree, and no second read queues behind the stuck one (each holds a libuv thread)
+  const key = projectsRoot + '\0' + remoteRoot;
+  if (TRANSCRIPT_WALKS_OUT.has(key)) { stuckSaid(TRANSCRIPT_WALKS_OUT, key, 'claude', projectsRoot); return { ...st, ok: false, late: true, has: () => false }; }
+  const walk = (async () => {
+    let top = [];
+    try { st.dirs++; top = await fsp.readdir(projectsRoot, { withFileTypes: true }); st.entries += top.length; st.topReadable = true; } // dirReadable: the projects directory itself was read
+    catch (e) { st.topReadable = false; if (!(e && e.code === 'ENOENT')) st.ok = false; }
+    for (const e of top) { const d = path.join(projectsRoot, e.name); await addJsonl(d, await listOf(d)); if (!st.ok) return; }
+    for (const h of await listOf(remoteRoot, { top: true })) { const d = path.join(remoteRoot, h.name); await addJsonl(d, await listOf(d)); if (!st.ok) return; }
+  })();
+  TRANSCRIPT_WALKS_OUT.set(key, { since: Date.now(), said: false });
+  walk.then(() => {}, () => { st.ok = false; }).finally(() => TRANSCRIPT_WALKS_OUT.delete(key));
+  let timer = null;
+  const bound = new Promise((r) => { timer = setTimeout(() => { st.ok = false; r(); }, boundMs); });
+  try { await Promise.race([walk.catch(() => { st.ok = false; }), bound]); } finally { clearTimeout(timer); }
+  const ok = st.ok;   // a late walk that finishes after the bound changes nothing handed out
+  // a name the walk READ is a fact even when the walk failed later (round 2: equal to the per-id lookup for what was read);
+  // `ok` says whether an absent name means absent
+  return { ok, topReadable: st.topReadable, dirs: st.dirs, entries: st.entries, has: (id) => names.has(String(id) + '.jsonl') };
+}
+const TRANSCRIPT_WALKS_OUT = new Map();   // roots → {since, said}: a walk past its bound, still out
+/** A walk that never returns leaves its tree UNKNOWN for as long as it stays out (the hub's life, if it never answers):
+ *  said ONCE in the journal — which tree, since when — and never doubled (round 2; no retry: the next sweep asks again). */
+function stuckSaid(map, key, tree, root) {
+  const e = map.get(key);
+  if (!e || e.said) return;
+  e.said = true;
+  console.warn(`[transcripts] the ${tree} transcript tree ${root} has not answered since ${new Date(e.since).toISOString()} — nobody is judged gone on it until it does`);
+}
+
 // ── WHY THERE IS NO CLAUDE MODEL READER HERE (B-6b6d round 2) ─────────────
 // Round 1 shipped `lastClaudeTurnModel`: a tail scan for the last MAIN-THREAD
 // assistant record's `message.model`, handed to the resume ladder as "the
@@ -1432,7 +1489,7 @@ function dedupWebuiSockets(entries) {
   return { winners, retire };
 }
 
-module.exports = {
+module.exports = { claudeTranscriptIndex, stuckSaid,
   warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
   extractSessionMeta,
   SESSIONS_DIR,

@@ -1427,7 +1427,7 @@ console.log('§4b wiring pins');
   ok(/if \(!myCid\) return res\.status\(409\)\.json\(\{ error: who\.cidWhy \|\| 'this session has no conversation id yet[^']*', code: 'bad-member' \}\)/.test(ar), 'PIN: with a groups engine, a cid-less sender is refused before the legacy lane — by the caller\'s own sentence (r4: a pending fork is "a fork that has not announced its own conversation id yet")');
   ok(/const own = ownConversationIdOf\(s\);\s*\n\s*return \{ job: null, cid: own\.cid, cidWhy: own\.why, s, id, myGroups: _myGroupIds\(s, id\) \};/.test(ar), 'PIN (channel-withdraw verify r4): msgCaller answers a session caller with its OWN conversation id — null while a fork still carries its parent\'s (a pending fork sent as the parent: the pair group held the parent\'s id, the target\'s reply woke the parent)');
   ok(/const fits = !rep\.text \|\| used \+ 2 \+ Buffer\.byteLength\(rep\.text, 'utf-8'\) <= INLINE_CAP - 64;\s*\n\s*if \(fits\) \{/.test(ar), 'PIN: prompt-context pushes the section (and commits its marks) only when it fits WHOLE');
-  ok(/reachability: s\._msgReachability \|\| null/.test(read('server.js')) && /groupSetting: \(gid\) =>/.test(read('server.js')), 'PIN: the roster carries the msg-acl override + the Task Group setting');
+  ok(/reachability: s\._msgReachability \|\| null/.test(read('src/server/roster-pass.js')) && /sessionRoster\(\{ sessions: \(\) => activeSessions,/.test(read('server.js')) && /groupSetting: \(gid\) =>/.test(read('server.js')), 'PIN: the roster carries the msg-acl override + the Task Group setting (lane roster-per-pass: the roster\'s builder moved to src/server/roster-pass.js sessionRoster, server.js hands it the session map)');
 }
 
 console.log('§7 the cards: a group message handed to a turn is SEEN in that chat (lane group-report-card)');
@@ -2178,7 +2178,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
 {
   const gsrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
   const CUT1 = "    await nextTurn();   // never on the caller's tick (the boot's listen callback)\n";
-  const CUT2 = "      if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) { await nextTurn(); sliceAt = sliceClock(); }\n";
+  const CUT2 = "        if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) return { yield: true };\n";   // lane roster-per-pass: the slice check is the segment judge's one line (cut ⇒ one segment, the one-tick sweep)
   ok(gsrc.split(CUT1).length === 2 && gsrc.split(CUT2).length === 2, 'SLICED SWEEP premise: the two slice lines are each one line of the engine');
   const MUTS = mutantCopies('chan-groups-slice', REPO);
   const OneTick = MUTS.load('src/server/groups-engine.js', gsrc.replace(CUT1, '').replace(CUT2, ''), 'one-tick');

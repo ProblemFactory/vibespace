@@ -186,6 +186,66 @@ function _lastTurnContextField(threadId, field) {
   return null;
 }
 
+/** lane roster-per-pass: every rollout `findCodexSessionJsonlPath(id)` would find, read ONCE for a liveness sweep — the
+ *  same walk as `_walkJsonlFiles` (the sessions tree, directories followed, `.jsonl` / `.jsonl.zst` files) plus the remote
+ *  cache's codex directories (data/remote-jsonl/<host>/codex/: exact names, as its existsSync asks), through fs.promises, one directory at a time. Keyed by the
+ *  last 36 characters of each rollout's name (a thread id is a UUID: `…-<id>.jsonl` ⇔ the key), with today's `endsWith`
+ *  over the walked names for an id of another length. A directory that fails (EACCES, EMFILE, one that vanished mid-walk)
+ *  or a walk past `boundMs` leaves it UNKNOWN (`ok: false`). A missing sessions directory or cache is not a failure.
+ *  → { ok, has(id) → boolean, dirs, entries, rollouts } */
+async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessionsDir = CODEX_SESSIONS_DIR, remoteRoot = path.join(__dirname, '..', '..', 'data', 'remote-jsonl') } = {}) {
+  const keys = new Set(), stems = [], cached = new Set();
+  const st = { ok: true, dirs: 0, entries: 0, rollouts: 0 };
+  const listOf = async (dir, { quiet = [] } = {}) => {
+    try { st.dirs++; const ents = await fsp.readdir(dir, { withFileTypes: true }); st.entries += ents.length; return ents; }
+    catch (e) { if (e && quiet.includes(e.code)) return []; st.ok = false; return []; }
+  };
+  const note = (name) => {
+    const stem = name.endsWith('.jsonl') ? name.slice(0, -6) : name.endsWith('.jsonl.zst') ? name.slice(0, -10) : null;
+    if (stem == null) return;
+    st.rollouts++; keys.add(stem.slice(-36)); stems.push(stem);
+  };
+  const key = sessionsDir + '\0' + remoteRoot;
+  if (CODEX_WALKS_OUT.has(key)) { require('../session-store.js').stuckSaid(CODEX_WALKS_OUT, key, 'codex', sessionsDir); return { ...st, ok: false, late: true, has: () => false }; }   // a stuck walk is not doubled, said once
+  const walk = (async () => {
+    const stack = [{ dir: sessionsDir, top: true }];
+    while (stack.length) {
+      const { dir, top } = stack.pop();
+      for (const e of await listOf(dir, { quiet: top ? ['ENOENT'] : [] })) {
+        if (e.isDirectory()) stack.push({ dir: path.join(dir, e.name), top: false });
+        else if (e.isFile()) note(e.name);
+      }
+      if (!st.ok) return;
+    }
+    // the cache: findCodexSessionJsonlPath asks existsSync(<host>/codex/<id>.jsonl | .jsonl.zst) — an exact name, of any
+    // kind, a link followed (a dangling one finds nothing); a host without a codex directory has none
+    for (const h of await listOf(remoteRoot, { quiet: ['ENOENT'] })) {
+      const d = path.join(remoteRoot, h.name, 'codex');
+      for (const e of await listOf(d, { quiet: ['ENOENT', 'ENOTDIR'] })) {
+        if (!e.name.endsWith('.jsonl') && !e.name.endsWith('.jsonl.zst')) continue;
+        if (e.isSymbolicLink()) { try { await fsp.stat(path.join(d, e.name)); } catch { continue; } }
+        cached.add(e.name);
+      }
+      if (!st.ok) return;
+    }
+  })();
+  CODEX_WALKS_OUT.set(key, { since: Date.now(), said: false });
+  walk.then(() => {}, () => { st.ok = false; }).finally(() => CODEX_WALKS_OUT.delete(key));
+  let timer = null;
+  const bound = new Promise((r) => { timer = setTimeout(() => { st.ok = false; r(); }, boundMs); });
+  try { await Promise.race([walk.catch(() => { st.ok = false; }), bound]); } finally { clearTimeout(timer); }
+  const ok = st.ok;   // a late walk that finishes after the bound changes nothing handed out
+  return {
+    ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts,
+    has: (id) => {
+      const k = String(id || ''); if (!k) return false;   // a name the walk READ is a fact even when it failed later
+      if (k.length === 36 ? keys.has(k) : stems.some((x) => x.endsWith(k))) return true;
+      return cached.has(k + '.jsonl') || cached.has(k + '.jsonl.zst');
+    },
+  };
+}
+const CODEX_WALKS_OUT = new Map();   // roots → {since, said}
+
 /** Locate a thread's rollout: `…-<threadId>.jsonl`, else its `.jsonl.zst`
  *  twin (codex ≥0.153 compression; the plain file wins when both exist), then
  *  the remote-jsonl cache. Returns the REAL path — readers materialize. */
@@ -1242,7 +1302,7 @@ class CodexAdapter extends BackendAdapter {
   }
 }
 
-module.exports = {
+module.exports = { codexTranscriptIndex,
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort,
   CODEX_SESSIONS_DIR,

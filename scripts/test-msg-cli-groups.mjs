@@ -574,7 +574,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     ok(liveC.toParent === '400:ambiguous', `CONTROL: with the raw roster the parent itself is \`ambiguous\` beside its pending fork (${liveC.toParent})`);
     // server.js's roster reads the SAME predicate (the suite cannot boot server.js: the line is pinned by name)
     const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-    ok(/liveSessions: \(\) => \{ const out = \[\]; for \(const \[id, s\] of activeSessions\) \{ const cid = addressableId\(s\);/.test(srv) && /const \{ addressableId \} = require\('\.\/src\/claude-lock-capture'\)/.test(srv), 'PIN: server.js\'s liveSessions roster (the groups engine\'s + the channels engine\'s) reads each row\'s id through addressableId');
+    ok(/for \(const \[id, s\] of sessions\(\)\) \{\n(?:\s*\/\/[^\n]*\n)*\s*const cid = addressableId\(s\);\n\s*if \(!cid\) continue;/.test(fs.readFileSync(path.join(REPO, 'src/server/roster-pass.js'), 'utf-8')) && /sessionRoster\(\{ sessions: \(\) => activeSessions, tasks: \(\) => tasks, addressableId, /.test(srv) && /const \{ addressableId \} = require\('\.\/src\/claude-lock-capture'\)/.test(srv), 'PIN: server.js\'s liveSessions roster (the groups engine\'s + the channels engine\'s) reads each row\'s id through addressableId (lane roster-per-pass: the builder is src/server/roster-pass.js sessionRoster, handed server.js\'s addressableId)');
 
     // THE JOB OWNER: a pending fork's `vibespace-job run` — refused by name; the control records the parent as the owner
     async function jobLeg(ARmod, name) {

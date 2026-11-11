@@ -373,7 +373,12 @@ class TaskGroupManager {
     delete t.folders; delete t.contextDir;
   }
 
+  /** lane roster-per-pass: a counter that moves with EVERY write of the state (each save, each notify) — the live roster's
+   *  Task Groups half is valid only while it holds still (src/server/roster-pass.js) */
+  rev() { return this._rev || 0; }
+
   _save() {
+    this._rev = (this._rev || 0) + 1;
     const tmp = this._file + '.tmp';
     // the held old fields ride back into the file beside each record (one release — see _holdLegacy)
     const doc = !this._legacy.size ? this._state : { ...this._state, tasks: Object.fromEntries(Object.entries(this._state.tasks).map(([id, t]) => [id, this._legacy.has(id) ? { ...t, ...this._legacy.get(id) } : t])) };
@@ -1879,7 +1884,7 @@ class TaskGroupManager {
 
   // lane task-group-fanout: a write names the groups it touched (`ids`; null = every group) — the hub's ONE broadcaster
   // (src/server/task-fanout.js) sends those groups' DELTA, never the store (1.57 MB to every client per Activity line before)
-  _notify(ids = null) { try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
+  _notify(ids = null) { this._rev = (this._rev || 0) + 1; try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
 
   _migrateGroups(userState) {
     const groups = userState?.sessionGroups && typeof userState.sessionGroups === 'object' ? userState.sessionGroups : {};

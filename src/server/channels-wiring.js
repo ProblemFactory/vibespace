@@ -23,7 +23,7 @@ const N = require('../normalizers.js');
 // conversation (a conversation-index claim ⇒ another machine's, or unknown when the claims are ambiguous; else a
 // session-meta of this machine: no `host` ⇒ local) and whether the transcript directory was readable. PURE
 // channel-groups `livenessFrom` judges: a remote / unknown-owner / unreadable-store conversation is never gone.
-function livenessReader({ liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, metaDir = null, transcriptDirs = null, findTranscript = null, now = () => Date.now() } = {}) {
+function livenessReader({ liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, metaDir = null, transcriptDirs = null, findTranscript = null, transcriptIndex = null, now = () => Date.now() } = {}) {
   const fs = require('fs'), path = require('path'), os = require('os'), G = require('../channel-groups.js');
   const dirs = transcriptDirs || (() => [path.join(os.homedir(), '.claude', 'projects')]);
   const found = findTranscript || ((cid) => !!(require('../session-store.js').findSessionJsonlPath(cid) || require('../adapters/codex.js').findCodexSessionJsonlPath(cid)));
@@ -45,17 +45,62 @@ function livenessReader({ liveSessions = () => [], readUserState = () => ({}), c
     const m = metaOf(cid);
     return m ? (m.host ? 'remote' : 'local') : 'unknown';
   };
-  return (cid, arch = archivedCids()) => {
+  const reader = (cid, arch = archivedCids()) => {
     const live = (liveSessions() || []).some((s) => s && s.cid === cid);
     if (live || arch.has(cid)) return G.livenessFrom({ live, archived: arch.has(cid) });
     const transcript = transcriptOf(cid);
     return G.livenessFrom(transcript ? { transcript } : { transcript, owner: ownerOf(cid), dirReadable: dirReadable() });
   };
+  // lane roster-per-pass: ONE SWEEP READS EACH TRANSCRIPT TREE ONCE — the judge of a sweep asks the trees' indexes, built
+  // once by an async walk (src/session-store.js claudeTranscriptIndex, src/adapters/codex.js codexTranscriptIndex: the same
+  // directories the per-id lookups read, the reads in libuv); per id a Set lookup, no I/O. A tree that was NOT read whole
+  // (a directory that failed, a walk past its bound) says NOTHING is gone: an id it would have to vouch for is judged
+  // unreadable (stopped), exactly as an unreadable projects directory is — no pair closes on it; the next sweep asks again.
+  // A drill that hands its own `findTranscript` keeps the per-id reader (its lookups are its own).
+  // `transcriptIndex` = { claude, codex }: a drill's options for the two walks (its own fs / bound / roots)
+  const io = transcriptIndex && typeof transcriptIndex === 'object' ? transcriptIndex : {};
+  const indexes = findTranscript ? null : async () => {
+    // ONE readdir per directory per sweep: the two walks share one listing of what both read (data/remote-jsonl)
+    const fsp0 = fs.promises, listed = new Map();
+    const once = { ...fsp0, readdir: (p, o) => { const k = String(p); if (!listed.has(k)) listed.set(k, fsp0.readdir(p, o)); return listed.get(k); } };
+    const [c, x] = await Promise.all([require('../session-store.js').claudeTranscriptIndex({ fsp: once, ...(io.claude || {}) }), require('../adapters/codex.js').codexTranscriptIndex({ fsp: once, ...(io.codex || {}) })]);
+    return { topReadable: c.topReadable, ok: c.ok && x.ok, has: (cid) => (c.has(cid) || x.has(cid) ? true : (c.ok && x.ok ? false : null)), trees: { projects: c, rollouts: x } };
+  };
+  const judgeWith = (idx) => (cid, arch = archivedCids()) => {
+    const live = (liveSessions() || []).some((s) => s && s.cid === cid);
+    if (live || arch.has(cid)) return G.livenessFrom({ live, archived: arch.has(cid) });
+    const t = idx.has(cid);
+    if (t === true) return G.livenessFrom({ transcript: true });
+    return G.livenessFrom({ transcript: false, owner: ownerOf(cid), dirReadable: t === null ? false : idx.topReadable === true });
+  };
+  let asks = 0;
+  reader.forSweep = async () => {
+    if (!indexes) return reader;
+    let idx = null;
+    try { idx = await indexes(); } catch { idx = null; }
+    if (!idx) return reader;
+    const judge = judgeWith(idx);
+    // round 2 — A «GONE» VERDICT IS TRUE WHEN IT ACTS: the index is the disk at the sweep's START, and its ids are judged
+    // later (across slices and every earlier act's awaits). An id the index judges gone is ASKED AGAIN right before its
+    // act — a fresh read of both trees, off the loop, its answer whatever the disk and the roster say NOW (a transcript
+    // written since ⇒ stopped; a read that fails ⇒ unknown ⇒ nobody gone; live / archived again). A sweep with G gone
+    // candidates costs G such asks more; running / stopped / archived keep the index.
+    judge.confirm = async (cid) => { asks++; let fresh = null; try { fresh = await indexes(); } catch { fresh = null; } return fresh ? judgeWith(fresh)(cid) : null; };
+    judge.index = idx;
+    return judge;
+  };
+  reader.asks = () => asks;   // the drill's count of the gone candidates asked again
+  return reader;
 }
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, publicUrl = () => null, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {}, decisionEngine = null } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], rosterFingerprint = null, sweepGapMs = 5000, transcriptIndex = null, readUserState = () => ({}), convIndex = () => null, groupSetting = () => 'none', authEnabled = () => false, publicUrl = () => null, getMounts = () => null, sessions = () => null, sessionMeta = () => null, onGroupsPending = () => {}, decisionEngine = null } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
+  // lane roster-per-pass: THE live roster, built ONCE per pass for every reader below — the channels engine (access,
+  // outbound), the groups engine, the liveness reader (src/server/roster-pass.js: frozen entries, the memo checked against
+  // the fingerprint of what the builder reads; server.js hands both)
+  const rosterPass = require('./roster-pass.js').createRosterPass(liveSessions, { fingerprint: rosterFingerprint });
+  liveSessions = rosterPass.read;
 
   // `integrations` is the §14 store handle: adapters ask its
   // `resolveIntegration(id)` — never `process.env` — and every real row's
@@ -94,14 +139,31 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
     const RCm = require('../record-clear.js');
     for (const s of live.values()) { try { N.redactGroupCards(s, keys, RCm.CLEARED_TEXT); } catch (e) { console.warn('[groups] a group card was not re-worded:', e && e.message); } }
   };
-  const liveness = livenessReader({ liveSessions, readUserState, convIndex, metaDir: require('path').join(dataDir, 'session-meta') });
+  const liveness = livenessReader({ liveSessions, readUserState, convIndex, metaDir: require('path').join(dataDir, 'session-meta'), transcriptIndex });   // transcriptIndex: a drill's own trees (null = the hub's)
   const groups = createGroups({ store: channels.store, dataDir, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting, onPending: onGroupsPending, onCleared: onGroupCardsCleared, liveness, userTodos });
-  // the archive / boot door: ONE sweep at a time, a write during a sweep re-runs it once after
-  let sweeping = null, sweepAgain = false;
+  // the archive / boot door: ONE sweep at a time, a write during a sweep re-runs it once after — and (lane roster-per-pass)
+  // WRITES DO NOT QUEUE SWEEPS: a sweep starts no sooner than `sweepGapMs` (5 s) after the last one ENDED. A write after a
+  // quiet gap sweeps AT ONCE (the leading edge); a burst is answered by one sweep per gap, the last write always followed by
+  // one (120 writes in 55 s ⇒ at most 12 sweeps). In a person's terms: after an archive, a sender waiting on that
+  // conversation is told after at most the sweep already running, 5 s, and one more sweep — and a sweep holds up to 1 + G
+  // walks, each with its own 10 s bound: its index of both trees, then one fresh walk for each of its G gone candidates whose
+  // act would change something (a «gone» already said in a live multi-member group is no act, so it is never asked again).
+  let sweeping = null, sweepAgain = false, lastEnd = -Infinity, gapWait = null;
+  const runSweep = () => {
+    gapWait = null;
+    sweeping = groups.sweepEnded().catch((e) => console.warn('[groups] ended sweep failed:', e && e.message)).finally(() => { sweeping = null; lastEnd = now(); if (sweepAgain) { sweepAgain = false; groups.noteUserState(); } });
+    return sweeping;
+  };
   groups.noteUserState = () => {
     if (sweeping) { sweepAgain = true; return sweeping; }
-    sweeping = groups.sweepEnded().catch((e) => console.warn('[groups] ended sweep failed:', e && e.message)).finally(() => { sweeping = null; if (sweepAgain) { sweepAgain = false; groups.noteUserState(); } });
-    return sweeping;
+    if (gapWait) return gapWait.p;
+    const wait = lastEnd + sweepGapMs - now();
+    if (!(wait > 0)) return runSweep();
+    let go = null;
+    const p = new Promise((r) => { go = r; });
+    gapWait = { p, t: setTimeout(() => go(runSweep()), wait) };
+    if (gapWait.t && gapWait.t.unref) gapWait.t.unref();
+    return p;
   };
   // THE GROUP CARDS' RING (lane group-report-card): the card door (src/normalizers.js feedGroupCard) keeps it on the live
   // session; its meta write is HERE, beside the meta store — ONE write per session per burst (a report's N cards are
@@ -134,7 +196,7 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   app.use(webhookRoutes.router);
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, groups, touches, flushGroupCards, shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  return { channels, groups, touches, flushGroupCards, liveness, roster: liveSessions, rosterChanged: () => rosterPass.invalidate(), rosterBuilds: () => rosterPass.builds(), shutdown: () => { try { channels.apiCards.stop(); } catch {} try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { flushGroupCards(); } catch (e) { console.warn('[groups] card flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create, livenessReader };

@@ -150,8 +150,16 @@ function create({
   let seq = 0;
 
   const live = () => { try { return (roster() || []).filter((s) => s && s.cid); } catch (e) { log.warn && log.warn('[groups] roster threw:', e && e.message); return []; } };
-  const sessionOf = (cid) => live().find((s) => s.cid === cid) || null;
+  // lane roster-per-pass: the wiring hands a roster that is built ONCE per pass (src/server/roster-pass.js) and carries the
+  // pass's own index — a lookup, never a rebuild; a plain roster function (a drill's) keeps the old find
+  const sessionOf = (cid) => {
+    if (typeof roster.sessionOf !== 'function') return live().find((s) => s.cid === cid) || null;
+    try { return roster.sessionOf(cid); } catch (e) { log.warn && log.warn('[groups] roster threw:', e && e.message); return null; } // as live() answers a throw
+  };
   const all = () => store.groups.live().groups;
+  // lane roster-per-pass: a synchronous pass over groups / members reads ONE roster (checked once at its start —
+  // src/server/roster-pass.js); a plain roster function (a drill's) has no passes: each read is its own
+  const inPass = (fn) => (typeof roster.pass === 'function' ? roster.pass(fn) : fn());
   const getGroup = (id) => (G.isGroupId(id) ? all()[id] || null : null);
   const endedOf = (cid) => { const e = (store.groups.live().ended || {})[cid]; return e && G.ENDED_WHYS.includes(e.why) ? { why: e.why, at: Number(e.at) || null } : null; };
   // the liveness the PURE rules read in the engine (the await table): live roster ⇒ running, the ledger ⇒ ended, else stopped
@@ -343,7 +351,7 @@ function create({
   const ownerUnread = (g) => unreadFor(g, G.OWNER, ownerReadOf(g.id));
   /** The OWNER's list (the panel, every broadcast): every group + its unread
    *  count for the owner. Agents read `listFor` (their own counts). */
-  const list = () => Object.values(all()).map((g) => ({ ...view(g), unread: ownerUnread(g) })).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  const list = () => inPass(() => Object.values(all()).map((g) => ({ ...view(g), unread: ownerUnread(g) })).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0)));
   const pendingChanged = () => { try { onPending(); } catch (e) { log.warn && log.warn('[groups] pending hook failed:', e && e.message); } };
   // the .197 integration (redact × group-report-card): ONE options shape carries both lanes' third parameters — the
   // cleared-record facts ("Clear content…") and the pending-strip flag (the roster call passes { pending: false })
@@ -369,7 +377,8 @@ function create({
    *  nothing sent). */
   const rosterSig = new Map();   // gid → "cid=name:live|…" as last announced
   const sigOfView = (v) => (v.members || []).map((m) => `${m.member}=${m.name}:${m.live ? 1 : 0}`).join('|');
-  function noteRoster() {
+  function noteRoster() { return inPass(() => noteRosterNow()); }
+  function noteRosterNow() {
     const names = new Map(live().map((s) => [s.cid, s]));
     const changed = [];
     for (const g of Object.values(all())) {
@@ -1163,17 +1172,62 @@ function create({
     const out = { closed: [], marked: [], revived: [] };
     for (const g of Object.values(all())) for (const m of g.members) seen.add(m.member);
     for (const cid of Object.keys(store.groups.live().ended || {})) seen.add(cid);
-    let sliceAt = sliceClock();
-    for (const cid of seen) {
-      if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) { await nextTurn(); sliceAt = sliceClock(); }
-      let lv = null;
-      try { lv = liveness(cid); } catch { lv = null; }
+    // lane roster-per-pass: ONE judge per sweep — the transcript trees read once (the wiring's forSweep), the roster once
+    // per synchronous segment (src/server/roster-pass.js); a reader without forSweep is asked per id as before
+    let judge = liveness;
+    if (typeof liveness.forSweep === 'function') { try { judge = (await liveness.forSweep()) || liveness; } catch { judge = liveness; } }
+    // each id judged right before its act, in seen's order, as before; the ids judged between two awaits (a slice's
+    // yield, an act) are ONE synchronous segment and read ONE roster (inPass) — an act's writes are seen by the next
+    const ids = [...seen];
+    let i = 0, sliceAt = sliceClock();
+    const liveGroupsOf = () => {   // the members of the unarchived groups, read once per segment (an act's writes end the segment)
+      let inLive = null, inPair = null;
+      const fill = () => { inLive = new Set(); inPair = new Set(); for (const g of Object.values(all())) if (!g.archivedAt) for (const m of g.members) { inLive.add(m.member); if (g.pair) inPair.add(m.member); } };
+      const has = (cid) => { if (!inLive) fill(); return inLive.has(cid); };
+      has.pair = (cid) => { if (!inLive) fill(); return inPair.has(cid); };   // …in an unarchived PAIR (where an end closes the group)
+      return has;
+    };
+    // the act a verdict asks for (the rule as before): archived / gone ⇒ end (unless already said and in no live group);
+    // a lifted archive ⇒ revive; else nothing. An end ALREADY SAID (the same why) changes something only in a live PAIR —
+    // it closes it; in a live multi-member group onConversationEnded skips it as said — so it is no act there, and a «gone»
+    // that changes nothing is never asked again (round 2's small: a gone member that stays in a live multi-member group
+    // cost one fresh walk every steady sweep)
+    const decide = (cid, lv, hasLiveGroup) => {
       const st = lv && lv.state;
       const e = endedOf(cid);
       if (st === 'archived' || st === 'gone') {
-        const hasLive = Object.values(all()).some((g) => !g.archivedAt && G.memberOf(g, cid));
-        if (!e || e.why !== st || hasLive) { const r = await onConversationEnded(cid, { why: st, at: lv.at || null }); out.closed.push(...r.closed); out.marked.push(...r.marked); }
-      } else if (e && e.why === 'archived' && (st === 'running' || st === 'stopped')) { if (await onConversationRevived(cid)) out.revived.push(cid); }
+        const hasLive = hasLiveGroup(cid);   // = Object.values(all()).some((g) => !g.archivedAt && G.memberOf(g, cid))
+        if (!e || e.why !== st || (hasLive && hasLiveGroup.pair(cid))) return { cid, end: { why: st, at: lv.at || null } };
+      } else if (e && e.why === 'archived' && (st === 'running' || st === 'stopped')) return { cid, revive: true };
+      return null;
+    };
+    const nextAct = () => {
+      const hasLiveGroup = liveGroupsOf();
+      for (; i < ids.length; i++) {
+        if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) return { yield: true };
+        const cid = ids[i];
+        let lv = null;
+        try { lv = judge(cid); } catch { lv = null; }
+        const act = decide(cid, lv, hasLiveGroup);
+        if (act) { i++; return act; }
+      }
+      return null;
+    };
+    for (;;) {
+      let act = inPass(nextAct);
+      if (!act) break;
+      if (act.yield) { await nextTurn(); sliceAt = sliceClock(); continue; }
+      // round 2 — A «GONE» VERDICT IS TRUE WHEN IT ACTS: the sweep's index is the disk at its start; a gone candidate is
+      // asked again (the reader's confirm: the disk and the roster NOW, off the loop) and the act is what THAT answer asks
+      if (act.end && act.end.why === 'gone' && typeof judge.confirm === 'function') {
+        let lv2 = null;
+        try { lv2 = await judge.confirm(act.cid); } catch { lv2 = null; }
+        const cid = act.cid;
+        act = inPass(() => decide(cid, lv2, liveGroupsOf()));
+        if (!act) continue;
+      }
+      if (act.end) { const r = await onConversationEnded(act.cid, act.end); out.closed.push(...r.closed); out.marked.push(...r.marked); }
+      else if (await onConversationRevived(act.cid)) out.revived.push(act.cid);
     }
     return out;
   }
@@ -1395,7 +1449,8 @@ function create({
   }
 
   /** The groups a conversation belongs to, each with its unread count. */
-  function listFor(cid) {
+  function listFor(cid) { return inPass(() => listForNow(cid)); }
+  function listForNow(cid) {
     const out = [];
     for (const g of Object.values(all())) {
       const m = G.memberOf(g, cid);
