@@ -15,7 +15,7 @@ parentPort.on('message', (msg) => {
   if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
   if (msg && msg.op === 'rebuild') {
     try {
-      const uh = Object.assign(Object.create(UsageHistory.prototype), { dir: msg.dir, ledgerWindowMs: msg.windowMs, ledgerHotMaxBytes: msg.hotMaxBytes, coldMaxBytes: msg.coldMaxBytes, _evCache: null });
+      const uh = Object.assign(Object.create(UsageHistory.prototype), { dir: msg.dir, ledgerWindowMs: msg.windowMs, ledgerHotMaxBytes: msg.hotMaxBytes, coldMaxBytes: msg.coldMaxBytes, _evCache: null, firstLoadInWorker: false });
       const { built, transfer } = uh._packWhole();
       parentPort.postMessage({ ev: 'done', id: msg.id, built }, transfer);
     } catch (e) {

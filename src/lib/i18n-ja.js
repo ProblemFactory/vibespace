@@ -1644,6 +1644,7 @@ export default {
   "⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). This is NORMAL under pooling and needs no action; named accounts are unaffected. Do NOT run /logout to “clean it up” — on a multi-copy account that revokes the login everywhere. Run /login in a terminal only if you actually use the bare CLI login.": "⚠ このマシン自身の CLI ログインに有効なトークンがありません（named/プールアカウントが全セッションを担うため放置され、refresh token が期限切れになりました）。プーリング下では正常な状態で、対応は不要です。named アカウントには影響しません。「掃除」のつもりで /logout を実行しないでください——複数箇所で保持しているアカウントは全体がログアウトされます。素の CLI ログインを実際に使う場合のみ、ターミナルで /login してください。",
   "via pool “{name}”": "プール“{name}”経由",
   "not in the ledger yet": "まだ台帳に未記帳",
+  "the usage ledger is still loading": "使用量の台帳を読み込み中",
   "Transfer status lost (server restarted) — it may still have completed": "転送の状態が失われました（サーバー再起動）——完了している可能性があります",
   "Click to copy": "クリックでコピー",
   "Copy as JSON": "JSON としてコピー",

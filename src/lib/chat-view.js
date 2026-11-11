@@ -2354,6 +2354,10 @@ class ChatView {
             // both matter (2.294.0), so name the machine after the account
             if (r.host && r.hostName) val += ` · ${t('on {host}', { host: r.hostName })}`;
           }
+        } else if (r?.loading) {
+          // the hub's ledger has not loaded yet (its first load failed and is tried again — lane ledger-boot-load): never «not in the ledger yet»
+          const sb = sessionBilling();
+          val = (sb ? sb + ' · ' : '') + t('the usage ledger is still loading');
         } else if (isRemote) {
           const sb = sessionBilling();
           val = (sb ? sb + ' · ' : '') + t('remote — reaches the ledger about a minute after the turn ends');

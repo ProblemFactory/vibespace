@@ -46,6 +46,7 @@ const DECLARED = {
   'drop _rebuildOnLoop': 'THE DECLARED ON-LOOP REBUILD — the sync full-row readers only',
   'drop _packWhole': "the worker's own instance (usage-cold-worker.js)",
   'set _swapCache': 'THE SWAP — one assignment',
+  'set _bootLoad': "the hub's first load (lane ledger-boot-load): an EMPTY placeholder that says «loading» — no line read; the worker's cache replaces it (_swapCache)",
 };
 const ONLOOP_CALLERS = new Set(['aggregate', '_allRows']); // migrations and tests: no server caller (the grep below)
 function rebuildCensus(src) {

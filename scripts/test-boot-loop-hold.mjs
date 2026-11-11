@@ -15,7 +15,7 @@
 //     judges the hold and never moves. The hosted reds were the product — the listen tick measured 255 ms of main-thread
 //     CPU here — so the groups sweep, the OTel replay and the usage cursor prune were sliced off it (kb-design-lessons §19).
 //   ② non-vacuous: the N sessions reconnected, the stash replay / identity repair / ledger warm ran (the warm loaded the
-//     shape's rows in > 100 slices), and the server's own boot clock (GET /api/boot-trace) agrees with this one.
+//     shape's rows — since ledger-boot-load by joining the first load in the fold worker, no slice on the loop), and the server's own boot clock (GET /api/boot-trace) agrees with this one.
 //   ③ RED CONTROL: the same boot with VIBESPACE_BOOT_TRACE_SYNC=1 (the warm the old way, in one tick) is red by the
 //     same judge — and VIBESPACE_BOOT_TRACE=1 names the hold: the step (usage-ledger-warm) and its sync sites.
 //     (lane ledger-dedup-law r10) + a TWO-HOLD control: short calls across two holds — each credited its own share, named.
@@ -181,7 +181,7 @@ const reconnected = (log1.match(/✓ Reconnected:/g) || []).length;
 check(`the ${SESSIONS} sessions were restored (the restore really ran)`, !!b1 && reconnected === SESSIONS, reconnected);
 const span = (r, n) => ((r && r.spans) || []).find((s) => s.name === n) || null;
 const warm1 = span(rep1, 'usage-ledger-warm');
-check('the ledger warm ran in slices and loaded the shape\'s ledger', !!warm1 && warm1.slices > 100 && warm1.rows > shape.rows.ledger * 0.5, warm1);
+check('the ledger warm joined the first load in the fold worker (lane ledger-boot-load: no slice parsed on the loop) and loaded the shape\'s ledger', !!warm1 && warm1.worker === true && warm1.slices === 0 && warm1.rows > shape.rows.ledger * 0.5, warm1);
 check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', ['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null), rep1 && rep1.spans);
 check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, j1.ok, { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
 // r12: the server names EVERY hold it recorded (≥ 100 ms) — its step / span, or the frames its CPU stood in (the sampler ran).

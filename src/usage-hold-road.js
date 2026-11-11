@@ -1394,8 +1394,9 @@ class UsageHoldRoad {
    *  then every paused host of the shard judged again (`_rejudge`). One read in flight per shard. */
   _judgeByIndex(shard) {
     if (this._judgeKick.has(shard)) return;
-    const p = this.whenWarm().then(() => { if (this._ingestIndex(shard)) return null; const ix = this._ingestIx.get(shard); return ix && ix.loading; })
-      .then(() => { this._judgeKick.delete(shard); this._rejudge(shard); }, (e) => { this._judgeKick.delete(shard); console.warn(`[usage] ${path.basename(shard)} could not be judged by its index: ${(e && e.message) || e} — judged again at the next ingest`); });
+    let later = false; // ledger-boot-load round 2: the wait is bounded by the try — after a failed first-load try the shard is judged again at the next ingest (never on the empty «loading» placeholder)
+    const p = this.whenWarm().then(() => { if (this._booting && this._booting()) { later = true; return null; } if (this._ingestIndex(shard)) return null; const ix = this._ingestIx.get(shard); return ix && ix.loading; })
+      .then(() => { this._judgeKick.delete(shard); if (!later) this._rejudge(shard); }, (e) => { this._judgeKick.delete(shard); console.warn(`[usage] ${path.basename(shard)} could not be judged by its index: ${(e && e.message) || e} — judged again at the next ingest`); });
     this._judgeKick.set(shard, p);
   }
   /** Every paused host of a shard judged again now: in shape ⇒ resumed (its notice closes), else paused by the verdict. */
@@ -1551,7 +1552,7 @@ class UsageHoldRoad {
    *  anchor sweep waits for the warm while its automatic decision is skipped (usage-estimator `wholeLedgerGate`). */
   ledgerLoading() { return this._warmLoading() || (this._primeHolds && this._primeHolds.size ? { priming: true, at: Math.min(...[...this._primeHolds].map((h) => h.at)), bytesLeft: 0 } : null); }
   /** The warm alone (the prime's own reads: it must not wait for itself). */
-  _warmLoading() { const left = this._pendingLeft(); return left > this._takeoverMax() ? { ...this._evCache.loading } : null; }
+  _warmLoading() { if (this._booting()) { this._loadEvents(); return this._booting() ? { ...this._evCache.loading } : null; } const left = this._pendingLeft(); return left > this._takeoverMax() ? { ...this._evCache.loading } : null; } // ledger-boot-load: the first load in the fold worker is loading for everyone
   /** PRIMING IS LOADING — FOR EVERYONE (hotfix usage-ledger-walk A2): while the first learn of a cold cost memo runs
    *  stepped (usage-anchors primeCostsStepped), this ledger says it is loading — ONE signal: the estimator answers no
    *  estimate and persists no rate, costBetweenMulti says `partial` and memoizes nothing, the pool engine's
@@ -1575,9 +1576,9 @@ class UsageHoldRoad {
   warmSettled() { return this._warmP ? this._warmP.then(() => { }, () => { }) : Promise.resolve(); }
   /** THE WHOLE LEDGER (lane ledger-dedup-law r2): resolves at once when a reader may load what is left in its own tick, else
    *  when the stepped warm ends — a warm that a reload restarted is the same warm. Never rejects. */
-  whenWarm() { return this._waitBigWarm() || (this._primeHolds && this._primeHolds.size && this._primeAll ? this._primeAll.p : null) || Promise.resolve(); }
+  whenWarm() { return (this._booting() ? (this._loadEvents(), this.bootLoadSettled()) : null) || this._waitBigWarm() || (this._primeHolds && this._primeHolds.size && this._primeAll ? this._primeAll.p : null) || Promise.resolve(); }
   /** An async reader's wait: the warm has more left than a takeover may parse ⇒ wait for it, else nothing. */
-  _waitBigWarm() { return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
+  _waitBigWarm() { if (this._booting()) return this._bootWait(); return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
 }
 
 module.exports = { UsageHoldRoad, setRecordCut, setReadClass, readClassOf, SET_ASIDE_DIR, SET_ASIDE_MAX, SET_READ_PASSES, SET_READ_REFUSED };

@@ -254,7 +254,7 @@ app.get('/api/usage-stats/rid-info', async (req, res) => {
     // global-bucket event (codex = the ChatGPT login, not "CLI login") and can
     // show the ledger's served model / codex effort when the record has none.
     res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName, be: ev.be || 'claude', model: ev.model || null, effort: ev.effort || null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { if (e && e.code === 'LOADING') return res.json({ found: false, loading: true }); res.status(500).json({ error: e.message }); } // lane ledger-boot-load: a first load that failed is «still loading», never «not in the ledger yet»
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() })); // the editor: the effective table + its sources (lane cli-update-needs-nothing)
 app.post('/api/usage-stats/pricing', (req, res) => {

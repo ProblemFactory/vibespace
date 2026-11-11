@@ -979,7 +979,7 @@ const mountHealth = require('./src/server/mount-health-watch.js').create({ file:
 }
 
 const usageHistory = new UsageHistory({
-  dataDir: path.join(__dirname, 'data'), paused: (roots) => mountHealth.paused('usage-walk', roots), // lane fuse-canary-notice: a wedged mount under the walk pauses it
+  dataDir: path.join(__dirname, 'data'), firstLoadInWorker: !bootTrace.syncControl /* ledger-boot-load: the first load in the fold worker; the boot-trace control keeps the one-tick warm */, paused: (roots) => mountHealth.paused('usage-walk', roots), // lane fuse-canary-notice: a wedged mount under the walk pauses it
   // THE RECORD, not list() (prod-stall-202): list() reads every account's login files and the
   // walker asks this once per ledger line — seconds of synchronous NFS reads per walk step on
   // production. The same three fields list()'s row carries: its type/backend defaults, and a

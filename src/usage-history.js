@@ -270,6 +270,7 @@ const CURSOR_SLICE_MS = 20;   // lane ci-351-reds: the walk's prune pass hands t
 // THE NAMES' CEILING (B r2): a table that reaches ARR_NAMES_MAX names RESTARTS the log — its names are dropped and `start`
 // moves to the next sequence number, so every mark before it is no longer held (that slot walks, master's road); the
 // sequence numbers go on rising (a mark is never re-used for another entry).
+const BOOT_RETRY_MS = 5000, BOOT_RETRY_MAX_MS = 120000; // ledger-boot-load: a failed first load in the fold worker is tried again at the next ask after 5 s, 10 s … ≤ 2 min
 const ARR_CAP = 100000, ARR_NAMES_MAX = 4096;
 const HOST_INDEX_KEEP_MS = 8 * 86400e3, HOST_INDEX_MAX_ROWS = 200000; // B2 r2: the dark-host index keeps 8 days (the question asks 7); past 200 000 rows (≈ 2.4 MB) it keeps the 8 days behind its newest row
 function _logArrival(c, ev) {
@@ -306,7 +307,9 @@ class UsageHistory {
   // runs in that same loop iteration, no timer between; the second lands past the next timers phase). Injected only by the parity suite,
   // which holds the yield shut to prove no reader sees a half-walked ledger.
   constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null,
-    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise((r) => setImmediate(() => setImmediate(r))), paused = () => false }) {
+    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise((r) => setImmediate(() => setImmediate(r))), paused = () => false,
+    firstLoadInWorker = false }) {
+    this.firstLoadInWorker = !!firstLoadInWorker; // ledger-boot-load: the hub's ledger takes its first load in the fold worker
     holdRoadInstall(); // r11: the hold road (src/usage-hold-road.js) joins the prototype with the first instance — below the class
     this._scanBudgetBytes = scanBudgetBytes;
     this._scanYield = scanYield;
@@ -707,7 +710,11 @@ class UsageHistory {
       // and the cursor write re-walks those rows (20 kills: 1 128 rows for 152 request ids, compounding). The ledger knows
       // every request id it holds once warm: the walk waits for the warm (its rows are in memory; the checks below re-run
       // after the wait) and the commit skips every row whose id the ledger already has
-      if (typeof this.whenWarm === 'function' && this._evCache) { try { await this.whenWarm(); } catch { } }
+      // ledger-boot-load round 2 — NOTHING WAITS ON A LOAD THAT IS FAILING (a first load whose tries failed kept this walk pending
+      // for good: every later scan() answered skipped, GET /api/usage-stats and the rid / mid lookups awaited scanSettled() and
+      // never reached their LOADING answer, the hub's own turns were not added): on the hub's first load the walk waits for the
+      // TRY under way only — between tries it goes on at once and its commit dedups by the shards' tails (the cold road below)
+      if (typeof this.whenWarm === 'function' && this._evCache) { try { if (this._booting()) { const b = this._boot; if (b && b.job) await b.job; } else await this.whenWarm(); } catch { } }
       // ROUND 4 (true words 6): ON A COLD LEDGER — the boot's own order: the walk runs BEFORE the warm — the rows a killed walk
       // appended (its cursor write lost) are the TAIL of their shards: each shard this walk appends to has its last bytes read
       // (fs.promises, ≤ TAIL_DEDUP_MAX) and a row whose request id is there is not appended again (20 kills: bounded)
@@ -1058,6 +1065,11 @@ class UsageHistory {
     // ONE SNAPSHOT (usage-ledger-walk B r2, MUST 2): inside a pinned ask (_pinLoad) nothing loads again — its version, its
     // arrival mark and its sums are of the ledger as the pin's own load left it
     if (this._pinDepth > 0 && this._evCache) return this._evCache.events;
+    // NO READER LOADS THE LEDGER IN ITS OWN TICK (lane ledger-boot-load — the owner's boot: the pool engine's first anchor sweep at
+    // +20 s → the whole-ledger gate's prime() → the estimator's first count parsed and hashed all 717 MB in ONE tick, 12.2 s):
+    // the hub's ledger (`firstLoadInWorker`) takes its FIRST load in the fold worker — the road a reload takes — and every reader
+    // meanwhile answers from an empty cache that says «loading» (ledgerLoading ⇒ {booting}); no line is read on the loop.
+    if (this._booting()) return this._bootLoad();
     // a reader during the stepped boot warm (B-1319, warmStepped): it takes the warm's pass over and finishes it HERE,
     // in its own tick — a money reader never answers from half a ledger. Lane ledger-dedup-law (the latent twin): only
     // while ≤ TAKEOVER_MAX_BYTES are left (≈ 8 steps, inside the boot law) — past it the warm keeps its pass, the async
@@ -1070,13 +1082,77 @@ class UsageHistory {
     const steps = this._loadSteps(); for (let r = steps.next(); !r.done; r = steps.next()); // chunkBytes Infinity: never yields
     return this._evCache.events;
   }
+  /** An empty cache (the load pass fills it; the boot load's placeholder stays empty until the worker's cache is swapped in). */
+  _newCache() { return { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), hostAcct: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() }; }
+  /** THE FIRST LOAD IN THE FOLD WORKER (lane ledger-boot-load): an empty placeholder cache marked `booting` (its generation new),
+   *  and ONE rebuild job in the worker (usage-cold-worker.js parses and hashes every line off the loop; _stageBuilt hands the
+   *  cache over a chunk a turn; _swapCache replaces the placeholder — its checkedAt 0, so the rows appended meanwhile are read
+   *  from the worker's own marks, once). A worker that fails is said once by name and tried again at the next ask after a
+   *  backoff — never a load on the loop. → the placeholder's (empty) rows */
+  _bootLoad() {
+    if (!this._evCache) {
+      this.ledgerGen = (this.ledgerGen || 0) + 1;
+      this._evCache = this._newCache(); this._evCache.booting = true; this._evCache.checkedAt = Infinity;
+      this._evCache.loading = { booting: true, at: Date.now(), bytesLeft: this._unreadBytes() };
+    }
+    const b = this._boot || (this._boot = { at: Date.now(), tries: 0, fails: 0, retryAt: 0, job: null, tryP: null, err: null, done: null, landed: null, awaited: false, timer: null });
+    if (!b.done) b.done = new Promise((r) => { b.landed = r; });
+    if (!b.job && Date.now() >= b.retryAt) {
+      b.tries++;
+      this._rbFail = null; // the first load keeps its OWN backoff (5 s doubling ≤ 2 min; a reload's is 60 s ≤ 15 min)
+      const t = this._requestRebuild('the first load');
+      b.job = t.then(() => { this._boot = null; clearTimeout(b.timer); b.landed(); }, (e) => {
+        b.job = null; b.fails++; b.err = String((e && (e.why || e.message)) || e).slice(0, 200); // the cause itself (the reload's sentence names a previous cache the boot has not)
+        const wait = Math.min(BOOT_RETRY_MAX_MS, BOOT_RETRY_MS * 2 ** (b.fails - 1)); b.retryAt = Date.now() + wait;
+        if (b.fails === 1) { // SAID ONCE, by name — the tries after it are counted in the line that says it landed
+          try { console.warn(`[usage] the ledger's first load in the fold worker failed (${b.err}) — the usage figures say «loading»; it is tried again after ${Math.round(wait / 1000)} s, then doubling to ≤ ${BOOT_RETRY_MAX_MS / 60e3} min — never parsed on the main loop`); } catch { }
+          try { global.__vsEvent?.('usage-first-load-failed', b.err); } catch { }
+        }
+        if (b.awaited) this._bootRearm(b);
+      });
+      b.tryP = t.then(() => { }, () => { throw this._bootErr(b); }); b.tryP.catch(() => { }); // an async reader's wait: THIS try (after b.job's handler: b.err is set)
+      if (b.nextR) { const r = b.nextR; b.next = null; b.nextR = null; b.job.then(r); } // the waits for «the next try» end with this one
+    }
+    return this._evCache.events;
+  }
+  /** The ledger's first load has not landed (the hub's ledger only — `firstLoadInWorker`). */
+  _booting() { return !!this.firstLoadInWorker && (!this._evCache || !!this._evCache.booting); }
+  /** A waiter (the anchor sweep's gate, the boot warm) is an ask still open: it asks again when the backoff ends. */
+  _bootRearm(b) {
+    if (b.job || b.timer || !b.fails || this._boot !== b) return;
+    b.timer = setTimeout(() => { b.timer = null; if (this._boot !== b) return; b.retryAt = Math.min(b.retryAt, Date.now()); try { this._loadEvents(); } catch { } }, Math.max(0, b.retryAt - Date.now()));
+    b.timer.unref?.();
+  }
+  _bootErr(b) {
+    return Object.assign(new Error(`the usage ledger is still loading — its first load in the fold worker failed (${b.err}); it is tried again ${b.awaited ? 'in' : 'at the next ask after'} ${Math.max(0, Math.ceil((b.retryAt - Date.now()) / 1000))} s`), { code: 'LOADING' });
+  }
+  /** A WAIT ON THE BOOT LOAD IS BOUNDED BY THE TRY (round 2 — this resolved only when a try LANDED, so a failing load kept every
+   *  waiter for good): resolves when the try under way ends, landed or failed; inside a failed try's backoff, when the NEXT try
+   *  ends (this wait is an open ask: that try starts when the backoff ends). Never rejects. A waiter that needs the ledger whole
+   *  looks again (the whole-ledger gate re-reads ledgerLoading() and waits for the next try — one wait at a time). */
+  bootLoadSettled() {
+    const b = this._boot; if (!b || !b.done) return Promise.resolve();
+    b.awaited = true;
+    if (b.job) return b.job; // never rejects: its two handlers return
+    this._bootRearm(b);
+    return b.next || (b.next = new Promise((r) => { b.nextR = r; }));
+  }
+  /** The boot warm's span (server.js's bootTrace): resolves when the first load LANDS — the boot's own one wait, not a reader's. */
+  bootLoadLanded() { const b = this._boot; return b && b.done ? b.done : Promise.resolve(); }
+  /** An ASYNC reader's wait (aggregateAsync, eventForRid/Mid): the try under way — or, inside a failed try's backoff, its
+   *  failure at once (code LOADING: the route says the ledger is still loading; never an answer from the empty cache). */
+  _bootWait() {
+    this._loadEvents();
+    const b = this._boot;
+    return !b ? null : b.job ? b.tryP : Promise.reject(this._bootErr(b));
+  }
   /** THE LOAD PASS (one implementation, two drivers): `_loadEvents` runs it to the end in one call; `warmStepped` hands
    *  the loop back at every `yield` — after each `chunkBytes` slice of a shard (each slice lands whole: its lines taken,
    *  the shard's place + append-proof moved past them) and between the heavy settle / sort steps. */
   *_loadSteps(chunkBytes = Infinity, trimBatch = TRIM_BATCH_ROWS) {
     const stepped = chunkBytes !== Infinity;
     if (!this._evCache) this.ledgerGen = (this.ledgerGen || 0) + 1; // a rebuilt cache = a new generation (cost memos keyed on it, r4)
-    if (!this._evCache) this._evCache = { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), hostAcct: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() };
+    if (!this._evCache) this._evCache = this._newCache();
     const c = this._evCache;
     // inc-mtox23xw (2.369.36): this ran a readdir + a stat per shard on EVERY
     // call — and the estimator calls it once per anchor PAIR (thousands per
@@ -1467,6 +1543,10 @@ class UsageHistory {
    *  files as they are now, stepped (lane ledger-dedup-law r2); a cache another door replaced whole ends it. Resolves
    *  {slices, rows, restarts}; never rejects. */
   warmStepped({ chunkBytes = WARM_SLICE_BYTES, trimBatch = TRIM_BATCH_ROWS, next = (fn) => setImmediate(fn) } = {}) {
+    if (this.firstLoadInWorker) { // ledger-boot-load: the boot's warm JOINS the first load in the fold worker (no slice parsed on the loop)
+      this._loadEvents();
+      return (this._warmP = this.bootLoadLanded().then(() => { const c = this._evCache; return { slices: 0, rows: c ? c.events.length + c.cold.n : 0, worker: true }; }));
+    }
     return (this._warmP = new Promise((resolve) => {
       let gen = null, cur = null, slices = 0, phase = 'load', keys = null, restarts = 0;
       const done = () => { if (this._warmRestart === restart) this._warmRestart = null; if (cur && cur.pending === gen) cur.pending = null; const c = this._evCache; resolve({ slices, rows: c ? c.events.length + c.cold.n : 0, restarts }); };
@@ -1540,14 +1620,18 @@ class UsageHistory {
     const t0 = Date.now();
     try {
       const res = await this._inWorker({ op: 'rebuild', dir: this.dir, windowMs: this._ledgerWindowMs(), hotMaxBytes: this._ledgerHotMaxBytes(), coldMaxBytes: this._coldMaxBytes() }, []);
-      const next = await this._stageBuilt(res.built);
+      const t1 = Date.now(), next = await this._stageBuilt(res.built);
       this._swapCache(next);
       this._rbFail = null;
-      console.log(`[usage] the ledger cache was rebuilt in the fold worker (${job.why}${job.asks > 1 ? `; ${job.asks - 1} more ask(s) joined it` : ''}): ${next.events.length + next.cold.n} rows in ${((Date.now() - t0) / 1000).toFixed(1)} s — the previous cache served meanwhile`);
+      const rows = next.events.length + next.cold.n, b = this._boot;
+      if (b) { // the first load (lane ledger-boot-load): its cost said — the worker's wall time, the hand-over's
+        this.firstLoadStats = { tries: b.tries, workerMs: t1 - t0, stageMs: Date.now() - t1, chunks: res.built.chunks.length, rows };
+        console.log(`[usage] the ledger's first load ran in the fold worker${b.fails ? ` (try ${b.tries}; the failure said above)` : ''}: ${rows} rows read and hashed in ${((t1 - t0) / 1000).toFixed(1)} s off the loop, handed over in ${((Date.now() - t1) / 1000).toFixed(1)} s (${res.built.chunks.length} chunks, one a turn) — the usage figures said «loading» meanwhile`);
+      } else console.log(`[usage] the ledger cache was rebuilt in the fold worker (${job.why}${job.asks > 1 ? `; ${job.asks - 1} more ask(s) joined it` : ''}): ${next.events.length + next.cold.n} rows in ${((Date.now() - t0) / 1000).toFixed(1)} s — the previous cache served meanwhile`);
     } catch (e) {
       const n = (this._rbFail ? this._rbFail.n : 0) + 1, wait = Math.min(REBUILD_RETRY_MAX_MS, REBUILD_RETRY_MS * 2 ** (n - 1)), why = (e && e.message) || String(e);
-      this._rbFail = { n, retryAt: Date.now() + wait, err: Object.assign(new Error(`the usage ledger could not be rebuilt after ${job.why} (${why}) — the previous figures keep serving; it tries again in ${Math.round(wait / 1000)} s`), { code: 'REBUILD' }) };
-      console.warn(`[usage] the ledger cache rebuild failed (${job.why}): ${why} — the previous cache keeps serving; next try in ${Math.round(wait / 1000)} s`);
+      this._rbFail = { n, retryAt: Date.now() + wait, err: Object.assign(new Error(`the usage ledger could not be rebuilt after ${job.why} (${why}) — the previous figures keep serving; it tries again in ${Math.round(wait / 1000)} s`), { code: 'REBUILD', why }) };
+      if (!this._boot) console.warn(`[usage] the ledger cache rebuild failed (${job.why}): ${why} — the previous cache keeps serving; next try in ${Math.round(wait / 1000)} s`);
       throw this._rbFail.err;
     }
   }
