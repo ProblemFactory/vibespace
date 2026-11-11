@@ -430,6 +430,7 @@ const CENSUS = [
   { file: 'src/server/egress-proxy.js', has: 'ur.pipe(res);', route: 'the egress CONNECT/http proxy', verdict: 'declared', why: 'a proxy: the upstream\'s own response headers, never ours to name' },
   { file: 'src/server/path-mounts.js', has: 'ur.pipe(res);', route: 'path-mounted services (/svc/…)', verdict: 'declared', why: 'a proxy: the upstream\'s own response headers, never ours to name' },
   { file: 'src/webdav.js', has: 'return stream.pipe(res);', route: 'GET /dav/…', verdict: 'declared', why: 'WebDAV: clients name files from the PROPFIND href — the URL IS the path' },
+  { file: 'src/server/loop-holds.js', has: 'st.pipe(res); });', route: 'GET /api/loop-holds/cpu-profiles/:name', verdict: 'named', how: 'attachment — contentDisposition(name): the name is one of ours (CC.FILE_RE, ASCII by construction)' },
   { file: 'server.js', has: "res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/css/xterm.css'));", route: 'GET /xterm.css', verdict: 'declared', why: 'a static stylesheet named by its URL' },
 ];
 function listSources() {

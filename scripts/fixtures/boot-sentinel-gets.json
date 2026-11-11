@@ -246,6 +246,7 @@
   "/api/layout-history",
   "/api/layouts",
   "/api/loop-holds",
+  "/api/loop-holds/cpu-profiles/:name",
   "/api/machine-mounts",
   "/api/maintenance",
   "/api/mount-tokens",

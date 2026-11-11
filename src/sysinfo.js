@@ -385,6 +385,10 @@ async function cmdlineHead(pid, { max = CMDLINE_HEAD, procDir = '/proc' } = {}) 
   catch { return null; } finally { try { await fh.close(); } catch { } }
 }
 
+// lane hub-loop-stalls commit 3: THE LAG WATCH'S CURRENT LEVEL for the CPU capture's trigger (src/cpu-capture.js
+// triggerVerdict) — {level, medianMs, at} of the last 3-min window, null before the window is full or without the watch
+let _lagNow = null;
+const loopLagNow = () => _lagNow;
 function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
   // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
@@ -406,6 +410,7 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
     const sorted = lagWin.map((x) => x.lag).sort((a, b) => a - b);
     const med = sorted[Math.floor(sorted.length / 2)];
     const level = med >= 800 ? 2 : med >= 300 ? 1 : 0;
+    _lagNow = { level, medianMs: med, at: now };
     if (level === 0) { if (med < 150) lagLevel = 0; return; }
     const cooldown = level > lagLevel ? 0 : 30 * 60 * 1000;
     if (now - lagAlertAt < cooldown) return;
@@ -443,4 +448,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD };

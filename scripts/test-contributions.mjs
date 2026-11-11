@@ -670,7 +670,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const pluginWins = app.pluginClient?.contributedWindows?.() || [];
     const tools = row(I.wrench, t('Tools'), { children: [row(I.chart, t('Usage…')), row(I.chart, t('Background Work…')), row(undefined, t('Agent browser…')), row(undefined, t('Designs…')), row(I.puzzle, t('Plugins…')), ...(pluginWins.length ? [SEP, ...pluginWins.map((w) => row(PLUGIN_ICON, w.title))] : [])] });
     const comm = row(I.chat, t('Communication'), { children: [row(undefined, t('For you…')), row(undefined, t('Channels…')), row(undefined, t('Outbox…'))] });
-    const system = row(I.cog, t('System'), { children: [row(I.alert || I.pulse, t('Report a problem…')), row(I.pulse, t('Diagnostics report…')), row(I.pulse, t('Profile the server for 10 minutes')) /* lane hub-loop-stalls */, SEP, row(I.exp || I.pulse, t('Restore a previous layout…')), row(I.exp, t('Backup & migrate…')), row(undefined, t('Integrations…')), row(I.lock, app._authEnabled ? t('Change password…') : t('Set password…'))] });
+    const system = row(I.cog, t('System'), { children: [row(I.alert || I.pulse, t('Report a problem…')), row(I.pulse, t('Diagnostics report…')), row(I.pulse, t('Profile the server for 10 minutes')) /* lane hub-loop-stalls */, row(I.pulse, t('Capture a CPU profile (20 s)')) /* lane hub-loop-stalls commit 3 */, SEP, row(I.exp || I.pulse, t('Restore a previous layout…')), row(I.exp, t('Backup & migrate…')), row(undefined, t('Integrations…')), row(I.lock, app._authEnabled ? t('Change password…') : t('Set password…'))] });
     const help = row(I.help, t('Help'), { children: [row(I.tour, t('Welcome tour'))] });
     return [appearance, SEP, row(I.key, t('Manage agents…')), row(I.cog, t('All Settings...')), row(undefined, 'Apps…'), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
   };
@@ -679,7 +679,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   // every label the tree ADDS beyond the legacy flat list — the five heads, the
   // five owner rows (never in gear-menu.js), the four Language choices and
   // All Settings (a quick-pref link before, a DIRECT row since 2.369.131)
-  const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'Profile the server for 10 minutes' /* lane hub-loop-stalls */, 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Apps…', 'Agent browser…', 'Designs…' /* lane design-systems-home */, 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
+  const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'Profile the server for 10 minutes' /* lane hub-loop-stalls */, 'Capture a CPU profile (20 s)' /* lane hub-loop-stalls commit 3 */, 'For you…', 'Channels…', 'Outbox…', 'Integrations…', 'Apps…', 'Agent browser…', 'Designs…' /* lane design-systems-home */, 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
   let n = 0, bad = null, census = null, budget = null, dangers = null;
   for (const [isMobile, _repoDir, _authEnabled, nPlugins] of cartesian([false, true], [null, '/repo'], [false, true], [0, 2])) {
     const wins = Array.from({ length: nPlugins }, (_, i) => ({ pluginId: 'p', windowId: 'w' + i, title: 'Plugin win ' + i }));
