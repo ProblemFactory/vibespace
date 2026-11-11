@@ -201,7 +201,8 @@ function loopVerdict(verb, v) {
   if (passkeyReads(verb)) return { act: 'note', code: v.state, text: v.text };
   return { act: 'answer', code: v.state, text: v.text };
 }
-function cancelText({ n = 0, rpId = '', kernel = false } = {}) {
+function cancelText({ n = 0, rpId = '', kernel = false, failed = 0 } = {}) {
+  if (!n && failed) return `VibeSpace could not cancel the page's passkey request (${rpWord(rpId) || 'this site'}) — the page did not take the cancel, so it is still waiting. Closing the tab ends it.`; // B-97ae round 2: said as it is, never «nothing is waiting»
   if (!n) return 'No passkey request is waiting on your browser.';
   const rp = rpWord(rpId) || 'this site';
   // lane passkey-sink: on a kernel with `webauthn` the kernel ends the ceremony — the page sees NotAllowedError (Q4), not AbortError
@@ -304,6 +305,33 @@ function keyForYouItem(r) {
   if (!m) return null;
   const file = str(r.file) || 'the key file', key = KEY_WORDS[m[1]], params = m[1] === 'key-unreadable' ? { file, code: m[2] || '?' } : { file };
   return { text: fill(key, params), detail: KEY_WORDS.detail, urgency: 'high', i18n: { text: { key, params }, detail: [{ key: KEY_WORDS.detail }] } };
+}
+// B-97ae walk (b) + round 2: a lent key a clean-up could not take back — SEEN still there (the server log names the missed steps),
+// or not checkable (the browser did not answer the look). The person is told which tab (its name made by the watch: the title
+// cleaned, else the origin) and that closing it removes the key (a closed tab takes its virtual authenticator with it —
+// measured, test-browser-passkey-chrome S12). Past a few tabs of one browser, ONE item counts the rest. Each item carries its
+// producer's identity (`itemKey`): a re-file is the same item, and the watch resolves it when the leftover ends.
+const LEFT_WORDS = Object.freeze({
+  text: 'The passkey VibeSpace lent to the tab «{tab}» could not be taken back — close that tab',
+  detail: 'VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time it is still on that tab, so that tab may still sign in with it without asking. Closing the tab removes it.',
+  uncheckedText: 'VibeSpace could not check whether the passkey it lent to the tab «{tab}» was taken back — close that tab',
+  uncheckedDetail: 'VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time the browser did not answer, so whether that tab can still sign in with it could not be checked. Closing the tab removes it.',
+  uvText: 'VibeSpace could not turn off user verification on the tab «{tab}» after a passkey sign-in — close that tab',
+  uvDetail: 'VibeSpace turns user verification on for a tab only while it lends a saved passkey for one sign-in. The passkey is gone from that tab, but the browser kept user verification on. Closing the tab ends it.',
+  refusedLookDetail: 'VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time the browser refused to show what the tab holds, so whether that tab can still sign in with it could not be checked. Closing the tab removes it.',
+  moreText: 'The passkeys VibeSpace lent to more tabs ({n}) could not be taken back or checked — close those tabs',
+  moreDetail: 'VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. On these tabs the browser kept it or did not answer. Closing a tab removes it; the server log names each tab.',
+});
+function leftForYouItem({ tab = '', unchecked = false, uvOnly = false, itemKey = null } = {}) {
+  // round 3: a UV left on with no key is its own words; a look the browser REFUSED is not one it did not answer (two facts, two words)
+  const t = str(tab).trim().slice(0, 80) || 'this tab';
+  const text = unchecked ? LEFT_WORDS.uncheckedText : uvOnly ? LEFT_WORDS.uvText : LEFT_WORDS.text;
+  const detail = unchecked === 'refused' ? LEFT_WORDS.refusedLookDetail : unchecked ? LEFT_WORDS.uncheckedDetail : uvOnly ? LEFT_WORDS.uvDetail : LEFT_WORDS.detail;
+  return { text: fill(text, { tab: t }), detail, urgency: 'high', ...(itemKey ? { itemKey: str(itemKey) } : {}), i18n: { text: { key: text, params: { tab: t } }, detail: [{ key: detail }] } };
+}
+function leftMoreItem({ n = 0, itemKey = null } = {}) {
+  const c = Math.max(1, Number(n) || 0);
+  return { text: fill(LEFT_WORDS.moreText, { n: c }), detail: LEFT_WORDS.moreDetail, urgency: 'high', ...(itemKey ? { itemKey: str(itemKey) } : {}), i18n: { text: { key: LEFT_WORDS.moreText, params: { n: c } }, detail: [{ key: LEFT_WORDS.moreDetail }] } };
 }
 function forYouItem(b, { label = '', display = null } = {}) {
   const rp = rpWord(b && b.rpId) || 'this site';
@@ -529,5 +557,5 @@ module.exports = {
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, NOT_WATCHED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, DOORS_DOOR_WORDS, waitsSaid,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
-  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
+  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, leftForYouItem /* B-97ae walk (b) */, leftMoreItem /* round 2 */, LEFT_WORDS, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

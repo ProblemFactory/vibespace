@@ -1151,6 +1151,7 @@ function createSessionMessages(session, sessionId) {
         forYou: {
           add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
           resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); },
+          sweep: (prefix) => { if (!userTodos || typeof userTodos.idsWhere !== 'function') return 0; const ids = userTodos.idsWhere((i) => i.status === 'open' && i.sessionKey === 'browser' && typeof i.itemKey === 'string' && i.itemKey.startsWith(String(prefix))); for (const id of ids) userTodos.setStatus(id, 'done', 'browser'); return ids.length; }, // B-97ae round 2: the watch's items of a past hub life (an item whose tab this hub does not hold is not kept)
           ended: (id, fact) => { if (userTodos && typeof userTodos.noteFact === 'function') userTodos.noteFact(id, fact); }, // lane passkey-browse-yourself r10: a card's «Allow once» taken back by a later answer — the record carries the end
         },
         // lane passkey-store-core: THE PASSKEY STORE — data/browser-passkeys.json (0600, written only by the watch) + the

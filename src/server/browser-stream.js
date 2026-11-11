@@ -304,7 +304,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const ack = (o) => send(viewer.ws, { type: 'passkey-ack', ...o });
     if (!dialogs || !pid || typeof dialogs.cancelPasskey !== 'function') return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
     dialogs.cancelPasskey({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relayEph(relay) }, { by: 'user' })
-      .then((r) => { ack(r.ok ? { ok: true, n: r.n, ...(r.n ? {} : { ended: true }) } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }); if (r.ok && !r.n && !pushPasskey(relay)) send(viewer.ws, passkeyNow(relay)); }) // acceptance r1: a Cancel whose wait is gone says so — and the view is told what stands now
+      .then((r) => { ack(r.ok ? { ok: true, n: r.n, ...(r.n ? {} : r.failed ? { failed: r.failed } : { ended: true }) } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }); if (r.ok && !r.n && !pushPasskey(relay)) send(viewer.ws, passkeyNow(relay)); }) // acceptance r1: a Cancel whose wait is gone says so — and the view is told what stands now // B-97ae round 3: a cancel the page did not take (`failed`) is never «ended» — the person is told it is still waiting
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
   }
   /** lane browser-ui-prompts: the live view's answer to a browser prompt, as the USER — the credential goes to the watch (and on

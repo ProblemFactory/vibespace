@@ -88,7 +88,7 @@ async function storeLegs() {
   const kids = [];
   const xv = spawn('/usr/bin/Xvfb', [disp, '-screen', '0', '1280x800x24', '-nolisten', 'tcp'], { stdio: 'ignore', detached: true }); kids.push(xv);
   await sleep(800);
-  const pg = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(`<!doctype html><title>PKS</title><input autocomplete="username webauthn"><script>
+  const pg = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(`<!doctype html>${String(q.url || '').startsWith('/untitled') ? '' : '<title>PKS</title>'}<input autocomplete="username webauthn"><script>
 const ch=()=>crypto.getRandomValues(new Uint8Array(32));
 window.reg=(name)=>navigator.credentials.create({publicKey:{challenge:ch(),rp:{id:'localhost',name:'L'},user:{id:new TextEncoder().encode(name),name,displayName:name.toUpperCase()},pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{residentKey:'required',userVerification:'preferred'},timeout:8000}}).then(()=>'ok',(e)=>e.name);
 window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:'localhost',userVerification:'preferred',timeout:8000},...(cond?{mediation:'conditional'}:{})}).then(()=>'ok',(e)=>e.name);
@@ -294,6 +294,136 @@ window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:
       ok(reArmed && kept.length >= 1 && en.length === 1 && en[0].ui === true && add.length === 1 && rm.length === 1 && !P2.e().pk.auth, `S11b the vault key he chose (policy yes): an authenticator for THAT ceremony only, Chrome's UI on, its key loaded, removed after — measured: ${out2} (the key's count on disk ${kept[0].signCount} → ${cnt2})`, { reArmed, kept: kept.length, sent, out2, ms2, cn2, count: [kept[0].signCount, cnt2] });
       w0.ws.send = send0;
       await dcall('Target.closeTarget', { targetId: P2.tid }); Wp.shutdown(); await sleep(300);
+
+      // S12 (B-97ae, the walk's (d) — MEASURED, then PINNED): what a tab KEEPS when the DevTools session that lent a key goes.
+      // The hub's shutdown() closes the watch's socket with no clean-up (a restart, a crash), and a tab can lose its session
+      // alone. The LOOK: the tab reloaded (no hook — no watch is attached) asks for a sign-in; an authenticator Chrome still
+      // holds signs it at once («ok in N ms»). The PROBE: the same after a FRESH session (the driver's) enables WebAuthn with UI
+      // off. Measured (2026-11-11): the lending session alive ⇒ «ok in 2 ms», after a reload too (the look's own control);
+      // its connection closed, its session detached, the person's watch gone mid-ceremony ⇒ nothing signs (the request is
+      // held). Chrome takes a virtual authenticator, its keys and UV with the session that added it: a restart needs NO sweep
+      // at re-arm — a Chrome that changes this goes red HERE. (PK_MEASURE_OUT names a file the measured line goes to.)
+      {
+        const conn = async () => { const ws = new WSI(BWS); await new Promise((r) => ws.once('open', r)); let n = 0; const pd = new Map(); ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pd.has(m.id)) { pd.get(m.id)(m); pd.delete(m.id); } }); return { ws, send: (method, params = {}, sessionId) => Promise.race([new Promise((r) => { const id = ++n; pd.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }), sleep(5000).then(() => ({ error: { message: 'no answer in 5 s' } }))]) }; };
+        const newTab = async () => { const tid = (await dcall('Target.createTarget', { url: PAGE })).result.targetId; const sid = (await dcall('Target.attachToTarget', { targetId: tid, flatten: true })).result.sessionId; await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid); return r.result && r.result.result && r.result.result.value === 'function'; }, 8000); return { tid, sid }; };
+        const signIn = async (sid, ms = 2500) => { const t0 = Date.now(); const r = await Promise.race([dcall('Runtime.evaluate', { expression: 'signin()', awaitPromise: true, returnByValue: true }, sid), sleep(ms).then(() => null)]); return r ? `${r.result && r.result.result ? r.result.result.value : (r.error && r.error.message) || '?'} in ${Date.now() - t0} ms` : `held ${ms} ms`; };
+        const reload = async (sid) => { await dcall('Page.reload', { ignoreCache: true }, sid); await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid); return r.result && r.result.result && r.result.result.value === 'function'; }, 8000); };
+        const look = async (sid) => { await reload(sid); return signIn(sid); }; // no enable: the page's own request in a new document — a live authenticator signs it at once
+        const probe = async (sid) => { // the fresh session's look, then the page's own request in a new document
+          const en = await dcall('WebAuthn.enable', { enableUI: false }, sid);
+          await dcall('Page.reload', { ignoreCache: true }, sid);
+          await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, sid); return r.result && r.result.result && r.result.result.value === 'function'; }, 8000);
+          const native = await dcall('Runtime.evaluate', { expression: "String(CredentialsContainer.prototype.get).includes('[native code]')", returnByValue: true }, sid);
+          const out = `${en.error ? 'enable ✗ ' + en.error.message : 'enabled'} · native get ${native.result && native.result.result ? native.result.result.value : '?'} · ${await signIn(sid)}`;
+          await dcall('WebAuthn.disable', {}, sid);
+          return out;
+        };
+        const lend = async (send, sid) => { // what the gate does, by hand (UI off so a live authenticator signs at once): an authenticator, a resident key for localhost, UV on
+          const en = await send('WebAuthn.enable', { enableUI: false }, sid);
+          const a = await send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } }, sid);
+          const aid = a.result && a.result.authenticatorId;
+          const key = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+          const c = aid && await send('WebAuthn.addCredential', { authenticatorId: aid, credential: { credentialId: Buffer.from('vs-s12-' + crypto.randomBytes(4).toString('hex')).toString('base64'), isResidentCredential: true, rpId: 'localhost', privateKey: key, userHandle: Buffer.from('u12').toString('base64'), signCount: 1 } }, sid);
+          return { ok: !!(en && !en.error && aid && c && !c.error), aid };
+        };
+        const m12 = {};
+        // A: a second CDP CONNECTION (as the hub's watch) lends, then the connection closes
+        const A = await newTab(); const cA = await conn(); const sA = (await cA.send('Target.attachToTarget', { targetId: A.tid, flatten: true })).result.sessionId;
+        const lA = await lend(cA.send, sA);
+        m12.A_live = await signIn(A.sid); m12.A_live_reloaded = await look(A.sid); // the CONTROL of the look: the lending session alive, the document reloaded
+        cA.ws.terminate(); await sleep(500);
+        m12.A_closed_look = await look(A.sid);
+        m12.A_closed = await probe(A.sid);
+        // B: the session DETACHED while its connection lives (Target.detachedFromTarget's road)
+        const B = await newTab(); const cB = await conn(); const sB = (await cB.send('Target.attachToTarget', { targetId: B.tid, flatten: true })).result.sessionId;
+        const lB = await lend(cB.send, sB);
+        m12.B_live = await signIn(B.sid); m12.B_live_reloaded = await look(B.sid);
+        await cB.send('Target.detachFromTarget', { sessionId: sB }); await sleep(500);
+        m12.B_detached_look = await look(B.sid);
+        m12.B_detached = await probe(B.sid);
+        cB.ws.close();
+        // C: THE REAL ROAD — the person's watch lends the vault key the person chose (policy yes, Chrome's UI on), then the hub goes
+        // (the socket terminated, shutdown(): no clean-up) while the page's request is held
+        const Wc = mk(D, PSx, { holders: HU, store: PSTORE });
+        const cArmed = (await Wc.arm(PID, { budgetMs: 5000 })).ok && Wc._watches.get(PID).mode === 'person';
+        const C = await newTab(); await until(() => { const e = Wc._watches.get(PID).targets.get(C.tid); return e && e.pk.armed; }, 8000);
+        const sentC = []; const wC = Wc._watches.get(PID); const sendC0 = wC.ws.send.bind(wC.ws); wC.ws.send = (raw) => { try { const m = JSON.parse(raw); if (/^WebAuthn\./.test(m.method)) sentC.push({ method: m.method, uv: m.params && m.params.isUserVerified }); } catch { /* */ } return sendC0(raw); };
+        const tC = Date.now(); let dC = null; dcall('Runtime.evaluate', { expression: 'signin()', awaitPromise: true, returnByValue: true }, C.sid).then((r) => { dC = `${r && r.result && r.result.result ? r.result.result.value : (r && r.error && r.error.message) || '?'} at +${Date.now() - tC} ms`; });
+        const lentC = await until(() => sentC.some((x) => x.method === 'WebAuthn.setUserVerified' && x.uv === true), 6000); await sleep(400);
+        const authC = (wC.targets.get(C.tid) || { pk: {} }).pk.auth || null;
+        const tGone = Date.now(); wC.ws.terminate(); Wc.shutdown();
+        await until(() => dC !== null, 3000);
+        m12.C_page = dC === null ? `still held 3 s after the hub went (+${Date.now() - tC} ms)` : `${dC} (the hub went at +${tGone - tC} ms)`;
+        m12.C_gone = await probe(C.sid);
+        say(`S12 MEASURED: ${JSON.stringify(m12)}`);
+        if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), m12, lA, lB, cArmed, authC, sentC }) + '\n'); // (the measuring round only — a green run's output is not kept)
+        const signed = (x) => /(^|· )ok in \d+ ms$/.test(String(x));
+        ok(lA.ok && lB.ok && signed(m12.A_live) && signed(m12.B_live) && signed(m12.A_live_reloaded) && signed(m12.B_live_reloaded),
+          `S12 (d) the CONTROL: while the lending session lives the page signs at once — «${m12.A_live}» / «${m12.B_live}», after a reload «${m12.A_live_reloaded}» / «${m12.B_live_reloaded}» (the look can see a live authenticator)`, { lA, lB, m12 });
+        ok(!signed(m12.A_closed_look) && !signed(m12.A_closed) && !signed(m12.B_detached_look) && !signed(m12.B_detached),
+          `S12 (d) the lending CONNECTION closed ⇒ «${m12.A_closed_look}» / «${m12.A_closed}»; its SESSION detached ⇒ «${m12.B_detached_look}» / «${m12.B_detached}»: Chrome took the authenticator, its key and UV with the session`, m12);
+        ok(cArmed && !!lentC && !!authC && !signed(m12.C_gone),
+          `S12 (d) the person's watch lent the vault key (Chrome's UI on), the hub gone mid-ceremony (no clean-up) ⇒ the page «${m12.C_page}», then «${m12.C_gone}»: nothing of the lent key signs — a restart needs no sweep at re-arm`, { cArmed, lentC: !!lentC, authC, sentC, m12 });
+        // S13 (B-97ae round 2, MUST 3(i) — MEASURED first): what Chrome SAYS when a tab's renderer CRASHES during a lend and when
+        // the tab is reloaded after it — on a connection holding the tab's session (as the watch's: Target discovery on, Runtime /
+        // Inspector / Page enabled) — and whether the lent authenticator survives the crash (the look after the reload signs ⇒ yes).
+        const m13 = {}; const ev13 = [];
+        const X13 = await newTab(); const c13 = await conn();
+        c13.ws.on('message', (d) => { let m; try { m = JSON.parse(d); } catch { return; } if (m.method && /rash|executionContext|detached|Destroyed|Inspector\.|frameNavigated|targetInfoChanged/.test(m.method)) ev13.push((m.sessionId ? 's:' : 'b:') + m.method + (m.params && m.params.reason ? '(' + m.params.reason + ')' : '') + (m.params && m.params.targetInfo ? '(' + m.params.targetInfo.type + ')' : '')); });
+        await c13.send('Target.setDiscoverTargets', { discover: true });
+        const s13 = (await c13.send('Target.attachToTarget', { targetId: X13.tid, flatten: true })).result.sessionId;
+        for (const dmn of ['Runtime.enable', 'Inspector.enable', 'Page.enable']) await c13.send(dmn, {}, s13);
+        const l13 = await lend(c13.send, s13);
+        m13.live = await signIn(X13.sid);
+        const e0 = ev13.length;
+        const crash = await Promise.race([dcall('Page.crash', {}, X13.sid).then((r) => (r && r.error ? 'error ' + r.error.message : 'answered')), sleep(3000).then(() => 'no answer in 3 s')]);
+        await sleep(1500);
+        m13.crash = crash; m13.afterCrash = ev13.slice(e0);
+        const g13a = await c13.send('WebAuthn.getCredentials', { authenticatorId: l13.aid }, s13);
+        m13.credsAfterCrash = g13a.error ? 'error ' + g13a.error.message : (g13a.result.credentials || []).length;
+        const e1 = ev13.length;
+        const rl = await c13.send('Page.reload', {}, s13);
+        await until(async () => { const r = await dcall('Runtime.evaluate', { expression: 'typeof window.signin', returnByValue: true }, X13.sid); return r.result && r.result.result && r.result.result.value === 'function'; }, 8000);
+        await sleep(300);
+        m13.reload = rl.error ? 'error ' + rl.error.message : 'answered'; m13.afterReload = ev13.slice(e1);
+        const g13b = await c13.send('WebAuthn.getCredentials', { authenticatorId: l13.aid }, s13);
+        m13.credsAfterReload = g13b.error ? 'error ' + g13b.error.message : (g13b.result.credentials || []).length;
+        m13.lookAfterReload = await signIn(X13.sid);
+        // S13b — THE WATCH ON A CRASH (the handler the measurement asked for): the person's watch lends the vault key (UI on), the
+        // renderer crashes ⇒ the ceremony ends and the lent authenticator is GONE — read on the watch's own session right after
+        const Wd = mk(D, PSx, { holders: HU, store: PSTORE });
+        const dArmed = (await Wd.arm(PID, { budgetMs: 5000 })).ok && Wd._watches.get(PID).mode === 'person';
+        const Y = await newTab(); await until(() => { const e = Wd._watches.get(PID).targets.get(Y.tid); return e && e.pk.armed; }, 8000);
+        const wD = Wd._watches.get(PID), sentD = []; const sendD0 = wD.ws.send.bind(wD.ws); wD.ws.send = (raw) => { try { const m = JSON.parse(raw); if (/^WebAuthn\./.test(m.method)) sentD.push({ method: m.method, uv: m.params && m.params.isUserVerified, at: Date.now() }); } catch { /* */ } return sendD0(raw); };
+        dcall('Runtime.evaluate', { expression: 'signin()', awaitPromise: true, returnByValue: true }, Y.sid).catch(() => {});
+        const lentD = await until(() => sentD.some((x) => x.method === 'WebAuthn.setUserVerified' && x.uv === true), 6000); await sleep(400);
+        const eD = wD.targets.get(Y.tid), authD = eD && eD.pk.auth;
+        const tD = Date.now(); dcall('Page.crash', {}, Y.sid).catch(() => {}); // (Page.crash never answers — measured, S13)
+        const endedD = await until(() => eD.pk.records.some((r) => /aborted/.test(r.outcome)) && sentD.some((x) => x.method === 'WebAuthn.removeVirtualAuthenticator'), 5000);
+        const rmD = sentD.find((x) => x.method === 'WebAuthn.removeVirtualAuthenticator' && x.at >= tD), msD = rmD ? rmD.at - tD : null; // the crash → the watch's removal
+        const lookD = await new Promise((res) => { const id = 9e8 + (++did); wD.waiting.set(id, res); wD.ws.send(JSON.stringify({ id, method: 'WebAuthn.getCredentials', params: { authenticatorId: authD }, sessionId: eD.sid })); setTimeout(() => res({ timeout: true }), 3000); });
+        m13.watch = { armed: dArmed, lent: !!lentD, ended: !!endedD, ms: msD, look: lookD.error ? 'error ' + lookD.error.message : lookD.timeout ? 'no answer' : (lookD.result.credentials || []).length + ' key(s)', sent: sentD.map((x) => x.method.replace('WebAuthn.', '')) };
+        wD.ws.send = sendD0; await dcall('Target.closeTarget', { targetId: Y.tid }); Wd.shutdown(); await sleep(300);
+        say(`S13 MEASURED: ${JSON.stringify(m13)}`);
+        if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), s13: m13, l13 }) + '\n');
+        ok(l13.ok && signed(m13.live) && m13.afterCrash.includes('b:Target.targetCrashed') && !m13.afterCrash.some((x) => /executionContext/.test(x)) && m13.credsAfterCrash === 1 && signed(m13.lookAfterReload),
+          `S13 (MUST 3(i)) MEASURED on real Chrome — a renderer crash during a lend says ${JSON.stringify(m13.afterCrash)} (no context event); the lent authenticator keeps its key (${m13.credsAfterCrash}); the reload says ${JSON.stringify(m13.afterReload)}; the key is still there (${m13.credsAfterReload}) and the reloaded page signs with it «${m13.lookAfterReload}» — so the CRASH must end the ceremony`, m13);
+        ok(m13.watch.armed && m13.watch.lent && m13.watch.ended && /Could not find a Virtual Authenticator|Virtual Authenticator Environment has not been enabled/.test(m13.watch.look), // either is GONE: the authenticator removed, then its environment disabled (measured)
+          `S13b the watch on a crash: the person's watch lent the vault key, the renderer crashed ⇒ the ceremony ended and the lent authenticator removed in ${m13.watch.ms} ms (the watch's own session: «${m13.watch.look}»; sent ${JSON.stringify(m13.watch.sent)})`, m13.watch);
+        c13.ws.close(); await dcall('Target.closeTarget', { targetId: X13.tid });
+        // S14 (B-97ae round 3 MUST 3 — MEASURED): what Chrome reports as an UNTITLED page's title (TargetInfo.title), and the name the
+        // watch gives that tab (tabName — the one name of the server line and the For-you item): the ORIGIN, never the address's query
+        const UA = PAGE + 'untitled?token=abc123&email=me%40x.test';
+        const tU = (await dcall('Target.createTarget', { url: UA })).result.targetId;
+        const iU = await until(async () => { const r = await dcall('Target.getTargetInfo', { targetId: tU }); const ti = r.result && r.result.targetInfo; return ti && ti.url === UA && ti.title ? ti : null; }, 6000);
+        const m14 = { title: iU ? iU.title : null, url: iU ? iU.url : null, named: iU ? D.tabName({ title: iU.title, url: iU.url }) : null };
+        if (process.env.PK_MEASURE_OUT) fs.appendFileSync(process.env.PK_MEASURE_OUT, JSON.stringify({ at: new Date().toISOString(), s14: m14 }) + '\n');
+        ok(!!iU && /untitled\?token=abc123/.test(m14.title) && m14.named === new URL(UA).origin && !/token|email/.test(m14.named),
+          `S14 (MUST 3) MEASURED on real Chrome: an untitled page's TargetInfo.title is «${m14.title}» (its address) — the watch names that tab «${m14.named}», the origin, never the query`, m14);
+        await dcall('Target.closeTarget', { targetId: tU });
+        for (const t of [A, B, C]) await dcall('Target.closeTarget', { targetId: t.tid });
+        await sleep(300);
+      }
     }
     // CONTROLS — mutant copies (src/server/browser-dialogs.js, src/browser-passkey-store.js) on the same Chrome, a fresh tab each
     const M = path.join(S, 'mut', 'src');

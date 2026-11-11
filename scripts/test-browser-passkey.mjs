@@ -803,7 +803,9 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
         const tag = m.method + (m.method === 'Runtime.callFunctionOn' && verbOf(m) ? ':' + verbOf(m) : '') + (m.params && m.params.authenticatorId ? '(' + m.params.authenticatorId + ')' : '');
         if (world.trace) world.trace.push('>' + tag);
         if (world.onSend) world.onSend(m);
-        if (m.method === 'Target.getTargets') result = { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey', browserContextId: 'CTX1' }, ...(world.two ? [{ targetId: 'T2', type: 'page', url: 'https://example.test/', title: 'Two', browserContextId: 'CTX1' }] : []) /* ⑨r8 */, ...(world.print ? [{ targetId: 'PR', type: 'page', url: 'chrome://print/', title: 'Print', browserContextId: 'CTX1' }] : [])] };
+        const failMsg = world.fail && world.fail.has(m.method) ? (typeof world.fail.get(m.method) === 'function' ? world.fail.get(m.method)(m) : world.fail.get(m.method)) : null; // round 3: a function refuses by its params (one credential)
+        if (failMsg) error = { message: failMsg }; // B-97ae walk (b): the browser REFUSES this method (its state unchanged)
+        else if (m.method === 'Target.getTargets') result = { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey', browserContextId: 'CTX1' }, ...(world.two ? [{ targetId: 'T2', type: 'page', url: 'https://example.test/', title: 'Two', browserContextId: 'CTX1' }] : []) /* ⑨r8 */, ...(world.print ? [{ targetId: 'PR', type: 'page', url: 'chrome://print/', title: 'Print', browserContextId: 'CTX1' }] : [])] };
         else if (m.method === 'Target.attachToTarget') result = { sessionId: 'S-' + m.params.targetId };
         else if (m.method === 'Browser.getVersion') result = { userAgent: 'Mozilla/5.0 Chrome/154.0.0.0' };
         else if (m.method === 'Runtime.addBinding' && sid === 'S-T3') error = { message: 'no binding here' };
@@ -840,7 +842,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   }
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
-  function world2({ modPath = null, holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */ } = {}) {
+  function world2({ modPath = null, holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */, callTimeoutMs = null, leftMax = null /* B-97ae round 2 */ } = {}) {
     const world = { sockets: 0, refuse: false, pending: [], print, two, said: [], ended: [] /* ⑨r10: forYou.ended */, H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
@@ -849,8 +851,8 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
-    const mkD = () => { const d = require(modPath || path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
-      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {}, ended: (id, fact) => world.ended.push({ id, fact }) } }); d.onChange((ev) => events.push(ev)); return d; };
+    const mkD = () => { const d = require(modPath || path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), ...(callTimeoutMs != null ? { callTimeoutMs } : {}), ...(leftMax != null ? { leftMax } : {}), leaseCountOf: () => holdersOf().length, passkeys,
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { const same = it.itemKey ? items.findIndex((x) => x.itemKey === it.itemKey) : -1; if (same >= 0) { items[same] = { ...it, status: 'open', id: items[same].id }; return items[same].id; } items.push({ ...it, status: 'open', id: 'todo-' + (items.length + 1) }); return 'todo-' + items.length; } /* B-97ae round 2: the store's identity — an itemKey re-file is the same item, reopened */, resolve: (id) => { (world.resolved = world.resolved || []).push(id); const x = items.find((i) => i.id === id); if (x) x.status = 'done'; }, sweep: (prefix) => { (world.swept = world.swept || []).push(prefix); return 0; }, ended: (id, fact) => world.ended.push({ id, fact }) } }); d.onChange((ev) => events.push(ev)); return d; };
     let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
     const w = () => D._watches.get(PID) || null;
@@ -1930,6 +1932,336 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       '⑨r10 MAJOR (his road, right before the release): he answers «no» while the vault authenticator pairs for his registration — the authenticator paired for it goes and the page gets Chrome\'s own window (never refused for the vault\'s sake), not created by him; his next registration: Chrome\'s own window at once, no pairing (f9fc15aa4: created by him in the vault)', E4);
     X.say({ ev: 'end', id: 6, outcome: 'ok' });
     X.D.shutdown();
+  }
+  // B-97ae walk (a): A DOCUMENT GONE MID-CEREMONY ends its ceremonies through THE ONE END, on BOTH roads. The agent's tab keeps
+  // its authenticator (it lives with the tab) but never the key or the UV an ended ceremony loaded into it; the person's
+  // once-authenticator leaves with its ceremony. Before: pkPageGone removed only the person's once-authenticator — on the agent's
+  // tab the loaded key and UV stayed until that tab's next ceremony ended (the acceptance's walk). Judged at rest, nothing said.
+  const gone97 = (X, how) => X.f.push(how === 'destroyed' ? { method: 'Runtime.executionContextDestroyed', sessionId: 'S-T1', params: { executionContextId: 7 } } : { method: 'Runtime.executionContextsCleared', sessionId: 'S-T1', params: {} });
+  const lendOn97 = async (road, store) => {
+    const X = world2({ holders: road === 'agent' ? 'agent' : 'human', store, print: false });
+    X.world.chrome = chrome6(); X.world.trace = [];
+    if (road === 'agent') { await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open'); await until2(X.armed, 500); await sleep2(5); } else await X.opened();
+    const opening = X.world.said.slice();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X);
+    const A = authOf5(X);
+    return { X, A, opening, lent: { A, keys: A ? keys7(X, A) : [], uv: A ? uv7(X, A) : false } };
+  };
+  for (const [road, how] of [['agent', 'destroyed'], ['agent', 'cleared'], ['person', 'destroyed'], ['person', 'cleared']]) {
+    const { X, A, opening, lent } = await lendOn97(road, VAULT5());
+    gone97(X, how);
+    const rest = await atRest97(X);
+    const r = { road, how, lent, rest, auth: authOf5(X), alive: !!A && X.world.chrome.auths.has(A), keys: A ? keys7(X, A) : [], uv: A ? uv7(X, A) : false, outcome: rec6(X, 1).outcome || null, keyRemoved: X.calls('WebAuthn.removeCredential', (m) => m.params.authenticatorId === A).length, said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    const kept = road === 'agent' ? r.alive && r.auth === A && r.keyRemoved === 1 : !r.alive && !r.auth;
+    ok(!!lent.A && lent.keys.join() === 'Kvault005' && lent.uv && rest && /aborted/.test(String(r.outcome)) && !r.keys.length && !r.uv && kept && !r.said.length,
+      `B-97ae walk (a) the ${road}'s document ${how} mid-ceremony ⇒ its ceremony ends through the one end: at rest the key ${road === 'agent' ? 'removed once and UV off, the tab\'s own authenticator kept' : 'and UV gone with its once-authenticator'}, not one line said`, r);
+  }
+  {
+    // … and never the NEXT document's: the page navigated (its context gone) and asked again at once in the new document
+    const { X, A, opening, lent } = await lendOn97('agent', VAULT5());
+    gone97(X, 'destroyed'); doc6(X, 8); X.start(2, 'vercel.com', 8);
+    await until2(() => released(X) > 1, 1000); const rest = await atRest97(X);
+    const r = { lent, rest, auth: authOf5(X), keys: keys7(X, A), uv: uv7(X, A), rec1: rec6(X, 1).outcome || null, rec2: rec6(X, 2).outcome || null, released: released(X), said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    ok(lent.keys.join() === 'Kvault005' && rest && /aborted/.test(String(r.rec1)) && r.rec2 === 'pending' && r.released === 2 && r.auth === A && r.keys.join() === 'Kvault005' && r.uv && !r.said.length,
+      'B-97ae walk (a) … never the next document\'s: a sign-in asked at once in the new document waits for the clean-up, loads its key and UV and keeps them', r);
+  }
+  // B-97ae walk (b): A CLEAN-UP THE BROWSER REFUSED IS SAID, NEVER BELIEVED. A step answered with an error while the tab's session
+  // is live leaves the key (or the UV) where VibeSpace believed it gone: said by name in the server log, the tab named to the
+  // person in the For-you tray (resolved when the tab closes — a closed tab takes its authenticator). A refused step the later
+  // steps make up for (the authenticator removed) leaves nothing: not said. A session that went (its errors name it) took its
+  // authenticators with it — measured on real Chrome (S12): not said.
+  const refuseRun = async (road, fail) => {
+    const { X, A, opening, lent } = road === 'person-cancel'
+      ? await (async () => { const X = world2({ holders: 'human', print: false, store: lentStore() }); X.world.chrome = chrome97(); X.world.trace = []; await X.opened(); const opening = X.world.said.slice(); X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X); const A = authOf5(X); return { X, A, opening, lent: { A, keys: keys7(X, A), uv: uv7(X, A) } }; })()
+      : await lendOn97('agent', VAULT5());
+    X.world.fail = new Map(fail);
+    if (road === 'person-cancel') { X.world.hook = (args) => { if (args[1] === 'cancel') setTimeout(() => X.say({ ev: 'end', id: 1, outcome: 'cancelled', name: 'AbortError' }), 5); return 1; }; await X.D.cancelPasskey({ profileId: PID, browserKey: HK, ephemeral: false }, { by: 'user' }); X.world.hook = null; }
+    else gone97(X, 'destroyed');
+    await until2(() => false, 30); const rest = await atRest97(X);
+    const r = { road, fail: fail.map(([m]) => m), lent, rest, keys: A ? keys7(X, A) : [], said: X.world.said.slice(opening.length), items: X.items.map((it) => it.text), fy: X.items.map((it) => it.i18n && it.i18n.text && it.i18n.text.key) };
+    X.world.fail = null;
+    return { X, r };
+  };
+  const REFUSED = 'Internal error', GONE = 'Session with given id not found.';
+  {
+    const { X, r } = await refuseRun('person-cancel', [['WebAuthn.removeCredential', REFUSED], ['WebAuthn.removeVirtualAuthenticator', REFUSED], ['WebAuthn.disable', REFUSED]]);
+    X.f.push({ method: 'Target.targetDestroyed', params: { targetId: 'T1' } }); await sleep2(5);
+    const resolved = (X.world.resolved || []).slice(); X.D.shutdown();
+    ok(r.lent.keys.join() && r.rest && r.keys.length === 1 && r.said.length === 1 && /the passkey lent to the tab «Use Your Passkey» could not be taken back \(1 key\) — removeCredential: refused \(Internal error\); removeVirtualAuthenticator: refused \(Internal error\); disable: refused \(Internal error\)$/.test(r.said[0]) && r.items.length === 1 && typeof PK.leftForYouItem === 'function' && r.items[0] === PK.leftForYouItem({ tab: 'Use Your Passkey' }).text && r.fy[0] === (PK.LEFT_WORDS || {}).text && resolved.length === 1,
+      'B-97ae walk (b) the browser refuses the key\'s removal, the authenticator\'s and the environment\'s on a live session ⇒ said by name ONCE (the server log names the steps), the tab named to the person in the For-you tray, resolved when the tab closes', { ...r, resolved });
+  }
+  {
+    const { X, r } = await refuseRun('person-cancel', [['WebAuthn.removeCredential', REFUSED]]); X.D.shutdown();
+    ok(r.rest && !r.keys.length && !r.said.length && !r.items.length, 'B-97ae walk (b) … ONE refused step the later steps make up for (the authenticator removed, the key with it) ⇒ nothing left, nothing said', r);
+  }
+  {
+    const { X, r } = await refuseRun('agent', [['WebAuthn.removeCredential', REFUSED]]); X.D.shutdown();
+    ok(r.rest && r.keys.join() === 'Kvault005' && r.said.length === 1 && /could not be taken back \(1 key\) — removeCredential: refused \(Internal error\)$/.test(r.said[0]) && r.items.length === 1,
+      'B-97ae walk (b) … on the agent\'s road the tab\'s authenticator stays by design: a refused key removal leaves the key ⇒ said, the tab named', r);
+  }
+  {
+    const { X, r } = await refuseRun('person-cancel', [['WebAuthn.getCredentials', GONE], ['WebAuthn.removeCredential', GONE], ['WebAuthn.setUserVerified', GONE], ['WebAuthn.removeVirtualAuthenticator', GONE], ['WebAuthn.disable', GONE]]); X.D.shutdown();
+    ok(r.rest && !r.said.length && !r.items.length, 'B-97ae walk (b) … a session that went (its errors name it) took its authenticators with it — measured on real Chrome (S12) ⇒ not said', r);
+  }
+  // ── B-97ae ROUND 2 (the acceptance of 0723db7e0): WHAT IS SAID ABOUT A LEFTOVER IS TRUE FOR AS LONG AS IT IS SAID ──
+  const leftOf = (X, tid = 'T1') => (X.w() && X.w().targets.get(tid) ? X.w().targets.get(tid).pk.left : null) || null;
+  const openFy = (X) => X.items.filter((i) => i.status === 'open');
+  const lend97 = async (road, opts = {}) => {
+    const X = world2({ holders: road, store: VAULT5(), print: false, ...opts });
+    X.world.chrome = chrome6(); X.world.trace = [];
+    if (road !== 'human') { await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open'); await until2(X.armed, 500); await sleep2(5); } else await X.opened();
+    const opening = X.world.said.slice();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X);
+    return { X, A: authOf5(X), opening };
+  };
+  const leaveKey97 = async (X) => { X.world.fail = new Map([['WebAuthn.removeCredential', 'Internal error']]); gone97(X, 'destroyed'); await atRest97(X); X.world.fail = null; }; // the agent's ceremony ends with its document; the browser refuses the key's removal
+  // MUST 1: THE ITEM LIVES EXACTLY AS LONG AS THE LEFTOVER — a later clean-up that finds the tab clean ends it (resolved, said),
+  // the once-key goes with it (a NEW leftover on the tab is said again), and nothing untrue is said meanwhile («not loaded»)
+  {
+    const { X, A, opening } = await lend97('agent');
+    await leaveKey97(X);
+    const filed = { left: !!leftOf(X), open: openFy(X).length, said: X.world.said.slice(opening.length) };
+    doc6(X, 8); X.start(2, 'vercel.com', 8); await until2(() => released(X) > 1, 1000); await atRest97(X);
+    X.say({ ev: 'end', id: 2, outcome: 'ok' }, 8); await atRest97(X);
+    const after = { left: leftOf(X), keys: keys7(X, A), open: openFy(X).length, resolved: (X.world.resolved || []).slice(), said: X.world.said.slice(opening.length) };
+    X.start(3, 'vercel.com', 8); await until2(() => released(X) > 2, 1000); await atRest97(X);
+    X.world.fail = new Map([['WebAuthn.removeCredential', 'Internal error']]); X.say({ ev: 'end', id: 3, outcome: 'ok' }, 8); await atRest97(X); X.world.fail = null;
+    const again = { open: openFy(X).length, lines: X.world.said.slice(opening.length).filter((l) => /could not be taken back/.test(l)).length };
+    X.D.shutdown();
+    ok(filed.left && filed.open === 1 && filed.said.length === 1 && !after.left && !after.keys.length && after.open === 0 && after.resolved.length === 1 && after.said.length === 2 && /the passkey left on the tab «Use Your Passkey» is gone now \(a later clean-up found the tab clean\)$/.test(after.said[1]) && again.open === 1 && again.lines === 2,
+      'B-97ae round 2 MUST 1: a later clean-up that finds the tab clean ENDS the leftover — its item resolved, said once; the once-key let go (a new leftover there is said again); the next sign-in that meets the leftover key says nothing untrue («not loaded»)', { filed, after, again });
+  }
+  for (const how of ['socket', 'detached', 'restart']) {
+    const { X } = await lend97('agent');
+    await leaveKey97(X);
+    const id = (openFy(X)[0] || {}).id || null;
+    if (how === 'socket') { X.f.sock().close(); await until2(() => !X.w() || X.w().state !== 'open', 500); await sleep2(10); }
+    else if (how === 'detached') { X.f.push({ method: 'Target.detachedFromTarget', params: { sessionId: 'S-T1', targetId: 'T1' } }); await sleep2(10); }
+    else { X.restart(); await sleep2(10); }
+    const r = { how, id, resolved: (X.world.resolved || []).slice(), open: openFy(X).length, swept: (X.world.swept || []).filter((p) => p === 'pk-left:').length };
+    X.D.shutdown();
+    ok(!!id && r.resolved.includes(id) && r.open === 0 && r.swept === (how === 'restart' ? 2 : 1),
+      `B-97ae round 2 MUST 1 … the ${how === 'socket' ? 'browser\'s socket closing' : how === 'detached' ? 'tab\'s session detaching' : 'hub restarting (shutdown, then a new hub that sweeps a past life\'s items: forYou.sweep(«pk-left:»))'} ends the leftover — it took the authenticator (S12): the item resolved`, r);
+  }
+  // MUST 2: «REFUSED» IS SAID ONLY OF A REFUSAL — a missed step is LOOKED at; what is said is what was seen
+  {
+    const { X, A, opening } = await lend97('agent', { callTimeoutMs: 60 });
+    X.world.hold = new Set(['WebAuthn.removeCredential']); X.world.held = [];
+    gone97(X, 'destroyed'); await until2(() => X.world.held.length > 0, 500); await sleep2(300);
+    const r = { keys: keys7(X, A), left: !!leftOf(X), said: X.world.said.slice(opening.length), items: openFy(X).length };
+    free7(X); await sleep2(10); X.D.shutdown();
+    ok(!r.keys.length && !r.left && !r.said.length && !r.items, 'B-97ae round 2 MUST 2: a removal the browser DID but answered after callTimeoutMs is looked at — the key is gone ⇒ nothing said, no item (never «refused»)', r);
+  }
+  {
+    const { X, opening } = await lend97('agent', { callTimeoutMs: 60 });
+    X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = [];
+    gone97(X, 'destroyed'); await sleep2(400);
+    const r = { left: leftOf(X), said: X.world.said.slice(opening.length), items: openFy(X).map((i) => i.text) };
+    free7(X); await sleep2(10); X.D.shutdown();
+    ok(!!r.left && r.left.unchecked && r.said.length === 1 && /whether the passkey lent to the tab «Use Your Passkey» was taken back could not be checked — the browser did not answer \(getCredentials: did not answer\)$/.test(r.said[0]) && r.items.length === 1 && typeof PK.leftForYouItem === 'function' && r.items[0] === PK.leftForYouItem({ tab: 'Use Your Passkey', unchecked: true }).text,
+      'B-97ae round 2 MUST 2 … the look itself got no answer on a live session ⇒ «could not be checked — the browser did not answer», the item «could not check», never «refused»', r);
+  }
+  // MUST 3(ii): THE HANDOVER agent → person judges its removal as (b) does — refused on a live session ⇒ said, the tab named
+  for (const refuse of [true, false]) {
+    const { X, A, opening } = await lend97('both');
+    const was = X.w().mode;
+    if (refuse) X.world.fail = new Map([['WebAuthn.removeVirtualAuthenticator', 'Internal error'], ['WebAuthn.disable', 'Internal error']]);
+    X.world.H.agent = false; await X.lease({ kind: 'detach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await until2(() => X.w().mode === 'person', 500); await atRest97(X);
+    X.world.fail = null;
+    const r = { refuse, was, mode: X.w().mode, alive: X.world.chrome.auths.has(A), keys: keys7(X, A), said: X.world.said.slice(opening.length), items: openFy(X).length };
+    X.D.shutdown();
+    ok(was === 'agent' && r.mode === 'person' && (refuse ? r.alive && r.keys.join() === 'Kvault005' && r.said.length === 1 && /could not be taken back \(1 key\) — removeVirtualAuthenticator: refused \(Internal error\); disable: refused \(Internal error\)$/.test(r.said[0]) && r.items === 1 : !r.alive && !r.said.length && !r.items),
+      `B-97ae round 2 MUST 3(ii): the agent → person handover ${refuse ? 'whose removal the browser refuses on a live session ⇒ said by name, the tab named (before: nothing — the key and UV stayed, the watch believed them gone)' : 'done ⇒ the authenticator gone, nothing said'}`, r);
+  }
+  // smaller 1: ONE name for the tab — the title cleaned (no bidi / invisible characters, no line breaks), else the ORIGIN, never
+  // the address's path or query (a sign-in address can carry a code or an e-mail address)
+  for (const [title, url, want] of [['‮evil\nline', 'https://vercel.com/login', 'evil line'], ['', 'https://vercel.com/login?token=abc123&email=me%40x.test', 'https://vercel.com']]) {
+    const { X, opening } = await lend97('agent');
+    const e = X.w().targets.get('T1'); e.title = title; e.url = url;
+    await leaveKey97(X);
+    const said = X.world.said.slice(opening.length), item = openFy(X)[0] || null, m = /the tab «([^»]*)»/.exec(said[0] || '');
+    X.D.shutdown();
+    ok(!!m && !!item && m[1] === want && item.i18n.text.params.tab === want && !/token|email|\?|‮|\n/.test(said[0] + item.text),
+      `B-97ae round 2 (smaller 1): the tab is named the same in the log and the item — ${title ? 'its title cleaned' : 'no title ⇒ its ORIGIN'} («${want}»), never the raw title or the address's query`, { said, item: item && item.text });
+  }
+  // smaller 2: a cap — past `leftMax` tabs of one browser, ONE item counts the rest
+  {
+    const X = world2({ holders: 'agent', store: VAULT5(), print: false, two: true, leftMax: 1 });
+    X.world.chrome = chrome6(); X.world.trace = [];
+    await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open'); await until2(X.armed, 500); await sleep2(5);
+    const sayT2 = (o, ctx = 7) => { const b = [...X.f.log].reverse().find((x) => x.method === 'Runtime.addBinding' && x.sessionId === 'S-T2'); X.f.push({ method: 'Runtime.bindingCalled', sessionId: 'S-T2', params: { name: b ? b.params.name : 'x', executionContextId: ctx, payload: JSON.stringify(o) } }); };
+    X.start(1, 'vercel.com'); sayT2({ ev: 'start', id: 1, kind: 'get', rpId: 'vercel.com', origin: 'https://vercel.com' }); await until2(() => released(X) > 1, 1000); await atRest97(X);
+    X.world.fail = new Map([['WebAuthn.removeCredential', 'Internal error']]);
+    gone97(X, 'destroyed'); X.f.push({ method: 'Runtime.executionContextDestroyed', sessionId: 'S-T2', params: { executionContextId: 7 } }); await atRest97(X); X.world.fail = null;
+    const two = openFy(X).map((i) => i.text);
+    X.f.push({ method: 'Target.targetDestroyed', params: { targetId: 'T2' } }); X.f.push({ method: 'Target.targetDestroyed', params: { targetId: 'T1' } }); await sleep2(10);
+    const closed = openFy(X).length;
+    X.D.shutdown();
+    ok(two.length === 2 && two.filter((t) => typeof PK.leftMoreItem === 'function' && t === PK.leftMoreItem({ n: 1 }).text).length === 1 && closed === 0,
+      'B-97ae round 2 (smaller 2): past the cap (here 1) the next tab\'s leftover is ONE item that counts the rest — both resolved when their tabs close', { two, closed });
+  }
+  // smaller 3: a cancel the page did not take says so — never «No passkey request is waiting» while one is
+  {
+    const X = world2({ holders: 'human', print: false, store: lentStore() }); X.world.chrome = chrome97(); X.world.trace = [];
+    await X.opened();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X);
+    X.world.hook = (args) => (args[1] === 'cancel' ? 0 : 1);
+    const cn = await X.D.cancelPasskey({ profileId: PID, browserKey: HK, ephemeral: false }, { by: 'user' });
+    X.world.hook = null;
+    const r = { n: cn.n, failed: cn.failed, text: cn.text, rec1: rec6(X, 1).outcome };
+    X.D.shutdown();
+    ok(cn.ok && r.n === 0 && r.failed === 1 && r.text === "VibeSpace could not cancel the page's passkey request (vercel.com) — the page did not take the cancel, so it is still waiting. Closing the tab ends it." && r.rec1 === 'pending',
+      'B-97ae round 2 (smaller 3): a cancel the page did not take (its hook answered 0) says it could not be cancelled — never «No passkey request is waiting» while one is', r);
+  }
+  // MUST 3(i): A CRASHED PAGE is a page that went — measured on real Chrome (S13): Target.targetCrashed, no context event until a
+  // reload, the lent key SURVIVING the crash and the reload. The crash itself ends the ceremony: at rest the key gone, nothing said;
+  // the reload after it (contexts cleared, a new one) and the next sign-in there load cleanly and keep their key
+  for (const road of ['agent', 'human']) {
+    const { X, A, opening } = await lend97(road);
+    X.f.push({ method: 'Target.targetCrashed', params: { targetId: 'T1', status: 'crashed', errorCode: 139 } });
+    const rest = await atRest97(X);
+    const r = { road, rest, outcome: rec6(X, 1).outcome || null, alive: !!A && X.world.chrome.auths.has(A), keys: A ? keys7(X, A) : [], uv: A ? uv7(X, A) : false, said: X.world.said.slice(opening.length) };
+    X.f.push({ method: 'Runtime.executionContextsCleared', sessionId: 'S-T1', params: {} }); doc6(X, 8); X.start(2, 'vercel.com', 8);
+    await until2(() => released(X) > 1, 1000); await atRest97(X);
+    const A2 = authOf5(X), next = { auth: A2, keys: A2 ? keys7(X, A2) : [], rec2: rec6(X, 2).outcome || null, said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    const kept = road === 'agent' ? r.alive : !r.alive;
+    ok(rest && /aborted/.test(String(r.outcome)) && kept && !r.keys.length && !r.uv && !r.said.length && next.rec2 === 'pending' && next.keys.join() === 'Kvault005' && !next.said.length,
+      `B-97ae round 2 MUST 3(i): the ${road === 'agent' ? "agent's" : "person's"} page CRASHES mid-ceremony (Target.targetCrashed) ⇒ its ceremony ends through the one end — at rest the key and UV gone${road === 'agent' ? ', the tab\'s authenticator kept' : ' with the once-authenticator'}, nothing said; the reload and the next sign-in there load cleanly`, { r, next });
+  }
+  // ── B-97ae ROUND 3 (the acceptance of 09d06e499): three places where what is said was still not what is so ──
+  // MUST 1: USER VERIFICATION LEFT ON IS A LEFTOVER TOO — the key removed, the UV-off refused ⇒ said «0 keys, user verification
+  // on», filed with the UV words; a later clean-up that turns it off ends it. The UV-off unanswered ⇒ «could not be checked».
+  {
+    const { X, A, opening } = await lend97('agent');
+    X.world.fail = new Map([['WebAuthn.setUserVerified', (m) => (m.params.isUserVerified === false ? 'Internal error' : null)]]);
+    gone97(X, 'destroyed'); await atRest97(X); X.world.fail = null;
+    const filed = { left: leftOf(X), keys: keys7(X, A), uv: uv7(X, A), said: X.world.said.slice(opening.length), items: openFy(X).map((i) => i.text) };
+    doc6(X, 8); X.start(2, 'vercel.com', 8); await until2(() => released(X) > 1, 1000); await atRest97(X);
+    X.say({ ev: 'end', id: 2, outcome: 'ok' }, 8); await atRest97(X);
+    const after = { left: leftOf(X), uv: uv7(X, A), open: openFy(X).length, resolved: (X.world.resolved || []).length };
+    X.D.shutdown();
+    ok(!!filed.left && !filed.keys.length && filed.uv && filed.said.length === 1 && /the passkey lent to the tab «Use Your Passkey» could not be taken back \(0 keys, user verification on\) — setUserVerified: refused \(Internal error\)$/.test(filed.said[0]) && filed.items.length === 1 && typeof PK.leftForYouItem === 'function' && filed.items[0] === PK.leftForYouItem({ tab: 'Use Your Passkey', uvOnly: true }).text && filed.items[0] !== PK.leftForYouItem({ tab: 'Use Your Passkey' }).text && !after.left && !after.uv && after.open === 0 && after.resolved === 1,
+      'B-97ae round 3 MUST 1: the key removed but the browser refused to turn user verification off ⇒ a leftover — said «0 keys, user verification on», filed with the UV words; a later clean-up that turns it off ends it', { filed, after });
+  }
+  {
+    const { X, opening } = await lend97('agent', { callTimeoutMs: 60 });
+    X.world.hold = new Set(['WebAuthn.setUserVerified']); X.world.held = [];
+    gone97(X, 'destroyed'); await sleep2(400);
+    const r = { left: leftOf(X), said: X.world.said.slice(opening.length), items: openFy(X).map((i) => i.text) };
+    free7(X); await sleep2(10); X.D.shutdown();
+    ok(!!r.left && r.said.length === 1 && /whether user verification on the tab «Use Your Passkey» was turned off could not be checked — the browser did not answer \(setUserVerified: did not answer\)$/.test(r.said[0]) && r.items.length === 1 && typeof PK.leftForYouItem === 'function' && r.items[0] === PK.leftForYouItem({ tab: 'Use Your Passkey', unchecked: 'silent' }).text,
+      'B-97ae round 3 MUST 1 … the UV-off got no answer (the key gone) ⇒ «whether user verification … was turned off could not be checked», the item «could not check» — never «it is still on that tab»', r);
+  }
+  // MUST 2: THE PERSON'S OWN CANCEL — the bridge carries `failed` (never `ended`), the live window says the cancel did not go through
+  {
+    const http = require('http'), WSm = require('ws');
+    const SB = require(path.join(REPO, 'src/server/browser-stream.js')), BHS = require(path.join(REPO, 'src/browser-stream.js'));
+    const target = BHS.humanTarget({ key: HK, profileId: PID, label: 'Mine' });
+    const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
+    const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
+    const OPEN1 = { state: 'passkey', passkey: { state: 'passkey_open', id: 'T1:7:1', rpId: 'vercel.com', text: 'x' }, headed: false, since: 1, profileId: PID };
+    const dl = new Set();
+    const dialogs = { arm: async () => ({ ok: true, watched: true }), passkeyFactOf: () => OPEN1, onChange: (fn) => { dl.add(fn); return () => dl.delete(fn); }, cancelPasskey: async () => ({ ok: true, n: 0, failed: 1, rpId: 'vercel.com', text: PK.cancelText({ n: 0, rpId: 'vercel.com', failed: 1 }) }), openOn: () => null };
+    class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+    const bridge = SB.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
+    const srv = http.createServer(); srv.on('upgrade', (req, s, h) => bridge.handleUpgrade(req, s, h));
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = [];
+    ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } }); await new Promise((r) => ws.on('open', r));
+    await until2(() => got.some((m) => m.type === 'status' && m.state === 'upstream-open')); await sleep2(40);
+    ws.send(JSON.stringify({ type: 'passkey-cancel' })); await until2(() => got.some((m) => m.type === 'passkey-ack'));
+    const ack = got.find((m) => m.type === 'passkey-ack') || null;
+    try { ws.close(); } catch { /* */ } bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+    // the window's own passkey-ack case, sliced and run over a stub scope (as ⑨r2 MAJOR 2 does)
+    const src = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8'), i0 = src.indexOf("      case 'passkey-ack':"), ackCase = i0 >= 0 ? src.slice(i0, src.indexOf('\n', i0)) : '';
+    const toasts = [], st = { passkeyCancelling: true, pkRelay: { relay: 1 } };
+    let run = null; try { run = new Function('st', 't', 'renderDialog', 'showToast', `return (m) => { switch (m.type) { ${ackCase}\n } };`)(st, (k) => k, () => {}, (m, o) => toasts.push({ m, o })); } catch { run = null; } // eslint-disable-line no-new-func
+    if (run && ack) run(ack);
+    const toast = toasts[toasts.length - 1] || null;
+    ok(!!ack && ack.ok && ack.n === 0 && ack.failed === 1 && ack.ended === undefined && !!run && !!toast && toast.m === "VibeSpace could not cancel the page's passkey request — the page did not take the cancel, so it is still waiting. Closing the tab ends it." && toast.o && toast.o.type === 'error' && st.passkeyCancelling === false && !!st.pkRelay,
+      'B-97ae round 3 MUST 2: the PERSON\'s Cancel the page did not take — the bridge answers `failed` (never `ended`), and the live window says it could not be cancelled and keeps the banner (never «The passkey wait had already ended»)', { ack, toast, relay: !!st.pkRelay });
+  }
+  // MUST 3: A TITLE THAT IS AN ADDRESS IS AN ADDRESS (an untitled page's TargetInfo.title is its URL — measured, S14): named by the
+  // tab's ORIGIN; a page naming itself as another site's address is named by its own origin
+  {
+    const D97 = require(path.join(REPO, 'src/server/browser-dialogs.js')), U = 'https://login.example/untitled?token=abc123&email=me%40x.test'; // (the untitled form itself is measured on real Chrome: S14)
+    const cases = typeof D97.tabName === 'function' ? [
+      [{ title: U, url: U }, 'https://login.example'], [{ title: U.replace('https://', ''), url: U }, 'https://login.example'],
+      [{ title: 'https://bank.example/login', url: 'https://vercel.com/login' }, 'https://vercel.com'], [{ title: 'vercel.com/login?next=/x', url: 'https://vercel.com/login?next=/x' }, 'https://vercel.com'],
+      [{ title: 'Use Your Passkey', url: U }, 'Use Your Passkey'], [{ title: '', url: U }, 'https://login.example'], [{ title: '', url: 'data:text/html,x' }, 'this tab'],
+    ].map(([inp, want]) => ({ inp, want, got: D97.tabName(inp) })) : [];
+    const { X, opening } = await lend97('agent');
+    const e = X.w().targets.get('T1'); e.title = 'https://vercel.com/login?token=abc123&email=me%40x.test'; e.url = e.title;
+    await leaveKey97(X);
+    const said = X.world.said.slice(opening.length), item = openFy(X)[0] || null;
+    X.D.shutdown();
+    ok(cases.length === 7 && cases.every((c) => c.got === c.want) && /the tab «https:\/\/vercel\.com» could not be taken back/.test(said[0] || '') && !!item && item.i18n.text.params.tab === 'https://vercel.com' && !/token|email/.test((said[0] || '') + item.text),
+      'B-97ae round 3 MUST 3: a title that IS an address (the tab\'s own — an untitled page — or one that parses as one) is named by the tab\'s ORIGIN, in the line and the item; a real title stays', { cases: cases.filter((c) => c.got !== c.want), said, item: item && item.text });
+  }
+  // smaller 1: a look the browser REFUSED is not one it did not answer — two facts, two words (the line and the item)
+  {
+    const { X, opening } = await lend97('agent');
+    X.world.fail = new Map([['WebAuthn.removeCredential', 'Internal error']]);
+    X.world.onSend = (m) => { if (m.method === 'WebAuthn.removeCredential') X.world.fail.set('WebAuthn.getCredentials', 'Not allowed'); };
+    gone97(X, 'destroyed'); await atRest97(X); X.world.fail = null; X.world.onSend = null;
+    const said = X.world.said.slice(opening.length), item = openFy(X)[0] || null;
+    X.D.shutdown();
+    ok(said.length === 1 && /could not be checked — the browser refused to show what the tab holds \(removeCredential: refused \(Internal error\); getCredentials: refused \(Not allowed\)\)$/.test(said[0]) && !!item && item.detail === (PK.LEFT_WORDS || {}).refusedLookDetail,
+      'B-97ae round 3 (smaller 1): a look the browser refused is said «refused to show what the tab holds» — never «did not answer» — and the item\'s detail says the same', { said, detail: item && item.detail });
+  }
+  // smaller 2: only what was LENT is counted as lent — a key the PAGE made, left behind, is said as what it is (the log), never filed
+  {
+    const { X, A, opening } = await lend97('agent');
+    X.world.chrome.creds.get(A).add('UGFnZU1hZGUx'); // the page registered a passkey of its own during the ceremony
+    X.world.fail = new Map([['WebAuthn.removeCredential', (m) => (String(m.params.credentialId) === 'UGFnZU1hZGUx' ? 'Internal error' : null)]]);
+    gone97(X, 'destroyed'); await atRest97(X); X.world.fail = null;
+    const r = { keys: keys7(X, A), said: X.world.said.slice(opening.length), items: openFy(X).length, left: !!leftOf(X) };
+    X.D.shutdown();
+    ok(r.keys.join() === 'UGFnZU1hZGUx' && !r.left && r.items === 0 && r.said.length === 1 && /a passkey the page made on the tab «Use Your Passkey» could not be removed from it — removeCredential: refused \(Internal error\)$/.test(r.said[0]),
+      'B-97ae round 3 (smaller 2): the lent key removed, a key the PAGE made refused ⇒ never «the passkey VibeSpace lent» (no item) — said as what it is in the log', r);
+  }
+  // smaller 3: after a page went (a crash here), its drain sends no call that would look for its dead context
+  for (const how of ['crash', 'destroyed']) {
+    const { X, opening } = await lend97('human');
+    const n0 = X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'drained').length;
+    if (how === 'crash') X.f.push({ method: 'Target.targetCrashed', params: { targetId: 'T1', status: 'crashed', errorCode: 139 } }); else gone97(X, 'destroyed');
+    await atRest97(X);
+    const r = { how, drained: X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === 'drained').length - n0, said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    ok(r.drained === 0 && !r.said.length, `B-97ae round 3 (smaller 3): a page that went (${how}) gets no «drained» call — its dead context is never looked for (the next sign-in waits out no callTimeoutMs)`, r);
+  }
+  // smaller 4: the handover's look sees the user verification like the others
+  {
+    const { X, opening } = await lend97('both');
+    X.world.fail = new Map([['WebAuthn.removeVirtualAuthenticator', 'Internal error'], ['WebAuthn.disable', 'Internal error'], ['WebAuthn.setUserVerified', (m) => (m.params.isUserVerified === false ? 'Internal error' : null)]]);
+    X.world.H.agent = false; await X.lease({ kind: 'detach', browserKey: CK, profileId: PID, sessionId: 's-c' }); await until2(() => X.w().mode === 'person', 500); await atRest97(X);
+    X.world.fail = null;
+    const said = X.world.said.slice(opening.length);
+    X.D.shutdown();
+    ok(said.length === 1 && /could not be taken back \(1 key, user verification on\) — removeVirtualAuthenticator: refused \(Internal error\); disable: refused \(Internal error\); setUserVerified: refused \(Internal error\)$/.test(said[0]),
+      'B-97ae round 3 (smaller 4): the handover\'s look sees the user verification too — «1 key, user verification on»', said);
+  }
+  // B-97ae walk (c): THE CANCEL ENDS WHAT WAS PENDING WHEN IT WAS SENT. A sign-in whose start lands in the same socket read as
+  // the cancel's answer (the page asked again at once; ws runs both frames before the await continues — measured by the
+  // acceptance) is not the cancel's: it is gated and released as any other. Before: marked «cancelled» by the person, never
+  // released — the page waited out its hold.
+  {
+    const X = world2({ holders: 'human', print: false, store: lentStore() });
+    X.world.chrome = chrome97(); X.world.trace = [];
+    await X.opened();
+    const opening = X.world.said.slice();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X);
+    X.world.hook = (args) => { if (args[1] === 'cancel') setTimeout(() => { X.say({ ev: 'end', id: 1, outcome: 'cancelled', name: 'AbortError' }); X.start(2, 'vercel.com'); }, 0); return 1; }; // both frames before the answer
+    const cn = await X.D.cancelPasskey({ profileId: PID, browserKey: HK, ephemeral: false }, { by: 'user' });
+    X.world.hook = null;
+    await until2(() => released(X) > 1, 1000); const rest = await atRest97(X);
+    const r = { cn: { ok: cn.ok, n: cn.n }, rest, rec1: rec6(X, 1).outcome || null, rec2: rec6(X, 2).outcome || null, by2: rec6(X, 2).by || null, released: released(X), said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    ok(r.cn.ok && r.cn.n === 1 && rest && r.rec1 === 'cancelled' && r.rec2 === 'pending' && r.by2 === 'human' && r.released === 2 && !r.said.length,
+      'B-97ae walk (c) the Cancel ends only what was pending when it was sent: a sign-in that started in the same socket read as its answer is gated and released as any other (never marked «cancelled» by the person)', r);
   }
 }
 

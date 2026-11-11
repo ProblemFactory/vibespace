@@ -925,6 +925,7 @@
 - (2026-11-10) THE OWNER'S HUB PAUSED 1–5 S EVERY FEW MINUTES: ITS OWN STORE WRITES HELD THE MAIN THREAD (hub-loop-stalls commit 2) — 不变量 = a store's write never holds the main loop: its own thread, a pace stated for its size, an exit no bound of ours cuts (kb-bugfix-invariants)
 - (2026-11-11) A CLOSE STALLED ~1 s: THE TOAST'S PLACEMENT HIT-TESTED THE PAGE (76 + 79 × 10.8 ms); A FOCUSED BOX'S FOLLOWER POLLED; THE FREEZE RINGS WERE EMPTY (owner; window-close-stall). 不变量 = a placement never hit-tests the page; a follower never polls; a ring accessor is set only when unset
 - (2026-11-11) THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (owner's recording: the stall watch's rAF loop, ≈ 190 ms/s at 98 Hz; window-close-stall C). 不变量 = no permanent rAF: long frames from the observer, one probe a second (kb-bugfix-invariants)
+- (2026-11-11) THE LENT KEY'S OTHER ENDS: A PAGE GONE, A REFUSED CLEAN-UP, A SAME-READ START, A HUB RESTART (B-97ae walk; passkey-lend-walk). 不变量 = every ended record goes through pkEnd; a key the browser kept is SAID; a gone session takes its authenticator (measured) ⇒ kb-bugfix-invariants.md
 
 ## THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (the owner's own recording, 2026-11-11; lane window-close-stall C, its own commit behind the hotfix)
 
@@ -958,6 +959,7 @@
 
 **The lesson.** The follower's cost was invisible in every suite: each measured one placement, never the passes a second. A per-second cost needs a pin that counts over time with nothing happening.
 
+
 ## EVERY CHECK OF A NEW CLAUDE CODE VOIDED IN HALF A SECOND ON A HUB WHOSE CHECKOUT LIVES IN THE HOME (the owner's hub, 2026-11-11; lane cli-self-measure, 2.369.395)
 
 **What happened.** The owner's hub was updated to 2.369.393 for the hub's own check of a new Claude Code. Every check of 2.1.322 ended `cannot-run (guarded-read)` in 473 ms, before any variant, and nothing kept which path had been read. The pool kept 11 long-lived-token accounts held; a conversation had to be started on an account picked by hand.
@@ -970,6 +972,50 @@
 1. The hub's own choice of where a run lives can never void it: a run lives where none of the walks a tracee makes (node's package.json, the CLI's project files to /) can reach a deny root — or it does not run and says so.
 2. Every cell of «where the data dir lives» is a pin, the one nobody drove first (test-cli-self-measure §12 in the fast tier; test-oat-measure-fake on the real tracer).
 3. A void keeps WHAT it read — a verdict nobody can trace back to a path is not a finding.
+
+## THE LENT KEY'S OTHER ENDS: A PAGE GONE, A REFUSED CLEAN-UP, A SAME-READ START, A HUB RESTART (B-97ae's second commit, 2026-11-11; lane passkey-lend-walk)
+
+**Symptom.** The hotfix closed the person's Cancel; the acceptance measured four more ends, each pre-existing on master.
+- An agent's tab whose document went mid-ceremony kept the loaded key and UV in its authenticator until the tab's next ceremony ended — and that ceremony's load of the same id failed («its id is already registered»).
+- A clean-up step the browser refused was never said: VibeSpace believed the key gone.
+- A sign-in that started in the same socket read as the cancel's answer was marked «cancelled» by the person and never released.
+- Nobody knew what a tab keeps when the hub restarts during a lend.
+
+**Cause.**
+- `pkPageGone` removed only the person's once-authenticator.
+- `pkUnload` / `pkOnceGone` ignored every answer.
+- `cancelPasskey` marked every record pending AFTER its await, not the ones it was sent for.
+
+**Fix.**
+- `pkPageGone` sends each ended record to `pkEnd`.
+- A step refused while the session is LIVE and that leaves a key or UV (the authenticator not removed, the environment not disabled) is said once by name, and the tab is named to the person in the For-you tray (resolved when the tab closes).
+- The Cancel marks only what was pending before its await.
+- Measured on real Chrome (S12): a DevTools session that goes — its connection closed, its session detached, the hub gone mid-ceremony — takes its virtual authenticator, keys and UV with it. So no sweep is needed at re-arm, and a gone session's failed steps are not said.
+
+**Round 2 (the acceptance: «WHAT IS SAID ABOUT A LEFTOVER IS TRUE FOR AS LONG AS IT IS SAID»).**
+- The leftover is kept per tab (`e.pk.left`), and its item lives exactly as long as it does. It is resolved by:
+  - a later clean-up that LOOKS and finds the tab clean;
+  - the session detaching;
+  - the socket or the browser going (`down()`, shutdown included);
+  - the tab closing;
+  - a hub START (`forYou.sweep('pk-left:')`: a past life's items are not kept).
+- «Refused» is said only of a refusal. A step that got no answer is LOOKED at (what the authenticator holds now); what is said is what was seen, and a look with no answer says «could not be checked».
+- The agent → person handover is judged the same way.
+- A CRASHED page is a page that went. Measured (S13): Chrome says `Target.targetCrashed` with no context event until a reload, and the lent key survives the crash AND the reload, so the crash itself ends the ceremony.
+- One tab name (title cleaned, else the origin — never the query); a cap of three items per browser plus one that counts; a cancel the page did not take says so.
+- (d)'s premise is named in kb-features («The limit — what a lent key rests on»).
+
+**Round 3.**
+- User verification left on is a leftover too (the look tries UV off once more, whatever the keys).
+- The person's own Cancel that the page did not take is said as failed in the live window.
+- A title that is an address (an untitled page's — measured, S14) is named by the tab's origin.
+- A refused look is not a silent one; a page-made key is never «lent»; a page that went gets no drain call.
+
+**不变量.** Every way a lent sign-in ends goes through ONE end (`pkEnd`), or Chrome's own session end takes the key. A key the browser kept is SAID only as SEEN, never believed gone, and never said a moment longer than it is there. A Cancel ends what it was sent for, and says so when it could not.
+
+**Pins.**
+- test-browser-passkey «B-97ae walk (a) ×5 / (b) ×4 / (c)», judged at rest; red on d5bc4c67d in 6 legs.
+- test-browser-passkey-chrome S12: the look's control (alive ⇒ signs, after a reload too); closed / detached / hub gone ⇒ nothing signs.
 
 ## THE PERSON SAID NO AND THEIR PASSKEY STAYED ON THE TAB (B-97ae, raised to HIGH 2026-11-10; lane passkey-lend-cleanup, the hotfix on .390)
 
@@ -985,7 +1031,7 @@
 
 **The lesson (the acceptance).** The first legs' fake refused the load (no `keys`), so only the authenticator's removal was pinned, and a pkEnd 50 ms late passed every leg that waited. So: assert the load happened before asserting the removal; judge at rest; fail on any line said, never on a word filter.
 
-**Not closed (the second commit, after .391 — each pre-existing on master, measured by the acceptance's own fake, none in ordinary use).**
+**Not closed in .391 — CLOSED in 2.369.397 (lane passkey-lend-walk; «THE LENT KEY'S OTHER ENDS» above), each pre-existing on master, measured by the acceptance's own fake, none in ordinary use.**
 - **The agent road, a document gone mid-ceremony.** Its context destroyed or cleared between the lend and the assertion (a window under 0.2 s). `pkPageGone` unloads only the person's once-authenticator, so the loaded key and UV stay in the agent tab's authenticator until that tab's next ceremony ends. The fix is one line by the same law: each ended record through the one end.
 - **A cleanup step that fails is never said.** One failure is made up for by the later steps. If `removeCredential`, `removeVirtualAuthenticator` and `disable` ALL fail on a live session, the key stays while VibeSpace believes it gone — it must be said by name, and the tab named to the person.
 - **`cancelPasskey` marks EVERY pending record of the context.** That includes one that arrived in the same socket read as the cancel's answer, which the hook did not cancel: it is never released and the page waits out its hold (no key is involved). Mark only what was pending before the await.

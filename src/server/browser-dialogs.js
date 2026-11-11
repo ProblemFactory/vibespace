@@ -134,11 +134,31 @@ const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is aske
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
 const SOCKET_CLOSED = 'the browser\'s CDP socket closed'; // lane passkey-browse-yourself: the one `down` reason a re-arm answers (a stop / a restart / a shutdown never)
 
+/** B-97ae round 3: ONE NAME FOR A TAB, the server log and the For-you tray alike — the page's title through ST.pageText (no invisible
+ *  or bidi characters, no line breaks, frames folded) unless that title IS AN ADDRESS: the tab's own (measured on real Chrome,
+ *  test-browser-passkey-chrome S14: an untitled page's TargetInfo.title is its address, query and all), or one that parses as an
+ *  address (a page naming itself as another site). Then, and with no title, the tab's ORIGIN — never its path or query (a
+ *  sign-in address can carry a code or an e-mail address); else «this tab». PURE. */
+function tabName({ title = '', url = '' } = {}) {
+  const raw = String(title == null ? '' : title).trim(), href = String(url == null ? '' : url);
+  let origin = ''; try { const u = new URL(href); if (u.origin && u.origin !== 'null') origin = u.origin; } catch { /* no address */ }
+  const bare = (x) => String(x).replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/+$/, '');
+  const isAddress = (x) => {
+    if (!x) return false;
+    if (href && (x === href || bare(x) === bare(href) || (bare(x).length > 3 && bare(href).startsWith(bare(x))))) return true;
+    try { if (/^(https?|file|ftp|wss?|chrome|chrome-extension|about|data|blob|javascript):$/i.test(new URL(x).protocol)) return true; } catch { /* not one */ }
+    return /^[\w.-]+\.[a-z]{2,}(:\d+)?\/\S*$/i.test(x) || /^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?\/\S*$/i.test(x);
+  };
+  const t = ST.pageText(raw, 80).trim();
+  if (t && !isAddress(raw) && !isAddress(t)) return t;
+  return origin || 'this tab';
+}
+
 function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.now,
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null, rearmMs = REARM_MS /* lane passkey-browse-yourself */,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
-  passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, drainMs = PK_DRAIN_MS /* r6; r7: the slow mark */, holdBeatMs = PK_HOLD_BEAT_MS, holdMaxMs = PK_HOLD_MAX_MS /* r7 */, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
+  passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, drainMs = PK_DRAIN_MS /* r6; r7: the slow mark */, holdBeatMs = PK_HOLD_BEAT_MS, holdMaxMs = PK_HOLD_MAX_MS /* r7 */, leftMax = 3 /* B-97ae round 2: per browser, the leftover items past which ONE counts the rest */, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
   logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
@@ -232,7 +252,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', mode: modeOf(profileId) /* acceptance r1: 'agent' | 'person' (WHO holds it) */, openedAt: 0, id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
+      pkSlot: pkIdsFor(profileId, url).slot, pkWorld: pkIdsFor(profileId, url).world, pkChan: pkIdsFor(profileId, url).chan, pkForYou: new Map(), pkLeft: { tabs: new Map(), more: new Set(), moreId: null } /* B-97ae round 2 */, pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
       permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
       kernel: null, surf: new Map(), surfTimers: new Map(), surfForYou: new Map(), nativeIgnored: 0, autoSurf: 0 }; // lane browser-surfaces: null = not asked yet; the open surfaces by id; the owner's card clock + item; the belt's count: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
@@ -283,6 +303,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.state === 'down') return;
     w.state = 'down';
     for (const id of w.pkForYou.values()) { try { forYou?.resolve?.(id); } catch { /* the tray's own failure */ } } w.pkForYou.clear(); // lane browser-passkey
+    for (const e of w.targets.values()) pkLeftEnd(w, e, 'down'); // B-97ae round 2: the socket (the browser, the hub) went — its sessions took their authenticators (S12)
     for (const rec of [...w.prompts.values()]) dropPrompt(w, rec, 'down'); // lane browser-ui-prompts: a gone socket's paused sign-in is Chrome's again
     w.ready();
     for (const fn of w.waiting.values()) { try { fn({ error: { message: why } }); } catch { /* */ } }
@@ -370,6 +391,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         w.targets.delete(tid); if (e.sid) w.sessions.delete(e.sid); if (e.reEnable) clearTimeout(e.reEnable);
         if (e.quiet) clearTimeout(e.quiet);
         if (PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); // lane browser-passkey: a closed tab waits for nothing
+        pkLeftEnd(w, e, 'closed'); // B-97ae walk (b): the closed tab took the key it kept
         if (w.prompts.has(tid)) dropPrompt(w, w.prompts.get(tid), 'tab-closed'); // lane browser-ui-prompts
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
         if (e.loop) { e.loop = null; emit({ kind: 'loop-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); } // lane site-reset: a closed tab's loop is over
@@ -379,7 +401,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (dlg) { w.open.delete(tid); emit({ kind: 'closed', profileId: w.profileId, targetId: tid, answered: { id: dlg.id, dialog: dlg, how: 'dismissed', by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }
         return;
       }
-      case 'Target.detachedFromTarget': { const sid = String(p.sessionId || ''); const tid = w.sessions.get(sid); w.sessions.delete(sid); const e = tid && w.targets.get(tid); if (e && e.sid === sid) { e.sid = null; e.enabled = false; } return; }
+      case 'Target.detachedFromTarget': { const sid = String(p.sessionId || ''); const tid = w.sessions.get(sid); w.sessions.delete(sid); const e = tid && w.targets.get(tid); if (e && e.sid === sid) { e.sid = null; e.enabled = false; pkLeftEnd(w, e, 'detached'); } return; } // B-97ae round 2: the session took its authenticator (S12)
       // verify r1 A7: a main-frame navigation IN FLIGHT (started, not committed) — a timeout then is the network's
       // verify r2 #5: `navFirst` = the first start of a RUN of navigations none of which committed (a page that starts a new
       // one every 20 s is ONE run — a per-start clock never reached the grace: never hung, never told), `navCount` its size
@@ -424,6 +446,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
       case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
+      // B-97ae round 2 MUST 3(i): A CRASHED PAGE IS A PAGE THAT WENT — (a)'s road. MEASURED on real Chrome (test-browser-passkey-
+      // chrome S13): a renderer crash during a lend says Target.targetCrashed (the browser's discovery — this watch's) and
+      // Inspector.targetCrashed (a session with Inspector on), and NO context event until a reload; the lent authenticator — its
+      // key and UV — SURVIVES the crash AND the reload (the reloaded page signed with it in 2 ms). So the crash itself ends the
+      // tab's pending ceremonies through THE ONE END; its documents are dead — the context maps cleared, and the records it ends
+      // are marked page-gone (pkPageGone), so the drain sends no call that would look for a dead context and wait out callTimeoutMs.
+      case 'Target.targetCrashed': case 'Inspector.targetCrashed': { const e = m.method === 'Target.targetCrashed' ? w.targets.get(String(p.targetId || '')) : tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); } return; }
       case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
       default: return;
     }
@@ -761,7 +790,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const rec of [...w.prompts.values()]) { const ar = w.authReq.get(rec.id); if (ar) { w.authReq.delete(rec.id); await call(w, 'Fetch.continueWithAuth', { requestId: ar.requestId, authChallengeResponse: { response: 'Default' } }, ar.sid || null); } dropPrompt(w, rec, 'person'); }
     await Promise.all(tabs.map(async (e) => {
       if (e.enabled) { await call(w, 'Fetch.disable', {}, e.sid); await call(w, 'Page.setInterceptFileChooserDialog', { enabled: false }, e.sid); }
-      if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid); }
+      if (e.pk.auth) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; const x = await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid), d = await call(w, 'WebAuthn.disable', {}, e.sid); const xa = pkAnswer(w, e, x), da = pkAnswer(w, e, d); if ((xa === 'refused' || xa === 'silent') && (da === 'refused' || da === 'silent')) { const uvHeld = [...e.pk.holds.values()].some((h) => h.auth === id && h.uv); const seen = await pkLook(w, e, id, [], uvHeld, { anyKey: true }); if (seen) pkLeftSet(w, e, id, seen, [pkWhy('WebAuthn.removeVirtualAuthenticator', x, xa), pkWhy('WebAuthn.disable', d, da)]); } } // round 3: the same look as the others (its UV too) // B-97ae round 2 MUST 3(ii): the handover's removal judged and said as (b)'s
     }));
     if ([...w.grants.values()].some((g) => g.kind === 'geolocation' && g.setting === 'granted')) await Promise.all(tabs.map((e) => call(w, 'Emulation.clearGeolocationOverride', {}, e.sid)));
     const ctxs = [...w.permCtx.keys()]; w.permCtx.clear();
@@ -1450,23 +1479,25 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
     const v = passkeyIn(pid, scopeFor(t));
     if (v.state === 'unknown') return { ok: true, n: 0, state: 'unknown', text: PK.UNKNOWN_TEXT };
-    let n = 0, kn = 0, rpId = '';
+    let n = 0, kn = 0, rpId = '', failed = 0, frp = '';
     for (const e of passkeyTabs(w, scopeFor(t))) {
       for (const rec of e.pk.records.filter((r) => r.kernel && r.outcome === 'pending')) if (await pkKernelCancel(w, e, rec, by)) { n++; kn++; rpId = rpId || rec.rpId; } // lane passkey-sink: the kernel ends it (cancelSurface) — the page sees NotAllowedError
       const ctxs = [...new Set(e.pk.records.filter((r) => r.outcome === 'pending' && !r.kernel).map((r) => r.ctx))];
       for (const ctx of ctxs) {
-        const rp0 = (e.pk.records.find((x) => x.outcome === 'pending' && !x.kernel && x.ctx === ctx) || {}).rpId || ''; // acceptance r3: the site read BEFORE the await (the page's own end can land first)
+        const asked = e.pk.records.filter((x) => x.outcome === 'pending' && !x.kernel && x.ctx === ctx); // B-97ae walk (c): what the cancel is sent FOR — a start that lands in the same socket read as its answer (ws runs both frames before the await continues) is a new sign-in, never this cancel's
+        const rp0 = (asked[0] || {}).rpId || ''; // acceptance r3: the site read BEFORE the await (the page's own end can land first)
         const r = await pkCall(w, e, ctx, 'cancel');
         const k = r && r.result && r.result.result ? Number(r.result.result.value) || 0 : 0;
+        if (k <= 0 && asked.some((x) => x.outcome === 'pending')) { failed++; frp = frp || rp0; } // round 2: the page did not take the cancel — said as it is, never «nothing is waiting»
         // lane passkey-lend-cleanup (B-97ae, HIGH): a ceremony the Cancel ENDS here goes through THE ONE END (pkEnd → the tab's
         // drain → pkUnload: its keys, its UV and the once-authenticator leave). The page reports its end too, but which lands
         // first is Chrome's: once this marks the record ended, that report matches no pending record (PK.applyEvent) — before
         // this, the cleanup then NEVER ran and the person's key stayed on the tab after their «no» (6 of 10 on .390)
-        if (k > 0) { n += k; rpId = rpId || rp0; for (const rec of e.pk.records) if (rec.outcome === 'pending' && rec.ctx === ctx) { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); } }
+        if (k > 0) { n += k; rpId = rpId || rp0; for (const rec of asked) if (rec.outcome === 'pending') { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); } }
       }
       if (n) passkeyChanged(w, e);
     }
-    return { ok: true, n, rpId, text: PK.cancelText({ n, rpId, kernel: kn > 0 }) };
+    return { ok: true, n, rpId, ...(failed ? { failed } : {}), text: PK.cancelText({ n, rpId: rpId || frp, kernel: kn > 0, failed }) };
   }
   // ── lane passkey-store-core: THE PASSKEY STORE'S CEREMONIES (docs/design-passkey-store.zh.md; P0's corrections) ──
   // The tab's virtual authenticator is EMPTY between ceremonies; a held ceremony is judged by PURE PS.gateVerdict and only
@@ -1669,7 +1700,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       rec.loaded = own.ids; rec.uvSet = own.uv; // r11 (acceptance r10 MINOR 1): marked as the CDP calls go out, before any later check — a refusal after the load (outranked) unloads what went in and turns UV off at its end (pkUnload)
       for (const l of loaded) {
         const r = await call(w, 'WebAuthn.addCredential', { authenticatorId: own.auth, credential: { credentialId: b64(l.row.credentialId), isResidentCredential: true, rpId: l.row.rpId, privateKey: l.key, ...(l.row.userHandle ? { userHandle: b64(l.row.userHandle) } : {}), signCount: l.loadAs, ...(l.row.userName ? { userName: l.row.userName } : {}), ...(l.row.displayName ? { userDisplayName: l.row.displayName } : {}) } }, e.sid);
-        if (r && r.error) say('pk-add:' + pid, `${pid}: a stored passkey was not loaded — ${r.error.message}`);
+        if (r && r.error && !/already registered/i.test(String(r.error.message || ''))) say('pk-add:' + pid, `${pid}: a stored passkey was not loaded — ${r.error.message}`); // round 2: «its id is already registered» = the key IS in the authenticator (a leftover's or an heir's) — usable, nothing untrue said
       }
       if (own.uv) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: own.auth, isUserVerified: true }, e.sid);
       why = stands(); if (why) return outranked(why); // r10: … and right before the release — an answer that came while it paired or loaded
@@ -1723,39 +1754,116 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  (pkGate), or found stale when the next ceremony starts (pkGate's belt). Any other ending record touches it not (7.1).
    *  r6: always inside a drain (pkDrain); no disable once a newer pairing began (`pairs` — r7: no gate goes past a drain now; kept as a belt).
    *  r7: never while another ceremony still pending holds a key in it — it passes to that one (its clean-up removes it). */
-  async function pkOnceGone(w, e, rec) {
+  /** B-97ae walk (b) + round 2: WHAT A CLEAN-UP COULD NOT TAKE BACK. Every step's answer is one of four: 'ok' · 'refused' (the
+   *  browser answered an error while the tab's session is LIVE) · 'silent' (no answer in callTimeoutMs on a live session) ·
+   *  'gone' (the socket or the session went, or the error names a gone session — measured on real Chrome, S12: a session that
+   *  goes takes its virtual authenticators, keys and UV with it, so nothing is left there and nothing is said). */
+  const PK_GONE_RE = /session with given id not found|no session with given id|target closed|not connected|session closed/i;
+  const PK_NO_AUTH_RE = /could not find a virtual authenticator/i;
+  const pkAnswer = (w, e, r) => { const live = w.state === 'open' && !!e.sid && w.sessions.has(e.sid); if (!r) return live ? 'silent' : 'gone'; if (!r.error && !r.timeout) return 'ok'; if (!live || (r.error && PK_GONE_RE.test(String(r.error.message || '')))) return 'gone'; return r.timeout ? 'silent' : 'refused'; };
+  const pkWhy = (method, r, a) => `${method.replace(/^WebAuthn\./, '')}: ${a === 'silent' ? 'did not answer' : 'refused (' + String((r && r.error && r.error.message) || '?').slice(0, 120) + ')'}`;
+  const pkTabName = (e) => tabName({ title: e.title, url: e.url }); // ONE name for a tab, in the server log and the tray alike (module-level tabName)
+  /** THE LOOK (round 2): after a missed step, what the authenticator HOLDS NOW is read on the live session — what is said is what
+   *  was seen. `ids` = the LENT keys it may hold (round 3: a key the page made itself is never counted as lent); `anyKey` = every
+   *  key in it is a lent one (the agent's authenticator at the handover). Round 3: the user verification is a leftover too — a
+   *  missed UV-off is tried once more and judged, whatever the keys. → null (nothing lent left: nothing to say) |
+   *  { keys, uv: false | true | 'unchecked', unchecked: false | 'silent' | 'refused', why } — `unchecked` when the look itself
+   *  got no answer ('silent') or an error ('refused'): two facts, two words. */
+  async function pkLook(w, e, auth, ids, uvMissed, { anyKey = false } = {}) {
+    const g = await call(w, 'WebAuthn.getCredentials', { authenticatorId: auth }, e.sid), a = pkAnswer(w, e, g);
+    if (a === 'gone' || (a === 'refused' && PK_NO_AUTH_RE.test(String(g.error.message || '')))) return null; // the session or the authenticator went — it took them
+    if (a !== 'ok') return { keys: ids.slice(), uv: uvMissed ? 'unchecked' : false, unchecked: a, why: [pkWhy('WebAuthn.getCredentials', g, a)] };
+    const there = ((g.result && g.result.credentials) || []).map((c) => b64u(c.credentialId)).filter((id) => anyKey || ids.includes(id));
+    let uv = false; const why = [];
+    if (uvMissed) { const u = await call(w, 'WebAuthn.setUserVerified', { authenticatorId: auth, isUserVerified: false }, e.sid), b = pkAnswer(w, e, u); if (b === 'refused') uv = true; else if (b === 'silent') uv = 'unchecked'; if (b === 'refused' || b === 'silent') why.push(pkWhy('WebAuthn.setUserVerified', u, b)); }
+    if (!there.length && uv === false) return null;
+    return { keys: there, uv, unchecked: false, why };
+  }
+  /** A LEFTOVER (e.pk.left: its authenticator, the keys seen in it): said ONCE by name — the server log names the tab and each
+   *  missed step — and the tab named to the person in the For-you tray. Round 2's law: the item lives EXACTLY as long as the
+   *  leftover — ended by a later look that finds the tab clean (pkLeftCheck), the session or the browser going (detach, down()),
+   *  the tab closing, the hub stopping (shutdown → down) or starting (create's sweep: an item whose tab this hub does not hold is
+   *  not kept). Past PK_LEFT_MAX tabs of one browser, ONE item counts the rest. */
+  const PK_LEFT_MAX = Math.max(1, Number(leftMax) || 3);
+  const pkLeftKey = (w, e) => 'pk-left:' + w.profileId + ':' + e.targetId;
+  function pkLeftSet(w, e, auth, seen, why) {
+    const pid = w.profileId, name = pkTabName(e), was = e.pk.left;
+    e.pk.left = { auth, keys: [...new Set([...(was && was.auth === auth ? was.keys : []), ...seen.keys])], uv: seen.uv, unchecked: seen.unchecked };
+    const n = e.pk.left.keys.length, steps = [...new Set([...why, ...(seen.why || [])])].join('; ');
+    say(pkLeftKey(w, e), seen.unchecked
+      ? `${pid}: whether the passkey lent to the tab «${name}» was taken back could not be checked — the browser ${seen.unchecked === 'refused' ? 'refused to show what the tab holds' : 'did not answer'} (${steps})`
+      : !n && seen.uv === 'unchecked'
+        ? `${pid}: whether user verification on the tab «${name}» was turned off could not be checked — the browser did not answer (${steps})` // round 3: no key left, the UV unknown
+        : `${pid}: the passkey lent to the tab «${name}» could not be taken back (${n} key${n === 1 ? '' : 's'}${seen.uv === true ? ', user verification on' : seen.uv === 'unchecked' ? ', user verification not checked' : ''}) — ${steps}`);
+    pkLeftFile(w, e);
+  }
+  function pkLeftFile(w, e) {
+    if (!forYou) return;
+    const pid = w.profileId, L = w.pkLeft, tid = e.targetId;
+    try {
+      if (L.tabs.has(tid) || (!L.more.has(tid) && L.tabs.size < PK_LEFT_MAX)) L.tabs.set(tid, forYou.add?.(pid, PK.leftForYouItem({ tab: pkTabName(e), unchecked: e.pk.left.unchecked || (!e.pk.left.keys.length && e.pk.left.uv === 'unchecked' ? 'silent' : false), uvOnly: !e.pk.left.keys.length && e.pk.left.uv === true, itemKey: pkLeftKey(w, e) })) || null);
+      else { L.more.add(tid); L.moreId = forYou.add?.(pid, PK.leftMoreItem({ n: L.more.size, itemKey: 'pk-left:' + pid + ':more' })) || null; }
+    } catch (err) { say('pk-left-fy:' + (err && err.message), `the passkey line was not filed — ${err && err.message}`); }
+  }
+  /** The leftover ended (`how`: clean · closed · detached · down): its item resolved (or the count of the rest lowered), its
+   *  once-key let go — a later leftover on this tab is a new one, said again. */
+  function pkLeftEnd(w, e, how) {
+    if (!e.pk.left) return;
+    e.pk.left = null; sayOnce.delete(pkLeftKey(w, e));
+    const L = w.pkLeft, tid = e.targetId;
+    try {
+      if (L.tabs.has(tid)) { const id = L.tabs.get(tid); L.tabs.delete(tid); if (id && forYou) forYou.resolve?.(id); }
+      else if (L.more.delete(tid) && forYou) { if (!L.more.size) { if (L.moreId) forYou.resolve?.(L.moreId); L.moreId = null; } else L.moreId = forYou.add?.(w.profileId, PK.leftMoreItem({ n: L.more.size, itemKey: 'pk-left:' + w.profileId + ':more' })) || L.moreId; }
+    } catch { /* the tray's own failure */ }
+    if (how === 'clean') say('pk-left-clean:' + w.profileId + ':' + tid + ':' + now(), `${w.profileId}: the passkey left on the tab «${pkTabName(e)}» is gone now (a later clean-up found the tab clean)`);
+  }
+  /** A later clean-up on the tab LOOKS at the leftover's authenticator: none of its keys there (or the authenticator gone) ⇒
+   *  the leftover ended; no answer ⇒ kept (nothing is said it is not known). */
+  async function pkLeftCheck(w, e) {
+    const L = e.pk.left; if (!L) return;
+    const seen = await pkLook(w, e, L.auth, L.keys, L.uv === true || L.uv === 'unchecked'); // round 3: a UV left on is looked at (UV off once more) like the keys
+    if (!seen) pkLeftEnd(w, e, pkAnswer(w, e, null) === 'gone' ? 'detached' : 'clean');
+  }
+  async function pkOnceGone(w, e, rec, left = null) {
     if (!(e.pk.once && e.pk.auth && w.mode === 'person' && e.pk.onceFor === rec)) return false;
     const heir = [...e.pk.holds].find(([r, x]) => r !== rec && r.outcome === 'pending' && x.auth === e.pk.auth);
     if (heir) { e.pk.onceFor = heir[0]; return false; }
     const id = e.pk.auth, pairs = e.pk.pairs; e.pk.auth = null; e.pk.once = false; e.pk.onceFor = null;
-    await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid);
-    if (e.pk.pairs === pairs) await call(w, 'WebAuthn.disable', {}, e.sid); // r6: never the environment a newer ceremony paired in
+    const x = await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid);
+    const d = e.pk.pairs === pairs ? await call(w, 'WebAuthn.disable', {}, e.sid) : null; // r6: never the environment a newer ceremony paired in
+    if (left) { const xa = pkAnswer(w, e, x), da = d ? pkAnswer(w, e, d) : null; if (xa === 'ok' || xa === 'gone' || da === 'ok' || da === 'gone') left.removed = true; else { left.auth = id; left.why.push(pkWhy('WebAuthn.removeVirtualAuthenticator', x, xa), ...(d ? [pkWhy('WebAuthn.disable', d, da)] : [])); } } // B-97ae walk (b): its removal (or the environment's) takes whatever a missed step left; round 2: a «did not answer» is never a «refused»
     return true;
   }
   /** A document went (a navigation, its contexts cleared): its pending ceremonies ended with it (PK.endPending) — no end of theirs
-   *  will reach pkEnd (applyEvent matches only a pending record), so the once-authenticator of one of them leaves here. */
+   *  will reach pkEnd (applyEvent matches only a pending record), so each goes through THE ONE END here. B-97ae walk (a): on BOTH
+   *  roads — the agent's tab keeps its authenticator, never the key or the UV an ended ceremony loaded into it (before, only the
+   *  person's once-authenticator left here: the agent's loaded key and UV stayed until that tab's next ceremony ended). */
   function pkPageGone(w, e, ended) {
     if (!ended.length) return;
     passkeyChanged(w, e);
-    const rec = e.pk.onceFor;
-    if (rec && ended.includes(rec)) pkDrain(w, e, () => pkOnceGone(w, e, rec)).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`));
+    for (const rec of ended) { rec.pageGone = true; pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); } // round 3: its drain tells no dead page
   }
   /** r7 (acceptance r6 MAJOR, both roads): a clean-up acts only on what ITS ceremony owns — the authenticator and the keys
    *  captured when it loaded (e.pk.holds), never the tab's live state. Its authenticator gone or replaced ⇒ nothing more (its
    *  keys went with it); on it everything goes (a key it made too) but a key or the UV another ceremony still PENDING holds there. */
   async function pkUnload(w, e, rec) {
     const own = e.pk.holds.get(rec); e.pk.holds.delete(rec);
+    const prior = e.pk.left; // round 2: a leftover from before — this clean-up looks at it when it is done
+    const left = { auth: own ? own.auth : null, ids: [], uvMissed: false, why: [], removed: false }; // B-97ae walk (b): the steps the browser did not do
     if (rec.loaded || rec.uvSet) {
       if (own && own.auth === e.pk.auth) {
-        const g = await call(w, 'WebAuthn.getCredentials', { authenticatorId: own.auth }, e.sid);
-        const kept = [...e.pk.holds].filter(([r, x]) => r.outcome === 'pending' && x.auth === own.auth).map(([, x]) => x);
-        for (const c of (g && g.result && g.result.credentials) || []) if (!kept.some((x) => x.ids.includes(b64u(c.credentialId)))) await call(w, 'WebAuthn.removeCredential', { authenticatorId: own.auth, credentialId: c.credentialId }, e.sid);
-        if (own.uv && !kept.some((x) => x.uv)) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: own.auth, isUserVerified: false }, e.sid);
+        const kept = [...e.pk.holds].filter(([r, x]) => r.outcome === 'pending' && x.auth === own.auth).map(([, x]) => x), keptId = (id) => kept.some((x) => x.ids.includes(id));
+        const g = await call(w, 'WebAuthn.getCredentials', { authenticatorId: own.auth }, e.sid), ga = pkAnswer(w, e, g);
+        if (ga === 'refused' || ga === 'silent') { left.ids.push(...own.ids.filter((id) => !keptId(id))); left.why.push(pkWhy('WebAuthn.getCredentials', g, ga)); }
+        for (const c of (g && g.result && g.result.credentials) || []) if (!keptId(b64u(c.credentialId))) { const cid = b64u(c.credentialId), x = await call(w, 'WebAuthn.removeCredential', { authenticatorId: own.auth, credentialId: c.credentialId }, e.sid), xa = pkAnswer(w, e, x); if (xa === 'refused' || xa === 'silent') { if (own.ids.includes(cid)) { left.ids.push(cid); left.why.push(pkWhy('WebAuthn.removeCredential', x, xa)); } else say('pk-page-key:' + w.profileId + ':' + e.targetId + ':' + cid, `${w.profileId}: a passkey the page made on the tab «${pkTabName(e)}» could not be removed from it — ${pkWhy('WebAuthn.removeCredential', x, xa)}`); } } // round 3: a key the PAGE made is never «the passkey VibeSpace lent» — said as what it is
+        if (own.uv && !kept.some((x) => x.uv)) { const u = await call(w, 'WebAuthn.setUserVerified', { authenticatorId: own.auth, isUserVerified: false }, e.sid), ua = pkAnswer(w, e, u); if (ua === 'refused' || ua === 'silent') { left.uvMissed = true; left.why.push(pkWhy('WebAuthn.setUserVerified', u, ua)); } }
       }
       if (!rec.refused) pkTrace(w, e, rec, rec.outcome, rec.harvested ? { harvested: true } : {});
     }
-    await pkOnceGone(w, e, rec); // acceptance r1: the vault ceremony's authenticator leaves with it — Chrome's own window for his next one
-    await pkCtl(w, e, rec, 'drained');
+    await pkOnceGone(w, e, rec, left); // acceptance r1: the vault ceremony's authenticator leaves with it — Chrome's own window for their next one
+    if (left.why.length && !left.removed && left.auth) { const seen = await pkLook(w, e, left.auth, left.ids, left.uvMissed); if (seen) pkLeftSet(w, e, left.auth, seen, left.why); } // B-97ae walk (b) + round 2: a missed step is LOOKED at — what is said is what was seen
+    if (prior && e.pk.left === prior) await pkLeftCheck(w, e); // round 2: a leftover from before ends when a later clean-up finds the tab clean
+    if (!rec.pageGone) await pkCtl(w, e, rec, 'drained'); // round 3: a page that went (a document destroyed, cleared, crashed) has no hook to tell — a call would look for its dead context and wait out callTimeoutMs before the next sign-in on the tab
   }
   /** ④ the harvest: a new key sealed + stored (`credentialAdded`), a sign count reconciled (`credentialAsserted`). */
   function pkHarvest(w, e, method, p) {
@@ -2572,6 +2680,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     });
   }
 
+  // B-97ae round 2: a leftover's For-you item a PAST hub life filed names a tab this hub does not hold — and the hub that held it
+  // took its sessions (and, measured — S12 — the authenticators in them) when it went: it is not kept
+  try { const n = forYou && typeof forYou.sweep === 'function' ? forYou.sweep('pk-left:') : 0; if (n) log.log?.(`[browser-dialog] ${n} passkey «could not be taken back» item(s) of a past hub life resolved — that hub's sessions took the authenticators with them`); } catch { /* the tray's own failure */ }
+
   return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, waitSettled /* int347: the alert race */, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     pageAnswers, // lane browser-shared-profile-freeze: the verb's own tab asked first, bounded (a silent page answered page_busy by name)
@@ -2605,4 +2717,4 @@ function holdersOfKeeper(keeper) {
     } catch { return []; }
   };
 }
-module.exports = { create, holdersOfKeeper, ANSWERED_KEEP, OUTCOMES_KEEP, VERB_RUNNING_MAX_MS, RE_ENABLE_MS };
+module.exports = { create, holdersOfKeeper, ANSWERED_KEEP, OUTCOMES_KEEP, VERB_RUNNING_MAX_MS, RE_ENABLE_MS, tabName /* B-97ae round 3 */ };
