@@ -361,6 +361,12 @@ const V = {
 /** PURE (round 5, smaller 1): why a hold the watchdog did not watch was not sampled — its own check ran ≥ STARVED_MS late
  *  ⇒ it was not running either; on time ⇒ none of its checks came after the hold's first second (it asks only from then) */
 const unseenWhy = ({ starvedMs = 0 } = {}) => (starvedMs >= STARVED_MS ? 'unseen' : 'between');
+/** PURE (the follow-up, minor 2): the words of «not sampled» — the unseen road says how late the watchdog was when it was
+ *  late at all (100 ms or more) yet under the 1 s it calls starved, never «on time» */
+function unsampledWords(h) {
+  if (h.unsampled === 'between' && Number.isFinite(h.unseenLateMs) && h.unseenLateMs >= 100) return `the watchdog ran ${secs(h.unseenLateMs)} s late (under the 1 s it calls starved), and none of its checks came after the hold\u2019s first second — it asks only from then`;
+  return UNSAMPLED[h.unsampled] || h.unsampled;
+}
 /** ROUND 5 (law B): a part of a hold is REAL when the scheduler's window gives it at least this share of the time measured */
 const PART_SHARE = 0.25;
 const CPU_CLS = ['js', 'native', 'notJs'], SLEEP_CLS = ['kernel', 'stopped'];
@@ -371,10 +377,14 @@ const topIn = (n, ks) => { let t = null; for (const k of ks) if ((n[k] || 0) > (
  *  never names the hold (it is printed as a sample). Two REAL parts (each ≥ PART_SHARE of the window), each sampled, are
  *  said as two parts in time order (`order`: 'sleep' when the first asleep sample came before the first on-CPU one).
  *  → null (no covering window: the samples alone, by count) | [{v, ms, part}] (one or two, in time order). */
-function partsOf({ d = null, n = {}, gc = false, order = null } = {}) {
-  const W = d && d.wallMs > 0 ? d.wallMs : 0;
-  if (!W || d.ranMs == null) return null;
-  const cpuMs = d.ranMs, sleepMs = Math.max(0, W - d.ranMs - (d.waitMs || 0));
+function partsOf({ d = null, n = {}, gc = false, order = null, spanMs = null } = {}) {
+  const W0 = d && d.wallMs > 0 ? d.wallMs : 0;
+  if (!W0 || d.ranMs == null) return null;
+  // the follow-up (minor 1): the parts' shares are taken over the HOLD's own span — the window measured reaches up to a beat
+  // past each side of it (and the idle before a hog), which round 5 counted as «asleep» (a 2.0 s hog with 0.42 s of naps
+  // read «… then in the kernel (blocked) for 0.8 s»; a 2.6 s sleep read 2.9 s)
+  const W = Number.isFinite(spanMs) && spanMs > 0 ? Math.min(W0, spanMs) : W0;
+  const cpuMs = Math.min(d.ranMs, W), sleepMs = Math.max(0, W - cpuMs - Math.min(d.waitMs || 0, W - cpuMs));
   const ct = topIn(n, CPU_CLS), st = topIn(n, SLEEP_CLS);
   const cpuV = ct === 'js' ? V.js : gc ? V.gc : ct === 'native' ? V.native : ct === 'notJs' ? V.notJs : st ? V.cpu : V.unsampled;
   const cpu = { v: cpuV, ms: cpuMs, part: 'cpu' }, sleep = { v: st === 'stopped' ? V.notRunning : V.blocked, ms: sleepMs, part: 'sleep' };
@@ -389,7 +399,7 @@ function partsOf({ d = null, n = {}, gc = false, order = null } = {}) {
  *  speed; an ask posted while ASLEEP names its wait channel — and, round 5 (law B), names the hold only when the window's
  *  larger part is asleep too (or as the asleep one of two real parts). */
 const ASK_ORDER = ['kernel', 'stopped', 'js', 'native', 'runnable', 'notJs'];
-function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null } = {}) {
+function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null, spanMs = null } = {}) {
   const W = d && d.wallMs > 0 ? d.wallMs : 0;
   if (W && d.ranMs != null) {
     if (lateMs >= STOPPED_LATE_SHARE * W && d.ranMs + (d.waitMs || 0) < STOPPED_RUN_SHARE * W) return V.notRunning;
@@ -397,7 +407,7 @@ function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null } = {
     if (d.ranMs < RAN_SHARE * W) return V.blocked;
     if (d.userMs != null && d.kernelMs != null && d.userMs + d.kernelMs > 0 && d.kernelMs >= KERNEL_SHARE * (d.userMs + d.kernelMs)) return V.kernel;
     // round 5 (law B): the window's split by time decides; the samples name each part (never the count of samples)
-    return partsOf({ d, n, gc: !!(gcMs != null && gcMs >= GC_SHARE * W), order }).map((p) => p.v).join(', then ');
+    return partsOf({ d, n, gc: !!(gcMs != null && gcMs >= GC_SHARE * W), order, spanMs }).map((p) => p.v).join(', then ');
   }
   // no window covers it: the samples alone, by count — the line says so and claims no more than they say
   const gc = !!(W && gcMs != null && gcMs >= GC_SHARE * W);
@@ -597,9 +607,13 @@ function foldHold(h) {
   const gc = gcOf(h.gc, h.fromM != null ? h.fromM : h.from, h.toM != null ? h.toM : h.to);
   const firstAt = (ks) => { let t = null; for (const x of samples) if (ks.includes(clsOf(x)) && Number.isFinite(x.at) && (t == null || x.at < t)) t = x.at; return t; };
   const tc = firstAt(CPU_CLS), ts = firstAt(SLEEP_CLS), order = tc != null && ts != null && ts < tc ? 'sleep' : 'cpu';
-  const v = verdict({ d: h.d, n, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order });
+  const spanMs = Number.isFinite(h.msHi) ? h.msHi : Number.isFinite(h.ms) ? h.ms : null;
+  const v = verdict({ d: h.d, n, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order, spanMs });
   const W = h.d && h.d.wallMs > 0 ? h.d.wallMs : 0;
-  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order }) : null;
+  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order, spanMs }) : null;
+  // the follow-up (minor 3): parts that INTERLEAVE (JavaScript, asleep, JavaScript …) are said as both, never one «then»
+  const seq = samples.filter((x) => Number.isFinite(x.at)).slice().sort((p, q) => p.at - q.at).map((x) => (CPU_CLS.includes(clsOf(x)) ? 'c' : SLEEP_CLS.includes(clsOf(x)) ? 's' : '')).filter(Boolean).join('').replace(/(.)\1+/g, '$1');
+  const interleaved = !!parts && seq.length > 2;
   const topOf = (cls) => {
     const by = new Map(), words = new Map();
     for (const x of samples) if (clsOf(x) === cls) { by.set(x.key, (by.get(x.key) || 0) + 1); if (!words.has(x.key) || (x.keyWords && !/^[\w./@+-]+:\d+$/.test(x.keyWords))) words.set(x.key, x.keyWords || x.key); }
@@ -611,7 +625,7 @@ function foldHold(h) {
   const top = topOf('js') || (v === V.blocked ? topOf('kernel') : null);
   const frameKey = top ? top.key : h.afterKey ? `${h.afterKey} (after)` : !samples.length ? '(not sampled)' : '(no JavaScript frame)';
   const frame = top ? top.words : h.afterKey ? `${h.afterKeyWords || h.afterKey} (after)` : frameKey;
-  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts };
+  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved };
 }
 /** why a frame's name was not read (the watchdog reads source files only after a hold has ended, within a budget) */
 const NAMES_UNREAD = { slow: 'the source files answered slowly — names are not read for ten minutes', budget: 'the time for reading names was spent' };
@@ -621,7 +635,7 @@ const SCHED_FIRST = new Set([V.notRunning, V.waiting, V.blocked, V.kernel]);
 function holdLine(h) {
   const f = h.fold || foldHold(h);
   // round 5 (law B): a hold with two real parts says both, in time order, with the window's seconds
-  const vw = f.parts && f.parts.length === 2 ? f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(', then ') : f.verdict;
+  const vw = f.parts && f.parts.length === 2 ? (f.interleaved ? `${f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(' and ')}, interleaved` : f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(', then ')) : f.verdict;
   const head = h.boot ? `[loop-hold] the boot held the main loop ${heldWords(h)} before its first turn — ${vw}` : `[loop-hold] the main loop was held ${heldWords(h)} — ${vw}`;
   const parts = [schedWords(h.d)];
   if (!h.d && !h.boot && insideOf(h).length) parts.push('no scheduler window covered it — the samples alone say where it was');   // the boot has no window by construction
@@ -629,7 +643,7 @@ function holdLine(h) {
   if (inside.length) {
     const n = `${inside.length} sample${inside.length === 1 ? '' : 's'}`;
     parts.push(`${SCHED_FIRST.has(f.verdict) && f.js ? `where it was (${n})` : n}: ${samplesWords(inside)}${h.standDown ? ` — then ${UNSAMPLED[h.standDown] || h.standDown}: the sampler stood down` : ''}`);
-  } else if (h.unsampled) parts.push(`not sampled (${UNSAMPLED[h.unsampled] || h.unsampled})`);
+  } else if (h.unsampled) parts.push(`not sampled (${unsampledWords(h)})`);
   else if (asked) parts.push(`not sampled (${notInsideWords(h)})`);
   if (h.after) parts.push(`the first JavaScript after it: ${h.after}`);
   if (h.namesUnread && h.namesUnread.n) parts.push(`the frames of ${h.namesUnread.n} source file${h.namesUnread.n === 1 ? '' : 's'} said by location alone (${NAMES_UNREAD[h.namesUnread.why] || NAMES_UNREAD.budget})`);
@@ -804,7 +818,7 @@ function profileLine(p) {
     (p.notSampledPct && p.notSampledWords ? ` — ${p.notSampledWords}` : '') + (p.tooLarge ? ' — its frames could not be kept (too large)' : '');
 }
 
-module.exports = { partsOf, PART_SHARE, unseenWhy, cutWords,
+module.exports = { partsOf, PART_SHARE, unseenWhy, unsampledWords, cutWords,
   profileOf, profileLine, foldProfileBy, sharesOf, heapFillOf, nodeArgv, PROFILE_MS, PROFILE_EVERY_MS, PROFILE_NOTE, PROFILE_HEAP_SHARE, PROFILE_KEEP, PROFILE_TOP, PROFILE_WORD_MAX,
   PROFILE_STOPPED, PROFILE_STOPPED_ANY, PROFILE_UNSAMPLED, PROFILE_UNSAMPLED_ANY, PROFILE_REFUSED, PROFILE_REFUSED_ANY, STOPPED_LATE_SHARE, STOPPED_RUN_SHARE, HOOK_KEY, ASK_WORDS, OUTSIDE_WORDS,
   frameOf, frameText, frameLoc, parseSample, sampleOf, stringFrame, spelledIn, repoFrame, chainWords, keyFrame, keyWords, sampleExpr, codeOf, thrownOf, stepRefusalOf, landedOf, isUnseenHold, isHoldOf, isGapHold, insideOf, notInsideWords,
