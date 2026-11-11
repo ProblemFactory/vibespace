@@ -2090,6 +2090,9 @@ const I_RECV = {
   // lane vault-paste-request: a paste request's card (its words are the agent's own — bounded, hidden characters refused, secret
   // shapes «redacted» — plus the registry's names), the place it names, the integration store's refusal rule, a free entry's label
   'src/server/vault-paste-door.js|card': ['secret request', 'a paste request\'s CARD (PURE vault-paste cardOf): the agent\'s own words and purpose (bounded, hidden characters refused, secret shapes redacted) and the registry\'s row / field names — the request\'s own text, never a record\'s'],
+  // lane totp-request-card: a two-step ask's proposed NAME rides the action as `totpName` — an entry's name (THE two-step name rule:
+  // 1–120 letters, digits, «.», «_», «-»), the place the request names, never a record's text
+  'src/server/vault-paste-door.js|v.target': ['vault entry', 'a two-step ask\'s proposed NAME (`totpName`, judged by THE two-step name rule — src/totp.js entryOf: 1–120 letters, digits, «.», «_», «-»): the entry the request names, never a record\'s text'],
   'src/server/vault-paste-door.js|e': ['integration rule', 'the integration store\'s refusal detail on a pasted value — the field\'s own validate complaint (a fixed rule\'s words, never the value, never a record\'s text)'],
   'src/foryou-actions.js|wa': ['vault run', 'lane wake-approve-card r11: a run card\'s `facts.whyAgain` (the vault door\'s whyAgainOf — {code, name}): `name` is the NAME of the plain environment variable that changed between two runs (a variable name the command carries, never a value and never a record\'s text) worded in the card\'s «Asked again» line'],
   'src/lib/vault-paste-box.js|r': ['vault entry', 'a free entry\'s LABEL the owner typed a moment ago in 「其他密钥或密码…」, echoed by the add door in its toast — the entry\'s own name, never a record\'s text'],

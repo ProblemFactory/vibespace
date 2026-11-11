@@ -53,6 +53,13 @@
 //      this account — the fill gate admits it, another conversation not), the receipt names the user + LOGIN_USE; unticked ⇒
 //      no row, no user in the receipt; an update says UPDATED; refuse ⇒ quiet; LOCKED ⇒ 423 then stored once unlocked; a
 //      restart's new door answers it; four open per conversation; a door with no web-login door refuses the ask by name
+//   ⑩d (lane totp-request-card, fb-251bb41646 — `--kind totp [--name <name>]`): the ask refused BY NAME before any card (a name the
+//      两步验证… dialog's own rule refuses, --host, --note, --into, an unknown kind — whose words name every kind); ONE item (kind
+//      totp, the proposed name `totpName`, the tick's default); the answer through THE two-step add door's writer (addEntry): its
+//      own refusals keep the item open; stored ⇒ ONE `totp:<name>` (no `secret:`), ticked ⇒ ONE grant through THE door (the
+//      entry's «Use for…»: this conversation, its current RUN) — the asker reads the CURRENT code, another conversation not; the
+//      receipt names the name + TOTP_USE, never the seed or a code; `exists` never overwrites; unticked by the link; NOT running at
+//      the press ⇒ stored, not given (said). ⑫: MUTANTS — agentAdd, the grant without the tick, the branch gone — each RED
 // Run: node scripts/test-vault-paste.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -165,7 +172,12 @@ function makeWorld(name, { door = null, routes = null } = {}) {
   const DOOR = door || require(path.join(REPO, 'src/server/vault-paste-door.js'));
   const grants = GS.create({ memory: true });   // lane login-request-card: a login's «Let it sign in» row lands here
   const logins = BLS.create({ vault, grants: () => grants, log: (m) => LOGS.push(String(m)) });
-  const paste = DOOR.create({ vault, integrations, userTodos, deliver, vaultRun, logins, log: (m) => LOGS.push(String(m)) });
+  // lane totp-request-card: THE two-step door (its ONE writer addEntry, the entry's «Use for…» grant) and the wiring's runOf (a
+  // running conversation's run = its token's digest — the agent route's own runOfToken), handed to the paste door as production does
+  const TOTPM = require(path.join(REPO, 'src/server/vault-totp.js'));
+  const totp = TOTPM.create({ dataDir, vault, log: (m) => LOGS.push(String(m)) });
+  const runOf = (cid) => { for (const s of activeSessions.values()) if (s && s.claudeSessionId === cid) return TOTPM.runOfToken(s.agentToken); return null; };
+  const paste = DOOR.create({ vault, integrations, userTodos, deliver, vaultRun, logins, totp, runOf, log: (m) => LOGS.push(String(m)) });
   const SESSION_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const OTHER_TOKEN = 'vsst_' + crypto.randomBytes(16).toString('hex');
   const activeSessions = new Map([
@@ -179,14 +191,13 @@ function makeWorld(name, { door = null, routes = null } = {}) {
   // r4 (the acceptance of r3, minor) + r4 tidy (#2): the world mounts the routes with EVERY dep the hub's wiring hands them
   // (WIRED_DEPS — the two-step door, the web-login door, a caller resolver, … — the world's own, else a stand-in), so ⑩c's census
   // reads the hub's real set of agent roads, gated ones included
-  const totp = require(path.join(REPO, 'src/server/vault-totp.js')).create({ dataDir, vault, log: (m) => LOGS.push(String(m)) });
   const callerOf = (token) => { for (const [k, s] of activeSessions) if (s.agentToken === token) return { conversationId: s.claudeSessionId, conv: s.claudeSessionId, scope: k, name: s.name, groups: [], live: true }; return null; };
   const own = { vault, activeSessions, getJobs: () => ({ jobByToken: () => null }), contents: VC.create({ vault, sources }), run: vaultRun, paste, totp, logins, callerOf };
   if (Object.keys(own).join() !== WORLD_OWN.join()) throw new Error('makeWorld: its own deps drifted from WORLD_OWN');
   const deps = Object.fromEntries([...WIRED_DEPS.map((k) => [k, k in own ? own[k] : STAND_INS[k]]), [EARS[0], (m) => LOGS.push(String(m))]]);
   catchRejections(app);
   (routes || require(path.join(REPO, 'src/routes/vault.js'))).registerVaultRoutes(app, deps);
-  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins };
+  return { dataDir, auth, vault, userTodos, integrations, deliver, vaultRun, paste, app, SESSION_TOKEN, OTHER_TOKEN, activeSessions, grants, logins, totp, TOTPM };
 }
 const ANSWERS = [];
 async function serve(w) {
@@ -527,6 +538,73 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
   ok(!P.loginAnswerOf({ username: 'u', password: 'a\rb' }).ok && !P.loginAnswerOf({ username: 'u', password: 'ab\u2028' }).ok && P.loginAnswerOf({ username: 'u', password: 'a b', totpName: '  ' }).totpName === null, 'loginAnswerOf: CR / U+2028 refused too; a blank two-step name is none');
 }
 
+console.log('⑩d A TWO-STEP CODE — one ask, one card with the two-step dialog\'s own fields, one totp entry (lane totp-request-card)');
+{
+  const TT = require(path.join(REPO, 'src/totp.js'));
+  const SEED = TT.base32Encode(crypto.randomBytes(20)), SEED2 = TT.base32Encode(crypto.randomBytes(20)), SEED3 = TT.base32Encode(crypto.randomBytes(20));   // typed by the person — never in an answer, frame, log, file or receipt
+  SENTINELS.push(SEED, SEED2, SEED3);
+  const n0 = openReqs(W).length;
+  const asks = [[{ kind: 'totp', name: 'bad name!' }, 'totp_bad_name'], [{ kind: 'totp', hosts: 'ssh.example.test' }, 'totp_host'], [{ kind: 'totp', note: 'the CI box' }, 'totp_words'], [{ kind: 'totp', into: 'llm.apiKey' }, 'bad_target'], [{ kind: 'otp-ish' }, 'bad_kind']];
+  const got = [];
+  for (const [b, code] of asks) { const r = await S.agent(W.SESSION_TOKEN, { words: 'the CI two-step', purpose: 'sign the release', ...b }); got.push([code, r.status, r.json.code]); }
+  ok(got.every(([c, s, g]) => s === 400 && g === c) && openReqs(W).length === n0, 'a proposed name the dialog\'s own rule refuses · a --host · a --note · an --into · an unknown kind ⇒ 400 BY NAME, before any card (nothing filed)', got);
+  const unk = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', kind: 'otp-ish' });
+  ok(/api-key, password or secret .*login .*totp/.test(unk.json.error || ''), 'the refusal of an unknown kind names every kind the road takes (api-key · password · secret · login · totp)', unk.json.error);
+  const a = await S.agent(W.SESSION_TOKEN, { words: 'the GitHub CI two-step code', purpose: 'sign the release on the CI box', kind: 'totp', name: 'github-ci' });
+  const it = openReqs(W).find((i) => i.action.requestId === a.json.requestId);
+  ok(a.status === 200 && a.json.target && a.json.target.totp === 'github-ci' && it && it.action.kind === 'totp' && it.action.totpName === 'github-ci' && it.action.into === '' && it.action.grant === true && !('value' in it.action),
+    'ONE item on the same road: action secret-request · kind totp · the proposed name `totpName` · the tick\'s default ON (vault.requestGrantsRequester) · no value', { a: a.json, action: it && it.action });
+  ok(it && it.text === 'Lane asker asks you for a two-step code (TOTP) for: sign the release on the CI box' && it.i18n.text.key === '{who} asks you for a two-step code (TOTP) for: {purpose}' && /The name it proposes: «github-ci»/.test(it.detail) && /never the seed, never a code/.test(it.detail),
+    'its FIRST line: who asks and for what; its lines: the agent\'s words, the name it proposes (the person may change it), what Save does', it && it.text);
+  const again = await S.agent(W.SESSION_TOKEN, { words: 'the GitHub CI two-step code', purpose: 'p', kind: 'totp', name: 'github-ci' });
+  ok(again.status === 200 && again.json.already === 'open' && again.json.requestId === a.json.requestId, 'the same name again ⇒ the same open request (its place is the name)', again.json);
+  const ans = (id, body) => S.hit(`/api/vault/secret-requests/${id}/answer`, { body });
+  const namesBefore = W.vault.secretNames().map((s) => s.name);
+  const bad = await ans(a.json.requestId, { answer: 'store', totpSeed: 'not-a-seed!', totp: { name: 'github-ci' }, allow: true });
+  const badName = await ans(a.json.requestId, { answer: 'store', totpSeed: SEED, totp: { name: 'bad name!' }, allow: true });
+  const names0 = W.vault.secretNames().map((s) => s.name);
+  ok(bad.status === 400 && bad.json.code === 'bad_seed' && badName.status === 400 && badName.json.code === 'bad_name' && names0.length === namesBefore.length && !names0.includes('totp:github-ci') && openReqs(W).some((i) => i.action.requestId === a.json.requestId),
+    'a seed that is not base32 ⇒ 400 bad_seed · a bad name ⇒ 400 bad_name — the two-step add door\'s own refusals; the item stays open, nothing written', [bad.json, badName.json]);
+  const bearer = await S.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { answer: 'store', totpSeed: SEED, totp: { name: 'github-ci' }, allow: true } });
+  ok(bearer.status === 403 && bearer.json.code === 'human_only', 'the asking agent\'s own bearer cannot answer (human_only)', bearer.json);
+  const s0 = STASH.length;
+  const st = await ans(a.json.requestId, { answer: 'store', totpSeed: SEED, totp: { name: 'github-ci' }, allow: true });
+  const names = W.vault.secretNames().map((s) => s.name);
+  const grants = () => { try { return JSON.parse(fs.readFileSync(path.join(W.dataDir, W.totp.GRANTS_FILE), 'utf8')).grants || []; } catch { return []; } };
+  ok(st.status === 200 && st.json.outcome === 'stored' && st.json.name === 'github-ci' && st.json.allowed === true && names.filter((n) => n === 'totp:github-ci').length === 1 && names.length === namesBefore.length + 1 && names.filter((n) => /^secret:/.test(n)).length === namesBefore.filter((n) => /^secret:/.test(n)).length && !JSON.stringify(st.json).includes(SEED),
+    'stored ⇒ ONE `totp:github-ci` entry through THE two-step add door\'s writer — no free secret: entry; the answer names it, never the seed', { st: st.json, names });
+  const g1 = grants().filter((x) => x.entry === 'totp:github-ci');
+  ok(g1.length === 1 && g1[0].subject === 'session:cid-asker-1' && g1[0].run === W.TOTPM.runOfToken(W.SESSION_TOKEN), 'ticked ⇒ ONE grant through THE door (the entry\'s «Use for…»): this conversation, held for its CURRENT RUN', g1);
+  const mine = await S.hit('/api/agent/vault/totp/github-ci', { method: 'GET', headers: { authorization: 'Bearer ' + W.SESSION_TOKEN } });
+  const other = await S.hit('/api/agent/vault/totp/github-ci', { method: 'GET', headers: { authorization: 'Bearer ' + W.OTHER_TOKEN } });
+  ok(mine.status === 200 && /^\d{6}$/.test(String(mine.json.code)) && !JSON.stringify(mine.json).includes(SEED) && other.status !== 200 && other.json.code === 'not_granted',
+    'the asker reads its CURRENT code (vibespace-vault totp github-ci) — never the seed; another conversation ⇒ not_granted', { mine: mine.status, other: other.json });
+  const rc = STASH.slice(s0).filter((e) => e.ref === a.json.requestId);
+  ok(rc.length === 1 && /STORED — a two-step code «github-ci» is in the vault/.test(rc[0].text) && rc[0].text.includes(P.TOTP_USE.replace('{name}', 'github-ci')) && /allowed THIS conversation to read its current code while it runs/.test(rc[0].text) && !rc[0].text.includes(SEED) && !/\b\d{6}\b/.test(rc[0].text),
+    'the receipt: stored, under which name, the grant in words (this run), TOTP_USE — never the seed, never a code', rc[0] && rc[0].text);
+  // a name already in the vault ⇒ never overwritten
+  const b = await S.agent(W.SESSION_TOKEN, { words: 'another two-step code', purpose: 'the staging box', kind: 'totp', name: 'github-ci' });
+  const ex = await ans(b.json.requestId, { answer: 'store', totpSeed: SEED2, totp: { name: 'github-ci' }, allow: false });
+  ok(b.status === 200 && ex.status === 409 && ex.json.code === 'exists' && openReqs(W).some((i) => i.action.requestId === b.json.requestId) && grants().filter((x) => x.entry === 'totp:github-ci').length === 1,
+    'a name already in the vault ⇒ 409 exists — never overwritten (its grant untouched); the item stays open, the person picks another name', ex.json);
+  // unticked, the LINK way (the person cleared the proposed name: the link's own name)
+  const s1 = STASH.length;
+  const un = await ans(b.json.requestId, { answer: 'store', totpLink: `otpauth://totp/Staging:ops?secret=${SEED2}&issuer=Staging`, totp: { name: '' }, allow: false });
+  const rcu = STASH.slice(s1).filter((e) => e.ref === b.json.requestId);
+  ok(un.status === 200 && un.json.allowed === false && typeof un.json.name === 'string' && un.json.name !== 'github-ci' && W.vault.secretNames().some((s) => s.name === `totp:${un.json.name}`) && grants().every((x) => x.entry !== `totp:${un.json.name}`) && rcu.length === 1 && /did not let this conversation read its code/.test(rcu[0].text) && !rcu[0].text.includes(SEED2),
+    `unticked, by the otpauth link ⇒ stored under the link's own name («${un.json.name}»), NO grant; the receipt says so — never the seed`, { un: un.json, receipt: rcu[0] && rcu[0].text });
+  // ticked, but the asking conversation is NOT RUNNING at the press ⇒ stored, not given — said
+  const c = await S.agent(W.OTHER_TOKEN, { words: 'the other box', purpose: 'the deploy jump host', kind: 'totp', name: 'other-box' });
+  const sess = W.activeSessions.get('w2');
+  W.activeSessions.delete('w2');
+  const s2 = STASH.length;
+  let nr;
+  try { nr = await ans(c.json.requestId, { answer: 'store', totpSeed: SEED3, totp: { name: 'other-box' }, allow: true }); } finally { W.activeSessions.set('w2', sess); }
+  const rcn = STASH.slice(s2).filter((e) => e.ref === c.json.requestId);
+  ok(nr.status === 200 && nr.json.allowed === false && nr.json.whyNot === 'not_running' && grants().every((x) => x.entry !== 'totp:other-box') && rcn.length === 1 && /ticked «Let this conversation read its code», but it was not given \(this conversation was not running at that moment\)/.test(rcn[0].text),
+    'ticked while the asking conversation was NOT running ⇒ stored, NOT given (the door\'s not_running); the receipt says so — the third outcome', { nr: nr.json, receipt: rcn[0] && rcn[0].text });
+}
+
 console.log('⑩c THE USER NAME REACHES THE ASKER ONLY WITH THE GRANT — every agent road (r3, law A: a census)');
 {
   const U_NO = ['quiet', 'owner', crypto.randomBytes(5).toString('hex')].join('-');   // typed by the owner, NOT granted (built at runtime)
@@ -714,7 +792,7 @@ console.log('⑬b LAW B(3) — ONE submittable card: the surface a card left red
     'i18n.js': `export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);`,
     'utils.js': `export const createModalShell = (o) => globalThis.__b3.shell(o); export const fetchJson = async () => ({ ok: false, code: 'b3_stub' }); export const showToast = () => {}; export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => '&#' + c.charCodeAt(0) + ';');`,
     'vault-unlock.js': `export const vaultFacts = () => ({ state: 'unlocked', setup: true }); export const showUnlock = () => {}; export const showSetup = () => {};`,
-    'vault-totp-row.js': `export const showTotpAddDialog = (o) => globalThis.__b3.totp(o); export const loadTotp = () => Promise.resolve({ entries: [] });`,
+    'vault-totp-row.js': `export const showTotpAddDialog = (o) => globalThis.__b3.totp(o); export const loadTotp = () => Promise.resolve({ entries: [] }); export const totpFields = () => ({ nodes: [], wipe() {}, doSave: async () => false });`,   // totpFields: lane totp-request-card (the two-step field set — a two-step card's, unused by a login scene)
   };
   const bundleBox = async (mutate) => {
     const out = await esbuild.build({
@@ -912,6 +990,28 @@ async function runRoad(name, { door, routes } = {}) {
   ok(l1.unknownStored, 'MUTANT the login door without its two-step-name check ⇒ a name that names no entry is stored (RED)', l1);
   const l2 = await loginRoad('m-login-user', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });", "settle(q, 'stored', { login: { user, updated: !!r.updated, allowed: true, asked: l.allow === true } });") });   // r3: the anchor names the LIVE settle line
   ok(l2.receipt.includes('mutant-user'), 'MUTANT the receipt treats an unticked login as allowed ⇒ it names the user (RED — an agent that may not fill it never learns its user)', l2.receipt);
+  // lane totp-request-card: THE TWO-STEP ROAD's mutants — the baseline: unticked ⇒ ONE totp: entry, the asker reads NO code
+  async function totpRoad(name, { door } = {}) {
+    STASH.length = 0;
+    const w = makeWorld(name, { door });
+    await w.vault.setup(PW);
+    const s = await serve(w);
+    const seed = require(path.join(REPO, 'src/totp.js')).base32Encode(crypto.randomBytes(20));
+    const a = await s.agent(w.SESSION_TOKEN, { words: 'a mutant two-step code', purpose: 'the mutant', kind: 'totp', name: 'mutant-code' });
+    const r = await s.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { body: { answer: 'store', totpSeed: seed, totp: { name: 'mutant-code' }, allow: false } });
+    const code = await s.hit('/api/agent/vault/totp/mutant-code', { method: 'GET', headers: { authorization: 'Bearer ' + w.SESSION_TOKEN } });
+    const entries = w.vault.secretNames().map((x) => x.name).filter((n) => /^(totp|secret):/.test(n));
+    s.srv.close();
+    return { stored: r.status === 200, readsCode: code.status === 200, entries, receipt: (STASH.find((e) => e.ref === a.json.requestId) || {}).text || '' };
+  }
+  const tb = await totpRoad('m-totp-base');
+  ok(tb.stored && !tb.readsCode && tb.entries.join() === 'totp:mutant-code' && /did not let this conversation read its code/.test(tb.receipt), 'the real two-step road: unticked ⇒ ONE totp: entry, the asker reads NO code (the two-step mutants\' baseline)', tb);
+  const t1 = await totpRoad('m-totp-agent', { door: mutant('src/server/vault-paste-door.js', "try { r = totp.addEntry(input, { who: String(by).slice(0, 40) }); }", "try { r = totp.agentAdd(input, { owner: q.conv, actor: 'mutant' }); }") });
+  ok(t1.stored && t1.readsCode, 'MUTANT the two-step door through agentAdd (the agent-owned road) ⇒ an UNTICKED answer lets the asker read codes with no grant (RED — the person\'s press is the only door)', t1);
+  const t2 = await totpRoad('m-totp-grant', { door: mutant('src/server/vault-paste-door.js', "if (t.allow === true && q.conv && typeof totp.grant === 'function') {", "if (q.conv && typeof totp.grant === 'function') {") });
+  ok(t2.stored && t2.readsCode, 'MUTANT the door gives the code without the tick ⇒ an unticked answer lets the asker read codes (RED)', t2);
+  const t3 = await totpRoad('m-totp-gone', { door: mutant('src/server/vault-paste-door.js', "    if (q.target && q.target.kind === P.TOTP_KIND) return answerTotp(q, id, two || {}, { by, mark });   // lane totp-request-card\n", '') });
+  ok(!t3.stored && !t3.entries.includes('totp:mutant-code'), 'MUTANT the totp branch of the answer gone ⇒ nothing lands as a two-step code (RED — the request\'s target is the two-step writer\'s)', t3);
 }
 
 W.vault.close();

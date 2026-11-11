@@ -79,11 +79,14 @@ const MORE_WORDS = Object.freeze({
   // lane login-request-card
   login_no_door: 'this server keeps no website logins — nothing was asked',
   login_totp_unknown: 'no two-step code of that name is in the vault — pick one from its list, or add it with «Two-step code…»',
+  // lane totp-request-card
+  totp_no_door: 'this server keeps no two-step codes — nothing was asked',
 });
 const STATUS = Object.freeze({
   unauthorized: 401, job_no_use: 403, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
   bad_answer: 400, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
+  totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_bad_origin: 400, login_words: 400, login_password_lines: 400, login_bad_user: 400, bad_totp: 400, not_written: 500, unreadable: 500,   // lane login-request-card (+ the add door's own codes)
 });
 const named = (code, extra = {}) => ({ ok: false, code, words: MORE_WORDS[code] || P.WORDS[code] || code, ...extra });
@@ -98,7 +101,7 @@ const statusOf = (code) => STATUS[code] || 400;
  * @param {object} [o.vaultRun]    src/server/vault-run-door.js (grantPasted — the asker may use a NEW free entry in runs)
  * @param {object} [o.logins]      src/server/browser-logins.js (addOwn — THE web-login writer; grant — the 用于… row) — lane login-request-card
  */
-function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {
+function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, logins = null, totp = null, runOf = () => null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {   // totp + runOf: lane totp-request-card (src/server/vault-totp.js — addEntry, THE person's two-step writer; grant, the entry's «Use for…»; runOf = the wiring's: a running conversation's run)
   // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
   // lane vault-use-grants round 5 (MAJOR item 2): the setting gates the 8-HOUR run grant (via vaultRun.grantPasted) — it no
   // longer needs useGrants (r4's standing member, which did, is gone). Default on; off ⇒ the asker must `request` to use it.
@@ -110,12 +113,12 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   const settling = new Set();  // item ids this door resolves itself (its own onStatus is not a refusal)
   let indexed = false;
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
-  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : t.kind === P.LOGIN_KIND ? `login:${t.origin}` : `entry:${String(t.label).toLowerCase()}`);   // login: lane login-request-card (its ONE site)
+  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : t.kind === P.LOGIN_KIND ? `login:${t.origin}` : t.kind === P.TOTP_KIND ? `totp:${String(t.label).toLowerCase()}` : `entry:${String(t.label).toLowerCase()}`);   // totp: lane totp-request-card (its name, else the agent's words)   // login: lane login-request-card (its ONE site)
   const recordOf = (it) => {
     const a = it && it.action;
     if (!a || a.type !== P.ACTION_TYPE || !P.REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
     const w = P.wordsOfItem(it);
-    const target = P.withNote(P.targetOfAction(a, { label: w.label }), w.note);   // lane vault-entry-description: + the description its words carry
+    const target = P.withNote(P.targetOfAction(a, { label: w.label, words: w.words }), w.note);   // words: lane totp-request-card (a two-step ask with no name dedupes on them)   // lane vault-entry-description: + the description its words carry
     return { requestId: a.requestId, todoId: it.id, conv: String(a.conv || ''), scope: String(a.scope || a.conv || ''), sessionKey: it.sessionKey || null, who: String(it.sessionName || 'a conversation'),
       words: w.words, purpose: w.purpose, target, place: target ? placeOf(target) : null, grant: a.grant === true };
   };
@@ -157,6 +160,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!v.ok) return v;
     if (!userTodos) return named('unfiled');
     if (v.target.kind === P.LOGIN_KIND && !(logins && typeof logins.addOwn === 'function')) return named('login_no_door');   // lane login-request-card
+    if (v.target.kind === P.TOTP_KIND && !(totp && typeof totp.addEntry === 'function')) return named('totp_no_door');   // lane totp-request-card
     index();
     const conv = String(caller.conversationId), place = placeOf(v.target), target = publicTarget(v.target);
     for (const q of open.values()) if (q.conv === conv && q.place === place) return { ok: true, already: 'open', requestId: q.requestId, target };
@@ -165,7 +169,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if ([...open.values()].filter((q) => q.conv === conv).length >= P.LIMITS.openPerConversation || open.size >= P.LIMITS.openHubWide) return named('too_many_requests');
     const requestId = `sr-${crypto.randomBytes(6).toString('hex')}`;
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
-    const grant = (v.target.kind === 'entry' || v.target.kind === P.LOGIN_KIND) && grantsAsker();   // lane vault-use-grants round 5: the paste gives the asker an 8-hour run grant (not a standing host-scoped member) — the card says so · lane login-request-card: a login's «Let it sign in» tick starts ticked (the owner's press decides)
+    const grant = (v.target.kind === 'entry' || v.target.kind === P.LOGIN_KIND || v.target.kind === P.TOTP_KIND) && grantsAsker();   // totp: lane totp-request-card (the «Let it read its code» tick's default)   // lane vault-use-grants round 5: the paste gives the asker an 8-hour run grant (not a standing host-scoped member) — the card says so · lane login-request-card: a login's «Let it sign in» tick starts ticked (the owner's press decides)
     const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target), grant: grant ? { hosts: v.target.hosts } : null, site: v.target.kind === P.LOGIN_KIND ? P.siteWords(v.target.origin, URL_.domainToUnicode) : null });
     const scope = String(caller.scope || conv);
     let it;
@@ -173,22 +177,22 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       it = userTodos.add(caller.sessionKey || 'vault', {
         origin: 'vault', kind: 'action', urgency: 'high', by: 'agent', sessionName: who,   // NO expiresAt: it waits for the owner (a restart keeps it)
         text: card.text, detail: card.detail, i18n: card.i18n,
-        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : v.target.kind === P.LOGIN_KIND ? P.LOGIN_KIND : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}), ...(v.target.kind === P.LOGIN_KIND ? { hosts: v.target.origin, grant } : {}) },   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
+        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : v.target.kind === P.LOGIN_KIND ? P.LOGIN_KIND : v.target.kind === P.TOTP_KIND ? P.TOTP_KIND : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}), ...(v.target.kind === P.LOGIN_KIND ? { hosts: v.target.origin, grant } : {}), ...(v.target.kind === P.TOTP_KIND ? { grant, ...(v.target.name ? { totpName: v.target.name } : {}) } : {}) },   // totp: lane totp-request-card (the proposed name, scalar)   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
       });
     } catch (e) { log(`${who}: the paste request could not be filed in For you: ${e.message}`); return named('unfiled'); }
     if (!it || !it.id) return named('unfiled');
     open.set(requestId, { requestId, todoId: it.id, conv, scope, sessionKey: caller.sessionKey || null, who, words: v.words, purpose: v.purpose, target: v.target, place, grant });
-    audit('vault-secret-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, place: v.target.kind === 'field' ? P.intoOf(v.target) : v.target.kind === P.LOGIN_KIND ? `a website login on ${v.target.origin}` : `a new ${v.target.entryKind} entry`, purpose: v.purpose, requestId });
+    audit('vault-secret-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, place: v.target.kind === 'field' ? P.intoOf(v.target) : v.target.kind === P.LOGIN_KIND ? `a website login on ${v.target.origin}` : v.target.kind === P.TOTP_KIND ? 'a two-step code' : `a new ${v.target.entryKind} entry`, purpose: v.purpose, requestId });
     return { ok: true, requestId, target };
   }
   /** The target as an answer says it (no label of the owner's: the agent's own words and the registry's names). */
-  function publicTarget(t) { if (t.kind === P.LOGIN_KIND) return { login: t.origin }; return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
+  function publicTarget(t) { if (t.kind === P.LOGIN_KIND) return { login: t.origin }; if (t.kind === P.TOTP_KIND) return { totp: t.name || null }; /* lane totp-request-card: the proposed name only */ return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
 
   /**
    * THE OWNER ANSWERS (the route: a person on this page; the value already taken off the request body).
    * answer 'store' + value ⇒ the ONE writer of the place · 'deny' ⇒ refused. → { ok: true, outcome, … } | a refusal.
    */
-  function answer(requestId, { answer: a, value = null, by = 'user', person = false, name, note, login = null } = {}) {   // login: lane login-request-card — { username, password, totpName, allow } (the password taken off the body by the route)
+  function answer(requestId, { answer: a, value = null, by = 'user', person = false, name, note, login = null, totp: two = null } = {}) {   // totp: lane totp-request-card — { uri | seed + digits / period / algorithm, name, allow } (the link and the seed taken off the body by the route)   // login: lane login-request-card — { username, password, totpName, allow } (the password taken off the body by the route)
     const id = String(requestId || '');
     index();
     const q = open.get(id);
@@ -200,6 +204,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (a === 'deny') { mark(); settle(q, 'refused', { why: 'denied' }); audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
     if (a !== 'store') return named('bad_answer');
     if (q.target && q.target.kind === P.LOGIN_KIND) return answerLogin(q, id, login || {}, { by, mark });   // lane login-request-card
+    if (q.target && q.target.kind === P.TOTP_KIND) return answerTotp(q, id, two || {}, { by, mark });   // lane totp-request-card
     const vv = P.valueOf(value);
     if (!vv.ok) return vv;
     if (!q.target) { settle(q, 'refused', { why: 'gone' }); return named('ask_unknown'); }   // its place left the registry since it was filed
@@ -280,6 +285,41 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     mark();
     settle(q, 'stored', { login: { user, updated: !!r.updated, allowed, asked: l.allow === true } });   // asked: the owner's tick (law D — granted / not ticked / ticked but not written)
     return { ok: true, outcome: 'stored', entry, updated: !!r.updated, allowed };
+  }
+
+  /** lane totp-request-card (fb-251bb41646): THE OWNER ADDS A TWO-STEP CODE on the card → THE two-step add door's ONE writer
+   *  (totp.addEntry — the person's door POST /api/vault/totp writes through the same function: the link or the seed sealed as
+   *  `totp:<name>` by: human; its own refusals by name — `exists` never overwrites, the person picks another name; a stale grant
+   *  dropped first). Never a free `secret:` entry, never agentAdd (the agent-owned road). With «Let it read its code» ticked
+   *  (`allow`): THE door that admits a conversation to a two-step entry's codes — totp.grant, the entry's «Use for…» — for THIS
+   *  conversation, held for its CURRENT RUN (runOf; a conversation not running is refused not_running: the code is stored, not
+   *  given, and the receipt says so). Every refusal keeps the item open — the box keeps its fields. The answer and the receipt
+   *  carry its NAME only — never the seed, never a code. */
+  function answerTotp(q, id, t, { by, mark }) {
+    if (!totp || typeof totp.addEntry !== 'function') return named('totp_no_door');
+    const st = vault.state();
+    if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    const input = typeof t.uri === 'string' && t.uri.trim()
+      ? { uri: t.uri, name: t.name }
+      : { seed: t.seed, digits: t.digits, period: t.period, algorithm: t.algorithm, name: t.name };
+    let r = null;
+    try { r = totp.addEntry(input, { who: String(by).slice(0, 40) }); }
+    catch (e) { log(`${q.requestId}: the two-step code could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
+    finally { input.seed = null; input.uri = null; }
+    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    const name = String(r.name);
+    let allowed = false, whyNot = null;
+    if (t.allow === true && q.conv && typeof totp.grant === 'function') {
+      try { const g = totp.grant(name, [`session:${q.conv}`], { who: String(by).slice(0, 40), by: 'user', runOf }); allowed = !!(g && g.ok); if (!allowed) { whyNot = (g && g.code) || 'error'; log(`${q.requestId}: the code was not given to the conversation (${whyNot}) — the two-step code is stored`); } }
+      catch (e) { whyNot = (e && e.code) || 'error'; log(`${q.requestId}: the code was not given to the conversation (${whyNot}) — the two-step code is stored`); }
+    }
+    try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }   // every open Vault window re-reads (its two-step codes)
+    // THE USE LAW (as the login card's): storing a seed is the OWNER's act — no use line; the asker's first USE is its first
+    // `vibespace-vault totp <name>`, which the agent door audits itself (vault-totp-use)
+    audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: r.entry || `totp:${name}`, allowed });
+    mark();
+    settle(q, 'stored', { totp: { name, allowed, asked: t.allow === true, whyNot } });
+    return { ok: true, outcome: 'stored', name, allowed, ...(whyNot ? { whyNot } : {}) };
   }
 
   // THE ITEM AND THE REQUEST ARE ONE STATE: the item leaving 'open' by another door is a refusal the agent is told

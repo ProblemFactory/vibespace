@@ -87,6 +87,12 @@ const USAGE = [
   '                             the password and an optional two-step code into the card; it lands as a web login only that site',
   '                             is ever filled with — you never see it. Your next turn says stored (and whether this conversation',
   '                             may sign in with it: vibespace-browser login <site>) or refused.',
+  '  vibespace-vault request "<what you need>" --purpose "<why>" --kind totp [--name <name>]',
+  '                             ask the user for a TWO-STEP CODE (TOTP) — a CLI, an SSH jump or an API console that prompts for',
+  '                             one (lane totp-request-card): ONE card with the Vault\'s own two-step fields — they paste its',
+  '                             otpauth link or type its seed, preview it and save it; --name proposes its name (they may change',
+  '                             it). Your next turn says stored, under which name, and whether THIS conversation may read its',
+  '                             current code while it runs: vibespace-vault totp <name> — never the seed.',
   '                             ask the user to PASTE a secret you do not have (a password, an API key): ONE item in their For you',
   '                             tray with a masked box — the value goes straight into the vault, never to you. --into = an',
   '                             Integrations field (e.g. llm.apiKey — VibeSpace uses it there itself); otherwise a NEW vault entry',
@@ -216,7 +222,7 @@ async function standingCmd(positional, out) {
  *  comes back — the receipt at the next turn says where it went). The hub judges every word (one spelling, CLI on any host). */
 async function pasteCmd(words, out) {
   if (out['--for'] !== undefined) { console.error('vibespace-vault: in a paste request the purpose is --purpose "<why>" and the place is --into <row>.<field> (or --kind / --name for a new entry); --for belongs to request <vault://…>'); process.exit(2); }
-  if (out['--purpose'] === undefined) { console.error('vibespace-vault: request "<what you need>" --purpose "<what you will do with it>" [--into <row>.<field> | --kind api-key|password|secret|login] [--name <label>] — a website login: --kind login --host https://<site>'); process.exit(2); }
+  if (out['--purpose'] === undefined) { console.error('vibespace-vault: request "<what you need>" --purpose "<what you will do with it>" [--into <row>.<field> | --kind api-key|password|secret|login|totp] [--name <label>] — a website login: --kind login --host https://<site>'); process.exit(2); }
   const body = { words, purpose: out['--purpose'] };
   if (out['--into'] !== undefined) body.into = out['--into'];
   if (out['--kind'] !== undefined) body.kind = out['--kind'];
@@ -225,11 +231,12 @@ async function pasteCmd(words, out) {
   if (out['--host'] !== undefined) body.hosts = out['--host'];   // lane vault-use-grants: the hub judges the list (one spelling)
   const d = await callCoded('POST', '/api/agent/vault/secret-request', body, 'request');
   const t = d.target || {};
-  const where = t.login ? `a website login on ${t.login} — only that site is ever filled with it; you never see it` : t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})${t.hosts && t.hosts.length ? ` for ${t.hosts.join(', ')}` : ''}`;   // login: lane login-request-card
+  const isTotp = Object.prototype.hasOwnProperty.call(t, 'totp');   // lane totp-request-card
+  const where = isTotp ? `a two-step code${t.totp ? ` named «${t.totp}» (the user may change it)` : ' the user names'} — you read its current code, never the seed` : t.login ? `a website login on ${t.login} — only that site is ever filled with it; you never see it` : t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})${t.hosts && t.hosts.length ? ` for ${t.hosts.join(', ')}` : ''}`;   // login: lane login-request-card
   const tray = (d.tray && (d.tray.phrase || d.tray.name)) || 'their For you tray';
-  if (d.already === 'open') console.log(t.login ? `already asked (${d.requestId}) — the login card for ${t.login} still waits in ${tray}; nothing waits on it` : `already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
-  else if (d.filed) { console.log(t.login ? `asked the user for a website login on ${t.login} — one card with the Vault's own login form; nothing waits on it` : `asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray) · lane login-request-card r3: a login's card said as what it is
-  else console.log(t.login ? `asked the user for a website login on ${t.login} (${d.requestId}) — one card with the Vault's own login form is in ${tray}; nothing waits on it` : `asked the user to paste it (${d.requestId}) — a masked paste box is in ${tray}; nothing waits on it`);
+  if (d.already === 'open') console.log(isTotp ? `already asked (${d.requestId}) — the two-step card still waits in ${tray}; nothing waits on it` : t.login ? `already asked (${d.requestId}) — the login card for ${t.login} still waits in ${tray}; nothing waits on it` : `already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
+  else if (d.filed) { console.log(isTotp ? 'asked the user for a two-step code — one card with the Vault\'s own two-step fields; nothing waits on it' : t.login ? `asked the user for a website login on ${t.login} — one card with the Vault's own login form; nothing waits on it` : `asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray) · lane login-request-card r3: a login's card said as what it is
+  else console.log(isTotp ? `asked the user for a two-step code (${d.requestId}) — one card with the Vault's own two-step fields is in ${tray}; nothing waits on it` : t.login ? `asked the user for a website login on ${t.login} (${d.requestId}) — one card with the Vault's own login form is in ${tray}; nothing waits on it` : `asked the user to paste it (${d.requestId}) — a masked paste box is in ${tray}; nothing waits on it`);
   console.log('  where it goes: ' + where);
   if (t.note) console.log('  its description: ' + t.note);   // lane vault-entry-description (the user may edit it before pasting)
   console.log('  your next turn says «stored» (where, and how to use it) or «refused» — never the value; do other work meanwhile,');

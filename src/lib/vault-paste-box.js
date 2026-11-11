@@ -18,13 +18,15 @@ import { vaultFacts, showUnlock, showSetup } from './vault-unlock.js';
 import { loginFields, loginRefusalWords } from './vault-login-row.js';   // lane login-request-card: THE add door's fields and words
 import { linkedHtml, maskedLinkNote } from './foryou-links.js';   // lane login-request-card r3: THE item's words renderer in the dialog (a masked link = its words + THE note)
 import { escHtml } from './utils.js';
-import { showTotpAddDialog } from './vault-totp-row.js';   // lane login-request-card: «Two-step code…» = THE 两步验证… dialog
+import { showTotpAddDialog, totpFields } from './vault-totp-row.js';   // lane login-request-card: «Two-step code…» = THE 两步验证… dialog · lane totp-request-card: its field set (THE two-step card)
 
 export const SECRET_ACTION = 'secret-request';
 /** Is this For-you item an agent's request for a secret (still answerable — it names its request)? */
 export const isSecretAsk = (i) => !!(i && i.action && i.action.type === SECRET_ACTION && /^sr-[0-9a-f]{12}$/.test(String(i.action.requestId || '')));
 /** lane login-request-card: …for a WEBSITE LOGIN (the request's `kind` — src/vault-paste.js LOGIN_KIND)? */
 export const isLoginAsk = (i) => isSecretAsk(i) && i.action.kind === 'login';
+/** lane totp-request-card: …for a TWO-STEP CODE (src/vault-paste.js TOTP_KIND)? */
+export const isTotpAsk = (i) => isSecretAsk(i) && i.action.kind === 'totp';
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const btn = (label, cls) => { const b = mk('button', cls, label); b.type = 'button'; return b; };
 
@@ -58,6 +60,7 @@ const ENTRY_KEY = 'Where it goes: a new vault entry «{label}» ({kind})', NOTE_
  *  (the vault locked / not set up — each with its door — or the last refusal's words). lane vault-entry-description: a NEW
  *  entry's name and description as the agent proposed them, above the field — the owner's to edit before saving (the owner's words win). */
 export function secretBoxEl(item) {
+  if (isTotpAsk(item)) return totpBoxEl(item);   // lane totp-request-card
   if (isLoginAsk(item)) return awayBoxEl(item) || loginBoxEl(item);   // lane login-request-card (r3: one answerable box — a moved card stands in its own window)
   const box = mk('div', 'ut-secret');
   box.dataset.req = String(item.action.requestId);
@@ -168,13 +171,53 @@ function loginBoxEl(item) {
   return box;
 }
 
+/** lane totp-request-card (fb-251bb41646): THE TWO-STEP CARD's box — THE 两步验证… dialog's own field set (totpFields: the two
+ *  ways, the name — the agent's proposal pre-filled, the person's edit wins — the hub's preview, the words), «Let <who> read its
+ *  current code — never the seed — while it runs» (ticked when the ask said so: vault.requestGrantsRequester), whose words say
+ *  what it gives (THE door: the entry's «Use for…», held for that conversation's current run), the button naming the moment
+ *  (Save and allow / Save only — drawn once a preview worked, as the dialog's Save is), and Refuse. Save sends the request's
+ *  answer (the link / the seed taken off the body by the route); `exists` and every other refusal say the dialog's own words. */
+function totpBoxEl(item) {
+  const box = mk('div', 'ut-secret ut-secret-totp-ask');
+  box.dataset.req = String(item.action.requestId);
+  box.dataset.target = 'totp';
+  const who = headParam(item, 'who') || t('The conversation that asked');
+  const allow = mk('input', 'ut-login-allow-box'); allow.type = 'checkbox'; allow.checked = item.action.grant === true;
+  const allowLab = mk('label', 'ut-login-allow');
+  allowLab.append(allow, mk('span', null, t('Let {who} read its current code — never the seed — while it runs', { who })));
+  const allowSays = mk('div', 'ut-secret-note ut-login-says');
+  const row = mk('div', 'ut-secret-row');
+  const save = btn('', 'ut-act ut-secret-save'), deny = btn(t('Refuse'), 'ut-act ut-secret-deny');
+  save.hidden = true;   // drawn once a preview worked (the dialog's rule — never a greyed button)
+  const word = () => (allow.checked ? t('Save and allow') : t('Save only'));
+  const sayAllow = () => {
+    allowSays.textContent = allow.checked
+      ? t('{who} can read its current code (never the seed) while it runs — a restart of that conversation ends it; give it again in Vault ▸ Two-step codes ▸ Use for….', { who })
+      : t('{who} cannot read its code until you give it in Vault ▸ Two-step codes ▸ Use for….', { who });
+    if (!box.dataset.saving) save.textContent = word();
+  };
+  const f = totpFields({
+    name: typeof item.action.totpName === 'string' ? item.action.totpName : '', autofocus: false,
+    onReady: (on) => { save.hidden = !on; },
+    onSaving: (on) => { if (on) box.dataset.saving = '1'; else delete box.dataset.saving; save.textContent = on ? t('Saving…') : word(); },
+    onSaved: () => { f.wipe(); },
+  });
+  box._totp = { fields: f, allow };
+  allow.addEventListener('change', sayAllow); sayAllow();
+  row.append(save, deny);
+  const note = mk('div', 'ut-secret-note', t('Wrong code, or not yours to give? Refuse — the agent can ask again.'));
+  box.append(...f.nodes, allowLab, allowSays, row, note, stateEl());
+  applySecretBox(box);
+  return box;
+}
+
 /** The box's state from the vault's facts (vault-unlock.js — kept live by the `vault-state` broadcast): LOCKED ⇒ the words
  *  + 解锁…; NOT SET UP and a new entry ⇒ the words + 设置第二密码…; else the last refusal (`error`) or nothing. */
 export function applySecretBox(box, { error } = {}) {
   if (!box) return;
   if (error !== undefined) box.dataset.error = error || '';
   const f = vaultFacts() || {}, st = f.state || '';
-  const entry = box.dataset.target === 'entry' || box.dataset.target === 'login';   // a free entry or a website login needs the vault set up
+  const entry = box.dataset.target === 'entry' || box.dataset.target === 'login' || box.dataset.target === 'totp';   // a free entry, a website login or a two-step code needs the vault set up
   const locked = st === 'locked', notSetUp = st === 'not_set_up' && entry;
   const say = locked ? t('The vault is locked (vault_locked) — unlock it, then save') : notSetUp ? t('The vault is not set up yet — set its second password, then save') : (box.dataset.error || '');
   const words = box.querySelector(':scope > .ut-secret-state > .ut-secret-words');
@@ -205,6 +248,7 @@ function refusalSay(code, r) {
 export async function submitSecretBox(model, item, box, answer) {
   if (!model || !item || !box || box.dataset.busy === '1') return false;
   if (box.dataset.target === 'login') return submitLoginBox(model, item, box, answer);   // lane login-request-card
+  if (box.dataset.target === 'totp' && answer === 'store') return submitTotpBox(model, item, box);   // lane totp-request-card
   const input = box.querySelector('input.ut-secret-input');
   const value = answer === 'store' && input ? input.value : null;
   const nameEl = box.querySelector('input.ut-secret-name'), descEl = box.querySelector('textarea.ut-secret-desc');   // lane vault-entry-description: the owner's words (a new entry only)
@@ -240,10 +284,27 @@ async function submitLoginBox(model, item, box, answer) {
   return !!done;
 }
 
+/** lane totp-request-card: the two-step box's Save — THE field set's own save (what its preview showed; a click while an ask is
+ *  on the wire waits, said on the button) through the model's ONE verb (the same door). A refusal comes back to the field set,
+ *  which says it in the dialog's own words («exists»: pick another name); the fields are wiped once it is stored. */
+async function submitTotpBox(model, item, box) {
+  const h = box._totp;
+  if (!h) return false;
+  box.dataset.busy = '1';
+  try {
+    return !!(await h.fields.doSave(async (body) => {
+      let refused = null;
+      const ok = await model.runAction(item, 'store', { totp: { ...body, allow: !!h.allow.checked }, onRefusal: (code, r) => { refused = { ...(r || {}), ok: false, code }; } });
+      return ok ? { ok: true } : (refused || { ok: false, code: 'failed' });
+    }));
+  } finally { delete box.dataset.busy; }
+}
+
 /** The answer's toast + the box's refusal (the model's runAction hands the refusal back through `onRefusal`). */
-export async function postSecretAnswer(item, answer, { value = null, name, note, login = null, onRefusal = null } = {}) {
-  const body = answer === 'store' ? (login ? { answer, ...login } : { answer, value, ...(typeof name === 'string' ? { name } : {}), ...(typeof note === 'string' ? { note } : {}) }) : { answer };   // name / note: lane vault-entry-description · login: lane login-request-card (its password as `loginPassword` — the route takes it off the body)
+export async function postSecretAnswer(item, answer, { value = null, name, note, login = null, totp = null, onRefusal = null } = {}) {   // totp: lane totp-request-card — the two-step field set's body + the tick
+  const body = answer === 'store' ? (totp ? { answer, totpLink: totp.uri, totpSeed: totp.seed, totp: { name: totp.name, digits: totp.digits, period: totp.period, algorithm: totp.algorithm }, allow: totp.allow === true } : login ? { answer, ...login } : { answer, value, ...(typeof name === 'string' ? { name } : {}), ...(typeof note === 'string' ? { note } : {}) }) : { answer };   // name / note: lane vault-entry-description · login: lane login-request-card (its password as `loginPassword` — the route takes it off the body)
   const r = await fetchJson(`/api/vault/secret-requests/${encodeURIComponent(item.action.requestId)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r && r.ok && totp && r.outcome === 'stored') { showToast(r.allowed ? t('Saved «{name}» — the agent may read its current code while it runs; it never sees the seed', { name: r.name }) : totp.allow ? t('Saved «{name}», but its code was not given — that conversation was not running; give it in Vault ▸ Two-step codes ▸ Use for…', { name: r.name }) : t('Saved «{name}» — the agent cannot read its code until you give it', { name: r.name }), totp.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane totp-request-card
   if (r && r.ok && login && r.outcome === 'stored') { showToast(r.allowed ? t('Saved to the vault — the agent may sign in with it on that site; it never sees the password') : login.allow ? t('Saved to the vault, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…') : t('Saved to the vault — the agent cannot sign in with it until you allow it'), login.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane login-request-card
   if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;

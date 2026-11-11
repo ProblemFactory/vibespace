@@ -42,6 +42,12 @@
 //      holds a copy it did not hold (the others named — the product draws an open ask on each surface at once); where a
 //      person's act redraws that surface (the tray, the mini inbox, the phone's sheet reopened) it draws «open in its own
 //      window · Show it», still no new box. Every firm press says which attempt landed when it needed a retry.
+//   ⑩ (lane totp-request-card, fb-251bb41646) A TWO-STEP CODE: `request … --kind totp --name ci-two-step` ⇒ the card in the tray IS the
+//      两步验证… dialog's own fields (its two ways, the proposed name pre-filled, the hub's preview — Save drawn only after it) +
+//      «Let <who> read its current code» (ticked); the seed typed into the masked field ⇒ Preview ⇒ Save and allow ⇒ ONE totp entry,
+//      the card resolved, the toast; the agent's NEXT TURN: stored, the name, TOTP_USE, never the seed; `vibespace-vault totp
+//      ci-two-step` answers a code; the seed in no DOM, frame or log. On the PHONE: every control ≥ 44 px, every text ≥ 16 px,
+//      nothing off the screen; by taps, unticked ⇒ «Save only» ⇒ stored, the receipt says it was not given
 //   ⑦ RED CONTROL (saved by Enter in the box): a mutant hub whose paste door logs the value and files it on an item ⇒ the same checks find it in the server
 //      log, the DOM and a WebSocket frame (they see a leak when there is one)
 // Run: node scripts/test-vault-paste-chrome.mjs   (SKIPs without chrome)
@@ -529,6 +535,37 @@ try {
     if (vb && (await firmPress('#vs-test-vw-paste'))) await surfaceLeg('vault-window', sV, '.vault-paste-dialog', false, 'born in its form — the band\'s «Paste and save…» draws no box; pressed again it raises THE form (test-vault-paste ⑬b)');
     else { check('[surface:vault-window] the press on «Paste and save…» lands', false); await pageApi('POST', `/api/vault/secret-requests/${sV}/answer`, { answer: 'deny' }); }
 
+    // ⑩ (lane totp-request-card, fb-251bb41646) THE TWO-STEP CARD on the desk — the 两步验证… dialog's own fields on a For-you card
+    console.log('⑩ a two-step code — the card IS the 两步验证… dialog\'s fields; ONE totp entry; the asker reads its current code (lane totp-request-card)');
+    const SEED10 = T8.base32Encode(crypto.randomBytes(20));
+    const k10 = await ask(['the CI box two-step code', '--purpose', 'sign the release on the CI box', '--kind', 'totp', '--name', 'ci-two-step'], TOKEN);
+    check('⑩ the agent asks for a two-step code (--kind totp --name ci-two-step) ⇒ ONE card filed', k10.code === 0 && !!k10.id && /two-step code/.test(k10.out), k10);
+    if (!(await trayOpen())) await realClick('#taskbar-user-todos');
+    const B10 = k10.id ? await pickVisible('totp-desk', k10.id, TRAY) : null;
+    const f10 = B10 ? await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(B10)}); const q = (s) => b.querySelector(s); const it = b.closest('.ut-item'); return { head: it ? (it.querySelector('.ut-text') || {}).textContent : '', ways: [...b.querySelectorAll('.vt-way')].map((x) => x.textContent), seedMasked: q('input.vt-seed').type === 'password', name: q('input.vt-name').value, tick: q('input.ut-login-allow-box').checked, saveShown: !q('.ut-secret-save').hidden, says: (q('.ut-login-says') || {}).textContent }; })()`) : null;
+    check(`⑩ the card: its first line «${f10?.head}»; the dialog's own two ways (${(f10?.ways || []).join(' · ')}), the seed field masked; the proposed name pre-filled; «read its current code» ticked; Save not drawn before a preview`,
+      !!f10 && /asks you for a two-step code \(TOTP\) for: sign the release on the CI box/.test(f10.head) && f10.ways.join('|') === 'Paste an otpauth link|Type the seed' && f10.seedMasked && f10.name === 'ci-two-step' && f10.tick === true && f10.saveShown === false && /read its current code \(never the seed\) while it runs/.test(f10.says), f10);
+    if (B10) {
+      check('⑩ «Type the seed» lands', !!(await firmPress(B10 + ' .vt-way[data-way="seed"]')));
+      check('⑩ the seed is typed into the dialog\'s own masked field (read back)', await firmType(B10 + ' input.vt-seed', SEED10));
+      check('⑩ Preview lands', !!(await firmPress(B10 + ' .vt-preview-b')));
+      const pv10 = await until(`(() => { const b = document.querySelector(${JSON.stringify(B10)}); const c = b && b.querySelector('.vw-code-digits'); const s = b && b.querySelector('.ut-secret-save'); return c && /\\d{3} \\d{3}/.test(c.textContent) && s && !s.hidden ? { code: c.textContent, save: s.textContent } : null; })()`, { timeout: 10000 });
+      check(`⑩ the hub's preview shows the code the seed makes now (${pv10 && pv10.code}) — and only then Save: «${pv10 && pv10.save}»`, !!pv10 && pv10.save === 'Save and allow', pv10);
+      check('⑩ Save and allow lands', !!(await firmPress(B10 + ' .ut-secret-save')));
+      const toast10 = await until(`(() => { const t = [...document.querySelectorAll('.toast, [class*=toast]')].map((x) => x.textContent).find((x) => /Saved «ci-two-step»/.test(x)); return t || null; })()`, { timeout: 10000 });
+      check(`⑩ the toast: «${toast10}»`, /the agent may read its current code while it runs; it never sees the seed/.test(String(toast10 || '')), toast10);
+    }
+    const gone10 = await until(`!document.querySelector('.ut-secret[data-req="${k10.id}"]')`, { timeout: 10000 });
+    const list10 = await pageApi('GET', '/api/vault/totp');
+    const e10 = ((list10.json || {}).entries || []).find((x) => x.name === 'ci-two-step');
+    check('⑩ stored ⇒ the card resolved; the Vault lists ONE two-step code «ci-two-step», granted to this conversation', !!gone10 && !!e10 && (e10.grants || []).length === 1 && /^session:/.test(e10.grants[0].subject), { gone: gone10, entry: e10 });
+    const turn10 = await nextTurn(TOKEN);
+    check('⑩ the agent\'s next turn: STORED, its name, the grant (this run), how to use it — never the seed', /STORED — a two-step code «ci-two-step» is in the vault/.test(turn10) && /vibespace-vault totp ci-two-step answers its current code \(never the seed\)/.test(turn10) && hitsIn(turn10, SEED10) === 0, turn10.slice(0, 700));
+    const code10 = await cli(['totp', 'ci-two-step'], TOKEN);
+    check('⑩ `vibespace-vault totp ci-two-step` (the asker) answers its current code — never the seed', code10.code === 0 && /\b\d{3} ?\d{3}\b/.test(code10.out) && hitsIn(code10.out, SEED10) === 0, code10);
+    check('⑩ the seed is in no DOM, WebSocket frame or server log line', WS_FRAMES.every((f) => hitsIn(f, SEED10) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), SEED10) === 0 && hitsIn(await pageText(), SEED10) === 0, WS_FRAMES.length);
+    if (await trayOpen()) await realClick('#taskbar-user-todos');
+
     // THE PHONE over a RESTART (locked at boot — no lock act); a SECOND client sees the card resolve live
     const l2 = await ask(['the forum login', '--purpose', 'read the thread you sent', '--kind', 'login', '--host', 'https://forum.example.test'], TOKEN);
     check('a second login ask, filed while unlocked', l2.code === 0 && !!l2.id, l2);
@@ -600,6 +637,33 @@ try {
     const boxShown = await evalJs(`(() => { const b = document.querySelector('.ut-item[data-leg-row="phone"] .ut-secret[data-req="${sP}"]'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`);
     if (rowShown && !boxShown) check('[surface:phone-page] a tap on the folded row opens it', await firmPress('.ut-item[data-leg-row="phone"]', true), lastSpot);   // the ROW is the tap (⑥'s and ⑧'s phone legs tap it): a folded row opens in place — a miss says what the look saw
     await surfaceLeg('phone-page', sP, '.ut-item[data-leg-row="phone"]', true, SURF === TRAY ? trayRedraw('the For-you sheet closed and opened again') : 'the row stood on the phone\'s page (no sheet open): the page redraws on its own schedule — the redraw road is test-vault-paste ⑬b\'s');
+    // ⑩ the two-step card ON THE PHONE — the same fields by taps; its targets and its text
+    const SEEDP = T8.base32Encode(crypto.randomBytes(20));
+    const kP = await ask(['the jump host two-step code', '--purpose', 'reach the jump host', '--kind', 'totp'], TOKEN);
+    check('⑩ phone: a two-step ask with no name proposed ⇒ ONE card', kP.code === 0 && !!kP.id, kP);
+    if (!(await evalJs(sheetOpen))) await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
+    await until(sheetOpen, { timeout: 8000 });
+    const SURFP = (await evalJs(sheetOpen)) ? '#user-todos-popup' : '#phone-home';
+    const visRowP = `[...document.querySelectorAll(${JSON.stringify(`${SURFP} .ut-item:has(.ut-secret[data-req="${kP.id}"])`)})].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (typeof e.checkVisibility !== 'function' || e.checkVisibility({ checkVisibilityCSS: true })); })`;
+    const rowP = await until(`(() => { const r = ${visRowP}; if (!r) return null; r.dataset.legRow = 'phone-totp'; return true; })()`, { timeout: 10000 });
+    const shownP = await evalJs(`(() => { const b = document.querySelector('.ut-item[data-leg-row="phone-totp"] .ut-secret[data-req="${kP.id}"]'); if (!b) return false; const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`);
+    if (rowP && !shownP) check('⑩ phone: a tap on the folded row opens it', !!(await firmPress('.ut-item[data-leg-row="phone-totp"]', true)), lastSpot);
+    const BP = '.ut-item[data-leg-row="phone-totp"] .ut-secret[data-req="' + kP.id + '"]';
+    const sizesOf = () => evalJs(`(() => { const b = document.querySelector(${JSON.stringify(BP)}); if (!b) return null; const vw = innerWidth; const on = (e) => e.getClientRects().length > 0 && !e.closest('[hidden]'); const els = [...b.querySelectorAll('input:not([type=checkbox]), select, button')].filter(on); const small = els.filter((e) => e.getBoundingClientRect().height < 44).map((e) => String(e.className).slice(0, 40) + ' ' + Math.round(e.getBoundingClientRect().height)); const texts = [...b.querySelectorAll('*')].filter((e) => on(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())); const tiny = texts.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16).map((e) => e.tagName + '.' + String(e.className).slice(0, 30) + ' ' + getComputedStyle(e).fontSize); const out = [...els, ...texts].filter((e) => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > vw + 0.5; }).map((e) => String(e.className).slice(0, 30)); return { n: els.length, small, tiny, out }; })()`);
+    const z0 = await sizesOf();
+    check(`⑩ phone: every control of the two-step card ≥ 44 px (${z0 && z0.n}), every text ≥ 16 px, nothing off the screen`, !!z0 && z0.n >= 4 && !z0.small.length && !z0.tiny.length && !z0.out.length, z0);
+    check('⑩ phone: «Type the seed» by a tap', !!(await firmPress(BP + ' .vt-way[data-way="seed"]', true)));
+    check('⑩ phone: the seed typed (read back)', await firmType(BP + ' input.vt-seed', SEEDP, true));
+    check('⑩ phone: the name typed (read back) — none was proposed', await firmType(BP + ' input.vt-name', 'jump-host', true));
+    check('⑩ phone: «read its current code» unticked by a tap', !!(await firmPress(BP + ' input.ut-login-allow-box', true)) && (await evalJs(`!document.querySelector(${JSON.stringify(BP + ' input.ut-login-allow-box')}).checked`)) === true);
+    check('⑩ phone: Preview by a tap', !!(await firmPress(BP + ' .vt-preview-b', true)));
+    const pvP = await until(`(() => { const b = document.querySelector(${JSON.stringify(BP)}); const s = b && b.querySelector('.ut-secret-save'); return s && !s.hidden ? s.textContent : null; })()`, { timeout: 10000 });
+    const z1 = await sizesOf();
+    check(`⑩ phone: after its preview, Save reads «${pvP}» — and the card still holds every control ≥ 44 px, every text ≥ 16 px`, pvP === 'Save only' && !!z1 && !z1.small.length && !z1.tiny.length && !z1.out.length, { pvP, z1 });
+    check('⑩ phone: Save only by a tap', !!(await firmPress(BP + ' .ut-secret-save', true)));
+    const goneP = await until(`!document.querySelector('.ut-secret[data-req="${kP.id}"]')`, { timeout: 10000 });
+    const turnP = await nextTurn(TOKEN);
+    check('⑩ phone: stored unticked ⇒ the card resolved; the next turn says «jump-host» is stored and NOT given — never the seed', !!goneP && /STORED — a two-step code «jump-host» is in the vault/.test(turnP) && /did not let this conversation read its code/.test(turnP) && hitsIn(turnP, SEEDP) === 0, turnP.slice(0, 600));
     const retried = PRESSES.filter((x) => x.at > 1), missed = PRESSES.filter((x) => x.at === 0);
     console.log(`    (⑨'s firm presses: ${PRESSES.length} — ${PRESSES.filter((x) => x.at === 1).length} at the first look, ${retried.length} after a retry${retried.length ? ': ' + retried.map((x) => `${x.sel} @${x.at}`).join(', ') : ''}, ${missed.length} missed)`);
     await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
