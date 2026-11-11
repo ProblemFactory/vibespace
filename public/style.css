@@ -1414,6 +1414,15 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 /* …in a narrower roster the words wrap tighter (three short lines, the row's own height), so the name line keeps its chips whole (test-roster-reset-eta §5: a login chip at 384 px) */
 @container (max-width: 460px) { .acct-key-row .acct-usage-unread { max-width: 120px; } }
 .usage-bar.usage-bar-unconfirmed { outline: 1px dashed var(--text-secondary); outline-offset: -1px; }
+/* lane account-reset-door: a person's «I reset this on Anthropic's site», the outcome said once, a lane older than its siblings */
+.usage-claim-btn { background: none; border: 1px solid var(--border, #444); border-radius: 4px; color: var(--text-secondary); font-size: 10px; padding: 0 5px; cursor: pointer; margin-left: 4px; }
+.usage-claim-btn:hover { color: var(--text); border-color: var(--text-secondary); }
+.usage-claim-outcome { display: flex; align-items: flex-start; gap: 6px; }
+.usage-outcome-x { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0 2px; margin-left: auto; font-size: 12px; line-height: 1; }
+.usage-stat-stale { color: var(--yellow, #e5c07b); }
+.usage-pie-aged { position: relative; display: inline-block; }
+.usage-age-badge, .acct-donut-age { position: absolute; top: -5px; right: -7px; font-size: 8px; line-height: 10px; padding: 0 2px; border-radius: 4px; background: var(--bg-input); color: var(--yellow, #e5c07b); border: 1px solid currentColor; pointer-events: none; }
+.acct-donut-aged { position: relative; }
 .usage-stat-unconfirmed { color: var(--text-secondary); font-style: italic; }
 .bsw-usage .bsw-seg.bsw-unconfirmed .bsw-pct { color: var(--text-secondary) !important; text-decoration: underline dashed 1px; text-underline-offset: 2px; }
 .acct-mini-est { border-bottom: 1px dashed currentColor; }

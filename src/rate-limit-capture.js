@@ -430,9 +430,17 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
       // the whole point of the refutation it records.
       if (corroborated === undefined) delete cache.corroborated; else cache.corroborated = !!corroborated;
     }
+    // THE LANES THIS EVENT STATED AND THOSE IT REFUSED (lane account-reset-door r3): only the event's own lanes — never a
+    // bucket of the freshest SIBLING spread above (its org twin's number is not this account's reading), never a guessed one
+    const QM = require('./quota-model.js');
+    const laneKey = (l) => (l.kind === 'fiveHour' ? 'plan:5h' : l.kind === 'sevenDay' ? 'plan:7d' : l.scopedName ? QM.scopedLimitId(l.scopedName) : null);
+    const own = lanes.filter((l) => !(l.kind === 'fiveHour' && ev.guessed) && (l.dead || l.utilization != null));
+    const stated = own.map(laneKey).filter((k) => QM.isLaneKey(k)), refused = own.filter((l) => l.dead).map(laneKey).filter((k) => QM.isLaneKey(k));
+    // a GUESSED lane's dead mark is still a refusal's number (r5): stamped so (`refusalMarks`), told to no claim
+    const refusalMarks = lanes.filter((l) => l.kind === 'fiveHour' && ev.guessed && l.dead).map(laneKey).filter((k) => QM.isLaneKey(k));
     const w = usageWrite.writeCacheObject({
       cacheDir, key, obj: cache, measuredAt: now,
-      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', passiveAnswer: passive,
+      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks,
     });
     if (!w.ok) return { ok: false, dead, wroteReading: false, error: w.why || 'write refused' };
     for (const id of ids) {
@@ -442,7 +450,9 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
         if (!c2) continue; // never create a sibling
         applyTo(c2); // fetchedAt deliberately untouched
         delete c2.limits; // the sibling's own limits are rebuilt from its own (now updated) view
-        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', passiveAnswer: passive });
+        // THE STAMP TRAVELS WITH THE REFUSAL (r4): the identity's twin is told what THIS event stated and refused — the same
+        // lanes, the same quota — so its window carries the mark too, never a «measured» 100 %
+        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', passiveAnswer: passive, stated, refused, refusalMarks });
       } catch { }
     }
     return { ok: true, dead, wroteReading: reading, lanes: lanes.map((l) => (l.kind === 'scoped' ? 'scoped:' + l.scopedName : l.kind)), modelCapLane: ev.modelCapLane || null };

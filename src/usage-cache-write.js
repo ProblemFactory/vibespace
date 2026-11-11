@@ -351,6 +351,66 @@ function onWindowChange(fn) { _onWindowChange = typeof fn === 'function' ? fn : 
 // (`replace`) measures nothing and says nothing.
 let _onReading = null;
 function onReading(fn) { _onReading = typeof fn === 'function' ? fn : null; }
+// A RESET SEEN IN A READING (lane account-reset-door): the one write path names a lane whose newer MEASUREMENT dropped under
+// an unchanged, still-ahead reset (quotaModel.resetsSeen) — every subscriber hears it (the claim store says it once and ends
+// a claim on it; the pool engine lifts the session walls that came from THAT lane). Compared on the RAW PAIR before the
+// merge (r2, ROOT 2): the stored reading against the producer's OWN measurement, each lane by its own time — never the
+// merged object, whose lift stamps a carried bucket with the write's clock (a late older record would read as a reset),
+// never a wall's mark, a repair or a view. A DIRECT writer (the shipped
+// statusline) is compared by its reader through `noteDirectWrite` — once a write: a file the write path itself wrote and
+// compared is not compared again.
+const _onVendorReset = new Set();
+function onVendorReset(fn) { if (typeof fn === 'function') _onVendorReset.add(fn); return () => _onVendorReset.delete(fn); }
+function noteVendorResets(key, prev, next, nowMs = Date.now(), { cacheDir = null } = {}) {
+  let seen = [];
+  try { seen = quotaModel.resetsSeen(prev, next, nowMs); } catch { seen = []; }
+  return sayVendorResets(key, seen, cacheDir);
+}
+function sayVendorResets(key, seen, cacheDir = null) {
+  if (!Array.isArray(seen) || !seen.length) return [];
+  for (const fn of _onVendorReset) { try { fn({ key, resets: seen, cacheDir }); } catch { } }
+  return seen;
+}
+// THE LANES A WRITE MEASURED (lane account-reset-door r2): the claim store settles a claim on them — a ⟳ that re-read a
+// claimed cap at the SAME 97 % keeps that window's older age (the carry rule) and is still the contradiction
+const _onLanesRead = new Set();
+function onLanesRead(fn) { if (typeof fn === 'function') _onLanesRead.add(fn); return () => _onLanesRead.delete(fn); }
+const _comparedOut = new Map(); // key → the stamp of the object the write path last wrote AND compared (the reader's dedupe)
+const outStamp = (o) => (o && typeof o === 'object' ? `${o.fetchedAt}|${o.source}|${Array.isArray(o.limits) ? o.limits.length : '-'}` : '');
+// THE LANES A STATED WRITE MEASURED (r3): the producer's own lifted reading, restricted to what it named; a refused lane is a
+// refusal (no number of spend), synthesized at 100 % when the producer's reading holds no window for it
+function statedLanesNow({ stated, refusedKeys, lifted, own, at }) {
+  const keys = new Set([...(Array.isArray(stated) ? stated.filter((l) => quotaModel.isLaneKey(l)) : stated && typeof stated === 'object' ? quotaModel.statedLanesOf(stated, own) : []), ...refusedKeys]);
+  const t = Number(at) || Date.now();
+  const rows = quotaModel.lanesOfReading({ fetchedAt: t, limits: quotaModel.limitsOf(lifted) }).filter((x) => keys.has(x.lane));
+  const stamps = new Map(quotaModel.lanesOfReading(own && typeof own === 'object' ? { ...own, limits: undefined } : null).filter((x) => x.own).map((x) => [x.lane, x.at]));
+  const out = rows.map((x) => ({ ...x, at: stamps.has(x.lane) && stamps.get(x.lane) < t ? stamps.get(x.lane) : t }));
+  for (const l of refusedKeys) if (!out.some((x) => x.lane === l)) out.push({ lane: l, at: t, usedPct: 100, resetsAt: null, source: null, mark: true });
+  return out.map((x) => (refusedKeys.includes(x.lane) ? { ...x, refused: true, mark: true, at: t } : x));
+}
+// WHEN EACH LANE WAS LAST STATED (r3, the age badge): the carry rule keeps an unchanged number's older `measuredAt` — the
+// number's provenance — so «read 14 h ago» stood beside a lane a ⟳ had just read. The write path knows; /api/usage hands it.
+const _lanesReadAt = new Map();
+function noteLanesReadAt(key, lanes) {
+  let m = _lanesReadAt.get(key);
+  if (!m) { m = new Map(); _lanesReadAt.set(key, m); if (_lanesReadAt.size > 2048) _lanesReadAt.delete(_lanesReadAt.keys().next().value); }
+  for (const x of lanes) if (x && x.lane && Number(x.at) > (m.get(x.lane) || 0)) m.set(x.lane, Number(x.at));
+}
+function lanesReadAt(key) { const m = _lanesReadAt.get(key); return m ? Object.fromEntries(m) : {}; }
+// A DIRECT writer's write (the shipped statusline writes the file itself): the lanes it STATED are those whose own stamp
+// (`asOf` — it stamps every window it renders) is newer than the file's last one; a bucket it spread forward unstated has
+// no new stamp and settles nothing. Compared by its reader once a write.
+function noteDirectWrite(key, prev, next, { nowMs = Date.now(), cacheDir = null } = {}) {
+  if (!prev || !next || _comparedOut.get(key) === outStamp(next)) return [];
+  let was = [], now = [];
+  try { was = quotaModel.lanesOfReading(prev); now = quotaModel.lanesOfReading(next); } catch { return []; }
+  const before = new Map(was.map((x) => [x.lane, x]));
+  const statedNow = now.filter((x) => x.own && Number(x.at) > 0 && !(before.get(x.lane) && Number(before.get(x.lane).at) >= Number(x.at)));
+  if (statedNow.length) { noteLanesReadAt(key, statedNow); for (const fn of _onLanesRead) { try { fn({ key, cacheDir, lanes: statedNow }); } catch { } } }
+  let seen = [];
+  try { seen = quotaModel.resetsSeenLanes(was, statedNow, nowMs); } catch { seen = []; }
+  return sayVendorResets(key, seen, cacheDir);
+}
 
 function atomicWrite(file, text) {
   fs.writeFileSync(file + '.tmp', text);
@@ -390,15 +450,17 @@ function atomicWrite(file, text) {
  *                                complete list — see `retireUnnamedScopes`.
  * @returns {{ok:boolean, why?:string, errors?:string[], limits?:Array, file?:string}}
  */
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null }) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null, stated = null, refused = null, refusalMarks = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
   // THE FILE IS READ FIRST, because the lift below needs it: a legacy snapshot
   // is ONE reading spread over a carry-forward of everything else, and only the
   // file can say which halves are which (carryUnmeasuredLimits).
-  let prevObj = null;
-  if (!replace) { try { prevObj = JSON.parse(fs.readFileSync(file, 'utf-8')) || null; } catch { prevObj = null; } }
+  // (r5) a REPLACE reads it too, for the stored record's word on itself only (carryStamps below) — never its numbers
+  let prevObj = null, storedObj = null;
+  try { storedObj = JSON.parse(fs.readFileSync(file, 'utf-8')) || null; } catch { storedObj = null; }
+  if (!replace) prevObj = storedObj;
   let prevSet = quotaModel.makeLimitSet({ identity: key });
   if (prevObj) {
     prevSet = liftCacheObject(prevObj, { identity: key, backend, familyOf });
@@ -412,8 +474,9 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     }
   }
   let next = set;
+  let lifted = null;   // the producer's object lifted, before the carry rule (lane account-reset-door r2: lanesMeasured)
   if (!next) {
-    next = liftCacheObject(obj, { identity: key, backend, familyOf, measuredAt: at });
+    next = lifted = liftCacheObject(obj, { identity: key, backend, familyOf, measuredAt: at });
     next = carryUnmeasuredLimits(prevSet, next);
   }
   // Stamp the producer's name on every limit this write MEASURED. A producer WE
@@ -457,8 +520,36 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     try { onRefuse && onRefuse(why, vNext.errors); } catch { }
     return { ok: false, why, errors: vNext.errors };
   }
+  // THE RAW PAIR (lane account-reset-door): the stored reading vs THE LANES THIS WRITE MEASURED. r3: A PRODUCER NAMES THEM —
+  // `stated` = every lane it stated in this write, at whatever number (lane keys, or its OWN reading — a panel's parse, an
+  // OAuth answer — never a spread of the file: a sibling's bucket it carried is not this account's reading), `refused` = the
+  // lanes the vendor REFUSED (a wall, a banner, a rejected rate_limit_event, the stream wall): the contradiction of a claim
+  // on them at once, whatever the merge keeps, and the record's own mark (`refusedAt`, below). A producer that names none
+  // keeps round 2's inference (quotaModel.lanesMeasured: a moved window, every cap an enumerating panel listed, a typed
+  // set's windows). Each lane no later than a bucket's own stamp. A claim is settled by them (`onLanesRead`) and a reset is
+  // seen in them against the stored reading — never in the merged object, never in a refusal.
+  let measuredLanes = [], seenResets = [];
+  const refusedKeys = (Array.isArray(refused) ? refused : []).filter((l) => quotaModel.isLaneKey(l));
+  // `refusalMarks` (r5): lanes whose number in this write is a REFUSAL's but which the producer does not state — a guessed
+  // lane (the capture's and the banner's guessed 5h): the window is stamped a refusal (`refusedAt`), the claim store is told
+  // nothing (a guess is not this account's statement)
+  const markKeys = (Array.isArray(refusalMarks) ? refusalMarks : []).filter((l) => quotaModel.isLaneKey(l));
+  if (!replace) {   // (a reading of another harness names no plan:/model: lane — lanesOfReading — so it measures none)
+    try {
+      if (stated || refusedKeys.length) measuredLanes = statedLanesNow({ stated, refusedKeys, lifted: lifted || set, own: set ? null : obj, at });
+      else measuredLanes = quotaModel.lanesMeasured({ carried: next, lifted, own: set ? null : obj, at, enumerated: Array.isArray(authoritativeScopes) && authoritativeScopes.includes('model') });
+    } catch { measuredLanes = []; }
+    if (prevObj) { try { seenResets = quotaModel.resetsSeenLanes(quotaModel.lanesOfReading(prevObj), measuredLanes.filter((x) => !x.refused), Date.now()); } catch { seenResets = []; } }
+  }
   const base = replace ? prevSet : retireUnnamedScopes(prevSet, next, authoritativeScopes, { key, source: source || (obj && obj.source) || null });
-  const merged = quotaModel.mergeLimitSets(base, next);
+  let merged = quotaModel.mergeLimitSets(base, next);
+  // THE RECORD'S WORD ON ITSELF (r5): a window rebuilt from a legacy view keeps the stamps of the same number; then every
+  // lane this write stated or measured (and every refusal mark) at 100 % or more is stamped `statedAt`, every refused one
+  // `refusedAt` (≥ it) — a refusal and a reading told apart by these, never by a status or a source (quota-model)
+  if (storedObj) merged = quotaModel.carryStamps(storedObj, merged);
+  const statedKeys = [...new Set([...measuredLanes.map((x) => x.lane), ...refusedKeys, ...markKeys])];
+  if (statedKeys.length) merged = quotaModel.markStated(merged, statedKeys, at);
+  if (refusedKeys.length || markKeys.length) merged = quotaModel.markRefused(merged, [...new Set([...refusedKeys, ...markKeys])], at);   // the record's own mark (r3, MUST 2)
   const view = quotaModel.toLegacyView(merged);
   const out = { ...(obj && typeof obj === 'object' ? obj : {}) };
   // THE DERIVED VIEW WINS over whatever the producer computed for the bucket
@@ -506,6 +597,9 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   const windowChange = replace ? null : (windowChangeOf(prevObj, prevSet, merged) || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));
   if (windowChange && _onWindowChange) { try { _onWindowChange({ key, ...windowChange, source: source || (obj && obj.source) || null }); } catch { } }
   if (!replace && _onReading) { try { _onReading({ key, at }); } catch { } }
+  if (!replace) { _comparedOut.set(key, outStamp(out)); if (_comparedOut.size > 2048) _comparedOut.delete(_comparedOut.keys().next().value); }
+  if (measuredLanes.length) { noteLanesReadAt(key, measuredLanes); for (const fn of _onLanesRead) { try { fn({ key, cacheDir, lanes: measuredLanes }); } catch { } } }
+  sayVendorResets(key, seenResets, cacheDir);
   return { ok: true, file, limits: merged.limits, object: out, ...(windowChange ? { windowChange } : {}) };
 }
 
@@ -538,6 +632,6 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading,
+  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES, onReading, onVendorReset, noteVendorResets, noteDirectWrite, onLanesRead, lanesReadAt,
   DERIVED_KEYS,
 };

@@ -196,6 +196,13 @@ function continueNoticeFor({ kind, armReason, label, moved = false, cause = null
   if (/^account usable again/.test(r)) return { cls: 'switched', text: `账号 ${who} 已恢复可用，已自动继续这个任务。` };
   return { cls: 'reset', text: '用量上限已重置，已自动继续这个任务。' };
 }
+/** PURE (lane account-reset-door r4): the card of a continue that rests on a person's reset claim — it says so, and that the
+ *  claim is unconfirmed. Laid over continueNoticeFor's verdict by attemptFire (fireNowOnClaim's road), so every shape of
+ *  continueNoticeFor stays master's. */
+function claimContinueNotice({ label, cause = null }) {
+  const who = label || '可用账号';
+  return { cls: 'switched', text: cause === 'member-usable' ? `账号 ${who} 按你的重置声明可用（未确认），已自动继续这个任务。` : `账号池已切换到 ${who}（按你的重置声明，未确认），已自动继续这个任务。` };
+}
 
 /** The delayed ARM announcement, worded by the arm's CAUSE (2.369.104, owner:
  *  "明明没到也没被中断你却提示到达上限了"): a hot pool switch arms a +45 s
@@ -874,7 +881,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  same identity had just been rejected.
    *    breaker → the SAME beforeFire gate → deliver → remember what we fired at
    *  Returns true when a continue was delivered or a gate is in flight. */
-  function attemptFire(id, session, a, kind, why, cause = null, origin = null) {
+  function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
     const now = Date.now();
     if (session._arFiring) return false;   // a gate is already running for this session (also breaks fireNow ⇄ beforeFire re-entry)
     const ident = identityFor(id, session);
@@ -919,6 +926,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // WHAT UNBLOCKED US decides both the journal line and the card, from the
       // ARMED RECORD (one source, one wording) — see continueNoticeFor
       const note = continueNoticeFor({ kind, armReason: a2.reason, label: label2, moved, cause });
+      if (claim) Object.assign(note, claimContinueNotice({ label: label2, cause }));   // a continue on a reset claim says so (fireNowOnClaim)
       // THE CEILING, on the identity the continue actually lands on. The gate
       // can have moved us onto a member whose budget is spent — charging the
       // one we resolved before it is the round-2 defect in a second currency.
@@ -1120,6 +1128,19 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     } catch (e) { log('[auto-resume] fireNow failed: ' + e.message); return false; }
   }
 
+  /** lane account-reset-door r4: a continue the pool asks ON A PERSON'S RESET CLAIM — fireNow's road exactly (the
+   *  breaker, the gate, the spend authorizer), its card saying it rests on an unconfirmed claim. A separate door so
+   *  fireNow stays master's, byte for byte. */
+  function fireNowOnClaim(id, why, { cause = null } = {}) {
+    try {
+      const a = armed.get(id);
+      if (!a || a.fired) return false;
+      const session = activeSessions.get(id);
+      if (!session || !enabledFor(session) || session._isStreaming) return false;
+      return attemptFire(id, session, a, 'now', why, cause, null, { claim: true });
+    } catch (e) { log('[auto-resume] fireNowOnClaim failed: ' + e.message); return false; }
+  }
+
   /** WHO IS WAITING. The new-member wake (2026-09-08) has to re-examine the
    *  conversations that are ARMED — they are exactly the ones that produce
    *  neither of the two events the pool re-evaluates on (a turn end, a streamed
@@ -1137,7 +1158,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
 
   return {
-    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
+    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
@@ -1148,5 +1169,5 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 module.exports = {
   create, CONTINUE_PROMPT, continuePromptFor, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
-  refusalNoticeFor, continueNoticeFor, armNoticeFor, // PURE: what the conversation is told, and when
+  refusalNoticeFor, continueNoticeFor, claimContinueNotice, armNoticeFor, // PURE: what the conversation is told, and when
 };

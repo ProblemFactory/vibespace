@@ -343,6 +343,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     // allowlist nobody prunes is how a retired exception becomes a licence.
     const ALLOW = new Map([
       ['src/usage-cache-write.js', 'THE write path itself'],
+      ['src/usage-reset-claim.js', 'lane account-reset-door: its own writes are data/usage-reset-claims.json (a person\'s reset claim, its own provenance) — it names the write path\'s events it hears, and never writes a usage-cache file (a claim is never a reading)'],
       ['src/reading-repair.js', 'its generic _writeAtomic serves the ANCHOR and ATTRIBUTION stores; its three usage-cache writes go through _writeCacheAtomic → writeCacheObject({replace:true})'],
       ['src/quota-model-migrate.js', 'the backfill migration: its usage-cache writes go through writeCacheObject({replace:true}); its own appendFileSync is the archive-never-destroy ndjson'],
       ['src/weekly-lanes-unfold.js', 'the weekly-lanes repair (inc-mubu23bd-5vxi): its usage-cache writes go through captureRateLimitEvent → the write path (the plan week, the model cap and the fold rule all apply); its own writeFileSync calls are the archive-never-destroy copy under data/archive/'],
@@ -2610,8 +2611,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const ENG7 = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8'), UR7 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
     ok(!!wo && r.fiveHour === undefined && r.fiveHourAbsent === T5 && r.sevenDay.utilization === 0.41 && !QM.windowOfKind(QM.planLimit({ limits: r.limits }), '5h') && SINCE(QM.planLimit({ limits: r.limits }), '5h') === T5 && wo(sib, null) === sib,
       `㉑7i a fresher SIBLING read in place of a «no 5h» member keeps the member's tombstone — its 5h window (legacy + typed) never outranks it — ${JSON.stringify({ f5: r.fiveHour, abs: r.fiveHourAbsent })}`);
-    ok((ENG7.match(/raw = quotaModel\.withOwnAbsence\(g\.cache, raw\); break;/g) || []).length === 2 && /_accountUsage\[gid\] = \{ \.\.\.quotaModel\.withOwnAbsence\(newest, a\),/.test(UR7) && /_rateLimitCache = quotaModel\.withOwnAbsence\(usage, g\);/.test(UR7),
-      '㉑7i …and every substitution reads through it: the pool\'s two readCache (the chooser + the engine) and the Usage popup\'s same-account merge');
+    ok((ENG7.match(/raw = quotaModel\.withOwnAbsence\(g\.cache, raw\); break;/g) || []).length === 1 && /_accountUsage\[gid\] = \{ \.\.\.quotaModel\.withOwnAbsence\(newest, a\),/.test(UR7) && /_rateLimitCache = quotaModel\.withOwnAbsence\(usage, g\);/.test(UR7),
+      '㉑7i …and every substitution reads through it: the pool\'s ONE reading door (poolReadReading — lane account-reset-door r2: the switch pass\'s own copy is gone) and the Usage popup\'s same-account merge');
   }
   // ── r4 (acceptance r3 minors): ONE item per member; the unknown window in words ─────────────────────────────────
   {
@@ -3338,10 +3339,14 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const RAW22 = /\b(?:utilization|usedPercent|usedPct|remainingPct|fiveHour|sevenDay|scopedWeekly)\b|conic-gradient\(|% used|% left/;
   const VIA22 = /\bbucketView\(|\bwindowDisplay\(|\b(?:v|v5|v7|vSc|cv5|cv7)\.reading\b/;
   const ALLOW22 = {
+    'account-wall-words.js': [["if (o.state === 'reset-seen') return t(", 'lane account-reset-door: an OUTCOME\'s words — the percents the hub\'s settle recorded from a READING newer than the claim (usage-reset-claim settle / noteResetSeen), never a stored bucket drawn'],
+      ["if (o.state === 'contradicted') return t(", '…the contradicted claim: its reading\'s own percent, said once'],
+      ["if (o.state === 'confirmed') return t(", '…the confirmed claim: its reading\'s own percent, said once']],
     'chat-renderers.js': [['const wallRoomLine = (r) =>', 'the usage wall\'s room sentence (lane agy-wall-signal): its percent is the hub\'s, taken through windowDisplay (src/server/stream-wall.js roomOf — only a weekly window the verdict READS)']],
     'chat-status-bar.js': [['chat-status-ctx-pie', 'the CONTEXT-window pie (a conversation\'s context use, not a quota bucket)'],
       ['has {rem}% left (under the {line}% floor', 'the wall line words the SERVER\'s pool verdict (bucketRemaining — the same 60-s inequality), never a stored bucket']],
     'manage-agents.js': [
+      ["const laneOfDonut = (x0) => (x0 && x0 === u.fiveHour ? 'plan:5h'", 'lane account-reset-door r2: WHICH lane a donut draws (an identity test on the bucket the row hands bucketView) — for its age (L3), draws nothing'],
       ['const w = h.sevenDay;', 'hostOwnReading: is there a reading at all (a presence gate, draws nothing)'],
       ['return h.fiveHour || (w && typeof w', 'hostOwnReading (presence)'],
       ['const pctOf = (x) => Math.min(100', 'the host pill\'s percent OF A VIEW (applied to bucketView\'s reading)'],
@@ -3366,6 +3371,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
     'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
     'usage-meter.js': [
+      ['const claimBtn = (lane, view, capName = null)', 'lane account-reset-door: the «I reset this» button is offered on a lane\'s VIEW (bucketView — the verdict already applied) that states a spend; it draws no percent'],
       ['const pct = un ? 0 : w.usedPct', 'limitRows rows: the row\'s `display` (windowDisplay in limitRows) decides `un`'],
       ['fmtReset(w.resetsAt, (w.usedPct || 0) / 100)', '…the same row\'s reset words'],
       ["escHtml(t('{pct}% used', { pct }))", '…the same row\'s percent'],

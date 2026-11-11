@@ -225,7 +225,9 @@ export function bucketView(model, reading, est, nowMs, { readAt = null } = {}) {
   const display = model.windowDisplay(reading, nowMs, { readAt });
   if (display.state !== 'reset-unconfirmed') return { display, reading, est: est || null, unconfirmed: false };
   const sec = (v) => { const n = Number(v) || 0; return n > 1e12 ? n / 1000 : n; };
-  const rolled = !!est && sec(est.resetsAt) > sec(reading.resetsAt) && Math.round((Number(est.utilization) || 0) * 100) > 0;
+  // …or the estimate counts from a person's reset claim itself (`claimedAt`, lane account-reset-door r2: the estimator
+  // re-bases a claimed lane at the claim — its burn since, never the pre-claim anchor's number)
+  const rolled = !!est && (sec(est.resetsAt) > sec(reading.resetsAt) || Number(est.claimedAt) > 0) && Math.round((Number(est.utilization) || 0) * 100) > 0;
   const zero = { ...reading, utilization: 0, ...(reading.usedPercent != null ? { usedPercent: 0 } : {}) };
   return { display, reading: zero, est: rolled ? est : null, unconfirmed: true };
 }

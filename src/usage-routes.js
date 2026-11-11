@@ -19,6 +19,7 @@ const { execFileSync } = require('child_process');
 // bottom for current callers (tests, the engine) so nothing drifts.
 const harnesses = require('./harnesses');
 const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the OAuth usage-poll accounts
+const { pressBearer } = require('./write-origin.js'); // a person's door: any Bearer is refused (the reset claim, lane account-reset-door)
 // THE ONE WRITE PATH (src/usage-cache-write.js, design-account-hardening §4.2):
 // every producer in this file reaches data/usage-cache/*.json through it. It
 // merges each reading into the file's typed `limits` PER limitId and rewrites
@@ -41,7 +42,7 @@ const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
 const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token (a refresh token beside it), never a long-lived one (acceptance r3/r4)
-const { unplaceableText } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
+const { unplaceableText, wallDoor } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
 const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
@@ -282,6 +283,15 @@ function _fetchOAuthRoles(token, cb) {
 // which the statusLine hook (data/bin/vibespace-usage) writes from the CLI's
 // OWN rate_limits during a real session — NO background OAuth calls.
 const _accountUsage = {}; // id → { ...usage, name }
+// A PERSON'S RESET CLAIM + A RESET SEEN IN A READING (lane account-reset-door): the ONE claim store (src/usage-reset-claim.js —
+// the pool engine reads the same one); a reading that shows a vendor-side reset is said once and ends a claim on its lane
+// a claim of an account that is gone — or that takes no claim (src/backend-caps.js oauthUsage: Claude's typed lanes) — is dropped
+const claimable = (key) => { if (key === '__global__') return true; try { const a = accounts.get(key); return !!a && oauthUsageAccount(a); } catch { return true; } };
+const keyName = (key) => (key === '__global__' ? 'the machine login' : (accounts.get(key)?.name || key));
+// (the store hears the write path's statements of ITS data dir itself — usage-reset-claim at(): the lanes a write stated
+// settle a claim, a reset a write showed is said once, named here)
+const resetClaims = require('./usage-reset-claim.js').at(path.dirname(USAGE_CACHE_DIR), { known: claimable, nameOf: keyName });
+resetClaims.onChange(() => { try { accounts._notify?.(); } catch { } });   // every device redraws at once (the accounts frame re-reads usage)
 
 // ── §ban-safety: background /api/oauth/usage polling is OPT-IN, default OFF ───
 // By DEFAULT we do NOT poll the usage endpoint with subscription OAuth tokens.
@@ -333,6 +343,9 @@ function ingestPassiveUsage() {
     let u = null;
     try { u = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8')); } catch { continue; }
     if (!u || typeof u.fetchedAt !== 'number') continue;
+    // A RESET THE SHIPPED STATUSLINE'S OWN WRITE SHOWS (lane account-reset-door r2): it writes the file itself, so its reading is
+    // compared HERE against the last one ingested — once a write (a file the write path wrote is compared there, never twice)
+    try { const was = key === '__global__' ? _rateLimitCache : _accountUsage[key]; if (was && u.fetchedAt > (was.fetchedAt || 0)) usageWrite.noteDirectWrite(key, was, u, { cacheDir: USAGE_CACHE_DIR }); } catch { }
     // A CHANGE THE SHIPPED STATUSLINE SAW AND LEFT UNSAID (lane no-5h-window): its 5h window gone (or back) — the
     // write path says it once and clears the marker (a settle write: it measures nothing, moves no `fetchedAt`).
     if (u.windowChangeUnsaid) {
@@ -636,9 +649,10 @@ async function refreshViaCliPanel(key) {
       const oat = acctMeta.loginState && acctMeta.loginState.state === 'oat-only';
       // ONE FACT, ONE SENTENCE (acceptance r3, F2): a token the LOCKED vault keeps is told as the roster and the gather
       // tell it — the vault is the wall, never the login (9d53db09 and b552c972 said «re-login» here)
-      const vaultLocked = !!(acctMeta.oatFile && acctMeta.oatFile.code === 'vault_locked');
-      const folderToken = el === OAT_FOLDER_NO_PANEL || vaultLocked; // a measured CLI with our token in the folder, or a locked vault: no re-login is the fix
-      panelSays(key, { at: Date.now(), outcome: folderToken ? 'not-probed' : 'login-needed', code: 'unprobeable', el, ...(vaultLocked ? { wall: 'vault-locked' } : {}), identityVerified: false, why: vaultLocked ? unplaceableText({ code: 'vault-locked' }) : folderToken ? `not probed (${el}: ${notProbedWords(el, acctMeta)})` : oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
+      // A WALL IS NAMED BY WHAT IS TRUE NOW (lane account-reset-door): the POOL's own verdict (accounts.placeWallOf — a CLI not measured is asked before the vault; a fact recorded while locked ends at the unlock), sent as `wall`
+      let wall = null; try { wall = typeof accounts.placeWallOf === 'function' ? accounts.placeWallOf(key) : null; } catch { wall = null; } const rowVault = !!(acctMeta.oatFile && acctMeta.oatFile.code === 'vault_locked'), rowDoor = el === OAT_FOLDER_NO_PANEL ? null : rowVault ? 'unlock' : 'relogin', poolDoor = wall ? wallDoor(wall) : rowDoor; // the pool's cause first; none ⇒ the row's (both from the sweep's facts, which the unlock clears)
+      const vaultLocked = wall ? wall.code === 'vault-locked' : rowVault, folderToken = poolDoor !== 'relogin', poolWords = !!wall && poolDoor !== rowDoor; // THE POOL'S CAUSE DECIDES THE WHOLE ANSWER (r2): its code, `loginNeeded` only where its door is a login, and its sentence wherever its door is not the row's
+      panelSays(key, { at: Date.now(), outcome: folderToken ? 'not-probed' : 'login-needed', code: 'unprobeable', el, ...(vaultLocked ? { wall: 'vault-locked' } : {}), ...(wall ? { wallWhy: wall } : {}), identityVerified: false, why: poolWords ? unplaceableText(wall) : vaultLocked ? unplaceableText({ code: 'vault-locked' }) : folderToken ? `not probed (${el}: ${notProbedWords(el, acctMeta)})` : oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
       return false;
     }
   }
@@ -879,7 +893,7 @@ async function refreshViaCliPanel(key) {
     // `cliPanel.scopedWeekly`, so the list this gate reads is unchanged, and
     // test-quota-model §⑱f drives this call site with a real CLI panel because
     // spelling it `u` here fails SILENTLY: authority simply never happens.)
-    const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+    const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', stated: cliPanel,   // stated: THE LANES IT READ (lane account-reset-door r3) — every one the panel states, at whatever number, never the file's spread
       // «NO 5h LIMIT» (lane no-5h-window): a panel with the week and no «Current session» row enumerated the plan and
       // found no 5-hour window — said only by a panel that PROVED whose it is (B-855a c1): an unverified one writes
       // its numbers and keeps every window the file holds, exactly as it keeps the account's established window.
@@ -1138,9 +1152,11 @@ app.post('/api/usage/refresh', async (req, res) => {
   // for both — is tried first, and the refusal is said by name only when it has no token either (below the ladder)
   const refusedByName = !cliOk && pv && pv.at >= t0 && (pv.code === 'login' || pv.code === 'unprobeable') ? pv : null;
   // the refusal BY NAME: what was refused and its remedy — the row's own state (a folder token, a locked vault: no re-login)
-  const refusalAnswer = (r) => (r.el === OAT_FOLDER_NO_PANEL || r.wall === 'vault-locked'
-    ? { error: 'not refreshed — ' + r.why, rung: 'panel', identityVerified: false, why: r.why, skipped }
-    : { error: 'needs re-login to refresh usage — ' + r.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: r.why, skipped });
+  // …and the answer carries the cause as a CODE (`wall`: the pool's verdict) — the client says it in the person's language,
+  // ONE sentence with its count and its door; the English `error` stays for the journal and an older bundle
+  const refusalAnswer = (r) => ((r.wallWhy ? wallDoor(r.wallWhy) !== 'relogin' : (r.el === OAT_FOLDER_NO_PANEL || r.wall === 'vault-locked'))
+    ? { error: 'not refreshed — ' + r.why, rung: 'panel', identityVerified: false, why: r.why, skipped, ...(r.wallWhy ? { wall: r.wallWhy } : {}) }
+    : { error: 'needs re-login to refresh usage — ' + r.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: r.why, skipped, ...(r.wallWhy ? { wall: r.wallWhy } : {}) });
   // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
   // the token ladder below is NOT tried for it — a reading that is not the CLI serving must never count as the renewal
   // …and the answer SAYS which (verify r1 ③): the CLI answered but its reading was refused as another account's window, or it did not answer
@@ -1228,7 +1244,7 @@ app.post('/api/usage/refresh', async (req, res) => {
         // enumerating producer (r5) — see refreshViaCliPanel. `u` IS this read's
         // own answer (no preserve-merge here at all), so its list is complete.
         const w = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: u, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
-          authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u) });
+          authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u), stated: u });   // its own answer: every lane it states
         if (w.ok) Object.assign(u, w.object);
       }
       if (isGlobal) { _rateLimitCache = u; writeUsageCache(); }
@@ -1492,6 +1508,37 @@ app.get('/api/usage/probe-log', (req, res) => {
 // agent must never re-anchor the identities its own bill is read from). Runs
 // the same repair boot runs, then reloads the in-memory panel from disk and
 // answers the report so the caller can see every sidecar/cache verdict.
+// THE RESET CLAIM (lane account-reset-door, the owner 2026-11-11): a PERSON says «I reset this on the vendor's site» — one lane
+// (`lanes: ['cap:fable']`, the lane where it is drawn) or the whole account (`lanes: 'all'`). A claim, never a reading: it
+// bills nothing and calls no vendor (the client then presses the SAME ⟳ for that account — the road a person's press already
+// has); an agent's token is refused. The answer names a wall that is NOT a quota (`wall`: the pool's verdict — the CLI not
+// measured, the vault, the login): the claim stands for the quota, and that cause still keeps the account unplaceable.
+app.post('/api/accounts/:id/reset-claim', (req, res) => {
+  if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only — a reset claim is a person\'s word about the vendor\'s site', code: 'agent_forbidden' });
+  const key = String(req.params.id || '');
+  const isGlobal = key === '__global__';
+  const acct = isGlobal ? null : (() => { try { return accounts.get(key) || null; } catch { return null; } })();
+  if (!isGlobal && !(acct && acct.type === 'subscription')) return res.status(404).json({ error: 'unknown subscription account', code: 'unknown_account' });
+  // GATED ON THE HARNESS ROW (r2, MUST 6): a claim is for the lanes that go through the pool's ONE reading door — Claude's
+  // typed limits (src/backend-caps.js oauthUsage). Another harness's readings (Codex, Antigravity) are refused BY NAME.
+  if (!isGlobal && !oauthUsageAccount(acct)) return res.status(409).json({ error: `a reset claim is for Claude accounts' limits — ${acct.backend || 'this'} account readings do not take one`, code: 'no_claim_door', backend: acct.backend || null });
+  const raw = isGlobal ? _rateLimitCache : (_accountUsage[key] || usageWrite.readCacheObject(USAGE_CACHE_DIR, key));
+  const lanes = req.body && req.body.lanes === 'all' ? 'all' : (Array.isArray(req.body && req.body.lanes) ? req.body.lanes.slice(0, 16).map(String) : []);
+  const r = resetClaims.claim(key, lanes, raw);
+  if (!r.ok) return res.status(r.code === 'no-reading' ? 409 : 400).json({ error: r.code === 'no-reading' ? 'this account has no reading yet — nothing to mark as reset' : r.code === 'too-low' ? 'that limit reads under 5 % used — its next reading could show no reset' : r.code === 'bad-key' ? 'bad account' : 'unknown lane', code: r.code, ...(r.lanes ? { lanes: r.lanes } : {}) });
+  let wall = null;
+  try { wall = !isGlobal && typeof accounts.placeWallOf === 'function' ? accounts.placeWallOf(key) : null; } catch { wall = null; }
+  let odMode = 'manual';
+  try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
+  console.log(`[reset-claim] ${keyName(key)}: a person says ${r.lanes.join(', ')} ${r.lanes.length === 1 ? 'was' : 'were'} reset on the vendor's site — reset, unconfirmed until ${r.lanes.length === 1 ? 'its' : 'their'} next reading${wall ? ` (and it stays unplaceable: ${unplaceableText(wall)})` : ''}`);
+  res.json({ ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' });
+});
+app.post('/api/accounts/:id/reset-claim/dismiss', (req, res) => {
+  if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+  const lane = req.body && typeof req.body.lane === 'string' ? req.body.lane.slice(0, 80) : null;
+  res.json({ ok: resetClaims.dismiss(String(req.params.id || ''), lane) });
+});
+
 app.post('/api/usage/repair-identity', (req, res) => {
   const auth = String(req.headers.authorization || '');
   if (/^Bearer\s+(vsst_|jbt_)/i.test(auth)) return res.status(403).json({ error: 'human-triggered only', code: 'agent-forbidden' });
@@ -1529,9 +1576,16 @@ app.get('/api/usage', (req, res) => {
     const meta = key === '__global_codex__' ? null : acctList.find((a) => a.id === key);
     codexAccounts[key] = { ...snap, name: meta?.name || null, email: meta?.email || null };
   }
+  // A RESET CLAIM IS A VIEW (lane account-reset-door): the readings as every surface draws them — a claimed lane older than
+  // its claim is viewed as reset (reset — unconfirmed); `resetClaims` names the lanes still claimed and the outcomes kept
+  const viewedAccounts = {};
+  const viewSafe = (id, snap) => { try { return resetClaims.viewOf(id, snap); } catch { return snap; } };   // a claim never fails the usage surface
+  for (const [id, snap] of Object.entries(_accountUsage)) viewedAccounts[id] = viewSafe(id, snap);
+  const viewedGlobal = _rateLimitCache ? viewSafe('__global__', _rateLimitCache) : _rateLimitCache;
+  let claimsForClients = {}; try { claimsForClients = resetClaims.forClients(); } catch { claimsForClients = {}; }
   res.json({
-    rateLimit: _rateLimitCache, codexRateLimit: codexRl.overall,
-    subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: _accountUsage,
+    rateLimit: viewedGlobal, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: (() => { const o = {}; try { for (const id of [...Object.keys(viewedAccounts), '__global__']) { const m = usageWrite.lanesReadAt(id); if (Object.keys(m).length) o[id] = m; } } catch { } return o; })(),   // when each lane was last STATED (the age badge, r3)
+    subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: viewedAccounts,
     // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +
     // learned-rate × ledger-cost-since. Purely local computation (30s memo);
     // keys match `accounts` + '__global__'. The popup renders these as a dim
@@ -1541,11 +1595,11 @@ app.get('/api/usage', (req, res) => {
         const e = app.locals.usageEstimator;
         if (!e) return {};
         const out = {}; const now = Date.now();
-        for (const [id, snap] of Object.entries(_accountUsage)) {
+        for (const [id, snap] of Object.entries(viewedAccounts)) {
           const est = e.estimateFor(id, snap, now);
           if (est) out[id] = est;
         }
-        const g = e.estimateFor(null, _rateLimitCache, now);
+        const g = e.estimateFor(null, viewedGlobal, now);
         if (g) out.__global__ = g;
         // codex identities estimate too (P1): same estimator, codex-prefixed
         // identities learned prior-less; keys match `codexAccounts`

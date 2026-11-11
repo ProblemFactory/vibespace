@@ -288,6 +288,306 @@ function memberProofState(x, nowMs) {
   return stated || lifted ? 'proven' : 'unread';
 }
 
+// ── A PERSON'S RESET CLAIM (lane account-reset-door, the owner 2026-11-11: «我手动reset过帐号之后没法通知vibespace…») ──
+// The vendor resets a lane early on the owner's own press on its site (a WEEKLY reset, or a FABLE reset that starts only the
+// model cap fresh). A person may SAY so, per lane or for the whole account: a CLAIM, never a reading — it has its own
+// provenance («person-reset», src/usage-reset-claim.js, the ONE writer) and is never stored into the cache. What it changes
+// is the VIEW: a lane whose own reading is OLDER than the claim, and whose stated reset is LATER, is viewed as reset at the
+// claim's instant (`resetsAt` moved back past RESET_GRACE_SEC, `claimedAt` stamped) — so `windowDisplay` says
+// 'reset-unconfirmed' (the full ring + its mark), `windowRemaining` 100 and the pool may place on it, with no branch of its
+// own. The claim stands until a WRITE states that lane (r3: usage-cache-write `stated` / `refused` — the store settles it,
+// lane by lane; a refusal of it at once) — a stored age never ends it; a stored refusal after it is the wall again.
+//
+// THE LANE IS THE LIMIT (round 2, ROOT 2): a lane is this model's own limit id — 'plan:5h' / 'plan:7d' (the plan limit's two
+// windows) and a model cap's limitId ('model:fable', scopedLimitId). ONE naming for the claim, its view, the settle, a reset
+// seen, a session wall and every surface — a producer that labels its cap otherwise (the stream wall names it by its id,
+// the shipped statusline writes the vendor's seven_day_overage_included as a bucket «Overage Included», which IS the
+// model-cap lane its reset names: nameModelCapLane) lands on the same lane. A LANE IS DATED BY ITS OWN WINDOW: the typed
+// window's `measuredAt` first (the write path re-stamps nothing a producer only carried — carryUnmeasuredLimits), else the
+// legacy bucket's own stamp (`measuredAt` / `asOf` — the statusline's cap), else the file's clock for that bucket family
+// (`scopedFetchedAt` for a cap, `fetchedAt` for the plan). A file-level clock never dates a lane a typed window dates.
+
+// A REFUSAL AND A READING ARE TOLD APART BY WHAT THE RECORD SAYS OF ITSELF (r5) — never by the number, never by a status
+// (the OAuth answer's, get_usage's and the statusline's parsers write «limited» on every honest reading of 100 % or more),
+// never by a producer's source name:
+//  · a window THIS tree's write path wrote at 100 % or more carries `statedAt` (usage-cache-write: every lane a write
+//    stated or measured, and every refusal mark) — and a refusal's carries `refusedAt` ≥ it;
+//  · a DIRECT writer's own bucket (the shipped statusline writes the file itself, every window it renders stamped `asOf`)
+//    is its own reading — a refusal never reaches one (refusals go through the write path, typed);
+//  · neither (a file written by 2.369.395 or earlier, or a window no write here stated): a 100 % is a MARK — the safe
+//    update: a real reset of such a lane is not said until this tree has read that lane itself once (kb-bugfix-invariants).
+const LANE_RE = /^(?:plan:(?:5h|7d)|model:[a-z0-9][\w.-]{0,59})$/;
+function isLaneKey(v) { return typeof v === 'string' && LANE_RE.test(v); }
+function isOverageIncludedName(n) { return lower(n).replace(/[\s_-]+/g, ' ').trim() === 'overage included'; }
+function laneUsedPct(w) {
+  if (!w || typeof w !== 'object') return null;
+  const u = num(w.utilization);
+  return num(w.usedPct) ?? num(w.usedPercent) ?? (u != null ? Math.round(u * 10000) / 100 : null);
+}
+function laneResetSec(w) { const r = posNum(w && w.resetsAt); return r == null ? null : (r > 1e12 ? Math.floor(r / 1000) : r); }
+/** The namer of ONE reading's lanes: a model cap → its limitId; «Overage Included» (the vendor's per-model weekly window by
+ *  accounting) → the named model lane whose weekly reset it shares, else the placeholder `model:cap`. */
+function laneNamer(obj) {
+  const typed = (obj && Array.isArray(obj.limits) ? obj.limits : []).filter((l) => l && typeof l === 'object' && l.limitId);
+  const models = typed.filter((l) => l.scope === 'model' && l.limitId !== 'model:overage-included' && !isOverageIncludedName(l.name));
+  for (const s of obj && Array.isArray(obj.scopedWeekly) ? obj.scopedWeekly : []) {
+    if (!s || !s.name || isOverageIncludedName(s.name)) continue;
+    const id = scopedLimitId(s.name);
+    if (!models.some((l) => l.limitId === id)) models.push({ limitId: id, name: String(s.name), scope: 'model', windows: [{ kind: '7d', resetsAt: laneResetSec(s) }] });
+  }
+  const cap = (limitId, name, resetSec) => (limitId === 'model:overage-included' || isOverageIncludedName(name)
+    ? nameModelCapLane({ limits: models, resetsAt: resetSec }).limitId : limitId);
+  return { typed, cap };
+}
+const capWindowOf = (l) => windowOfKind(l, '7d') || windowsOf(l).find((x) => x && isBudgetKind(x.kind)) || null;
+
+/** THE LANES A READING DRAWS: [{ lane, at (ms — the lane's own age, null = unknown), usedPct, resetsAt (s), source, name,
+ *  mark, refusedAt }]. A MARK IS THE RECORD'S OWN FACT (r3): the write path stamps `refusedAt` on the window of every lane a
+ *  producer says the vendor REFUSED (usage-cache-write `refused` — a wall, a banner, a rejected rate_limit_event, the
+ *  stream wall), whatever source wrote it; a mark is never the «before» of a reset. (A file written before that stamp:
+ *  100 % from a wall source, or 100 % that was not its limit's last write.) Two buckets of one lane (a named cap and
+ *  «Overage Included») are ONE lane: the newer reading stands. A legacy plan bucket a DIRECT writer left (the statusline
+ *  drops the typed plan limit) is dated by its own stamp only — a bucket it spread forward unstated has no age. */
+function lanesOfReading(obj) {
+  if (!obj || typeof obj !== 'object') return [];
+  const { typed, cap } = laneNamer(obj);
+  const ids = new Set(typed.map((l) => String(l.limitId)));
+  const out = new Map();
+  const put = (lane, w, at, source, name, own = false) => {
+    if (!isLaneKey(lane) || !w || typeof w !== 'object') return;
+    const usedPct = laneUsedPct(w);
+    const refusedAt = posNum(w.refusedAt), statedAt = posNum(w.statedAt);
+    const e = { lane, at: posNum(at), usedPct, resetsAt: laneResetSec(w), source: str(source), ...(name ? { name: String(name).slice(0, 60) } : {}), ...(own ? { own: true } : {}),
+      ...(refusedAt ? { refusedAt } : {}), ...(statedAt ? { statedAt } : {}),
+      // a stored 100 % is a mark by what the record says of ITSELF (r5, above): a refusal's stamp no statement is newer than;
+      // or no word of its own at all (the safe update)
+      mark: refusedAt != null ? !(statedAt != null && statedAt > refusedAt) : (statedAt == null && !own && usedPct != null && usedPct >= 100) };
+    const p = out.get(lane);
+    if (!p || (e.at || 0) > (p.at || 0)) out.set(lane, e);
+  };
+  for (const l of typed) {
+    if (l.scope === 'plan' && l.limitId === 'plan') {
+      for (const w of windowsOf(l)) if (w && (w.kind === '5h' || w.kind === '7d')) {
+        const at = posNum(w.measuredAt) ?? posNum(l.fetchedAt) ?? posNum(obj.fetchedAt);
+        put('plan:' + w.kind, w, at, l.source, null);
+      }
+    } else if (l.scope === 'model') {
+      const w = capWindowOf(l);
+      if (!w) continue;
+      put(cap(String(l.limitId), l.name, laneResetSec(w)), w, posNum(w.measuredAt) ?? posNum(l.fetchedAt) ?? posNum(obj.fetchedAt), l.source, l.name || l.family || l.model);
+    }
+  }
+  // a legacy bucket whose limit is ABSENT from the typed array is a reading its producer wrote directly (the lift's restore
+  // rung, usage-cache-write liftCacheObject: the shipped statusline drops the limits it measured) — dated by its own stamp
+  const ownAt = (b) => posNum(b && b.measuredAt) ?? posNum(b && b.asOf);
+  if (!ids.has('plan')) {
+    const fileClock = typed.length ? null : posNum(obj.fetchedAt);   // a whole legacy object: its clock is its buckets'
+    if (obj.fiveHour) put('plan:5h', obj.fiveHour, ownAt(obj.fiveHour) ?? fileClock, obj.source, null, ownAt(obj.fiveHour) != null);
+    if (obj.sevenDay) put('plan:7d', obj.sevenDay, ownAt(obj.sevenDay) ?? fileClock, obj.source, null, ownAt(obj.sevenDay) != null);
+  }
+  for (const s of Array.isArray(obj.scopedWeekly) ? obj.scopedWeekly : []) {
+    if (!s || !s.name) continue;
+    const id = scopedLimitId(s.name);
+    if (ids.has(id)) continue;
+    put(cap(id, s.name, laneResetSec(s)), s, ownAt(s) ?? posNum(obj.scopedFetchedAt) ?? posNum(obj.fetchedAt), obj.source, s.name, ownAt(s) != null);
+  }
+  return [...out.values()];
+}
+/** The lane of ONE drawn legacy bucket (`field` 'fiveHour' | 'sevenDay' | 'scoped' + its `name`) — the surfaces' claim
+ *  buttons and stale badges ask THIS, never a spelling of their own. */
+function laneOfBucket(obj, field, name = null) {
+  if (field === 'fiveHour') return 'plan:5h';
+  if (field === 'sevenDay') return 'plan:7d';
+  if (field !== 'scoped' || !name) return null;
+  const b = (obj && Array.isArray(obj.scopedWeekly) ? obj.scopedWeekly : []).find((x) => x && lower(x.name) === lower(name));
+  const lane = laneNamer(obj || {}).cap(scopedLimitId(name), name, laneResetSec(b));
+  return isLaneKey(lane) ? lane : null;
+}
+/** A lane in the journal's words (English; the client's are account-wall-words laneWords) */
+function laneText(lane, name = null) {
+  if (lane === 'plan:5h') return 'the 5-hour window';
+  if (lane === 'plan:7d') return 'the weekly limit';
+  const n = name || String(lane || '').replace(/^model:/, '').replace(/-/g, ' ');
+  return `the ${n ? n.charAt(0).toUpperCase() + n.slice(1) : '?'} cap`;
+}
+/** The lane of a typed limit's window: the plan's 5h / 7d, a model cap's own id (limitId 'model:…'). */
+function laneOfLimit(limitId, kind) {
+  const id = String(limitId || '');
+  if (id === 'plan') return kind === '5h' || kind === '7d' ? 'plan:' + kind : null;
+  return isLaneKey(id) && id.startsWith('model:') ? id : null;
+}
+/** THE LANES A PRODUCER STATED (r3: a producer names what it measured in THIS write — every lane it stated, at whatever
+ *  number): `own` = its own reading (a panel's parse, an OAuth answer — never a spread of the file), named against `ctx`
+ *  (the object written: «Overage Included» names the lane its reset shares). → [lane] */
+function statedLanesOf(own, ctx = null) {
+  if (!own || typeof own !== 'object') return [];
+  const out = new Set();
+  if (own.fiveHour && typeof own.fiveHour === 'object') out.add('plan:5h');
+  if (own.sevenDay && typeof own.sevenDay === 'object') out.add('plan:7d');
+  const { cap } = laneNamer(ctx && typeof ctx === 'object' ? ctx : own);
+  for (const s of Array.isArray(own.scopedWeekly) ? own.scopedWeekly : []) if (s && s.name) { const l = cap(scopedLimitId(s.name), s.name, laneResetSec(s)); if (isLaneKey(l)) out.add(l); }
+  for (const l of Array.isArray(own.limits) ? own.limits : []) for (const w of windowsOf(l)) { const k = l && l.scope === 'model' ? cap(String(l.limitId), l.name, laneResetSec(w)) : laneOfLimit(l && l.limitId, w && w.kind); if (isLaneKey(k)) out.add(k); }
+  return [...out];
+}
+/** THE WRITE PATH'S MARK (r3): every window of a refused lane carries `refusedAt` — the record's own fact that its 100 % is
+ *  the vendor's refusal, not a measurement of spend. PURE: a fresh set; a lane with no window is left as it is. */
+function markRefused(set, lanes, at) {
+  const want = new Set((Array.isArray(lanes) ? lanes : []).filter(isLaneKey));
+  const t = posNum(at);
+  if (!want.size || !t || !set || !Array.isArray(set.limits)) return set;
+  const { cap } = laneNamer(set);
+  return { ...set, limits: set.limits.map((l) => {
+    if (!l || !Array.isArray(l.windows)) return l;
+    let moved = false;
+    const windows = l.windows.map((w) => {
+      if (!w) return w;
+      const k = l.scope === 'model' ? (isBudgetKind(w.kind) ? cap(String(l.limitId), l.name, laneResetSec(w)) : null) : laneOfLimit(l.limitId, w.kind);
+      if (!k || !want.has(k)) return w;
+      moved = true;
+      return { ...w, refusedAt: t };
+    });
+    return moved ? { ...l, windows } : l;
+  }) };
+}
+/** THE WRITE PATH'S STATEMENT (r5): every window this write stated (or marked as a refusal) at 100 % or more carries
+ *  `statedAt` — the record's own word that THIS tree wrote that number, so an honest full reading is told apart from a file
+ *  written before the stamp (a window under 100 % is never a mark, so it carries nothing new). PURE: a fresh set. */
+function markStated(set, lanes, at) {
+  const want = new Set((Array.isArray(lanes) ? lanes : []).filter(isLaneKey));
+  const t = posNum(at);
+  if (!want.size || !t || !set || !Array.isArray(set.limits)) return set;
+  const { cap } = laneNamer(set);
+  return { ...set, limits: set.limits.map((l) => {
+    if (!l || !Array.isArray(l.windows)) return l;
+    let moved = false;
+    const windows = l.windows.map((w) => {
+      if (!w) return w;
+      const k = l.scope === 'model' ? (isBudgetKind(w.kind) ? cap(String(l.limitId), l.name, laneResetSec(w)) : null) : laneOfLimit(l.limitId, w.kind);
+      const u = laneUsedPct(w);
+      if (!k || !want.has(k) || !(u != null && u >= 100)) return w;
+      moved = true;
+      return { ...w, statedAt: t };
+    });
+    return moved ? { ...l, windows } : l;
+  }) };
+}
+/** THE STAMPS TRAVEL WITH THEIR NUMBER (r5): a window the write rebuilt from a legacy view (a lift, a sibling's spread, a
+ *  repair's or a migration's replace) carries no stamp of its own; when the stored record's lane says the SAME number at the
+ *  same reset (±60 s), that lane's word on itself is kept — its `statedAt` (a direct writer's own stamp counts as one),
+ *  its `refusedAt`. PURE: a fresh set. */
+function carryStamps(prevObj, set) {
+  if (!prevObj || !set || !Array.isArray(set.limits)) return set;
+  const was = new Map(lanesOfReading(prevObj).filter((x) => x.statedAt != null || x.refusedAt != null || (x.own && x.at != null)).map((x) => [x.lane, x]));
+  if (!was.size) return set;
+  const { cap } = laneNamer(set);
+  return { ...set, limits: set.limits.map((l) => {
+    if (!l || !Array.isArray(l.windows)) return l;
+    let moved = false;
+    const windows = l.windows.map((w) => {
+      if (!w || w.statedAt != null || w.refusedAt != null) return w;
+      const k = l.scope === 'model' ? (isBudgetKind(w.kind) ? cap(String(l.limitId), l.name, laneResetSec(w)) : null) : laneOfLimit(l.limitId, w.kind);
+      const p = k ? was.get(k) : null, u = laneUsedPct(w), r = laneResetSec(w);
+      if (!p || u == null || p.usedPct == null || Math.abs(u - p.usedPct) > 0.01 || r == null || p.resetsAt == null || Math.abs(r - p.resetsAt) > 60) return w;
+      const st = p.statedAt ?? (p.own ? p.at : null);
+      if (st == null && p.refusedAt == null) return w;
+      moved = true;
+      return { ...w, ...(st != null ? { statedAt: st } : {}), ...(p.refusedAt != null ? { refusedAt: p.refusedAt } : {}) };
+    });
+    return moved ? { ...l, windows } : l;
+  }) };
+}
+/** A RESET IS RECOGNISED WHEN A READING SHOWS IT (the owner 2026-11-11: «你有办法探测到 reset 嘛？»). Within one window a
+ *  lane's spend only grows; a NEWER MEASUREMENT of a lane whose used % is lower by RESET_SEEN_MIN_DROP points or more while
+ *  its stated reset instant is the same (within RESET_SEEN_SAME_S) and still ahead is the vendor's own early reset. `prev`
+ *  and `next` are TWO MEASUREMENTS — the stored reading and the producer's own (usage-cache-write compares them BEFORE the
+ *  merge, each lane by its own time), never a wall's mark, an estimate, a repair or a view. PURE.
+ *  → [{ lane, before, after, resetsAt (s), readAt (ms), name? }] */
+const RESET_SEEN_MIN_DROP = 5;
+const RESET_SEEN_SAME_S = 60;
+function resetsSeen(prev, next, nowMs = Date.now()) { return resetsSeenLanes(lanesOfReading(prev), lanesOfReading(next), nowMs); }
+function resetsSeenLanes(prevLanes, nextLanes, nowMs = Date.now()) {
+  const was = new Map((Array.isArray(prevLanes) ? prevLanes : []).map((x) => [x.lane, x]));
+  const out = [];
+  for (const n of Array.isArray(nextLanes) ? nextLanes : []) {
+    const p = was.get(n.lane);
+    if (!p || p.usedPct == null || n.usedPct == null || p.resetsAt == null || n.resetsAt == null) continue;
+    if (p.mark || n.mark) continue;                                                 // a refusal's number is not a measurement (r5: by its stamp)
+    if (!(Number(n.at) > Number(p.at))) continue;                                   // not a newer reading of this lane
+    if (Math.abs(n.resetsAt - p.resetsAt) > RESET_SEEN_SAME_S) continue;           // its window moved: an ordinary roll
+    if (!(n.resetsAt * 1000 > Number(nowMs))) continue;                            // the window's own reset passed
+    if (p.usedPct - n.usedPct < RESET_SEEN_MIN_DROP) continue;
+    out.push({ lane: n.lane, before: p.usedPct, after: n.usedPct, resetsAt: n.resetsAt, readAt: Number(n.at), ...(n.name || p.name ? { name: n.name || p.name } : {}) });
+  }
+  return out;
+}
+
+/** THE LANES ONE WRITE MEASURED (the write path's own knowledge, PURE): `carried` = the producer's limit set after the carry
+ *  rule (a window whose numbers did not move keeps the stored one — usage-cache-write carryUnmeasuredLimits), `lifted` = the
+ *  same before it (every window stamped `at`), `own` = the producer's legacy object (its buckets' own stamps), `enumerated` =
+ *  the producer listed EVERY model cap (`authoritativeScopes` 'model' — the ⟳ panel): each cap it listed was read now, even at
+ *  an unchanged number (a cap still at 97 % after a claim is the contradiction). → lanesOfReading's rows, each dated by the
+ *  measurement — never later than a bucket's own stamp (a late record stamped at arrival is as old as it says). */
+function lanesMeasured({ carried, lifted = null, own = null, at, enumerated = false } = {}) {
+  const t = posNum(at);
+  const liftedById = new Map(limitsOf(lifted).map((l) => [l.limitId, l]));
+  const keep = [];
+  for (const l of limitsOf(carried)) {
+    if (!l || !l.limitId) continue;
+    const whole = enumerated && l.scope === 'model';
+    const src = whole ? (liftedById.get(l.limitId) || l) : l;
+    const ws = windowsOf(src).filter((w) => w && (whole || (t != null && posNum(w.measuredAt) === t)));
+    if (ws.length) keep.push({ ...src, fetchedAt: t, windows: ws.map((w) => ({ ...w, measuredAt: t })) });
+  }
+  const lanes = lanesOfReading({ fetchedAt: t, limits: keep });
+  const stamps = new Map(lanesOfReading(own && typeof own === 'object' ? { ...own, limits: undefined } : null).filter((x) => x.own).map((x) => [x.lane, x.at]));
+  return lanes.map((x) => (stamps.has(x.lane) && stamps.get(x.lane) < (x.at || Infinity) ? { ...x, at: stamps.get(x.lane) } : x));
+}
+
+/** THE VIEW OF A READING UNDER A CLAIM. `claim` = { lanes: { <lane>: { at } } } (src/usage-reset-claim.js) → the reading
+ *  with every claimed lane whose reset is later than the claim (and that the vendor has not refused since) viewed as reset at the claim
+ *  — its legacy bucket(s) and its typed window alike (a fresh object; `resetClaims` = {lane: at} names the lanes viewed so).
+ *  No claim, or nothing older than it ⇒ the reading itself. */
+function withResetClaim(obj, claim) {
+  const lanes = claim && claim.lanes && typeof claim.lanes === 'object' ? claim.lanes : null;
+  if (!obj || typeof obj !== 'object' || !lanes || !Object.keys(lanes).length) return obj;
+  const read = new Map(lanesOfReading(obj).map((x) => [x.lane, x]));
+  const seen = {};
+  for (const [lane, c] of Object.entries(lanes)) {
+    const t = posNum(c && c.at), r = read.get(lane);
+    if (!t || !r || r.resetsAt == null) continue;                // nothing read of it, or no deadline to move
+    if (r.refusedAt != null && r.refusedAt >= t) continue;       // the vendor refused it after the claim: the wall stands
+    if (r.resetsAt <= Math.floor(t / 1000) - RESET_GRACE_SEC) continue; // it reset already on its own
+    seen[lane] = t;                                              // (r3) a claim stands until a write STATES the lane — the store settles it
+  }
+  if (!Object.keys(seen).length) return obj;
+  const view = (lane, w) => {
+    const t = lane && seen[lane];
+    if (!t || !w || typeof w !== 'object') return w;
+    const r = posNum(w.resetsAt);
+    if (r == null) return w;
+    const ms = r > 1e12, atSec = Math.floor(t / 1000) - RESET_GRACE_SEC; // landed at once, by the one inequality (resetLanded)
+    if ((ms ? r / 1000 : r) <= atSec) return w;
+    return { ...w, resetsAt: ms ? atSec * 1000 : atSec, claimedAt: t };
+  };
+  const { cap } = laneNamer(obj);
+  const out = { ...obj };
+  if (obj.fiveHour) out.fiveHour = view('plan:5h', obj.fiveHour);
+  if (obj.sevenDay) out.sevenDay = view('plan:7d', obj.sevenDay);
+  if (Array.isArray(obj.scopedWeekly)) out.scopedWeekly = obj.scopedWeekly.map((b) => (b && b.name ? view(cap(scopedLimitId(b.name), b.name, laneResetSec(b)), b) : b));
+  if (Array.isArray(obj.limits)) {
+    out.limits = obj.limits.map((l) => {
+      if (!l || typeof l !== 'object' || !Array.isArray(l.windows)) return l;
+      if (l.scope === 'plan' && l.limitId === 'plan') return { ...l, windows: l.windows.map((w) => (w && (w.kind === '5h' || w.kind === '7d') ? view('plan:' + w.kind, w) : w)) };
+      if (l.scope !== 'model') return l;
+      const cw = capWindowOf(l);
+      const lane = cap(String(l.limitId), l.name, laneResetSec(cw));
+      return { ...l, windows: l.windows.map((w) => (w && isBudgetKind(w.kind) ? view(lane, w) : w)) };
+    });
+  }
+  out.resetClaims = seen;
+  return out;
+}
+
 // ── limits ──────────────────────────────────────────────────────────────────
 
 function makeLimit({ limitId, name = null, scope = 'plan', model = null, family = null, windows = [], flags = null, source = null, fetchedAt = null }, opts = undefined) {
@@ -1637,7 +1937,7 @@ module.exports = {
   // windows
   windowState, windowRemaining, minutesOf,
   // the display verdict + the proving spawn's question (lane reset-unproven)
-  windowDisplay, memberProofState,
+  windowDisplay, memberProofState, withResetClaim, lanesOfReading, lanesMeasured, laneOfBucket, laneOfLimit, statedLanesOf, markRefused, markStated, carryStamps, laneText, isLaneKey, resetsSeen, resetsSeenLanes, RESET_SEEN_MIN_DROP,
   // accessors
   limitsOf, windowsOf, windowOfKind, planLimit, limitFor, applicableLimits, limitNamesModel,
   remaining, deadline, bucketReport, countingWindows, isBudgetKind, bucketCounts,

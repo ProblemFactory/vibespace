@@ -862,6 +862,7 @@ const STORAGE = {
   'src/lib/usage-meter.js|localStorage|\'vibespace.usageAccountCodex\'': ['ids', 'the chosen usage account id'],
   'src/lib/usage-meter.js|localStorage|\'vibespace.usageAccount\'': ['ids', 'the chosen usage account id'],
   'src/lib/usage-meter.js|localStorage|\'vibespace.quotaRefreshAck\'': ['marker', 'the quota-refresh explanation was acknowledged'],
+  'src/lib/usage-meter.js|localStorage|\'vibespace.resetOutcomesSeen\'': ['marker', 'the reset outcomes already said on this device (lane account-reset-door: key|lane|state|readAt → when)'],
   'src/lib/user-todos-panel.js|localStorage|HISTORY_SEEN_KEY': ['marker', 'when the Notifications tab was last seen (a time)'],
   'src/lib/user-todos-panel.js|localStorage|NOTICE_FILTER_KEY': ['pref', 'the notices filter'],
   'src/lib/utils.js|localStorage|\'vibespace.toastHistory\'': ['ref', 'THE toast history: {m: the head, ref: {kind, id}} for a toast about a record — never its words (r4); a legacy entry is cut at load'],
@@ -1982,7 +1983,7 @@ const I_RECV = {
   'src/server/usage-pool-engine.js|v': ['quota', 'a reset-credit verdict\'s reason'], 'src/server/usage-pool-engine.js|wr': ['quota', 'a wall reading\'s detail'],
   // lane reset-path: the helper writer's refusal (the spend ceiling's sentence / why the helper cannot run) and the
   // usage menu's codex ⟳ toast (codexRefreshToast — the server's numbers and refusal words, never a record's text)
-  'src/server/usage-pool-engine.js|hw': ['quota', 'the reset-credit helper writer\'s refusal detail'], 'src/lib/usage-meter.js|toast': ['quota', 'the codex refresh answer\'s one sentence'],
+  'src/server/usage-pool-engine.js|hw': ['quota', 'the reset-credit helper writer\'s refusal detail'], 'src/lib/usage-meter.js|toast': ['quota', 'the codex refresh answer\'s one sentence'], 'src/lib/usage-meter.js|w': ['quota', 'a wall\'s words (lane account-reset-door: account-wall-words over the pool\'s cause CODE — no record\'s words)'], 'src/lib/manage-agents.js|g': ['quota', 'one sentence per cause (lane account-reset-door: account-wall-words groupWalls over the pool\'s cause codes)'],
   'src/server/window-request.js|r': ['window', 'a share request\'s refusal reason'], 'src/server/window-request.js|s': ['session', 'a session\'s name'],
   'src/server/window-targets-engine.js|bRow': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|drec': ['desktop app', 'an app label'], 'src/server/window-targets-engine.js|e': ['window', 'a window\'s name'],
   'src/server/window-targets-engine.js|holder': ['session', 'a lease holder\'s name'], 'src/server/window-targets-engine.js|l': ['session', 'a lease\'s session name'], 'src/server/window-targets-engine.js|rec': ['desktop app', 'an app label'],

@@ -686,7 +686,9 @@ function writeUsage(p) {
   const measuredName = (s) => scopedMeasured.some((m) => String(m.name).toLowerCase() === String((s && s.name) || '').toLowerCase());
   const out = {
     ...(prev && typeof prev === 'object' ? prev : {}),
-    ...(five ? { fiveHour: five } : {}), ...(sevenDay ? { sevenDay } : {}),
+    // each window THIS render states carries its own `asOf` (lane account-reset-door r3) — a window spread forward from
+    // `prev` keeps the stamp of the render that stated it, so a reader can tell what this render measured
+    ...(five ? { fiveHour: { ...five, asOf: now } } : {}), ...(sevenDay ? { sevenDay: { ...sevenDay, asOf: now } } : {}),
     // an account that has never had a model-scoped bucket still needs the field
     // present (it is how a reader tells a claude snapshot from a codex one);
     // a bucket this render did NOT measure is kept by construction

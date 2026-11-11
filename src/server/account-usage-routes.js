@@ -541,7 +541,7 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
       try { row = typeof accounts.poolRoster === 'function' ? (accounts.poolRoster(id) || []).find((r) => r && r.id === memberId) || null : null; } catch { row = null; }
       if (row && row.why) {
         const words = require('../account-pool-auto.js').unplaceableText(row.why);
-        return res.status(409).json({ code: 'not_placeable', why: row.why.code, member: row.name || memberId, error: `${row.name || memberId}: ${words} — nothing was moved.` });
+        return res.status(409).json({ code: 'not_placeable', why: row.why.code, wall: row.why, member: row.name || memberId, error: `${row.name || memberId}: ${words} — nothing was moved.` }); // `wall`: the cause as a code — the client says it in the person's words, with its door (lane account-reset-door)
       }
       return res.status(400).json({ error: 'not a signed-in member of this pool', code: 'not_member' });
     }

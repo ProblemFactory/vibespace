@@ -36,6 +36,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one con
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
 import { overageChip, spendControlChip, creditsChipHtml, creditsState, bucketView, unconfirmedText, capRing, readingCaps, NO5H_RINGS } from './usage-source.js';
+import { wallWords, groupWalls, staleLaneAge } from './account-wall-words.js'; // PURE (lane account-reset-door): the pool's cause in a person's words, one sentence per cause
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
@@ -1310,7 +1311,7 @@ export function installManageAgents(App, ctx = {}) {
     // the answer in words: what moved, what was left alone (pinned / the member cannot serve it),
     // a refusal by its code — never "every conversation" when some stayed
     const said = gatherWords(r, t, { poolName, memberName, fmtTime });
-    showToast(said.text, { type: said.type, duration: said.type ? 8000 : 6000 });
+    showToast(said.text, { type: said.type, duration: said.type ? 8000 : 6000, action: said.door ? this._wallDoorAction?.(said.door) : undefined });
     if (!r?.success) return;
     for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
   },
@@ -1657,6 +1658,10 @@ export function installManageAgents(App, ctx = {}) {
     // A RESET NOT YET CONFIRMED (lane reset-unproven): a bucket whose reset landed since its reading is drawn RESET —
     // 0 % used, a dashed muted ring, a reset glyph under it, the words in its tooltip — never the stale pre-reset arc
     // `readAt` = the bucket's reading instant: the cap ring hands its own (capRing: `scopedFetchedAt || fetchedAt`, the popup's)
+    // L3 (lane account-reset-door r2): each lane dated by ITS window (quotaModel.lanesOfReading) — a cap the statusline just
+    // read is not «14 h old» because the file's scopedFetchedAt is
+    const laneAts = new Map(quotaModel.lanesOfReading(u).map((x) => [x.lane, Math.max(Number(x.at) || 0, Number(u.lanesReadAt?.[x.lane]) || 0)]));   // …or when it was last STATED (r3)
+    const laneOfDonut = (x0) => (x0 && x0 === u.fiveHour ? 'plan:5h' : x0 && x0 === u.sevenDay ? 'plan:7d' : x0 && x0.name ? quotaModel.laneOfBucket(u, 'scoped', x0.name) : null);
     const donut = (label, x0, tipName, est0, readAt = u.fetchedAt) => {
       const v = bucketView(quotaModel, x0, est0, now, { readAt });
       const x = v.reading, estBucket = v.est;
@@ -1680,7 +1685,11 @@ export function installManageAgents(App, ctx = {}) {
       // equal while the donut floated above an empty gap).
       const etaHtml = v.unconfirmed ? `<span class="acct-donut-eta acct-donut-reset" aria-hidden="true">${UI_ICONS.refresh}</span>`
         : eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
-      return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}${v.unconfirmed ? ' acct-donut-unconfirmed' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
+      // L3 (lane account-reset-door): a lane whose own reading is far older than the row's freshest says so ON ITSELF
+      const lk = laneOfDonut(x0);
+      const stale = lk && laneAts.get(lk) ? staleLaneAge(laneAts.get(lk), Math.max(0, ...laneAts.values()), now) : '';
+      const staleTip = stale ? ' · ' + escHtml(t('read {age} ago', { age: stale })) : '';
+      return `<span class="acct-donut-col${stale ? ' acct-donut-aged' : ''}"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}${v.unconfirmed ? ' acct-donut-unconfirmed' : ''}" title="${tip}${staleTip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${stale ? `<span class="acct-donut-age" aria-hidden="true">${escHtml(stale)}</span>` : ''}${etaHtml}</span>`;
     };
     // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
     const wins = Array.isArray(u.windows) ? u.windows : null;
@@ -1818,6 +1827,8 @@ export function installManageAgents(App, ctx = {}) {
       // be dropped entirely — the Anthropic call was made, the click "worked",
       // and the user saw zero evidence anything failed.
       const unreported = [];
+      // lane account-reset-door: refusals the POOL names (a code) — ONE sentence per cause, its count, its door
+      const walled = [];
       const labelOf = (tg) => {
         const hostName = tg.host ? ((this._agentsHostsList || []).find(h => h.id === tg.host)?.name || tg.host) : t('this machine');
         if (tg.id === '__global__') return hostName;
@@ -1829,13 +1840,14 @@ export function installManageAgents(App, ctx = {}) {
         try {
           r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tg.body) });
         } catch {}
-        const msgOf = () => (r?.loginNeeded ? t('Needs re-login to refresh usage') : r?.error ? String(r.error)
+        if (r?.wall) walled.push({ wall: r.wall, name: labelOf(tg) });
+        const msgOf = () => (r?.wall ? wallWords(r.wall, { t, name: labelOf(tg) }).text : r?.loginNeeded ? t('Needs re-login to refresh usage') : r?.error ? String(r.error)
           : r?.throttled ? t('Refreshed less than a minute ago — try again shortly')
           : !r ? t('Refresh failed') : null);
         const row = rowOf(tg);
         if (!row || !row.isConnected) { // no row to write on — collect for the summary
           const m = msgOf();
-          if (m) unreported.push(`${labelOf(tg)}: ${m}`);
+          if (m && !r?.wall) unreported.push(`${labelOf(tg)}: ${m}`);
           return;
         }
         row.querySelector('.acct-refresh-err')?.remove();
@@ -1884,6 +1896,7 @@ export function installManageAgents(App, ctx = {}) {
         await one(tg);
       })());
       await Promise.allSettled(jobs);
+      for (const g of groupWalls(walled, { t })) showToast(g.text, { type: 'error', duration: 10000, action: this._wallDoorAction?.(g.door) });
       if (unreported.length) {
         showToast(t('Quota refresh failed for {n} target(s): {details}', { n: unreported.length, details: unreported.slice(0, 4).join(' · ') + (unreported.length > 4 ? ' …' : '') }), { type: 'error', duration: 10000 });
       }
@@ -3684,6 +3697,9 @@ export function installManageAgents(App, ctx = {}) {
           items.splice(1, 0, { label: a?.loggedIn ? t('Re-login on this machine…') : t('Log in on this machine…'), action: () => this._reloginSubscription(id, a, refresh) });
         }
         if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
+        // lane account-reset-door: «I reset this account on Anthropic's site» — the whole account (each lane's own act is where
+        // the lane is drawn: the usage popup); a claim, never a reading — its next reading confirms or corrects it
+        if (isSub && !a?.pooled && !selectedHost && billingRow(a?.backend).usage === 'accounts') items.push({ label: t('I reset this account on Anthropic’s site…'), title: t('Mark every limit of this account as reset — unconfirmed until the next refresh reads them'), action: () => this._resetClaim?.(id, 'all') });
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ label: a?.note ? t('Edit note…') : t('Set note…'), action: doNote });
         items.push({ label: t('Models…'), title: t('The model provider of this account and the models it may use'), action: () => openAccountModelsDialog({ accountId: id, name: a?.name || '', onTest: (model) => doTest(model) }) });

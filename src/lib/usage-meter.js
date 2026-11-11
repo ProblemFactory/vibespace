@@ -20,6 +20,8 @@ import { overageState, spendControlState } from '../spend-authorizer.js';
 // GPT-5.3-Codex-Spark model cap and `premium`, and the file on disk held the
 // Spark limit at 0 % while the plan limit — the one at 5 % — was gone.
 import * as quotaModel from '../quota-model.js';
+import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge } from './account-wall-words.js'; // PURE (lane account-reset-door)
+import { showUnlock } from './vault-unlock.js'; // a vault wall's door: Unlock… in the toast itself
 
 export function installUsageMeter(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -57,13 +59,17 @@ export function installUsageMeter(App, ctx = {}) {
       // "Full overview" → the Agents machine-sectioned account+quota center
       // (2.245.0 — the popup's Remote-hosts section moved there).
       const ov = e.target.closest('.usage-overview-link');
-      if (ov) { e.stopPropagation(); popup.classList.add('hidden'); this._showAgentsDialog(); return; }
+      if (ov) { e.stopPropagation(); this._openUsageOverview(); return; }
       // the codex ⟳ shares the .usage-refresh-btn look — dispatch the SPECIFIC
       // class first (owner report 2.369.32: clicking it refreshed CLAUDE's quota)
       const cxbtn = e.target.closest('.usage-refresh-codex-btn');
       if (cxbtn) { e.stopPropagation(); this._refreshCodexQuota(cxbtn); return; }
       const rbtn = e.target.closest('.usage-refresh-btn');
       if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
+      const cbtn = e.target.closest('.usage-claim-btn');   // lane account-reset-door: «I reset this on Anthropic's site»
+      if (cbtn) { e.stopPropagation(); this._resetClaim(cbtn.dataset.claimKey, [cbtn.dataset.claimLane], { capName: cbtn.dataset.capName || null }); return; }
+      const ox = e.target.closest('.usage-outcome-x');
+      if (ox) { e.stopPropagation(); this._dismissClaimOutcome(ox.dataset.outcomeKey, ox.dataset.outcomeLane); return; }
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
@@ -90,6 +96,11 @@ export function installUsageMeter(App, ctx = {}) {
     this._subSignedOut = !!data?.subscriptionSignedOut;
     this._subSignedOutCause = data?.subscriptionSignedOutCause || 'console';
     this._accountUsage = data?.accounts || {}; // per-subscription usage (Manage Agents rows)
+    // WHEN EACH LANE WAS LAST STATED rides its account's reading (r3, the age badge): the popup and the roster donut read
+    // `lanesReadAt` beside the typed window's age (a ⟳ that re-read a lane at the same number keeps the older one)
+    for (const [id, m] of Object.entries(data?.lanesReadAt || {})) { if (this._accountUsage[id] && typeof this._accountUsage[id] === 'object') this._accountUsage[id] = { ...this._accountUsage[id], lanesReadAt: m }; else if (id === '__global__' && this._rateLimit && typeof this._rateLimit === 'object') this._rateLimit = { ...this._rateLimit, lanesReadAt: m }; }
+    this._resetClaims = data?.resetClaims || {}; // lane account-reset-door: the lanes a person marked reset + the outcomes said once
+    try { this._sayClaimOutcomes(); } catch { }
     this._usageGlobal = data?.globalLogin || null; // CLI-login identity (+ linked named account)
     this._usageCodexGlobal = data?.codexGlobalLogin || null;
     this._codexAccountUsage = data?.codexAccounts || {}; // per-account codex quota buckets
@@ -121,7 +132,74 @@ export function installUsageMeter(App, ctx = {}) {
       ? (claudeDefId && claudeSubs.some(a => a.id === claudeDefId) ? claudeDefId : '__global__')
       : sel;
     if (target !== '__global__' && gl.accountId === target) target = '__global__';
-    return { sel, rl, target };
+    // the account whose reading `rl` IS (r3, MUST 4): a claim is that account's, never the refresh's '__global__' key
+    const drawnKey = sel === 'auto' ? ((claudeDefId && this._accountUsage?.[claudeDefId]) ? claudeDefId : '__global__') : sel;
+    return { sel, rl, target, drawnKey };
+  },
+
+  // ── lane account-reset-door ────────────────────────────────────────────────
+  /** A wall's door as a toast action: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents (its re-login doors) */
+  _wallDoorAction(door) {
+    if (door === 'unlock') return { label: t('Unlock…'), run: () => { try { showUnlock(); } catch { } } };
+    if (door === 'relogin') return { label: t('Manage agents…'), run: () => { try { this._openUsageOverview(); } catch { } } };
+    return undefined;
+  },
+  /** The popup's ONE door into the Agents surface — «Full overview» and a wall's re-login door alike */
+  _openUsageOverview() { document.getElementById('usage-popup')?.classList.add('hidden'); this._showAgentsDialog(); },
+  _usageKeyName(key) { return key === '__global__' ? t('CLI login') : ((this._accounts?.accounts || []).find((a) => a.id === key)?.name || key); },
+  _capNameOf(key, lane, o = null) { return (o && o.name) || null; },   // the server hands the cap's own name with its lane (quotaModel.lanesOfReading)
+  /** «I RESET THIS ON ANTHROPIC'S SITE» — one lane where it is drawn (`lanes` = [lane]) or the whole account ('all'). A claim
+   *  (it bills nothing, asks no vendor); then the SAME ⟳ for that one account, so a reading confirms or corrects it at once.
+   *  A wall that is not a quota (the CLI not measured, the vault, the login) is said at the press — the claim stands. */
+  async _resetClaim(key, lanes, { capName = null } = {}) {
+    const name = this._usageKeyName(key);
+    const lane = Array.isArray(lanes) && lanes.length === 1 ? lanes[0] : null;
+    const words = claimConfirmWords({ t, name, lane, capName });
+    if (!(await showConfirmDialog({ title: words.title, message: words.message, confirmText: words.confirmText }))) return;   // ONE options object (the approval census §1b)
+    const r = await fetchJson('/api/accounts/' + encodeURIComponent(key) + '/reset-claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanes }) });
+    if (!r || !r.ok) { showToast(r?.code === 'no-reading' ? t('{name} has no reading yet — nothing to mark as reset', { name }) : r?.code === 'too-low' ? t('That limit is under 5 % — its next reading could show no reset, so it cannot be marked as reset') : (r?.error || t('Could not mark it as reset')), { type: 'error' }); return; }   // r5: «too low» in every language
+    const what = lane ? laneWords(lane, { t, capName }) : t('every limit of {name}', { name });
+    if (r.wall) {
+      const w = wallWords(r.wall, { t, name });
+      showToast(t('Marked {what} as reset — unconfirmed. It still cannot be used now: {why}', { what, why: w.text }), { type: 'error', duration: 10000, action: this._wallDoorAction(w.door) });
+    } else showToast(t('Marked {what} as reset — unconfirmed until its next reading', { what }), { duration: 7000 });
+    if (r.refresh) {   // the refresh the dialog promised: what it answered is said (r4), never dropped
+      let rr = null; try { rr = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: key }) }); } catch (e) { rr = { error: String((e && e.message) || e) }; }
+      if (rr && rr.error) { if (rr.wall) { const w = wallWords(rr.wall, { t, name }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door) }); } else showToast(t('{name} was not refreshed: {why}', { name, why: String(rr.error).slice(0, 300) }), { type: 'error', duration: 9000 }); }   // r5: the refresh's own reason, said
+    }
+    const data = await fetchJson('/api/usage');
+    if (data) { this._applyUsage(data); this._renderUsage(); }
+  },
+  async _dismissClaimOutcome(key, lane) {
+    try { await fetchJson('/api/accounts/' + encodeURIComponent(key) + '/reset-claim/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane }) }); } catch { }
+    const data = await fetchJson('/api/usage');
+    if (data) { this._applyUsage(data); this._renderUsage(); }
+  },
+  /** An outcome (a reset a reading showed, a claim confirmed or contradicted) is said ONCE on each device — a toast — and
+   *  stays as a note where the account's lanes are drawn until it is dismissed */
+  _sayClaimOutcomes() {
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem('vibespace.resetOutcomesSeen') || '{}') || {}; } catch { seen = {}; }
+    let moved = false;
+    for (const [key, c] of Object.entries(this._resetClaims || {})) {
+      for (const o of (c && c.outcomes) || []) {
+        const k = `${key}|${o.lane}|${o.state}|${o.readAt}`;
+        if (seen[k]) continue;
+        seen[k] = Date.now(); moved = true;
+        const text = outcomeText(o, { t, name: this._usageKeyName(key), capName: this._capNameOf(key, o.lane, o) });
+        if (text) showToast(text, { type: o.state === 'contradicted' ? 'error' : undefined, duration: 9000 });
+      }
+    }
+    if (!moved) return;
+    const cut = Date.now() - 3 * 86400e3;
+    for (const [k, at] of Object.entries(seen)) if (at < cut) delete seen[k];
+    try { localStorage.setItem('vibespace.resetOutcomesSeen', JSON.stringify(seen)); } catch { }
+  },
+  /** Another device marked a reset / a reading settled one: the accounts frame says something moved — read usage now */
+  _usageNow() {
+    if (this._usageNowAt && Date.now() - this._usageNowAt < 1000) return;
+    this._usageNowAt = Date.now();
+    fetchJson('/api/usage').then((data) => { if (data) { this._applyUsage(data); this._renderUsage(); } }).catch(() => { });
   },
 
   // User-initiated quota refresh (⟳ / popup open) — the only way to get the
@@ -171,7 +249,9 @@ export function installUsageMeter(App, ctx = {}) {
     const { target } = this._claudeSelResolved();
     if (btn) btn.classList.add('usage-refresh-spin');
     const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
-    if (r?.error && !silent) showToast(r.loginNeeded ? t('Needs re-login to refresh usage') : r.error, { type: 'error' });
+    // the pool's own cause, in this person's words, with its door (lane account-reset-door) — never the server's English
+    if (r?.error && !silent && r.wall) { const w = wallWords(r.wall, { t, name: this._usageKeyName(target) }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door) }); }
+    else if (r?.error && !silent) showToast(r.loginNeeded ? t('Needs re-login to refresh usage') : r.error, { type: 'error' });
     // B-855a: the answer names the RUNG (own /usage panel vs a live session)
     // and whether the reading's identity was verified — an unverified one is
     // still recorded, so say so rather than let the number look proven
@@ -411,6 +491,10 @@ export function installUsageMeter(App, ctx = {}) {
     // full name + «resets in …» in the tooltip; not read = an EMPTY track that says the last read's fact («… no data yet —
     // press ⟳» / «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again») — never a slash, never «no cap» (r4)
     const capPie = (c) => {
+      if (c.state === 'read' && c.staleAge) {   // L3 (lane account-reset-door): its reading is hours older than its siblings'
+        const pie = renderPie(escHtml(c.label), c.pct, false, c.pair, c.view, c.tipName, ' · ' + t('read {age} ago', { age: c.staleAge }));
+        return `<div class="usage-pie-aged">${pie}<span class="usage-age-badge" title="${escHtml(t('read {age} ago', { age: c.staleAge }))}">${escHtml(c.staleAge)}</span></div>`;
+      }
       if (c.state !== 'read') return `<div class="usage-pie usage-donut" title="${escHtml(c.tip)}" style="background:var(--bg-input)"><span class="usage-donut-label">${escHtml(c.label)}</span></div>`;
       const dur = bucketMayNameDeadline(c.view.reading) ? fullEta(bucketResetMs(c.view.reading), Date.now()) : null;
       return renderPie(escHtml(c.label), c.pct, false, c.pair, c.view, c.tipName, dur ? ' · ' + t('resets in {dur}', { dur }) : '');
@@ -488,6 +572,22 @@ export function installUsageMeter(App, ctx = {}) {
       // `acctCap` = the account's cap as capRing reads it, with or without a 5h (r3: the popup's scoped note says its words)
       const acctCap = noData ? null : capRing(quotaModel, rl, estSel, Date.now(), { pair: estDisplayPair, t, refreshOff: (this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off' });
       const cap = has5h ? null : acctCap;
+      // lane account-reset-door: the account's usage key (the claim's), the lanes it marked, the freshest lane's instant (L3)
+      const claimKey = this._claudeSelResolved().drawnKey;   // the account whose reading this popup draws (r3)
+      const claimed = (this._resetClaims?.[claimKey] && this._resetClaims[claimKey].lanes) || {};
+      // each lane dated by ITS window (r2: quotaModel.lanesOfReading — the typed window, the bucket's own stamp, then the file's)
+      const statedAt = (rl && rl.lanesReadAt) || {};   // when the write path last STATED each lane (r3: a ⟳ that re-read it at the same number)
+      const laneAt = new Map((noData || !rl ? [] : quotaModel.lanesOfReading(rl)).map((x) => [x.lane, Math.max(Number(x.at) || 0, Number(statedAt[x.lane]) || 0) || null]));
+      const atOf = (lane) => (lane && laneAt.get(lane)) || null;
+      const freshest = Math.max(0, ...[...laneAt.values()].map((v) => Number(v) || 0));
+      if (cap && cap.state === 'read') cap.staleAge = staleLaneAge(atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt, freshest);
+      const laneAge = (at) => { const a = staleLaneAge(at, freshest); return a ? `<span class="usage-stat usage-stat-stale">${escHtml(t('read {age} ago', { age: a }))}</span>` : ''; };
+      const claimBtn = (lane, view, capName = null) => (noData || !lane || !view || view.unconfirmed || claimed[lane] || !(Number(view.reading?.utilization) >= quotaModel.RESET_SEEN_MIN_DROP / 100) ? ''
+        : `<button class="usage-claim-btn" data-claim-key="${escHtml(claimKey)}" data-claim-lane="${escHtml(lane)}"${capName ? ` data-cap-name="${escHtml(capName)}"` : ''} title="${escHtml(t('Mark it as reset — unconfirmed until the next refresh reads it'))}">${escHtml(t('I reset this on Anthropic’s site'))}</button>`);
+      const outcomeNotes = ((this._resetClaims?.[claimKey] && this._resetClaims[claimKey].outcomes) || []).map((o) => {
+        const txt = outcomeText(o, { t, name: this._usageKeyName(claimKey), capName: this._capNameOf(claimKey, o.lane, o) });
+        return txt ? `<div class="usage-note usage-claim-outcome${o.state === 'contradicted' ? ' usage-warn' : ''}">${escHtml(txt)} <button class="usage-outcome-x" data-outcome-key="${escHtml(claimKey)}" data-outcome-lane="${escHtml(o.lane)}" title="${escHtml(t('Dismiss'))}">×</button></div>` : '';
+      }).join('');
       const ring = cap && { '7d': renderPie('7d', pct7d, false, p7, v7), cap: capPie(cap) };
       rows.push(ring ? ringRow('claude', NO5H_RINGS.map((k) => ring[k])) : renderRow('claude', '5h', pct5h, '7d', pct7d, noData, [p5, p7], [v5, v7]));
       if (!noData) chipWorst = Math.max(chipWorst, has5h ? (p5.estPct ?? pct5h) : -1, p7.estPct ?? pct7d);
@@ -522,7 +622,8 @@ export function installUsageMeter(App, ctx = {}) {
         const colorSc = usageColor(pctSc);
         // Scoped buckets only arrive via on-demand refresh (⟳) — show THEIR
         // age, which can lag the passively-updated 5h/7d above.
-        const scAge = rl.scopedFetchedAt ? `<span class="usage-stat" title="${escHtml(t('Model-scoped data comes from the ⟳ refresh, not the passive feed'))}">${escHtml(t('as of {ago}', { ago: agoText(rl.scopedFetchedAt) }))}</span>` : '';
+        const scAt = atOf(quotaModel.laneOfBucket(rl, 'scoped', sc.name)) || rl.scopedFetchedAt;   // the cap's OWN age (r2: a statusline-read cap is not «14 h old»)
+        const scAge = scAt ? `<span class="usage-stat" title="${escHtml(t('Model-scoped data comes from the ⟳ refresh, not the passive feed'))}">${escHtml(t('as of {ago}', { ago: agoText(scAt) }))}</span>` : '';
         scopedSections.push(`
       <div class="usage-session">
         <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
@@ -531,7 +632,7 @@ export function installUsageMeter(App, ctx = {}) {
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
           ${estStat(pSc)}
           ${resetStat(vSc, scNotStarted ? escHtml(windowNote(sc, { t })) : fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated))}
-          ${scNotStarted ? '' : scAge}
+          ${scNotStarted ? '' : scAge}${scNotStarted ? '' : claimBtn(quotaModel.laneOfBucket(rl, 'scoped', sc.name), vSc, sc.name)}
         </div>
       </div>`);
       }
@@ -556,6 +657,7 @@ export function installUsageMeter(App, ctx = {}) {
           <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
           ${estStat(p5)}
           ${resetStat(v5, fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization))}
+          ${laneAge(atOf('plan:5h'))}${claimBtn('plan:5h', v5)}
         </div>
       </div>` : no5hSince ? `<div class="usage-session usage-session-lifted" data-window="5h">
         <div class="usage-session-name">${escHtml(t('5-hour limit lifted ({when})', { when: stampText(no5hSince) }))}</div>
@@ -571,8 +673,9 @@ export function installUsageMeter(App, ctx = {}) {
           <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
           ${estStat(p7)}
           ${resetStat(v7, fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated))}
+          ${laneAge(atOf('plan:7d'))}${claimBtn('plan:7d', v7)}
         </div>
-      </div>${scopedSections.join('')}
+      </div>${scopedSections.join('')}${outcomeNotes}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
         ? t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')
         : t('⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). This is NORMAL under pooling and needs no action; named accounts are unaffected. Do NOT run /logout to “clean it up” — on a multi-copy account that revokes the login everywhere. Run /login in a terminal only if you actually use the bare CLI login.')}</div>` : ''}

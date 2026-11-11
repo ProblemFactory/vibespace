@@ -338,6 +338,7 @@ class App {
         // roster only updated on the next manual reopen, so adding an account
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
         try { this._agentsRefreshHook?.(); } catch {}
+        try { this._usageNow?.(); } catch {} // lane account-reset-door: a reset claim / a settled one moved the readings — every device redraws them now
       }
       // agent browser P1: the profile registry digest (every commit broadcasts it — the multi-client law)
       if (msg.type === 'browser-profiles-updated') this._onBrowserProfilesUpdated(msg);

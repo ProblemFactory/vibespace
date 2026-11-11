@@ -318,6 +318,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       globalLogin(false);
       const realL = am.list.bind(am);
       am.list = () => { const l = realL(); l.accounts = l.accounts.map((r) => { const f = r.id === id2 ? { ...PROBEABLE_FACTS, email: 'other' + '@example.invalid' } : r.id === id3 ? NOLOGIN_FACTS : null; if (!f) return r; const x = { ...r, ...f }; x.probeEligibility = probeEligibility(x); return x; }); return l; };
+      // lane account-reset-door r2: ⟳'s answer is the POOL's cause where its door is not the row's — this world stubs the row
+      // only, so the pool is handed the fact the row states: a measured CLI with its token in the folder is placeable (no wall)
+      const realW2 = am.placeWallOf.bind(am); am.placeWallOf = (k) => (k === id2 ? null : realW2(k));
       const n0 = calls.length, b2 = runs();
       const j2 = await call(id2), j3 = await call(id3);
       ok('§5 ④e: …with no fallback token, the folder-token row is refused BY NAME — «not refreshed — not probed (unprobeable:oat-folder-no-panel …)», never «re-login», no loginNeeded',
@@ -345,8 +348,11 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       const id4 = am.createSubscription({ name: 'Locked Four' }).id;
       const realL4 = am.list.bind(am);
       am.list = () => { const l = realL4(); l.accounts = l.accounts.map((r) => { if (r.id !== id4) return r; const x = { ...r, oat: true, loginState: OAT_LS, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'refused', reason: 'key-unreadable', cli: '2.1.306', code: 'vault_locked' } }; x.probeEligibility = probeEligibility(x); return x; }); return l; };
+      // lane account-reset-door: ⟳ says the POOL's own cause (accounts.placeWallOf — both read the sweep's facts in the hub); this
+      // world stubs the row only, so the pool is handed the same fact the row states
+      const realW4 = am.placeWallOf.bind(am); am.placeWallOf = (k) => (k === id4 ? { code: 'vault-locked' } : realW4(k));
       const j4 = await call(id4);
-      am.list = realL4;
+      am.list = realL4; am.placeWallOf = realW4;
       ok('§5 ④h (acceptance r3): ⟳ on a member whose token the LOCKED vault keeps ⇒ «not refreshed — the vault is locked — … (Unlock… …; For you names what is waiting on it)», no loginNeeded, never «re-login» — the roster\'s own sentence (b552c972: «needs re-login …»)',
         /^not refreshed — the vault is locked — /.test(j4.error) && /Unlock…/.test(j4.error) && !/re-login/.test(j4.error) && !j4.loginNeeded, JSON.stringify(j4));
       // ④i THE USAGE BEARER LAW (F4): an oat-shaped token planted in a member's folder WITHOUT our mark is never a Bearer —

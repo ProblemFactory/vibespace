@@ -12,6 +12,7 @@
 // (addendum 4: the one "everything now" act must never be unreachable); turning
 // Manual priority ON seeds the order with the member the pool sits on at the top,
 // so the default does not move by the switch itself; turning it OFF clears the list.
+import { wallWords } from './account-wall-words.js'; // PURE (lane account-reset-door)
 import { quotaVerdict } from '../account-pool-auto.js';
 
 const i18nKey = (s) => s;
@@ -173,6 +174,12 @@ export function gatherConfirmWords({ move = 0, pinned = 0 } = {}, t, { memberNam
  *  → {text, type: 'error'|undefined} */
 export function gatherWords(r, t, { poolName = '', memberName = '', fmtTime = (ms) => new Date(ms).toISOString() } = {}) {
   if (!r || !r.success) {
+    // THE PICK SAYS WHY (lane account-reset-door, the owner: «我甚至试图这么切换也不行» — nothing happened, nothing said why): a member the
+    // pool lists but cannot place is said in the person's words with what ends it (the pool's own cause), and its door
+    if (r && r.code === 'not_placeable' && r.wall) {
+      const w = wallWords(r.wall, { t, name: r.member || memberName });
+      return { type: 'error', text: t(i18nKey('{why} — nothing was moved.'), { why: w.text }), door: w.door };
+    }
     if (r && r.code === 'target_cannot_serve') {
       const why = r.why === 'pin-login-dead' ? t(i18nKey('cannot sign in'))
         : r.why === 'pin-lapsed' ? t(i18nKey('subscription inactive'))

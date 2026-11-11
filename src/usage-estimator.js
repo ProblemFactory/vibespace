@@ -293,14 +293,17 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
   const estBucket = (key, b, { weekly }) => {
     const r = rates[key];
     if (!b || !r) return null;
-    let baseU = normU(b.u);
+    // A PERSON'S RESET CLAIM (lane account-reset-door r2): a claimed bucket starts AT THE CLAIM — 0 % plus the burn since
+    // it, with no reset instant (the vendor named none; claimRebase) — never the pre-claim anchor's number
+    const claimedAt = Number(b.claimedAt) || 0;
+    let baseU = claimedAt ? 0 : normU(b.u);
     if (baseU == null) return null;
-    let resetSec = Number(b.resetsAt) || 0;
+    let resetSec = claimedAt ? 0 : (Number(b.resetsAt) || 0);
     // Scoped readings arrive only via ⟳ — the anchor may carry a reading
     // OLDER than its own fetchedAt (preserve-merged). Cost accrues from when
     // the READING was true, not from the anchor write (else fable spend since
     // the last ⟳ silently vanishes from the estimate).
-    let fromMs = (b.asOf && b.asOf < anchor.fetchedAt) ? b.asOf : anchor.fetchedAt;
+    let fromMs = claimedAt || ((b.asOf && b.asOf < anchor.fetchedAt) ? b.asOf : anchor.fetchedAt);
     // resetsAt-less reading (defensive statusline fallbacks write resetsAt:0):
     // window state unknowable — dead-reckon only within ONE window length of
     // the base, then abstain (verifier repro: a 3-day-old anchor + $600 of
@@ -345,7 +348,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
       du = r.rate * c;
     }
     const u = Math.min(1.2, baseU + du);
-    return { utilization: Math.round(u * 10000) / 10000, resetsAt: resetSec || undefined, estimated: true };
+    return { utilization: Math.round(u * 10000) / 10000, resetsAt: resetSec || undefined, estimated: true, ...(claimedAt ? { claimedAt } : {}) };
   };
   const out = { estimated: true, anchorAt: anchor.fetchedAt, asOf: nowMs };
   const b = anchor.buckets;
@@ -439,6 +442,27 @@ function burnRates({ rates, costFn, nowMs, windowMs = BURN_WINDOW_MS }) {
     if (du > 0) out[key] = du / min;
   }
   return out;
+}
+
+// AN ESTIMATE OVER A CLAIMED LANE STARTS AT THE CLAIM (lane account-reset-door r2, ROOT 1): the reading door hands the
+// estimator the CLAIM'S VIEW (src/usage-reset-claim.js viewOf — a claimed bucket carries `claimedAt`), while the anchor it
+// dead-reckons from was recorded from the pre-claim reading (sweepUsageAnchors persists readings, never a claim). Each
+// claimed bucket of the anchor is re-based at the claim: 0 % at `claimedAt`, the ledger's cost since — so every reader of
+// the estimate (the chooser, the verdict, the switch pass, /api/usage's rings) sees the claim, not the anchor's 97 %.
+function claimRebase(anchor, view) {
+  if (!anchor || !anchor.buckets || !view || typeof view !== 'object' || !view.resetClaims) return anchor;
+  const at = (x) => (x && typeof x === 'object' && Number(x.claimedAt) > 0 ? Number(x.claimedAt) : 0);
+  const b = { ...anchor.buckets };
+  let moved = false;
+  if (at(view.fiveHour)) { b.fiveHour = { u: 0, resetsAt: 0, claimedAt: at(view.fiveHour) }; moved = true; }
+  if (at(view.sevenDay)) { b.sevenDay = { u: 0, resetsAt: 0, claimedAt: at(view.sevenDay) }; moved = true; }
+  const claimed = (Array.isArray(view.scopedWeekly) ? view.scopedWeekly : []).filter((s) => s && s.name && at(s));
+  if (claimed.length) {
+    const list = (Array.isArray(b.scopedWeekly) ? b.scopedWeekly : []).filter((s) => s && !claimed.some((c) => scopedKey(c.name) === scopedKey(s.name)));
+    for (const c of claimed) list.push({ name: c.name, u: 0, resetsAt: 0, claimedAt: at(c) });
+    b.scopedWeekly = list; moved = true;
+  }
+  return moved ? { ...anchor, buckets: b } : anchor;
 }
 
 // Merge an estimate over a raw cache entry → a cache-SHAPED view the pool
@@ -1181,7 +1205,10 @@ class UsageEstimator {
   // (sweep lag ≤60s), the cache itself is the better base — build a pseudo-
   // anchor from it rather than estimating from the stale anchor.
   estimateFor(accountId, rawCache, nowMs = Date.now()) {
-    const memoKey = accountId || '__global__';
+    // the memo is the reading's AND its claim's (lane account-reset-door r2): a claim's view and a bare reading never share
+    // an entry, so no reader's answer depends on which reader ran first in the last 30 s
+    const claimSig = rawCache && rawCache.resetClaims ? JSON.stringify(rawCache.resetClaims) : '';
+    const memoKey = (accountId || '__global__') + (claimSig ? '|' + claimSig : '');
     const m = this._estMemo.get(memoKey);
     // Memo is stale the moment FRESHER ground truth exists (rawCache newer
     // than what the memo was computed against) — a frozen estimate vs an
@@ -1218,6 +1245,7 @@ class UsageEstimator {
         }
         if (anchor) {
           baseFetchedAt = anchor.fetchedAt; rv = this._ratesVerOf(ik); // a fold that landed inside this ask: its version
+          anchor = claimRebase(anchor, rawCache);   // lane account-reset-door: the claim's view of the anchor (baseFetchedAt stays the pre-claim anchor's)
           if (rates0) {
             const accountIds = this.accountIdsFor(ident.identityKey, [accountId || '__global__']); est = estimateBuckets({ anchor, rates: rates0, costFn: this._costFn(accountIds), nowMs, lagS: this.lagS });
             const rc = this._rateCache.get(ik); if (est && rc && rc.seeded && rc.rates === rates0) est.ratesSeeded = true; // round 5: built on the last run's rates (rates.json) until its relearn lands — marked
@@ -1361,6 +1389,7 @@ function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = n
 }
 
 module.exports = {
+  claimRebase,
   PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,

@@ -150,7 +150,8 @@ function createStreamWallRoad({ harnessOf, cacheDir, usageWrite = require('../us
     const set = quotaModel.makeLimitSet({ identity: key, fetchedAt: null, source: 'stream', limits: [quotaModel.makeLimit({
       limitId: sig.limitId, name: sig.limitId, scope: 'model', source: 'stream', fetchedAt: sig.measuredAt,
       windows: [{ kind: sig.window, usedPct: sig.usedPct, resetsAt: sig.resetsAt, measuredAt: sig.measuredAt }] })] });
-    const w = usageWrite.writeCacheObject({ cacheDir, key, obj, set, measuredAt: sig.measuredAt, source: 'stream', backend: session.backend });
+    const wallLane = quotaModel.laneOfLimit ? quotaModel.laneOfLimit(sig.limitId, sig.window) : null;   // the stream's wall is a REFUSAL of its lane (lane account-reset-door r3)
+    const w = usageWrite.writeCacheObject({ cacheDir, key, obj, set, measuredAt: sig.measuredAt, source: 'stream', backend: session.backend, ...(wallLane ? { stated: [wallLane], refused: [wallLane] } : {}) });
     if (!w || !w.ok) { log(`[stream-wall] ${key}: the wall was not written — ${(w && w.why) || 'refused'}`); return null; }
     const won = quotaModel.windowOfKind((w.limits || []).find((l) => l && l.limitId === sig.limitId), sig.window);
     if (!won || won.measuredAt !== sig.measuredAt) { log(`[stream-wall] ${key}: a newer reading of ${sig.limitId} ${sig.window} stands — the wall changes nothing`); return null; }

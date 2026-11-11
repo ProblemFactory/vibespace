@@ -155,6 +155,7 @@ const WALL_RING_MAX = 16;
 const SESSION_WALL_MS = 10 * 60e3;       // "this member rejected THIS session" — dead for its verdicts + switch targets
 const _wallRing = new Map();             // account key → [{at, sid}] walled-turn timestamps (one entry per turn per key)
 const _sessionWalls = new Map();         // webuiId → Map(memberId → ts): the members that walled THIS session
+const _sessionWallLanes = new Map();     // webuiId → Map(memberId → lane | null): the lane each wall came from (lane account-reset-door r2)
 const _noTargetLogAt = new Map();        // webuiId → last "nowhere to go" per-session log (10min floor)
 const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session, with a ':soft' twin for the soft-exhaustion defer) | poolId:default (the pool default — its proactive warm-cache hold only; no soft twin since the default dropped its soft hold, design-reset-credits §8 ③) → last "warm cache, move deferred" log (10min floor); a per-session RE-POINT deletes that conversation's two keys (a new deferral episode speaks again — verifier LOW-3)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
@@ -389,9 +390,10 @@ async function pushSealedOrders(poolId) {
   const pv = poolProviderOf(a); // (q-053 P0b / q-055 M1) THE provider reader of this pool's decisions — the order names it per path
   // (q-055 M2) a default a deletion left UNPLACED keeps ITS provider here too: the reflex never re-creates it on another one
   const defMember = accounts.poolCurrent(poolId) || accounts.unplacedOf(poolId, null)?.member || null;
+  const ownFileReading = poolReadReading({ group: false }); // THE reading door (lane account-reset-door r2): the member's own file, under a person's reset claim
   const ranked = rankPoolMembers({
     members,
-    readCache: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } },
+    readCache: ownFileReading,
     nowSec: nowSecOf(),
     // A sealed order is executed by the DEVICE, possibly hours after we push
     // it and while this server is unreachable — a login that dies in the
@@ -497,14 +499,20 @@ setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 // (nested buckets); an unknown family means NO projection — today's
 // conservative semantics, never a relaxation on ignorance.
 const { familyOfModel, projectCacheForFamily } = require('../model-family.js');
-function poolReadCache(poolId) {
+function poolReadCache(poolId, now = Date.now(), { also = [] } = {}) {
   // the engine's readCache, extracted for reuse (identity-group freshest file
-  // + estimator overlay); kept here so chooser/switch/engine cannot drift
-  const now = Date.now();
+  // + estimator overlay); kept here so chooser/switch/engine cannot drift —
+  // THE ONE DECISION DOOR (lane account-reset-door r2, ROOT 1): every quota
+  // reader of the engine reads here (the chooser, the verdict, the per-session
+  // pass and the pool switch alike); the estimate is built over the CLAIM'S
+  // VIEW, so a claimed lane is dead-reckoned from its claim (usage-estimator
+  // claimRebase), never from the pre-claim anchor
   const reading = poolReadReading();
   // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4): while a member this pool compares cannot be estimated yet (its
-  // first learn), every member is read raw — never one estimated beside one raw
-  let rawBasis = false; try { const m = poolId ? poolMembershipOf(poolId) : null; rawBasis = !!(m && m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m)); } catch { }
+  // first learn), every member is read raw — never one estimated beside one raw. Decided ONCE, over the pool's membership AND
+  // `also` = the ids a caller compares beyond it (lane account-reset-door × relearn: the switch pass's default current member
+  // — an unplaced default's member deleted since is not in the membership — its candidates, each conversation's billing member)
+  let rawBasis = false; try { const m = [...new Set([...((poolId ? poolMembershipOf(poolId) : null) || []), ...(Array.isArray(also) ? also : [])].filter(Boolean))]; rawBasis = !!(m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m)); } catch { }
   return (id) => {
     const raw = reading(id);
     if (rawBasis) return raw;
@@ -514,17 +522,45 @@ function poolReadCache(poolId) {
 // THE READING the overlay starts from — the member's own file or its identity group's freshest — never an estimate.
 // The proving spawn judges a member on THIS (lane reset-unproven): the overlay re-bases a rolled weekly bucket onto next
 // week's projected reset, which would read as a fresh reading.
-function poolReadReading() {
+// ORG-MERGED identities keep TWO cache files (__global__ + the named sub) and ground truth lands in whichever one the
+// refresh targeted — during the 2026-08-09 #2 exhaustion the ⟳ readings (Fable 34%→51%) went to __global__.json while a
+// decision read the sub's file frozen at 01:23. Read through the IDENTITY GROUP: freshest file wins (`group: false` = the
+// member's own file only — the sealed orders a device runs offline). THE ENGINE'S READS OF THE USAGE CACHE: every QUOTA
+// read is this door (+ poolReadCache over it); the rest read a reading's STAMPS, never its windows, and stay raw — the
+// anchor sweep (it persists readings; a claim is none), the api-window sidecar, readRawUsageCache (overage facts), the
+// wall's demotion line (the reset its own write stored), onMemberReadingFresh's freshness gate and ownReading (lapse
+// evidence). scripts/test-account-reset-door.mjs pins every read to one of these rows.
+let _bareDoor = false;   // THE COUNTERFACTUAL (MUST 8): «did the claim decide this?» — the same decision, the claim left out
+function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { return fn(); } finally { _bareDoor = was; } }
+function poolReadReading({ group = true } = {}) {
   return (id) => {
     let raw = null;
     try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
-    try {
+    if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
         if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
-    return raw;
+    // A PERSON'S RESET CLAIM IS A VIEW (lane account-reset-door): a claimed lane older than its claim reads as reset — the
+    // verdicts below (bucketRemaining, memberProofState) see it with no branch of their own; the stored file is untouched
+    if (_bareDoor || !raw) return raw;
+    try { return resetClaimsStore().viewOf(id, raw); } catch { return raw; }
   };
+}
+let _resetClaims = null;
+function resetClaimsStore() { return _resetClaims || (_resetClaims = require('../usage-reset-claim.js').at(path.dirname(USAGE_CACHE_DIR))); }
+/** THE CLAIM DECIDED IT (lane account-reset-door r2, MUST 8): `on` = the member a placement or a move lands on; `rerun` = the
+ *  same decision again (its target). Only when `on` is claimed AND the decision over the bare reading names another member
+ *  did the claim decide it → the claimed lanes in words; else null (a placement the readings make says nothing new). */
+function claimDecided(on, rerun) {
+  try {
+    if (!on || !resetClaimsStore().anyClaimed([on])) return null;
+    const view = poolReadReading()(on);
+    const claimed = view && view.resetClaims ? Object.keys(view.resetClaims) : [];
+    if (!claimed.length || withBareDoor(rerun) === on) return null;
+    const names = new Map(quotaModel.lanesOfReading(view).map((x) => [x.lane, x.name || null]));
+    return claimed.map((l) => quotaModel.laneText(l, names.get(l))).join(', ');
+  } catch { return null; }
 }
 // ── THE PROOFS IN FLIGHT (lane reset-unproven, owner ruling «B吧»): memberId → sinceMs — a spawn the chooser placed to
 // turn a member's guess into a reading (account-pool-auto PROVING_HOLD_MS). ONE map for the whole hub, keyed by MEMBER
@@ -550,6 +586,29 @@ function noteProofLanded({ key, at } = {}) {
   console.log(`[pool] proving: ${accounts.get(key)?.name || key} (${key}) read at ${OF.when(Number(at))} — its proof is in`);
 }
 usageWrite.onReading(noteProofLanded);
+// A RESET SEEN IN A READING ENDS THE WALLS THAT RESTED ON THE OLD ONE (lane account-reset-door): a member that walled a
+// conversation is out of that conversation's verdicts for SESSION_WALL_MS — a vendor-side reset shown by a newer reading
+// (usage-cache-write onVendorReset) lifts it at once, for the member and its identity group
+// …ONLY THE WALLS THAT CAME FROM THE LANE THAT RESET (r2, MUST 3): a session wall records the lane its signal named
+// (`_sessionWallLanes`); a wall from another lane, or one whose lane is not known (a guessed wall, a signal naming several),
+// keeps its own SESSION_WALL_MS
+function liftLaneWalls(key, laneList, why) {
+  const lanes = new Set((Array.isArray(laneList) ? laneList : []).filter(Boolean));
+  if (!lanes.size) return 0;
+  const ids = new Set([key]);
+  try { for (const id of usageIdentityAccountIds(key)) ids.add(id); } catch { }
+  let lifted = 0;
+  for (const [sid, m] of _sessionWalls) {
+    const ml = _sessionWallLanes.get(sid);
+    for (const id of ids) { const lane = ml ? ml.get(id) : null; if (lane && lanes.has(lane) && m.delete(id)) { ml.delete(id); lifted++; } }
+  }
+  if (lifted) console.log(`[wall] ${nameOf(key)}: ${why(lanes)} — ${lifted} conversation wall(s) from that lane lifted`);
+  return lifted;
+}
+usageWrite.onVendorReset(({ key, resets }) => liftLaneWalls(key, (Array.isArray(resets) ? resets : []).map((r) => r && r.lane), (ls) => `a reading shows ${[...ls].map((l) => quotaModel.laneText(l)).join(', ')} reset`));
+// …and A CLAIM LIFTS THEM TOO (r3, small 2): the person says that lane is usable — the readers no longer disagree for the
+// wall's ten minutes (the verdict excluding the member while the switch pass keeps the conversation on it)
+try { resetClaimsStore().onClaim(({ key, lanes }) => liftLaneWalls(key, lanes, (ls) => `a person marked ${[...ls].map((l) => quotaModel.laneText(l)).join(', ')} as reset (unconfirmed)`)); } catch { }
 // THE engine's login reader (2026-09-07). ONE memoized read per tick per
 // member: loginStateOf hits the credential file, and a single pool decision
 // asks about the same member several times. §ban-safety: file reads only —
@@ -724,13 +783,19 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // spawn and every conversation that reads the default link onto it. No proving input ⇒ no mark, no «spawn on» line.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const chooseNow = () => decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = chooseNow();
+    // THE POOL SAYS IT (lane account-reset-door r2, MUST 8): a placement the CLAIM decided — the same decision over the bare
+    // reading names another member — is said, once, at the spawn; one the readings make says nothing new (asked BEFORE the
+    // proving mark below, so the counterfactual weighs the same inputs)
+    const byClaim = claimDecided((d && d.to) || cur, () => { const b = chooseNow(); return (b && b.to) || cur; });
     // THE PROVING SPAWN (lane reset-unproven): the member it lands on is marked in flight and the placement is said
     if (d && d.reason === 'proving' && d.to) {
       provingInFlight().set(d.to, Date.now());
       const { provingText } = require('../account-pool-auto.js');
       console.log(`[pool] spawn on "${a.name || poolId}": ${provingText(d, { when: (ms) => OF.when(ms) })}`);
     }
+    if (byClaim) console.log(`[pool] spawn on "${a.name || poolId}": placed on ${nameOf((d && d.to) || cur)} on your reset claim (${byClaim}) — unconfirmed until its first reading`);
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
@@ -1060,7 +1125,7 @@ function writeUsageCacheForKey(key, parsed, { producer = null } = {}) {
     // process state (on a failed endpoint read, its header windows), so it is counted as THAT process's passive answer —
     // the producer its stream records name (`ev:<webui id>`): a stated 5h window restores a tombstone only when it began
     // at or after it or the week moved; one that began before it is a session that never saw the lift (kept out, silent)
-    return usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: parsed.source || null, familyOf: familyOfScopedBucket, backend: 'claude',
+    return usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: parsed.source || null, familyOf: familyOfScopedBucket, backend: 'claude', stated: parsed,   // the get_usage rung states what it read (r4)
       authoritativeScopes: quotaModel.authoritativeScopesOf(parsed),
       passiveAnswer: { producer, weekSig: quotaModel.planWeekSigOf(parsed.sevenDay), fiveHour: parsed.fiveHour ? { resetsAt: Number(parsed.fiveHour.resetsAt) || 0 } : null, absent5h: !parsed.fiveHour && !!parsed.sevenDay } }).ok;
   } catch { return false; }
@@ -1976,13 +2041,26 @@ function fireIdentityFor(session) {
  *  member) and by the per-session switch (it cannot pick one). Session-scoped
  *  and self-expiring: a pool-wide fact would be the 2.368.34 misattribution
  *  class again. */
-function noteSessionWall(sid, memberId, now = Date.now()) {
+function noteSessionWall(sid, memberId, now = Date.now(), lane = null) {
   if (!sid || !memberId) return;
   let m = _sessionWalls.get(sid);
   if (!m) { m = new Map(); _sessionWalls.set(sid, m); }
   m.set(memberId, now);
-  for (const [k, t] of m) if (now - t > SESSION_WALL_MS) m.delete(k);
-  if (_sessionWalls.size > 512) { const k = _sessionWalls.keys().next().value; _sessionWalls.delete(k); }
+  let ml = _sessionWallLanes.get(sid);
+  if (!ml) { ml = new Map(); _sessionWallLanes.set(sid, ml); }
+  ml.set(memberId, quotaModel.isLaneKey(lane) ? lane : null);
+  for (const [k, t] of m) if (now - t > SESSION_WALL_MS) { m.delete(k); ml.delete(k); }
+  if (_sessionWalls.size > 512) { const k = _sessionWalls.keys().next().value; _sessionWalls.delete(k); _sessionWallLanes.delete(k); }
+}
+/** The lane a wall signal names (lane account-reset-door r2) — null when it names none for sure (a guessed bucket, a cap
+ *  with no name of its own): such a wall is left to its own SESSION_WALL_MS by a reset a reading shows */
+function wallLaneOf(kind, scopedName, guessed = false) {
+  if (guessed) return null;
+  if (kind === 'fiveHour') return 'plan:5h';
+  if (kind === 'sevenDay') return 'plan:7d';
+  if (kind !== 'scoped' || !scopedName) return null;
+  const l = quotaModel.scopedLimitId(scopedName);
+  return quotaModel.isLaneKey(l) && l !== 'model:cap' && l !== 'model:overage-included' ? l : null;
 }
 function sessionWalledMembers(sid, now = Date.now()) {
   const out = new Set();
@@ -2976,7 +3054,8 @@ function demoteWalledAccount(session, sigs) {
       return { demoted: false, reason: 'refuted', key: member.id, walls };
     }
   } else {
-    noteSessionWall(session._webuiId, member.id, now);
+    const sigLanes = new Set(sigs.filter((x) => x && (!x.key || ids.has(x.key))).map((x) => wallLaneOf(x.bucket || 'fiveHour', x.scopedName, !!x.guessed)));
+    noteSessionWall(session._webuiId, member.id, now, sigLanes.size === 1 ? [...sigLanes][0] : null);
   }
   if (!slotMatch && walls < 2) {
     const held = (slot.id && ids.has(slot.id)) ? `this session's slot, but unvalidated: ${slot.slotReason || 'unknown'}` : "not this session's credential slot";
@@ -3026,7 +3105,7 @@ function demoteWalledAccount(session, sigs) {
     // pinned member was held out of the pool for three hours on somebody
     // else's wall, so re-filing the numbers while leaving the demotion behind
     // would fix the panel and keep the cost.
-    if (dest.id !== member.id) noteSessionWall(session._webuiId, dest.id, now);
+    if (dest.id !== member.id) noteSessionWall(session._webuiId, dest.id, now, wallLaneOf(b.kind, b.scopedName, !!b.guessed));
     // a GUESSED 5h wall on a «no 5h» member names no window it cannot know (lane no-5h-window r3): no label at all —
     // `unknownWindow` says so, and the card's sentence words it (r4: the raw English token reached the zh card)
     const unknownWindow = !!(b.kind !== 'scoped' && b.guessed && b.kind === 'fiveHour' && quotaModel.fiveHourAbsent(readRawUsageCache(dest.id)));
@@ -5618,7 +5697,13 @@ function markLimitBannerNow(session, text) {
     // witnesses are its own file's, and its tombstone is not this key's (the rate-limit-capture twin)
     delete cache.windowChangeUnsaid; delete cache.fiveHourAbsentWitnesses;
     if (base !== ownFile) { if (tomb5h(ownFile)) cache.fiveHourAbsent = ownFile.fiveHourAbsent; else delete cache.fiveHourAbsent; }
-    usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: cache, measuredAt: cache.fetchedAt, source: 'limit-banner', familyOf: familyOfScopedBucket, backend: 'claude' });
+    // THE BANNER IS A REFUSAL OF ITS LANE (lane account-reset-door r3): stated and refused — the contradiction of a claim on
+    // it at once, whatever the merge keeps; the sibling buckets spread above are not this banner's reading
+    const bannerLane = hit.kind === 'fiveHour' ? (hit.guessed ? null : 'plan:5h') : hit.kind === 'sevenDay' ? 'plan:7d' : hit.kind === 'scoped' ? quotaModel.scopedLimitId(hit.name) : null;
+    const bannerLanes = quotaModel.isLaneKey(bannerLane) ? [bannerLane] : [];
+    // a GUESSED 5h bump is still a refusal's number (r5): its window stamped so (`refusalMarks`), told to no claim
+    const bannerMarks = hit.kind === 'fiveHour' && hit.guessed ? ['plan:5h'] : [];
+    usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: cache, measuredAt: cache.fetchedAt, source: 'limit-banner', familyOf: familyOfScopedBucket, backend: 'claude', stated: bannerLanes, refused: bannerLanes, refusalMarks: bannerMarks });
     for (const id of ids) {
       if (id === key) continue;
       try {
@@ -5626,7 +5711,7 @@ function markLimitBannerNow(session, text) {
         if (!c2) continue; // never CREATE a sibling file here
         applyHit(c2, c2); // fetchedAt deliberately untouched
         delete c2.limits;
-        usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key: id, obj: c2, measuredAt: cache.fetchedAt, familyOf: familyOfScopedBucket, backend: 'claude' });
+        usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key: id, obj: c2, measuredAt: cache.fetchedAt, familyOf: familyOfScopedBucket, backend: 'claude', stated: bannerLanes, refused: bannerLanes, refusalMarks: bannerMarks });   // the twin's mark travels with the refusal (r4)
       } catch {}
     }
     global.__vsEvent?.('usage-limit-banner-marked', `${key}:${hit.kind}`);
@@ -5921,7 +6006,8 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
       const why2 = landsOn !== memberId ? 'lands-elsewhere' : before !== memberId ? 'the wake moved it' : cold ? 'cold pool — it restarts instead' : null;
       if (why2) { out.skipped.push({ id, landsOn, before, why: why2 }); continue; }
       try {
-        if (ar.fireNow(id, `${nameOf(memberId)} 已恢复可用`, { cause: 'member-usable' })) out.fired.push(id);
+        const onClaim = (() => { try { return !!resetClaimsStore().get(memberId); } catch { return false; } })();   // usable through a person's claim (r3, small 1)
+        if (onClaim ? ar.fireNowOnClaim?.(id, `${nameOf(memberId)} 按你的重置声明可用（未确认）`, { cause: 'member-usable' }) : ar.fireNow(id, `${nameOf(memberId)} 已恢复可用`, { cause: 'member-usable' })) { out.fired.push(id); if (onClaim) console.log(`[auto-resume] ${id}: a continue on ${nameOf(memberId)} was asked on your reset claim — unconfirmed; the spend authorizer decides whether it is sent`); }
       } catch (e) { console.warn('[auto-resume] wake fire failed:', e.message); }
     }
     for (const k of out.skipped) {
@@ -7372,23 +7458,9 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
     // ledger cost since) so the decision sees NOW, not the last reading. The
     // estimator abstains per bucket when it has nothing better; those keep raw.
-    let rawBasis = false; // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4): set from the members below, before any read
-    const readCache = (id) => {
-      let raw = null;
-      try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
-      // ORG-MERGED identities keep TWO cache files (__global__ + the named
-      // sub) and ground truth lands in whichever one the refresh targeted —
-      // during the 2026-08-09 #2 exhaustion the ⟳ readings (Fable 34%→51%)
-      // went to __global__.json while this decision read the sub's file
-      // frozen at 01:23. Read through the IDENTITY GROUP: freshest file wins.
-      try {
-        for (const [, g] of usageIdentityGroupsCached()) {
-          if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
-        }
-      } catch { }
-      if (rawBasis) return raw;
-      try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
-    };
+    // THE PASS READS THROUGH THE ONE DECISION DOOR (lane account-reset-door r2, ROOT 1) — the identity group's freshest file, a
+    // person's reset claim as a view, the estimate over it: the reading the chooser and the verdict decide on. Its reader is
+    // built below, once the ids this pass compares are known (its basis — usage-relearn-stepped round 4 — covers them all).
     // proactive EDF tier only for HOT pools (re-point is free — no restart);
     // cold pools switch on exhaustion only (each switch restarts conversations).
     // Hot pools also treat est<10% as exhaustion (提前切 — switch BEFORE the
@@ -7410,7 +7482,13 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // not candidates (2.335.0), but a login-dead member must still REACH
     // decidePoolSwitch so its refusal can name it and prescribe the re-login.
     const members = switchCandidates(poolId);
-    try { rawBasis = !!(usageEstimator.basisRaw && usageEstimator.basisRaw([currentId, ...members].filter(Boolean))); } catch { }
+    // NO DECISION ON A MIXED BASIS, decided ONCE for everything this pass compares (lane account-reset-door × usage-relearn-
+    // stepped round 4): the pool's membership (the door's own) + the default's current member + the candidates + each of
+    // this pool's conversations' billing member (decidePoolSwitch compares a current member's reading with the members'
+    // even when the pool no longer lists it) — raw for all while any of them is still learning
+    const basisIds = [currentId, ...members];
+    for (const [sid, s2] of activeSessions) { if (s2._accountId !== poolId || s2.host) continue; try { basisIds.push(heldPoolMemberFor(s2, poolId) || accounts.poolCurrentFor(poolId, sid) || null); } catch { } }
+    const readCache = poolReadCache(poolId, now, { also: basisIds });
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const roster = evaluationRoster(poolId, rosters); // …and ONE roster read for it, shared by every conversation's decision (acceptance r2) and the tick's sweep (r3)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
@@ -7476,8 +7554,13 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
       const pinRec = poolPinOf(s2, poolId);
+      const decideSession = () => {
       const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
-      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+      return dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+      };
+      const ds = decideSession();
+      // a MOVE the claim decided is said too (lane account-reset-door r2, MUST 8): the same decision over the bare reading stays
+      const moveByClaim = ds && ds.to && ds.to !== linkCur ? claimDecided(ds.to, () => { const b = decideSession(); return (b && b.to) || curFor; }) : null;
       if (!ds || !ds.to) {
         // (q-053 P0b, decision ①) only ANOTHER provider could take it and the pool's setting is 'never': ONE For-you card asks
         // the owner (nothing moves); the blocked outcome below still speaks as today
@@ -7566,13 +7649,17 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
         else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
+        if (moveByClaim) console.log(`[pool] per-session switch ${poolId}/${sid}: moved onto ${nameOf(ds.to)} on your reset claim (${moveByClaim}) — unconfirmed until its first reading`);
         // a hot re-point does not move an idle limit-blocked session by itself
         // (c1206711: the pool switched back and the session stayed dead) —
         // an ARMED session gets its continue NOW. Hot only: a cold switch
         // restarts the conversation through the client instead.
         // …never for a REMOVED member's eviction (2026-09-28): a removal starts no turn, on
         // this path exactly as through memberRemoved — the arm's own timer re-decides it
-        if (a.hot && ds.reason !== 'not-a-member') { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
+        // A move made on a reset claim fires its own continue (the card says it rests on an
+        // unconfirmed claim); every other move fires master's, byte for byte.
+        if (a.hot && ds.reason !== 'not-a-member' && moveByClaim) { try { if (getAutoResume()?.fireNowOnClaim?.(sid, `账号池已切换到 ${toName}（按你的重置声明，未确认）`)) console.log(`[auto-resume] ${sid}: a continue on ${toName} was asked on your reset claim (${moveByClaim}) — unconfirmed; the spend authorizer decides whether it is sent`); } catch { } }
+        else if (a.hot && ds.reason !== 'not-a-member') { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
         if (!a.hot) {
           sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }], now);
         }
@@ -7606,7 +7693,9 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // decision on the estimate of NOW (a projection alone never moves a warm
     // conversation).
     const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), nowSecOf(now), PROJECTION_LEAD_SEC);
-    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+    const decideDefault = () => decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+    const d = decideDefault();
+    const defaultByClaim = d && d.to && d.to !== currentId ? claimDecided(d.to, () => { const b = decideDefault(); return (b && b.to) || currentId; }) : null; // MUST 8: the pool's own move, said when the claim decided it
     if (!d) return;
     if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId); // the pool can serve again (r3)
     if (!d.to) {
@@ -7720,6 +7809,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId, Date.now(), { slot: true }); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : `Pool "${a.name}" auto-switched to ${d.toName}${d.priorityRank ? ` (priority #${d.priorityRank})` : ''} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
+    if (defaultByClaim) console.log(`[pool] auto-switch ${poolId}: moved onto ${nameOf(d.to)} on your reset claim (${defaultByClaim}) — unconfirmed until its first reading`);
     if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
       sendColdRestart(poolId, affected, now);
@@ -7805,7 +7895,7 @@ function maybeStopOnFallback(session, id, from, to) {
     repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
-    _wallRing, _sessionWalls, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
+    _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,

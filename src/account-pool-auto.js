@@ -1277,6 +1277,19 @@ function unplaceableText(why) {
     default: return 'not signed in — re-login';
   }
 }
+/** THE DOOR A WALL'S CAUSE OPENS (lane account-reset-door r2): 'unlock' = the vault's Unlock…, 'relogin' = a re-login (or a
+ *  re-mint), null = nothing to press (it ends by itself). The ⟳ answer's `loginNeeded` is true ONLY for a 'relogin' cause, and
+ *  the client's words (src/lib/account-wall-words.js wallWords) name the same door — test-account-reset-door pins the two. */
+function wallDoor(why) {
+  const w = why && typeof why === 'object' ? why : { code: String(why || '') };
+  switch (w.code) {
+    case 'vault-locked': return 'unlock';
+    case 'oat-not-in-folder': return w.reason === 'pending' ? null : 'relogin';
+    case 'cli-unmeasured': return w.local && typeof w.local === 'object' && w.local.state === 'checking' ? null : 'relogin';   // its own sentence: «re-login it to use it now» unless the check is running (r3)
+    case 'auth-failed': case 'lapsed': case 'held-out': case 'unreadable': return null;
+    default: return 'relogin';
+  }
+}
 /** Every member id a blocked verdict NAMES — in exactly one of its buckets (the roster census, test-account-verdicts) */
 function namedMembersOf(d) {
   const ids = [];
@@ -1825,6 +1838,7 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 }
 
 module.exports = {
+  wallDoor,
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

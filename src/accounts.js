@@ -1824,6 +1824,24 @@ class AccountManager {
    *    oat-expired        no login, and the long-lived token has ended
    *    oat-mismatch       the post-check read the token as ANOTHER account's
    *    logged-out | expired | no-file | no-login   the login itself (wiped / ended / no file / nothing readable) */
+  /** THE POOL'S OWN WALL FOR ONE ACCOUNT (lane account-reset-door): what keeps a NEW placement off it that is not a quota —
+   *  the roster's `why` (a CLI not measured, the vault, the login, a token), null when the pool may place on it. ⟳'s refusal,
+   *  the reset claim's answer and the pick say THIS — one cause per account, the pool's. */
+  placeWallOf(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') return null;
+    const be = this._acctBackend(a) || 'claude';
+    try { return this._unplaceableWhy(be, id) || null; } catch { return { code: 'unreadable' }; }
+  }
+  /** A FACT RECORDED WHILE LOCKED ENDS AT THE UNLOCK (lane account-reset-door: ⟳ said «the vault is locked» 14× with the vault
+   *  open — the sweep's per-account `vault_locked` lasted to the next 15-min tick). The vault's unlock drops every such fact
+   *  (the row then reads «pending» or its true cause) and the caller ticks the sweep, which records what is true now. */
+  forgetVaultLockedFacts() {
+    let n = 0;
+    for (const [id, f] of this._oatFileFacts) if (f && f.code === 'vault_locked') { this._oatFileFacts.delete(id); n++; }
+    if (n) this._notify();
+    return n;
+  }
   _unplaceableWhy(be, id) {
     const info = this._readAuthFor(be, id);
     const caps = this.oatFileCaps();
