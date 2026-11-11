@@ -7,6 +7,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - An agent can ask you for a two-step code: its card in For you has the fields of Vault ▸ Add ▸ Two-step code…, and the agent may suggest its name.
 - Its tick lets that conversation read the current code while it runs — never the seed. After a restart, Vault ▸ Two-step codes ▸ Use for… gives it again.
+- When the server stops answering for a second or more, the Diagnostics report says what held it: a VibeSpace function, the system or a wait for a processor.
+- ⚙ System → Profile the server for 10 minutes shows in the Diagnostics report where the server's time goes, function by function.
+- When VibeSpace is slow, Diagnostics can show which of its own code is using the processor.
+- ⚙ System → Capture a CPU profile (20 s) shows it in the Diagnostics report; one is also taken by itself when the server is slow.
 
 ## 2.369.392 — 2026-11-11
 
