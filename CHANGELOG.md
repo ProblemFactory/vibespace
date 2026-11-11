@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - When the server was held while it also waited for a processor, the Diagnostics report still names the code that held it and says how long it waited.
+- VibeSpace no longer slows down while it hides your vault's secrets in what agents write: it prepares them once each time the vault changes.
 
 ## 2.369.393 — 2026-11-11
 
