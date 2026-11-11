@@ -21,6 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - A newer Claude Code's records no longer say "not registered … until the next release"; Diagnostics lists them quietly.
+- On a phone, a conversation waiting for you now shows on the Desktops button, the window list and the Desktops list, and stops once you answer on any device.
 
 ## 2.369.392 — 2026-11-11
 
