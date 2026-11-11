@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.395 — 2026-11-11
+
+### Fixed
+- With VibeSpace installed in your home folder, its check of a new Claude Code no longer stops at once; held accounts rejoin the pool when it passes.
+- If the check sees Claude Code read a file outside its own folder, For you names the file.
+
 ## 2.369.394 — 2026-11-11
 
 ### Fixed
