@@ -924,6 +924,21 @@
 - (2026-11-11) EVERY CHECK OF A NEW CLAUDE CODE VOIDED IN HALF A SECOND ON A HUB WHOSE CHECKOUT LIVES IN THE HOME (cli-self-measure) — 不变量 = a run lives in a private folder outside the home and the data dir, or refuses by name; a void keeps what it read (kb-bugfix-invariants)
 - (2026-11-10) THE OWNER'S HUB PAUSED 1–5 S EVERY FEW MINUTES: ITS OWN STORE WRITES HELD THE MAIN THREAD (hub-loop-stalls commit 2) — 不变量 = a store's write never holds the main loop: its own thread, a pace stated for its size, an exit no bound of ours cuts (kb-bugfix-invariants)
 - (2026-11-11) A CLOSE STALLED ~1 s: THE TOAST'S PLACEMENT HIT-TESTED THE PAGE (76 + 79 × 10.8 ms); A FOCUSED BOX'S FOLLOWER POLLED; THE FREEZE RINGS WERE EMPTY (owner; window-close-stall). 不变量 = a placement never hit-tests the page; a follower never polls; a ring accessor is set only when unset
+- (2026-11-11) THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (owner's recording: the stall watch's rAF loop, ≈ 190 ms/s at 98 Hz; window-close-stall C). 不变量 = no permanent rAF: long frames from the observer, one probe a second (kb-bugfix-invariants)
+
+## THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (the owner's own recording, 2026-11-11; lane window-close-stall C, its own commit behind the hotfix)
+
+**Symptom.** In the recording's quiet stretches the main thread ran a full frame at every vsync (98 Hz), and nothing on screen changed.
+
+**Cause.** telemetry-client.js installCompositorStallWatch's `loop` re-asked `requestAnimationFrame` from its own callback for the page's life (2.339.4, the compositor-stall detector, later the frame-gap ring's source). Each forced frame ran the commit, two IntersectionObserver passes and a style pass: ≈ 1.9 ms, ≈ 190 ms of main thread a second.
+
+**Fix.** Long frames come from the Long Animation Frames observer. ONE rAF a second, asked by the watch's own 1-s tick, is the stall arm's heartbeat and catches a frame the compositor did not deliver. The per-frame loop is left only for a browser without the observer, and only while a person acts.
+
+**Round 2 (主开发's read of the first form).** The first form's stall arm asked how long since the probe's last answer. A 1.1–1.9 s main-thread task that delayed a tick was then filed as a «compositor stall … GPU side» (4 to 44 of 50 phases in a virtual page). The arm now counts a frame the page asked for that stayed undelivered across two ON-TIME ticks with no long frame or long task of the page's own between them. A task or a storm of tasks never opens one. That also closes master's own false name for tasks of 2 s or more. Round 3: «a person was there» is asked from the last frame the page knows arrived, not from the unanswered request. A click as the frames stopped (the usual way a person meets a frozen window) is inside it again.
+
+**不变量.** No permanent rAF loop. A frame is asked for only by what paints, by a person's act, or by one probe a second. A compositor stall is a frame asked for and undelivered while the page's own main thread was free.
+
+**Pins.** test-incident «frames» (5 s idle ⇒ ≤ 8 rAF calls; red on 5c77612ef); test-freeze-probe (no unconditional per-frame rAF in the watch).
 
 ## A CLOSE STALLED ABOUT A SECOND: THE TOAST'S PLACEMENT HIT-TESTED THE PAGE; A FOCUSED BOX'S FOLLOWER POLLED; THE FREEZE BUNDLES' LONG TASKS WERE EMPTY (the owner 2026-11-11: «every time I close a window it now stalls for about a second»; lane window-close-stall, the hotfix on .394)
 

@@ -212,6 +212,12 @@ if (CHROME) {
   await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.captureIncident)').catch(() => false)) break; await sleep(400); }
+  // ── lane window-close-stall: THE PAGE NEVER ASKS FOR A FRAME IT DOES NOT PAINT (the owner's own recording: the compositor-stall
+  // watch's rAF loop asked one at every vsync — ≈ 190 ms of main thread a second at 98 Hz with nobody acting). The REAL page, 5 s
+  // with nothing moving and nobody acting: every requestAnimationFrame counted (the watch's one probe a second + whatever else
+  // asks) ≤ 8; the long-animation-frame observer is what the watch reads. RED on 5c77612ef (one a vsync).
+  const idleRaf = await evaljs(`(async () => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); await new Promise((r) => setTimeout(r, 1500)); let n = 0; const raf = window.requestAnimationFrame; window.requestAnimationFrame = function (cb) { n++; return raf.call(window, cb); }; await new Promise((r) => setTimeout(r, 5000)); window.requestAnimationFrame = raf; return { n, loaf: typeof PerformanceObserver === 'function' && (PerformanceObserver.supportedEntryTypes || []).includes('long-animation-frame') }; })()`).catch((e) => ({ error: String(e.message || e) }));
+  check(`frames: 5 s with nobody acting asks for ${idleRaf && idleRaf.n} frames (≤ 8: the stall watch's one probe a second — no per-vsync loop; the long-animation-frame observer present)`, !!idleRaf && idleRaf.n <= 8 && idleRaf.loaf === true, JSON.stringify(idleRaf));
   // ── lane window-close-stall: THE RECORDER TELLS AFTER A DOC WINDOW OPENED. The owner's 14 newest «renderer freeze» bundles
   // all had snapshot.longTasks EMPTY: the lazy doc editor bundle (public/doc-editor.js) evaluates a SECOND copy of
   // telemetry-client.js whose installers never run, and it re-pointed every window.__vs* ring accessor at its own empty rings.

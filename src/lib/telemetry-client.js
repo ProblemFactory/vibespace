@@ -306,18 +306,93 @@ export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSinc
 }
 export function installCompositorStallWatch() {
   const t0 = Date.now();
-  let lastRaf = t0;
   let stallStart = 0;
   let stormOpen = 0;
   // visibility state first: the rAF loop's return filter reads it
   let visibleSince = document.hidden ? 0 : t0, hiddenAt = document.hidden ? t0 : 0;
   try { document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenAt = Date.now(); else visibleSince = Date.now(); }); } catch { }
-  const loop = () => {
-    const now = Date.now(); const gap = now - lastRaf; lastRaf = now;
-    if (gap >= 300 && !document.hidden && !frameGapIsReturn({ now, gap, visibleSince, hiddenAt })) { _frameGaps.push({ t: now, gap }); if (_frameGaps.length > 200) _frameGaps.shift(); }
-    requestAnimationFrame(loop);
+  // THE PAGE NEVER ASKS FOR A FRAME IT DOES NOT PAINT (lane window-close-stall — the owner's own recording, 2026-11-11: this
+  // watch's rAF loop re-asked a frame at EVERY vsync for the page's life; with nobody acting each forced frame cost ≈ 1.9 ms —
+  // two intersection passes, the commit, a style pass — ≈ 190 ms of main thread a second at 98 Hz). No loop now:
+  //   (1) A LONG FRAME is the browser's own word — the Long Animation Frames observer: a frame ≥ 300 ms is a gap {t: its end,
+  //       gap: its length}, the ring's meaning unchanged (jankStormVerdict / paintGapKind read the same {t, gap});
+  //   (2) ONE rAF A SECOND, asked by the 1-s tick below — THE STALL ARM COUNTS HOW LONG A FRAME THE PAGE ASKED FOR WENT
+  //       UNDELIVERED WHILE ITS TIMERS RAN (主开发's read of C's first form, which asked «how long since the last answer» of a
+  //       once-a-second heartbeat and filed «compositor … GPU side» for a plain 1.1–1.9 s main-thread task — 4 to 44 of 50
+  //       phases in a virtual page): a tick that comes LATE means the MAIN THREAD held the page, never the compositor, so the
+  //       undelivered time is counted from that tick on; a stall opens after two ON-TIME ticks found the frame still undelivered
+  //       and closes when it comes (its length = from the request). A late answer is a frame gap too, judged at the next tick
+  //       — once the long-frame observer has named any long frame that covers it (never counted twice);
+  //   (3) a browser WITHOUT the observer: the old per-frame loop, and only while a person acts (≤ 2 s after an input).
+  const pushGap = (end, gap) => {
+    if (gap >= 300 && !document.hidden && !frameGapIsReturn({ now: end, gap, visibleSince, hiddenAt })) { _frameGaps.push({ t: end, gap }); if (_frameGaps.length > 200) _frameGaps.shift(); }
   };
-  try { requestAnimationFrame(loop); } catch { return; }
+  const longFrames = []; // [{start, end}] — the last long frames the observer named (Date ms)
+  let observed = false;
+  try {
+    if (typeof PerformanceObserver === 'function' && (PerformanceObserver.supportedEntryTypes || []).includes('long-animation-frame')) {
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          const end = Math.round(performance.timeOrigin + e.startTime + e.duration), gap = Math.round(e.duration);
+          longFrames.push({ start: end - gap, end }); if (longFrames.length > 40) longFrames.shift();
+          pushGap(end, gap);
+        }
+      }).observe({ type: 'long-animation-frame' });
+      observed = true;
+    }
+  } catch { observed = false; }
+  let probeAt = 0, undeliveredSince = 0, heldTicks = 0, probeGap = null, lastAnswer = Date.now(), presenceFrom = 0;
+  // a stall that ended: its ring line, and an incident only when a person was there or the main thread was busy over it —
+  // «there» asked over the whole time the page could not vouch a frame was delivered: from the LAST FRAME IT KNOWS ARRIVED
+  // (`from`, the answer before the unanswered request), not from the request (主开发's second driver: a click as the frames
+  // stopped fell outside a window opened at the request — 0 / 12 / 33 of 50 at 0 / 300 / 700 ms into a 3-s stall)
+  const endStall = (ended, from = stallStart) => {
+    const dur = Math.round((ended - stallStart) / 1000 * 10) / 10;
+    _compStalls.push({ at: stallStart, s: dur });
+    if (_compStalls.length > 20) _compStalls.shift();
+    // UNPAINTED ≠ A STALL WORTH FILING (2.369.339, inc-mvi5ggqh-1tz8): the arm was
+    // built for the GPU case (the RTX-5090 verdict) where the person is THERE —
+    // keep that incident. But an idle desktop (monitor off / lock screen / an
+    // occluded window) stops painting with no busy main thread and nobody present:
+    // a metric + a ring line, never an auto incident the owner never felt.
+    if (paintGapKind({ t: ended, gap: ended - Math.min(from || stallStart, stallStart) }, { longTasks: _longTasks, inputs: _inputs }) === 'jank') {
+      metric('compositor-stall-s', dur);
+      track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
+      notifyFreeze({ kind: 'compositor', s: dur, at: stallStart, longTasks: _longTasks.slice(-5) });
+    } else {
+      metric('paint-gap-s', dur);
+      track('event', 'paint-gap', `${dur}s (rAF dead, timers alive — window not painting; no busy main thread, nobody present)`);
+    }
+    stallStart = 0;
+  };
+  const probe = () => {
+    if (probeAt) return; // (one in flight: a stalled compositor never stacks them)
+    probeAt = undeliveredSince = Date.now(); heldTicks = 0; presenceFrom = lastAnswer;
+    try {
+      requestAnimationFrame(() => {
+        const now = Date.now(), lat = now - probeAt; probeAt = 0; heldTicks = 0;
+        if (lat >= 300) probeGap = { end: now, gap: lat };
+        if (stallStart) endStall(now, presenceFrom);
+        lastAnswer = now;
+      });
+    } catch { probeAt = 0; }
+  };
+  // a late answer is a gap unless a long frame the observer named covers ≥ half of it (judged a tick later: the entry may come
+  // after the frame)
+  const mainHeld = (a, b) => longFrames.some((f) => f.end > a && f.start < b) || _longTasks.some((lt) => { const e = lt.at != null ? lt.at : lt.t, d = lt.ms != null ? lt.ms : (lt.dur || 0); return e > a && e - d < b; });
+  const flushProbeGap = () => {
+    const g = probeGap; probeGap = null;
+    if (g && !longFrames.some((f) => Math.min(f.end, g.end) - Math.max(f.start, g.end - g.gap) >= g.gap / 2)) pushGap(g.end, g.gap);
+  };
+  if (!observed) {
+    let running = false, lastFrame = 0, lastInput = 0;
+    const loop = () => {
+      const now = Date.now(); if (lastFrame) pushGap(now, now - lastFrame); lastFrame = now;
+      if (now - lastInput < 2000) requestAnimationFrame(loop); else { running = false; lastFrame = 0; }
+    };
+    const acted = () => { lastInput = Date.now(); if (running) return; running = true; lastFrame = 0; try { requestAnimationFrame(loop); } catch { running = false; } };
+    try { for (const t of ['pointerdown', 'pointermove', 'keydown', 'wheel']) window.addEventListener(t, acted, { capture: true, passive: true }); } catch { }
+  }
   let lastTick = Date.now();
   setInterval(() => {
     // SELF-GAP (2.340.3): if THIS 1s timer itself fired late by >3s, the whole
@@ -345,29 +420,14 @@ export function installCompositorStallWatch() {
       track('event', 'renderer-freeze', `${Math.round((tickGap - 1000) / 1000)}s (timer AND rAF stalled — whole renderer/system)`);
       notifyFreeze({ kind: 'renderer', s: Math.round((tickGap - 1000) / 100) / 10, at: tickNow - tickGap, longTasks: _longTasks.slice(-5) });
     }
-    if (document.hidden || Date.now() - visibleSince < 3000) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF; a return spike is not a stall
-    const age = Date.now() - lastRaf;
-    if (age > 2000 && !stallStart) stallStart = lastRaf;
-    if (age <= 2000 && stallStart) {
-      const ended = Date.now();
-      const dur = Math.round((ended - stallStart) / 1000 * 10) / 10;
-      _compStalls.push({ at: stallStart, s: dur });
-      if (_compStalls.length > 20) _compStalls.shift();
-      // UNPAINTED ≠ A STALL WORTH FILING (2.369.339, inc-mvi5ggqh-1tz8): the arm was
-      // built for the GPU case (the RTX-5090 verdict) where the person is THERE —
-      // keep that incident. But an idle desktop (monitor off / lock screen / an
-      // occluded window) stops painting with no busy main thread and nobody present:
-      // a metric + a ring line, never an auto incident the owner never felt.
-      if (paintGapKind({ t: ended, gap: ended - stallStart }, { longTasks: _longTasks, inputs: _inputs }) === 'jank') {
-        metric('compositor-stall-s', dur);
-        track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
-        notifyFreeze({ kind: 'compositor', s: dur, at: stallStart, longTasks: _longTasks.slice(-5) });
-      } else {
-        metric('paint-gap-s', dur);
-        track('event', 'paint-gap', `${dur}s (rAF dead, timers alive — window not painting; no busy main thread, nobody present)`);
-      }
-      stallStart = 0;
-    }
+    if (document.hidden || Date.now() - visibleSince < 3000) { stallStart = 0; heldTicks = 0; undeliveredSince = Date.now(); return; } // hidden tabs legitimately stop rAF; a return spike is not a stall
+    flushProbeGap();
+    if (!probeAt) { probe(); return; } // the one frame this second asks for
+    // the frame asked for has not come: a HELD tick = on time AND no long frame / long task of the page's own since the last
+    // one (the timers ran, the main thread was free — the compositor did not deliver); otherwise the MAIN THREAD held the page
+    // (a task, a storm of them) — its own hold, counted from here on, never a compositor stall
+    if (tickGap < 1500 && !mainHeld(prevTick, tickNow)) heldTicks++; else { heldTicks = 0; undeliveredSince = tickNow; }
+    if (heldTicks >= 2 && !stallStart) stallStart = undeliveredSince;
   }, 1000);
 }
 

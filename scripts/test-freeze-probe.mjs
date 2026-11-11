@@ -109,12 +109,109 @@ ok(selfGapIsFreeze({ tickGap: 4001, prevTick: T + 100000, now: T + 104001, hidde
 // a metric (not an incident), and the recorder carries the new screen facts ──
 {
   const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
-  ok(/if \(gap >= 300 && !document\.hidden && !frameGapIsReturn\(\{ now, gap, visibleSince, hiddenAt \}\)\)/.test(src), 'WIRING: the rAF loop pushes a frame gap only when it is not a return');
+  // lane window-close-stall C (主开发's read of the first form: «how long since the last answer» of a once-a-second heartbeat
+  // filed «compositor stall … GPU side» for a plain 1.1–1.9 s main-thread task, 4 to 44 of 50 phases): A VIRTUAL PAGE — one
+  // main thread, the 1-s tick, rAF answered at the next 10-ms vsync when the thread is free (or WITHHELD: the compositor), long
+  // tasks that hold everything, the long-animation-frame entry after a task — over the REAL telemetry-client.js (input stamp,
+  // long-task watch, stall watch installed), in a child process. THE LAW: the arm counts how long a frame the page ASKED FOR
+  // went undelivered while its timers ran; a main-thread task is never a compositor stall.
+  {
+    const os = await import('node:os'), cp = await import('node:child_process'), path = (await import('node:path')).default, { fileURLToPath } = await import('node:url');
+    const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'), J = JSON.stringify;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stall-sim-'));
+    const SIM = `import { pathToFileURL } from 'node:url';
+const [mod, kind, arg, actArg] = process.argv.slice(2), L = Number(arg), ACT = Number(actArg || 0), PHASES = 50, VSYNC = 10;
+let now = 1800000000000; const RD = Date; globalThis.Date = class extends RD { static now() { return now; } };
+let timers = [], rafs = [], seq = 0, busyUntil = 0, withheldUntil = 0, pendingLoaf = null;
+globalThis.setInterval = (fn, ms) => { timers.push({ fn, ms, due: now + ms, id: ++seq, rep: true }); return seq; };
+globalThis.setTimeout = (fn, ms = 0) => { timers.push({ fn, ms, due: now + ms, id: ++seq, rep: false }); return seq; };
+globalThis.clearTimeout = (id) => { timers = timers.filter((t) => t.id !== id); }; globalThis.clearInterval = globalThis.clearTimeout;
+globalThis.requestAnimationFrame = (cb) => { rafs.push(cb); return ++seq; };
+const ls = {}; globalThis.document = { activeElement: null, body: {}, hidden: false, addEventListener: () => {}, visibilityState: 'visible' };
+globalThis.window = { addEventListener: (t, f) => { (ls[t] ||= []).push(f); }, requestAnimationFrame: globalThis.requestAnimationFrame };
+globalThis.performance = { timeOrigin: now, now: () => now - globalThis.performance.timeOrigin };
+let loafCb = null, ltCb = null;
+globalThis.PerformanceObserver = class { constructor(cb) { this.cb = cb; } observe(o) { if (o.type === 'long-animation-frame') loafCb = this.cb; if (o.type === 'longtask' || (o.entryTypes || []).includes('longtask')) ltCb = this.cb; } disconnect() {} static get supportedEntryTypes() { return ['longtask', 'long-animation-frame']; } };
+Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'sim', sendBeacon: () => true }, configurable: true }); globalThis.location = { href: 'http://x/', pathname: '/' }; globalThis.fetch = async () => ({ ok: true, json: async () => ({}) });
+const T = await import(pathToFileURL(mod).href);
+const filed = []; T.onRendererFreeze((f) => filed.push(f));
+T.installInputStamp(); T.installLongTaskWatch(); T.installCompositorStallWatch();
+const step = (ms) => { const end = now + ms; while (now < end) {
+  if (now < busyUntil) { now = Math.min(busyUntil, end); continue; }
+  if (pendingLoaf) { const e = pendingLoaf; pendingLoaf = null; if (ltCb) ltCb({ getEntries: () => [e] }); if (loafCb) loafCb({ getEntries: () => [e] }); }
+  for (let i = 0; i < timers.length; i++) { const t = timers[i]; if (t.due <= now) { if (t.rep) t.due = now + t.ms; else { timers.splice(i, 1); i--; } try { t.fn(); } catch (e) { } if (now < busyUntil) break; } }
+  if (rafs.length && now >= withheldUntil && now >= busyUntil && now % VSYNC === 0) { const q = rafs; rafs = []; for (const cb of q) cb(); }
+  let next = end; for (const t of timers) if (t.due < next) next = t.due;
+  if (rafs.length) next = Math.min(next, Math.max(withheldUntil, Math.ceil((now + 1) / VSYNC) * VSYNC));
+  now = Math.max(now + 1, Math.min(next, end));
+} };
+const click = () => { for (const f of (ls.pointerdown || [])) f({}); };
+const out = { comp: 0, ring: 0, lens: [] };
+if (kind === 'task') for (let p = 0; p < PHASES; p++) {
+  step(5000 + p * (1000 / PHASES)); const b = filed.length, r = T.recentCompositorStalls().length;
+  click(); const start = now; busyUntil = now + L; pendingLoaf = { startTime: start - globalThis.performance.timeOrigin, duration: L };
+  step(L + 6000); out.comp += filed.slice(b).filter((f) => f.kind === 'compositor').length; out.ring += T.recentCompositorStalls().length - r;
+}
+else if (kind === 'storm') for (let p = 0; p < 10; p++) { // a STORM: tasks of L ms back to back, each started by a timer right after the tick — the frame never gets a free vsync
+  step(5000 + p * 100); const b = filed.length, r = T.recentCompositorStalls().length; click(); let n = 0;
+  const go = () => { if (n++ >= 5) return; const s0 = now; busyUntil = now + L; pendingLoaf = { startTime: s0 - globalThis.performance.timeOrigin, duration: L }; timers.push({ fn: go, ms: 0, due: now + L, id: ++seq, rep: false }); };
+  go(); step(6 * L + 6000); out.comp += filed.slice(b).filter((f) => f.kind === 'compositor').length; out.ring += T.recentCompositorStalls().length - r;
+}
+else if (kind === 'stall-act') for (let p = 0; p < PHASES; p++) { // every frame withheld L ms, the thread free; ONE act ACT ms into it (the way a person meets a frozen window: a click, then nothing paints)
+  step(5000 + p * (1000 / PHASES)); const b = filed.length; withheldUntil = now + L;
+  if (ACT) step(ACT); click(); step(L - ACT + 4000); if (filed.slice(b).some((x) => x.kind === 'compositor')) out.comp++;
+}
+else for (let p = 0; p < 5; p++) { // the compositor withholds every frame for L ms, the main thread free; a person there (or not)
+  step(5000 + p * 200); const b = filed.length, r = T.recentCompositorStalls().length;
+  if (kind === 'stall-person') click(); withheldUntil = now + L; if (kind === 'stall-person') { step(L / 2); click(); step(L / 2); } else step(L);
+  step(4000); const f = filed.slice(b).filter((x) => x.kind === 'compositor'); out.comp += f.length; out.ring += T.recentCompositorStalls().length - r; for (const x of f) out.lens.push(x.s);
+}
+console.log(JSON.stringify(out));`;
+    fs.writeFileSync(path.join(dir, 'sim.mjs'), SIM);
+    const TC = path.join(ROOT, 'src/lib/telemetry-client.js'), TSRC = fs.readFileSync(TC, 'utf8');
+    const bv = path.join(ROOT, 'src/lib/build-version.js');
+    fs.writeFileSync(path.join(dir, 'build-version.js'), fs.existsSync(bv) ? fs.readFileSync(bv, 'utf8') : "export const BUILD_VERSION = 'test';\n");
+    const copy = (name, src) => { const f = path.join(dir, name + '.mjs'); fs.writeFileSync(f, src.replace("from './build-version.js'", "from './build-version.js'")); return f; };
+    const sim = (mod, kind, L, act = 0) => { try { return JSON.parse(cp.execFileSync(process.execPath, [path.join(dir, 'sim.mjs'), mod, kind, String(L), String(act)], { encoding: 'utf8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').pop()); } catch (e) { return { error: String(e.message || e).slice(0, 200) }; } };
+    const real = copy('telemetry-client', TSRC);
+    const tasks = [1100, 1200, 1500, 1900, 2500].map((L) => [L, sim(real, 'task', L)]);
+    ok(tasks.every(([, r]) => r.comp === 0 && r.ring === 0), `A MAIN-THREAD TASK IS NEVER A COMPOSITOR STALL: tasks of ${tasks.map(([L]) => L).join(' / ')} ms (a click just before), each at 50 phases of the tick ⇒ 0 compositor incidents, 0 stall-ring lines (C's first form: 4 / 9 / 24 / 44 of 50; master 50 of 50 at 2 500)`, tasks);
+    const s3 = sim(real, 'stall-person', 3000), s6 = sim(real, 'stall-person', 6000), idle = sim(real, 'stall-idle', 3000);
+    const storm = sim(real, 'storm', 1200);
+    ok(storm.comp === 0 && storm.ring === 0, `…nor a STORM of them: six tasks of 1 200 ms back to back (the frame never gets a free vsync, each tick ~1.2 s apart) at 10 phases ⇒ 0 incidents, 0 ring lines`, storm);
+    ok(s3.comp === 5 && s3.lens.every((x) => Math.abs(x - 3) <= 1) && s6.comp === 5 && s6.lens.every((x) => Math.abs(x - 6) <= 1), `A REAL COMPOSITOR STALL (every frame withheld 3 s / 6 s, the main thread free, a person there) is still filed ONCE each, its length within a second of the truth (${J(s3.lens)} / ${J(s6.lens)})`, { s3, s6 });
+    ok(idle.comp === 0 && idle.ring === 5, `…the same 3-s stall with NOBODY there is a paint gap (a ring line, ${idle.ring} of 5) — never an incident (${idle.comp})`, idle);
+    // 主开发's second driver, as a row: ONE act at 0 / 300 / 700 / 1 200 ms into a 3-s and a 6-s stall, 50 phases each ⇒ an
+    // incident in every phase — «a person was there» asked from the LAST FRAME the page knows arrived, not from the unanswered
+    // request (C round 2's window lost 50 / 38 / 17 of 50 at 0 / 300 / 700 ms)
+    const acts = [];
+    for (const S of [3000, 6000]) for (const A of [0, 300, 700, 1200]) acts.push([S, A, sim(real, 'stall-act', S, A).comp]);
+    ok(acts.every(([, , n]) => n === 50), `A PERSON WHO MET THE FROZEN WINDOW IS THERE: one act at 0 / 300 / 700 / 1 200 ms into a 3-s and a 6-s stall ⇒ an incident in ${acts.map(([S, A, n]) => `${S / 1000}s@${A}:${n}`).join(' · ')} of 50 phases`, acts);
+    const M3 = TSRC.replace('        if (stallStart) endStall(now, presenceFrom);', '        if (stallStart) endStall(now);');
+    const m3 = M3 !== TSRC ? sim(copy('m3', M3), 'stall-act', 3000, 0).comp : null;
+    ok(m3 !== null && m3 < 50, `CONTROL: the presence window opened at the probe's request (round 2's) ⇒ an act at the stall's first ms is «nobody there» in ${m3 === null ? 'ANCHOR GONE' : 50 - m3} of 50 phases — RED`, m3);
+    // MUTANTS — each RED by name: a stall opened after ONE held tick (the tick a task delayed); the first form's «time since the
+    // last answer», asked at every tick
+    const M1 = TSRC.replace('if (tickGap < 1500 && !mainHeld(prevTick, tickNow)) heldTicks++;', 'if (tickGap < 1500) heldTicks++;');
+    const M2 = TSRC.replace('let probeAt = 0, undeliveredSince = 0, heldTicks = 0, probeGap = null;', 'let probeAt = 0, undeliveredSince = 0, heldTicks = 0, probeGap = null, lastAnswer = Date.now();')
+      .replace('const now = Date.now(), lat = now - probeAt; probeAt = 0; heldTicks = 0;', 'const now = Date.now(), lat = now - probeAt; probeAt = 0; heldTicks = 0; lastAnswer = now;')
+      .replace('    flushProbeGap();\n    if (!probeAt) { probe(); return; }', '    flushProbeGap();\n    if (tickNow - lastAnswer > 2000 && !stallStart) stallStart = lastAnswer;\n    if (!probeAt) { probe(); return; }');
+    const m1 = M1 !== TSRC ? sim(copy('m1', M1), 'storm', 1200) : null, m2 = M2 !== TSRC ? sim(copy('m2', M2), 'task', 1500) : null;
+    ok(!!m1 && (m1.comp + m1.ring) > 0 && !!m2 && m2.comp > 0, `CONTROLS: a held tick that does not ask whether the page's own long frames held it ⇒ ${m1 && m1.ring} of 10 storms written as a compositor stall (ring lines, ${m1 && m1.comp} incidents); the first form's time since the last answer ⇒ ${m2 && m2.comp} of 50 of 1 500 ms — both RED`, { m1, m2 });
+    if (process.env.VS_STALL_SIM_KEEP) console.log('    (sim kept in ' + dir + ')'); else try { fs.rmSync(dir, { recursive: true, force: true }); } catch { }
+  }
+  ok(/const pushGap = \(end, gap\) => \{\n    if \(gap >= 300 && !document\.hidden && !frameGapIsReturn\(\{ now: end, gap, visibleSince, hiddenAt \}\)\)/.test(src), 'WIRING: a frame gap (a long frame, a late probe, the fallback loop) is pushed only when it is not a return');
+  // lane window-close-stall (the owner's recording: this watch's rAF loop forced a frame at every vsync, ≈ 190 ms of main thread
+  // a second with nobody acting): THE PAGE NEVER ASKS FOR A FRAME IT DOES NOT PAINT — long frames from the observer, one probe a
+  // second from the tick, the per-frame loop only without the observer and only while a person acts
+  const W2 = (src.match(/export function installCompositorStallWatch\(\) \{[\s\S]*?\n\}\n/) || [''])[0];
+  ok(/\.observe\(\{ type: 'long-animation-frame' \}\)/.test(W2) && /    if \(!probeAt\) \{ probe\(\); return; \} \/\/ the one frame this second asks for/.test(W2) && /if \(now - lastInput < 2000\) requestAnimationFrame\(loop\); else \{ running = false;/.test(W2) && /if \(!observed\) \{/.test(W2) && (W2.match(/requestAnimationFrame\(/g) || []).length === 3,
+    'NO PERMANENT rAF: frame gaps from the long-animation-frame observer, ONE rAF a second asked by the tick (the stall arm\'s heartbeat), the per-frame loop only where the observer is missing and only ≤ 2 s after an input — three requestAnimationFrame calls in the watch, none unconditional', (W2.match(/requestAnimationFrame\(/g) || []).length);
   ok(/jankStormVerdict\(_frameGaps, \{ now: tickNow, visibleSince, longTasks: _longTasks, inputs: _inputs \}\)/.test(src), 'WIRING: the live jank-storm verdict is handed the long tasks and the input stamps');
   ok(/if \(paintGapKind\(f, \{ longTasks, inputs \}\) !== 'jank'\) continue;/.test(src), 'WIRING: the storm verdict drops any gap that is not jank (unpainted never counts)');
-  ok(/paintGapKind\(\{ t: ended, gap: ended - stallStart \}, \{ longTasks: _longTasks, inputs: _inputs \}\) === 'jank'/.test(src), 'WIRING: the compositor arm classifies its stall by the same verdict');
+  ok(/paintGapKind\(\{ t: ended, gap: ended - Math\.min\(from \|\| stallStart, stallStart\) \}, \{ longTasks: _longTasks, inputs: _inputs \}\) === 'jank'/.test(src), 'WIRING: the compositor arm classifies its stall by the same verdict (its presence window from the last frame the page knows arrived)');
   ok(/metric\('paint-gap-s', dur\);/.test(src) && /track\('event', 'paint-gap',/.test(src), 'WIRING: an unpainted compositor stall is a paint-gap metric + a ring line');
-  const ci = src.indexOf("paintGapKind({ t: ended, gap: ended - stallStart }");
+  const ci = src.indexOf("paintGapKind({ t: ended, gap: ended - Math.min(from || stallStart, stallStart) }");
   const compBlock = src.slice(ci, src.indexOf('stallStart = 0;', ci));
   ok(compBlock.includes("notifyFreeze({ kind: 'compositor'") && compBlock.includes('} else {') && compBlock.includes("metric('paint-gap-s'") && compBlock.indexOf("notifyFreeze({ kind: 'compositor'") < compBlock.indexOf('} else {'), 'WIRING: notifyFreeze for a compositor stall is in the jank branch; the unpainted (else) branch files only a metric — no auto incident');
   ok(/window\.addEventListener\('pointerdown', noteInput/.test(src) && /window\.addEventListener\('keydown', noteInput/.test(src), 'WIRING: the input-stamp ring listens to pointerdown + keydown');
