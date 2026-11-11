@@ -641,8 +641,10 @@ const mod = mkModule();
   check('the wrapper\'s permission_rules answer fires NO unknown-record breadcrumb (it is a named side channel, deliberately card-less)',
     fire('permission_rules').length === 0, JSON.stringify(fire('permission_rules')));
   // NEGATIVE CONTROL: the detector still sees a genuinely unknown type, so the
-  // zero above is a measurement and not a blind spot.
-  const ctl = fire('some_future_codex_event');
+  // zero above is a measurement and not a blind spot. It counts ITS OWN breadcrumb only: since cli-self-measure
+  // (2.369.393) an unknown record kind ALSO fires the shared `cli-record-kind` count (src/message-window.js) —
+  // another detector's signal, not this one's (int393 seam).
+  const ctl = fire('some_future_codex_event').filter(([n]) => String(n).startsWith('codex-unknown-record:'));
   check('NEGATIVE CONTROL: a genuinely unknown event_msg type still fires the breadcrumb (the signal this fix protects is alive)',
     ctl.length === 1 && ctl[0][0] === 'codex-unknown-record:some_future_codex_event', JSON.stringify(ctl));
   // the comment that promised a client broadcast the client never had
