@@ -1125,6 +1125,16 @@ function create({
    */
   async function onConversationEnded(cid, { why = 'archived', at = null } = {}) {
     if (!G.isCid(cid) || !G.ENDED_WHYS.includes(why)) return { ok: false, closed: [], marked: [] };
+    // AN END THAT CHANGES NOTHING WRITES NOTHING AND ANNOUNCES NOTHING (lane groups-sweep-on-change): the ledger already says
+    // this end, and no unarchived group would close (a pair) or be told (a multi-member group it was not said in) — no store
+    // update (groups.json rewritten), no broadcast (the full list rebuilt for every page)
+    {
+      const cur = store.groups.live() || {};
+      const prev = cur.ended && cur.ended[cid];
+      const said = !!(prev && prev.why === why);
+      const touches = Object.values(cur.groups || {}).some((g) => g && !g.archivedAt && G.memberOf(g, cid) && (g.pair || !said));
+      if (said && !touches) return { ok: true, closed: [], marked: [], unchanged: true };
+    }
     const closed = [], marked = [], recs = [];
     await store.groups.update((gr) => {
       gr.ended = gr.ended && typeof gr.ended === 'object' ? gr.ended : {};
@@ -1151,16 +1161,16 @@ function create({
       }
     });
     const changed = closed.concat(marked);
-    if (changed.length) announce(changed, recs);
-    else announce([], null, null, { pending: false });
+    if (changed.length) announce(changed, recs);   // an announce names what changed — a ledger row alone changed no group: nothing is sent
     return { ok: true, closed, marked };
   }
   /** The archive was LIFTED (the owner un-archived it): the ledger row goes — its rows wait again (a closed pair stays
    *  closed: a new `send` makes a new pair). */
   async function onConversationRevived(cid) {
     let moved = false;
+    { const cur = store.groups.live() || {}; if (!(cur.ended && cur.ended[cid] && cur.ended[cid].why === 'archived')) return false; }   // nothing to lift: nothing written
     await store.groups.update((gr) => { if (gr.ended && gr.ended[cid] && gr.ended[cid].why === 'archived') { delete gr.ended[cid]; moved = true; } });
-    if (moved) announce([], null, null, { pending: false });
+    if (moved) { const touched = Object.values(all()).filter((g) => !g.archivedAt && G.memberOf(g, cid)).map((g) => g.id); if (touched.length) announce(touched, null, null, { pending: false }); }   // the groups it is in, never the full list for nothing
     return moved;
   }
   /** THE STANDING RULE (boot, after restoreSessions, and every archive): every member of a live group is asked the

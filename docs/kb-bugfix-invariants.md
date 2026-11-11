@@ -6,6 +6,7 @@
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- (2026-11-11) EVERY USER-STATE WRITE SWEPT THE ENDED GROUPS, AND AN END THAT CHANGED NOTHING REWROTE groups.json AND BROADCAST THE FULL LIST (groups-sweep-on-change) — 不变量 = a sweep acts only on a change (or after 10 min); a no-op writes and says nothing ⇒ kb-bugfix-invariants
 - (2026-11-11) THE GROUPS LIST REBUILT THE LIVE ROSTER PER MEMBER, 1 448 TIMES; EACH ARCHIVE WALKED THE CODEX TREE PER ID (roster-per-pass) — 不变量 = a pass builds the roster once, valid only while what it read holds; a sweep reads each tree once, off the loop ⇒ kb-bugfix-invariants
 - THE OUTBOX BUTTON DID NOTHING — ITS WINDOW WAS ON ANOTHER DESKTOP (userW inc-muv3qfo7-96tm): revealWindow focused a hidden window. FIX = reveal switches to the window's desktop first; a census of singleton openers. 不变量 = reveal lifts every hider, the desktop included
 - A PARKED GROUP MESSAGE WAITED THROUGH A BILLED WAKE (owner): the next-turn drain was gated on a keystroke. FIX = any billed turn drains it; the echo guard became words. 不变量 = what waits for the next turn rides the next turn, whoever started it
@@ -955,6 +956,16 @@
 - **A cleanup step that fails is never said.** One failure is made up for by the later steps. If `removeCredential`, `removeVirtualAuthenticator` and `disable` ALL fail on a live session, the key stays while VibeSpace believes it gone — it must be said by name, and the tab named to the person.
 - **`cancelPasskey` marks EVERY pending record of the context.** That includes one that arrived in the same socket read as the cancel's answer, which the hook did not cancel: it is never released and the page waits out its hold (no key is involved). Mark only what was pending before the await.
 - **UNMEASURED: the watch's socket closed or the hub restarted during a lent ceremony.** Whether Chrome drops the virtual authenticator with the DevTools session needs real Chrome. Measure it first; it decides whether a re-arm needs a sweep.
+
+## EVERY USER-STATE WRITE SWEPT THE ENDED GROUPS, AND AN END THAT CHANGED NOTHING REWROTE groups.json AND BROADCAST THE FULL LIST (the owner, 2026-11-11; lane groups-sweep-on-change commit 1, on 2.369.394)
+
+**Symptom.** «The frontend keeps getting worse»: starring, renaming, archiving or changing a session setting froze the hub a second or more, and every page redrew its groups list. The owner's capture: the sweep chain 5 729 ms of 20 s (28.6 % of the main thread).
+
+**Cause.** channels-wiring's `noteUserState` swept on every user-state write, whatever was written; and an end already said for a member of a live multi-member group (or a ledger row alone, or a revive with nothing to lift) still ran the store update and `announce([], …)` — groups.json rewritten and the full list rebuilt and broadcast for an empty change.
+
+**Fix.** `judgedSig` — the archived set, the unarchived groups' members and the ended ledger — gates the sweep: a write that moves none of it starts none (boot and re-runs always sweep) — unless the last sweep ended more than ten minutes ago: a transcript that leaves the disk moves nothing the signature reads, and «A MESSAGE TO A CONVERSATION THAT ENDED WAITED FOR EVER» (a dead addressee is said, its pair closes) must not wait for the next archive or boot, so a quiet write still sweeps once per ten minutes of activity (≈ 5.5 ms at the owner's shape). `onConversationEnded` returns before the store when nothing would change; an announce names what changed, never the full list for nothing.
+
+**不变量.** A sweep acts only on a change of what it judges, or when the last one ended more than ten minutes ago (a «gone» is still said within minutes of activity); an act that changes nothing writes nothing and announces nothing. Gated by test-groups-sweep-on-change: red on master 3c7ae82a2, and each part of the signature and the bound red on a patch the suite carries with that part out.
 
 ## THE GROUPS LIST REBUILT THE WHOLE LIVE ROSTER PER MEMBER — 1 448 TIMES PER LIST — AND EVERY ARCHIVE WALKED THE CODEX TREE PER ID (the owner's hub and a fleet hub, main thread 85–93 % in JS, 2026-11-10 ~21:43 PT; lane roster-per-pass, .393)
 

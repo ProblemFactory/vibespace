@@ -148,14 +148,40 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // conversation is told after at most the sweep already running, 5 s, and one more sweep — and a sweep holds up to 1 + G
   // walks, each with its own 10 s bound: its index of both trees, then one fresh walk for each of its G gone candidates whose
   // act would change something (a «gone» already said in a live multi-member group is no act, so it is never asked again).
-  let sweeping = null, sweepAgain = false, lastEnd = -Infinity, gapWait = null;
+  // A SWEEP ACTS ONLY ON A CHANGE (lane groups-sweep-on-change, the owner's profile 2026-11-11: the sweep chain was 28.6 % of
+  // the owner's hub main thread, run by EVERY user-state write — a star, a rename, a setting): a write starts a sweep only when
+  // what the sweep judges moved since the last one saw it — the archived set (the user state's only input to liveness),
+  // the members of the unarchived groups and the ended ledger. The first ask (boot) always sweeps; `force` too.
+  // …AND A «GONE» IS STILL SAID WITHIN MINUTES (kb-bugfix-invariants «A MESSAGE TO A CONVERSATION THAT ENDED WAITED FOR
+  // EVER»: a dead addressee is said and its pair closes): a transcript that leaves the disk moves nothing the signature
+  // reads, so a write that changes nothing it judges still sweeps when the last sweep ENDED more than SWEEP_STALE_MS ago —
+  // at most one sweep per ten minutes of activity (≈ 5.5 ms of main thread at the owner's shape). A hub with no write at all
+  // judges it at the next write or the next boot, as on master.
+  const SWEEP_STALE_MS = 10 * 60 * 1000;
+  const crypto = require('crypto');
+  const judgedSig = () => {
+    try {
+      const st = readUserState() || {}, arch = Array.isArray(st.archivedSessions) ? st.archivedSessions : [];
+      const gr = channels.store.groups.live() || {}, mem = [];
+      for (const g of Object.values(gr.groups || {})) if (g && !g.archivedAt) for (const m of g.members || []) mem.push(m.member);
+      const h = crypto.createHash('sha1');
+      h.update(arch.join('\n')); h.update('\u0000'); h.update(mem.sort().join('\n')); h.update('\u0000'); h.update(Object.keys(gr.ended || {}).sort().join('\n'));
+      return `${arch.length}:${mem.length}:${h.digest('hex')}`;
+    } catch { return null; }   // unknown ⇒ sweep (never skip on a read that failed)
+  };
+  let sweeping = null, sweepAgain = false, lastEnd = -Infinity, gapWait = null, lastSig = null, startSig = null;
+  const counts = { sweeps: 0, skipped: 0 };
   const runSweep = () => {
     gapWait = null;
-    sweeping = groups.sweepEnded().catch((e) => console.warn('[groups] ended sweep failed:', e && e.message)).finally(() => { sweeping = null; lastEnd = now(); if (sweepAgain) { sweepAgain = false; groups.noteUserState(); } });
+    startSig = judgedSig(); counts.sweeps++;
+    sweeping = groups.sweepEnded().catch((e) => console.warn('[groups] ended sweep failed:', e && e.message)).finally(() => { sweeping = null; lastEnd = now(); lastSig = judgedSig(); if (sweepAgain) { sweepAgain = false; groups.noteUserState({ force: true }); } });
     return sweeping;
   };
-  groups.noteUserState = () => {
-    if (sweeping) { sweepAgain = true; return sweeping; }
+  groups.sweepCounts = () => ({ ...counts });   // the drill's count (sweeps run, writes that changed nothing it judges)
+  groups.noteUserState = ({ force = false } = {}) => {
+    const sig = force ? null : judgedSig();
+    if (sweeping) { if (force || sig === null || sig !== startSig) sweepAgain = true; return sweeping; }
+    if (!force && sig !== null && lastSig !== null && sig === lastSig && !gapWait && now() - lastEnd <= SWEEP_STALE_MS) { counts.skipped++; return Promise.resolve(null); }   // nothing it judges moved, the last sweep < 10 min ago
     if (gapWait) return gapWait.p;
     const wait = lastEnd + sweepGapMs - now();
     if (!(wait > 0)) return runSweep();

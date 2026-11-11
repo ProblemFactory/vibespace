@@ -504,10 +504,12 @@ const LEGS = {
     const GAP = 60;
     const x = await world(A, { gap: GAP, now: () => Date.now() });
     let starts = 0; const real = x.w.groups.sweepEnded; x.w.groups.sweepEnded = (...a) => { starts++; return real(...a); };
-    const p = x.w.groups.noteUserState(); const atOnce = starts;
+    // each write ARCHIVES something (lane groups-sweep-on-change: a write that changes nothing the sweep judges starts none)
+    let k = 0; const archive = () => { x.st.userState = { ...x.st.userState, archivedSessions: [...x.st.userState.archivedSessions, `claude:${U(0x6e00 + ++k)}`] }; return x.w.groups.noteUserState(); };
+    const p = archive(); const atOnce = starts;
     await p; const end1 = Date.now();
-    x.w.groups.noteUserState(); const inGap = starts;
-    await sleep(GAP / 3); x.w.groups.noteUserState(); x.w.groups.noteUserState();   // more writes in the gap: one sweep answers them
+    archive(); const inGap = starts;
+    await sleep(GAP / 3); archive(); archive();   // more writes in the gap: one sweep answers them
     let startedAt = null; while (starts === inGap && Date.now() - end1 < 2000) await sleep(5); startedAt = Date.now();
     const waited = startedAt - end1;
     await sleep(GAP + 20);
@@ -522,7 +524,7 @@ const LEGS = {
     for (let i = 0; i < N; i++) {
       const due = t0 + (i * 11 * G0) / (N - 1);
       while (performance.now() < due) await sleep(Math.max(0, Math.min(2, due - performance.now())));
-      x.st.userState = { ...x.st.userState, archivedSessions: [...x.st.userState.archivedSessions] }; x.w.groups.noteUserState();
+      x.st.userState = { ...x.st.userState, archivedSessions: [...x.st.userState.archivedSessions, `claude:${U(0x6f00 + i)}`] }; x.w.groups.noteUserState();   // each write archives one (a change the sweep judges)
     }
     const span = performance.now() - t0;
     await sleep(G0 * 4);
