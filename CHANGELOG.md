@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.393 — 2026-11-11
+
+### Added
+- An agent can ask you for a two-step code: its card in For you has the fields of Vault ▸ Add ▸ Two-step code…, and the agent may suggest its name.
+- Its tick lets that conversation read the current code while it runs — never the seed. After a restart, Vault ▸ Two-step codes ▸ Use for… gives it again.
+
 ## 2.369.392 — 2026-11-11
 
 ### Fixed
