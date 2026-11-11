@@ -1976,6 +1976,46 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
   let hitCalls = 0; const countHit = () => { hitCalls++; return []; };
   const pc = placeRun(BTN, [...maxedIn, w1, wFront], { hits: countHit }), ps = placeRun(BTN, [...maxedIn, w1, wBehind], { hits: countHit });
   ok(hitCalls === 0, `lane window-close-stall (the owner's recording: a close's toast placement ran 76 + 79 elementsFromPoint at 10.8 ms each): the toasts' and the announce's chrome rule asks the window manager's stacking — 0 hit tests (${hitCalls})`, hitCalls);
+  // lane window-close-stall — THE STACKING RULE'S FOUR EDGES (主开发's eight mutants of utils.js: four went green over every
+  // fast row). A composer inside window w1 (z 100), the column the whole width; each edge on its own, the REAL utils and a
+  // patched copy each (scripts/mutant-copy.mjs) — each mutant RED by name:
+  //   M2 a window in front over ONE corner of it ⇒ still kept (a point a person sees)            [some → every]
+  //   M4 a float in front that the rule passes over (the toasts' own) ⇒ still kept               [!skip(f) dropped]
+  //   M5 an open float (a menu, a popover, the For-you window) over it ⇒ covered, not kept       [floats never in front]
+  //   M6 a window on ANOTHER desktop (visibility:hidden) stacked above it ⇒ still kept           [showsHere(w) dropped]
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const MU = mutantCopies('ut-stack', ROOT);
+    const USRC = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8');
+    const comp = box(0, 640, 1280, 756);
+    const sceneOf = (edge) => {
+      const w1 = fakeWin(box(0, 40, 1280, 760), 100), c = inWin(w1, fakeEl('.chat-input-area', comp));
+      if (edge === 'M2') { const w2 = fakeWin(box(0, 600, 40, 660), 101); return { els: [c, w1, w2], over: () => false, want: 1 }; }
+      if (edge === 'M4') { const t = fakeEl('[data-popover]', box(0, 600, 1280, 800)); t.closest = (q) => (q === '#global-toasts' ? t : null); return { els: [c, w1, t], over: (e) => !!e.closest?.('#global-toasts'), want: 1 }; }
+      if (edge === 'M5') { const f = fakeEl('[data-popover]', box(0, 600, 1280, 800)); f.closest = () => null; return { els: [c, w1, f], over: () => false, want: 0 }; }
+      const w3 = fakeWin(box(0, 600, 1280, 800), 102); w3.checkVisibility = () => false; return { els: [c, w1, w3], over: () => false, want: 1 };
+    };
+    const kept = (Umod, edge) => { const sc = sceneOf(edge); const doc = { querySelectorAll: (sel) => sc.els.filter((e) => tags(sel).includes(e.sel)), getElementById: () => null };
+      globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
+      try { return { n: Umod.chromeAvoidRects(0, 1280, sc.over).length, want: sc.want }; } finally { globalThis.document = had.document; globalThis.window = had.window; } };
+    const MUT = {
+      M2: ['  return pts.some(([x, y]) => !fronts.some(', '  return pts.every(([x, y]) => !fronts.some('],
+      M4: ['!(win && win.contains(f)) && !skip(f) && showsHere(f)) take(f); });', '!(win && win.contains(f)) && showsHere(f)) take(f); });'],
+      M5: ['floats.forEach((f, i) => { if (i > mine && ', 'floats.forEach((f, i) => { if (i < mine && '],
+      M6: ['zOfWin(w) > z && !skip(w) && showsHere(w)) take(w); }', 'zOfWin(w) > z && !skip(w)) take(w); }'],
+    };
+    const rows = [];
+    for (const [edge, [from, to]] of Object.entries(MUT)) {
+      const real = kept(U, edge);
+      const applied = USRC.split(from).length === 2;
+      const Um = applied ? await import(pathToFileURL(MU.write('src/lib/utils.js', USRC.replace(from, to), edge.toLowerCase())).href) : null;
+      const mut = Um ? kept(Um, edge) : null;
+      rows.push({ edge, real, mut, applied });
+    }
+    ok(rows.every((r) => r.real.n === r.real.want), `the stacking rule's four edges on the REAL utils: ${rows.map((r) => `${r.edge} kept ${r.real.n} (want ${r.real.want})`).join(' · ')} — one corner covered still kept; a passed-over float passes; an open float covers; another desktop's window covers nothing`, rows);
+    ok(rows.every((r) => r.applied && r.mut && r.mut.n !== r.mut.want), `CONTROLS (主开发's mutants M2 / M4 / M5 / M6): each patched copy breaks its own edge — ${rows.map((r) => `${r.edge} ${r.applied ? 'kept ' + (r.mut && r.mut.n) : 'ANCHOR GONE'}`).join(' · ')} — each RED by name`, rows);
+  }
+
   ok(!!p1.rect && !meets(p1.rect, composer) && !meets(p1.rect, strip) && p1.rect.bottom <= strip.top && !!p2.rect && !meets(p2.rect, controls) && p2.rect.top >= controls.bottom && !!p3.rect && p3.rect.top === 554,
     `RED-able (r14 — 5b4b36649: the stack stood by the For-you button over a maximized chat's composer — the toasts above it cleared it): the stack never stands on a window's own controls — a maximized chat's composer and strip under its place ⇒ it RISES above both (top ${p1.rect && p1.rect.top}); under a top bar's button a window's title-bar buttons ⇒ it SINKS below them (top ${p2.rect && p2.rect.top}); nothing there ⇒ its own place (top ${p3.rect && p3.rect.top})`, { p1, p2, p3 });
   ok(!!m1.rect && meets(m1.rect, composer), 'CONTROL (r14): the mutant that drops the avoidance stands on the composer — the leg goes red', m1);
