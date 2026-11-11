@@ -4,6 +4,21 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.391 — 2026-11-10
+
+### dialog-press — a suite presses only what holds still, and checks where its press landed (B-8b8c; the .390 mirror's red)
+- **Measured, not assumed.** test-refresh-note-chrome's desk 确定 landed on 取消 (the .390 mirror, both tries) or the footer (.373). A per-frame recorder on the suite's own road showed the cause: the suite unfolds the session list and opens the form 21–30 ms later, inside `#main-wrapper`'s 0.2 s margin-left slide, which carries the WHOLE workspace. 确定 stays the same node and its window never re-places; the ground moved +40.6 px in one frame between the helper's read and its press. Reproduced on the box: the base suite's desk leg was red 3 runs of 4. CPU throttling made it rarer, because it slowed the suite past the slide.
+- **Not the product.** The form's buttons never move inside it. On the desktop, only the person's own act changes the list's width.
+- **THE still door** (scripts/scratch.mjs `stillPresser`; PURE `stillVerdict` / `landingVerdict` / `stillLookSource`):
+  - It presses only a still target: the element at its point, enabled, the same rect on two looks, and no running box-moving animation on it or an ancestor.
+  - It then checks where the pointerdown and the click landed; a miss is named.
+  - `realClicker` shares both halves.
+  - test-refresh-note-chrome presses through the door everywhere.
+- **Gates.**
+  - test-still-press (fast) carries the verdict table, both mirror rows as named misses, two mutants red by name, and THE CENSUS (a ratchet ledger: 126 heavy suites, 299 direct coordinate presses on 2.369.390).
+  - test-refresh-note-chrome's new leg runs the page's own slide slowed by CDP `Animation.setPlaybackRate` 0.1, with two RED controls.
+  - The Chrome mutant (the gate removed) is red by name on both tries.
+
 ## 2.369.390 — 2026-11-10
 
 ### jobs-addressed-push — a job's lines reach only the conversations they are addressed to (the owner's yes, 2026-11-10)
