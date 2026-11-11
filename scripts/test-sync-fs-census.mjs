@@ -105,7 +105,6 @@ const ROWS = [
   ["src/exit-proxy.js", "ExitProxyManager._transferHeld", 6, "guarded", "target/part/dir/now = the agent-named pull destination (body.local) in the session's project dir; DOOR.blocked(target) precedes only the L849 stat."],
   ["src/exit-proxy.js", "ExitProxyManager._transferHeld > mine", 1, "guarded", "p = `${target}.<hex>.vs-part` or its /proc/self/fd name — next to the agent-named pull target (body.local)."],
   ["src/fixture-ledger-purge.js", "*", 9, "local-only", "every path is under dataDir (migrations.js one-shot passes <checkout>/data): usage-history/, usage-anchors/, archive/"],
-  ["src/gmail-sync.js", "GmailSync._seenIds > scan", 1, "guarded", "a gmail storage's folder: the sync worker's own LOCAL folder (its provider row is filesystem:false — never a storage root); a custom path under a FUSE mount is refused by the guard and the sync says its error"],
   ["src/gmail-sync.js", "GmailSync._syncOnce", 2, "guarded", "the gmail folder's state file (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
   ["src/gmail-sync.js", "GmailSync._saveState", 2, "guarded", "the gmail folder's state file (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],
   ["src/gmail-sync.js", "GmailSync._writeMessage", 3, "guarded", "a gmail message file in its folder (a LOCAL folder: filesystem:false row); under a FUSE mount the guard refuses it"],

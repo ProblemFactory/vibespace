@@ -2293,6 +2293,7 @@ export default {
   "Syncing {done}/{total}…": "同期中 {done}/{total}…",
   "Checking for new mail…": "新着メールを確認中…",
   "Synced — {n} emails": "同期済み——メール {n} 件",
+  "Sync stopped: {error} — it tries again in 2 minutes": "同期が止まりました：{error}——2 分後にもう一度試します",
   "Sync paused — emails stay in the folder; connect to resume": "同期は一時停止中——メールはフォルダに残ります。接続で再開します",
   "Stop syncing (synced emails stay)": "同期を停止（同期済みメールは残ります）",
   "This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.": "これはライブマウントではなく同期です：メールは .eml ファイルとしてフォルダにダウンロードされ（読み取り専用アーカイブ）、接続中は同期し続けます。",

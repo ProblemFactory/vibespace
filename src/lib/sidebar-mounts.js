@@ -460,6 +460,10 @@ export function installSidebarMounts(Sidebar) {
         } else if (m.mounted && m.gmailState === 'syncing') {
           sync.innerHTML = `<span class="mounts-sync-label">${escHtml(tr('Checking for new mail…'))}</span>
             <span class="mounts-syncbar mounts-syncbar-ind"><i></i></span>`;
+        } else if (m.mounted && m.gmailState === 'error') {
+          // lane hub-sync-holds rank 16: a pass that failed (a folder that could not be read, the API) is SAID — never
+          // «Synced — N emails» over a failure; the worker tries again at its 120 s backoff
+          sync.textContent = tr('Sync stopped: {error} — it tries again in 2 minutes', { error: m.gmailError || '?' });
         } else if (m.mounted) {
           const when = m.lastSyncAt ? new Date(m.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
           sync.textContent = tr('Synced — {n} emails', { n: m.gmailCount ?? 0 }) + (when ? ` · ${when}` : '') + (m.email ? ` · ${m.email}` : '');

@@ -2010,6 +2010,8 @@ const I_RECV = {
   'src/mic-install.js|st.mic': ['audio device', 'the virtual microphone already installed (its device name, in the plan\'s refusal)'],
   'src/server/desktop-access.js|r.device': ['audio device', 'the default microphone the machine now uses (its device name, in the hub journal)'],
   'src/port-forward.js|h': ['host', 'a machine name'], 'src/server/auto-cli-loop.js|it.pj': ['quota', 'a projection\'s label'],
+  // lane hub-sync-holds rank 16 (round 2): the mail walk's directory entry — its file name builds the folder path the walk's «could not be read» error names (the person's own mail folder, said on their own mount's row), never a record's words
+  'src/gmail-sync.js|ent': ['mail folder', 'a directory entry of the person\'s own Gmail mount folder (its file name, in the walk\'s «the mail folder could not be read» error)'],
   'src/server/auto-resume.js|chk': ['quota', 'a pre-fire check\'s reason'], 'src/server/auto-resume.js|ident': ['account', 'a billing identity'],
   'src/server/boot-restore.js|h': ['host', 'a machine name'], 'src/server/boot-restore.js|session': ['session', 'a session\'s name'],
   'src/server/boot-restore.js|tally': ['count', 'the re-probe tally — its `open` is the list of sock files still unanswered, never a For-you item\'s door (lane foryou-plugin-notices gave the item an `open` field, a SHAPES drop row)'],

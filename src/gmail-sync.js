@@ -139,10 +139,10 @@ class GmailSync {
   start(cfg) {
     this.stop(cfg.id);
     const w = {
-      cfg, state: 'syncing', error: null, count: 0, lastSyncAt: 0,
+      // count: null until a walk of the folder has FINISHED (rank 16 round 2) — an unread folder is never «0 emails»
+      cfg, state: 'syncing', error: null, count: null, lastSyncAt: 0,
       tok: JSON.parse(cfg.token), stopped: false, timer: null,
     };
-    try { w.count = this._seenIds(w).size; } catch { }
     this._workers.set(cfg.id, w);
     this._loop(w).catch(() => { });
     return w;
@@ -188,7 +188,10 @@ class GmailSync {
         w.error = String(e.message || e).slice(0, 300);
       }
       if (w.stopped) return;
-      const delay = (w.state === 'error' ? 120 : (w.cfg.pollSeconds || 300)) * 1000;
+      // a failed pass (a folder that could not be read, the API) is tried again after 120 s — never LATER than a normal pass
+      // would come (rank 16 round 2: a walk that did not finish is retried; mounts set no pollSeconds, so 300 s ⇒ 120 s)
+      const poll = w.cfg.pollSeconds || 300;
+      const delay = (w.state === 'error' ? Math.min(120, poll) : poll) * 1000;
       await new Promise((r) => { w.timer = setTimeout(r, delay); w.timer.unref?.(); });
     }
   }
@@ -232,21 +235,36 @@ class GmailSync {
 
   _statePath(w) { return path.join(w.cfg.dir, '.vibespace-gmail-state.json'); }
 
+  /** The mailbox's seen message ids. Message ids ride in the filename tail: …_<id>.eml — THE DIRECTORY TREE IS THE DEDUP
+   *  INDEX (no separate DB to drift). One subdir level covers the date-grouping layouts (YYYY-MM/ or YYYY-MM-DD/, and
+   *  label/YYYY-MM); files already in the flat root keep counting after grouping is turned on (no re-download).
+   *  Lane hub-sync-holds, rank 16 — the owner's hub held its loop 1.5–1.7 s every 300 s per mailbox when each pass re-listed
+   *  the tree with readdirSync. The walk is ASYNC now (off the loop), and it is RE-PROVEN AT EVERY PASS (round 2, the
+   *  acceptance panel: a set kept across passes was the separate DB — a folder emptied to sync again, a file deleted or added
+   *  by another process, read wrong for the worker's life). ONE walk at a time (a second ask while one runs shares it);
+   *  a folder that does not exist reads as EMPTY (that walk finished: nothing is there);
+   *  within a pass the set grows by what this sync writes (_writeMessage). A WALK THAT DID NOT FINISH IS NEVER AN ANSWER:
+   *  it throws, the pass fails before any download, the mount's state says which folder could not be read, and the next
+   *  pass walks again — never «0 seen», never a seed read as complete. */
   _seenIds(w) {
-    // message ids ride in the filename tail: …_<id>.eml — the directory tree
-    // IS the dedup index (no separate DB to drift). One subdir level covers
-    // the date-grouping layouts (YYYY-MM/ or YYYY-MM-DD/); files already in
-    // the flat root keep counting after grouping is turned on (no re-download).
+    if (!w.walkP) w.walkP = this._walkSeen(w).finally(() => { w.walkP = null; });
+    return w.walkP;
+  }
+  async _walkSeen(w) {
     const seen = new Set();
-    const scan = (dir, depth) => {
-      let entries = [];
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const e of entries) {
-        if (e.isDirectory() && depth < 2 && !e.name.startsWith('.')) scan(path.join(dir, e.name), depth + 1);
-        else { const m = /_([a-f0-9]{8,20})\.eml$/.exec(e.name); if (m) seen.add(m[1]); }
+    const scan = async (dir, depth) => {
+      let entries;
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); }
+      catch (err) {
+        if (err.code === 'ENOENT') return; // no folder there (the root not made yet, a subfolder removed between its listing and its read): nothing on disk
+        throw Object.assign(new Error(`the mail folder could not be read (${err.code || err.message}): ${dir}`), { code: 'mail_walk_failed' });
+      }
+      for (const ent of entries) {
+        if (ent.isDirectory() && depth < 2 && !ent.name.startsWith('.')) await scan(path.join(dir, ent.name), depth + 1);
+        else { const m = /_([a-f0-9]{8,20})\.eml$/.exec(ent.name); if (m) seen.add(m[1]); }
       }
     };
-    scan(w.cfg.dir, 0);
+    await scan(w.cfg.dir, 0);
     return seen;
   }
 
@@ -254,7 +272,7 @@ class GmailSync {
     fs.mkdirSync(w.cfg.dir, { recursive: true });
     let state = {};
     try { state = JSON.parse(fs.readFileSync(this._statePath(w), 'utf-8')); } catch { }
-    const seen = this._seenIds(w);
+    const seen = await this._seenIds(w); // the folder, read now (async; a walk that did not finish throws — rank 16)
     w.count = seen.size;
 
     if (!w.email) {
