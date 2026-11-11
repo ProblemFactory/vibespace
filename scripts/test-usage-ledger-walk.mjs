@@ -32,6 +32,9 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // a world's dir removed: the store writer forgets its rates.json first (a pending write would say ENOENT and retry — hub-loop-stalls commit 2)
 const rmWorld = (w) => { try { require('../src/store-writer.js').storeWriter().forget(path.join(w.adir || path.join(w.data, 'usage-anchors'), 'rates.json')); } catch { } fs.rmSync(w.data, { recursive: true, force: true }); };
 const DAY = 86400e3, NOW = 1794300000000;
+// this suite judges commit B's laws on WHOLE relearns (every estimator it builds, twins included); a relearn's own slices — one
+// budget a loop turn — are test-usage-relearn-stepped's
+require('../src/usage-estimator.js').UsageEstimator.prototype.relearnStepLines = Infinity;
 
 /** One seeded world over a source tree: a ledger (cold + hot), anchor histories, an estimator. */
 function world(TREE, { seed = 3, rows = 12000, pairs = [1500, 300, 120, 400], steps = [15, 30, 60, 20], ages = [0, 0, 0, 0], nanRate = 0.01, dataDir = null } = {}) {
@@ -572,6 +575,7 @@ console.log('§8 B3 + the rest — the hour sums, the stepped plan, the relearn 
     const M = mutantCopies('usage-ledger-walk-b3w', REPO), src = read('src/usage-estimator.js');
     const from = "      require('./store-writer.js').storeWriter().dirty(fp, { name: 'usage-rates.write', produce: () => JSON.stringify(this._ratesAll, null, 1) });";
     const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, "      this._ratesAll = null; let all = {}; try { all = JSON.parse(fs.readFileSync(fp, 'utf-8')) || {}; } catch { } all[identityKey] = { computedAt: Date.now(), nAnchors, buckets: rates }; fs.writeFileSync(fp + '.tmp', JSON.stringify(all, null, 1)); fs.renameSync(fp + '.tmp', fp);"), 'b3-on-loop')) : null;
+    if (EM) EM.UsageEstimator.prototype.relearnStepLines = Infinity; // usage-relearn-stepped: B's laws judged on whole relearns (the mutant class too)
     const R = EM ? b3(EM) : null;
     ok(!!R && R.writes >= 2 * R.ids && R.builds >= R.ids, `RED: rates.json written on the loop per identity (master's road) ⇒ ${R && R.reads} reads, ${R && R.writes} writes, ${R && R.builds} JSON builds in the handler`, R);
   }
@@ -806,8 +810,8 @@ console.log('§9 ROUND 2 — a slot is of ONE ledger and ONE price table, read a
   {
     // RED: a reload that keeps the copy read before the migration — the dropped rates come back at the next persist
     const M = mutantCopies('usage-ledger-walk-r2w', REPO), src = read('src/usage-estimator.js');
-    const from = '  reloadRates() { this._ratesAll = null;';
-    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '  reloadRates() {'), 'reload-keeps')) : null;
+    const from = '  reloadRates() { this._seeded = false; this._ratesAll = null;';
+    const EM = src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, '  reloadRates() { this._seeded = false;'), 'reload-keeps')) : null;
     const R = EM ? r1(EM) : null;
     ok(!!R && R.back, `RED: a reload that keeps the copy ⇒ the dropped identity is written back (${R && R.back})`, R);
   }

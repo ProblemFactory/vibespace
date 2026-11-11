@@ -502,8 +502,12 @@ function poolReadCache(poolId) {
   // + estimator overlay); kept here so chooser/switch/engine cannot drift
   const now = Date.now();
   const reading = poolReadReading();
+  // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4): while a member this pool compares cannot be estimated yet (its
+  // first learn), every member is read raw — never one estimated beside one raw
+  let rawBasis = false; try { const m = poolId ? poolMembershipOf(poolId) : null; rawBasis = !!(m && m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m)); } catch { }
   return (id) => {
     const raw = reading(id);
+    if (rawBasis) return raw;
     try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
   };
 }
@@ -7368,6 +7372,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
     // ledger cost since) so the decision sees NOW, not the last reading. The
     // estimator abstains per bucket when it has nothing better; those keep raw.
+    let rawBasis = false; // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4): set from the members below, before any read
     const readCache = (id) => {
       let raw = null;
       try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
@@ -7381,6 +7386,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
           if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
         }
       } catch { }
+      if (rawBasis) return raw;
       try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
     };
     // proactive EDF tier only for HOT pools (re-point is free — no restart);
@@ -7404,6 +7410,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // not candidates (2.335.0), but a login-dead member must still REACH
     // decidePoolSwitch so its refusal can name it and prescribe the re-login.
     const members = switchCandidates(poolId);
+    try { rawBasis = !!(usageEstimator.basisRaw && usageEstimator.basisRaw([currentId, ...members].filter(Boolean))); } catch { }
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const roster = evaluationRoster(poolId, rosters); // …and ONE roster read for it, shared by every conversation's decision (acceptance r2) and the tick's sweep (r3)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
