@@ -29,6 +29,13 @@
  * agent's output holds no live vault value until the run / mint / fill doors land, each of which masks its own child).
  * When vault-run.js lands the require resolves and ① turns on with no change here.
  *
+ * THE FORMS ARE BUILT WHEN THE VAULT CHANGES, NEVER WHEN A TEXT IS MASKED (lane vault-masker-once — the owner's hub 2026-11-11:
+ * formsOf / percentForms / createRunMasker ≈ half its main thread, the belt decrypting all 44 entries and compiling every form of
+ * each for EVERY text). `compiledFor` asks the vault for its ONE compiled set (the engine's `maskForms`: built once per vault
+ * state, shared by every sink, dropped at every entry write and at every lock); each text still gets its OWN masker over that set
+ * (fresh stream state — nothing carries from one text to the next), so what a sink writes is byte-identical to a per-call build.
+ * A provider without `maskForms` (a test double) is compiled per call, as before.
+ *
  * NOT PURE: reaches the vault through src/secret-box.js `vaultForDir(dataDir)` (the provider a door holding only its data
  * dir looks up). A writer passes its own `dataDir`; a locked / un-set-up / unregistered vault yields no live values, so
  * the belt degrades to ② — correct (no plaintext to read when locked). Gate: scripts/test-agent-output-sinks.mjs (the
@@ -71,6 +78,14 @@ function maskableSecrets(v) {
   return out;
 }
 
+/** The compiled forms of every maskable secret of `v` (src/vault-run.js compileForms over `maskableSecrets`, each value at least
+ *  MIN_MASK_BYTES) — the vault's ONE shared set when it keeps one (`maskForms`), else compiled now. null ⇒ nothing to mask. */
+function compiledFor(v, vr) {
+  if (!v) return null;
+  const build = () => vr.compileForms(maskableSecrets(v).filter((x) => Buffer.byteLength(x.value, 'utf8') >= vr.MIN_MASK_BYTES));
+  return typeof v.maskForms === 'function' ? v.maskForms(build) : build();
+}
+
 /**
  * Mask one whole text an agent produced, bound for a store a reader will see. `dataDir` = the writer's own data dir (how
  * the belt finds the vault); omit it (or point at a locked vault) and only the shape census runs. Returns the masked
@@ -83,13 +98,12 @@ function maskForSink(text, { dataDir } = {}) {
   const vr = vaultRun();
   if (vr && dataDir) {
     try {
-      const v = SB.vaultForDir(dataDir);
-      const secrets = maskableSecrets(v).filter((x) => Buffer.byteLength(x.value, 'utf8') >= vr.MIN_MASK_BYTES);
-      if (secrets.length) s = vr.maskText(s, secrets);
+      const forms = compiledFor(SB.vaultForDir(dataDir), vr);   // lane vault-masker-once: built once per vault state, not per text
+      if (forms && forms.size) s = vr.maskText(s, forms);
     } catch { /* the shape census below still runs — the belt never loses the write */ }
   }
   try { s = redactSecrets(s).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
   return s;
 }
 
-module.exports = { maskForSink, maskableSecrets };
+module.exports = { maskForSink, maskableSecrets, compiledFor };

@@ -335,6 +335,7 @@ src/vault-kinds.js `request` + scripts/test-vault-kinds-census.mjs CHECK.request
 src/vault-paste.js + src/server/vault-paste-door.js `answerTotp` + src/lib/vault-paste-box.js `totpBoxEl` (lane totp-request-card) — A TWO-STEP CODE ASKED FOR: `--kind totp [--name]`, ONE totp: entry through vault-totp addEntry; the tick = the entry's «Use for…» for this run ⇒ the essay below
 src/lib/vault-totp-row.js totpFields (lane totp-request-card) — THE 两步验证… dialog's field set (two ways, the name, the hub's preview, its words) drawn ONCE by the dialog AND the two-step card in For you ⇒ the essay below
   (lane vault-manual-and-lock: + request / answerRequest / usesFor — an agent's request = ONE For-you ask; the owner's answer = a grant row in memory the run verdict honours (once / 8 h); one vault-use line per entry per run; a lock withdraws requests, ends grants)
+scripts/test-vault-masker-once.mjs — lane vault-masker-once gate (fast, 0.8 s): a real engine, 44 invented entries — N texts ⇒ ONE build (counts), a change ⇒ a rebuild seen by the next text, a lock holds nothing compiled, equality with the per-call build
 scripts/test-vault-run-model.mjs — lane vault-run-model gate (fast, 1.8 s): every vault-run.js table (shape+hosts, verdict, scrubber, own road) + the gh grammar CENSUS ⑤c (SKIP off-gate / RED on CI; r9 diffs allowlist help HASHES) + ⑤d hygiene (r9: reviewed allowlist + writeGuard refuses a GROW)
 scripts/make-vault-run-card-facts.mjs (vault-agent-own r20) — writes scripts/fixtures/vault-run-card-facts.json from cardFactsOf over 3 shapes; test-vault-run re-derives buildFixture() so it never drifts; bytes shared with lane wake-approve-card (int-C) ⇒ vault-run.js
 scripts/test-vault-run.mjs — lane vault-run-door gate (fast, 6.5 s): real engine + For you + children — 0 bytes of a value in 21 spellings, a split between pipes, the switch, the card, the lock's kill, the audit, the request cap; mutants: no card, a value in the audit, two scrubbers, a cut flush
@@ -1627,6 +1628,14 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/vault-run.js compileForms + src/server/vault-engine.js maskForms + src/agent-output-belt.js compiledFor — THE FORMS ARE BUILT WHEN THE VAULT CHANGES (lane vault-masker-once, 2026-11-11, hotfix)
+- **Why:** the belt runs on every piece of an agent's output (a job's log chunk, a message, a status, a progress note). It decrypted every maskable entry and compiled every form of each for EACH text. On the owner's hub (44 entries) that was over half the main thread.
+- **compileForms(secrets)** (PURE) builds the table (form → placeholder), the ONE alternation (longest first) and the window, frozen. `createRunMasker` takes a list or a compiled set, so a run's own scrubber (vault-run-door, job-wrapper) still compiles its own values per run.
+- **The shared `re`:** `look()` resets its lastIndex before each scan and runs synchronously, so maskers never interleave on it.
+- **maskForms(build)** (the engine): ONE set per vault state. `masks = null` at the top of `writeRecord` (any write, even a failed one), in `load()` and in `lock()` next to the DEK's zeroing. The quiet lock is included, because lock hooks are not. While locked it returns null and builds nothing.
+- **What a sink writes is byte-identical to the per-call build:** every masker gets fresh stream state; only the read-only compiled set is shared.
+- **Gate:** scripts/test-vault-masker-once.mjs. A new writer of `record` must go through `writeRecord` (or `load`), or the set would outlive the entries it was built from.
 
 ### src/job-model.js addressedTo + src/jobs.js updatesFor / digestFor / _event + data/bin/vibespace-job + scripts/test-jobs-addressed.mjs — PUSH IS ADDRESSED (lane jobs-addressed-push, 2026-11-10, .390)
 **The law.** A Background Work job's event line (`<vibespace-jobs-update>`, prompt-context) and its digest row (task-context) reach a conversation only when `M.addressedTo(job, caller, parent)` names it: it can VIEW the job (canView first — a subscriber that left the group is no addressee) AND is its owner lineage (`isOwner`) or a subscriber of it or of its cron parent. Answers 'owner' | 'subscriber' | ''. A borrowed id (a pending fork: conversationId null) is nobody's subscriber. View stays a PULL right: the agent routes' list / show / poll / logs / subscribe keep `visibleJobs`.

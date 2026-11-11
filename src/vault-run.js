@@ -1715,7 +1715,16 @@ function readView(vw, buf, end, final) {
  * Hand it text from a streaming decoder (StringDecoder / TextDecoder { stream: true }) — never bytes cut mid-character.
  * A value under MIN_MASK_BYTES throws `entry_too_short_to_mask` (runVerdict refused it already).
  */
-function createRunMasker(secrets, streams = ['out', 'err']) {
+/**
+ * THE COMPILED FORMS (lane vault-masker-once — the owner's hub 2026-11-11: formsOf / percentForms / jsonForms / createRunMasker
+ * held over half its main thread, because the output belt rebuilt every form of every secret for EVERY text it masked): every
+ * spelling of every value (`formsOf`) → its placeholder, the ONE alternation over them (longest first) and the window — built
+ * once from `secrets` and shared READ-ONLY by every masker made from it. A masker keeps its own stream state (`held`, the
+ * counts): nothing carries from one text to the next. `secrets` as createRunMasker takes them; a value under MIN_MASK_BYTES
+ * throws `entry_too_short_to_mask`. → a frozen { table, texts, re, W, size } (`size` = the distinct spelled forms).
+ */
+const COMPILED = Symbol('vault-run.compiledForms');
+function compileForms(secrets) {
   const table = new Map();
   for (const s of Array.isArray(secrets) ? secrets : []) {
     const v = String(s && s.value != null ? s.value : '');
@@ -1727,6 +1736,13 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
   const re = texts.length ? new RegExp(texts.map(reEscape).join('|'), 'g') : null;
   const maxLen = texts.length ? texts[0].length : 1;
   const W = maxLen - 1;
+  return Object.freeze({ [COMPILED]: true, table, texts, re, W, size: texts.length });
+}
+/** Is `x` a compiled set (compileForms), not a secrets list? */
+const isCompiledForms = (x) => !!(x && x[COMPILED] === true);
+function createRunMasker(secrets, streams = ['out', 'err']) {
+  const C = isCompiledForms(secrets) ? secrets : compileForms(secrets);   // lane vault-masker-once: a compiled set is used as it is (shared, read-only)
+  const { table, texts, re, W } = C;
   const names = [...streams];
   let held = [];   // [[stream, text]] in arrival order — what the run has not handed on yet
   const st = { hits: 0, bytes: 0, byForm: {} };
@@ -1857,12 +1873,13 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W, streams: names,
   };
 }
-/** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
+/** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. `secrets` = a secrets list or a compiled set
+ *  (compileForms). → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
 function createMasker(secrets) {
   const m = createRunMasker(secrets, ['out']);
   return { push: (chunk) => m.push('out', chunk).out, end: (cut) => m.end(cut).out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
 }
-/** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
+/** One whole text scrubbed (a card's command, a short output, the output belt's sink text) — `secrets` a list or a compiled set. */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 
 module.exports = {
@@ -1872,5 +1889,5 @@ module.exports = {
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, PIN_ENV, pinOf, wildcardToolOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
-  FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
+  FORMS, FORM_ROWS, VIEWS, formsOf, compileForms, isCompiledForms, createMasker, createRunMasker, maskText,
 };

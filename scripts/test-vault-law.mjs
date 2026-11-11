@@ -435,6 +435,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     useCounts: 'receipt',   // lane vault-use-grants: counts of the vault-use lines per entry / per grant (numbers — never a value)
     contentsChanged: 'hub-only',   // lane vault-use-grants: THE ONE NOTIFY (a counter broadcast to the owner's pages — never a name or a value)
     editEntryWords: 'hub-only',   // lane vault-entry-description: THE writer of an entry's name and description — the owner's Allow / Edit… doors only (words, never a value)
+    maskForms: 'hub-only', masksHeld: 'hub-only',   // lane vault-masker-once: the output belt's ONE compiled set (memory only, dropped at every write and lock) and whether one is held (a gate's question — never a value)
     usesOf: 'receipt',   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (closed fields — never a value)   // lane vault-run-door: a mark over the run door's own store under a DEK-derived key — the hub's code only
   };
   const SIBLING_KEYS = new Set(['agentMint', 'agentPut']);

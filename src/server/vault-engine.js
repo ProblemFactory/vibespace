@@ -111,6 +111,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let record = null;          // the parsed record | null (not set up)
   let recordBad = null;       // a vault.json that is there but not readable / not a record: LOCKED for good (never the legacy files beside it)
   let dek = null;             // THE DEK — in memory only, zeroed by lock()
+  let masks = null;           // lane vault-masker-once: THE output belt's compiled forms ({ forms }) — memory only, while unlocked; dropped at every record write, load and lock (maskForms)
   const keys = new Map();     // name → unwrapped store key (zeroed by lock())
   let epoch = 0;              // bumped at every unlock / lock — a cache of a key (the passkey cipher) is good for one epoch
   let lockedSince = now();
@@ -126,6 +127,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const blockedHooks = [];  // … and who is told: the wiring's one For-you item
 
   function load() {
+    masks = null;   // lane vault-masker-once: a record read from disk is a new vault state
     let text;
     try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {
       if (e && e.code === 'ENOENT') { record = null; recordBad = null; return; }
@@ -184,6 +186,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   const announce = () => { try { bcast({ type: 'vault-state', ...facts() }); } catch { } };
 
   function writeRecord(rec) {
+    masks = null;   // lane vault-masker-once: an entry added / edited / removed (any record write, even one that then fails) ⇒ the forms are rebuilt at the next ask
     if (faultAt) faultAt('write-record', '');
     writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\n');
     contentsChanged('record');
@@ -667,7 +670,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   function lock(why = 'door', { ip = null, quiet = false } = {}) {
     if (!setUp()) return { ok: false, code: 'vault_not_set_up' };
     if (!dek) return { ok: true, already: true };
-    V.zero(dek); dek = null;
+    V.zero(dek); dek = null; masks = null;   // lane vault-masker-once: the compiled forms die with the key — every lock, the quiet ones too
     for (const k of keys.values()) V.zero(k);
     keys.clear();
     epoch++; lockedSince = now(); blockedList.clear();   // a new lock epoch: nobody stopped yet
@@ -733,7 +736,21 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   let timer = null;
   if (idleTimer) { timer = setInterval(idleTick, 60e3); timer.unref?.(); }
 
-  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt, secretNames, blocked };   // secretNames: the agent-output belt (src/agent-output-belt.js) enumerates the maskable entries from a data dir   // `blocked`: a door that holds only the data dir reaches the ONE helper (SB.vaultForDir)
+  /** lane vault-masker-once — THE ONE COMPILED SET of the output belt (src/agent-output-belt.js): `build()` (the belt's — every
+   *  maskable secret's forms, src/vault-run.js compileForms) runs ONCE per vault state and its result is shared by every sink; it
+   *  is dropped at every record write and load (an entry added, edited or removed) and at every lock. Memory only: never written,
+   *  never answered by any route. Not unlocked ⇒ null and nothing is built (the belt then masks no live value, as before).
+   *  `masksHeld()` says whether a set is held (a gate's question — never a value). */
+  function maskForms(build) {
+    if (state() !== 'unlocked' || typeof build !== 'function') return null;
+    if (masks) return masks.forms;
+    const at = record;
+    const forms = build();
+    if (state() === 'unlocked' && record === at) masks = { forms };   // kept only for the record it was built from
+    return forms;
+  }
+  const masksHeld = () => !!masks;
+  const provider = { keyFor, peek, hasEntry, state, epoch: () => epoch, secretGet, secretPut, secretDrop, secretAdopt, secretNames, blocked, maskForms, masksHeld };   // secretNames: the agent-output belt (src/agent-output-belt.js) enumerates the maskable entries from a data dir   // `blocked`: a door that holds only the data dir reaches the ONE helper (SB.vaultForDir)
   const unregister = register ? SB.registerVault(dataDir, provider) : () => {};
   const engine = {
     dataDir, file: FILE, state, facts, setup, unlock, lock, change, setIdleLock, touch, idleTick, keyFor, peek, hasEntry,
@@ -758,6 +775,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     editEntryWords,   // lane vault-entry-description: THE writer of an entry's name and description after its creation
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked
     epoch: () => epoch, resumeSeal,
+    maskForms, masksHeld,   // lane vault-masker-once
     close() { if (timer) clearInterval(timer); lock('close', { quiet: true }); unregister(); LIVE.delete(engine); },
   };
   LIVE.add(engine);
