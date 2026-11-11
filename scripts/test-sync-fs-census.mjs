@@ -368,7 +368,7 @@ const ROWS = [
   ["src/task-groups.js", "TaskGroupManager._kindOf", 1, "guarded", "a Context row's stat: a STORAGE row answers from its SafeFs fact (stat, src/storage-facts.js; never read yet = reading) — this stat runs for a local / home row only"],
   ["src/task-groups.js", "TaskGroupManager._stat", 1, "guarded", "a Context row's stat (size / mtime): a STORAGE row answers from its SafeFs fact — this stat runs for a local / home row only"],
   ["src/task-groups.js", "TaskGroupManager._readText", 1, "guarded", "a told Context file's read: a STORAGE file answers from its SafeFs fact (textHead) — this read runs for a local / home file only"],
-  ["src/task-groups.js", "TaskGroupManager.groupsForSession", 1, "guarded", "a session cwd's realpath (per prompt, cached): never on a STORAGE mount (storageRootOf ⇒ the cwd itself matches) nor a blocked one; a local / home cwd once"],
+  ["src/task-groups.js", "TaskGroupManager._realOf", 1, "guarded", "a session cwd's realpath (per prompt, cached): never on a STORAGE mount (storageRootOf ⇒ the cwd itself matches) nor a blocked one; a local / home cwd once"],
   ["src/task-groups.js", "TaskGroupManager.exportToFile", 3, "guarded", "mkdir/write/rename at req.body.path — any absolute path the person/agent names (server.js export route)"],
   ["src/task-groups.js", "TaskGroupManager.importFromFile", 1, "guarded", "readFileSync of req.body.path — any absolute file the person/agent names (server.js import route)"],
   ["src/task-groups.js", "*", 16, "local-only", "store + Activity-log archive under dataDir = <checkout>/data (server.js new TaskGroupManager): task-groups.json, tasks.json, task-groups-archive/<id>/<month>.ndjson"],

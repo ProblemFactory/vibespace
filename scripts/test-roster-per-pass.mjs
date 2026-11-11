@@ -345,10 +345,16 @@ const LEGS = {
     const x = await world(A, shapeSpec({ NG: 400, NL: 36, NTG: 10, NM: 380, NEND: 600 }));
     const med = (f, n) => { const xs = []; for (let i = 0; i < n; i++) { const t = performance.now(); f(); xs.push(performance.now() - t); } xs.sort((a, b) => a - b); return xs[n >> 1]; };
     x.R.build(); if (A.hasPass) x.w.groups.list();     // warm (realpath cache, JIT; master's list warms itself 1 840 times)
+    // THE UNIT holds still: one build whose Task-Group membership is THE WALK (groupsForSession as it was asked when K was
+    // set) — groups-sweep-on-change commit 2's membership index makes a build ~3× cheaper, which would move the unit, not
+    // list(); a tree without the walk (master) builds as it is
+    const walk = typeof x.tasks._groupsForSessionWalk === 'function';
+    if (walk) x.tasks.groupsForSession = (a) => x.tasks._groupsForSessionWalk(a);
     const one = med(() => x.R.build(), 15);
+    if (walk) delete x.tasks.groupsForSession;
     const list = med(() => x.w.groups.list(), A.hasPass ? 9 : 1);
     const k = list / Math.max(one, 1e-3);
-    return { ok: k <= K_RATCHET, detail: `list() ${list.toFixed(2)} ms = ${k.toFixed(1)} × one roster build (${one.toFixed(3)} ms) at 400 groups × 36 live × 10 Task Groups — the ratchet K = ${K_RATCHET}`, k, one, list };
+    return { ok: k <= K_RATCHET, detail: `list() ${list.toFixed(2)} ms = ${k.toFixed(1)} × one roster build (${one.toFixed(3)} ms${walk ? ', membership by the walk' : ''}) at 400 groups × 36 live × 10 Task Groups — the ratchet K = ${K_RATCHET}`, k, one, list };
   },
   // ① the memo never outlives its synchronous run
   async 'memo:run'(A) {

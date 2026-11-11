@@ -55,6 +55,19 @@ const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the 
 // lane cli-call-timeouts: one TASK.md mirror write's bound (each op through SafeFs / fs.promises) and the retry after a miss
 const MIRROR_BOUND_MS = 10000;
 const MIRROR_RETRY_MS = 30000;
+// lane groups-sweep-on-change commit 2 — MEMBERSHIP IS AN INDEX (groupsForSession): its result map holds at most this many
+// asks between two rebuilds — one per distinct (session key, cwd + its realpath, spawned-into ids) asked, i.e. every live
+// and discovered session × its cwds — and is CLEARED at the cap (an answer is recomputed, never wrong)
+const MEMBER_RESULTS_MAX = 2048;
+// what membership READS, per record, in store order: its key, id, archived, createdAt (the answer's order), sessions[] and
+// its Context rows (the discover folders). A store write that moves none of it (a progress line, a title, a note, a
+// backlog item) keeps the index; this is the split of the revision — by what membership reads, never by a list of writers
+// (a writer added later that forgets to say «membership» would leave a stale index, and a stale membership is a wrong grant)
+function memberSig(tasks) {
+  const h = crypto.createHash('sha1');
+  for (const [k, t] of Object.entries(tasks)) h.update(JSON.stringify(t && typeof t === 'object' ? [k, t.id, !!t.archived, t.createdAt ?? null, t.sessions ?? null, t.ctx ?? null] : [k, typeof t]) + '\n');
+  return h.digest('hex');
+}
 // Backlog PRIORITY + the ownership-aware selection every READ uses (TASK.md,
 // the per-turn reminders, the show/backlog listing) — the store keeps every
 // item; which ones a read shows is decided there (2026-09-22).
@@ -647,7 +660,7 @@ class TaskGroupManager {
   _res(t, rows = null) {
     const list = rows || this._ctxRows(t);
     if (!list.length) return [];
-    const key = JSON.stringify(list.map((r) => (r.ref ? '@' + r.ref : r.path)));
+    const key = this._resKey(list);
     if (!this._resCache) this._resCache = new Map();
     const hit = this._resCache.get(key);
     if (hit && Date.now() - hit.at < 4000) return hit.res;
@@ -656,6 +669,8 @@ class TaskGroupManager {
     this._resCache.set(key, { res, at: Date.now() });
     return res;
   }
+
+  _resKey(list) { return JSON.stringify(list.map((r) => (r.ref ? '@' + r.ref : r.path))); }
 
   /** The old folders[], derived: every 'discover' row's folder [{ path, recursive: true }] (membership by cwd). */
   foldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.discoverFolders(this._ctxRows(t), this._res(t)) : []; }
@@ -1758,11 +1773,94 @@ class TaskGroupManager {
   // pass. Belonging is LIVE: a UI bind/drag or a folder change takes effect on the
   // agent's next turn with no respawn (fixes the old bind≠context gap). Returns
   // full task objects, stable order.
-  groupsForSession({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
-    const spawnedInto = new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x));
-    // Match a folder against the cwd AND its symlink-resolved realpath (a session
-    // opened under claude-code-webui → vibespace must match a folder on either).
-    // realpath is cached (this runs per prompt; same scheme as routes/sessions.js).
+  //
+  // lane groups-sweep-on-change commit 2 — MEMBERSHIP IS AN INDEX. Callers ask per prompt (agent-routes prompt-context,
+  // server.js ctxGroupsOf), per roster build × every live session (roster-pass), per agent call / route (task-context,
+  // resolveAgentGroup, jobs, msg endpoints — every session per send) and per grant / mount check (mounts-plugins-wiring,
+  // spawn caps, automations, peer cards, apps access); the walk below looped every group per call and, per group, built
+  // the Context rows' cache key by serializing them. The index (_memberIndex) holds what membership reads, once per store
+  // revision: the unarchived groups in the answer's order, each one's session-key Set and its resolved discover folders,
+  // and a result map keyed by the call's own strings. Its truth:
+  //  · the store moved (rev) ⇒ memberSig is asked: what membership reads unchanged ⇒ the index stays (a progress line
+  //    every few seconds costs one signature, not a rebuild); changed ⇒ rebuilt;
+  //  · a group's folders are the ones _res holds NOW: the index keeps the very cache entry they came from and re-derives
+  //    them when that entry is gone or past its 4 s bound — a folder created on disk is seen within it, as by the walk;
+  //  · the result map is bounded (MEMBER_RESULTS_MAX) and dropped when the store or a folder list moves;
+  //  · ON ANY DOUBT THE WALK ANSWERS, said nowhere: a call shape the index does not key (a non-string key / cwd), a record
+  //    that is not an object or whose createdAt is not a number, any throw while the index is read or built. A stat that
+  //    throws, a symlink loop, a cwd that no longer exists are the walk's own answers (_kindOf ⇒ missing, the realpath ⇒
+  //    the cwd alone) — the index reads the same _res / _realOf, so it gives them; never a throw into a grant check.
+  groupsForSession(args = {}) {
+    let ans = null;
+    try { ans = this._memberAnswer(args || {}); } catch { ans = null; }   // a doubt: the walk answers
+    if (ans) { this._mixStats.answers++; return ans; }
+    this._mixStats.walks++;
+    return this._groupsForSessionWalk(args);
+  }
+
+  get _mixStats() { return this.__mixStats || (this.__mixStats = { builds: 0, kept: 0, answers: 0, walks: 0, hits: 0, cleared: 0 }); }
+  memberIndexStats() { const ix = this._mix; return { ...this._mixStats, results: ix ? ix.results.size : 0, max: MEMBER_RESULTS_MAX }; }
+
+  _memberIndex() {
+    const tasks = this._state && this._state.tasks;
+    if (!tasks || typeof tasks !== 'object') return null;
+    const rev = this.rev(), now = Date.now();
+    let ix = this._mix;
+    if (ix && (ix.tasks !== tasks || ix.rev !== rev)) {
+      // …and every record it answers with is still the store's own object (an import may replace one with an equal copy)
+      if (ix.tasks === tasks && memberSig(tasks) === ix.sig && ix.groups.every((g) => tasks[g.key] === g.t)) { ix.rev = rev; this._mixStats.kept++; }
+      else ix = this._mix = null;
+    }
+    if (!ix) {
+      const groups = [];
+      for (const [key, t] of Object.entries(tasks)) {
+        if (!t || typeof t !== 'object') return null;
+        if (t.archived) continue;
+        if (!(t.createdAt == null || Number.isFinite(t.createdAt))) return null;
+        groups.push({ key, t, sessions: new Set(Array.isArray(t.sessions) ? t.sessions : []), rows: this._ctxRows(t).length > 0, resKey: null, resEntry: null, dirs: [], fsig: '' });
+      }
+      groups.sort((a, b) => (a.t.createdAt || 0) - (b.t.createdAt || 0));
+      ix = this._mix = { tasks, rev, sig: memberSig(tasks), groups, results: new Map() };
+      this._mixStats.builds++;
+    }
+    let moved = false;
+    for (const g of ix.groups) {
+      if (!g.rows) continue;   // no rows ⇒ no folders (the walk's _res answers [] there, uncached)
+      const e = g.resKey !== null && this._resCache ? this._resCache.get(g.resKey) : undefined;
+      if (e !== undefined && e === g.resEntry && now - e.at < 4000) continue;
+      g.dirs = this.foldersOf(g.t);
+      g.resKey = this._resKey(this._ctxRows(g.t));
+      g.resEntry = this._resCache ? this._resCache.get(g.resKey) : undefined;
+      const fsig = JSON.stringify(g.dirs);
+      if (fsig !== g.fsig) { g.fsig = fsig; moved = true; }
+    }
+    if (moved && ix.results.size) ix.results.clear();
+    return ix;
+  }
+
+  _memberAnswer({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
+    for (const v of [sessionKey, cwd, realCwd]) if (v != null && typeof v !== 'string') return null;   // a shape the index does not key
+    const ix = this._memberIndex();
+    if (!ix) return null;
+    const spawned = [...new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x))].sort();
+    const real = this._realOf(cwd, realCwd);
+    const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
+    const key = JSON.stringify([sessionKey || '', cwds, spawned]);
+    let hit = ix.results.get(key);
+    if (hit) this._mixStats.hits++;
+    else {
+      const sp = new Set(spawned);
+      hit = ix.groups.filter((g) => (sessionKey && g.sessions.has(sessionKey)) || sp.has(g.t.id) || (cwds.length > 0 && g.dirs.some((f) => cwds.some((c) => insideFolder(c, f)))));
+      if (ix.results.size >= MEMBER_RESULTS_MAX) { ix.results.clear(); this._mixStats.cleared++; }
+      ix.results.set(key, hit);
+    }
+    return hit.map((g) => g.t);
+  }
+
+  // Match a folder against the cwd AND its symlink-resolved realpath (a session
+  // opened under claude-code-webui → vibespace must match a folder on either).
+  // realpath is cached (this runs per prompt; same scheme as routes/sessions.js).
+  _realOf(cwd, realCwd) {
     let real = realCwd;
     if (!real && cwd) {
       if (!this._realCache) this._realCache = new Map();
@@ -1774,6 +1872,14 @@ class TaskGroupManager {
         this._realCache.set(cwd, real);
       }
     }
+    return real;
+  }
+
+  // THE WALK — membership as it was asked before the index, kept as the index's answer on any doubt and as its
+  // equality pin (scripts/test-groups-sweep-on-change.mjs: every call shape ≡ the walk over seeded stores)
+  _groupsForSessionWalk({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
+    const spawnedInto = new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x));
+    const real = this._realOf(cwd, realCwd);
     const cwds = [cwd, real && real !== cwd ? real : null].filter(Boolean);
     const out = [];
     for (const t of Object.values(this._state.tasks)) {
@@ -2695,4 +2801,4 @@ class TaskGroupManager {
 }
 
 // B-31d7: the item's line + detail caps, for the route that REFUSES past them before a write (never a silent clip)
-module.exports = { TaskGroupManager, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };
+module.exports = { TaskGroupManager, MEMBER_RESULTS_MAX, BACKLOG_PRIORITIES, BACKLOG_CAPS: Object.freeze({ text: CAPS.backlogItem, detail: CAPS.detail }), CHANNELS_SECTION_LINES };
