@@ -139,8 +139,9 @@ export function registerGearMenu() {
   registerMenuItem({ menu: M, id: 'system', submenu: true, group: '1_admin', order: 40, icon: I.cog, label: () => t('System') });
   registerMenuItem({ menu: M, parent: 'system', order: 10, icon: I.alert || I.pulse, label: () => t('Report a problem…'), run: (c) => c.app.captureIncident?.() });
   registerMenuItem({ menu: M, parent: 'system', order: 20, icon: I.pulse, label: () => t('Diagnostics report…'), run: (c) => c.app._openDiagnostics() });
-  registerMenuItem({ menu: M, parent: 'system', order: 26, icon: I.pulse, label: () => t('Capture a CPU profile (20 s)'), run: (c) => c.app._captureCpuProfile?.() }); // lane hub-loop-stalls commit 3: which of VibeSpace's own code uses the processor — the table in the Diagnostics report
-  registerMenuItem({ menu: M, parent: 'system', order: 25, icon: I.pulse, label: () => t('Profile the server for 10 minutes'), run: (c) => c.app._profileServer?.() }); // lane hub-loop-stalls (law L): where the main thread's time goes — the result in the Diagnostics report
+  // THE SYSTEM ORDER (int393 seam, the coordinator's ruling 2026-11-11): 20 Diagnostics · 25 Agent feedback (feedback-sheet.js) · 26, 27 the profile doors · 30 the rule — no two rows share a number (a tie is won by registration order)
+  registerMenuItem({ menu: M, parent: 'system', order: 26, icon: I.pulse, label: () => t('Profile the server for 10 minutes'), run: (c) => c.app._profileServer?.() }); // lane hub-loop-stalls (law L): where the main thread's time goes — the result in the Diagnostics report
+  registerMenuItem({ menu: M, parent: 'system', order: 27, icon: I.pulse, label: () => t('Capture a CPU profile (20 s)'), run: (c) => c.app._captureCpuProfile?.() }); // lane hub-loop-stalls commit 3: which of VibeSpace's own code uses the processor — the table in the Diagnostics report
   registerMenuItem({ menu: M, parent: 'system', order: 30, separator: true });
   registerMenuItem({ menu: M, parent: 'system', order: 40, icon: I.exp || I.pulse, label: () => t('Restore a previous layout…'), run: (c) => c.app._showLayoutHistory() });
   registerMenuItem({ menu: M, parent: 'system', order: 50, icon: I.exp, label: () => t('Backup & migrate…'), run: (c) => c.app._showTransferDialog() });
