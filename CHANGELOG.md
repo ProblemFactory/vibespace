@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.392 — 2026-11-11
+
+### Fixed
+- VibeSpace no longer freezes for seconds every half minute while it estimates how much of each account's limits is left.
+
 ## 2.369.391 — 2026-11-10
 
 ### Changed

@@ -515,10 +515,13 @@ class UsageEstimator {
     const fam = m.includes('fable') ? 'fable' : m.includes('opus') ? 'opus' : m.includes('sonnet') ? 'sonnet' : m.includes('haiku') ? 'haiku' : 'other';
     const entry = { rid, acct: accountId || '__global__', fam, usd, cwUsd: Number(cwUsd) || 0, crUsd: Number(crUsd) || 0, ts };
     this._liveRids.set(rid, entry);
-    this._liveRing.push(entry);
-    if (this._liveRing.length > 3000) {
-      this._liveRing.splice(0, this._liveRing.length - 2000);
-      this._liveRids = new Map(this._liveRing.map((e) => [e.rid, e]));
+    const ring = this._liveRing, last = ring[ring.length - 1];
+    if (last && !(entry.ts >= last.ts)) this._liveOutOfOrder = true; // the range search below needs the ring in ts order
+    ring.push(entry);
+    if (ring.length > 3000) {
+      ring.splice(0, ring.length - 2000);
+      this._liveRids = new Map(ring.map((e) => [e.rid, e]));
+      this._liveOutOfOrder = ring.some((e, i) => i > 0 && !(e.ts >= ring[i - 1].ts));
     }
     // freshest signal there is — estimates must not serve a pre-burn memo
     this._estMemo.clear();
@@ -543,7 +546,21 @@ class UsageEstimator {
     // un-scanned cost vanish from the estimate after N minutes (a dip
     // exactly when the scan lags worst); the ring cap bounds memory instead.
     const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 } };
-    for (const e of this._liveRing) {
+    // THE RING BY RANGE (hotfix usage-ledger-walk ③ — the full ring, up to 3 000 entries, was scanned on every costFn call:
+    // per anchor pair in a relearn, per bucket per member per conversation in a pool evaluation, and the ring only fills
+    // with uptime): in ts order the entries in [from, now] are ONE block — found by binary search, walked in ring order
+    // (the same entries, the same sums); an interval outside the ring's span is answered at once. A ring noted out of
+    // order keeps the whole scan.
+    const ring = this._liveRing;
+    let lo = 0, hi = ring.length;
+    if (!this._liveOutOfOrder) {
+      if (!(ring[ring.length - 1].ts >= fromMs) || !(ring[0].ts <= nowMs)) return null;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (ring[m].ts < fromMs) lo = m + 1; else hi = m; }
+      hi = ring.length;
+    }
+    for (let i = lo; i < hi; i++) {
+      const e = ring[i];
+      if (!this._liveOutOfOrder && e.ts > nowMs) break;
       if (e.ts < fromMs || e.ts > nowMs) continue;
       if (!want.has(e.acct)) continue;
       if (knows && knows(e.rid)) continue;
@@ -630,12 +647,48 @@ class UsageEstimator {
     this._persistRates(identityKey, rates, lines.length);
     return rates;
   }
+  /** THE FIRST LEARN IS ONE SWEEP (hotfix usage-ledger-walk ③): once per cost-memo epoch (a boot, a pricing edit, a
+   *  rewritten ledger — usage-anchors costMemoEpoch) every identity's anchor pairs are costed by ONE ledger walk
+   *  (usage-anchors primeCosts) before the first live relearn asks them one by one; afterwards a relearn reads the memo
+   *  and walks only an interval a row entered (a new pair, a late row). */
+  /** The pool engine's gate asks this before it reads the ledger's signal (A2): a cold memo starts priming — and holds. */
+  primeIfCold() { try { this._primePairs(); } catch { } }
+  _primePairs() {
+    const { costMemoEpoch, primeCostsStepped } = require('./usage-anchors.js');
+    const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
+    let ep = null; try { ep = costMemoEpoch(uh); } catch { ep = null; }
+    if (ep == null || ep === this._primedEpoch || (this._priming && this._priming.epoch === ep)) return;
+    const groups = [];
+    let files = []; try { files = fs.readdirSync(this.dir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { }
+    for (const f of files) {
+      let key = null;
+      try { const data = fs.readFileSync(path.join(this.dir, f), 'utf-8'); const nl = data.lastIndexOf('\n', data.length - 2); key = JSON.parse(data.slice(nl + 1)).identityKey || null; } catch { key = null; }
+      if (!key || this._file(key) !== path.join(this.dir, f)) continue;
+      const lines = this.lines(key), at = new Set(lines.map((l) => l.fetchedAt)), intervals = [];
+      for (const l of lines) if (l && l.prevFetchedAt && l.costSince && at.has(l.prevFetchedAt) && l.fetchedAt > l.prevFetchedAt) intervals.push([l.prevFetchedAt, l.fetchedAt]);
+      if (intervals.length) groups.push({ ids: this.accountIdsFor(key), intervals });
+    }
+    const pr = { epoch: ep, done: false, at: Date.now() };
+    this._priming = pr;
+    const land = (r) => { pr.done = true; pr.result = r || null; if (this._priming === pr) { this._primedEpoch = ep; this._estMemo.clear(); } };
+    let p; try { p = primeCostsStepped(uh, groups, this.primeOpts || {}); } catch { p = null; }
+    if (p && typeof p.then === 'function') p.then(land, () => land(null)); else land(p); // a small span lands at once
+  }
   invalidate(identityKey) { this._rateCache.delete(identityKey); this._lineCache.delete(identityKey); this._estMemo.clear(); }
   /** The ledger this estimator reads is still loading past its takeover bound (the boot's stepped warm) → {bytesLeft, at},
    *  else null (lane ledger-dedup-law r2): a cost read now is part of the ledger. */
   _ledgerLoading() {
-    try { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; return uh && typeof uh.ledgerLoading === 'function' ? uh.ledgerLoading() : null; } catch { return null; }
+    let loading = null;
+    try { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; loading = uh && typeof uh.ledgerLoading === 'function' ? uh.ledgerLoading() : null; } catch { loading = null; }
+    if (loading) return loading;
+    // THE FIRST LEARN IS ONE SWEEP, STEPPED (hotfix usage-ledger-walk ②, 主开发's ruling): a whole ledger whose cost memo is
+    // new (a boot, a pricing edit, a rewritten ledger) primes every identity's anchor pairs off the request path first —
+    // until it lands this estimator answers as while the ledger loads (no estimate, the reading stands; rates from the
+    // frozen costSince, never persisted). A small span primes at once and says nothing.
+    try { this._primePairs(); } catch { }
+    try { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; return uh && typeof uh.ledgerLoading === 'function' ? uh.ledgerLoading() : null; } catch { return null; } // the ONE signal (A2): the ledger's own, its priming hold included
   }
+
   _persistRates(identityKey, rates, nAnchors) {
     try {
       const fp = path.join(this.dir, 'rates.json');
@@ -829,12 +882,14 @@ function cliRefreshDrift(est, raw, nowMs = Date.now()) {
 // whole, else once when the warm ends (an ask meanwhile joins that one run; the first sweep at 20 s simply waits); its
 // automatic pool decision is SKIPPED — `holds()`: true while loading, said once ("ledger still loading"), and `onWhole`
 // hears the warm's end so every auto pool is decided again. Never throws.
-function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {} } = {}) {
+function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = null } = {}) {
   const queued = [];
   let waiting = null, said = false, held = false;
-  const loading = () => { try { return ledger && typeof ledger.ledgerLoading === 'function' ? ledger.ledgerLoading() : null; } catch { return null; } };
+  // `prime` (hotfix usage-ledger-walk A2): a cold cost memo starts its first learn BEFORE the signal is read — the gate then
+  // holds through it like through the warm (one signal: the ledger's ledgerLoading, its priming hold included)
+  const loading = () => { try { if (typeof prime === 'function') prime(); } catch { } try { return ledger && typeof ledger.ledgerLoading === 'function' ? ledger.ledgerLoading() : null; } catch { return null; } };
   const wait = (l) => {
-    if (!said) { said = true; log(`ledger still loading (${Math.ceil(((l && l.bytesLeft) || 0) / 1048576)} MiB left) — the anchor sweep and the automatic pool decisions wait for the whole ledger`); }
+    if (!said) { said = true; log(l && l.priming ? 'the usage costs are priming (the first learn after a boot, a pricing edit or a rewritten ledger) — the anchor sweep and the automatic pool decisions wait for it' : `ledger still loading (${Math.ceil(((l && l.bytesLeft) || 0) / 1048576)} MiB left) — the anchor sweep and the automatic pool decisions wait for the whole ledger`); }
     if (waiting) return;
     waiting = Promise.resolve(typeof ledger.whenWarm === 'function' ? ledger.whenWarm() : null).catch(() => { }).then(() => {
       waiting = null;

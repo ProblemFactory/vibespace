@@ -437,7 +437,7 @@ async function pushSealedOrders(poolId) {
 // lane ledger-dedup-law r2 — NO MONEY DECISION FROM A PARTIAL LEDGER (usage-estimator `wholeLedgerGate`): the sweep waits for
 // the boot warm, the automatic pool decision is skipped while it loads and every auto pool is decided again at its end
 const _wholeLedger = wholeLedgerGate({
-  ledger: usageHistory, log: (m) => console.log(`[usage-pool] ${m}`),
+  ledger: usageHistory, log: (m) => console.log(`[usage-pool] ${m}`), prime: () => usageEstimator.primeIfCold(), // A2 (hotfix usage-ledger-walk): the first learn holds the sweep and the decisions too
   onWhole: () => { try { for (const a of (accounts.list().accounts || [])) { const full = accounts.get(a.id); if (full?.type === 'pooled' && full.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } } } } catch { } },
 });
 function sweepUsageAnchors() { return _wholeLedger.run(sweepUsageAnchorsNow); }

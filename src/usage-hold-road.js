@@ -1549,12 +1549,20 @@ class UsageHoldRoad {
    *  rows loaded so far — so (lane ledger-dedup-law r2, NO MONEY DECISION FROM A PARTIAL LEDGER) costBetweenMulti says
    *  `partial` and memoizes nothing, the estimator learns and writes no rate and answers no estimate, and the pool engine's
    *  anchor sweep waits for the warm while its automatic decision is skipped (usage-estimator `wholeLedgerGate`). */
-  ledgerLoading() { const left = this._pendingLeft(); return left > this._takeoverMax() ? { ...this._evCache.loading } : null; }
+  ledgerLoading() { return this._warmLoading() || (this._primeHold ? { priming: true, at: this._primeHold.at, bytesLeft: 0 } : null); }
+  /** The warm alone (the prime's own reads: it must not wait for itself). */
+  _warmLoading() { const left = this._pendingLeft(); return left > this._takeoverMax() ? { ...this._evCache.loading } : null; }
+  /** PRIMING IS LOADING — FOR EVERYONE (hotfix usage-ledger-walk A2): while the first learn of a cold cost memo runs
+   *  stepped (usage-anchors primeCostsStepped), this ledger says it is loading — ONE signal: the estimator answers no
+   *  estimate and persists no rate, costBetweenMulti says `partial` and memoizes nothing, the pool engine's
+   *  wholeLedgerGate holds its sweep (no anchor, no calib) and its automatic decisions, and whenWarm resolves when it lands. */
+  _holdForPrime(at = Date.now()) { if (this._primeHold) return this._primeHold; let done; const p = new Promise((r) => { done = r; }); this._primeHold = { at, p, done }; return this._primeHold; }
+  _releasePrime(h) { if (h && this._primeHold === h) { this._primeHold = null; try { h.done(); } catch { } } }
   /** Resolves when the stepped boot warm (if any) has ended. Never rejects. */
   warmSettled() { return this._warmP ? this._warmP.then(() => { }, () => { }) : Promise.resolve(); }
   /** THE WHOLE LEDGER (lane ledger-dedup-law r2): resolves at once when a reader may load what is left in its own tick, else
    *  when the stepped warm ends — a warm that a reload restarted is the same warm. Never rejects. */
-  whenWarm() { return this._waitBigWarm() || Promise.resolve(); }
+  whenWarm() { return this._waitBigWarm() || (this._primeHold ? this._primeHold.p : null) || Promise.resolve(); }
   /** An async reader's wait: the warm has more left than a takeover may parse ⇒ wait for it, else nothing. */
   _waitBigWarm() { return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
 }

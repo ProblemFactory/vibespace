@@ -1131,7 +1131,28 @@ class UsageHistory {
     if (!c.loading || Date.now() - c.loading.at >= 1000) c.loading = { bytesLeft: this._unreadBytes(), at: Date.now() };
     return c.loading.bytesLeft;
   }
-  _sortHot(c) { c.sorted = c.events.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0)); c.sortedLen = c.events.length; }
+  /** The hot rows in ts order (a STABLE sort: equal ts keep their load order). INCREMENTAL (hotfix usage-ledger-walk ④ — a
+   *  fresh hub spent whole seconds re-sorting every hot row because one row arrived): rows only ever APPEND to `events`
+   *  between sorts (a trim or a rebuild replaces the array and drops `sorted`), so the new tail is sorted alone and appended
+   *  — or merged, old first on equal ts — which is the same order the full stable sort gives. */
+  _sortHot(c) {
+    const ts = (e) => e.ts || 0;
+    const old = c.sorted, n0 = c.sortedLen;
+    if (old && c.sortedOf === c.events && n0 >= 0 && n0 <= c.events.length) {
+      const add = c.events.slice(n0).sort((a, b) => ts(a) - ts(b));
+      if (!add.length) c.sorted = old;
+      else if (!old.length || ts(add[0]) >= ts(old[old.length - 1])) c.sorted = old.concat(add);
+      else {
+        const out = new Array(old.length + add.length);
+        let i = 0, j = 0, k = 0;
+        while (i < old.length && j < add.length) out[k++] = ts(add[j]) < ts(old[i]) ? add[j++] : old[i++];
+        while (i < old.length) out[k++] = old[i++];
+        while (j < add.length) out[k++] = add[j++];
+        c.sorted = out;
+      }
+    } else c.sorted = c.events.slice().sort((a, b) => ts(a) - ts(b));
+    c.sortedLen = c.events.length; c.sortedOf = c.events;
+  }
   /** One parsed line → hot (1), cold (2) or dropped (0, a duplicate rid — the FIRST copy wins, whatever its
    *  ts; r3 verify #4/#15: a cold hash hit is a candidate, the rid STRING at its place decides). */
   _take(c, ev, sh, off, size, seen, lineHash = NaN) {

@@ -145,8 +145,8 @@ ok(hitRate > 0.4, `a working set 30% past the 20000-entry cap still hits ${(hitR
 
 // wiring: the estimator + the pool sweep still reach the same function
 const ua = fs.readFileSync(path.join(REPO, 'src/usage-anchors.js'), 'utf8');
-ok(/const _costMemos = new WeakMap\(\);/.test(ua) && /usageHistory\._evCountUpTo\(toMs \|\| Infinity\)/.test(ua) && /usageHistory\.pricingToken\(\)/.test(ua) && /_memoPut\(memo, memoKey/.test(ua),
-  'costBetweenMulti memo is per-ledger and keyed by ids|from|to|count-up-to|pricing-token');
+ok(/const _costMemos = new WeakMap\(\);/.test(ua) && /const _rowsIn = \(usageHistory, fromMs, toV\) => usageHistory\._evCountUpTo\(toV\) - usageHistory\._evCountUpTo\(\(fromMs \|\| 0\) - 1\);/.test(ua) && /usageHistory\.pricingToken\(\)/.test(ua) && /_memoPut\(memo, memoKey/.test(ua) && /memoKey = `\$\{\[\.\.\.want\]\.sort\(\)\.join\(','\)\}\|\$\{fromMs\}`;/.test(ua),
+  'costBetweenMulti memo is per-ledger, keyed by ids|from and VERSIONED by the rows in [from, to] (hotfix usage-ledger-walk: the interval\'s own version); a pricing edit or a new ledger generation empties it');
 ok(/Math\.floor\(Math\.random\(\) \* m\.keys\.length\)/.test(ua), 'eviction picks a RANDOM victim (a cyclic scan defeats FIFO/LRU completely)');
 ok(/typeof usageHistory\?\.pricingToken === 'function'/.test(ua), 'a ledger that cannot version its prices is NOT memoized at all');
 const uhs = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
