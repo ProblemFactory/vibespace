@@ -223,7 +223,7 @@ await leg('①', async () => {
   await warm; await tick(); await tick();
   const c2 = costBetweenMulti(uh, ids, from, to);
   ok(sweeps === 1 && sweptReq === N && sweptPartial === false && wholes === 1 && c2.requests === N && !c2.partial, `① the warm ends ⇒ the sweep runs ONCE on the whole ledger (${sweptReq} requests), the pools are decided again (onWhole ×${wholes}), costBetweenMulti whole: ${c2.requests} requests, $${c2.total}`, { sweeps, sweptReq, wholes, c2: c2.requests });
-  ue.ratesFor('ident-1');
+  ue.ratesFor('ident-1'); ue.flushRates?.(); // usage-ledger-walk B3: written once a tick
   ok(fs.existsSync(path.join(ad, 'rates.json')), '① on the whole ledger the rates are learned and written again (the first ask after the warm)');
   // the wiring: the engine's two money writers stand behind the gate
   const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');

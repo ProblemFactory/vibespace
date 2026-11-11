@@ -362,6 +362,13 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
 // them (the same rule estimateBuckets predicts with); a bucket with no rate or
 // no cost in the window has NO burn entry (absent = no claim, never 0 by
 // default — a projection must not rest on a number nobody measured).
+// B3: THE RELEARN SPREAD — ratesFor's 10-minute TTL, spread ±25 % per identity by a hash of its key (the same identity keeps
+// its own TTL): the identities first learned together at a boot fall due across ~5 minutes, never all in one pass
+function rateTtlMs(identityKey) {
+  let h = 2166136261; const k = String(identityKey || '');
+  for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return Math.round(600000 * (0.75 + 0.5 * (h / 4294967296)));
+}
 const BURN_WINDOW_MS = 10 * 60e3;
 function burnRates({ rates, costFn, nowMs, windowMs = BURN_WINDOW_MS }) {
   if (!rates || !costFn || !(windowMs > 0)) return {};
@@ -628,7 +635,7 @@ class UsageEstimator {
     // live-cost recomputation should see it without waiting for a new anchor.
     const c = this._rateCache.get(identityKey);
     const loading = this._ledgerLoading();
-    if (c && (loading || (!c.partial && Date.now() - c.at < 600000))) return c.rates;
+    if (c && (loading || (!c.partial && Date.now() - c.at < rateTtlMs(identityKey)))) return c.rates; // B3: the TTL SPREAD per identity (a whole population never relearns in one pass)
     const lines = this.lines(identityKey);
     // lane ledger-dedup-law r2 — NO LEARNED RATE FROM A PARTIAL LEDGER: while the boot warm is still loading, the live
     // recompute below would read part of the ledger (840 of 20 000 requests in the acceptance's fixture). The rates learn
@@ -651,28 +658,85 @@ class UsageEstimator {
    *  rewritten ledger — usage-anchors costMemoEpoch) every identity's anchor pairs are costed by ONE ledger walk
    *  (usage-anchors primeCosts) before the first live relearn asks them one by one; afterwards a relearn reads the memo
    *  and walks only an interval a row entered (a new pair, a late row). */
+  /** A first-learn line, said once per memo epoch and kind («slow» per phase, «dropped», «stopped»); a repeat is counted and
+   *  told on the next line that is said (B r4 — a stalling loop once repeated them at every new prime). */
+  _sayPrime(ep, m, say) {
+    const kind = /is slow \(reading/.test(m) ? 'slow (the anchor files)' : /is slow/.test(m) ? 'slow' : /made no step/.test(m) ? 'dropped' : /stopped/.test(m) ? 'stopped' : 'said';
+    const S = this._primeSaid || (this._primeSaid = { ep: undefined, kinds: new Set(), held: new Map() });
+    if (S.ep !== ep) { S.ep = ep; S.kinds = new Set(); }
+    if (S.kinds.has(kind)) { S.held.set(kind, (S.held.get(kind) || 0) + 1); return; }
+    S.kinds.add(kind);
+    let tail = '';
+    if (S.held.size) { tail = ` (not said again since: ${[...S.held].map(([k, n]) => `${k} ×${n}`).join(', ')})`; S.held.clear(); }
+    try { say(m + tail); } catch { }
+  }
   /** The pool engine's gate asks this before it reads the ledger's signal (A2): a cold memo starts priming — and holds. */
   primeIfCold() { try { this._primePairs(); } catch { } }
   _primePairs() {
     const { costMemoEpoch, primeCostsStepped } = require('./usage-anchors.js');
     const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory;
     let ep = null; try { ep = costMemoEpoch(uh); } catch { ep = null; }
-    if (ep == null || ep === this._primedEpoch || (this._priming && this._priming.epoch === ep)) return;
-    const groups = [];
+    if (ep == null || ep === this._primedEpoch || (this._priming && !this._priming.done && this._priming.epoch === ep)) return;
     let files = []; try { files = fs.readdirSync(this.dir).filter((f) => /^anchors-.*\.ndjson$/.test(f)); } catch { }
-    for (const f of files) {
-      let key = null;
-      try { const data = fs.readFileSync(path.join(this.dir, f), 'utf-8'); const nl = data.lastIndexOf('\n', data.length - 2); key = JSON.parse(data.slice(nl + 1)).identityKey || null; } catch { key = null; }
-      if (!key || this._file(key) !== path.join(this.dir, f)) continue;
-      const lines = this.lines(key), at = new Set(lines.map((l) => l.fetchedAt)), intervals = [];
-      for (const l of lines) if (l && l.prevFetchedAt && l.costSince && at.has(l.prevFetchedAt) && l.fetchedAt > l.prevFetchedAt) intervals.push([l.prevFetchedAt, l.fetchedAt]);
-      if (intervals.length) groups.push({ ids: this.accountIdsFor(key), intervals });
-    }
     const pr = { epoch: ep, done: false, at: Date.now() };
     this._priming = pr;
-    const land = (r) => { pr.done = true; pr.result = r || null; if (this._priming === pr) { this._primedEpoch = ep; this._estMemo.clear(); } };
-    let p; try { p = primeCostsStepped(uh, groups, this.primeOpts || {}); } catch { p = null; }
-    if (p && typeof p.then === 'function') p.then(land, () => land(null)); else land(p); // a small span lands at once
+    // a landing marks the epoch learned; so does a THROW (failed — master's road for this epoch, as A5); a stall or a moved epoch
+    // leaves it UNLEARNED: the next ask starts a new stepped prime (the first learn never runs on the synchronous road)
+    const land = (r) => { if (pr.done) return; pr.done = true; pr.result = r || null; if (this._priming === pr) { if (!(r && r.abandoned && !r.failed)) this._primedEpoch = ep; this._estMemo.clear(); } };
+    const opts0 = this.primeOpts || {};
+    const opts = { ...opts0, say: (m) => this._sayPrime(ep, m, opts0.say || ((x) => console.warn(x))) }; // the prime's lines, once an epoch
+    const groupOf = (f) => { // one identity: its anchor file's pairs (a step's work — B3: never all files on the first ask)
+      let key = null;
+      try { const data = fs.readFileSync(path.join(this.dir, f), 'utf-8'); const nl = data.lastIndexOf('\n', data.length - 2); key = JSON.parse(data.slice(nl + 1)).identityKey || null; } catch { key = null; }
+      if (!key || this._file(key) !== path.join(this.dir, f)) return null;
+      const lines = this.lines(key), at = new Set(lines.map((l) => l.fetchedAt)), intervals = [];
+      for (const l of lines) if (l && l.prevFetchedAt && l.costSince && at.has(l.prevFetchedAt) && l.fetchedAt > l.prevFetchedAt) intervals.push([l.prevFetchedAt, l.fetchedAt]);
+      return intervals.length ? { ids: this.accountIdsFor(key), intervals } : null;
+    };
+    const finish = (groups, release) => { // the prime's own watchdog windows (round 3's «one bound» went: a slow file phase must not shorten the prime's)
+      let p; try { p = primeCostsStepped(uh, groups, opts); } catch { p = null; }
+      if (p && typeof p.then === 'function') p.then((r) => { land(r); release(); }, () => { land(null); release(); }); else { land(p); release(); } // r4: land first, release after (no gap between the hold and the verdict)
+    };
+    let small = true; try { small = !(uh && typeof uh._evCountUpTo === 'function') || uh._evCountUpTo(Infinity) <= (opts.syncMaxRows ?? 50000); } catch { small = true; }
+    if (small) { const groups = []; for (const f of files) { const g = groupOf(f); if (g) groups.push(g); } finish(groups, () => { }); return; }
+    // THE FIRST ASK HOLDS ONLY (B3): ITS OWN hold (every reader answers «still learning» — A2; r4: a prime's hold is its own), then one
+    // identity's file a step, then the stepped prime (holding its own too); a watchdog per window: slow ⇒ said, it goes on; no step
+    // in a whole window ⇒ dropped, the epoch unlearned (the next ask primes again, stepped)
+    const hold = typeof uh._holdForPrime === 'function' ? uh._holdForPrime() : null;
+    let released = false;
+    const release = () => { if (released) return; released = true; if (hold) { try { uh._releasePrime(hold); } catch { } } };
+    // SAID ONCE AN EPOCH (B r4): a loop that keeps stalling drops and restarts primes for ever — each kind of line («slow»,
+    // «dropped», «stopped») is said once per memo epoch; the repeats are counted and told on the next line that IS said
+    const winMs = opts.holdMaxMs || 30000, sayP = opts.say; // opts.say IS the once-an-epoch wrapper
+    let fsteps = 0, fseen = 0, fslow = false, bound = null;
+    const watch = () => { // THE FIRST LEARN NEVER RUNS ON THE SYNCHRONOUS ROAD: a slow file phase goes on; one with no step in a window is dropped (unlearned)
+      if (pr.done) return;
+      if (fsteps === fseen) { try { sayP(`[usage] the first cost sweep made no step for ${winMs} ms — it is dropped; the next ask starts a new one (stepped)`); } catch { } try { global.__vsEvent?.('usage-prime-dropped', 'the anchor files'); } catch { } land({ abandoned: true, stalled: true }); release(); return; } // r4: land first, release after
+      fseen = fsteps;
+      if (!fslow) { fslow = true; try { sayP(`[usage] the first cost sweep is slow (reading the anchor files: ${fsteps} of ${files.length} in ${winMs} ms — the loop is busy) — estimates wait for it; it goes on`); } catch { } }
+      bound = setTimeout(watch, winMs); if (bound && typeof bound.unref === 'function') bound.unref();
+    };
+    bound = setTimeout(watch, winMs);
+    if (bound && typeof bound.unref === 'function') bound.unref();
+    const next = opts.next || ((fn) => setImmediate(fn));
+    const groups = []; let k = 0;
+    const step = () => {
+      if (pr.done || this._priming !== pr) { release(); return; }
+      fsteps++;
+      try {
+        if (costMemoEpoch(uh) !== ep) { clearTimeout(bound); land({ abandoned: true, moved: true }); release(); return; } // B r3: the memo's epoch moved during the file steps — this priming ends; the next ask primes the new epoch (a throw: the guard below)
+        if (k < files.length) { const g = groupOf(files[k++]); if (g) groups.push(g); next(step); return; }
+        clearTimeout(bound);
+        finish(groups, release);
+      } catch (e) { // A5 / B r3: a throw in a file step (an anchor file, the epoch's own read) ends this priming — master's road, said once an epoch, naming the step
+        clearTimeout(bound);
+        const why = String((e && e.message) || e || 'unknown').slice(0, 160), where = k > 0 ? `reading anchor file ${k} of ${files.length}` : "the memo epoch's read";
+        try { sayP(`[usage] the first cost sweep stopped (${where} threw: ${why}) — the costs of this price table / ledger are walked interval by interval, as before the sweep existed`); } catch { }
+        try { global.__vsEvent?.('usage-prime-failed', where); } catch { }
+        land({ abandoned: true, failed: why }); release();
+      }
+    };
+    try { next(step); } catch { clearTimeout(bound); land(null); release(); }
   }
   invalidate(identityKey) { this._rateCache.delete(identityKey); this._lineCache.delete(identityKey); this._estMemo.clear(); }
   /** The ledger this estimator reads is still loading past its takeover bound (the boot's stepped warm) → {bytesLeft, at},
@@ -689,6 +753,11 @@ class UsageEstimator {
     try { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; return uh && typeof uh.ledgerLoading === 'function' ? uh.ledgerLoading() : null; } catch { return null; } // the ONE signal (A2): the ledger's own, its priming hold included
   }
 
+  // B3 ON THE STORE WRITER (usage-ledger-walk B, rebased onto hub-loop-stalls commit 2 — ONE writer of rates.json): a relearn of
+  // every identity costs the loop no read and no write of this file per identity — the copy is read once (the first persist
+  // after a (re)load), each persist merges into it and marks the file dirty, the writer builds the text when its write is due
+  // (once, whatever the persists since) and writes it on its own thread. B r2's law is commit 2's road: every caller that
+  // archives and drops this file runs inside the boot's migrations, between server.js's settleRates and reloadRates.
   _persistRates(identityKey, rates, nAnchors) {
     // lane hub-loop-stalls commit 2: through THE STORE WRITER (its own thread; on the owner's hub this write held the loop
     // twice ≥ 1 s in six hours). The file is read at the first persist after a (re)load and kept here; each persist merges
@@ -927,6 +996,6 @@ module.exports = {
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
   CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift, wholeLedgerGate,
-  burnRates, BURN_WINDOW_MS,
+  burnRates, BURN_WINDOW_MS, rateTtlMs,
   UsageEstimator,
 };

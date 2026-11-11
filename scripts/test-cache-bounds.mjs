@@ -193,7 +193,7 @@ const READERS = {
   'src/usage-history.js': 'owner — the hot rows, the cold columns, the streamed cold rows',
   'src/usage-hold-road.js': 'owner — UsageHistory\'s hold road (lane ledger-dedup-law r11: its methods, moved out of usage-history.js): the drain appends a held month into the hot rows',
   'src/usage-anchors.js': 'columns — costBetweenMulti reads ts/acct/be/host/atype/model/tokens through _events + the _evCountUpTo version',
-  'src/server/usage-pool-engine.js': 'columns — the 7-day dark taint reads host/acct/atype through _events',
+  // src/server/usage-pool-engine.js left the census (hotfix usage-ledger-walk B2): the dark taint asks usageHistory.hostAccountsIn — the (host, account) index — and walks no row
   'src/usage-estimator.js': 'ids — ledgerKnowsId; the _evCache sets only for a ledger stub without it',
 };
 const NEEDLE = /\._events\(|\._evCache\b|\._loadEvents\(|\._sortedEvents\(|\._evCountUpTo\(|\b_allRows\(|\b(?:usageHistory|uh)\.(?:aggregate|rows)\(/;

@@ -265,6 +265,36 @@ const REBUILD_RETRY_MS = 60e3, REBUILD_RETRY_MAX_MS = 15 * 60e3;
 const CURSOR_PRUNE_MS = 3600 * 1000;
 const CURSOR_SLICE_MS = 20;   // lane ci-351-reds: the walk's prune pass hands the loop back after this much of the real clock
 
+// B1's ring: ARR_CAP entries of typed columns (8 × 6 + 4 × 4 = 64 bytes an entry ≈ 6.4 MB at 100 000), allocated at the
+// first arrival after the first whole pass; a name (account key, account, backend, model) is interned once per cache.
+// THE NAMES' CEILING (B r2): a table that reaches ARR_NAMES_MAX names RESTARTS the log — its names are dropped and `start`
+// moves to the next sequence number, so every mark before it is no longer held (that slot walks, master's road); the
+// sequence numbers go on rising (a mark is never re-used for another entry).
+const ARR_CAP = 100000, ARR_NAMES_MAX = 4096;
+const HOST_INDEX_KEEP_MS = 8 * 86400e3, HOST_INDEX_MAX_ROWS = 200000; // B2 r2: the dark-host index keeps 8 days (the question asks 7); past 200 000 rows (≈ 2.4 MB) it keeps the 8 days behind its newest row
+function _logArrival(c, ev) {
+  let L = c.arr;
+  if (L && (L.names.key.length >= ARR_NAMES_MAX || L.names.acct.length >= ARR_NAMES_MAX || L.names.be.length >= ARR_NAMES_MAX || L.names.model.length >= ARR_NAMES_MAX)) {
+    const full = Object.keys(L.names).filter((k) => L.names[k].length >= ARR_NAMES_MAX).join(', ');
+    L.names = { key: [], acct: [], be: [], model: [] }; L.ids = { key: new Map(), acct: new Map(), be: new Map(), model: new Map() }; L.start = L.seq; L.restarts = (L.restarts || 0) + 1;
+    if (L.restarts === 1) { // B r3: A STAND-DOWN IS SAID — once per ledger cache (the census counts the later ones)
+      try { console.warn(`[usage] the arrival log restarted at its ${ARR_NAMES_MAX}-name ceiling (${full}) — an interval last asked before sequence ${L.seq} is walked again as before`); } catch { }
+      try { global.__vsEvent?.('usage-arrival-log-restarted', full); } catch { }
+    }
+  }
+  if (!L) {
+    L = c.arr = { cap: ARR_CAP, seq: 0, start: 0, restarts: 0, ts: new Float64Array(ARR_CAP), tok: [0, 1, 2, 3, 4].map(() => new Float64Array(ARR_CAP)), key: new Int32Array(ARR_CAP), acct: new Int32Array(ARR_CAP), be: new Int32Array(ARR_CAP), model: new Int32Array(ARR_CAP),
+      names: { key: [], acct: [], be: [], model: [] }, ids: { key: new Map(), acct: new Map(), be: new Map(), model: new Map() } };
+  }
+  const id = (k, v) => { const m = L.ids[k]; let x = m.get(v); if (x === undefined) { x = L.names[k].length; L.names[k].push(v); m.set(v, x); } return x; };
+  const j = L.seq % L.cap;
+  L.ts[j] = ev.ts || 0;
+  const t = [ev.i, ev.o, ev.cw5, ev.cw1, ev.cr];
+  for (let k = 0; k < 5; k++) L.tok[k][j] = t[k] === undefined ? NaN : t[k] === null ? 0 : t[k]; // an absent count prices as NaN, a null as 0 — as the walk's row does
+  L.key[j] = id('key', ev.acct || globalUsageKeyOf(ev.be)); L.acct[j] = id('acct', ev.acct === undefined ? undefined : ev.acct); L.be[j] = id('be', ev.be); L.model[j] = id('model', ev.model);
+  L.seq++;
+}
+
 class UsageHistory {
   // resolveAccount(acctId) → { type:'subscription'|'api'|'codex-subscription', name, tail } | null
   // Lets the ledger BAKE which account (and its billing TYPE) each request used,
@@ -1025,6 +1055,9 @@ class UsageHistory {
   // shards by (shard, offset) (usage-cold-walk.js). rids/mids = the hot rows' ids; the cold rows' ids live
   // in the slab's sorted hash indexes (r2: dedup and ledgerKnowsId regardless of ts).
   _loadEvents() {
+    // ONE SNAPSHOT (usage-ledger-walk B r2, MUST 2): inside a pinned ask (_pinLoad) nothing loads again — its version, its
+    // arrival mark and its sums are of the ledger as the pin's own load left it
+    if (this._pinDepth > 0 && this._evCache) return this._evCache.events;
     // a reader during the stepped boot warm (B-1319, warmStepped): it takes the warm's pass over and finishes it HERE,
     // in its own tick — a money reader never answers from half a ledger. Lane ledger-dedup-law (the latent twin): only
     // while ≤ TAKEOVER_MAX_BYTES are left (≈ 8 steps, inside the boot law) — past it the warm keeps its pass, the async
@@ -1043,7 +1076,7 @@ class UsageHistory {
   *_loadSteps(chunkBytes = Infinity, trimBatch = TRIM_BATCH_ROWS) {
     const stepped = chunkBytes !== Infinity;
     if (!this._evCache) this.ledgerGen = (this.ledgerGen || 0) + 1; // a rebuilt cache = a new generation (cost memos keyed on it, r4)
-    if (!this._evCache) this._evCache = { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() };
+    if (!this._evCache) this._evCache = { consumed: new Map(), marks: new Map(), events: [], sizes: [], locs: [], hrh: [], hotBytes: 0, rids: new Set(), mids: new Set(), srcWm: new Map(), hostAcct: new Map(), checkedAt: 0, cold: new CB.ColdSlab(), cutoff: -Infinity, walking: 0, shards: [], shardIx: new Map() };
     const c = this._evCache;
     // inc-mtox23xw (2.369.36): this ran a readdir + a stat per shard on EVERY
     // call — and the estimator calls it once per anchor PAIR (thousands per
@@ -1212,6 +1245,44 @@ class UsageHistory {
     // sourceWatermarks() to detect an ACTIVE source that has gone dark.
     const src = ev.host || 'local';
     if ((ev.ts || 0) > (c.srcWm.get(src) || 0)) c.srcWm.set(src, ev.ts);
+    // THE ARRIVAL LOG (hotfix usage-ledger-walk B1): after the first whole pass every row that counts (not a remote host's own
+    // unresolved bucket) is logged in the order it ARRIVES — what an addition to a cost needs, never the row (a backfill of
+    // old rows stays in the cold columns, not resident as objects) — so a cached interval learns which of ITS account's
+    // rows arrived since it was last asked, whatever their ts (usage-anchors costBetweenMulti).
+    if (c.whole && !(ev.host && ev.atype === 'host')) _logArrival(c, ev);
+    if (c.hours && typeof c.hours.add === 'function') { try { c.hours.add(ev); } catch { c.hours = null; } } // B3: the hour sums keep up (usage-anchors installs them)
+    // THE (HOST, ACCOUNT) INDEX (hotfix usage-ledger-walk B2): a remote host's RESOLVED rows (an account, not the host's own
+    // bucket) by their ts — the dark-taint question («which accounts did a dark host spend in the last 7 days») answered by
+    // binary search (hostAccountsIn), never a 7-day walk. Rows only arrive within a generation; a rewrite is a new cache.
+    // KEPT 8 DAYS (B r2): a row older than the index's floor is not held (an ask reaching before the floor walks); every
+    // resolved remote row moves the version, held or not. THE ROW CEILING (no host need ever go dark): past
+    // HOST_INDEX_MAX_ROWS held rows the index keeps the 8 days behind its newest row (never past the clock); if those alone pass
+    // it, the index stands down for this cache (its floor +∞: every ask walks, master's loop).
+    if (ev.host && ev.acct && ev.atype !== 'host') {
+      const t = ev.ts || 0;
+      c.hostAcctVer = (c.hostAcctVer || 0) + 1;
+      if (!(t < (c.hostAcctFloor ?? -Infinity))) {
+        if (!c.hostAcct) c.hostAcct = new Map();
+        let byA = c.hostAcct.get(ev.host); if (!byA) c.hostAcct.set(ev.host, byA = new Map());
+        let l = byA.get(ev.acct); if (!l) byA.set(ev.acct, l = { ts: [], sorted: true });
+        if (l.ts.length && t < l.ts[l.ts.length - 1]) l.sorted = false;
+        l.ts.push(t);
+        if (t > (c.hostAcctNewest ?? -Infinity)) c.hostAcctNewest = t;
+        if (c.hostAcctRows === undefined) { c.hostAcctRows = 0; for (const m of c.hostAcct.values()) for (const x of m.values()) c.hostAcctRows += x.ts.length; } else c.hostAcctRows++;
+        const max = this.hostIndexMaxRows || HOST_INDEX_MAX_ROWS;
+        if (c.hostAcctRows > max) {
+          this._hostIndexPrune(c, Math.min(c.hostAcctNewest, Date.now()) - 7 * 86400e3, true);
+          let n = 0; for (const m of c.hostAcct.values()) for (const x of m.values()) n += x.ts.length;
+          if (n > max) { // 8 days alone pass the ceiling: the index stands down (every ask walks) — said once (B r3)
+            c.hostAcctDown = { at: Date.now(), rows: n }; c.hostAcct = new Map(); c.hostAcctFloor = Infinity;
+            try { console.warn(`[usage] the dark-host index stood down at its ${max}-row ceiling (${n} resolved remote rows in 8 days) — a dark host's accounts are found by walking 7 days of the ledger, as before`); } catch { }
+            try { global.__vsEvent?.('usage-dark-index-stood-down', String(n)); } catch { }
+            n = 0;
+          }
+          c.hostAcctRows = n;
+        }
+      }
+    }
     if (ev.ts < c.cutoff && CB.coldable(ev, sh, off)) { c.cold.push(ev, sh, off, lineHash); return 2; }
     if (ev.rid) c.rids.add(ev.rid);
     if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
@@ -1271,7 +1342,23 @@ class UsageHistory {
       CB.cacheRow('usage ledger window', { bytes: c ? c.hotBytes : 0, count: c ? c.events.length : 0, unit: 'rows', ceiling: this._ledgerHotMaxBytes(), kind: 'heap', basis: 'raw line bytes' }),
       CB.cacheRow('usage ledger cold columns', { bytes: c ? c.cold.bytes() : 0, count: c ? c.cold.n : 0, unit: 'rows', ceiling: this._coldMaxBytes(), kind: 'arraybuffers', basis: 'typed arrays' }),
       ...(STUCK.size ? [CB.cacheRow('usage fold workers stuck', { count: STUCK.size, unit: 'workers (storage not answering)' })] : []), // r4, verify #2
+      // hotfix usage-ledger-walk B (主开发's condition 3): every index the commit keeps, bounded and counted
+      ...this._ledgerWalkCensus(c),
     ];
+  }
+  _ledgerWalkCensus(c) {
+    const rows = [];
+    const L = c && c.arr, arrBytes = L ? [L.ts, ...L.tok, L.key, L.acct, L.be, L.model].reduce((n, a) => n + a.byteLength, 0) : 0;
+    let names = 0, nameBytes = 0; if (L) for (const k of Object.keys(L.names)) for (const v of L.names[k]) { names++; nameBytes += 136 + String(v).length; } // r3: measured ≈ 150 / 166 B for a 20- / 40-character name (the string, its Map entry, its slot)
+    rows.push(CB.cacheRow('usage arrival log', { bytes: arrBytes + nameBytes, count: L ? Math.min(L.seq - (L.start || 0), L.cap) : 0, unit: 'rows', ceiling: ARR_CAP * 64 + 4 * ARR_NAMES_MAX * 128, kind: 'arraybuffers', basis: `typed columns, 64 bytes a row (allocated whole at the first arrival) + ${names} interned names at ≈ 136 bytes + 1 a character (measured) — each table's ceiling ${ARR_NAMES_MAX} names: at it the log restarts (an older mark walks)${L && L.restarts ? ` — RESTARTED ${L.restarts} time${L.restarts > 1 ? 's' : ''} (last at sequence ${L.start})` : ''}` }));
+    const H = c && c.hours && c.hours.cells;
+    const UAx = require('./usage-anchors.js'), down = c && c.hoursOver && typeof c.hoursOver === 'object' ? c.hoursOver : null;
+    rows.push(CB.cacheRow('usage hour sums', { bytes: H ? H.bytes : 0, count: H ? H.blocks : 0, unit: '(account, UTC day) blocks of 24 hours', ceiling: UAx.HOURS_MAX_BYTES, kind: 'heap', basis: down ? `STOOD DOWN at ${(down.bytes / 1048576).toFixed(1)} MB (${down.blocks} day blocks) past the ${Math.round(UAx.HOURS_MAX_BYTES / 1048576)} MB ceiling — a long interval walks (master's road) until the ledger is rebuilt` : `${UAx.HOUR_BLOCK_BYTES} bytes a block (24 hours × 10 numbers + the array and its Map entry, measured) — at the ceiling the sums stand down for this ledger (a long interval walks, master's road)` }));
+    let hostTs = 0; if (c && c.hostAcct) for (const byA of c.hostAcct.values()) for (const l of byA.values()) hostTs += l.ts.length;
+    const hdown = c && c.hostAcctDown;
+    rows.push(CB.cacheRow('usage dark-host index', { bytes: hostTs * 12, count: hostTs, unit: 'resolved remote rows', ceiling: HOST_INDEX_MAX_ROWS * 12, kind: 'heap', basis: hdown ? `STOOD DOWN at ${hdown.rows} rows (8 days alone past the ${HOST_INDEX_MAX_ROWS}-row ceiling) — a dark host's accounts are found by walking 7 days (master's loop)` : `≤ 12 bytes a row (counted at a growing array's 12; a pruned one measures 8.5) — kept ${HOST_INDEX_KEEP_MS / 86400e3} days behind its last ask (the dark-taint question asks 7), and past ${HOST_INDEX_MAX_ROWS} rows the ${HOST_INDEX_KEEP_MS / 86400e3} days behind its newest row (if those alone pass it, the index stands down): older rows dropped, an ask before the floor walks` }));
+    try { const m = require('./usage-anchors.js').costMemoCensus(this); if (m) rows.push(CB.cacheRow('usage cost memo', m)); } catch { }
+    return rows;
   }
 
   // THE COLD ROWS' FULL FIELDS (B-9428 r2): the slab's ordered positions in [from, to], cut into one group per
@@ -1483,7 +1570,7 @@ class UsageHistory {
     const sizes = Float64Array.from(c.sizes), locs = Float64Array.from(c.locs), hrh = Float64Array.from(c.hrh), cold = c.cold.parts();
     const marks = [...c.marks].map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: new Uint8Array(m.probe) }]);
     return {
-      built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },
+      built: { buf, chunks, sizes, locs, hrh, perm, hotBytes: c.hotBytes, cold: cold.parts, consumed: [...c.consumed], marks, srcWm: [...c.srcWm], hostAcct: [...(c.hostAcct || new Map())].map(([h, m]) => [h, [...m].map(([a, l]) => [a, l.ts.slice()])]), hostAcctFloor: c.hostAcctFloor ?? null, hostAcctNewest: c.hostAcctNewest ?? null, cutoff: c.cutoff, shards: c.shards, overWarned: !!c.overWarned },
       transfer: [buf.buffer, sizes.buffer, locs.buffer, hrh.buffer, perm.buffer, ...cold.transfer],
     };
   }
@@ -1500,12 +1587,98 @@ class UsageHistory {
     const sorted = new Array(events.length);
     for (let k = 0; k < sorted.length; k++) sorted[k] = events[b.perm[k]];
     const marks = new Map(b.marks.map(([f, m]) => [f, { ino: m.ino, mtimeMs: m.mtimeMs, probe: Buffer.from(m.probe.buffer, m.probe.byteOffset, m.probe.length) }]));
-    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedLen: events.length, overWarned: b.overWarned, whole: true };
+    return { consumed: new Map(b.consumed), marks, events, sizes, locs, hrh, hotBytes: b.hotBytes, rids, mids, srcWm: new Map(b.srcWm), hostAcct: new Map((b.hostAcct || []).map(([h, m]) => [h, new Map(m.map(([a, ts]) => [a, { ts, sorted: false }]))])), hostAcctFloor: b.hostAcctFloor ?? undefined, hostAcctNewest: b.hostAcctNewest ?? undefined, checkedAt: 0, cold: CB.ColdSlab.fromParts(b.cold), cutoff: b.cutoff, walking: 0, shards: b.shards, shardIx: new Map(b.shards.map((f, i) => [f, i])), sorted, sortedLen: events.length, overWarned: b.overWarned, whole: true };
   }
   /** THE SWAP: ONE assignment — a reader sees the previous cache or the rebuilt one, each whole — and a new generation for
    *  the cost memos (usage-anchors keys on ledgerGen). The appends since the worker read come in the next pass (checkedAt 0). */
   _swapCache(next) { next.checkedAt = 0; this._evCache = next; this.ledgerGen = (this.ledgerGen || 0) + 1; }
 
+  /** B2 (hotfix usage-ledger-walk): the accounts a remote host in `hosts` spent on (a resolved row: an account, not the
+   *  host's own bucket) with a ts in [since, to] — by binary search over the (host, account) index kept in _take; the same
+   *  set as walking the rows (usage-pool-engine darkTaintedAccounts' old loop). `ver` = the index's version. KEPT 8 DAYS
+   *  (B r2): an ask reaching before the index's floor walks the rows (the old loop, verbatim); after an ask the index drops
+   *  what lies a day before its `since` (once a day — the 7-day question never reaches back there). */
+  hostAccountsIn(hosts, since, to) {
+    try { this._loadEvents(); } catch { }
+    const c = this._evCache, accts = new Set();
+    if (!c) return { accts, ver: 0 };
+    if (since < (c.hostAcctFloor ?? -Infinity)) {
+      const hs = new Set(hosts || []);
+      for (const ev of this._events(since, to)) if (ev.host && hs.has(ev.host) && ev.acct && ev.atype !== 'host') accts.add(ev.acct);
+      return { accts, ver: c.hostAcctVer || 0, walked: true };
+    }
+    if (!c.hostAcct) { this._hostIndexPrune(c, since); return { accts, ver: c.hostAcctVer || 0 }; }
+    for (const h of hosts || []) {
+      const byA = c.hostAcct.get(h); if (!byA) continue;
+      for (const [acct, l] of byA) {
+        if (accts.has(acct)) continue;
+        if (!l.sorted) { l.ts.sort((x, y) => x - y); l.sorted = true; }
+        let lo = 0, hi = l.ts.length;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (l.ts[m] < since) lo = m + 1; else hi = m; }
+        if (lo < l.ts.length && l.ts[lo] <= to) accts.add(acct);
+      }
+    }
+    this._hostIndexPrune(c, since);
+    return { accts, ver: c.hostAcctVer || 0 };
+  }
+  _hostIndexPrune(c, since, full = false) {
+    const cut = since - (HOST_INDEX_KEEP_MS - 7 * 86400e3);
+    if (!(cut > (c.hostAcctFloor ?? -Infinity) + (full ? 0 : 86400e3))) return; // once a day of floor (the ceiling: whenever it moves)
+    if (c.hostAcct) for (const [h, byA] of c.hostAcct) {
+      for (const [a, l] of byA) {
+        if (!l.sorted) { l.ts.sort((x, y) => x - y); l.sorted = true; }
+        let lo = 0, hi = l.ts.length;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (l.ts[m] < cut) lo = m + 1; else hi = m; }
+        if (lo === l.ts.length) byA.delete(a); else if (lo) l.ts = l.ts.slice(lo);
+      }
+      if (!byA.size) c.hostAcct.delete(h);
+    }
+    c.hostAcctFloor = cut; c.hostAcctRows = undefined; // recounted at the next held row
+  }
+  /** B1: the arrivals since sequence number `seq` (exclusive) as light rows { ts, key, i, o, cw5, cw1, cr, acct, be, model } —
+   *  the fields _cost / _addRow read — in arrival order; null when the log no longer holds `seq` (it moved past it: the
+   *  caller walks, master's road). `arrivalSeq()` = the number of rows logged in this generation so far. */
+  arrivalSeq() { try { this._loadEvents(); } catch { } const L = this._evCache && this._evCache.arr; return L ? L.seq : 0; }
+  /** ONE SNAPSHOT (B r2, MUST 2): one load now and none until the returned release is called — every read in between (the
+   *  version, the arrival mark, the walk) is of the same ledger. Re-entrant; the release is idempotent. */
+  _pinLoad() {
+    this._loadEvents();
+    this._pinDepth = (this._pinDepth || 0) + 1;
+    let done = false;
+    return () => { if (done) return; done = true; this._pinDepth--; };
+  }
+  /** B1 r2: the arrivals since `seq` (exclusive) of the account keys in `keys` with a ts in [from, to] — read from the
+   *  columns, a light row built only for one that matches (the walk's fields); null when the log no longer holds `seq`. */
+  arrivalsFor(seq, keys, from, to) {
+    const L = this._evCache && this._evCache.arr;
+    if (!L) return seq === 0 ? [] : null;
+    if (seq < Math.max(L.start || 0, L.seq - L.cap) || seq > L.seq) return null;
+    const want = []; for (const k of keys) { const x = L.ids.key.get(k); if (x !== undefined) want.push(x); }
+    const out = [];
+    if (!want.length) return out;
+    const w0 = want[0], one = want.length === 1, lo = from == null ? -Infinity : from, hi = to == null ? Infinity : to;
+    for (let q = seq; q < L.seq; q++) {
+      const j = q % L.cap, t = L.ts[j];
+      if (t < lo || t > hi) continue;
+      const kx = L.key[j];
+      if (one ? kx !== w0 : !want.includes(kx)) continue;
+      out.push({ ts: t, key: L.names.key[kx], i: L.tok[0][j], o: L.tok[1][j], cw5: L.tok[2][j], cw1: L.tok[3][j], cr: L.tok[4][j], acct: L.names.acct[L.acct[j]], be: L.names.be[L.be[j]], model: L.names.model[L.model[j]] });
+    }
+    return out;
+  }
+  arrivalsSince(seq) {
+    const L = this._evCache && this._evCache.arr;
+    if (!L) return seq === 0 ? [] : (seq > 0 ? null : null);
+    if (seq < Math.max(L.start || 0, L.seq - L.cap) || seq > L.seq) return null;
+    const out = [];
+    for (let q = seq; q < L.seq; q++) {
+      const j = q % L.cap;
+      out.push({ ts: L.ts[j], key: L.names.key[L.key[j]], i: L.tok[0][j], o: L.tok[1][j], cw5: L.tok[2][j], cw1: L.tok[3][j], cr: L.tok[4][j], acct: L.names.acct[L.acct[j]], be: L.names.be[L.be[j]], model: L.names.model[L.model[j]] });
+    }
+    return out;
+  }
+  /** The (host, account) index's version and this ledger's generation — a memo of hostAccountsIn holds while both stand. */
+  hostAccountsVersion() { try { this._loadEvents(); } catch { } return `${this.ledgerGen || 0}:${(this._evCache && this._evCache.hostAcctVer) || 0}`; }
   /** Per-source (per-machine) newest-event-timestamp map: {local: ts, <hostId>: ts}.
    *  The offline-bias defense reads this to tell "idle" from "dark": a source
    *  with RECENT events whose link is down is actively-consuming-but-invisible
