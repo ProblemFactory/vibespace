@@ -138,7 +138,11 @@ export function installTelemetry() {
 // ring to tell the two apart.
 const _longTasks = [];
 export function recentLongTasks() { return _longTasks.slice(); }
-try { window.__vsLongTasks = recentLongTasks; window.__vsScreenEvents = () => _screenEvents.slice(); } catch { }
+// EVERY window.__vs* ring accessor is set ONLY WHEN UNSET (lane window-close-stall, the owner's 14 newest «renderer freeze»
+// bundles all with snapshot.longTasks EMPTY): the lazy doc editor bundle (public/doc-editor.js ← src/lib/utils.js) carries a
+// SECOND copy of this module whose installers never run — its accessors pointed the recorder at its own empty rings the moment
+// the first Doc window opened. The first copy (client.js, the one that installs the watches) owns them for the page's life.
+try { window.__vsLongTasks ||= recentLongTasks; window.__vsScreenEvents ||= () => _screenEvents.slice(); } catch { }
 // ── COMPOSITOR-STALL detector (2.339.4, the RTX-5090 verdict) ────────────
 // rAF callbacks are driven by the compositor's vsync; timers are not. When a
 // 1s timer observes the last rAF tick aging past 2s while the page is
@@ -280,7 +284,7 @@ export function paintGapKind({ t, gap } = {}, { longTasks = [], inputs = [] } = 
 // frame gap with an input during it or just after is jank the person could feel.
 const _inputs = [];
 export function recentInputs() { return _inputs.slice(); }
-try { window.__vsInputs = recentInputs; } catch { }   // the bundle's "was anyone there?" ring — timestamps only
+try { window.__vsInputs ||= recentInputs; } catch { }   // the bundle's "was anyone there?" ring — timestamps only
 function noteInput() { _inputs.push(Date.now()); if (_inputs.length > 60) _inputs.shift(); }
 export function installInputStamp() {
   try {
@@ -292,7 +296,7 @@ const _frameGaps = [];   // {t, gap} for every frame that took ≥ 300 ms (a tab
 const _tickLags = [];    // {t, gap, hidden, visibleAgo} for every 1 s tick ≥ 1.5 s late
 export function recentFrameGaps() { return _frameGaps.slice(); }
 export function recentTickLags() { return _tickLags.slice(); }
-try { window.__vsFrameGaps = recentFrameGaps; window.__vsTickLags = recentTickLags; } catch { }
+try { window.__vsFrameGaps ||= recentFrameGaps; window.__vsTickLags ||= recentTickLags; } catch { }
 export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSince, hiddenAt, minGapMs = 4000 }) {
   if (!(tickGap > minGapMs) || hiddenNow) return false;
   if (prevTick < visibleSince) return false;           // the gap started before the page came back
@@ -413,7 +417,7 @@ export function installFetchTimingWatch() {
     po.observe({ type: 'resource', buffered: true });
   } catch { }
 }
-try { window.__vsFetchTimings = recentFetchTimings; } catch { }
+try { window.__vsFetchTimings ||= recentFetchTimings; } catch { }
 
 export function installLongTaskWatch() {
   try {

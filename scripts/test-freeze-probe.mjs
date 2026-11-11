@@ -124,7 +124,10 @@ ok(selfGapIsFreeze({ tickGap: 4001, prevTick: T + 100000, now: T + 104001, hidde
   ok(/installInputStamp\(\);/.test(client), 'WIRING: client.js installs the input-stamp ring at boot');
   const rec = fs.readFileSync(new URL('../src/lib/incident-recorder.js', import.meta.url), 'utf8');
   ok(/out\.screenEvents = window\.__vsScreenEvents/.test(rec), 'WIRING: the incident snapshot carries screenEvents (the window\'s screen facts reach the bundle)');
-  ok(/window\.__vsInputs = recentInputs/.test(src), 'WIRING: the input ring is exposed as window.__vsInputs (like the sibling rings)');
+  ok(/window\.__vsInputs \|\|= recentInputs/.test(src), 'WIRING: the input ring is exposed as window.__vsInputs (like the sibling rings)');
+  // lane window-close-stall: the lazy doc editor bundle carries a SECOND copy of telemetry-client.js — every ring accessor is set
+  // only when unset, so that copy never re-points the recorder at its own empty rings (test-incident «rings» drives it in Chrome)
+  ok(!/window\.__vs\w+ = /.test(src) && (src.match(/window\.__vs\w+ \|\|= /g) || []).length === 6, 'WIRING: every window.__vs* ring accessor in telemetry-client.js is set ONLY WHEN UNSET (||=) — six, none assigned bare', (src.match(/window\.__vs\w+ \|?\|?= /g) || []));
   ok(/out\.inputs = window\.__vsInputs/.test(rec), 'WIRING: the snapshot carries the input ring (the paint-gap verdict\'s present-person evidence)');
 }
 // ── THE PAGE'S LAST REQUESTS (lane vault-slow-load): a resource-timing entry ⇒ { at, route, ms } for the page's own
@@ -145,7 +148,7 @@ ok(selfGapIsFreeze({ tickGap: 4001, prevTick: T + 100000, now: T + 104001, hidde
   const client = fs.readFileSync(new URL('../src/client.js', import.meta.url), 'utf8');
   const rec = fs.readFileSync(new URL('../src/lib/incident-recorder.js', import.meta.url), 'utf8');
   ok(/po\.observe\(\{ type: 'resource', buffered: true \}\)/.test(src) && /const rec = fetchTimingOf\(e, location\.origin, performance\.timeOrigin\);/.test(src) && /if \(_fetchTimings\.length > FETCH_TIMINGS_KEPT\) _fetchTimings\.shift\(\);/.test(src), 'WIRING: the ring observes the resource timings through fetchTimingOf and keeps the last FETCH_TIMINGS_KEPT');
-  ok(/window\.__vsFetchTimings = recentFetchTimings/.test(src) && /installFetchTimingWatch\(\);/.test(client), 'WIRING: exposed as window.__vsFetchTimings (like the sibling rings), installed by client.js at boot');
+  ok(/window\.__vsFetchTimings \|\|= recentFetchTimings/.test(src) && /installFetchTimingWatch\(\);/.test(client), 'WIRING: exposed as window.__vsFetchTimings (like the sibling rings), installed by client.js at boot');
   const carries = (t) => /out\.fetchTimings = window\.__vsFetchTimings \? window\.__vsFetchTimings\(\)\.slice\(-20\) : null;/.test(t);
   ok(carries(rec), 'WIRING: the incident snapshot carries the page\'s last 20 requests (route, ms)');
   ok(!carries(rec.replace(/\n.*out\.fetchTimings = .*/, '')), 'RED CONTROL: the base recorder (no such line) carries no timing — inc-mvk5jyv3\'s bundle');

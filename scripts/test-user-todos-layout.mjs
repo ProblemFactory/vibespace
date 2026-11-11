@@ -1912,8 +1912,11 @@ console.log('㉛ THE ANNOUNCE YIELDS TO THE OWNER\'S OWN ACT (lane needs-card-ta
   // kept; one elsewhere, or on another desktop (visibility:hidden) ⇒ shown
   const box = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
   const el = (rect, vis = true) => ({ getClientRects: () => [rect], checkVisibility: () => vis, getBoundingClientRect: () => rect });
+  const UG = await import((await import('node:url')).pathToFileURL(path.join(ROOT, 'src/lib/utils.js')).href); // (lane window-close-stall: the step-aside reads geometry — utils frontRects / seenAt)
+  const inDoc = (doc, f) => (...a) => { const had = globalThis.document; globalThis.document = doc; try { return f(...a); } finally { globalThis.document = had; } };
   const asideRun = (els) => { const st = { isConnected: true, style: { visibility: '' }, contains: () => false, getBoundingClientRect: () => box(880, 560, 1260, 760) };
-    const A2 = run(slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || slice('  const annAside = () => {', '  const annDrop = (id) =>'), 'annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: { querySelectorAll: () => els } });
+    const doc = { querySelectorAll: () => els };
+    const A2 = run(slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || slice('  const annAside = () => {', '  const annDrop = (id) =>'), 'annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: doc, frontRects: inDoc(doc, UG.frontRects), seenAt: UG.seenAt });
     if (A2.annAside) A2.annAside(); return A2.threw ? A2.threw : st.style.visibility; };
   const formOver = asideRun([el(box(340, 120, 940, 700))]), farForm = asideRun([el(box(40, 60, 600, 400))]), hiddenDesk = asideRun([el(box(340, 120, 940, 700), false)]), none = asideRun([]);
   ok(formOver === 'hidden' && farForm === '' && hiddenDesk === '' && none === '', `RED-able (r13 — 3b8602717 has no step-aside): a form / dialog / menu where the stack stands ⇒ the stack steps aside («${formOver}»); one elsewhere («${farForm}»), on another desktop («${hiddenDesk}»), none («${none}») ⇒ it stands`, { formOver, farForm, hiddenDesk, none });
@@ -1964,8 +1967,15 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
   const m1 = placeRun(BTN, maxed, { avoid: () => [] }); // the mutant: the avoidance dropped
   // a COVERED window's composer and strip (⑱ on fb61162f9: the For-you window in front of them — they pushed the toasts and the
   // stack into each other) are no controls to keep clear of; the same ones in front are
-  const cover = { cover: 1 }, compSeen = (x, y) => { const e = maxed.find((m) => { const r = m.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }); return e ? [e] : [cover]; };
-  const pc = placeRun(BTN, maxed, { hits: () => [cover] }), ps = placeRun(BTN, maxed, { hits: compSeen });
+  // lane window-close-stall: COVERED is read from the window manager's own stacking (frontRects — the windows above theirs), never
+  // a hit test: the composer and strip inside window w1 (z 100); w2 IN FRONT (z 101) over both ⇒ none; w2 BEHIND (z 99) ⇒ both
+  const fakeWin = (rect, z) => { const w = fakeEl('.window', rect); w.style = { zIndex: String(z) }; w.kids = []; w.contains = (x) => x === w || w.kids.includes(x); return w; };
+  const inWin = (w, e) => { e.closest = (s) => (s === '.window' ? w : null); w.kids.push(e); return e; };
+  const w1 = fakeWin(box(0, 40, 1280, 760), 100), wFront = fakeWin(box(0, 520, 1280, 800), 101), wBehind = fakeWin(box(0, 520, 1280, 800), 99);
+  const maxedIn = [inWin(w1, fakeEl('.chat-input-area', composer)), inWin(w1, fakeEl('.chat-attn-dock', strip))];
+  let hitCalls = 0; const countHit = () => { hitCalls++; return []; };
+  const pc = placeRun(BTN, [...maxedIn, w1, wFront], { hits: countHit }), ps = placeRun(BTN, [...maxedIn, w1, wBehind], { hits: countHit });
+  ok(hitCalls === 0, `lane window-close-stall (the owner's recording: a close's toast placement ran 76 + 79 elementsFromPoint at 10.8 ms each): the toasts' and the announce's chrome rule asks the window manager's stacking — 0 hit tests (${hitCalls})`, hitCalls);
   ok(!!p1.rect && !meets(p1.rect, composer) && !meets(p1.rect, strip) && p1.rect.bottom <= strip.top && !!p2.rect && !meets(p2.rect, controls) && p2.rect.top >= controls.bottom && !!p3.rect && p3.rect.top === 554,
     `RED-able (r14 — 5b4b36649: the stack stood by the For-you button over a maximized chat's composer — the toasts above it cleared it): the stack never stands on a window's own controls — a maximized chat's composer and strip under its place ⇒ it RISES above both (top ${p1.rect && p1.rect.top}); under a top bar's button a window's title-bar buttons ⇒ it SINKS below them (top ${p2.rect && p2.rect.top}); nothing there ⇒ its own place (top ${p3.rect && p3.rect.top})`, { p1, p2, p3 });
   ok(!!m1.rect && meets(m1.rect, composer), 'CONTROL (r14): the mutant that drops the avoidance stands on the composer — the leg goes red', m1);
@@ -2003,18 +2013,20 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
   const mv = twoPlaces(maxed, []), hv = twoPlaces(maxed, [], { hover: true });
   ok(!mv.threw && mv.t1 < 554 && mv.t2 === 554 && mv.nudged === 1 && !hv.threw && hv.t2 === hv.t1 && hv.nudged === 0,
     `r14 (⑱ on fb61162f9: the stack moved at a tick and the toasts stayed where it had been — over its cards, a press on a card opened a toast's item): the chat closed ⇒ the stack moves back (${mv.t1} → ${mv.t2}) and asks the toasts again (${mv.nudged}); the same with the pointer on it ⇒ it stays where it was read (${hv.t1} → ${hv.t2})`, { mv, hv });
-  const ta = (UT.match(/function _toastAvoid\(\) \{[\s\S]*?\n\}/) || [''])[0], one = (UT.match(/export const chromeAvoidEls = \(\) => document\.querySelectorAll\('([^']+)'\);/) || [])[1];
+  const ta = (UT.match(/function _toastAvoid\([^)]*\) \{[\s\S]*?\n\}/) || [''])[0], one = (UT.match(/export const chromeAvoidEls = \(\) => document\.querySelectorAll\('([^']+)'\);/) || [])[1];
   const ct = (UT.match(/function _composerTop\(\) \{[\s\S]*?\n\}/) || [''])[0];
-  ok(tags(one).sort().join() === '.chat-attn-dock,.chat-input-area,.window-controls' && /chromeAvoidRects\(sr \? sr\.left : 0, sr \? sr\.right : window\.innerWidth,/.test(ta) && /const chrome = chromeAvoidRects\(left, left \+ w,[^\n]*\n    const spot = toastDeskSpot\(\{ rect: \{ left, right: left \+ w, top, bottom: top \+ h, height: h \}, avoid: chrome,/.test(slice('  const annFree = (w, h, vw, vh) => {', '  const annPlace = (') || '') && (slice('  const annPlace = (', '  /** r13 (the .365 runner') || '').split('annFree(pr.width, pr.height, vw, vh)').length === 3 /* r17: one free rule, both branches */ && /export function chromeAvoidRects\(x0, x1, over = \(\) => false\) \{\n  const hits = typeof document\.elementsFromPoint === 'function', out = \[\];\n  for \(const el of chromeAvoidEls\(\)\) \{/.test(UT) && /soft: !!el\.classList\?\.contains\('window-controls'\) \}\);/.test(UT) && /document\.querySelectorAll\('\.chat-input-area, \.chat-attn-dock'\)/.test(ct),
+  ok(tags(one).sort().join() === '.chat-attn-dock,.chat-input-area,.window-controls' && /chromeAvoidRects\(sr \? sr\.left : 0, sr \? sr\.right : window\.innerWidth,/.test(ta) && /const chrome = chromeAvoidRects\(left, left \+ w,[^\n]*\n    const spot = toastDeskSpot\(\{ rect: \{ left, right: left \+ w, top, bottom: top \+ h, height: h \}, avoid: chrome,/.test(slice('  const annFree = (w, h, vw, vh) => {', '  const annPlace = (') || '') && (slice('  const annPlace = (', '  /** r13 (the .365 runner') || '').split('annFree(pr.width, pr.height, vw, vh)').length === 3 /* r17: one free rule, both branches */ && /export function chromeAvoidRects\(x0, x1, over = \(\) => false\) \{\n  const out = \[\], fronts = new Map\(\);[^\n]*\n  for \(const el of chromeAvoidEls\(\)\) \{/.test(UT) && !/elementsFromPoint\(/.test((UT.match(/export function chromeAvoidRects[\s\S]*?\n\}/) || [''])[0]) /* lane window-close-stall: geometry, never a hit test */ && /soft: !!el\.classList\?\.contains\('window-controls'\) \}\);/.test(UT) && /document\.querySelectorAll\('\.chat-input-area, \.chat-attn-dock'\)/.test(ct),
     'ONE LIST, ONE RULE: utils chromeAvoidEls names a window\'s own controls (every composer, every attention strip, a title bar\'s buttons), chromeAvoidRects keeps the ones a person SEES in a column — the global toasts (_toastAvoid) and the announce (annPlace) both read it and both move through toastDeskSpot; the phone tier\'s toasts (_composerTop) rise above the strip as above the composer (r14 — the 375 shot: two arrival toasts over the strip\'s answers)');
   // B — WHAT THE PERSON SEES: the REAL annAside — every entry of its list on its own, the topmost element under the stack
   const ASIDE = ['.dialog-overlay', '.dialog-form', '[data-popover]', '.context-menu', '.taskbar-context-menu', '#user-todos-popup', '#phone-home'];
   const SR = box(880, 360, 1260, 560), OVER = box(700, 200, 1280, 700);
   const ASIDE_SRC = slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || slice('  const annAside = () => {', '  const annDrop = (id) =>');
+  const inDoc = (doc, f) => (...a) => { const had = globalThis.document; globalThis.document = doc; try { return f(...a); } finally { globalThis.document = had; } };
+  let asideHits = 0; // (lane window-close-stall: the step-aside reads geometry — every hit test counted, 0 allowed)
   const asideRun = (els, { hits = null, roots = '.dialog-overlay, .dialog-form', src = ASIDE_SRC } = {}) => {
     const st = { isConnected: true, style: { visibility: '' }, contains: (e) => e === st || e === card, getBoundingClientRect: () => SR }, card = { card: 1 };
-    const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), ...(hits ? { elementsFromPoint: () => [card, ...hits()] } : {}) };
-    const A = run(src, 'annAside', { annStack: st, DIALOG_ROOTS: roots, document: doc });
+    const doc = { querySelectorAll: (sel) => els.filter((e) => tags(sel).includes(e.sel)), elementsFromPoint: () => { asideHits++; return [card, ...(hits ? hits() : [])]; } };
+    const A = run(src, 'annAside', { annStack: st, DIALOG_ROOTS: roots, document: doc, frontRects: inDoc(doc, U.frontRects), seenAt: U.seenAt });
     if (A.threw) return A.threw;
     A.annAside(); return st.style.visibility;
   };
@@ -2029,9 +2041,14 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     return [s, src !== lit || roots !== '.dialog-overlay, .dialog-form', asideRun([e], { hits: () => [kid, e], roots, src })];
   });
   ok(muts.every(([, applied, v]) => applied && v === ''), `CONTROL (r14 — the acceptance's M3 stayed ALL PASS): a mutant dropping ANY ONE entry leaves the stack over it — ${muts.map(([s, , v]) => `${s} «${v}»`).join(', ')}`, muts);
-  const formEl = fakeEl('.dialog-form', OVER), formKid = inside(formEl), front = { front: 1 };
-  const toast = { closest: (s) => (s === '#global-toasts' ? toast : null) };
-  const covered = asideRun([formEl], { hits: () => [front, formEl] }), seen = asideRun([formEl], { hits: () => [formKid, formEl] }), noHit = asideRun([formEl]), underToast = asideRun([formEl], { hits: () => [toast, formKid, formEl] });
+  // the form in its window fw (z 100): a window IN FRONT (z 101) over the overlap ⇒ no act; the same window BEHIND (z 99) ⇒ the
+  // form is seen; none ⇒ seen; a float in front that is a toast's (inside #global-toasts) is passed over ⇒ seen
+  const formEl = fakeEl('.dialog-form', OVER);
+  const fw = fakeEl('.window', box(600, 150, 1280, 760)); fw.style = { zIndex: '100' }; fw.contains = (x) => x === fw || x === formEl; formEl.closest = (s) => (s === '.window' ? fw : null);
+  const winAt = (z) => { const w = fakeEl('.window', box(820, 300, 1280, 620)); w.style = { zIndex: String(z) }; return w; };
+  const toastFloat = fakeEl('[data-popover]', box(820, 300, 1280, 620)); toastFloat.closest = (s) => (s === '#global-toasts' ? toastFloat : null);
+  const covered = asideRun([formEl, fw, winAt(101)]), seen = asideRun([formEl, fw, winAt(99)]), noHit = asideRun([formEl, fw]), underToast = asideRun([formEl, fw, toastFloat]);
+  ok(asideHits === 0, `lane window-close-stall: the step-aside reads the window manager's stacking — 0 hit tests over every leg above (${asideHits})`, asideHits);
   ok(covered === '' && seen === 'hidden' && noHit === 'hidden' && underToast === 'hidden', `RED-able (r14 — 5b4b36649 judged rectangles: a form BEHIND the window in front hid an urgent card for its whole clock): a form window covered where the stack stands ⇒ the card shows («${covered}»); the same form in front ⇒ it steps aside («${seen}»), a toast above both changing nothing («${underToast}» — the phone's arrival toast sat on the stack's points); a page with no hit test ⇒ the rectangle decides («${noHit}»)`, { covered, seen, noHit, underToast });
   // C — THE OPEN ASKS AT ONCE (never the next tick): the REAL annSoon / annWatch and the open event's listener
   const heard = [], obs = [];
@@ -2535,22 +2552,28 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     let mo = null; const layer = { children: [] };
     class MO3 { constructor(fn) { this.fn = fn; this.on = []; if (!mo || this.fn !== mo.fn) { if (!mo) mo = []; mo.push(this); } } observe(t, o) { this.on.push([t, o]); } disconnect() { this.off = true; } }
     const st = { isConnected: true, style: { visibility: '' }, contains: (e) => e === st || e === card, getBoundingClientRect: () => SR19 }, card = { card: 1 };
-    const els = [], front = { front: 1 }; let inFront = true;
+    // (lane window-close-stall: what is in front is the window manager's stacking — the form's window fw (z 100) and another
+    // window over the overlap at z 99 (behind: the form is in front) or z 101 (raised over it); never a hit test)
+    const els = []; let inFront = true;
     const form = { sel: '.dialog-form', getBoundingClientRect: () => OVER19, checkVisibility: () => true, getClientRects: () => [OVER19] }, kid = { kid: 1 }; form.contains = (x) => x === form || x === kid; const win = { nodeType: 1, parentNode: layer };
-    const doc = { body: { body: 1 }, addEventListener() {}, getElementById: (id) => (id === 'workspace' ? layer : null), querySelectorAll: (sel) => els.filter((e) => tags19(sel).includes(e.sel)), elementsFromPoint: () => [card, ...(inFront ? [kid, form] : [front, form])] };
-    const A3 = run(src, 'annWatch, annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: doc, MutationObserver: MO3, requestAnimationFrame: () => 1, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT });
+    const fw = { sel: '.window', style: { zIndex: '100' }, getBoundingClientRect: () => box(600, 150, 1280, 760), checkVisibility: () => true, contains: (x) => x === fw || x === form }; form.closest = (q) => (q === '.window' ? fw : null);
+    const other = { sel: '.window', style: { get zIndex() { return inFront ? '99' : '101'; } }, getBoundingClientRect: () => box(820, 300, 1280, 620), checkVisibility: () => true, contains: (x) => x === other };
+    let hits19 = 0;
+    const doc = { body: { body: 1 }, addEventListener() {}, getElementById: (id) => (id === 'workspace' ? layer : null), querySelectorAll: (sel) => els.filter((e) => tags19(sel).includes(e.sel)), elementsFromPoint: () => { hits19++; return []; } };
+    const inDoc19 = (f) => (...a) => { const had = globalThis.document; globalThis.document = doc; try { return f(...a); } finally { globalThis.document = had; } };
+    const A3 = run(src, 'annWatch, annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: doc, MutationObserver: MO3, requestAnimationFrame: () => 1, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT, frontRects: inDoc19(U.frontRects), seenAt: U.seenAt });
     if (A3.threw) return { threw: A3.threw };
     A3.annWatch(true);
     const lm = (mo || []).find((o) => o.on.some(([t]) => t === layer));
     const fire = (rec) => { if (lm) lm.fn([rec]); };
     const v0 = st.style.visibility;
-    layer.children.push(win); els.push(form); fire({ type: 'childList', target: layer, addedNodes: [win] }); const vOpen = st.style.visibility;
+    layer.children.push(win); els.push(form, fw, other); fire({ type: 'childList', target: layer, addedNodes: [win] }); const vOpen = st.style.visibility;
     inFront = false; fire({ type: 'attributes', target: win, attributeName: 'style', addedNodes: [] }); const vCovered = st.style.visibility;
     inFront = true; fire({ type: 'attributes', target: win, attributeName: 'style', addedNodes: [] }); const vRaised = st.style.visibility;
-    return { v0, vOpen, vCovered, vRaised };
+    return { v0, vOpen, vCovered, vRaised, hits: hits19 };
   };
   const sp = stepOf(ASIDE19 + WATCH19), spx = stepOf(ASIDE19 + WATCH19.replace("const layer = document.getElementById?.('workspace');", 'const layer = null;'));
-  ok(!sp.threw && sp.v0 === '' && sp.vOpen === 'hidden' && sp.vCovered === '' && sp.vRaised === 'hidden' && !spx.threw && spx.vOpen === '',
+  ok(!sp.threw && sp.v0 === '' && sp.vOpen === 'hidden' && sp.vCovered === '' && sp.vRaised === 'hidden' && sp.hits === 0 && !spx.threw && spx.vOpen === '',
     `RED-able (r19 — 1c4261dcc: the stack stayed over the new form until the next 1 s tick, «${spx.vOpen}»): a form window comes up under the stack, in front ⇒ it steps aside at once («${sp.vOpen}»); a window raised over the form ⇒ the stack shows again («${sp.vCovered}»); the form raised ⇒ aside («${sp.vRaised}») — every one at that moment, no tick`, { sp, spx });
 }
 console.log('lane mask-value-shape (the owner 2026-11-07, «URL被替换和redact了»): THE CARD\'S WORDS FOR A LINK — the owner\'s gcloud sign-in URL through the belt is ONE whole link; a URL the belt masked inside is WORDS + the note, never a link');

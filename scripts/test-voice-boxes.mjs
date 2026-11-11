@@ -147,7 +147,8 @@ const pins = (src) => ({
   phoneTab: /if \(followed \|\| \(window\.matchMedia && window\.matchMedia\(VC_PHONE_MEDIA\)\.matches\)\) btn\.tabIndex = -1/.test(src),
   escWhileRecording: (src.match(/document\.addEventListener\('keydown', onKey, true\)/g) || []).length === 1 && /rec\.start\(250\);\n\s*document\.addEventListener\('keydown', onKey, true\)/.test(src) && /function release\(\) \{\n\s*document\.removeEventListener\('keydown', onKey, true\);/.test(src),
   docListeners: (src.match(/document\.addEventListener\(/g) || []).length === 4 && /document\.addEventListener\('visibilitychange'/.test(src) && /document\.addEventListener\('focusin', /.test(src) && /document\.addEventListener\('focusout', /.test(src),
-  absentClass: /classList\.toggle\('voice-absent', !voiceOn\)/.test(src),
+  // lane window-close-stall: the fact is ONE for the page (the global symbol registry), shared with the doc editor bundle's copy
+  absentClass: /classList\.toggle\('voice-absent', !FACT\.on\)/.test(src) && /Symbol\.for\('vibespace\.voice\.fact'\)/.test(src),
   neverFocusedEnd: /stopSel = everFocused \?/.test(src),
 });
 const P = pins(V);

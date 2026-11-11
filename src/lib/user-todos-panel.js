@@ -33,7 +33,7 @@ import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, 
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale, chromeAvoidRects, frontRects, seenAt, toastDeskSpot, placeToastsSoon, MODAL_OPEN_EVENT } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
@@ -1430,17 +1430,12 @@ export function installUserTodos(app) {
    *  so the stack steps aside: hidden with its cards kept, back once that closes (the placement and the 1 s tick ask again; a
    *  window on another desktop is visibility:hidden — not the person's act). r14 (the r13 acceptance, MINOR D): what the
    *  person SEES there, never a rectangle alone — a form window BEHIND the window in front (a system-opened form opens behind
-   *  the focused one) is no act: the topmost element under the stack (elementsFromPoint, the stack's own and a toast skipped) at the
-   *  overlap's corners and middle must be inside it; and the open itself asks (annWatch), never the next tick. */
+   *  the focused one) is no act: a point of the overlap (its corners and middle) must be clear of every box in FRONT of it (utils
+   *  frontRects — the windows stacked above its window, the open floats; the stack's own and a toast passed over) — read from
+   *  geometry, NEVER a hit test (lane window-close-stall: five a candidate at 10.8 ms each on the owner's page); and the open
+   *  itself asks (annWatch), never the next tick. */
   const ANN_ASIDE = `${DIALOG_ROOTS}, [data-popover], .context-menu, .taskbar-context-menu, #user-todos-popup, #phone-home`;
-  const annSees = (el, l, tp, rt, bt) => {
-    if (typeof document.elementsFromPoint !== 'function') return true; // (no hit test — the rectangle decides, as before)
-    const xs = [l + 1, (l + rt) / 2, rt - 1], ys = [tp + 1, (tp + bt) / 2, bt - 1];
-    return [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]].some(([i, j]) => {
-      const hit = document.elementsFromPoint(xs[i], ys[j]).find((e) => !annStack.contains(e) && !e.closest?.('#global-toasts')); // (a toast above both is no act either)
-      return !!hit && el.contains(hit);
-    });
-  };
+  const annSees = (el, l, tp, rt, bt) => seenAt(l, tp, rt, bt, frontRects(el, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), false); // (a toast above both is no act either)
   const annAside = () => {
     if (!annStack || !annStack.isConnected) return;
     const sr = annStack.getBoundingClientRect();

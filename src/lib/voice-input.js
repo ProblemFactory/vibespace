@@ -25,8 +25,9 @@
 // secret field, the terminal, a read-only / disabled / hidden / data-no-dictation one) calls a target and that has no
 // microphone of its own (OWN — the composer, a voiceField box) gets one: a small button in a fixed host ANCHORED to the
 // field's box (PURE followPlace: outside it — never over the field, the keyboard-yield strip or the buttons beside it),
-// re-placed on scroll / resize / the field's own resize, gone on blur (a recording finishes first) or when the field leaves
-// the page; the field's layout and DOM never change. The words land at the caret through the same attachDictation (a
+// re-placed only on a real change of THAT field's geometry — never on a timer or a scroll that is not its own (lane
+// window-close-stall: A FOLLOWER NEVER POLLS LAYOUT; see placeFollow) — gone on blur (a recording finishes first) or when the
+// field leaves the page; none while voice is absent; the field's layout and DOM never change. The words land at the caret through the same attachDictation (a
 // text input / contenteditable through `boxOf`; a one-line box takes a dictated line break as a space — a dictation never
 // types Enter, chat-enter-keys.js's 2026-10-14 lesson) and fire `input` (unfocused: `change` too) so the box's own rules
 // run; its context = the field's label + the dialog's title or the card's words (PURE followFacts, ≤ 600 chars). A press
@@ -37,37 +38,44 @@ import { copyText, uiScale } from './utils.js';
 import { VOICE_LIMITS, RECORDER_MIME, dictationContext, dictationMessagesOf, voiceWords } from '../voice-model.js';
 import { dictationTarget, followPlace, followCandidates, followFacts, VOICE_UI } from '../voice-focus.js'; // lane voice-follows-focus: the ONE predicate + placement + facts
 import { teachAfterDictation } from './voice-teach-ui.js'; // P1: teach / context — only when the person turned them on
+import { SHEET_ROOTS } from './form-yield.js'; // the dialog sheet's ONE selector (test-architecture §103)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 const MIC_SVG = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2M5.5 14.5h5"/></svg>';
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 // ── is there a microphone at all? ONE fact for the whole page (unknown = absent until the first answer) ──
-let voiceOn = false, voiceKnown = false, askedAt = 0, visBound = false;
-function paintAvailability() { try { document.documentElement.classList.toggle('voice-absent', !voiceOn); } catch { } }
+// ONE fact for the PAGE, not for this copy of the module: the lazy doc editor bundle (public/doc-editor.js) carries a second copy
+// whose first attach painted html.voice-absent while IT did not know yet — and a failed read of its own left every microphone on
+// the page hidden (lane window-close-stall, the second-copy census). Kept in the global symbol registry, like OWN below.
+const FACT = (() => { const k = Symbol.for('vibespace.voice.fact'); try { return globalThis[k] || (globalThis[k] = { on: false, known: false, askedAt: 0 }); } catch { return { on: false, known: false, askedAt: 0 }; } })();
+let visBound = false;
+function paintAvailability() { try { document.documentElement.classList.toggle('voice-absent', !FACT.on); } catch { } }
 /** an /api/voice/status answer, from any reader: on = the plugin switched on AND Dropline connected */
 export function noteVoiceStatus(st) {
   if (!st || typeof st !== 'object' || st.error) return;
-  voiceOn = st.on !== undefined ? !!st.on : !!(st.enabled && st.connected);
-  voiceKnown = true;
+  FACT.on = st.on !== undefined ? !!st.on : !!(st.enabled && st.connected);
+  FACT.known = true;
   paintAvailability();
+  availabilityChanged();
 }
 /** the plugins-updated broadcast (app.js): the voice-input row's `enabled` = switched on AND keyed (src/plugins/voice-input.js) */
 export function noteVoicePlugins(plugins) {
   const row = Array.isArray(plugins) ? plugins.find((p) => p && p.id === 'voice-input') : null;
   if (!row) return;
-  voiceOn = !!row.enabled;
-  voiceKnown = true;
+  FACT.on = !!row.enabled;
+  FACT.known = true;
   paintAvailability();
+  availabilityChanged();
 }
 function askAvailability() {
-  if (Date.now() - askedAt < 30e3) return; // one read per 30 s however many boxes attach
-  askedAt = Date.now();
-  fetch('/api/voice/status').then((r) => r.json()).then(noteVoiceStatus).catch(() => { askedAt = 0; });
+  if (Date.now() - FACT.askedAt < 30e3) return; // one read per 30 s however many boxes (and module copies) attach
+  FACT.askedAt = Date.now();
+  fetch('/api/voice/status').then((r) => r.json()).then(noteVoiceStatus).catch(() => { FACT.askedAt = 0; });
 }
 function bindAvailability() {
   try {
-    if (!voiceKnown) paintAvailability();
+    if (!FACT.known) paintAvailability();
     askAvailability();
     if (visBound) return;
     visBound = true; // ONE page-lifetime listener for every box: a tab coming back re-reads the fact
@@ -372,7 +380,7 @@ export function attachDictation(textarea, { getFacts = () => ({}), getCwd = () =
 
 // ── DICTATION FOLLOWS THE FOCUS (lane voice-follows-focus) — see the head of this file ──
 const followers = new WeakMap(); // a followed field → its dictation (made at its first focus, kept as long as the field lives)
-let follow = null;               // the one shown: { el, d, host, ctl, ro, timer, raf }
+let follow = null;               // the one shown: { el, d, host, holder, ctl, ro, mo, io, raf, cheap, at }
 let following = false;
 // what a microphone beside a field never sits on (besides the field): what the person presses or types into, and the
 // keyboard-yield strip (lane takeover-keyboard: "your keys come here")
@@ -420,6 +428,54 @@ function underPoint(x, y) {
   return null;
 }
 
+// lane window-close-stall (the owner 2026-11-11, inc-mwcf2e42-bps1: «every time I close a window it now stalls»): A FOLLOWER
+// NEVER POLLS LAYOUT. Measured on the owner's shape (scripts/test-window-close-chrome.mjs): the follower placed itself 4 times a
+// second and on every scroll anywhere on the page, each pass 31 penetrating elementsFromPoint — with the report dialog's
+// textarea focused while two hidden chats scrolled, a third (CPU ×1) to a half (×4) of the main thread. Now a placement costs
+// ONE hit test (is the field the thing on top?); what the microphone keeps clear of is read from GEOMETRY — the holder's own
+// KEEP_CLEAR controls around the field and every window / popover / menu stacked in front of the holder — never by hit-testing
+// thirty points; and it runs only on a real change of the field's geometry (followTo's signals).
+/** the follower's HOLDER: the window, sheet or popover the field lives in — its move, resize, hide or raise is the follower's */
+const HOLDER = `.window, ${SHEET_ROOTS}, [data-popover], .context-menu`; // a hosted form's holder is its .window
+const zOf = (n) => { const z = parseInt(n && n.style ? n.style.zIndex : '', 10); return Number.isFinite(z) ? z : 0; };
+const hiddenBox = (n) => n.getAttribute('aria-hidden') === 'true' || n.style.visibility === 'hidden' || n.hidden;
+/** the boxes beside the field the microphone must not cover, from GEOMETRY (no hit test): the KEEP_CLEAR controls of the
+ *  field's nearest ancestor that holds every place tried (≤ 6 levels up, never past the holder; ≤ 200 controls), every
+ *  window / popover / menu stacked IN FRONT of the holder, and — where a place tried pokes out of the holder — that part
+ *  (the sidebar, the taskbar or another window's buttons may be there: the microphone stays inside its holder when it can) */
+function keepClearRects(el, holder, band) {
+  const out = [], seen = new Set();
+  const meets = (b) => b.left < band.right && band.left < b.right && b.top < band.bottom && band.top < b.bottom;
+  const take = (n) => {
+    if (!n || seen.has(n) || n === el || n.contains(el) || el.contains(n) || voiceOwns(n)) return;
+    seen.add(n);
+    const b = n.getBoundingClientRect();
+    if (b.width > 0 && b.height > 0 && meets(b)) out.push({ left: b.left, top: b.top, right: b.right, bottom: b.bottom });
+  };
+  let scope = el.parentElement;
+  for (let i = 0; scope && scope !== holder && i < 6; i++) {
+    const r = scope.getBoundingClientRect();
+    if ((r.left <= band.left && r.top <= band.top && r.right >= band.right && r.bottom >= band.bottom) || !scope.parentElement) break;
+    scope = scope.parentElement;
+  }
+  if (scope) { let k = 0; for (const n of scope.querySelectorAll(KEEP_CLEAR)) { if (++k > 200) break; take(n); } }
+  if (holder) {
+    const h = holder.getBoundingClientRect();
+    for (const q of [ // the band minus the holder: up to four strips
+      { left: band.left, top: band.top, right: band.right, bottom: Math.min(band.bottom, h.top) },
+      { left: band.left, top: Math.max(band.top, h.bottom), right: band.right, bottom: band.bottom },
+      { left: band.left, top: Math.max(band.top, h.top), right: Math.min(band.right, h.left), bottom: Math.min(band.bottom, h.bottom) },
+      { left: Math.max(band.left, h.right), top: Math.max(band.top, h.top), right: band.right, bottom: Math.min(band.bottom, h.bottom) },
+    ]) if (q.right > q.left && q.bottom > q.top) out.push(q);
+  }
+  const hz = zOf(holder), inWindow = !!holder && holder.classList.contains('window');
+  for (const w of document.querySelectorAll(HOLDER)) {
+    if (w === holder || (holder && (holder.contains(w) || w.contains(holder))) || w.contains(el) || hiddenBox(w)) continue;
+    if (w.classList.contains('window') ? inWindow && zOf(w) > hz : true) take(w); // a popover / menu / sheet outside the holder floats above it
+  }
+  return out;
+}
+
 function placeFollow() {
   const f = follow;
   if (!f) return;
@@ -429,36 +485,36 @@ function placeFollow() {
   const Z = uiScale() || 1, r = el.getBoundingClientRect(), vv = window.visualViewport;
   const view = vv ? { left: vv.offsetLeft, top: vv.offsetTop, right: vv.offsetLeft + vv.width, bottom: vv.offsetTop + vv.height } : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
   const field = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-  // a field scrolled out of its pane or covered by something else: no microphone until it is seen again
+  // the person's own act in the field (input / keyup / pointerup — the cheap road): nothing moved ⇒ no hit test, no write
+  const same = !!f.at && f.at.left === r.left && f.at.top === r.top && f.at.width === r.width && f.at.height === r.height && f.at.vw === view.right && f.at.vh === view.bottom;
+  const cheap = f.cheap; f.cheap = false;
+  if (cheap && same) return;
+  f.at = { left: r.left, top: r.top, width: r.width, height: r.height, vw: view.right, vh: view.bottom };
+  // THE ONE HIT TEST: a field scrolled out of its pane or covered by something else has no microphone until it is seen again
   const cx = Math.min(Math.max(r.left + r.width / 2, view.left + 1), view.right - 1), cy = Math.min(Math.max(r.top + r.height / 2, view.top + 1), view.bottom - 1);
   const top = r.width > 0 && r.height > 0 && r.bottom > view.top && r.top < view.bottom ? underPoint(cx, cy) : null;
-  f.host.hidden = !(top && (top === el || el.contains(top)));
-  if (f.host.hidden) return;
+  const hide = !(top && (top === el || el.contains(top)));
+  if (f.host.hidden !== hide) f.host.hidden = hide;
+  if (hide) return;
   const size = (f.host.offsetHeight || 26) * Z;
-  const avoid = [];
-  for (const c of followCandidates({ field, size })) {
-    const q = c.rect;
-    for (const [x, y] of [[q.left + 1, q.top + 1], [q.right - 1, q.top + 1], [q.left + 1, q.bottom - 1], [q.right - 1, q.bottom - 1], [(q.left + q.right) / 2, (q.top + q.bottom) / 2]]) {
-      const n = underPoint(x, y), o = n && n.closest ? n.closest(KEEP_CLEAR) : null;
-      if (o && o !== el && !o.contains(el) && !el.contains(o)) { const b = o.getBoundingClientRect(); avoid.push({ left: b.left, top: b.top, right: b.right, bottom: b.bottom }); }
-    }
-  }
-  const p = followPlace({ field, view, size, avoid });
+  const band = followCandidates({ field, size }).reduce((b, c) => ({ left: Math.min(b.left, c.rect.left), top: Math.min(b.top, c.rect.top), right: Math.max(b.right, c.rect.right), bottom: Math.max(b.bottom, c.rect.bottom) }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+  const p = followPlace({ field, view, size, avoid: keepClearRects(el, f.holder, band) });
   if (!p) return;
-  const st = f.host.style;
-  st.top = `${p.y / Z}px`;
-  if (p.anchor === 'right') { st.right = `${(window.innerWidth - p.x - size) / Z}px`; st.left = 'auto'; } else { st.left = `${p.x / Z}px`; st.right = 'auto'; }
-  f.host.dataset.side = p.side;
+  const st = f.host.style, put = (k, v) => { if (st[k] !== v) st[k] = v; }; // a placement that lands where it stood writes nothing
+  put('top', `${p.y / Z}px`);
+  if (p.anchor === 'right') { put('right', `${(window.innerWidth - p.x - size) / Z}px`); put('left', 'auto'); } else { put('left', `${p.x / Z}px`); put('right', 'auto'); }
+  if (f.host.dataset.side !== p.side) f.host.dataset.side = p.side;
 }
-const followSoon = () => { if (follow && !follow.raf) follow.raf = requestAnimationFrame(placeFollow); };
+const followSoon = () => { if (!follow) return; follow.cheap = false; if (!follow.raf) follow.raf = requestAnimationFrame(placeFollow); };
+/** the person acted in the field: re-placed once — a full placement only if the field moved (the cheap road, placeFollow) */
+const followSelf = () => { if (!follow || follow.raf) return; follow.cheap = true; follow.raf = requestAnimationFrame(placeFollow); };
 
 function unfollow() {
   const f = follow;
   if (!f) return;
   follow = null;
   f.ctl.abort();
-  try { f.ro && f.ro.disconnect(); } catch { }
-  clearInterval(f.timer);
+  for (const o of [f.ro, f.mo, f.io]) { try { o && o.disconnect(); } catch { } }
   if (f.raf) cancelAnimationFrame(f.raf);
   f.host.remove();
 }
@@ -475,7 +531,7 @@ function followTo(el) {
   if (!el || el.nodeType !== 1 || voiceOwns(el)) return;
   if (follow && follow.el === el) { followSoon(); return; }
   if (follow && follow.d.state !== 'idle') return; // a recording (or the words on their way) belongs to its field: it finishes first
-  const v = el[OWN] ? { ok: false, why: 'own' } : dictationTarget(fieldFacts(el));
+  const v = el[OWN] ? { ok: false, why: 'own' } : !FACT.on ? { ok: false, why: 'absent' } : dictationTarget(fieldFacts(el)); // no follower while voice is absent (unknown = absent until the first answer: availabilityChanged follows then)
   unfollow();
   if (!v.ok) return;
   let d = followers.get(el);
@@ -490,15 +546,51 @@ function followTo(el) {
   // (utils.js onOutsidePress); a cancelled pointerdown fires no compatibility mousedown (§59: no mousedown listener here)
   const guard = (e) => { if (voiceOwns(e.target)) { e.preventDefault(); e.stopPropagation(); } };
   window.addEventListener('pointerdown', guard, { capture: true, ...o });
-  window.addEventListener('scroll', followSoon, { capture: true, passive: true, ...o });
+  // THE SIGNALS — a real change of THIS field's geometry, never a timer, never a scroll that is not the field's (lane
+  // window-close-stall): (1) a scroll of one of ITS ancestors (an element's scroll does not bubble: one listener on each; the
+  // document's own bubbles to the window — heard there WITHOUT capture, so no other element's scroll reaches it); (2) its size (its ResizeObserver); (3) A PANE THAT MOVED WITHOUT A SCROLL = its holder's style or class
+  // written (the window manager writes left / top / size / z-index and window-active there: a move, a resize, a hide, another
+  // window raised over it), and the visual viewport / the page resized; (4) A FIELD REMOVED WITHOUT A BLUR = its parent's or its
+  // holder's parent's child list changing with the field gone, and its IntersectionObserver (it left the view or the page).
+  // (5) A LAYOUT SHIFT INSIDE THE HOLDER (主开发's read: a validation line appears above the field, an image loads, a details
+  // opens — the field moves, nothing scrolls, its own size and the holder's attributes untouched): ONE ResizeObserver over the
+  // field AND each ancestor up to the holder (≤ 8) — content that grows above the field grows an ancestor it shares with it;
+  // and the person's own act in the field (input / keyup / pointerup) re-places once, by the cheap road (no hit test unless the
+  // field moved). The observers' first, spec-made deliveries describe what the first placement already saw: skipped.
+  const holder = el.closest(HOLDER);
+  for (let p = el.parentElement; p; p = p.parentElement) p.addEventListener('scroll', followSoon, { passive: true, ...o });
+  window.addEventListener('scroll', followSoon, { passive: true, ...o });
   window.addEventListener('resize', followSoon, o);
   if (window.visualViewport) { window.visualViewport.addEventListener('resize', followSoon, o); window.visualViewport.addEventListener('scroll', followSoon, o); }
-  let ro = null;
-  try { ro = new ResizeObserver(followSoon); ro.observe(el); } catch { }
-  // a field removed without a blur, a pane that moved without a scroll: looked at four times a second while one shows
-  const timer = setInterval(followSoon, 250);
-  follow = { el, d, host, ctl, ro, timer, raf: 0 };
+  const gone = () => { const f = follow; if (f && f.el === el && !el.isConnected) { f.d.destroy(); unfollow(); return true; } return false; };
+  const later = (fn) => { let first = true; return () => { if (first) { first = false; return; } if (!gone()) fn(); }; };
+  let ro = null, mo = null, io = null;
+  try {
+    const seen = new WeakSet();
+    // (by the cheap road: a size change that left the field where the last placement saw it — that placement already read the
+    // grown layout — makes no hit test; one that moved it places)
+    ro = new ResizeObserver((entries) => { let moved = false; for (const e of entries) { if (seen.has(e.target)) moved = true; else seen.add(e.target); } if (moved && !gone()) followSelf(); });
+    ro.observe(el);
+    for (let a = el.parentElement, i = 0; a && i < 8; a = a.parentElement, i++) { ro.observe(a); if (a === holder) break; }
+  } catch { }
+  for (const t of ['input', 'keyup', 'pointerup']) el.addEventListener(t, followSelf, { passive: true, ...o });
+  try {
+    mo = new MutationObserver(() => { if (!gone()) followSoon(); });
+    if (holder) mo.observe(holder, { attributes: true, attributeFilter: ['style', 'class', 'hidden', 'aria-hidden'] });
+    if (el.parentNode) mo.observe(el.parentNode, { childList: true });
+    if (holder && holder.parentNode) mo.observe(holder.parentNode, { childList: true });
+  } catch { }
+  try { io = new IntersectionObserver(later(followSoon)); io.observe(el); } catch { }
+  follow = { el, d, host, holder, ctl, ro, mo, io, raf: 0, cheap: false, at: null };
   placeFollow();
+}
+
+/** voice came on (or went): the focused field is followed now (or let go of — a recording in flight keeps its field) */
+function availabilityChanged() {
+  if (!following) return;
+  if (!FACT.on) { if (follow && follow.d.state === 'idle') unfollow(); return; }
+  const a = typeof document !== 'undefined' ? document.activeElement : null;
+  if (a && a !== document.body && !(follow && follow.el === a)) followTo(a);
 }
 
 /** ONE document focusin / focusout pair for the page's life (app.js calls it once): the microphone follows the focus */

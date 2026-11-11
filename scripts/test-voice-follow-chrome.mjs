@@ -27,6 +27,14 @@
 //      Actions checkout is depth 1, so the .335 cut's read of the base commit was a red there (lane ci-335-reds)
 //   ⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived): printed; each box this suite rendered is judged at run time
 //      exactly as the census judged its site
+//   ⑦ A FOLLOWER NEVER POLLS LAYOUT (lane window-close-stall, the owner 2026-11-11: «every time I close a window it now
+//      stalls»): the Report a problem box focused, NOTHING moving, 5 s after the first placement ⇒ the follower places 0 times
+//      (its own elementsFromPoint, counted in the page) and forces 0 layouts (a CDP trace); the same 5 s while ANOTHER pane
+//      scrolls; the focus arms no timer. Then its signals, each a real change: the box grows (its ResizeObserver), a sibling
+//      ABOVE it grows by 40 px (主开发's layout shift: the ResizeObserver over its ancestors), a key typed (the cheap road: no
+//      hit test), the holder moves without a scroll (its style), a 2-s drag (≤ one placement a frame) and 5 s of streaming
+//      into the holder (≤ one a message) — both counts printed — a popover over it and gone, the dialog removed without a blur.
+//      MUTANTS: the 250-ms timer back ⇒ the idle pins RED; the window-capture scroll listener back ⇒ the scroll pin RED.
 // PNGs: VIBESPACE_VOICE_PNG_DIR (default: the scratch dir) → follow-reject.png, follow-dialog.png, follow-phone-390.png,
 //   follow-phone-375.png, follow-report-448.png
 import fs from 'node:fs';
@@ -56,7 +64,7 @@ const end = (code) => { try { chrome && chrome.kill('SIGKILL'); } catch { } try 
 // a leg that throws (a page exception, a missing element) is a RED with Chrome torn down — never an orphaned browser
 for (const ev of ['uncaughtException', 'unhandledRejection']) process.on(ev, (e) => { fail++; console.log(`  ✗ the suite threw — ${String((e && e.stack) || e).slice(0, 900)}`); console.log(`\n${fail} FAILED (${pass} passed)`); end(1); });
 const CDP_PENDS = new Set();
-armWatchdog({ capMs: 280e3, exit: end, pending: () => [...CDP_PENDS].flatMap((m) => [...m.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`)) });
+armWatchdog({ capMs: 400e3, exit: end, pending: () => [...CDP_PENDS].flatMap((m) => [...m.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`)) });
 
 // ── the fake Dropline (the vendor stubbed: never a real call) ──
 const KEY = 'dl_follow_fake_0123456789';
@@ -197,6 +205,13 @@ await bundle('mutant2.js', [{ name: 'no-guard-no-voice', setup(b) {
   b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, ''), loader: 'js', resolveDir: path.dirname(VI_PATH) }));
   b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: U_SRC.replace(VOICE_FACT, ''), loader: 'js', resolveDir: path.dirname(U_PATH) }));
 } }]);
+// ⑦'s MUTANTS (lane window-close-stall): the base's two polls put back after the press guard — the 250-ms timer, and the
+// window-capture scroll listener (any scroll anywhere on the page placed the follower)
+const POLL_TIMER = GUARD + '  setInterval(followSoon, 250);\n';
+const POLL_SCROLL = GUARD + "  window.addEventListener('scroll', followSoon, { capture: true, passive: true, ...o });\n";
+ok('⑦ the timer is gone from voice-input.js (no setInterval in the follower) and the page-wide scroll listener too', !/setInterval\(followSoon/.test(VI_SRC) && !/addEventListener\('scroll', followSoon, \{ capture: true/.test(VI_SRC));
+await bundle('poll-timer.js', [{ name: 'poll-timer', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, POLL_TIMER), loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
+await bundle('poll-scroll.js', [{ name: 'poll-scroll', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]voice-input\.js$/ }, () => ({ contents: VI_SRC.replace(GUARD, POLL_SCROLL), loader: 'js', resolveDir: path.dirname(VI_PATH) })); } }]);
 // RED CONTROL = the base's shape (no follower): a PATCHED COPY of today's voice-input.js in the scratch dir with followFocus
 // unexported, so app.js's call has nothing to call, as on the base. It runs on any checkout: no git history (lane ci-335-reds)
 const FOLLOW_EXPORT = 'export function followFocus() {';
@@ -216,8 +231,9 @@ app.get('/api/vault/facts', (q, s) => s.json({ state: 'locked' }));
 const CSS = [...String(fs.readFileSync(path.join(REPO, 'public/index.html'), 'utf8')).matchAll(/<link rel="stylesheet" href="\/([\w-]+)\.css">/g)].map((m) => m[1]);
 const cssFile = (n) => (n === 'xterm' ? path.join(REPO, 'node_modules/@xterm/xterm/css/xterm.css') : path.join(REPO, `public/${n}.css`));
 for (const n of CSS) app.get(`/${n}.css`, (q, s) => (fs.existsSync(cssFile(n)) ? s.type('text/css').send(fs.readFileSync(cssFile(n))) : s.type('text/css').send('')));
-for (const n of ['page', 'mutant', 'mutant2', 'base']) app.get(`/${n}.js`, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, `${n}.js`))));
-app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-window);color:var(--text);font:13px system-ui} #stage{position:fixed;inset:0;padding:120px 24px 24px;overflow:auto}</style></head><body><div id="stage"></div><script src="/${['mutant', 'mutant2', 'base'].includes(q.query.b) ? q.query.b : 'page'}.js"></script></body></html>`));
+const BUNDLES = ['page', 'mutant', 'mutant2', 'base', 'poll-timer', 'poll-scroll']; // (every bundle built above — the page serves exactly these)
+for (const n of BUNDLES) app.get(`/${n}.js`, (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, `${n}.js`))));
+app.get('/', (q, s) => s.type('text/html').send(`<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${CSS.map((n) => `<link rel="stylesheet" href="/${n}.css">`).join('')}<style>body{margin:0;background:var(--bg-window);color:var(--text);font:13px system-ui} #stage{position:fixed;inset:0;padding:120px 24px 24px;overflow:auto}</style></head><body><div id="stage"></div><script src="/${BUNDLES.includes(q.query.b) ? q.query.b : 'page'}.js"></script></body></html>`));
 app.use((q, s) => s.status(404).json({ error: 'not in this harness' }));
 const PORT = await freePort();
 srv = http.createServer(app);
@@ -248,8 +264,23 @@ async function page(w, h, { touch = false, b = 'page', follow = true } = {}) {
   const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
   let seq = 0; const pend = new Map(); CDP_PENDS.add(pend);
-  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id).r(m); pend.delete(m.id); } });
+  const traceBuf = []; let traceDone = null;
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id).r(m); pend.delete(m.id); } else if (m.method === 'Tracing.dataCollected') { for (const e of m.params.value) traceBuf.push(e); } else if (m.method === 'Tracing.tracingComplete' && traceDone) traceDone(); });
   const cdp = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, { r, method, at: Date.now() }); ws.send(JSON.stringify({ id, method, params })); });
+  /** a CDP trace of `ms` (lane window-close-stall ⑦) → the events of THIS page's main thread between its two marks */
+  const trace = async (ms) => {
+    traceBuf.length = 0;
+    await cdp('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { includedCategories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.stack', 'blink.user_timing'] } });
+    await sleep(300);
+    await cdp('Runtime.evaluate', { expression: "performance.mark('vf7-a'), window.__vf && (window.__vf.hits = 0, window.__vf.rafs = 0)" });
+    await sleep(ms);
+    await cdp('Runtime.evaluate', { expression: "performance.mark('vf7-b')" });
+    const done = new Promise((r) => { traceDone = r; });
+    await cdp('Tracing.end'); await done; traceDone = null;
+    const a = traceBuf.find((e) => e.name === 'vf7-a'), b = traceBuf.find((e) => e.name === 'vf7-b');
+    if (!a || !b) return null;
+    return traceBuf.filter((e) => e.pid === a.pid && e.tid === a.tid && e.ts >= a.ts && e.ts <= b.ts);
+  };
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `try { localStorage.setItem('vibespace.lang', 'zh'); } catch {} ${FAKE_MIC}` });
@@ -279,7 +310,7 @@ async function page(w, h, { touch = false, b = 'page', follow = true } = {}) {
     fs.writeFileSync(path.join(SHOTS, file), Buffer.from(pic.result.data, 'base64'));
     console.log(`    (PNG ${path.join(SHOTS, file)})`);
   };
-  return { cdp, ev, until, clickSel, clickAt, tapSel, press, touchTap, key, shot, started, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
+  return { cdp, ev, until, clickSel, clickAt, tapSel, press, touchTap, key, shot, started, trace, close: () => { CDP_PENDS.delete(pend); ws.close(); } };
 }
 
 // the follower's microphone for the focused field: geometry + who holds the focus
@@ -577,6 +608,123 @@ console.log('⑤ RED CONTROL = the base\'s shape (the follower unexported in a p
   const base = await p.ev(`(() => { const f = document.querySelector('.chan-prop-rejectbox input'), r = f.getBoundingClientRect(); const near = [...document.querySelectorAll('.chat-voice-btn')].filter((b) => { const q = b.getBoundingClientRect(); return q.width > 0 && Math.abs(q.top - r.top) < 80; }).length; return { focused: document.activeElement === f, mics: near }; })()`);
   ok('BASE SHAPE: the focused reject box has no microphone at all — the check ① proves is RED without the follower', base.focused && base.mics === 0, base);
   p.close();
+}
+
+console.log('⑦ A FOLLOWER NEVER POLLS LAYOUT — the Report a problem box focused, nothing moving: 0 placements, 0 forced layouts in 5 s; the same while another pane scrolls; its signals');
+{
+  const RP = '.dialog-overlay .dialog-body textarea.dialog-input';
+  // THE FOLLOWER'S OWN HIT TESTS = its placements: placeFollow makes exactly one document.elementsFromPoint call (underPoint) and
+  // nothing else on this page calls it (geo() reads elementFromPoint) — counted in the page. A trace's HitTest events also hold
+  // Chrome's own (hover after a scroll, the cursor): printed, not judged. A forced layout = a trace Layout with a JS stack. Beside
+  // them: requestAnimationFrame callbacks that ran (the follower places in one), the timers armed after the focus, visibility.
+  const COUNT = `(() => { if (window.__vfWrapped) return true; window.__vfWrapped = true; const V = window.__vf = { hits: 0, rafs: 0, intervals: 0 };
+    const f = Document.prototype.elementsFromPoint; Document.prototype.elementsFromPoint = function (...a) { V.hits++; return f.apply(this, a); };
+    const raf = window.requestAnimationFrame.bind(window); window.requestAnimationFrame = (cb) => raf((t) => { V.rafs++; return cb(t); });
+    const si = window.setInterval.bind(window); window.setInterval = (...a) => { V.intervals++; return si(...a); };
+    return true; })()`;
+  const SCROLLER = `(() => { const d = document.createElement('div'); d.id = 'zz-other-pane'; d.style.cssText = 'position:fixed;left:0;top:0;width:260px;height:300px;overflow:auto;z-index:1'; d.innerHTML = Array.from({ length: 400 }, (_, i) => '<p>line ' + i + '</p>').join(''); document.body.appendChild(d); return true; })()`;
+  const DRIVE = `(() => { const d = document.getElementById('zz-other-pane'); window.__vfDrive = setInterval(function vfDrive() { d.scrollTop = (d.scrollTop + 9) % 4000; }, 40); return true; })()`;
+  const STOP = `(clearInterval(window.__vfDrive), true)`;
+  const V0 = `(() => { const v = window.__vf; v.hits = 0; v.rafs = 0; v.intervals = 0; return true; })()`;
+  const VREAD = `({ ...window.__vf, visible: document.visibilityState, focus: document.hasFocus() })`;
+  const cost = (evs) => {
+    if (!evs) return null;
+    const forced = evs.filter((e) => e.name === 'Layout' && e.args && e.args.beginData && e.args.beginData.stackTrace && !e.args.beginData.stackTrace.some((f) => /^vf(Drive|Drag|Stream)$/.test(f.functionName)));
+    return { chromeHitTests: evs.filter((e) => e.name === 'HitTest' && e.ph !== 'E').length, forcedLayouts: forced.length, stacks: forced.slice(0, 3).map((e) => e.args.beginData.stackTrace.slice(0, 3).map((f) => f.functionName || '(anon)').join(' < ')) };
+  };
+  const window5 = async (p) => { await p.ev(V0); const evs = await p.trace(5000); return { ...cost(evs), ...(await p.ev(VREAD)) }; };
+  const scene = async (b) => {
+    const p = await page(1280, 860, { b });
+    await p.cdp('Page.bringToFront');
+    // (the bundle this scene asked for is the one the page runs — a mutant page that fell back to page.js judged nothing)
+    ok(`⑦ the «${b}» page runs ${b}.js`, await p.ev(`[...document.scripts].some((s) => s.src.endsWith('/${b}.js'))`));
+    await p.ev(COUNT);
+    await p.ev('window.__report()');
+    await p.until(`!!document.querySelector(${JSON.stringify(RP)})`);
+    await p.ev(SCROLLER);
+    await p.ev(V0);
+    await p.clickSel(RP);
+    const shown = await p.until(`!!document.querySelector(${JSON.stringify(MIC)}) && document.activeElement === document.querySelector(${JSON.stringify(RP)})`, 3000);
+    await sleep(1000); // the first placement and the observers' first deliveries
+    const armed = await p.ev(VREAD);
+    const idle = await window5(p);
+    await p.ev(DRIVE);
+    await sleep(300);
+    const scroll = { ...(await window5(p)), scrolled: await p.ev(`document.getElementById('zz-other-pane').scrollTop > 0`) };
+    await p.ev(STOP);
+    return { p, shown, armed, idle, scroll };
+  };
+  const g = await scene('page');
+  console.log(`    after the focus (1 s): ${JSON.stringify(g.armed)}`);
+  console.log(`    nothing moving 5 s: ${JSON.stringify(g.idle)}`);
+  console.log(`    another pane scrolling 5 s: ${JSON.stringify(g.scroll)}`);
+  ok('⑦ the Report a problem box focused ⇒ the follower\'s microphone shows', g.shown);
+  ok('⑦ the focus arms NO timer (0 setInterval in the second after it)', g.armed.intervals === 0, g.armed);
+  ok('⑦ NOTHING MOVING, 5 s after the first placement: the follower places 0 times (0 hit tests of its own) and forces 0 layouts', g.idle.hits === 0 && g.idle.forcedLayouts === 0, g.idle);
+  ok('⑦ ANOTHER PANE SCROLLING (not an ancestor of the field), 5 s: the follower places 0 times and forces 0 layouts', g.scroll.scrolled && g.scroll.hits === 0 && g.scroll.forcedLayouts === 0, g.scroll);
+  const p = g.p;
+  const g0 = await geo(p, RP);
+  ok('⑦ …and the microphone still stands beside the box (outside it, in the view, on top), the box focused', g0.mic && !g0.overField && g0.inView && g0.onTop && g0.focused, g0);
+  const rel = () => p.ev(`(() => { const m = document.querySelector('.voice-follow').getBoundingClientRect(), f = document.querySelector(${JSON.stringify(RP)}).getBoundingClientRect(); return { dx: Math.round(m.left - f.left), dy: Math.round(m.top - f.top), fx: Math.round(f.left), fy: Math.round(f.top), hidden: document.querySelector('.voice-follow').hidden }; })()`);
+  const beside = async (label, act, { ms = 2000 } = {}) => {
+    const before = await rel(); await p.ev(V0);
+    await p.ev(act);
+    let ok2 = false;
+    for (const t0 = Date.now(); Date.now() - t0 < ms && !ok2; await sleep(50)) { const g2 = await geo(p, RP); ok2 = g2.mic && !g2.overField && g2.inView; }
+    const after = await rel(), v = await p.ev(VREAD);
+    return { label, before, after, placements: v.hits, ok: ok2 };
+  };
+  // (1) its size: the box grows (its own ResizeObserver)
+  const s1 = await beside('grow', `(() => { const f = document.querySelector(${JSON.stringify(RP)}); f.style.height = (f.getBoundingClientRect().height + 60) + 'px'; return true; })()`);
+  ok('⑦ SIGNAL — the box grows (its ResizeObserver): the microphone is placed again, outside the box', s1.ok && s1.placements >= 1 && s1.after.fy !== s1.before.fy, s1);
+  // (2) 主开发's read: A LAYOUT SHIFT INSIDE THE HOLDER — a sibling ABOVE the field grows by 40 px (a validation line): the field
+  // moves, nothing scrolls, its size and the holder's attributes untouched — the ResizeObserver over its ancestors; 0 timers
+  const s2 = await beside('sibling', `(() => { const f = document.querySelector(${JSON.stringify(RP)}); const v = document.createElement('div'); v.className = 'zz-validation'; v.style.cssText = 'height:40px'; v.textContent = 'a validation line'; f.parentElement.insertBefore(v, f); return true; })()`);
+  ok('⑦ SIGNAL — a sibling above the box grows by 40 px (the field moves, nothing scrolls): the microphone is beside the box again, 0 timers armed', s2.ok && s2.after.fy !== s2.before.fy && Math.abs(s2.after.dy - s2.before.dy) <= 1 && (await p.ev('window.__vf.intervals')) === 0, s2);
+  // (3) the person's own act in the field: a key typed re-places by the cheap road — nothing moved ⇒ no hit test
+  await p.ev(V0); await p.key('a', 'KeyA', 65); await sleep(300);
+  const typed = await p.ev(VREAD);
+  ok('⑦ a key typed in the box (nothing moved): the follower looks once and makes NO hit test (the cheap road)', typed.hits === 0, typed);
+  // (4) a pane that moved without a scroll: the holder's style written (the window manager's move) — same offset after
+  const s4 = await beside('move', `(document.querySelector('.dialog-overlay').style.transform = 'translate(-180px, 40px)', true)`);
+  ok('⑦ SIGNAL — the pane that holds it moves without a scroll (its holder\'s style): the microphone moves with the box (the same offset)', s4.ok && s4.after.fx === s4.before.fx - 180 && Math.abs(s4.after.dx - s4.before.dx) <= 1 && Math.abs(s4.after.dy - s4.before.dy) <= 1, s4);
+  // 主开发's numbers: (a) a 2-s DRAG of the holder — its style written every frame; (b) 5 s of STREAMING into the holder — a line
+  // added above the field 1.8 / s and the holder's class flipped with each (the chat window's per-message shape)
+  await p.ev(V0);
+  const drag = await p.ev(`new Promise((res) => { const o = document.querySelector('.dialog-overlay'); let n = 0; const t0 = performance.now(); const step = function vfDrag() { n++; o.style.transform = 'translate(' + (-180 + Math.round(40 * Math.sin(n / 6))) + 'px, ' + (40 + (n % 20)) + 'px)'; if (performance.now() - t0 < 2000) requestAnimationFrame(step); else res(n); }; requestAnimationFrame(step); })`);
+  await sleep(100);
+  const dv = await p.ev(VREAD);
+  const g5 = await geo(p, RP);
+  console.log(`    DRAG 2 s: ${drag} frames of style writes on the holder ⇒ ${dv.hits} placements (one hit test each)`);
+  ok('⑦ a 2-s drag of the holder: at most one placement a frame, and the microphone beside the box at the end', drag > 30 && dv.hits <= drag + 1 && g5.mic && !g5.overField, { drag, dv, g5 });
+  await p.ev(V0);
+  await p.ev(`(() => { const f = document.querySelector(${JSON.stringify(RP)}); const o = document.querySelector('.dialog-overlay'); const list = document.createElement('div'); list.className = 'zz-stream'; f.parentElement.insertBefore(list, f); let n = 0; window.__vfStream = setInterval(function vfStream() { const l = document.createElement('p'); l.textContent = '流式输出第 ' + (++n) + ' 行 — streaming line ' + n; l.style.margin = '0'; list.appendChild(l); o.classList.toggle('zz-busy'); }, 555); return true; })()`);
+  await sleep(5000);
+  await p.ev('(clearInterval(window.__vfStream), true)');
+  await sleep(150);
+  const sv = await p.ev(VREAD), lines = await p.ev(`document.querySelectorAll('.zz-stream p').length`), g6 = await geo(p, RP);
+  console.log(`    STREAMING 5 s: ${lines} lines added above the box (each one a class flip on the holder) ⇒ ${sv.hits} placements (one hit test each)`);
+  ok('⑦ 5 s of streaming into the holder (a line a message, the holder\'s class flipped): one placement a message at most, the microphone beside the box', lines >= 8 && sv.hits <= lines + 1 && g6.mic && !g6.overField, { lines, sv, g6 });
+  // (5) something laid over it, then gone: the holder's parent's child list; the one hit test hides / shows it
+  await p.ev(`(() => { const f = document.querySelector(${JSON.stringify(RP)}).getBoundingClientRect(); const c = document.createElement('div'); c.id = 'zz-cover'; c.setAttribute('data-popover', ''); c.style.cssText = 'position:fixed;z-index:100000;background:#fff;left:' + (f.left - 60) + 'px;top:' + (f.top - 60) + 'px;width:' + (f.width + 120) + 'px;height:' + (f.height + 120) + 'px'; document.body.appendChild(c); return true; })()`);
+  const covered = await p.until(`document.querySelector('.voice-follow').hidden === true`, 2000);
+  await p.ev(`(document.getElementById('zz-cover').remove(), true)`);
+  const uncovered = await p.until(`document.querySelector('.voice-follow').hidden === false`, 2000);
+  ok('⑦ SIGNAL — a popover laid over the box hides the microphone; gone again ⇒ it is back', covered && uncovered, { covered, uncovered });
+  // (6) a field removed without a blur — the dialog's whole sheet removed (an ancestor, not the field's parent)
+  await p.ev(`(document.querySelector('.dialog-overlay').remove(), true)`);
+  ok('⑦ SIGNAL — the dialog removed with the box focused (no blur): the follower is gone', await p.until(`!document.querySelector('.voice-follow')`, 2000));
+  ok('⑦ no page error', (await p.ev('window.__errs')).length === 0, await p.ev('window.__errs'));
+  p.close();
+  // MUTANTS — each poll put back is RED here, by name
+  const mt = await scene('poll-timer');
+  console.log(`    MUTANT the 250-ms timer back: armed ${JSON.stringify(mt.armed)} · idle ${JSON.stringify(mt.idle)}`);
+  ok('⑦ MUTANT (the 250-ms timer back): the focus arms a timer and, nothing moving, the follower places every tick — the idle pins are RED', mt.shown && mt.armed.intervals >= 1 && mt.idle.hits >= 10, { armed: mt.armed, idle: mt.idle });
+  mt.p.close();
+  const ms2 = await scene('poll-scroll');
+  console.log(`    MUTANT the page-wide scroll listener back: idle ${JSON.stringify(ms2.idle)} · scroll ${JSON.stringify(ms2.scroll)}`);
+  ok('⑦ MUTANT (the window-capture scroll listener back): another pane scrolling places the follower every frame — the scroll pin is RED', ms2.shown && ms2.idle.hits === 0 && ms2.scroll.hits >= 10, { idle: ms2.idle, scroll: ms2.scroll });
+  ms2.p.close();
 }
 
 console.log('⑥ THE CENSUS (scripts/test-voice-focus.mjs, grep-derived) — and the boxes rendered here judged at run time as their sites were');

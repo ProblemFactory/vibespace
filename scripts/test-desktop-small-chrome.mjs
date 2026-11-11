@@ -596,8 +596,24 @@ const runViewport = async ([VW, VH], font) => {
     const pre = await evalJs('window.__preAt || null');
     if (pre) { await hover(pre.x, pre.y); await sleep(250); }
     const h2 = await evalJs(HITS);
-    await evalJs(`(() => { const c = [...app.wm.windows.values()].find((w) => w.type === 'chat'); app.wm.requestClose(c.id); return 1; })()`); await sleep(500); // a running conversation's ✕ says it keeps running — a toast with its ✕
+    // lane window-close-stall (the owner's own recording, 2026-11-11: ONE close's toast placement — chromeAvoidRects probing nine
+    // points of every composer, strip and title bar in the stack's column — ran 76 document.elementsFromPoint in the click's task
+    // and 79 in the frame after, 10.8 ms each on the owner's page): the OTHER chat maximized (its composer and title bar in the stack's
+    // column), nothing focused, every elementsFromPoint and every read of the stack's rect (one a placement) counted from the
+    // close through the toast's ✕. RED on 5c77612ef (nine a control, each placement).
+    const tcSet = await evalJs(`(() => { window.__tc = { hits: 0, placed: 0 }; if (!window.__tcWrapped) { window.__tcWrapped = true; const e = Document.prototype.elementsFromPoint; Document.prototype.elementsFromPoint = function (...a) { if (window.__tc) window.__tc.hits++; return e.apply(this, a); }; const g = Element.prototype.getBoundingClientRect; Element.prototype.getBoundingClientRect = function () { if (window.__tc && this.id === 'global-toasts') window.__tc.placed++; return g.call(this); }; }
+      const chats = [...app.wm.windows.values()].filter((w) => w.type === 'chat'), keep = chats[1]; if (keep) app.wm.toggleMaximize(keep.id); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); window.__tcKeep = keep ? keep.id : null;
+      return { chats: chats.length, maximized: !!keep, composer: !!(keep && keep.element.querySelector('.chat-input-area')) }; })()`);
+    await sleep(400); await evalJs(`(window.__tc = { hits: 0, placed: 0 }, 1)`);
+    await evalJs(`(() => { const c = [...app.wm.windows.values()].find((w) => w.type === 'chat' && w.id !== window.__tcKeep); app.wm.requestClose(c.id); return 1; })()`); await sleep(500); // a running conversation's ✕ says it keeps running — a toast with its ✕
+    const tcArrive = await evalJs(`({ ...window.__tc, toasts: document.querySelectorAll('#global-toasts .global-toast').length })`);
     const h3 = await evalJs(HITS);
+    await evalJs(`(() => { const x = document.querySelector('#global-toasts .global-toast-x'); if (x) x.click(); return !!x; })()`); await sleep(400);
+    const tcLife = await evalJs(`({ ...window.__tc, stack: !!document.getElementById('global-toasts') })`);
+    await evalJs(`(() => { window.__tc = null; if (window.__tcKeep) app.wm.toggleMaximize(window.__tcKeep); return 1; })()`); await sleep(300);
+    console.log(`    the close's toast (${tag}): arrival ${J(tcArrive)} · its whole life to the ✕ ${J(tcLife)} (${J(tcSet)})`);
+    check(`⑧ ${tag} (lane window-close-stall — RED on 5c77612ef): a running chat's ✕ with a maximized chat's composer and title bar in the toast's column — its toast is placed with 0 hit tests (the click's task and the frames after), in ${tcArrive.placed} placements`, tcSet.maximized && tcSet.composer && tcArrive.toasts >= 1 && tcArrive.hits === 0 && tcArrive.placed >= 1 && tcArrive.placed <= 3, { tcSet, tcArrive });
+    check(`⑧ ${tag}: the toast's whole life (shown, then its ✕) costs ${tcLife.placed} placements and 0 hit tests — two placements, not two storms`, tcLife.hits === 0 && tcLife.placed <= 4 && !tcLife.stack, tcLife);
     await evalJs(`(() => { app.showNewSessionDialog(); return 1; })()`); await sleep(700);
     const h4 = await evalJs(HITS);
     await esc(); await sleep(300);

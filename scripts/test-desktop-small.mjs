@@ -252,7 +252,7 @@ console.log('§6 the wiring — every door asks its rule');
   ok(/this\._narrowTitleRO = new ResizeObserver/.test(W) && !/this\._titleRO\b/.test(W), 'the narrow-title observer has its own field (`_titleRO` is the tab-group mixin\'s split-tail observer — sharing it silenced the split tail: test-split-ux)');
   const SU = read('src/lib/settings-ui.js');
   ok(/dialog\.append\(header, searchWrap, body, foot\);/.test(SU) && /\.settings-foot \{/.test(SC), 'P3-3 the Settings window: its save rule at its foot (the nav is its own column already)');
-  ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const desk = toastDeskSpot\(\{ rect: stack\.getBoundingClientRect\(\), avoid: _toastAvoid\(\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
+  ok(/if \(shown && !_toastTier\(\) && !_openModalDialog\(\)\) \{ _placeDeskToasts\(stack\); return; \}/.test(U) && /const rect = stack\.getBoundingClientRect\(\);\n  const desk = toastDeskSpot\(\{ rect, avoid: _toastAvoid\(rect\),/.test(U), 'the desktop tier\'s toast stack (anchored or centred) is placed off every open menu and composer');
 }
 
 // ── §7 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

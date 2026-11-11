@@ -632,20 +632,46 @@ export function avoidRects(els, skip = null) {
   }
   return out;
 }
+/** THE BOXES IN FRONT OF `el`, from what the window manager already knows — A PLACEMENT NEVER HIT-TESTS THE PAGE (lane
+ *  window-close-stall; the owner's own recording, 2026-11-11: ONE close's toast placement — chromeAvoidRects probing nine points
+ *  of every composer, strip and title bar in the stack's column — ran 76 document.elementsFromPoint in the click's task and 79 in
+ *  the frame after, 10.8 ms EACH on a page of 20 stacked windows over 4 desktops: 970 + 922 ms, «every close stalls about a
+ *  second»; kb-patterns «A placement never hit-tests the page»). In front of `el`: the windows of THIS desktop stacked above its
+ *  window (each window's inline z-index — the window manager's own order; a window on another desktop is visibility:hidden) and
+ *  the open floats (FRONT_FLOATS: menus, popovers, the For-you window) — above every window; among floats the later one is in
+ *  front. `skip(e)` passes over one (the toasts, the announce's stack). Viewport rects. */
+export const FRONT_FLOATS = '.context-menu, .taskbar-context-menu, [data-popover], #user-todos-popup';
+const zOfWin = (w) => parseInt(w && w.style ? w.style.zIndex : '', 10) || 0;
+const showsHere = (e) => !(typeof e.checkVisibility === 'function' && !e.checkVisibility({ visibilityProperty: true }));
+export function frontRects(el, skip = () => false) {
+  const out = [], take = (e) => { const r = e.getBoundingClientRect(); if (r.width > 0 && r.height > 0) out.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }); };
+  const win = typeof el.closest === 'function' ? el.closest('.window') : null;
+  const floats = [...document.querySelectorAll(FRONT_FLOATS)], mine = floats.findIndex((f) => f === el || f.contains(el));
+  if (mine < 0 && win) { const z = zOfWin(win); for (const w of document.querySelectorAll('.window')) if (w !== win && !w.contains(el) && zOfWin(w) > z && !skip(w) && showsHere(w)) take(w); }
+  floats.forEach((f, i) => { if (i > mine && !f.contains(el) && !el.contains(f) && !(win && win.contains(f)) && !skip(f) && showsHere(f)) take(f); });
+  return out;
+}
+/** is a point of the box [l, t, r, b] — its corners (1 px in), its middle, and with `nine` its edges' middles — clear of every
+ *  box in `fronts`? (what a person sees there, read from geometry) */
+export function seenAt(l, t, r, b, fronts, nine = true) {
+  const xs = [l + 1, (l + r) / 2, r - 1], ys = [t + 1, (t + b) / 2, b - 1];
+  const pts = nine ? xs.flatMap((x) => ys.map((y) => [x, y])) : [[xs[0], ys[0]], [xs[2], ys[0]], [xs[1], ys[1]], [xs[0], ys[2]], [xs[2], ys[2]]];
+  return pts.some(([x, y]) => !fronts.some((f) => x >= f.left && x <= f.right && y >= f.top && y <= f.bottom));
+}
 /** THE CHROME A PERSON SEES in the column [x0, x1] (lane needs-card-tail r14 — ⑱ on fb61162f9: the composers and strips of
  *  windows COVERED by the For-you window pushed the toasts and the announce into each other, a toast over the card pressed):
- *  chromeAvoidEls' rects whose element is the topmost thing (elementsFromPoint, the overlays `over(el)` passed over) at a point
- *  of it inside the column — a covered window's controls are no control to keep clear of; outside the column nothing meets */
+ *  chromeAvoidEls' rects of which a point inside the column is clear of every box in front of it (frontRects — the windows
+ *  stacked above its window, the open floats; the overlays `over(el)` passed over) — a covered window's controls are no control
+ *  to keep clear of; outside the column nothing meets. NO hit test (lane window-close-stall: it was nine a control). */
 export function chromeAvoidRects(x0, x1, over = () => false) {
-  const hits = typeof document.elementsFromPoint === 'function', out = [];
+  const out = [], fronts = new Map(); // (the boxes in front of one window, read once a call)
   for (const el of chromeAvoidEls()) {
-    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue;
+    if (!showsHere(el)) continue;
     const r = el.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) || r.right <= x0 || r.left >= x1) continue;
-    if (hits) { // (no hit test — the rectangle decides)
-      const l = Math.max(r.left, x0), rt = Math.min(r.right, x1), xs = [l + 1, (l + rt) / 2, rt - 1], ys = [r.top + 1, (r.top + r.bottom) / 2, r.bottom - 1];
-      if (!xs.some((x) => ys.some((y) => { const h = document.elementsFromPoint(x, y).find((e) => !over(e)); return !!h && el.contains(h); }))) continue;
-    }
+    const win = typeof el.closest === 'function' ? el.closest('.window') : null;
+    if (!fronts.has(win)) fronts.set(win, frontRects(el, over));
+    if (!seenAt(Math.max(r.left, x0), r.top, Math.min(r.right, x1), r.bottom, fronts.get(win))) continue;
     // a title bar's buttons are SOFT: they give way first when there is no room clear of everything (toastDeskSpot)
     out.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, soft: !!el.classList?.contains('window-controls') });
   }
@@ -653,8 +679,8 @@ export function chromeAvoidRects(x0, x1, over = () => false) {
 }
 /** what the desktop tier's stack must not stand on: every open menu / float, THE window chrome it would meet (chromeAvoidRects in
  *  its own column) and the For-you announce's stack (`.ut-announce`, no popover since lane needs-card-tail r11) — viewport px */
-function _toastAvoid() {
-  const st = document.getElementById('global-toasts'), sr = st ? st.getBoundingClientRect() : null;
+function _toastAvoid(sr = null) { // (`sr`: the stack's rect its placement already read)
+  if (!sr) { const st = document.getElementById('global-toasts'); sr = st ? st.getBoundingClientRect() : null; }
   return [...avoidRects(document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .ut-announce'), (el) => el.id === 'global-toasts' || !!el.closest('#global-toasts')),
     ...chromeAvoidRects(sr ? sr.left : 0, sr ? sr.right : window.innerWidth, (e) => !!e.closest?.('#global-toasts, .ut-announce'))];
 }
@@ -683,7 +709,8 @@ function _anchorToastStack(stack) {
 function _placeDeskToasts(stack) {
   _anchorToastStack(stack);
   const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
-  const desk = toastDeskSpot({ rect: stack.getBoundingClientRect(), avoid: _toastAvoid(), topY: tr && tr.height ? tr.bottom : 0, vh: window.innerHeight, scale: uiScale() });
+  const rect = stack.getBoundingClientRect();
+  const desk = toastDeskSpot({ rect, avoid: _toastAvoid(rect), topY: tr && tr.height ? tr.bottom : 0, vh: window.innerHeight, scale: uiScale() });
   if (desk) { stack.style.top = 'auto'; stack.style.bottom = desk.bottom + 'px'; }
   if (!_toastWatch) { _toastWatch = new MutationObserver(_queueToastPlace); _toastWatch.observe(document.body, { childList: true }); }
   _toastWatch.observe(stack, { childList: true });

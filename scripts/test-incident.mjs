@@ -6,7 +6,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv, stillPresser } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
@@ -212,6 +212,32 @@ if (CHROME) {
   await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.captureIncident)').catch(() => false)) break; await sleep(400); }
+  // ── lane window-close-stall: THE RECORDER TELLS AFTER A DOC WINDOW OPENED. The owner's 14 newest «renderer freeze» bundles
+  // all had snapshot.longTasks EMPTY: the lazy doc editor bundle (public/doc-editor.js) evaluates a SECOND copy of
+  // telemetry-client.js whose installers never run, and it re-pointed every window.__vs* ring accessor at its own empty rings.
+  // A REAL Doc window is opened (the bundle imported and mounted), then a REAL click and key (CDP Input — the window-capture
+  // stamps): the accessors are still the first copy's and the rings hold the click and the key; the bundle below carries them.
+  // RED on e74fabc6b (the accessors re-pointed, the inputs ring empty).
+  const DOC = path.join(wt, 'rings-note.md');
+  fs.writeFileSync(DOC, '# Rings\n\nA doc window opened before the capture.\n');
+  const before = await evaljs(`(() => { window.__ringRefs = ['__vsInputs', '__vsLongTasks', '__vsFrameGaps', '__vsTickLags', '__vsFetchTimings', '__vsScreenEvents'].map((k) => [k, window[k]]); return window.__ringRefs.filter(([, f]) => typeof f === 'function').length; })()`);
+  await evaljs(`(() => { window.app.openDoc({ host: '', path: ${JSON.stringify(DOC)} }); return true; })()`);
+  let mounted = null;
+  for (let i = 0; i < 80; i++) {
+    mounted = await evaljs(`(() => { const r = [...document.querySelectorAll('.doc-window')]; const loaded = performance.getEntriesByType('resource').some((e) => String(e.name).includes('/doc-editor.js')); return { loaded, mounted: r.some((x) => x.firstElementChild || !/Loading/.test(x.textContent)) }; })()`).catch(() => null);
+    if (mounted && mounted.loaded && mounted.mounted) break;
+    await sleep(250);
+  }
+  check('rings: a REAL Doc window opened — public/doc-editor.js imported and its editor mounted', !!(mounted && mounted.loaded && mounted.mounted), JSON.stringify(mounted));
+  const t0 = await evaljs('Date.now()');
+  // the click through THE still door (scripts/scratch.mjs stillPresser): the Doc window's title, still and on top
+  const bar = await stillPresser({ evalJs: evaljs, cdp })(`JS:([...document.querySelectorAll('.window')].find((x) => x.querySelector('.doc-window')) || document.body).querySelector('.window-title')`);
+  await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+  await sleep(200);
+  const rings = await evaljs(`(() => ({ same: window.__ringRefs.filter(([k, f]) => window[k] !== f).map(([k]) => k), inputs: (window.__vsInputs ? window.__vsInputs() : []).filter((t) => t >= ${t0} - 5).length }))()`);
+  check('rings: every window.__vs* ring accessor is still the first copy\'s after the Doc window (the doc editor\'s copy re-points none)', before === 6 && rings && rings.same.length === 0, JSON.stringify({ before, rings }));
+  check('rings: the REAL click and key after the Doc window are in the inputs ring', !!bar && rings && rings.inputs >= 2, JSON.stringify({ bar, rings }));
   const ui = await evaljs(`(async () => {
     window.app.captureIncident();
     await new Promise((r) => setTimeout(r, 300));
@@ -243,6 +269,8 @@ if (CHROME) {
   if (ui?.ok) {
     const b2 = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', ui.id, 'bundle.json'), 'utf8'));
     check('UI-driven capture wrote the note from the textarea', b2.note === 'ui e2e note');
+    const inputs = b2.client?.snapshot?.inputs;
+    check('rings: the bundle captured after the Doc window carries the click and the key (snapshot.inputs)', Array.isArray(inputs) && inputs.filter((x) => x >= t0 - 5).length >= 2, JSON.stringify(inputs));
   }
   cws.close();
 } else console.log('  (chrome absent — dialog render check skipped)');
