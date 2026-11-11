@@ -4,8 +4,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.391 — 2026-11-10
 
+### Changed
+- Settings → Integrations says what a company app's settings leave out and which file your admin writes it in.
+
 ### Fixed
 - After you cancel a passkey sign-in, the passkey VibeSpace lent to that tab is always taken back. Before, it could stay on the tab.
+- Connecting Gmail or Lark under a company app no longer ends at the sign-in page's address error: the dialog first says to paste the last page's address back.
+- After you press Connect, the account dialog always has a way on: open the sign-in again, cancel it in one press, or try the other address.
+- A company Slack app that cannot bring your sign-in back says so before Slack opens and points you to making your own app.
 
 ## 2.369.390 — 2026-11-10
 
