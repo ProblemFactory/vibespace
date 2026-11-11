@@ -10,9 +10,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - While it runs, the pool's notice says what is being checked, instead of a reset date days away.
 - If the check cannot run or finds a difference, For you says why and offers Check again.
 - In VibeSpace's Docker images the check does not run yet; there, those accounts wait for a VibeSpace release, as before.
+- Settings → Integrations says what a company app's settings leave out and which file your admin writes it in.
 
 ### Fixed
 - A newer Claude Code's records no longer say "not registered … until the next release"; Diagnostics lists them quietly.
+- Connecting Gmail or Lark under a company app no longer ends at the sign-in page's address error: the dialog first says to paste the last page's address back.
+- After you press Connect, the account dialog always has a way on: open the sign-in again, cancel it in one press, or try the other address.
+- A company Slack app that cannot bring your sign-in back says so before Slack opens and points you to making your own app.
 
 ## 2.369.390 — 2026-11-10
 
