@@ -136,6 +136,16 @@ if (cfg.plan === 'lateWatchdog' || cfg.fifo) {
   process.on('exit', () => { try { feeder && feeder.kill('SIGKILL'); } catch { } });
 }
 const H = require(${JSON.stringify(path.join(ROOT, 'src/hogs.js'))});
+// THE SUITE'S OWN MEASURE (主开发's ruling 2026-11-11 07:31Z): each CPU hog's span read by THIS harness from the main thread's
+// own schedstat (on-CPU ns, run-queue wait ns) — never the product's readings — so a hold the suite measures as starved is
+// ASSERTED «waiting for a CPU», and one the product calls starved that this does not show is red
+const SPANS = [];
+const SS0 = () => { try { const t = require('fs').readFileSync('/proc/self/task/' + process.pid + '/schedstat', 'utf8').split(' '); return [Number(t[0]), Number(t[1])]; } catch (e) { return [0, 0]; } };
+const kmono0 = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
+for (const k of ['busyHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibHog', 'regexHog', 'gcHog']) if (typeof H[k] === 'function') {
+  const f = H[k];
+  H[k] = function (...a) { const s0 = SS0(), w0 = Date.now(), m0 = kmono0(); try { return f.apply(this, a); } finally { const s1 = SS0(); SPANS.push({ fn: k, wall: w0, ms: kmono0() - m0, waitMs: (s1[1] - s0[1]) / 1e6, ranMs: (s1[0] - s0[0]) / 1e6 }); } };
+}
 const make = () => require((cfg.tree || ${JSON.stringify(REPO)}) + '/src/server/sync-fs-witness.js').create({ rootDir: ${JSON.stringify(ROOT)}, armed: true, readMountinfo: () => '', fresh: true,
   beatMs: cfg.beatMs || 20, holdMs: 100, noAnswerMs: 50, liveMs: cfg.liveMs || 250, capPerHour: cfg.cap == null ? 20 : cfg.cap, samplingOn: () => cfg.sampling !== false, ...(cfg.samplesPerHold ? { samplesPerHold: cfg.samplesPerHold } : {}),
   ...(fproc ? { procRoot: fproc } : {}),
@@ -148,18 +158,20 @@ const recs = [];
 if (W && cfg.record) W.wire({ record: (ev) => recs.push(ev) });
 if (cfg.boot) H.bootHog(cfg.boot);
 const out = { checks: {} };
-const done = (ms = 900) => setTimeout(() => { out.report = W.holds().report(cfg.maxBytes ? { maxBytes: cfg.maxBytes } : {}); out.checks.evals = evals; out.checks.recs = recs; out.cpuMs = (process.cpuUsage().user + process.cpuUsage().system) / 1000; process.stdout.write(JSON.stringify(out)); W.stop(); }, ms);
+const done = (ms = 900) => setTimeout(() => { out.report = W.holds().report(cfg.maxBytes ? { maxBytes: cfg.maxBytes } : {}); out.checks.evals = evals; out.checks.recs = recs; out.spans = SPANS; out.cpuMs = (process.cpuUsage().user + process.cpuUsage().system) / 1000; process.stdout.write(JSON.stringify(out)); W.stop(); }, ms);
 const later = (ms, f) => setTimeout(f, ms);
 const plan = cfg.plan;
 const kmono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
 if (plan === 'boot') done(600);
 else if (plan === 'nativeSweep') {   // round 4 (A): a native call + a JavaScript tail in ONE function, once per N
   const { BroadcastChannel } = require('worker_threads'); const posts = [], bc = new BroadcastChannel('lh-posts'); bc.onmessage = (e) => posts.push(e.data);
+  // THE CHILD'S OWN RECORD OF COLLECTIONS (主开发's ruling 08:30Z — never the product's): every gc entry on the hogs' clock
+  const gcs = []; { const PH = require('perf_hooks'); const off = kmono() - PH.performance.now(); new PH.PerformanceObserver((l) => { for (const e of l.getEntries()) gcs.push([off + e.startTime, e.duration]); }).observe({ entryTypes: ['gc'] }); }
   let perMs = 0; { const t = kmono(); require('crypto').pbkdf2Sync('a', 'b', 20000, 32, 'sha256'); perMs = 20000 / Math.max(0.5, kmono() - t); }
   let jperMs = 0; if (cfg.kind === 'json') { const js = '[' + '1,'.repeat(1e6) + '1]'; const t = kmono(); JSON.parse(js); jperMs = 1e6 / Math.max(0.5, kmono() - t); }
   const runs = []; let i = 0;
   const next = () => {
-    if (i >= cfg.ns.length) return later(300, () => { bc.close(); out.checks.runs = runs; out.checks.posts = posts.filter((x) => x.ev === 'post'); done(300); });
+    if (i >= cfg.ns.length) return later(300, () => { bc.close(); out.checks.runs = runs; out.checks.posts = posts.filter((x) => x.ev === 'post'); out.checks.gcs = gcs; done(300); });
     const N = cfg.ns[i++], js = cfg.kind === 'json' ? '[' + '1,'.repeat(Math.round(jperMs * N)) + '1]' : null;
     later(250, () => { const wall = Date.now(), start = kmono(); const nativeEnd = js ? H.parseHog(js, cfg.tail) : H.pbkdfHog(Math.round(perMs * N), cfg.tail); runs.push({ N, wall, start, nativeEnd, end: kmono() }); setTimeout(next, 50); });
   };
@@ -183,7 +195,13 @@ else if (plan === 'heapFill') {   // round 4 (3): a REAL small old generation fi
   const fill = () => LHn.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LHn.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) });
   const keep = []; let f = fill();
   // round 5: 256 KB arrays — each a large object (no scavenge copy, no compaction move): 40 000 arrays of 32 KB ran Node 24 out of memory at 86 % of 160 MB once in two runs
-  while (f.used < 0.86 * f.limit && keep.length < 4000) { keep.push(new Array(32768).fill(keep.length)); f = fill(); }   // just past the 85 % bound (88 % ran a 96 MB old generation out of memory)
+  // follow-up: a 256 KB array is born in the YOUNG large-object space, which heapFillOf does not count (it judges the old
+  // generation against its own limit) — counted HERE for the fill's stop, else the fill overshot by what that space held
+  // (Node 24's 64 MB semi-spaces: 7 of 8 children out of memory, on 82648e1f9 and on this sha alike); then short-lived
+  // garbage until a scavenge has promoted every one of them, so the press reads the fill the leg made
+  const youngLo = () => Number((v8.getHeapSpaceStatistics().find((x) => x.space_name === 'new_large_object_space') || {}).space_used_size) || 0;
+  while (f.used + youngLo() < 0.86 * f.limit && keep.length < 4000) { keep.push(new Array(32768).fill(keep.length)); f = fill(); }   // just past the 85 % bound (88 % ran a 96 MB old generation out of memory)
+  for (let i = 0; i < 4000 && youngLo() > 0; i++) { let g = []; for (let j = 0; j < 1000; j++) g.push({ j }); g = null; }
   later(400, () => { const r = W.holds().startProfile(1000); out.checks.heap = { usedMb: Math.round(fill().used / 1048576), limitMb: Math.round(fill().limit / 1048576), heapSizeLimitMb: Math.round(v8.getHeapStatistics().heap_size_limit / 1048576), press: r }; keep.length = 0; done(200); });
 }
 else if (plan === 'mixedLate') {   // round 4 (B): JavaScript then a sync child, the watchdog's thread starting late inside it
@@ -305,10 +323,55 @@ else if (plan === 'twoUnseen') { const tw = []; const hog = (at) => later(at, ()
 else if (plan === 'profile') later(400, () => { W.holds().startProfile(); setTimeout(() => H.busyHog(300), 400); setTimeout(() => H.sleepHog(0.4), 900); setTimeout(() => done(100), 1900); });
 `);
 
-function run(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onReady = null, env = {} } = {}) {
+// THE BOX CAN STARVE A CHILD (the follow-up, 主开发's ruling 07:31Z). A hold whose own window shows ≥ 20 % run-queue wait
+// is judged «waiting for a CPU» by the product — TRUE, and outside every leg's law about the asks. Measured (a lane probe,
+// load 6–7): 120 busy windows of 300 ms, bare 0 starved; with this watchdog at the suite's 20 ms beat 2 (40–70 ms of
+// run-queue wait). THE SUITE'S OWN COUNT decides, never the product's word: each hog's span's wait over its length
+// (SPANS, read in the child by the harness). ≥ SUITE_STARVED ⇒ the product MUST say «waiting for a CPU»; the product saying
+// it with < SUITE_CLEAR measured ⇒ red; between them (the product's window runs up to a beat past the span) neither is
+// asserted. A hold is OUTSIDE the asks' law only when the product says «waiting for a CPU» AND the suite measured
+// ≥ SUITE_CLEAR. THE FLOOR: ASKED_FLOOR of a child's holds judged by its asks (≥ 70 %: the ask legs' own count floors —
+// (A)'s 8 of ~12–39 holds in native code — stay reachable, and the box's measured 2 % leaves a wide margin); under it the
+// child reruns ONCE, then it is red by name «the box starved the suite: N of M». The count is printed every run.
+const SUITE_STARVED = 0.25, SUITE_CLEAR = 0.1, ASKED_FLOOR = 0.7;
+const STARVE = { holds: 0, waiting: 0, outside: 0, measured: 0, measuredStarved: 0, band: 0, disagree: [], reruns: [], red: [] };
+/** each hold of a child with the suite's own measure of its span (null: no measured hog in it) */
+function starveOf(r) {
+  const holds = (r.out && r.out.report && r.out.report.holds) || [], spans = (r.out && r.out.spans) || [];
+  return holds.map((h) => {
+    const s = spans.filter((x) => x.wall >= h.at - 60 && x.wall <= h.at + 10 + (h.msHi || h.ms || 0)).sort((a, b) => b.ms - a.ms)[0] || null;
+    const share = s && s.ms > 0 ? s.waitMs / s.ms : null, waiting = h.verdict === LH.V.waiting;
+    return { h, share, waiting, outside: waiting && share != null && share >= SUITE_CLEAR };
+  });
+}
+function account(rows, plan) {
+  for (const x of rows) {
+    STARVE.holds++; if (x.waiting) STARVE.waiting++; if (x.outside) STARVE.outside++;
+    if (x.share == null) continue;
+    STARVE.measured++;
+    const pc = (100 * x.share).toFixed(0);
+    if (x.share >= SUITE_STARVED) { STARVE.measuredStarved++; if (!x.waiting) STARVE.disagree.push(`${plan}: the suite measured ${pc} % run-queue wait, the product said «${x.h.verdict}»`); }
+    else if (x.share >= SUITE_CLEAR) STARVE.band++;
+    else if (x.waiting) STARVE.disagree.push(`${plan}: the product said «waiting for a CPU», the suite measured ${pc} %`);
+  }
+}
+async function run(cfg, opts = {}) {
+  let r = await run1(cfg, opts), rows = starveOf(r);
+  account(rows, cfg.plan);
+  const under = (rs) => rs.length > 0 && (rs.length - rs.filter((x) => x.outside).length) / rs.length < ASKED_FLOOR;
+  if (under(rows)) {
+    STARVE.reruns.push(`${cfg.plan}: ${rows.filter((x) => x.outside).length} of ${rows.length}`);
+    r = await run1(cfg, opts); rows = starveOf(r); account(rows, cfg.plan);
+    if (under(rows)) STARVE.red.push(`${cfg.plan}: ${rows.filter((x) => x.outside).length} of ${rows.length}`);
+  }
+  r.starve = rows;
+  return r;
+}
+function run1(cfg, { node = process.execPath, args = [], timeoutMs = 30000, onReady = null, env = {}, pin = null } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const c = spawn(node, [...args, KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), ...env } });
+    const c = pin != null ? spawn('taskset', ['-c', String(pin), node, ...args, KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), ...env } })
+      : spawn(node, [...args, KID, JSON.stringify(cfg)], { stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: os.tmpdir(), ...env } });
     let out = '', err = '', exitAt = null, readied = false;
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; if (onReady && !readied && err.includes('[kid] ready')) { readied = true; onReady(c); } });
     const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, timeoutMs);
@@ -530,7 +593,7 @@ async function legRound3(node, tag) {
       const r = await run({ plan: 'lateJs', fifo: true, fifoAt: 350, blockS: (680 + d) / 1000, hogAt: 500, hogMs: 300 }, { node });
       const hs = (r.out && r.out.report.holds) || [], truth = r.out && r.out.checks.truth ? r.out.checks.truth.end - r.out.checks.truth.start : null;
       const how = (l) => (/ — JavaScript: /.test(l) ? 'JS inside' : / — on the CPU — JavaScript or native code, no sample of that part/.test(l) ? 'on the CPU, an asleep sample' : /no sample landed inside it — asked/.test(l) ? 'asked, ' + ((/the answer came (at its end|after it)/.exec(l) || [, 'no answer'])[1]) : /the watchdog was not running either|none of its checks came after/.test(l) ? 'unseen' : l.slice(0, 80));
-      res.push({ d, verdicts: hs.map((h) => h.verdict), how: holdLines(r).map(how).join('+'), contains: hs.length ? hs.every((h) => within(h, truth)) : null, truth, lines: holdLines(r) });
+      res.push({ d, verdicts: hs.filter((h) => !(r.starve || []).some((y) => y.h === h && y.outside)).map((h) => h.verdict), how: holdLines(r).map(how).join('+'), contains: hs.length ? hs.every((h) => within(h, truth)) : null, truth, lines: holdLines(r) });
     }
     const native = res.filter((x) => x.verdicts.includes(LH.V.native));
     const okv = res.every((x) => x.verdicts.length && x.verdicts.every((v) => v === LH.V.js || v === LH.V.unsampled || v === LH.V.cpu));
@@ -609,13 +672,12 @@ async function legRound5(node, tag) {
   ok(lines.length >= 30 && !blocked.length, `(law B) ${tag}: ${lines.length} JSON.parse holds — none «in the kernel (blocked)» (an asleep sample of a hold the window says RAN never names it; ${asleepSeen} carried one)`, blocked.slice(0, 3));
   return { holds: lines.length, by, asleepSeen };
 }
-async function legRound4(node, tag, tree = null) {
-  console.log(`⑫ round 4 — the two sweeps (${tag}${tree ? ', the tree ' + tree + ': a REPORT' : ''})`);
-  const say = (x) => console.log('  · ' + x);
-  // (A) pbkdf2 / JSON.parse followed by a JavaScript tail of 0 / 5 / 50 ms IN THE SAME FUNCTION, one ask a hold; its POST
-  //     (stamped in the watchdog's own thread) against the native call's own end: x = end − post
+/** (A) THE SWEEP: pbkdf2 / JSON.parse followed by a JavaScript tail of 0 / 5 / 50 ms IN THE SAME FUNCTION, one ask a hold;
+ *  its POST (stamped in the watchdog's own thread) against the native call's own end: x = end − post; `gc`: a collection in
+ *  the ask's window by the child's OWN record. `sets` narrows it (the mutants' legs). */
+async function sweepA(node, tag, tree = null, sets = null) {
   const A = [];
-  for (const [kind, ns] of [['pbkdf2', [90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190]], ['json', [105, 120, 135, 150]]]) for (const tail of [0, 5, 50]) {
+  for (const [kind, ns, tails] of sets || [['pbkdf2', [90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190], [0, 5, 50]], ['json', [105, 120, 135, 150], [0, 5, 50]]]) for (const tail of tails) {
     const r = await run({ plan: 'nativeSweep', kind, tail, ns, samplesPerHold: 1, cap: 100, tree }, { node, args: ['-r', SWEEP_PRE], env: { LH_POSTWATCH: '1' }, timeoutMs: 90000 });
     const c = r.out && r.out.checks;
     if (!c || !c.runs) { ok(false, `(A) ${kind}, tail ${tail} ms: the child answered (${tag})`, r.err.slice(-800)); continue; }
@@ -623,17 +685,54 @@ async function legRound4(node, tag, tree = null) {
     for (const x of c.runs) {
       const post = c.posts.find((p) => p.at >= x.start - 25 && p.at <= x.end);
       const h = holds.find((y) => y.at >= x.wall - 60 && y.at <= x.wall + 10);
-      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null });
+      const sv = h && r.starve ? r.starve.find((y) => y.h === h) : null;
+      // THE ASK'S LATENCY WINDOW, from the hog's own timing: posted while the native call ran it lands at the first
+      // JavaScript after it — [post, nativeEnd + JS_FAST_MS + 1]; posted inside the tail it answers within JS_FAST_MS unless
+      // something holds it — [post, post + JS_FAST_MS + 1]; a collection inside it, by the child's OWN record
+      const winEnd = post ? Math.max(post.at, post.at < x.nativeEnd ? x.nativeEnd : post.at) + LH.JS_FAST_MS + 1 : null;
+      const gc = !!post && (c.gcs || []).some(([gs, gd]) => gs < winEnd && gs + gd > post.at);
+      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc });
     }
   }
+  return A;
+}
+async function legRound4(node, tag, tree = null) {
+  console.log(`⑫ round 4 — the two sweeps (${tag}${tree ? ', the tree ' + tree + ': a REPORT' : ''})`);
+  const say = (x) => console.log('  · ' + x);
+  // (A) pbkdf2 / JSON.parse followed by a JavaScript tail of 0 / 5 / 50 ms IN THE SAME FUNCTION, one ask a hold; its POST
+  //     (stamped in the watchdog's own thread) against the native call's own end: x = end − post
+  let A = await sweepA(node, tag, tree);
   const fast = LH.JS_FAST_MS;
-  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict);
+  // THE COLLECTOR, BY THE CHILD'S OWN RECORD (主开发's ruling 08:30Z): a hold whose ask's LATENCY window (sweepA) holds a
+  // collection leaves (A)'s two strict legs and its sentence is ASSERTED to be one of the TRUE forms for that case;
+  // a hold the record shows no collection for stays strict. THE FLOOR: STRICT_FLOOR of (A)'s judged holds strict AND at
+  // least 3 strict asks in the tail — measured, the record took 48–52 % of the judged holds here (JSON.parse allocates its
+  // result, pbkdf2 its buffers: a collection inside a 15–20 ms native window is common); under it the sweep runs ONCE more,
+  // then it is red by name «the collector took the suite». «Never JavaScript» holds for BOTH kinds in native code (the
+  // collection's true forms exclude it): the count floors (8 asks, 6 of them 5–55 ms) are over all of them
+  const STRICT_FLOOR = 0.25;
+  const judged = (a) => a.x != null && a.verdict && !a.outside;
+  const strictShare = (L) => { const j = L.filter(judged); const tail = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2).length; return j.length && tail >= 3 ? j.filter((a) => !a.gc).length / j.length : 0; };
+  let rerunA = false;
+  if (!tree && strictShare(A) < STRICT_FLOOR) { rerunA = true; say(`(A) the collector took ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds (under the floor ${100 * STRICT_FLOOR} % strict) — the sweep runs once more`); A = await sweepA(node, tag, tree); }
+  if (!tree) ok(strictShare(A) >= STRICT_FLOOR, `(A) ${tag}: the collector took the suite? ${A.filter((a) => judged(a) && a.gc).length} of ${A.filter(judged).length} judged holds had a collection in the ask's window by the child's own record — ${Math.round(100 * strictShare(A))} % judged strictly (the floor ${100 * STRICT_FLOOR} %${rerunA ? '; after ONE rerun' : ''})`);
+  const gcHolds = A.filter((a) => judged(a) && a.gc);
+  const gcNative = gcHolds.filter((a) => a.x >= fast + 1), gcTail = gcHolds.filter((a) => a.x <= -1 && a.tail + a.x >= 2);
+  const TRUE_NATIVE = [LH.V.native, LH.V.cpu], TRUE_TAIL = [LH.V.js, LH.V.native, LH.V.cpu];
+  const gcLies = [...gcNative.filter((a) => !TRUE_NATIVE.includes(a.verdict)), ...gcTail.filter((a) => !TRUE_TAIL.includes(a.verdict))];
+  say(`(A) the child's own record: ${gcHolds.length} of ${A.filter(judged).length} judged holds had a collection in the ask's window — ${gcNative.length} posted in native code, ${gcTail.length} in the tail — judged by their TRUE forms`);
+  if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}» (${gcNative.length} + ${gcTail.length} holds)`, gcLies.slice(0, 3));
+
+  // THE STRICT LEGS: the holds the box did not starve AND the child's own record shows no collection for
+  const inNative = A.filter((a) => a.x != null && a.x >= fast + 1 && a.verdict && !a.outside && !a.gc), inTail = A.filter((a) => a.x != null && a.x <= -1 && a.tail + a.x >= 2 && a.verdict && !a.outside && !a.gc);
+  say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law`);
   const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native), wrongTail = inTail.filter((a) => a.verdict !== LH.V.js);
+  const nativeAll = [...inNative, ...gcNative], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
   const named = inNative.filter((a) => a.tail >= 5), namedOk = named.filter((a) => /the first JavaScript after it: [^;]*\b(pbkdfHog|parseHog) \(src\/hogs\.js:\d+\)/.test(a.line || ''));
   const xs = inNative.map((a) => a.x);
   say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.length - wrongJs.length} «native», ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.length - wrongTail.length} «JavaScript»`);
   if (!tree) {
-    ok(inNative.length >= 8 && inNative.filter((a) => a.x >= 5 && a.x <= 55).length >= 6 && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${inNative.length} holds, x from ${fast + 1} ms up, ${inNative.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms): «native code or garbage collection»`, wrongJs.slice(0, 3));
+    ok(nativeAll.length >= 8 && nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length >= 6 && !saidJs.length && !wrongJs.length, `(A) ${tag}: an ask POSTED while pbkdf2 / JSON.parse still ran (${nativeAll.length} holds, x from ${fast + 1} ms up, ${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} in the verifiers' 5–55 ms) is never «JavaScript», whatever the tail (0 / 5 / 50 ms) — the ${inNative.length} with NO collection in its window (the child's own record) «native code or garbage collection» exactly, the ${gcNative.length} with one a TRUE form`, [...saidJs, ...wrongJs].slice(0, 3));
     ok(named.length > 0 && namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
     ok(inTail.length >= 3 && !wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds) is «JavaScript» — the law cuts both ways`, wrongTail.slice(0, 3));
   }
@@ -715,9 +814,71 @@ async function legRamp(node, tag, runs = 10, tree = REPO) {
   return { ...res, medNone: med(res.none), medWatchdog: med(res.watchdog), load };
 }
 
-// VS_LH_LEGS=named,boot,lawC,retain,conditions,acceptance,round3,round4,ramp,node22 — a maintainer's re-run of some legs (unset = every leg but ramp: the gate)
+// VS_LH_LEGS=named,boot,lawC,retain,conditions,acceptance,round3,round4,round5,starved,gclies,ramp,node22 — a maintainer's re-run of some legs (unset = every leg but ramp: the gate)
 // --tree <dir> (or VS_LH_TREE=<dir> through ci's claim): ONLY the round-4 sweeps against another tree's watchdog (a report —
 // the red control on the round-3 sha; LH_REPORT=<file> keeps its numbers)
+// ── ⑭ THE STARVED HOLD IS A LEG OF ITS OWN (the follow-up, 主开发's ruling 07:31Z): a TRUE starved hold — the child and a
+//     spinner pinned to ONE cpu (taskset): the suite's own count must see it starved and the product must say «waiting for
+//     a CPU»; then the two lies each red by name — a product that never says it (WAIT_SHARE out of reach) on the starved
+//     scene, and one that always says it (WAIT_SHARE 0) on a calm one ──────────────────────────────────────────────────
+function agreeOf(rows) {
+  const bad = [];
+  for (const x of rows) {
+    if (x.share == null) continue;
+    if (x.share >= SUITE_STARVED && !x.waiting) bad.push(`measured ${(100 * x.share).toFixed(0)} %, said «${x.h.verdict}»`);
+    else if (x.share < SUITE_CLEAR && x.waiting) bad.push(`said «waiting for a CPU», measured ${(100 * x.share).toFixed(0)} %`);
+  }
+  return bad;
+}
+async function legStarved() {
+  console.log('⑭ the starved hold: the suite\'s own count and the product\'s verdict, each lie red by name');
+  const say = (x) => console.log('  · ' + x);
+  const cpu = Math.max(0, os.cpus().length - 1);
+  const mutTree = (name, from, to) => {
+    const t = path.join(ROOT, 'mut-' + name); fs.cpSync(path.join(REPO, 'src'), path.join(t, 'src'), { recursive: true });
+    const f = path.join(t, 'src/loop-hold.js'), x = fs.readFileSync(f, 'utf8'); if (!x.includes(from)) throw new Error('mutant anchor: ' + from);
+    fs.writeFileSync(f, x.replace(from, to)); return t;
+  };
+  const starvedRun = async (tree = null) => {   // a spinner on the same cpu for the child's life
+    const spin = spawn('taskset', ['-c', String(cpu), process.execPath, '-e', 'const t = Date.now(); while (Date.now() - t < 6000);'], { stdio: 'ignore' });
+    try { return await run1({ plan: 'busy', ...(tree ? { tree } : {}) }, { pin: cpu }); } finally { try { spin.kill('SIGKILL'); } catch { } }
+  };
+  const S = await starvedRun(), sr = starveOf(S), sh = sr.find((x) => x.share != null);
+  say(`⑭ the starved scene (cpu ${cpu} shared with a spinner): the suite measured ${sh ? (100 * sh.share).toFixed(0) : '?'} % run-queue wait; the product said «${sh ? sh.h.verdict : '?'}»`);
+  ok(sh && sh.share >= SUITE_STARVED && sh.waiting && !agreeOf(sr).length, `a TRUE starved hold (one cpu, a spinner beside it): the suite's own count ≥ ${100 * SUITE_STARVED} % and the product says «waiting for a CPU» — they agree`, sr.map((x) => ({ share: x.share, v: x.h.verdict })));
+  const never = await starvedRun(mutTree('never', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 99,'));
+  const nb = agreeOf(starveOf(never));
+  ok(nb.length > 0 && /said «/.test(nb[0]), `MUTANT «never waiting» (WAIT_SHARE out of reach) on the starved scene is RED by name: ${nb[0] || 'no disagreement found'}`);
+  const always = await run1({ plan: 'busy', tree: mutTree('always', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 0,') });
+  const ab = agreeOf(starveOf(always));
+  ok(ab.length > 0 && /said «waiting for a CPU», measured/.test(ab[0]), `MUTANT «always waiting» (WAIT_SHARE 0) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
+}
+
+// ── ⑮ THE COLLECTOR'S TWO LIES (主开发's ruling 08:30Z), beside ⑭'s: a product that ALWAYS says «native code or garbage
+//     collection» (JS_FAST_MS −1: every answer late) and one that NEVER does (JS_FAST_MS 10⁹: every answer «JavaScript»), each
+//     on a small sweep, each red by name — the strict legs (no collection by the child's own record) or the true forms ──
+async function legGcLies(node, tag) {
+  console.log(`⑮ the collector's two lies, each red by name (${tag})`);
+  const mutTree = (name, to) => {
+    const t = path.join(ROOT, 'mut-gc-' + name); fs.cpSync(path.join(REPO, 'src'), path.join(t, 'src'), { recursive: true });
+    const f = path.join(t, 'src/loop-hold.js'), x = fs.readFileSync(f, 'utf8'), from = 'const JS_FAST_MS = 2;';
+    if (!x.includes(from)) throw new Error('mutant anchor: ' + from);
+    fs.writeFileSync(f, x.replace(from, `const JS_FAST_MS = ${to};`)); return t;
+  };
+  // asks land in the tail when the native call ends before the hold's first ask (≈ 100 ms held): pbkdf2 under 100 ms, a 50 ms tail
+  const fast = LH.JS_FAST_MS, SETS = [['pbkdf2', [55, 60, 65, 70, 75, 80, 85, 90, 120, 150], [50]], ['json', [120, 135], [50]]];
+  const judge = (A) => {
+    const j = A.filter((a) => a.x != null && a.verdict && !a.outside);
+    const sN = j.filter((a) => !a.gc && a.x >= fast + 1), sT = j.filter((a) => !a.gc && a.x <= -1 && a.tail + a.x >= 2);
+    const gN = j.filter((a) => a.gc && a.x >= fast + 1), gT = j.filter((a) => a.gc && a.x <= -1 && a.tail + a.x >= 2);
+    return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict !== LH.V.js).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, sT: sT.length };
+  };
+  const always = judge(await sweepA(node, tag, mutTree('always', -1)));   // the whole sweep: its tail asks are what this lie fails on
+  ok(always.strictTailNotJs > 0, `MUTANT «always garbage collection» (JS_FAST_MS −1) is RED by name: ${always.strictTailNotJs} of ${always.sT} asks posted inside the JavaScript tail with NO collection in their window (the child's own record) said «${LH.V.native}»`, always);
+  const never = judge(await sweepA(node, tag, mutTree('never', 1e9), SETS));
+  ok(never.strictNativeSaidJs + never.gcNativeSaidJs > 0, `MUTANT «never garbage collection» (JS_FAST_MS 10⁹) is RED by name: ${never.strictNativeSaidJs + never.gcNativeSaidJs} asks posted while the native call ran said «JavaScript» (${never.gcNativeSaidJs} of them with a collection in their window)`, never);
+}
+
 const LEGS = String(process.env.VS_LH_LEGS || '').split(',').filter(Boolean), leg = (n) => !LEGS.length || LEGS.includes(n);
 if (LEGS.length) console.log(`(only the legs ${LEGS.join(', ')} — VS_LH_LEGS; the gate runs every leg)`);
 const TI = process.argv.indexOf('--tree'), OTHER = TI > 0 ? path.resolve(process.argv[TI + 1]) : process.env.VS_LH_TREE ? path.resolve(process.env.VS_LH_TREE) : null;   // VS_LH_TREE = the same through ci's claim
@@ -737,6 +898,8 @@ try {
   const rep4 = {};   // LH_REPORT=<file>: the round-4 / ramp numbers kept for a report (ci keeps a green suite's output nowhere)
   if (leg('round4')) rep4.round4n24 = await legRound4(process.execPath, 'Node 24');
   if (leg('round5')) rep4.round5n24 = await legRound5(process.execPath, 'Node 24');
+  if (leg('starved')) await legStarved();
+  if (leg('gclies')) await legGcLies(process.execPath, 'Node 24');
   if (LEGS.includes('ramp')) { const r24 = await legRamp(process.execPath, 'Node 24'); const n22r = process.env.VS_NODE22; const r22 = n22r && fs.existsSync(n22r) ? await legRamp(n22r, 'Node 22') : null; fs.writeFileSync(path.join(os.tmpdir(), 'lh-ramp-report.json'), JSON.stringify({ r24, r22 }, null, 1)); rep4.ramp = { r24, r22 }; }
   const n22 = process.env.VS_NODE22;
   if (!leg('node22')) { }
@@ -747,9 +910,16 @@ try {
     await legRound3(n22, 'Node 22');
     rep4.round4n22 = await legRound4(n22, 'Node 22');
   } else console.log('⑧ not run: no Node 22 given (VS_NODE22=/path/to/node22)');
+  // the starved ledger kept OUTSIDE the suite (ci.mjs keeps nothing of a green suite): the report's counts, every run
+  rep4.starve = { holds: STARVE.holds, waiting: STARVE.waiting, outside: STARVE.outside, measured: STARVE.measured, measuredStarved: STARVE.measuredStarved, band: STARVE.band, reruns: STARVE.reruns.slice(), red: STARVE.red.slice(), disagree: STARVE.disagree.length };
   if (process.env.LH_REPORT) { try { fs.writeFileSync(process.env.LH_REPORT, JSON.stringify(rep4, null, 1)); } catch { } }
 } finally {
   fs.rmSync(ROOT, { recursive: true, force: true });
+}
+console.log(`\nTHE BOX AND THE SUITE: ${STARVE.waiting} of ${STARVE.holds} holds judged «waiting for a CPU» (${STARVE.outside} outside the asks' law, the suite's own count agreeing); measured by the suite ${STARVE.measured}: starved (≥ ${100 * SUITE_STARVED} %) ${STARVE.measuredStarved}, the band (${100 * SUITE_CLEAR}–${100 * SUITE_STARVED} %) ${STARVE.band}; children rerun once: ${STARVE.reruns.length ? STARVE.reruns.join(', ') : 'none'}`);
+if (!process.env.VS_LH_TREE && process.argv.indexOf('--tree') < 0) {
+  ok(!STARVE.disagree.length, `the product's «waiting for a CPU» agrees with the suite's OWN count of each hold's run-queue wait: ${STARVE.measuredStarved} measured starved (≥ ${100 * SUITE_STARVED} %), every one said so; no hold said starved under ${100 * SUITE_CLEAR} % measured`, STARVE.disagree.slice(0, 5));
+  ok(!STARVE.red.length, `the box starved the suite: ${STARVE.red.length ? STARVE.red.join(', ') : 'no child under the floor after its one rerun'} (the floor: ${100 * ASKED_FLOOR} % of a child's holds judged by its asks)`, STARVE.red);
 }
 console.log(`\nthe children used ${(cpuMs / 1000).toFixed(1)} cpu seconds`);
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

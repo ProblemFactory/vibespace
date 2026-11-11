@@ -327,7 +327,7 @@ function unseenHold(g, now, shared = 1) {
   let lateMs = 0, starvedMs = 0; for (const x of lates) if (x.at > from && x.at <= now) { lateMs += x.late; starvedMs = Math.max(starvedMs, x.late); }
   // round 5: smaller 1 — the watchdog on time says so (it asks only after a second); smaller 2 — a window two holds share is said
   const d = LH.coveredDelta(a, b, from, g.end); if (d && shared >= 2) d.shared = shared;
-  finish({ boot: false, first: false, fromM: from, toM: g.end, ms: Math.max(0, g.gap - beatMs), msHi: g.gap, samples: [], asks: [], unsampled: LH.unseenWhy({ starvedMs }), after: null, d, lateMs, starvedMs: starvedMs >= LH.STARVED_MS ? starvedMs : 0, ended: true, finished: false });
+  finish({ boot: false, first: false, fromM: from, toM: g.end, ms: Math.max(0, g.gap - beatMs), msHi: g.gap, samples: [], asks: [], unsampled: LH.unseenWhy({ starvedMs }), unseenLateMs: Math.round(starvedMs), after: null, d, lateMs, starvedMs: starvedMs >= LH.STARVED_MS ? starvedMs : 0, ended: true, finished: false });
 }
 function finish(h) {
   if (h.finished) return;
@@ -344,7 +344,7 @@ function tell(h, named, why, unread) {
   const samples = J.samples.map((x) => ({ cls: x.cls, kind: x.cls === 'js' ? 'js' : 'none', words: x.words, key: x.key, keyWords: x.keyWords, ...(Number.isFinite(x.at) ? { at: x.at } : {}) }));
   const facts = { boot: h.boot, from: toWall(h.fromM), to: toWall(h.toM), fromM: h.fromM, toM: h.toM, ms: h.ms, msHi: h.msHi, samples, outside: J.outside,
     after: J.after ? J.after.words : null, afterKey: J.after ? J.after.key : null, afterKeyWords: J.after ? J.after.keyWords : null,
-    unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };
+    unsampled: samples.length ? h.unsampled : (h.unsampled || h.standDown), standDown: samples.length ? h.standDown : null, ...(Number.isFinite(h.unseenLateMs) ? { unseenLateMs: h.unseenLateMs } : {}), d: h.d, starvedMs: h.starvedMs, lateMs: h.lateMs, ...(unread.size ? { namesUnread: { n: unread.size, why: why || 'budget' } } : {}) };
   try { parentPort && parentPort.postMessage({ ev: 'hold', hold: facts }); } catch { }
 }
 function stepHold(h, now) {

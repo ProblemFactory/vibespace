@@ -392,8 +392,9 @@ console.log('⑦ round 4 — the law over {asked 0…3} × {latency} × {state a
     // (ii) 2.1 s of JavaScript, then 2.6 s asleep in a sync child: two parts, in time order, with the window's seconds
     const ii = L([S('js', 50300), S('js', 51200), S('kernel', 53500, { w: 'asleep: pipe_read in read' })], win(2100, 4700), 4500);
     const iiRev = L([S('kernel', 50300, { w: 'asleep: pipe_read in read' }), S('js', 53500), S('js', 54000)], win(2100, 4700), 4500);
-    ok(/ — JavaScript for 2\.1 s, then in the kernel \(blocked\) for 2\.6 s: /.test(ii.line) && ii.fo.verdict === `${LH.V.js}, then ${LH.V.blocked}` && ii.fo.frameKey === 'src/hogs.js:2'
-      && / — in the kernel \(blocked\) for 2\.6 s, then JavaScript for 2\.1 s: /.test(iiRev.line),
+    // the follow-up (minor 1): the parts' seconds over the HOLD's own span (4.5 s here; the window measured 4.7 s)
+    ok(/ — JavaScript for 2\.1 s, then in the kernel \(blocked\) for 2\.4 s: /.test(ii.line) && ii.fo.verdict === `${LH.V.js}, then ${LH.V.blocked}` && ii.fo.frameKey === 'src/hogs.js:2'
+      && / — in the kernel \(blocked\) for 2\.4 s, then JavaScript for 2\.1 s: /.test(iiRev.line),
       `law B (ii): a hold with two real parts is said as two, in time order, with the window's seconds — «${ii.line.slice(ii.line.indexOf(' — ') + 3, ii.line.indexOf(' — ') + 75)}…»`, { ii: ii.line, iiRev: iiRev.line });
     // the larger part decides when the other is no REAL part (under PART_SHARE), and a part with no sample of its own is said
     const big = L([S('kernel', 50300), S('kernel', 50600), S('js', 51000)], win(3900, 4700), 4500);   // ran 83 %: the two asleep samples never name it
@@ -428,6 +429,24 @@ console.log('⑦ round 4 — the law over {asked 0…3} × {latency} × {state a
     const f = LH.foldProfileBy(by, names, 60), ws = Object.values(f.names);
     ok(ws.length === 51 && new Set(ws).size === 51 && ws.filter((w) => /^handler\d+ \(…/.test(w)).length === 50 && ws.some((w) => /^\(#2\) handler0 \(…/.test(w)) && ws.every((w) => w.length <= 300),
       `(smaller 6) 51 frames whose long paths share a tail: 51 distinct rows, each with its FUNCTION in front («${ws[0].slice(0, 40)}…»), the one that still met numbered`, ws.slice(0, 3));
+  }
+  // THE FOLLOW-UP (round 5's accepted verdict, minors 1–3): the parts' shares over the HOLD's span; the unseen road says how
+  // late the watchdog was; parts that interleave are said as such
+  {
+    const win2 = (ran, wall) => LH.schedDelta(R(70000, { ut: 0, st: 0, run: 0, wait: 0 }), R(70000 + wall, { ut: ran / 10, st: 0, run: ran, wait: 0 }));
+    const Sx = (cls, at) => cls === 'js' ? { cls, kind: 'js', words: 'busyHog (src/hogs.js:2)', key: 'src/hogs.js:2', keyWords: 'busyHog (src/hogs.js:2)', at } : { cls, kind: 'none', words: 'asleep: hrtimer_nanosleep in clock_nanosleep', key: '(asleep)', keyWords: '(asleep)', at };
+    const Lx = (samples, d, ms, msHi) => { const h = { from: 70000, to: 70000 + msHi, fromM: 70000, toM: 70000 + msHi, ms, msHi, samples, d }; return { line: LH.holdLine(h), fo: LH.foldHold(h) }; };
+    // (1) a 2.0 s JavaScript hog with 0.42 s of naps inside a 2.42 s hold, the window measuring 2.9 s around it
+    const m1 = Lx([Sx('js', 70300), Sx('kernel', 71500), Sx('js', 71900)], win2(2000, 2900), 2170, 2420);
+    ok(m1.fo.verdict === LH.V.js && !/, then /.test(m1.line), `minor 1: a 2.0 s hog with 0.42 s of naps in a 2.42 s hold (window 2.9 s) is JavaScript — its naps are no REAL part over the hold's own span (round 5 said «then in the kernel (blocked) for 0.8 s» 3 of 16 times)`, m1.line);
+    // (2) the unseen road with the watchdog 0.65 s late — under its 1 s starved bar — says so
+    const late = LH.holdLine({ from: 0, to: 1100, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 650 }), unseenLateMs: 650, d: null });
+    const onTime = LH.holdLine({ from: 0, to: 1100, ms: 900, msHi: 1150, unsampled: LH.unseenWhy({ starvedMs: 40 }), unseenLateMs: 40, d: null });
+    ok(/not sampled \(the watchdog ran 0\.7 s late \(under the 1 s it calls starved\), and none of its checks came after/.test(late) && !/ran on time/.test(late) && /the watchdog ran on time/.test(onTime),
+      'minor 2: the unseen road with the watchdog 0.65 s late says how late (round 5 said «on time»); 40 ms late is on time', { late, onTime });
+    // (3) JavaScript, asleep, JavaScript — two real parts that INTERLEAVE: both named, «interleaved», never one «then»
+    const m3 = Lx([Sx('js', 70300), Sx('kernel', 71800), Sx('js', 73400)], win2(2100, 4700), 4300, 4500);
+    ok(/ — JavaScript for 2\.1 s and in the kernel \(blocked\) for 2\.4 s, interleaved: /.test(m3.line), `minor 3: JavaScript, asleep, JavaScript — said as two parts, interleaved (${m3.line.slice(m3.line.indexOf(' — ') + 3, m3.line.indexOf(' — ') + 90)})`, m3.line);
   }
   // ROUND 5 (law A): AN ASK THE SAMPLER WITHDREW IS NOT A SAMPLE — a stand-down answer (a debugger opened, an accessor on
   // Error.prepareStackTrace) and, in a hold during which the sampler stood down, an ask with no answer say nothing about
