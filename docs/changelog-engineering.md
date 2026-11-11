@@ -38,6 +38,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Equality.** scripts/test-vault-masker-once.mjs ④ compares against the per-call build. The lane corpus against master's OWN files (e74fabc6b src, both belts in one process over one real vault): 494 texts, 0 differences, before and after an add, an edit and a removal.
 - **Pins (red on e74fabc6b: 12 of 16).** N texts ⇒ one decrypt pass and one compileForms. A change ⇒ one rebuild, and the very next text sees it. A lock (door or quiet) holds nothing compiled. The test-vault-run-model mutant «no window» still hits: compileForms keeps the `const W = maxLen - 1;` line. test-vault-law classifies maskForms and masksHeld as hub-only.
 
+### int394 — the .394 hotfix train's own notes (lane int361; on 5c77612ef = 2.369.393)
+- **A hotfix of two picks, right behind .393.** The output masker built once per vault state is the largest named cost on the owner's main thread: about half of the hub's own JavaScript in two captures. B-1409: a hold that also waited for a CPU is still named by its function, plus its suite follow-up. The road: a single mirror on the cut. Before the push, the four self-hosted suites that load the changed code run on the release, with test-loop-hold-live. The seven suites that only read the changed files' text run after the push.
+- **The fast tier's sum cap 971 → 972 s, by arithmetic (the train's seam, step 0).** The .394 tree states 971.125 s over 553 fast rows: the .393 tree's 970.325 s over 552, plus test-vault-masker-once at 0.80 s. The cap is the next whole second above the stated sum.
+- **test-loop-hold-live runs in every release's self-hosted claim from this train on (B-1409).** On the hosted runner the watchdog thread itself can be late, so its count legs may end as a named, counted skip: «ALL PASS (N, K skipped)» and «SKIPPED BY THE BOX …». A skip is not a green. The suite's run on the box is the one that judges those legs.
+- **Not in this release:** the voice-follower hotfix and the usage ledger's commit B (their gates were still running; they open .395 with the passkey walk), fable-52-cli-321, the build stamp (B-88e5) and the heavy-verdict guard follow-ups (B-e56e).
+
 ## 2.369.393 — 2026-11-11
 
 ### totp-request-card — an agent asks the person for a TWO-STEP CODE on one card; what they type lands as ONE two-step entry (fb-251bb41646; the owner said yes 2026-11-11 04:55Z)
