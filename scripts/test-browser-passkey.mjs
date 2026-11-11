@@ -72,6 +72,7 @@ import fs from 'fs';
 import os from 'os';
 import vm from 'vm';
 import { fileURLToPath } from 'url';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PK = require(path.join(REPO, 'src/browser-passkey.js'));
@@ -839,7 +840,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   }
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
-  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */ } = {}) {
+  function world2({ modPath = null, holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */ } = {}) {
     const world = { sockets: 0, refuse: false, pending: [], print, two, said: [], ended: [] /* ⑨r10: forYou.ended */, H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
@@ -848,7 +849,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
-    const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
+    const mkD = () => { const d = require(modPath || path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
       tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {}, ended: (id, fact) => world.ended.push({ id, fact }) } }); d.onChange((ev) => events.push(ev)); return d; };
     let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
@@ -1259,6 +1260,79 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     ok(cn.ok && cn.n === 1 && cn.rpId === 'vercel.com' && /\(vercel\.com\)/.test(cn.text),
       '⑨r4 the cancel names the site of the request it ended (read before its await — the page\'s own end can land first; r3\'s real-Chrome S11b said «this site»)', cn);
     X.D.shutdown();
+  }
+  // B-97ae (HIGH, the real-Chrome S11b red 6 in 10 on .390): THE KEPT PASSKEY LEAVES WITH ITS CEREMONY HOWEVER IT ENDS — here
+  // the person's Cancel (cancelPasskey). The page reports its end through the hook too, but which lands first is Chrome's: the
+  // cancel's ANSWER first (the red order: the watch marks the ceremony ended itself) or the page's report first (the green
+  // order) — and a page whose report never comes. Every order, judged AT REST (below): the key really loaded, then the key
+  // removed (removeCredential), UV off and the authenticator removed EXACTLY ONCE (the fake behaves as Chromium does: a second
+  // remove of a gone authenticator is an error), nothing at all said, and never their NEXT sign-in's.
+  const lentStore = () => { const cipher = PS2.cipherOf(crypto2, crypto2.randomBytes(32)); return { file: PS2.withRow(null, PID, { credentialId: 'Kvault097', rpId: 'vercel.com', userName: 'me', displayName: 'Me', keySealed: cipher.seal('pkcs8-key-text'), signCount: 1, createdBy: 'human', createdAt: 1, lastUsedAt: 0, uses: 0, policy: 'yes' }), cipher }; }; // the person's kept key, «always» (S11b's)
+  const chrome97 = () => ({ env: false, auths: new Set(), creds: new Map(), uv: new Map(), keys: [] }); // Chromium's WebAuthn environment (⑨r6's model; `keys` = the authenticator each addCredential loaded into — without it the fake refuses the load)
+  // AT REST = the moment a person could look at the tab: every call the watch sent is answered and the watch has sent nothing for
+  // 20 ms (≥ 5 turns of the loop). Never «wait until it is clean» — a clean-up behind a timer passes that (acceptance: a pkEnd
+  // 50 ms late was green on every leg that waited); at rest it is still lent, red by what is on the tab.
+  const atRest97 = async (X, quietMs = 20) => {
+    const t0 = Date.now(); let n = -1, since = 0, turns = 0;
+    while (Date.now() - t0 < 3000) {
+      const tr = X.world.trace, open = tr.filter((x) => x[0] === '>').length - tr.filter((x) => x[0] === '<').length;
+      if (tr.length !== n) { n = tr.length; since = Date.now(); turns = 0; } else if (open === 0 && turns >= 5 && Date.now() - since >= quietMs) return true;
+      turns++; await sleep2(2);
+    }
+    return false;
+  };
+  const cancelRun = async (order, { modPath = null, next = false } = {}) => {
+    const X = world2({ holders: 'human', print: false, store: lentStore(), modPath });
+    X.world.chrome = chrome97(); X.world.trace = [];
+    await X.opened();
+    const opening = X.world.said.slice(); // what the watch says opening on this fake (a browser with no VibeSpace surfaces) — nothing more may be said from the lend on
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0); await atRest97(X);
+    const T = () => X.w().targets.get('T1').pk;
+    const auth1 = T().auth || null, ch = X.world.chrome;
+    const lent = { auth: !!auth1 && ch.auths.has(auth1), keys: [...(ch.creds.get(auth1) || [])], uv: ch.uv.get(auth1) === true };
+    let reported = order === 'never-reported';
+    const endOf = () => { reported = true; X.say({ ev: 'end', id: 1, outcome: 'cancelled', name: 'AbortError' }); };
+    X.world.hook = (args) => { if (args[1] === 'cancel') { if (order === 'report-first') endOf(); else if (order === 'answer-first') setTimeout(endOf, 5); } return 1; };
+    const cn = await X.D.cancelPasskey({ profileId: PID, browserKey: HK, ephemeral: false }, { by: 'user' });
+    X.world.hook = null;
+    let auth2 = null;
+    if (next) { X.start(2, 'vercel.com'); await until2(() => released(X) > 1, 1000); auth2 = T().auth || null; } // their NEXT sign-in starts at once
+    await until2(() => reported, 500); const rest = await atRest97(X); // the Cancel answered, the page's report landed (when it comes), the link quiet
+    const on1 = (method) => X.calls(method, (m) => m.params.authenticatorId === auth1);
+    const after = { rest, removedIds: X.calls('WebAuthn.removeVirtualAuthenticator').map((m) => m.params.authenticatorId), keyRemoved: on1('WebAuthn.removeCredential').map((m) => m.params.credentialId), uvOff: on1('WebAuthn.setUserVerified').filter((m) => m.params.isUserVerified === false).length,
+      auth: T().auth || null, chromeAuths: [...ch.auths], keysOn1: [...(ch.creds.get(auth1) || [])], uvOn: [...ch.uv].filter(([, v]) => v).map(([a]) => a), keysOn2: auth2 ? [...(ch.creds.get(auth2) || [])] : [], opening, said: X.world.said.slice(opening.length) };
+    X.D.shutdown();
+    return { order, lent, cn: { ok: cn.ok, n: cn.n }, auth1, auth2, after };
+  };
+  const lentOk = (r) => r.lent.auth && r.lent.keys.length === 1 && r.lent.uv && r.cn.ok && r.cn.n === 1 && r.after.rest && r.after.opening.every((l) => /no VibeSpace surfaces on this browser .* today's dialog road$/.test(l));
+  const backOk = (r) => r.after.removedIds.filter((a) => a === r.auth1).length === 1 && r.after.keyRemoved.length === 1 && r.after.keyRemoved[0] === r.lent.keys[0] && r.after.uvOff === 1 && !r.after.keysOn1.length && !r.after.uvOn.includes(r.auth1) && !r.after.said.length;
+  for (const order of ['answer-first', 'never-reported', 'report-first']) {
+    const r = await cancelRun(order);
+    ok(lentOk(r) && backOk(r) && !r.after.auth && !r.after.chromeAuths.length && !r.after.uvOn.length,
+      `B-97ae the person's Cancel takes the lent passkey back in EVERY order — ${order}: at rest the key removed, UV off, the authenticator removed exactly once, nothing left on the tab, not one line said from the lend on`, r);
+  }
+  {
+    const r = await cancelRun('answer-first', { next: true });
+    ok(lentOk(r) && backOk(r) && !!r.auth2 && r.auth2 !== r.auth1 && r.after.removedIds.length === 1 && r.after.auth === r.auth2 && r.after.chromeAuths.join() === r.auth2 && r.after.keysOn2.length === 1 && r.after.uvOn.join() === r.auth2,
+      'B-97ae … never their NEXT sign-in\'s: a sign-in started at once after the Cancel waits for the clean-up (the tab\'s drain), gets its own authenticator, key and UV and keeps them — only the cancelled one\'s go', r);
+  }
+  {
+    const MUTP = mutantCopies('browser-passkey', REPO);
+    const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const ONE_END = " rpId = rpId || rec.rpId; pkEnd(w, e, rec).catch(";
+    // RED CONTROL: the Cancel no longer reaching the one end (the pkEnd it hands each ended ceremony removed) — the key stays
+    const mut = MUTP.write('src/server/browser-dialogs.js', dsrc.replace(ONE_END, " rpId = rpId || rec.rpId; void (w, e, rec, () => {}).catch?.("), 'b97ae-no-end');
+    const r = await cancelRun('answer-first', { modPath: mut });
+    ok(dsrc.split(ONE_END).length === 2 && r.lent.auth && r.after.removedIds.length === 0 && r.after.auth === r.auth1,
+      'B-97ae RED CONTROL: a Cancel that marks the ceremony ended without the one end (05082bbd0\'s cancelPasskey) leaves the person\'s key lent on the tab — the order that was red on real Chrome', r);
+    // TIMER CONTROL (acceptance): the one end reached, but 50 ms late — at rest the key, its UV and the authenticator are still on
+    // the tab: the legs above are red by BEHAVIOUR on a delayed end, not by a text anchor
+    const late = MUTP.write('src/server/browser-dialogs.js', dsrc.replace(ONE_END, " rpId = rpId || rec.rpId; new Promise((go) => setTimeout(go, 50)).then(() => pkEnd(w, e, rec)).catch("), 'b97ae-late-end');
+    for (const order of ['answer-first', 'never-reported']) {
+      const t = await cancelRun(order, { modPath: late });
+      ok(dsrc.split(ONE_END).length === 2 && lentOk(t) && !backOk(t) && t.after.auth === t.auth1 && t.after.keysOn1.length === 1 && t.after.uvOn.includes(t.auth1),
+        `B-97ae TIMER CONTROL: the one end reached 50 ms late — ${order}: at rest the key, its UV and the authenticator are still lent (the legs above red by behaviour)`, t);
+    }
   }
   // THE HOLDER ROWS (found by r4's live ⑪ a2 / g on real Chrome): ONE production composer (browser-dialogs.holdersOfKeeper) gives
   // HIS row once, flagged — the keeper's list carries it too (holderRows: `human: true`), and r2–r3's inline wiring copied it without

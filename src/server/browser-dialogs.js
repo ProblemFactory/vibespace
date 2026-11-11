@@ -1458,7 +1458,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         const rp0 = (e.pk.records.find((x) => x.outcome === 'pending' && !x.kernel && x.ctx === ctx) || {}).rpId || ''; // acceptance r3: the site read BEFORE the await (the page's own end can land first)
         const r = await pkCall(w, e, ctx, 'cancel');
         const k = r && r.result && r.result.result ? Number(r.result.result.value) || 0 : 0;
-        if (k > 0) { n += k; rpId = rpId || rp0; for (const rec of e.pk.records) if (rec.outcome === 'pending' && rec.ctx === ctx) { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; } }
+        // lane passkey-lend-cleanup (B-97ae, HIGH): a ceremony the Cancel ENDS here goes through THE ONE END (pkEnd → the tab's
+        // drain → pkUnload: its keys, its UV and the once-authenticator leave). The page reports its end too, but which lands
+        // first is Chrome's: once this marks the record ended, that report matches no pending record (PK.applyEvent) — before
+        // this, the cleanup then NEVER ran and the person's key stayed on the tab after their «no» (6 of 10 on .390)
+        if (k > 0) { n += k; rpId = rpId || rp0; for (const rec of e.pk.records) if (rec.outcome === 'pending' && rec.ctx === ctx) { rec.outcome = 'cancelled'; rec.endedAt = now(); rec.by = by; rpId = rpId || rec.rpId; pkEnd(w, e, rec).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`)); } }
       }
       if (n) passkeyChanged(w, e);
     }

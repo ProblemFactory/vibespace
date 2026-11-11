@@ -912,6 +912,27 @@
 - (2026-11-09) EVERY NEW CLAUDE MODEL NEEDED A RELEASE OF OURS (Fable 5.2; Haiku 5.5 at ×10). 不变量 = what the installed CLI states about its models (ids, sizes, prices, families, aliases) is READ from the binary at runtime, never re-typed; the shipped tables are the seed (kb-bugfix-invariants)
 - (2026-11-09) A REPLY WAS «READ BY» A TURN THAT NEVER CARRIED IT (report-mark-on-ack). 不变量 = an injection's marks move only when the caller confirms the turn carried it; unconfirmed ⇒ composed again «sent again», counted «[inject] not carried» (kb-bugfix-invariants)
 - (2026-11-10) A LOCKED CHIP READ AMBER «🔒⚠ claude-fable-5-2» WHILE FABLE 5.2 SERVED ITS fable[1m] LOCK (the owner; fable-52-cli-321 F1) — 不变量 = amber only when the lock target does not hold the served model; every client is told live when the lock moves ⇒ kb-bugfix-invariants
+- (2026-11-10) THE PERSON SAID NO AND THEIR PASSKEY STAYED ON THE TAB (B-97ae; passkey-lend-cleanup). 不变量 = a ceremony the CANCEL ends goes through the ONE end (pkEnd), whichever report lands first: at rest its key, UV and authenticator gone, once (other ends «Not closed») ⇒ kb-bugfix-invariants.md
+
+## THE PERSON SAID NO AND THEIR PASSKEY STAYED ON THE TAB (B-97ae, raised to HIGH 2026-11-10; lane passkey-lend-cleanup, the hotfix on .390)
+
+**Symptom.** In the person's own browsing, VibeSpace lends their kept passkey to the tab for one sign-in (WebAuthn.enable ui:true, addVirtualAuthenticator, addCredential, setUserVerified). They press Cancel: the page sees AbortError, «Cancelled the page's passkey request». In 6 of 10 runs on .390, nothing more went out — the authenticator, their key and user-verified stayed on the tab (the same socket, the page's record naming it 10 s later). The same site's next request on that tab could have been answered without them.
+
+**Cause.** `cancelPasskey` ended the ceremony's record itself (`outcome = 'cancelled'`) after the hook's `cancel` answered, without the cleanup. The cleanup ran only from the page's own end report, and that report matches only a pending record. When the cancel's answer landed first — Chrome's order, more often with its own sheet open — the report matched nothing and the cleanup never started.
+
+**Fix.** The Cancel's end goes through the ONE end (`pkEnd` → the drain → `pkUnload`), whichever report lands first; a later report finds the record ended and adds nothing.
+
+**不变量.** A ceremony the CANCEL ends (the banner's, the CLI's) goes through the ONE end (`pkEnd` → the tab's drain → `pkUnload`), whichever report lands first. At rest its key is removed, UV is off and its authenticator is removed exactly once, with nothing said, and the next ceremony's key is never touched. The law this serves — every way a lent sign-in can end takes the passkey back through ONE end — holds today for the Cancel and for the page's own report; the ends below are not closed yet.
+
+**Pins.** test-browser-passkey «B-97ae … in EVERY order»: the answer first / the report never / the report first, over a Chromium-shaped fake that really loads the key (a second remove is an error). Each order is judged AT REST — every call answered and the link quiet for 20 ms, never «wait until it is clean». At rest: the key removed once, UV off, the authenticator removed once, not one line said from the lend on. On 05082bbd0 two orders are red, and so is «never their NEXT sign-in's» (the key left only with the authenticator, at the next sign-in). Two controls: a RED CONTROL (the Cancel without the one end) and a TIMER CONTROL (the one end 50 ms late: still lent at rest). test-browser-passkey-chrome S11b on real Chrome.
+
+**The lesson (the acceptance).** The first legs' fake refused the load (no `keys`), so only the authenticator's removal was pinned, and a pkEnd 50 ms late passed every leg that waited. So: assert the load happened before asserting the removal; judge at rest; fail on any line said, never on a word filter.
+
+**Not closed (the second commit, after .391 — each pre-existing on master, measured by the acceptance's own fake, none in ordinary use).**
+- **The agent road, a document gone mid-ceremony.** Its context destroyed or cleared between the lend and the assertion (a window under 0.2 s). `pkPageGone` unloads only the person's once-authenticator, so the loaded key and UV stay in the agent tab's authenticator until that tab's next ceremony ends. The fix is one line by the same law: each ended record through the one end.
+- **A cleanup step that fails is never said.** One failure is made up for by the later steps. If `removeCredential`, `removeVirtualAuthenticator` and `disable` ALL fail on a live session, the key stays while VibeSpace believes it gone — it must be said by name, and the tab named to the person.
+- **`cancelPasskey` marks EVERY pending record of the context.** That includes one that arrived in the same socket read as the cancel's answer, which the hook did not cancel: it is never released and the page waits out its hold (no key is involved). Mark only what was pending before the await.
+- **UNMEASURED: the watch's socket closed or the hub restarted during a lent ceremony.** Whether Chrome drops the virtual authenticator with the DevTools session needs real Chrome. Measure it first; it decides whether a re-arm needs a sweep.
 
 ## A LOCKED CHIP READ AMBER «🔒⚠ claude-fable-5-2» WHILE FABLE 5.2 SERVED ITS fable[1m] LOCK (the owner's phone, 2026-11-10; lane fable-52-cli-321 F1, .390)
 
