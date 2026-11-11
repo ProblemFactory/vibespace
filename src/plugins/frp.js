@@ -4,7 +4,8 @@
 // The plugin contract (create(h) → verbs, the host handle h) is described in src/plugins.js.
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { whichKept, whichNow, whichKnown } = require('./which-kept.js'); // lane hub-sync-holds: where frpc lives, KEPT — never a child on the loop's turn
 const { pidCmdline, pidAlive } = require('./proc.js');
 const { replaceShredding } = require('../secret-file.js');   // lane vault-e2e-password-fix-r2: an older frpc.toml held the token
 const os = require('os');
@@ -30,11 +31,11 @@ module.exports = {
   provides: ['relay', 'reminders'],   // reminders: a public name the relay refused is ONE For-you item (lane relay-token-per-instance)
   create(h) {
     const frpDir = () => h.dir;
-    const frpBin = () => {
-      const local = path.join(frpDir(), 'bin', 'frpc');
-      if (fs.existsSync(local)) return local;
-      try { return execFileSync('which', ['frpc'], { encoding: 'utf-8' }).trim() || null; } catch { return null; }
-    };
+    // OUR frpc, else the PATH's — the kept answer (status() is sync and runs no child: rank 13); statusAsync() refreshes it
+    const frpBin = () => { const local = path.join(frpDir(), 'bin', 'frpc'); return fs.existsSync(local) ? local : whichKept('frpc'); };
+    // …and a FRESH answer where a decision acts on it (the boot's install-or-start): the kept one is empty before its first read,
+    // and an empty answer there would download a frpc the PATH already has
+    const frpBinNow = async () => { const local = path.join(frpDir(), 'bin', 'frpc'); return fs.existsSync(local) ? local : whichNow('frpc'); };
     const frpProxiesDir = () => path.join(frpDir(), 'proxies');
     const frpConf = () => path.join(frpDir(), 'frpc.toml');
     const frpPidFile = () => path.join(frpDir(), 'frpc.pid');
@@ -546,7 +547,7 @@ module.exports = {
         if (!frpEffectiveEnabled() || !frpConfigured()) return;   // a LOCKED vault with a sealed override reads as unconfigured here — the unlock's sealSecrets replays it
         (async () => {
           try {
-            if (!frpBin()) { console.log('[plugins] boot: installing frpc (relay default-on)'); await verbs.install(); }
+            if (!(await frpBinNow())) { console.log('[plugins] boot: installing frpc (relay default-on)'); await verbs.install(); }
             if (!frpDaemonPid()) { console.log('[plugins] boot replay: starting frp'); verbs.start(); }
           } catch (e) { console.warn('[plugins] boot replay frp failed:', e.message); }
         })();
@@ -563,7 +564,7 @@ module.exports = {
         if (!res.ok) throw new Error('download failed: HTTP ' + res.status);
         const tgz = path.join(frpDir(), 'frp.tgz');
         fs.writeFileSync(tgz, Buffer.from(await res.arrayBuffer()));
-        execFileSync('tar', ['-xzf', tgz, '-C', frpDir()]);
+        await new Promise((resolve, reject) => execFile('tar', ['-xzf', tgz, '-C', frpDir()], { timeout: 120000 }, (err) => (err ? reject(new Error('could not unpack ' + name)) : resolve()))); // async, bounded (rank 13's census)
         fs.copyFileSync(path.join(frpDir(), name, 'frpc'), path.join(binDir, 'frpc'));
         fs.chmodSync(path.join(binDir, 'frpc'), 0o755);
         fs.rmSync(path.join(frpDir(), name), { recursive: true, force: true });
@@ -621,6 +622,8 @@ module.exports = {
         return { stopped: true };
       },
 
+      /** the fresh answer: the PATH's frpc asked again (async, bounded), then the same rows (lane hub-sync-holds, rank 13) */
+      async statusAsync({ signal } = {}) { await frpBinNow(); if (signal && signal.aborted) throw (signal.reason || new Error('aborted')); return verbs.status(); },
       status() {
         const rec = h.peek();
         const c = frpCfg();
@@ -646,6 +649,9 @@ module.exports = {
           // echo the CURRENT effective config so the UI can prefill editable fields
           config: { serverAddr: c.serverAddr, serverPort: c.serverPort, hasToken: !!c.token, subDomainHost: c.subDomainHost },
           relay: relayStatus(c),   // lane relay-token-per-instance: this instance's own identity (never its token)
+          // rank 13 round 2: where frpc lives is not known yet (no own bin, no finished `which`) ⇒ the row says «Checking…»,
+          // never «not installed» with an Install over a frpc the PATH has
+          ...(fs.existsSync(path.join(frpDir(), 'bin', 'frpc')) || whichKnown('frpc') ? {} : { checking: true }),
         };
       },
 

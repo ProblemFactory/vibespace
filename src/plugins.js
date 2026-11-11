@@ -50,7 +50,10 @@ const SB = require('./secret-box.js');       // the data dir's vault (a plugin's
 // a BROWSER ENGINE answers the engine registry's two verbs — src/server/browser-engines.js, the contract src/browser-engines.js)
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'], 'browser-engine': ['probe', 'launchOptions'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
-const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
+// statusAsync (lane hub-sync-holds, rank 13): the fresh answer of a status that needs a child — async, bounded; status() then
+// answers the KEPT one with no child (a snapshot or a broadcast never execs)
+const STATUS_BOUND_MS = 20000;
+const OPTIONAL_VERBS = ['statusAsync', 'setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -82,6 +85,9 @@ class PluginManager {
     this._watchers = new Set(); // lane tailnet-names r4: watch() — what follows a plugin's state AND its rows (the tailnet door)
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = { plugins: {} }; }
     this._defs = new Map(); this._verbs = new Map();
+    this._fresh = new Map(); // id → the status refresh in flight (ONE at a time — rank 13)
+    this._statusFailed = new Map(); // id → {at, why}: the last refresh did not answer — the kept answer stands, said as stale
+    this._statusBoundMs = Number(opts.statusBoundMs) > 0 ? Number(opts.statusBoundMs) : STATUS_BOUND_MS;
     for (const def of plugins) {
       validatePlugin(def);
       if (this._defs.has(def.id)) throw new Error('built-in plugin ' + def.id + ': registered twice');
@@ -89,7 +95,7 @@ class PluginManager {
       const h = {
         id, dir: path.join(PLUGIN_ROOT, id), opts, dataDir,
         rec: () => this._rec(id), peek: () => this._state.plugins[id] || {},
-        save: () => this._save(), notify: () => this._notify(),
+        save: () => this._save(), notify: () => { this._notify(); this.refreshStatus(id).catch(() => { }); }, // the plugin's own event refreshes its kept status (rank 13)
         probeProto: (port, o) => this._probeProto(port, o),
         settings: () => PS.valuesOf(id, this._readSettings()),
         setting: (key) => PS.valuesOf(id, this._readSettings())[key],
@@ -234,10 +240,9 @@ class PluginManager {
     return out;
   }
 
-  /** ONE pass over every plugin → the panel rows AND the compact service rows.
-   *  Deliberately one pass: `status('tailscale')` shells out (pgrep + `tailscale
-   *  status --json`, 5s timeout) on the event loop, so building the two shapes
-   *  with two walks would double that cost on every plugin broadcast. */
+  /** ONE pass over every plugin → the panel rows AND the compact service rows. A plugin's status() is sync and runs NO child
+   *  (lane hub-sync-holds, rank 13: tailscale's ran pgrep + sudo + `tailscale status --json` here, 4.7–4.9 s on the owner's
+   *  hub): a status that needs one is a KEPT fact, refreshed by refreshStatus() — never by a snapshot or a broadcast. */
   _snapshot() {
     const plugins = [], services = {};
     for (const d of Object.values(this.defs())) {
@@ -277,6 +282,34 @@ class PluginManager {
    *  lives in src/opencode-serve.js — ONE parse of that switch). */
   wantsServiceUp(id) { const rec = this._state.plugins[id] || {}; return !!(rec.enabled && rec.desiredUp); }
 
+  /** THE KEPT STATUS, REFRESHED (rank 13): a plugin that declares statusAsync is asked again — ONE refresh at a time, bounded
+   *  by STATUS_BOUND_MS (its children carry their own timeouts); when the kept answer changed every card hears it. Asked at boot
+   *  (bootReplay), on a person's press (the panel's GET) and on the plugin's own event (h.notify). → the status */
+  refreshStatus(id) {
+    const v = this._verbs.get(id);
+    if (!v) return Promise.reject(new Error('unknown plugin: ' + id));
+    if (typeof v.statusAsync !== 'function') return Promise.resolve().then(() => this.status(id));
+    if (this._fresh.has(id)) return this._fresh.get(id);
+    const was = this._statusOr(id);
+    const ms = this._statusBoundMs;
+    let timer = null;
+    // round 2: the bound ABORTS the ask (its signal) — an abandoned ask starts nothing more (each step checks the signal, the
+    // child it holds is killed) and writes nothing, so a later ask never runs beside it (tailscale's worst case: which 5 +
+    // pgrep 5 + sudo -n 3 + sudo -n 3 + which 5 + status --json 5 = 26 s, over the 20 s bound — the abort is what holds)
+    const ac = new AbortController();
+    const bound = new Promise((resolve, reject) => { timer = setTimeout(() => { const e = new Error(`its status took over ${ms} ms`); ac.abort(e); reject(e); }, ms); if (timer.unref) timer.unref(); });
+    // a refresh that does not answer: the KEPT answer stands, marked stale (`statusError`, its time) — retried at the next ask
+    // (a press, the plugin's own event, the next boot), never by a timer; each child it started ends at its own timeout
+    const p = Promise.race([Promise.resolve().then(() => v.statusAsync({ signal: ac.signal })), bound])
+      .then(() => { this._statusFailed.delete(id); }, (e) => { const why = String((e && e.message) || e).slice(0, 200); this._statusFailed.set(id, { at: Date.now(), why }); console.warn(`[plugins] ${id}: its status was not read again — ${why}`); })
+      .then(() => { clearTimeout(timer); this._fresh.delete(id); const now = this._statusOr(id); if (JSON.stringify(now) !== JSON.stringify(was)) this._notify(); return now; });
+    this._fresh.set(id, p);
+    return p;
+  }
+  /** every kept status asked again (a person opened the panel) — nothing waits for it; the broadcast follows a change */
+  refreshAll() { for (const [id, v] of this._verbs) if (typeof v.statusAsync === 'function') this.refreshStatus(id).catch(() => { }); }
+  _statusOr(id) { try { return this.status(id); } catch (e) { return { error: e.message }; } }
+
   setMode(id, mode) { return this._verb(id, 'mode')(mode); }
   setConfig(id, patch = {}) { return this._verb(id, 'config')(patch); }
 
@@ -306,6 +339,7 @@ class PluginManager {
   // owns its rule (frp: default-on from the cluster env, no prior desiredUp; opencode-serve: the env override);
   // the default is enabled + desiredUp ⇒ start, unless the daemon is already running or managed by the system.
   bootReplay() {
+    this.refreshAll(); // every kept status read once at boot — async, bounded (rank 13)
     for (const [id, verbs] of this._verbs) {
       if (verbs.bootReplay) { verbs.bootReplay(); continue; }
       const rec = this._state.plugins[id] || {};
@@ -323,7 +357,8 @@ class PluginManager {
   async install(id) { return this._verb(id, 'install')(); }
   start(id) { return this._verb(id, 'start')(); }
   stop(id) { return this._verb(id, 'stop')(); }
-  status(id) { return this._verb(id, 'status')(); }
+  /** the plugin's KEPT status (sync, no child — rank 13); a last refresh that did not answer is said with it (`statusError`) */
+  status(id) { const st = this._verb(id, 'status')(); const f = this._statusFailed && this._statusFailed.get(id); return f ? { ...st, statusError: { at: f.at, why: f.why } } : st; }
   // Guided setup: the plugin's setup verb (tailscale: `tailscale up` prints the auth URL — captured for the UI,
   // the Drive-OAuth pattern: user opens the link, approves, the card polls status).
   loginStart(id) { return this._verb(id, 'setup')(); }

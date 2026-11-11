@@ -136,7 +136,7 @@ const manager = (def, { settings = {}, resolv, backup = NO_BACKUP } = {}) => {
   return new PluginManager({ dataDir, plugins: [def], resolvConf: resolv, resolvBackup: backup, settings: { read: () => S, patch: (p) => Object.assign(S, p) } });
 };
 const ourPid = () => { try { return Number(fs.readFileSync(path.join(TSDIR, 'tailscaled.pid'), 'utf8')); } catch { return 0; } };
-const stopAll = async (pm) => { const pid = ourPid(); try { pm.stop('tailscale'); } catch { } if (pid) await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 3000); };
+const stopAll = async (pm) => { const pid = ourPid(); try { await pm.stop('tailscale'); } catch { } if (pid) await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 3000); };
 const quietLogs = async (fn) => {
   const seen = [], log = console.log, warn = console.warn;
   console.log = (...a) => seen.push(a.join(' ')); console.warn = (...a) => seen.push(a.join(' '));
@@ -149,7 +149,7 @@ async function driveStart(def, waitMs = 4000) {
   process.env.VIBESPACE_INSTANCE_NAME = 'pod-a';
   const pm = manager(def, { settings: { mode: 'userspace' }, resolv: plant('k8s.conf', K8S) });
   const before = sets().length;
-  const out = pm.start('tailscale');
+  const out = await pm.start('tailscale'); // async since lane hub-sync-holds (rank 13: no sync child on the loop)
   const pid = ourPid(); if (pid) spawned.add(pid);
   await until(() => sets().length > before, waitMs);
   await sleep(150);
@@ -189,7 +189,7 @@ let pmA;
   })();
   ok('Log in: the auth URL captured', r?.authUrl === 'https://login.tailscale.com/a/0abc123', r);
   ok('Log in: `up` carries --accept-dns=false; the typed --accept-dns=true is dropped, --hostname kept', ups.length === 1 && ups[0] === `${SOCK} up --accept-routes --accept-dns=false --hostname=pod-a`, ups);
-  const st = pm.status('tailscale');
+  const st = await pm.refreshStatus('tailscale'); // the fresh status (async, bounded) — status() answers the kept one
   ok('the row: dns = { acceptDns: false, why: cluster, rewritten: false }', st.running && JSON.stringify(st.dns) === JSON.stringify({ acceptDns: false, why: 'cluster', rewritten: false }), st.dns);
   ok('tunnelLookup: a tailnet name answers from OUR daemon\'s status --json (full, bare, any case); a stranger null', pm.tunnelLookup('mac-mini.tail1a2b.ts.net')?.ip === '100.64.0.3' && pm.tunnelLookup('MAC-MINI')?.ip === '100.64.0.3' && pm.tunnelLookup('github.com') === null);
   const noTunnel = new PluginManager({ dataDir, plugins: [{ id: 'acme-plain', label: 'Plain', description: 'x', provides: [], create: () => ({ install() {}, start() {}, stop() {}, status() { return {}; } }) }] });
@@ -224,7 +224,7 @@ console.log('③ THE SELF-HEAL at boot (a daemon of ours outlived the server)');
     const pm = bare(magic);
     const b = lines('sudo.log').length;
     await quietLogs(async () => { pm.bootReplay(); await until(() => lines('sudo.log').length > b, 2500); await sleep(150); });
-    const su = lines('sudo.log').slice(b);
+    const su = lines('sudo.log').slice(b).filter((l) => l !== '-n true'); // the boot's kept-status read probes sudo (`sudo -n true`, async — lane hub-sync-holds): not the DNS act this leg counts
     ok(`a bare machine in kernel mode, the MagicDNS row ${magic ? 'ON' : 'off'} ⇒ \`sudo -n tailscale … set --accept-dns=${want}\``, su.length === 1 && su[0].endsWith(`${SOCK} set --accept-dns=${want}`) && su[0].startsWith('-n '), su);
     pm._rec('tailscale').mode = 'userspace';
   }
@@ -298,7 +298,7 @@ console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART K
     return { pm, d, v, took, pac };
   };
   fs.writeFileSync(statusFile, RUN(['mac-mini']));
-  pmA.status('tailscale'); // OUR daemon's read: the table + its time persisted
+  await pmA.refreshStatus('tailscale'); // OUR daemon's read: the table + its time persisted
   const kept = (pmA._rec('tailscale') || {}).tailnetTable;
   ok('the table persisted with its time (data/plugins.json: suffix, state, Self, peers)', !!kept && kept.at > 0 && kept.state === 'Running' && kept.suffix === 'tail1a2b.ts.net' && kept.self?.short === 'pod-a' && (kept.peers || []).map((p) => p.short).join() === 'mac-mini', kept);
   const pm0 = manager(REAL, { settings: { mode: 'userspace' } });
@@ -351,7 +351,7 @@ console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART K
     let TRm = null; try { TRm = require(path.join(REPO, 'src/tailnet-reach.js')); } catch { TRm = null; }
     const routed = async (def) => {
       const pm = manager(def, { settings: { mode: 'userspace' } });
-      pm.status('tailscale'); // OUR daemon's read: the table + its time
+      await pm.refreshStatus('tailscale'); // OUR daemon's read: the table + its time
       const d = DOOR.create({ reach: () => (typeof pm.tunnelReach === 'function' ? pm.tunnelReach() : null), fresh: fresh(pm), log: quietLog });
       const v = await d.launch({ label: 'many' }); const pac = await pacOf(d); await d.close();
       const rr = (typeof pm.tunnelReach === 'function' ? pm.tunnelReach() : null) || {}; // a base without the verb reds BY NAME
@@ -376,7 +376,7 @@ console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART K
       let pmW = null;
       PR.setup({ dataDir: DW, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, onSettingsWrite: (next, prev) => { try { pmW.onSettingsWrite(next, prev); } catch { } } });
       pmW = new PluginManager({ dataDir: DW, plugins: [REAL], resolvConf: plant('k8s.conf', K8S), resolvBackup: NO_BACKUP, settings: { read: () => PR.router.readSettings(), patch: (p) => PR.router.patchSettings(p) } });
-      pmW.status('tailscale'); // OUR daemon's read: the table
+      await pmW.refreshStatus('tailscale'); // OUR daemon's read: the table
       if (!D || typeof D.follow !== 'function') return { out: { missing: 'tailnet-door.js follow(plugins) — the door hears the plugin broadcast only' } };
       const d = D.follow(pmW, { dataDir: DW, log: quietLog });
       const settled = async () => { if (d.synced) await d.synced(); }; // the follow the WRITE started (never one of its own)
@@ -404,7 +404,7 @@ console.log('④b lane tailnet-names r2 (N3): THE FIRST LAUNCH AFTER A RESTART K
     ok('MUTANT the tip\'s wiring (r3: only the plugin broadcast reaches the door) ⇒ the row OFF leaves the door listening ⇒ RED', !!WM && WM.out.rowOff !== null && WM.out.heldOff === 200, WM && WM.out);
     if (WM && WM.d) await WM.d.close();
     // the plugin's state: its stop (the plugin's own verb ⇒ its broadcast ⇒ watch) closes the door — the same ONE subscription
-    if (WR.d) { WR.pmW.stop('tailscale'); await (WR.d.synced ? WR.d.synced() : null); }
+    if (WR.d) { await WR.pmW.stop('tailscale'); await (WR.d.synced ? WR.d.synced() : null); }
     const stopped = WR.d ? { port: WR.d.port(), held: (await fetchUrl(w.url0)).status } : null;
     ok('r4 N1 — THE PLUGIN\'S STATE REACHES THE DOOR through the same subscription: the plugin stopped (its own verb, its broadcast) ⇒ the door closes (the held PAC refused)', !!stopped && stopped.port === null && stopped.held === 0, stopped);
     if (WR.d) await WR.d.close();
@@ -428,7 +428,7 @@ console.log('⑥ MUTANTS: copies of src/plugins/tailscale.js outside the tree');
   const rb = await driveSetup(pmB);
   ok('CONTROL (b) Log in without the flag ⇒ `up` lacks --accept-dns=false ⇒ ② RED', rb.ups.length === 1 && !rb.ups[0].includes('--accept-dns=false'), rb.ups);
   // (c) no boot replay of its own ⇒ the manager's default skips a running daemon ⇒ no heal
-  const bootAt = src.indexOf('      bootReplay() {'), bootEnd = src.indexOf('      /** a tailnet name', bootAt);
+  const bootAt = src.indexOf('      async bootReplay() {'), bootEnd = src.indexOf('      /** a tailnet name', bootAt);
   ok('CONTROL (c): the bootReplay verb found', bootAt > 0 && bootEnd > bootAt);
   const c = M.load(REL, src.slice(0, bootAt) + src.slice(bootEnd), 'no-boot-replay');
   const rc = await driveBoot(c);

@@ -158,6 +158,14 @@ export function installPluginsUI(App) {
     if (container) container.classList.add('mounts-dialog-body');
     const { body, close } = shell;
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
+    // THE ROWS FOLLOW THE BROADCAST (lane hub-sync-holds, rank 13): a plugin's status is a KEPT fact the server refreshes after
+    // this panel opens — when the refresh lands, `plugins-updated` arrives and the open panel draws the fresh rows (a row that
+    // said «Checking…» says what was found); the listener ends with the panel
+    let redraw = null;
+    const offWs = this.ws?.onGlobal?.((msg) => {
+      if (!body.isConnected) { offWs?.(); return; }
+      if (msg && msg.type === 'plugins-updated') { clearTimeout(redraw); redraw = setTimeout(() => { if (body.isConnected) render(); }, 150); }
+    });
 
     const render = async () => {
       const r = await fetchJson('/api/plugins');
@@ -219,12 +227,15 @@ export function installPluginsUI(App) {
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
         } else {
           // relay (frp) / tunnel (Tailscale): on = start now + at boot; off = stop (said first) + not at boot
-          const loginNeeded = isTunnel && running && p.backendState !== 'Running';
-          chip = p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
+          const loginNeeded = isTunnel && running && p.backendState !== 'Running' && p.cli !== false;   // no tailscale command ⇒ nothing to log in with (rank 13 r2)
+          // a status the server has not read yet since its start (rank 13) is said as that — never «not installed» / «stopped»
+          // by default: the row says «Checking…», its switch and Install wait for the answer (the broadcast redraws it)
+          chip = p.checking ? (p.statusError ? t('Status unknown — it could not be read') : t('Checking…')) : p.mode === 'system' ? t('managed by the system (outside VibeSpace)')
             : isRelay && p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)')   // lane vault-e2e-password-fix-r2: the sealed relay token
             : isRelay && p.configured === false ? t('relay not configured on this instance')
+              : isTunnel && running && p.cli === false ? t('running — its tailscale command is missing, so its sign-in state is unknown')
               : loginNeeded ? t('Log in…') : running ? t('connected') : p.installed ? t('stopped') : t('not installed');
-          tone = running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';
+          tone = isTunnel && running && p.cli === false ? 'warn' : running && !loginNeeded ? 'ok' : loginNeeded ? 'warn' : '';
           if (isRelay && p.vaultLocked) { tone = 'warn'; onChip = () => window.dispatchEvent(new CustomEvent('vs-vault-door')); }
           else if (isRelay && p.configured === false) {
             const miss = (p.missing || []).map((k) => ({ serverAddr: t('relay address'), token: t('relay token') }[k] || k));
@@ -234,8 +245,16 @@ export function installPluginsUI(App) {
           if (isRelay && p.relay && !p.vaultLocked && (p.configured || p.relay.kind !== 'none')) { onChip = () => relaySheet(p, api, render); fact = relayFact(p.relay); }   // lane relay-token-per-instance
           if (loginNeeded) onChip = () => this._tailscaleLogin(p, api, render);
           if (p.self?.ips?.length) chipTitle = `${t('Tailnet address')}: ${p.self.ips[0]}`;
+          if (p.statusError) chipTitle = t('Its status could not be read again just now — this is the last answer. Open the panel again to retry.');
           if (isTunnel && running && p.dns) fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact', textContent: tunnelDnsWords(p.dns) });
-          swOn = !!p.enabled || running; swDisabled = p.mode === 'system' || !p.installed || (isRelay && p.configured === false);
+          // rank 13 round 2: a refresh that did not answer is SAID on the row (not only a hover title)
+          if (p.statusError) {
+            const stale = Object.assign(document.createElement('div'), { className: 'plugin-row-fact', textContent: t('Not read again just now ({why}) — this is the last answer; it is read again when you open the panel.', { why: p.statusError.why || '' }) });
+            if (fact) { const both = document.createElement('div'); both.append(fact, stale); fact = both; } else fact = stale;
+          }
+          // the switch waits for a FIRST answer only while one may still come (no statusError); a running daemon can always be
+          // stopped, even when whether it is installed is not known
+          swOn = !!p.enabled || running; swDisabled = (!!p.checking && !p.statusError) || p.mode === 'system' || (!p.installed && !running) || (isRelay && p.configured === false);
           onSwitch = async (on, cb) => {
             if (!on) {
               // verify-r6 D1: an OPTIONS OBJECT (two positional strings rendered a blank "Confirm / OK" dialog)
@@ -250,7 +269,7 @@ export function installPluginsUI(App) {
             }
             return act(async () => { await api('enabled', { body: JSON.stringify({ enabled: true }) }); if (!running) await api('start'); });
           };
-          if (!p.installed && p.mode !== 'system' && !(isRelay && p.configured === false)) {
+          if (!p.checking && !p.installed && p.mode !== 'system' && !(isRelay && p.configured === false)) {
             install = document.createElement('button'); install.className = 'mounts-btn plugin-install'; install.textContent = t('Install');
             install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: p.label })); await api('install'); showToast(t('Installed')); });
           }

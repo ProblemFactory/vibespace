@@ -26,7 +26,16 @@
 // The plugin contract (create(h) → verbs, the host handle h) is described in src/plugins.js.
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFile, execFileSync } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { whichKept, whichNow } = require('./which-kept.js'); // lane hub-sync-holds: where a command lives, KEPT — never a child on the loop's turn
+// ONE async child with a timeout → {code, out} (code null on spawn failure / timeout) — never a sync child on the hub's loop (rank 13)
+// an async child with its timeout — it NEVER throws or rejects (rank 13 round 2: a probe with nothing to run answers what it
+// knows): no program ⇒ {code: null}; an aborted ask (`signal`, the manager's bound) starts nothing and kills the child it holds
+const run = (prog, args, ms, signal) => new Promise((resolve) => {
+  if (!prog || (signal && signal.aborted)) return resolve({ code: null, out: '' });
+  try { execFile(prog, args, { encoding: 'utf-8', timeout: ms, maxBuffer: 16 << 20, ...(signal ? { signal } : {}) }, (err, out) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : null) : 0, out: String(out || '') })); }
+  catch { resolve({ code: null, out: '' }); }
+});
 const { pidCmdline, pidAlive } = require('./proc.js');
 const DNS = require('../tailscale-dns.js');
 const { serviceEnv } = require('../agent-env.js');
@@ -40,12 +49,11 @@ module.exports = {
   provides: ['tunnel'],
   create(h) {
     const loginProcs = new Map(); // id → {proc, authUrl}
+    let kept = null; // the last statusAsync() answer — status() reads it (lane hub-sync-holds, rank 13)
     const tsDir = () => h.dir;
-    const tsBin = (name) => {
-      const local = path.join(tsDir(), 'bin', name);
-      if (fs.existsSync(local)) return local;
-      try { return execFileSync('which', [name], { encoding: 'utf-8' }).trim() || null; } catch { return null; }
-    };
+    // where a binary lives: OUR copy, else the PATH's — the kept answer (sync callers) or a fresh one (async callers)
+    const tsBin = (name) => { const local = path.join(tsDir(), 'bin', name); return fs.existsSync(local) ? local : whichKept(name); };
+    const tsBinNow = async (name) => { const local = path.join(tsDir(), 'bin', name); return fs.existsSync(local) ? local : whichNow(name); };
     const tsSock = () => path.join(tsDir(), 'tailscaled.sock');
     const tsPidFile = () => path.join(tsDir(), 'tailscaled.pid');
     const tsOurDaemonPid = () => {
@@ -55,31 +63,27 @@ module.exports = {
       } catch { }
       return null;
     };
-    const systemTailscaled = () => {
+    const systemTailscaled = async (signal) => {
       // a root/system tailscaled on the DEFAULT socket — report, never manage.
       // OURS is identified by its cmdline referencing our socket/dir (in kernel
       // mode tailscaled runs under a `sudo` wrapper AND forks a child, so pgrep
       // returns pids that differ from the pidfile — comparing pids alone
       // false-flagged our own child as 'system', graying out the card).
-      try {
-        const out = execFileSync('pgrep', ['-x', 'tailscaled'], { encoding: 'utf-8' }).trim();
-        const ours = tsSock();
-        const ourDir = tsDir();
-        for (const pid of out.split('\n').filter(Boolean)) {
-          const cmd = pidCmdline(Number(pid));
-          if (cmd.includes(ours) || cmd.includes(ourDir)) continue; // our parent/child
-          return Number(pid); // genuinely foreign (default socket, dev machine)
-        }
-      } catch { }
+      const r = await run('pgrep', ['-x', 'tailscaled'], 5000, signal);
+      const ours = tsSock();
+      const ourDir = tsDir();
+      for (const pid of r.out.trim().split('\n').filter(Boolean)) {
+        const cmd = pidCmdline(Number(pid));
+        if (cmd.includes(ours) || cmd.includes(ourDir)) continue; // our parent/child
+        return Number(pid); // genuinely foreign (default socket, dev machine)
+      }
       return null;
     };
-    const sudoAvailable = () => {
-      try { execFileSync('sudo', ['-n', 'true'], { stdio: 'ignore', timeout: 3000 }); return true; } catch { return false; }
-    };
-    const tunUsable = () => {
+    const sudoAvailable = async (signal) => (await run('sudo', ['-n', 'true'], 3000, signal)).code === 0;
+    const tunUsable = async (signal) => {
       try { fs.accessSync('/dev/net/tun', fs.constants.R_OK | fs.constants.W_OK); return true; } catch { }
       // root/sudo can still open it even without direct perms
-      return fs.existsSync('/dev/net/tun') && (process.getuid?.() === 0 || sudoAvailable());
+      return fs.existsSync('/dev/net/tun') && (process.getuid?.() === 0 || await sudoAvailable(signal));
     };
     // User-tuned `tailscale up` flags (free text, whitespace-separated). Only
     // tokens starting with '-' or their following values are kept, and a small
@@ -179,7 +183,7 @@ module.exports = {
       },
       applySettings() {
         // if running, restart into the new mode (login persists in the statedir)
-        if (tsOurDaemonPid()) { try { verbs.stop(); } catch { } setTimeout(() => { try { verbs.start(); } catch { } }, 1500); }
+        if (tsOurDaemonPid()) { Promise.resolve().then(() => verbs.stop()).catch(() => { }).then(() => new Promise((r) => setTimeout(r, 1500))).then(() => verbs.start()).catch(() => { }); } // async now (rank 13): the stop, then the start
         h.notify();
       },
 
@@ -203,7 +207,7 @@ module.exports = {
         if (!res.ok) throw new Error('download failed: HTTP ' + res.status);
         fs.writeFileSync(tgz, Buffer.from(await res.arrayBuffer()));
         // tarball layout: tailscale_<ver>_<arch>/{tailscale,tailscaled}
-        execFileSync('tar', ['-xzf', tgz, '-C', tsDir()]);
+        { const t = await run('tar', ['-xzf', tgz, '-C', tsDir()], 120000); if (t.code !== 0) throw new Error('could not unpack ' + name); }
         const extracted = fs.readdirSync(tsDir()).find((f) => f.startsWith('tailscale_') && fs.statSync(path.join(tsDir(), f)).isDirectory());
         if (!extracted) throw new Error('unexpected tarball layout');
         for (const b of ['tailscale', 'tailscaled']) {
@@ -219,10 +223,10 @@ module.exports = {
         return { installed: true, version: extracted.replace(/^tailscale_/, '').replace(/_[^_]+$/, '') };
       },
 
-      start() {
-        if (systemTailscaled()) throw new Error('a system tailscaled is already running — this machine is managed outside VibeSpace');
+      async start() {
+        if (await systemTailscaled()) throw new Error('a system tailscaled is already running — this machine is managed outside VibeSpace');
         if (tsOurDaemonPid()) { applyDns('start'); return { running: true }; }
-        const daemon = tsBin('tailscaled');
+        const daemon = await tsBinNow('tailscaled');
         if (!daemon) throw new Error('tailscaled not installed — run install first');
         // the socket-path census (src/sock-path.js, lane-pairing ④): tailscaled's socket lives under the plugin root —
         // a path over the platform's sun_path is refused HERE by name, never a daemon that dies with `bind: invalid argument`
@@ -234,8 +238,9 @@ module.exports = {
         // exists, else userspace), 'kernel' (force full-tunnel; errors if no tun),
         // 'userspace' (force proxy-only — never touches the pod's routing table).
         const pref = h.setting('mode') || 'auto';
-        if (pref === 'kernel' && !tunUsable()) throw new Error('kernel mode needs /dev/net/tun + NET_ADMIN (or sudo) — none available; use auto or userspace');
-        const kernel = pref === 'kernel' || (pref === 'auto' && tunUsable());
+        const tunOk = pref === 'userspace' ? false : await tunUsable();
+        if (pref === 'kernel' && !tunOk) throw new Error('kernel mode needs /dev/net/tun + NET_ADMIN (or sudo) — none available; use auto or userspace');
+        const kernel = pref === 'kernel' || (pref === 'auto' && tunOk);
         const args = [
           `--statedir=${stateDir}`,
           `--socket=${tsSock()}`,
@@ -261,15 +266,15 @@ module.exports = {
 
       // boot: enabled + desiredUp ⇒ start (the manager's default rule); a daemon of OURS that outlived the server (a
       // VibeSpace upgrade restarts only the server) gets the DNS verdict — an old install self-heals here
-      bootReplay() {
+      async bootReplay() {
         const rec = h.peek();
         const pid = tsOurDaemonPid();
         if (!pid && !(rec.enabled && rec.desiredUp)) return;
         try {
           if (pid) { applyDns('boot'); return; }
-          if (systemTailscaled() || !tsBin('tailscaled')) return;
+          if (await systemTailscaled() || !(await tsBinNow('tailscaled'))) return;
           console.log('[plugins] boot replay: starting tailscale');
-          verbs.start();
+          await verbs.start();
         } catch (e) { console.warn('[plugins] boot replay tailscale failed:', e.message); }
       },
 
@@ -305,12 +310,12 @@ module.exports = {
         return verbs.reach();
       },
 
-      stop() {
+      async stop() {
         const pid = tsOurDaemonPid();
         if (pid) {
-          // kernel-mode daemon may run as root — try plain kill, then sudo
+          // kernel-mode daemon may run as root — try plain kill, then sudo (an async child with its timeout)
           try { process.kill(pid, 'SIGTERM'); }
-          catch { try { execFileSync('sudo', ['-n', 'kill', String(pid)], { timeout: 5000 }); } catch { } }
+          catch { await run('sudo', ['-n', 'kill', String(pid)], 5000); }
         }
         try { fs.unlinkSync(tsPidFile()); } catch { }
         const rec = h.rec();
@@ -320,25 +325,43 @@ module.exports = {
         return { stopped: true };
       },
 
+      /** THE KEPT ANSWER (lane hub-sync-holds, rank 13 — the owner's hub held 4.7–4.9 s in this verb when it ran pgrep, sudo and
+       *  `tailscale status --json` on every snapshot): sync, NO child — the last statusAsync() answer with this record's own rows
+       *  read fresh; before the first one, what the files say, `checking: true` */
       status() {
         const rec = h.peek();
-        const installed = !!tsBin('tailscaled');
-        const sysPid = systemTailscaled();
+        const rows = { desiredUp: !!rec.desiredUp, modePref: h.setting('mode') || 'auto', upFlags: h.setting('upFlags') || '', socksPort: SOCKS_PORT };
+        if (kept) return { ...kept, ...rows };
+        const pid = tsOurDaemonPid();
+        return { installed: !!tsBin('tailscaled'), tunAvailable: fs.existsSync('/dev/net/tun'), ...rows, running: !!pid, mode: pid ? (rec.mode || 'userspace') : (rec.mode || null), checking: true };
+      },
+      /** the fresh answer: every child async with its timeout (which 5 s, pgrep 5 s, sudo -n 3 s ×2, status --json 5 s) — kept.
+       *  `signal` = the manager's bound (round 2): once it fires this ask STARTS NOTHING MORE (each step checks it, the child it
+       *  holds is killed) and WRITES NOTHING — a later ask is the only one that answers. */
+      async statusAsync({ signal } = {}) {
+        const live = () => { if (signal && signal.aborted) throw (signal.reason || new Error('aborted')); };
+        const rec = h.peek();
+        const installed = !!(await tsBinNow('tailscaled')); live();
+        const sysPid = await systemTailscaled(signal); live();
+        const tunOk = await tunUsable(signal); live();
+        const sudoOk = await sudoAvailable(signal); live();
         const base = {
           installed,
           tunAvailable: fs.existsSync('/dev/net/tun'),
-          tunUsable: tunUsable(),
-          sudo: sudoAvailable(),
+          tunUsable: tunOk,
+          sudo: sudoOk,
           desiredUp: !!rec.desiredUp,
           modePref: h.setting('mode') || 'auto',
           upFlags: h.setting('upFlags') || '',
           socksPort: SOCKS_PORT,
         };
-        const cli = tsBin('tailscale');
-        const probe = (sockArg) => {
+        const cli = await tsBinNow('tailscale'); live();
+        const probe = async (sockArg) => {
+          if (!cli) return null; // no tailscale command: the row answers what it knows (running or not, `cli: false`)
+          const r = await run(cli, [...(sockArg ? [`--socket=${sockArg}`] : []), 'status', '--json'], 5000, signal);
+          if (r.code !== 0) return null;
           try {
-            const out = execFileSync(cli, [...(sockArg ? [`--socket=${sockArg}`] : []), 'status', '--json'], { encoding: 'utf-8', timeout: 5000 });
-            const j = JSON.parse(out);
+            const j = JSON.parse(r.out);
             if (sockArg) takeStatus(j); // lane tailnet-names: the table + suffix + sign-in state of OUR daemon
             return {
               backendState: j.BackendState,
@@ -348,30 +371,38 @@ module.exports = {
           } catch { return null; }
         };
         names.system = !!sysPid; // lane tailnet-names: reach() says `system` (no pgrep on its own path)
+        base.cli = !!cli;
+        let out;
         if (sysPid) {
           // system daemon: report its state read-only (default socket)
-          return { ...base, running: true, mode: 'system', ...(cli ? probe(null) || {} : {}) };
+          out = { ...base, running: true, mode: 'system', ...(cli ? (await probe(null)) || {} : {}) };
+        } else {
+          const pid = tsOurDaemonPid();
+          if (!pid) out = { ...base, running: false, mode: rec.mode || null };
+          else {
+            const v = dnsVerdict(); // whose resolver this instance uses — the row's DNS line
+            out = { ...base, running: true, mode: rec.mode || 'userspace', pid, dns: { acceptDns: v.acceptDns, why: v.why, rewritten: v.rewritten }, ...((await probe(tsSock())) || {}) };
+          }
         }
-        const pid = tsOurDaemonPid();
-        if (!pid) return { ...base, running: false, mode: rec.mode || null };
-        const v = dnsVerdict(); // whose resolver this instance uses — the row's DNS line
-        return { ...base, running: true, mode: rec.mode || 'userspace', pid, dns: { acceptDns: v.acceptDns, why: v.why, rewritten: v.rewritten }, ...(probe(tsSock()) || {}) };
+        live(); // an ask abandoned at its bound writes nothing
+        kept = out;
+        return out;
       },
 
       // Guided login: `tailscale up` prints the auth URL — capture it for the UI
       // (the Drive-OAuth pattern: user opens the link, approves, we poll status).
-      setup() {
+      async setup() {
         const id = h.id;
-        if (systemTailscaled()) throw new Error('system tailscaled — log in with `sudo tailscale up` on the machine');
+        if (await systemTailscaled()) throw new Error('system tailscaled — log in with `sudo tailscale up` on the machine');
         if (!tsOurDaemonPid()) throw new Error('daemon not running — start it first');
-        const st = verbs.status();
-        if (st.backendState === 'Running') return Promise.resolve({ done: true, self: st.self });
+        const st = await verbs.statusAsync();
+        if (st.backendState === 'Running') return { done: true, self: st.self };
         const prev = loginProcs.get(id);
-        if (prev?.authUrl && prev.proc.exitCode === null) return Promise.resolve({ authUrl: prev.authUrl });
+        if (prev?.authUrl && prev.proc.exitCode === null) return { authUrl: prev.authUrl };
         prev?.proc?.kill?.();
-        const cli = tsBin('tailscale');
+        const cli = await tsBinNow('tailscale');
         h.rec();
-        const running = verbs.status().mode; // 'kernel' | 'userspace'
+        const running = st.mode; // 'kernel' | 'userspace'
         const useSudo = running === 'kernel' && process.getuid?.() !== 0;
         // Base flags + user-tuned `tailscale up` flags (advertise-routes, exit-node,
         // hostname, ssh, …). Stored per-plugin; validated to look like flags.

@@ -36,7 +36,7 @@ for (const f of files) {
   const m = require(path.join(repo, 'src/plugins', f));
   if (m && typeof m === 'object' && !Array.isArray(m) && typeof m.id === 'string') plugins.push(m); else helpers.push(f);
 }
-ok(JSON.stringify(helpers) === JSON.stringify(['index.js', 'proc.js']), `① helper files (no plugin id): ${helpers.join(', ')}`);
+ok(JSON.stringify(helpers) === JSON.stringify(['index.js', 'proc.js', 'which-kept.js']), `① helper files (no plugin id): ${helpers.join(', ')}`); // which-kept.js: where a command lives, KEPT (lane hub-sync-holds, rank 13)
 const listed = require(path.join(repo, 'src/plugins/index.js')).map((p) => p.id).sort();
 ok(JSON.stringify(plugins.map((p) => p.id).sort()) === JSON.stringify(listed), `① every plugin file is on the one list (${listed.join(', ')})`);
 for (const p of plugins) {
