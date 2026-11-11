@@ -189,6 +189,7 @@ const KIT_HISTORY = [
   [/^scripts\/test-design-docs\.mjs$/, 'this census'],
   [/^scripts\/test-published-pages\.mjs$/, 'NEGATIVE pins: the server no longer creates / hands over / routes the kit (and the chip no longer fetches it)'],
   [/^scripts\/test-agent-tool-rules\.mjs$/, 'NEGATIVE pins: the retired verb is no longer pre-approved'],
+  [/^scripts\/test-loop-child-census\.mjs$/, 'the loop-child census names each site by its enclosing scope — the migration\'s own walk (removeDesignKit) is one'],
 ];
 /** Single lines that may: the kb records of this removal (the retirement, the migration, this census, the routing row's
  *  exception). Each must be live (a stale allowance is red). */

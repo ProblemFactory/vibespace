@@ -243,7 +243,7 @@ const WS_CTX_CONTRACT = [
   'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
   'NODE_CMD', 'DTACH_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV', 'cliCmds', // cliCmds: the spawn-time re-resolve (B-a18e)
-  'adapterRegistry', 'pty', 'path', 'fs', 'os', 'execFileSync', 'ensureDir', 'hosts',
+  'adapterRegistry', 'pty', 'path', 'fs', 'os', 'ensureDir', 'hosts', // execFileSync dropped (lane hub-sync-holds: a sync child nothing here called)
   'accounts', 'scheduleCtxSync', 'activeSessionsPayload',
   'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv', 'telemetry',
   'sendUserInput', // THE typing path (src/server/user-input.js) — the chat-input case and the For-you reply route share it
@@ -261,7 +261,7 @@ function registerWsHandler(wss, ctx) {
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
-    adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
+    adapterRegistry, pty, path, fs, os, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
     sendUserInput, getExitProxy = () => null, getDesign = () => null, setCustomName = null,

@@ -78,7 +78,7 @@ function mergeKeptStopped(rows, kept) {
 
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
-  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, serverSetting } = ctx;
+  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, hosts, serverSetting } = ctx;
   // R3 (three-tier): the transcript read composite lives in ONE service —
   // this interface is the future `transcript.*` device op schema.
   const { createTranscriptService } = require('../transcript-service');

@@ -109,7 +109,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
-    adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
+    adapterRegistry, pty, path, fs, os, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;

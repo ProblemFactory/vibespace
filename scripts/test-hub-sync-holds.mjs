@@ -8,6 +8,7 @@
 //       the whole tree with readdirSync: 1.5–1.7 s per mailbox, growing with it)
 //   §12a rank 12a — no update runs inside the boot (a synchronous `git pull` held 5.5 s before the first loop turn, right
 //       after scripts/update.sh had pulled): the update's ONE road is scripts/update.sh
+//   the loop-child census (every synchronous child / tree walk a row) is scripts/test-loop-child-census.mjs
 // Run: node scripts/test-hub-sync-holds.mjs
 import fs from 'node:fs';
 import { spawn as spawnChild } from 'node:child_process';

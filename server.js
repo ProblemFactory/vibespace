@@ -15,7 +15,7 @@ const storeTiming = require('./src/timed-sync.js');
 storeTiming.enable(process.env.VIBESPACE_STORE_TIMING !== '0');
 const fs = require('fs');
 const os = require('os');
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process'); // no sync child here (lane hub-sync-holds: the census — scripts/loop-child-census.mjs)
 const compression = require('compression');
 const { MessageManager, driftLedgerRows } = require('./src/message-manager');
 const { sameToken } = require('./src/pairing-token'); // B-8dda: a vsst_ compare in constant time
@@ -1463,7 +1463,7 @@ const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createS
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting, cacheFactsOf, paused: (kind) => mountHealth.paused(kind), stoppedSessions });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, hosts, accounts, sessionAuth, serverSetting, cacheFactsOf, paused: (kind) => mountHealth.paused(kind), stoppedSessions });
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, decisionEngine, // lanes decision-attention + decision-rule: the judged rows and the decision rule's pre-judge ask THE decisions caller // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)
@@ -1518,7 +1518,7 @@ const wsApi = registerWsHandler(wss, {
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
-  adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
+  adapterRegistry, pty, path, fs, os, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the kill path ends a dead conversation's pairs + asks
   USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, getDesign: () => designEngine, setCustomName: (k, n) => persistenceRouter.setCustomName(k, n), /* lane peer-card-sender: rename-session → customNames */ // getDesign = the Design window's watch (design-watch / design-unwatch); telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
