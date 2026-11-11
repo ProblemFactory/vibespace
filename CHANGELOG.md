@@ -12,6 +12,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When VibeSpace is slow, Diagnostics can show which of its own code is using the processor.
 - ⚙ System → Capture a CPU profile (20 s) shows it in the Diagnostics report; one is also taken by itself when the server is slow.
 
+### Changed
+- After a Claude Code update, accounts with a long-lived token pause for about five minutes while VibeSpace checks the new version, then continue.
+- No VibeSpace update is needed for that check, and a chat waiting on those accounts continues by itself when it passes.
+- While it runs, the pool's notice says what is being checked, instead of a reset date days away.
+- If the check cannot run or finds a difference, For you says why and offers Check again.
+- In VibeSpace's Docker images the check does not run yet; there, those accounts wait for a VibeSpace release, as before.
+
 ### Fixed
 - The model chip no longer turns amber with ⚠ when Claude Code's alias moves to a newer model, or after you change the model with /model or on another device.
 - Locking the model locks the model your conversation uses, never an older one; a chat set to an exact model version shows ⚠ when another version answers.
@@ -21,6 +28,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If the AI provider refuses a model you typed with /model, the model chip turns amber, names it, and its menu is where to pick another.
 - On a remote conversation, a /model sent while the connection was down, or unanswered when it dropped, stays said in the chat, with where to pick the model.
 - When a model's own price row takes over from a price you set (Haiku 5.5's, for one), Diagnostics names your row and where to change it.
+- A newer Claude Code's records no longer say "not registered … until the next release"; Diagnostics lists them quietly.
 
 ## 2.369.392 — 2026-11-11
 
