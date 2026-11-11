@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - Settings → Integrations says what a company app's settings leave out and which file your admin writes it in.
+- Antigravity chats list the models Antigravity reports for that account, asked when you open the list (at most every 6 hours) or by "Refresh from Antigravity".
 
 ### Fixed
 - After you cancel a passkey sign-in, the passkey VibeSpace lent to that tab is always taken back. Before, it could stay on the tab.
