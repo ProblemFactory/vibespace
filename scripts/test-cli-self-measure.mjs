@@ -793,5 +793,28 @@ console.log('§12 the incident: a hub whose data dir is under a home that is a g
   ok(/\/\[\\\\\/\]cli-self-measure\(\?:-\[0-9a-f\]\{8\}-run-\|\[\\\\\/\]run-\)\[\^\\\\\/\]\+\$\/\.test\(job\.runDir\)/.test(read('src/claude-oat-probe.js')), '§12 the child removes its run folder by the new name (or .393\'s in data/) — never another path');
 }
 
+{ // §12b THE RUN'S FOLDER IS ALWAYS ONE IT MADE (主开发's mutant — mkdirSync(root, { recursive: true }) — passed all 194): a
+  // DIRECTORY and then a SYMLINK planted at the exact name the next run takes (the randomness stubbed) ⇒ that run refuses:
+  // cannot-run (setup, EEXIST), nothing forked, nothing written through the link
+  const crypto = require('crypto');
+  const realRB = crypto.randomBytes;
+  for (const [what, plant] of [['a directory', (p) => fs.mkdirSync(p)], ['a symlink to another folder', (p) => fs.symlinkSync(fs.mkdtempSync(path.join(tmp, 'elsewhere-')), p)]]) {
+    const tag = 'planted-' + what.split(' ')[1];
+    const hubtag = crypto.createHash('sha256').update(path.resolve(path.join(tmp, 'orch-' + tag))).digest('hex').slice(0, 8);
+    const hex = 'a1b2c3d4';
+    const at = path.join(SCRATCH_BASE, `cli-self-measure-${hubtag}-run-${process.pid}-${hex}`);
+    plant(at);
+    crypto.randomBytes = (n, ...a) => (n === 4 && !a.length ? Buffer.from(hex, 'hex') : realRB(n, ...a));
+    try {
+      const W = await world(tag);
+      note(W.h); await until(() => !!ledgerOf(W.dir)?.binaries?.['2.1.399']?.['sha-399']);
+      const r = (ledgerOf(W.dir)?.binaries?.['2.1.399'] || {})['sha-399'] || {};
+      const through = fs.lstatSync(at).isSymbolicLink() ? fs.readdirSync(fs.realpathSync(at)).length : fs.readdirSync(at).length;
+      ok(W.forks.length === 0 && r.state === 'cannot-run' && r.reason && r.reason.code === 'setup' && /EEXIST/.test(r.reason.observation) && through === 0, `§12b ${what} already at the run's exact folder name ⇒ the run refuses it (cannot-run, EEXIST) — nothing forked, nothing created inside it`, { forks: W.forks.length, r, through });
+      W.o.stop();
+    } finally { crypto.randomBytes = realRB; }
+  }
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
