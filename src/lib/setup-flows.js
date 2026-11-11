@@ -579,6 +579,22 @@ export function installSetupFlows(App) {
     showToast(t('Profiling the server until {time} — then open ⚙ System → Diagnostics report…', { time: new Date(r.until).toLocaleTimeString() }));
   },
 
+  /** lane hub-loop-stalls commit 3: ONE 20 s CPU capture of the server's main thread (POST /api/loop-holds/capture answers
+   *  its table when it ends); a refusal is said AT THE PRESS by name; then the Diagnostics report opens with it in «Main
+   *  loop held». The switch «Name the code that holds the server» turns only the automatic capture off — this door works. */
+  async _captureCpuProfile() {
+    showToast(t('Capturing a CPU profile of the server for 20 s…'));
+    const r = await fetchJson('/api/loop-holds/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const why = { debugger_attached: t('The CPU profile did not run: a debugger is attached to the server.'),
+      heap_near_limit: t('The CPU profile did not run: the server’s memory is near its limit, and sampling it now could run it out of memory.'),
+      no_watchdog: t('The CPU profile did not run: the server’s watchdog thread is not running.'),
+      no_inspector: t('The CPU profile did not run: this server’s Node has no inspector.'),
+      capture_running: t('A CPU profile is already running — its table is in the Diagnostics report when it ends.') }[r && r.error];
+    if (why) { showToast(why, { type: 'error' }); return; }
+    if (!r || !r.ok || !r.capture) { showToast(t('Could not capture the CPU profile: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }
+    this._openDiagnostics();
+  },
+
     async _openDiagnostics() {
     const [d, c, ci, bt, csp, rt, reg, ch, lh] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14&drift=1'),
@@ -702,6 +718,26 @@ export function installSetupFlows(App) {
         ${l.tooLarge ? `<p class="dim">${esc(t('Its frames could not be kept (too large); the shares above are complete.'))}</p>` : ''}
         ${top ? `<table>${top}</table>` : ''}
         <p class="dim">${esc(t('One sample a second; a sample that does not answer within 50 ms counts as «no JavaScript frame» (native work or a system call).'))}</p>`;
+      })()}
+      ${(() => {
+        // lane hub-loop-stalls commit 3: THE NEWEST CPU CAPTURE — the server's own table (src/cpu-capture.js: self time by
+        // function, every share of the whole window, idle never work), its split, the collector from its record, and the
+        // kept .cpuprofile files (the owner's cookie downloads them). Code names and paths are shown as they are.
+        const cp = lh.capture || {};
+        const files = Array.isArray(cp.files) ? cp.files : [];
+        const dl = files.length ? `<p class="dim">${esc(t('Kept profiles (open them in a browser’s developer tools):'))} ${files.map((f) => `<a href="/api/loop-holds/cpu-profiles/${encodeURIComponent(f)}" download="${esc(f)}">${esc(f)}</a>`).join(' · ')}</p>` : '';
+        if (cp.running) return `<p><b>${esc(t('A CPU profile is running until {time}.', { time: new Date(cp.running.until).toLocaleTimeString() }))}</b></p>${dl}`;
+        const l = cp.last;
+        if (!l) return `<p class="dim">${esc(t('⚙ System → Capture a CPU profile (20 s): which of VibeSpace’s own code is using the processor. One is also taken by itself when the server is slow.'))}</p>${dl}`;
+        const sp = l.split || {};
+        const rows = (l.rows || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.fn)} <span class="dim">· ${esc(x.loc || '')}${x.via ? ` — ${esc(t('{pct} % through {fn}', { pct: x.viaPct, fn: x.via }))}` : ''}</span></td></tr>`).join('');
+        return `<h3>${esc(t('CPU profile — {n} samples over {s} s, {time}', { n: l.samples, s: (l.windowMs / 1000).toFixed(1), time: new Date(l.endedAt).toLocaleString() }))}</h3>
+        <p class="dim">${esc(l.auto ? t('Taken by itself: the server was slow.') : t('Taken on request.'))}</p>
+        <p>${esc(t('JavaScript {js} %, on the processor outside JavaScript {native} %, idle {idle} %.', { js: sp.js ?? 0, native: sp.native ?? 0, idle: sp.idle ?? 0 }))} ${l.gc && l.gc.pct != null ? esc(t('Garbage collection {gc} % of the window.', { gc: l.gc.pct })) : esc(t('Garbage collection not split.'))}</p>
+        ${l.stopped ? `<p class="dim">${esc(t('It stopped early.'))}</p>` : ''}
+        ${rows ? `<table>${rows}</table>` : `<p class="dim">${esc(t('No function used 3 % of the time or more.'))}</p>`}
+        <p class="dim">${esc(t('Self time by function: time inside native calls is counted on the JavaScript caller; functions under 3 % are not listed.'))}</p>
+        ${l.file ? `<p><a href="/api/loop-holds/cpu-profiles/${encodeURIComponent(l.file)}" download="${esc(l.file)}">${esc(t('Download this profile (.cpuprofile)'))}</a></p>` : ''}${dl}`;
       })()}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>

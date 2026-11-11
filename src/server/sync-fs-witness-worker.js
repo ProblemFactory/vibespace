@@ -204,10 +204,10 @@ function readNote() {
   if (!NI) return null;
   const s1 = Atomics.load(NI, 0);
   if (s1 % 2) return null;
-  const count = NI[1], len = Math.min(NB.length, Math.max(0, NI[2])), beat = NI[3], at = NF[0];
+  const count = NI[1], len = Math.min(NB.length, Math.max(0, NI[2])), beat = NI[3], at = NF[0], ownUs = NI[6];
   const text = dec.decode(NB.slice(0, len));
   if (Atomics.load(NI, 0) !== s1) return null;
-  return { count, beat, at, text };
+  return { count, beat, at, text, ownUs };   // ownUs (commit 3): the sample's own run on the main thread, its first instruction → its note
 }
 /** one ask for `asker` ({kind: 'hold', h} | {kind: 'profile', pr, pq}) — null when one is in flight or it cannot post */
 function ask(asker) {
@@ -229,7 +229,7 @@ function settleAsk(now) {
   const q = inflight;
   if (!q) return;
   const n = readNote();
-  if (n && n.count !== q.notes0) { inflight = null; closeSession(q); q.text = n.text; return answered(q, textAnswer(n.text, NO_READ), n.beat, n.at); }
+  if (n && n.count !== q.notes0) { inflight = null; closeSession(q); q.text = n.text; q.ownUs = n.ownUs; return answered(q, textAnswer(n.text, NO_READ), n.beat, n.at); }
   if (q.responded) {   // the session answered and no note: it threw — at its entry or inside (the stack nearly full) ⇒ JavaScript
     inflight = null;
     const beat = NI[4] !== q.entered0 ? NI[5] : Atomics.load(I, 3);
@@ -241,7 +241,7 @@ function settleAsk(now) {
     return;
   }
   if (!q.late && now - q.at > noAnswerMs) { q.late = true; unanswered(q); }
-  if (q.late && !q.enteredSeenAt && Atomics.load(I, 3) - q.beat0 >= 3) { inflight = null; }   // the loop turned 3 times and it never ran: dropped
+  if (q.late && !q.enteredSeenAt && Atomics.load(I, 3) - q.beat0 >= 3) { inflight = null; if (q.asker.kind === 'capture') captureDropped(q); }   // the loop turned 3 times and it never ran: dropped
 }
 /** an answer → what it says (the check's condition 3): frames; «the stack was nearly full (deep recursion)»; «between
  *  JavaScript frames» for a stack with no JavaScript frame; «frames unreadable (inside the program's own stack
@@ -256,6 +256,7 @@ function textAnswer(text, readers = NO_READ) {
   return { kind: 'js', words: LH.chainWords(sm.frames), key: LH.keyFrame(sm.frames), keyWords: LH.keyWords(sm.frames), form: sm.form };
 }
 function answered(q, a, beat, at) {
+  if (q.asker.kind === 'capture') return captureAnswered(q, a);
   if (q.asker.kind === 'profile') {
     const latency = at != null && q.postedAt != null ? at - q.postedAt : null;
     return profileAnswered(q, a, latency != null ? latency <= noAnswerMs : !q.late);   // a deep sample has no time: at the point unless it was already late
@@ -270,6 +271,7 @@ function answered(q, a, beat, at) {
 /** unanswered at noAnswerMs: its facts stay as they are (no answer yet) — the PURE judgement says what the instant was
  *  by the thread's state at the post (asleep ⇒ the kernel, on the CPU ⇒ native, unread ⇒ not JavaScript) */
 function unanswered(q) {
+  if (q.asker.kind === 'capture') return;   // commit 3: a capture's ask waits — every tick it waits for is booked on its answer
   if (q.asker.kind === 'profile') return profileUnanswered(q);
   q.result = 'late';
   q.asker.h.last = withGlobals(null, fullReading(mono()));
@@ -431,6 +433,162 @@ function stepProfile(now) {
   ask({ kind: 'profile', pr, pq: { countedTo: now, counted: false } });
 }
 
+// ── commit 3: THE CPU CAPTURE — a tick every everyMs for ms, from this thread (PURE src/cpu-capture.js) ─────────────
+// Each tick reads the main thread's kernel state FIRST (CC.tickOf): asleep in its own loop's poll with the beat fresh =
+// idle (never asked); a hold open = held (the hold's own sampler asks for it — never two asks, its line names it);
+// stopped = not running; else ONE ask (commit 1's road: one in flight, its session by the kernel state) or booked on the
+// ask in flight — every tick an ask waits for is booked on the stack that answers it (native time on its JavaScript
+// caller). The answer's frames are interned RAW (≤ MEM_BYTES) and named at the end, off the tick's path: the sources read
+// with fs.promises, one at a time, within NAME_BUDGET_MS. Then the .cpuprofile (CC.profileOf), its table (CC.aggregate),
+// the file under data/cpu-profiles (temp + rename, the newest KEEP_FILES kept) and ONE message to the main thread, which
+// adds the collector's record and says the block. The asks' own run (the note's own µs) is summed: one past
+// ASK_BOUND_MS halves the rate, the sum past its bound stops the capture early — both said.
+const CC = require('../cpu-capture.js');
+let cap = null;
+const capRefusal = (flags, door) => (!door && !(flags & FLAG_KNOWN) ? 'unknown' : !door && !(flags & FLAG_SAMPLING) ? 'off' : flags & FLAG_DEBUGGER ? 'debugger' : flags & FLAG_HEAP_HIGH ? 'heap' : !inspector ? 'inspector' : null);
+const tellCapture = (c) => { try { parentPort && parentPort.postMessage({ ev: 'captured', c }); } catch { } };
+function startCapture(msg = {}, now = mono()) {
+  if (cap) return tellCapture({ id: msg.id, refused: 'running' });
+  const door = msg.auto !== true;
+  const refused = I ? capRefusal(Atomics.load(I, 6), door) : 'no_watchdog';
+  if (refused) return tellCapture({ id: msg.id, refused, auto: !door });
+  const everyMs = Math.max(5, Number(msg.everyMs) || CC.CAPTURE_EVERY_MS), ms = Math.max(everyMs, Number(msg.ms) || CC.CAPTURE_MS);
+  cap = { id: msg.id, auto: !door, cause: msg.cause || (door ? 'door' : null), startedM: now, untilM: now + ms, everyMs, curEveryMs: everyMs, ticks: [], stacks: [], stackIds: new Map(),
+    raws: [], rawIds: new Map(), bytes: 0, pastMem: 0, costUs: 0, asks: 0, halved: null, stopped: null, dir: typeof msg.dir === 'string' && msg.dir ? msg.dir : null,
+    askBoundMs: Number.isFinite(msg.askBoundMs) ? msg.askBoundMs : CC.ASK_BOUND_MS, costMaxMs: Number.isFinite(msg.costMaxMs) ? msg.costMaxMs : CC.COST_SHARE_MAX * ms,
+    rateFloorMs: Number.isFinite(msg.rateFloorMs) ? msg.rateFloorMs : CC.RATE_FLOOR_MS, memBytes: Number.isFinite(msg.memBytes) ? msg.memBytes : CC.MEM_BYTES, timer: null, ending: false, finished: false };
+  const c = cap;
+  // EACH INTERVAL DRAWN between half and one and a half of the rate (its mean): a tick at a fixed period would phase-lock
+  // with the hub's own timers (250 ms, 500 ms, 1 s — multiples of 50) and read a periodic callback as more or less than it
+  // is (measured: 5 % for a 10 % one); a tick stands for the time to the next, so the shares stay the window's own
+  const next = () => { if (c !== cap || c.ending) return; c.timer = setTimeout(() => { stepCapture(c, mono()); next(); }, c.curEveryMs * (0.5 + Math.random())); };
+  stepCapture(c, now);
+  next();
+}
+function stepCapture(c, now) {
+  if (c !== cap || c.ending) return;
+  const flags = Atomics.load(I, 6);
+  const stop = flags & FLAG_DEBUGGER ? 'debugger' : flags & FLAG_HEAP_HIGH ? 'heap' : c.auto && !(flags & FLAG_SAMPLING) ? 'off' : c.costUs / 1000 >= c.costMaxMs ? 'cost' : null;
+  if (stop) { c.stopped = stop; return endCapture(c, now); }
+  if (now >= c.untilM) return endCapture(c, now);
+  const wchan = readProc(task('wchan')), sys = readProc(task('syscall')), state = LH.stateOf(readProc(task('stat')));
+  const mine = !!(inflight && inflight.asker.kind === 'capture' && inflight.asker.c === c);
+  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: !!hold, mine, other: !!inflight && !mine });
+  const tk = { t: now, k: null };
+  c.ticks.push(tk);
+  if (k === 'booked') { inflight.asker.pending.push(tk); return; }
+  if (k !== 'ask') { tk.k = k; return; }
+  if (!ask({ kind: 'capture', c, pending: [tk] })) tk.k = 'unsampled';
+}
+/** a raw frame / a stack → its id, interned within the capture's memory bound (past it: null) */
+function internRaw(c, raw) {
+  const key = `${raw.fn}\u0000${raw.file}\u0000${raw.line}\u0000${raw.encl}\u0000${raw.evalish ? 1 : 0}`;
+  let id = c.rawIds.get(key);
+  if (id !== undefined) return id;
+  const cost = 2 * key.length + 96;
+  if (c.bytes + cost > c.memBytes) return null;
+  c.bytes += cost; id = c.raws.length; c.raws.push(raw); c.rawIds.set(key, id);
+  return id;
+}
+function stackOf(c, text) {
+  const r = CC.rawFramesOf(text);
+  if (r.form === 'debugger') return { stand: 'debugger' };
+  if (r.form === 'accessor' || r.form === 'formatting' || r.form === 'none') return { k: 'unsampled' };
+  if (!r.frames.length) return { k: 'native' };   // no JavaScript frame on its stack: on the CPU outside JavaScript
+  const ids = [];
+  for (const raw of r.frames) { const id = internRaw(c, raw); if (id === null) { c.pastMem++; return { k: 'unsampled' }; } ids.push(id); }
+  const key = ids.join(',');
+  let sid = c.stackIds.get(key);
+  if (sid === undefined) {
+    const cost = 2 * key.length + 64;
+    if (c.bytes + cost > c.memBytes) { c.pastMem++; return { k: 'unsampled' }; }
+    c.bytes += cost; sid = c.stacks.length; c.stacks.push(ids); c.stackIds.set(key, sid);
+  }
+  return { k: sid };
+}
+function captureAnswered(q, a) {
+  const { c, pending } = q.asker;
+  q.result = 'answered';
+  if (c.finished) return;
+  c.asks++;
+  const own = Number.isInteger(q.ownUs) && q.ownUs >= 0 ? q.ownUs : null;
+  if (own != null) c.costUs += own;
+  const s = q.text != null ? stackOf(c, q.text) : { k: a && a.kind === 'js' && !a.empty ? 'unsampled' : 'native' };
+  if (s.stand) { for (const tk of pending) tk.k = 'unsampled'; if (!c.ending) { c.stopped = 'debugger'; endCapture(c, mono()); } }
+  else for (const tk of pending) tk.k = s.k;
+  // THE ASK'S OWN COST, bounded: one ask past its bound halves the rate (no further than one per rateFloorMs) — said
+  if (own != null && own / 1000 > c.askBoundMs && !c.ending && c.curEveryMs * 2 <= c.rateFloorMs) {
+    c.curEveryMs *= 2; c.halved = { askMs: own / 1000, everyMs: c.curEveryMs, times: (c.halved ? c.halved.times : 0) + 1 };   // the next interval is drawn at the new rate
+  }
+  if (c.ending) finishCapture(c);
+}
+function captureDropped(q) { const { c, pending } = q.asker; for (const tk of pending) if (tk.k == null) tk.k = 'unsampled'; if (c.ending) finishCapture(c); }
+function endCapture(c, now) {
+  if (c.ending) return;
+  c.ending = true; c.endedM = now; clearTimeout(c.timer);
+  if (inflight && inflight.asker.kind === 'capture' && inflight.asker.c === c) {   // its last ask: waited for (its ticks are the window's)
+    const t = setTimeout(() => finishCapture(c), CC.ANSWER_WAIT_MS); t.unref?.();
+    return;
+  }
+  finishCapture(c);
+}
+/** a promise, or `fallback` after ms (the read / write it raced is left to finish on its own) */
+const within = (p, ms, fallback) => new Promise((res) => { const t = setTimeout(() => res(fallback), Math.max(0, ms)); t.unref?.(); p.then((v) => { clearTimeout(t); res(v); }, () => { clearTimeout(t); res(fallback); }); });
+async function nameRaws(c) {
+  const frames = new Array(c.raws.length), byFile = new Map();
+  const classify = (i) => { frames[i] = CC.callFrameOf(LH.frameOf(c.raws[i], rootDir, NO_READ.isRepoFile, NO_READ.lineOf, isInternal), c.raws[i]); };
+  for (let i = 0; i < c.raws.length; i++) {
+    let need = null;
+    LH.frameOf(c.raws[i], rootDir, (rel) => { if (rootDir && !(realFiles.has(rel) && sources.has(rel))) need = rel; return NO_READ.isRepoFile(rel); }, NO_READ.lineOf, isInternal);
+    if (need) { if (!byFile.has(need)) byFile.set(need, []); byFile.get(need).push(i); } else classify(i);
+  }
+  const deadline = mono() + CC.NAME_BUDGET_MS;
+  let why = null;
+  for (const [rel, idx] of byFile) {   // ONE read at a time; each file's frames classed right after it (its lines are then cached)
+    if (!why && mono() >= deadline) why = 'budget';
+    if (!why && (mono() < slowUntil || naming)) why = 'slow';
+    if (!why) {
+      naming = rel; const a = mono();
+      const done = await within(readSource(rel).then(() => true), deadline - mono(), false);
+      naming = null;
+      if (!done) why = 'budget';
+      else if (mono() - a >= SLOW_READ_MS) { slowUntil = mono() + SLOW_HOLD_MS; why = 'slow'; }
+    }
+    for (const i of idx) classify(i);   // unread: its location alone
+  }
+  return { frames, why };
+}
+async function finishCapture(c) {
+  if (c.finished) return;
+  c.finished = true;
+  for (const tk of c.ticks) if (tk.k == null) tk.k = 'native';   // on the CPU, its ask not answered by the end: native code to the end
+  let out = null;
+  try {
+    const { frames, why } = await nameRaws(c);
+    const prof = CC.profileOf({ ticks: c.ticks, stacks: c.stacks, frames, startedM: c.startedM, endedM: c.endedM, everyMs: c.everyMs, finalEveryMs: c.curEveryMs });
+    const agg = CC.aggregate(prof);
+    let file = null, fileError = null;
+    if (c.dir) {
+      const name = CC.fileName(toWall(c.startedM), c.auto), tmp = path.join(c.dir, `.${name}.${process.pid}.tmp`);
+      const wrote = await within((async () => {
+        await fs.promises.mkdir(c.dir, { recursive: true });
+        await fs.promises.writeFile(tmp, JSON.stringify(prof));
+        await fs.promises.rename(tmp, path.join(c.dir, name));
+        return true;
+      })().catch((e) => { fs.promises.unlink(tmp).catch(() => {}); return (e && e.code) || 'error'; }), 10000, 'the disk did not answer in 10 s');
+      if (wrote === true) {
+        file = name;
+        try { const { drop } = CC.keptFiles(await within(fs.promises.readdir(c.dir), 5000, [])); for (const d of drop) fs.promises.unlink(path.join(c.dir, d.name)).catch(() => {}); } catch { }
+      } else fileError = String(wrote);
+    }
+    out = { id: c.id, auto: c.auto, cause: c.cause, startedM: c.startedM, endedM: c.endedM, startedAt: toWall(c.startedM), endedAt: toWall(c.endedM), windowMs: c.endedM - c.startedM,
+      everyMs: c.everyMs, finalEveryMs: c.curEveryMs, halved: c.halved, askBoundMs: c.askBoundMs, stopped: c.stopped, costMs: c.costUs / 1000, asks: c.asks, pastMem: c.pastMem, namesWhy: why,
+      agg: { samples: agg.samples, totalMs: agg.totalMs, ms: agg.ms, share: agg.share, listed: agg.listed, under: agg.under, floor: agg.floor }, file, fileError, nodes: prof.nodes.length };
+  } catch (e) { out = { id: c.id, auto: c.auto, failed: (e && e.message) || 'error' }; }
+  if (cap === c) cap = null;
+  tellCapture(out);
+}
+
 function check(now = mono()) {
   if (!I) return null;
   const late = Math.max(0, now - lastCheckAt - beatMs);   // this thread's OWN lateness (a starved or stopped watchdog) — monotonic
@@ -495,6 +653,7 @@ if (parentPort && sab) {
   parentPort.on('message', (msg) => {
     if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
     if (msg && msg.ev === 'profile') startProfile(msg);   // law L: the owner pressed «Profile the server for 10 minutes»
+    if (msg && msg.ev === 'capture') startCapture(msg);   // commit 3: a CPU capture — the trigger's or the owner's door
   });
 }
 

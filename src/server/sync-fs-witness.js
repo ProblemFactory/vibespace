@@ -231,7 +231,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   // NOW — the sample checks it on the main thread, also inside a hold the beat cannot see), `note(out)` (THE way an answer
   // leaves: the watchdog closed its session as it posted), `z` (the sample's ENTERED cell + the beat count then — plain
   // stores, no call) and `b` (this slot: the beat count at I[3])
-  // the note slot: [seqlock, count, bytes, beat (−1 = written inside the beat itself), ENTERED, beat at entry, -, -] +
+  // the note slot: [seqlock, count, bytes, beat (−1 = written inside the beat itself), ENTERED, beat at entry, the sample's
+  // OWN RUN in µs (commit 3: its first instruction → its note — the capture sums what its asks cost this thread), -] +
   // the monotonic time of the sample's first instruction + the bytes; THIS thread is its ONE writer, one sample at a time (the watchdog keeps ONE ask
   // in flight; a sample never runs inside another — the inspector drains its queue one message after another)
   const noteSab = new SharedArrayBuffer(40 + NOTE_BYTES), NI = new Int32Array(noteSab, 0, 8), NF = new Float64Array(noteSab, 32, 1), NB = new Uint8Array(noteSab, 40);
@@ -248,7 +249,9 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     Atomics.store(NI, 0, w0 + 1);   // odd = being written
     try {
       NI[2] = enc.encodeInto(out.length > NOTE_BYTES / 4 ? out.slice(0, NOTE_BYTES / 4) : out, NB).written;
-      NI[3] = inBeat ? -1 : I[3]; NF[0] = typeof t0 === 'number' && t0 >= 0 ? t0 : mono(); NI[1] = NI[1] + 1;
+      NI[3] = inBeat ? -1 : I[3]; NF[0] = typeof t0 === 'number' && t0 >= 0 ? t0 : mono();
+      NI[6] = typeof t0 === 'number' && t0 >= 0 ? Math.min(2147483647, Math.max(0, Math.round((mono() - t0) * 1000))) : -1;
+      NI[1] = NI[1] + 1;
     } catch { } finally { Atomics.store(NI, 0, w0 + 2); }   // ALWAYS even again (a throw inside leaves no odd slot behind)
     try { Atomics.notify(NI, 1); } catch { }
   };
@@ -298,7 +301,9 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
       try { Object.defineProperty(globalThis, LH.HOOK_KEY, { value: hookObject, configurable: true, enumerable: false, writable: false }); } catch { }
       try {
         const st = () => { const f = Atomics.load(I, 6); return { known: (f & FLAG_KNOWN) !== 0, on: (f & FLAG_SAMPLING) !== 0, debugger: (f & FLAG_DEBUGGER) !== 0, heapHigh: (f & FLAG_HEAP_HIGH) !== 0, capPerHour, holdMs, watchdog: !!worker && !workerGone }; };
-        holds = require('./loop-holds.js').create({ log, record: (ev) => record(ev), askProfile: (ms) => worker.postMessage({ ev: 'profile', ms, everyMs: profileEveryMs }), samplingState: st, readProfile, debuggerNow: () => debuggerOpen() === true, ...holdsOptions });
+        holds = require('./loop-holds.js').create({ log, record: (ev) => record(ev), askProfile: (ms) => worker.postMessage({ ev: 'profile', ms, everyMs: profileEveryMs }), samplingState: st, readProfile, debuggerNow: () => debuggerOpen() === true,
+          // commit 3: the CPU capture — asked of the watchdog thread, its file under data/cpu-profiles
+          askCapture: (m) => worker.postMessage({ ...m, ev: 'capture' }), profileDir: typeof dataDir === 'string' && dataDir ? path.join(dataDir, 'cpu-profiles') : null, ...holdsOptions });
       } catch (e) { try { log.warn?.(`[loop-hold] no book of holds (${e && e.message})`); } catch { } }
       writeFlags();             // the boot's hold reads the flags before any beat (the setting read BEFORE anything is asked)
       started = true;
@@ -317,6 +322,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
           if (m && m.ev === 'memory') return;
           if (m && m.ev === 'hold' && holds) setImmediate(() => { try { holds.onHold(m.hold); } catch { } });
           if (m && m.ev === 'holdsLost' && holds && typeof holds.onLost === 'function') { try { holds.onLost(m.n); } catch { } }
+          if (m && m.ev === 'captured' && holds && typeof holds.onCaptured === 'function') { try { holds.onCaptured(m.c); } catch { } }   // commit 3: a CPU capture's result
         });
         worker.on('error', (e) => { workerGone = true; try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
         worker.on('exit', () => { workerGone = true; });
