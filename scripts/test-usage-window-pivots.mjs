@@ -14,7 +14,8 @@
 //      carries session × origin alone (a pivot nobody draws any more is let go);
 // CONTROL: the bundle rebuilt with the base's unconditional fetch planted back ⇒ ① is red (the first paint asks for both).
 //   §7 (lane ledger-boot-load follow-up) the ledger still LOADING through the real route over a hung first load: the words, no error
-//      toast, the window's own re-ask; a LOADING answer in flight at the close ⇒ 0 asks after it; reopened ⇒ one loop.
+//      toast, the window's own re-ask; a LOADING answer in flight at the close ⇒ 0 asks after it; reopened ⇒ ONE loop, counted
+//      as asks in flight with every answer held (a loop holds at most one), never as asks per window of time.
 //      CONTROL: the window's life not checked (alive() always true) ⇒ asks after the close, two loops.
 // UWP_TREE=<dir> bundles another tree (a base checkout: red there — the "before" numbers); UWP_SHOTS=<dir> [UWP_PREFIX=after]
 // writes <prefix>-first-paint.png, <prefix>-panel-asking.png (its ask held open), <prefix>-panel-open.png, <prefix>-classic.png
@@ -143,7 +144,8 @@ async function page(b) {
   const logUntil = async (n, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (LOG.length >= n && LOG.slice(0, n).every((r) => r.code)) return true; await sleep(50); } return false; };
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?b=${b}` });
   const shot = async (file) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); await sleep(450); const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 860, height: 600, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, file), Buffer.from(r.result.data, 'base64')); };
-  return { ev, until, logUntil, shot, close: () => { try { ws.close(); } catch { } } };
+  return { ev, until, logUntil, shot, cdp, close: () => { try { ws.close(); } catch { } },
+    closeTab: async () => { try { ws.close(); } catch { } await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tg.id}`).catch(() => null); } };
 }
 
 // the page's view of the session × origin panel and the window body
@@ -268,33 +270,51 @@ if (scrollBuilt) {
 }
 console.log('§7 the ledger still LOADING (ledger-boot-load follow-up): a closed window asks nothing; one loop per open window');
 // THE LISTENER LIFECYCLE: a LOADING answer that lands after the close must not arm the re-ask (the release has no such loop);
-// a reopened window runs ONE loop — the closed one's never beside it
+// a reopened window runs ONE loop — the closed one's never beside it.
+// LOOPS ARE COUNTED, NOT TIMED (the .397 seam: a count of asks per 4 s window was decided by the runner's pace, both ways). A
+// loop has at most ONE ask in flight: it asks, awaits the answer (fetchJson has no timeout), then re-arms. So with EVERY
+// answer held, each live loop ends with exactly one ask waiting in the server and asks nothing more — the number of asks
+// held, once no new one comes, IS the number of live loops. Held while no window is open, an ask can only be the closed
+// window's loop's; held after the reopen, the asks are every live loop's. Who asked, at any pace.
+// VS_CPU_THROTTLE=<n> slows §7's pages n× through CDP (the tree's stand-in for a slow runner).
+const THROTTLE7 = Number(process.env.VS_CPU_THROTTLE) > 1 ? Number(process.env.VS_CPU_THROTTLE) : 0;
+if (THROTTLE7) console.log(`  (§7's pages run with their CPU throttled ×${THROTTLE7} — VS_CPU_THROTTLE)`);
+// wait until no new ask has come for QUIET ms (bounded): under a full hold, the loops that will ask have asked
+const settle = async (QUIET = 3000, cap = 15000) => { const t0 = Date.now(); let n = LOG.length, at = Date.now(); while (Date.now() - t0 < cap) { await sleep(100); if (LOG.length !== n) { n = LOG.length; at = Date.now(); } else if (Date.now() - at >= QUIET) return true; } return false; };
 async function loadingLeg(b) {
   LOG.length = 0; loadingMode = true; holdLoad = null;
   const X = await page(b);
-  const shown = await X.until(`!!document.querySelector('.usage-ledger-loading')`, 15000);
+  if (THROTTLE7) await X.cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE7 });
+  const shown = await X.until(`!!document.querySelector('.usage-ledger-loading')`, 20000);
   const words = shown ? await X.ev(`document.querySelector('.usage-ledger-loading').textContent`) : '';
   const toast = await X.ev(`!!document.querySelector('.global-toast-error')`).catch(() => false);
-  await sleep(4000); const open1 = LOG.length; // one open window's asks, from its first, over its first ~4 s
+  let t0 = Date.now(); while (LOG.length < 2 && Date.now() - t0 < 20000) await sleep(50);
+  const asksAgain = LOG.length >= 2; // the window asked again BY ITSELF (an event, not a count per window of time)
   let rel = null; holdLoad = { p: new Promise((r) => { rel = r; }) }; // the next re-ask is held in flight …
-  const n0 = LOG.length, e = Date.now() + 5000; while (LOG.length === n0 && Date.now() < e) await sleep(20);
+  const n0 = LOG.length, e = Date.now() + 10000; while (LOG.length === n0 && Date.now() < e) await sleep(20);
   const held = LOG.length > n0;
   await X.ev('window.__close()'); // … the window closes under it …
   const atClose = LOG.length; holdLoad = null; rel(); // … and the LOADING answer lands after the close
   await sleep(4000); const afterClose = LOG.length - atClose;
-  await X.ev('window.__open()'); const r0 = LOG.length; await sleep(4000); const reopen = LOG.length - r0; // reopened: one loop
-  X.close(); loadingMode = false;
-  return { shown, words: String(words).slice(0, 120), toast, open1, held, afterClose, reopen };
+  // THE LOOPS: every answer held from here on
+  let relAll = null; holdLoad = { p: new Promise((r) => { relAll = r; }) }; const i0 = LOG.length;
+  const quiet1 = await settle(); const closedLoops = LOG.length - i0; // no window open: only a closed window's loop can ask
+  await X.ev('window.__open()');
+  t0 = Date.now(); while (LOG.length - i0 <= closedLoops && Date.now() - t0 < 20000) await sleep(50); // the reopened window's first ask
+  const quiet2 = await settle(); const openLoops = LOG.length - i0; // every live loop: each one ask waiting, none asking more
+  holdLoad = null; relAll();
+  await X.ev('window.__close()').catch(() => null); await X.closeTab(); loadingMode = false;
+  return { shown, words: String(words).slice(0, 120), toast, asksAgain, held, afterClose, closedLoops, openLoops, settled: quiet1 && quiet2 };
 }
 {
   const LD = await loadingLeg('after.js');
-  ok(LD.shown && /The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words) && !LD.toast && LD.open1 >= 2,
-    `§7 the ledger still LOADING is a state: «${LD.words}», no error toast, the window asks again by itself (${LD.open1} asks in its first ~4 s)`, JSON.stringify(LD));
+  ok(LD.shown && /The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words) && !LD.toast && LD.asksAgain,
+    `§7 the ledger still LOADING is a state: «${LD.words}», no error toast, the window asks again by itself`, JSON.stringify(LD));
   ok(LD.held && LD.afterClose === 0, `§7 a LOADING answer in flight at the close lands after it ⇒ ${LD.afterClose} asks in the 4 s after the close (nothing a closed window awaited arms, asks or draws)`, JSON.stringify(LD));
-  ok(LD.reopen >= 2 && LD.reopen <= LD.open1 + 1, `§7 reopened ⇒ ONE loop: ${LD.reopen} asks in 4 s, as the first window's ${LD.open1}`, JSON.stringify(LD));
+  ok(LD.settled && LD.closedLoops === 0 && LD.openLoops === 1, `§7 reopened ⇒ ONE loop: with every answer held, ${LD.closedLoops} asks wait from the closed window and ${LD.openLoops} once reopened (each live loop holds one)`, JSON.stringify(LD));
   if (closeBuilt) {
     const LX = await loadingLeg('noclose.js');
-    ok(LX.held && LX.afterClose > 0 && LX.reopen > LD.open1 + 1, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close, ${LX.reopen} in 4 s reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
+    ok(LX.held && LX.afterClose > 0 && LX.settled && LX.closedLoops >= 1 && LX.openLoops >= 2, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close; with every answer held, ${LX.closedLoops} wait from the closed window and ${LX.openLoops} once reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
   }
 }
 console.log('  TABLE ' + JSON.stringify(T));
