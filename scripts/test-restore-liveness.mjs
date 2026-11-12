@@ -760,13 +760,23 @@ e2e: {
     // HOLD the table full for a minute: every debounced writer that fires meanwhile meets the EMFILE (measured: the
     // session-status write, the channels index, port-forwards, the usage cursors, the fd gauge itself) — none may end the server
     for (let k = 0; k < 12 && srv.exitCode === null; k++) await sleep(5000);
-    ok(r1.status === 200 && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server (POST ${r1.status}${r1.status ? '' : ` — ${String(r1.body).slice(0, 80)}`}, exit ${srv.exitCode})`,
+    // .396 seam 3 (lane hub-loop-stalls commit 2, round 2 law B): the route answers AFTER the store writer's write of the
+    // person's override — at a full table that write fails, so the law's answer is 503 «not-durable» carrying the record
+    // (applied, kept in memory, retried); 200 when the write got through. Either, with the server alive — never another
+    // status, never no answer; what makes the 503 honest is the next two legs (WHO ran out; the SAME status lands after)
+    let r1Body = null; try { r1Body = JSON.parse(r1.body); } catch { }
+    const r1Met = r1.status === 200 && r1Body?.success === true && r1Body?.status?.state === 'working' ? '200 — on disk before the answer'
+      : r1.status === 503 && r1Body?.code === 'not-durable' && r1Body?.status?.state === 'working' && r1Body?.status?.reason === 'emfile' ? '503 not-durable — applied, kept in memory, retried'
+        : null;
+    ok(!!r1Met && srv.exitCode === null, `FIX e2e ⑤ a minute at a FULL table, the status write included, did NOT kill the server, and the POST answered by the law (this run: ${r1Met || `POST ${r1.status} — ${String(r1.body).slice(0, 120)}`}; exit ${srv.exitCode})`,
       jrn().split('\n').filter((l) => /EMFILE|Error|\[fd\]|\[channels\]/.test(l)).slice(-12).join('\n'));
     const failLine = (jrn().match(/\[fd\] a background write failed \(EMFILE[^\n]*/) || [''])[0];
     ok(/This server ran out of file handles \(EMFILE\)/.test(failLine) && new RegExp(`holds ${LIM} of ${LIM}`).test(failLine), `FIX e2e ⑤ …and it said WHO ran out: ${JSON.stringify(failLine.slice(0, 220))}`);
     for (const w of conns) { try { w.terminate(); } catch { } }
-    const landed = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 70000) { try { if (/emfile-probe/.test(fs.readFileSync(path.join(wt, 'data/session-status.json'), 'utf8'))) return true; } catch { } await sleep(500); } return false; })();
-    ok(landed, 'FIX e2e ⑤ the pressure gone, the retry LANDED (data/session-status.json carries the write)');
+    // seam 3: bound to THIS probe's key and its record — the same state and reason the POST carried (a 503 above is honest
+    // only if this lands)
+    const landed = await (async () => { const t0 = Date.now(); while (Date.now() - t0 < 70000) { try { const st = JSON.parse(fs.readFileSync(path.join(wt, 'data/session-status.json'), 'utf8')); const rec = st && st.statuses && st.statuses['webui:emfile-probe']; if (rec && rec.state === 'working' && rec.reason === 'emfile') return true; } catch { } await sleep(500); } return false; })();
+    ok(landed, `FIX e2e ⑤ the pressure gone, the retry LANDED: data/session-status.json carries webui:emfile-probe as the POST set it (working, «emfile») — the POST answered ${r1.status}`);
     const sAfter = await streams('after-pressure');
     ok(sAfter.ok, 'FIX e2e ⑤ the session still streams to a new client after the pressure', JSON.stringify(sAfter));
     srv.kill('SIGKILL'); servers.delete(srv);
