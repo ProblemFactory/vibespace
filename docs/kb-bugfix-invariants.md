@@ -928,6 +928,36 @@
 - (2026-11-11) A CLOSE STALLED ~1 s: THE TOAST'S PLACEMENT HIT-TESTED THE PAGE (76 + 79 × 10.8 ms); A FOCUSED BOX'S FOLLOWER POLLED; THE FREEZE RINGS WERE EMPTY (owner; window-close-stall). 不变量 = a placement never hit-tests the page; a follower never polls; a ring accessor is set only when unset
 - (2026-11-11) THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (owner's recording: the stall watch's rAF loop, ≈ 190 ms/s at 98 Hz; window-close-stall C). 不变量 = no permanent rAF: long frames from the observer, one probe a second (kb-bugfix-invariants)
 - (2026-11-11) THE LENT KEY'S OTHER ENDS: A PAGE GONE, A REFUSED CLEAN-UP, A SAME-READ START, A HUB RESTART (B-97ae walk; passkey-lend-walk). 不变量 = every ended record goes through pkEnd; a key the browser kept is SAID; a gone session takes its authenticator (measured) ⇒ kb-bugfix-invariants.md
+- (2026-11-12) A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (job-logs-sweep) — 不变量 = what no record lists leaves job-logs 14 days after its NEWEST file; never a live / listed run; ≤ 500 a pass, said twice; no removal on the main thread (kb-bugfix-invariants)
+
+## A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (the data-move rehearsal, 2026-11-12; lane job-logs-sweep, 2.369.398)
+
+**Symptom.** The owner's hub held 123 523 entries under `data/job-logs` (543 MB), its largest store by entry count. Every walk of data/ paid for them: a backup, the data move, the hub's own sweeps.
+
+**Cause.** Three gaps added up:
+- A job's record keeps its last 20 runs (`_spawn`'s splice), and nothing removed the directory of a run it dropped.
+- The 14-day gc ages a TASK by its LAST run, and a scheduled job fires ONE child task for ever, so a cron child never aged out (15 105 of the 15 309 dropped dirs older than 14 days were cron children).
+- `rm` of a live record removed no directory, leaving 1 422 job dirs that no record names.
+
+The five removers that did exist deleted whole directories synchronously on the main loop, which on this hub is a network mount.
+
+**Invariants.**
+1. **A run dir that no record lists** (the store's or the archive's) leaves 14 days after its NEWEST file, not after its start: 10 of the owner's run dirs started more than 14 days ago and wrote within them. An empty run dir is aged by its start.
+2. **NEVER removed:**
+   - a run whose wrapper lives (pid.json against /proc: pid + starttime + boot id). An unreadable stamp keeps its run;
+   - a listed run;
+   - a run held for an unfinished scope reap;
+   - a skeleton record's dir (corrupt-store recovery);
+   - an entry of another name.
+3. **Paced:** at most 500 run dirs a pass, a pass every 30 s while a catch-up is open. The catch-up is said twice (start with the count, done with the total), and its record goes through the store writer: a restart resumes without a second start line.
+4. **NO removal under job-logs on the main thread.**
+   - ONE remover thread with a timeout.
+   - A thread that cannot end (the storage stopped answering) HOLDS the remover: no second thread beside it, and this is said once.
+   - The whole-dir verdicts (the gc's two legs, the archive cap, the ✕, the boot collapse) are their callers'; the syscalls are the thread's.
+   - The ✕ answers once the dir is gone, or past 10 s with `logsPending` («its log files are still being deleted in the background»).
+5. **The pass never reads the archive synchronously on the main thread.** It uses the archive in memory when loaded; otherwise the thread reads it, and an unreadable archive removes nothing.
+
+**Pins.** scripts/test-job-logs-sweep.mjs, red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
 
 ## BATCH ARCHIVE KEPT ROLLING BACK (the owner's incident inc-mwbn2xp8-ks0b, 2026-11-11 04:49Z: «我的批量操作一直在回滚»; lane sidebar-echo-order, .397)
 

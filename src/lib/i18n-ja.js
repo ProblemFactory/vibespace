@@ -2946,6 +2946,7 @@ export default {
   "Open panel": "パネルを開く",
   "Remove job": "ジョブを削除",
   "Remove {name} and its run history?": "{name} と実行履歴を削除しますか？",
+  "Removed. Its log files are still being deleted in the background.": "削除しました。ログファイルはバックグラウンドで削除を続けています。",
   "created": "作成",
   "no group": "グループなし",
   "view": "表示",

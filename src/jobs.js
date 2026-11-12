@@ -22,6 +22,7 @@ const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — 
 const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
+const LS = require('./job-logs-sweep.js'); // lane job-logs-sweep: what a record no longer lists leaves data/job-logs after 14 days — every removal under job-logs off the main thread
 
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp-' + process.pid;
@@ -120,6 +121,8 @@ const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
 // runs at boot and every ARCHIVE_SWEEP_MS on the engine's existing 5 s tick
 const ARCHIVE_CAP = 2000;
+const LOGS_RETRY_MS = 300_000; // lane job-logs-sweep: a failed pass inside an open catch-up is retried after 5 min (a held remover, a storage that did not answer)
+const LOGS_OWED_MAX = 5000; // lane job-logs-sweep: whole-dir removals owed after a held / failed batch, kept in memory at most
 const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // A STOP'S GRACE and THE REAP'S BOUND (lane jobs-memory-bound, acceptance round 5): a stop's SIGTERM, then STOP_GRACE_MS before
 // the kill step — the owner's stop, a timeout, an until-marker and a stop the sweep honors alike (the tick never cuts it short);
@@ -171,6 +174,12 @@ class JobManager {
     this.file = path.join(deps.dataDir, 'jobs.json');
     this.notifsFile = path.join(deps.dataDir, 'job-notifications.json');
     this.logsDir = path.join(deps.dataDir, 'job-logs');
+    // lane job-logs-sweep: THE CATCH-UP's record ({catchUp, last}) — read by the first pass's worker (never on this thread),
+    // written through the store writer (paced); null = not read yet. _logsRm = THE remover (src/job-logs-sweep.js), made on use
+    this.logsSweepFile = path.join(deps.dataDir, 'jobs-logs-sweep.json');
+    this._logsState = null; this._logsRm = null; this._logsPassP = null; this._logsGapT = null; this._logsStopped = false;
+    this._logsGone = new Map();   // id → the ✕'s removal in flight (deleted when it settles) — logsGone() answers the person after the disk
+    this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
     this.lockFile = path.join(deps.dataDir, 'jobs.lock');
     // TRIAGE ARCHIVE (design §13): terminal one-shots leave jobs.json for
     // this append-only array (newest first, capped at ARCHIVE_CAP). Loaded
@@ -218,7 +227,9 @@ class JobManager {
       const t2 = setInterval(() => this._cronTick().catch((e) => this.d.log('[jobs] cron tick failed:', e.message)), 30_000);
       const t3 = setInterval(() => this._gc().catch((e) => this.d.log('[jobs] gc failed:', e.message)), 3600_000);
       const t4 = setInterval(() => { if (this._dirty) this._save(); }, 2000);
-      for (const t of [t1, t2, t3, t4]) { t.unref?.(); this._timers.push(t); }
+      // lane job-logs-sweep: ONE pass soon after the boot (a hub that restarts more often than hourly never reached its hourly gc)
+      const t5 = setTimeout(() => this.sweepLogs({ why: 'boot' }).catch((e) => this.d.log('[jobs] job-logs pass failed:', e.message)), this._logsCfg().bootDelayMs);
+      for (const t of [t1, t2, t3, t4, t5]) { t.unref?.(); this._timers.push(t); }
       this._cronTick().catch(() => { });
       this.ready = true;
     } catch (e) {
@@ -228,7 +239,7 @@ class JobManager {
       this._forYou(null, M.forYouCopy(null, 'engine-failed', { error: e.message }));
     }
   }
-  shutdown() { try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } }
+  shutdown() { try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
 
   _takeLock() {
     try {
@@ -250,7 +261,7 @@ class JobManager {
         try {
           for (const id of fs.readdirSync(this.logsDir)) {
             if (!id.startsWith('jb-')) continue;
-            this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: 'recovered from corrupt store — resolve before reuse', owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
+            this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: LS.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
           }
         } catch { }
         this._forYou(null, M.forYouCopy(null, 'store-corrupt'));
@@ -374,7 +385,7 @@ class JobManager {
     for (const m of moved) { this.jobs.delete(m.id); this.waiters.delete(m.id); this.ansWaiters.delete(m.id); }
     this._dirty = true; // a failed flush retries on the 2 s timer; a boot re-archive is idempotent (see above)
     this._save();
-    for (const d of dropped) { try { fs.rmSync(path.join(this.logsDir, d.id), { recursive: true, force: true }); } catch { } }
+    if (dropped.length) this._logsWhole(dropped.map((d) => d.id)); // lane job-logs-sweep: off the main thread (the remover's worker)
     this.d.log(`[jobs] archived ${moved.length} one-shot(s) (${why}; ${moved.map((m) => m.archivedWhy).filter((x, i, a) => a.indexOf(x) === i).join(', ')})${dropped.length ? `, cap dropped ${dropped.length}` : ''}`);
     try { this.d.broadcast('jobs-updated', { archived: moved.map((m) => m.id) }); } catch { }
     return { archived: moved.map((m) => m.id), dropped: dropped.length };
@@ -599,7 +610,9 @@ class JobManager {
     if (i < 0) return { error: 'no such archived job' };
     const w = this._writeArchive(arch.filter((r) => r.id !== id));
     if (!w.ok) return { error: 'archive write failed: ' + w.error }; // the row stays until its removal is durable
-    try { fs.rmSync(path.join(this.logsDir, id), { recursive: true, force: true }); } catch { }
+    // lane job-logs-sweep: its dir goes off the main thread; the routes answer the person once it is gone (logsGone, bounded)
+    const gone = this._logsWhole([id]).then((a) => !!a && !a.error && (a.gone || []).includes(id));
+    this._logsGone.set(id, gone); gone.then(() => { if (this._logsGone.get(id) === gone) this._logsGone.delete(id); });
     try { this.d.broadcast('jobs-updated', { id, removed: true, archived: true }); } catch { }
     return { ok: true };
   }
@@ -1976,7 +1989,7 @@ class JobManager {
     }
     // one-shot collapse of pre-2.343.3 per-fire child records: keep the newest
     // child per cron, drop older TERMINAL ones (stamp-verified not alive)
-    const byParent = new Map();
+    const byParent = new Map(), collapsed = [];
     for (const j of this.jobs.values()) if (j.cronParent) (byParent.get(j.cronParent) || byParent.set(j.cronParent, []).get(j.cronParent)).push(j);
     for (const [, kids] of byParent) {
       if (kids.length < 2) continue;
@@ -1986,9 +1999,10 @@ class JobManager {
         if (this._verifyAlive(this._readStamp(old))) continue;
         this.jobs.delete(old.id); this._dirty = true;
         (this._collapsed = this._collapsed || new Map()).set(old.id, kids[0].id); // poll of a stale id names the survivor
-        try { fs.rmSync(path.join(this.logsDir, old.id), { recursive: true, force: true }); } catch { }
+        collapsed.push(old.id);
       }
     }
+    if (collapsed.length) this._logsWhole(collapsed); // lane job-logs-sweep: off the main thread (the remover's worker)
     for (const job of this.jobs.values()) {
       try {
         const replays = () => job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt);
@@ -2431,9 +2445,9 @@ class JobManager {
       this._spawn(child, trigger);
     }
   }
-  async _gc() {
+  async _gc({ now: at = now() } = {}) {
     if (this.readOnly) return;
-    const cutoff = now() - 14 * 86400e3;
+    const cutoff = at - 14 * 86400e3, whole = [];
     try { // spill files: age-swept alongside the records they narrate
       const dir = path.join(this.d.dataDir, 'job-notifications-read');
       for (const f of fs.readdirSync(dir)) {
@@ -2447,7 +2461,7 @@ class JobManager {
         const run = job.runs && job.runs[job.runs.length - 1];
         if (run && run.endedAt && run.endedAt < cutoff) {
           this.jobs.delete(id); this._dirty = true;
-          try { fs.rmSync(path.join(this.logsDir, id), { recursive: true, force: true }); } catch { }
+          whole.push(id);
         }
       }
     }
@@ -2455,9 +2469,107 @@ class JobManager {
     // dirs follow the SAME 14-day retention as a live record's (triage §13)
     try {
       for (const rec of this._loadArchive()) {
-        if (M.terminalAt(rec) < cutoff) { try { fs.rmSync(path.join(this.logsDir, rec.id), { recursive: true, force: true }); } catch { } }
+        if (M.terminalAt(rec) < cutoff) whole.push(rec.id);
       }
     } catch { }
+    // lane job-logs-sweep: the two legs' verdicts stay theirs; their removals and THE LAW's pass run in the remover's worker
+    if (whole.length) this._logsWhole(whole);
+    if (!this._logsGapT) await this.sweepLogs({ now: at, why: 'gc' });   // an open catch-up keeps its own pace (its timer armed); a stalled one is picked up here
+  }
+
+  // ── data/job-logs: THE REMOVER (lane job-logs-sweep, 2026-11-12; src/job-logs-sweep.js states the law) ───────────────
+  /** the pace — deps.logsSweep overrides each number (a suite's); the product's are the module's */
+  _logsCfg() {
+    const o = (this.d && this.d.logsSweep) || {};
+    const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+    return { max: num(o.max, LS.PASS_MAX), gapMs: num(o.gapMs, LS.GAP_MS), bootDelayMs: num(o.bootDelayMs, LS.BOOT_DELAY_MS), timeoutMs: num(o.timeoutMs, LS.BATCH_TIMEOUT_MS), retentionMs: num(o.retentionMs, LS.RETENTION_MS) };
+  }
+  _logsRemover() {
+    const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
+    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined });
+    return this._logsRm;
+  }
+  /** a WHOLE job dir — its caller's verdict (the gc's two legs, the archive cap, the ✕, the boot collapse) — removed in the
+   *  remover's worker; a run whose wrapper lives stays (the sweep takes it once it ends). → Promise<{gone: [ids], …}> */
+  _logsWhole(ids) {
+    if (this.readOnly || this._logsStopped) return Promise.resolve({ error: this.readOnly ? 'read-only' : 'stopped', gone: [] });
+    const list = [...new Set(ids)];
+    return this._logsRemover().whole(list).then((a) => {
+      if (a && a.error && a.error !== 'stopped') { for (const id of list) if (this._logsOwed.size < LOGS_OWED_MAX) this._logsOwed.add(id); }
+      else if (a) for (const id of list) this._logsOwed.delete(id);   // gone, or a live run kept (the law's pass takes it once it ends and ages)
+      return a;
+    });
+  }
+  /** THE LAW's pass (hourly from _gc, once after the boot, every gap while a catch-up is open): a run dir no record lists,
+   *  past the retention by its newest entry, its wrapper proven gone ⇒ removed; at most `max` a pass. ONE pass at a time — a
+   *  second ask shares the one in flight. `now` is injectable (like archiveSweep). */
+  sweepLogs({ now: at = now(), why = 'tick' } = {}) {
+    if (this.readOnly || this._logsStopped) return Promise.resolve({ skipped: this.readOnly ? 'read-only' : 'stopped' });
+    if (this._logsPassP) return this._logsPassP;
+    const p = this._logsPass(at, why).finally(() => { if (this._logsPassP === p) this._logsPassP = null; });
+    this._logsPassP = p;
+    return p;
+  }
+  async _logsPass(at, why) {
+    const cfg = this._logsCfg();
+    if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);   // what the storage did not take last time, first
+    // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
+    const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
+    // the archive from memory when it is loaded; otherwise the worker reads its file (never _loadArchive's synchronous read here)
+    const keep = LS.keepSetOf({ jobs: [...this.jobs.values()], archive: this.archive || [], held });
+    const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
+    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile, archiveFile: this.archive ? null : this.archiveFile },
+      { timeoutMs: counting ? 4 * cfg.timeoutMs : cfg.timeoutMs });   // a counting pass walks the whole tree (≈ 30 s on the owner's NAS)
+    if (!ans || ans.error) {
+      if (ans && ans.error !== 'stopped' && !ans.held) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — the next pass retries`);   // HELD is said once by the remover
+      if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));   // an open catch-up never stalls on a failed pass
+      return ans;
+    }
+    if (this._logsState === null) { const r = ans.state; this._logsState = { catchUp: r && r.catchUp && typeof r.catchUp === 'object' ? r.catchUp : null, last: (r && r.last) || null }; }
+    const st = this._logsState;
+    if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
+      st.catchUp = { startedAt: at, counted: ans.removed + ans.left, countedEntries: ans.entries + ans.leftEntries, removed: 0, entries: 0, passes: 0 };
+      this.d.log(LS.words.start({ counted: st.catchUp.counted, entries: st.catchUp.countedEntries, max: cfg.max, gapMs: cfg.gapMs }));
+    }
+    const cu = st.catchUp;
+    if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.passes++; }
+    else if (ans.removed) this.d.log(LS.words.pass(ans));
+    st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
+    if (cu && !ans.more) { this.d.log(LS.words.done(cu)); st.catchUp = null; } // …and once when it is done, with its total
+    this._logsSave();
+    if (st.catchUp) this._logsNext(cfg.gapMs);
+    return ans;
+  }
+  _logsNext(ms) {
+    if (this._logsGapT) clearTimeout(this._logsGapT);
+    if (this._logsStopped) return;
+    this._logsGapT = setTimeout(() => { this._logsGapT = null; this.sweepLogs({ why: 'catch-up' }).catch((e) => this.d.log('[jobs] job-logs pass failed:', e.message)); }, ms);
+    this._logsGapT.unref?.();
+  }
+  /** the catch-up's record through THE STORE WRITER (its own thread, paced): a SIGKILL before its write costs at most one
+   *  repeated start line (the next boot counts again what is left) */
+  _logsSave() {
+    if (this.readOnly || this._logsState === null) return;
+    require('./store-writer.js').storeWriter().dirty(this.logsSweepFile, { name: 'jobs-logs-sweep.write', produce: () => JSON.stringify(this._logsState) });
+  }
+  _logsStop() {
+    this._logsStopped = true;
+    if (this._logsGapT) { clearTimeout(this._logsGapT); this._logsGapT = null; }
+    if (this._logsRm) this._logsRm.stop();
+  }
+  /** once no pass and no removal is queued or in flight (a suite's wait; the catch-up's NEXT pass is a timer, not waited) */
+  async logsSettled() {
+    for (let i = 0; i < 1000; i++) {
+      if (this._logsPassP) { await this._logsPassP.catch(() => { }); continue; }
+      if (this._logsRm && this._logsRm.busy()) { await this._logsRm.settled(); continue; }
+      return;
+    }
+  }
+  /** the ✕'s answer after the disk: true once the archived record's dir is gone, false past `ms` (the remover goes on) */
+  logsGone(id, ms = 10_000) {
+    const p = this._logsGone.get(id);
+    if (!p) return Promise.resolve(true);
+    return new Promise((resolve) => { const t = setTimeout(() => resolve(false), ms); t.unref?.(); p.then((ok) => { clearTimeout(t); resolve(!!ok); }); });
   }
 
   // ── public API (callers pre-authorize via job-model predicates) ─────────

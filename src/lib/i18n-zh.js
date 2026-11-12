@@ -2946,6 +2946,7 @@ export default {
   "Open panel": "打开面板",
   "Remove job": "移除任务",
   "Remove {name} and its run history?": "移除 {name} 及其运行历史？",
+  "Removed. Its log files are still being deleted in the background.": "已移除。它的日志文件仍在后台删除中。",
   "created": "创建于",
   "no group": "无分组",
   "view": "可见",

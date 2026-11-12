@@ -234,7 +234,9 @@ URL — share the new one.
   delivery, subscribers + your filter, context, last run
 - `poll <id> [--wait 100] [--tail 40]` — state + context echo + log tail;
   `--wait` long-polls (cap 100s)
-- `logs <id> [--tail 200]` · `progress "text"` (in-job status line)
+- `logs <id> [--tail 200]` · `progress "text"` (in-job status line); a job keeps
+  its last 20 runs — the files of a run it no longer lists are deleted 14 days
+  after that run ended
 - a job the user CLEARED ("Clear content…") keeps its id, schedule and command;
   its name reads "[cleared at the user's request]" and the log of every run from
   before the clear is withheld (`logs` says so) — runs after it log normally;

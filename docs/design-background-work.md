@@ -191,6 +191,11 @@ CLIENT `src/lib/jobs-panel.js` (+ `src/lib/job-interact.js` §6.4) · M2 DEVICE
   substrings; match → grace 30 s → SIGTERM group → `ok(until-output)`.
 - **GC**: age-based only; never GC a record whose stamp verifies alive; never
   unlink a non-terminal run's log (rotate via wrapper reopen, don't unlink).
+  A run directory no record lists (the record keeps the last 20 runs; a removed
+  job lists none) leaves 14 days after its NEWEST file — never a run whose
+  wrapper lives, never a listed one — and nothing under `data/job-logs` is
+  removed on the main thread: one remover thread, ≤ 500 run dirs a pass, a
+  catch-up said twice (lane job-logs-sweep, 2.369.398; src/job-logs-sweep.js).
 - **Ports integration**: registered `ports` suppress the "new port" toast
   (service row instead; annotation waits on engine-ready); orphan detector
   consults the registry; orphan toast gains **"Track this"** (adopts as
@@ -701,7 +706,8 @@ timer) moves terminal one-shots out of `data/jobs.json` into
   **never while unacknowledged**;
 - never a service, never a cron parent, never a job with a live pid or an
   open interaction, never a cron child whose schedule is still active;
-- `0` = never archive. The per-job logs dir follows the existing retention.
+- `0` = never archive. The per-job logs dir follows the existing retention (and the
+  run dirs a record no longer lists leave 14 days after their newest file — §GC).
 
 Both numbers are settings rows in the **Background Work** category
 (`SETTINGS_CATEGORIES`, zh+ja). `GET /api/jobs?archived=1` lists the archive

@@ -233,7 +233,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // the panel's expand ping (already acknowledged — a no-op that says so)
       const rec = jm.archivedById(req.params.id);
       if (!rec) return res.status(404).json({ error: 'no such job' });
-      if (act === 'rm') { const r = jm.rmArchived(rec.id); return r.error ? res.status(400).json({ error: r.error }) : res.json({ success: true, ...r }); }
+      // lane job-logs-sweep: «gone for good» is said once its log dir is gone (removed off the main thread; ≤ 10 s, then `logsPending`)
+      if (act === 'rm') { const r = jm.rmArchived(rec.id); if (r.error) return res.status(400).json({ error: r.error }); return jm.logsGone(rec.id).then((gone) => res.json({ success: true, ...r, ...(gone ? {} : { logsPending: true }) })); }
       if (act === 'seen') return res.json({ success: true, changed: false, ack: M.ackState(rec), archived: true });
       return res.status(400).json({ error: `job ${rec.id} is archived — only rm applies` });
     }

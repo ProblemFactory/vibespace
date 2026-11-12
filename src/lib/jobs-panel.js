@@ -137,6 +137,7 @@ async function jobAction(app, j, act, refresh) {
   if (act === 'panel') return openInteractWindow(app, j.id); // redirects to the rail panel when it exists
   if (act === 'rm' && !(await showConfirmDialog({ title: t('Remove job'), message: t('Remove {name} and its run history?', { name: isCleared(j) ? clearedText() : j.name }), confirmText: t('Remove'), danger: true }))) return; // a cleared job's name is the sentence in this device's words (lane-redact verify r5 — the belt)
   const r = await fetchJson(`/api/jobs/${j.id}/${act}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (act === 'rm' && r?.logsPending) showToast(t('Removed. Its log files are still being deleted in the background.')); // lane job-logs-sweep: the record is gone; the remover finishes off the main thread (never beside an error)
   if (r?.error) showToast(r.error, { error: true });
   refresh?.();
 }

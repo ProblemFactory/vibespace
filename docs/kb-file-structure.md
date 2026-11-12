@@ -9,6 +9,9 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ```
 src/user-state-ops.js (NEW, PURE — lane sidebar-echo-order) — user state by item in the server's order: diffOps / applyOps, stateRev + stateEpoch, a FACT per slot (factStore / judgeRequest / moveFacts: the later act wins by each act's age), createSync (each request carries all unconfirmed) ⇒
 src/lib/sidebar-state.js _userSync / _applyServerState / _pushUserState (lane sidebar-echo-order) — the person's ops at the act to the ops door, each batch with its age; an echo at or below the page's stateRev changes nothing ⇒ the essay is src/user-state-ops.js's (below)
+src/job-logs-sweep.js + src/job-logs-sweep-worker.js — NEW (lane job-logs-sweep) THE JOB-LOGS REMOVER: runVerdict (age = NEWEST file; never listed / held / skeleton / alive), keepSetOf, createRemover (one queue, one thread, timeouts, HELD); the worker does every removal under data/job-logs ⇒
+src/jobs.js sweepLogs · _logsWhole · logsGone (lane job-logs-sweep) — an unlisted run dir goes 14 days after its newest file (≤ 500 a pass, said twice); the five whole-dir removals through the worker; the ✕ answers after the disk (≤ 10 s, else logsPending) ⇒
+scripts/test-job-logs-sweep.mjs — fast (lane job-logs-sweep): a cron fired 30× (real wrapper), live / removed-job runs, the 5 000-run catch-up on slow storage (paced, off the loop, said twice), a restart mid-way, the removers, a wedged thread, 4 mutants ⇒
 src/loop-hold.js — PURE NEW (lane hub-loop-stalls) WHAT HELD THE LOOP: law G's frame words, ONE constant SAMPLE_EXPR, /proc parsers, the verdict FROM EACH ASK (askOf: state at the post; ≤ 2 ms = JavaScript), the one bar, lines, profile words ⇒ kb-file-structure.md
 src/server/loop-holds.js — ORCH NEW (lane hub-loop-stalls) the book: heap, utilization (collections only when a maintainer opts in), ONE [loop-hold] line a hold, srv-loop-hold-ms, ring 50 + table, GET /api/loop-holds + POST …/profile (owner only) ⇒ kb-file-structure.md
 src/cpu-capture.js — PURE NEW (lane hub-loop-stalls commit 3) THE CPU CAPTURE: the trigger verdict, a tick's class by kernel state (idle never work), the .cpuprofile from ticks, the table off any .cpuprofile, the collector's split, the 15-line block ⇒ kb-file-structure.md
@@ -1658,6 +1661,50 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 - **maskForms(build)** (the engine): ONE set per vault state. `masks = null` at the top of `writeRecord` (any write, even a failed one), in `load()` and in `lock()` next to the DEK's zeroing. The quiet lock is included, because lock hooks are not. While locked it returns null and builds nothing.
 - **What a sink writes is byte-identical to the per-call build:** every masker gets fresh stream state; only the read-only compiled set is shared.
 - **Gate:** scripts/test-vault-masker-once.mjs. A new writer of `record` must go through `writeRecord` (or `load`), or the set would outlive the entries it was built from.
+
+### src/job-logs-sweep.js + src/job-logs-sweep-worker.js + src/jobs.js sweepLogs — WHAT A JOB'S RECORD NO LONGER LISTS LEAVES data/job-logs (lane job-logs-sweep, 2026-11-12)
+
+**Why it exists.** A job's record keeps its last 20 runs (`_spawn`'s splice), but the directory of a dropped run stayed for ever. A cron fires ONE child task for ever, so the 14-day gc of a task never reached it, and `rm` of a live record removed no directory. The owner's hub held 123 523 entries under job-logs, its largest store by entry count. The full record is in changelog-engineering 2.369.398.
+
+**THE LAW (runVerdict — read it before touching either file):**
+- A run dir no record lists (store or archive) is removed once its NEWEST entry is 14 days old. Its start is not its age: a service runs for weeks. An empty run dir is aged by its start.
+- **NEVER removed:**
+  - a listed run;
+  - a run held for an unfinished scope reap (`_reapLater` — it re-reads that run's pid.json every tick);
+  - a skeleton record's dir (corrupt-store recovery: `state 'unverified'` + `RECOVERED_NOTE`, `runs: []`);
+  - a run whose wrapper lives (proc-identity `aliveIdentity` of its pid.json; another boot ⇒ gone; no stamp ⇒ gone; an unreadable stamp ⇒ KEPT).
+- A run that STARTED after the cutoff is young by its name: the worker reads no disk and no /proc for it, nor for a run its record decides.
+- A job dir no record names is rmdir'd once emptied, either by this pass or because its own mtime is past the cutoff. A YOUNG empty job dir may be a spawn between its two mkdirs, so it is left to a later pass.
+- An entry that is neither `jb-…` nor numeric is never the sweep's.
+
+**ONE REMOVER — nothing under job-logs is removed on the main thread.**
+- `createRemover` keeps ONE queue and ONE worker thread:
+  - the thread is started for a batch and lingers 1 s idle, unref'd;
+  - each batch has a timeout of 120 s, ×4 for a counting pass, and is retried once;
+  - a terminated thread that has not ENDED after WEDGED_MS (2 s) is a syscall the storage never answers ⇒ HELD. No second thread is started beside it, every batch answers `{error:'held'}`, and this is said once, then «has ended — removals go on».
+- The worker answers the memory ask first (src/worker-memory.js) and throws on the main thread.
+- jobs.js keeps no `rmSync`. The five whole-dir verdicts (gc (a) and (b), the archive cap, the ✕, the boot collapse) call `_logsWhole(ids)`. A whole-dir removal keeps a run whose wrapper lives; the law's pass takes that dir once the run has ended and aged.
+- `_logsWhole` remembers ids whose batch failed or was held (`_logsOwed`, ≤ LOGS_OWED_MAX 5 000, memory only) and re-sends them first at the next pass.
+
+**THE PASS.**
+- **When it runs:** `sweepLogs({now, why})` runs ONE pass at a time (a second ask shares it). It is called by `_gc` hourly (unless a catch-up's timer is armed), ONE `setTimeout` 2 min after `init()`, and `_logsNext(G)` while a catch-up is open. A failed or held pass inside an open catch-up re-arms `_logsNext(LOGS_RETRY_MS = 5 min)`, so it never stalls.
+- **The keep set** comes from memory. The archive comes from memory when loaded, otherwise the worker reads `jobs-archive.json`. Never `_loadArchive()` here: its synchronous read is a measured main-loop hold. An unreadable archive ⇒ the pass errors and removes nothing.
+- **The catch-up:**
+  - It opens when a pass finds more than B candidates; the count comes from a counting pass that walks on past B. It is said once with the count and closed once with the total.
+  - Its record (`data/jobs-logs-sweep.json`: `{catchUp: {startedAt, counted, countedEntries, removed, entries, passes} | null, last}`) goes through `storeWriter().dirty(…, {name: 'jobs-logs-sweep.write'})`.
+  - The first pass after a boot reads that record IN THE WORKER (`_logsState === null` until then). A SIGKILL before a paced write costs at most one repeated start line.
+- **`deps.logsSweep`** `{max, gapMs, bootDelayMs, timeoutMs, retentionMs, workerPath}` is a suite's seam. The product's numbers are the module's: B 500, G 30 s, a boot delay of 2 min, 120 s, 14 days.
+
+**THE ✕ (`rmArchived`).**
+- The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`.
+- Both routes answer after `logsGone(id)` (≤ 10 s); past that they answer `logsPending: true`:
+  - the panel toasts «Removed. Its log files are still being deleted in the background.»;
+  - the CLI says «removed — its log files are still being deleted in the background».
+
+**Gotchas.**
+- `_gc({now})` takes a clock like `archiveSweep`. A suite that wants the law's pass at a clock calls `sweepLogs({now})`. `_gc` at +15 days also collects a done cron child itself (leg (a)) — that is the old rule.
+- A suite awaits removals with `logsSettled()` (a pass or a batch in flight). It does not wait for the catch-up's next timer.
+- test-sync-fs-census, mount-reader-census and test-memory-census each carry a row for the worker; move them with any new read.
 
 ### src/store-writer.js + src/store-writer-worker.js + src/store-pace.js (PURE) — NO STORE WRITE HOLDS THE MAIN THREAD (lane hub-loop-stalls commit 2, 2026-11-10)
 On the owner's hub 58 of 64 holds ≥ 1 s in six hours were the channels index's rename (21.7 MB rewritten whole, 1.3 s median on a fuse.bindfs data dir over network storage); a scratch hub on a slow stand-in showed EVERY atomic store write holding the loop for its whole rename (kb-design-lessons §19 «NO STORE WRITE HOLDS THE MAIN THREAD»; kb-bugfix-invariants).

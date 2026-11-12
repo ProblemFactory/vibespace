@@ -224,6 +224,7 @@ console.log('§6 the archive cap');
   ok(arch.length === ARCHIVE_CAP && C.jobs.size === 0, `${N} archived at once ⇒ the file holds exactly ARCHIVE_CAP=${ARCHIVE_CAP}`);
   const kept = new Set(arch.map((r) => r.id));
   ok(rows.slice(0, ARCHIVE_CAP).every((r) => kept.has(r.id)) && rows.slice(ARCHIVE_CAP).every((r) => !kept.has(r.id)), 'the cap keeps the NEWEST records (by terminal instant) and drops the oldest');
+  await C.logsSettled();   // lane job-logs-sweep: the cap's removal runs in the remover's worker (never on the main thread) — waited for here
   ok(rows.slice(-5).every((r) => !fs.existsSync(path.join(dir2, 'job-logs', r.id))) && fs.existsSync(path.join(dir2, 'job-logs', rows[0].id)), 'a cap-dropped record loses its log dir; a kept one keeps it');
   ok(arch[0].id === rows[0].id && arch[arch.length - 1].id === rows[ARCHIVE_CAP - 1].id, 'the archive is ordered newest first');
   C.shutdown();

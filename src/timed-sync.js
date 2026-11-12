@@ -37,6 +37,7 @@ const STORES = Object.freeze({
   'jobs.write': row('write', 'jobs', 'src/jobs.js', ['_save']),
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
+  'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
