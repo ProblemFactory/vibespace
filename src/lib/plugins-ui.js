@@ -151,8 +151,13 @@ export function installPluginsUI(App) {
   async openPluginsDialog({ container } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source)
     if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
+    // the broadcast listener below ENDS WITH THE MODAL'S CLOSE (2.369.398, the dialog seam's ruling: a listener that left only at
+    // the next socket frame lingered in app.ws.globalHandlers until one came) — `offWs` and the redraw timer are declared BEFORE
+    // the shell, so a close reads them through these bindings (the set-up dialog's pattern, src/lib/sidebar-mounts.js
+    // _showBootstrapDialog: a close can run before the handler registers)
+    let offWs = null, redraw = null;
     // one subject: the one Plugins manager
-    const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+    const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form', onClose: () => { clearTimeout(redraw); offWs?.(); } });
     if (shell.raised) return;   // raised: the open manager, as it was
     // rail panel: same body class as the modal so one stylesheet serves both
     if (container) container.classList.add('mounts-dialog-body');
@@ -160,9 +165,10 @@ export function installPluginsUI(App) {
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     // THE ROWS FOLLOW THE BROADCAST (lane hub-sync-holds, rank 13): a plugin's status is a KEPT fact the server refreshes after
     // this panel opens — when the refresh lands, `plugins-updated` arrives and the open panel draws the fresh rows (a row that
-    // said «Checking…» says what was found); the listener ends with the panel
-    let redraw = null;
-    const offWs = this.ws?.onGlobal?.((msg) => {
+    // said «Checking…» says what was found); the listener ends with the panel — the modal's at its close (above); the RAIL has no
+    // close to hook (its shell's close is a no-op and the next render replaces the body), so there it ends at the first frame
+    // after its body left the page
+    offWs = this.ws?.onGlobal?.((msg) => {
       if (!body.isConnected) { offWs?.(); return; }
       if (msg && msg.type === 'plugins-updated') { clearTimeout(redraw); redraw = setTimeout(() => { if (body.isConnected) render(); }, 150); }
     });

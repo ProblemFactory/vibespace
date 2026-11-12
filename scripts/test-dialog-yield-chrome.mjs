@@ -24,6 +24,8 @@
 //   ⑨ a form open on the desktop becomes its sheet when the page crosses into the phone tier (a fold, a narrowed browser) —
 //     the same element, what was typed kept; its ✕ / remove closes it
 //   ⑧ CONTROL — the phone tier (390 × 844, touch): Install plugin… is still the sheet (a .dialog-overlay, no form window)
+//   ㊴ (2.369.398) the Plugins MODAL's close ends its broadcast listener at once: opened and closed by its ✕ in ONE task (no
+//      socket frame between), the raw handler count is back (2.369.397 left it +1 until the next frame)
 // ROUND 2 (acceptance r1): ⑪ typing in the chat, then a form opened with no press since — behind, «hello world» whole; ⑫ ONE
 // Escape door — Report a problem's typed note asked about, never lost; ⑬ the OAT sign-in running + Escape — «Cancel the
 // sign-in?» over the LIVE dialog, No keeps it; ⑭ the self-update progress (Escape left off) stays; ⑮ the same form opened again
@@ -1367,6 +1369,17 @@ await step('⑧', async () => {
   const s = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); return { isMobile: !!app.isMobile, overlay: !!f && f.classList.contains('dialog-overlay'), inWindow: !!f && !!f.closest('.window'), forms: [...app.wm.windows.values()].filter((w) => w.type === 'form').length }; })()`);
   await shot('8-phone-sheet');
   check('⑧ CONTROL: on the phone tier (390 × 844, touch) Install plugin… is still the sheet — a .dialog-overlay, no form window', s.isMobile && s.overlay && !s.inWindow && s.forms === 0, s);
+});
+
+// ── ㊴ (2.369.398) the Plugins MODAL's close ends its broadcast listener AT ONCE — no frame sent, the count already back ──
+await step('㊴', async () => {
+  // still the phone tier (⑧ set it): openPluginsDialog is the modal here, never the sidebar rail
+  await evalJs(`(() => { document.querySelector('#plugin-install-dialog .dialog-close')?.click(); return true; })()`);
+  await sleep(300);
+  // ONE synchronous task: a socket frame is a task of its own, so none can be dispatched between these readings — the count is
+  // the RAW length, never the settled one (a listener that waits for the next frame would still be there)
+  const r = await evalJs(`(() => { const n = () => app.ws.globalHandlers.length; const h0 = n(); app.openPluginsDialog(); const d = document.getElementById('plugins-dialog'); const h1 = n(); const x = d && d.querySelector('.dialog-close'); if (x) x.click(); return { mobile: !!app.isMobile, opened: !!d, closer: !!x, h0, h1, h2: n(), gone: !(d && d.isConnected) }; })()`);
+  check('㊴ the Plugins modal (the phone tier) opened, then closed by its ✕ in ONE task with no socket frame between ⇒ its broadcast listener left AT THE CLOSE — the count is back (2.369.397: +1 until the next frame came)', r.mobile && r.opened && r.closer && r.gone && r.h1 === r.h0 + 1 && r.h2 === r.h0, r);
 });
 
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield-chrome: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);
