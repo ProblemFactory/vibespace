@@ -639,11 +639,13 @@ class UserTodoManager {
   _flush() {
     if (!this._dirty) return;
     const json = JSON.stringify(this._state, null, 2);
-    if (json === this._lastWritten) { this._dirty = false; return; }
-    const tmp = this._file + '.tmp';
-    timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
-    this._lastWritten = json;
+    if (json !== this._lastWritten) {
+      const tmp = this._file + '.tmp';
+      timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
+      this._lastWritten = json;
+    }
     this._dirty = false;
+    // lane job-logs-sweep r4: what memory holds IS on disk either way (written now, or already) — a waiter is answered on both roads
     const ws = this._writtenWaiters; this._writtenWaiters = null; if (ws) for (const r of ws) { try { r(true); } catch { } }
   }
 

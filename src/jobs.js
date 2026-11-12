@@ -2636,7 +2636,7 @@ class JobManager {
     // round 2: the record FIRST (read in the child, its shape validated) — what was owed before a restart is re-sent below, and a
     // catch-up of an odd shape steers nothing
     if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
-    if (this._logsState === null) { const e = 'the catch-up record could not be read — nothing removed (a fresh record would overwrite what it owes)'; if (this._logsLastErr !== e) { this._logsLastErr = e; this.d.log(`[jobs] job-logs: ${e}`); } return { error: e }; }   // a MISSING record reads as none (adopted empty); a failed read waits
+    if (this._logsState === null) return this._logsRecordUnread();   // a MISSING record reads as none (adopted empty); a failed read waits
     // round 4 §1: «THIS PROCESS HOLDS» HOLDS — a failed records read whose note is not on disk: the note is asked for again, and while
     // it is still not written the pass answers HELD here, before the owed removals and before the walk (the ✕ and a record's own
     // verdicts go on: `_logsWhole` is theirs)
@@ -2658,8 +2658,8 @@ class JobManager {
       const part = ans && ans.partial && Number.isFinite(ans.partial.removed) ? ans.partial : null;   // what a cut pass removed before it was ended
       if (ans && ans.error !== 'stopped' && !ans.held && (ans.error !== this._logsLastErr || part)) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — ${part ? `${part.removed} run dir(s) were removed before it was ended; ` : 'nothing removed; '}the next pass asks again after its rest`);   // HELD is said once by the remover; the same failure once
       if (ans) this._logsLastErr = ans.error;
-      const cuF = this._logsState && this._logsState.catchUp;
-      if (cuF && part) { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
+      const cuF = this._logsState && this._logsState.catchUp;   // a STOP's count went into the record at the stop (round 4 §3: `_logsStop`)
+      if (cuF && part && ans.error !== 'stopped') { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
       if (cuF) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS, cfg.restFactor * cfg.timeoutMs));   // a failed or cut pass RESTS (≥ 5 min, ≥ 10× its timeout); an open catch-up never stalls
       return ans;
     }
@@ -2670,13 +2670,16 @@ class JobManager {
       this._logsHeldSaid = ''; this._logsState.heldNow = []; this._logsSave();
     }
     const st = this._logsState;
+    let opened = false;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
-      st.catchUp = { startedAt: at, counted: ans.nameOld, removed: 0, entries: 0, jobDirs: 0, passes: 0 };
+      // round 4 §3: it opens WITH its first pass in it — the record made durable before the start line already counts what that pass
+      // removed (a kill right after the start line lost the first pass from the done line)
+      st.catchUp = { startedAt: at, counted: ans.nameOld, removed: ans.removed, entries: ans.entries, jobDirs: ans.jobDirs || 0, passes: 1 }; opened = true;
       this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: on disk at the open — a restart resumes it, never a second start line
       this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));   // round 3 §8: said AFTER the record is on disk (a kill between never says it twice)
     }
     const cu = st.catchUp;
-    if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; }
+    if (cu) { if (!opened) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; } }   // the opening pass is in the record already
     else if (ans.removed) this.d.log(LS.words.pass(ans));
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
     if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
@@ -2703,6 +2706,15 @@ class JobManager {
     if (this._logsHeldSaid !== line) { this._logsHeldSaid = line; this.d.log(`[jobs] job-logs clean-up HELD: ${names.join(', ')} could not be read and no note of it is on disk — nothing is removed in this process until the note is written (it is tried again before each pass)`); }
     if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));
     return { heldBy: 'unread-unnoted', removed: 0, heldFiles: [], unnoted: names };
+  }
+  /** round 4 §3: the catch-up's OWN record cannot be read — the pass waits (a fresh record would overwrite its open catch-up and what it
+   *  owes): the journal names the cause and the file, once per cause; ONE For-you item says what waits and what to move */
+  _logsRecordUnread() {
+    const file = path.basename(this.logsSweepFile), code = this._logsStateErr ? this._logsStateErr.code : null;
+    const e = `${(this._logsStateErr && this._logsStateErr.error) || 'the catch-up record could not be read'} — nothing removed; the clean-up waits until ${file} can be read or is moved away (a fresh record would overwrite what it owes)`;
+    if (this._logsLastErr !== e) { this._logsLastErr = e; this.d.log(`[jobs] job-logs: ${e}`); }
+    if (code && !this._logsRecordSaid) { this._logsRecordSaid = true; this._forYou(null, M.forYouCopy(null, 'sweep-record-unread', { file, error: code })); }
+    return { error: e };
   }
   _logsOn() { try { return !(this.d && typeof this.d.logsSweepOn === 'function' && this.d.logsSweepOn() === false); } catch { return true; } }   // the setting jobs.logsSweep (jobs-wiring)
   _logsNext(ms) {
@@ -2753,6 +2765,7 @@ class JobManager {
     if (this.readOnly) return;
     if (this._logsState) { this._logsMergeSaid(); return; }
     if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile, this.d.dataDir).then((a) => {
+      this._logsStateErr = a && a.error ? { error: a.error, code: a.code || 'unreadable' } : null;   // round 4 §3: the cause, said by the pass
       if (a && a.recordSetAside) this.d.log(`[jobs] job-logs: the catch-up record did not parse — set aside as ${a.recordSetAside}; a fresh one is started`);
       for (const n of (a && a.cutCounts) || []) this.d.log(`[jobs] job-logs: an orphaned remover's count file was cut while it was written (${n}) — its count is lost; forgotten`);
       for (const n of (a && a.badCounts) || []) this.d.log(`[jobs] job-logs: ${n} does not hold a remover's count (not counted) — forgotten`);
@@ -2795,7 +2808,10 @@ class JobManager {
   _logsStop() {
     this._logsStopped = true;
     if (this._logsGapT) { clearTimeout(this._logsGapT); this._logsGapT = null; }
-    if (this._logsRm) this._logsRm.stop();
+    // round 4 §3: a stop on the hub's REAL exit — the in-flight batch's count (as its progress said it) goes into the open catch-up NOW
+    // and the record is dirty before shutdown's exitFlush writes it (the pass's own continuation runs after the exit, i.e. never)
+    const part = this._logsRm ? this._logsRm.stop() : null, cu = this._logsState && this._logsState.catchUp;
+    if (cu && part && Number.isFinite(part.removed) && part.removed > 0) { cu.removed += part.removed; cu.entries += part.entries || 0; cu.jobDirs = (cu.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
   }
   /** once no pass and no removal is queued or in flight (a suite's wait; the catch-up's NEXT pass is a timer, not waited) */
   async logsSettled() {

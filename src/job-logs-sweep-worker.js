@@ -210,8 +210,8 @@ function stateOf({ stateFile, orphanDir: od = null }) {
   // waits (a fresh record would overwrite its open catch-up and what it owes); bytes that do not parse are set aside and a fresh
   // record starts (the catch-up's bookkeeping only — never a job record)
   let st = null, recordSetAside = null, raw = null;
-  try { raw = fs.readFileSync(stateFile, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') return { error: `the catch-up record could not be read: ${(e && (e.code || e.message)) || e}` }; }
-  if (raw != null) { try { st = JSON.parse(raw); } catch { const to = `${stateFile}.corrupt-${Date.now()}`; try { fs.renameSync(stateFile, to); recordSetAside = path.basename(to); } catch (re) { return { error: `the catch-up record did not parse and could not be set aside: ${(re && re.code) || re}` }; } } }
+  try { raw = fs.readFileSync(stateFile, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') return { error: `the catch-up record could not be read: ${(e && (e.code || e.message)) || e}`, code: String((e && (e.code || e.message)) || e).slice(0, 60) }; }
+  if (raw != null) { try { st = JSON.parse(raw); } catch { const to = `${stateFile}.corrupt-${Date.now()}`; try { fs.renameSync(stateFile, to); recordSetAside = path.basename(to); } catch (re) { return { error: `the catch-up record did not parse and could not be set aside: ${(re && re.code) || re}`, code: `did not parse; set-aside refused: ${String((re && re.code) || re).slice(0, 30)}` }; } } }
   const orphans = [], cutCounts = [], badCounts = [];
   const count = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);   // a count a remover wrote: a whole number of a batch's size, never verbatim
   if (od) { let all = []; try { all = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX)); } catch { }

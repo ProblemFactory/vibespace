@@ -719,13 +719,15 @@ try {
     if (LS) {
       const slowF = path.join(tmp, 'slow-answer-child.cjs');
       fs.writeFileSync(slowF, "process.on('message', (m) => { setTimeout(() => process.send({ seq: m.seq, removed: 0, entries: 0, more: false, gone: [] }), 3000); }); process.on('disconnect', () => process.exit(0));\n");
-      let started = 0; const cp = await import('node:child_process');
-      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, forkImpl: (...a) => { started++; return cp.fork(...a); } });
+      let started = 0; const cp = await import('node:child_process'); const saidC = [];
+      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), log: (l) => saidC.push(l), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, forkImpl: (...a) => { started++; return cp.fork(...a); } });
       const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1 }); const sweepStarts = started;
       await until(() => !R.held(), 3000);
       const w = await R.whole(['jb-12340001']);
       ok(cut.error && /no answer in/.test(cut.error) && sweepStarts === 1, `A CUT SWEEP IS NOT REPEATED at once: one child, one timeout, answered («${cut.error}») — the pass's rest comes next`);
       ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} children)`);
+      const fl = saidC.filter((l) => /remover: a \w+ batch failed/.test(l));
+      ok(fl.length === 3 && /a sweep batch failed .* — not repeated before the pass's rest$/.test(fl[0]) && /a whole batch failed .* — queued again$/.test(fl[1]) && !/queued again/.test(fl[2]), 'round 4 §3: the journal says «queued again» only for the whole-dir batch that IS queued again — the cut sweep\'s line says it waits for its pass\'s rest', fl);
       R.stop();
     }
     // c2. the REAL worker's progress: a pass over a slow storage (1 ms a removal) cut at its timeout answers what it removed so far
@@ -898,6 +900,69 @@ try {
     await until(() => LN6.some((l) => /catch-up done/.test(l)), 10000, 10);
     ok(LN6.some((l) => /catch-up done: 10 run dir\(s\) removed/.test(l)) && !fs.existsSync(path.join(o6, oname)), 'a restart between an orphan\'s count and its forget: its name in the record keeps it from being counted twice (done: 5 + 5 = 10), and its file is forgotten', LN6.filter((l) => /job-logs/.test(l)));
   }
+  // round 4 §3 (a survivor pinned): A BATCH FROM A HUB ALREADY GONE IS NEVER STARTED, WHATEVER ITS OP — the hub killed the moment its
+  // child appears (its batch message written), the child starting 400 ms late: a whole-dir batch, the record read, a forget, a note
+  if (LS) {
+    const late14 = path.join(tmp, 'late14-child.cjs');
+    fs.writeFileSync(late14, `const sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(WORKER)});\n`);
+    const hub14 = path.join(tmp, 'hub14.cjs');
+    fs.writeFileSync(hub14, `const cp = require('child_process'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst [logsDir, op, args] = JSON.parse(process.argv[2]);\nconst R = LS.createRemover({ logsDir, workerPath: ${JSON.stringify(late14)}, forkImpl: (p, a) => { const c = cp.fork(p, a, { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); globalThis.kid = c; return c; } });\nif (typeof R[op] === 'function') R[op](...args);\nsetTimeout(() => { if (globalThis.kid) process.stdout.write('CHILD ' + globalThis.kid.pid + '\\n'); }, 30);   // the batch message is WRITTEN by now\nsetInterval(() => { }, 1000);\n`);
+    const goneAtFork = async (logsDir, op, args) => {
+      const h = spawn(process.execPath, [hub14, JSON.stringify([logsDir, op, args])], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(h);
+      let o = ''; const pid = await new Promise((resolve) => { const k = setTimeout(() => { try { process.kill(h.pid, 'SIGKILL'); } catch { } resolve(0); }, 8000); h.stdout.on('data', (d) => { o += d; const m = /CHILD (\d+)/.exec(o); if (m) { clearTimeout(k); try { process.kill(h.pid, 'SIGKILL'); } catch { } resolve(Number(m[1])); } }); });
+      return pid > 0 && await until(() => { try { fs.statSync('/proc/' + pid); return false; } catch { return true; } }, 8000, 10);
+    };
+    const g14 = mkDir('g14'); const L14 = path.join(g14, 'job-logs'); fs.mkdirSync(L14, { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'g14-target'), 'kept'); fs.symlinkSync(path.join(tmp, 'g14-target'), path.join(L14, 'jb-11dc0014')); fs.mkdirSync(path.join(L14, 'jb-e0000014'));
+    const torn14 = path.join(g14, 'jobs-logs-sweep.json'); fs.writeFileSync(torn14, '{ torn'); fs.writeFileSync(path.join(g14, LS.ORPHAN_PREFIX + '1-1.json.tmp'), '{');
+    fs.writeFileSync(path.join(g14, LS.ORPHAN_PREFIX + '9-9.json'), JSON.stringify({ removed: 1, entries: 1, jobDirs: 0 }));
+    const e1 = await goneAtFork(L14, 'whole', [['jb-11dc0014', 'jb-e0000014']]);
+    const e2 = await goneAtFork(L14, 'state', [torn14, g14]);
+    const e3 = await goneAtFork(L14, 'forget', [g14, [LS.ORPHAN_PREFIX + '9-9.json']]);
+    const e4 = await goneAtFork(L14, 'note', [g14, [{ name: 'jobs.json.corrupt-unread', body: {} }]]);
+    let lk = false; try { lk = fs.lstatSync(path.join(L14, 'jb-11dc0014')).isSymbolicLink(); } catch { }
+    ok(e1 && e2 && e3 && e4 && lk && has(L14, 'jb-e0000014') && fs.readFileSync(torn14, 'utf8') === '{ torn' && has(g14, LS.ORPHAN_PREFIX + '1-1.json.tmp') && has(g14, LS.ORPHAN_PREFIX + '9-9.json') && !has(g14, 'jobs.json.corrupt-unread'), 'round 4 §3: a batch from a hub already gone is never started, WHATEVER its op — a whole-dir batch (a link and an empty job dir untouched), the record read (a torn record not renamed, a cut count kept), a forget, a note', { e1, e2, e3, e4, lk });
+  }
+  // round 4 §3: A STOP ON THE HUB'S REAL EXIT KEEPS THE IN-FLIGHT BATCH'S COUNT — a child-process hub that exits the way server.js
+  // shutdownNow does (beginExit, the rank-0 flush, the jobs engine's shutdown, the last exitFlush, process.exit) mid-batch
+  if (LS) {
+    const slowX = path.join(tmp, 'slowX-child.cjs');
+    fs.writeFileSync(slowX, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 15; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(WORKER)});\n`);
+    const x9 = mkDir('x9'); fs.mkdirSync(path.join(x9, 'job-logs'), { recursive: true });
+    const xb = Date.now() - 50 * DAY; for (let i = 0; i < 60; i++) seedRun(x9, 'jb-0ld0b009', xb + i * 1000, { ageMs: 30 * DAY });
+    fs.writeFileSync(path.join(x9, 'jobs.json'), JSON.stringify([{ id: 'jb-0ld0b009', kind: 'task', name: 'often run', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [] }]));
+    const hubX = path.join(tmp, 'exiting-hub-x9.cjs');
+    fs.writeFileSync(hubX, `const { JobManager } = require(${JSON.stringify(path.join(ROOT, 'src/jobs.js'))}); const SW = require(${JSON.stringify(path.join(ROOT, 'src/store-writer.js'))}).storeWriter();\nconst jm = new JobManager({ dataDir: ${JSON.stringify(x9)}, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => process.stdout.write(a.join(' ') + '\\n'), memoryRungs: [], logsSweep: { max: 20, gapMs: 30, restFactor: 1, bootDelayMs: 20, workerPath: ${JSON.stringify(slowX)} } });\njm.init(); setInterval(() => { }, 1000);\nprocess.on('SIGTERM', () => { try { SW.beginExit(); SW.exitFlush({ only: 'rank0' }); } catch { } jm.shutdown(); try { SW.exitFlush({ debtMs: 0 }); } catch { } process.exit(0); });   // THE EXIT'S ORDER (server.js shutdownNow)\n`);
+    const leftX = () => runsOn(x9, 'jb-0ld0b009').length;
+    const hx = spawn(process.execPath, [hubX], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(hx);
+    let outX = ''; hx.stdout.on('data', (d) => { outX += d; });
+    const midX = await until(() => /catch-up: 60 run dir/.test(outX) && leftX() <= 34 && leftX() >= 24, 15000, 2);   // pass 1 recorded; pass 2 at least six removals in
+    const exitedX = new Promise((r) => hx.once('exit', r)); try { process.kill(hx.pid, 'SIGTERM'); } catch { } await Promise.race([exitedX, sleep(8000)]);
+    await sleep(80);
+    let recX = null; try { recX = JSON.parse(fs.readFileSync(path.join(x9, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+    const goneX = 60 - leftX();
+    ok(midX && recX && recX.catchUp && recX.catchUp.removed >= goneX - 1 && recX.catchUp.removed <= goneX, `round 4 §3: a stop on the hub's REAL exit road keeps the in-flight batch's count — the record the exit flushed says ${recX && recX.catchUp && recX.catchUp.removed}, ${goneX} are gone (a progress message in the pipe at the stop may lag one)`, { midX, catchUp: recX && recX.catchUp });
+  }
+  // round 4 §3 (a survivor pinned): what a ✕ owed BEFORE A RESTART is re-sent while the clean-up is PAUSED — the record read first
+  if (LS) {
+    const p13 = mkDir('p13');
+    const owedR = seedRun(p13, 'jb-a8c0ff13', Date.now() - DAY), cand13 = seedRun(p13, 'jb-0e1a0b13', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    fs.writeFileSync(path.join(p13, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: null, last: null, heldSaid: [], owed: ['jb-a8c0ff13'], heldNow: [], orphansCounted: [] }));
+    const { jm: P13 } = boot(p13, { bootDelayMs: 20 }, { logsSweepOn: () => false });
+    await until(() => !has(owedR), 5000, 10); await settle(P13); await gcAt(P13, Date.now());
+    ok(!has(owedR) && has(cand13), 'round 4 §3: a ✕ owed BEFORE A RESTART is finished by the next engine while the clean-up is PAUSED (its record read first) — the clean-up\'s own candidate stays');
+    P13.shutdown();
+  }
+  // round 4 (NOT ASKED, a reader's side note): the For-you store answers «written» when its flush finds memory already on disk too
+  {
+    const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
+    const ut = fs.mkdtempSync(path.join(tmp, 'ut-')); const U = new UserTodoManager({ dataDir: ut, onChange() { } });
+    U.flush(); U._dirty = true;   // nothing changed since the last write: memory IS on disk
+    const w = typeof U.whenWritten === 'function' ? U.whenWritten() : null; U.flush();   // the release has no whenWritten: red by name
+    const answered = !!w && await Promise.race([w.then(() => true), sleep(500).then(() => false)]);
+    ok(answered, 'the For-you store\'s whenWritten is answered when its flush finds memory unchanged (a «said» never waits for an unrelated later write)');
+    try { U.stop && U.stop(); } catch { }
+  }
   // an IDLE child ends — no process parked between two passes
   if (LS) {
     const cpm = await import('node:child_process'); const forked = [];
@@ -921,6 +986,7 @@ try {
       log: (...a) => { const l = a.join(' '); logs8.push(l); if (/job-logs catch-up: 30 run dir/.test(l)) { try { onDiskAtStart = JSON.parse(fs.readFileSync(path.join(s8, 'jobs-logs-sweep.json'), 'utf8')); } catch { onDiskAtStart = false; } } } });
     J8.init(); engines.push(J8); await J8.sweepLogs({ why: 'boot' });
     ok(onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.counted === 30, 'the catch-up\'s start line is said only once its record is ON DISK (a kill between never says it twice)');
+    ok(onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.removed === 10 && onDiskAtStart.catchUp.passes === 1, `round 4 §3: the record on disk AT the start line already holds the opening pass (removed ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.removed} of 10, passes ${onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.passes}) — a kill right after it leaves the done line whole`);
     // b. a batch ended by a STOP keeps its count (progress after every removal)
     const slow8 = path.join(tmp, 'slow8-child.cjs');
     fs.writeFileSync(slow8, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 15; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
@@ -938,9 +1004,11 @@ try {
     // PARSE is set aside and a fresh one starts
     const c8 = mkDir('c8'); fs.mkdirSync(path.join(c8, 'jobs-logs-sweep.json'));   // a directory in its place: EISDIR
     const c8Run = seedRun(c8, 'jb-0e1a00c8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
-    const { jm: C8, logs: LC8 } = boot(c8);
+    const { jm: C8, logs: LC8, items: IC8 } = boot(c8);
     await sweepAt(C8, Date.now()); await sweepAt(C8, Date.now());
     ok(has(c8Run) && fs.statSync(path.join(c8, 'jobs-logs-sweep.json')).isDirectory() && LC8.filter((l) => /the catch-up record could not be read/.test(l)).length === 1, 'a catch-up record that cannot be READ (a directory in its place): the pass WAITS — nothing removed, nothing overwritten, said once');
+    const ic8 = IC8.filter((n) => n && n.fact === 'sweep-record-unread');
+    ok(LC8.some((l) => /the catch-up record could not be read: EISDIR — nothing removed; the clean-up waits until jobs-logs-sweep\.json can be read or is moved away/.test(l)) && ic8.length === 1 && ic8[0].words.params.file === 'jobs-logs-sweep.json' && ic8[0].words.params.error === 'EISDIR', 'round 4 §3: the journal names the cause (EISDIR) and the file, and ONE For-you item says what waits and what to move (over two passes)', { items: ic8.length });
     const d8 = mkDir('d8'); fs.writeFileSync(path.join(d8, 'jobs-logs-sweep.json'), '{ "catchUp": { torn');
     const d8Run = seedRun(d8, 'jb-0e1a00d8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: D8, logs: LD8 } = boot(d8); await sweepAt(D8, Date.now());

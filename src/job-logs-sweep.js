@@ -19,8 +19,9 @@
 //      the store writer;
 //   4. NOTHING UNDER job-logs IS REMOVED ON THE MAIN THREAD: every removal — the sweep's, and the whole-directory removals
 //      whose verdicts stay their callers' (the hourly gc's two legs, the archive cap, the ✕ on an archived row, the boot's
-//      collapse of pre-2.343.3 children) — runs in ONE worker thread (src/job-logs-sweep-worker.js), started per batch,
-//      gone when its queue is empty, terminated past its timeout (the batch said once and queued again).
+//      collapse of pre-2.343.3 children) — runs in ONE child process (src/job-logs-sweep-worker.js), started per batch,
+//      gone when its queue is empty, killed past its timeout (said once; a whole-dir batch is queued again once, a cut sweep
+//      waits for its pass's rest).
 // PURE here (the verdict, the keep set, the words) + the main-thread side of the worker (a queue; no fs call of its own).
 // scripts/test-job-logs-sweep.mjs pins it.
 const path = require('path');
@@ -30,7 +31,7 @@ const RETENTION_MS = 14 * 86400e3;   // a finished task's (src/jobs.js _gc): the
 const PASS_MAX = 500;                // B — run dirs removed per pass (≈ 2 000 entries on the owner's shape)
 const GAP_MS = 30_000;               // G — between two passes while a catch-up is open
 const BOOT_DELAY_MS = 120_000;       // the first pass after a boot (a hub that restarts more often than hourly still sweeps)
-const BATCH_TIMEOUT_MS = 120_000;    // a batch past this is terminated, said once, queued again (≤ 2 tries)
+const BATCH_TIMEOUT_MS = 120_000;    // a batch past this is killed and said once (a whole-dir batch queued again once; a sweep rests)
 const IDLE_MS = 1000;                // an idle worker lingers this long (unref'd) for the next batch, then is terminated
 // «KEPT UNTIL EVIDENCE» (round 3 §5): no clock — src/job-logs-sweep-worker.js namedRuns (a running process's argv naming the run dir)
 // a remover whose hub ended stops between two run dirs and leaves what it removed in this file in the data dir (the next engine
@@ -95,7 +96,9 @@ const words = {
   start: ({ counted, max, gapMs }) => `[jobs] job-logs catch-up: ${n0(counted)} run dir(s) that started more than 14 days ago and no record lists — removing at most ${max} per pass off the main thread, resting at least ${every(gapMs)} (ten times a pass's own time) between passes`,
   done: ({ removed, entries, jobDirs = 0, kept = 0, passes, startedAt }) => `[jobs] job-logs catch-up done: ${n0(removed)} run dir(s) removed (${n0(entries)} entries) and ${n0(jobDirs)} job dir(s) no record names; ${n0(kept)} kept (young by their newest file, live, or their stamp unjudgeable) — ${passes} pass(es) since ${Number.isFinite(Number(startedAt)) ? new Date(Number(startedAt)).toISOString() : 'an earlier boot'}`,
   pass: ({ removed, entries }) => `[jobs] job-logs: ${n0(removed)} run dir(s) past the 14-day retention that no record lists removed (${n0(entries)} entries)`,
-  failed: ({ op, error, tries }) => `[jobs] job-logs remover: a ${op} batch failed (${error}) — ${tries < 2 ? 'queued again' : 'given up; the next pass retries'}`,
+  // round 4 §3: the words follow the batch's real fate — only a whole-dir batch is queued again (once); a cut sweep waits for its
+  // pass's rest; the record's, the note's and an orphan's ops are asked again by the next pass
+  failed: ({ op, error, requeued }) => `[jobs] job-logs remover: a ${op} batch failed (${error}) — ${requeued ? 'queued again' : op === 'sweep' ? 'not repeated before the pass\'s rest' : op === 'whole' ? 'given up; it is owed, re-sent before the next pass' : 'given up; the next pass asks again'}`,
 };
 
 /** THE MAIN-THREAD SIDE: one queue, one CHILD at a time (started for a batch; idle, it lingers IDLE_MS unref'd, then goes), a
@@ -128,10 +131,11 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     }
     if (it) {
       it.tries = (it.tries || 0) + 1;
-      try { log(words.failed({ op: it.msg.op, error, tries: it.tries })); } catch { }
       // round 2 law 3: only a WHOLE-dir batch (its caller's verdict) is retried at once; a cut SWEEP is never repeated before
       // its rest (the pass's failure arms it) — it answers what it removed before it was ended
-      if (it.tries < 2 && !stopped && it.msg.op === 'whole') queue.unshift(it); else it.resolve({ error, ...(it.progress ? { partial: it.progress } : {}) });
+      const requeued = it.tries < 2 && !stopped && it.msg.op === 'whole';
+      try { log(words.failed({ op: it.msg.op, error, requeued })); } catch { }
+      if (requeued) queue.unshift(it); else it.resolve({ error, ...(it.progress ? { partial: it.progress } : {}) });
     }
     next();
   };
@@ -193,8 +197,9 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     busy: () => !!cur || queue.length > 0,
     held: () => !!wedged,
     // a stop never waits for the child: it is killed and left to the kernel (a child wedged in a storage call ends when the call
-    // does; the hub's own exit does not join it)
-    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.kill('SIGKILL'); } catch { } try { w && refs(w, false); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped', ...(it.progress ? { partial: it.progress } : {}) }); next(); },   // round 3 §8: a stopped batch answers what it removed
+    // does; the hub's own exit does not join it). Round 4 §3: it RETURNS the in-flight sweep's count as its progress said it — the
+    // hub's exit flushes the record right after, before any continuation of the pass could run
+    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.kill('SIGKILL'); } catch { } try { w && refs(w, false); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped', ...(it.progress ? { partial: it.progress } : {}) }); next(); return it && it.msg.op === 'sweep' && it.progress ? { ...it.progress } : null; },   // round 3 §8: a stopped batch answers what it removed
   };
 }
 

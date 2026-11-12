@@ -100,6 +100,8 @@ try {
     const iHold = pass.indexOf('return this._logsHeldUnnoted(cfg)'), iOwed = pass.indexOf('await this._logsWhole([...this._logsOwed])'), iWalk = pass.indexOf('this._logsRemover().sweep(');
     ok(iHold > 0 && iOwed > iHold && iWalk > iHold, 'round 4 §1: the pass answers HELD for a note not on disk BEFORE the owed re-send and before the walk');
     if (LS) {
+      const fw = (op, requeued) => LS.words.failed({ op, error: 'no answer in 2 s', requeued });
+      ok(/queued again$/.test(fw('whole', true)) && !/queued again/.test(fw('sweep', false)) && /not repeated before the pass's rest/.test(fw('sweep', false)) && !/queued again/.test(fw('state', false)) && !/queued again/.test(fw('whole', false)), 'round 4 §3: «queued again» only for a whole-dir batch that IS queued again; a cut sweep waits for its pass\'s rest');
       ok(!!LS.NOTE_NAME && typeof LS.whenOf === 'function' && LS.NOTE_NAME.test('jobs.json.corrupt-unread') && LS.NOTE_NAME.test('jobs-archive.json.corrupt-unread') && !LS.NOTE_NAME.test('jobs.json.corrupt-unread-1700000000000') && !LS.NOTE_NAME.test('../jobs.json.corrupt-unread') && /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/.test(LS.whenOf(1794500000000)), 'round 4 §2: ONE note name per store (`<store>.corrupt-unread`, no moment in it, no path), and the failure\'s moment in words that need no translation');
     }
   }
