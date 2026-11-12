@@ -224,16 +224,27 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
         : lst === 'fail' ? t('Written to this account’s folder, but Claude Code {cli} uses long-lived tokens differently: running sessions continue, no new ones are placed here — For you says what differed and what to do. The long-lived token is valid until {date}.', { date, cli })
         : lst === 'cannot-run' || lst === 'aborted' ? t('Written to this account’s folder, but VibeSpace could not check Claude Code {cli} on this machine: running sessions continue, no new ones are placed here — For you says why and has Check again. The long-lived token is valid until {date}.', { date, cli })
         : t('Written to this account’s folder, but Claude Code {cli} is not in this VibeSpace’s records yet: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.', { date, cli });
+      // A QUIET STATE IS A MARK (lane oat-chip-icon, 2026-11-12, owner: «让这个长期 token 不要占据备注的空间，变成一个小
+      // icon 或者放到别处。»): a token in the folder, verified, not in its last day, not held, asks nothing of the person — the
+      // chip is its clock alone (its noun is the screen reader's name, its sentence the hover, its door the same), and the note
+      // behind it gets the line. Words stay where they are news: the last day, HELD, a pool member's name (below)
+      const quiet = !near && !held;
       const titleOk = held ? title
         : t('Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date, cli });
-      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${titleOk}${tail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
+      const endTail = near && oatCountdownCase(a) ? ' · ' + oatCountdownTitle(a) : '';   // the countdown tag's hover, said once (r2)
+      if (quiet) return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat acct-login-quiet" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" aria-label="${escHtml(label)}" title="${titleOk}${tail}">${ROSTER_ICONS.CLOCK}</span>`;
+      return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${titleOk}${tail}${endTail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
     }
     // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it
     const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code) : '';
     const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
       : t('long-lived token only');
     const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
-    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
+    // …and «long-lived token only» is quiet too (lane oat-chip-icon, law 3): nothing to do now — the account's own sessions
+    // run on the token, only ⟳ needs a sign-in, which its hover says; its last day and a refusal keep their words
+    if (!near && !refused) return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat acct-login-quiet" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" aria-label="${escHtml(label)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}</span>`;
+    const endTail = near && oatCountdownCase(a) ? ' · ' + oatCountdownTitle(a) : '';   // the countdown tag's hover, said once (r2)
+    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}${tail}${endTail}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
   }
   const dead = ls.state === 'expired' || ls.state === 'logged-out';
   if (!dead && !(local && ls.state === 'expiring')) return '';
@@ -292,7 +303,10 @@ export function serveLapsedChipHtml(a, { mode = 'manual', pooled = true } = {}) 
 
 export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '', note = '' } = {}) {
   const hard = login + (oatWarn ? oat : '');
-  const soft = prov + (oatWarn ? '' : oat) + note;
+  let soft = prov + (oatWarn ? '' : oat) + note;
+  // A SEPARATOR STANDS BETWEEN WORDS (lane oat-chip-icon r2): when nothing WORDED precedes the soft box on its line — no chip,
+  // or a quiet chip that is its clock alone — its first part starts at once, without its «·» (the line's gap is enough)
+  if (soft && !hard.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]*>/g, '').trim()) soft = soft.replace(/^(\s*<span\b[^>]*>)\s*[·・]\s*/, '$1');
   if (!hard && !soft) return '';
   return `<span class="acct-key-extra">${hard}${soft ? `<span class="acct-extra-soft">${soft}</span>` : ''}</span>`;
 }
@@ -372,6 +386,15 @@ const oatAskTitle = (a) => (a.oatIdentity === 'hint'
  *  section (`local: false`) shows only the dead one. The healthy green tag
  *  is not drawn beside the 「仅长期 token」 chip (the word already says there
  *  is a token); a countdown or a death is another fact and stays. */
+/** THE TOKEN'S LAST DAY IS SAID ONCE (lane oat-chip-icon r2): while the login chip counts the token down («ends in {left}» —
+ *  an oat-only row on this machine, under a day left) the ≤ 30-day countdown tag is the same fact in another unit — it steps
+ *  aside, and its hover sentence (re-mint it in ⋯ → Long-lived token) rides the chip's hover. The chip keeps its door. */
+export const oatEndOnChip = (a, { local = true } = {}) => !!(local && a && a.loginState && a.loginState.state === 'oat-only'
+  && typeof a.loginState.msLeft === 'number' && a.loginState.msLeft < 24 * 3600e3);
+/** the countdown tag's own case (oatTagHtml's ≤ 30-day branch: no other token fact ahead of it) */
+const oatCountdownCase = (a) => !!(a && a.type === 'subscription' && a.oat && a.oatDaysLeft > 0 && a.oatDaysLeft <= 30
+  && !oatForeign(a) && !oatIdentityAsk(a) && !oatUnknownRoad(a) && !oatUnverified(a));
+const oatCountdownTitle = (a) => t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft });
 export function oatTagHtml(a, { local = true } = {}) {
   if (!a || a.type !== 'subscription' || !a.oat) return '';
   const oatDead = a.oatDaysLeft <= 0;
@@ -390,7 +413,7 @@ export function oatTagHtml(a, { local = true } = {}) {
     : oatUnverified(a)
     ? ` <span class="acct-blocked-hint acct-oat-unverified" title="${escHtml(t('No usage reading has checked this long-lived token against the account since it was saved over a day ago. Re-bind it, or re-mint it while signed in as this account, in ⋯ → Long-lived token.'))}">· ${t('Identity unverified')}</span>`
     : a.oatDaysLeft <= 30
-    ? ` <span class="acct-blocked-hint" title="${t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in ⋯ → Long-lived token.', { n: a.oatDaysLeft })}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`
+    ? (oatEndOnChip(a, { local }) ? '' : ` <span class="acct-blocked-hint" title="${oatCountdownTitle(a)}">${t('· long-lived token · {n}d left', { n: a.oatDaysLeft })}</span>`)
     : oatOnlyChipShown(a, { local }) ? ''
     : ` <span class="acct-linked-hint" title="${t('Has a long-lived token: usable on any machine (incl. paired devices) without shipping the login. Renews in {n} days.', { n: a.oatDaysLeft })}">${t('· long-lived token')}</span>`;
 }
@@ -3238,8 +3261,11 @@ export function installManageAgents(App, ctx = {}) {
       // that it's an independent copy)
       const provTag = a.originHost
         ? ` <span class="acct-linked-hint" title="${t('Imported from {host}’s Console login — an independent copy held in VibeSpace (not linked to {host}); usable on any machine.', { host: escHtml(a.originHost) })}">${t('· from {host}', { host: escHtml(a.originHost) })}</span>` : '';
+      // the note is cut by its BOX alone (lane oat-chip-icon r3): the soft box's one line and its own ellipsis
+      // (.acct-extra-soft — nowrap, so a line break or a long word never grows the row) decide what shows, never a count in
+      // the markup; its whole text stays in the title and in ⋯ → Account note
       const noteTag = a.note
-        ? ` <span class="acct-blocked-hint" title="${escHtml(a.note)}">· ${escHtml(String(a.note).slice(0, 24))}${a.note.length > 24 ? '…' : ''}</span>` : '';
+        ? ` <span class="acct-blocked-hint" title="${escHtml(a.note)}">· ${escHtml(String(a.note))}</span>` : '';
       // Long-lived token state (oatTagHtml): quiet while healthy, amber under 30 days, red once expired.
       const oatTag = oatTagHtml(a, { local: !selectedHost });
       // LOGIN-SESSION expiry (2026-09-07): the chip that makes a dying login

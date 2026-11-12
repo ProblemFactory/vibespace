@@ -509,7 +509,8 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   else {
     const ls = am.list().accounts.find((a) => a.id === wiped);
     const chip = MA.loginExpiryChipHtml(ls);
-    ok(/>Long-lived token<\/span>$/.test(chip) && /title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip) && !/written to this account’s folder \(CLI/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip: the noun "Long-lived token"; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
+    // lane oat-chip-icon (2026-11-12): a QUIET token's chip is its clock alone — the noun is its screen-reader name
+    ok(/<\/svg><\/span>$/.test(chip) && !/>Long-lived token</.test(chip) && /aria-label="Long-lived token"/.test(chip) && /title="Written to this account’s folder; CLI 2\.1\.296 verified\. /.test(chip) && !/written to this account’s folder \(CLI/.test(chip) && /data-relogin="sub-/.test(chip) && !chip.includes(OAT.slice(14, 30)), 'the member row\'s chip (quiet): the clock alone, the noun "Long-lived token" its screen-reader name; its hover leads "Written to this account’s folder; CLI 2.1.296 verified." (the re-login door kept for the quota ⟳)', chip.slice(0, 200));
     const heldChip = MA.loginExpiryChipHtml({ ...ls, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.999' } });
     ok(/>Long-lived token<\/span>$/.test(heldChip) && /title="Written to this account’s folder, but Claude Code 2\.1\.999 is not in this VibeSpace’s records yet: running sessions continue/.test(heldChip) && !/verified|not measured/.test(heldChip), 'a HELD file: the same noun "Long-lived token"; the hover names the hub\'s CLI as not in the records yet (lane cli-self-measure: never «not measured»), never "verified"', heldChip.slice(0, 300));
     const poolRow = amP.list().accounts.find((a) => a.id === P);

@@ -1058,6 +1058,23 @@ console.log('— §5 wiring');
   ck('§5x the login chip PRECEDES the note, outside the ellipsis box; provenance then the note LAST inside it; an expiring token warning sits whole beside the chip', eo.ok);
   const oldOrder = ma.replace(/(export function acctExtrasHtml\([^)]*\) \{)[\s\S]*?\n\}\n/, '$1\n  if (!(login || oat || prov || note)) return \'\';\n  return `<span class="acct-key-extra">${prov}${note}${oat}${login}</span>`;\n}\n');
   ck('§5x CONTROL: a patched copy with the OLD order (prov, note, oat, chip on one ellipsis line) goes red', oldOrder !== ma && extrasOrder(oldOrder).ok === false);
+  // lane oat-chip-icon r2 — A SEPARATOR STANDS BETWEEN WORDS: after a chip that is its clock alone (or no chip at all) the
+  // soft box's first part starts at once; after a WORDED chip its «·» stays. CONTROL: the strip line cut.
+  const sepLaw = (src) => {
+    const i = src.indexOf('export function acctExtrasHtml('); if (i < 0) return { ok: false };
+    const fn = new Function(src.slice(i, src.indexOf('\n}\n', i) + 2).replace(/^export /, '') + '\nreturn acctExtrasHtml;')();
+    const quietChip = ' <span class="acct-blocked-hint acct-login-chip acct-login-oat acct-login-quiet" role="button" aria-label="long-lived token only"><svg width="14" height="14"><circle/></svg></span>';
+    const worded = ' <span class="acct-blocked-hint acct-login-chip" role="button">login expires in 13 h</span>';
+    const note = ' <span class="acct-blocked-hint" title="3548 09">· 3548 09</span>', prov = ' <span class="acct-linked-hint">・box から</span>';
+    const soft = (x) => (x.match(/<span class="acct-extra-soft">([\s\S]*)<\/span><\/span>$/) || [])[1] || '';
+    const q = soft(fn({ login: quietChip, note })), qp = soft(fn({ login: quietChip, prov, note })), none = soft(fn({ note })), w = soft(fn({ login: worded, prov, note }));
+    return { ok: q === ' <span class="acct-blocked-hint" title="3548 09">3548 09</span>' && qp.startsWith(' <span class="acct-linked-hint">box から</span>') && qp.endsWith(note)
+      && none === ' <span class="acct-blocked-hint" title="3548 09">3548 09</span>' && w === prov + note, q, qp, none, w };
+  };
+  const sl = sepLaw(ma);
+  ck('§5x r2 (lane oat-chip-icon): after a quiet chip (its clock alone) or no chip, the soft box starts without its «·» (the note «3548 09»; provenance «box から», the note behind it keeps its «·»); after a worded chip every «·» stays', sl.ok, sl);
+  const noStrip = ma.replace(/\n  if \(soft && !hard\.replace\([^\n]*\n/, '\n');
+  ck('§5x r2 CONTROL: a copy without the strip line keeps the orphan «·» after the quiet chip (red)', noStrip !== ma && sepLaw(noStrip).ok === false);
   ck('the chip ACTION is the existing re-login flow (no second login path)', /acct-login-chip'\)/.test(ma) && /this\._reloginSubscription\(target, targetAcct, refresh\)/.test(ma));
   ck('the chip is an SVG icon, never emoji, and never a literal colour', /ROSTER_ICONS\.CLOCK/.test(ma) && /var\(--red/.test(ma) && !/[\u{1F300}-\u{1FAFF}]/u.test(ma.slice(ma.indexOf('loginExpiryChipHtml'), ma.indexOf('loginExpiryChipHtml') + 3000)));
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
@@ -1900,7 +1917,13 @@ console.log('— §10 login × long-lived token (oat-only)');
     const CUT_FOLD = ["export const oatOnlyChipShown = (a, { local = true } = {}) => !!(local && a && a.loginState && a.loginState.state === 'oat-only');", 'export const oatOnlyChipShown = () => false;'];
     const CUT_WORD = ["const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })\n      : t('long-lived token only');",
       "const label = near ? t('login expired · long-lived token ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })\n      : t('login expired · sessions use the long-lived token; usage refresh needs re-login');"];
-    const maBase = maSrc.replace(CUT_FOLD[0], CUT_FOLD[1]).replace(CUT_WORD[0], CUT_WORD[1]);
+    // lane oat-chip-icon (2026-11-12, owner: «让这个长期 token 不要占据备注的空间，变成一个小 icon 或者放到别处。»): a QUIET token
+    // (not in its last day, no refusal) is the chip's clock alone — its words are the screen reader's name. CUT_QUIET = the
+    // not-in-folder quiet return, cut: the base control draws the base words, the WORDS control draws today's words
+    const CUT_QUIET = maSrc.split('\n').find((l) => l.startsWith('    if (!near && !refused) return ') && l.includes('acct-login-quiet')) || '@none@';
+    const maBase = maSrc.replace(CUT_FOLD[0], CUT_FOLD[1]).replace(CUT_WORD[0], CUT_WORD[1]).replace(CUT_QUIET + '\n', '');
+    const maWords = maSrc.replace(CUT_QUIET + '\n', '');
+    ck('the icon control cut the quiet return out of manage-agents.js (its words back on the chip)', CUT_QUIET !== '@none@' && maSrc.split(CUT_QUIET).length === 2 && !maWords.includes(CUT_QUIET));
     ck('the one-word control cut both changes out of manage-agents.js (the fold + the chip word)', maSrc.includes(CUT_FOLD[0]) && maSrc.includes(CUT_WORD[0]) && !maBase.includes(CUT_FOLD[0]) && !maBase.includes(CUT_WORD[0]));
     await esbuild.build({ stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' }, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma-base.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
     // WIRING: the roster row composes exactly these helpers, and the word has exactly two doors (the chip; the ident of a token row with no chip)
@@ -1920,10 +1943,13 @@ console.log('— §10 login × long-lived token (oat-only)');
     const fullRows = "const F = (o) => Object.assign({ type: 'subscription', oat: true, oatDaysLeft: 360 }, o); const LS = " + lsRow + ";\n"
       + "const FULL = [['A', F({ id: 'sub-a', name: 'Work', loggedIn: false, loginState: LS }), '', true], ['B', F({ id: 'sub-b', name: 'Home', loggedIn: true, subscriptionType: 'max', loginState: LS }), 'you@example.com', true],"
       + " ['Ae', F({ id: 'sub-c', name: 'Side', loggedIn: false, loginState: LS }), 'you@example.com', true], ['amber', F({ id: 'sub-d', name: 'Old', loggedIn: true, subscriptionType: 'max', oatDaysLeft: 12, loginState: LS }), 'you@example.com', true],"
-      + " ['hostA', F({ id: 'sub-a', name: 'Work', loggedIn: false, loginState: LS }), '', false], ['bare', F({ id: 'sub-e', name: 'Token', loggedIn: false, loginState: { state: 'unknown' } }), '', true]];\n"
+      + " ['hostA', F({ id: 'sub-a', name: 'Work', loggedIn: false, loginState: LS }), '', false], ['bare', F({ id: 'sub-e', name: 'Token', loggedIn: false, loginState: { state: 'unknown' } }), '', true],"
+      // lane oat-chip-icon r2: a quiet row with a note (no orphan «·»), a row in the token's LAST DAY (said once)
+      + " ['noted', F({ id: 'sub-n', name: 'Noted', loggedIn: true, subscriptionType: 'max', loginState: LS, note: '3548 09' }), 'you@example.com', true],"
+      + " ['last', F({ id: 'sub-l', name: 'Last', loggedIn: true, subscriptionType: 'max', oatDaysLeft: 0.8, loginState: " + lsNear + ", note: '3548 09' }), 'you@example.com', true]];\n"
       + "document.getElementById('full').innerHTML = FULL.map(([k, a, email, local]) => { const chip = MA.loginExpiryChipHtml(a, { local }), oat = MA.oatTagHtml(a, { local });\n"
       + "  return '<div class=\"acct-key-row\" data-k=\"' + k + '\"><span class=\"acct-type-icon\"></span><span class=\"acct-key-main\"><span class=\"acct-key-line\"><span class=\"acct-key-name\">' + a.name + '</span><span class=\"acct-key-tail\">' + MA.subIdentHtml(a, { email, local })"
-      + " + '</span></span>' + MA.acctExtrasHtml({ login: chip, oat, oatWarn: !!oat && a.oatDaysLeft <= 30 }) + '</span><span class=\"acct-key-actions\"><button class=\"acct-icon\"></button></span></div>'; }).join('');\n";
+      + " + '</span></span>' + MA.acctExtrasHtml({ login: chip, oat, oatWarn: !!oat && a.oatDaysLeft <= 30, note: a.note ? ' <span class=\"acct-blocked-hint\" title=\"' + a.note + '\">· ' + a.note + '</span>' : '' }) + '</span><span class=\"acct-key-actions\"><button class=\"acct-icon\"></button></span></div>'; }).join('');\n";
     const page = (lang, bundle = './ma.js') => '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="./style.css"></head>\n'
       + '<body><script>' + "localStorage.setItem('vibespace.lang','" + (lang || 'en') + "');" + '<' + '/script><div id="mount" class="acct-list" style="width:420px"></div><div id="full" class="acct-list" style="width:420px"></div><script src="' + bundle + '"></script><script>\n'
       + "const A = (id, name, ls, type) => ({ id, name, type: type || 'subscription', loginState: ls });\n"
@@ -1932,6 +1958,12 @@ console.log('— §10 login × long-lived token (oat-only)');
       + "document.getElementById('mount').innerHTML = '" + rowH('LuMax', 'window.chips.row') + "' + '" + rowH('Pool', 'window.chips.pool') + "' + '" + rowH('LuMax (base verdict)', 'window.chips.old') + "';\n" + fullRows
       + '<' + '/script></body></html>';
       fs.writeFileSync(path.join(dir, 'en.html'), page('')); fs.writeFileSync(path.join(dir, 'zh.html'), page('zh')); fs.writeFileSync(path.join(dir, 'base-en.html'), page('', './ma-base.js'));
+    await esbuild.build({ stdin: { contents: maWords, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' }, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma-words.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
+    fs.writeFileSync(path.join(dir, 'words-en.html'), page('', './ma-words.js'));
+    const TWICE = ['(oatEndOnChip(a, { local }) ? \'\' : ` <span', '(false ? \'\' : ` <span'];
+    ck('the last-day control cut the countdown\'s step-aside out of manage-agents.js', maSrc.split(TWICE[0]).length === 2);
+    await esbuild.build({ stdin: { contents: maSrc.replace(TWICE[0], TWICE[1]), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' }, bundle: true, format: 'iife', globalName: 'MA', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'ma-twice.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stubBV] });
+    fs.writeFileSync(path.join(dir, 'twice-en.html'), page('', './ma-twice.js'));
     const CDP_PORT = await freePort();
     const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1955,36 +1987,55 @@ console.log('— §10 login × long-lived token (oat-only)');
           const ref = document.createElement('span'); ref.className = 'acct-blocked-hint'; document.body.appendChild(ref);
             const full = Object.fromEntries([...document.querySelectorAll('#full .acct-key-row')].map((row) => { const c = row.querySelector('.acct-login-chip');
             return [row.dataset.k, { text: row.textContent, tail: row.querySelector('.acct-key-tail').textContent, chip: c ? c.textContent : null, chipColor: c ? getComputedStyle(c).color : null, chipTitle: c ? c.title : null,
+              chipAria: c ? c.getAttribute('aria-label') : null, soft: row.querySelector('.acct-extra-soft') ? row.querySelector('.acct-extra-soft').textContent : null, chipRole: c ? c.getAttribute('role') + '/' + c.getAttribute('tabindex') : null, chipW: c ? c.getBoundingClientRect().width : null, chipSvgW: c && c.querySelector('svg') ? c.querySelector('svg').getBoundingClientRect().width : null,
               notLoggedIn: !!row.querySelector('.ob-warn'), green: [...row.querySelectorAll('.acct-linked-hint')].map((x) => x.textContent), amber: [...row.querySelectorAll('.acct-blocked-hint:not(.acct-login-chip)')].map((x) => x.textContent) }]; }));
-          return { yellow: getComputedStyle(ref).color, chips: window.chips, full, rows: sp.map((s) => ({ text: s.textContent, color: getComputedStyle(s).color, title: s.title, relogin: s.dataset.relogin })), clip: { x: 0, y: 0, width: Math.ceil(r.right) + 8, height: Math.ceil(r.bottom) + 8 } }; })()`);
+          return { yellow: getComputedStyle(ref).color, chips: window.chips, full, rows: sp.map((s) => ({ text: s.textContent, color: getComputedStyle(s).color, title: s.title, relogin: s.dataset.relogin, aria: s.getAttribute('aria-label'), role: s.getAttribute('role') + '/' + s.getAttribute('tabindex'), w: s.getBoundingClientRect().width, svgW: s.querySelector('svg') ? s.querySelector('svg').getBoundingClientRect().width : 0 })), clip: { x: 0, y: 0, width: Math.ceil(r.right) + 8, height: Math.ceil(r.bottom) + 8 } }; })()`);
       };
       const en = await look('en');
       const [rowC, poolC, oldC] = en.rows;
       const YELLOW = en.yellow; // the class default = the theme's warning colour
       console.log('    en row: ' + rowC.text + ' | ' + rowC.color + '\n    en pool: ' + poolC.text + ' | ' + poolC.color + '\n    base verdict row: ' + oldC.text + ' | ' + oldC.color);
-        ck('BROWSER: the owner\'s row draws the WARNING chip (yellow, not the dead red) saying ONE word, "long-lived token only"; the tooltip keeps the two facts; the re-login door', rowC.text.trim() === 'long-lived token only' && rowC.color === YELLOW && rowC.relogin === 'sub-o' && /sessions keep running on its long-lived token \(valid until/.test(rowC.title) && /only the quota refresh/.test(rowC.title));
+      const quietOk = (c, name) => !!c && c.text.trim() === '' && c.aria === name && c.svgW > 0 && c.w <= c.svgW + 7 && c.role === 'button/0';
+        ck('BROWSER: the owner\'s row (a QUIET token: not in its last day, no refusal) draws the chip as its CLOCK ALONE — no words, «long-lived token only» its screen-reader name, the warning colour, the tooltip keeps the two facts, the re-login door (role button, tabindex 0), its box the icon + its padding (' + (rowC.w || 0).toFixed(1) + ' px for a ' + (rowC.svgW || 0).toFixed(1) + ' px icon)',
+          quietOk(rowC, 'long-lived token only') && rowC.color === YELLOW && rowC.relogin === 'sub-o' && /sessions keep running on its long-lived token \(valid until/.test(rowC.title) && /only the quota refresh/.test(rowC.title));
       ck('BROWSER: RED control — the BASE verdict for the same row draws the red "login expired … — re-login" chip', /login expired .* — re-login/.test(oldC.text) && oldC.color !== YELLOW && /every session on this account fails/.test(oldC.title));
       ck('BROWSER: the token\'s last day counts the TOKEN down; a host section hides an oat-only row', />long-lived token only · ends in 20 h</.test(en.chips.near) && en.chips.host === '');
       ck('BROWSER: the pool row keeps the slot truth (red) and says the pool cannot use the member\'s token', /LuMax: login signed out — re-login · the pool can’t use its long-lived token/.test(poolC.text) && poolC.color !== YELLOW && /a pooled session reads the login file/.test(poolC.title));
       const zh = await look('zh');
       console.log('    zh row: ' + zh.rows[0].text + '\n    zh pool: ' + zh.rows[1].text);
-        ck('BROWSER zh: the chip says 仅长期 token (warning colour) + the pool line', zh.rows[0].text.trim() === '仅长期 token' && zh.rows[0].color === YELLOW && zh.rows[1].text.includes('池用不了它的长期 token'));
+        ck('BROWSER zh: the quiet chip is the clock alone, «仅长期 token» its screen-reader name (warning colour) + the pool line keeps its words', quietOk(zh.rows[0], '仅长期 token') && zh.rows[0].color === YELLOW && zh.rows[1].text.includes('池用不了它的长期 token'));
       // THE WHOLE ROWS: the word once; row A's line 2 is the e-mail or empty (never "not logged in"); row B keeps e-mail · plan
       const once = (r, w) => (r.text.split(w).length - 1) === 1;
       const { A, B, Ae, amber, hostA, bare } = en.full;
       console.log('    en row A: [' + A.tail + '] ' + A.text.trim() + '\n    en row B: [' + B.tail + '] ' + B.text.trim());
-      ck('BROWSER row A (login gone, token valid, no e-mail): line 2 EMPTY, the chip "long-lived token only", no green token tag, the word ONCE, never "not logged in"',
-        A.tail === '' && A.chip.trim() === 'long-lived token only' && A.chipColor === YELLOW && A.green.length === 0 && A.amber.length === 0 && once(A, 'long-lived token only') && !A.notLoggedIn && !/not logged in/.test(A.text));
-      ck('BROWSER row A with a known e-mail: line 2 = the e-mail alone', Ae.tail === 'you@example.com' && once(Ae, 'long-lived token only') && Ae.green.length === 0);
-      ck('BROWSER row B (expired login still parses loggedIn + valid token): line 2 = e-mail · plan, the chip "long-lived token only", no green token tag',
-        B.tail === 'you@example.com · max' && B.chip.trim() === 'long-lived token only' && B.chipColor === YELLOW && B.green.length === 0 && once(B, 'long-lived token only') && !/· long-lived token(?! only)/.test(B.text));
-      ck('BROWSER: a token in its last 30 days keeps the amber countdown tag beside the chip (another fact)', amber.chip.trim() === 'long-lived token only' && amber.amber.map((x) => x.trim()).join('|') === '· long-lived token · 12d left' && amber.green.length === 0);
+      // lane oat-chip-icon: a QUIET row says the token by its clock alone — the words are its name, never on the line
+      const quietRow = (r, name) => r.chip.trim() === '' && r.chipAria === name && r.chipSvgW > 0 && r.chipW <= r.chipSvgW + 7 && r.chipRole === 'button/0' && !r.text.includes(name);
+      ck('BROWSER row A (login gone, token valid, no e-mail): line 2 EMPTY, the chip its clock alone («long-lived token only» its name, not on the line), no green token tag, never "not logged in"',
+        A.tail === '' && quietRow(A, 'long-lived token only') && A.chipColor === YELLOW && A.green.length === 0 && A.amber.length === 0 && !A.notLoggedIn && !/not logged in/.test(A.text));
+      ck('BROWSER row A with a known e-mail: line 2 = the e-mail alone', Ae.tail === 'you@example.com' && quietRow(Ae, 'long-lived token only') && Ae.green.length === 0);
+      ck('BROWSER row B (expired login still parses loggedIn + valid token): line 2 = e-mail · plan, the chip its clock alone, no green token tag',
+        B.tail === 'you@example.com · max' && quietRow(B, 'long-lived token only') && B.chipColor === YELLOW && B.green.length === 0 && !/· long-lived token(?! only)/.test(B.text));
+      ck('BROWSER: a token in its last 30 days keeps the amber countdown tag beside the quiet chip (another fact, its words)', quietRow(amber, 'long-lived token only') && amber.amber.map((x) => x.trim()).join('|') === '· long-lived token · 12d left' && amber.green.length === 0);
       ck('BROWSER: a host section is unchanged (no chip there; the ident says the word, no healthy tag)', hostA.chip === null && hostA.green.join('|') === 'long-lived token only' && once(hostA, 'long-lived token only'));
       ck('BROWSER: a token row with no chip (no login file at all) says the word in its ident, as before', bare.chip === null && bare.green[0] === 'long-lived token only' && !bare.notLoggedIn);
       const zA = zh.full.A, zB = zh.full.B;
       console.log('    zh row A: [' + zA.tail + '] ' + zA.text.trim() + '\n    zh row B: [' + zB.tail + '] ' + zB.text.trim());
-      ck('BROWSER zh rows A / B: 仅长期 token once, no 「· 长期 token」, no 未登录', zA.tail === '' && zA.chip.trim() === '仅长期 token' && once(zA, '仅长期 token') && zA.green.length === 0 && !zA.notLoggedIn
-        && zB.tail === 'you@example.com · max' && zB.chip.trim() === '仅长期 token' && once(zB, '仅长期 token') && zB.green.length === 0);
+      ck('BROWSER zh rows A / B: the chip its clock alone («仅长期 token» its name), no 「· 长期 token」, no 未登录', zA.tail === '' && quietRow(zA, '仅长期 token') && zA.green.length === 0 && !zA.notLoggedIn
+        && zB.tail === 'you@example.com · max' && quietRow(zB, '仅长期 token') && zB.green.length === 0);
+      // lane oat-chip-icon r2: the note after a quiet chip starts at once; the token's last day is said ONCE (the chip's
+      // «ends in»; the countdown tag steps aside, its hover sentence on the chip's hover; the chip keeps its re-login door)
+      const { noted, last } = en.full;
+      const tokenTags = (r) => r.amber.map((x) => x.trim()).filter((x) => /long-lived token/.test(x));   // the note is a hint too
+      console.log('    en noted: [' + noted.soft + ']\n    en last: chip [' + last.chip.trim() + '] token tags [' + tokenTags(last).join('|') + ']');
+      ck('BROWSER r2: a quiet row\'s note starts at once — no orphan «·» after the clock («' + (noted.soft || '').trim() + '»)', quietRow(noted, 'long-lived token only') && (noted.soft || '').trim() === '3548 09');
+      ck('BROWSER r2: the token\'s LAST DAY is said once — the chip «long-lived token only · ends in 20 h» (its re-login door), no countdown tag beside it, the countdown\'s sentence at the end of the chip\'s hover, the note behind it',
+        last.chip.trim() === 'long-lived token only · ends in 20 h' && tokenTags(last).length === 0 && last.chipRole === 'button/0' && /expires in 0\.8 days — re-mint it in ⋯ → Long-lived token\.$/.test(last.chipTitle) && (last.soft || '').trim() === '· 3548 09');
+      const twice = await look('twice-en');
+      ck('BROWSER r2: RED control — with the step-aside cut, the last day is said twice (the countdown tag beside the chip)', tokenTags(twice.full.last).join('|') === '· long-lived token · 0.8d left');
+      // RED control (lane oat-chip-icon): the quiet return cut — the same rows draw today's words on the line
+      const words = await look('words-en');
+      ck('BROWSER: RED control — with the quiet return cut, the owner\'s row and row A draw the words «long-lived token only» on the line (the icon checks fail)',
+        !quietOk(words.rows[0], 'long-lived token only') && words.rows[0].text.trim() === 'long-lived token only' && !quietRow(words.full.A, 'long-lived token only') && once(words.full.A, 'long-lived token only'));
       const base = await look('base-en');
       const bA = base.full.A, bB = base.full.B;
       console.log('    base row A: [' + bA.tail + '] ' + bA.text.trim() + '\n    base row B: [' + bB.tail + '] ' + bB.text.trim());
@@ -2029,9 +2080,14 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
     const maSrc = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
     const CUT = [": t('Long-lived token');\n",
       ": held ? t('this CLI version is not measured: running sessions continue, no new ones are placed here')\n        : t('long-lived token written to this account’s folder (CLI {cli} verified)', { cli });\n"];
-    const maBase = maSrc.replace(CUT[0], CUT[1]);
+    // lane oat-chip-icon: a token in the folder, verified, not in its last day, not held is QUIET — the chip's clock alone, the
+    // noun its screen-reader name; a HELD file keeps the noun. CUT_QUIET = that return, cut (the base and the WORDS controls)
+    const CUT_QUIET = maSrc.split('\n').find((l) => l.startsWith('      if (quiet) return ') && l.includes('acct-login-quiet')) || '@none@';
+    const maBase = maSrc.replace(CUT[0], CUT[1]).replace(CUT_QUIET + '\n', '');
     ck('the noun control cut the chip word out of manage-agents.js (the base sentence back on the chip)', maSrc.split(CUT[0]).length === 2 && !maBase.includes(CUT[0]));
+    ck('the icon control cut the in-folder quiet return out of manage-agents.js (the noun back on the chip)', CUT_QUIET !== '@none@' && maSrc.split(CUT_QUIET).length === 2);
     await bundle({ stdin: { contents: maBase, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' } }, 'ma-base.js');
+    await bundle({ stdin: { contents: maSrc.replace(CUT_QUIET + '\n', ''), resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'manage-agents.js', loader: 'js' } }, 'ma-words.js');
     fs.copyFileSync(path.join(REPO, 'public/style.css'), path.join(dir, 'style.css'));
     const D = 86400e3, NOWB = Date.now();
     const ls = { state: 'oat-only', login: 'logged-out', msLeft: 300 * D, refreshExpiresAt: NOWB - 9 * H, oatValidUntil: NOWB + 300 * D, oatFile: true };
@@ -2048,6 +2104,7 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
       + '<script src="./' + js + '"></script><script>\n' + rowsJs + '<' + '/script></body></html>';
     for (const lang of ['en', 'zh', 'ja']) fs.writeFileSync(path.join(dir, lang + '.html'), page(lang, 'ma.js'));
     fs.writeFileSync(path.join(dir, 'base-en.html'), page('en', 'ma-base.js'));
+    fs.writeFileSync(path.join(dir, 'words-en.html'), page('en', 'ma-words.js'));
     const CDP_PORT = await freePort();
     const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--window-size=900,700', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore' });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2075,17 +2132,22 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
             while ((n = w.nextNode())) { if (!n.textContent.trim()) continue; const r = document.createRange(); r.selectNodeContents(n); for (const b of r.getClientRects()) if (b.width > 0) tops.add(Math.round(b.top)); } return tops.size; };
           const out = {}; for (const id of ${phone ? "['phone']" : "['desk', 'min']"}) { const list = document.getElementById(id);
             out[id] = { width: Math.round(list.getBoundingClientRect().width), rows: Object.fromEntries([...list.querySelectorAll('.acct-key-row')].map((row) => { const c = row.querySelector('.acct-login-chip'), cr = c.getBoundingClientRect(), rr = row.getBoundingClientRect();
-              return [row.dataset.k, { chip: c.textContent.trim(), title: c.title, lines: lines(c), fits: c.scrollWidth <= c.clientWidth + 1 && cr.right <= rr.right + 0.5, relogin: c.dataset.relogin }]; })) }; }
+              const sv = c.querySelector('svg');
+              return [row.dataset.k, { chip: c.textContent.trim(), title: c.title, lines: lines(c), fits: c.scrollWidth <= c.clientWidth + 1 && cr.right <= rr.right + 0.5, relogin: c.dataset.relogin,
+                aria: c.getAttribute('aria-label'), role: c.getAttribute('role') + '/' + c.getAttribute('tabindex'), w: cr.width, svgW: sv ? sv.getBoundingClientRect().width : 0 }]; })) }; }
           return out; })()`);
       };
       const NOUN = { en: 'Long-lived token', zh: '长期 token', ja: '長期トークン' };
       const LEAD = { en: ['Written to this account’s folder; CLI 2.1.296 verified.', 'Written to this account’s folder, but Claude Code 2.1.301 is not in this VibeSpace’s records yet'], zh: ['已写入此账号目录；CLI 2.1.296 已验。', '已写入这个账号的文件夹，但 Claude Code 2.1.301 还不在这个 VibeSpace 的记录里'], ja: ['このアカウントのフォルダーに書き込み済み；CLI 2.1.296 で検証済み。', 'このアカウントのフォルダに書き込み済みですが、Claude Code 2.1.301 はまだこの VibeSpace の記録にありません'] }; // lane cli-self-measure: never «unmeasured»
-      const nounOk = (lang, r) => [r.W, r.Hd].every((c) => c.chip === NOUN[lang] && c.lines === 1 && c.fits);
+      // a QUIET token (W: in the folder, verified) is the clock alone — the noun its screen-reader name, its box the icon + its
+      // padding, so the note behind it has the line; a HELD file (Hd) keeps the noun on one line
+      const quietOk = (lang, c) => c.chip === '' && c.aria === NOUN[lang] && c.svgW > 0 && c.w <= c.svgW + 7 && c.role === 'button/0' && c.fits;
+      const nounOk = (lang, r) => quietOk(lang, r.W) && r.Hd.chip === NOUN[lang] && r.Hd.lines === 1 && r.Hd.fits;
       for (const lang of ['en', 'zh', 'ja']) {
         const desk = await look(lang, false), phone = await look(lang, true);
         for (const [where, l] of [['desk sidebar', desk.desk], ['200 px sidebar', desk.min], ['phone', phone.phone]]) {
           console.log('    ' + lang + ' ' + where + ' (' + l.width + ' px): [' + l.rows.W.chip + '] ' + l.rows.W.lines + ' line · [' + l.rows.Hd.chip + '] ' + l.rows.Hd.lines + ' line');
-          ck('BROWSER ' + lang + ' ' + where + ' (' + l.width + ' px): the chip says only 「' + NOUN[lang] + '」 (a HELD file too), ONE line, inside its row', nounOk(lang, l.rows));
+          ck('BROWSER ' + lang + ' ' + where + ' (' + l.width + ' px): a quiet token\'s chip is its clock alone («' + NOUN[lang] + '» its name, ' + l.rows.W.w.toFixed(1) + ' px for a ' + l.rows.W.svgW.toFixed(1) + ' px icon); a HELD file\'s says only 「' + NOUN[lang] + '」, ONE line, inside its row', nounOk(lang, l.rows));
         }
         const W = desk.desk.rows.W, Hd = desk.desk.rows.Hd;
         ck('BROWSER ' + lang + ': the hover leads with the facts the chip used to say (「' + LEAD[lang][0] + '」) and keeps the rest; the re-login door stays',
@@ -2096,6 +2158,8 @@ console.log('— §11 the token-in-folder chip is one noun (desk + phone)');
       console.log('    base desk: [' + base.desk.rows.W.chip + '] ' + base.desk.rows.W.lines + ' lines');
       ck('BROWSER: RED control — the base sentence on the chip fails the same check at the desk sidebar (' + base.desk.rows.W.lines + ' lines)',
         !nounOk('en', base.desk.rows) && base.desk.rows.W.chip === 'long-lived token written to this account’s folder (CLI 2.1.296 verified)' && base.desk.rows.W.lines > 1);
+      const words = await look('words-en', false);
+      ck('BROWSER: RED control — with the quiet return cut, the in-folder chip says «Long-lived token» on the line again (the icon check fails)', !quietOk('en', words.desk.rows.W) && words.desk.rows.W.chip === 'Long-lived token');
       // LOGIN_OAT_SHOTS=<dir> writes oat-folder-<lang>-desk.png / oat-folder-<lang>-phone.png (lang base-en = the control's words)
       if (process.env.LOGIN_OAT_SHOTS) {
         for (const [lang, phone] of [['en', false], ['zh', false], ['ja', false], ['base-en', false], ['en', true], ['zh', true], ['ja', true]]) {
@@ -2189,7 +2253,7 @@ console.log('— §12 the row says why its reading ages: never probed / the last
       const look = async (lang) => {
         await cdp('Page.navigate', { url: 'file://' + path.join(dir, lang + '.html') }); await sleep(900);
         return ev(`(() => { const out = {}; for (const row of document.querySelectorAll('.acct-key-row')) { const age = row.querySelector('.acct-usage-age'), chip = row.querySelector('.acct-login-chip');
-            out[row.dataset.k] = { age: age ? age.textContent.trim() : null, ageTitle: age ? age.title : null, chip: chip ? chip.textContent.trim() : null, chipTitle: chip ? chip.title : null, relogin: chip ? chip.dataset.relogin : null, imgs: row.querySelectorAll('img').length, text: row.textContent }; }
+            out[row.dataset.k] = { age: age ? age.textContent.trim() : null, ageTitle: age ? age.title : null, chip: chip ? chip.textContent.trim() : null, chipAria: chip ? chip.getAttribute('aria-label') : null, chipTitle: chip ? chip.title : null, relogin: chip ? chip.dataset.relogin : null, imgs: row.querySelectorAll('img').length, text: row.textContent }; }
           return { rows: out, xss: window.__xss === 1, repainted: window.repainted }; })()`);
       };
       const W = {
@@ -2203,13 +2267,13 @@ console.log('— §12 the row says why its reading ages: never probed / the last
         console.log('    ' + lang + ' O age [' + R.O.age + '] «' + R.O.ageTitle + '» · chip «' + R.O.chipTitle.slice(0, 80) + '…»\n    ' + lang + ' F age «' + R.F.ageTitle + '»');
         ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '», as the base draws it) and its age chip\'s tooltip says it is not probed and why (Claude Code 2.1.308 not cleared on this machine yet), refreshed by use',
           R.O.age === base.rows.O.age && R.O.age !== '' && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
-        ck('§12 BROWSER ' + lang + ': …its 「仅长期 token」 chip keeps its ONE word, its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
-          R.O.chip === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
+        ck('§12 BROWSER ' + lang + ': …its quiet chip (lane oat-chip-icon: the clock alone, 「仅长期 token」 its screen-reader name) — its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
+          R.O.chip === '' && R.O.chipAria === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
         ck('§12 BROWSER ' + lang + ': a probeable row whose last probe failed says why on its age chip («' + w.failed + '<why>»)', R.F.ageTitle.endsWith(w.failed + 'exit 1: Not logged in · Please run /login') && !R.F.chip);
         ck('§12 BROWSER ' + lang + ': a markup-shaped why is TEXT in the tooltip (escHtml) — no element, no script ran', R.X.ageTitle.endsWith(w.failed + 'exit 1: <img src=x onerror="window.__xss=1">') && R.X.imgs === 0 && !xss);
         ck('§12 BROWSER ' + lang + ': a failure OLDER than the reading is not said; a row with no failure says nothing new', !R.S.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.failed) && !R.K.ageTitle.includes(w.never));
         ck('§12 BROWSER ' + lang + ': the poll\'s repaint (_repaintRosterUsage) keeps the stamped note on the age chip', repainted === 1 && R.P && R.P.ageTitle.endsWith(w.never));
-        ck('§12 BROWSER ' + lang + ': a profile-less token says THAT on both tooltips (the fact that failed, named)', R.N.ageTitle.endsWith(w.noProfile) && R.N.chipTitle.endsWith(' · ' + w.noProfile) && R.N.chip === w.chip);
+        ck('§12 BROWSER ' + lang + ': a profile-less token says THAT on both tooltips (the fact that failed, named)', R.N.ageTitle.endsWith(w.noProfile) && R.N.chipTitle.endsWith(' · ' + w.noProfile) && R.N.chip === '' && R.N.chipAria === w.chip);
         ck('§12 BROWSER ' + lang + ': THE ADDENDUM — an oat-only row the probe CAN prove (profile, measured CLI, written in its folder) says nothing new: no note on its age chip, its chip\'s hover as before',
           !R.Q.ageTitle.includes(w.noProfile) && !R.Q.ageTitle.includes(w.never) && !/can’t be probed|无法主动探测|自動では確認できません/.test(R.Q.ageTitle + ' ' + (R.Q.chipTitle || '')) && R.Q.ageTitle !== '');
       }

@@ -124,11 +124,13 @@ const AD = await post('/api/accounts/subscription', { name: 'Member D' });
 const AE = await post('/api/accounts/subscription', { name: 'Member E' });
 const AF = await post('/api/accounts/subscription', { name: 'Member F' });
 check('six subscriptions minted', !!(A?.id && B?.id && C?.id && AD?.id && AE?.id && AF?.id), { A, B, C, AD, AE, AF });
-// G (§5, 2.369.212 — owner: "这个登陆过期提示会被备注抢占位置导致看不到"): a 24-character NOTE + a
-// login session ending in 13 h. Access token only (no refresh token): nothing can try to refresh it.
-const NOTE_G = 'Team seat 0248 08 desk B';
+// G (§5, 2.369.212 — owner: "这个登陆过期提示会被备注抢占位置导致看不到"): a NOTE + a login session ending in 13 h.
+// Access token only (no refresh token): nothing can try to refresh it. The note is 60 characters (lane oat-chip-icon r3):
+// it is cut by its BOX alone — the markup's 24-character slice is gone — so a wide row shows more than 24 of them.
+const NOTE_G = 'Team seat 0248 08 desk B — reserved for the night batch runs';
 const AG = await post('/api/accounts/subscription', { name: 'Note Max' });
-check('the note row is minted with its 24-character note', !!AG?.id && NOTE_G.length === 24 && (await api('/api/accounts/' + AG.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: NOTE_G }) }))?.account?.note === NOTE_G);
+const notePatched = await api('/api/accounts/' + AG.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: NOTE_G }) });   // the PATCH runs whatever the length check says (a short-circuit once skipped it)
+check('the note row is minted with its 60-character note', !!AG?.id && NOTE_G.length === 60 && notePatched?.account?.note === NOTE_G, { len: NOTE_G.length, got: notePatched?.account?.note });
 fs.writeFileSync(path.join(wt, 'data', 'subs', AG.id, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'expired-test-token', expiresAt: Date.now() - 1000, refreshTokenExpiresAt: Date.now() + 13 * 3600e3 } }));
 for (const s of [A, B, C, AD, AE, AF]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
 const cacheDir = path.join(wt, 'data', 'usage-cache');
@@ -516,16 +518,45 @@ try {
       return { contentR: rr.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth), chipR: cr.right, sw: chip.scrollWidth, cw: chip.clientWidth, text: chip.textContent,
         hitMid: hit(cr.left + cr.width / 2), hitEnd: hit(cr.right - 2), font: getComputedStyle(chip).fontFamily, chipOutside: !chip.closest('.acct-extra-soft'),
         chipFirst: !!note && !!(chip.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING),
-        clips: !!box && box.scrollWidth > box.clientWidth + 0.5, noteR: note ? R(note).right : null, boxR: box ? R(box).right : null, rowTop: rr.top };
+        clips: !!box && box.scrollWidth > box.clientWidth + 0.5, noteR: note ? R(note).right : null, boxR: box ? R(box).right : null, rowTop: rr.top,
+        // lane oat-chip-icon r3: the note's whole text is in the markup; how many of its characters the BOX shows (those
+        // whose glyph ends inside the box — the box's own ellipsis hides the rest)
+        noteText: note ? note.textContent : null, boxW: box ? box.clientWidth : 0,
+        w26: (() => { const tn = note && [...note.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); if (!tn) return 0; const rg = document.createRange(); rg.setStart(tn, 0); rg.setEnd(tn, Math.min(26, tn.textContent.length)); return rg.getBoundingClientRect().width; })(),
+        fullW: (() => { const tn = note && [...note.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); if (!tn) return 0; const rg = document.createRange(); rg.selectNodeContents(tn); return rg.getBoundingClientRect().width; })(),
+        noteShown: (() => { const tn = note && [...note.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim()); if (!tn || !box) return 0;
+          const rg = document.createRange(), right = R(box).right; let n = 0; for (let i = 0; i < tn.textContent.length; i++) { rg.setStart(tn, i); rg.setEnd(tn, i + 1); const b = rg.getBoundingClientRect(); if (b.width > 0 && b.right <= right + 0.5) n++; } return n; })() };
     })()`;
     const whole = (m) => !!m && !m.err && m.chipR <= m.contentR + 0.5 && m.sw <= m.cw + 0.5 && m.hitMid && m.hitEnd && /13/.test(m.text) && m.chipOutside && m.chipFirst && /^"?DejaVu Sans/.test(m.font);
+    // lane oat-chip-icon r3: THE NOTE IS CUT BY ITS BOX ALONE — on every surface its whole text is in the markup; where the box
+    // has room for more than 24 of its characters, more than 24 show; where the note is wider than the box, the box's own
+    // ellipsis ends it. The room is the ROW's, not the rail's (at 504 px the usage column stands beside the row; at 304 px the
+    // row folds it under the name — the width rungs — and the line is wider). CONTROL, on the first roomy surface: the old
+    // 24-character slice written into the same note shows ≤ 24 and leaves the box nothing to clip.
+    let ctlDone = false, roomyAll = 0;   // a worded chip leaves zh / en no surface with that room at ≤ 504 px (the usage column beside the row); ja has one
+    const byBox = async (lang, where, m, root) => {
+      const shown = m && typeof m.noteShown === 'number' ? m.noteShown - 2 : -1;   // «· » leads the note after a worded chip
+      const roomy = !!m && m.w26 > 0 && m.boxW >= m.w26 + 14;
+      check(`${lang} ${where}: the 60-character note is whole in the markup and its BOX decides — ${shown} of its characters shown in ${m ? m.boxW : '?'} px${roomy ? ' (room for more than 24)' : ''}${m && m.fullW > m.boxW + 0.5 ? ', the box\'s own ellipsis ending it' : ', all of it'}`,
+        !!m && m.noteText === '· ' + NOTE_G && (!roomy || shown > 24) && (m.fullW <= m.boxW + 0.5 ? shown >= 60 : (m.clips && shown < 60)), m);
+      if (roomy) roomyAll++;
+      if (roomy && !ctlDone) {
+        ctlDone = true;
+        const find = `[...${root}.querySelector('.acct-key-row[data-id="${AG.id}"]').querySelectorAll('.acct-blocked-hint')].find((x) => x.getAttribute('title') === ${JSON.stringify(NOTE_G)})`;
+        const was = await evalJs(`(() => { const n = ${find}; if (!n) return null; const w = n.textContent; n.textContent = '· ' + ${JSON.stringify(NOTE_G.slice(0, 24))} + '…'; return w; })()`);
+        const mc = await evalJs(LC(root));
+        check(`CONTROL (${where}): with the old 24-character slice in the markup the same row shows ≤ 24 of the note's characters and the box does not clip — the count decided, not the room`, was === '· ' + NOTE_G && !!mc && mc.noteShown - 2 <= 25 && !mc.clips, mc);
+        await evalJs(`(() => { const n = ${find}; if (n) n.textContent = '· ' + ${JSON.stringify(NOTE_G)}; return 1; })()`);
+      }
+      return roomy;
+    };
     const judge = (lang, where, m) => {
       check(`${lang} ${where}: the chip is whole inside its row (right ${m && m.chipR != null ? m.chipR.toFixed(1) : '?'} ≤ content ${m && m.contentR != null ? m.contentR.toFixed(1) : '?'}, scroll ${m && m.sw}/${m && m.cw}, mid+end hit-testable, before the note, DejaVu)`, whole(m), m);
       check(`${lang} ${where}: if the line is short, the NOTE is what truncates (${m && m.clips ? 'clipped: note right ' + m.noteR.toFixed(1) + ' > box ' + m.boxR.toFixed(1) : 'nothing clipped'})`, !!m && (!m.clips || m.noteR > m.boxR - 0.5), m);
       return !!(m && m.clips);
     };
     for (const lang of ['zh', 'ja', 'en']) {
-      let clipped = 0;
+      let clipped = 0, roomy = 0;
       await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
       await openPage();
       await evalJs(`(() => { localStorage.setItem('vibespace.lang', '${lang}'); return 1; })()`);
@@ -537,6 +568,7 @@ try {
         await sleep(300);
         const m = await until(async () => evalJs(LC(LOCAL)), 20000, 300);
         if (judge(lang, `rail ${sbw}px`, m)) clipped++;
+        if (await byBox(lang, `rail ${sbw}px`, m, LOCAL)) roomy++;
         if (SHOTS && lang === 'zh' && sbw === 384 && m) { const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: Math.max(0, m.rowTop - 140), width: sbw, height: 300, scale: 2 } }); fs.writeFileSync(path.join(SHOTS, 'login-chip-zh.png'), Buffer.from(r.data, 'base64')); }
       }
       const relog = await evalJs(`(() => { const chip = ${LOCAL}.querySelector('.acct-key-row[data-id="${AG.id}"] .acct-login-chip'); if (!chip) return null;
@@ -554,13 +586,15 @@ try {
       }
       await evalJs(`(() => { app.sidebar.el.style.width = ''; app.sidebar._applySidebarLayoutWidth?.(); app._showAgentsDialog({ forceModal: true }); return 1; })()`); // desktop: without forceModal it routes to the rail panel
       const MODAL5 = `document.querySelector('#agents-dialog-overlay .agents-dialog-body .agents-machine-sec[data-host=""]')`;
-      if (judge(lang, 'Manage agents modal', await until(async () => evalJs(LC(MODAL5)), 20000, 300))) clipped++;
+      { const mm = await until(async () => evalJs(LC(MODAL5)), 20000, 300); if (judge(lang, 'Manage agents modal', mm)) clipped++; if (await byBox(lang, 'Manage agents modal', mm, MODAL5)) roomy++; }
       await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
       await openPage();
       await evalJs(`(() => { app._showAgentsDialog(); return 1; })()`);
-      if (judge(lang, '390 px (phone modal)', await until(async () => evalJs(LC(MODAL5)), 20000, 300))) clipped++;
+      { const mp = await until(async () => evalJs(LC(MODAL5)), 20000, 300); if (judge(lang, '390 px (phone modal)', mp)) clipped++; if (await byBox(lang, '390 px (phone modal)', mp, MODAL5)) roomy++; }
       check(`${lang}: the fixture is under real pressure — the note truncates on at least one surface (${clipped})`, clipped > 0);
+
     }
+    check(`some real surface gives the 60-character note room for more than 24 of its characters, and they show (${roomyAll} surface(s) over zh / ja / en); the control ran there`, roomyAll > 0 && ctlDone);
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: dv.identifier });
     await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   }
