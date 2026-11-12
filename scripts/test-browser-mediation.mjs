@@ -430,6 +430,23 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   await new Promise((r) => setTimeout(r, 200));
   ok(x1.every((r) => /the browser's version is not known on this connection yet/.test(r.error.message)) && logs6f.some((l) => /Page\.zzzNeverNamed has no row/.test(l) && /did not say its version/.test(l)) && fake6x.version.asks <= 3, `⑥ r2: a browser that never answers /json/version — the refusal says «not known on this connection yet», the journal «did not say its version», and 50 refusals asked it ${fake6x.version.asks} time(s) (paced)`, fake6x.version.asks);
   c6x.ws.close(); med6f.shutdown(); fake6x.close();
+  // the browser's own name is made safe too (主开发's acceptance of r2: the one line no leg held) — a stand-in whose /json/version
+  // answers a Browser string with a newline, a NUL and 300 characters: the words and the journal line stay ONE line, the label at
+  // most 80 printable characters. (Whoever answers /json/version is the browser, not the agent: a pin, not a hole.)
+  const evil = 'Evil/9.9\n[cdp-mediator] FORGED by the browser\u0000' + 'x'.repeat(300);
+  const fake6e = await fakeBrowser({ browser: evil });
+  const logs6e = [];
+  const med6e = MED.create({ log: { log: (l) => logs6e.push(String(l)), warn: (l) => logs6e.push('W ' + String(l)) } });
+  const g6e = await med6e.grantFor({ profileId: 'bp-0000006e', browserKey: 'bk-0000006e', upstream: fake6e.url, targetIds: ['T-A'], paused: () => false });
+  const c6e = cdpClient(g6e.url); await c6e.open;
+  await c6e.call('Target.getTargets', {});
+  const e1 = await c6e.call('Page.zzzEvilBrowser', {});
+  const label = (/the browser is (.*?) and VibeSpace's CDP census/.exec(e1.error ? e1.error.message : '') || [])[1] || '';
+  const eLine = logs6e.find((l) => /Page\.zzzEvilBrowser has no row/.test(l)) || '';
+  ok(e1.error && !/[\n\u0000]/.test(e1.error.message) && label.length > 0 && label.length <= 80 && /^[\x20-\x7e]+$/.test(label) && label.startsWith('Evil/9.9?[cdp-mediator] FORGED') && eLine && !/[\n\u0000]/.test(eLine) && eLine.includes(label) && !eLine.includes('x'.repeat(81)),
+    `⑥ r2: a browser whose /json/version names itself with a newline, a NUL and 300 characters — the refusal and the journal line stay ONE line, the label ${label.length} printable characters (≤ 80)`, JSON.stringify({ label, line: eLine.slice(0, 200) }));
+  ok(M.browserLabel(evil) === label && M.browserLabel('') === null && M.browserLabel(null) === null && M.browserLabel('  Chrome/157.0.8103.50  ') === 'Chrome/157.0.8103.50', '⑥ r2: browserLabel — printable ASCII only, at most 80 characters, trimmed; empty / none ⇒ null («not known»)');
+  c6e.ws.close(); med6e.shutdown(); fake6e.close();
 }
 
 // ═══ ③ the real proxy over a fake CDP upstream ══════════════════════════════
