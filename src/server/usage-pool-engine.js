@@ -499,7 +499,51 @@ setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 // (nested buckets); an unknown family means NO projection — today's
 // conservative semantics, never a relaxation on ignorance.
 const { familyOfModel, projectCacheForFamily } = require('../model-family.js');
-function poolReadCache(poolId, now = Date.now(), { also = [] } = {}) {
+// THE POOL'S BASIS (lane account-reset-door K1 r2, after .397) — A FACT OF ONE POOL. A decision compares the members of ONE
+// pool; every reading inside it stands on one basis, decided by what THAT pool compares: its membership (read now) + the ids
+// its own last switch pass compared beyond it (the default's current member, each of its conversations' billing member — a
+// member narrowed out or deleted since still bills until it moves). Nothing another pool compares moves it: a member in two
+// pools may read raw inside one pool's decision and estimated inside the other's at the same instant — no decision mixes.
+// A reader that knows its pool names it; a reader with no pool (a conversation that runs directly on an account, the
+// projection's re-read, the Usage rings) reads as the release reads — estimated where the estimator has an estimate.
+// ONE INSTANT: a pool's fact is held for the rest of the synchronous run that read it; across runs it is kept BASIS_MEMO_MS,
+// and built again at once when what the pool compares changed (its id set) or the estimator says it may have changed
+// (basisGen: rates landed, a fold threw). A FLIP found by the pool's own pass is said and decided by that pass; a flip found by
+// any other reader is decided by a forced pass of that pool in the next turn — never inside the reader's run.
+const BASIS_MEMO_MS = 1000;
+const _passCompared = new Map(); // poolId → the sorted ids its last switch pass compared beyond the membership
+const _basisOf = new Map();      // poolId → { at, gen, sig, raw, run }
+let _run = null;                 // the current synchronous run (dropped at its microtask checkpoint)
+let _passGen = 0;                // a switch pass's own reads serve its loop only while no other pass started inside it
+function runNow() { if (!_run) { _run = {}; queueMicrotask(() => { _run = null; }); } return _run; }
+function isPoolId(id) { try { return !!id && accounts.get(id)?.type === 'pooled'; } catch { return false; } }
+function poolBasisRaw(poolId, { pass = false } = {}) {
+  if (!isPoolId(poolId)) return false;
+  let ids = []; try { ids = [...new Set([...(poolMembershipOf(poolId) || []), ...(_passCompared.get(poolId) || [])].filter((x) => typeof x === 'string' && x))].sort(); } catch { ids = []; }
+  const sig = ids.join('\n'), t = Date.now(), run = runNow(); let gen = 0; try { gen = usageEstimator.basisGen || 0; } catch { gen = 0; }
+  const m = _basisOf.get(poolId);
+  if (m && m.sig === sig && m.gen === gen && (m.run === run || (t >= m.at && t - m.at < BASIS_MEMO_MS))) { m.run = run; return m.raw; } // held for its run and its second — while nothing it compares and nothing the estimator says moved
+  let raw = false; try { raw = !!(ids.length && usageEstimator.basisRaw && usageEstimator.basisRaw(ids)); } catch { raw = false; }
+  _basisOf.set(poolId, { at: t, gen, sig, raw, run });
+  if (m && m.raw !== raw) { if (pass) sayBasisFlip(poolId, raw, true); else setImmediate(() => redecideOnBasis(poolId, raw)); }
+  return raw;
+}
+function sayBasisFlip(pid, raw, byPass) {
+  try {
+    const p = accounts.get(pid);
+    console.log(`[pool] ${(p && p.name) || pid}: ${raw ? 'an id it compares is on its first learn — every member is read raw while it learns (at most 60 s each)' : 'no id it compares holds it raw any more — its members are estimated again'}; ${byPass ? 'this pass decides on that basis' : 'the pool decides again on that basis'}`);
+  } catch { }
+}
+// a flip another reader found: the pool's conversations were decided on the other basis — a forced pass decides them on this
+// one in the next turn (a hot pool's move fires its armed continue at once — fireNow), said once per flip
+function redecideOnBasis(pid, raw) {
+  try {
+    const p = accounts.get(pid); if (!p || p.type !== 'pooled' || !p.auto) return;
+    sayBasisFlip(pid, raw, false);
+    maybePoolAutoSwitchForPool(pid, { force: true });
+  } catch { }
+}
+function poolReadCache(poolId, now = Date.now()) {
   // the engine's readCache, extracted for reuse (identity-group freshest file
   // + estimator overlay); kept here so chooser/switch/engine cannot drift —
   // THE ONE DECISION DOOR (lane account-reset-door r2, ROOT 1): every quota
@@ -508,11 +552,10 @@ function poolReadCache(poolId, now = Date.now(), { also = [] } = {}) {
   // VIEW, so a claimed lane is dead-reckoned from its claim (usage-estimator
   // claimRebase), never from the pre-claim anchor
   const reading = poolReadReading();
-  // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4): while a member this pool compares cannot be estimated yet (its
-  // first learn), every member is read raw — never one estimated beside one raw. Decided ONCE, over the pool's membership AND
-  // `also` = the ids a caller compares beyond it (lane account-reset-door × relearn: the switch pass's default current member
-  // — an unplaced default's member deleted since is not in the membership — its candidates, each conversation's billing member)
-  let rawBasis = false; try { const m = [...new Set([...((poolId ? poolMembershipOf(poolId) : null) || []), ...(Array.isArray(also) ? also : [])].filter(Boolean))]; rawBasis = !!(m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m)); } catch { }
+  // NO DECISION ON A MIXED BASIS (usage-relearn-stepped round 4) — THE BASIS IS A FACT OF ONE POOL (lane account-reset-door
+  // K1 r2): a pool's reader takes that pool's basis (all raw while an id it compares is on its first learn); a reader with no
+  // pool reads as the release reads — estimated
+  const rawBasis = poolId ? poolBasisRaw(poolId) : false;
   return (id) => {
     const raw = reading(id);
     if (rawBasis) return raw;
@@ -2096,6 +2139,7 @@ function wallCount(key, now = Date.now()) {
 
 // The account system's usability answer for a scope (pool id OR cache key),
 // model-projected. Pool = any member usable / min over members' blockedUntil.
+function sessionPoolOf(session) { try { const p = session && session._accountId; return p && !session.host && isPoolId(p) ? p : null; } catch { return null; } }
 function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only = null } = {}) {
   // ONE CLOCK (lane pool-silent-members R4): the pre-fire gate hands the instant its switch judged, so the switch
   // and this verdict can never answer the reset second differently (nowSecOf = the pool's one floored clock)
@@ -2107,9 +2151,12 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
   // This site is the one that authorises money: `onWalledTurn` arms from it,
   // and `beforeAutoResumeFire` spends on it.
   const fam = projectionFamilyFor(session, model);
-  const read = poolReadCache(null); // generic estimator-overlaid identity reader
-  const proj = (c) => { try { return fam ? projectCacheForFamily(c, fam) : c; } catch { return c; } };
   const a = accounts.get(scope);
+  // THE READER NAMES ITS POOL (K1 r2): a pool scope reads on that pool's basis; a member scope asked for a pooled session (the
+  // gate's target check, the link's own verdict) on the session's pool's; a conversation that runs directly on an account is
+  // no pool — it reads as the release reads (estimated)
+  const read = poolReadCache(a && a.type === 'pooled' ? scope : sessionPoolOf(session));
+  const proj = (c) => { try { return fam ? projectCacheForFamily(c, fam) : c; } catch { return c; } };
   if (a && a.type === 'pooled') {
     // A PROCESS THAT HOLDS ITS MEMBER CAN ONLY BE CONTINUED BY THAT MEMBER
     // (reset credits r3, reproduced on the real engine + the real auto-resume):
@@ -2234,14 +2281,14 @@ function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only 
 // run's start, so a reader drops it the moment that run is no longer checking (global.__vsCliCheckingNow, the ORCH's live answer)
 // could this member serve if the check passes? Its LAST reading's verdict (acceptance r2 item 6: the promise looks at the member that
 // would come back — a spent or reading-less member promises nothing)
-const memberServable = (id) => { try { return quotaVerdict(poolReadCache()(id), Date.now() / 1000, { tier: 'hot' }).usable === true; } catch { return false; } };
+const memberServable = (id, poolId = null) => { try { return quotaVerdict(poolReadCache(poolId)(id), Date.now() / 1000, { tier: 'hot' }).usable === true; } catch { return false; } };
 function checkingFor(session) {
   try {
     const caps = accounts.oatFileCaps();
     const l = caps && caps.local;
     if (!l || l.state !== 'checking' || !session || !session._accountId) return null;
     const held = (accounts.poolRoster(session._accountId) || []).filter((r) => r && r.why && r.why.code === 'cli-unmeasured' && r.why.local && r.why.local.state === 'checking');
-    if (!held.some((r) => memberServable(r.id))) return null; // nobody it holds could serve: the card keeps the wall's own words (item 6)
+    if (!held.some((r) => memberServable(r.id, sessionPoolOf(session)))) return null; // nobody it holds could serve: the card keeps the wall's own words (item 6)
     const lf = held[0].why.local;
     return { cli: caps.cli, n: held.length, startedAt: Number(l.startedAt) || null, typicalMin: lf.typicalMin || 5, boundMin: lf.boundMin || 20 };
   } catch { return null; }
@@ -5958,9 +6005,9 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
       try { maybePoolAutoSwitchForPool(p.id, { force: true }); } catch (e) { console.warn(`[pool] wake re-decide ${p.id} failed:`, e.message); }
     }
 
-    let usable = null;
-    try { usable = quotaVerdict(poolReadCache()(memberId), at / 1000, { tier: 'hot' }).usable; } catch { }
-    if (usable !== true) { out.reason = 'member-not-usable'; return out; }
+    // usable IN EACH SCOPE IT FIRES IN (K1 r2): a pool's conversations on that pool's basis, a direct conversation as the release
+    const usableIn = new Map(), usableOf = (pid) => { if (!usableIn.has(pid)) { let u = null; try { u = quotaVerdict(poolReadCache(pid)(memberId), at / 1000, { tier: 'hot' }).usable; } catch { } usableIn.set(pid, u === true); } return usableIn.get(pid); };
+    if (![null, ...pools.map((p) => p.id)].some(usableOf)) { out.reason = 'member-not-usable'; return out; }
     if (!ar || !ar.fireNow || !ar.armedIds) { out.reason = 'no-auto-resume'; return out; }
     const poolIds = new Set(pools.map((p) => p.id));
     let ids = [];
@@ -5970,6 +6017,7 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
       if (!s) continue;
       const acct = s._accountId || null;
       if (acct !== memberId && !poolIds.has(acct)) continue;
+      if (!usableOf(poolIds.has(acct) ? acct : null)) continue; // usable on THIS conversation's basis (K1 r2)
       // THE CONTINUE MUST LAND ON THE MEMBER THAT BECAME USABLE, AND MUST
       // ALREADY HAVE BEEN GOING TO (r2 — see the header). `fireIdentityFor` is
       // this module's ONE answer to "where would a continue land right now"
@@ -7482,13 +7530,6 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // not candidates (2.335.0), but a login-dead member must still REACH
     // decidePoolSwitch so its refusal can name it and prescribe the re-login.
     const members = switchCandidates(poolId);
-    // NO DECISION ON A MIXED BASIS, decided ONCE for everything this pass compares (lane account-reset-door × usage-relearn-
-    // stepped round 4): the pool's membership (the door's own) + the default's current member + the candidates + each of
-    // this pool's conversations' billing member (decidePoolSwitch compares a current member's reading with the members'
-    // even when the pool no longer lists it) — raw for all while any of them is still learning
-    const basisIds = [currentId, ...members];
-    for (const [sid, s2] of activeSessions) { if (s2._accountId !== poolId || s2.host) continue; try { basisIds.push(heldPoolMemberFor(s2, poolId) || accounts.poolCurrentFor(poolId, sid) || null); } catch { } }
-    const readCache = poolReadCache(poolId, now, { also: basisIds });
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const roster = evaluationRoster(poolId, rosters); // …and ONE roster read for it, shared by every conversation's decision (acceptance r2) and the tick's sweep (r3)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
@@ -7496,13 +7537,27 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     const membership = poolMembershipOf(poolId); // the removed-member wall (2026-09-28): a member the pool no longer LISTS is a hard wall for every decision below
     const priority = poolPriorityOf(a); // MANUAL PRIORITY (2026-09-28): the owner's order — null = automatic (EDF + the warm hold)
     reconcileCrossAsks();
+    // THE POOL'S BASIS, decided again at this pass's start (lane account-reset-door K1): over the membership + what this pool
+    // compares beyond it — the default's current member and each conversation's billing member (decidePoolSwitch compares a
+    // current member's reading with the members' even when the pool no longer lists it). Each conversation's link and billing
+    // member are read HERE, once, after the cross asks settled, and the loop below decides on these very reads (a conversation's
+    // link moves only by its own decision, after its read); a pass started meanwhile (a gate run inside a fire) ends the reuse
+    const passGen = ++_passGen, passReads = new Map(), compared = [currentId];
+    for (const [sid, s2] of activeSessions) {
+      if (s2._accountId !== poolId || s2.host) continue;
+      try { const linkCur = accounts.poolCurrentFor(poolId, sid) || null, cm = sessionBillingMember(s2, poolId); passReads.set(sid, { linkCur, cm }); compared.push(cm.id || linkCur); } catch { }
+    }
+    _passCompared.set(poolId, [...new Set(compared.filter((x) => typeof x === 'string' && x))].sort());
+    poolBasisRaw(poolId, { pass: true }); // this pool's fact (built again when its compared ids moved); a flip it finds is said here and decided by this pass
+    const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool's basis
     for (const [sid, s2] of activeSessions) {
       feedOwedCrossLine(sid, s2); // (q-053 P0b) the line a cross-provider switch owes the RESUMED conversation
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if (capsOf(s2.backend || 'claude').hotSwitch === 'impossible') continue; // it holds its member for life — no per-session link
       if (s2._accountId !== poolId || s2.host) continue;
+      const pr = _passGen === passGen ? passReads.get(sid) : null; // this pass's own read of the link (K1), while no other pass ran
       let linkCur = null;
-      try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }
+      if (pr) linkCur = pr.linkCur; else try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }
       const hasOwnLink = hasOwnPoolLink(poolId, sid);
       // (lane pool-provider-latents, q-055 M2) UNPLACED by a deletion: decided from its deleted member — its own provider, the
       // pool's 'allow', or the owner's card; never the default, never another provider by itself
@@ -7515,7 +7570,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // "switch" to the member the link was already on ("re-point, same
       // target", 740 of them in the incident journal) and then fire again.
       // The observation still rides along in the log line as corroboration.
-      const cm = sessionBillingMember(s2, poolId);
+      const cm = pr ? pr.cm : sessionBillingMember(s2, poolId);
       const curFor = cm.id || linkCur;
       // ONE RULE FOR THE PROJECTION QUESTION (2026-09-13 r2) — while a
       // classifier reroute is standing this is null, so every bucket of every

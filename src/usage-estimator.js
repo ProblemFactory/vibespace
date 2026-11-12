@@ -942,11 +942,12 @@ class UsageEstimator {
   /** The identity's anchor file's signature now (one stat). */
   _sigNow(key) { let st = null; try { st = fs.statSync(this._file(key)); } catch { } return sigOf(st); }
   /** The rates of `key` landed: its version moves — an estimate memoized on an older version (or on none) is never served again. */
-  _ratesLanded(key) { if (!this._ratesVer) this._ratesVer = new Map(); this._ratesVer.set(key, (this._ratesVer.get(key) || 0) + 1); }
+  _ratesLanded(key) { if (!this._ratesVer) this._ratesVer = new Map(); this._ratesVer.set(key, (this._ratesVer.get(key) || 0) + 1); this.basisGen = (this.basisGen || 0) + 1; } // basisGen (lane account-reset-door K1): the pools' basis is decided again at its next read
   _ratesVerOf(key) { return (this._ratesVer && this._ratesVer.get(key)) || 0; }
   /** A fold that THREW (round 2, small 3 — a malformed record was restarted by every ask, silently): said once by name, the
    *  identity's last rates served, tried again after a backoff (5 s doubling ≤ 5 min); a fold that lands clears it. */
   _foldThrew(key, e) {
+    this.basisGen = (this.basisGen || 0) + 1; // K1: a member whose fold threw is read raw alone — the pools' basis is decided again
     if (!this._foldFail) this._foldFail = new Map();
     const n = ((this._foldFail.get(key) || {}).n || 0) + 1, wait = Math.min(FOLD_RETRY_MAX_MS, FOLD_RETRY_MS * 2 ** (n - 1));
     this._foldFail.set(key, { n, retryAt: Date.now() + wait, why: String((e && e.message) || e).slice(0, 160), sig: this._sigNow(key) });

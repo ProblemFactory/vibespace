@@ -30,6 +30,8 @@ import { spawnSync } from 'node:child_process';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'b19f0ecdb';   // master under this commit (2.369.396) — a sha the repository has
+const K1R1 = 'b05ea2098';   // K1 round 1 (one basis per connected set of pools) — the per-pool leg's red tree (ref account-reset-door-k1r1)
+const MERGED397 = 'c3215f7b5';   // the .397 pre-bump tip (the door × relearn, the basis decided per call) — K1's red tree
 const ROUND1 = '18104c29c'; // this lane's round 1 (its acceptance said: not accepted) — round 2's pins are red there
 const ROUND3 = 'cedee3d11'; // round 3 (not accepted: the sibling fan-out wrote a refusal without its stamp…) — round 4's pins are red there
 const ROUND4 = 'd0c5a8799'; // round 4 (not accepted: the status rule silenced a real reset after an honest 100 %) — round 5's pins are red there
@@ -149,6 +151,46 @@ function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0 } = {}) {
   const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
   const claim = (tag, lanes) => (claimMod ? claimMod.at(dataDir).claim(id[tag], lanes, JSON.parse(fs.readFileSync(path.join(cacheDir, id[tag] + '.json'), 'utf8'))) : { ok: false, code: 'no-module' });
   return { r, eng, am, P, id, sessions, arms, mkSession, tagOf, claim, cacheDir, est: app.locals.usageEstimator, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)) };
+}
+// ── K1's world (主开发's rebuild drive-basis shape): a hot pool A, B, C (default A), 5h at 88 / 50 / 30 % read 2 h ago — A sits
+// in the raw-usable / estimated-dead band (12 % left raw; 4 % by its burn: the estimate = the reading + 8 points; the hot line is
+// 10 % left). `learning` = the member on its first learn (no estimate; basisRaw true for any set that holds it); `pool2` = a
+// second pool listing only B (it shares B with the first)
+function basisWorld(T, { learning = 'C', pool2 = false, onProbe = null, tags = ['A', 'B', 'C'], rd = {}, def = 'A', more = [], onFire = null } = {}) {
+  const r = reqOf(T);
+  const engMod = r('./src/server/usage-pool-engine.js'), { AccountManager } = r('./src/accounts.js'), { ClaudeCodeAdapter } = r('./src/adapters/claude-code.js');
+  const root = fs.mkdtempSync(path.join(ROOT, 'basis-')), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
+  const am = new AccountManager({ dataDir }), id = {};
+  for (const tag of tags) { id[tag] = am.createSubscription({ name: 'acct-' + tag.toLowerCase() }).id; fs.writeFileSync(path.join(am.subDir(id[tag]), '.credentials.json'), CREDS(id[tag]), { mode: 0o600 }); }
+  const P = am.createPool({ name: 'pool-x', members: [id.A, id.B, id.C] }).id; am.setPoolTarget(P, id[def]); am.updatePool(P, { auto: true, hot: true });
+  const P2 = pool2 ? am.createPool({ name: 'pool-y', members: [id.B] }).id : null;
+  if (P2) { am.setPoolTarget(P2, id.B); am.updatePool(P2, { auto: true, hot: true }); }
+  const extra = {}; // more pools: [name, member tags] — null = no member list (every subscription of the backend)
+  for (const [nm, mem] of more) { extra[nm] = am.createPool({ name: nm, ...(mem ? { members: mem.map((t) => id[t]) } : {}) }).id; am.setPoolTarget(extra[nm], id[(mem || tags)[0]]); am.updatePool(extra[nm], { auto: true, hot: true }); }
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const rd5 = (u5) => ({ fetchedAt: NOW - 2 * H, source: 'on-demand', fiveHour: { utilization: u5, resetsAt: S + 2 * 3600 }, sevenDay: { utilization: 0.08, resetsAt: S + 4 * 86400 } });
+  const R = { A: 0.88, B: 0.5, C: 0.3, D: 0.4, ...rd };
+  for (const t of tags) fs.writeFileSync(path.join(cacheDir, id[t] + '.json'), JSON.stringify(rd5(R[t])));
+  const sessions = new Map(), arms = [];
+  const autoResume = { armIfEnabled: (sid, s, until, why) => arms.push({ sid, why: String(why || '').slice(0, 100) }), noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget(sid, n, reason) { arms.push({ noPoolTarget: reason, sid }); }, statusFor: () => null, enabledFor: () => false, fireNow(sid, why) { if (onFire) onFire(sid, why); }, armedIds: () => [], refreshStatus() { } };
+  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const eng = engMod.create({
+    app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
+    serverNotice: () => { }, serverSetting: () => undefined, getAccounts: () => am,
+    getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
+    getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+    getAutoResume: () => autoResume, getQuotaProbe: () => (onProbe ? (t) => { onProbe(t); return false; } : null), getSessionMetaStore: () => null,
+  });
+  const est = app.locals.usageEstimator, st = { learning };
+  est.basisRaw = (ids) => !!st.learning && (ids || []).includes(id[st.learning]);
+  est.estimateFor = (aid, raw) => { if (st.learning && aid === id[st.learning]) return null; if (!raw || !raw.fiveHour) return null; return { fiveHour: { ...raw.fiveHour, utilization: raw.fiveHour.utilization + 0.08 }, sevenDay: raw.sevenDay, scopedWeekly: [] }; };
+  const mkSession = (sid, member) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-sonnet-4-5' }; sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[member], { why: 'drill' }); return s; };
+  const mkDirect = (sid, tag) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: id[tag], name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-sonnet-4-5' }; sessions.set(sid, s); return s; };
+  const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
+  const viewOf = (rc, ts = ['A', 'B', 'C']) => ts.map((t) => { const c = rc(id[t]) || {}; return `${t}:${Math.round(((c.fiveHour || {}).utilization || 0) * 100)}${c.estimated ? 'e' : 'r'}`; }).join(' ');
+  // the learn LANDS: nobody is learning any more, and the estimator says so the way it does when rates land (basisGen)
+  const learnLands = () => { st.learning = null; est.basisGen = (est.basisGen || 0) + 1; };
+  return { r, eng, am, P, P2, extra, id, sessions, arms, mkSession, mkDirect, tagOf, viewOf, st, est, learnLands, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)), defaultOf: () => tagOf(am.poolCurrent(P)) };
 }
 async function enginePass(T, { switchFirst }) {
   const w = engineWorld(T);
@@ -749,20 +791,127 @@ const LEGS = {
   // switch decision only (the sealed orders' snapshot is the membership's own decision).
   async 'switch-basis'(T) {
     const rows = [];
-    for (const kase of ['cold', 'outside']) {
+    for (const kase of ['cold', 'outside', 'default-outside']) {
       const w = engineWorld(T, { def: 'B', fableA: 0.3, fableB: 0.3 });
       const est = w.est;
       if (!est || typeof est.basisRaw !== 'function') return { ok: false, detail: 'no basis door (usageEstimator.basisRaw)' };
-      w.mkSession('s1', 'A');
+      if (kase !== 'default-outside') w.mkSession('s1', 'A');
       if (kase === 'outside') w.am.updatePool(w.P, { members: [w.id.B] });
-      const learning = w.id.A, asked = [], estimated = [];
+      if (kase === 'default-outside') { w.am.updatePool(w.P, { members: [w.id.A] }); try { w.am.setPoolTarget(w.P, w.id.B, { why: 'drill' }); } catch { } } // the default's link on a member the pool no longer lists
+      const learning = kase === 'default-outside' ? w.id.B : w.id.A, asked = [], estimated = [];
       const origEst = est.estimateFor.bind(est);
       est.basisRaw = (ids) => { asked.push([...(ids || [])]); return (ids || []).includes(learning); };
       est.estimateFor = (id, raw, nowMs) => { const st = new Error().stack || ''; if (st.includes('maybePoolAutoSwitchForPool') && !st.includes('pushSealedOrders')) estimated.push(id); return origEst(id, raw, nowMs); };
       await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
       const withA = asked.some((ids) => ids.includes(learning));
-      rows.push({ ok: withA && estimated.length === 0, text: `${kase === 'cold' ? 'a cold boot, A still learning (both members)' : 'A outside the membership, still learning, billing s1'}: the basis asked ${withA ? 'WITH' : 'without'} A; estimated in the decision: ${estimated.length ? '[' + [...new Set(estimated.map(w.tagOf))].join(',') + '] beside raw — MIXED' : 'nobody (all raw)'}` });
+      rows.push({ ok: withA && estimated.length === 0, text: `${kase === 'cold' ? 'a cold boot, A still learning (both members)' : kase === 'outside' ? 'A outside the membership, still learning, billing s1' : 'the default\'s link on B, a member the pool no longer lists, B still learning (no conversation)'}: the basis asked ${withA ? 'WITH' : 'without'} ${w.tagOf(learning)}; estimated in the decision: ${estimated.length ? '[' + [...new Set(estimated.map(w.tagOf))].join(',') + '] beside raw — MIXED' : 'nobody (all raw)'}` });
     }
+    return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
+  // K1 (after .397; r2 13:12Z) — THE BASIS IS A FACT OF ONE POOL: a decision compares the members of ONE pool and every reading
+  // in it stands on that pool's basis — what IT compares. C mid first learn, s1 linked to A in the raw-usable / estimated-dead
+  // band: the pool's reader reads all raw; the chooser, the switch, the verdict and the pre-fire gate name the SAME member and
+  // the continue is not held; a member scope asked for the pooled session answers like the pool scope; a pool that shares B
+  // but compares no learner reads B estimated; a reader with no pool reads as the release. Nobody learning ⇒ the release's.
+  async 'one-basis'(T) {
+    const MODEL = 'claude-sonnet-4-5', rows = [];
+    let QV = null; try { QV = reqOf(T)('./src/account-pool-auto.js').quotaVerdict; } catch { }
+    for (const learning of ['C', null]) {
+      const w = basisWorld(T, { learning, pool2: !!learning });
+      const pool = w.viewOf(w.eng.poolReadCache(w.P)), none = w.viewOf(w.eng.poolReadCache(null));
+      const s1 = w.mkSession('s1', 'A');
+      const ch = w.tagOf((await quiet(() => w.eng.poolChooserForModel(w.P, { model: MODEL }))).r);
+      await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const link = w.linkOf('s1');
+      const v = (await quiet(() => w.eng.quotaVerdictFor(w.P, { model: MODEL, session: s1 }))).r || {};
+      const nowSec = Math.floor(Date.now() / 1000), poolRc = w.eng.poolReadCache(w.P);
+      const scopes = ['A', 'B', 'C'].map((t) => { const m = w.eng.quotaVerdictFor(w.id[t], { model: MODEL, session: s1 }) || {}; const p = QV ? QV(poolRc(w.id[t]), nowSec) || {} : {}; return { t, same: m.usable === p.usable, m: m.usable, p: p.usable }; });
+      const fire = await quiet(() => w.eng.beforeAutoResumeFire('s1', s1));
+      const fired = fire.r === true, held = w.arms.filter((x) => x.why).length;
+      const linkAfter = w.linkOf('s1');
+      const p2 = w.P2 ? w.viewOf(w.eng.poolReadCache(w.P2), ['B']) : null;
+      const want = learning ? { pool: 'A:88r B:50r C:30r', member: 'A' } : { pool: 'A:96e B:58e C:38e', member: 'C' };
+      const sameMember = ch === want.member && link === want.member && w.tagOf(v.viaId) === want.member && linkAfter === want.member;
+      rows.push({ ok: pool === want.pool && none === (learning ? 'A:96e B:58e C:30r' : 'A:96e B:58e C:38e') && sameMember && scopes.every((x) => x.same) && fired && held === 0 && (!p2 || p2 === 'B:58e'),
+        text: `${learning ? 'C on its first learn' : 'nobody learning'}: the pool reads ${pool}, a reader with no pool ${none}; chooser ${ch}, s1 ${link} after the pass, the verdict ${v.usable ? 'via ' + w.tagOf(v.viaId) : 'unusable'}; the pooled session's member scope = the pool scope ${scopes.map((x) => x.t + (x.same ? '=' : `≠(${x.m}/${x.p})`)).join(' ')}; the gate ${fired ? 'fired' : 'HELD'} (${held} re-arm${held === 1 ? '' : 's'}), s1 on ${linkAfter}${p2 ? `; a pool sharing B (no learner in it) reads ${p2}` : ''}` });
+    }
+    return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
+  // K1, THE ONE INSTANT (主开发 12:24Z — «a learn that lands between the gate's verdict and the re-decision it forces»):
+  // (a) the learn lands during the gate's probe — after the gate's own pass kept s1 on A raw, before its verdict: the verdict
+  // reads the newer basis, the re-decision it forces moves s1 to C on that same basis, the continue goes to C (never held on
+  // A); (b) a landing no gate asks about: the next read decides the basis again, the pool decides again in the next turn and
+  // moves s1 (said once); (c) one synchronous run reads one basis even across the memo's second; the estimator's basisGen
+  // moves when rates land and when a fold throws
+  async 'basis-flip'(T) {
+    const MODEL = 'claude-sonnet-4-5', rows = [], tick = () => new Promise((res) => setImmediate(res));
+    { let w = null, s1 = null, keptBefore = null;
+      w = basisWorld(T, { learning: 'C', onProbe: () => { keptBefore = w.linkOf('s1'); w.learnLands(); } });
+      s1 = w.mkSession('s1', 'A');
+      const fire = await quiet(async () => { const f = await w.eng.beforeAutoResumeFire('s1', s1); await tick(); await tick(); return f; }); // its flip's own re-decision runs here too
+      const held = w.arms.filter((x) => x.why).length, after = w.linkOf('s1');
+      rows.push({ ok: keptBefore === 'A' && fire.r === true && after === 'C' && held === 0, text: `a learn landing during the gate's probe: the gate's pass kept s1 on ${keptBefore}; the continue ${fire.r === true ? 'fired' : 'HELD'} on ${after} (${held} re-arm${held === 1 ? '' : 's'})` }); }
+    { const w = basisWorld(T, { learning: 'C' }); w.mkSession('s1', 'A');
+      await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const kept = w.linkOf('s1');
+      const q = await quiet(async () => { w.learnLands(); w.eng.poolReadCache(w.P)(w.id.B); await tick(); await tick(); });
+      const said = q.lines.filter((l) => /the pool decides again on that basis/.test(l)).length;
+      rows.push({ ok: kept === 'A' && w.linkOf('s1') === 'C' && said === 1, text: `a landing no gate asks about: s1 kept on ${kept} raw, then on ${w.linkOf('s1')} the turn after the next read (said ${said}×)` }); }
+    { const w = basisWorld(T, { learning: 'C' });
+      const a1 = w.viewOf(w.eng.poolReadCache(w.P)), real = Date.now;
+      let a2 = null, a3 = null;
+      try { w.st.learning = null; Date.now = () => real() + 2000; a2 = w.viewOf(w.eng.poolReadCache(w.P)); await null; a3 = w.viewOf(w.eng.poolReadCache(w.P)); } finally { Date.now = real; }
+      const g0 = w.est.basisGen || 0; let g1 = g0, g2 = g0;
+      try { w.est._ratesLanded('ik-drill'); g1 = w.est.basisGen || 0; w.est._foldThrew('ik-drill', new Error('drill')); g2 = w.est.basisGen || 0; } catch { }
+      rows.push({ ok: a1 === a2 && a2 === 'A:88r B:50r C:30r' && a3 === 'A:96e B:58e C:38e' && g1 === g0 + 1 && g2 === g1 + 1, text: `one run, one basis: ${a1} then, 2 s later in the same run, ${a2}; the next run ${a3}; basisGen ${g0} → ${g1} (rates landed) → ${g2} (a fold threw)` }); }
+    return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
+  // K1 r2 (主开发 13:12Z) — ONE POOL'S FACT, AND EVERY MECHANISM HOLDING IT ITS OWN ROW: (1) a learner in ANOTHER pool moves
+  // nothing in this one; (2) a pool with no member list (every subscription — the learner too) reads raw, a listed pool beside
+  // it estimated; (3) a conversation that runs directly on an account fires as the release does — HELD and re-armed on a member
+  // its burn has spent; (4) a flip's pass is FORCED (a default switch just stamped the pool's 10 s gate); (5) a flip the pool's
+  // own pass finds is said by it, no second pass; (6) a reader that finds a flip moves nothing inside its own run; (7) the
+  // compared ids moving inside the memo's second build the fact again; (8) an estimated → raw flip is decided again too;
+  // (9) a pass started inside the loop ends the loop's reuse of its own reads
+  async 'pool-own'(T) {
+    const MODEL = 'claude-sonnet-4-5', rows = [], tick = () => new Promise((res) => setImmediate(res)), n = (ls, re) => ls.filter((l) => re.test(l)).length, ABCD = ['A', 'B', 'C', 'D'];
+    { const w = basisWorld(T, { learning: 'D', tags: ABCD, more: [['pool-q', ['B', 'D']]] }); const s1 = w.mkSession('s1', 'A');
+      const ch = w.tagOf((await quiet(() => w.eng.poolChooserForModel(w.P, { model: MODEL }))).r);
+      await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const v = (await quiet(() => w.eng.quotaVerdictFor(w.P, { model: MODEL, session: s1 }))).r || {}, f = await quiet(() => w.eng.beforeAutoResumeFire('s1', s1));
+      const pv = w.viewOf(w.eng.poolReadCache(w.P)), qv = w.viewOf(w.eng.poolReadCache(w.extra['pool-q']), ['B', 'D']);
+      rows.push({ ok: pv === 'A:96e B:58e C:38e' && qv === 'B:50r D:40r' && ch === 'C' && w.linkOf('s1') === 'C' && w.tagOf(v.viaId) === 'C' && f.r === true, text: `a learner in another pool (Q{B,D}, D learning): P reads ${pv} (Q ${qv}); P's chooser ${ch}, s1 on ${w.linkOf('s1')}, the verdict via ${w.tagOf(v.viaId)}, the gate ${f.r === true ? 'fired' : 'HELD'}` }); }
+    { const w = basisWorld(T, { learning: 'D', tags: ABCD, more: [['pool-n', null]] });
+      const pv = w.viewOf(w.eng.poolReadCache(w.P)), nv = w.viewOf(w.eng.poolReadCache(w.extra['pool-n']), ['A', 'D']);
+      rows.push({ ok: pv === 'A:96e B:58e C:38e' && nv === 'A:88r D:40r', text: `a pool with no member list (every subscription, the learner D too) reads ${nv}; the listed pool beside it ${pv}` }); }
+    { const w = basisWorld(T, { learning: 'C' }); const d1 = w.mkDirect('d1', 'A'); const f = await quiet(() => w.eng.beforeAutoResumeFire('d1', d1));
+      const re = w.arms.filter((x) => x.sid === 'd1' && x.why).length;
+      rows.push({ ok: f.r === false && re === 1, text: `a conversation directly on A (A in P, C learning; A 88 % read, 96 % by its burn): the continue ${f.r === true ? 'FIRED' : 'held'}, ${re} re-arm${re === 1 ? '' : 's'} — the release's` }); }
+    { const w = basisWorld(T, { learning: 'C', rd: { B: 1.0 }, def: 'B' }); w.mkSession('s2', 'A');
+      await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const def = w.defaultOf(), kept = w.linkOf('s2');
+      await quiet(async () => { w.learnLands(); w.eng.poolReadCache(w.P)(w.id.A); await tick(); await tick(); });
+      rows.push({ ok: def !== 'B' && kept === 'A' && w.linkOf('s2') !== 'A', text: `a flip right after a default switch (the default moved B→${def}, the pool's 10 s gate stamped): s2 kept on ${kept} raw, then on ${w.linkOf('s2')} — the flip's pass is forced` }); }
+    { const w = basisWorld(T, { learning: 'C' }); w.mkSession('s1', 'A'); await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const q = await quiet(async () => { w.learnLands(); w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); await tick(); await tick(); });
+      const own = n(q.lines, /this pass decides on that basis/), again = n(q.lines, /the pool decides again on that basis/);
+      rows.push({ ok: own === 1 && again === 0 && w.linkOf('s1') === 'C', text: `a flip the pool's own pass finds: said by it ${own}×, a second pass ${again}×, s1 on ${w.linkOf('s1')}` }); }
+    { const w = basisWorld(T, { learning: 'C' }); w.mkSession('s1', 'A'); await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      let inRun = null; await quiet(async () => { w.learnLands(); w.eng.poolReadCache(w.P)(w.id.B); inRun = w.linkOf('s1'); await tick(); await tick(); });
+      rows.push({ ok: inRun === 'A' && w.linkOf('s1') === 'C', text: `a reader that finds a flip: s1 on ${inRun} when its run ends, on ${w.linkOf('s1')} the turn after` }); }
+    for (const kase of ['pass', 'read']) {
+      const w = basisWorld(T, { learning: 'D', tags: ABCD }); w.mkSession('s1', 'A');
+      const q = await quiet(async () => { const warm = w.viewOf(w.eng.poolReadCache(w.P)); w.am.updatePool(w.P, { members: ABCD.map((t) => w.id[t]) });
+        if (kase === 'pass') w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); else w.eng.poolReadCache(w.P)(w.id.B);
+        await tick(); await tick(); return warm; });
+      const said = n(q.lines, kase === 'pass' ? /this pass decides on that basis/ : /the pool decides again on that basis/);
+      rows.push({ ok: q.r === 'A:96e B:58e C:38e' && w.linkOf('s1') === 'A' && said === 1, text: `D (learning) joins P inside the memo's second (warm: ${q.r}), then ${kase === 'pass' ? 'a pass' : 'a reader'}: s1 on ${w.linkOf('s1')}, the estimated → raw flip said ${said}×` });
+    }
+    { let w = null, nested = 0; w = basisWorld(T, { learning: null, rd: { A: 1.0 }, onFire: () => { if (nested++ === 0) w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); } });
+      w.mkSession('s1', 'A'); w.mkSession('s2', 'A');
+      const q = await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const s2moves = n(q.lines, /per-session switch [^/]+\/s2:/);
+      rows.push({ ok: nested >= 1 && s2moves === 1, text: `a pass started inside the loop (a fire whose gate ran at once): s2 moved ${s2moves}× (s1 → ${w.linkOf('s1')}, s2 → ${w.tagOf(w.am.poolCurrentFor(w.P, 's2'))})` }); }
     return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
   },
   // the smalls of round 5: «too low» toasted in every language; the journal's numbers rounded where said; the follow-up
@@ -1090,7 +1239,7 @@ const LEGS = {
       return cacheReadCensus(T, { [f]: copy }).bad.length > 0; });
     const pins = {
       oneDoor: !unrowed.length && plantedRed.every(Boolean),
-      switchPassOnTheDoor: /const readCache = poolReadCache\(poolId, now, \{ also: basisIds \}\);/.test(eng),   // the door, its basis over every id the pass compares (× usage-relearn-stepped)
+      switchPassOnTheDoor: /poolBasisRaw\(poolId, \{ pass: true \}\);[^\n]*\n    const readCache = poolReadCache\(poolId, now\); \/\/ THE ONE DOOR/.test(eng),   // the door on the pool's basis, decided again at the pass's start (K1)
       sealedOrdersOnTheDoor: /const ownFileReading = poolReadReading\(\{ group: false \}\);/.test(eng) && /readCache: ownFileReading,/.test(eng),
       placementWhenDecided: /claimDecided\(/.test(eng) && /moved onto \$\{nameOf\(ds\.to\)\} on your reset claim/.test(eng),
       wallsByLane: /lane && lanes\.has\(lane\) && m\.delete\(id\)/.test(eng),
@@ -1126,9 +1275,9 @@ if (!CONTROLS) say(`RED CONTROLS — run by the heavy row test-account-reset-doo
 const R5 = ['honest-full', 'guess-and-replace', 'words-r5'];
 const R4 = ['twin-refusal', 'old-mark', 'getusage-states', 'words-r4', 'writes-census', 'wiring'];
 const R3 = ['view', 'refusal-contradicts', 'rejection-is-a-mark', 'twin-not-measured', 'popup-key', 'same-number', 'claim-lifts-walls', 'lane-read-at', 'words-r3', 'store', 'claims-file', 'refresh-answer', 'wiring'];
-for (const [rev, tag, legs] of CONTROLS ? [[BASE, 'base', Object.keys(LEGS)], ...(ROUNDS ? [[ROUND1, 'round1', Object.keys(LEGS).filter((l) => l !== 'unlock')], [ROUND2, 'round2', R3], [ROUND3, 'round3', R4], [ROUND4, 'round4', R5]] : [])] : []) {
+for (const [rev, tag, legs] of CONTROLS ? [[BASE, 'base', Object.keys(LEGS)], [MERGED397, 'merged397', ['one-basis', 'basis-flip']], [K1R1, 'k1r1', ['pool-own']], ...(ROUNDS ? [[ROUND1, 'round1', Object.keys(LEGS).filter((l) => l !== 'unlock')], [ROUND2, 'round2', R3], [ROUND3, 'round3', R4], [ROUND4, 'round4', R5]] : [])] : []) {
   const T = archive(rev, tag);
-  say(`RED CONTROLS — ${legs.length} legs on ${rev}${tag === 'round1' ? ' (round 1: the legs round 2 adds or re-states)' : tag === 'round2' ? ' (round 2: the legs round 3 adds or re-states)' : tag === 'round3' ? ' (round 3: the legs round 4 adds or re-states)' : tag === 'round4' ? ' (round 4: the legs round 5 adds)' : ''}`);
+  say(`RED CONTROLS — ${legs.length} legs on ${rev}${tag === 'merged397' ? ' (the .397 pre-bump tip: the basis decided per call)' : tag === 'k1r1' ? ' (K1 round 1: one basis per connected set of pools)' : tag === 'round1' ? ' (round 1: the legs round 2 adds or re-states)' : tag === 'round2' ? ' (round 2: the legs round 3 adds or re-states)' : tag === 'round3' ? ' (round 3: the legs round 4 adds or re-states)' : tag === 'round4' ? ' (round 4: the legs round 5 adds)' : ''}`);
   if (!T) { skipped += legs.length; say(`  SKIP ${legs.length} red controls — ${rev} is not in this clone (a depth-1 checkout): COUNTED, not passed`); continue; }
   for (const leg of legs) { const r = await run(leg, T); ok(!r.ok, `${rev} is RED at ${leg}: ${r.detail}`); }
 }
@@ -1147,9 +1296,21 @@ if (CONTROLS) {
   // THE MERGED PASS'S WRONG SIDES (lane account-reset-door × usage-relearn-stepped): patches of src/server/usage-pool-engine.js
   const ENGSRC = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   const WRONG = [
-    ['no-also', 'the door without the pass\'s own ids (this lane\'s side alone: the membership\'s basis)', 'const readCache = poolReadCache(poolId, now, { also: basisIds });', 'const readCache = poolReadCache(poolId, now);', 'switch-basis'],
-    ['no-basis', 'the door without a basis (estimated whatever is still learning)', 'rawBasis = !!(m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m));', 'rawBasis = false;', 'switch-basis'],
-    ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now, { also: basisIds });', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],
+    ['no-pass-ids', 'the basis without what the pass compares beyond the membership (the membership\'s basis alone)', "_passCompared.set(poolId, [...new Set(compared.filter((x) => typeof x === 'string' && x))].sort());", '_passCompared.set(poolId, []);', 'switch-basis'],
+    ['default-not-compared', 'the default\'s current member left out of what the pass compares', 'passReads = new Map(), compared = [currentId];', 'passReads = new Map(), compared = [];', 'switch-basis'],
+    ['no-basis', 'the door without a basis (estimated whatever is still learning)', 'raw = !!(ids.length && usageEstimator.basisRaw && usageEstimator.basisRaw(ids));', 'raw = false;', 'switch-basis'],
+    ['verdict-no-pool', 'K1\'s wrong side: the verdict reads with no pool (the .397 tip\'s)', "const read = poolReadCache(a && a.type === 'pooled' ? scope : sessionPoolOf(session));", 'const read = poolReadCache(null);', 'one-basis'],
+    ['no-gen', 'a learn that landed is not seen until the memo\'s second is up', 'if (m && m.sig === sig && m.gen === gen && (', 'if (m && m.sig === sig && (', 'basis-flip'],
+    ['no-hold', 'the fact not held for the run that read it (the memo\'s second can split one decision)', 'm.gen === gen && (m.run === run ||', 'm.gen === gen && (false ||', 'basis-flip'],
+    ['no-kick', 'a flip another reader finds is not decided again', 'if (pass) sayBasisFlip(poolId, raw, true); else setImmediate(() => redecideOnBasis(poolId, raw));', 'if (pass) sayBasisFlip(poolId, raw, true);', 'basis-flip'],
+    ['kick-unforced', 'the flip\'s pass not forced (the pool\'s 10 s gate swallows it)', '    maybePoolAutoSwitchForPool(pid, { force: true });\n  } catch { }\n}', '    maybePoolAutoSwitchForPool(pid);\n  } catch { }\n}', 'pool-own'],
+    ['kick-self', 'a flip the pool\'s own pass finds also schedules a second pass', 'if (pass) sayBasisFlip(poolId, raw, true); else setImmediate(', 'if (pass) { sayBasisFlip(poolId, raw, true); setImmediate(() => redecideOnBasis(poolId, raw)); } else setImmediate(', 'pool-own'],
+    ['kick-sync', 'the flip decided inside the reader\'s own run', 'else setImmediate(() => redecideOnBasis(poolId, raw));', 'else redecideOnBasis(poolId, raw);', 'pool-own'],
+    ['ids-unwatched', 'the memo kept when what the pool compares changed', 'if (m && m.sig === sig && m.gen === gen && (', 'if (m && m.gen === gen && (', 'pool-own'],
+    ['only-landing', 'only raw → estimated flips decided again', 'if (m && m.raw !== raw) {', 'if (m && m.raw === true && raw === false) {', 'pool-own'],
+    ['no-passgen', 'the loop reuses its reads after a pass started inside it', 'const pr = _passGen === passGen ? passReads.get(sid) : null;', 'const pr = passReads.get(sid);', 'pool-own'],
+    ['flip-silent', 'a flip said by nobody', "    console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", "    if (0) console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", 'pool-own'],
+    ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool\'s basis', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],
   ];
   say('RED CONTROLS — the merged switch pass\'s wrong sides (patches the suite carries on a copy of src/)');
   for (const [tag, what, from, to, leg] of WRONG) {
