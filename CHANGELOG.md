@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If the browser ever keeps a passkey VibeSpace lent to a tab, VibeSpace now tells you which tab to close, and the notice goes once the passkey is gone.
 - If a page does not take your Cancel of a passkey sign-in, VibeSpace now says it could not cancel it, instead of saying nothing is waiting.
 - A passkey sign-in that a page starts right after you cancel one is no longer cancelled along with it.
+- Relearning how fast each account uses its limits no longer pauses VibeSpace: it happens a little at a time.
 
 ## 2.369.396 — 2026-11-11
 
