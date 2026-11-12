@@ -204,9 +204,27 @@ function isPausedMethod(method) { return pausedVerdict(method).refuse; }
  * The scope road (judgeScope — an owner's cooperative lease) is untouched: it forwards every call by design.
  */
 const UNCLASSIFIED_CODE = 'method_unclassified';
+/**
+ * lane chrome-157 r2 (主开发's round 2, MUST): A METHOD NAME IS JUDGED FOR SHAPE BEFORE ANYTHING OF IT IS REMEMBERED OR SAID.
+ * Every census row and every censused Chrome's fixture (153–157: 685 methods) is `Domain.method` in letters — the longest
+ * 58 characters (BluetoothEmulation.simulateCharacteristicOperationResponse); a custom kernel's VibeSpace.* the same. A name
+ * of any other shape (a newline, a space, 10 MB) is no CDP method: refused `bad_message`, its words echo only a short
+ * JSON-escaped head, and the mediator keeps and journals NOTHING of it (a count). Asked only on the no-row branch, so no
+ * classified verdict can move. Only a SHAPED name reaches the bounded lists and the journal (src/server/cdp-mediator.js).
+ */
+const METHOD_NAME_MAX = 100;
+const METHOD_NAME_SHAPE = /^[A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9]*$/;
+function methodShaped(method) { return typeof method === 'string' && method.length <= METHOD_NAME_MAX && METHOD_NAME_SHAPE.test(method); }
+/** The browser's own name of itself, made safe to print: printable ASCII only, at most 80 characters (null if none). */
+function browserLabel(browser) { const b = browser == null ? '' : String(browser).replace(/[^\x20-\x7e]/g, '?').slice(0, 80).trim(); return b || null; }
 function unclassifiedWords(method, browser = null) {
-  const b = browser ? String(browser).slice(0, 80) : 'its version not read yet';
-  return `${method} is not a method this VibeSpace knows yet — the browser is ${b} and VibeSpace's CDP census (src/cdp-census.js) has no row for it, so it is refused on this lease whoever drives; there is no way round it: a VibeSpace update that classes the method lifts this (censused on Chrome ${CENSUS.CENSUS_CHROMES.join(' + ')})`;
+  const b = browserLabel(browser);
+  return `${method} is not a method this VibeSpace knows yet — ${b ? `the browser is ${b}` : 'the browser\'s version is not known on this connection yet'} and VibeSpace's CDP census (src/cdp-census.js) has no row for it, so it is refused on this lease whoever drives; there is no way round it: a VibeSpace update that classes the method lifts this (censused on Chrome ${CENSUS.CENSUS_CHROMES.join(' + ')})`;
+}
+/** The words for a name that is not a CDP method's shape — never the name itself, only a short escaped head of it. */
+function malformedWords(method) {
+  const m = String(method);
+  return `a method name ${JSON.stringify(m.slice(0, 40))}${m.length > 40 ? `… (${m.length} characters)` : ''} is not the shape of a CDP method (Domain.method, letters and digits, at most ${METHOD_NAME_MAX} characters) — refused; nothing of it is kept`;
 }
 /**
  * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27): which calls STILL WAITING on the browser at the takeover
@@ -370,7 +388,10 @@ function judge(msg, scope, { paused = false, browser = null } = {}) {
   if (id == null) return { kind: 'drop', why: 'no id' };
   if (sid && !scope.sessions.has(sid)) return { kind: 'refuse', reply: refusal(id, 'session_out_of_scope', `CDP session ${sid} was not handed to this lease`, sid) };
   if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', why: 'refused', reply: refusal(id, 'method_refused', `${method} ${ALWAYS_REFUSED_WHY[method] || 'acts on the whole shared browser — not through a session url'}`, sid) };
-  if (!CENSUS.rowOf(method)) return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };   // (lane chrome-157: both driving states)
+  if (!CENSUS.hasRow(method)) {   // (lane chrome-157: both driving states; r2: one Set lookup a message, the name's SHAPE judged first)
+    if (!methodShaped(method)) return { kind: 'refuse', why: 'malformed', reply: refusal(id, 'bad_message', malformedWords(method), sid) };
+    return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };
+  }
   if (paused) { const pv = pausedVerdict(method); if (pv.refuse) return { kind: 'refuse', why: pv.why, reply: refusal(id, INT.INTERRUPTED_CODE, pausedWords(method, pv), sid) }; }
   if (TARGET_METHODS.has(method)) {
     const t = params.targetId == null ? '' : String(params.targetId);
@@ -551,7 +572,7 @@ function grantKey(profileId, browserKey) { return `${String(profileId || '')}|${
  *  the raw upstream. */
 function grantView(g) {
   if (!g) return null;
-  return { profileId: g.profileId, browserKey: g.browserKey, mode: g.mode === SCOPE_MODE ? SCOPE_MODE : MEDIATED_MODE, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream, unclassified: g.unclassified ? [...g.unclassified] : [], // verify r4: the methods this lease was refused for lacking a census row
+  return { profileId: g.profileId, browserKey: g.browserKey, mode: g.mode === SCOPE_MODE ? SCOPE_MODE : MEDIATED_MODE, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream, unclassified: g.unclassified ? [...g.unclassified] : [], unclassifiedMore: Number(g.unclassifiedMore) || 0, malformed: Number(g.malformed) || 0,   /* lane chrome-157 r2: the list is BOUNDED (the mediator keeps ≤ UNCLASSIFIED_KEEP shaped names; `unclassifiedMore` = refused calls of names not listed, `malformed` = calls whose name was no CDP method's shape — counts, never the names) */ // verify r4: the methods this lease was refused for lacking a census row
     // the owner's ruling (2026-09-27): what the LAST takeover interrupted on this lease (counts + method names + the browser's answers to terminateExecution — never a param)
     lastInterrupt: g.lastInterrupt ? { at: g.lastInterrupt.at, aborted: g.lastInterrupt.aborted, methods: [...(g.lastInterrupt.methods || [])], terminated: g.lastInterrupt.terminated, terminateAnswers: [...(g.lastInterrupt.terminateAnswers || [])], landed: Number(g.lastInterrupt.landed) || 0, landedMethods: [...(g.lastInterrupt.landedMethods || [])] } : null }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
 }
@@ -568,7 +589,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, UNCLASSIFIED_CODE, unclassifiedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

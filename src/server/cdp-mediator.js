@@ -12,8 +12,13 @@
  * The RULES are PURE (src/browser-mediation.js over the census src/cdp-census.js):
  * scope over `Target.*`, the typed `browser_paused` refusal while the user
  * drives (a live callback the keeper hands the grant — read PER MESSAGE, never
- * cached; verify r4: a method with no census row is refused by name while
- * paused, logged once per method), the whole-browser acts refused outright.
+ * cached), the whole-browser acts refused outright. A method with no census row
+ * is refused by name WHOEVER drives (lane chrome-157; verify r4 refused it only
+ * while paused) and named in the journal once per method per run — BOUNDED
+ * (lane chrome-157 r2): a name that is not a CDP method's shape is refused
+ * `bad_message` and only counted; at most UNCLASSIFIED_SAY names a run are
+ * journalled and UNCLASSIFIED_KEEP a grant listed, the rest counted. The
+ * refusal names the browser of ITS connection (read at each wire).
  * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27 — "直接打断所有脚本和
  * agent操作"): `interrupt({profileId, browserKey})` (the keeper calls it at the
  * takeover instant) answers every call of the lease still waiting on the browser
@@ -65,14 +70,23 @@ const INTERNAL_ID_BASE = 2000000000;
 const SPENT_CREDIT_REPLY_MS = 10000; // verify r3: how long a SPENT credit waits for the browser's own answer before its receipt says no_reply
 const UPSTREAM_OPEN_MS = 8000;
 const FETCH_MS = 4000;
+/** lane chrome-157 r2 (主开发's MUST): what an agent's invented method names may cost — the grant's view lists at most
+ *  UNCLASSIFIED_KEEP names (it rides the keeper's digest to every client), the journal says at most UNCLASSIFIED_SAY a run
+ *  (one line each, then ONE line that the rest go uncounted line by line, and the count at shutdown). Only a SHAPED name
+ *  (browser-mediation.methodShaped: Domain.method, letters, ≤ 100 characters) is ever kept or written. */
+const UNCLASSIFIED_KEEP = 32;
+const UNCLASSIFIED_SAY = 64;
+/** A connection whose /json/version read failed asks again at its next unclassified refusal, no sooner than this. */
+const VERSION_RETRY_MS = 5000;
 /** The status text a PARKED client is refused with (503) when its grant moved during the upstream's open — keyed by
  *  the close reason the grant's live connections get (verify r3 M3). */
 const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
-function create({ log = console, now = Date.now } = {}) {
+function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS } = {}) {
   /** lane chrome-157: the methods an unclassified refusal was said for in the journal, this RUN of this mediator (the hub makes
-   *  ONE a run) — once a method, never per call */
+   *  ONE a run) — once a method, never per call; r2: at most UNCLASSIFIED_SAY of them, the rest counted (`unsaid`) */
   const unclassifiedSaid = new Set();
+  let unsaid = 0, sayFull = false, malformedSaid = false;
   const grants = new Map();   // token → grant
   const byKey = new Map();    // grantKey → token
   let server = null, wss = null, port = null, listening = null, closed = false;
@@ -168,8 +182,8 @@ function create({ log = console, now = Date.now } = {}) {
     });
   }
   function wire(g, p, ws, up) {
-    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now() };
-    if (!g.versionAsked) { g.versionAsked = true; fetchJson(g, '/json/version').then((r) => { g.browserVersion = r && r.json && r.json.Browser ? String(r.json.Browser).slice(0, 80) : null; }, () => { }); }   // (lane chrome-157: once a grant — an unclassified refusal names the browser)
+    const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null };
+    askVersion(g, conn);   // (lane chrome-157 r2: the browser of THIS connection — a restart / relaunch closes it, the reconnect reads the new one)
     g.conns.add(conn);
     g.lastUsedAt = now();
     const closeBoth = (code, reason) => {
@@ -195,13 +209,14 @@ function create({ log = console, now = Date.now } = {}) {
         credit = tc.credit;
       }
       // the owner's ruling (2026-09-27): no switch — every class but read / session / harmless is refused while the user drives
-      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: g.browserVersion || null });   // (lane chrome-157: the browser's version names itself in an unclassified refusal) // lane browser-shared-profile-freeze: the scope road passes every call
+      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: conn.browser });   // (lane chrome-157: the browser's version names itself in an unclassified refusal; r2: this connection's) // lane browser-shared-profile-freeze: the scope road passes every call
       if (v.kind === 'refuse') {
         g.refusals = (g.refusals || 0) + 1;
         // a method the census does not list was refused (lane chrome-157: whoever drives) — said in the hub's journal ONCE per method
-        // per RUN of this hub (a new Chrome in the field is learned of before a suite meets it), never per call. Never a token, never the raw url.
-        if (v.why === 'unclassified') { g.unclassified = g.unclassified || new Set(); g.unclassified.add(msg.method); }   // (the grant's view lists them — the operator's signal)
-        if (v.why === 'unclassified' && !unclassifiedSaid.has(msg.method)) { unclassifiedSaid.add(msg.method); log.warn?.(`[cdp-mediator] ${msg.method} has no row in the CDP census (src/cdp-census.js) — refused on a mediated lease (first seen from ${g.browserKey} on ${g.profileId}, the browser ${g.browserVersion || 'not yet read'}); a row classing it lifts this`); }
+        // per RUN of this hub (a new Chrome in the field is learned of before a suite meets it), never per call; r2: BOUNDED, and
+        // only a shaped name is ever kept or written. Never a token, never the raw url.
+        if (v.why === 'unclassified') noteUnclassified(g, conn, msg.method);
+        else if (v.why === 'malformed') noteMalformed(g);
         if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
@@ -347,6 +362,43 @@ function create({ log = console, now = Date.now } = {}) {
       if (g.credits.length > 256) settleCredit(g.credits.shift(), { ok: false, code: 'not_dispatched', error: 'too many inputs waiting' });
     });
   }
+  /** lane chrome-157 r2: read the browser's own name for THIS connection (/json/version) — at each wire, and again at an
+   *  unclassified refusal when the last read failed (paced by VERSION_RETRY_MS). A journal line waiting on the read is said
+   *  when it settles, naming the browser or saying plainly it did not say its version. */
+  function askVersion(g, conn) {
+    if (conn.browser || conn.versionAsking || (conn.versionFailedAt && now() - conn.versionFailedAt < versionRetryMs)) return;
+    conn.versionAsking = true;
+    const settle = (b) => {
+      conn.versionAsking = false;
+      if (b) conn.browser = b; else conn.versionFailedAt = now();
+      const w = conn.versionWaiters; conn.versionWaiters = null;
+      if (w) for (const f of w) { try { f(); } catch { /* a journal line */ } }
+    };
+    fetchJson(g, '/json/version').then((r) => settle(r && r.ok && r.json ? M.browserLabel(r.json.Browser) : null), () => settle(null));
+  }
+  /** lane chrome-157 r2: an unclassified (shaped) name — the grant's view lists ≤ UNCLASSIFIED_KEEP, the journal says ≤
+   *  UNCLASSIFIED_SAY a run, once each, the rest counted. */
+  function noteUnclassified(g, conn, method) {
+    g.unclassified = g.unclassified || new Set();
+    if (!g.unclassified.has(method)) { if (g.unclassified.size < UNCLASSIFIED_KEEP) g.unclassified.add(method); else g.unclassifiedMore = (g.unclassifiedMore || 0) + 1; }
+    if (unclassifiedSaid.has(method)) return;
+    if (unclassifiedSaid.size >= UNCLASSIFIED_SAY) {
+      unsaid++;
+      if (!sayFull) { sayFull = true; log.warn?.(`[cdp-mediator] ${UNCLASSIFIED_SAY} different methods with no row in the CDP census were journalled this run — later ones are refused without a line each (counted, said at shutdown; a grant's view lists up to ${UNCLASSIFIED_KEEP})`); }
+      return;
+    }
+    unclassifiedSaid.add(method);
+    const say = () => log.warn?.(`[cdp-mediator] ${method} has no row in the CDP census (src/cdp-census.js) — refused on a mediated lease (first seen from ${g.browserKey} on ${g.profileId}, the browser ${conn.browser || 'did not say its version'}); a row classing it lifts this`);
+    if (!conn.browser) askVersion(g, conn);
+    if (conn.browser || !conn.versionAsking) say(); else (conn.versionWaiters = conn.versionWaiters || []).push(say);
+  }
+  /** lane chrome-157 r2: a name that is no CDP method's shape — counted on the grant, journalled ONCE a run without the name. */
+  function noteMalformed(g) {
+    g.malformed = (g.malformed || 0) + 1;
+    if (malformedSaid) return;
+    malformedSaid = true;
+    log.warn?.(`[cdp-mediator] a mediated lease sent a method name that is not a CDP method's shape — refused bad_message, nothing of the name kept or written (first from ${g.browserKey} on ${g.profileId}); later ones are counted on the grant's view only`);
+  }
   function repointGrant(g, upstream) {
     const was = g.upstream;
     g.upstream = upstream ? String(upstream) : null;
@@ -406,6 +458,7 @@ function create({ log = console, now = Date.now } = {}) {
   function list() { return [...grants.values()].map(view); }
   function shutdown() {
     closed = true;
+    if (unsaid) { log.warn?.(`[cdp-mediator] and ${unsaid} more refused call(s) of methods with no census row this run were not journalled one by one (past the first ${UNCLASSIFIED_SAY} names)`); unsaid = 0; }
     for (const g of grants.values()) closeConns(g, 1001, 'server_shutdown');
     grants.clear(); byKey.clear();
     try { wss?.close(); } catch { /* none */ }
@@ -425,4 +478,4 @@ function create({ log = console, now = Date.now } = {}) {
   return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
-module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE };
+module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS };

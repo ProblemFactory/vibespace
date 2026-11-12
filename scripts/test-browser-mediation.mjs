@@ -322,7 +322,14 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   const unk = M.judge({ id: 10, method: 'Page.zzzFutureMethod', params: {}, sessionId: 'S-A' }, sc, { paused: true, browser: 'Chrome/157.0.8103.50' });
   const unkA = M.judge({ id: 14, method: 'Page.zzzFutureMethod', params: {}, sessionId: 'S-A' }, sc, { browser: 'Chrome/157.0.8103.50' });
   ok([unk, unkA].every((v) => v.kind === 'refuse' && v.why === 'unclassified' && M.refusalCodeOf(v.reply) === 'method_unclassified' && /Page\.zzzFutureMethod is not a method this VibeSpace knows yet/.test(v.reply.error.message) && /the browser is Chrome\/157\.0\.8103\.50/.test(v.reply.error.message) && /no way round it/.test(v.reply.error.message) && /update/.test(v.reply.error.message) && /src\/cdp-census\.js/.test(v.reply.error.message) && new RegExp(C.CENSUS_CHROME.replace(/\./g, '\\.')).test(v.reply.error.message)), '⑥ a method the census does not list (a newer Chrome\'s) is refused method_unclassified in BOTH driving states, NAMED with the browser\'s version, the census file and the censused Chrome, no way round it, an update lifts it', unk.reply && unk.reply.error.message);
-  ok(M.judge({ id: 11, method: 'Zzz.newDomainMethod', params: {} }, sc, { paused: true }).why === 'unclassified' && M.judge({ id: 12, method: 'Zzz.newDomainMethod', params: {} }, sc, {}).why === 'unclassified' && /its version not read yet/.test(M.judge({ id: 15, method: 'Zzz.newDomainMethod', params: {} }, sc, {}).reply.error.message) && M.isPausedMethod('Page.zzzFutureMethod') === true && M.pausedVerdict('Page.zzzFutureMethod').why === 'unclassified' && M.judgeScope({ id: 16, method: 'Page.zzzFutureMethod', params: {} }).kind === 'forward', '⑥ a whole unknown domain the same, in both states (a version not read yet is said so); the SCOPE road still forwards an unknown method — by design, pinned so nobody «fixes» it by accident');
+  ok(M.judge({ id: 11, method: 'Zzz.newDomainMethod', params: {} }, sc, { paused: true }).why === 'unclassified' && M.judge({ id: 12, method: 'Zzz.newDomainMethod', params: {} }, sc, {}).why === 'unclassified' && /the browser's version is not known on this connection yet/.test(M.judge({ id: 15, method: 'Zzz.newDomainMethod', params: {} }, sc, {}).reply.error.message) && M.isPausedMethod('Page.zzzFutureMethod') === true && M.pausedVerdict('Page.zzzFutureMethod').why === 'unclassified' && M.judgeScope({ id: 16, method: 'Page.zzzFutureMethod', params: {} }).kind === 'forward', '⑥ a whole unknown domain the same, in both states (a version not read yet is said so); the SCOPE road still forwards an unknown method — by design, pinned so nobody «fixes» it by accident');
+  // lane chrome-157 r2: THE SHAPE is judged first on the no-row branch — a name that is no CDP method is bad_message (an escaped
+  // head only); a domain named like an object's own member has NO row (it was forwarded in both states, the release too)
+  const MAL = ['Page.zzz\n[cdp-mediator] FORGED', 'Page.' + 'x'.repeat(200), ' Page.navigate', 'Page.navigate.', 'Ρage.navigate', 'Page.navigate\u0000x', 'Page', '.navigate', 'Page.nav-igate'];
+  ok(MAL.every((m) => [false, true].every((p) => { const v = M.judge({ id: 20, method: m, params: {} }, sc, { paused: p }); return v.kind === 'refuse' && v.why === 'malformed' && M.refusalCodeOf(v.reply) === 'bad_message' && v.reply.error.message.length < 400 && !v.reply.error.message.includes('\n') && /nothing of it is kept/.test(v.reply.error.message); })), '⑥ r2: a name that is not a CDP method\'s shape (a newline, 200 characters, a space, a trailing dot, a Greek letter, a NUL, no dot, a dash) is refused bad_message in both states — the words carry only an escaped head (< 400 characters, no newline)');
+  const PROTO = ['constructor.keys', '__proto__.toString', 'hasOwnProperty.name', 'Page.constructor', 'toString.call'];
+  ok(PROTO.every((m) => !C.hasRow(m) && C.rowOf(m) === null && [false, true].every((p) => { const v = M.judge({ id: 21, method: m, params: {} }, sc, { paused: p }); return v.kind === 'refuse' && M.refusalCodeOf(v.reply) === (M.methodShaped(m) ? 'method_unclassified' : 'bad_message'); })), '⑥ r2: a domain named like an object\'s own member (constructor.keys, __proto__.toString, hasOwnProperty.name, Page.constructor) has NO row and is refused in both states — no hole in «no row ⇒ refused»');
+  ok(C.rows().every((r) => M.methodShaped(r.domain + '.' + r.method) && C.hasRow(r.domain + '.' + r.method)) && Math.max(...C.rows().map((r) => (r.domain + '.' + r.method).length)) < M.METHOD_NAME_MAX, `⑥ r2: every census row is shaped and found by hasRow (the longest ${Math.max(...C.rows().map((r) => (r.domain + '.' + r.method).length))} characters < ${M.METHOD_NAME_MAX})`);
   // a page-mutation refusal's words (no setting named any more — the switch is retired) + the sentence
   const swv = M.judge({ id: 13, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'S-A' }, sc, { paused: true, fenceScripts: false });
   ok(swv.kind === 'refuse' && swv.why === 'page-mutation' && M.refusalCodeOf(swv.reply) === 'browser_interrupted' && !/fenceScriptsWhileDriven/.test(swv.reply.error.message) && /took over your window of this browser/.test(swv.reply.error.message) && /run it again/.test(swv.reply.error.message), '⑥ a page-mutation refusal (even with the retired switch passed OFF) names the takeover and the way out — never a setting', swv.reply && swv.reply.error.message);
@@ -332,7 +339,7 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   const MUT6 = mutantCopies('mediation-census', REPO6);
   const censusSrc = fs.readFileSync(path.join(REPO6, 'src/cdp-census.js'), 'utf8');
   const medSrc = fs.readFileSync(path.join(REPO6, 'src/browser-mediation.js'), 'utf8');
-  const rowAnchor = "dispatchKeyEvent: ['input', '2026-09-21'],", unkAnchor = "  if (!CENSUS.rowOf(method)) return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };", swAnchor = "'page-mutation': 'refuse',";
+  const rowAnchor = "dispatchKeyEvent: ['input', '2026-09-21'],", unkAnchor = "  if (!CENSUS.hasRow(method)) {   // (lane chrome-157: both driving states; r2: one Set lookup a message, the name's SHAPE judged first)\n    if (!methodShaped(method)) return { kind: 'refuse', why: 'malformed', reply: refusal(id, 'bad_message', malformedWords(method), sid) };\n    return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };\n  }", swAnchor = "'page-mutation': 'refuse',";
   ok(censusSrc.split(rowAnchor).length === 2 && medSrc.split(unkAnchor).length === 2 && censusSrc.split(swAnchor).length === 2, '⑥ control setup: the dispatchKeyEvent row, the unknown rule and the page-mutation rule are each spelled once');
   const bound = (censusPath) => medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(censusPath)})`);
   const demotedCensus = MUT6.write('src/cdp-census.js', censusSrc.replace(rowAnchor, "dispatchKeyEvent: ['read', '2026-09-21'],"), 'demoted');
@@ -367,7 +374,62 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
   st.paused = false;
   const h6 = await c6.call('Page.zzzFutureMethod', {}, s6);
   ok(M.refusalCodeOf(h6) === 'method_unclassified' && h6.result === undefined && logs6.filter((l) => /has no row/.test(l)).length === 1, '⑥ …handed back, the unknown method is STILL refused by name (lane chrome-157: it was forwarded) — and the journal still says it once a run');
+  // lane chrome-157 r2: the refusal names the browser of THIS connection (the fake's /json/version: Fake/1.0), the journal too
+  ok(/the browser is Fake\/1\.0/.test(u6.error.message) && logs6.some((l) => /Page\.zzzFutureMethod has no row/.test(l) && /the browser Fake\/1\.0/.test(l)), '⑥ r2: the refusal and its journal line name the browser of this connection (Fake/1.0, read from its /json/version)', u6.error && u6.error.message);
+  // …ONCE PER RUN, not per grant: a second lease on the same mediator refusing the same method adds no journal line, and lists it
+  const g6b = await med6.grantFor({ profileId: 'bp-00000006', browserKey: 'bk-0000006b', upstream: fake6.url, targetIds: ['T-B'], paused: () => false });
+  const c6b = cdpClient(g6b.url); await c6b.open;
+  const u6b = await c6b.call('Page.zzzFutureMethod', {});
+  ok(M.refusalCodeOf(u6b) === 'method_unclassified' && logs6.filter((l) => /Page\.zzzFutureMethod has no row/.test(l)).length === 1 && med6.list().find((v) => v.browserKey === 'bk-0000006b').unclassified.join() === 'Page.zzzFutureMethod', '⑥ r2: a SECOND lease refusing the same method adds no journal line (once per RUN, not per grant) — its own view lists it');
+  // THE BROWSER THAT IS RUNNING: the browser restarts onto a newer one (repoint) — the reconnect's refusal names the NEW browser
+  const fake6n = await fakeBrowser({ browser: 'Fake/2.0' });
+  med6.repoint('bp-00000006', fake6n.url);
+  const c6n = cdpClient(g6.url); await c6n.open;
+  await c6n.call('Target.getTargets', {});
+  const u6n = await c6n.call('Page.zzzFutureMethod', {}), u6n2 = await c6n.call('Page.zzzNewOnTwo', {});
+  ok(/the browser is Fake\/2\.0/.test(u6n.error.message) && !/Fake\/1\.0/.test(u6n.error.message) && logs6.some((l) => /Page\.zzzNewOnTwo has no row/.test(l) && /the browser Fake\/2\.0/.test(l)), '⑥ r2: after a restart onto a newer browser (repoint) the refusal and a new method\'s journal line name the NEW browser (Fake/2.0), never the old', u6n.error && u6n.error.message);
+  c6n.ws.close();
+  const c6c = cdpClient(g6b.url); await c6c.open;   // (the repoint closed every connection of the profile — the lease reconnects)
+  // THE MUST: invented names are BOUNDED — 10 000 different shaped names: every call answered, ≤ UNCLASSIFIED_SAY journal lines + one
+  // «the rest are counted» line, the view lists UNCLASSIFIED_KEEP and counts the rest
+  const before6 = logs6.length;
+  const N6 = 10000;
+  const flood = await Promise.all(Array.from({ length: N6 }, (_, i) => c6c.call(`Zzz${i}.invented${i}`, {})));
+  const floodLines = logs6.slice(before6);
+  const vb = med6.list().find((v) => v.browserKey === 'bk-0000006b');
+  ok(flood.every((r) => M.refusalCodeOf(r) === 'method_unclassified') && floodLines.filter((l) => /has no row in the CDP census \(src/.test(l)).length <= MED.UNCLASSIFIED_SAY && floodLines.length <= MED.UNCLASSIFIED_SAY + 1 && floodLines.filter((l) => /later ones are refused without a line each/.test(l)).length === 1, `⑥ r2 THE MUST: ${N6} different invented names — every call answered method_unclassified, at most ${MED.UNCLASSIFIED_SAY} journal lines + ONE «the rest are counted» line (${floodLines.length})`, floodLines.length);
+  ok(vb.unclassified.length === MED.UNCLASSIFIED_KEEP && vb.unclassifiedMore === N6 + 1 - MED.UNCLASSIFIED_KEEP && JSON.stringify(vb).length < 4096, `⑥ r2: the grant's view (it rides the keeper's digest) lists ${MED.UNCLASSIFIED_KEEP} names and COUNTS the rest (${vb.unclassifiedMore}), ${JSON.stringify(vb).length} bytes`, JSON.stringify(vb).length);
+  // a name that is no CDP method's shape: a newline (a forged journal line), a 1 MB name — refused bad_message, NOTHING of it kept or written
+  const forged = 'Page.zzz\n[cdp-mediator] FORGED line';
+  const before6m = logs6.length;
+  const m1 = await c6c.call(forged, {}), m2 = await c6c.call('Page.' + 'x'.repeat(1024 * 1024), {}), m3 = await c6c.call('Page.navigate ', {});
+  const mLines = logs6.slice(before6m);
+  const vm = med6.list().find((v) => v.browserKey === 'bk-0000006b');
+  ok([m1, m2, m3].every((r) => M.refusalCodeOf(r) === 'bad_message' && /is not the shape of a CDP method/.test(r.error.message) && r.error.message.length < 400) && mLines.length === 1 && !/\n/.test(mLines[0]) && !/FORGED/.test(mLines[0]) && /not a CDP method's shape/.test(mLines[0]) && vm.malformed === 3 && !vm.unclassified.some((n) => /FORGED|xxxx|navigate /.test(n)) && JSON.stringify(vm).length < 4096, '⑥ r2: a name with a newline, a 1 MB name, a trailing space — refused bad_message (the words ≤ 400 characters, an escaped head only), ONE journal line with no newline and none of the agent\'s text, counted on the view, never listed', JSON.stringify(mLines));
+  c6c.ws.close(); c6b.ws.close(); fake6n.close();
   c6.ws.close(); med6.shutdown(); fake6.close();
+  ok(logs6.filter((l) => /and \d+ more refused call\(s\) of methods with no census row/.test(l)).length === 1, '⑥ r2: at shutdown the journal says the count of refused calls past the first names, ONCE');
+  // a failed version read is asked again (paced): the first read fails ⇒ the words say plainly it is not known; the next ⇒ the name
+  const fake6f = await fakeBrowser({ browser: 'Fake/3.0', versionFails: 1 });
+  const logs6f = [];
+  const med6f = MED.create({ log: { log: (l) => logs6f.push(String(l)), warn: (l) => logs6f.push('W ' + String(l)) }, versionRetryMs: 50 });
+  const g6f = await med6f.grantFor({ profileId: 'bp-0000006f', browserKey: 'bk-0000006f', upstream: fake6f.url, targetIds: ['T-A'], paused: () => false });
+  const c6f = cdpClient(g6f.url); await c6f.open;
+  await new Promise((r) => setTimeout(r, 300));
+  const f1 = await c6f.call('Page.zzzFirst', {});
+  await new Promise((r) => setTimeout(r, 300));
+  const f2 = await c6f.call('Page.zzzSecond', {});
+  ok(/the browser's version is not known on this connection yet/.test(f1.error.message) && /the browser is Fake\/3\.0/.test(f2.error.message) && fake6f.version.asks === 2 && logs6f.some((l) => /Page\.zzzFirst has no row/.test(l) && /the browser Fake\/3\.0/.test(l)), '⑥ r2: a FAILED version read: the refusal says plainly «not known on this connection yet», the read is asked again at that refusal, its journal line waits for it and names the browser (Fake/3.0), and the next refusal names it too', JSON.stringify([f1.error && f1.error.message.slice(0, 120), f2.error && f2.error.message.slice(0, 120), fake6f.version.asks]));
+  c6f.ws.close(); fake6f.close();
+  // a browser that never says its version: the words and the journal say so plainly; the asks are paced, never one per call
+  const fake6x = await fakeBrowser({ browser: 'Fake/4.0', versionFails: 1e9 });
+  const g6x = await med6f.grantFor({ profileId: 'bp-0000006x', browserKey: 'bk-0000006x', upstream: fake6x.url, targetIds: ['T-A'], paused: () => false });
+  const c6x = cdpClient(g6x.url); await c6x.open;
+  await new Promise((r) => setTimeout(r, 200));
+  const x1 = await Promise.all(Array.from({ length: 50 }, () => c6x.call('Page.zzzNeverNamed', {})));
+  await new Promise((r) => setTimeout(r, 200));
+  ok(x1.every((r) => /the browser's version is not known on this connection yet/.test(r.error.message)) && logs6f.some((l) => /Page\.zzzNeverNamed has no row/.test(l) && /did not say its version/.test(l)) && fake6x.version.asks <= 3, `⑥ r2: a browser that never answers /json/version — the refusal says «not known on this connection yet», the journal «did not say its version», and 50 refusals asked it ${fake6x.version.asks} time(s) (paced)`, fake6x.version.asks);
+  c6x.ws.close(); med6f.shutdown(); fake6x.close();
 }
 
 // ═══ ③ the real proxy over a fake CDP upstream ══════════════════════════════
@@ -377,13 +439,14 @@ console.log('— ③ the real proxy over a fake CDP upstream: two grants, cross-
  *  createTarget (announcing targetCreated BEFORE the reply — Chrome's order),
  *  attaches with a sessionId, closes with success + targetDestroyed, echoes
  *  {} for the rest; every `Target.closeTarget` it receives is recorded. */
-function fakeBrowser() {
+function fakeBrowser({ browser = 'Fake/1.0', versionFails = 0 } = {}) {   // lane chrome-157 r2: the browser's own name + its first N /json/version reads failing
+  const version = { asks: 0 };
   const targets = new Map([['T-A', { targetId: 'T-A', type: 'page', url: 'about:a' }], ['T-B', { targetId: 'T-B', type: 'page', url: 'about:b' }], ['T-Z', { targetId: 'T-Z', type: 'page', url: 'about:z' }]]);
   const closes = [], socks = new Set(), seen = [], held = [];
   let nextT = 1, nextS = 1, port = 0;
   const srv = http.createServer((req, res) => {
     const j = (o) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
-    if (req.url === '/json/version') return j({ Browser: 'Fake/1.0', 'Protocol-Version': '1.3', webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID` });
+    if (req.url === '/json/version') { version.asks++; if (version.asks <= versionFails) { res.writeHead(500); res.end(); return; } return j({ Browser: browser, 'Protocol-Version': '1.3', webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID` }); }
     if (req.url === '/json/list' || req.url === '/json') return j([...targets.values()].map((t) => ({ id: t.targetId, type: t.type, url: t.url, webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/page/${t.targetId}`, devtoolsFrontendUrl: `/devtools/inspector.html?ws=127.0.0.1:${port}/devtools/page/${t.targetId}` })));
     res.writeHead(404); res.end();
   });
@@ -416,12 +479,14 @@ function fakeBrowser() {
       });
     });
   });
-  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => { port = srv.address().port; resolve({ port, url: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID`, targets, closes, seen, held, release: () => { const hs = held.splice(0); for (const h of hs) h(); return hs.length; }, emit: (o) => { for (const s of socks) s.send(JSON.stringify(o)); }, close: () => { for (const s of socks) { try { s.terminate(); } catch { /* none */ } } srv.close(); } }); }));
+  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => { port = srv.address().port; resolve({ port, url: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID`, targets, closes, seen, held, version, release: () => { const hs = held.splice(0); for (const h of hs) h(); return hs.length; }, emit: (o) => { for (const s of socks) s.send(JSON.stringify(o)); }, close: () => { for (const s of socks) { try { s.terminate(); } catch { /* none */ } } srv.close(); } }); }));
 }
 function cdpClient(url) {
   const ws = new WebSocket(url); let id = 0; const waits = new Map(); const events = [];
   ws.on('message', (d) => { const m = JSON.parse(String(d)); if (m.id != null && waits.has(m.id)) { waits.get(m.id)(m); waits.delete(m.id); } else if (m.id == null) events.push(m); });
-  const call = (method, params = {}, sessionId) => new Promise((res) => { const i = ++id; waits.set(i, res); ws.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) })); });
+  // lane chrome-157 r2: every call's wait is BOUNDED — a reply the proxy drops resolves { noReply: true } after waitMs, so the
+  // leg reading it goes red by name (a dropped refusal hung the suite: rc 124, no assert named)
+  const call = (method, params = {}, sessionId, { waitMs = 15000 } = {}) => new Promise((res) => { const i = ++id; const t = setTimeout(() => { if (waits.delete(i)) res({ noReply: true, id: i, method }); }, waitMs); waits.set(i, (m) => { clearTimeout(t); res(m); }); ws.send(JSON.stringify({ id: i, method, params, ...(sessionId ? { sessionId } : {}) })); });
   const closed = new Promise((r) => ws.on('close', (c, reason) => r({ code: c, reason: String(reason) })));
   return { ws, call, events, closed, open: new Promise((r, j) => { ws.once('open', r); ws.once('error', j); }) };
 }

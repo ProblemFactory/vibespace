@@ -470,12 +470,18 @@ function rowOf(method) {
   const m = String(method || '');
   const dot = m.indexOf('.');
   if (dot <= 0) return null;
-  const dom = ROWS[m.slice(0, dot)];
+  // lane chrome-157 r2: the DOMAIN is an own key too — `constructor.keys` / `__proto__.toString` found Object's own members
+  // through a plain lookup and got a row with no class (forwarded in both states, the release too)
+  const dom = Object.prototype.hasOwnProperty.call(ROWS, m.slice(0, dot)) ? ROWS[m.slice(0, dot)] : null;
   if (!dom || !Object.prototype.hasOwnProperty.call(dom, m.slice(dot + 1))) return null;
   const v = dom[m.slice(dot + 1)];
   const o = typeof v === 'string' ? { cls: v } : Array.isArray(v) ? { cls: v[0], since: v[1] } : { ...v };
   return { domain: m.slice(0, dot), method: m.slice(dot + 1), cls: o.cls, since: o.since || SINCE, fence: o.fence || 'mediator', why: o.why || null, chrome: o.chrome || CENSUS_CHROMES[0], until: o.until || null };
 }
+/** lane chrome-157 r2: THE NAMES the census has rows for, built ONCE at load — `hasRow` is the one lookup the mediator does
+ *  per message (rowOf allocates a row; the judge only asks «is there one»). Closed over, never exported as a Set. */
+const NAMES = (() => { const s = new Set(); for (const dom of Object.keys(ROWS)) for (const m of Object.keys(ROWS[dom])) s.add(dom + '.' + m); return s; })();
+function hasRow(method) { return typeof method === 'string' && NAMES.has(method); }
 /** Does a CENSUSED Chrome list this row's method? (`chrome` ≤ v < `until`). null for a version the census never saw. */
 function listedOn(row, v) {
   if (!row || !CENSUS_CHROMES.includes(v)) return null;
@@ -501,8 +507,8 @@ function census() {
 /**
  * Compare the table against a protocol listing (`{domains:[{domain, commands:[{name}]}]}` — /json/protocol's shape,
  * the fixture's or a live one) of the Chrome `chrome`: `{chrome, relation, unclassified, stale, misdated, sameSet,
- * listed, rows}`. A method the protocol lists with NO row at all is UNCLASSIFIED (refused by name while the user
- * drives; the legs print it). On a CENSUSED Chrome the table must name EXACTLY its methods: a row listed there that
+ * listed, rows}`. A method the protocol lists with NO row at all is UNCLASSIFIED (refused by name on every
+ * mediated lease whoever drives — lane chrome-157; the legs print it). On a CENSUSED Chrome the table must name EXACTLY its methods: a row listed there that
  * the protocol lacks is STALE, a method it lists whose row's `chrome` / `until` says it is not there is MISDATED —
  * `sameSet` = none of the three. On any other Chrome (or none given) `stale` is every row the protocol lacks
  * (informational — an older / newer Chrome) and nothing is misdated.
@@ -535,4 +541,4 @@ function validate() {
   }
   return bad;
 }
-module.exports = { SINCE, CENSUS_CHROME, CENSUS_CHROMES, CLASSES, PAUSED_RULE, ROWS, rowOf, classOf, rows, rowsOn, listedOn, methodsOf, census, compare, validate, chromeParts, cmpChrome, chromeRelation };
+module.exports = { SINCE, CENSUS_CHROME, CENSUS_CHROMES, CLASSES, PAUSED_RULE, ROWS, rowOf, hasRow, classOf, rows, rowsOn, listedOn, methodsOf, census, compare, validate, chromeParts, cmpChrome, chromeRelation };
