@@ -708,24 +708,35 @@ console.log('§25–§31 r4: the person is told, stuck workers, the whole-line h
   await until(() => { if (!fifoTid()) return true; knock(); try { fs.closeSync(fs.openSync(fifo, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK)); } catch { } return false; });
 }
 /** §30 (verify #5): a month bigger than the fold's soft cap — built and warmed inside §15's control window, folded twice
- *  beside §26's r3 control */
+ *  beside §26's r3 control.
+ *  THE CAP (B-a77d) sits where neither verdict follows the collector. Measured with this leg's own month and fold (a copy of
+ *  the worker that records the largest used_heap_size at a 2 000-row check; MB = 1 048 576 bytes, as the product's), 30
+ *  folds each way:
+ *  - the 5 000-row chunks HOLD <= 9.5 MB, but the reading at a check (what the collector has not taken yet included) is
+ *    27.9-30.4 MB plain, 28.3-30.3 on one core, 29.0-32.7 on one core under --single-threaded-gc (32.9 the largest seen).
+ *    It does not follow the worker's old-space limit: 28.0-30.8 under 96 MB instead of 64;
+ *  - the whole group HOLDS 58 MB after a full collection (refused at «59-65 MB at 2000 rows»).
+ *  30 MB sat on the chunks' reading, so the collector's timing decided (the tip alone: red 2 of 12; on one core under
+ *  --single-threaded-gc: 8 of 10). 46 MB sits between: 13 MB over the chunks' largest reading, 12 MB under what the whole
+ *  group holds, each more than a quarter of the cap; the month (50 MB) is still larger than the cap. */
 function prep30() {
+  const SOFT30 = 46;   // (a const in the function: prep30 runs inside §15's block, before this line of the module is reached)
   const t5 = mkUh('r4big', 40 * DAY, 60 * 1024);
   fs.mkdirSync(t5.dir, { recursive: true });
   const base5 = Date.UTC(new Date(NOW - 120 * DAY).getUTCFullYear(), new Date(NOW - 120 * DAY).getUTCMonth(), 2);
   const rows5 = []; for (let k = 0; k < 120000; k++) rows5.push(JSON.stringify({ ...mkRow(base5 + k * 10000), pad: 'p'.repeat(200) }));
   fs.writeFileSync(path.join(t5.dir, shardOf(base5)), rows5.join('\n') + '\n');
-  t5.warm(); t5.coldWorkerHeapMb = 30;
+  t5.warm(); t5.coldWorkerHeapMb = SOFT30;
   return { t5, base5 };
 }
 async function fold30({ t5, base5 }) {
   t5.coldRowBudget = 5000; const ok5 = await t5.aggregateAsync({ to: NOW - 100 * DAY }).then((x) => x.totals.requests, (e) => e.message);
   t5.coldRowBudget = 1e9; const bad5 = await t5.aggregateAsync({ to: NOW - 101 * DAY }).then(() => 'answered', (e) => e);
-  return { ok5, bad5, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
+  return { ok5, bad5, cap: t5.coldWorkerHeapMb, mb: Math.round(fs.statSync(path.join(t5.dir, shardOf(base5))).size / 1048576) };
 }
 { // §30 (verify #5): a month bigger than the fold's soft cap folds in row-budget chunks (its fold ran beside §26's r3 control)
-  const { ok5, bad5, mb } = await month30Run;
-  ok(ok5 === 120000, `§30 a ${mb} MB month under a 30 MB soft cap, 5 000-row chunks: ${ok5}`);
+  const { ok5, bad5, cap, mb } = await month30Run;
+  ok(mb > cap && ok5 === 120000, `§30 a ${mb} MB month under a ${cap} MB soft cap, 5 000-row chunks: ${ok5}`);
   ok(bad5 && bad5.code === 'FOLD_TOO_BIG' && /retrying will not help/.test(bad5.message) && !/retry$/.test(bad5.message), `control (the whole-group read): "${bad5.message && bad5.message.slice(0, 70)}…" ⇒ RED, and it does not say retry`);
 }
 // §31 THE STEPPED BOOT WARM (B-1319): server.js warms the ledger with warmStepped — a MiB per tick, its window slide a
