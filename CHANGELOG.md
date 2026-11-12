@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.397 — 2026-11-12
+
+### Fixed
+- When a page goes away or crashes in the middle of a passkey sign-in, the passkey VibeSpace lent to the tab is taken back. Before, it could stay on the tab.
+- If the browser ever keeps a passkey VibeSpace lent to a tab, VibeSpace now tells you which tab to close, and the notice goes once the passkey is gone.
+- If a page does not take your Cancel of a passkey sign-in, VibeSpace now says it could not cancel it, instead of saying nothing is waiting.
+- A passkey sign-in that a page starts right after you cancel one is no longer cancelled along with it.
+
 ## 2.369.396 — 2026-11-11
 
 ### Fixed

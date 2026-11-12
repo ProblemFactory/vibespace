@@ -4,6 +4,75 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.397 — 2026-11-12
+
+### passkey-lend-walk — every other way a lent sign-in ends takes the passkey back, or says it could not (B-97ae's second commit; the acceptance's walk a–d)
+- **(d) MEASURED first, on real Chrome** (test-browser-passkey-chrome S12, the suite's own headed Chrome on its Xvfb). The question: what does a tab keep when the DevTools session that lent a key goes? The hub's `shutdown()` closes the watch's socket with no clean-up (a restart, a crash), and a tab can lose its session alone.
+  - The control, with the lending session alive: the page signs at once — «ok in 2 ms» (A and B). It also signs after a reload — the look's own control, asserted in S12.
+  - A, a second CDP connection lends and then closes: «held 2500 ms».
+  - B, the session detached while its connection lives: «held 2500 ms».
+  - C, the person's watch lends the vault key (UI on), then the hub goes mid-ceremony (socket terminated, `shutdown()`): «held 2500 ms». The page's own request is still held 3 s later.
+  - In each case the look is the same: a fresh session enables WebAuthn with UI off and the tab is reloaded with no hook. The empty environment holds the request; nothing signs it.
+  - So Chrome takes a virtual authenticator — and the keys and UV in it — with the session that added it. A restart needs NO sweep at re-arm; S12 pins it (a Chrome that changes this goes red there).
+- **(a) A document gone mid-ceremony ends its ceremonies through THE ONE END on both roads.** `pkPageGone` sends each ended record to `pkEnd`.
+  - Before, it removed only the person's once-authenticator. On the agent's tab, which keeps its authenticator, the loaded key and UV stayed until that tab's next ceremony ended (and that ceremony's load of the same id failed: «its id is already registered»).
+- **(b) A clean-up step the browser REFUSED is said, never believed.** `pkUnload` / `pkOnceGone` judge every answer.
+  - A step counts as a miss when it is answered with an error or no answer while the tab's session is LIVE: the watch open, the session still mapped, and the error not naming a gone session.
+  - Misses that leave a key or UV with the authenticator not removed (and the environment not disabled) are said ONCE by name in the server log, which names the steps.
+  - The tab is named to the person in the For-you tray (`PK.leftForYouItem`, en / zh / ja). The item resolves when the tab closes, since a closed tab takes its authenticator.
+  - One refused step the later steps make up for is not said. A gone session's failures are not said: (d) measured that the key went with the session.
+- **(c) The Cancel ends what was pending when it was sent.** `cancelPasskey` marks only the records that were pending before its await.
+  - A start that lands in the same socket read as the cancel's answer is a new sign-in. ws runs both frames before the await continues, as the acceptance measured. It is gated and released as any other.
+  - Before, it was marked «cancelled» by the person and never released; the page waited out its hold.
+- **Pinned** (test-browser-passkey, fast, judged at rest with not one line said unless named):
+  - «B-97ae walk (a)» ×5: the agent's / the person's document destroyed / cleared, and never the next document's key;
+  - «B-97ae walk (b)» ×4: three refusals on a live session ⇒ said + For you + resolved at close; one refusal made up for ⇒ silent; the agent's road ⇒ said; a gone session ⇒ silent;
+  - «B-97ae walk (c)».
+  - RED on d5bc4c67d (.391 by itself): 6 legs — (a) the agent's destroyed / cleared / the next document, (b) the two «said» legs, (c). Green there by design: the person's road in (a) (`pkOnceGone` covered it) and the two silent legs in (b).
+  - test-browser-passkey-chrome S12 on real Chrome.
+- **Pin scans** of every suite naming a changed src file: string literals (412 suite × file pairs) and regex literals (28 421 tried) — clean.
+- **Round 2 (the acceptance of 0723db7e0, 主开发 2026-11-11 12:12Z: «WHAT IS SAID ABOUT A LEFTOVER IS TRUE FOR AS LONG AS IT IS SAID»).** Two verifiers drove master and the tree through the tree's own fixture (world2's modPath seam). They confirmed (a)–(c) and (d) and found that the one new thing the commit shows a person could be wrong.
+  - **MUST 1 — the item lives exactly as long as the leftover.**
+    - A leftover is now kept per tab (`e.pk.left`: its authenticator and the keys SEEN in it).
+    - Its For-you item carries the producer's identity (`itemKey: pk-left:<profile>:<tab>`): a re-file is the same item, reopened.
+    - It is resolved by whatever ends the leftover:
+      - a later clean-up on the tab that LOOKS and finds none of its keys (`pkLeftCheck`, said once: «… is gone now»);
+      - the session detaching;
+      - the socket or the browser going (`down()`, the hub's shutdown included);
+      - the tab closing;
+      - a hub START, which sweeps a past life's items (`forYou.sweep('pk-left:')`, the wiring's new door): an item whose tab this hub does not hold is not kept, because the hub that held it took its sessions — and, per S12, their authenticators.
+    - The log's once-key goes with the leftover, so a NEW leftover on that tab is said again.
+  - **MUST 2 — «refused» is said only of a refusal.**
+    - Every answer is one of four: ok · refused (an error on a live session) · silent (no answer in callTimeoutMs) · gone (the session or socket went, or the error names a gone session).
+    - After a missed step THE LOOK reads what the authenticator holds now (`getCredentials`, and UV off once more if that step missed); what is said is what was seen.
+    - A removal done but answered late ⇒ nothing.
+    - A look with no answer ⇒ «… could not be checked — the browser did not answer», and the item «VibeSpace could not check whether …».
+  - **MUST 3(ii) — the agent → person handover** (`toPerson`) judges its removeVirtualAuthenticator / disable as (b) does: both missed on a live session ⇒ the look ⇒ said and filed.
+  - **Smaller.**
+    1. ONE tab name for the line and the item (`pkTabName`): the title through ST.pageText (no bidi or invisible characters, no line breaks), else the ORIGIN — never the address's path or query.
+    2. A cap: past `leftMax` (3) tabs of one browser, ONE item counts the rest (`PK.leftMoreItem`).
+    3. A cancel the page did not take (its call missed, or the hook answered 0) says «VibeSpace could not cancel the page's passkey request (…) — … it is still waiting», never «No passkey request is waiting».
+    4. «its id is already registered» is a key that IS there (a leftover's, an heir's): no «not loaded» line.
+    5. (d)'s premise is named where an engine is judged: kb-features, the custom-kernel passkey section, «The limit — what a lent key rests on». This is the kb option, not a feature row: nothing would act on such a row except a sweep, which was ruled out.
+  - **MUST 3(i) — a crashed page, MEASURED first on real Chrome (S13).**
+    - A renderer crash during a lend says `Target.targetCrashed` on the browser's discovery (this watch's) and `Inspector.targetCrashed` on a session with Inspector on. There is NO context event until a reload, and `Page.crash` never answers.
+    - The lent authenticator keeps its key (1).
+    - The reload says `Inspector.targetReloadedAfterCrash`, `Runtime.executionContextsCleared`, the new contexts and `Page.frameNavigated`. The key is still there (1), and the reloaded page signs with it «ok in 2 ms».
+    - So the CRASH ends the ceremony: `Target.targetCrashed` / `Inspector.targetCrashed` clear the tab's dead context maps (a call into them would wait out callTimeoutMs) and end its pending records through `pkPageGone` → `pkEnd`.
+    - S13b, the person's watch on real Chrome: lent, crashed ⇒ the ceremony ended and the lent authenticator removed (the watch's own session: «Could not find a Virtual Authenticator»).
+  - **Pins:** test-browser-passkey round-2 legs (MUST 1 ×4, MUST 2 ×2, MUST 3(i) ×2, MUST 3(ii) ×2, smaller 1 ×2, smaller 2, smaller 3) — 269 / 269. On 0723db7e0 by itself: 13 of the 14 red (the fourteenth is the done-handover control); the two round-1 (b) legs read the new words. test-browser-passkey-chrome S13 (the measured crash) and S13b (the watch on a crash).
+- **Round 3 (the acceptance of 09d06e499, 主开发 15:57Z: «three places where what is said is still not what is so»).** One verifier drove the tree with its own fixture and the REAL UserTodoManager (33 scenes on master, 0723db7e0 and the tree), and 主开发 ran seven mutants of their own.
+  - **MUST 1 — user verification left on is a leftover too.** `pkLook` tries UV off once more and judges it whatever the keys: the key removed but UV kept ⇒ «… could not be taken back (0 keys, user verification on)», and the item with the UV words. A later clean-up that turns it off ends it. A UV-off with no answer (no key left) ⇒ «whether user verification on the tab … was turned off could not be checked».
+  - **MUST 2 — the person's own Cancel.** browser-stream.js `cancelPasskeyFor` answers `failed` (never `ended`) when the page did not take the cancel. The live window says «VibeSpace could not cancel the page's passkey request — … it is still waiting. Closing the tab ends it.» and keeps the banner, where before it said «The passkey wait had already ended».
+  - **MUST 3 — a title that is an address is an address.** Measured on real Chrome (S14): an untitled page's TargetInfo.title is its address, query and all. `tabName` (module-level, PURE, exported) names such a tab by its ORIGIN, and so too a title that parses as an address or equals the tab's own; a real title stays.
+  - **Smaller.**
+    1. A look the browser REFUSED is said «refused to show what the tab holds» (line and item detail), never «did not answer».
+    2. Only what was LENT is counted: a key the page made, left behind, is said as what it is («a passkey the page made on the tab … could not be removed from it»), never filed as lent.
+    3. A record whose page went (destroyed, cleared, crashed) is marked `pageGone`; its drain sends no call that would look for the dead context and wait out callTimeoutMs.
+    4. The handover's look sees UV like the others.
+    5. kb-file-structure's browser-engines essay points to the premise.
+  - **Pins:** test-browser-passkey «round 3» ×9 — red on 09d06e499 by itself, all nine; 278 / 278 on the tree. test-browser-passkey-chrome S14 (the untitled page measured).
+
 ## 2.369.396 — 2026-11-11
 
 ### hub-loop-stalls — EVERY HOLD GETS ITS FIRST SAMPLE; THE INSTRUMENT IS NEVER THE HOLDER; THE LOOP BEFORE THE DISK (the owner's hub on .393, 20:09Z boot: its capture and its journal)
