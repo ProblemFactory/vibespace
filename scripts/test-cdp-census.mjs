@@ -23,7 +23,11 @@
 //      find whoever started it), the two sub-app lists reads, the five Private Verification Token verbs classed like the
 //      Trust Token pair; Storage.getRelatedWebsiteSets, which 156 dropped, keeps its row marked `until`; the step's two
 //      parameter changes move no class;
-//   ⑤ the unknown rule on ANY Chrome: a method no row names is refused BY NAME while the user drives whatever the
+//   ④d the 157 step (lane chrome-157, 2026-11-12 — one .397 prep-mirror shard ran on Chrome 157): CSS.forcePositionTryOption
+//      page-mutation and Page.setInputVisualization view, each carrying its measurement; Page.getSpellCheckCustomDictionary
+//      read ON THE VENDOR'S DESCRIPTION, its row saying it was not measured (r2); the step's reflag / parameter / event
+//      changes move no class;
+//   ⑤ the unknown rule on ANY Chrome: a method no row names is refused BY NAME (method_unclassified) whoever drives, whatever the
 //      installed version (newer, older — the fleet's Debian chromium 150 —, between, unparsable), the words naming
 //      every censused Chrome; `chromeRelation` over the four relations;
 //   ⑥ the fixture shape (names only: closed keys, parameter NAMES as strings, no schema) and the diff's honesty — a
@@ -168,6 +172,30 @@ if (fixtures[C155] && fixtures[C156]) {
     && pcOf('Emulation.setDeviceMetricsOverride').added.join() === 'textLayoutMode?' && C.classOf('Emulation.setDeviceMetricsOverride') === 'view'
     && d56.events.added.join() === 'Storage.privateVerificationTokensUpdated' && d56.events.removed.length === 0,
   `④c ${C155} → ${C156} (both sides recorded): +11 −1 methods (+ the FindInPage domain), two parameter changes that move no class (Animation.seekAnimations currentTime → currentTime? + currentTimes?, still page-mutation; Emulation.setDeviceMetricsOverride +textLayoutMode?, still view), one event added (Storage.privateVerificationTokensUpdated)`, JSON.stringify({ domains: d56.domains, methods: d56.methods, params: pc, events: d56.events }).slice(0, 600));
+}
+
+// ═══ ④d the 157 step, row by row (lane chrome-157 r2 — the reader's finding: no leg read the three rows) ═══
+console.log('— ④d Chrome 157\'s three new methods: their classes, dates and words through the real judge; the step\'s other changes move no class');
+const NEW157 = { 'CSS.forcePositionTryOption': 'page-mutation', 'Page.getSpellCheckCustomDictionary': 'read', 'Page.setInputVisualization': 'view' };
+for (const [m, cls] of Object.entries(NEW157)) {
+  const r = C.rowOf(m);
+  const paused = C.PAUSED_RULE[cls] === 'refuse' ? `browser_interrupted:${cls}` : 'forward';
+  ok(r && r.cls === cls && r.chrome === C157 && r.until === null && r.since === '2026-11-12' && r.fence === 'mediator' && typeof r.why === 'string' && r.why.includes(C157) && verdict(M, m, { paused: true }) === paused && verdict(M, m, {}) === 'forward',
+    `④d ${m}: class ${cls}, first listed on ${C157}, dated 2026-11-12, the Chrome named on its row — ${paused === 'forward' ? 'forwarded while the user drives' : 'browser_interrupted while the user drives'}, forwarded when the agent does`, r && JSON.stringify({ cls: r.cls, chrome: r.chrome, since: r.since, paused: verdict(M, m, { paused: true }) }));
+}
+const fw7 = (m) => C.rowOf(m).why;
+ok(/470 → 520 px/.test(fw7('CSS.forcePositionTryOption')) && /getBoundingClientRect/.test(fw7('CSS.forcePositionTryOption')) && /byte-identical/.test(fw7('Page.setInputVisualization')) && /DOM is unchanged/.test(fw7('Page.setInputVisualization')),
+  '④d the two MEASURED rows carry their measurement (the anchored element moves 470 → 520 px and the page\'s script sees it; a click changes the picture, the DOM unchanged)');
+ok(/VENDOR'S OWN DESCRIPTION/.test(fw7('Page.getSpellCheckCustomDictionary')) && /frame's document added/.test(fw7('Page.getSpellCheckCustomDictionary')) && /NOT measured/.test(fw7('Page.getSpellCheckCustomDictionary')) && /\{ words: \[\] \} whatever the profile holds/.test(fw7('Page.getSpellCheckCustomDictionary')) && !/never the person's own dictionary file/.test(fw7('Page.getSpellCheckCustomDictionary')),
+  '④d the dictionary row stands on the vendor\'s own description and SAYS it was not measured (stock 157 answers [] whatever the profile holds) — never «measured: never the person\'s file»');
+if (fixtures[C156] && fixtures[C157]) {
+  const d67 = diffListings(fixtures[C156], fixtures[C157]);
+  const pc7 = (d67.params && d67.params.changed) || [];
+  ok(d67.unrecorded.length === 0 && d67.methods.added.join() === Object.keys(NEW157).sort().join() && d67.methods.removed.length === 0 && d67.methods.reflagged.join() === 'IO.resolveBlob: stable → deprecated' && C.classOf('IO.resolveBlob') === 'read'
+    && d67.domains.added.length === 0 && d67.domains.removed.length === 0
+    && pc7.length === 1 && pc7[0].method === 'Debugger.stepOver' && pc7[0].added.join() === 'enterRanges?' && pc7[0].removed.length === 0 && C.classOf('Debugger.stepOver') === 'view'
+    && d67.events.added.length === 0 && d67.events.removed.length === 0 && d67.events.changed.length === 1 && d67.events.changed[0].event === 'Network.loadingFinished' && d67.events.changed[0].added.join() === 'encodedBodyLength?',
+  `④d ${C156} → ${C157} (both sides recorded): +3 −0 methods, IO.resolveBlob reflagged deprecated (still read), Debugger.stepOver +enterRanges? (still view), the event Network.loadingFinished +encodedBodyLength?`, JSON.stringify({ domains: d67.domains, methods: d67.methods, params: pc7, events: d67.events }).slice(0, 600));
 }
 
 // ═══ ⑤ the unknown rule on ANY Chrome ═══════════════════════════════════════
