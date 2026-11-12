@@ -468,26 +468,36 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
   const J = (o) => JSON.stringify(o) + '\n';
   handlers.data(J({ type: 'session_meta', payload: { id: 'th-w', cwd: tmp } }));
   handlers.data(J({ type: 'wrapper_meta', payload: { threadId: 'th-w', model: 'gpt-6-astra', permissionMode: 'yolo', effort: 'ultra', effortNext: 'ultra' } }));
-  const metaOnDisk = () => { try { return JSON.parse(fs.readFileSync(path.join(META_DIR, 'cw-eff.json'), 'utf8')); } catch { return null; } };
+  // .396 seam 2 (lane hub-loop-stalls, commit 2 — the store writer): a socket whose meta is on disk already is RE-written by
+  // the STORE WRITER — session-stdout hands the new version to the writer's thread (paced, META_DEBOUNCE_MS), so the file in
+  // the next statement is still the version before. Every read below goes the road the product offers a caller that must
+  // read back: the writer's own flush of THAT file, under a stated bound — a write the writer did not land inside it fails
+  // by name ("NOT LANDED …"), never as "not persisted", and never a wait for whenever (which a write that never lands passes).
+  const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  const FLUSH_BOUND_MS = 5000;
+  const writerLanded = (name) => { const r = SW.flushSync([path.join(META_DIR, name)], { budgetMs: FLUSH_BOUND_MS }); return r.left.length ? `NOT LANDED: the store writer did not write ${name} within ${FLUSH_BOUND_MS} ms (${r.left[0].why})` : null; };
+  const writerRead = (name) => { const why = writerLanded(name); let meta = null; try { meta = JSON.parse(fs.readFileSync(path.join(META_DIR, name), 'utf8')); } catch { } return { why, meta }; };
   ok(sess._effort === 'ultra', 'the wrapper\'s own effort moves session._effort (it used to move only on a CLIENT click)', String(sess._effort));
   // B-6b6d: WHICH FACT that value is. We commanded nothing (no CODEX_WEBUI_EFFORT
   // on this bench), so the wrapper is reporting what the THREAD itself runs at.
   ok(sess._effortOrigin === 'conversation',
     '…and with nothing commanded, the value the wrapper adopted from the thread is stated as the CONVERSATION\'s own', String(sess._effortOrigin));
-  ok(metaOnDisk()?.effort === 'ultra', '…and is PERSISTED to session-meta — the value a resume spawns with', JSON.stringify(metaOnDisk()?.effort));
+  let dk = writerRead('cw-eff.json');
+  ok(!dk.why && dk.meta?.effort === 'ultra', '…and is PERSISTED to session-meta by the STORE WRITER (read back after its flush of the file, bound 5 s) — the value a resume spawns with', dk.why || JSON.stringify(dk.meta?.effort));
   // r3 (adversarial verifier, medium): the ORIGIN is persisted WITH the value
   // it describes. Without this the disk kept the spawn's origin while memory
   // moved on, and boot-restore rebuilt the stale one.
-  ok(metaOnDisk()?.effortOrigin === 'conversation',
-    'r3: …and so is WHICH FACT it is — the writer that re-authors the origin must write it', JSON.stringify(metaOnDisk()?.effortOrigin));
+  ok(!dk.why && dk.meta?.effortOrigin === 'conversation',
+    'r3: …and so is WHICH FACT it is — the writer that re-authors the origin must write it (the same store-writer write, landed)', dk.why || JSON.stringify(dk.meta?.effortOrigin));
   // an effort typed as `/effort` inside the chat takes the same road
   handlers.data(J({ type: 'wrapper_meta', payload: { threadId: 'th-w', model: 'gpt-6-astra', permissionMode: 'yolo', effort: 'ultra', effortNext: 'high' } }));
-  ok(sess._effort === 'high' && metaOnDisk()?.effort === 'high',
-    'a later pending pick (a `/effort` typed into the chat) follows the same road', JSON.stringify({ s: sess._effort, d: metaOnDisk()?.effort }));
+  dk = writerRead('cw-eff.json');
+  ok(!dk.why && sess._effort === 'high' && dk.meta?.effort === 'high',
+    'a later pending pick (a `/effort` typed into the chat) follows the same road — the store writer\'s write of the meta, landed within its bound', dk.why || JSON.stringify({ s: sess._effort, d: dk.meta?.effort }));
   ok(sess._effortOrigin === 'chosen',
     '…and moving AWAY from a value we already knew is a choice made inside the session, not the conversation\'s own (B-6b6d)', String(sess._effortOrigin));
-  ok(metaOnDisk()?.effortOrigin === 'chosen',
-    'r3: …on disk too, so a server restart cannot rebuild a hand-changed value as "the conversation\'s own"', JSON.stringify(metaOnDisk()?.effortOrigin));
+  ok(!dk.why && dk.meta?.effortOrigin === 'chosen',
+    'r3: …on disk too (the store writer\'s write, landed), so a server restart cannot rebuild a hand-changed value as "the conversation\'s own"', dk.why || JSON.stringify(dk.meta?.effortOrigin));
   // ── r2 review: `effortNext: null` is a STATEMENT, not a gap ──
   // Picking "Auto (model default)" clears the pick: the wrapper sends
   // thread/settings/update {effort:null}, the thread's effort goes away, and it
@@ -497,7 +507,8 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
   // next resume spawn. ws-handler had just written null on the same click.
   handlers.data(J({ type: 'wrapper_meta', payload: { threadId: 'th-w', model: 'gpt-6-astra', permissionMode: 'yolo', effort: 'high', effortNext: null } }));
   ok(sess._effort === null, 'clearing the pick CLEARS session._effort (the last turn\'s level is not the next turn\'s pick)', JSON.stringify(sess._effort));
-  ok(metaOnDisk()?.effort === null, '…and session-meta with it, so the next resume commands nothing', JSON.stringify(metaOnDisk()?.effort));
+  dk = writerRead('cw-eff.json');
+  ok(!dk.why && dk.meta?.effort === null, '…and session-meta with it (the store writer\'s write, landed), so the next resume commands nothing', dk.why || JSON.stringify(dk.meta?.effort));
   // NEGATIVE CONTROL: a wrapper that PREDATES this release sends neither field.
   // `undefined` is "this record says nothing", and must leave master's value
   // exactly where it was — the version-skew class (2.361.1 / 2.364.1).
@@ -531,14 +542,16 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
     activeSessions.set('w-eff2', s2);
     const h2 = {};
     so.setupSessionPty(s2, 'w-eff2', { onData: (f) => { h2.data = f; }, onExit: () => { }, write() { }, pid: 2 });
-    const disk2 = () => { try { return JSON.parse(fs.readFileSync(path.join(META_DIR, 'cw-eff2.json'), 'utf8')); } catch { return null; } };
+    // the same road (seam 2): this file's FIRST version here happens to be written on the main thread — the writer's listing
+    // of META_DIR was taken before the bench wrote it — and a later one is the writer's; each read waits for the writer's flush
+    const disk2 = () => { const r = writerRead('cw-eff2.json'); return r.why ? { notLanded: r.why } : r.meta; };
     h2.data(J({ type: 'wrapper_meta', payload: { threadId: 'th-w2', effort: 'ultra', effortNext: 'high' } }));
     ok(s2._effort === 'high' && s2._effortOrigin === 'chosen',
       'r3 ① the scenario: `/effort high` inside a resumed ultra conversation ⇒ memory says high / chosen',
       JSON.stringify({ e: s2._effort, o: s2._effortOrigin }));
     ok(disk2()?.effort === 'high' && disk2()?.effortOrigin === 'chosen',
       'r3 ① THE FIX: the disk says the same — before it kept "conversation" and boot-restore rebuilt that',
-      JSON.stringify({ e: disk2()?.effort, o: disk2()?.effortOrigin }));
+      disk2()?.notLanded || JSON.stringify({ e: disk2()?.effort, o: disk2()?.effortOrigin }));
     // …and what the panel would claim after a restart, through the REAL rule
     const { spawnValueOrigin } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
     ok(spawnValueOrigin(disk2()?.effortOrigin, disk2()?.effort, undefined) === spawnValueOrigin(s2._effortOrigin, s2._effort, undefined),
@@ -550,7 +563,7 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
     // what carries it, and that has to be measured, not assumed.
     ok(disk2()?.modelOrigin === 'conversation',
       'r3 ① negative control: `modelOrigin` — which this consumer never authors — survives the write untouched',
-      JSON.stringify(disk2()?.modelOrigin));
+      disk2()?.notLanded || JSON.stringify(disk2()?.modelOrigin));
     // NEGATIVE CONTROL ②: a wrapper that says nothing about effort changes
     // NEITHER the value nor the origin, on disk or in memory (version skew).
     const before2 = JSON.stringify(disk2());

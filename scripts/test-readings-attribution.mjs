@@ -3093,8 +3093,10 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§16c(h) NEGATIVE CONTROL: without the reload the unlinked file changes NOTHING for that process — both rows keep the stranger\'s window (what r6 shipped before its verifier)',
         stale.rep.globalFile === 'archived' && stale.body.rateLimit?.sevenDay?.resetsAt === WB && stale.body.accounts?.[A]?.sevenDay?.resetsAt === WB,
         JSON.stringify([stale.body.rateLimit?.sevenDay, stale.body.accounts?.[A]?.sevenDay]));
-      ok('§16c(h) WIRING PIN: server.js calls usage.reloadRateLimitCache() right after runLocalMigrations(), and usage-routes exports it',
-        /runLocalMigrations\(\);(?:\s*persistenceRouter\.reloadSettings\?\.\(\)\s*(?:\/\*[^*]*\*\/)?\s*;)?\s*usage\.reloadRateLimitCache\?\.\(\)/.test(read('server.js')) && /reloadRateLimitCache,/.test(read('src/usage-routes.js')));
+      // .396 seam (lane hub-loop-stalls, commit 2): the boot runs the migrations inside bootTrace.step('migrations', () => …),
+      // so the call ends «runLocalMigrations());» — the pin follows the wrapper's close paren; the reload must still FOLLOW it
+      ok('§16c(h) WIRING PIN: server.js calls usage.reloadRateLimitCache() right after runLocalMigrations() (inside its boot-trace step), and usage-routes exports it',
+        /runLocalMigrations\(\)\)?;(?:\s*persistenceRouter\.reloadSettings\?\.\(\)\s*(?:\/\*[^*]*\*\/)?\s*;)?\s*usage\.reloadRateLimitCache\?\.\(\)/.test(read('server.js')) && /reloadRateLimitCache,/.test(read('src/usage-routes.js')));
     }
     ok('§16c …and a second run has nothing left to do (idempotent: the copy is gone, and what re-seeded it came FROM the repaired directory)',
       (() => { const r2 = repair.repairByWindow({ dataDir: dd, roster: ROSTER, accounts: ACCT_MAIL, id: 'W8h2' }); return r2.globalFile === 'clean' && sibOf(dd)?.sevenDay?.resetsAt === WA; })(), '');

@@ -1578,9 +1578,16 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(/fs\.renameSync\(tmp, fp\);[\s\S]*b\.record\(sid, meta\.browserKey\)/.test(wsm), 'session-stdout.writeSessionMeta records the binding AFTER the meta write');
   ok(/const sid = b\.bindableIdOf\(meta\); if \(sid\) b\.record\(sid, meta\.browserKey\)/.test(wsm) && !/b\.conversationIdOf\(meta\)/.test(wsm), 'r6: through the store\'s own bindableIdOf (the id a record may BIND), never conversationIdOf (the id it NAMES) — the round-5 shape');
   ok(/browserBindings\(\)/.test(wsm) && /require\('\.\/browser-bindings\.js'\)\.create\(\{ dataDir: path\.dirname\(META_DIR\) \}\)/.test(ss), 'lazily, against the same data dir');
+  // .396 seam (lane hub-loop-stalls, commit 2 — the store writer): the body grew past any fixed length (it names the file
+  // once, drops the pending copies, has the writer FORGET the file, then unlinks it) — sliced by its END, not by 400 chars
   const dAt = ss.indexOf('function deleteSessionMeta(');
-  const del = ss.slice(dAt, dAt + 400);
-  ok(/fs\.unlinkSync\(path\.join\(META_DIR, sockName \+ '\.json'\)\)/.test(del) && !/bindings/.test(del), 'deleteSessionMeta still unlinks the meta file and touches NO binding (a kill is not the end of the conversation)');
+  const dEnd = dAt < 0 ? -1 : ss.indexOf('\n}\n', dAt);
+  const del = dAt >= 0 && dEnd > dAt ? ss.slice(dAt, dEnd + 2) : '';
+  const fpName = (/const (\w+) = path\.join\(META_DIR, sockName \+ '\.json'\);/.exec(del) || [])[1] || null;
+  const unlinkAt = fpName ? del.search(new RegExp(`fs\\.unlinkSync\\(${fpName}\\)`)) : del.search(/fs\.unlinkSync\(path\.join\(META_DIR, sockName \+ '\.json'\)\)/);
+  const forgetAt = fpName ? del.search(new RegExp(`storeWriter\\(\\)\\.forget\\(${fpName}\\)`)) : -1;
+  ok(!!del && unlinkAt >= 0 && !/bindings/.test(del), 'deleteSessionMeta still unlinks THAT socket\'s meta file and touches NO binding (a kill is not the end of the conversation)');
+  ok(forgetAt >= 0 && unlinkAt > forgetAt, '…and the STORE WRITER forgets the file BEFORE the unlink (.396, commit 2): a paced write still owed for it is dropped first, so none lands after the delete and resurrects it');
   ok(/if \(session\.sockName\) deleteSessionMeta\(session\.sockName\);/.test(read('src/ws-handler.js')), 'the ws kill path still deletes the meta — so rung 2 alone can never serve a Terminate → Resume, which is why rung 1 exists');
   ok(/const bound = bindings\.lookup\(String\(conversationId\)\);\s*\n\s*if \(bound\) return bound;/.test(beSrc0), 'browser-env.priorKeyFor asks the store FIRST');
 }

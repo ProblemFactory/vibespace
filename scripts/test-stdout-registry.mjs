@@ -150,7 +150,19 @@ const J = (o) => JSON.stringify(o) + '\n';
 // process — the never-block-the-event-loop law), so its verdict lands on a
 // later tick than the frame that triggered it.
 const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
-const meta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META_DIR, s.sockName + '.json'), 'utf8')); } catch { return null; } };
+// .396 seam (lane hub-loop-stalls, commit 2 — the store writer): a session's FIRST meta version is written at once, every
+// LATER field is the STORE WRITER's paced write (its thread, after META_DEBOUNCE_MS) — so every read here goes after the
+// writer's own flush of that file, bound META_FLUSH_BOUND_MS; a write the writer did not land inside it is said by name
+// (metaNotLanded) in the leg that read it, never read as «not persisted» — and an ABSENCE read here is the landed state's
+const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+const META_FLUSH_BOUND_MS = 5000;
+let metaNotLanded = null;
+const meta = (s) => {
+  const fp = path.join(META_DIR, s.sockName + '.json');
+  const r = SW.flushSync([fp], { budgetMs: META_FLUSH_BOUND_MS });
+  metaNotLanded = r.left.length ? `NOT LANDED: the store writer did not write ${s.sockName}.json within ${META_FLUSH_BOUND_MS} ms (${r.left[0].why})` : null;
+  try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; }
+};
 const labels = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'streaming-label').map((b) => b.label);
 const outputs = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'output').map((b) => b.data);
 
@@ -182,7 +194,8 @@ console.log('— stream-json (claude)');
   ok('attach wires onData + onExit on the pty', typeof p.data === 'function' && typeof p.exit === 'function');
   p.data(J({ type: 'system', subtype: 'init', session_id: 'sid-claude-1', apiKeySource: 'none', permissionMode: 'default', model: 'claude-fable-5' }));
   ok('init record → id adoption (backendSessionId + claudeSessionId) persisted to session-meta', s.backendSessionId === 'sid-claude-1' && s.claudeSessionId === 'sid-claude-1' && meta(s)?.claudeSessionId === 'sid-claude-1' && meta(s)?.webuiSessionId === 'w-claude', JSON.stringify(meta(s)));
-  ok('…apiKeySource + permissionMode truth adopted from the init record', s._apiKeySource === 'none' && s._permissionMode === 'default' && meta(s)?.apiKeySource === 'none');
+  { const m = meta(s);
+    ok('…apiKeySource + permissionMode truth adopted from the init record (on disk by the STORE WRITER\'s write — read after its flush of the file, bound 5 s)', !metaNotLanded && s._apiKeySource === 'none' && s._permissionMode === 'default' && m?.apiKeySource === 'none', metaNotLanded || JSON.stringify(m)); }
   ok('…and the init record reached the REAL normalizer through feedLive', s._fed.some((m) => m.type === 'system' && m.subtype === 'init'));
   const asst = { type: 'assistant', session_id: 'sid-claude-1', uuid: 'u-asst-1', message: { id: 'msg_1', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'hello from claude' }], usage: { input_tokens: 10, output_tokens: 5 } } };
   const asstLine = J(asst);
@@ -1506,9 +1519,10 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
   const s6 = mkSession('claude', 'w-wt'); s6.cwd = '/repo'; s6._worktree = true;
   const p6 = fakePty(); so2.setupSessionPty(s6, 'w-wt', p6);
   p6.data(J({ type: 'system', subtype: 'init', session_id: 'sid-wt', cwd: '/repo/.claude/worktrees/w1', model: 'claude-fable-5' }));
-  ok('a --worktree session records the directory the CLI ANNOUNCED in its init frame (never a path composed from a naming rule) + persists + broadcasts it',
-    s6._worktreePath === '/repo/.claude/worktrees/w1' && meta(s6)?.worktreePath === '/repo/.claude/worktrees/w1' && meta(s6)?.worktree === true
-    && calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktreePath === '/repo/.claude/worktrees/w1'), JSON.stringify(meta(s6)));
+  const m6 = meta(s6), m6Not = metaNotLanded;
+  ok('a --worktree session records the directory the CLI ANNOUNCED in its init frame (never a path composed from a naming rule) + persists (the STORE WRITER\'s write, landed within its bound) + broadcasts it',
+    !m6Not && s6._worktreePath === '/repo/.claude/worktrees/w1' && m6?.worktreePath === '/repo/.claude/worktrees/w1' && m6?.worktree === true
+    && calls.broadcasts.some((b) => b.id === 'w-wt' && b.type === 'worktree-path' && b.worktreePath === '/repo/.claude/worktrees/w1'), m6Not || JSON.stringify(m6));
   const s7 = mkSession('claude', 'w-nowt'); s7.cwd = '/repo';
   const p7 = fakePty(); so2.setupSessionPty(s7, 'w-nowt', p7);
   p7.data(J({ type: 'system', subtype: 'init', session_id: 'sid-nowt', cwd: '/somewhere/else', model: 'claude-fable-5' }));

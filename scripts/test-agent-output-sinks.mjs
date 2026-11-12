@@ -102,7 +102,7 @@ tg.addProgress(grp.id, { note: 'progress ' + SHAPE, detail: 'ctx ' + KV });
 // --- session-status (vibespace-status notice) ---
 const ss = new SessionStatusManager({ dataDir, onChange: () => {} });
 ss.setByAgent('sess-a', { state: 'working', reason: 'why ' + SHAPE, detail: 'more ' + KV });
-ss._flush();
+ss.flush();   // .396 (lane hub-loop-stalls commit 2): the PUBLIC flush — its save + the STORE WRITER's flush of session-status.json, so the file read next is on disk
 {
   const f = readFile('session-status.json');
   ok(!leaks(f, SHAPEMAT) && !leaks(f, KVMAT), 'session-status.json carries no raw secret material (reason + detail belted)');
