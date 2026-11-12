@@ -383,6 +383,67 @@ This file is the engineers' record of every release: the lanes, the verification
 - **K3 (minor).** The Agents roster can show an old «read N h ago» mark on a limit for up to one poll (about 8 s) after an accounts broadcast. Two different sentences say what confirms a claimed reset, and the age mark's units are not translated.
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 
+### int397 — the .397 train's own notes (lane int361; on b19f0ecdb = 2.369.396)
+- **Ten units, 20 picked commits, in pick order; each pick's changed lines, outside the changelogs, are its lane's byte for byte** (one docs exception: account-reset-door's first commit and docs/kb-bugfix-invariants.md, where the kb resolver merged both sides).
+  - hub-loop-stalls' test commit (a): every read of a writer store follows its owner's flush.
+  - passkey-lend-walk round 3: every other way a lent sign-in ends takes the passkey back, or says it could not.
+  - The seam: two fast rows restated to their measured truth. test-browser-passkey goes 4.8 → 9.2 s; test-freeze-probe goes 25 ms → 0.7 s, the row .396 named as under its truth.
+  - usage-relearn-stepped round 6 and its follow-up: a relearn holds the loop a slice a turn, after one walk of its lines; an idle turn looks again by itself.
+  - oat-chip-icon: a quiet long-lived token is a mark, not words, and the note keeps its line.
+  - hub-sync-holds ×5:
+    - a plugin's status is a kept fact;
+    - the mail folder is read off the loop;
+    - a restart keeps its version (no update inside the boot);
+    - the loop-child census;
+    - the follow-up: the door has one caller.
+  - Four late joiners, each named by the coordinator before the 11:55Z cut-off:
+    - hub-sync-holds' docs-and-tests commit a490b2b77, directly behind its follow-up (the train's tail was re-picked to keep that order);
+    - ledger-boot-load and its follow-up: the ledger's first load runs in the fold worker, and a closed Usage window asks nothing;
+    - sidebar-echo-order round 14, its follow-up and its keepalive commit 0302baa01: an echo never undoes what the person did after it was asked, and a user-state request that fits goes keepalive, so a tab closed right after its acts still delivers them;
+    - account-reset-door, rebased (below), and its K1 cure e9e50c59d: the raw-or-estimated basis is a fact of ONE pool, so a learner in another pool no longer moves a pool with none (the merged-tip read's K1, cured in this release).
+- **A product seam sent to its lane, not resolved at a pick (the coordinator's ruling R1, 2026-11-12 11:20Z).** The conflict: account-reset-door's first commit replaced the pool switch pass's own quota reader with the one decision door. usage-relearn-stepped round 6 had given that same reader a raw-or-estimated basis over the current member and the switch candidates, set once the members are known. A textual resolution could only go one of two ways:
+  - undo the door for that pass, or
+  - leave a dead assignment in a strict-mode file. That is a ReferenceError swallowed by its own try, and the basis would move silently to the pool's membership list.
+  
+  The lane rebased onto relearn's accepted tip 0dd72da0d under the coordinator's law: the pass reads through the one door; the door's basis covers every id that decision compares; no dead assignment is left. Its two new commits rode as the last joiner. 20 of its 22 product files carry the changed lines the coordinator had accepted before; the two merged files (the switch pass, the estimator) were read again.
+- **The fast tier's sum cap 1004 → 1066 s, by arithmetic, written once after the last pick.** .396 states 1003.125 s over 559 rows. On top of that:
+  - the seam +5.075 (the two rows above);
+  - usage-relearn-stepped +14.3 (test-usage-relearn-cap 8.2, test-usage-relearn-stepped 6.1);
+  - hub-sync-holds +14.2 (test-hub-sync-holds 7.8, test-loop-child-census 3.0, test-update-clean 3.4);
+  - ledger-boot-load +10.2 (test-ledger-boot-load 4.4, test-ledger-boot-fail 6.0, and test-usage-relearn-cap restated 8.2 → 8.0 by its own measurement — the lane edited that suite; ruled to stand);
+  - sidebar-echo-order +17.6 (test-user-state-bounds 7.8, test-user-state-echo 9.8; its keepalive commit restates no row);
+  - account-reset-door +1.1 (test-account-reset-door: 0.95, then 1.1 by K1's own measurement of its 44 legs).
+  
+  That totals 1065.600 s over 569 rows. The other picks add no row. sidebar-echo-order had moved the cap on its own base (1004 → 1021); the train's one cap commit supersedes it and keeps its line as history. Nothing was restated to fit. The proof the rows add: the tip after picks 1–6 (ee23d7174) states 1022.5 s over 561 rows = 1003.125 + 5.075 + 14.3.
+- **The train's test-only seams, each one line, each accepted on read.** The first (36b76a3ec, 11:55Z): sidebar-echo-order's storage census in test-user-state-echo freezes every localStorage write in src/lib as of its base. account-reset-door adds one: which reset-outcome toasts this device has shown ('vibespace.resetOutcomesSeen'), one device's memory, not a store of acts. The row is added by name; the census's controls stay red by name.
+  - The prep mirror's text pins (12:42Z): test-webhook-routes' pin follows sidebar-echo-order's middleware line (cd32bf716); test-exit-forensics' kill census declares hub-sync-holds' which-child grace kill (409994cd4).
+  - test-record-clear-census on the merged tip: K1's [pool] journal line prints a pool account's name; its receiver is judged an account exactly like the spawn lines' (ccf617066). The sidebar lane's own fix follows a keepalive body one step back to its JSON.stringify (1dcfdebda, the lane's).
+- **Two CI seams: the hosted heavy tier runs as SEVEN shards (2026-11-12 12:48Z / 12:54Z).** The first prep mirror lost two shards to the 45-minute limit, each with one suite in flight.
+  - 5598c0f56 refreshed scripts/fixtures/ci-shard-timings.json from that run's logs. 13 hosted heavies had no runner time at all; test-store-writer counted as 0 s in shard 1's serial group.
+  - Six shards then predicted 37–45 min, seven 32–39. d28b4e7f8 makes it seven: the workflow's matrix, name and shard argument; test-ci-gate-shards §8b/§8c; test-ci-heavy-verdict reading N from the workflow.
+- **The float row left the train before the bump (the coordinator's ruling, 14:06Z).** window-close-stall's float row (fe6b33be3: one MutationObserver on the page's body in voice-input.js) was the one pick that every red phone / xpra suite loaded:
+  - test-tray-voice-phone was red on both tries in the prep mirror and green on master with the same recipe (19/19);
+  - test-desktop-xpra-window-scale was red in a «before» claim.
+  The rebuilt tip's own runs then split the charge:
+  - the phone red was NOT the float row's: test-tray-voice-phone stayed red without it, its cause being rank 13's plugins broadcast over a page-only stub, cured by a test seam;
+  - for test-desktop-xpra-window-scale, the charge is WITHDRAWN (the coordinator, 21:07Z). §15 F3 maps a window at the previous scale's size once in twelve connects and corrects it about a second later: a race in the release's own desktop window code (no file of it is in this train). It was seen only when the claim ran beside a whole fast tier (4 of 4), never otherwise (48 of 48 connects: the tip alone, the tip beside one heavy, the release alone twice). It is a backlog row.
+  It does not come back into .397 (product bytes); it returns to its lane with both suites in its claim.
+- **The prep, before the bump (the lesson of .396).**
+  - The box's whole fast tier on c3215f7b5, 568 / 568; again on the final pre-bump tip babbaf9a2, 568 run, the one red test-cache-bounds §30 = the standing flake B-a77d, green alone twice.
+  - Two prep mirrors read job by job: ci 43213079096 (six shards, two lost to the 45-minute limit) and ci 43236203161 (SEVEN shards, each inside 38 minutes, all 345 hosted heavies with a line). Every red was answered: a seam, a lane's commit, or a named line.
+  - The runner's Chrome 157: test-browser-mediation-chrome ⑥ is red on image 20261103.629 by construction (three new protocol methods without census rows, for .398). test-exit-access-ui was red once on a 157 job and green on the next on the same image; lane chrome-157 showed the release and the tip GREEN on Chrome for Testing 157, and its seam (below) settles the click.
+  - The merged-tip read of c3215f7b5 (five readers, no must-fix) found K1, cured in this release by e9e50c59d. K2–K4 ship named.
+- **Late test-only seams of the lanes, each picked on the coordinator's word after its line through the fair queue:**
+  - sidebar-echo-order 1dcfdebda (the census's H1b) and ff9c6960c (the give-back leg);
+  - hub-sync-holds c5a50a776 (test-tray-voice-phone: the page's stub also answers rank 13's plugins broadcast) and f639acb12 (test-dialog-yield-chrome: every handler count a settled one, since the Plugins panel's listener leaves lazily);
+  - ledger-boot-load 53d9bc1a3 + 74fce2e75 (test-usage-window-pivots §7: loops counted, not asks per 4 s, since the control raced the runner's pace);
+  - chrome-157 32b71e4a6 (the shared pairing-ui helper: a real click waits for a settled rect, since test-exit-access-ui's one red on a Chrome 157 runner was a click made during a settling layout).
+- **The self-hosted classes (the coordinator's rule, 2026-11-12 11:55Z).** It is .396's split, plus one rule: a pick's own heavy suite always runs before the bump. Each pick's own range was listed, and an after-class suite moved up only where a pick's code runs in it (it is the suite file, names the pick's file, or loads it through the import graph).
+  - Twelve moved, mostly passkey's and the float row's.
+  - Not moved, as a named choice: a reach only by the composition root (server.js), a spawned program (data/bin/vibespace-usage) or a directory name.
+  - BEFORE: 39 + test-loop-hold-live (every release). AFTER: 20. Out by name: test-desktop-xpra-window-close (it hangs on master too).
+- **Not in this release:** window-close-stall's float row (above); hub-loop-stalls' product commit (b); queued-is-not-woke; fable-52-cli-321 r16; mount-class-by-source; job-logs-sweep.
+
 ## 2.369.396 — 2026-11-11
 
 ### hub-loop-stalls — EVERY HOLD GETS ITS FIRST SAMPLE; THE INSTRUMENT IS NEVER THE HOLDER; THE LOOP BEFORE THE DISK (the owner's hub on .393, 20:09Z boot: its capture and its journal)
