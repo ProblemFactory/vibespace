@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.396 — 2026-11-11
+
+### Fixed
+- The Diagnostics report now names what held a slow server for every hold, not only for the first 20 holds in an hour.
+- Time a server spent waiting on a disk is shown on the code that waited, and a server that was busy is no longer reported as a disk that stopped answering.
+- On slow or network storage the server no longer pauses for seconds while it saves its lists and usage data; those saves now run in the background.
+- If the disk stops answering, repeated CPU captures no longer pile up stuck reads, and a capture cut off while saving no longer leaves a hidden file.
+
 ## 2.369.395 — 2026-11-11
 
 ### Fixed
