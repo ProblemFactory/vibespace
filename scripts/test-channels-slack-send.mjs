@@ -96,6 +96,17 @@ function secretScan(files, dir) {
   return { rc, found: found.map((x) => (typeof x === 'string' ? x : `${path.relative(dir, x.file)} ${x.rule} ${String(x.snippet || '').slice(0, 4)}…`)) };
 }
 const filesUnder = (d) => { const out = []; const walk = (x) => { for (const e of fs.readdirSync(x, { withFileTypes: true })) { const p = path.join(x, e.name); if (e.isDirectory()) walk(p); else out.push(p); } }; if (fs.existsSync(d)) walk(d); return out; };
+// item 7 (store-writer follow-up): «the token in NO file» reads what the stores still OWE too. The channels index and its
+// acts journal are the store writer's paced stores (500 ms) and `settle` waits on the msgs log (synchronous), so a census
+// right after it read the index's version before the pass. The owner's flush first — every dirty store under the data
+// dir, through the ONE writer (null = every store; `only` keeps it to this dir) — and a store it could not write is a
+// hit of the census, BY NAME.
+const STORE_W = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+const unlandedUnder = (d, budgetMs = 10000) => {
+  const at = path.resolve(d) + path.sep;
+  const r = STORE_W.flushSync(null, { budgetMs, only: (s) => path.resolve(String(s.file)).startsWith(at) });
+  return r.left.map((x) => `NOT LANDED: ${x.name || '?'} ${path.relative(d, String(x.file || ''))} (${x.why})`);
+};
 
 // ── ① connect by paste ──
 console.log('① connect by paste');
@@ -118,8 +129,9 @@ const W1 = await mkEngine('connect');
   ok(await settle(eng), 'the Connect\'s own first pass ingests the channel');
   const rec = JSON.parse(fs.readFileSync(path.join(dir, 'adapters.json'), 'utf-8')).adapters.find((x) => x.id === 'slack');
   ok(rec && rec.auth && rec.auth.tokenEnc && rec.identity && rec.identity.userId === 't0acme001/u0self001', 'the record holds the SEALED token and the identity t…/u… (D11)');
+  const unl1 = unlandedUnder(root);   // item 7 (store-writer follow-up): the owner's flush, before the files are listed
   const all = filesUnder(root);
-  const plain = all.filter((f) => { const b = fs.readFileSync(f); return b.includes(TOKEN) || b.includes(encodeURIComponent(TOKEN)); });
+  const plain = [...unl1, ...all.filter((f) => { const b = fs.readFileSync(f); return b.includes(TOKEN) || b.includes(encodeURIComponent(TOKEN)); })];
   ok(all.some((f) => f.endsWith('adapters.json')) && all.some((f) => f.endsWith('C0GENERAL.ndjson')) && !plain.length, `the token is in NO file of the data dir — the account record and the message log included (${all.length} files read)`, plain.join(', '));
   // lane ci-339-reds (the 2.369.339 runner's fast red): a SEALED value is random ciphertext — its base64 read a cephx key
   // («AQ» + 20 base64 after a `+` `/` `.`) in 8 of 2 000 fresh seals of this very record — so the scan reads every file with
@@ -333,9 +345,10 @@ console.log('⑧ two pastes through the engine');
   const c = await eng.connect('slack', { flowId: fid });
   ok(c.adapter && c.adapter.kind === 'slack', 'Connect creates the account');
   await settle(eng, c.adapter.id);
+  const unl8 = unlandedUnder(root);   // item 7 (store-writer follow-up): the owner's flush, before the files are listed
   const all = filesUnder(root);
   const holds = (f) => { const b = fs.readFileSync(f); return b.includes(CONFIG_TOKEN) || b.includes(encodeURIComponent(CONFIG_TOKEN)) || b.includes(CONFIG_TOKEN.slice(10, 34)) || b.includes(CLIENT_SECRET); };
-  const plain = all.filter(holds);
+  const plain = [...unl8, ...all.filter(holds)];
   ok(all.some((f) => f.endsWith('adapters.json')) && !plain.length, `the setup token and the create's client secret are in NO file of the data dir (${all.length} files read)`, plain.join(', '));
   const planted = path.join(root, 'planted.json'); fs.writeFileSync(planted, JSON.stringify({ flow: { step: 'created', facts: { t: CONFIG_TOKEN } } }));
   ok(filesUnder(root).filter(holds).join() === planted, 'CONTROL: the same census finds a planted copy');
@@ -422,9 +435,10 @@ console.log('⑨ the workspace app through the engine');
   const basic = Buffer.from(`${WS_CLIENT_ID}:${WS_CLIENT_SECRET}`).toString('base64'), basicB = Buffer.from(`${WS_CLIENT_ID}:${WRONG}`).toString('base64');
   ok(Lb.r.ok === false && Lb.r.why === 'failed' && /client id or secret was refused/.test(Lb.r.error || '') && !(Lb.r.error || '').includes('wrong-secret-fixture') && !(Lb.r.error || '').includes(basicB), 'a refused client (the fake ECHOES the Basic header): the landing names it — and carries neither the secret nor its Basic form', Lb.r.error);
   const holds9 = (f) => { const b = fs.readFileSync(f); return b.includes(WS_CLIENT_SECRET) || b.includes(basic) || b.includes('wrong-secret-fixture') || b.includes(basicB); };
+  const unl9 = [...unlandedUnder(root), ...unlandedUnder(W9b.root)];   // item 7 (store-writer follow-up): the owner's flush first
   const files9 = [...filesUnder(root), ...filesUnder(W9b.root)];
   const said9 = JSON.stringify([logLines.slice(from), frames, W9b.frames, st, L1.r, s1, replay, c1, L3.r, L4.r, c4, Lb.r, eng.digest(), eng.oauthStatus(st3.flowId), W9b.eng.oauthStatus(stb.flowId), SW.landingHtml(Lb.r)]);
-  ok(files9.some((f) => f.endsWith('adapters.json')) && !files9.filter(holds9).length && !said9.includes(WS_CLIENT_SECRET) && !said9.includes(basic) && !said9.includes('wrong-secret-fixture') && !said9.includes(basicB), `the client secret (and its Basic form) in NO file of the data dirs (${files9.length}), log line, frame, answer, status, landing page or error`);
+  ok(files9.some((f) => f.endsWith('adapters.json')) && !unl9.length && !files9.filter(holds9).length && !said9.includes(WS_CLIENT_SECRET) && !said9.includes(basic) && !said9.includes('wrong-secret-fixture') && !said9.includes(basicB), `the client secret (and its Basic form) in NO file of the data dirs (${files9.length}), log line, frame, answer, status, landing page or error`, [...unl9, ...files9.filter(holds9)].join(', '));
   const planted9 = path.join(root, 'planted.json'); fs.writeFileSync(planted9, JSON.stringify({ c: WS_CLIENT_SECRET }));
   ok(filesUnder(root).filter(holds9).join() === planted9, 'CONTROL: the same census finds a planted copy'); fs.unlinkSync(planted9);
   // a paste account RE-POINTED through the preset: the same record, the token replaced

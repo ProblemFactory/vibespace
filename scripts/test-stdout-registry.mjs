@@ -157,10 +157,12 @@ const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
 const META_FLUSH_BOUND_MS = 5000;
 let metaNotLanded = null;
+const metaReads = { n: 0, notLanded: [] };   // item 9 (store-writer follow-up): EVERY read of the run, not only the legs that look at the flag
 const meta = (s) => {
   const fp = path.join(META_DIR, s.sockName + '.json');
   const r = SW.flushSync([fp], { budgetMs: META_FLUSH_BOUND_MS });
   metaNotLanded = r.left.length ? `NOT LANDED: the store writer did not write ${s.sockName}.json within ${META_FLUSH_BOUND_MS} ms (${r.left[0].why})` : null;
+  metaReads.n++; if (metaNotLanded) metaReads.notLanded.push(metaNotLanded);
   try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; }
 };
 const labels = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'streaming-label').map((b) => b.label);
@@ -2163,5 +2165,9 @@ console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC pro
   activeSessions.delete('w-acorig');
 }
 
+// item 9 (store-writer follow-up): an ABSENCE read through meta() after a flush that did NOT land would still pass its own
+// leg (the flag is per call, and only two legs read it) — so the run itself answers for every read
+ok(`no meta read of the run found the store writer not landed (${metaReads.n} reads, each after the writer's flush of its file, bound ${META_FLUSH_BOUND_MS} ms)`,
+  metaReads.n > 0 && metaReads.notLanded.length === 0, metaReads.notLanded.slice(0, 3).join(' | '));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -596,11 +596,22 @@ console.log('⑨ remove');
   await eng.setAssignment(idA, 'thr_a', { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
   const ENG4 = patchedEngine([['    const refs = referencesOf(rec.id);\n', '    const refs = [];\n']]);
   const d4 = path.join(ROOT, 'eng4'); fs.mkdirSync(path.join(d4, 'channels'), { recursive: true });
-  for (const f of ['adapters.json', 'index.json']) fs.copyFileSync(path.join(engDir, 'channels', f), path.join(d4, 'channels', f));
+  // item 7 (store-writer follow-up): THE COPY IS THE STATE AFTER THE ACT. The assignment answered once its act was in the
+  // acts journal; index.json follows at the writer's pace — so every store under the data dir is written first (the
+  // owner's flush, one left unwritten named). WHO is assigned is a row of the grants store (grants.json, lane
+  // grants-unify), so it is copied too: without it the copy held no reference at all, and this CONTROL removed an
+  // UNASSIGNED account — it could not go red for anything.
+  const at4 = path.resolve(engDir) + path.sep;
+  const left4 = require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync(null, { budgetMs: 10000, only: (s) => path.resolve(String(s.file)).startsWith(at4) }).left.map((x) => `NOT LANDED: ${x.name || '?'} ${path.relative(engDir, String(x.file || ''))} (${x.why})`);
+  for (const f of ['channels/adapters.json', 'channels/index.json', 'grants.json']) if (fs.existsSync(path.join(engDir, f))) fs.copyFileSync(path.join(engDir, f), path.join(d4, f));
   const eng4 = ENG4.create({ dataDir: d4, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng4);
+  // item 7 (store-writer follow-up): THE REFERENCE CHECK — the copy's own reader (the patch removes only remove()'s call
+  // of it) names thr_a's access row BEFORE the copy removes the account: the control's premise, read off the copied files
+  const refs4 = eng4.referencesOf(idA);
+  const assigned4 = refs4.some((x) => x.kind === 'access' && x.convId === 'thr_a');
   const r4 = await threw(() => eng4.remove(idA));
-  ok(!r4 && !eng4.adapterRecords().adapters.some((x) => x.id === idA), 'CONTROL: a copy with no reference check removes an ASSIGNED account — the defect the refusal exists for');
+  ok(!left4.length && assigned4 && !r4 && !eng4.adapterRecords().adapters.some((x) => x.id === idA), `CONTROL: a copy with no reference check removes an ASSIGNED account (the copy's own reader names ${refs4.map((x) => `${x.kind} ${x.convId || x.key || x.id || ''}`).join(', ') || 'NO reference'}) — the defect the refusal exists for`, [...left4, ...(assigned4 ? [] : ['the copied state holds no access row on thr_a'])].join('; '));
   eng4.stop();
   ok((await threw(() => eng.remove(idA))).code === 'account-referenced', 'and the real engine refuses the same removal');
   await eng.setAssignment(idA, 'thr_a', null);

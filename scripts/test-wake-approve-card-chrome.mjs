@@ -530,8 +530,13 @@ try {
   const pr = await A.restThenPress(`.cn-card[data-item="${wrPush && wrPush.id}"] .ut-action-proposal[data-answer="approve"]`);
   const pressed = pr.pressed;
   const pushDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPush && wrPush.id)));
+  // pass 3 (store-writer follow-up): the decision is APPLIED at once (the hub's list says resolved), but its toast comes with
+  // the press's ANSWER, which follows the store writer's durable write — a toast read 700 ms after the press may be EMPTY,
+  // and «no Undo» on an empty toast is no check at all: the toast itself is waited for, bounded, then judged
+  const toastOf = async (P, seen) => { if (seen) return seen; for (let i = 0; i < 100; i++) { const t = await P.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`); if (t) return t; await sleep(150); } return ''; };
+  const prToast = await toastOf(A, pr.toast);
   check('a real click on the card\'s Approve ⇒ the hub resolved THAT request `allowed` (the other still open)', pressed && !!pushDone && pushDone.resolvedBy === 'allowed' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), { pr, pushDone: pushDone && { by: pushDone.resolvedBy } });
-  check(`round 2: a decision is final — its toast offers no Undo («${pr.toast}»); the record carries the person verdict's mark`, !/Undo/.test(pr.toast || '') && !!pushDone && !!pushDone.resolvedFact && pushDone.resolvedFact.decidedBy === 'person', { toast: pr.toast, fact: pushDone && pushDone.resolvedFact });
+  check(`round 2: a decision is final — its toast (waited for, bound 15 s) offers no Undo («${prToast}»); the record carries the person verdict's mark`, !!prToast && !/Undo/.test(prToast) && !!pushDone && !!pushDone.resolvedFact && pushDone.resolvedFact.decidedBy === 'person', { toast: pr.toast, fact: pushDone && pushDone.resolvedFact });
   const watches = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: { Authorization: 'Bearer ' + (env && env.token) } })).json().catch(() => null);
   const wake = ((watches && watches.watches) || []).find((w) => /fake-push-ops/.test(JSON.stringify(w)));
   check('…the wake proceeds: the agent\'s own watch list now holds exactly what the card said — a WAKE on the Slack-like «Ops room» (and nothing on the other)', !!wake && /wake/.test(JSON.stringify(wake)) && !((watches && watches.watches) || []).some((w) => /fake-poll-ops/.test(JSON.stringify(w))), watches);
@@ -559,7 +564,8 @@ try {
   const dr = await A.restThenPress('.iw-item .iw-act[data-act="proposal-reject"]');
   const denied = dr.pressed;
   const pollDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)));
-  check('a real click on Deny in the For-you window ⇒ the hub resolved that request `denied` — no Undo offered', denied && !!pollDone && pollDone.resolvedBy === 'denied' && !/Undo/.test(dr.toast || ''), { dr, pollDone: pollDone && pollDone.resolvedBy });
+  const drToast = await toastOf(A, dr.toast);   // pass 3: the deny's toast, waited for (its answer follows the durable write)
+  check('a real click on Deny in the For-you window ⇒ the hub resolved that request `denied` — its toast (waited for, bound 15 s) offers no Undo', denied && !!pollDone && pollDone.resolvedBy === 'denied' && !!drToast && !/Undo/.test(drToast), { dr, drToast, pollDone: pollDone && pollDone.resolvedBy });
   const stampPoll = 'denied by you · ' + (await hm(A, pollDone && pollDone.resolvedAt));
   await A.waitFor(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.classList.contains('cn-done')`, 10000);
   const aRec = await A.evalJs(CARD(wrPoll && wrPoll.id));

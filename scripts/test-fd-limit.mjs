@@ -204,6 +204,27 @@ console.log('\n§F who ran out — the next EMFILE has a name');
 // ── §G the debounced writes never throw ──
 console.log('\n§G the debounced writes keep their state, retry, and report — never a crash (session-status, user-todos, the channels index)');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// item 8 (store-writer follow-up): THE FIRST CHECK'S MARGIN, FROM THE MECHANISM (src/store-writer.js, src/store-pace.js,
+// src/session-status.js, src/channel-store.js). A poked store's first write is due at its DEBOUNCE — 500 ms: session-
+// status's debounceMs, the index's FLUSH_DEBOUNCE_MS, user-todos' own timer. Since commit 2 the writer then hands the bytes
+// to its THREAD — STARTED by that first write (a Worker boot) — and hears the failure back by a message, so the failure is
+// reported at DEBOUNCE + START + ROUND TRIP (on the base: a main-thread timer at 500 ms). The retry is due RETRY after the
+// failure — store-pace retryMs(1) = RETRY_FLOOR_MS = 1 s, the backoff this leg tests. The first check must sit between the
+// two: after the failure, before the retry — it counts exactly ONE failure (the backoff held) and the file system must
+// recover before the retry runs:  DEBOUNCE + START + RT  ≤  check  <  DEBOUNCE + START + RT + RETRY.
+// The earliest retry is at DEBOUNCE + RETRY = 1500 ms (a thread that starts in no time; a loaded loop delays the check and
+// the retry alike, and runs them in due order); the check sits GUARD before it (the writer times on process.hrtime, a
+// sleep on the loop's cached clock) — 500 + 1000 − 250 = 1250 ms — so START + RT may take up to RETRY − GUARD = 750 ms.
+// The 800 ms check left START + RT 300 ms — about 250 over a calm box's thread start — and spent the other 700 ms of the
+// window on the side that cannot move.
+const G_DEBOUNCE_MS = 500, G_RETRY_MS = 1000, G_GUARD_MS = 250;
+const G_FIRST_CHECK_MS = G_DEBOUNCE_MS + G_RETRY_MS - G_GUARD_MS;
+// item 8 (store-writer follow-up): the retry lands at DEBOUNCE + START + RT + RETRY + its own round trip; with START + RT at
+// its 750 ms budget and the retry's round trip given the same, by 500 + 750 + 1000 + 750 = 3000 ms from the change —
+// polled for, failing past it. A first retry that failed again retries no sooner than 500 + 1000 + 2000 = 3500 ms, so a
+// pass inside the bound is the FIRST retry's.
+const G_RETRY_LANDS_BY_MS = G_DEBOUNCE_MS + (G_RETRY_MS - G_GUARD_MS) + G_RETRY_MS + (G_RETRY_MS - G_GUARD_MS);
+const until = async (holds, boundMs) => { const t0 = Date.now(); for (;;) { if (holds()) return true; if (Date.now() - t0 >= boundMs) return false; await sleep(25); } };
 // THE FOUR LEGS RUN AT ONCE (lane fast-tier-ratchet): each waits on its store's OWN timers (a 500 ms debounce, a 1 s retry)
 // in its own data dir, so they are independent — run one after another they slept ~8 s of the suite's 8. Each leg returns
 // its verdicts and they are judged in the old order once all have settled; the real timers, the real EISDIR and the
@@ -215,12 +236,13 @@ const writerLeg = async ([rel, cls, file, poke, tmpOf = (f) => f + '.tmp']) => {
   const Cls = require(path.join(REPO, rel))[cls];
   const errs = [];
   const m = new Cls({ dataDir: dir, onChange() { }, onWriteError: (e, f, o) => errs.push({ code: e.code, f, ...o }) });
+  const t0 = Date.now();
   poke(m);
-  await sleep(800);
-  out.push([errs.length === 1 && errs[0].code === 'EISDIR' && errs[0].failures === 1 && errs[0].retryMs === 1000 && m._dirty === true, `${cls}: the failed write did NOT throw — dirty kept, reported (${JSON.stringify(errs[0])})`]);
+  await sleep(G_FIRST_CHECK_MS);
+  out.push([errs.length === 1 && errs[0].code === 'EISDIR' && errs[0].failures === 1 && errs[0].retryMs === 1000 && m._dirty === true, `${cls}: the failed write did NOT throw — dirty kept, reported (${JSON.stringify(errs[0])}${errs.length === 1 ? '' : `; ${errs.length} failures at ${G_FIRST_CHECK_MS} ms`})`]);
   fs.rmdirSync(path.join(dir, tmpOf(file)));
-  await sleep(1400);
-  out.push([fs.existsSync(path.join(dir, file)) && m._dirty === false && m._writeFailures === 0, `${cls}: the retry landed once the file system recovered`]);
+  const landed = await until(() => fs.existsSync(path.join(dir, file)) && m._dirty === false && m._writeFailures === 0, G_RETRY_LANDS_BY_MS - (Date.now() - t0));
+  out.push([landed, `${cls}: the retry landed once the file system recovered${landed ? '' : ` — not within ${G_RETRY_LANDS_BY_MS} ms of the change`}`]);
   try { clearTimeout(m._expiryTimer); clearInterval(m._expiryTimer); } catch { }
   return out;
 };
@@ -239,12 +261,13 @@ const channelLeg = async () => {
   const tmp = path.join(dir, `index.json.tmp-${process.pid}-w`);
   fs.mkdirSync(tmp, { recursive: true });   // the writer's tmp path is a directory: its write fails (EISDIR)
   await st.index.update((ix) => { ix.conversations['fake/c1'] = { probe: 1 }; });
-  await sleep(800);
+  const t0 = Date.now();
+  await sleep(G_FIRST_CHECK_MS);
   out.push([warns.some((w) => /\[store-write\] channels-index\.write not written \(EISDIR; attempt 1\) — kept in memory, retrying in 1 s/.test(w)), `channel-store: the failed index write did NOT throw — said and owed (${JSON.stringify(warns[0] || '')})`]);
   fs.rmdirSync(tmp);
-  await sleep(1500);
-  let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { }
-  out.push([onDisk && onDisk.conversations && onDisk.conversations['fake/c1'], 'channel-store: the retry wrote the owed index (dirty is cleared only once it is on disk)']);
+  const owedOnDisk = () => { let d = null; try { d = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { } return !!(d && d.conversations && d.conversations['fake/c1']); };
+  const landed = await until(owedOnDisk, G_RETRY_LANDS_BY_MS - (Date.now() - t0));
+  out.push([landed, `channel-store: the retry wrote the owed index (dirty is cleared only once it is on disk)${landed ? '' : ` — not within ${G_RETRY_LANDS_BY_MS} ms of the change`}`]);
   try { st.close(); } catch { }
   writer.stop();
   return out;

@@ -1848,8 +1848,12 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(g3.sheet, 'Access…: removed again + ✕ asks again', JSON.stringify(g3));
   await actA(BTN(A, '保存'));
   let gone = false; for (let i = 0; i < 40 && !(gone = (await accessNames()) === 'Yu'); i++) await sleep(150);
-  const g4 = await p1.evaljs(STATE(A));
-  ok(gone && !g4.open, 'Access… 保存 on the sheet writes the list (Yu only) and closes', JSON.stringify({ g4, wire: await accessNames() }));
+  // pass 3 (store-writer follow-up): the access list is APPLIED at once (GET /api/channels says Yu), but the dialog closes on
+  // the save's ANSWER, which follows the store writer's durable write of the channels index (setGrain) — the dialog's own
+  // fact is waited for, bounded, never read at the instant the wire says so
+  let g4 = await p1.evaljs(STATE(A));
+  for (let i = 0; i < 100 && g4 && g4.open; i++) { await sleep(150); g4 = await p1.evaljs(STATE(A)); }
+  ok(gone && !g4.open, 'Access… 保存 on the sheet writes the list (Yu only) and closes (once the save\'s answer came — it follows the durable write; bound 15 s)', JSON.stringify({ g4, wire: await accessNames() }));
   // teardown: the account's access back to Yu + 工作, no notification
   const t1 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
   const t2 = await api('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [] });

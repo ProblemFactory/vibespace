@@ -404,9 +404,13 @@ try {
   check('chat-reaction-card-zh.png', await shot('chat-reaction-card-zh.png', CMSG(rx1), 10));
   check('a REAL click on the reaction card\'s Approve (in the chat)', await realClick(RAPP(rx1)), lastMiss);
   const sent7 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx1))}); return !!c && c.classList.contains('chan-prop-sent'); })()`, 15000);
+  // .396 (lane hub-loop-stalls commit 2, round 2 law B): an Approve is a DURABLE act — the store says «sent» at once (the
+  // broadcast draws the card), but the approve request's ANSWER, which draws the toast, comes only after the store writer
+  // has written the channels index: the toast is waited for on the PAGE, bounded, never read at the instant the card turns
+  const toast7 = await waitFor(`window.__toasts.some((n) => n.textContent.startsWith('已添加表情回应'))`, 15000);
   const t7 = await toasts();
   const st7 = (await api('GET', '/api/channels/outbox')).body?.proposals?.find((q) => q.id === rx1);
-  check('APPROVED: the toast «已添加表情回应», no refusal — the store says sent and the chat card too', sent7 && t7.some((x) => x.startsWith('已添加表情回应')) && !t7.some((x) => /请求被拒绝|shown/.test(x)) && st7 && st7.state === 'sent', { toasts: t7, state: st7 && st7.state, reason: st7 && st7.reason });
+  check('APPROVED: the toast «已添加表情回应» once the approve\'s answer came (it follows the store writer\'s durable write — bound 15 s), no refusal — the store says sent and the chat card too', sent7 && !!toast7 && t7.some((x) => x.startsWith('已添加表情回应')) && !t7.some((x) => /请求被拒绝|shown/.test(x)) && st7 && st7.state === 'sent', { toasts: t7, state: st7 && st7.state, reason: st7 && st7.reason });
   const rxs = await waitFor(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-ops/reactions?ids=fake-poll-ops-m1').then((x) => x.json()).catch(() => null); return r ? JSON.stringify(r).slice(0, 600) : null; })()`, 5000);
   check('…the vendor holds the account\'s own 👍 on that message (the engine\'s reaction fold)', !!rxs && /thumbsup/.test(rxs) && /"mine":true/.test(rxs), rxs);
   await sleep(400);
@@ -432,8 +436,10 @@ try {
   check('the Outbox card\'s Approve says next turn too', !!ob3 && !/唤醒/.test(ob3.label) && ob3.deliver === 'next-turn', ob3);
   check('a REAL click on the Outbox card\'s Approve', await realClick(`.chan-outbox .chan-prop[data-proposal="${rx3}"] .chan-prop-actions button[data-approve]`), lastMiss);
   const sent8 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox').then((x) => x.json()); const p = (r.proposals || []).find((q) => q.id === ${JSON.stringify(rx3)}); return p && p.state === 'sent'; })()`, 15000);
+  // the same law here: the route says «sent» before the answer that draws the toast — the page's own fact, bounded
+  const toast8 = await waitFor(`window.__toasts.some((n) => n.textContent.startsWith('已添加表情回应'))`, 15000);
   const t8 = await toasts();
-  check('APPROVED in the Outbox: «已添加表情回应», no refusal, the store says sent', sent8 && t8.some((x) => x.startsWith('已添加表情回应')) && !t8.some((x) => /请求被拒绝|shown/.test(x)), t8);
+  check('APPROVED in the Outbox: «已添加表情回应» once the approve\'s answer came (it follows the store writer\'s durable write — bound 15 s), no refusal, the store says sent', sent8 && !!toast8 && t8.some((x) => x.startsWith('已添加表情回应')) && !t8.some((x) => /请求被拒绝|shown/.test(x)), t8);
   const all8 = await waitFor(`(() => { const r = document.querySelector('[data-orow="${rx3}"]'); return !!r && r.classList.contains('chan-orow-sent'); })()`, 10000);
   check('the Outbox row says sent', all8);
   check('outbox-reaction-sent-zh.png', await shot('outbox-reaction-sent-zh.png', '.chan-outbox', 4));

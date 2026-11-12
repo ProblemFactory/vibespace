@@ -1586,7 +1586,14 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const fpName = (/const (\w+) = path\.join\(META_DIR, sockName \+ '\.json'\);/.exec(del) || [])[1] || null;
   const unlinkAt = fpName ? del.search(new RegExp(`fs\\.unlinkSync\\(${fpName}\\)`)) : del.search(/fs\.unlinkSync\(path\.join\(META_DIR, sockName \+ '\.json'\)\)/);
   const forgetAt = fpName ? del.search(new RegExp(`storeWriter\\(\\)\\.forget\\(${fpName}\\)`)) : -1;
-  ok(!!del && unlinkAt >= 0 && !/bindings/.test(del), 'deleteSessionMeta still unlinks THAT socket\'s meta file and touches NO binding (a kill is not the end of the conversation)');
+  // item 9 (store-writer follow-up): NO binding BY ANY SPELLING — the word case-blind (browserBindings(), the module's own
+  // require('./browser-bindings.js')) and every MODULE-LEVEL name whose value reaches the store (an alias of an alias too)
+  const reachNames = new Set();
+  const decls = [...ss.matchAll(/^(?:const|let|var)\s+(\w+)\s*=\s*([^\n]*)/gm)].map((m) => [m[1], m[2]]);
+  for (const [n, v] of decls) if (/bindings/i.test(n) || /bindings/i.test(v)) reachNames.add(n);
+  for (let more = true; more;) { more = false; for (const [n, v] of decls) if (!reachNames.has(n) && [...reachNames].some((r) => new RegExp(`\\b${r}\\b`).test(v))) { reachNames.add(n); more = true; } }
+  const reachesBindings = (body) => /bindings/i.test(body) || [...reachNames].some((r) => new RegExp(`\\b${r}\\b`).test(body));
+  ok(!!del && unlinkAt >= 0 && !reachesBindings(del), `deleteSessionMeta still unlinks THAT socket\'s meta file and touches NO binding by any spelling (a kill is not the end of the conversation; names that reach the store: ${[...reachNames].join(', ') || 'none'})`);
   ok(forgetAt >= 0 && unlinkAt > forgetAt, '…and the STORE WRITER forgets the file BEFORE the unlink (.396, commit 2): a paced write still owed for it is dropped first, so none lands after the delete and resurrects it');
   ok(/if \(session\.sockName\) deleteSessionMeta\(session\.sockName\);/.test(read('src/ws-handler.js')), 'the ws kill path still deletes the meta — so rung 2 alone can never serve a Terminate → Resume, which is why rung 1 exists');
   ok(/const bound = bindings\.lookup\(String\(conversationId\)\);\s*\n\s*if \(bound\) return bound;/.test(beSrc0), 'browser-env.priorKeyFor asks the store FIRST');

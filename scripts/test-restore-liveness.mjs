@@ -625,7 +625,19 @@ e2e: {
     sid2 = m2.find((m) => m.type === 'created').sessionId;
     ws.close();
   }
-  await sleep(1500);   // the second session's meta lands
+  // item 8 (store-writer follow-up): THE KILL WAITS FOR THE FACT THIS LEG NEEDS, ON DISK — each session's meta, found by
+  // its webuiSessionId (the file patchMeta rewrites below) — by a bounded poll, never 1.5 s of pace. A meta's FIRST version
+  // is written at the socket's birth, before the `created` reply; its later versions ride the store writer (100 ms) and a
+  // SIGKILL loses one not written yet — none of them is this leg's: it rewrites the file itself with the server down.
+  {
+    const META_BOUND_MS = 10000;
+    const mdir = path.join(wt, 'data', 'session-meta');
+    const metaOf = (id) => { let names = []; try { names = fs.readdirSync(mdir).filter((f) => f.endsWith('.json')); } catch { } return names.some((f) => { try { return JSON.parse(fs.readFileSync(path.join(mdir, f), 'utf-8')).webuiSessionId === id; } catch { return false; } }); };
+    const t0 = Date.now();
+    let seen = { sid: metaOf(sid), sid2: metaOf(sid2) };
+    while (!(seen.sid && seen.sid2) && Date.now() - t0 < META_BOUND_MS) { await sleep(100); seen = { sid: metaOf(sid), sid2: metaOf(sid2) }; }
+    ok(seen.sid && seen.sid2, `e2e ④ setup: both sessions' metas are on disk before the SIGKILL (found by webuiSessionId)${seen.sid && seen.sid2 ? '' : ` — not within ${META_BOUND_MS / 1000} s`}`, JSON.stringify({ ...seen, ms: Date.now() - t0 }));
+  }
   srv.kill('SIGKILL'); servers.delete(srv);
   await sleep(600);
   // the accounts, written with the server DOWN: two ChatGPT logins + a codex

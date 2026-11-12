@@ -459,6 +459,22 @@ console.log('\n⑤ a session with no browser key gets one on its first browser u
   const { ws, msgs } = await connect();
   const metaDir = path.join(wt, 'data', 'session-meta');
   const metaOf = (webuiId) => { for (const f of (fs.existsSync(metaDir) ? fs.readdirSync(metaDir) : [])) { if (!f.endsWith('.json')) continue; try { const m = JSON.parse(fs.readFileSync(path.join(metaDir, f), 'utf8')); if (m.webuiSessionId === webuiId) return m; } catch { } } return null; };
+  // item 7 (store-writer follow-up): THE LIVE RECORD, from the server's memory. A later version of session-meta is the
+  // writer's paced store (100 ms): a key a route minted lands on disk AFTER that route's answer, so a disk read right after
+  // the answer can only say «no key» / «the same key». The server cannot be flushed from here, and its stop would take the
+  // session's file with it (the kill unlinks it) — but a NEW socket is answered at once with the active-sessions payload
+  // built from the live sessions, `browserKey` = the session's own key, which the mint sets BEFORE it persists. That is the
+  // newest state, read after the answer (bounded: no payload within 5 s is red by name).
+  const liveKeyOf = async (webuiId) => {
+    const c = await connect();
+    try {
+      await until(() => c.msgs.some((m) => m.type === 'active-sessions'), 5000, 20);
+      const frame = c.msgs.find((m) => m.type === 'active-sessions');
+      if (!frame) return { seen: false, key: null, why: 'NO active-sessions payload within 5 s' };
+      const s = (frame.sessions || []).find((x) => x && (x.id === webuiId || x.sessionId === webuiId));
+      return s ? { seen: true, key: s.browserKey || null } : { seen: false, key: null, why: `the payload names no session ${webuiId}` };
+    } finally { try { c.ws.close(); } catch { } }
+  };
   const envOf = (webuiId) => {
     for (const d of fs.readdirSync('/proc')) {
       if (!/^\d+$/.test(d)) continue;
@@ -492,7 +508,8 @@ console.log('\n⑤ a session with no browser key gets one on its first browser u
     // the user has by then (a default reaches a conversation only at its start)
     { const w = metaOf(s1)?.browserPinAtStart; ok(w && typeof w === 'object' && w.origin === 'harness' && w.profileId === '' && Number.isFinite(w.at) && Math.abs(w.at - metaOf(s1).createdAt) < 5000 && 'cap' in w, `the keyless spawn's record carries its pin WITNESS (browserPinAtStart: ${JSON.stringify(w)}) — what its ladder picked at the start`); }
     let r = await agent(tok, 'GET', '/api/agent/browser/status');
-    ok(r.status === 409 && r.json?.code === 'no_browser_key' && r.json?.why === 'isolation_off' && /Give each session its own agent browser/.test(r.json?.error || '') && !metaOf(s1).browserKey, `while they are still off its browser command is refused BY NAME — isolation_off, naming the setting (${r.status} ${r.json?.code}/${r.json?.why}); nothing minted`);
+    const live0 = await liveKeyOf(s1);   // item 7 (store-writer follow-up): «nothing minted» read off the live record, after the answer
+    ok(r.status === 409 && r.json?.code === 'no_browser_key' && r.json?.why === 'isolation_off' && /Give each session its own agent browser/.test(r.json?.error || '') && live0.seen && !live0.key && !metaOf(s1).browserKey, `while they are still off its browser command is refused BY NAME — isolation_off, naming the setting (${r.status} ${r.json?.code}/${r.json?.why}); nothing minted (the server's live record: ${live0.seen ? live0.key || 'no key' : live0.why})`);
     ok(await setIso(true), 'per-session browsers switched back ON');
     r = await agent(tok, 'GET', '/api/agent/browser/status');
     await until(() => !!metaOf(s1)?.browserKey, 5000);
@@ -503,7 +520,8 @@ console.log('\n⑤ a session with no browser key gets one on its first browser u
     await sleep(300);
     ok(bindingOf(Z) === kL && mintLines() === 1, `bindings.json binds ${Z.slice(0, 8)}… → ${bindingOf(Z)} (THE choke point wrote it), and the server said so once (${mintLines()} line)`);
     r = await agent(tok, 'GET', '/api/agent/browser/status');
-    ok(r.status === 200 && metaOf(s1)?.browserKey === kL && mintLines() === 1, 'a second route mints nothing — the same key, still one line');
+    const live2 = await liveKeyOf(s1);   // item 7 (store-writer follow-up): a second mint is in the live record at once; its file lands paced
+    ok(r.status === 200 && live2.seen && live2.key === kL && metaOf(s1)?.browserKey === kL && mintLines() === 1, `a second route mints nothing — the same key (the server's live record: ${live2.seen ? live2.key || 'no key' : live2.why}), still one line`);
     ok(!envOf(s1)?.AGENT_BROWSER_SESSION, 'HONEST BOUNDARY: the running process\'s environment is unchanged (immutable) — the CLI builds its child env from /resolve\'s answer, which is why no restart is needed');
     ws.send(JSON.stringify({ type: 'kill', sessionId: s1 }));
     await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s1), 10000);

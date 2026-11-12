@@ -183,7 +183,7 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     const gate = wholeLedgerGate({ ledger: w3.uh, prime: () => w3.est.primeIfCold() });
     const ratesFile = path.join(w3.adir, 'rates.json');
     const first = gate.run(() => ran.push({ rates: w3.est.ratesFor('email:a@x'), cost: w3.UA.costBetweenMulti(w3.uh, ['sub-a'], NOW - 3 * DAY, NOW - DAY) }));
-    const held = { first, holds: gate.holds(), loading: w3.uh.ledgerLoading(), est: w3.est.estimateFor('sub-a', null, NOW), partial: w3.UA.costBetweenMulti(w3.uh, ['sub-a'], NOW - 2 * DAY, NOW).partial === true, ratesWritten: fs.existsSync(ratesFile) };
+    const held = { first, holds: gate.holds(), loading: w3.uh.ledgerLoading(), est: w3.est.estimateFor('sub-a', null, NOW), partial: w3.UA.costBetweenMulti(w3.uh, ['sub-a'], NOW - 2 * DAY, NOW).partial === true, ratesWritten: (w3.est.flushRates(), fs.existsSync(ratesFile)) };   // item 7: read after the writer's flush — a paced write would land after a bare read
     for (let k = 0; k < 400 && !ran.length; k++) await new Promise((r) => setImmediate(r));
     const o3 = new (w3.est.constructor)({ anchorsDir: w3.adir, usageHistory: w3.uh, resolveIdentity: w3.est.resolveIdentity, lagS: 20 });
     o3._costFn = (ids) => (f, t) => masterWalk(w3.uh, ids, f, t); o3._primePairs = () => { };

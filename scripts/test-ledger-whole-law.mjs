@@ -212,6 +212,7 @@ await leg('①', async () => {
   ue.ratesFor('ident-1');
   const raw = { fetchedAt: T0 + N * 1000, fiveHour: { utilization: 0.4, resetsAt: Math.floor((T0 + N * 1000) / 1000) + 3600 }, sevenDay: { utilization: 0.3, resetsAt: Math.floor((T0 + N * 1000) / 1000) + 86400 } };
   const est = ue.estimateFor(null, raw, T0 + N * 1000 + 60e3);
+  ue.flushRates();   // item 7 (store-writer follow-up): rates.json is the writer's paced store — an absence read before its flush passes on ANY write (the e11e1f61 regression too)
   ok(!fs.existsSync(path.join(ad, 'rates.json')) && est === null, `① the estimator during the warm: rates.json ${fs.existsSync(path.join(ad, 'rates.json')) ? 'WRITTEN' : 'not written'}, the estimate ${est === null ? 'none (the reading stands)' : 'computed off part of the ledger'} (e11e1f61: written + computed)`, { est });
   // the engine's sweep + its automatic decision, through the gate
   const gate = typeof EST.wholeLedgerGate === 'function' ? EST.wholeLedgerGate({ ledger: uh, log: (m) => said.push(m), onWhole: () => { wholes++; } }) : null;

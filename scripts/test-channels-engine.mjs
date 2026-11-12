@@ -49,6 +49,17 @@ let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started out
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// item 7 (store-writer follow-up): a census «in NO file» reads what the stores still OWE too. The channels index and its
+// acts journal are the store writer's paced stores (500 ms): a walk right after the act reads the version before it, so
+// «in no file» passed on any leak still queued. The owner's flush first — every dirty store under the census root, through
+// the ONE writer (null = every store; `only` keeps it to this root, where another leg's removed dir cannot answer) — and
+// a store it could not write is a hit of the census, BY NAME.
+const STORE_W = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+const unlandedUnder = (root, budgetMs = 10000) => {
+  const at = path.resolve(root) + path.sep;
+  const r = STORE_W.flushSync(null, { budgetMs, only: (s) => path.resolve(String(s.file)).startsWith(at) });
+  return r.left.map((x) => `NOT LANDED: ${x.name || '?'} ${path.relative(ROOT, String(x.file || ''))} (${x.why})`);
+};
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -2492,18 +2503,25 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const sE = await eEcho.startOAuth({ kind: 'gmail', fromMount: P }); await landOn(eEcho, sE.flow, 'code-echo');
   const kE = (await eEcho.connect('gmail', { flowId: sE.flowId, fromMount: P, name: 'echo' })).adapter.id;
   await sleep(40);
-  const whereIs = (sec) => ({ frames: frames.filter((f) => JSON.stringify(f).includes(sec)).length, disk: (() => { const hits = []; const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, f.name); if (f.isDirectory()) walk(q); else if (fs.readFileSync(q, 'latin1').includes(sec)) hits.push(path.relative(ROOT, q)); } }; walk(path.join(ROOT, 'cfm-echo')); return hits; })(), logs: logs.filter((l) => l.includes(sec)).length, inbox: todosR4.filter((x) => JSON.stringify(x).includes(sec)).length });
+  // item 7 (store-writer follow-up): the disk census reads AFTER the owner's flush — the rebind's refusal is 60 ms old here,
+  // and a copy of the secret the act put in the channels index would land half a second later
+  const whereIs = (sec) => ({ frames: frames.filter((f) => JSON.stringify(f).includes(sec)).length, disk: (() => { const hits = unlandedUnder(path.join(ROOT, 'cfm-echo')); const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, f.name); if (f.isDirectory()) walk(q); else if (fs.readFileSync(q, 'latin1').includes(sec)) hits.push(path.relative(ROOT, q)); } }; walk(path.join(ROOT, 'cfm-echo')); return hits; })(), logs: logs.filter((l) => l.includes(sec)).length, inbox: todosR4.filter((x) => JSON.stringify(x).includes(sec)).length });
   frames.length = 0; logs.length = 0; echoSecret = true;
   const rbE = await eEcho.reauthorize(kE, { fromMount: D });   // the rebind: its consent under D's client, refused with an echo of D's secret
   await landOn(eEcho, rbE.flow, 'code-echo-d'); await sleep(60);
-  const wD = whereIs(DSEC); const recE1 = recOf(path.join(ROOT, 'cfm-echo'), kE);
-  ok(wD.frames === 0 && wD.disk.length === 0 && wD.logs === 0 && wD.inbox === 0 && /\[client_secret withheld\] was rejected \(fake vendor echo\)/.test(recE1.lastAuthError || ''), `verify r4 (rebind): the vendor's echo of the borrowed secret is WITHHELD by value — no frame, no file, no log line carries it; the vendor's other words stay ("${recE1.lastAuthError}")`, JSON.stringify(wD));
+  // item 7 (store-writer follow-up): the census looks for the secret this rebind SENT, read off the fake vendor's own record
+  // of the exchange — mount D's client was edited twice above (r3: the edited, then the third secret), so DSEC (its first
+  // secret) never rode this flow and a census for it could not see the echo land anywhere (measured: the third secret in
+  // cfm-echo's index under a mutant, the DSEC census green)
+  const sentD = String(((calls.filter((c) => c.form && c.form.code === 'code-echo-d').pop() || {}).form || {}).client_secret || '');
+  const wD = whereIs(sentD || DSEC); const recE1 = recOf(path.join(ROOT, 'cfm-echo'), kE);
+  ok(sentD.length >= 8 && wD.frames === 0 && wD.disk.length === 0 && wD.logs === 0 && wD.inbox === 0 && /\[client_secret withheld\] was rejected \(fake vendor echo\)/.test(recE1.lastAuthError || ''), `verify r4 (rebind): the vendor's echo of the borrowed secret is WITHHELD by value — no frame, no file, no log line carries it; the vendor's other words stay ("${recE1.lastAuthError}")`, JSON.stringify({ sent: sentD ? `${sentD.slice(0, 7)}… (${sentD.length} chars)` : 'NO client_secret recorded for code-echo-d', ...wD }));
   const rsE = await eEcho.reauthorize(kE, { fromMount: P });   // the record's own flow (same id: the secret re-copied in place)
   await landOn(eEcho, rsE.flow, 'code-echo-p'); await sleep(60);
   const wP = whereIs(CSEC);
   ok(wP.frames === 0 && wP.disk.length === 0 && wP.logs === 0 && /\[client_secret withheld\]/.test(recOf(path.join(ROOT, 'cfm-echo'), kE).lastAuthError || ''), 'verify r4 (the record\'s own flow): the same — withheld everywhere', JSON.stringify(wP));
   echoSecret = false;
-  ok(!frames.some((f) => JSON.stringify(f).includes(CSEC) || JSON.stringify(f).includes(DSEC)), 'verify r4: no broadcast frame of this leg carried either secret');
+  ok(!frames.some((f) => JSON.stringify(f).includes(CSEC) || JSON.stringify(f).includes(DSEC) || (!!sentD && JSON.stringify(f).includes(sentD))), 'verify r4: no broadcast frame of this leg carried either secret (P\'s, and the one the rebind sent)');   // item 7 (store-writer follow-up): + the secret the rebind actually sent
   // (14) a SIGN-IN IS THE OWNER'S: a self-identifying agent bearer is 403 on every verb that begins or completes a consent,
   // whatever the body names (r2 refused only a body naming a mount — a bearer that could begin 33 sign-ins could end the
   // owner's through the cap); the config route's refusal is r2's
@@ -5893,7 +5911,9 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
   // ── (J) THE SNIPPET: never in the store, the digest or a broadcast (every hit carried one)
   const leaks = [];
   const walkDir = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p2 = path.join(d, f.name); if (f.isDirectory()) walkDir(p2); else if (fs.readFileSync(p2, 'utf-8').includes('SNIPPET-LEAK')) leaks.push(path.relative(ROOT, p2)); } };
-  for (const d of [dA, dM, dI]) walkDir(path.join(d, 'channels'));
+  // item 7 (store-writer follow-up): every store under each dir written first (the owner's flush) — a store the writer
+  // still owes is what a bare walk cannot see; one it could not write is a leak of the census, by name
+  for (const d of [dA, dM, dI]) { leaks.push(...unlandedUnder(path.join(d, 'channels'))); walkDir(path.join(d, 'channels')); }
   const bleak = [...events, ...E2.events, ...Mx.events].filter((m) => JSON.stringify(m).includes('SNIPPET-LEAK')).length;
   const sv = eng2.adapterView(eng2.adapterRecords().adapters[0]).feed;
   ok(leaks.length === 0 && bleak === 0 && !JSON.stringify(eng2.digest()).includes('SNIPPET-LEAK') && sv.counters && Mx.eng.adapterRecords().adapters[0].feed.counters.stripped > 0, 'THE SNIPPET NEVER LEAVES THE ADAPTER: every hit carried one — stripped at the registry (counted), in no store file, no digest, no broadcast', JSON.stringify({ leaks, bleak }));

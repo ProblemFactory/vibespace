@@ -551,6 +551,12 @@ await turn('second turn');
 // telemetry + incidents: no word
 { const tel = execSync(`grep -rl -F ${J(S)} ${J(path.join(DATA, 'telemetry'))} ${J(path.join(DATA, 'incidents'))} 2>/dev/null || true`, { encoding: 'utf8' }).trim(); check('telemetry shards + incident captures carry no word', !tel, tel); }
 
+// item 7 (store-writer follow-up): §6's and §7's «in no file» censuses are read AFTER THE SERVER'S STOP (below §7). Its
+// session meta, session status, channels index + acts journal (and any store moved onto the writer) are written by ONE
+// paced writer thread, so a grep right after an HTTP answer read the files BEFORE what the server still owed — it could
+// only pass. A spawned server cannot be flushed from here; its stop can: SIGTERM's exit flush writes every store it owes.
+// Each row: {name, v: the value no file may hold, also(): the journal / stdin half of the same check}.
+const afterStop = [];
 // ── §6 THE SIGN-IN ROAD (lane door-signin-fixes, the verify's claim 2): a code typed into the Claude sign-in rides no answer ──
 console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches the CLI and nothing else');
 {
@@ -567,8 +573,7 @@ console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches 
   check('§6 no answer of the sign-in routes holds the typed code (start, code, GET after the death)', !holds(st.text) && !holds(sent.text) && !holds(g.text), { st: holds(st.text), sent: holds(sent.text), get: g.text.slice(0, 300) });
   const seen = frames.slice(f0).filter((f) => f.type === 'claude-signin');
   check(`§6 no claude-signin broadcast holds it (${seen.length} frames)`, seen.length > 0 && !seen.some(holds), seen.filter(holds).slice(0, 2));
-  const files = execSync(`grep -rl -F ${J(SW)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
-  check('§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', !files && !fs.readFileSync(JOURNAL, 'utf8').includes(SW), files);
+  afterStop.push({ name: '§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', v: SW, also: () => !fs.readFileSync(JOURNAL, 'utf8').includes(SW) });   // item 7 (store-writer follow-up): read after the stop
   await raw(`/api/accounts/${aid}`, { method: 'DELETE' });
 }
 
@@ -596,8 +601,7 @@ console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches i
   check(`§7 no probe's answer holds the pasted value (${PROBES.length} probes)`, answers.length === 0, answers);
   const seen = frames.slice(f0);
   check(`§7 no broadcast holds it (${seen.length} frames — the For-you snapshot and the integration's masked view among them)`, seen.length > 0 && !seen.some((f) => holds(f)), seen.filter((f) => holds(f)).slice(0, 2));
-  const files = execSync(`grep -rl -F ${J(PV)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
-  check('§7 … nor any file under data/ or HOME (sealed in the integration store), nor the journal, nor the stub\'s stdin', !files && !fs.readFileSync(JOURNAL, 'utf8').includes(PV) && !stdinLog().includes(PV), files);
+  afterStop.push({ name: '§7 … nor any file under data/ or HOME (sealed in the integration store), nor the journal, nor the stub\'s stdin', v: PV, also: () => !fs.readFileSync(JOURNAL, 'utf8').includes(PV) && !stdinLog().includes(PV) });   // item 7 (store-writer follow-up): read after the stop
   // the request's item is the record: it holds the agent's words (never the value) — the owner's clear takes them
   const items = ((await raw('/api/user-todos')).json || {}).todos || {};
   const it = [...(items.open || []), ...(items.resolved || [])].find((x) => x && x.action && x.action.requestId === rid);
@@ -606,6 +610,23 @@ console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches i
   const after = ((await raw('/api/user-todos')).json || {}).todos || {};
   const it2 = [...(after.open || []), ...(after.resolved || [])].find((x) => x && x.id === (it && it.id));
   check('§7 the owner clears it ⇒ the request\'s words are gone from the item (the cleared sentence, in its place)', cl.status === 200 && !!it2 && !holds(it2, PW7), { cl: cl.text.slice(0, 200), it2: it2 && it2.text });
+}
+
+// item 7 (store-writer follow-up): THE ABSENCE READS AFTER THE SERVER'S STOP — the last leg that needs the server is §7;
+// SIGTERM runs its shutdown, whose exit flush writes every store the writer owes (moved or not), once, then exit 0. A
+// server that did not stop that way wrote nothing it owed: the censuses below are red by name, never read blind.
+console.log('\nitem 7: §6\'s and §7\'s file censuses, after the server\'s stop (its exit flush wrote every store it owed)');
+{
+  try { wsc.close(); } catch {}
+  const t0s = Date.now();
+  const exited = srv.exitCode !== null || srv.signalCode !== null ? { code: srv.exitCode, signal: srv.signalCode, before: true }
+    : await new Promise((res) => { const to = setTimeout(() => res(null), 60000); srv.once('exit', (code, signal) => { clearTimeout(to); res({ code, signal }); }); try { srv.kill('SIGTERM'); } catch {} });
+  const flushed = !!exited && !exited.before && exited.code === 0;
+  check(`the server STOPPED on SIGTERM through its shutdown (exit 0 — the exit flush ran): ${exited ? `${exited.before ? 'it had already exited, ' : ''}exit ${exited.code}${exited.signal ? ` (${exited.signal})` : ''} after ${Date.now() - t0s} ms` : 'NOT EXITED within 60 s'}`, flushed, exited);
+  for (const a of afterStop) {
+    const files = execSync(`grep -rl -F ${J(a.v)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
+    check(a.name, flushed && !files && a.also(), files || (flushed ? 'the journal / the stub\'s stdin' : 'the server did not stop through its shutdown — what it owed was never written, so no file read here is the truth'));
+  }
 }
 
 // ── §5 CONTROL: the walk's judge over a copy whose For-you snapshot serves a SHADOW copy of the words ──

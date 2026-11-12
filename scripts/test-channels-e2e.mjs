@@ -74,6 +74,41 @@ const chromeDir = scratch('chan-e2e-chrome');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// item 8 (store-writer follow-up): A READ OF THE SPAWNED SERVER'S DISK IS A BOUNDED POLL ON THE FACT ITSELF. Since the
+// .396 store writer, index.json reaches the disk on the writer's thread at its pace (500 ms after its first unwritten
+// change, at this size), and layouts.json 500 ms after its last sync — so a file read in the statement after an act holds
+// the version BEFORE it, and this process cannot flush another process's writer. `onDisk(read, holds, boundMs)` re-reads
+// until `holds(value)` and answers `{ok, v, ms}`; the caller fails BY NAME past the bound (late()). A sleep sized to the
+// pace is never the wait: it passes by timing, and a SIGKILL after one races the pace instead of testing the restart.
+// The bounds: INDEX_BOUND_MS is 20× the index's 500 ms pace at this size (past it, the write did not land); KILL_GATE_MS
+// covers what a SIGKILL waits for — the client's 2 s layout autosave, then the server's 500 ms write — with room.
+const DISK_POLL_MS = 100;
+const INDEX_BOUND_MS = 10000;
+const KILL_GATE_MS = 20000;
+const onDisk = async (read, holds, boundMs) => {
+  const t0 = Date.now();
+  for (;;) {
+    let v; try { v = read(); } catch (e) { v = { unreadable: String((e && e.message) || e).slice(0, 160) }; }
+    let held = false; try { held = !!holds(v); } catch { held = false; }
+    if (held) return { ok: true, v, ms: Date.now() - t0 };
+    if (Date.now() - t0 >= boundMs) return { ok: false, v, ms: Date.now() - t0 };
+    await sleep(DISK_POLL_MS);
+  }
+};
+/** item 8 (store-writer follow-up): the words a miss adds to its assert — the fact and the bound it ran out ('' once it landed) */
+const late = (w, what) => (w.ok ? '' : ` — ${what} not on disk within ${Math.round(w.ms / 1000)} s`);
+const readIndex = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8'));
+/** item 8 (store-writer follow-up): ONE row of index.json as it is on disk now (null: no row, or no readable file yet) */
+const indexRow = (key) => { try { return readIndex().conversations[key] || null; } catch { return null; } };
+/** item 8 (store-writer follow-up): the conversation windows the next boot RESTORES from layouts.json, by convId — the first
+ *  desktop's autoSave (the legacy autoSave while there are no desktops), as DesktopManager.loadFromServer reads it; never
+ *  a regex over the whole file (the Outbox's `openChannelOutbox` matches /openChannel/). null: no readable file. */
+const bootChannelConvs = () => {
+  let lay = null; try { lay = JSON.parse(fs.readFileSync(path.join(wt, 'data/layouts.json'), 'utf-8')); } catch { return null; }
+  const meta = Array.isArray(lay && lay.desktopMeta) ? lay.desktopMeta : [];
+  const st = meta.length ? (lay.desktops && meta[0] && lay.desktops[meta[0].id] && lay.desktops[meta[0].id].autoSave) : lay && lay.autoSave;
+  return (st && Array.isArray(st.windows) ? st.windows : []).filter((w) => w && w.openSpec && w.openSpec.action === 'openChannel').map((w) => w.openSpec.convId);
+};
 
 // ── throwaway worktree + WORKING-TREE overlay (a pre-commit run must test what
 //    is about to ship) ──
@@ -249,12 +284,15 @@ ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its ev
     fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/fake-push-ops/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
     fetch(`http://127.0.0.1:${PORT}/api/channels/fake-scan/fake-scan-ops/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   ]);
-  await sleep(2500);
-  const ix = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations;
-  ok(ix['fake-push/fake-push-ops'].anchor && ix['fake-scan/fake-scan-ops'].anchor,
+  // item 8 (store-writer follow-up): the cursors are read once index.json HOLDS them — a bounded poll on the fact this
+  // leg asserts. The route answers when the pass is done in memory; its plain index.update reaches the disk at the
+  // writer's pace, which the 2.5 s sleep only outran by timing.
+  const w5 = await onDisk(() => readIndex().conversations, (c) => c['fake-push/fake-push-ops'].anchor && c['fake-scan/fake-scan-ops'].anchor, INDEX_BOUND_MS);
+  const ix = w5.v && !w5.v.unreadable ? w5.v : {};
+  ok(w5.ok,
     'EXIT ⑤: two simultaneous passes each advanced their OWN cursor, through the REAL store',
-    JSON.stringify({ push: ix['fake-push/fake-push-ops'].anchor, scan: ix['fake-scan/fake-scan-ops'].anchor, before: Object.keys(before.conversations).length }));
-  ok(ix['fake-poll/fake-poll-ops'].anchor && ix['fake-poll/fake-poll-announce'].anchor, '…and the earlier pass\'s cursors are still there (nothing clobbered anything)');
+    JSON.stringify({ push: ix['fake-push/fake-push-ops']?.anchor, scan: ix['fake-scan/fake-scan-ops']?.anchor, before: Object.keys(before.conversations).length, ms: w5.ms, ...(w5.v && w5.v.unreadable ? { unreadable: w5.v.unreadable } : {}) }) + late(w5, 'both cursors'));
+  ok(ix['fake-poll/fake-poll-ops']?.anchor && ix['fake-poll/fake-poll-announce']?.anchor, '…and the earlier pass\'s cursors are still there (nothing clobbered anything)');
   const logs = fs.readdirSync(path.join(wt, 'data/channels/msgs'));
   ok(logs.length === 3, 'each adapter owns its own message-log directory', logs.join(','));
   // THE SCAN LANE'S CHIP AND ITS LOG AGREE (r3): the pass PRODUCED
@@ -303,8 +341,9 @@ ok(synced.ok, `EXIT ④(b): a change on ONE client repaints the OTHER from the b
 // with a reason, and the pointer goes with it.
 const readTodos = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos || { open: [], resolved: [] };
 const readRow = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations['fake-poll/fake-poll-ops'];
-// the index reaches disk on the store's 500 ms debounce (2 s interval); wait for the write, bounded
-const waitRow = async (pred) => { for (let i = 0; i < 24; i++) { const r = readRow(); if (pred(r)) return r; await sleep(250); } return readRow(); };
+// item 8 (store-writer follow-up): the index reaches the disk at the store writer's pace (500 ms after its first unwritten
+// change, at this size); wait for the write, bounded — `{ok, row, ms}`, and a miss names its bound (late())
+const waitRow = async (pred) => { const w = await onDisk(readRow, (r) => !!r && !r.unreadable && pred(r), INDEX_BOUND_MS); return { ...w, row: w.v && !w.v.unreadable ? w.v : null }; };
 // A USER-DRAFTED PROPOSAL through the /propose route (g3, design §22.2 ①: the
 // composer on a conversation that offers send-as-user now SENDS the owner's
 // own words directly — ⑩b below — so a proposal the owner wants reviewed is
@@ -342,8 +381,9 @@ const PROPOSE = (text) => `(async () => {
   const todos = await readTodos();
   const ptr = (todos.open || []).filter((t) => t.sessionKey === 'channels' && /awaiting approval/.test(t.text));
   ok(ptr.length === 1, 'EXIT P3 ②: exactly ONE open "For you" pointer is filed for the conversation (count-free text)', JSON.stringify((todos.open || []).map((t) => [t.sessionKey, t.text])));
-  const ix1 = await waitRow((r) => !!r.pendingTodoId);
-  ok(ptr.length === 1 && ix1.pendingTodoId === ptr[0].id, "the pointer's id is PERSISTED on the conversation row (`pendingTodoId`) — the retraction link", JSON.stringify({ row: ix1.pendingTodoId, item: ptr[0] && ptr[0].id }));
+  const w1 = await waitRow((r) => !!r.pendingTodoId);
+  const ix1 = w1.row || {};
+  ok(w1.ok && ptr.length === 1 && ix1.pendingTodoId === ptr[0].id, "the pointer's id is PERSISTED on the conversation row (`pendingTodoId`) — the retraction link", JSON.stringify({ row: ix1.pendingTodoId, item: ptr[0] && ptr[0].id }) + late(w1, "the pointer's id"));
 
   // the second client: panel button + row badge + the Outbox window, same proposal, same store
   const p2ob = await p2.evaljs(`(async () => {
@@ -391,8 +431,9 @@ const PROPOSE = (text) => `(async () => {
   const todos2 = await readTodos();
   const ptrGone = !(todos2.open || []).some((t) => ptr[0] && t.id === ptr[0].id);
   const ptrDone = (todos2.resolved || []).find((t) => ptr[0] && t.id === ptr[0].id);
-  const ix2 = await waitRow((r) => !r.pendingTodoId);
-  ok(ptrGone && !!ptrDone && ptrDone.resolvedBy === 'system' && !ix2.pendingTodoId, 'EXIT P3 ⑤: the pointer is RETRACTED (by the engine, as `system`) when the last proposal leaves awaiting-approval, and the row forgets its id', JSON.stringify({ gone: ptrGone, done: ptrDone && [ptrDone.status, ptrDone.resolvedBy], row: ix2.pendingTodoId }));
+  const w2 = await waitRow((r) => !r.pendingTodoId);
+  const ix2 = w2.row || {};
+  ok(w2.ok && ptrGone && !!ptrDone && ptrDone.resolvedBy === 'system' && !ix2.pendingTodoId, 'EXIT P3 ⑤: the pointer is RETRACTED (by the engine, as `system`) when the last proposal leaves awaiting-approval, and the row forgets its id', JSON.stringify({ gone: ptrGone, done: ptrDone && [ptrDone.status, ptrDone.resolvedBy], row: ix2.pendingTodoId }) + late(w2, "the row's cleared link"));
 
   // the audit log: attempt BEFORE outcome, the identity fields on every line
   const audit = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === pid);
@@ -406,6 +447,12 @@ const PROPOSE = (text) => `(async () => {
   ok(!second.fail && second.id !== pid, 'a second proposal lands in awaiting-approval (a new id)', JSON.stringify(second));
   const ptrB = (await readTodos()).open.filter((t) => t.sessionKey === 'channels' && /awaiting approval/.test(t.text));
   ok(ptrB.length === 1 && ptr[0] && ptrB[0].id === ptr[0].id, 'the pointer is RE-FILED as the SAME item (dedupe by text = the idempotence we want), not a second one', JSON.stringify({ before: ptr[0] && ptr[0].id, now: ptrB.map((t) => t.id) }));
+  // item 8 (store-writer follow-up): THE RE-FILE'S LINK IS ON DISK BEFORE THE REJECT. The first retraction (EXIT P3 ⑤) left
+  // the row with no id on disk, and the retraction below is read as «no id» — which that older version already holds: the
+  // poll could pass seeing neither the re-file nor its clear. With the re-file's id read on disk first, «no id» below can
+  // only be the retraction's own version (or a later one).
+  const wB = await waitRow((r) => !!ptrB[0] && r.pendingTodoId === ptrB[0].id);
+  ok(wB.ok, "the RE-FILED pointer's id is persisted on the row again — on disk before the reject (the version its retraction must replace)", JSON.stringify({ row: wB.row && wB.row.pendingTodoId, item: ptrB[0] && ptrB[0].id }) + late(wB, 'the re-filed id'));
   const rejected = await p1.evaljs(`(async () => {
     const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
     const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${second.id}"]');
@@ -423,8 +470,9 @@ const PROPOSE = (text) => `(async () => {
   })()`);
   ok(!rejected.fail && /wrong tone/.test(rejected.reason || '') && !rejected.approve, 'Reject with a reason repaints the card as rejected, carrying the reason verbatim', JSON.stringify(rejected));
   const todos3 = await readTodos();
-  const rowC = await waitRow((r) => !r.pendingTodoId);
-  ok(!(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId }));
+  const wC = await waitRow((r) => !r.pendingTodoId);   // item 8 (store-writer follow-up): after wB, only the retraction's own version holds this
+  const rowC = wC.row || {};
+  ok(wB.ok && wC.ok && !(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId, refiledOnDisk: wB.ok }) + late(wC, "the rejection's cleared link"));
   const auditB = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === second.id).map((a) => a.op);
   ok(auditB.includes('reject') && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
   // ⑩c lane channel-enter-ime (inc-mv7mdv6b-emxq, 2026-10-14 — the owner's rejection left mid-word: the ring's
@@ -631,9 +679,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 20, button: 'left', clickCount: 1 });
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 20, button: 'left', clickCount: 1 });
   await p1.evaljs('window.app.layoutManager.scheduleAutoSave(), 1');
-  await sleep(3500);
-  const layouts = path.join(wt, 'data/layouts.json');
-  ok(fs.existsSync(layouts) && /openChannel/.test(fs.readFileSync(layouts, 'utf-8')), 'the channel window is in the saved layout (its openSpec, not its contents)');
+  // item 8 (store-writer follow-up): THE KILL WAITS FOR WHAT THE REBOOT READS, ON DISK. A SIGKILL has no exit flush: what
+  // survives is what reached the disk — the layout the boot restores holding this window (the client's 2 s autosave, then
+  // the server's 500 ms write) and index.json holding the ④ refresh override (the store writer's paced write). Each by a
+  // bounded poll, never the 3.5 s that let the pace beat the kill: the leg measures the RESTART, not the pace.
+  const g3 = await onDisk(() => ({ convs: bootChannelConvs(), every: ((indexRow('fake-poll/fake-poll-ops') || {}).refresh || {}).every }), (v) => Array.isArray(v.convs) && v.convs.includes('fake-poll-ops') && v.every === 'paused', KILL_GATE_MS);
+  ok(Array.isArray(g3.v.convs) && g3.v.convs.includes('fake-poll-ops'), 'the channel window is in the saved layout (its openSpec, not its contents)', JSON.stringify(g3.v.convs) + late(g3, 'the layout the boot restores'));
+  ok(g3.v.every === 'paused', '…and the ④ refresh override is in index.json — on disk BEFORE the kill (a SIGKILL writes nothing more)', JSON.stringify(g3.v.every === undefined ? null : g3.v.every) + late(g3, 'the override'));
   srv.kill('SIGKILL');
   await sleep(1200);
   srv = bootServer();
@@ -742,13 +794,17 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // …and the closed windows issue NOTHING when the engine broadcasts.
   await p1.evaljs('window.__cnt = { bc: 0, read: 0, byUrl: {} }');
   await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"at":0}' });
+  // item 8 (store-writer follow-up): these 3 s are the WINDOW the counters below watch — a closed window's traffic is an
+  // absence, and an absence needs a span — no longer the wait for the disk: the mark is read below by a bounded poll
   await sleep(3000);
   const after = JSON.parse(await p1.evaljs('JSON.stringify(window.__cnt)'));
   const conv = after.byUrl['/api/channels/fake-poll/fake-poll-ops'] || 0;
   ok(conv === 0 && after.read === 0,
     'a CLOSED window fetches NOTHING and POSTs NOTHING when the engine broadcasts', JSON.stringify(after));
-  const readAt = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations['fake-poll/fake-poll-ops'].readAt;
-  ok(readAt === 0, 'and the read mark we set to 0 is still 0 — no ghost window overwrote it', String(readAt));
+  // item 8 (store-writer follow-up): the mark on disk, by a bounded poll on its own value — 0 is this act's (the window's
+  // mark on open was its newest message's instant), and a ghost's /read would write a later instant over it, never 0
+  const wR = await onDisk(() => (indexRow('fake-poll/fake-poll-ops') || {}).readAt, (v) => v === 0, INDEX_BOUND_MS);
+  ok(wR.ok, 'and the read mark we set to 0 is still 0 — no ghost window overwrote it', String(wR.v) + late(wR, 'the mark 0'));
 }
 
 // ── ⑨ THE FRESHNESS CHIP IS IN THE DEVICE'S LANGUAGE (r2) ─────────────────
@@ -1289,11 +1345,17 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   // answered 2 for the whole wait — red whenever the reload beat the engine's first 5 s tick). Closed on both pages,
   // the layout autosaved (a real pointerdown, as ③), then the kill.
   const CHAN_WINS = `[...window.app.wm.windows.values()].filter((x) => x.type === 'channel')`;
+  const layBefore17 = (() => { try { return fs.readFileSync(path.join(wt, 'data/layouts.json'), 'utf-8'); } catch { return null; } })();
   for (const p of [p1, p2]) await p.evaljs(`(() => { for (const w of ${CHAN_WINS}) window.app.wm.closeWindow(w.id); return 1; })()`);
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 20, button: 'left', clickCount: 1 });
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 20, button: 'left', clickCount: 1 });
   await p1.evaljs('window.app.layoutManager.scheduleAutoSave(), 1');
-  await sleep(3500);
+  // item 8 (store-writer follow-up): the kill waits for the closing's AUTOSAVE to be on disk — layouts.json no longer the
+  // bytes it held before the windows closed — a bounded poll, never 3.5 s of pace; a SIGKILL writes nothing more. What the
+  // boot restores from it is judged after the reboot (below), by the page itself — never by re-deriving the client's
+  // choice of desktop here (the first round's reader picked a desktop the boot does not restore from: a false red)
+  const g17 = await onDisk(() => { try { return fs.readFileSync(path.join(wt, 'data/layouts.json'), 'utf-8'); } catch { return null; } }, (t) => t !== null && t !== layBefore17, KILL_GATE_MS);
+  ok(g17.ok, '⑰ the closing\'s layout autosave is on disk before the kill', (g17.ok ? 'landed' : 'unchanged') + late(g17, "the closed windows' layout"));
   try { srv.kill('SIGKILL'); } catch {}
   await sleep(400);
   // lane discovery-cursor-persist (int235): a restart RESUMES — an account listed whole is not re-listed until its periodic
