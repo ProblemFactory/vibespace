@@ -343,7 +343,6 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
     // allowlist nobody prunes is how a retired exception becomes a licence.
     const ALLOW = new Map([
       ['src/usage-cache-write.js', 'THE write path itself'],
-      ['src/usage-reset-claim.js', 'lane account-reset-door: its own writes are data/usage-reset-claims.json (a person\'s reset claim, its own provenance) — it names the write path\'s events it hears, and never writes a usage-cache file (a claim is never a reading)'],
       ['src/reading-repair.js', 'its generic _writeAtomic serves the ANCHOR and ATTRIBUTION stores; its three usage-cache writes go through _writeCacheAtomic → writeCacheObject({replace:true})'],
       ['src/quota-model-migrate.js', 'the backfill migration: its usage-cache writes go through writeCacheObject({replace:true}); its own appendFileSync is the archive-never-destroy ndjson'],
       ['src/weekly-lanes-unfold.js', 'the weekly-lanes repair (inc-mubu23bd-5vxi): its usage-cache writes go through captureRateLimitEvent → the write path (the plan week, the model cap and the fold rule all apply); its own writeFileSync calls are the archive-never-destroy copy under data/archive/'],

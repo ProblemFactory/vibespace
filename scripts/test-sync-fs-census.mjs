@@ -374,7 +374,6 @@ const ROWS = [
   ["src/transcript-service.js", "createTranscriptService > gapInfo", 1, "local-only", "fp = harness store.locate: ~/.claude/projects/*/<id>.jsonl, ~/.codex/sessions, or <checkout>/data/remote-jsonl cache (cwd only names the projdir)."],
   ["src/transcript-service.js", "createTranscriptService > rescue", 8, "local-only", "fp = localTranscriptPath (~/.claude/projects, ~/.codex/sessions, data/remote-jsonl) and its .pre-rescue-/.rescue-tmp siblings."],
   ["src/usage-reset-claim.js", "create", 1, "local-only", "data/usage-reset-claims.json — the claim store's own file (lane account-reset-door), read once at start; the store writes it off the loop"],
-  ["src/usage-reset-claim.js", "create > flushSync", 2, "local-only", "data/usage-reset-claims.json — the hub's STOP PATH only (stopAll at the process's exit, the atomic-persistence law): tmp `wx` 0600, fsync, rename of the store's own file"],
   ["src/usage-anchors.js", "*", 2, "local-only", "this._file(key) under this.dir = <rootDir>/data/usage-anchors (usage-pool-engine new UsageAnchors)"],
   ["src/usage-cache-write.js", "*", 6, "local-only", "cacheDir is always USAGE_CACHE_DIR = <checkout>/data/usage-cache (usage-routes, usage-pool-engine, cli-usage-door, migrations, reading-repair, weekly-lanes-unfold)"],
   ["src/usage-cold-walk.js", "*", 2, "local-only", "fp = a ledger shard under <dataDir>/usage-history (usage-history this.dir; coldRows also runs in usage-cold-worker.js)"],

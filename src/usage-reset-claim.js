@@ -16,8 +16,10 @@
 // (account, lane, reset instant ± 60 s), and that memory survives a restart.
 // THE FILE (data/usage-reset-claims.json, 0600): read once at start and SHAPE-CHECKED — an entry that is not a claim (a
 // null, a string «lanes», a lane that is no lane, a claim stamped in the future, a removed account's) is dropped and said
-// once; the rest stands. Written off the loop by the atomic-persistence law (tmp opened `wx` 0600, fsync, rename), and
-// flushed on the hub's stop path (stopAll at the process's exit — shutdownNow's process.exit, the conversation-index way).
+// once; the rest stands. WRITTEN THROUGH THE STORE WRITER (lane account-reset-door K2, the .396 law): memory is
+// authoritative, the writer's own thread does the temp + write + rename (0600), never the fs threadpool and never the main
+// thread — at a stop too (the writer's exit flush). A person's claim and dismissal are ACTS: on disk before their routes
+// answer (`persisted()` — the writer's next write, durable); what a reading settles is paced.
 const fs = require('fs');
 const path = require('path');
 const quotaModel = require('./quota-model.js');
@@ -31,7 +33,6 @@ const SEEN_SPAN_S = 8 * 86400;        // a reset instant outside now ± this is 
 const KEY_RE = /^(?:__global__|[\w-]{1,80})$/;
 const OUTCOME_STATES = new Set(['confirmed', 'contradicted', 'reset-seen']);
 const _byFile = new Map();
-let _exitHooked = false;
 
 /** The hub's one store for a data dir (the usage routes and the pool engine read the same claims). `known(key)` = is this
  *  account still one that takes a claim (a removed account's claims are dropped) — set by the first caller that knows. */
@@ -49,14 +50,11 @@ function at(dataDir, { known = null, nameOf = null } = {}) {
       W.onVendorReset((e) => { if (mine(e)) { try { st.noteResetSeen(e.key, e.resets, { name: st.nameOf(e.key) }); } catch { } } });
     } catch { }
   }
-  if (!_exitHooked) { _exitHooked = true; process.once('exit', () => { try { stopAll(); } catch { } }); }   // THE STOP PATH: what no async save landed is written as the hub exits
   const s = _byFile.get(file);
   if (typeof known === 'function') s.setKnown(known);
   if (typeof nameOf === 'function') s.setNameOf(nameOf);
   return s;
 }
-/** The hub's stop path: every store's unsaved word lands now (synchronously). */
-function stopAll() { let ok = true; for (const s of _byFile.values()) { try { if (!s.flushSync()) ok = false; } catch { ok = false; } } return ok; }
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const short = (v, n = 60) => (typeof v === 'string' && v ? v.slice(0, n) : null);
@@ -109,35 +107,22 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
     if (r.dropped.length) log(`[reset-claim] ${file}: dropped ${r.dropped.length} malformed entr${r.dropped.length === 1 ? 'y' : 'ies'} (${r.dropped.slice(0, 4).join('; ')}${r.dropped.length > 4 ? '; …' : ''}) — the rest stands; the file is rewritten without them`);
     var _rewrite = !!(unreadable || r.dropped.length);   // said ONCE: the clean state replaces the bad bytes (below, once `save` exists)
   }
-  let writing = null, again = false, dirty = false, seq = 0;
-  const tmpName = () => `${file}.${process.pid}.${++seq}.tmp`;
-  const save = () => {
+  let dirty = false, failSaid = false;
+  const W = () => require('./store-writer.js').storeWriter();
+  // THE STORE WRITER (K2): `act` = a person's claim / dismissal — rank 0, the writer's next write (persisted() awaits it)
+  function save({ act = false } = {}) {
     dirty = true;
-    if (!file) return Promise.resolve();
-    if (writing) { again = true; return writing; }
-    writing = (async () => {
-      const text = JSON.stringify(state);
-      const tmp = tmpName();
-      await fs.promises.mkdir(path.dirname(file), { recursive: true });
-      const fh = await fs.promises.open(tmp, 'wx', 0o600);
-      try { await fh.writeFile(text); await fh.sync(); } finally { await fh.close(); }
-      await fs.promises.rename(tmp, file);
-      if (!again) dirty = false;
-    })().catch((e) => log('[reset-claim] write failed:', (e && e.message) || e)).finally(() => { writing = null; if (again) { again = false; save(); } });
-    return writing;
-  };
-  /** THE STOP PATH (the atomic-persistence law): what the last async save has not landed is written now. */
-  function flushSync() {
-    if (!file || !dirty) return true;
-    try {
-      const tmp = tmpName();   // (its dir is the hub's data/ — a dir that is gone keeps nothing, and is never re-made here)
-      const fd = fs.openSync(tmp, 'wx', 0o600);
-      try { fs.writeSync(fd, JSON.stringify(state)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-      fs.renameSync(tmp, file);
-      dirty = false;
-      return true;
-    } catch (e) { if (!(e && e.code === 'ENOENT')) log(`[reset-claim] the hub stops with claims that never reached ${file}: ${(e && e.message) || e}`); return false; }
+    if (!file) return;
+    W().dirty(file, { name: 'reset-claims.write', mode: 0o600, ...(act ? { rank: 0 } : {}),
+      produce: () => { if (!dirty) return null; dirty = false; return JSON.stringify(state); },
+      onWritten: (ok, e) => {
+        if (ok) { failSaid = false; return; }
+        dirty = true;   // kept in memory and owed again — the writer retries it
+        if (!failSaid) { failSaid = true; log(`[reset-claim] ${file}: its write failed (${(e && (e.code || e.message)) || e}) — the claims are kept in memory and written again`); }
+      } });
   }
+  /** an act is on disk before its answer (true), or its write failed / is still queued at the writer's bound (false) */
+  const persisted = () => (file ? W().durable(file) : Promise.resolve(true));
   const listeners = new Set(), claimListeners = new Set();
   const changed = (key) => { for (const fn of listeners) { try { fn(key); } catch { } } };
   if (_rewrite) save();
@@ -163,7 +148,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
     for (const l of want) { const r = known.find((x) => x.lane === l); c.lanes[l] = { at: t, by, before: r.usedPct, ...(r.name ? { name: r.name } : {}) }; }
     state.claims[k] = c;
     if (state.outcomes[k]) { state.outcomes[k] = state.outcomes[k].filter((o) => !want.includes(o.lane)); if (!state.outcomes[k].length) delete state.outcomes[k]; } // a new claim replaces the lane's last word
-    save(); changed(k);
+    save({ act: true }); changed(k);
     for (const fn of claimListeners) { try { fn({ key: k, lanes: want.slice(), at: t }); } catch { } }   // the engine lifts that lane's walls (r3)
     return { ok: true, lanes: want, at: t };
   }
@@ -262,7 +247,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
     if (!state.outcomes[k]) return false;
     state.outcomes[k] = lane ? state.outcomes[k].filter((o) => o.lane !== lane) : [];
     if (!state.outcomes[k].length) delete state.outcomes[k];
-    save(); changed(k);
+    save({ act: true }); changed(k);
     return true;
   }
   /** What the surfaces draw: per key, the lanes still claimed ({lane: at}) and the outcomes kept for the note. */
@@ -276,7 +261,7 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
   /** Is any of these accounts claimed now? (the pool asks before it weighs whether a claim decided a placement) */
   const anyClaimed = (ids) => (Array.isArray(ids) ? ids : []).some((id) => !!state.claims[String(id)]);
   return {
-    claim, viewOf, settle, noteLanesRead, dismiss, forClients, noteResetSeen, flushSync, anyClaimed, file,
+    claim, viewOf, settle, noteLanesRead, dismiss, forClients, noteResetSeen, persisted, anyClaimed, file,
     get: (key) => state.claims[String(key)] || null,
     outcomesOf: (key) => (state.outcomes[String(key)] || []).slice(),
     onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
@@ -284,8 +269,8 @@ function create({ file, now = () => Date.now(), log = (...a) => console.log(...a
     setKnown: (fn) => { if (typeof fn === 'function') isKnown = fn; },
     setNameOf: (fn) => { if (typeof fn === 'function') nameFn = fn; },
     nameOf: (k) => { try { return nameFn ? nameFn(k) : null; } catch { return null; } },
-    flush: async () => { while (writing) await writing; },   // a save chained behind another lands too
+    flush: () => persisted(),   // whatever is owed is on disk (the writer's next write of this file)
   };
 }
 
-module.exports = { create, at, stopAll, sanitize, MAX_AGE_MS, OUTCOME_KEEP_MS };
+module.exports = { create, at, sanitize, MAX_AGE_MS, OUTCOME_KEEP_MS };

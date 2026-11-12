@@ -65,7 +65,6 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'] };
 const DEBT_MAX = 518;
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
-  ["src/usage-reset-claim.js","*",3,"exit","—","a claim made after the last async save is lost with the stop — the person marks it again (one small JSON, ≤ 64 claims per account)","lane account-reset-door: the claims store's STOP PATH (flushSync: writeSync + fsyncSync + renameSync of the tmp opened wx 0600) — stopAll() at the hub's stop and the module's own process exit, only when the last async save has not landed"],
   ["src/adapters/codex.js","*",2,"debt","—","—","round 2 (newly scanned): the codex adapter's plain copy of a transcript — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/agentd/client.js","*",6,"durable","—","NOT idempotent: the device agent's local token and proof — a lost write is a device that cannot prove itself","round 2 (newly scanned, required by server.js): the local device's token / proof / install — must be on disk before the answer"],
   ["src/channels/fake.js","*",1,"debt","—","—","round 2 (newly scanned): the FAKE channel adapter (suites and a demo account) — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
@@ -356,7 +355,6 @@ console.log('② the synchronous flushes the main thread waits on — named debt
     ['src/channel-store.js', 1, 'the index\'s flush() — a person\'s clear-history waits on it (measured 2.3 s at 1.2 s a write, the verifier) and a caller ordering a cursor after its rows'],
     ['src/usage-history.js', 1, 'flushCursors() — the walk\'s cursors on disk before a caller reads them (a migration, a test, the shutdown hand-over)'],
     ['src/usage-estimator.js', 1, 'flushRates() / settleRates() — the learned rates on disk before the boot\'s migrations step and a ledger backfill\'s pass completes'],
-    ['src/usage-reset-claim.js', 1, 'stopAll() — at the hub\'s stop and the module\'s own process exit, the claims the async save has not landed (one small JSON file, ≤ 64 claims per account; nothing waits on it while the hub serves)'],
     ['src/session-status.js', 1, 'flush() — the session-status map before the shutdown hands over and the set routes answer (persisted())'],
     ['src/server/session-stdout.js', 1, 'writeSessionMeta {sync: true} — a meta its caller renames next (boot-restore retireDeadSocket): the write in flight lands, then this one'],
   ];

@@ -1052,14 +1052,15 @@ const LEGS = {
     fs.writeFileSync(f3, JSON.stringify({ v: 1, claims: {}, seen: { 'sub-a': [{ lane: FABLE, resetsAt: 9e15 }, { lane: FABLE, resetsAt: RC }, 'junk'] } }));
     const s4 = C.create({ file: f3, now: () => NOW, log: (l) => l3.push(String(l)) });
     const seenOk = typeof s4.noteResetSeen === 'function' && s4.noteResetSeen('sub-a', [{ lane: FABLE, before: 97, after: 10, resetsAt: RC, readAt: NOW }]) === 0 && l3.some((l) => /seen sub-a: 2 not a reset instant/.test(l));
-    // the stop path: a claim made, the hub stops before the async save lands → stopAll writes it
+    // K2: A PERSON'S ACT IS ON DISK BEFORE ITS ANSWER — through the store writer (its own thread; never the main thread,
+    // never the fs threadpool): the claim's persisted() resolves true once the file holds it, 0600
     const f2 = path.join(ROOT, `stop-${Math.random().toString(36).slice(2)}.json`);
     const s3 = C.create({ file: f2, now: () => NOW, log: () => { } });
     s3.claim('sub-s', [K(T).fable], reading());
-    const flushed = typeof s3.flushSync === 'function' && s3.flushSync() && /sub-s/.test(fs.readFileSync(f2, 'utf8'));
+    const flushed = typeof s3.persisted === 'function' && (await s3.persisted()) === true && fs.existsSync(f2) && /sub-s/.test(fs.readFileSync(f2, 'utf8'));
     const mode = flushed ? (fs.statSync(f2).mode & 0o777).toString(8) : '-';
     return { ok: !threw && kept === 'sub-ok' && said === 1 && rewritten && seenOk && flushed && mode === '600',
-      detail: `threw ${threw || 'never'}; the claims served ${kept || '(none)'} (null / string lanes / future / removed account dropped); said ${said}×; the file rewritten without them ${rewritten}; the said-once memory checked at load (junk + an absurd instant said, the true one kept) ${seenOk}; the stop path's flush ${flushed} (mode ${mode})` };
+      detail: `threw ${threw || 'never'}; the claims served ${kept || '(none)'} (null / string lanes / future / removed account dropped); said ${said}×; the file rewritten without them ${rewritten}; the said-once memory checked at load (junk + an absurd instant said, the true one kept) ${seenOk}; the claim on disk when persisted() answers (the store writer) ${flushed} (mode ${mode})` };
   },
   // MUST 8 — «said once» per (lane, reset ± 60 s), across a restart; a write heard once
   async 'said-once'(T) {
@@ -1251,7 +1252,7 @@ const LEGS = {
       noVendorInStore: rc !== '' && !/require\(['"](https?|node:https?|undici)['"]\)|fetch\(/.test(rc),
       ingestNewestWins: /if \(!_rateLimitCache \|\| \(u\.fetchedAt > \(_rateLimitCache\.fetchedAt \|\| 0\)\)\) \{ _rateLimitCache = u; writeUsageCache\(\); \}/.test(ur) && /usageWrite\.noteDirectWrite\(key, was, u, \{ cacheDir: USAGE_CACHE_DIR \}\)/.test(ur),
       routeOnTheRow: /if \(pressBearer\(req\.headers\)\) return res\.status\(403\)/.test(ur) && /oauthUsageAccount\(acct\)/.test(ur),
-      stopPathFlush: /process\.once\('exit', \(\) => \{ try \{ stopAll\(\); \} catch \{ \} \}\)/.test(rc),
+      onTheStoreWriter: /storeWriter\(\)/.test(rc) && /\.durable\(file\)/.test(rc) && !/\b(writeSync|renameSync|fsyncSync|openSync)\(|fs\.promises/.test(rc) && (ur.match(/resetClaims\.persisted\(\)/g) || []).length === 2,   // K2: the claims store writes through the store writer; both acts answer after it
       producersState: /backend: .claude., stated: cliPanel,/.test(ur) && /stated: u \}\);/.test(ur) && /stated: bannerLanes, refused: bannerLanes/.test(eng) && /stated: \[wallLane\], refused: \[wallLane\]/.test(rd('src/server/stream-wall.js')) && /passiveAnswer: passive, stated, refused,/.test(rd('src/rate-limit-capture.js')),
       statuslineStamps: /fiveHour: \{ \.\.\.five, asOf: now \}/.test(rd('data/bin/vibespace-usage')),
       continueSaysClaim: /a continue on \$\{toName\} was asked on your reset claim/.test(eng) && /按你的重置声明可用/.test(eng) && /fireNowOnClaim\?\.\(/.test(eng),

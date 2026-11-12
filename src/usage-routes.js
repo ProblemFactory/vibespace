@@ -1530,13 +1530,17 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   try { wall = !isGlobal && typeof accounts.placeWallOf === 'function' ? accounts.placeWallOf(key) : null; } catch { wall = null; }
   let odMode = 'manual';
   try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
+  // A PERSON'S ACT IS ON DISK BEFORE ITS ANSWER (K2): the claims store's next write through the store writer
+  resetClaims.persisted().then((durable) => {
   console.log(`[reset-claim] ${keyName(key)}: a person says ${r.lanes.join(', ')} ${r.lanes.length === 1 ? 'was' : 'were'} reset on the vendor's site — reset, unconfirmed until ${r.lanes.length === 1 ? 'its' : 'their'} next reading${wall ? ` (and it stays unplaceable: ${unplaceableText(wall)})` : ''}`);
-  res.json({ ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' });
+  res.json({ ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off', ...(durable ? {} : { durable: false }) });
+  });
 });
 app.post('/api/accounts/:id/reset-claim/dismiss', (req, res) => {
   if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
   const lane = req.body && typeof req.body.lane === 'string' ? req.body.lane.slice(0, 80) : null;
-  res.json({ ok: resetClaims.dismiss(String(req.params.id || ''), lane) });
+  const ok = resetClaims.dismiss(String(req.params.id || ''), lane);
+  (ok ? resetClaims.persisted() : Promise.resolve(true)).then((durable) => res.json({ ok, ...(durable ? {} : { durable: false }) }));
 });
 
 app.post('/api/usage/repair-identity', (req, res) => {
