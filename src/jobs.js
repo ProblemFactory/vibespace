@@ -184,6 +184,9 @@ class JobManager {
     // removes nothing those records could name in THIS process; the worker re-reads the file at every pass (a read that then
     // succeeds keeps its records in the keep set by itself). The durable fact is the set-aside file (worker: setAside).
     this._logsUnread = { store: null, archive: null };
+    // round 4 §1: a failed read with NOTHING set aside — {error, at} until the store's note is ON DISK: THE PASS HOLDS meanwhile (before
+    // the owed removals and before the walk), for the life of this process if the note never lands; the remover's child writes it
+    this._logsNoteOwed = { store: null, archive: null }; this._logsNoteP = null; this._logsUnnotedSaid = new Set();
     this._logsSaidNow = new Set();   // set-aside files whose item was filed in this process, merged into the record's `heldSaid`
     this._logsHeldSaid = '';         // the journal's last HELD line (said once per process per set of files)
     this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
@@ -246,7 +249,7 @@ class JobManager {
       this._forYou(null, M.forYouCopy(null, 'engine-failed', { error: e.message }));
     }
   }
-  shutdown() { try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
+  shutdown() { this._logsNoteAtExit(); try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } this._logsStop(); }
 
   _takeLock() {
     try {
@@ -262,15 +265,15 @@ class JobManager {
       if (!Array.isArray(arr)) throw Object.assign(new Error('the store is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: set aside like a torn file
       for (const j of arr) this.jobs.set(j.id, j);
     } catch (e) {
-      // lane job-logs-sweep r2 law 1 / r3 §1: ONLY «the file is not there» means «no records». Any other failure leaves a FILE behind
-      // before this load returns — so before any write of that store — that the clean-up's child honours on every road and after
-      // every restart: the bytes set aside (renamed, else copied), else a NOTE of the failure (`_logsHeldFile`)
+      // lane job-logs-sweep r2 law 1 / r3 §1 / r4: ONLY «the file is not there» means «no records». Any other failure is a fact the
+      // clean-up's child honours on every road and after every restart: the bytes set aside before this load returns (renamed, else
+      // copied), else the store's NOTE — and until that note is on disk THIS PROCESS HOLDS the law's pass (`_logsHeldFile`)
       if (e && e.code === 'ENOENT') return;
       const exists = fs.existsSync(this.file);
       let bad = null;
       if (exists) { // corrupt store: preserve bytes, reconcile skeletons from log dirs (§5)
-        bad = this._logsHeldFile(this.file, e, 'store');
-        this.d.log('[jobs] store corrupt → preserved at', bad || '(nowhere — a note of it instead)', '— rebuilding skeletons; error:', e.message);
+        bad = this._logsHeldFile(this.file, e, 'store', true);
+        this.d.log('[jobs] store corrupt → preserved at', bad || (this.readOnly ? '(nowhere — a read-only engine writes nothing)' : '(nowhere — its note holds the job-logs clean-up)'), '— rebuilding skeletons; error:', e.message);
         try {
           for (const id of fs.readdirSync(this.logsDir)) {
             if (!id.startsWith('jb-')) continue;
@@ -279,46 +282,89 @@ class JobManager {
         } catch { }
         // r2: ONE item for the cause, the hold in it; r3 §6: it names the file that HOLDS the bytes (a name, never a path), never the live store
         if (bad) this._logsSay(path.basename(bad), 'store-corrupt', { file: path.basename(bad) });
-      } else this._logsHeldFile(this.file, e, 'store');   // the read AND the stat failed: nothing to set aside — a note
+      } else this._logsHeldFile(this.file, e, 'store', false);   // the read AND the stat failed: nothing to set aside — the note
     }
   }
-  /** lane job-logs-sweep r3 §1: a records read that failed (anything but ENOENT) leaves its FACT ON DISK before the load returns:
-   *  - bytes that can be read but do not parse: renamed aside (`<store>.corrupt-<ms>`), else COPIED aside (another syscall) → its name
+  /** lane job-logs-sweep r3 §1 / r4: a records read that failed (anything but ENOENT) is a FACT the clean-up holds:
+   *  - bytes that can be read but do not parse: renamed aside (`<store>.corrupt-<ms>`), else COPIED aside — before this load returns,
+   *    so before any write of that store → its name
    *  - bytes that cannot be read (an I/O error; the release's rename of the live store on such an error is row B-f276, untouched),
-   *    or a rename + copy that both failed: a NOTE `<store>.corrupt-unread-<ms>` = {store, error, at} — ONE per store (a hub that
-   *    restarts through the same failure finds it and writes none) — its item filed once (`records-unread`) → null
-   *  - even the note cannot be written: the in-process hold (`_logsUnread`) and an item that says so → null
-   *  Lifted ONLY by a person moving the file: after this hub's own write, a read that succeeds proves nothing. Main thread, the load's
-   *  failure branch only: one rename / copy / listing / note write per failed load. */
-  _logsHeldFile(file, e, what) {
+   *    or a rename + copy that both failed: THIS PROCESS HOLDS the law's pass at once (`_logsNoteOwed`, round 4 §1) and the remover's
+   *    child writes the store's ONE note `<store>.corrupt-unread` = {store, error, at} (round 4 §2: O_EXCL, no listing — EEXIST = a
+   *    note already stands, nothing new filed), asked at once and again before every pass until it is on disk → null
+   *  Lifted ONLY by a person moving the file: after this hub's own write, a read that succeeds proves nothing. Main thread: the load's
+   *  failure branch makes no call the release's did not (its read + its existsSync; a rename; a copy only for bytes that did not
+   *  parse) — no listing, no note write here (round 4 §3). A READ-ONLY engine writes nothing (round 4 §3). */
+  _logsHeldFile(file, e, what, exists) {
     const parseErr = e instanceof SyntaxError || (e && e.code === 'ENOTLIST');
+    const code = String((e && (e.code || (parseErr ? 'did not parse' : e.message))) || 'unreadable').slice(0, 60);
+    // round 4 §3: a READ-ONLY engine (a second server against a live lock) writes NOTHING into the live engine's data dir — no
+    // set-aside, no copy, no note, no item (a file it left would hold the live engine's clean-up); it says the failure here only
+    if (this.readOnly) { this.d.log(`[jobs] ${what} could not be read (${code}) — a read-only engine: nothing is set aside, noted or filed from it (the live engine reads its own)`); return null; }
     // memory holds NONE of those records now: the child re-reads that file at every pass of this process (`_logsUnread`) — after a
     // person moved the held file, what the file still lists keeps its runs (what this hub wrote over it is row B-f276's)
     this._logsUnread[what] = (e && (e.code || (parseErr ? 'did not parse' : 'unreadable'))) || 'unreadable';
-    if (fs.existsSync(file)) {
+    if (exists) {
       const bad = file + '.corrupt-' + now();
       try { fs.renameSync(file, bad); return bad; } catch (re) { this.d.log(`[jobs] ${what} could not be set aside (${(re && re.code) || re})${parseErr ? ' — copying its bytes aside' : ''}`); }
       if (parseErr) { try { fs.copyFileSync(file, bad, fs.constants.COPYFILE_EXCL); return bad; } catch (ce) { this.d.log(`[jobs] ${what}'s bytes could not be copied aside either (${(ce && ce.code) || ce})`); } }
     }
-    const base = path.basename(file), dir = path.dirname(file), prefix = base + '.corrupt-unread-';
-    let have = null; try { have = fs.readdirSync(dir).find((n) => n.startsWith(prefix)) || null; } catch { }
-    const code = (e && (e.code || (parseErr ? 'did not parse' : e.message))) || 'unreadable';
-    if (have) { this.d.log(`[jobs] ${what} could not be read again (${code}) — the note ${have} still holds the job-logs clean-up`); return null; }
-    const note = prefix + now();
-    try { fs.writeFileSync(path.join(dir, note), JSON.stringify({ store: base, error: code, at: now() }), { flag: 'wx' }); }
-    catch (we) {
-      this._logsUnread[what] = code;
-      this.d.log(`[jobs] ${what} could not be read (${code}) and no note of it could be written (${(we && we.code) || we}) — the job-logs clean-up removes nothing in this process`);
-      this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: base, error: code }));
-      return null;
-    }
-    this.d.log(`[jobs] ${what} could not be read (${code}) — the note ${note} holds the job-logs clean-up until a person moves it`);
-    this._logsSay(note, 'records-unread', { store: base, note, error: code });
+    this._logsNoteOwed[what] = { error: code, at: now() };   // round 4 §1: THE HOLD, at once — before this load returns
+    this._logsNoteSoon();
     return null;
   }
+  /** round 4 §1: at the hub's EXIT a note still owed (its child had not written it, or could not) is written by the exit itself — ONE
+   *  O_EXCL write per store, BEFORE the exit's own write of that store, on a loop that serves nothing any more (as the exit's flush
+   *  writes the stores). What is left uncovered: a crash between the failed load and the child's note (the in-process hold's window) */
+  _logsNoteAtExit() {
+    if (this.readOnly) return;
+    for (const w of ['store', 'archive']) {
+      const o = this._logsNoteOwed[w]; if (!o) continue;
+      const base = path.basename(w === 'store' ? this.file : this.archiveFile), name = base + LS.NOTE_SUFFIX;
+      try { fs.writeFileSync(path.join(this.d.dataDir, name), JSON.stringify({ store: base, error: o.error, at: o.at }), { flag: 'wx' }); this._logsNoteOwed[w] = null; this.d.log(`[jobs] ${w} could not be read (${o.error}) — its note ${name} was written at the exit; it holds the job-logs clean-up until a person moves it`); }
+      catch (e) { if (e && e.code === 'EEXIST') this._logsNoteOwed[w] = null; else this.d.log(`[jobs] ${w} could not be read (${o.error}) and its note could not be written at the exit either (${(e && e.code) || e}) — the next start cannot know those records were unread`); }
+    }
+  }
+  /** round 4 §1: the store's NOTE, written by the remover's child (never this thread) — one attempt at a time, asked at the failed load
+   *  and again before every pass (paused or not) while a note is owed. → Promise (never rejects) */
+  _logsNoteSoon() {
+    if (this.readOnly) return Promise.resolve();
+    const p = (this._logsNoteP || Promise.resolve()).then(() => this._logsWriteNotes()).catch((e) => { try { this.d.log('[jobs] job-logs: the note could not be asked for:', e && e.message); } catch { } });
+    this._logsNoteP = p; p.then(() => { if (this._logsNoteP === p) this._logsNoteP = null; });
+    return p;
+  }
+  async _logsWriteNotes() {
+    const owed = ['store', 'archive'].filter((w) => this._logsNoteOwed[w]);
+    if (!owed.length || this._logsStopped) return;
+    // each owed note: its side (store | archive), the failure it records, its store's file name and its own (names only)
+    const todo = owed.map((side) => { const base = path.basename(side === 'store' ? this.file : this.archiveFile); return { side, o: this._logsNoteOwed[side], base, file: base + LS.NOTE_SUFFIX }; });
+    const a = await this._logsRemover().note(this.d.dataDir, todo.map((t) => ({ name: t.file, body: { store: t.base, error: t.o.error, at: t.o.at } })));
+    for (const t of todo) {
+      if (this._logsNoteOwed[t.side] !== t.o) continue;   // a newer failure meanwhile: its own attempt answers for it
+      const r = a && !a.error && a.notes ? a.notes[t.file] : null;
+      if (r === 'written' || r === 'stood') {
+        this._logsNoteOwed[t.side] = null;
+        if (r === 'written') {
+          this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) — the note ${t.file} holds the job-logs clean-up until a person moves it`);
+          // «said» keyed by the note AND its moment: a note a person moved and a later failure wrote again is told again
+          this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: LS.whenOf(t.o.at) });
+        } else this.d.log(`[jobs] ${t.side} could not be read again (${t.o.error}) — the note ${t.file} still holds the job-logs clean-up (not a new failure: nothing filed)`);
+        if (this._logsUnnotedSaid.has(t.side)) this.d.log(`[jobs] job-logs: the note ${t.file} is on disk now — it holds the clean-up, also across a restart`);
+        continue;
+      }
+      if (a && a.error === 'stopped') continue;
+      const why = String((a && a.error) || (r && r.error) || 'no answer').slice(0, 60);
+      if (this._logsUnnotedSaid.has(t.side)) continue;   // said once per process; the note is asked for again before each pass
+      this._logsUnnotedSaid.add(t.side);
+      this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) and no note of it could be written (${why}) — the job-logs clean-up removes nothing in this process; the note is tried again before each pass`);
+      this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: t.base, error: t.o.error, when: LS.whenOf(t.o.at) }));
+    }
+  }
+
   /** an item for a held file, «said» only once the For-you store has WRITTEN it (round 3 §6: the order — a crash between costs a
    *  second telling at worst, never none) */
   _logsSay(name, kind, opts) {
+    (this._logsTelling || (this._logsTelling = new Set())).add(name);   // filed in this process: the pass never files it again while «said» waits
     const v = this._forYou(null, M.forYouCopy(null, kind, opts));   // §93: the copy minted at the door's call, never handed in
     if (v && v.ok === false) return;   // refused (said in the log): asked again by the next process
     const w = v && typeof v.written === 'function' ? v.written() : null;
@@ -362,17 +408,17 @@ class JobManager {
       if (!Array.isArray(arr)) throw Object.assign(new Error('the archive is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: a non-list was read as [] with no bytes kept
       this.archive = arr.filter((r) => r && typeof r === 'object' && r.id);
     } catch (e) {
-      // lane job-logs-sweep r3 §1: as the store's — a file behind before this load returns (the bytes set aside, renamed else copied;
-      // else a NOTE); ENOENT alone is «no records»
+      // lane job-logs-sweep r3 §1 / r4: as the store's — the bytes set aside before this load returns (renamed, else copied), else the
+      // archive's note, THIS PROCESS HOLDING until it is on disk; ENOENT alone is «no records». The release's ONE existsSync (round 4 §3)
       if (!e || e.code !== 'ENOENT') {
         if (fs.existsSync(this.archiveFile)) {
-          const bad = this._logsHeldFile(this.archiveFile, e, 'archive');
+          const bad = this._logsHeldFile(this.archiveFile, e, 'archive', true);
           if (bad) {
             this.d.log('[jobs] archive corrupt → preserved at', bad, '—', e.message);
             // lane job-logs-sweep r2: the FIRST time the owner hears of it (the release said it in the console only) — the records first, the clean-up second
             this._logsSay(path.basename(bad), 'records-held', { file: path.basename(bad) });
           }
-        } else this._logsHeldFile(this.archiveFile, e, 'archive');
+        } else this._logsHeldFile(this.archiveFile, e, 'archive', false);
       }
       this.archive = [];
     }
@@ -2591,6 +2637,11 @@ class JobManager {
     // catch-up of an odd shape steers nothing
     if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
     if (this._logsState === null) { const e = 'the catch-up record could not be read — nothing removed (a fresh record would overwrite what it owes)'; if (this._logsLastErr !== e) { this._logsLastErr = e; this.d.log(`[jobs] job-logs: ${e}`); } return { error: e }; }   // a MISSING record reads as none (adopted empty); a failed read waits
+    // round 4 §1: «THIS PROCESS HOLDS» HOLDS — a failed records read whose note is not on disk: the note is asked for again, and while
+    // it is still not written the pass answers HELD here, before the owed removals and before the walk (the ✕ and a record's own
+    // verdicts go on: `_logsWhole` is theirs)
+    if (this._logsNoteOwed.store || this._logsNoteOwed.archive) await this._logsNoteSoon();
+    if (this._logsNoteOwed.store || this._logsNoteOwed.archive) return this._logsHeldUnnoted(cfg);
     if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);   // what the storage did not take last time, first
     // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
@@ -2638,8 +2689,20 @@ class JobManager {
    *  record first, so what an earlier process owed is known); the pause is for the clean-up nobody asked for */
   async _logsOwedWhilePaused() {
     if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
+    // round 4 §1: the note is asked for paused or not (the fact must reach the disk before a restart); while it is not, the owed
+    // re-send waits too — as the pass's does
+    if (this._logsNoteOwed.store || this._logsNoteOwed.archive) await this._logsNoteSoon();
+    if (this._logsNoteOwed.store || this._logsNoteOwed.archive) return { skipped: 'paused', heldBy: 'unread-unnoted' };
     if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);
     return { skipped: 'paused' };
+  }
+  /** round 4 §1: HELD in this process — a records read failed and its note is not on disk (yet): said once per process and set of
+   *  stores, an open catch-up rests and asks again; nothing is removed by the pass (no owed re-send, no walk) */
+  _logsHeldUnnoted(cfg) {
+    const names = ['store', 'archive'].filter((w) => this._logsNoteOwed[w]).map((w) => path.basename(w === 'store' ? this.file : this.archiveFile)), line = 'unnoted: ' + names.join(', ');
+    if (this._logsHeldSaid !== line) { this._logsHeldSaid = line; this.d.log(`[jobs] job-logs clean-up HELD: ${names.join(', ')} could not be read and no note of it is on disk — nothing is removed in this process until the note is written (it is tried again before each pass)`); }
+    if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));
+    return { heldBy: 'unread-unnoted', removed: 0, heldFiles: [], unnoted: names };
   }
   _logsOn() { try { return !(this.d && typeof this.d.logsSweepOn === 'function' && this.d.logsSweepOn() === false); } catch { return true; } }   // the setting jobs.logsSweep (jobs-wiring)
   _logsNext(ms) {
@@ -2659,12 +2722,15 @@ class JobManager {
     if ((this._logsState.heldNow || []).join() !== files.join()) { this._logsState.heldNow = files.slice(0, 20); this._logsSave(); }   // the hold in the record: «resumes» is said even after a restart
     const said = new Set([...this._logsState.heldSaid, ...this._logsSaidNow]);
     // round 3 §8: a name this hub gives a set-aside (`<store>.corrupt-<ms>`) is «records that could not be read»; any other name was a
-    // person's — its item says only what is true of it. Names only, never the data folder's path (round 3 §6)
+    // person's — its item says only what is true of it. Names only, never the data folder's path (round 3 §6). Round 4 §2/§3: the NOTE
+    // is its EXACT name `<store>.corrupt-unread` (a person's `…corrupt-unread-mine.txt` is a person's), «said» keyed by its moment
+    const notes = ans.notes || {};
     for (const f of files) {
-      if (said.has(f) || (this._logsTelling || (this._logsTelling = new Set())).has(f)) continue;
-      this._logsTelling.add(f);   // filed in this process: never twice while its «said» waits for the For-you store's write
-      const m = /^(jobs(?:-archive)?\.json)\.corrupt-unread-\d+$/.exec(f);
-      this._logsSay(f, m ? 'records-unread' : /^jobs(?:-archive)?\.json\.corrupt-\d+$/.test(f) ? 'records-held' : 'set-aside-other', m ? { store: m[1], note: f, error: 'see the note' } : { file: f });
+      const m = /^(jobs(?:-archive)?\.json)\.corrupt-unread$/.exec(f), nb = m ? notes[f] || {} : null;
+      const key = m && Number.isFinite(nb.at) ? `${f}@${nb.at}` : f;
+      if (said.has(key) || (this._logsTelling || (this._logsTelling = new Set())).has(key)) continue;
+      this._logsTelling.add(key);   // filed in this process: never twice while its «said» waits for the For-you store's write
+      this._logsSay(key, m ? 'records-unread' : /^jobs(?:-archive)?\.json\.corrupt-\d+$/.test(f) ? 'records-held' : 'set-aside-other', m ? { store: m[1], note: f, error: nb.error || 'see the note', when: LS.whenOf(nb.at) } : { file: f });
     }
     this._logsMergeSaid();
     if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));

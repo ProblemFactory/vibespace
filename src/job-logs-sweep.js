@@ -42,6 +42,13 @@ const RUN_NAME = /^\d{1,16}$/;
 // the corrupt-store recovery's skeleton (src/jobs.js _load) — its runs [] were never the job's runs
 const RECOVERED_NOTE = 'recovered from corrupt store — resolve before reuse';
 const isSkeleton = (j) => !!j && j.state === 'unverified' && j.note === RECOVERED_NOTE;
+// round 4 §2: a record store's read that failed with nothing set aside leaves ONE NOTE per store, by a name that cannot multiply —
+// `<store>.corrupt-unread` (written O_EXCL by the remover's child: EEXIST = a note already stands), {store, error, at} inside;
+// recognised by that EXACT name (round 4 §3: a person's file that merely starts like it is not the note)
+const NOTE_SUFFIX = '.corrupt-unread';
+const NOTE_NAME = /^[\w.-]{1,80}\.json\.corrupt-unread$/;
+/** the moment a failure happened, in words that need no translation (a For-you param): `2026-11-12 14:03 UTC` */
+const whenOf = (at) => (Number.isFinite(Number(at)) && Number(at) > 0 ? new Date(Number(at)).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'earlier');
 
 /** THE VERDICT over one run directory → 'listed' | 'held' | 'skeleton' | 'young' | 'alive' | 'unproven' | 'remove'.
  *  `newestMs` and `alive` may be thunks: the worker reads the disk and /proc only for a run every cheaper rule let through
@@ -181,6 +188,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     sweep: (args, opts) => ask({ op: 'sweep', ...args }, opts),   // opts.timeoutMs: the counting pass walks the whole tree
     state: (stateFile, orphanDir = null) => ask({ op: 'state', stateFile, orphanDir }),   // the catch-up's record (+ what an orphaned remover left), read off the main thread
     forget: (dir, names) => ask({ op: 'forget', dir, names }),   // an orphan's counts, once the record that counted them is on disk
+    note: (dir, notes) => ask({ op: 'note', dir, notes }),   // round 4 §1: a store's NOTE (O_EXCL), written off the main thread
     settled: () => (cur || queue.length ? new Promise((r) => idle.push(r)) : Promise.resolve()),
     busy: () => !!cur || queue.length > 0,
     held: () => !!wedged,
@@ -190,4 +198,4 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   };
 }
 
-module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, ORPHAN_PREFIX, JOB_NAME, RUN_NAME, RECOVERED_NOTE, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };
+module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, ORPHAN_PREFIX, JOB_NAME, RUN_NAME, RECOVERED_NOTE, NOTE_SUFFIX, NOTE_NAME, whenOf, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };

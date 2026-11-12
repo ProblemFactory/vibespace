@@ -64,6 +64,26 @@ const seedRun = (dir, id, ts, { stamp = deadStamp(), ageMs = null, files = ['cur
   if (ageMs != null) { const t = (Date.now() - ageMs) / 1000; for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), t, t); }
   return d;
 };
+// round 4: a CHILD that cannot write a store's note while the gate file is there (the storage refuses it) — the hub's own fs is untouched
+const WORKER = path.join(ROOT, 'src/job-logs-sweep-worker.js');
+const noteGate = path.join(tmp, 'note-gate'), noteRefuser = path.join(tmp, 'note-refusing-child.cjs');
+fs.writeFileSync(noteRefuser, `const fs = require('fs'); const wf = fs.writeFileSync; fs.writeFileSync = function (f, ...a) { if (/\\.corrupt-unread$/.test(String(f)) && fs.existsSync(${JSON.stringify(noteGate)})) throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' }); return wf.call(this, f, ...a); };\nrequire(${JSON.stringify(WORKER)});\n`);
+/** a records read that fails on THIS thread while fn runs (EIO; the stat fails too unless `stat`; with `noNote` a note write fails here
+ *  too — the storage refuses it from both sides, as round 3's tree wrote it on this thread) — the remover's child has its own fs */
+const unreadDuring = (file, fn, { stat = false, noNote = false } = {}) => {
+  const rf = fs.readFileSync, ex = fs.existsSync, wf = fs.writeFileSync;
+  fs.readFileSync = function (f, ...a) { if (String(f) === file) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, f, ...a); };
+  if (!stat) fs.existsSync = function (f, ...a) { if (String(f) === file) return false; return ex.call(this, f, ...a); };
+  if (noNote) fs.writeFileSync = function (f, ...a) { if (/corrupt-unread/.test(String(f))) throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' }); return wf.call(this, f, ...a); };
+  try { return fn(); } finally { fs.readFileSync = rf; fs.existsSync = ex; fs.writeFileSync = wf; }
+};
+/** every fs call THIS thread makes on a path under `dir` while fn runs: [name, basename] */
+const callsDuring = (dir, fn) => {
+  const calls = [], names = ['readFileSync', 'existsSync', 'readdirSync', 'writeFileSync', 'renameSync', 'copyFileSync', 'statSync', 'lstatSync', 'openSync'], orig = {};
+  for (const n of names) { orig[n] = fs[n]; fs[n] = function (f, ...a) { if (String(f).startsWith(dir)) calls.push([n, path.basename(String(f))]); return orig[n].call(this, f, ...a); }; }
+  try { fn(); } finally { for (const n of names) fs[n] = orig[n]; }
+  return calls;
+};
 const wrapperOf = (dir, id, ts) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'job-logs', id, String(ts), 'pid.json'), 'utf8')); } catch { return null; } };
 /** end a run's wrapper and its group — only after its cmdline names THIS scratch dir's wrapper (never a pid taken on trust) */
 const endWrapper = (stamp, ctl) => {
@@ -426,9 +446,12 @@ try {
     const AF = path.join(h6, 'jobs-archive.json'), rf = fs.readFileSync, rn = fs.renameSync;
     fs.readFileSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, f, ...a); };
     fs.renameSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, rename'), { code: 'EIO' }); return rn.call(this, f, ...a); };
-    try { JH6.archive = null; JH6._loadArchive(); } finally { fs.readFileSync = rf; fs.renameSync = rn; }
-    const notes6 = () => fs.readdirSync(h6).filter((n) => /^jobs-archive\.json\.corrupt-unread-\d+$/.test(n));
-    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && notes6().length === 1 && JH6.archive.length === 0, 'round 3 §1: an EIO read whose set-aside also failed leaves a NOTE on disk before the load returns (`jobs-archive.json.corrupt-unread-<ms>`)');
+    let calls6 = []; try { calls6 = callsDuring(h6, () => { JH6.archive = null; JH6._loadArchive(); }); } finally { fs.readFileSync = rf; fs.renameSync = rn; }
+    const heldAtOnce6 = !!(JH6._logsNoteOwed && JH6._logsNoteOwed.archive);
+    if (JH6._logsNoteP) await JH6._logsNoteP;
+    const notes6 = () => fs.readdirSync(h6).filter((n) => /corrupt-unread/.test(n));
+    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && heldAtOnce6 && notes6().length === 1 && notes6()[0] === 'jobs-archive.json.corrupt-unread' && JH6.archive.length === 0, 'round 4 §1 + §2: an EIO read whose set-aside also failed HOLDS this process before the load returns, and the remover\'s child writes the archive\'s ONE note `jobs-archive.json.corrupt-unread`');
+    ok(calls6.map((c) => c[0]).join() === 'readFileSync,existsSync,renameSync', `round 4 §3: the failed load on the MAIN THREAD makes only the release's calls — its read, its one existsSync, its rename (here refused): no listing, no second existsSync, no note write (${calls6.map((c) => c[0]).join(', ')})`);
     JH6._writeArchive([]);   // THE HUB'S OWN OVERWRITE (the boot sweep, any save): its empty list over the unread file
     await sweepAt(JH6, Date.now()); await sweepAt(JH6, Date.now());
     ok(has(h6Listed) && has(h6Orphan), 'THE HOLD HAS A FILE: after the hub\'s own overwrite a read SUCCEEDS on its empty list — and the pass still removes NOTHING (the note holds it)');
@@ -452,7 +475,7 @@ try {
       J1r.shutdown();
       const { jm: J2r, logs: L2r } = boot(hr, { bootDelayMs: 20 });
       await until(() => L2r.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(J2r);
-      ok(has(rRun) && L2r.some((l) => new RegExp('HELD: ' + path.basename(SF2).replace(/\./g, '\\.') + '\\.corrupt-unread-').test(l)), `THE RESTART ROAD (${which}): the next engine loads the hub-written file cleanly, and its boot pass removes NOTHING — the note on disk holds it`);
+      ok(has(rRun) && L2r.some((l) => new RegExp('HELD: ' + path.basename(SF2).replace(/\./g, '\\.') + '\\.corrupt-unread\\b').test(l)), `THE RESTART ROAD (${which}): the next engine loads the hub-written file cleanly, and its boot pass removes NOTHING — the note on disk holds it`);
     }
     // H6c THE ARCHIVE'S RENAME ALONE FAILS (no second fault): a torn archive whose set-aside rename is refused — its bytes are COPIED
     // aside, the copy holds the pass, the item names the copy (a name, never a path)
@@ -476,12 +499,14 @@ try {
         fs.readFileSync = function (f, ...a) { if (String(f) === SF3) throw Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }); return rf3.call(this, f, ...a); };
         fs.existsSync = function (f, ...a) { if (String(f) === SF3) return false; return ex.call(this, f, ...a); };
         let Jk, Ik; try { const b = boot(h3x); Jk = b.jm; Ik = b.items; Jk.archive = null; Jk._loadArchive(); } finally { fs.readFileSync = rf3; fs.existsSync = ex; }
+        if (Jk._logsNoteP) await Jk._logsNoteP; await sweepAt(Jk, Date.now());
         if (Jk._logsStateP) await Jk._logsStateP; await sleep(700);   // the For-you store's own write (500 ms debounce) lands before «said»
         await W8w().storeWriter().durable(path.join(h3x, 'jobs-logs-sweep.json'));
         allItems.push(...Ik.filter((n) => n && /^records-unread/.test(n.fact))); Jk.shutdown();
       }
-      const notes = fs.readdirSync(h3x).filter((n) => /corrupt-unread-/.test(n));
-      ok(notes.length === 1 && allItems.length === 1 && /first check that jobs-archive\.json reads as it should/.test(fill(allItems[0].words)) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words true once the store reads again («first check that it reads as it should»), a name not a path`);
+      const notes = fs.readdirSync(h3x).filter((n) => /corrupt-unread/.test(n));
+      const w3 = allItems[0] ? fill(allItems[0].words) : '';
+      ok(notes.length === 1 && allItems.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: ETIMEDOUT\)/.test(w3) && !/when VibeSpace started/.test(w3) && /if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored/.test(w3) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words say WHEN it failed (a later load too, never «when VibeSpace started») and what a person can SEE after the hub's own write («fewer jobs … keep the note until it is restored»), a name not a path`);
     }
     // H6e «SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: a restart before that tells again (twice at worst, never never)
     {
@@ -504,19 +529,19 @@ try {
       const sc6 = IS.find((n) => n && n.fact === 'store-corrupt'); const copy = fs.readdirSync(hs).find((n) => /^jobs\.json\.corrupt-\d+$/.test(n));
       ok(sc6 && copy && sc6.words.params.file === copy && sc6.words.params.file !== 'jobs.json' && !/\//.test(sc6.words.params.file), 'THE WORDS NEVER TELL THE OWNER TO DELETE A LIVE STORE: a failed rename copies the bytes aside and the item names the copy, never jobs.json');
     }
-    // H6g EVEN THE NOTE CANNOT BE WRITTEN: this process holds, and the item says so
+    // H6g EVEN THE NOTE CANNOT BE WRITTEN (the archive, loaded later): THIS PROCESS HOLDS — after the hub's own write too (round 4 §1:
+    // round 3's fallback only re-read the file, and the read then succeeded on the hub's empty list)
     {
-      const hn = mkDir('h6g'); const SF5 = path.join(hn, 'jobs-archive.json'); fs.writeFileSync(SF5, '[]');
-      const hnOrphan = seedRun(hn, 'jb-0e1a00e9', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
-      const { jm: JN, items: IN } = boot(hn);
-      const ex = fs.existsSync, rf5 = fs.readFileSync, wf5 = fs.writeFileSync;
-      fs.readFileSync = function (f, ...a) { if (String(f) === SF5) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return rf5.call(this, f, ...a); };
-      fs.existsSync = function (f, ...a) { if (String(f) === SF5) return false; return ex.call(this, f, ...a); };
-      fs.writeFileSync = function (f, ...a) { if (/corrupt-unread-/.test(String(f))) throw Object.assign(new Error('EROFS'), { code: 'EROFS' }); return wf5.call(this, f, ...a); };
-      try { JN.archive = null; JN._loadArchive(); } finally { fs.readFileSync = rf5; fs.existsSync = ex; fs.writeFileSync = wf5; }
-      fs.writeFileSync(SF5, '[]');   // the store is plain again for the child's read
-      await sweepAt(JN, Date.now());
-      ok(IN.some((n) => n && n.fact === 'records-unread-unnoted') && JN._logsUnread.archive === 'EIO', 'EVEN THE NOTE CANNOT BE WRITTEN: this process holds (the child re-reads the store), and the item says no note could be written');
+      const hn = mkDir('h6g'); const SF5 = path.join(hn, 'jobs-archive.json'), gT = Date.now() - 20 * DAY;
+      fs.writeFileSync(SF5, JSON.stringify([{ id: 'jb-a7c0ffe9', kind: 'task', state: 'done', runs: [{ startedAt: gT, endedAt: gT + 1 }] }]));
+      const hnListed = seedRun(hn, 'jb-a7c0ffe9', gT, { ageMs: 20 * DAY }), hnOrphan = seedRun(hn, 'jb-0e1a00e9', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      fs.writeFileSync(noteGate, '1');
+      const { jm: JN, items: IN, logs: LN } = boot(hn, { workerPath: noteRefuser });
+      unreadDuring(SF5, () => { JN.archive = null; JN._loadArchive(); }, { noNote: true });
+      JN._writeArchive([]);   // THE HUB'S OWN WRITE: its empty list over the unread archive — a read of it now succeeds
+      await sweepAt(JN, Date.now()); await gcAt(JN, Date.now());
+      ok(has(hnListed) && has(hnOrphan) && IN.filter((n) => n && n.fact === 'records-unread-unnoted').length === 1 && !fs.readdirSync(hn).some((n) => /corrupt-unread/.test(n)) && LN.some((l) => /HELD: jobs-archive\.json could not be read and no note of it is on disk/.test(l)), 'EVEN THE NOTE CANNOT BE WRITTEN: after the hub\'s own write the pass and the hourly gc remove NOTHING — not the run the unread archive listed, not a dir no record names — and the item says no note could be written (once)');
+      fs.unlinkSync(noteGate); JN.shutdown();
     }
     // H7 THE STORE READ FAILED WITH NO SET-ASIDE: a stand-in EIO at boot whose stat failed too (nothing to set aside, no
     // skeletons) — the worker reads the store at the pass
@@ -529,12 +554,144 @@ try {
     fs.existsSync = function (f, ...a) { if (String(f) === SF) return false; return ex.call(this, f, ...a); };
     let JH7; try { JH7 = boot(h7).jm; } finally { fs.readFileSync = rf; fs.existsSync = ex; }
     await sweepAt(JH7, Date.now());
-    const notes7 = () => fs.readdirSync(h7).filter((n) => /^jobs\.json\.corrupt-unread-\d+$/.test(n));
+    if (JH7._logsNoteP) await JH7._logsNoteP;
+    const notes7 = () => fs.readdirSync(h7).filter((n) => n === 'jobs.json.corrupt-unread');
     ok(JH7._logsUnread && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && notes7().length === 1 && has(h7Listed) && has(h7Orphan), 'a STORE read that failed at boot with nothing to set aside (the stat failed too): a NOTE on disk, and the pass removes nothing');
     for (const n of notes7()) fs.renameSync(path.join(h7, n), path.join(tmp, n + '.h7'));
     await sweepAt(JH7, Date.now());
     ok(has(h7Listed) && !has(h7Orphan), '…the note moved by a person: the child reads the store (memory holds no record of it) — its listed run stays, a run no record names goes');
   }
+
+
+  // ── §N4 ROUND 4: «THIS PROCESS HOLDS» HOLDS; ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS ─────────────────────────────
+  lap('§N4 round 4: the hold that has no file holds; one note per store');
+  if (LS) {
+    const acc = { view: 'all', control: 'session' };
+    // N1 THE STORE ROAD: the read and the stat fail at boot, and the child cannot write the note — THIS PROCESS HOLDS, before any write
+    // and after the hub's own; the note is tried again before each pass and holds from the moment it lands, also across a restart
+    {
+      const n1 = mkDir('n1'); const SF = path.join(n1, 'jobs.json'), svT = Date.now() - 25 * DAY;
+      fs.writeFileSync(SF, JSON.stringify([{ id: 'jb-5e7f1c01', kind: 'service', state: 'up', desiredUp: false, owner, access: acc, runs: [{ startedAt: svT, endedAt: svT + 1 }] }]));
+      const svOld = seedRun(n1, 'jb-5e7f1c01', svT, { ageMs: 25 * DAY }), orphan = seedRun(n1, 'jb-0e1a0b01', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      const owedT = seedRun(n1, 'jb-0e1a0b0d', Date.now() - DAY);   // a whole-dir removal owed from before (young: the clean-up itself would keep it)
+      fs.writeFileSync(noteGate, '1');
+      const b = unreadDuring(SF, () => boot(n1, { workerPath: noteRefuser }), { noNote: true }), J = b.jm;
+      const owedOf = (j, w) => !!(j._logsNoteOwed && j._logsNoteOwed[w]);   // round 3's tree has no such hold: red by name, never thrown
+      const heldAtOnce = owedOf(J, 'store');
+      if (J._logsOwed) J._logsOwed.add('jb-0e1a0b0d');
+      const p1 = await J.sweepLogs({ now: Date.now() }); await settle(J);
+      ok(heldAtOnce && p1 && p1.heldBy === 'unread-unnoted' && has(svOld) && has(orphan) && has(owedT), 'round 4 §1 «THIS PROCESS HOLDS» HOLDS (the store): its read, its stat and its note all failed — pass 1, BEFORE any write, removes nothing (no unnamed dir, no owed removal): HELD before the owed re-send and the walk', p1);
+      J._dirty = true; J._save();   // THE HUB'S OWN WRITE: its empty list over the unread store — a read of it now succeeds
+      await sweepAt(J, Date.now()); await gcAt(J, Date.now());
+      ok(has(svOld) && has(orphan) && has(owedT), '…AFTER the hub\'s own write the pass and the hourly gc still remove nothing — not the run the unread store listed, not a dir no record names');
+      const un = b.items.filter((n) => n && n.fact === 'records-unread-unnoted');
+      ok(un.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: EIO\), and no note of it could be written yet/.test(fill(un[0].words)) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
+      J._writeArchive([{ id: 'jb-a8c0ffb1', kind: 'task', name: 'x', state: 'done', owner, access: acc, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
+      seedRun(n1, 'jb-a8c0ffb1', Date.now() - DAY); J.rmArchived('jb-a8c0ffb1');
+      ok((await J.logsGone('jb-a8c0ffb1')).gone === true && !has(n1, 'job-logs', 'jb-a8c0ffb1'), '…while the ✕ (a removal a person asks for) still removes its logs: the hold is the pass\'s');
+      fs.unlinkSync(noteGate);   // THE STORAGE IS BACK
+      await sweepAt(J, Date.now());
+      ok(has(n1, 'jobs.json.corrupt-unread') && !owedOf(J, 'store') && b.items.filter((n) => n && n.fact === 'records-unread').length === 1 && has(svOld) && has(orphan), 'the note is tried again before each pass: once the storage takes it, `jobs.json.corrupt-unread` is on disk, its item filed once, and the NOTE holds the pass');
+      J.shutdown();
+      const { jm: J2, logs: L2 } = boot(n1, { bootDelayMs: 20 });
+      await until(() => L2.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-unread\b/.test(l)), 5000, 10); await settle(J2);
+      ok(has(svOld) && has(orphan), '…and after a restart (the store reads cleanly now — the hub wrote it) the note on disk holds the next engine\'s boot pass');
+      J2.shutdown();
+    }
+    // N2 THE ARCHIVE ROAD AT BOOT: the boot's own archive sweep writes over the unread archive INSIDE init — the FIRST boot pass holds
+    {
+      const n2 = mkDir('n2'); const AF = path.join(n2, 'jobs-archive.json'), arT = Date.now() - 20 * DAY, dT = Date.now() - 3 * DAY;
+      fs.writeFileSync(AF, JSON.stringify([{ id: 'jb-a7c0ffb2', kind: 'task', name: 'old', state: 'done', owner, access: acc, runs: [{ startedAt: arT, endedAt: arT + 1, exit: 0 }], archivedAt: Date.now() - 10 * DAY, archivedWhy: 'done' }]));
+      fs.writeFileSync(path.join(n2, 'jobs.json'), JSON.stringify([{ id: 'jb-d0e00b02', kind: 'task', name: 'done-q', state: 'done', owner, access: acc, createdAt: dT, runs: [{ startedAt: dT, endedAt: dT + 1000, exit: 0 }] }]));
+      const arOld = seedRun(n2, 'jb-a7c0ffb2', arT, { ageMs: 20 * DAY }), orphan2 = seedRun(n2, 'jb-0e1a0b02', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      fs.writeFileSync(noteGate, '1');
+      const b2 = unreadDuring(AF, () => boot(n2, { bootDelayMs: 20, workerPath: noteRefuser }, { archivePolicy: () => ({ doneAfterHours: 24, failedAfterDays: 7 }) }), { noNote: true });
+      await until(() => b2.logs.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(b2.jm);
+      let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(AF, 'utf8')); } catch { }
+      ok(Array.isArray(onDisk) && onDisk.some((r) => r.id === 'jb-d0e00b02') && !onDisk.some((r) => r.id === 'jb-a7c0ffb2') && has(arOld) && has(orphan2), 'round 4 §1 (the archive): the boot\'s own archive sweep wrote over the unread archive INSIDE init — and the FIRST boot pass removes nothing (not the run the unread archive listed, not an unnamed dir)', { onDisk: onDisk && onDisk.map((r) => r.id) });
+      await gcAt(b2.jm, Date.now());
+      ok(has(arOld) && has(orphan2), '…nor does the hourly gc');
+      fs.unlinkSync(noteGate); b2.jm.shutdown();
+    }
+    // N3 THE EXIT ROAD: a note still owed at the hub's exit is written by the exit itself (one O_EXCL write) — the next engine holds
+    {
+      const n3 = mkDir('n3'); const SF = path.join(n3, 'jobs.json'); fs.writeFileSync(SF, '[]');
+      const orphan3 = seedRun(n3, 'jb-0e1a0b03', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      fs.writeFileSync(noteGate, '1');
+      const b3 = unreadDuring(SF, () => boot(n3, { workerPath: noteRefuser }), { noNote: true });
+      if (b3.jm._logsNoteP) await b3.jm._logsNoteP;   // the child refused it
+      const owedAtExit = !!(b3.jm._logsNoteOwed && b3.jm._logsNoteOwed.store) && !has(n3, 'jobs.json.corrupt-unread');
+      b3.jm._dirty = true; b3.jm.shutdown();   // THE EXIT: the note first, then the hub's own write of the store
+      fs.unlinkSync(noteGate);
+      const { jm: J3b, logs: L3b, items: I3b } = boot(n3, { bootDelayMs: 20 });
+      await until(() => L3b.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-unread\b/.test(l)), 5000, 10); await settle(J3b);
+      ok(owedAtExit && has(n3, 'jobs.json.corrupt-unread') && has(orphan3) && I3b.some((n) => n && n.fact === 'records-unread'), 'round 4 §1: a note still OWED at the hub\'s exit is written by the exit itself — the next engine (its store read cleanly) is held by it and files its item');
+      J3b.shutdown();
+    }
+    // N4 ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS (round 4 §2) — REAL modes, no stand-in: the store a link to itself (the read
+    // ELOOPs, the stat fails), the data dir unlistable (0300) during each boot; three boots, then a person moves the note while the
+    // store is STILL unreadable
+    {
+      const n4 = mkDir('n4'); fs.symlinkSync('jobs.json', path.join(n4, 'jobs.json'));
+      const orphan4 = seedRun(n4, 'jb-0e1a0b04', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      const all4 = []; let unlistable = false;
+      const bootClosed = async () => {
+        fs.chmodSync(n4, 0o300); let b;
+        try { try { fs.readdirSync(n4); } catch (e) { unlistable = e.code === 'EACCES'; } b = boot(n4); if (b.jm._logsNoteP) await b.jm._logsNoteP; } finally { fs.chmodSync(n4, 0o700); }
+        await sweepAt(b.jm, Date.now()); await sleep(30);
+        await W8w().storeWriter().durable(path.join(n4, 'jobs-logs-sweep.json'));
+        all4.push(...b.items.filter((n) => n && /^records-unread/.test(n.fact))); b.jm.shutdown();
+      };
+      for (let k = 0; k < 3; k++) await bootClosed();
+      const notes4 = () => fs.readdirSync(n4).filter((n) => /corrupt-unread/.test(n));
+      ok(unlistable && notes4().join() === 'jobs.json.corrupt-unread' && all4.length === 1 && all4[0].fact === 'records-unread' && has(orphan4), `round 4 §2 ONE NOTE PER STORE, WHATEVER THE DIRECTORY SAYS (real modes: the store a link to itself, the data dir unlistable at each boot): three boots, ${notes4().length} note, ${all4.length} item — «a note already stands» files nothing`);
+      try { fs.renameSync(path.join(n4, 'jobs.json.corrupt-unread'), path.join(tmp, 'n4-note-moved')); } catch { /* round 3's tree wrote other names: red by name above */ }   // a person moves it — the store is STILL unreadable
+      await bootClosed();
+      ok(notes4().length === 1 && all4.length === 2 && has(orphan4), '…a person moves the note while the store still cannot be read: the next boot writes it again and tells again (a new failure, a new moment)');
+    }
+    // N5 A PERSON'S FILE THAT MERELY STARTS LIKE THE NOTE (round 4 §3) swallows nothing, and moving it lifts nothing
+    {
+      const n5 = mkDir('n5'); const SF = path.join(n5, 'jobs.json'); fs.writeFileSync(SF, '[]');
+      fs.writeFileSync(path.join(n5, 'jobs.json.corrupt-unread-mine.txt'), 'a person\'s own notes');
+      const orphan5 = seedRun(n5, 'jb-0e1a0b05', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      const b5 = unreadDuring(SF, () => boot(n5)); if (b5.jm._logsNoteP) await b5.jm._logsNoteP;
+      await sweepAt(b5.jm, Date.now());
+      const ru5 = b5.items.filter((n) => n && n.fact === 'records-unread'), so5 = b5.items.filter((n) => n && n.fact === 'set-aside-other');
+      ok(has(n5, 'jobs.json.corrupt-unread') && ru5.length === 1 && so5.length === 1 && so5[0].words.params.file === 'jobs.json.corrupt-unread-mine.txt' && has(orphan5), 'round 4 §3: a person\'s file that merely STARTS like the note swallows nothing — the real failure writes ITS note and files its item; the person\'s file gets its own true words');
+      fs.renameSync(path.join(n5, 'jobs.json.corrupt-unread-mine.txt'), path.join(tmp, 'n5-mine'));   // the person moves THEIR file, as its item says
+      b5.jm._dirty = true; b5.jm._save(); await sweepAt(b5.jm, Date.now());
+      ok(has(orphan5), '…and moving it lifts nothing: the note still holds the pass');
+      b5.jm.shutdown();
+    }
+    // N6 A READ-ONLY ENGINE (a second server against a live lock) writes nothing into the live engine's data dir (round 4 §3)
+    {
+      const n6 = mkDir('n6'); const SF = path.join(n6, 'jobs.json');
+      // THE LIVE ENGINE is another process (a stand-in holding the lock by its pid and start time — the lock's own test)
+      const holder = spawn('sleep', ['30'], { stdio: 'ignore' }); kids.push(holder); await until(() => !!PI.identityOf(holder.pid), 2000, 10);
+      fs.writeFileSync(path.join(n6, 'jobs.lock'), JSON.stringify({ pid: holder.pid, starttime: PI.identityOf(holder.pid).starttime, at: Date.now() }));
+      fs.writeFileSync(SF, '[{"id":"jb-70rn0006","runs":[{"startedAt":1');   // torn bytes the read-only engine reads (the release renamed them aside even here)
+      const ro1 = boot(n6);
+      const ro2 = unreadDuring(SF, () => boot(n6));
+      await sleep(150);
+      const left6 = fs.readdirSync(n6).filter((n) => /\.corrupt-/.test(n));
+      ok(ro1.jm.readOnly && ro2.jm.readOnly && left6.length === 0 && fs.readFileSync(SF, 'utf8').startsWith('[{"id":"jb-70rn0006"') && !ro1.items.length && !ro2.items.length && !(ro2.jm._logsNoteOwed && ro2.jm._logsNoteOwed.store) && ro1.logs.concat(ro2.logs).filter((l) => /a read-only engine: nothing is set aside, noted or filed from it/.test(l)).length === 2, 'round 4 §3: a READ-ONLY engine whose read fails (torn bytes; an EIO) says it in its own log and writes NOTHING — no set-aside, no copy, no note, no item', { left6, items: ro1.items.length + ro2.items.length });
+      ro1.jm.shutdown(); ro2.jm.shutdown(); try { holder.kill('SIGKILL'); } catch { }
+    }
+    // N7 PAUSED, AND THE NOTE NOT WRITTEN: the paused road asks for the note too (the fact must reach the disk before a restart),
+    // and while it is not written the owed re-send waits as the pass's does
+    {
+      const n7 = mkDir('n7'); const SF = path.join(n7, 'jobs.json'); fs.writeFileSync(SF, '[]');
+      const owed7 = seedRun(n7, 'jb-0e1a0b7d', Date.now() - DAY);
+      fs.writeFileSync(noteGate, '1');
+      const b7 = unreadDuring(SF, () => boot(n7, { workerPath: noteRefuser }, { logsSweepOn: () => false }), { noNote: true });
+      if (b7.jm._logsOwed) b7.jm._logsOwed.add('jb-0e1a0b7d');
+      await gcAt(b7.jm, Date.now());
+      const keptWhilePaused = has(owed7);
+      fs.unlinkSync(noteGate); await gcAt(b7.jm, Date.now());
+      ok(keptWhilePaused && has(n7, 'jobs.json.corrupt-unread') && !has(owed7), 'round 4 §1 PAUSED: while the note is not on disk the paused road re-sends no owed removal either; once the storage takes it, the paused hourly tick writes the note — and only then the owed ✕ goes');
+      b7.jm.shutdown();
+    }
+  } else ok(false, 'round 4: the hold that has no file (no remover on this tree)');
 
 
   // ── §P THE PACE FOLLOWS THE STORAGE, AND A PERSON CAN STOP IT (round 2 law 3) ─────────────────────────────────────────

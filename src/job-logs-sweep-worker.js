@@ -10,6 +10,7 @@
 //   sweep {keep, cutoff, max, count, stateFile} — THE LAW's pass (src/job-logs-sweep.js runVerdict): each job dir's runs
 //                  oldest first, at most `max` removed; `count` walks on past it to count what is left (the catch-up's
 //                  start); `stateFile` (the first pass after a boot) reads the catch-up record here, off the main thread.
+//   note {dir, notes} — round 4: a record store's NOTE (`<store>.corrupt-unread`, O_EXCL — one per store; EEXIST = it stands).
 if (typeof process.send !== 'function') throw new Error('src/job-logs-sweep-worker.js runs only as the child src/job-logs-sweep.js forks (an IPC channel)');
 const fs = require('fs');
 const path = require('path');
@@ -147,7 +148,7 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   // it is what lifts it. A data dir that cannot be listed holds the pass too.
   if (setAside && setAside.dir) {
     let names; try { names = fs.readdirSync(setAside.dir).filter((n) => (setAside.prefixes || []).some((p) => n.startsWith(p))); } catch (e) { out.error = 'the data dir could not be listed: ' + (e.code || e.message); out.ms = Date.now() - t0; return out; }
-    if (names.length) { out.heldBy = 'set-aside'; out.heldFiles = names.sort(); out.ms = Date.now() - t0; return out; }
+    if (names.length) { out.heldBy = 'set-aside'; out.heldFiles = names.sort(); out.notes = notesOf(setAside.dir, out.heldFiles, setAside.prefixes || []); out.ms = Date.now() - t0; return out; }
   }
   let jobs; try { jobs = fs.readdirSync(logsDir, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.error = e.message; out.ms = Date.now() - t0; return out; }
   walk: for (const je of jobs) {
@@ -181,6 +182,28 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   return out;
 }
 
+/** round 4 §2: what each NOTE says (its exact name only: `<store>.corrupt-unread`) — {at, error}, or {} for bytes that are not a note's
+ *  (a person's file of that name, a write cut short): it holds all the same */
+function notesOf(dir, names, prefixes) {
+  const out = {};
+  for (const n of names) {
+    if (!prefixes.some((p) => n === p + 'unread')) continue;
+    let o = null; try { const st = lst(path.join(dir, n)); if (st && st.isFile() && st.size <= 4096) o = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')); } catch { }
+    out[n] = o && typeof o === 'object' && Number.isFinite(o.at) ? { at: o.at, error: typeof o.error === 'string' ? o.error.slice(0, 60) : null } : {};
+  }
+  return out;
+}
+/** round 4 §1 + §2: a record store's NOTE — ONE per store, by a name that cannot multiply (O_EXCL: EEXIST = a note already stands — not
+ *  a new failure); no listing (a data dir that cannot be listed made a note per boot). → {notes: {name: 'written' | 'stood' | {error}}} */
+function note({ dir, notes = [] }) {
+  const out = { notes: {} };
+  for (const n of Array.isArray(notes) ? notes : []) {
+    if (!n || typeof n.name !== 'string' || !S.NOTE_NAME.test(n.name) || typeof dir !== 'string') continue;
+    try { fs.writeFileSync(path.join(dir, n.name), JSON.stringify(n.body && typeof n.body === 'object' ? n.body : {}), { flag: 'wx' }); out.notes[n.name] = 'written'; }
+    catch (e) { out.notes[n.name] = e && e.code === 'EEXIST' ? 'stood' : { error: (e && (e.code || e.message)) || String(e) }; }
+  }
+  return out;
+}
 /** the catch-up's record, read here (never on the main thread): its parsed object, or null (none, or bytes that do not parse) */
 function stateOf({ stateFile, orphanDir: od = null }) {
   // round 3 §8: ONLY «not there» is «no record»; a record that cannot be READ (EACCES, EIO, a directory) is an error — the pass
@@ -211,7 +234,7 @@ process.on('message', (msg) => {
   procRoot = msg && typeof msg.procRoot === 'string' ? msg.procRoot : '/proc'; writers = null;   // a fresh walk per batch (a suite may point it elsewhere)
   orphanDir = msg && typeof msg.orphanDir === 'string' ? msg.orphanDir : null; orphanSeq = msg && msg.seq;
   let out;
-  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : msg && msg.op === 'forget' ? forget(msg) : { error: 'unknown op' }; }
+  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : msg && msg.op === 'forget' ? forget(msg) : msg && msg.op === 'note' ? note(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
   try { process.send({ ...out, seq: msg && msg.seq }); } catch { }
 });

@@ -91,6 +91,18 @@ try {
     ok(/'jobs\.logsSweep': \{\n\s*type: 'boolean', default: true,/.test(SCH) && /logsSweepOn: \(\) => \{ try \{ return serverSetting\('jobs\.logsSweep'\) !== false; \}/.test(WIR), 'the pause is ONE schema row (boolean, default on) and its reader in jobs-wiring');
     ok(!/4 \* cfg\.timeoutMs/.test(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8')), 'the counting pass has the normal timeout (past B it reads directories only)');
   }
+  // round 4
+  {
+    const JS5 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+    const held = (JS5.match(/  _logsHeldFile\(file, e, what, exists\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    ok(held && !/readdirSync|writeFileSync|existsSync|statSync/.test(held) && /this\._logsNoteOwed\[what\] = /.test(held), 'round 4 §3: a failed load\'s branch on the MAIN THREAD lists nothing, writes no note and checks no existence a second time — the hold is set there, the note is the child\'s');
+    const pass = (JS5.match(/  async _logsPass\(at, why\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    const iHold = pass.indexOf('return this._logsHeldUnnoted(cfg)'), iOwed = pass.indexOf('await this._logsWhole([...this._logsOwed])'), iWalk = pass.indexOf('this._logsRemover().sweep(');
+    ok(iHold > 0 && iOwed > iHold && iWalk > iHold, 'round 4 §1: the pass answers HELD for a note not on disk BEFORE the owed re-send and before the walk');
+    if (LS) {
+      ok(!!LS.NOTE_NAME && typeof LS.whenOf === 'function' && LS.NOTE_NAME.test('jobs.json.corrupt-unread') && LS.NOTE_NAME.test('jobs-archive.json.corrupt-unread') && !LS.NOTE_NAME.test('jobs.json.corrupt-unread-1700000000000') && !LS.NOTE_NAME.test('../jobs.json.corrupt-unread') && /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/.test(LS.whenOf(1794500000000)), 'round 4 §2: ONE note name per store (`<store>.corrupt-unread`, no moment in it, no path), and the failure\'s moment in words that need no translation');
+    }
+  }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw — ' + (e && e.stack || e));
 } finally {
