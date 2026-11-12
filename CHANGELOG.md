@@ -4,10 +4,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.397 — 2026-11-12
 
+### Added
+- You can tell VibeSpace you reset an account, or one of its limits, on Anthropic’s site: it shows as reset until its next reading confirms it.
+
 ### Changed
 - In the accounts list, a long-lived token that needs nothing from you is now a small clock icon, so the account's note has its line back.
 - A long-lived token's last day is now said once on its row, not twice.
 - A restart no longer updates VibeSpace by itself — to update, press ⚙ → Update VibeSpace….
+- When a reading shows that Anthropic reset a limit early, VibeSpace takes it at once and tells you once.
 
 ### Fixed
 - When a page goes away or crashes in the middle of a passkey sign-in, the passkey VibeSpace lent to the tab is taken back. Before, it could stay on the tab.
@@ -26,6 +30,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When two devices change the same conversation, the later change stands; a laptop waking from sleep no longer puts back its old screen.
 - A change made more than a week before it reaches the server is not kept, and the page says so where it shows something else because of it.
 - Importing your settings is no longer undone by an older change that was still on its way.
+- Refreshing usage no longer says the vault is locked after you unlocked it.
+- Accounts that cannot refresh for the same reason get one message in your language, with the button that fixes it.
+- A limit read hours before the others on the same account shows how old its reading is.
+- Moving a pool’s conversations to an account it cannot use now says why, and what ends it.
 
 ## 2.369.396 — 2026-11-11
 
