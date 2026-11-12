@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If the disk stops answering, repeated CPU captures no longer pile up stuck reads, and a capture cut off while saving no longer leaves a hidden file.
 - VibeSpace stays responsive with hundreds of agent groups.
 - Starring, renaming or changing a conversation's settings no longer freezes VibeSpace for a moment or redraws every agent group list.
+- VibeSpace stays responsive while a remote machine sleeps or conversations stream: the usage estimates read only what is new.
 
 ## 2.369.395 — 2026-11-11
 
