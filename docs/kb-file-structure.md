@@ -1695,6 +1695,16 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - The first pass after a boot reads that record IN THE WORKER (`_logsState === null` until then). A SIGKILL before a paced write costs at most one repeated start line.
 - **`deps.logsSweep`** `{max, gapMs, bootDelayMs, timeoutMs, retentionMs, workerPath}` is a suite's seam. The product's numbers are the module's: B 500, G 30 s, a boot delay of 2 min, 120 s, 14 days.
 
+**THE HELD FACT (round 2, law 1 — «no record names it» is a fact the hub holds, never «the hub could not read who names it»).**
+- **The fact on disk** is the set-aside bytes themselves: `jobs.json.corrupt-*` and `jobs-archive.json.corrupt-*` in the data dir. The worker lists the data dir at the start of EVERY pass. While one is there, the law's pass removes NOTHING, on every road: the gc (whose leg (b) loads the archive first), a list before a pass, a pass before the gc, and a restart followed by its boot pass. Moving or deleting the file is what lifts the hold; the next pass says «resumes».
+- **Every way a store loses its records lands on that fact.** A torn, unreadable or non-list store or archive is set aside; a non-list was read as [] with no bytes kept on the release. Only ENOENT («not there») means «no records».
+- **A read that failed with no set-aside** (an EIO whose stat failed, a rename refused) is `_logsUnread.{store,archive}`, held for this process. The worker re-reads that file at every pass and unions its records into the keep set, so a read that succeeds lifts the hold by itself.
+- **One cause, one item:**
+  - the torn store's existing For-you item (`store-corrupt`) now names the set-aside file and says the clean-up holds;
+  - a torn archive (which the release said only in the console) files `records-held`, records first and the clean-up second;
+  - a set-aside file the owner was never told of (one from before this version) gets `records-held` once.
+  - The «said» names live in the record's `heldSaid`, written durably right after the filing (`_logsMarkSaid` reads the record in the worker first), so a restart never files twice. The hub does not resolve the item: it tells the person to move the file and that the clean-up then resumes by itself.
+
 **THE ✕ (`rmArchived`).**
 - The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`.
 - Both routes answer after `logsGone(id)` (≤ 10 s); past that they answer `logsPending: true`:

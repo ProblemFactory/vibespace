@@ -724,7 +724,8 @@ const FOR_YOU_WORDS = Object.freeze({
   fire: '{text}',
   // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
   'engine-failed': 'Background Work engine failed to start: {error}',
-  'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel',
+  'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.',   // lane job-logs-sweep r2: ONE item for the cause carries the clean-up's hold
+  'records-held': 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.',   // lane job-logs-sweep r2: a set-aside the owner was never told of (the archive's; one from before this version)
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
   'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
@@ -755,7 +756,7 @@ function forYouCopy(job, kind, opts = {}) {
   return c;
 }
 function forYouWords(job, kind, opts) {
-  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null } = opts || {};
+  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null } = opts || {};
   if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
@@ -767,7 +768,8 @@ function forYouWords(job, kind, opts) {
   if (kind === 'parked-memory') return { fact: 'parked-memory', words: { key: FOR_YOU_WORDS['parked-memory'], params: { name } }, urgency: 'normal' };
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
-  if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'] }, urgency: 'high' };
+  if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
+  if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
 }

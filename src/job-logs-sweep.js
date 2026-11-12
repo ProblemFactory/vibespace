@@ -153,6 +153,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   return {
     whole: (ids) => ask({ op: 'whole', ids: [...new Set((Array.isArray(ids) ? ids : [ids]).filter((id) => typeof id === 'string' && JOB_NAME.test(id)))] }),
     sweep: (args, opts) => ask({ op: 'sweep', ...args }, opts),   // opts.timeoutMs: the counting pass walks the whole tree
+    state: (stateFile) => ask({ op: 'state', stateFile }),   // the catch-up's record, read off the main thread
     settled: () => (cur || queue.length ? new Promise((r) => idle.push(r)) : Promise.resolve()),
     busy: () => !!cur || queue.length > 0,
     held: () => !!wedged,

@@ -179,6 +179,12 @@ class JobManager {
     this.logsSweepFile = path.join(deps.dataDir, 'jobs-logs-sweep.json');
     this._logsState = null; this._logsRm = null; this._logsPassP = null; this._logsGapT = null; this._logsStopped = false;
     this._logsGone = new Map();   // id → the ✕'s removal in flight (deleted when it settles) — logsGone() answers the person after the disk
+    // round 2 law 1: a records read that FAILED without leaving a set-aside file (an I/O error, a rename that failed) — the pass
+    // removes nothing those records could name in THIS process; the worker re-reads the file at every pass (a read that then
+    // succeeds keeps its records in the keep set by itself). The durable fact is the set-aside file (worker: setAside).
+    this._logsUnread = { store: null, archive: null };
+    this._logsSaidNow = new Set();   // set-aside files whose item was filed in this process, merged into the record's `heldSaid`
+    this._logsHeldSaid = '';         // the journal's last HELD line (said once per process per set of files)
     this._logsOwed = new Set();   // ids whose whole-dir removal the storage did not do (held / failed) — re-sent before every pass; ≤ LOGS_OWED_MAX, a restart forgets them (the law's pass takes them 14 days after their newest file)
     this.lockFile = path.join(deps.dataDir, 'jobs.lock');
     // TRIAGE ARCHIVE (design §13): terminal one-shots leave jobs.json for
@@ -252,11 +258,15 @@ class JobManager {
   _load() {
     try {
       const arr = timedSync('jobs.read', () => JSON.parse(fs.readFileSync(this.file, 'utf-8')));
+      if (!Array.isArray(arr)) throw Object.assign(new Error('the store is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: set aside like a torn file
       for (const j of arr) this.jobs.set(j.id, j);
     } catch (e) {
+      // lane job-logs-sweep r2 law 1: ONLY «the file is not there» means «no records»; any other failure keeps the job-logs
+      // clean-up from removing what those records could name (the set-aside file is that fact on disk; a failed set-aside, here)
+      if (e && e.code !== 'ENOENT' && !fs.existsSync(this.file)) { this._logsUnread.store = e.code || 'unreadable'; this.d.log(`[jobs] store could not be read (${e.code || e.message}) and is not there to set aside — the job-logs clean-up removes nothing in this process until a read succeeds`); }
       if (fs.existsSync(this.file)) { // corrupt store: preserve bytes, reconcile skeletons from log dirs (§5)
-        const bad = this.file + '.corrupt-' + now();
-        try { fs.renameSync(this.file, bad); } catch { }
+        let bad = this.file + '.corrupt-' + now();
+        try { fs.renameSync(this.file, bad); } catch (re) { this._logsUnread.store = (re && re.code) || 'not set aside'; this.d.log(`[jobs] store could not be set aside (${(re && re.code) || re}) — the job-logs clean-up removes nothing in this process until a read succeeds`); bad = this.file; }
         this.d.log('[jobs] store corrupt → preserved at', bad, '— rebuilding skeletons; error:', e.message);
         try {
           for (const id of fs.readdirSync(this.logsDir)) {
@@ -264,7 +274,8 @@ class JobManager {
             this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: LS.RECOVERED_NOTE, owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
           }
         } catch { }
-        this._forYou(null, M.forYouCopy(null, 'store-corrupt'));
+        this._forYou(null, M.forYouCopy(null, 'store-corrupt', { file: bad }));   // r2: ONE item for the cause — it says the job-logs clean-up holds too
+        if (bad !== this.file) this._logsMarkSaid(path.basename(bad));
       }
     }
   }
@@ -303,12 +314,18 @@ class JobManager {
     if (this.archive) return this.archive;
     try {
       const arr = JSON.parse(fs.readFileSync(this.archiveFile, 'utf-8'));
-      this.archive = Array.isArray(arr) ? arr.filter((r) => r && typeof r === 'object' && r.id) : [];
+      if (!Array.isArray(arr)) throw Object.assign(new Error('the archive is not a list of records'), { code: 'ENOTLIST' });   // lane job-logs-sweep r2: a non-list was read as [] with no bytes kept
+      this.archive = arr.filter((r) => r && typeof r === 'object' && r.id);
     } catch (e) {
+      if (e && e.code !== 'ENOENT' && !fs.existsSync(this.archiveFile)) { this._logsUnread.archive = e.code || 'unreadable'; this.d.log(`[jobs] archive could not be read (${e.code || e.message}) and is not there to set aside — the job-logs clean-up removes nothing in this process until a read succeeds`); }
       if (fs.existsSync(this.archiveFile)) { // corrupt: preserve the bytes, never destroy
         const bad = this.archiveFile + '.corrupt-' + now();
-        try { fs.renameSync(this.archiveFile, bad); } catch { }
-        this.d.log('[jobs] archive corrupt → preserved at', bad, '—', e.message);
+        let setAside = true; try { fs.renameSync(this.archiveFile, bad); } catch (re) { setAside = false; this._logsUnread.archive = (re && re.code) || 'not set aside'; this.d.log(`[jobs] archive could not be set aside (${(re && re.code) || re}) — the job-logs clean-up removes nothing in this process until a read succeeds`); }
+        if (setAside) {
+          this.d.log('[jobs] archive corrupt → preserved at', bad, '—', e.message);
+          // lane job-logs-sweep r2: the FIRST time the owner hears of it (the release said it in the console only) — the records first, the clean-up second
+          this._forYou(null, M.forYouCopy(null, 'records-held', { file: bad })); this._logsMarkSaid(path.basename(bad));
+        }
       }
       this.archive = [];
     }
@@ -2512,20 +2529,27 @@ class JobManager {
   }
   async _logsPass(at, why) {
     const cfg = this._logsCfg();
+    if (this._logsStateP) await this._logsStateP;   // a set-aside this boot: its «said» is on disk before the pass
     if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);   // what the storage did not take last time, first
     // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
     // the archive from memory when it is loaded; otherwise the worker reads its file (never _loadArchive's synchronous read here)
     const keep = LS.keepSetOf({ jobs: [...this.jobs.values()], archive: this.archive || [], held });
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
-    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile, archiveFile: this.archive ? null : this.archiveFile },
+    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,
+      archiveFile: this.archive && !this._logsUnread.archive ? null : this.archiveFile, storeFile: this._logsUnread.store ? this.file : null,
+      setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] } },
       { timeoutMs: counting ? 4 * cfg.timeoutMs : cfg.timeoutMs });   // a counting pass walks the whole tree (≈ 30 s on the owner's NAS)
+    if (ans && !ans.error && ans.heldBy) { this._logsHeld(ans, cfg); return ans; }   // a set-aside record store: nothing removed, said once
+    if (this._logsHeldSaid && ans && !ans.error) { this._logsHeldSaid = ''; this.d.log('[jobs] job-logs clean-up resumes: no set-aside job record file is left in the data dir'); }
     if (!ans || ans.error) {
-      if (ans && ans.error !== 'stopped' && !ans.held) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — the next pass retries`);   // HELD is said once by the remover
+      if (ans && ans.error !== 'stopped' && !ans.held && ans.error !== this._logsLastErr) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — nothing removed; the next pass asks again`);   // HELD is said once by the remover; the same failure once
+      if (ans) this._logsLastErr = ans.error;
       if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));   // an open catch-up never stalls on a failed pass
       return ans;
     }
-    if (this._logsState === null) { const r = ans.state; this._logsState = { catchUp: r && r.catchUp && typeof r.catchUp === 'object' ? r.catchUp : null, last: (r && r.last) || null }; }
+    this._logsLastErr = null;
+    if (this._logsState === null) { this._logsAdopt(ans.state); this._logsMergeSaid(); }
     const st = this._logsState;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
       st.catchUp = { startedAt: at, counted: ans.removed + ans.left, countedEntries: ans.entries + ans.leftEntries, removed: 0, entries: 0, passes: 0 };
@@ -2545,6 +2569,39 @@ class JobManager {
     if (this._logsStopped) return;
     this._logsGapT = setTimeout(() => { this._logsGapT = null; this.sweepLogs({ why: 'catch-up' }).catch((e) => this.d.log('[jobs] job-logs pass failed:', e.message)); }, ms);
     this._logsGapT.unref?.();
+  }
+  /** HELD by a set-aside record store (round 2 law 1): said ONCE in the journal per process and set of files, ONE For-you item
+   *  per file the owner was never told of (its name kept in the record's `heldSaid`, written durably) — the torn store's own
+   *  item and the torn archive's (filed at the set-aside) already say it; an open catch-up rests and asks again */
+  _logsHeld(ans, cfg) {
+    const files = ans.heldFiles || [], line = files.join(', ');
+    if (this._logsHeldSaid !== line) { this._logsHeldSaid = line; this.d.log(`[jobs] job-logs clean-up HELD: ${line} in the data dir hold job records VibeSpace could not read — nothing is removed until they are moved or deleted`); }
+    if (this._logsState === null) this._logsAdopt(ans.state);   // the record as read by this pass — what was said before the restart
+    const said = new Set([...this._logsState.heldSaid, ...this._logsSaidNow]);
+    for (const f of files) if (!said.has(f)) { this._forYou(null, M.forYouCopy(null, 'records-held', { file: path.join(this.d.dataDir, f) })); this._logsSaidNow.add(f); }
+    this._logsMergeSaid();
+    if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));
+  }
+  /** the record as read (a missing, torn or odd shape adopts nothing it cannot use: a catch-up only with finite numbers) */
+  _logsAdopt(r) {
+    const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+    const cu = r && r.catchUp;
+    this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { countedEntries: 0, ...cu } : null,
+      last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [] };
+  }
+  /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
+  _logsMarkSaid(name) {
+    this._logsSaidNow.add(name);
+    if (this.readOnly) return;
+    if (this._logsState) { this._logsMergeSaid(); return; }
+    if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile).then((a) => { if (this._logsState === null && a && !a.error) this._logsAdopt(a.state); this._logsMergeSaid(); }).catch(() => { }).finally(() => { this._logsStateP = null; });
+  }
+  _logsMergeSaid() {
+    const st = this._logsState; if (!st) return;
+    let grew = false;
+    for (const n of this._logsSaidNow) if (!st.heldSaid.includes(n)) { st.heldSaid.push(n); grew = true; }
+    if (st.heldSaid.length > 100) st.heldSaid.splice(0, st.heldSaid.length - 100);
+    if (grew) { this._logsSave(); require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { }); }   // «said» is an act: on disk now
   }
   /** the catch-up's record through THE STORE WRITER (its own thread, paced): a SIGKILL before its write costs at most one
    *  repeated start line (the next boot counts again what is left) */

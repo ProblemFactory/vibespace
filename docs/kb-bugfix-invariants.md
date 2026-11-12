@@ -956,6 +956,7 @@ The five removers that did exist deleted whole directories synchronously on the 
    - The whole-dir verdicts (the gc's two legs, the archive cap, the ✕, the boot collapse) are their callers'; the syscalls are the thread's.
    - The ✕ answers once the dir is gone, or past 10 s with `logsPending` («its log files are still being deleted in the background»).
 5. **The pass never reads the archive synchronously on the main thread.** It uses the archive in memory when loaded; otherwise the thread reads it, and an unreadable archive removes nothing.
+6. **«No record names it» is a fact the hub holds (round 2).** While a record store of jobs is SET ASIDE (`jobs*.json.corrupt-*` in the data dir — the fact on disk, seen by every pass on every road and after every restart) or a read of one failed in this process, the law's pass removes nothing. Only «the file is not there» means «no records». The owner hears it ONCE: on the torn store's own item, on a torn archive's first item (records first, the clean-up second), and once for a set-aside never told of. Moving the file lifts it.
 
 **Pins.** scripts/test-job-logs-sweep.mjs, red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
 

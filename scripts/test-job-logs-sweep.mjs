@@ -35,10 +35,10 @@ const caller = { conversationId: 'conv-L', sessionId: 'sess-L', sessionCreatedAt
 const owner = { conversation: { backend: 'claude', id: 'conv-L' }, sessionId: 'sess-L', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-l'] };
 const mkDir = (name) => { const dir = path.join(tmp, name); fs.mkdirSync(path.join(dir, 'bin'), { recursive: true }); fs.copyFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), path.join(dir, 'bin', 'job-wrapper.js')); return dir; };
 const boot = (dir, sweep = {}) => {
-  const logs = [];
-  const jm = new JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, ...sweep } });
+  const logs = [], items = [];
+  const jm = new JobManager({ dataDir: dir, broadcast() { }, notifyUser(n) { items.push(n); return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, ...sweep } });
   jm.init(); engines.push(jm);
-  return { jm, logs };
+  return { jm, logs, items };
 };
 const settle = async (jm) => { if (typeof jm.logsSettled === 'function') await jm.logsSettled(); };
 // THE LAW's pass at a clock (the release has none: its hourly gc, which removes no dropped run, stands in — red by name)
@@ -305,6 +305,97 @@ try {
     ok(intact(c4) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
     R.stop();
   } else ok(false, 'the guards are driven (no remover on this tree)');
+
+
+  // ── §H «NO RECORD NAMES IT» IS A FACT THE HUB HOLDS (round 2 law 1): a set-aside or unread record store holds the pass ──
+  lap('§H the held fact');
+  {
+    const W = require(path.join(ROOT, 'src/store-writer.js'));
+    const tornArchive = (dir, id, ts) => fs.writeFileSync(path.join(dir, 'jobs-archive.json'), `[{"id":"${id}","kind":"task","runs":[{"startedAt":${ts}`);
+    const setAsides = (dir) => fs.readdirSync(dir).filter((n) => /\.corrupt-/.test(n));
+    const heldItems = (items) => items.filter((n) => n && n.fact === 'records-held');
+    // H1 THE HOURLY ROAD: the gc's own leg loads the torn archive first (the product sets it aside), then the law's pass
+    const h1 = mkDir('h1'); const a1Ts = Date.now() - 20 * DAY; tornArchive(h1, 'jb-a4c0ffee', a1Ts);
+    const h1Listed = seedRun(h1, 'jb-a4c0ffee', a1Ts, { ageMs: 20 * DAY }), h1Orphan = seedRun(h1, 'jb-0e1a0002', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH1, logs: LH1, items: IH1 } = boot(h1);
+    await gcAt(JH1, Date.now()); await gcAt(JH1, Date.now());
+    ok(setAsides(h1).length === 1 && has(h1Listed) && has(h1Orphan), 'THE HOURLY ROAD: the gc sets the torn archive aside, and its law\'s pass removes NOTHING (the set-aside bytes could name any run)', { setAside: setAsides(h1), listed: has(h1Listed), orphan: has(h1Orphan) });
+    ok(LH1.filter((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-\d+ in the data dir/.test(l)).length === 1, 'the hold is said ONCE in the journal over two passes');
+    ok(heldItems(IH1).length === 1 && /could not be read/.test(heldItems(IH1)[0].words.key) && /jobs-archive\.json\.corrupt-\d+$/.test(heldItems(IH1)[0].words.params.file), 'ONE For-you item, filed at the set-aside: «Job records in <file> could not be read» first, the clean-up second');
+    // H2 ANY LOAD FIRST: one archive list (the panel, an agent route) before a pass
+    const h2 = mkDir('h2'); tornArchive(h2, 'jb-a5c0ffee', a1Ts);
+    const h2Listed = seedRun(h2, 'jb-a5c0ffee', a1Ts, { ageMs: 20 * DAY }), h2Orphan = seedRun(h2, 'jb-0e1a0003', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH2 } = boot(h2);
+    JH2.archivedList(); await sweepAt(JH2, Date.now());
+    ok(has(h2Listed) && has(h2Orphan), 'A LIST FIRST, THEN A PASS: nothing removed');
+    // H3 PASS, THEN GC: the first pass refuses the torn file, the gc in the same process sets it aside — still nothing
+    const h3 = mkDir('h3'); tornArchive(h3, 'jb-a6c0ffee', a1Ts);
+    const h3Listed = seedRun(h3, 'jb-a6c0ffee', a1Ts, { ageMs: 20 * DAY }), h3Orphan = seedRun(h3, 'jb-0e1a0004', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH3 } = boot(h3);
+    await sweepAt(JH3, Date.now()); const afterPass = has(h3Listed) && has(h3Orphan);
+    await gcAt(JH3, Date.now());
+    ok(afterPass && has(h3Listed) && has(h3Orphan) && setAsides(h3).length === 1, 'A PASS, THEN THE GC: the pass refuses the torn file, the gc sets it aside, and its pass removes nothing');
+    // H4 THE STORE, ACROSS A RESTART: a torn jobs.json (a live service listing a 20-day-old run) → skeletons at boot 1 (never
+    // written back) → boot 2 loads an EMPTY store; its boot pass removes nothing while the set-aside file is there; moved ⇒ resumes
+    const h4 = mkDir('h4'); const s4Ts = Date.now() - 20 * DAY;
+    fs.writeFileSync(path.join(h4, 'jobs.json'), `[{"id":"jb-5e7f1ce4","kind":"service","state":"up","runs":[{"startedAt":${s4Ts}},{"startedAt":${Date.now()}`);
+    const h4Run = seedRun(h4, 'jb-5e7f1ce4', s4Ts, { ageMs: 20 * DAY });
+    const { jm: A4, items: IA4 } = boot(h4);
+    if (A4._logsStateP) await A4._logsStateP;
+    await W.storeWriter().durable(path.join(h4, 'jobs-logs-sweep.json'));
+    const scItems = IA4.filter((n) => n && n.fact === 'store-corrupt');
+    ok(scItems.length === 1 && /old job logs are not cleaned up until that file is moved or deleted/.test(scItems[0].words.key) && /jobs\.json\.corrupt-\d+$/.test(scItems[0].words.params.file), 'ONE CAUSE, ONE ITEM: the torn store\'s own For-you item names the set-aside file and says the clean-up holds');
+    A4.shutdown();
+    const { jm: B4, logs: LB4, items: IB4 } = boot(h4, { bootDelayMs: 20 });
+    await until(() => B4._logsState && B4._logsState.last || LB4.some((l) => /HELD/.test(l)), 5000, 10); await settle(B4);
+    ok(B4.jobs.size === 0 && has(h4Run) && LB4.some((l) => /job-logs clean-up HELD: jobs\.json\.corrupt-\d+/.test(l)), 'AFTER A RESTART the store loads empty (no skeletons) — and the boot pass removes NOTHING: the set-aside file is the fact, on disk', { jobs: B4.jobs.size, run: has(h4Run) });
+    ok(heldItems(IB4).length === 0 && IB4.filter((n) => n && n.fact === 'store-corrupt').length === 0, '…and nothing is said twice across the restart (the file\'s item is «said» in the record, written durably)');
+    const moved = path.join(tmp, 'moved-by-a-person'); fs.mkdirSync(moved, { recursive: true });
+    for (const f of setAsides(h4)) fs.renameSync(path.join(h4, f), path.join(moved, f));
+    await sweepAt(B4, Date.now());
+    ok(!has(h4Run) && LB4.some((l) => /job-logs clean-up resumes/.test(l)), 'the file MOVED by a person lifts the hold by itself: the next pass removes what no record lists, and says it resumes');
+    // H5 A PARSED ARCHIVE THAT IS NOT A LIST: set aside like a torn one (the release read it as [] and kept no bytes) — held
+    const h5 = mkDir('h5'); fs.writeFileSync(path.join(h5, 'jobs-archive.json'), '{"records":[]}');
+    const h5Orphan = seedRun(h5, 'jb-0e1a0005', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH5 } = boot(h5);
+    await sweepAt(JH5, Date.now()); const h5Worker = has(h5Orphan);
+    JH5._loadArchive(); await sweepAt(JH5, Date.now());
+    ok(h5Worker && setAsides(h5).length === 1 && has(h5Orphan), 'an archive that parses to a non-list: the worker refuses it, the load sets it aside (bytes kept), the pass removes nothing');
+    const h5b = mkDir('h5b'); fs.writeFileSync(path.join(h5b, 'jobs-archive.json'), '"not a list"');
+    const h5bOrphan = seedRun(h5b, 'jb-0e1a0015', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH5b } = boot(h5b); await sweepAt(JH5b, Date.now());
+    ok(has(h5bOrphan), 'the worker refuses an archive that parses to a non-list even when it iterates (a JSON string) — nothing removed');
+    // H6 A READ THAT FAILED WITH NO SET-ASIDE (a stand-in in code: EIO on the read, the rename refused) — this process holds,
+    // and the next pass reads the file again in the worker: a read that succeeds keeps its records by itself
+    const h6 = mkDir('h6'); const a6Ts = Date.now() - 20 * DAY;
+    fs.writeFileSync(path.join(h6, 'jobs-archive.json'), JSON.stringify([{ id: 'jb-a7c0ffee', kind: 'task', state: 'done', runs: [{ startedAt: a6Ts, endedAt: a6Ts + 1 }] }]));
+    const h6Listed = seedRun(h6, 'jb-a7c0ffee', a6Ts, { ageMs: 20 * DAY }), h6Orphan = seedRun(h6, 'jb-0e1a0006', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: JH6, logs: LH6 } = boot(h6);
+    const AF = path.join(h6, 'jobs-archive.json'), rf = fs.readFileSync, rn = fs.renameSync;
+    fs.readFileSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, f, ...a); };
+    fs.renameSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, rename'), { code: 'EIO' }); return rn.call(this, f, ...a); };
+    try { JH6.archive = null; JH6._loadArchive(); } finally { fs.readFileSync = rf; fs.renameSync = rn; }
+    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && setAsides(h6).length === 0 && JH6.archive.length === 0, 'an EIO read whose set-aside also failed: no file is left behind — the process notes it (law: only «not there» means «no records»)');
+    fs.chmodSync(AF, 0o000);
+    await sweepAt(JH6, Date.now());
+    ok(has(h6Listed) && has(h6Orphan), 'while the worker cannot read it either, the pass removes NOTHING');
+    fs.chmodSync(AF, 0o644);
+    await sweepAt(JH6, Date.now());
+    ok(has(h6Listed) && !has(h6Orphan), 'the read that succeeds at the next pass lifts it by itself: the file\'s listed run stays, a run no record names goes');
+    ok(LH6.filter((l) => /archive could not be read: EACCES/.test(l)).length <= 1, 'the same failure is said once, not every pass');
+    // H7 THE STORE READ FAILED WITH NO SET-ASIDE: a stand-in EIO at boot whose stat failed too (nothing to set aside, no
+    // skeletons) — the worker reads the store at the pass
+    const h7 = mkDir('h7'); const s7Ts = Date.now() - 20 * DAY;
+    fs.writeFileSync(path.join(h7, 'jobs.json'), JSON.stringify([{ id: 'jb-5e7f1ce7', kind: 'service', state: 'up', desiredUp: true, owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: s7Ts }] }]));
+    const h7Listed = seedRun(h7, 'jb-5e7f1ce7', s7Ts, { ageMs: 20 * DAY }), h7Orphan = seedRun(h7, 'jb-0e1a0007', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const SF = path.join(h7, 'jobs.json');
+    const ex = fs.existsSync;
+    fs.readFileSync = function (f, ...a) { if (String(f) === SF) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, f, ...a); };
+    fs.existsSync = function (f, ...a) { if (String(f) === SF) return false; return ex.call(this, f, ...a); };
+    let JH7; try { JH7 = boot(h7).jm; } finally { fs.readFileSync = rf; fs.existsSync = ex; }
+    await sweepAt(JH7, Date.now());
+    ok(JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && setAsides(h7).length === 0 && has(h7Listed) && !has(h7Orphan), 'a STORE read that failed at boot with no set-aside (memory holds no record of it): the worker reads the store at the pass — its listed run stays, a run no record names goes');
+  }
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────
   lap('P4 the catch-up');

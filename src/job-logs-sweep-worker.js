@@ -72,20 +72,36 @@ function whole({ ids = [] }) {
   return out;
 }
 
-function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null }) {
+function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null, storeFile = null, setAside = null }) {
   const t0 = Date.now();
   const out = { removed: 0, entries: 0, left: 0, leftEntries: 0, jobDirs: 0, failed: 0, more: false, kept: { listed: 0, held: 0, skeleton: 0, young: 0, alive: 0, unproven: 0 } };
   if (stateFile) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } out.state = st && typeof st === 'object' ? st : null; }
   if (count === 'auto') count = !(out.state && out.state.catchUp);
   out.counted = !!count;
   const listed = new Set(keep.listed || []), held = new Set(keep.held || []), skel = new Set(keep.skeleton || []), named = new Set(keep.named || []);
-  // the archive the hub has not loaded is read HERE (never on the main thread): its records name and list as the store's do;
-  // an archive that cannot be read keeps the walk from removing anything (a record it names could be lost)
-  if (archiveFile) {
-    let arr = null; try { arr = JSON.parse(fs.readFileSync(archiveFile, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') { out.error = 'the archive could not be read: ' + e.message; out.ms = Date.now() - t0; return out; } arr = []; }
-    const k = S.keepSetOf({ archive: Array.isArray(arr) ? arr : [] });
-    for (const x of k.named) named.add(x); for (const x of k.listed) listed.add(x); for (const x of k.skeleton) skel.add(x);
+  // THE HELD FACT (round 2 law 1): a record store of jobs SET ASIDE in the data dir (`jobs.json.corrupt-*`,
+  // `jobs-archive.json.corrupt-*` — the bytes the hub could not read, kept by its load) — the pass removes NOTHING while one is
+  // there: on every road and after every restart, because the fact is the file, never a variable. A person moving or deleting
+  // it is what lifts it. A data dir that cannot be listed holds the pass too.
+  if (setAside && setAside.dir) {
+    let names; try { names = fs.readdirSync(setAside.dir).filter((n) => (setAside.prefixes || []).some((p) => n.startsWith(p))); } catch (e) { out.error = 'the data dir could not be listed: ' + (e.code || e.message); out.ms = Date.now() - t0; return out; }
+    if (names.length) { out.heldBy = 'set-aside'; out.heldFiles = names.sort(); out.ms = Date.now() - t0; return out; }
   }
+  // a store the hub could not read (`storeFile`, its load failed with no set-aside) and the archive it has not loaded or could
+  // not read (`archiveFile`) are read HERE, never on the main thread: their records name and list as memory's do. ONLY «the
+  // file is not there» reads as no records; a read that fails, or bytes that are not a list, keep the walk from removing anything
+  const readRecords = (file, what) => {
+    let arr; try { arr = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e && e.code === 'ENOENT') return []; throw new Error(`the ${what} could not be read: ${(e && (e.code || e.message)) || e}`); }
+    if (!Array.isArray(arr)) throw new Error(`the ${what} is not a list of records`);
+    return arr;
+  };
+  try {
+    for (const [file, what] of [[storeFile, 'store'], [archiveFile, 'archive']]) {
+      if (!file) continue;
+      const k = S.keepSetOf({ archive: readRecords(file, what) });
+      for (const x of k.named) named.add(x); for (const x of k.listed) listed.add(x); for (const x of k.skeleton) skel.add(x);
+    }
+  } catch (e) { out.error = e.message; out.ms = Date.now() - t0; return out; }
   let jobs; try { jobs = fs.readdirSync(logsDir, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.error = e.message; out.ms = Date.now() - t0; return out; }
   walk: for (const je of jobs) {
     if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) continue;
@@ -114,10 +130,13 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   return out;
 }
 
+/** the catch-up's record, read here (never on the main thread): its parsed object, or null (none, or bytes that do not parse) */
+function stateOf({ stateFile }) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } return { state: st && typeof st === 'object' ? st : null }; }
+
 parentPort.on('message', (msg) => {
   if (answerMemory(msg, parentPort)) return;   // the memory census (src/worker-memory.js) — answered between two ops
   let out;
-  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep(msg) : { error: 'unknown op' }; }
+  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep(msg) : msg && msg.op === 'state' ? stateOf(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
   parentPort.postMessage({ ...out, seq: msg && msg.seq });
 });
