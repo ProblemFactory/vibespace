@@ -1315,6 +1315,7 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/proc-identity.js': [2, 'not a conversation: the identity-proven signal (background jobs\' group kill, B-1cc6) — moved from src/jobs.js'],
     'src/plugins/frp.js': [1, 'not a conversation: plugins (the frpc daemon it started)'],
     'src/plugins/tailscale.js': [1, 'not a conversation: plugins (the tailscaled it started)'],
+    'src/plugins/which-kept.js': [1, 'not a conversation: plugins (its own which lookup child, killed by the handle it holds after its grace — hub-sync-holds, 2.369.397)'],
     'src/server/plugin-loader.js': [2, 'not a conversation: plugin children'],
     'src/port-forward.js': [1, 'not a conversation: port forwards'],
     'src/remote-fs.js': [2, 'not a conversation: file transfers'],
