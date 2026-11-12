@@ -3324,7 +3324,7 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
 {
   // ROUND 15 — THE KEEPALIVE BUDGET: (c) it binds, in bytes — renames of 1.5 KB (500 three-byte characters) made while the hub answers nothing (every request carries every
   // unconfirmed batch, so they grow) ⇒ keepalive until 48 KiB are in flight, then plain; never more than 48 KiB in flight; (d) it is
-  // given back — 300 one-op acts, each answered before the next ⇒ every one keepalive; (e) a keepalive the browser refuses ⇒ the next
+  // given back — 400 one-op acts, each answered before the next (~70 KB in all) ⇒ every one keepalive; (e) a keepalive the browser refuses ⇒ the next
   // send plain, then keepalive again once a send succeeds
   const Sb = await loadPage(STATE_SRC);
   const watch = (p, rejectFirstKeep = false) => {
@@ -3353,7 +3353,7 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
   const S = await addPage(w, Sb, 'S');
   await w.run(w.now() + 600);
   const d = watch(S);
-  for (let i = 0; i < 300; i++) { S.toggleStar(w.sessions[i]); await w.run(w.now() + 100); }
+  for (let i = 0; i < 400; i++) { S.toggleStar(w.sessions[i % 400]); await w.run(w.now() + 100); }   // (~70 KB sent in all — past the budget if it were never given back)
   const T = await addPage(w, Sb, 'T');
   await w.run(w.now() + 600);
   const e = watch(T, true);
@@ -3362,8 +3362,8 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
   T.toggleArchive(w.sessions[2]);
   await w.run(w.now() + 3000);
   const eKinds = e.reqs.map((x) => (x.keep ? 'K' : 'P')).join('');
-  ok(cKeep >= 5 && cPlain >= 5 && cMax <= 49152 && cMax > 40000 && d.reqs.length >= 300 && d.reqs.every((x) => x.keep) && e.refused === 1 && /^KPK/.test(eKinds),
-    `ROUND 15 — THE KEEPALIVE BUDGET: 40 renames of 1.5 KB with the hub answering nothing ⇒ ${cKeep} keepalive then ${cPlain} plain, at most ${cMax} B in flight (≤ 49 152); 300 acts each answered ⇒ ${d.reqs.filter((x) => x.keep).length} of ${d.reqs.length} keepalive (the budget given back); a refused keepalive ⇒ «${eKinds}» (the next plain, then keepalive again)`, { cKeep, cPlain, cMax, dKeep: d.reqs.filter((x) => x.keep).length, eKinds });
+  ok(cKeep >= 5 && cPlain >= 5 && cMax <= 49152 && cMax > 40000 && d.reqs.length >= 400 && d.reqs.every((x) => x.keep) && e.refused === 1 && /^KPK/.test(eKinds),
+    `ROUND 15 — THE KEEPALIVE BUDGET: 40 renames of 1.5 KB with the hub answering nothing ⇒ ${cKeep} keepalive then ${cPlain} plain, at most ${cMax} B in flight (≤ 49 152); 400 acts each answered ⇒ ${d.reqs.filter((x) => x.keep).length} of ${d.reqs.length} keepalive (the budget given back: ${d.reqs.reduce((n, x) => n + x.bytes, 0)} B sent in all); a refused keepalive ⇒ «${eKinds}» (the next plain, then keepalive again)`, { cKeep, cPlain, cMax, dKeep: d.reqs.filter((x) => x.keep).length, eKinds });
 }
 
 {
