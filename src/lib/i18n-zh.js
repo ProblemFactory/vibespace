@@ -2946,6 +2946,8 @@ export default {
   "Open panel": "打开面板",
   "Remove job": "移除任务",
   "Remove {name} and its run history?": "移除 {name} 及其运行历史？",
+  "Removed. One of its runs is still running; its log files are deleted 14 days after it ends.": "已移除。它的一次运行仍在进行；日志文件会在运行结束 14 天后删除。",
+  "Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.": "已移除。它的一次运行无法核实；等 VibeSpace 能确定它已结束时，日志文件才会删除。",
   "Removed. Its log files are still being deleted in the background.": "已移除。它的日志文件仍在后台删除中。",
   "created": "创建于",
   "no group": "无分组",

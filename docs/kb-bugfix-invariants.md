@@ -951,10 +951,12 @@ The five removers that did exist deleted whole directories synchronously on the 
    - an entry of another name.
 3. **Paced:** at most 500 run dirs a pass; a pass rests at least 30 s and at least ten times its own time while a catch-up is open (round 2); a cut pass is never repeated before a rest of at least 5 minutes; the setting `jobs.logsSweep` pauses it. The catch-up is said twice (start with the count, done with the total), and its record goes through the store writer: a restart resumes without a second start line.
 4. **NO removal under job-logs on the main thread.**
-   - ONE remover thread with a timeout.
-   - A thread that cannot end (the storage stopped answering) HOLDS the remover: no second thread beside it, and this is said once.
+   - ONE remover CHILD PROCESS with a timeout (round 2: a child, so the hub's exit never waits for it — an exit joins threads, not children).
+   - A child that cannot end (the storage stopped answering) HOLDS the remover: no second child beside it, and this is said once.
+   - The verdict is taken when the removal runs: an id a live record names again by then keeps its dir.
    - The whole-dir verdicts (the gc's two legs, the archive cap, the ✕, the boot collapse) are their callers'; the syscalls are the thread's.
-   - The ✕ answers once the dir is gone, or past 10 s with `logsPending` («its log files are still being deleted in the background»).
+   - The ✕'s promise is true or not made: it answers once the dir is gone; with what stays and why (a run still running, a run that could not be checked); or past 10 s with `logsPending` — and then the removal is owed in the record, durably, re-sent before every pass.
+   - A stamp that cannot be judged is kept until evidence: written before this machine's boot, it names no live process.
 5. **The pass never reads the archive synchronously on the main thread.** It uses the archive in memory when loaded; otherwise the thread reads it, and an unreadable archive removes nothing.
 6. **«No record names it» is a fact the hub holds (round 2).** While a record store of jobs is SET ASIDE (`jobs*.json.corrupt-*` in the data dir — the fact on disk, seen by every pass on every road and after every restart) or a read of one failed in this process, the law's pass removes nothing. Only «the file is not there» means «no records». The owner hears it ONCE: on the torn store's own item, on a torn archive's first item (records first, the clean-up second), and once for a set-aside never told of. Moving the file lifts it.
 

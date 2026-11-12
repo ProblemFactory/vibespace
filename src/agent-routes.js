@@ -2798,7 +2798,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     // an ARCHIVED record answers `rm` (control-holders; gone for good) and
     // nothing else — every other verb names the archive instead of a 404
     const arc = a.selfJob ? null : findVisibleIn(a.jm.archivedList(), a.caller, ref);
-    if (arc && act === 'rm' && jobModel.canControl(arc, a.caller)) { const r = a.jm.rmArchived(arc.id); if (r.error) return res.status(400).json({ error: r.error }); return a.jm.logsGone(arc.id).then((gone) => res.json({ success: true, ...r, ...(gone ? {} : { logsPending: true }) })); }   // lane job-logs-sweep: answered once its log dir is gone (off the main thread, ≤ 10 s)
+    if (arc && act === 'rm' && jobModel.canControl(arc, a.caller)) { const r = a.jm.rmArchived(arc.id); if (r.error) return res.status(400).json({ error: r.error }); return a.jm.logsGone(arc.id).then((v) => res.json({ success: true, ...r, ...(v.gone ? {} : v.kept && v.kept !== 'pending' ? { logsKept: v.kept } : { logsPending: true }) })); }   // lane job-logs-sweep: answered once its log dir is gone (off the main thread, ≤ 10 s)
     if (arc) return res.status(400).json({ error: `${arc.id} is archived (${arc.archivedWhy || 'terminal'}) — only rm applies; vibespace-job list --archived` });
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }

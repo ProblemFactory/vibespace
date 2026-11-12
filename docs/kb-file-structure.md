@@ -9,7 +9,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ```
 src/user-state-ops.js (NEW, PURE — lane sidebar-echo-order) — user state by item in the server's order: diffOps / applyOps, stateRev + stateEpoch, a FACT per slot (factStore / judgeRequest / moveFacts: the later act wins by each act's age), createSync (each request carries all unconfirmed) ⇒
 src/lib/sidebar-state.js _userSync / _applyServerState / _pushUserState (lane sidebar-echo-order) — the person's ops at the act to the ops door, each batch with its age; an echo at or below the page's stateRev changes nothing ⇒ the essay is src/user-state-ops.js's (below)
-src/job-logs-sweep.js + src/job-logs-sweep-worker.js — NEW (lane job-logs-sweep) THE JOB-LOGS REMOVER: runVerdict (age = NEWEST file; never listed / held / skeleton / alive), keepSetOf, createRemover (one queue, one thread, timeouts, HELD); the worker does every removal under data/job-logs ⇒
+src/job-logs-sweep.js + src/job-logs-sweep-worker.js — NEW (lane job-logs-sweep) THE JOB-LOGS REMOVER: runVerdict (age = NEWEST file; never listed / held / skeleton / alive), keepSetOf, createRemover (one queue, one child process, timeouts, HELD); the child does every removal under data/job-logs ⇒
 src/jobs.js sweepLogs · _logsWhole · logsGone (lane job-logs-sweep) — an unlisted run dir goes 14 days after its newest file (≤ 500 a pass, said twice); the five whole-dir removals through the worker; the ✕ answers after the disk (≤ 10 s, else logsPending) ⇒
 scripts/test-job-logs-sweep.mjs — fast (lane job-logs-sweep): a cron fired 30× (real wrapper), live / removed-job runs, the 5 000-run catch-up on slow storage (paced, off the loop, said twice), a restart mid-way, the removers, a wedged thread, 4 mutants ⇒
 src/loop-hold.js — PURE NEW (lane hub-loop-stalls) WHAT HELD THE LOOP: law G's frame words, ONE constant SAMPLE_EXPR, /proc parsers, the verdict FROM EACH ASK (askOf: state at the post; ≤ 2 ms = JavaScript), the one bar, lines, profile words ⇒ kb-file-structure.md
@@ -1678,11 +1678,13 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 - An entry that is neither `jb-…` nor numeric is never the sweep's.
 
 **ONE REMOVER — nothing under job-logs is removed on the main thread.**
-- `createRemover` keeps ONE queue and ONE worker thread:
-  - the thread is started for a batch and lingers 1 s idle, unref'd;
-  - each batch has a timeout of 120 s, ×4 for a counting pass, and is retried once;
-  - a terminated thread that has not ENDED after WEDGED_MS (2 s) is a syscall the storage never answers ⇒ HELD. No second thread is started beside it, every batch answers `{error:'held'}`, and this is said once, then «has ended — removals go on».
-- The worker answers the memory ask first (src/worker-memory.js) and throws on the main thread.
+- `createRemover` keeps ONE queue and ONE CHILD PROCESS (round 2 — a process's exit joins its threads, never its children; a worker thread wedged in a storage call held a standalone exit until it was killed):
+  - the child is forked for a batch (`child_process.fork`, an IPC channel, its env BUILT: a PATH only, a bounded heap) and lingers 1 s idle, unref'd;
+  - each batch has a timeout of 120 s and is killed past it (SIGKILL); only a whole-dir batch is retried once;
+  - a killed child that has not ENDED after WEDGED_MS (2 s) is an uninterruptible storage call ⇒ HELD. No second child is started beside it, every batch answers `{error:'held'}`, and this is said once, then «has ended — removals go on».
+  - **A stop never waits for it:** it is killed and left to the kernel; the hub's exit does not join it.
+- The child throws without its IPC channel (never in the hub's process). The memory census does not list it: it is its own process.
+- **The verdict is taken when the removal runs:** at dequeue a whole-dir batch drops every id a live record names again (`filterWhole`); the batch says «named» for those.
 - jobs.js keeps no `rmSync`. The five whole-dir verdicts (gc (a) and (b), the archive cap, the ✕, the boot collapse) call `_logsWhole(ids)`. A whole-dir removal keeps a run whose wrapper lives; the law's pass takes that dir once the run has ended and aged.
 - `_logsWhole` remembers ids whose batch failed or was held (`_logsOwed`, ≤ LOGS_OWED_MAX 5 000, memory only) and re-sends them first at the next pass.
 
@@ -1692,7 +1694,9 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 - **The catch-up:**
   - It opens when a pass finds more than B candidates; the count comes from a counting pass that walks on past B. It is said once with the count and closed once with the total.
   - Its record (`data/jobs-logs-sweep.json`: `{catchUp: {startedAt, counted, countedEntries, removed, entries, passes} | null, last}`) goes through `storeWriter().dirty(…, {name: 'jobs-logs-sweep.write'})`.
-  - The first pass after a boot reads that record IN THE WORKER (`_logsState === null` until then). A SIGKILL before a paced write costs at most one repeated start line.
+  - The pass reads that record FIRST, in the child, and validates its shape: a catch-up whose numbers are not finite is adopted as none. A record that cannot be read at all (a held remover) makes the pass wait; a missing one is none.
+  - **It is written DURABLY at the catch-up's open, and wherever something is owed or «said»,** so a restart resumes: never a second start line.
+  - It also keeps `owed` (whole-dir ids the storage did not take, ≤ 5 000, the overflow said once) and `heldNow` (the files of a standing hold, so «resumes» is said even after a restart).
 - **`deps.logsSweep`** `{max, gapMs, bootDelayMs, timeoutMs, retentionMs, workerPath}` is a suite's seam. The product's numbers are the module's: B 500, G 30 s, a boot delay of 2 min, 120 s, 14 days.
 
 **THE HELD FACT (round 2, law 1 — «no record names it» is a fact the hub holds, never «the hub could not read who names it»).**
@@ -1711,11 +1715,17 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 - **The counting pass counts BY NAME:** run dirs that STARTED more than 14 days ago and no record lists. Past B it reads directories only (no stat, no /proc), inside the normal timeout. The done line names the same run dirs: removed + kept (young by their newest file, live, unjudgeable — the last, complete pass's `keptOld`), equal to the start's count plus what crossed the line meanwhile. Job dirs are counted apart.
 - **THE PAUSE:** the setting `jobs.logsSweep` (boolean, default on, advanced, Background Work). jobs-wiring reads it with `logsSweepOn`. Off gates `sweepLogs` (the boot pass, the hourly pass, an open catch-up) and is said once per pause; never `_logsWhole`. The catch-up record waits, and the next hourly pass after it is turned on resumes it.
 
+**«KEPT UNTIL EVIDENCE» (round 2).** A stamp that cannot be judged keeps its run only while it could still name a live process. Written before this machine's boot (`/proc/stat` btime, read by the child) ⇒ no process it names runs ⇒ gone, for the sweep and for whole() alike (the release removed such dirs; round 1 kept them for ever). A suite hands its own boot instant (`deps.logsSweep.bootTimeMs`).
+
 **THE ✕ (`rmArchived`).**
-- The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`.
-- Both routes answer after `logsGone(id)` (≤ 10 s); past that they answer `logsPending: true`:
+- The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`, which resolves `{gone}` · `{kept: 'running' | 'unjudgeable' | 'named'}` · `{pending}`.
+- Both routes answer after `logsGone(id)` (≤ 10 s): gone, or `logsKept: <why>` (the panel and the CLI say a run still runs and its logs go 14 days after it ends, or that a run could not be checked), or past that `logsPending: true` — then the removal is OWED in the record, durably:
   - the panel toasts «Removed. Its log files are still being deleted in the background.»;
   - the CLI says «removed — its log files are still being deleted in the background».
+
+**NAMED, not built (round 2).**
+- Two engines over ONE data dir on different machines each sweep by their own keep set (`jobs.lock` is a local pid check): a hub on another machine over a shared data dir would remove every run its own records do not list. Refusing a pass when the lock's host / boot id is not this machine's is the fix, not built.
+- The keep set's cost at the archive's real cap: 2 000 archived records × ≤ 20 runs ≈ 40 000 `<id>/<runTs>` strings built on the main thread and cloned to the child once a pass (hourly, or every rest of a catch-up) — measured 19.1 ms worst loop delay on the owner's shape with a 2 000-record archive.
 
 **Gotchas.**
 - `_gc({now})` takes a clock like `archiveSweep`. A suite that wants the law's pass at a clock calls `sweepLogs({now})`. `_gc` at +15 days also collects a done cron child itself (leg (a)) — that is the old rule.

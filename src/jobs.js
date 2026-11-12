@@ -629,7 +629,7 @@ class JobManager {
     const w = this._writeArchive(arch.filter((r) => r.id !== id));
     if (!w.ok) return { error: 'archive write failed: ' + w.error }; // the row stays until its removal is durable
     // lane job-logs-sweep: its dir goes off the main thread; the routes answer the person once it is gone (logsGone, bounded)
-    const gone = this._logsWhole([id]).then((a) => !!a && !a.error && (a.gone || []).includes(id));
+    const gone = this._logsWhole([id]).then((a) => (!a || a.error ? { pending: true } : (a.gone || []).includes(id) ? { gone: true } : { kept: (a.keptWhy || {})[id] || 'pending' }));   // round 2: the promise names what stays and why
     this._logsGone.set(id, gone); gone.then(() => { if (this._logsGone.get(id) === gone) this._logsGone.delete(id); });
     try { this.d.broadcast('jobs-updated', { id, removed: true, archived: true }); } catch { }
     return { ok: true };
@@ -2504,7 +2504,8 @@ class JobManager {
   }
   _logsRemover() {
     const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
-    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined });
+    // filterWhole: THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS (round 2) — an id a live record names again by then keeps its dir
+    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id)), bootTimeMs: Number.isFinite(o.bootTimeMs) ? o.bootTimeMs : null });
     return this._logsRm;
   }
   /** a WHOLE job dir — its caller's verdict (the gc's two legs, the archive cap, the ✕, the boot collapse) — removed in the
@@ -2513,8 +2514,12 @@ class JobManager {
     if (this.readOnly || this._logsStopped) return Promise.resolve({ error: this.readOnly ? 'read-only' : 'stopped', gone: [] });
     const list = [...new Set(ids)];
     return this._logsRemover().whole(list).then((a) => {
-      if (a && a.error && a.error !== 'stopped') { for (const id of list) if (this._logsOwed.size < LOGS_OWED_MAX) this._logsOwed.add(id); }
+      const before = this._logsOwed.size;
+      if (a && a.error && a.error !== 'stopped') {
+        for (const id of list) { if (this._logsOwed.size < LOGS_OWED_MAX) this._logsOwed.add(id); else if (!this._logsOwedFullSaid) { this._logsOwedFullSaid = true; this.d.log(`[jobs] job-logs: more than ${LOGS_OWED_MAX} whole-dir removals are owed — the rest are not kept; the clean-up takes those dirs 14 days after their newest file`); } }
+      }
       else if (a) for (const id of list) this._logsOwed.delete(id);   // gone, or a live run kept (the law's pass takes it once it ends and ages)
+      if (this._logsOwed.size !== before || (a && !a.error && list.some((id) => (this._logsState && (this._logsState.owed || []).includes(id))))) this._logsKeepOwed();   // owed survives a restart: in the record, durably
       return a;
     });
   }
@@ -2534,7 +2539,10 @@ class JobManager {
   }
   async _logsPass(at, why) {
     const cfg = this._logsCfg();
-    if (this._logsStateP) await this._logsStateP;   // a set-aside this boot: its «said» is on disk before the pass
+    // round 2: the record FIRST (read in the child, its shape validated) — what was owed before a restart is re-sent below, and a
+    // catch-up of an odd shape steers nothing
+    if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
+    if (this._logsState === null) return { error: 'the catch-up record could not be read — nothing removed (a fresh record would overwrite what it owes)' };   // a MISSING record reads as none (adopted empty); a failed read waits
     if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);   // what the storage did not take last time, first
     // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
@@ -2546,7 +2554,6 @@ class JobManager {
       setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] } },
       { timeoutMs: cfg.timeoutMs });   // round 2: the counting pass has the same timeout — past B it only reads directories
     if (ans && !ans.error && ans.heldBy) { this._logsHeld(ans, cfg); return ans; }   // a set-aside record store: nothing removed, said once
-    if (this._logsHeldSaid && ans && !ans.error) { this._logsHeldSaid = ''; this.d.log('[jobs] job-logs clean-up resumes: no set-aside job record file is left in the data dir'); }
     if (!ans || ans.error) {
       const part = ans && ans.partial && Number.isFinite(ans.partial.removed) ? ans.partial : null;   // what a cut pass removed before it was ended
       if (ans && ans.error !== 'stopped' && !ans.held && (ans.error !== this._logsLastErr || part)) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — ${part ? `${part.removed} run dir(s) were removed before it was ended; ` : 'nothing removed; '}the next pass asks again after its rest`);   // HELD is said once by the remover; the same failure once
@@ -2558,10 +2565,15 @@ class JobManager {
     }
     this._logsLastErr = null;
     if (this._logsState === null) { this._logsAdopt(ans.state); this._logsMergeSaid(); }
+    if (this._logsHeldSaid || (this._logsState.heldNow || []).length) {   // a hold lifted — in this process or before a restart: said where the journal is read
+      this.d.log(`[jobs] job-logs clean-up resumes: no set-aside job record file is left in the data dir${(this._logsState.heldNow || []).length ? ` (held by ${this._logsState.heldNow.join(', ')})` : ''}`);
+      this._logsHeldSaid = ''; this._logsState.heldNow = []; this._logsSave();
+    }
     const st = this._logsState;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
       st.catchUp = { startedAt: at, counted: ans.nameOld, removed: 0, entries: 0, jobDirs: 0, passes: 0 };
       this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));
+      this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: on disk at the open — a restart resumes it, never a second start line
     }
     const cu = st.catchUp;
     if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; }
@@ -2587,6 +2599,7 @@ class JobManager {
     const files = ans.heldFiles || [], line = files.join(', ');
     if (this._logsHeldSaid !== line) { this._logsHeldSaid = line; this.d.log(`[jobs] job-logs clean-up HELD: ${line} in the data dir hold job records VibeSpace could not read — nothing is removed until they are moved or deleted`); }
     if (this._logsState === null) this._logsAdopt(ans.state);   // the record as read by this pass — what was said before the restart
+    if ((this._logsState.heldNow || []).join() !== files.join()) { this._logsState.heldNow = files.slice(0, 20); this._logsSave(); }   // the hold in the record: «resumes» is said even after a restart
     const said = new Set([...this._logsState.heldSaid, ...this._logsSaidNow]);
     for (const f of files) if (!said.has(f)) { this._forYou(null, M.forYouCopy(null, 'records-held', { file: path.join(this.d.dataDir, f) })); this._logsSaidNow.add(f); }
     this._logsMergeSaid();
@@ -2597,11 +2610,15 @@ class JobManager {
     const fin = (v) => typeof v === 'number' && Number.isFinite(v);
     const cu = r && r.catchUp;
     this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { jobDirs: 0, ...cu } : null,
-      last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [] };
+      last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [],
+      owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [] };
+    for (const id of this._logsState.owed) this._logsOwed.add(id);   // what an earlier process owed survives its restart
   }
   /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
-  _logsMarkSaid(name) {
-    this._logsSaidNow.add(name);
+  _logsMarkSaid(name) { this._logsSaidNow.add(name); this._logsEnsureMerged(); }
+  _logsKeepOwed() { this._logsEnsureMerged(); }
+  /** the record read (in the child) if it is not yet, then what this process holds is merged into it and written durably */
+  _logsEnsureMerged() {
     if (this.readOnly) return;
     if (this._logsState) { this._logsMergeSaid(); return; }
     if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile).then((a) => { if (this._logsState === null && a && !a.error) this._logsAdopt(a.state); this._logsMergeSaid(); }).catch(() => { }).finally(() => { this._logsStateP = null; });
@@ -2611,6 +2628,8 @@ class JobManager {
     let grew = false;
     for (const n of this._logsSaidNow) if (!st.heldSaid.includes(n)) { st.heldSaid.push(n); grew = true; }
     if (st.heldSaid.length > 100) st.heldSaid.splice(0, st.heldSaid.length - 100);
+    const owed = [...this._logsOwed].slice(-LOGS_OWED_MAX);
+    if (owed.join() !== (st.owed || []).join()) { st.owed = owed; grew = true; }
     if (grew) { this._logsSave(); require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { }); }   // «said» is an act: on disk now
   }
   /** the catch-up's record through THE STORE WRITER (its own thread, paced): a SIGKILL before its write costs at most one
@@ -2632,11 +2651,13 @@ class JobManager {
       return;
     }
   }
-  /** the ✕'s answer after the disk: true once the archived record's dir is gone, false past `ms` (the remover goes on) */
+  /** the ✕'s answer after the disk → {gone: true} · {kept: 'running' | 'unjudgeable' | 'named'} (a run of it still runs / could not
+   *  be judged — the law's pass takes it later; a live record names the id again) · {pending: true} (past `ms`, or the storage held
+   *  it: OWED in the record, durably — re-sent before every pass) */
   logsGone(id, ms = 10_000) {
     const p = this._logsGone.get(id);
-    if (!p) return Promise.resolve(true);
-    return new Promise((resolve) => { const t = setTimeout(() => resolve(false), ms); t.unref?.(); p.then((ok) => { clearTimeout(t); resolve(!!ok); }); });
+    if (!p) return Promise.resolve({ gone: true });
+    return new Promise((resolve) => { const t = setTimeout(() => resolve({ pending: true }), ms); t.unref?.(); p.then((v) => { clearTimeout(t); resolve(v && typeof v === 'object' ? v : { pending: true }); }); });
   }
 
   // ── public API (callers pre-authorize via job-model predicates) ─────────

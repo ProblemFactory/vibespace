@@ -378,6 +378,10 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const rmAns = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/rm`, { stop: !!flags.stop, orphan: !!flags.orphan });
       if (rmAns && rmAns.logsPending) {   // lane job-logs-sweep: an archived id's ✕ answered past its 10 s (two literal prints: the peer-text census judges every chain a print interpolates)
         console.log('removed — its log files are still being deleted in the background');
+      } else if (rmAns && rmAns.logsKept === 'running') {   // round 2: what stays and why
+        console.log('removed — one of its runs is still running; its log files are deleted 14 days after it ends');
+      } else if (rmAns && rmAns.logsKept === 'unjudgeable') {
+        console.log('removed — one of its runs could not be checked; its log files are deleted once it can be told it has ended');
       } else console.log('removed');
       break;
     }

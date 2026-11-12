@@ -189,7 +189,7 @@ try {
   const rmA = J1.rmArchived(arcId);
   const stillThere = has(arcRun);
   ok(rmA.ok && stillThere, 'the ✕ answers its record\'s removal with the dir still there — no removal on the main thread', `ok=${rmA.ok} there=${stillThere}`);
-  ok(typeof J1.logsGone === 'function' && (await J1.logsGone(arcId)) === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)');
+  ok(typeof J1.logsGone === 'function' && (await J1.logsGone(arcId)).gone === true && !has(d1, 'job-logs', arcId), '…and logsGone() resolves once the remover\'s worker has removed it (the routes answer the person then)');
   // a whole-dir verdict never takes a live run: the gc's leg (a) over a done task past 14 days with a live stray run
   const gcT = 'jb-9c0de0aa', live2 = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(live2);
   await until(() => PI.identityOf(live2.pid) != null, 3000);
@@ -207,7 +207,7 @@ try {
   const arc3Run = seedRun(d1, arc3, Date.now() - DAY);
   J1._logsRm = { whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: (...a) => realRm.sweep(...a), settled: () => realRm.settled(), busy: () => realRm.busy(), held: () => true, stop() { } };
   J1.rmArchived(arc3); const gone3 = await J1.logsGone(arc3);
-  ok(gone3 === false && has(arc3Run) && J1._logsOwed && J1._logsOwed.has(arc3), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed');
+  ok(gone3 && gone3.pending === true && has(arc3Run) && J1._logsOwed && J1._logsOwed.has(arc3), 'a ✕ the remover could not do (HELD): answered false (the routes say logsPending), its dir owed');
   J1._logsRm = realRm; await sweepAt(J1, Date.now());
   ok(!has(d1, 'job-logs', arc3) && !J1._logsOwed.has(arc3), '…and the next pass re-sends it first: gone, nothing owed');
   } else ok(false, 'a ✕ the remover could not do is owed and re-sent (no remover on this tree)');
@@ -223,25 +223,40 @@ try {
   await sweepAt(J1, Date.now());
   ok(has(orphanOld), 'an archive that cannot be read removes NOTHING (a record it names could be lost) — the pass fails and says so');
   fs.writeFileSync(path.join(d1, 'jobs-archive.json'), '[]');
-  // A WEDGED THREAD: a storage that never answers (a FIFO's open never returns) — the batch times out, no second thread is
-  // started beside it, the remover is HELD (said once), and goes on once the thread has ended
+  // A WEDGED CHILD: a storage call that never returns is an uninterruptible wait not even SIGKILL ends (a child cannot model it
+  // on a local disk — a FIFO's open IS interruptible): a stand-in child that never exits. The batch times out, the child is killed
+  // and does not end ⇒ no second child beside it, the remover is HELD (said once), and goes on once that child has ended
   if (LS) {
-    const fifo = path.join(tmp, 'wedge.fifo'), mark = path.join(tmp, 'wedge.released'); execFileSync('mkfifo', [fifo]);
-    const hang = path.join(tmp, 'wedged-worker.cjs');
-    fs.writeFileSync(hang, `const fs = require('fs'); const { parentPort } = require('worker_threads');\nparentPort.on('message', (m) => { if (!fs.existsSync(${JSON.stringify(mark)})) fs.readFileSync(${JSON.stringify(fifo)}); parentPort.postMessage({ seq: m.seq, removed: 0, entries: 0, more: false }); });\n`);
-    let started = 0; const { Worker } = await import('node:worker_threads');
-    class Counted extends Worker { constructor(...a) { super(...a); started++; } }
-    const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, workerPath: hang, WorkerImpl: Counted });
+    const { EventEmitter } = await import('node:events');
+    let started = 0, answer = false; const kids = [];
+    const fakeFork = () => { started++; const c = new EventEmitter(); c.kills = 0; c.ref = () => { }; c.unref = () => { }; c.channel = null;
+      c.kill = () => { c.kills++; };   // never exits on its own: wedged
+      c.send = (m) => { if (answer) setTimeout(() => c.emit('message', { seq: m.seq, removed: 0, entries: 0, more: false }), 5); };
+      kids.push(c); return c; };
+    const alive = setInterval(() => { }, 50);   // a stand-in child holds no handle — the real one keeps the loop up
+    const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, forkImpl: fakeFork });
     const a1 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
     const a2 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
-    ok(a1.error && !a1.held && a2.held && started === 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated); its thread cannot end ⇒ HELD — the next batch answers at once and NO second thread is started (${started} started)`);
+    ok(a1.error && !a1.held && a2.held && started === 1 && kids[0].kills >= 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated); its child is killed and does not end ⇒ HELD — the next batch answers at once and NO second child is started (${started} started)`);
     ok(said.filter((l) => /HELD/.test(l)).length === 1, 'the hold is said ONCE', said);
-    fs.writeFileSync(mark, '1'); { const fd = fs.openSync(fifo, 'w'); fs.closeSync(fd); }
-    await until(() => !R.held(), 5000);
+    answer = true; kids[0].emit('exit', null, 'SIGKILL');
     const a3 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
-    ok(!R.held() && !a3.error && started === 2 && said.some((l) => /has ended — removals go on/.test(l)), 'once the wedged thread ends the remover goes on (a new thread answers), and says so');
-    R.stop();
-  } else ok(false, 'a wedged thread holds the remover (no remover on this tree)');
+    ok(!R.held() && !a3.error && started === 2 && said.some((l) => /has ended — removals go on/.test(l)), 'once the wedged child ends the remover goes on (a new child answers), and says so');
+    R.stop(); clearInterval(alive);
+  } else ok(false, 'a wedged child holds the remover (no remover on this tree)');
+  // THE HUB'S EXIT NEVER WAITS FOR THE REMOVER (round 2): a process whose remover child is blocked in a storage call (a FIFO's
+  // open that never returns) exits at once — a process exit joins its threads, never its children; the child goes when its call does
+  if (LS) {
+    const fifoX = path.join(tmp, 'exit.fifo'); execFileSync('mkfifo', [fifoX]);
+    const blockF = path.join(tmp, 'block-child.cjs');
+    fs.writeFileSync(blockF, `const fs = require('fs'); process.on('message', (m) => { fs.openSync(${JSON.stringify(fifoX)}, 'r'); process.send({ seq: m.seq, removed: 0, more: false }); }); process.on('disconnect', () => process.exit(0));\n`);
+    const hubF = path.join(tmp, 'exiting-hub.cjs');
+    fs.writeFileSync(hubF, `const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))}); const R = LS.createRemover({ logsDir: '/nowhere', workerPath: ${JSON.stringify(blockF)} });\nR.sweep({ keep: {}, cutoff: 0, max: 1 }); setTimeout(() => { R.stop(); const t = Date.now(); process.on('exit', () => process.stderr.write('EXIT ' + (Date.now() - t) + '\\n')); process.exit(0); }, 400);\n`);
+    const t0 = Date.now();
+    const r = await new Promise((resolve) => { const c = spawn(process.execPath, [hubF], { stdio: ['ignore', 'ignore', 'pipe'] }); let err = ''; c.stderr.on('data', (d) => { err += d; }); const k = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 6000); c.on('exit', (code, sig) => { clearTimeout(k); resolve({ code, sig, err, ms: Date.now() - t0 }); }); });
+    try { const fd = fs.openSync(fifoX, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); } catch { /* ENXIO: no reader is left — the child was killed by the stop */ }
+    ok(r.code === 0 && !r.sig && /EXIT \d+/.test(r.err), `THE HUB'S EXIT NEVER WAITS FOR THE REMOVER: with its child blocked in a storage call, the process exits BY ITSELF (code ${r.code}${r.sig ? ', killed by the leg\'s 6 s backstop — it waited' : ''}; a thread there holds the exit until the backstop)`);
+  }
 
   // ── THE STATIC CENSUS OF jobs.js ───────────────────────────────────────────────────────────────────────────────────────
   lap('§S static');
@@ -250,11 +265,12 @@ try {
   const wholeSites = (JS.replace(/async _logsPass\([\s\S]*?\n  \}\n/, '').match(/this\._logsWhole\(/g) || []).length;   // the pass's own re-send of what is owed is not a verdict
   ok(wholeSites === 4, 'the whole-dir verdicts reach the remover at exactly four sites (the gc\'s two legs, the archive cap, the ✕, the boot collapse)', wholeSites);
   const WW = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), AR = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), CLI = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8'), PANEL = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
-  ok(/jm\.logsGone\(rec\.id\)\.then\(\(gone\) => res\.json\(\{ success: true, \.\.\.r, \.\.\.\(gone \? \{\} : \{ logsPending: true \}\) \}\)\)/.test(WW) && /a\.jm\.logsGone\(arc\.id\)\.then\(\(gone\) => res\.json\(\{ success: true, \.\.\.r, \.\.\.\(gone \? \{\} : \{ logsPending: true \}\) \}\)\)/.test(AR), 'both ✕ routes (the owner\'s and the agent\'s) answer after logsGone, `logsPending` past its bound');
-  ok(/if \(rmAns && rmAns\.logsPending\) \{[^\n]*\n\s*console\.log\('removed — its log files are still being deleted in the background'\);\n\s*\} else console\.log\('removed'\);/.test(CLI) && /act === 'rm' && r\?\.logsPending\) showToast\(t\('Removed\. Its log files are still being deleted in the background\.'\)\)/.test(PANEL), 'what the person reads past the bound: the panel\'s toast «Removed. Its log files are still being deleted in the background.», the CLI\'s «removed — its log files are still being deleted in the background»');
+  const ROUTE = '.then((v) => res.json({ success: true, ...r, ...(v.gone ? {} : v.kept && v.kept !== \'pending\' ? { logsKept: v.kept } : { logsPending: true }) }))';
+  ok(WW.includes('jm.logsGone(rec.id)' + ROUTE) && AR.includes('a.jm.logsGone(arc.id)' + ROUTE), 'both ✕ routes (the owner\'s and the agent\'s) answer after logsGone: gone, or what stays and why (`logsKept`), or `logsPending`');
+  ok(/if \(rmAns && rmAns\.logsPending\) \{[^\n]*\n\s*console\.log\('removed — its log files are still being deleted in the background'\);/.test(CLI) && /rmAns\.logsKept === 'running'\) \{[^\n]*\n\s*console\.log\('removed — one of its runs is still running; its log files are deleted 14 days after it ends'\);/.test(CLI) && /logsKept === 'unjudgeable'\) showToast/.test(PANEL) && /act === 'rm' && r\?\.logsPending\) showToast\(t\('Removed\. Its log files are still being deleted in the background\.'\)\)/.test(PANEL), 'what the person reads past the bound: the panel\'s toast «Removed. Its log files are still being deleted in the background.», the CLI\'s «removed — its log files are still being deleted in the background»');
   ok(!/_loadArchive\(/.test((JS.match(/async _logsPass\([\s\S]*?\n  \}\n/) || [''])[0]) && /async _logsPass\(/.test(JS), 'the pass never calls _loadArchive (its synchronous read): the archive from memory, or the worker reads it');
   const WK = (() => { try { return fs.readFileSync(path.join(ROOT, 'src/job-logs-sweep-worker.js'), 'utf8'); } catch { return ''; } })();
-  ok(/if \(isMainThread\) throw/.test(WK) && /lstatSync/.test(WK) && !/statSync\(/.test(WK.replace(/lstatSync/g, '')), 'the worker throws on the main thread and calls no stat that follows a link (that a link is never FOLLOWED is §G\'s legs, driven)');
+  ok(/if \(typeof process\.send !== 'function'\) throw/.test(WK) && /lstatSync/.test(WK) && !/statSync\(/.test(WK.replace(/lstatSync/g, '')), 'the remover\'s child throws without its IPC channel (never in the hub\'s process) and calls no stat that follows a link (that a link is never FOLLOWED is §G\'s legs, driven)');
 
 
   // ── §G THE GUARDS, EACH DRIVEN (round 2 §2: nine mutants left the suite green while a deletion changed) ───────────────
@@ -266,7 +282,7 @@ try {
     const canary = (name) => { const c = path.join(out, name), r = path.join(c, String(OLD)); fs.mkdirSync(r, { recursive: true }); fs.writeFileSync(path.join(r, 'pid.json'), JSON.stringify(deadStamp())); fs.writeFileSync(path.join(c, 'person.txt'), 'mine'); for (const f of [path.join(r, 'pid.json'), path.join(c, 'person.txt')]) age(f, 40 * DAY); return c; };
     const intact = (c) => has(c, 'person.txt') && has(c, String(OLD), 'pid.json');
     const seedAt = (dir, files = { 'pid.json': JSON.stringify(deadStamp()), 'current.log': 'x\n' }) => { fs.mkdirSync(dir, { recursive: true }); for (const [f, b] of Object.entries(files)) { fs.writeFileSync(path.join(dir, f), b); age(path.join(dir, f), 30 * DAY); } return dir; };
-    const R = LS.createRemover({ logsDir: GL });
+    const R = LS.createRemover({ logsDir: GL, bootTimeMs: Date.now() - 60 * DAY });   // a machine up for 60 days: a 30-day stamp is no evidence
     // 1. links: a linked job dir under the sweep; a linked run dir inside an unnamed job dir — the canaries outside stay whole
     const c1 = canary('c1'), c2 = canary('c2');
     fs.symlinkSync(c1, path.join(GL, 'jb-11110001'));
@@ -303,6 +319,18 @@ try {
     const wAns = await R.whole(['jb-11110009', 'jb-1111000a']);
     ok(intact(c3) && !fs.existsSync(path.join(GL, 'jb-11110009')) && (wAns.gone || []).includes('jb-11110009'), 'whole() over a job dir that is a LINK unlinks the link alone (as the release did) — the canary outside is whole, the id is gone');
     ok(intact(c4) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
+    // 7. «KEPT UNTIL EVIDENCE»: the same unjudgeable stamps on a machine booted since they were written cannot name a live process
+    const GE = path.join(g, 'evidence'), JE = path.join(GE, 'jb-1111000e'); fs.mkdirSync(JE, { recursive: true });
+    const evDir = seedAt(path.join(JE, String(OLD + 1)), { 'current.log': 'x\n' }); fs.mkdirSync(path.join(evDir, 'pid.json')); age(path.join(evDir, 'pid.json'), 30 * DAY);
+    const evObj = seedAt(path.join(JE, String(OLD + 2)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const evFresh = seedAt(path.join(JE, String(OLD + 3)), { 'pid.json': '{}', 'current.log': 'x\n' }); fs.utimesSync(path.join(evFresh, 'pid.json'), new Date(), new Date()); age(path.join(evFresh, 'current.log'), 30 * DAY);
+    const RE = LS.createRemover({ logsDir: GE, bootTimeMs: Date.now() - DAY });   // booted a day ago
+    await RE.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
+    ok(!has(evDir) && !has(evObj) && has(evFresh), 'KEPT UNTIL EVIDENCE: an unjudgeable stamp written before this machine\'s boot names no live process — its run goes; one written since the boot stays');
+    const JW = path.join(GE, 'jb-1111000f'); const wObj = seedAt(path.join(JW, String(OLD)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const wAns2 = await RE.whole(['jb-1111000f']);
+    ok(!has(JW) && (wAns2.gone || []).includes('jb-1111000f'), '…and a whole-dir verdict takes such a run too (the release removed it; round 1 kept it for ever)');
+    RE.stop();
     R.stop();
   } else ok(false, 'the guards are driven (no remover on this tree)');
 
@@ -422,16 +450,15 @@ try {
     ok(jb.length === 2 && /catch-up: 600 run dir\(s\) that started more than 14 days ago/.test(jb[0]) && /done: 540 run dir\(s\) removed .*; 60 kept \(young by their newest file/.test(jb[1]), 'THE COUNT IS BY NAME and the done line names the same run dirs: 600 at the start = 540 removed + 60 kept (young by their newest file)', jb);
     // c. a cut SWEEP batch is never repeated before its rest; a cut WHOLE-dir batch is retried once (its caller's verdict)
     if (LS) {
-      const slowF = path.join(tmp, 'slow-answer-worker.cjs');
-      fs.writeFileSync(slowF, "const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000); parentPort.postMessage({ seq: m.seq, removed: 0, entries: 0, more: false, gone: [] }); });\n");
-      let started = 0; const { Worker } = await import('node:worker_threads');
-      class Counted extends Worker { constructor(...a) { super(...a); started++; } }
-      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, WorkerImpl: Counted });
-      const t0 = Date.now(); const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1 }); const tookMs = Date.now() - t0, sweepStarts = started;
+      const slowF = path.join(tmp, 'slow-answer-child.cjs');
+      fs.writeFileSync(slowF, "process.on('message', (m) => { setTimeout(() => process.send({ seq: m.seq, removed: 0, entries: 0, more: false, gone: [] }), 3000); }); process.on('disconnect', () => process.exit(0));\n");
+      let started = 0; const cp = await import('node:child_process');
+      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, forkImpl: (...a) => { started++; return cp.fork(...a); } });
+      const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1 }); const sweepStarts = started;
       await until(() => !R.held(), 3000);
       const w = await R.whole(['jb-12340001']);
-      ok(cut.error && sweepStarts === 1 && tookMs < 1500, `A CUT SWEEP IS NOT REPEATED at once: one thread, one timeout (${tookMs} ms), answered — the pass's rest comes next`);
-      ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} threads)`);
+      ok(cut.error && /no answer in/.test(cut.error) && sweepStarts === 1, `A CUT SWEEP IS NOT REPEATED at once: one child, one timeout, answered («${cut.error}») — the pass's rest comes next`);
+      ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} children)`);
       R.stop();
     }
     // c2. the REAL worker's progress: a pass over a slow storage (1 ms a removal) cut at its timeout answers what it removed so far
@@ -443,7 +470,7 @@ try {
       const R2 = LS.createRemover({ logsDir: path.join(pc, 'job-logs'), timeoutMs: 350, wedgedMs: 2000, workerPath: slow1 });
       const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
       const goneOnDisk = 600 - runsOn(pc, 'jb-0ld0000c').length;
-      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 100 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed < 100, `the REAL worker's progress: a pass cut at its timeout answers what it removed so far (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said to the last hundred)`);
+      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 100 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed < 300, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said every hundred; a message in flight at the kill may lag one)`);
       R2.stop();
     }
     // d. a pass cut at its timeout RESTS (≥ 5 min, ≥ 10× its timeout) and keeps the count of what it removed before it was ended
@@ -464,12 +491,93 @@ try {
     ok(has(peRun) && LPE.filter((l) => /job-logs clean-up paused by the setting jobs\.logsSweep/.test(l)).length === 1, 'PAUSED (the setting off): the boot pass, a direct pass and the hourly gc remove nothing — said ONCE');
     const peArc = 'jb-a8c0ffee'; PE._writeArchive([{ id: peArc, kind: 'task', name: 'arch', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
     seedRun(pe, peArc, Date.now() - DAY); PE.rmArchived(peArc);
-    ok(typeof PE.logsGone === 'function' && (await PE.logsGone(peArc)) === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs');
+    ok(typeof PE.logsGone === 'function' && (await PE.logsGone(peArc)).gone === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs');
     on = true; await gcAt(PE, Date.now());
     ok(!has(peRun), 'turned ON again: the next hourly pass resumes and removes');
     const SCH = fs.readFileSync(path.join(ROOT, 'src/lib/settings-schema.js'), 'utf8'), WIR = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
     ok(/'jobs\.logsSweep': \{\n\s*type: 'boolean', default: true,/.test(SCH) && /logsSweepOn: \(\) => \{ try \{ return serverSetting\('jobs\.logsSweep'\) !== false; \}/.test(WIR), 'the pause is ONE schema row (boolean, default on) and its reader in jobs-wiring');
     ok(!/4 \* cfg\.timeoutMs/.test(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8')), 'the counting pass has the normal timeout (past B it reads directories only)');
+  }
+
+
+  // ── §4 THE SMALLER LAWS (round 2 §4) ───────────────────────────────────────────────────────────────────────────────────
+  lap('§4 the smaller laws');
+  {
+    const W = require(path.join(ROOT, 'src/store-writer.js'));
+    // a. THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS: a whole-dir removal queued behind a slow pass; a live record names its id again
+    const q = mkDir('q4'); fs.mkdirSync(path.join(q, 'job-logs'), { recursive: true });
+    const qb = Date.now() - 50 * DAY; for (let i = 0; i < 1500; i++) seedRun(q, 'jb-0ld0000d', qb + i * 1000, { ageMs: 30 * DAY });
+    const { jm: Q } = boot(q, { max: 2000, workerPath: slowWorker });
+    if (typeof Q.sweepLogs === 'function') {
+      const passP = Q.sweepLogs({ why: 'tick' }); await sleep(30);
+      const wholeP = Q._logsWhole(['jb-4e5ed001']);
+      const nt = Date.now() - 20 * DAY; Q.jobs.set('jb-4e5ed001', { id: 'jb-4e5ed001', kind: 'task', name: 'named-again', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: nt }, { startedAt: nt + 1000 }] });
+      const n1 = seedRun(q, 'jb-4e5ed001', nt), n2 = seedRun(q, 'jb-4e5ed001', nt + 1000);
+      const [, wAns] = await Promise.all([passP, wholeP]);
+      ok(has(n1) && has(n2) && (wAns.keptWhy || {})['jb-4e5ed001'] === 'named', 'THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS: a live record naming the id again by then keeps both of its runs (the batch says «named»)');
+    } else ok(false, 'the verdict is taken when the removal runs (no remover on this tree)');
+    // b. THE ✕'S PROMISE IS TRUE OR NOT MADE: a run still running / a run whose stamp cannot be judged ⇒ «kept», with why
+    const x = mkDir('x4'); const { jm: X } = boot(x, { bootTimeMs: Date.now() - 60 * DAY });
+    if (typeof X.logsGone === 'function') {
+      const liveX = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(liveX); await until(() => PI.identityOf(liveX.pid) != null, 3000);
+      const rec = (id) => ({ id, kind: 'task', name: id, state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 2 * DAY, endedAt: Date.now() - 2 * DAY }], archivedAt: Date.now(), archivedWhy: 'done' });
+      X._writeArchive([rec('jb-a9c0ffe1'), rec('jb-a9c0ffe2')]);
+      seedRun(x, 'jb-a9c0ffe1', Date.now() - 2 * DAY, { stamp: stampOf(liveX.pid) });
+      { const d2 = seedRun(x, 'jb-a9c0ffe2', Date.now() - 2 * DAY, { stamp: null, files: ['current.log'] }); fs.writeFileSync(path.join(d2, 'pid.json'), '{}'); }
+      X.rmArchived('jb-a9c0ffe1'); X.rmArchived('jb-a9c0ffe2');
+      const v1 = await X.logsGone('jb-a9c0ffe1'), v2 = await X.logsGone('jb-a9c0ffe2');
+      ok(v1.kept === 'running' && v2.kept === 'unjudgeable', `THE ✕ SAYS WHAT STAYS AND WHY: a run still running ⇒ «${v1.kept}», a stamp that cannot be judged ⇒ «${v2.kept}» (never «still being deleted» for a dir that will not go)`);
+      liveX.kill('SIGKILL');
+      // what is OWED survives a restart: a HELD ✕ → the record keeps it durably → a new engine's first pass removes it
+      const real = X._logsRemover(); X._logsRm = { ...real, whole: async () => ({ error: 'held', held: true, gone: [] }), sweep: (...a) => real.sweep(...a), state: (...a) => real.state(...a), settled: () => real.settled(), busy: () => real.busy(), held: () => true, stop: () => real.stop() };
+      X._writeArchive([rec('jb-a9c0ffe3')]); const owedRun = seedRun(x, 'jb-a9c0ffe3', Date.now() - DAY);
+      X.rmArchived('jb-a9c0ffe3'); const v3 = await X.logsGone('jb-a9c0ffe3');
+      if (X._logsStateP) await X._logsStateP;
+      await W.storeWriter().durable(path.join(x, 'jobs-logs-sweep.json'));
+      let rec3 = null; try { rec3 = JSON.parse(fs.readFileSync(path.join(x, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+      ok(v3.pending && rec3 && (rec3.owed || []).includes('jb-a9c0ffe3'), 'a ✕ the storage held is OWED in the record, on disk (the «still being deleted» promise survives a restart)');
+      X._logsRm = real; X.shutdown();
+      const { jm: X2 } = boot(x, { bootDelayMs: 20 });
+      await until(() => !has(owedRun), 5000, 10);
+      ok(!has(owedRun) && !X2._logsOwed.has('jb-a9c0ffe3'), '…and the next engine\'s first pass removes it: nothing owed is forgotten by a restart');
+      // past the cap: said ONCE
+      const { jm: X3, logs: LX3 } = boot(mkDir('x4b'));
+      const realX3 = X3._logsRemover(); X3._logsRm = { ...realX3, whole: async () => ({ error: 'held', held: true, gone: [] }), state: (...a) => realX3.state(...a), settled: () => realX3.settled(), busy: () => false, held: () => true, stop: () => realX3.stop() };
+      const many = Array.from({ length: 5003 }, (_, i) => 'jb-' + (0x50000000 + i).toString(16));
+      await X3._logsWhole(many); await X3._logsWhole(['jb-6ffffff1', 'jb-6ffffff2']);
+      ok(X3._logsOwed.size === 5000 && LX3.filter((l) => /more than 5000 whole-dir removals are owed/.test(l)).length === 1, 'past 5 000 owed removals the rest are not kept — and that is SAID once (never dropped without a word)');
+      X3._logsRm = realX3;
+    } else ok(false, 'the ✕ says what stays and why (no remover on this tree)');
+    // d. THE CATCH-UP RECORD: on disk at the open; an odd shape adopts nothing and throws nowhere
+    const c4 = mkDir('c4'); fs.mkdirSync(path.join(c4, 'job-logs'), { recursive: true });
+    const cb = Date.now() - 50 * DAY; for (let i = 0; i < 30; i++) seedRun(c4, 'jb-0ld0000e', cb + i * 1000, { ageMs: 30 * DAY });
+    fs.writeFileSync(path.join(c4, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: { startedAt: 'yesterday', counted: 'x' }, last: null }));
+    const { jm: C4, logs: LC4 } = boot(c4, { max: 10, gapMs: 3600e3 });
+    if (typeof C4.sweepLogs === 'function') {
+      let threw = null; try { await C4.sweepLogs({ why: 'boot' }); } catch (e) { threw = e; }
+      let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(path.join(c4, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+      ok(!threw && LC4.some((l) => /job-logs catch-up: 30 run dir\(s\)/.test(l)) && onDisk && onDisk.catchUp && onDisk.catchUp.counted === 30, 'a catch-up record of an odd shape adopts nothing and throws nowhere — a new catch-up opens, and its record is ON DISK when the opening pass answers (a restart resumes it)');
+    } else ok(false, 'the catch-up record is durable at the open (no law on this tree)');
+    // g. «resumes» is said after a restart too: the hold is in the record
+    const r4 = mkDir('r4'); fs.writeFileSync(path.join(r4, 'jobs-archive.json'), '[{ torn');
+    const { jm: R4a } = boot(r4); R4a._loadArchive(); await sweepAt(R4a, Date.now());
+    if (typeof R4a.sweepLogs === 'function') {
+      await W.storeWriter().durable(path.join(r4, 'jobs-logs-sweep.json')); R4a.shutdown();
+      const mv = path.join(tmp, 'moved-r4'); fs.mkdirSync(mv, { recursive: true });
+      for (const f of fs.readdirSync(r4).filter((n) => /\.corrupt-/.test(n))) fs.renameSync(path.join(r4, f), path.join(mv, f));
+      const { jm: R4b, logs: LR4b } = boot(r4, { bootDelayMs: 20 });
+      await until(() => LR4b.some((l) => /job-logs clean-up resumes/.test(l)), 5000, 10);
+      ok(LR4b.some((l) => /job-logs clean-up resumes: no set-aside job record file is left in the data dir \(held by jobs-archive\.json\.corrupt-\d+\)/.test(l)), '«resumes» is said where a person reads the journal even when the file was moved across a restart (the hold is in the record)');
+    } else ok(false, '«resumes» after a restart (no law on this tree)');
+    // f. §S, stronger: every removal call of jobs.js is a listed site; no alias of a removing fs call; the record never written by hand
+    const JS4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+    const REMOVALS_OK = ['fs.renameSync(this.archiveFile', 'fs.renameSync(this.file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile'];
+    const removals = [...JS4.matchAll(/fs\.(?:unlink|rm|rmdir|rename)Sync\(\s*[^,)]*|fs\.promises\.(?:rm|unlink|rmdir|rename)\(\s*[^,)]*/g)].map((m) => m[0]);
+    const strangers = removals.filter((r) => !REMOVALS_OK.includes(r));
+    ok(removals.length === 7 && !strangers.length, `jobs.js's removal calls are exactly the listed seven (the set-aside renames, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
+    ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js');
+    const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
+    ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');
   }
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────

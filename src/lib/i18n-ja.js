@@ -2946,6 +2946,8 @@ export default {
   "Open panel": "パネルを開く",
   "Remove job": "ジョブを削除",
   "Remove {name} and its run history?": "{name} と実行履歴を削除しますか？",
+  "Removed. One of its runs is still running; its log files are deleted 14 days after it ends.": "削除しました。実行の 1 つがまだ続いています。ログファイルはその終了から 14 日後に削除されます。",
+  "Removed. One of its runs could not be checked; its log files are deleted once VibeSpace can tell it has ended.": "削除しました。実行の 1 つを確認できませんでした。終了を確認できた時点でログファイルを削除します。",
   "Removed. Its log files are still being deleted in the background.": "削除しました。ログファイルはバックグラウンドで削除を続けています。",
   "created": "作成",
   "no group": "グループなし",

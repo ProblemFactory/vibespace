@@ -82,20 +82,23 @@ const words = {
   failed: ({ op, error, tries }) => `[jobs] job-logs remover: a ${op} batch failed (${error}) — ${tries < 2 ? 'queued again' : 'given up; the next pass retries'}`,
 };
 
-/** THE MAIN-THREAD SIDE: one queue, one worker at a time (started for a batch; idle, it lingers IDLE_MS unref'd, then goes), a
+/** THE MAIN-THREAD SIDE: one queue, one CHILD at a time (started for a batch; idle, it lingers IDLE_MS unref'd, then goes), a
  *  timeout per batch. whole(ids) → Promise<{removed, entries, keptAlive}>; sweep(args) → Promise<answer>; settled() →
  *  Promise once nothing is queued or in flight. A stopped remover answers {error:'stopped'} and starts nothing. */
-function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS, idleMs = IDLE_MS, wedgedMs = WEDGED_MS, workerPath = path.join(__dirname, 'job-logs-sweep-worker.js'), WorkerImpl = null } = {}) {
-  const Worker = WorkerImpl || require('worker_threads').Worker;
+function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS, idleMs = IDLE_MS, wedgedMs = WEDGED_MS, workerPath = path.join(__dirname, 'job-logs-sweep-worker.js'), forkImpl = null, filterWhole = null, bootTimeMs = null } = {}) {
+  // round 2 law «the hub's exit never waits for the remover»: a CHILD PROCESS, not a worker thread — a process's exit joins its
+  // threads (one wedged in a storage call held a standalone exit until it was killed), never its children
+  const fork = forkImpl || require('child_process').fork;
   const queue = [];
   let worker = null, cur = null, timer = null, idleT = null, seq = 0, stopped = false;
-  // a thread terminated past its timeout that has not ENDED yet — wedged in a syscall (a storage that stopped answering):
-  // no second thread is started beside it (each would wedge the same way); the batches meanwhile answer `held`
+  // a child killed past its timeout that has not ENDED yet — wedged in a syscall (a storage that stopped answering: an
+  // uninterruptible wait even SIGKILL cannot end): no second child is started beside it; the batches meanwhile answer `held`
   let wedged = null, wedgedPast = false, wedgedT = null, heldSaid = false;
   const idle = [];
   const settleIdle = () => { if (!cur && !queue.length) while (idle.length) idle.shift()(); };
   const finish = (ans) => {
     const it = cur; cur = null; if (timer) { clearTimeout(timer); timer = null; }
+    if (it && it.named && ans && !ans.error) ans = { ...ans, keptWhy: { ...(ans.keptWhy || {}), ...Object.fromEntries(it.named.map((id) => [id, 'named'])) } };
     if (it) it.resolve(ans);
     next();
   };
@@ -105,8 +108,8 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     if (w) {
       wedged = w; wedgedPast = false; heldSaid = false;
       wedgedT = setTimeout(() => { wedgedT = null; if (wedged === w) { wedgedPast = true; next(); } }, wedgedMs); wedgedT.unref?.();
-      w.once('exit', () => { if (wedged !== w) return; wedged = null; wedgedPast = false; if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } if (heldSaid) { try { log('[jobs] job-logs remover: its last thread has ended — removals go on'); } catch { } } next(); });
-      try { w.terminate(); } catch { }
+      w.once('exit', () => { if (wedged !== w) return; wedged = null; wedgedPast = false; if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } if (heldSaid) { try { log('[jobs] job-logs remover: its last child has ended — removals go on'); } catch { } } next(); });
+      try { w.kill('SIGKILL'); } catch { }
     }
     if (it) {
       it.tries = (it.tries || 0) + 1;
@@ -117,37 +120,46 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     }
     next();
   };
-  function startThread() {   // a worker_threads Worker (not a child process): it shares this process's env by design — no secret is handed to it
-    const w = new Worker(workerPath, { workerData: { logsDir }, resourceLimits: { maxOldGenerationSizeMb: 96, maxYoungGenerationSizeMb: 16 } });
-    try { require('./worker-memory.js').trackWorker('job-logs-remover', w); } catch { }   // the memory census (src/worker-memory.js)
+  /** the remover's child: our own script, its env BUILT (a PATH only — the hub's environment and its secrets never reach it),
+   *  an IPC channel and nothing else, a bounded heap */
+  function startChild() {
+    const w = fork(workerPath, [logsDir], { env: { PATH: process.env.PATH || '/usr/bin:/bin' }, execArgv: ['--max-old-space-size=96'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     w.on('message', (m) => {
-      if (m && m.ev === 'memory') return;   // the census's answer (src/worker-memory.js)
       if (w === worker && cur && m && m.seq === cur.msg.seq) { if (m.progress && !('removed' in m && 'more' in m)) { cur.progress = m.progress; return; } finish(m); }
     });
     w.on('error', (e) => { if (w === worker) fail((e && e.message) || String(e)); });
-    w.on('exit', (code) => { if (w === worker) { worker = null; if (cur) fail(`the worker exited (${code})`); } });
+    w.on('exit', (code, sig) => { if (w === worker) { worker = null; if (cur) fail(`the remover exited (${code != null ? code : sig})`); } });
     return w;
   }
+  const refs = (w, on) => { try { if (on) { w.ref(); w.channel && w.channel.ref(); } else { w.unref(); w.channel && w.channel.unref(); } } catch { } };
   function next() {
     if (stopped) { while (queue.length) queue.shift().resolve({ error: 'stopped' }); settleIdle(); return; }
     if (cur) return;
     if (!queue.length) {
-      if (worker && !idleT) { try { worker.unref(); } catch { } idleT = setTimeout(() => { idleT = null; if (!cur && !queue.length) { const w = worker; worker = null; try { w && w.terminate(); } catch { } } }, idleMs); idleT.unref?.(); }
+      if (worker && !idleT) { refs(worker, false); idleT = setTimeout(() => { idleT = null; if (!cur && !queue.length) { const w = worker; worker = null; try { w && w.kill('SIGKILL'); } catch { } } }, idleMs); idleT.unref?.(); }
       settleIdle(); return;
     }
     if (wedged) {   // its exit is awaited; past WEDGED_MS it is HELD: every queued batch answers at once, nothing is started, said once
       if (!wedgedPast) return;
-      if (!heldSaid) { heldSaid = true; try { log('[jobs] job-logs remover: HELD — its last thread was ended past its timeout and has not stopped yet (the storage is not answering); nothing is removed until it does'); } catch { } }
+      if (!heldSaid) { heldSaid = true; try { log('[jobs] job-logs remover: HELD — its last child was killed past its timeout and has not ended yet (the storage is not answering); nothing is removed until it does'); } catch { } }
       while (queue.length) queue.shift().resolve({ error: 'held', held: true });
       settleIdle(); return;
     }
     if (idleT) { clearTimeout(idleT); idleT = null; }
     cur = queue.shift();
-    try { if (!worker) worker = startThread(); else worker.ref(); } catch (e) { const it = cur; cur = null; it.resolve({ error: e.message }); next(); return; }
+    // THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS (round 2): a whole-dir batch drops, now, every id a live record names again
+    if (cur.msg.op === 'whole' && typeof filterWhole === 'function') {
+      let keepIds = []; try { keepIds = filterWhole(cur.msg.ids) || []; } catch { keepIds = cur.msg.ids; }
+      const named = new Set(cur.msg.ids.filter((id) => !keepIds.includes(id)));
+      if (named.size) { cur.named = [...named]; cur.msg = { ...cur.msg, ids: cur.msg.ids.filter((id) => !named.has(id)) }; }
+      if (!cur.msg.ids.length) { const it = cur; cur = null; it.resolve({ removed: 0, entries: 0, keptAlive: 0, gone: [], kept: [], keptWhy: Object.fromEntries((it.named || []).map((id) => [id, 'named'])) }); next(); return; }
+    }
+    if (bootTimeMs != null) cur.msg = { ...cur.msg, bootTimeMs };   // a suite's machine-boot instant (the product's: the child reads /proc/stat)
+    try { if (!worker) worker = startChild(); else refs(worker, true); } catch (e) { const it = cur; cur = null; it.resolve({ error: e.message }); next(); return; }
     const tmo = cur.timeoutMs || timeoutMs;
     timer = setTimeout(() => fail(`no answer in ${Math.round(tmo / 1000)} s`), tmo);
     timer.unref?.();
-    worker.postMessage(cur.msg);
+    try { worker.send(cur.msg); } catch (e) { fail((e && e.message) || String(e)); return; }
   }
   const ask = (msg, { timeoutMs: t = null } = {}) => new Promise((resolve) => {
     if (stopped) { resolve({ error: 'stopped' }); return; }
@@ -161,7 +173,9 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     settled: () => (cur || queue.length ? new Promise((r) => idle.push(r)) : Promise.resolve()),
     busy: () => !!cur || queue.length > 0,
     held: () => !!wedged,
-    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.terminate(); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped' }); next(); },
+    // a stop never waits for the child: it is killed and left to the kernel (a child wedged in a storage call ends when the call
+    // does; the hub's own exit does not join it)
+    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.kill('SIGKILL'); } catch { } try { w && refs(w, false); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped' }); next(); },
   };
 }
 
