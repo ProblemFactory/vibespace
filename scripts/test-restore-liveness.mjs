@@ -691,8 +691,14 @@ e2e: {
     const LIM = 640;
     const ssFile = path.join(wt, 'src/session-status.js');
     const ssFixed = fs.readFileSync(ssFile, 'utf8');
-    const ssPre = ssFixed.replace('this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);', 'this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);');
-    ok(ssPre !== ssFixed, 'e2e ⑤ setup: the pre-fix session-status copy took its patch (the timer calls the bare write)');
+    // lane hub-loop-stalls commit 2: session-status writes through THE STORE WRITER (its own thread; a failed write is
+    // reported, never thrown) — the pre-fix copy is then its write put BACK on the main thread: a bare synchronous write in
+    // its own 500 ms timer (the 2026-09-30 shape), the same options object; the older timer shape where a tree still has it
+    const SW_DIRTY = "require('./store-writer.js').storeWriter().dirty(this._file, { name: 'session-status.write', debounceMs: 500,";
+    const ssPre = ssFixed.includes(SW_DIRTY)
+      ? ssFixed.replace(SW_DIRTY, "((o) => { if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; const j = o.produce(); if (j != null) { fs.writeFileSync(this._file + '.tmp', j); fs.renameSync(this._file + '.tmp', this._file); o.onWritten(true); } }, 500); })({ name: 'session-status.write', debounceMs: 500,")
+      : ssFixed.replace('this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);', 'this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flush(); }, 500);');
+    ok(ssPre !== ssFixed, 'e2e ⑤ setup: the pre-fix session-status copy took its patch (its write a bare synchronous one in a main-thread timer)');
     const bootLimited = () => { const c = spawn(prlimitBin, [`--nofile=${LIM}:${LIM}`, 'node', 'server.js'], { cwd: wt, env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(c); return c; };
     const fdCount = (pid) => { try { return fs.readdirSync(`/proc/${pid}/fd`).length; } catch { return null; } };
     /** fill the server's table with ws connections until it refuses one; returns the open sockets */

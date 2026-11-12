@@ -216,8 +216,8 @@ console.log('— caps row');
   ok(/responseStyle: !!\(caps && caps\.responseStyle\)/.test(read('src/server/wrapper-files.js')), 'wrapperCaps reads that advert from the sidecar the WRAPPER writes (never session-meta \u2014 the 2.364.1 lesson)');
   // RESTART SURVIVAL: a live style must not evaporate when the server restarts
   // (the chip would report "default" for a session really running one).
-  ok(/outputStyle: session\._outputStyle \|\| null,/.test(read('src/ws-create.js')) && /writeSessionMeta\(session\.sockName, \{ \.\.\.m, outputStyle: session\._outputStyle \}\)/.test(wh),
-    'the effective style is written to session meta at spawn AND on every live change');
+  ok(/outputStyle: session\._outputStyle \|\| null,/.test(read('src/ws-create.js')) && /Promise\.resolve\(session\.sockName \? writeSessionMeta\(session\.sockName, \{ \.\.\.readSessionMeta\(session\.sockName\), outputStyle: session\._outputStyle \}, \{ durable: true \}\) : true\)\.then\(\(ok\) => \{\n\s+broadcastToSession\(session, data\.sessionId, \{ type: 'response-style-updated'/.test(wh),
+    'the effective style is written to session meta at spawn AND on every live change — the live change\u2019s write asked DURABLE (lane hub-loop-stalls commit 2: the store writer), its «response-style-updated» frame sent only after that write answered');
   ok(((s, r) => (s.match(new RegExp(r.source, 'g')) || []).length === 1 && r.test((s.match(/\nfunction sessionFromMeta\(meta, transportFacts\) \{[\s\S]*?\n\}\n/) || [''])[0]) && (s.match(/= sessionFromMeta\(meta, \{/g) || []).length === 3)(read('src/server/boot-restore.js'), /_outputStyle: meta\.outputStyle \|\| null,/),
     'boot-restore reads it back on ALL THREE session-construction paths (a dead persistence write is worse than none)');
   ok(/_outputStyle:\s+\{ owner: 'ws',\s+persisted: 'session-meta'/.test(read('src/session-schema.js')), 'the session-schema row names its real persistence home');
