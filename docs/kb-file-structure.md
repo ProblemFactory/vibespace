@@ -1705,6 +1705,12 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - a set-aside file the owner was never told of (one from before this version) gets `records-held` once.
   - The «said» names live in the record's `heldSaid`, written durably right after the filing (`_logsMarkSaid` reads the record in the worker first), so a restart never files twice. The hub does not resolve the item: it tells the person to move the file and that the clean-up then resumes by itself.
 
+**THE PACE AND THE PAUSE (round 2, law 3).**
+- **The rest:** a pass rests max(G, 10 × its own time) before the next (`restFactor`, `_logsRestMs`), so the storage's duty stays ≤ about 9 %.
+- **A cut SWEEP batch is never re-queued;** only a whole-dir batch, its caller's verdict, is retried once. The cut pass answers what it removed before it was ended (the worker posts progress every 100) and rests max(5 min, 10 × its timeout).
+- **The counting pass counts BY NAME:** run dirs that STARTED more than 14 days ago and no record lists. Past B it reads directories only (no stat, no /proc), inside the normal timeout. The done line names the same run dirs: removed + kept (young by their newest file, live, unjudgeable — the last, complete pass's `keptOld`), equal to the start's count plus what crossed the line meanwhile. Job dirs are counted apart.
+- **THE PAUSE:** the setting `jobs.logsSweep` (boolean, default on, advanced, Background Work). jobs-wiring reads it with `logsSweepOn`. Off gates `sweepLogs` (the boot pass, the hourly pass, an open catch-up) and is said once per pause; never `_logsWhole`. The catch-up record waits, and the next hourly pass after it is turned on resumes it.
+
 **THE ✕ (`rmArchived`).**
 - The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`.
 - Both routes answer after `logsGone(id)` (≤ 10 s); past that they answer `logsPending: true`:

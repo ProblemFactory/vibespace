@@ -3783,6 +3783,8 @@ export default {
   "{n} running": "{n} 个运行中",
   "{used} of {cap} slots in use": "已用 {used}/{cap} 个槽位",
   "0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; \"Keep running\" in a window exempts that app.": "0（默认）永不因为闲置而停止应用。填分钟数才会在桌面应用窗口无输入达到该时长后停止它；窗口里的“保持运行”可豁免该应用。",
+  "Clean up old job logs": "清理旧的任务日志",
+  "On: the log files of runs that no background job lists any more are deleted 14 days after they ended, a few hundred at a time in the background. Off: they are kept, and the clean-up resumes where it stopped within the hour of being turned back on. Removing a job still removes its logs either way.": "开启：后台任务已不再列出的运行，其日志文件在运行结束 14 天后删除，每次几百个，在后台进行。关闭：保留这些文件；重新开启后一小时内从停下的地方继续清理。无论开关如何，删除任务仍会删除它的日志。",
   "Archive finished tasks after (hours)": "已完成任务多少小时后归档",
   "A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.": "一次性任务成功结束这么多小时后离开后台工作列表进入归档（运行记录、投递日志与确认状态都保留；对该 id 的 poll/show 仍然有效）。0 = 永不归档已完成任务。",
   "Archive acknowledged failures after (days)": "已确认的失败多少天后归档",

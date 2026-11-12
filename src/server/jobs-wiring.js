@@ -142,6 +142,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read
     // live; an explicit 0 = never archive that class
     archivePolicy: () => ({ doneAfterHours: serverSetting('jobs.archiveDoneAfterHours'), failedAfterDays: serverSetting('jobs.archiveFailedAfterDays') }),
+    logsSweepOn: () => { try { return serverSetting('jobs.logsSweep') !== false; } catch { return true; } },   // lane job-logs-sweep r2: the clean-up's pause (the setting; default on)
     // THE MEMORY BOUND's ladder inputs (lane jobs-memory-bound), read live per run: the owner's setting as STORED (undefined
     // while never set — the schema's 4096 is the ladder's last rung, not an owner's word) and the cluster's default (the
     // chart's `jobs.memoryMb` → env VIBESPACE_JOBS_MEMORY_MB)

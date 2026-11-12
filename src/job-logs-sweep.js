@@ -74,8 +74,10 @@ function keepSetOf({ jobs = [], archive = [], held = [] } = {}) {
 const n0 = (n) => Number(n || 0).toLocaleString('en-US');
 const every = (ms) => (ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms)} ms`);
 const words = {
-  start: ({ counted, entries, max, gapMs }) => `[jobs] job-logs catch-up: ${n0(counted)} run dir(s) past the 14-day retention that no record lists (${n0(entries)} entries) — removing at most ${max} per pass, every ${every(gapMs)}, off the main thread`,
-  done: ({ removed, entries, passes, startedAt }) => `[jobs] job-logs catch-up done: ${n0(removed)} run dir(s) removed (${n0(entries)} entries) in ${passes} pass(es) since ${new Date(startedAt).toISOString()}`,
+  // round 2: the start counts BY NAME (run dirs that started more than 14 days ago and no record lists); the done line names the
+  // SAME run dirs: removed + kept (young by their newest file, live, unjudgeable) = the start's count + what crossed the line since
+  start: ({ counted, max, gapMs }) => `[jobs] job-logs catch-up: ${n0(counted)} run dir(s) that started more than 14 days ago and no record lists — removing at most ${max} per pass off the main thread, resting at least ${every(gapMs)} (ten times a pass's own time) between passes`,
+  done: ({ removed, entries, jobDirs = 0, kept = 0, passes, startedAt }) => `[jobs] job-logs catch-up done: ${n0(removed)} run dir(s) removed (${n0(entries)} entries) and ${n0(jobDirs)} job dir(s) no record names; ${n0(kept)} kept (young by their newest file, live, or their stamp unjudgeable) — ${passes} pass(es) since ${Number.isFinite(Number(startedAt)) ? new Date(Number(startedAt)).toISOString() : 'an earlier boot'}`,
   pass: ({ removed, entries }) => `[jobs] job-logs: ${n0(removed)} run dir(s) past the 14-day retention that no record lists removed (${n0(entries)} entries)`,
   failed: ({ op, error, tries }) => `[jobs] job-logs remover: a ${op} batch failed (${error}) — ${tries < 2 ? 'queued again' : 'given up; the next pass retries'}`,
 };
@@ -109,7 +111,9 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     if (it) {
       it.tries = (it.tries || 0) + 1;
       try { log(words.failed({ op: it.msg.op, error, tries: it.tries })); } catch { }
-      if (it.tries < 2 && !stopped) queue.unshift(it); else it.resolve({ error });
+      // round 2 law 3: only a WHOLE-dir batch (its caller's verdict) is retried at once; a cut SWEEP is never repeated before
+      // its rest (the pass's failure arms it) — it answers what it removed before it was ended
+      if (it.tries < 2 && !stopped && it.msg.op === 'whole') queue.unshift(it); else it.resolve({ error, ...(it.progress ? { partial: it.progress } : {}) });
     }
     next();
   };
@@ -118,7 +122,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     try { require('./worker-memory.js').trackWorker('job-logs-remover', w); } catch { }   // the memory census (src/worker-memory.js)
     w.on('message', (m) => {
       if (m && m.ev === 'memory') return;   // the census's answer (src/worker-memory.js)
-      if (w === worker && cur && m && m.seq === cur.msg.seq) finish(m);
+      if (w === worker && cur && m && m.seq === cur.msg.seq) { if (m.progress && !('removed' in m && 'more' in m)) { cur.progress = m.progress; return; } finish(m); }
     });
     w.on('error', (e) => { if (w === worker) fail((e && e.message) || String(e)); });
     w.on('exit', (code) => { if (w === worker) { worker = null; if (cur) fail(`the worker exited (${code})`); } });

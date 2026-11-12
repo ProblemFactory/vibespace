@@ -983,6 +983,15 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Background Work'), liveApply: true,
   },
+  // lane job-logs-sweep (round 2 law 3): THE PAUSE of the job-logs clean-up — off gates its boot pass, its hourly pass and an
+  // open catch-up; never the removals a record or a person asks for (removing a job, an archived job, the gc's own verdicts)
+  'jobs.logsSweep': {
+    type: 'boolean', default: true,
+    label: t('Clean up old job logs'),
+    description: t('On: the log files of runs that no background job lists any more are deleted 14 days after they ended, a few hundred at a time in the background. Off: they are kept, and the clean-up resumes where it stopped within the hour of being turned back on. Removing a job still removes its logs either way.'),
+    tier: 'advanced',
+    category: t('Background Work'), liveApply: true,
+  },
   // lane jobs-memory-bound (F6 of B-7f9e): THE LADDER's owner rung (src/job-model.js memoryMbOf) — read by the engine at every
   // run AS STORED (unset ⇒ the cluster's default, else 4096); 0 = unbounded, only ever by the owner's own word
   'jobs.memoryMb': {

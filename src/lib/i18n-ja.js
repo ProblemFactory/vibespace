@@ -3782,6 +3782,8 @@ export default {
   "{n} running": "{n} 件実行中",
   "{used} of {cap} slots in use": "{cap} スロット中 {used} 使用中",
   "0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; \"Keep running\" in a window exempts that app.": "0（既定）では放置中のアプリを停止しません。分数を設定すると、その時間入力のないデスクトップアプリのウィンドウを停止します。ウィンドウの「実行を維持」でそのアプリを除外できます。",
+  "Clean up old job logs": "古いジョブのログを片付ける",
+  "On: the log files of runs that no background job lists any more are deleted 14 days after they ended, a few hundred at a time in the background. Off: they are kept, and the clean-up resumes where it stopped within the hour of being turned back on. Removing a job still removes its logs either way.": "オン：どのバックグラウンドジョブにも一覧されなくなった実行のログファイルを、終了から 14 日後に、数百件ずつバックグラウンドで削除します。オフ：残します。オンに戻すと、1 時間以内に止まったところから片付けを再開します。どちらでも、ジョブを削除するとそのログは削除されます。",
   "Archive finished tasks after (hours)": "完了したタスクをアーカイブするまでの時間（時間）",
   "A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.": "正常に完了した単発タスクは、終了からこの時間が経つとバックグラウンド作業の一覧からアーカイブへ移ります（実行履歴・配信ログ・確認状態は保持され、その id への poll/show は引き続き応答します）。0 = 完了タスクをアーカイブしない。",
   "Archive acknowledged failures after (days)": "確認済みの失敗をアーカイブするまでの日数（日）",

@@ -72,9 +72,13 @@ function whole({ ids = [] }) {
   return out;
 }
 
-function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null, storeFile = null, setAside = null }) {
+function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile = null, archiveFile = null, storeFile = null, setAside = null, seq = null }) {
   const t0 = Date.now();
-  const out = { removed: 0, entries: 0, left: 0, leftEntries: 0, jobDirs: 0, failed: 0, more: false, kept: { listed: 0, held: 0, skeleton: 0, young: 0, alive: 0, unproven: 0 } };
+  // nameOld = run dirs that STARTED before the cutoff and no record lists, holds or recovered — THE CATCH-UP's count, BY NAME (a
+  // counting pass walks on past `max` with readdirs only: no stat, no /proc — round 2 law 3); keptOld = of those, the ones the full
+  // verdict kept (young by their newest file, live, unjudgeable) — the done line's «kept» (a complete pass's figure)
+  const out = { removed: 0, entries: 0, jobDirs: 0, nameOld: 0, keptOld: 0, unnamedJobs: 0, failed: 0, more: false, kept: { listed: 0, held: 0, skeleton: 0, young: 0, alive: 0, unproven: 0 } };
+  const progress = () => { if (seq != null && out.removed % 100 === 0) { try { parentPort.postMessage({ seq, progress: { removed: out.removed, entries: out.entries, jobDirs: out.jobDirs } }); } catch { } } };   // a pass cut at its timeout keeps its count
   if (stateFile) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } out.state = st && typeof st === 'object' ? st : null; }
   if (count === 'auto') count = !(out.state && out.state.catchUp);
   out.counted = !!count;
@@ -106,18 +110,21 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   walk: for (const je of jobs) {
     if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) continue;
     const id = je.name, jobDir = path.join(logsDir, id);
+    if (!named.has(id)) out.unnamedJobs++;
     let ents; try { ents = fs.readdirSync(jobDir, { withFileTypes: true }); } catch { continue; }
     const runs = ents.filter((e) => e.isDirectory() && S.RUN_NAME.test(e.name)).map((e) => e.name).sort((a, b) => Number(a) - Number(b));
     let removedHere = 0;
     for (const r of runs) {
       const runDir = path.join(jobDir, r), k = `${id}/${r}`;
+      const byName = !listed.has(k) && !held.has(k) && !skel.has(id) && Number(r) < cutoff;
+      if (byName) out.nameOld++;
+      if (out.removed >= max) { if (byName) { out.more = true; if (!count) break walk; } continue; }   // past B: counted by its name only
       let sc = null;
       const v = S.runVerdict({ listed: listed.has(k), held: held.has(k), skeleton: skel.has(id), startMs: Number(r), cutoff,
         newestMs: () => { sc = scan(runDir); return !sc ? Infinity : sc.n ? sc.newest : Number(r); }, alive: () => aliveOf(runDir) });
-      if (v !== 'remove') { out.kept[v]++; continue; }
+      if (v !== 'remove') { out.kept[v]++; if (byName) out.keptOld++; continue; }
       const n = 1 + (sc ? sc.n : 0);
-      if (out.removed >= max) { out.more = true; if (!count) break walk; out.left++; out.leftEntries += n; continue; }
-      try { fs.rmSync(runDir, { recursive: true, force: true }); out.removed++; out.entries += n; removedHere++; } catch { out.failed++; }
+      try { fs.rmSync(runDir, { recursive: true, force: true }); out.removed++; out.entries += n; removedHere++; progress(); } catch { out.failed++; }
     }
     // a job dir no record names: removed once empty — emptied by this pass, or old itself (a young empty one may be a spawn
     // between its two mkdirs; it is left to a later pass)
@@ -136,7 +143,7 @@ function stateOf({ stateFile }) { let st = null; try { st = JSON.parse(fs.readFi
 parentPort.on('message', (msg) => {
   if (answerMemory(msg, parentPort)) return;   // the memory census (src/worker-memory.js) — answered between two ops
   let out;
-  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep(msg) : msg && msg.op === 'state' ? stateOf(msg) : { error: 'unknown op' }; }
+  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
   parentPort.postMessage({ ...out, seq: msg && msg.seq });
 });

@@ -949,7 +949,7 @@ The five removers that did exist deleted whole directories synchronously on the 
    - a run held for an unfinished scope reap;
    - a skeleton record's dir (corrupt-store recovery);
    - an entry of another name.
-3. **Paced:** at most 500 run dirs a pass, a pass every 30 s while a catch-up is open. The catch-up is said twice (start with the count, done with the total), and its record goes through the store writer: a restart resumes without a second start line.
+3. **Paced:** at most 500 run dirs a pass; a pass rests at least 30 s and at least ten times its own time while a catch-up is open (round 2); a cut pass is never repeated before a rest of at least 5 minutes; the setting `jobs.logsSweep` pauses it. The catch-up is said twice (start with the count, done with the total), and its record goes through the store writer: a restart resumes without a second start line.
 4. **NO removal under job-logs on the main thread.**
    - ONE remover thread with a timeout.
    - A thread that cannot end (the storage stopped answering) HOLDS the remover: no second thread beside it, and this is said once.

@@ -34,9 +34,9 @@ const engines = [], kids = [];
 const caller = { conversationId: 'conv-L', sessionId: 'sess-L', sessionCreatedAt: 1, groups: new Set(['T-l']) };
 const owner = { conversation: { backend: 'claude', id: 'conv-L' }, sessionId: 'sess-L', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-l'] };
 const mkDir = (name) => { const dir = path.join(tmp, name); fs.mkdirSync(path.join(dir, 'bin'), { recursive: true }); fs.copyFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), path.join(dir, 'bin', 'job-wrapper.js')); return dir; };
-const boot = (dir, sweep = {}) => {
+const boot = (dir, sweep = {}, extra = {}) => {
   const logs = [], items = [];
-  const jm = new JobManager({ dataDir: dir, broadcast() { }, notifyUser(n) { items.push(n); return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, ...sweep } });
+  const jm = new JobManager({ dataDir: dir, broadcast() { }, notifyUser(n) { items.push(n); return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, restFactor: 1, ...sweep }, ...extra });   // restFactor 1: the suite's pace (the product rests 10× a pass — §P pins it)
   jm.init(); engines.push(jm);
   return { jm, logs, items };
 };
@@ -234,7 +234,7 @@ try {
     const said = [], R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere'), log: (l) => said.push(l), timeoutMs: 150, wedgedMs: 300, workerPath: hang, WorkerImpl: Counted });
     const a1 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
     const a2 = await R.sweep({ keep: {}, cutoff: 0, max: 1 });
-    ok(a1.held && a2.held && started === 1 && R.held(), `a batch past its timeout whose thread cannot end: HELD — the next batch answers at once and NO second thread is started (${started} started)`);
+    ok(a1.error && !a1.held && a2.held && started === 1 && R.held(), `a sweep past its timeout answers its timeout (never repeated); its thread cannot end ⇒ HELD — the next batch answers at once and NO second thread is started (${started} started)`);
     ok(said.filter((l) => /HELD/.test(l)).length === 1, 'the hold is said ONCE', said);
     fs.writeFileSync(mark, '1'); { const fd = fs.openSync(fifo, 'w'); fs.closeSync(fd); }
     await until(() => !R.held(), 5000);
@@ -397,6 +397,81 @@ try {
     ok(JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && setAsides(h7).length === 0 && has(h7Listed) && !has(h7Orphan), 'a STORE read that failed at boot with no set-aside (memory holds no record of it): the worker reads the store at the pass — its listed run stays, a run no record names goes');
   }
 
+
+  // ── §P THE PACE FOLLOWS THE STORAGE, AND A PERSON CAN STOP IT (round 2 law 3) ─────────────────────────────────────────
+  lap('§P pace and pause');
+  {
+    const seedOld = (dir, n, { youngEvery = 0 } = {}) => {
+      fs.mkdirSync(path.join(dir, 'job-logs'), { recursive: true });
+      const base = Date.now() - 50 * DAY;
+      for (let i = 0; i < n; i++) { const young = youngEvery && i % youngEvery === 0; seedRun(dir, 'jb-0ld00001', base + i * 1000, { ageMs: young ? DAY : 30 * DAY }); }
+    };
+    // a. the rest after a pass is ≥ 10 × that pass's own time (the product's factor), never only the gap
+    const pa = mkDir('pa'); seedOld(pa, 600);
+    const ansA = [];
+    const { jm: PA } = boot(pa, { max: 200, gapMs: 20, restFactor: 10, workerPath: slowWorker });
+    const oa = PA.sweepLogs.bind(PA); PA.sweepLogs = (o) => { const pr = oa(o); pr.then((a) => ansA.push(a)); return pr; };
+    await PA.sweepLogs({ why: 'boot' });
+    ok(ansA[0] && ansA[0].removed === 200 && PA._logsRestMs >= Math.max(20, 10 * ansA[0].ms) && ansA[0].ms >= 40, `A SLOW PASS EARNS A LONGER REST: a pass of ${ansA[0] && ansA[0].ms} ms rests ${PA._logsRestMs} ms (≥ 10× its own time, ≥ the gap)`);
+    PA.shutdown();
+    // b. the count BY NAME reconciles: 600 runs started > 14 days ago, 60 of them young by their newest file — start 600, done 540 + 60 kept
+    const pb = mkDir('pb'); seedOld(pb, 600, { youngEvery: 10 });
+    const { jm: PB, logs: LPB } = boot(pb, { max: 200, gapMs: 15, bootDelayMs: 20 });
+    await until(() => PB._logsState && PB._logsState.last && !PB._logsState.catchUp && LPB.some((l) => /catch-up done/.test(l)), typeof PB.sweepLogs === 'function' ? 15000 : 1000, 10);
+    const jb = LPB.filter((l) => /job-logs catch-up/.test(l));
+    ok(jb.length === 2 && /catch-up: 600 run dir\(s\) that started more than 14 days ago/.test(jb[0]) && /done: 540 run dir\(s\) removed .*; 60 kept \(young by their newest file/.test(jb[1]), 'THE COUNT IS BY NAME and the done line names the same run dirs: 600 at the start = 540 removed + 60 kept (young by their newest file)', jb);
+    // c. a cut SWEEP batch is never repeated before its rest; a cut WHOLE-dir batch is retried once (its caller's verdict)
+    if (LS) {
+      const slowF = path.join(tmp, 'slow-answer-worker.cjs');
+      fs.writeFileSync(slowF, "const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000); parentPort.postMessage({ seq: m.seq, removed: 0, entries: 0, more: false, gone: [] }); });\n");
+      let started = 0; const { Worker } = await import('node:worker_threads');
+      class Counted extends Worker { constructor(...a) { super(...a); started++; } }
+      const R = LS.createRemover({ logsDir: path.join(tmp, 'nowhere2'), timeoutMs: 150, wedgedMs: 2000, workerPath: slowF, WorkerImpl: Counted });
+      const t0 = Date.now(); const cut = await R.sweep({ keep: {}, cutoff: 0, max: 1 }); const tookMs = Date.now() - t0, sweepStarts = started;
+      await until(() => !R.held(), 3000);
+      const w = await R.whole(['jb-12340001']);
+      ok(cut.error && sweepStarts === 1 && tookMs < 1500, `A CUT SWEEP IS NOT REPEATED at once: one thread, one timeout (${tookMs} ms), answered — the pass's rest comes next`);
+      ok(w.error && started === 3, `…while a cut WHOLE-dir batch (a caller's verdict) is retried once (${started - sweepStarts} threads)`);
+      R.stop();
+    }
+    // c2. the REAL worker's progress: a pass over a slow storage (1 ms a removal) cut at its timeout answers what it removed so far
+    if (LS) {
+      const slow1 = path.join(tmp, 'slow1-worker.cjs');
+      fs.writeFileSync(slow1, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 1; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+      const pc = path.join(tmp, 'pc'); fs.mkdirSync(path.join(pc, 'job-logs'), { recursive: true });
+      const base = Date.now() - 50 * DAY; for (let i = 0; i < 600; i++) seedRun(pc, 'jb-0ld0000c', base + i * 1000, { ageMs: 30 * DAY });
+      const R2 = LS.createRemover({ logsDir: path.join(pc, 'job-logs'), timeoutMs: 350, wedgedMs: 2000, workerPath: slow1 });
+      const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
+      const goneOnDisk = 600 - runsOn(pc, 'jb-0ld0000c').length;
+      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 100 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed < 100, `the REAL worker's progress: a pass cut at its timeout answers what it removed so far (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said to the last hundred)`);
+      R2.stop();
+    }
+    // d. a pass cut at its timeout RESTS (≥ 5 min, ≥ 10× its timeout) and keeps the count of what it removed before it was ended
+    if (typeof PB._logsRemover === 'function') {
+      const pd = mkDir('pd'); const { jm: PD, logs: LPD } = boot(pd, { timeoutMs: 1000, restFactor: 10 });
+      PD._logsState = { catchUp: { startedAt: Date.now(), counted: 900, removed: 0, entries: 0, jobDirs: 0, passes: 1 }, last: null, heldSaid: [] };
+      const real = PD._logsRemover(); PD._logsRm = { ...real, sweep: async () => ({ error: 'no answer in 1 s', partial: { removed: 3, entries: 9, jobDirs: 0 } }), whole: (...a) => real.whole(...a), settled: () => real.settled(), busy: () => real.busy(), held: () => false, stop: () => real.stop() };
+      await PD.sweepLogs({ why: 'catch-up' });
+      ok(PD._logsRestMs >= 300000 && PD._logsRestMs >= 10 * 1000 && PD._logsState.catchUp.removed === 3 && LPD.some((l) => /3 run dir\(s\) were removed before it was ended/.test(l)), `A CUT PASS RESTS (${PD._logsRestMs} ms) and keeps the count of what it removed before it was ended (3)`);
+      clearTimeout(PD._logsGapT); PD._logsGapT = null; PD._logsRm = real;
+    } else ok(false, 'a cut pass rests and keeps its count (no law on this tree)');
+    // e. THE PAUSE: the setting off — the boot pass, the hourly one and an open catch-up remove nothing (said once); the removals a
+    // record or a person asks for still run; on again ⇒ the next hourly pass resumes
+    const pe = mkDir('pe'); let on = false;
+    const peRun = seedRun(pe, 'jb-0e1a00e1', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: PE, logs: LPE } = boot(pe, { bootDelayMs: 20 }, { logsSweepOn: () => on });
+    await sleep(120); await sweepAt(PE, Date.now()); await gcAt(PE, Date.now());
+    ok(has(peRun) && LPE.filter((l) => /job-logs clean-up paused by the setting jobs\.logsSweep/.test(l)).length === 1, 'PAUSED (the setting off): the boot pass, a direct pass and the hourly gc remove nothing — said ONCE');
+    const peArc = 'jb-a8c0ffee'; PE._writeArchive([{ id: peArc, kind: 'task', name: 'arch', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
+    seedRun(pe, peArc, Date.now() - DAY); PE.rmArchived(peArc);
+    ok(typeof PE.logsGone === 'function' && (await PE.logsGone(peArc)) === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs');
+    on = true; await gcAt(PE, Date.now());
+    ok(!has(peRun), 'turned ON again: the next hourly pass resumes and removes');
+    const SCH = fs.readFileSync(path.join(ROOT, 'src/lib/settings-schema.js'), 'utf8'), WIR = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
+    ok(/'jobs\.logsSweep': \{\n\s*type: 'boolean', default: true,/.test(SCH) && /logsSweepOn: \(\) => \{ try \{ return serverSetting\('jobs\.logsSweep'\) !== false; \}/.test(WIR), 'the pause is ONE schema row (boolean, default on) and its reader in jobs-wiring');
+    ok(!/4 \* cfg\.timeoutMs/.test(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8')), 'the counting pass has the normal timeout (past B it reads directories only)');
+  }
+
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────
   lap('P4 the catch-up');
   const seedTree = (dir, n) => {
@@ -428,7 +503,7 @@ try {
   ok(real4.length >= 2 && real4.slice(1).every((a, i) => a.at - real4[i].at >= 25), 'each pass after the gap (≥ 25 ms between passes here; 30 s in the product)');
   ok(done4 && worstMs < 60, `OFF THE LOOP (a slow storage: ${SLOW_MS} ms a removal): the main loop's worst delay over the whole catch-up ${worstMs.toFixed(1)} ms (< 60 ms; a pass of 500 is ≥ ${500 * SLOW_MS} ms of removals)`);
   const jl4 = L4.filter((l) => /job-logs/.test(l));
-  ok(jl4.length === 2 && /catch-up: 5,000 run dir\(s\) past the 14-day retention that no record lists \(15,000 entries\) — removing at most 500 per pass, every 25 ms, off the main thread$/.test(jl4[0]) && /catch-up done: 5,000 run dir\(s\) removed \(15,000 entries\) in \d+ pass\(es\)/.test(jl4[1]), 'SAID TWICE: once at the start with the count, once when done with the total — nothing in between', jl4);
+  ok(jl4.length === 2 && /catch-up: 5,000 run dir\(s\) that started more than 14 days ago and no record lists — removing at most 500 per pass off the main thread, resting at least 25 ms/.test(jl4[0]) && /catch-up done: 5,000 run dir\(s\) removed \(15,000 entries\) and 0 job dir\(s\) no record names; 0 kept .* — \d+ pass\(es\)/.test(jl4[1]), 'SAID TWICE: once at the start with the count, once when done with the total — nothing in between', jl4);
   // CONTROL: ONE pass of the same removals ON the main thread (the release's shape: a synchronous rm per dir), the same slow
   // storage — the loop is held past the bound
   {

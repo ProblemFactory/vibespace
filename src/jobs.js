@@ -121,6 +121,7 @@ const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
 // runs at boot and every ARCHIVE_SWEEP_MS on the engine's existing 5 s tick
 const ARCHIVE_CAP = 2000;
+const LOGS_REST_FACTOR = 10; // lane job-logs-sweep r2: a pass rests ≥ 10× its own time (the storage's duty ≤ ~9 %)
 const LOGS_RETRY_MS = 300_000; // lane job-logs-sweep: a failed pass inside an open catch-up is retried after 5 min (a held remover, a storage that did not answer)
 const LOGS_OWED_MAX = 5000; // lane job-logs-sweep: whole-dir removals owed after a held / failed batch, kept in memory at most
 const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
@@ -2499,7 +2500,7 @@ class JobManager {
   _logsCfg() {
     const o = (this.d && this.d.logsSweep) || {};
     const num = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
-    return { max: num(o.max, LS.PASS_MAX), gapMs: num(o.gapMs, LS.GAP_MS), bootDelayMs: num(o.bootDelayMs, LS.BOOT_DELAY_MS), timeoutMs: num(o.timeoutMs, LS.BATCH_TIMEOUT_MS), retentionMs: num(o.retentionMs, LS.RETENTION_MS) };
+    return { max: num(o.max, LS.PASS_MAX), gapMs: num(o.gapMs, LS.GAP_MS), bootDelayMs: num(o.bootDelayMs, LS.BOOT_DELAY_MS), timeoutMs: num(o.timeoutMs, LS.BATCH_TIMEOUT_MS), retentionMs: num(o.retentionMs, LS.RETENTION_MS), restFactor: num(o.restFactor, LOGS_REST_FACTOR) };
   }
   _logsRemover() {
     const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
@@ -2522,6 +2523,10 @@ class JobManager {
    *  second ask shares the one in flight. `now` is injectable (like archiveSweep). */
   sweepLogs({ now: at = now(), why = 'tick' } = {}) {
     if (this.readOnly || this._logsStopped) return Promise.resolve({ skipped: this.readOnly ? 'read-only' : 'stopped' });
+    // THE PAUSE (round 2 law 3): the setting jobs.logsSweep — off gates this pass (the boot's, the hourly one, the catch-up's);
+    // never _logsWhole (the five removals a record or a person asks for). Said once per pause; the catch-up record waits as it is
+    if (!this._logsOn()) { if (!this._logsPausedSaid) { this._logsPausedSaid = true; this.d.log('[jobs] job-logs clean-up paused by the setting jobs.logsSweep — nothing is removed by it (removing a job still removes its logs); it resumes where it stopped within the hour of being turned on'); } return Promise.resolve({ skipped: 'paused' }); }
+    this._logsPausedSaid = false;
     if (this._logsPassP) return this._logsPassP;
     const p = this._logsPass(at, why).finally(() => { if (this._logsPassP === p) this._logsPassP = null; });
     this._logsPassP = p;
@@ -2536,36 +2541,41 @@ class JobManager {
     // the archive from memory when it is loaded; otherwise the worker reads its file (never _loadArchive's synchronous read here)
     const keep = LS.keepSetOf({ jobs: [...this.jobs.values()], archive: this.archive || [], held });
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
-    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,
+    const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,   // `counting` walks on past B by NAME only (no stat, no /proc)
       archiveFile: this.archive && !this._logsUnread.archive ? null : this.archiveFile, storeFile: this._logsUnread.store ? this.file : null,
       setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] } },
-      { timeoutMs: counting ? 4 * cfg.timeoutMs : cfg.timeoutMs });   // a counting pass walks the whole tree (≈ 30 s on the owner's NAS)
+      { timeoutMs: cfg.timeoutMs });   // round 2: the counting pass has the same timeout — past B it only reads directories
     if (ans && !ans.error && ans.heldBy) { this._logsHeld(ans, cfg); return ans; }   // a set-aside record store: nothing removed, said once
     if (this._logsHeldSaid && ans && !ans.error) { this._logsHeldSaid = ''; this.d.log('[jobs] job-logs clean-up resumes: no set-aside job record file is left in the data dir'); }
     if (!ans || ans.error) {
-      if (ans && ans.error !== 'stopped' && !ans.held && ans.error !== this._logsLastErr) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — nothing removed; the next pass asks again`);   // HELD is said once by the remover; the same failure once
+      const part = ans && ans.partial && Number.isFinite(ans.partial.removed) ? ans.partial : null;   // what a cut pass removed before it was ended
+      if (ans && ans.error !== 'stopped' && !ans.held && (ans.error !== this._logsLastErr || part)) this.d.log(`[jobs] job-logs pass (${why}) failed: ${ans.error} — ${part ? `${part.removed} run dir(s) were removed before it was ended; ` : 'nothing removed; '}the next pass asks again after its rest`);   // HELD is said once by the remover; the same failure once
       if (ans) this._logsLastErr = ans.error;
-      if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));   // an open catch-up never stalls on a failed pass
+      const cuF = this._logsState && this._logsState.catchUp;
+      if (cuF && part) { cuF.removed += part.removed; cuF.entries += part.entries || 0; cuF.jobDirs = (cuF.jobDirs || 0) + (part.jobDirs || 0); this._logsSave(); }
+      if (cuF) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS, cfg.restFactor * cfg.timeoutMs));   // a failed or cut pass RESTS (≥ 5 min, ≥ 10× its timeout); an open catch-up never stalls
       return ans;
     }
     this._logsLastErr = null;
     if (this._logsState === null) { this._logsAdopt(ans.state); this._logsMergeSaid(); }
     const st = this._logsState;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
-      st.catchUp = { startedAt: at, counted: ans.removed + ans.left, countedEntries: ans.entries + ans.leftEntries, removed: 0, entries: 0, passes: 0 };
-      this.d.log(LS.words.start({ counted: st.catchUp.counted, entries: st.catchUp.countedEntries, max: cfg.max, gapMs: cfg.gapMs }));
+      st.catchUp = { startedAt: at, counted: ans.nameOld, removed: 0, entries: 0, jobDirs: 0, passes: 0 };
+      this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));
     }
     const cu = st.catchUp;
-    if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.passes++; }
+    if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; }
     else if (ans.removed) this.d.log(LS.words.pass(ans));
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
-    if (cu && !ans.more) { this.d.log(LS.words.done(cu)); st.catchUp = null; } // …and once when it is done, with its total
+    if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
-    if (st.catchUp) this._logsNext(cfg.gapMs);
+    if (st.catchUp) this._logsNext(Math.max(cfg.gapMs, cfg.restFactor * (ans.ms || 0)));   // round 2: a slow pass earns a longer rest
     return ans;
   }
+  _logsOn() { try { return !(this.d && typeof this.d.logsSweepOn === 'function' && this.d.logsSweepOn() === false); } catch { return true; } }   // the setting jobs.logsSweep (jobs-wiring)
   _logsNext(ms) {
     if (this._logsGapT) clearTimeout(this._logsGapT);
+    this._logsRestMs = ms;   // the rest armed (a suite reads it)
     if (this._logsStopped) return;
     this._logsGapT = setTimeout(() => { this._logsGapT = null; this.sweepLogs({ why: 'catch-up' }).catch((e) => this.d.log('[jobs] job-logs pass failed:', e.message)); }, ms);
     this._logsGapT.unref?.();
@@ -2586,7 +2596,7 @@ class JobManager {
   _logsAdopt(r) {
     const fin = (v) => typeof v === 'number' && Number.isFinite(v);
     const cu = r && r.catchUp;
-    this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { countedEntries: 0, ...cu } : null,
+    this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { jobDirs: 0, ...cu } : null,
       last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [] };
   }
   /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
