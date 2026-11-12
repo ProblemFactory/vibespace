@@ -427,7 +427,7 @@ try {
     fs.existsSync = function (f, ...a) { if (String(f) === SF) return false; return ex.call(this, f, ...a); };
     let JH7; try { JH7 = boot(h7).jm; } finally { fs.readFileSync = rf; fs.existsSync = ex; }
     await sweepAt(JH7, Date.now());
-    ok(JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && setAsides(h7).length === 0 && has(h7Listed) && !has(h7Orphan), 'a STORE read that failed at boot with no set-aside (memory holds no record of it): the worker reads the store at the pass — its listed run stays, a run no record names goes');
+    ok(JH7._logsUnread && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && setAsides(h7).length === 0 && has(h7Listed) && !has(h7Orphan), 'a STORE read that failed at boot with no set-aside (memory holds no record of it): the worker reads the store at the pass — its listed run stays, a run no record names goes');
   }
 
 
@@ -443,8 +443,7 @@ try {
     const pa = mkDir('pa'); seedOld(pa, 600);
     const ansA = [];
     const { jm: PA } = boot(pa, { max: 200, gapMs: 20, restFactor: 10, workerPath: slowWorker });
-    const oa = PA.sweepLogs.bind(PA); PA.sweepLogs = (o) => { const pr = oa(o); pr.then((a) => ansA.push(a)); return pr; };
-    await PA.sweepLogs({ why: 'boot' });
+    if (typeof PA.sweepLogs === 'function') { const oa = PA.sweepLogs.bind(PA); PA.sweepLogs = (o) => { const pr = oa(o); pr.then((a) => ansA.push(a)); return pr; }; await PA.sweepLogs({ why: 'boot' }); }   // the release has no pass: red by name below
     ok(ansA[0] && ansA[0].removed === 200 && PA._logsRestMs >= Math.max(20, 10 * ansA[0].ms) && ansA[0].ms >= 40, `A SLOW PASS EARNS A LONGER REST: a pass of ${ansA[0] && ansA[0].ms} ms rests ${PA._logsRestMs} ms (≥ 10× its own time, ≥ the gap)`);
     PA.shutdown();
     // b. the count BY NAME reconciles: 600 runs started > 14 days ago, 60 of them young by their newest file — start 600, done 540 + 60 kept
