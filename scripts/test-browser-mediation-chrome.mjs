@@ -188,7 +188,7 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
 // `--chrome <binary>` (lane-cdp-154): run ① / ⑥ against ANOTHER Chrome — an older or newer one than the census — to see
 // the version rules on a real browser (e.g. an extracted older .deb); the default is the installed one
 const chromeArg = (() => { const i = process.argv.indexOf('--chrome'); return i > 0 ? process.argv[i + 1] : null; })();
-const CHROME = chromeArg || ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+const CHROME = chromeArg || [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has — as the pairing-ui harness reads it)
 async function launchChrome() {
   const port = await freePort();
   const dir = path.join(ROOT, 'chrome'); fs.mkdirSync(dir, { recursive: true });
@@ -313,14 +313,14 @@ else {
   ok((await c6.call('DOM.getDocument', { depth: 1 }, s6)).result !== undefined && (await c6.call('Page.getLayoutMetrics', {}, s6)).result !== undefined, '⑥ PAUSED · read: DOM.getDocument and Page.getLayoutMetrics answer');
   ok(((await c6.call('Target.getTargets')).result || {}).targetInfos.map((t) => t.targetId).join() === A, '⑥ PAUSED · session: Target.getTargets answers (the lease\'s own tab only)');
   ok((await c6.call('Page.enable', {}, s6)).result !== undefined && (await c6.call('Runtime.enable', {}, s6)).result !== undefined, '⑥ PAUSED · harmless: Page.enable / Runtime.enable answer');
-  // unknown: refused BY NAME while the user drives
+  // unknown: refused BY NAME whoever drives (lane chrome-157 — 主开发's ruling)
   const unk = await c6.call('Page.zzzFutureMethod', {}, s6);
-  ok(codeOf(unk) === 'browser_interrupted' && /Page\.zzzFutureMethod/.test(unk.error.message) && /cdp-census/.test(unk.error.message), '⑥ PAUSED · unknown: a method with no census row is browser_interrupted BY NAME (the refusal names the method and the census file)', unk.error && unk.error.message);
+  ok(codeOf(unk) === 'method_unclassified' && /Page\.zzzFutureMethod is not a method this VibeSpace knows yet/.test(unk.error.message) && /cdp-census/.test(unk.error.message) && /no way round it/.test(unk.error.message), '⑥ PAUSED · unknown: a method with no census row is method_unclassified BY NAME (the method, that VibeSpace does not know it yet, the census file, no way round it)', unk.error && unk.error.message);
   // lane-cdp-154: THIS Chrome's own methods without a row (a newer or an older Chrome than the census) — every one is
   // refused by name while the user drives, whatever the version; none reaches the browser
   const extraWrong = [];
-  for (const m of cmp.unclassified) { const r = await c6.call(m, {}, s6); if (!(codeOf(r) === 'browser_interrupted' && r.error.message.includes(m) && r.error.message.includes(C.CENSUS_CHROMES.join(' + ')))) extraWrong.push(`${m}: ${JSON.stringify(r).slice(0, 160)}`); }
-  ok(extraWrong.length === 0 && (await oracle('document.title')) === 'census', `⑥ PAUSED · Chrome ${cv}'s ${cmp.unclassified.length} method(s) without a row${cmp.unclassified.length ? ` (${cmp.unclassified.join(', ')})` : ''} + the synthetic one: each browser_interrupted BY NAME (the words name the censused Chromes ${C.CENSUS_CHROMES.join(' + ')}) — the page unchanged`, extraWrong.join('\n    '));
+  for (const m of cmp.unclassified) { const r = await c6.call(m, {}, s6); if (!(codeOf(r) === 'method_unclassified' && r.error.message.includes(m) && r.error.message.includes(C.CENSUS_CHROMES.join(' + ')))) extraWrong.push(`${m}: ${JSON.stringify(r).slice(0, 160)}`); }
+  ok(extraWrong.length === 0 && (await oracle('document.title')) === 'census', `⑥ PAUSED · Chrome ${cv}'s ${cmp.unclassified.length} method(s) without a row${cmp.unclassified.length ? ` (${cmp.unclassified.join(', ')})` : ''} + the synthetic one: each method_unclassified BY NAME (the words name the censused Chromes ${C.CENSUS_CHROMES.join(' + ')}) — the page unchanged`, extraWrong.join('\n    '));
   // lane-cdp-154: Chrome 154's two READS answer while the user drives (forwarded — the browser answers, never our refusal)
   const lists = (m) => proto.json.domains.some((d) => d.domain === m.split('.')[0] && (d.commands || []).some((c) => c.name === m.split('.')[1]));
   if (lists('Ads.getAdScripts') && lists('Browser.getGlobalPrivacyControl')) {
@@ -384,7 +384,7 @@ else {
   ok(dm2.result !== undefined && (await oracle('innerWidth')) === 300, '⑥ handed back: Emulation.setDeviceMetricsOverride goes through and the viewport is 300 px wide (the view row is honest both ways)');
   await c6.call('Emulation.clearDeviceMetricsOverride', {}, s6);
   const unk2 = await c6.call('Page.zzzFutureMethod', {}, s6);
-  ok(codeOf(unk2) === null && unk2.error && unk2.error.code === -32601, `⑥ handed back: the unknown method is FORWARDED and Chrome itself answers ${unk2.error && unk2.error.code} (method not found) — the census fences only while the user drives`, JSON.stringify(unk2).slice(0, 200));
+  ok(codeOf(unk2) === 'method_unclassified' && unk2.result === undefined && unk2.error.message.includes(cv), `⑥ handed back (the agent drives): the unknown method is STILL refused by name, naming the live browser (${cv}) — lane chrome-157: before, it was FORWARDED and Chrome itself answered -32601; never reaches the browser`, JSON.stringify(unk2).slice(0, 240));
   // lane-cdp-154: Chrome 154's two whole-browser SETTERS are method_refused on EVERY lease — handed back too (the agent
   // drives). The camera's effect is OBSERVED from another tab: a loopback page (a secure context) counts the video
   // inputs; the RAW endpoint adding a mock camera is the positive control (the oracle sees one when one is added)

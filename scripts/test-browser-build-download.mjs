@@ -130,11 +130,12 @@ console.log('— ① the lists: no fetch at boot / for the facts; the channel li
     'the picker opens: ONE read of the 10 KB channel list — four rows, each url on the file host', c.channels);
   // lane mediation-chrome-155: Chrome 155 joined the census and the fixture's Stable 154.0.8037.92 went from newer to
   // between it (the chip says older) — the expectation is THE census's own relation and newest Chrome; the fixture's
-  // Canary is the row still newer than the census
+  // Canary is the row still newer than the census — lane chrome-157: Chrome 157.0.8103.50 joined the census and the fixture's Canary
+  // 157.0.8083.0 went from newer to between (the chip says older): its expectation is the census's own relation too
   const censusWant = (v) => { const r = CC.chromeRelation(v); return { relation: r === 'between' ? 'older' : r, census: CC.CENSUS_CHROME }; };
   const ca = (c.channels || []).find((r) => r.channel === 'Canary'), want = censusWant(st.version);
-  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && ca && chip(ca, 'census').relation === 'newer' && chip(ca, 'census').census === CC.CENSUS_CHROME && !chip(st, 'cloak') && chip(st, 'profile').wrote === 156 && chip(st, 'cli') && st.verdict.offer === true,
-    `Stable ${st.version}: ${want.relation} than the census (${want.census}; Canary ${ca && ca.version} newer than it), can't switch to CloakBrowser later, older than the Chrome that last opened "Old logins" (156) — chips, not refusals (offered)`, { stable: st.verdict, canary: ca && ca.verdict });
+  ok(chip(st, 'census').relation === want.relation && chip(st, 'census').census === want.census && ca && chip(ca, 'census').relation === censusWant(ca.version).relation && chip(ca, 'census').census === CC.CENSUS_CHROME && !chip(st, 'cloak') && chip(st, 'profile').wrote === 156 && chip(st, 'cli') && st.verdict.offer === true,
+    `Stable ${st.version}: ${want.relation} than the census (${want.census}; Canary ${ca && ca.version} ${ca ? censusWant(ca.version).relation : '?'} than it), can't switch to CloakBrowser later, older than the Chrome that last opened "Old logins" (156) — chips, not refusals (offered)`, { stable: st.verdict, canary: ca && ca.verdict });
   await kk.chromeBuildsAvailable({ lists: 'channels' });
   ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 2, 'opened again: read again (fresh every time a person opens it)');
   const o = await kk.chromeBuildsAvailable({ lists: 'older' });

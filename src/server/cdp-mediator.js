@@ -70,6 +70,9 @@ const FETCH_MS = 4000;
 const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
 function create({ log = console, now = Date.now } = {}) {
+  /** lane chrome-157: the methods an unclassified refusal was said for in the journal, this RUN of this mediator (the hub makes
+   *  ONE a run) — once a method, never per call */
+  const unclassifiedSaid = new Set();
   const grants = new Map();   // token → grant
   const byKey = new Map();    // grantKey → token
   let server = null, wss = null, port = null, listening = null, closed = false;
@@ -166,6 +169,7 @@ function create({ log = console, now = Date.now } = {}) {
   }
   function wire(g, p, ws, up) {
     const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now() };
+    if (!g.versionAsked) { g.versionAsked = true; fetchJson(g, '/json/version').then((r) => { g.browserVersion = r && r.json && r.json.Browser ? String(r.json.Browser).slice(0, 80) : null; }, () => { }); }   // (lane chrome-157: once a grant — an unclassified refusal names the browser)
     g.conns.add(conn);
     g.lastUsedAt = now();
     const closeBoth = (code, reason) => {
@@ -191,12 +195,13 @@ function create({ log = console, now = Date.now } = {}) {
         credit = tc.credit;
       }
       // the owner's ruling (2026-09-27): no switch — every class but read / session / harmless is refused while the user drives
-      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg) : M.judge(msg, g.scope, { paused: credit ? false : paused }); // lane browser-shared-profile-freeze: the scope road passes every call
+      const v = g.mode === M.SCOPE_MODE ? M.judgeScope(msg) : M.judge(msg, g.scope, { paused: credit ? false : paused, browser: g.browserVersion || null });   // (lane chrome-157: the browser's version names itself in an unclassified refusal) // lane browser-shared-profile-freeze: the scope road passes every call
       if (v.kind === 'refuse') {
         g.refusals = (g.refusals || 0) + 1;
-        // verify r4: a method the census does not list was refused while the user drives — said ONCE per method per grant (the
-        // census is extended by a row; the refusal already names the file). Never a token, never the raw url.
-        if (v.why === 'unclassified') { g.unclassified = g.unclassified || new Set(); if (!g.unclassified.has(msg.method)) { g.unclassified.add(msg.method); log.warn?.(`[cdp-mediator] ${g.browserKey} on ${g.profileId}: ${msg.method} has no row in the CDP census (src/cdp-census.js) — refused while the user drives; add its row`); } }
+        // a method the census does not list was refused (lane chrome-157: whoever drives) — said in the hub's journal ONCE per method
+        // per RUN of this hub (a new Chrome in the field is learned of before a suite meets it), never per call. Never a token, never the raw url.
+        if (v.why === 'unclassified') { g.unclassified = g.unclassified || new Set(); g.unclassified.add(msg.method); }   // (the grant's view lists them — the operator's signal)
+        if (v.why === 'unclassified' && !unclassifiedSaid.has(msg.method)) { unclassifiedSaid.add(msg.method); log.warn?.(`[cdp-mediator] ${msg.method} has no row in the CDP census (src/cdp-census.js) — refused on a mediated lease (first seen from ${g.browserKey} on ${g.profileId}, the browser ${g.browserVersion || 'not yet read'}); a row classing it lifts this`); }
         if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }

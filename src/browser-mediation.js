@@ -25,12 +25,14 @@
  *     (src/cdp-census.js — ONE row per method of the installed Chrome's own
  *     /json/protocol: every `Input.*`, the navigation family, a file upload, a
  *     dialog answer, a focus move, the tab acts, viewport / emulation / a frozen
- *     page, script evaluation, DOM / CSS edits, cookies…) and every method
- *     WITHOUT a row (a newer Chrome's, or an older one's — the census names the
- *     Chromes it read, CENSUS_CHROMES) — a typed `browser_interrupted` CDP error
- *     naming the takeover, never a timeout, the unclassified one NAMED so the
- *     census can be extended (verify r4: three rounds each found a hand-written
- *     list one method short). THE OWNER'S RULING (2026-09-27, verbatim):
+ *     page, script evaluation, DOM / CSS edits, cookies…) — a typed
+ *     `browser_interrupted` CDP error naming the takeover, never a timeout
+ *     (verify r4: three rounds each found a hand-written list one method short);
+ *     every method WITHOUT a row (a newer Chrome's, or an older one's — the
+ *     census names the Chromes it read, CENSUS_CHROMES) is refused
+ *     `method_unclassified` WHOEVER drives (lane chrome-157, 2026-11-12: it was
+ *     forwarded while the agent drove), NAMED so the census can be extended.
+ *     THE OWNER'S RULING (2026-09-27, verbatim):
  *     "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，
  *     交还时提醒它重新运行" — D6's open script door and the r4 switch
  *     `browser.fenceScriptsWhileDriven` are gone; only `read`, `session` and
@@ -173,8 +175,8 @@ const PAUSED_METHODS = new Set(CENSUS.rows().filter((r) => CENSUS.PAUSED_RULE[r.
 /**
  * THE PAUSED FENCE IS A CENSUS, NOT A LIST (verify S2 r4). `{refuse, why, row}`: `why` names the class that refused
  * (`input` / `view` / `page-mutation` — the owner's ruling of 2026-09-27 retired the r4 switch: scripts and page edits
- * are refused like input), `unclassified` for a method the census does not list (a newer Chrome — FAIL CLOSED while
- * the user drives, and said by name), else null. A row whose `fence` is `anchor` (Page.bringToFront) is refused by
+ * are refused like input), `unclassified` for a method the census does not list (a newer Chrome — FAIL CLOSED, and said by name;
+ * judge() refuses it in BOTH driving states before it asks this — lane chrome-157), else null. A row whose `fence` is `anchor` (Page.bringToFront) is refused by
  * the live view's takeover anchor, never here (measured r2 + r3). A second argument (the retired `{fenceScripts}`) is
  * IGNORED — nothing can re-open the script door.
  */
@@ -193,6 +195,19 @@ function pausedWords(method, pv) {
   return INT.interruptedText(method);
 }
 function isPausedMethod(method) { return pausedVerdict(method).refuse; }
+/**
+ * lane chrome-157 (主开发's ruling, 2026-11-12): A METHOD WITH NO CENSUS ROW IS REFUSED BY NAME ON EVERY MEDIATED LEASE, IN BOTH
+ * DRIVING STATES. judge() consulted the census only while the person drove, so the census's «never a hole» held only then: a
+ * newer Chrome's methods (Chrome 157's three; a whole-browser act among a later Chrome's would be the same) reached the agent
+ * while it drove, until somebody wrote their row. The words are the AGENT's (never i18n): the method, the browser's version,
+ * that this VibeSpace does not know it yet, and what to do — there is no way round it; an update that classes it lifts it.
+ * The scope road (judgeScope — an owner's cooperative lease) is untouched: it forwards every call by design.
+ */
+const UNCLASSIFIED_CODE = 'method_unclassified';
+function unclassifiedWords(method, browser = null) {
+  const b = browser ? String(browser).slice(0, 80) : 'its version not read yet';
+  return `${method} is not a method this VibeSpace knows yet — the browser is ${b} and VibeSpace's CDP census (src/cdp-census.js) has no row for it, so it is refused on this lease whoever drives; there is no way round it: a VibeSpace update that classes the method lifts this (censused on Chrome ${CENSUS.CENSUS_CHROMES.join(' + ')})`;
+}
 /**
  * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27): which calls STILL WAITING on the browser at the takeover
  * instant the mediator answers NOW with `browser_interrupted` (`abort`: every pending call whose method is refused
@@ -345,7 +360,7 @@ function refusalCodeOf(reply) {
  * `paused` is the live input side (true = the user drives). A refusal carries `why`
  * (the census class, or 'unclassified'). The retired `fenceScripts` option is ignored.
  */
-function judge(msg, scope, { paused = false } = {}) {
+function judge(msg, scope, { paused = false, browser = null } = {}) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
   const id = msg.id;
   const method = typeof msg.method === 'string' ? msg.method : '';
@@ -355,6 +370,7 @@ function judge(msg, scope, { paused = false } = {}) {
   if (id == null) return { kind: 'drop', why: 'no id' };
   if (sid && !scope.sessions.has(sid)) return { kind: 'refuse', reply: refusal(id, 'session_out_of_scope', `CDP session ${sid} was not handed to this lease`, sid) };
   if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', why: 'refused', reply: refusal(id, 'method_refused', `${method} ${ALWAYS_REFUSED_WHY[method] || 'acts on the whole shared browser — not through a session url'}`, sid) };
+  if (!CENSUS.rowOf(method)) return { kind: 'refuse', why: 'unclassified', reply: refusal(id, UNCLASSIFIED_CODE, unclassifiedWords(method, browser), sid) };   // (lane chrome-157: both driving states)
   if (paused) { const pv = pausedVerdict(method); if (pv.refuse) return { kind: 'refuse', why: pv.why, reply: refusal(id, INT.INTERRUPTED_CODE, pausedWords(method, pv), sid) }; }
   if (TARGET_METHODS.has(method)) {
     const t = params.targetId == null ? '' : String(params.targetId);
@@ -552,7 +568,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, UNCLASSIFIED_CODE, unclassifiedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

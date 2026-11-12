@@ -10,7 +10,8 @@
  * the takeover fence ONE METHOD SHORT because the fence was a hand-written LIST (Input.* + a navigation family, then
  * + setIgnoreInputEvents, then + DOM.focus): a list names what somebody thought of; a census names what the vendor
  * ships. The rule is now: the table is complete over the vendor's list, the judge reads the CLASS, and a method with
- * NO ROW (a newer Chrome) is refused while the user drives and NAMED in the refusal, so the gap is visible, never a hole.
+ * NO ROW (a newer Chrome) is refused — and NAMED in the refusal — on every mediated lease whoever drives (lane chrome-157, 2026-11-12:
+ * until then only while the user drove, so it reached the agent while the agent drove), so the gap is visible, never a hole.
  *
  * The classes (CLASSES, closed) and what the mediator does with each while the USER drives (`paused`) — since the
  * owner's ruling of 2026-09-27 ("直接打断所有脚本和agent操作", src/browser-interrupt.js) every class but read / session /
@@ -63,12 +64,15 @@
  * ships it, and the fence on that Chrome still needs its class). On every censused Chrome the rows listed there are
  * EXACTLY that Chrome's methods (`compare(protocol, {chrome})`). The JUDGE IS VERSION-INDEPENDENT: a row is judged by
  * its class whatever Chrome is installed (a row outliving its method costs nothing — the browser answers -32601), and
- * a method with no row is refused by name while the user drives on EVERY version — an older Chrome than the census
+ * a method with no row is refused by name on every mediated lease whoever drives (since lane chrome-157) on EVERY version — an older Chrome than the census
  * (the fleet's Debian chromium 150: measured 149–152 list 6–12 methods no row names, none a whole-browser act) and a
  * newer one alike. Chrome 155.0.8059.39 is the third (lane mediation-chrome-155, 2026-10-14: the Actions runner's
  * ubuntu-latest image moved to it and the mirror's heavy leg went red on its 3 new DOM methods — +3, −0). Chrome
  * 156.0.8078.47 is the fourth (lane chrome-156-drift, 2026-10-22: the runner image moved to it between the branch run
- * and the master mirror of the SAME sha, and the mirror's heavy leg went red on its 11 new methods — +11, −1).
+ * and the master mirror of the SAME sha, and the mirror's heavy leg went red on its 11 new methods — +11, −1). Chrome 157.0.8103.50 is the fifth (lane chrome-157,
+ * 2026-11-12: one shard of the .397 prep mirror ran on the runner image 20261103.629 and the heavy leg went red on its 3 new
+ * methods — +3, −0). Since then a method with NO row is refused by name on every MEDIATED lease in BOTH driving states
+ * (browser-mediation.js UNCLASSIFIED_CODE — it had passed while the agent drove); the scope road still forwards it.
  *
  * The gates: test-cdp-census (fast — every censused fixture ⇔ the table, the version marks ⇔ the fixtures' diff, the
  * rows' own words; patched-copy controls) + test-browser-mediation ⑥ (every row's verdicts; the unknown rule; controls)
@@ -79,7 +83,7 @@
 const SINCE = '2026-09-26';
 /** The Chromes whose protocols this table was censused against, OLDEST FIRST — each has its names-only fixture
  *  scripts/fixtures/cdp-protocol-<version>/protocol.json (scripts/cdp-protocol-fetch.mjs writes it). */
-const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57', '155.0.8059.39', '156.0.8078.47']);
+const CENSUS_CHROMES = Object.freeze(['153.0.8010.47', '154.0.8037.57', '155.0.8059.39', '156.0.8078.47', '157.0.8103.50']);
 /** The NEWEST censused Chrome (the refusal words name every censused one). */
 const CENSUS_CHROME = CENSUS_CHROMES[CENSUS_CHROMES.length - 1];
 /** The Chrome of the 2026-09-28 census step (the rows it added carry `chrome`, the rows it removed `until`). */
@@ -88,6 +92,8 @@ const C154 = '154.0.8037.57';
 const C155 = '155.0.8059.39';
 /** The Chrome of the 2026-10-22 census step (the 11 rows it added carry `chrome`, the one it removed `until`). */
 const C156 = '156.0.8078.47';
+/** The Chrome of the 2026-11-12 census step (the 3 rows it added carry `chrome`; it removed none). */
+const C157 = '157.0.8103.50';
 const CLASSES = Object.freeze(['input', 'view', 'page-mutation', 'read', 'session', 'harmless', 'refused']);
 /** What the paused fence does with a class: 'refuse' (input / view / page-mutation — the owner's ruling of 2026-09-27;
  *  the r4 'switch' rule and its setting are retired), 'allow' (read / session / harmless); 'refused' rows never reach the fence. */
@@ -148,6 +154,7 @@ const ROWS = Object.freeze({
     setNavigationText: 'page-mutation', setScopeText: 'page-mutation', setRuleSelector: 'page-mutation', setStyleSheetText: 'page-mutation',
     setStyleTexts: 'page-mutation', startRuleUsageTracking: 'harmless', stopRuleUsageTracking: 'read', takeCoverageDelta: 'read',
     setLocalFontsEnabled: 'page-mutation',
+    forcePositionTryOption: { cls: 'page-mutation', since: '2026-11-12', chrome: C157, why: "forces one of an anchor-positioned element's position-try fallbacks (1-based; 0 = the base position; omitted = clear) — measured on Chrome 157.0.8103.50: the element MOVES (top 470 → 520 px with fallback 1, back on clear) and the page's own script sees the new geometry (getBoundingClientRect) — the page's computed style changed under it, as CSS.forcePseudoState / forceStartingStyle" },
   },
   CacheStorage: {
     deleteCache: 'page-mutation', deleteEntry: 'page-mutation', requestCacheNames: 'read', requestCachedResponse: 'read', requestEntries: 'read',
@@ -326,6 +333,8 @@ const ROWS = Object.freeze({
     stopScreencast: 'read', produceCompilationCache: 'harmless', addCompilationCache: 'harmless', clearCompilationCache: 'harmless',
     setSPCTransactionMode: 'page-mutation', setRPHRegistrationMode: 'page-mutation', generateTestReport: 'harmless', waitForDebugger: 'view',
     setInterceptFileChooserDialog: 'page-mutation', setPrerenderingAllowed: 'page-mutation', getAnnotatedPageContent: 'read',
+    getSpellCheckCustomDictionary: { cls: 'read', since: '2026-11-12', chrome: C157, why: "returns ONLY the words the frame's own document added to its spell-check dictionary with document.spellCheckCustomDictionary.addWords() (page script cannot read them back), never the person's own dictionary file — measured on Chrome 157.0.8103.50: a scratch profile whose Custom Dictionary.txt holds a word the person added answers { words: [] }; stock 157 exposes no addWords (also not with experimental web-platform features), so a page's list is empty there — a read of the page's own state" },
+    setInputVisualization: { cls: 'view', since: '2026-11-12', chrome: C157, why: "turns on Chrome's click visualization for the page — measured on Chrome 157.0.8103.50: with it on, a click CHANGES the page's picture (a mark where it landed; off, the same click leaves the picture byte-identical) and the page's DOM is unchanged — an overlay painted on the page under the person's hands, as Overlay.setShow*" },
   },
   Performance: {
     disable: 'harmless', enable: 'harmless', setTimeDomain: 'harmless', getMetrics: 'read',

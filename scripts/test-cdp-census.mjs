@@ -55,6 +55,7 @@ const name = (r) => r.domain + '.' + r.method;
 const C154 = '154.0.8037.57';
 const C155 = '155.0.8059.39';
 const C156 = '156.0.8078.47';
+const C157 = '157.0.8103.50';   // (lane chrome-157)
 
 // a judge scope: tab T-A attached as session S-A (the shape test-browser-mediation ⑥ judges every row on)
 const scope = () => { const sc = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc); return sc; };
@@ -71,7 +72,7 @@ for (const v of C.CENSUS_CHROMES) {
   fixtures[v] = fixtureOf(v);
   ok(versionOf(fixtures[v]) === v && fixtures[v].protocolVersion === '1.3', `① Chrome ${v}: the fixture names the Chrome it was read from (${fixtures[v].browser}, protocol ${fixtures[v].protocolVersion})`);
 }
-ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C156, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
+ok(C.CENSUS_CHROME === C.CENSUS_CHROMES[C.CENSUS_CHROMES.length - 1] && C.CENSUS_CHROME === C157, `① CENSUS_CHROME is the newest censused Chrome (${C.CENSUS_CHROME})`);
 
 // ═══ ② each censused Chrome ⇔ the table ═════════════════════════════════════
 console.log('— ② on EACH censused Chrome the table names exactly its methods');
@@ -170,18 +171,18 @@ if (fixtures[C155] && fixtures[C156]) {
 }
 
 // ═══ ⑤ the unknown rule on ANY Chrome ═══════════════════════════════════════
-console.log('— ⑤ a method no row names is refused BY NAME while the user drives — on every Chrome, older or newer than the census');
-ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation(C155) === 'censused' && C.chromeRelation(C156) === 'censused' && C.chromeRelation('155.0.8100.1') === 'between' && C.chromeRelation('154.0.8037.92') === 'between' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation('156.0.8100.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
+console.log('— ⑤ a method no row names is refused BY NAME on a mediated lease WHOEVER drives (lane chrome-157) — on every Chrome, older or newer than the census');
+ok(C.chromeRelation('153.0.8010.47') === 'censused' && C.chromeRelation(C154) === 'censused' && C.chromeRelation(C155) === 'censused' && C.chromeRelation(C156) === 'censused' && C.chromeRelation('155.0.8100.1') === 'between' && C.chromeRelation('154.0.8037.92') === 'between' && C.chromeRelation('150.0.7871.124') === 'older' && C.chromeRelation('153.0.8010.60') === 'between' && C.chromeRelation(C157) === 'censused' && C.chromeRelation('156.0.8100.1') === 'between' && C.chromeRelation('157.0.8200.1') === 'newer' && C.chromeRelation('chromium') === 'unknown' && C.chromeRelation('') === 'unknown', '⑤ chromeRelation: censused / older (the fleet\'s Debian chromium 150) / between / newer / unknown');
 // an OLDER Chrome's extra (measured 2026-09-28: Chrome for Testing 149.0.7827.55, 151.0.7922.34 and Google Chrome
 // 152.0.7977.82 list Network.setRequestInterception, which 153 dropped) and a NEWER Chrome's (a synthetic name)
 const older = { domains: [...fixtures['153.0.8010.47'].domains.map((d) => (d.domain === 'Network' ? { ...d, commands: [...d.commands, { name: 'setRequestInterception' }] } : d))] };
-const newer = { domains: [...fixtures[C156].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
-const cOld = C.compare(older, { chrome: '150.0.7871.124' }), cNew = C.compare(newer, { chrome: '156.0.8100.1' });
+const newer = { domains: [...fixtures[C157].domains, { domain: 'Zzz', commands: [{ name: 'futureMethod' }] }] };
+const cOld = C.compare(older, { chrome: '150.0.7871.124' }), cNew = C.compare(newer, { chrome: '157.0.8200.1' });
 ok(cOld.chrome === null && cOld.relation === 'older' && cOld.unclassified.join() === 'Network.setRequestInterception' && cNew.relation === 'newer' && cNew.unclassified.join() === 'Zzz.futureMethod' && cNew.misdated.length === 0, '⑤ compare on an uncensused Chrome: the extra method is UNCLASSIFIED (older and newer alike), nothing is judged misdated');
 for (const m of ['Network.setRequestInterception', 'Zzz.futureMethod', 'Page.zzzFutureMethod']) {
   const v = M.judge({ id: 30, method: m, params: {}, sessionId: 'S-A' }, scope(), { paused: true });
   const msg = v.reply && v.reply.error && v.reply.error.message;
-  ok(v.kind === 'refuse' && v.why === 'unclassified' && M.refusalCodeOf(v.reply) === 'browser_interrupted' && msg.includes(m) && msg.includes(C.CENSUS_CHROMES.join(' + ')) && /src\/cdp-census\.js/.test(msg) && verdict(M, m, {}) === 'forward', `⑤ ${m}: refused BY NAME while the user drives (the words name every censused Chrome — ${C.CENSUS_CHROMES.join(' + ')} — and the census file), forwarded when the agent drives`, msg);
+  ok(v.kind === 'refuse' && v.why === 'unclassified' && M.refusalCodeOf(v.reply) === 'method_unclassified' && msg.includes(m) && msg.includes(C.CENSUS_CHROMES.join(' + ')) && /src\/cdp-census\.js/.test(msg) && verdict(M, m, {}) === 'method_unclassified:unclassified', `⑤ ${m}: refused BY NAME whoever drives (the words name every censused Chrome — ${C.CENSUS_CHROMES.join(' + ')} — and the census file) — lane chrome-157: also when the agent drives (it was forwarded then); refused, never forwarded the agent drives`, msg);
 }
 
 // ═══ ⑥ the fixture shape and the diff's honesty ═════════════════════════════
@@ -227,7 +228,7 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   const Ca = require(noRow);
   const a = Ca.compare(fixtures[C154], { chrome: C154 });
   const Ma = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(noRow)})`), 'no-mock-camera-row');
-  ok(!a.sameSet && a.unclassified.join() === 'Browser.addMockCamera' && verdict(Ma, 'Browser.addMockCamera', {}) === 'forward' && verdict(M, 'Browser.addMockCamera', {}) === 'method_refused:refused', `CONTROL (a) Browser.addMockCamera's row removed: Chrome ${C154} is no longer covered (unclassified: ${a.unclassified.join()}) and a free lease's mock camera is FORWARDED into the shared device list — the row is what refuses it on every lease`);
+  ok(!a.sameSet && a.unclassified.join() === 'Browser.addMockCamera' && verdict(Ma, 'Browser.addMockCamera', {}) === 'method_unclassified:unclassified' && verdict(M, 'Browser.addMockCamera', {}) === 'method_refused:refused', `CONTROL (a) Browser.addMockCamera's row removed: Chrome ${C154} is no longer covered (unclassified: ${a.unclassified.join()}) and a free lease's mock camera is refused only as UNCLASSIFIED (lane chrome-157: before, FORWARDED into the shared device list) — its row is what names it a whole-browser act — the row is what refuses it on every lease`);
   // (b) a removed row's until mark dropped
   const b = require(MUT.write('src/cdp-census.js', src.replace(untilA, "setSharedStorageTracking: 'harmless',"), 'no-until')).compare(fixtures[C154], { chrome: C154 });
   ok(!b.sameSet && b.stale.join() === 'Storage.setSharedStorageTracking' && b.unclassified.length === 0, `CONTROL (b) Storage.setSharedStorageTracking's until mark dropped: Chrome ${C154} reports it STALE (the table claims a method it no longer ships)`);
