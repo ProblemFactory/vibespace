@@ -15,6 +15,7 @@ const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollb
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
 const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
 const { noteDupsLeft } = require('../lib/desktop-record.js'); // PURE (r4 K, inc-mw1ogdno-5jny): a desktop's dedup trace never names a window its record lists
+const UO = require('../user-state-ops.js'); // PURE (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): user state by item, in the server's order (stateRev within a life, stateEpoch)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
@@ -26,9 +27,15 @@ function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive
 // constantly; a crash mid-writeFileSync truncates the file, the next read's
 // catch silently resets to defaults, and the next autosave makes the loss
 // permanent. rename() is atomic on POSIX so readers see old-or-new, never torn.
+// lane sidebar-echo-order r12–13: a text in PARTS, marked by this Symbol (no stored data carries it — round 13: round 12 read ANY array
+// as parts, and bookmarks.json, a JSON array, threw at every write), is written one after the other, never joined: a 12 MiB state and
+// its facts joined cost a copy of the whole text at every write. ONE write call still, the later parts appended — the store-write
+// census counts call sites
+const TEXT_PARTS = Symbol('a text in parts');
 function writeJsonAtomic(file, data) {
   const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  const parts = data && data[TEXT_PARTS] ? data[TEXT_PARTS] : [typeof data === 'string' ? data : JSON.stringify(data, null, 2)];
+  for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
   fs.renameSync(tmp, file);
 }
 
@@ -58,11 +65,19 @@ function wordlessTitles(node, depth = 0) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null, userStateClock = () => Date.now(), userStateMono = () => performance.now() }) {   // (lane sidebar-echo-order r7: the facts' clock — a test's virtual one)
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
       if (client.readyState === WS_OPEN) { try { client.send(json); } catch {} }
+    });
+  };
+  // lane sidebar-echo-order r12: a frame whose text is made by `make` (the user state's, read off its file's one stringify) — made
+  // only when a client is there to take it
+  const broadcastText = (make) => {
+    let json = null;
+    wss.clients.forEach(client => {
+      if (client.readyState === WS_OPEN) { if (json === null) json = make(); try { client.send(json); } catch {} }
     });
   };
 
@@ -610,6 +625,54 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // ── User State ──
   const USER_STATE_FILE = path.join(dataDir, 'user-state.json');
+  // lane sidebar-echo-order (inc-mwbn2xp8-ks0b): user state BY ITEM, IN THE SERVER'S ORDER — the ops (src/user-state-ops.js, PURE,
+  // shared with the page), the write counter `stateRev` and the server's LIFE `stateEpoch` (round 2, law 3: one id per process
+  // start — the counter orders states within one life; a restore of an older file, a LOWER counter, always restarts the hub,
+  // so a page that meets another life takes its state whatever its number). Never data: never exported, never taken.
+  // the life's start comes first (round 6: a page orders lives by it) and is never behind the hub's clock mark (round 8: a clock
+  // stepped back across a restart still starts a LATER life — the mark rides in the file)
+  let _userStateEpoch = null;
+  const userStateEpoch = () => _userStateEpoch || (readUserState(), _userStateEpoch = 'ep' + Math.floor(Math.max(Date.now(), _userStateClockMark)).toString(36) + '-' + require('crypto').randomBytes(6).toString('base64url'));
+  // THE FACTS (round 7): one per SLOT a write changed in the last week — when, by which page and act (UO.factStore); the
+  // later act wins, as on master, and an act made before another writer's change to its slot is dropped. Kept in
+  // user-state.json as `stateFacts`, in the SAME atomic write as the state and stateRev; out of the GET, the broadcast and
+  // the export; a fact older than UO.MAX_ACT_AGE_MS is dropped AT A WRITE (never on the read path).
+  const _userStateFacts = UO.factStore();
+  let _userStateReadOnlySaid = false;   // the normalizer's rewrite refused by the disk: said once (C2)
+  // THE HUB'S CLOCK, HIGH-WATER (round 8): never behind a time this hub already gave — a wall clock stepped back is read as the mark
+  // plus the MONOTONIC time since, until the wall catches up (a carried act's age still dates it right); persisted with the facts
+  // (UO.CLOCK_KEY), so a restart starts at or after it
+  let _userStateClockMark = 0, _userStateMarkMono = null;
+  const userStateNow = () => {
+    let t, m;
+    try { t = Math.floor(Number(userStateClock())); } catch { t = NaN; }
+    if (!Number.isFinite(t)) t = Date.now();
+    try { m = Number(userStateMono()); } catch { m = NaN; }
+    const run = Number.isFinite(m) && _userStateMarkMono != null ? _userStateClockMark + Math.max(0, m - _userStateMarkMono) : _userStateClockMark;   // (round 9: the fractions carried — a floored delta per call ran slow)
+    _userStateClockMark = Math.max(t, run);
+    if (Number.isFinite(m)) _userStateMarkMono = m;
+    return Math.floor(_userStateClockMark);
+  };
+  /** user-state.json's text: the state as JSON.stringify writes it (compact — round 12), the hub's clock mark and the facts last — the
+   *  facts' part from the store's kept fragments with `draft`'s changes laid over (round 8: a write ENCODES only what it changed; it still JOINS every kept fact — O(facts), round 13) */
+  // round 12, LAW A — ONE STRINGIFY A WRITE: master stringifies a write's whole state twice, pretty for its file and compact for its
+  // broadcast; here user-state.json is written COMPACT and the broadcast's state is the same text (the file without the server's facts
+  // and clock mark, with the life after it) — one pass where master makes two; the frame is byte for byte what wireOf would give
+  const userStateTexts = (st, draft = null) => {
+    const { [UO.FACTS_KEY]: _f, [UO.CLOCK_KEY]: clock, ...body } = st || {};
+    const text = JSON.stringify(body), empty = text === '{}', head = text.slice(0, -1);   // (head: the body without its closing brace)
+    const more = clock === undefined ? [] : [`${JSON.stringify(UO.CLOCK_KEY)}:${JSON.stringify(clock)}`];   // (the hub's clock mark last)
+    if (_userStateFacts.size || (draft && draft.changes.size)) more.push(`${JSON.stringify(UO.FACTS_KEY)}:${_userStateFacts.text(draft)}`);
+    // the file in two PARTS (the writer writes one, then appends the other — never joined): the body, then the members after it
+    const parts = !more.length ? [text] : [head, more.map((m, i) => (empty && i === 0 ? '' : ',') + m).join('') + '}'];
+    return { parts, wire: () => `${head}${empty ? '' : ','}${JSON.stringify(UO.EPOCH_KEY)}:${JSON.stringify(userStateEpoch())}}` };
+  };
+  const userStateParts = (st, draft = null) => userStateTexts(st, draft).parts;
+  /** user-state.json written whole — the ONE call both writers make (a state, or the facts alone): its texts, for the broadcast */
+  const writeUserStateFile = (st, draft) => { const texts = userStateTexts(st, draft); writeJsonAtomic(USER_STATE_FILE, { [TEXT_PARTS]: texts.parts }); return texts; };
+  const userStateText = (st, draft = null) => userStateParts(st, draft).join('');
+  /** what a client is told: the store minus the server's facts, plus the server's life */
+  const wireOf = (st) => { const { [UO.FACTS_KEY]: _f, [UO.CLOCK_KEY]: _c, ...rest } = st || {}; return { ...rest, [UO.EPOCH_KEY]: userStateEpoch() }; };
   let _userStateCache = null;
   const USER_STATE_DEFAULT = {
     stateVersion: 2,
@@ -717,7 +780,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       sessionGroups[groupName] = migrateStateArray(sessionRefs, knownSessionKeys);
     }
     const extras = {};
-    for (const [k, v] of Object.entries(source)) if (!USER_STATE_MIGRATED_KEYS.has(k) && v !== undefined) extras[k] = v;
+    for (const [k, v] of Object.entries(source)) if (!USER_STATE_MIGRATED_KEYS.has(k) && !UO.SERVER_KEYS.includes(k) && !UO.WIRE_KEYS.includes(k) && v !== undefined) extras[k] = v;   // stateRev / stateEpoch / stateBatches are the server's; a request's own keys (batches, born, seq) a .392 hub stored as top-level junk are dropped (lane sidebar-echo-order r6)
     return {
       ...extras,
       stateVersion: 2,
@@ -733,38 +796,93 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     };
   }
 
+  /** the facts alone (a request whose applied ops decided slots without changing a value): no new rev, no broadcast, no hook — a
+   *  restart must still know which act decided them */
+  function writeUserFacts(draft, now) {
+    ensureDir(dataDir);
+    const next = { ...readUserState(), [UO.CLOCK_KEY]: now };
+    _userStateFacts.sweep(draft, now);
+    writeUserStateFile(next, draft);
+    _userStateCache = next;
+    _userStateFacts.commit(draft);   // only what this write changed
+  }
+
   function readUserState() {
     if (_userStateCache) return _userStateCache;
     ensureDir(dataDir);
-    try {
-      const rawText = fs.readFileSync(USER_STATE_FILE, 'utf-8');
-      const parsed = JSON.parse(rawText);
-      _userStateCache = normalizeUserState(parsed);
-      const normalizedText = JSON.stringify(_userStateCache, null, 2);
-      if (normalizedText !== rawText.trim()) {
-        writeJsonAtomic(USER_STATE_FILE, _userStateCache);
-      }
+    // lane sidebar-echo-order r7, C2 — NOTHING ON THE READ PATH REPLACES WHAT WAS READ: a state read whole is the state served; the
+    // normalizer's own rewrite (legacy refs, a stored junk key) is tried on its own and, should the disk refuse it, said once — never
+    // the default served for a write that failed (a hub booting on a full disk or a read-only data dir served an empty sidebar,
+    // and the next write persisted it)
+    let rawText = null, parsed = null;
+    try { rawText = fs.readFileSync(USER_STATE_FILE, 'utf-8'); parsed = JSON.parse(rawText); } catch { parsed = null; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { _userStateCache = { ...USER_STATE_DEFAULT }; return _userStateCache; }
+    _userStateCache = normalizeUserState(parsed);
+    if (UO.revOf(parsed)) _userStateCache[UO.REV_KEY] = UO.revOf(parsed);   // the counter survives a restart (the file holds it)
+    const mark = Number(parsed[UO.CLOCK_KEY]);
+    if (Number.isSafeInteger(mark) && mark > 0) { _userStateCache[UO.CLOCK_KEY] = mark; if (mark > _userStateClockMark) _userStateClockMark = mark; }   // the hub's clock mark survives too
+    _userStateFacts.load(parsed[UO.FACTS_KEY]);   // as read (pruned only at a write)
+    if (userStateText(_userStateCache) !== String(rawText).trim()) {
+      try { writeJsonAtomic(USER_STATE_FILE, userStateText(_userStateCache)); }
+      catch (e) { if (!_userStateReadOnlySaid) { _userStateReadOnlySaid = true; console.warn('[user-state] the normalized state could not be written back — it is served as read:', (e && (e.code || e.message)) || e); } }
     }
-    catch { _userStateCache = { ...USER_STATE_DEFAULT }; }
     return _userStateCache;
   }
 
-  function writeUserState(data) {
+  function writeUserState(data, { facts = null, decided = null, writer = null, omits = false, whole = false, maxMoves = Infinity } = {}) {
     ensureDir(dataDir);
-    _userStateCache = normalizeUserState(data);
-    writeJsonAtomic(USER_STATE_FILE, _userStateCache);
-    broadcast({ type: 'user-state-updated', state: _userStateCache });
+    const prev = _userStateCache || readUserState();
+    // lane sidebar-echo-order («once» is on disk before it is said): the next state and its FACTS are ONE write; the cache and the
+    // facts change only once it is on disk — a write that throws (a full disk) changes nothing here, and its caller says so.
+    // THE ONE PLACE every writer moves the facts (round 7): each slot whose value this write changes — by a page's op (`writers`),
+    // or by a whole-key writer (an old page, desktop-app-prefs, a restore, the server's own archive / rename: no page)
+    const next = normalizeUserState(data);
+    next[UO.REV_KEY] = UO.revOf(prev) + 1;   // EVERY write gets the next number — whatever the body said
+    const now = userStateNow();
+    next[UO.CLOCK_KEY] = now;
+    // the facts move for the keys this write REPLACED (a merge / applyOps keeps the others' references) — the diff costs the keys it
+    // changed; the file's facts text still joins every kept fact (O(facts) — the kb's Limits row)
+    const after = { ...prev };
+    for (const k of UO.KEYS) if (!data || data[k] !== prev[k]) after[k] = next[k];
+    const draft = facts || _userStateFacts.draft();
+    // (round 10, MUST 3: `omits` = an old page's whole key — what it lacks is its ignorance; every other writer is an act at its time)
+    UO.moveFacts(draft, prev, after, now, decided || new Set(), writer, undefined, omits, whole ? UO.KEYS : null, maxMoves);   // (an import decides every key whole, at its time)
+    _userStateFacts.sweep(draft, now);   // a fact older than a week is dropped HERE, at most hourly (no op old enough to need it is applied)
+    const texts = writeUserStateFile(next, draft);
+    _userStateCache = next;
+    _userStateFacts.commit(draft);   // only what this write changed
+    broadcastText(() => `{"type":"user-state-updated","state":${texts.wire()}}`);   // (= wireOf(next), read off the file's one stringify — round 12)
     // lane pair-group-fate: the ONE write of the sidebar's archived list — a conversation archived here ends its groups' waits
     try { onUserStateWrite(_userStateCache); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
   }
 
-  router.get('/api/user-state', (req, res) => res.json(readUserState()));
+  // round 9: THE HUB'S CLOCK MARK IS TAKEN AT BOOT — the state (and its mark) read and the clock taken once, before the routes serve
+  // anything: a wall step back before the first write still runs on from the previous life's mark (a GET anchors nothing)
+  try { userStateEpoch(); userStateNow(); } catch (e) { console.warn('[user-state] the state could not be read at boot:', (e && e.message) || e); }
+  // rounds 12–13, LAW C at the ONE door this release added: the ops door reads its own body under its own bound (MAX_BODY_BYTES, the
+  // page's splitter's number) — body-parser counting the bytes it reads (a chunked body, a gzip body by what it inflates to) — and refuses
+  // past it by name before the handler. server.js skips its 50 MB parser for exactly the paths THIS parser's layer matches: the router's
+  // own compiled match (any letter case, a trailing slash), never a second expression (round 13: server.js's own regex missed
+  // '/api/user-state/batches/' and '/API/USER-STATE/BATCHES', and a 41 MB ops request landed). Master's roads — the whole-key doors, the
+  // import — keep master's parser and take what master takes
+  const userStateBody = (limit) => { const parse = express.json({ limit }); return (req, res, next) => parse(req, res, (err) => {
+    if (!err) return next();
+    if (err.type === 'entity.too.large' || err.status === 413) return res.status(413).json({ error: `the body is past ${limit} B (as read)`, code: 'too-large' });
+    return res.status(err.status && err.status < 500 ? err.status : 400).json({ error: `the body could not be read (${err.type || err.message})`, code: 'malformed' });
+  }); };
+  router.use('/api/user-state/batches', userStateBody(UO.MAX_BODY_BYTES));
+  { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p); }   // (the parser's own layer: ONE match)
+  router.get('/api/user-state', (req, res) => res.json(wireOf(readUserState())));   // lane sidebar-echo-order: + stateEpoch, − stateBatches
 
   router.post('/api/user-state', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
-    writeUserState(data);
-    res.json({ success: true });
+    // (an older page before its first fetch POSTs its whole copy — round 10: its gaps are no acts. MASTER'S ROAD (round 13): it takes
+    // what master takes — no bound master does not have; past MAX_WHOLE_MOVES changed items the write is ONE fact a key, as an import)
+    try { writeUserState(data, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) {
+      return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` });
+    }
+    res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
   });
 
   // Merge-only write (B-b87b clobber belt): user-state is full-doc
@@ -775,12 +893,52 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // can no longer travel, so a stale tab's damage is bounded to the key it
   // actually edited (same-key races stay last-write-wins, the documented
   // residual until a rev protocol lands).
+  // lane sidebar-echo-order (the owner's incident inc-mwbn2xp8-ks0b): TWO DOORS. PATCH /api/user-state takes WHOLE top-level
+  // keys, as before (an old page, desktop-app-prefs, the panels' folds) — merged, last write wins per key. PATCH
+  // /api/user-state/batches (round 6, MUST 3) takes what the person CHANGED — ops per item (and per member / per field) — as
+  // {batches: [{batch, age, ops}, …]}: every batch the page has not seen confirmed, oldest first, under its own ids, each with its
+  // age. A server without this door answers 404 — to this page a failure like any other (round 7, C1). Every answer names the
+  // `rev` and the server's life `epoch`.
   router.patch('/api/user-state', (req, res) => {
     const data = req.body;
-    if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
-    const cur = readUserState();
-    writeUserState({ ...cur, ...data });
-    res.json({ success: true });
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return res.status(400).json({ error: 'Expected object' });
+    if (UO.WIRE_KEYS.some((k) => Object.prototype.hasOwnProperty.call(data, k)) || Object.prototype.hasOwnProperty.call(data, 'ops'))
+      return res.status(400).json({ error: 'ops go to PATCH /api/user-state/batches — this door takes whole top-level keys' });
+    // MASTER'S ROAD (round 13): an older page's whole key takes what master takes — no bound master does not have; past MAX_WHOLE_MOVES
+    // changed items the write is ONE fact a key, as an import (a different record, never a refusal)
+    readUserState();
+    try { writeUserState({ ...readUserState(), ...data }, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) { return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` }); }
+    res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
+  });
+  // THE OPS DOOR: each op judged against its slot's fact — THE LATER ACT WINS (round 7): applied when no other writer changed the
+  // slot after the act was made (its age), its own page's next act; held as its own duplicate; superseded otherwise. An act older
+  // than a week is not applied. BOUNDED: a body ≤ UO.MAX_BODY_BYTES; a batch ≤ UO.MAX_OPS_PER_BATCH ops (a batch past it, or with
+  // a bad op, is refused on its own). The state and its facts are ONE write, answered after it.
+  router.patch('/api/user-state/batches', (req, res) => {
+    const data = req.body;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return res.status(400).json({ error: 'Expected object', code: 'malformed' });
+    const { batches, ...whole } = data;
+    const answer = (extra = {}) => res.json({ success: true, rev: UO.revOf(_userStateCache || readUserState()), epoch: userStateEpoch(), ...extra });
+    if (Object.keys(whole).length) return res.status(400).json({ error: `whole top-level keys beside batches (${Object.keys(whole).slice(0, 4).join(', ')}) — whole keys go to PATCH /api/user-state`, code: 'malformed' });
+    // (its body is read at most MAX_BODY_BYTES at its parser, below — round 12, law C: a header no longer decides it)
+    const r = UO.parseRequest(batches);
+    if (r.error) return res.status(400).json({ error: r.error, code: r.code || 'malformed' });   // (round 9: a CODE the page words in the person's language)
+    const cur = readUserState();   // the facts are loaded WITH the state — the first request of a new process may be a re-send
+    const now = userStateNow();
+    // round 7: THE LATER ACT WINS — each op judged against its slot's fact by the act's age (UO.judgeRequest)
+    const j = UO.judgeRequest(_userStateFacts.draft(), r.page, r.list, cur, now);
+    const next = j.ops.length ? UO.applyOps(cur, j.ops) : cur;
+    // the state and its facts ONE write, answered after it — a write that fails moves neither, and is said by name
+    const lastB = r.list[r.list.length - 1];
+    const last = lastB ? { page: r.page, counter: lastB.seq, t: Math.floor(Math.min(now - lastB.age, now)) } : null;   // (round 8: the act's time)
+    try {
+      if (UO.changedKeys(cur, next).length) writeUserState(next, { facts: j.facts, decided: j.decided, writer: last });
+      else if (j.decided.size) writeUserFacts(j.facts, now);
+    }
+    catch (e) { return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'}) — nothing was applied` }); }
+    const of = (k) => j.verdicts.filter((v) => v.verdict === k).map((v) => v.id);
+    const named = (k) => j.verdicts.filter((v) => v.verdict === k).map((v) => ({ batch: v.id, error: v.problem, code: v.code || null }));
+    answer({ applied: of('applied'), held: of('held'), superseded: of('superseded'), old: named('old'), refused: named('refused'), dropped: j.verdicts.filter((v) => v.dropped && v.dropped.length).map((v) => ({ batch: v.id, ops: v.dropped })) });
   });
 
   // ── Settings ──
@@ -957,7 +1115,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     take('settings', readSettings);
     take('customThemes', readCustomThemes);
     take('layouts', readLayouts);
-    take('userState', readUserState);
+    take('userState', () => UO.personKeys(readUserState()));   // lane sidebar-echo-order: stateRev / stateBatches are the server's, never exported
     take('bookmarks', readBookmarks);
     take('tasks', () => getTasks?.()?.exportBundle?.() || null);
     take('pricing', () => getUsageHistory?.()?.pricingTable?.() || null);
@@ -1036,7 +1194,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('settings', (d) => { if (d && typeof d === 'object') writeSettings(d); });
     apply('customThemes', (d) => { if (d && typeof d === 'object') { writeCustomThemes(d); } });
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
-    apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d); });
+    apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it
     apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
     apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d); });
     let pricingSkipped = [];

@@ -3,6 +3,26 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
+  "The server refused a change ({reason}), so it was undone here": "サーバーが変更を拒否したため、ここで元に戻しました（{reason}）",
+  "The server refused a change, so it was undone here.": "サーバーが変更を拒否したため、ここで元に戻しました。",
+  "This page did not keep a change ({reason})": "このページは変更を保持しませんでした（{reason}）",
+  "This page did not keep a change.": "このページは変更を保持しませんでした。",
+  "This server is older than this page, so changes made here are not saved — reload the page": "サーバーがこのページより古いため、ここでの変更は保存されません — ページを再読み込みしてください",
+  "a group larger than 20 000 conversations": "20 000 件を超える会話のグループ",
+  "more changed values than one request carries": "1 回の送信に収まらない量の変更値",
+  "a kind of change it does not keep": "保存しない種類の変更",
+  "a name it does not keep": "保存しない名前",
+  "a value it does not take": "受け付けない値",
+  "a change it could not read": "読めない変更",
+  "an empty change": "空の変更",
+  "too many changes at once": "一度の変更が多すぎます",
+  "too large to take at once": "一度に受け取るには大きすぎます",
+  "a value nested too deep": "入れ子が深すぎる値",
+  "a value larger than any setting": "どの設定よりも大きい値",
+  "the id of an earlier change": "以前の変更の ID の再利用",
+  "A change made more than 7 days ago was not kept — this page now shows the server's": "7 日より前に行った変更は保持されませんでした — このページはサーバーの状態を表示しています",
+  "{n} changes made more than 7 days ago were not kept — this page now shows the server's": "7 日より前に行った変更 {n} 件は保持されませんでした — このページはサーバーの状態を表示しています",
   "the browser's own window": "ブラウザ自身のウィンドウ",
   "the page's picture — this machine has no display": "ページの画面 — このマシンにはディスプレイがありません",
   "the page's picture — the browser runs on another machine": "ページの画面 — ブラウザは別のマシンで動いています",

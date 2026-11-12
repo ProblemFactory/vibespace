@@ -186,7 +186,7 @@ registerWebdav(app, { tokens: mountTokens });
 // target on Content-Length (inc-mt2bpw2f: page rendered, every button dead).
 // Skip here rather than mount unblocker earlier: auth must keep covering /proxy/. lane webhook-l1-server: /hook/<slug> + the pairing read their OWN raw bytes after their refusals.
 const jsonBody = express.json({ limit: '50mb' }), OWN_BODY_RE = /^\/(?:proxy\/|hook\/|api\/channels\/webhook\/[^/]+\/pair$|api\/feedback\/forward$)/; // lane feedback-forward: the hub's forward door reads ≤ 64 KB AFTER its token
-app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : jsonBody(req, res, next)));
+app.use((req, res, next) => (OWN_BODY_RE.test(req.path) || (persistenceRouter.ownsBody && persistenceRouter.ownsBody(req.path)) ? next() : jsonBody(req, res, next)));   // lane sidebar-echo-order r13 (law C): the ops door reads its own body — skipped here by its parser's OWN match (the router's), never a second expression
 
 app.get('/xterm.css', (req, res) => {
   res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/css/xterm.css'));

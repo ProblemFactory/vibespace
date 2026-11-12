@@ -10,13 +10,14 @@ import { showToast, showInputDialog } from './utils.js';
 import { t as tr } from './i18n.js';
 import { reportOwnerPage } from './owner-facts.js'; // lane agent-context-owner-facts (B-7960 b): what this page tells the hub about the owner's screen
 import { sessionRowOf, placeOf, settingsPolicy } from '../attention-model.js'; // PURE: THE attention list (lane attention-predicate-shared) — the rank reads a session's band
+import { diffOps, viewOf, createSync } from '../user-state-ops.js'; // PURE CJS (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): the page's user state = the server's newest + its own acts not yet confirmed; a push carries the person's ops
 
 export function installSidebarState(SidebarClass) {
   const proto = SidebarClass.prototype;
 
   // ── Server State Sync ──
 
-  proto._fetchUserState = async function() {
+  proto._fetchUserState = async function({ tries, signal } = {}) {
     // Retry on failure (2.223.4, userW incident): this used to be a
     // ONE-SHOT fetch — a tab loading during a server-restart window came up
     // with names/stars/archives ALL unapplied (renames "gone", archived
@@ -26,13 +27,20 @@ export function installSidebarState(SidebarClass) {
     // Now: retries with backoff, the fetched flag is set only after a
     // SUCCESSFUL apply (writes stay blocked until then), and the app's
     // reconnect path calls this again (idempotent).
-    for (const wait of [0, 2000, 5000, 15000]) {
+    // lane sidebar-echo-order r11–12: ONE try when the user-state engine paces its own asks for the server's state — one in flight,
+    // given up by the engine's own timer through `signal` (15 s, doubling with its pace); the first fetch and a reconnect: four tries
+    for (const wait of (tries === 1 ? [0] : [0, 2000, 5000, 15000])) {
       if (wait) await new Promise((r) => setTimeout(r, wait));
       try {
-        const res = await fetch('/api/user-state');
+        const res = await fetch('/api/user-state', signal ? { signal } : undefined);
         if (!res.ok) continue;
         const state = await res.json();
+        const again = this._userStateFetched;
         this._applyServerState(state);
+        // lane sidebar-echo-order: the connection is BACK (a later fetch) — what is in flight or failing goes again, AFTER this
+        // state says which server answers (round 6, MUST 3: ops only to a server that said it takes them); the first fetch
+        // re-sends nothing (an act made before it is sent ONCE, when this state names the server)
+        if (again) this._userSync().resend();
         this._render();
         this.app.updateTaskbar();
         // Only after the authoritative server state has been applied may
@@ -44,7 +52,7 @@ export function installSidebarState(SidebarClass) {
         return;
       } catch {}
     }
-    console.warn('[user-state] initial fetch failed after retries — stars/names read-only until reconnect');
+    if (tries !== 1) console.warn('[user-state] initial fetch failed after retries — stars/names read-only until reconnect');
   };
 
   proto._writeUserStateToLocalStorage = function(state) {
@@ -200,57 +208,129 @@ export function installSidebarState(SidebarClass) {
     return true;
   };
 
-  proto._applyServerState = function(state) {
-    if (state.starredSessions) this._starredIds = new Set(state.starredSessions);
-    if (state.archivedSessions) this._archivedIds = new Set(state.archivedSessions);
-    if (state.archivedFolders) this._archivedFolders = new Set(state.archivedFolders);
-    if (state.customNames) this._customNames = { ...state.customNames };
-    if (state.sessionModes) this._sessionModes = { ...state.sessionModes };
-    if (state.sessionConfigs) this._sessionConfigs = { ...state.sessionConfigs };
-    if (state.sessionGroups) this._sessionGroups = { ...state.sessionGroups };
-    if (state.groupFolders) this._groupFolders = { ...state.groupFolders };
-    // snapshot what the SERVER said — _pushUserState diffs against it so a
-    // stale tab can only ever send the keys it actually changed (B-b87b)
-    this._serverStateJson = {};
-    for (const k of ['starredSessions', 'archivedSessions', 'archivedFolders', 'customNames', 'sessionModes', 'sessionConfigs', 'sessionGroups', 'groupFolders']) {
-      if (state[k] !== undefined) this._serverStateJson[k] = JSON.stringify(state[k]);
-    }
-    this._writeUserStateToLocalStorage({
-      starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
+  // ── THE PAGE'S USER STATE (lane sidebar-echo-order — the owner's incident inc-mwbn2xp8-ks0b, 2026-11-11: «我的批量操作一直在回滚»).
+  // 122 Archive clicks in 55 s on a hub whose loop lagged ~1.9 s: the first user-state-updated echo came 44 s after the first
+  // click, and every echo REPLACED this page's whole sets with what the server held when THAT echo was made (its own echo
+  // included); the next click then PATCHed the rolled-back list WHOLE (B-b87b's belt diffed top-level keys only), erasing on
+  // the server what the echo had rolled back on the screen. NOW: the page keeps a BASE — the newest server state by its
+  // stateRev, the write counter the server gives; an echo at or below it is the past and changes nothing — and its own PENDING
+  // acts (src/user-state-ops.js createSync), and shows base + pending. A push carries what the person changed, per item (and
+  // per member / per field inside a group / a conversation's config), handed to the network AT THE ACT in a request that carries
+  // every batch of this page not yet confirmed (round 5 — a later act carries an earlier one whose request failed), each applied
+  // once by its batch id; a failing write stays shown while the page lives and rides the next act or a paced re-send — nothing is
+  // said about it (round 9: the page speaks only when it takes something back on the screen, and only after its rows show it).
+  proto._userStateView = function() {
+    return {
+      starredSessions: [...(this._starredIds || [])], archivedSessions: [...(this._archivedIds || [])],
       archivedFolders: [...(this._archivedFolders || [])],
-      customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
-      sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
-    });
+      customNames: this._customNames || {}, sessionModes: this._sessionModes || {}, sessionConfigs: this._sessionConfigs || {},
+      sessionGroups: this._sessionGroups || {}, groupFolders: this._groupFolders || {},
+    };
   };
 
-  proto._pushUserState = async function() {
-    const state = {
-      starredSessions: [...this._starredIds], archivedSessions: [...this._archivedIds],
-      archivedFolders: [...(this._archivedFolders || [])],
-      customNames: this._customNames, sessionModes: this._sessionModes, sessionConfigs: this._sessionConfigs,
-      sessionGroups: this._sessionGroups, groupFolders: this._groupFolders,
+  proto._userSync = function() {
+    if (this.__userSync) return this.__userSync;
+    const rnd = () => { try { const a = new Uint8Array(9); globalThis.crypto.getRandomValues(a); return Array.from(a, (x) => x.toString(36)).join(''); } catch { return Math.random().toString(36).slice(2, 14); } };
+    const doors = this.__doors || {};   // a TEST SEAM only (a harness's virtual clock); production never sets it
+    // this page's unconfirmed acts live and die with this PAGE — its id is made per page LOAD, in memory; nothing about an act in
+    // flight is stored or shared with another page. EVERY ACT IS ON THE WIRE AT THE ACT (round 4), in a request that carries every
+    // batch this page has not seen confirmed, oldest first (round 5 — a later act carries an earlier one whose request failed)
+    const sync = createSync({
+      ...doors,
+      pageId: ('pg' + rnd()).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24),
+      refetch: (o) => { try { return this._fetchUserState(o && o.paced ? { tries: 1, signal: o.signal } : undefined); } catch { return null; } },   // the server's state (an answer from another life confirms nothing; round 11: the engine's paced asks, one GET each)
+      initial: this._userStateDisplayCopy(),   // what the page last SHOWED: replaced by the first server state, NEVER sent
+      send: async (body, { signal } = {}) => {
+        // round 7, C1: ops only, to the OPS DOOR — a server without it answers 404, a failure like any other (kept, retried; round 14:
+        // said once a page — the engine's 'older-server')
+        const res = await fetch('/api/user-state/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+        let j = null;
+        try { j = await res.json(); } catch { }
+        const list = (k) => (j && Array.isArray(j[k]) ? j[k] : []);
+        if (res.ok && j && j.success) return { ok: true, rev: j.rev, epoch: j.epoch, refused: list('refused'), old: list('old'), superseded: list('superseded') };   // a batch refused on its own, or too old to keep, is named — with a CODE the page words (round 9)
+        // a REFUSAL of the ops themselves (400 / 413 / 422) is undone here and said (its code worded by this page); 401 / 403 waits
+        // for the next answered state; anything else (a 5xx — the server could not write it —, a 404, no answer in 15 s) keeps them
+        // shown and pending, sent again, with no word
+        return { ok: false, refused: [400, 413, 422].includes(res.status), status: res.status, code: (j && typeof j.code === 'string' && j.code) || null };
+      },
+      onView: (v, why) => this._showUserStateView(v, why),
+      say: (kind, info) => this._sayUserStateWrite(kind, info),
+    });
+    this.__userSync = sync;
+    return sync;
+  };
+
+  /** what this page last SHOWED — its localStorage display copy (every shown view is written there, and an act changes the
+   *  in-memory sets FIRST): so an engine made at the first act still starts from the view BEFORE it (the constructor makes it
+   *  earlier anyway) */
+  proto._userStateDisplayCopy = function() {
+    const rd = (raw, d) => { try { const v = JSON.parse(raw || 'null'); return v == null ? d : v; } catch { return d; } };
+    return {
+      starredSessions: rd(localStorage.getItem('starredSessions'), []), archivedSessions: rd(localStorage.getItem('archivedSessions'), []),
+      archivedFolders: rd(localStorage.getItem('archivedFolders'), []), customNames: rd(localStorage.getItem('sessionCustomNames'), {}),
+      sessionModes: rd(localStorage.getItem('sessionModes'), {}), sessionConfigs: rd(localStorage.getItem('sessionConfigs'), {}),
+      sessionGroups: rd(localStorage.getItem('sessionGroups'), {}), groupFolders: rd(localStorage.getItem('groupFolders'), {}),
     };
-    this._writeUserStateToLocalStorage(state);
-    // CLOBBER BELT (B-b87b): the full-doc POST let a tab acting on a STALE
-    // mirror (open all day, missed broadcasts) silently revert every key it
-    // never touched — stars/renames/configs made in other tabs vanished. Diff
-    // against the last server-applied snapshot and PATCH only the changed
-    // top-level keys; unchanged keys can't travel, so stale damage is bounded
-    // to the key actually edited. No snapshot yet (pre-first-fetch legacy
-    // path) → full POST as before.
-    try {
-      const snap = this._serverStateJson;
-      if (snap) {
-        const delta = {};
-        for (const [k, v] of Object.entries(state)) {
-          if (snap[k] !== JSON.stringify(v)) delta[k] = v;
-        }
-        if (!Object.keys(delta).length) return;
-        await fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(delta) });
-        return;
-      }
-      await fetch('/api/user-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) });
-    } catch {}
+  };
+
+  /** the engine's view → this page's sets / maps (copies: an in-place edit never touches the engine's base) + the display copy */
+  proto._showUserStateView = function(v, why) {
+    const c = viewOf(v);
+    // round 10, MUST 1: an ANSWER that changes what the page shows (a refusal, the 7-day rule, a superseded act, a later state taking an
+    // act back) repaints the rows in this same task — a word is said only after (an act and a state are painted by their callers)
+    const changed = why === 'answer' && JSON.stringify(c) !== JSON.stringify(viewOf(this._userStateView()));
+    this._starredIds = new Set(c.starredSessions);
+    this._archivedIds = new Set(c.archivedSessions);
+    this._archivedFolders = new Set(c.archivedFolders);
+    this._customNames = c.customNames;
+    this._sessionModes = c.sessionModes;
+    this._sessionConfigs = c.sessionConfigs;
+    this._sessionGroups = c.sessionGroups;
+    this._groupFolders = c.groupFolders;
+    this._writeUserStateToLocalStorage(c);
+    if (changed) { try { this._render(); this.app?.updateTaskbar?.(); } catch { } }
+  };
+
+  /** round 9: the page SPEAKS ONLY WHEN IT TAKES SOMETHING BACK ON THE SCREEN — a refusal, worded from its CODE in the person's
+   *  language, and the 7-day rule; no word about waiting, none about arriving (a 401 is the app's: it sends a signed-out person to
+   *  sign in, as on master) */
+  const REFUSAL_REASONS = {
+    'unknown-key': 'a kind of change it does not keep', 'not-a-name': 'a name it does not keep', 'bad-value': 'a value it does not take',
+    'not-an-op': 'a change it could not read', malformed: 'a change it could not read', 'no-ops': 'an empty change',
+    'too-many-ops': 'too many changes at once', 'too-large': 'too large to take at once', 'too-deep': 'a value nested too deep', 'too-large-value': 'a value larger than any setting',
+    'reused-id': 'the id of an earlier change', 'too-large-group': 'a group larger than 20 000 conversations', 'too-large-values': 'more changed values than one request carries',
+  };
+  proto._sayUserStateWrite = function(kind, info) {
+    if (kind === 'refused') {
+      const reason = info && REFUSAL_REASONS[info.code];
+      // round 13: what THIS page refused never left it — never «the server refused»
+      if (info && info.local) showToast(reason ? tr('This page did not keep a change ({reason})', { reason: tr(reason) }) : tr('This page did not keep a change.'), { type: 'error' });
+      else showToast(reason ? tr('The server refused a change ({reason}), so it was undone here', { reason: tr(reason) }) : tr('The server refused a change, so it was undone here.'), { type: 'error' });   // (the rows were repainted before it — round 10)
+    } else if (kind === 'older-server') {
+      // round 14: the ops door answered 404 — a server older than this page (a downgrade, the minute of a rolling update): its acts
+      // never land there, and a reload shows that server's state; said once a page (the engine's)
+      showToast(tr('This server is older than this page, so changes made here are not saved — reload the page'), { type: 'error' });
+    } else if (kind === 'old') {
+      // one sentence, true whether the act was never applied or applied once and beaten since — said only where what the page
+      // shows changed because of it; the count agrees with its noun
+      const n = (info && info.count) || 1;
+      showToast(n === 1 ? tr("A change made more than 7 days ago was not kept — this page now shows the server's") : tr("{n} changes made more than 7 days ago were not kept — this page now shows the server's", { n }), { type: 'error' });
+    }
+  };
+
+  /** a server state (the GET, a broadcast) → false when it is not newer than the one this page holds (an echo of the past
+   *  never undoes a later act); else the page shows it + its own acts not yet confirmed */
+  proto._applyServerState = function(state) {
+    return this._userSync().apply(state);
+  };
+
+  /** the person's acts since the page last showed its state: per item / member / field, never a whole key (lane sidebar-echo-order) */
+  proto._pushUserState = async function() {
+    const sync = this._userSync();
+    // (round 13: the diff reads the engine's view as it stands — no copy of either side — and copies only the values it changed)
+    const ops = diffOps(sync.peek(), this._userStateView(), undefined, false).map((o) => (o.value !== null && typeof o.value === 'object' ? { ...o, value: JSON.parse(JSON.stringify(o.value)) } : o));
+    if (!ops.length) return;
+    await sync.record(ops);
   };
 
   // ── Star / Archive / Rename ──
@@ -439,6 +519,8 @@ export function installSidebarState(SidebarClass) {
     const stateKey = this._getSessionStateKey(sessionOrKey);
     if (!stateKey) return;
     const trimmed = (name || '').trim();
+    // lane sidebar-echo-order r14: what this page will not send is refused BEFORE any road carries it — here the window's title too
+    if (trimmed) { const no = this._userSync().refuses([{ key: 'customNames', item: stateKey, value: trimmed }]); if (no) { this._sayUserStateWrite('refused', { code: no, local: true }); return; } }
     if (trimmed) this._customNames[stateKey] = trimmed;
     else delete this._customNames[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);
@@ -522,6 +604,9 @@ export function installSidebarState(SidebarClass) {
     });
     if (name === null) return;
     if (!stateKey) return;
+    // lane sidebar-echo-order r13: what this page will not send is refused BEFORE any road carries it — the ops door's bounds; a harness's
+    // ws rename (master's road, no bound) would otherwise store what the page has just said it did not keep
+    if (name.trim()) { const no = this._userSync().refuses([{ key: 'customNames', item: stateKey, value: name.trim() }]); if (no) { this._sayUserStateWrite('refused', { code: no, local: true }); return; } }
     if (name.trim()) this._customNames[stateKey] = name.trim();
     else delete this._customNames[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);

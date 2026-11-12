@@ -924,15 +924,14 @@ const USER_STATE = {
   'src/lib/channels-panel.js|channelsNoticesSeen': ['pref', 'lane channel-row-notices: the account notices the person put away — account id → the state\'s sig (a code, a time; no words)'],
   'src/lib/desktop-app-prefs.js|[key]': ['pref', 'the per-app frame / scale maps (catalog keys)'],
   'src/lib/desktop-app-launcher.js|patch': ['pref', 'the launcher\'s advanced-open flag + recent catalog ids'],
-  'src/lib/sidebar-state.js|delta': ['owner', 'stars / archives (ids), the names the owner typed, modes, configs, legacy groups — the changed top-level keys'],
-  'src/lib/sidebar-state.js|state': ['owner', 'the same document, whole (the pre-first-fetch path)'],
+  'src/lib/sidebar-state.js|body': ['owner', 'lane sidebar-echo-order: every batch of the person\'s acts not yet confirmed, oldest first, as ops under their ids — per item (and per member / per field): stars / archives (ids), the names the owner typed, modes, config fields, legacy group members; never a whole key, never before the first fetch as a whole document'],
   'src/lib/window-share.js|[REACH_KEY]': ['ids', 'app → the principals a window is shared with'],
   'src/lib/owner-facts.js|page': ['pref', 'the owner\'s last page: its language (en / zh / ja) and whether it is the phone layout — the agents name the tray by them (lane agent-context-owner-facts)'],
 };
 const userStateWrites = (srcs) => {
   const rows = [];
   for (const [rel, text] of srcs) {
-    for (const m of text.matchAll(/\b(?:fetch|fetchJson|fj)\s*\(\s*'\/api\/user-state'/g)) {
+    for (const m of text.matchAll(/\b(?:fetch|fetchJson|fj)\s*\(\s*'\/api\/user-state(?:\/batches)?'/g)) {   // (lane sidebar-echo-order r6: the ops door too)
       let d = 0, i = m.index + m[0].indexOf('('), end = i;
       for (; i < text.length; i++) { const ch = text[i]; if (ch === '(') d++; else if (ch === ')') { d--; if (d === 0) { end = i; break; } } }
       const args = text.slice(m.index, end + 1);

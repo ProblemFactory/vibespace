@@ -78,7 +78,7 @@ ok('non-proxy routes still get parsed JSON bodies', l.parsed && l.parsed.a === 1
 // 5. wiring pins: server.js carries the exact pattern (unstaged-wiring class)
 const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
 // lane webhook-l1-server: the skip is ONE pattern now (/proxy/ + the webhook door + its pairing route read their own bytes)
-ok('server.js json parser skips /proxy/', /OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv) && /OWN_BODY_RE\.test\(req\.path\) \? next\(\) : jsonBody/.test(sv));
+ok('server.js json parser skips /proxy/', /OWN_BODY_RE = \/\^\\\/\(\?:proxy\\\//.test(sv) && /OWN_BODY_RE\.test\(req\.path\)( \|\| \(persistenceRouter\.ownsBody && persistenceRouter\.ownsBody\(req\.path\)\))? \? next\(\) : jsonBody/.test(sv));
 // lane tailnet-names mounts it through the tailnet door (`app.use(require('./src/server/tailnet-door.js').embedded(unblocker))`):
 // the mount is found either way — a vanished mount still reads -1 and fails
 const unblockerAt = sv.search(/app\.use\((?:require\('\.\/src\/server\/tailnet-door\.js'\)\.embedded\()?unblocker\)/);

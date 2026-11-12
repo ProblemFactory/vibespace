@@ -204,6 +204,7 @@ class Sidebar {
     this._sessionConfigs = JSON.parse(localStorage.getItem('sessionConfigs') || '{}'); // { sessionKey: {model, effort, permission} }
     this._sessionGroups = JSON.parse(localStorage.getItem('sessionGroups') || '{}'); // { groupName: [sessionId, ...] }
     this._groupFolders = JSON.parse(localStorage.getItem('groupFolders') || '{}'); // { groupName: [folderPath, ...] }
+    this._userSync(); // lane sidebar-echo-order: the page's user-state engine starts HERE, from this display copy — before any act
 
     this._sortMode = localStorage.getItem('sessionSort') || 'recent';
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
@@ -248,7 +249,7 @@ class Sidebar {
     // Listen for user-state-updated WebSocket messages from other clients
     app.ws.onGlobal((msg) => {
       if (msg.type === 'user-state-updated' && msg.state) {
-        this._applyServerState(msg.state);
+        if (this._applyServerState(msg.state) === false) return;   // lane sidebar-echo-order: the past (stateRev at or below the page's)
         this._render();
         this.app.updateTaskbar();
       }
@@ -1104,7 +1105,9 @@ class Sidebar {
     // Task ⚠ badges depend on the session list (folder auto-include + blocked
     // key resolution) — re-evaluate; signature-guarded, so usually a no-op
     this.refreshTaskAttention?.();
-    if (this._migrateUserStateKeys(this._allSessions)) {
+    // lane sidebar-echo-order r2: the key migration runs on the first SERVER state, never on the stale display copy (it moved
+    // an item the person never touched before the first GET landed)
+    if (this._userStateFetched && this._migrateUserStateKeys(this._allSessions)) {
       // Never push migration results before the initial server fetch has been
       // applied — doing so POSTs the stale localStorage cache as full state,
       // wiping changes made from other devices (server is last-write-wins).

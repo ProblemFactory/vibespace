@@ -3,6 +3,26 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  // lane sidebar-echo-order (inc-mwbn2xp8-ks0b, round 9): the page speaks only when it takes something back on the screen
+  "The server refused a change ({reason}), so it was undone here": "服务器拒绝了一项改动（{reason}），已在此撤销",
+  "The server refused a change, so it was undone here.": "服务器拒绝了一项改动，已在此撤销。",
+  "This page did not keep a change ({reason})": "本页没有保留一项改动（{reason}）",
+  "This page did not keep a change.": "本页没有保留一项改动。",
+  "This server is older than this page, so changes made here are not saved — reload the page": "服务器比本页旧，在这里做的改动不会被保存 — 请重新加载页面",
+  "a group larger than 20 000 conversations": "超过 20 000 个对话的分组",
+  "more changed values than one request carries": "一次请求装不下的改动值",
+  "a kind of change it does not keep": "它不保存的改动类型",
+  "a name it does not keep": "它不保存的名称",
+  "a value it does not take": "它不接受的值",
+  "a change it could not read": "它读不懂的改动",
+  "an empty change": "空的改动",
+  "too many changes at once": "一次的改动太多",
+  "too large to take at once": "一次太大，无法接收",
+  "a value nested too deep": "嵌套太深的值",
+  "a value larger than any setting": "比任何设置都大的值",
+  "the id of an earlier change": "沿用了之前一项改动的编号",
+  "A change made more than 7 days ago was not kept — this page now shows the server's": "超过 7 天前做的一项改动没有保留 — 本页现在显示服务器上的状态",
+  "{n} changes made more than 7 days ago were not kept — this page now shows the server's": "{n} 项超过 7 天前做的改动没有保留 — 本页现在显示服务器上的状态",
   "the browser's own window": "浏览器自己的窗口",
   "the page's picture — this machine has no display": "页面画面 — 这台机器没有显示器",
   "the page's picture — the browser runs on another machine": "页面画面 — 浏览器运行在另一台机器上",
