@@ -2553,7 +2553,7 @@ class JobManager {
   _logsRemover() {
     const o = (this.d && this.d.logsSweep) || {};   // workerPath: a suite's slow-storage stand-in around the real worker
     // filterWhole: THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS (round 2) — an id a live record names again by then keeps its dir
-    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id)), bootTimeMs: Number.isFinite(o.bootTimeMs) ? o.bootTimeMs : null });
+    if (!this._logsRm) this._logsRm = LS.createRemover({ logsDir: this.logsDir, log: (...a) => { try { this.d.log(...a); } catch { } }, timeoutMs: this._logsCfg().timeoutMs, workerPath: typeof o.workerPath === 'string' ? o.workerPath : undefined, filterWhole: (ids) => ids.filter((id) => !this.jobs.has(id)), procRoot: typeof o.procRoot === 'string' ? o.procRoot : null });
     return this._logsRm;
   }
   /** a WHOLE job dir — its caller's verdict (the gc's two legs, the archive cap, the ✕, the boot collapse) — removed in the

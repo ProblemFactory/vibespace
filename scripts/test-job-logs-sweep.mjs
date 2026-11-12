@@ -143,7 +143,7 @@ try {
   const badTs = fired[0] - 6000, badDir = seedRun(d1, child.id, badTs, { stamp: null }); fs.writeFileSync(path.join(badDir, 'pid.json'), '{"pid": 12');
   await sweepAt(J1, Date.now() + 15 * DAY);
   ok(has(liveDir), 'a run no record lists whose wrapper LIVES stays past the retention');
-  ok(has(badDir), 'a run whose stamp cannot be read stays (it cannot be proven gone)');
+  ok(!has(badDir), 'round 3 §5: a run whose stamp cannot be read, and that no running process\'s argv names, GOES (no clock — its one writer, the wrapper, is not running)');
   live.kill('SIGKILL'); await until(() => PI.aliveIdentity(stampOf(live.pid) || { pid: live.pid, starttime: -1 }) !== true, 3000);
   await sleep(50);
   await sweepAt(J1, Date.now() + 15 * DAY);
@@ -164,6 +164,22 @@ try {
   await sweepAt(J1, Date.now() + 15 * DAY);
   ok(!has(ctl3) && !has(d1, 'job-logs', j3.id), '…once it ended: past the retention its run dir AND the job dir no record names are gone');
 
+  // ── THE REAL WRAPPER (round 3 §5): an unreadable stamp of a run whose REAL wrapper runs — kept while it runs (its argv names the
+  // run dir for its whole life: it never sets a title), gone after it ends ─────────────────────────────────────────────────
+  {
+    const r5 = J1.create({ kind: 'task', name: 'real-wrapper', cmd: { argv: ['sleep', '60'] }, owner }, caller);
+    const j5 = J1.jobs.get(r5.job.id);
+    await until(() => j5.runs && j5.runs.length && J1._verifyAlive(J1._readStamp(j5)), 10000);
+    const ts5 = j5.runs[0].startedAt, ctl5 = path.join(d1, 'job-logs', j5.id, String(ts5)), w5 = wrapperOf(d1, j5.id, ts5);
+    fs.writeFileSync(path.join(ctl5, 'pid.json'), '{ torn');   // a stamp that cannot be read
+    J1.rm(j5, { orphan: true });
+    const wl = await J1._logsWhole([j5.id]);
+    ok(has(ctl5) && (wl.keptWhy || {})[j5.id] === 'unjudgeable', 'THE REAL WRAPPER: its stamp torn, its record removed — a whole-dir verdict KEEPS the run while that wrapper runs (its argv names the run dir)');
+    ok(w5 && endWrapper(w5, ctl5), 'its wrapper ended (cmdline checked)');
+    await until(() => PI.aliveIdentity(w5) !== true, 5000); await sleep(50);
+    await J1._logsWhole([j5.id]);
+    ok(!has(ctl5), '…and once it ended, nothing names the run dir: the same verdict removes it');
+  }
   // ── THE RULES ON DISK ──────────────────────────────────────────────────────────────────────────────────────────────────
   lap('§R the rules on disk');
   const longTs = Date.now() - 20 * DAY, longDir = seedRun(d1, child.id, longTs, { ageMs: 2 * DAY });
@@ -284,7 +300,7 @@ try {
     const canary = (name) => { const c = path.join(out, name), r = path.join(c, String(OLD)); fs.mkdirSync(r, { recursive: true }); fs.writeFileSync(path.join(r, 'pid.json'), JSON.stringify(deadStamp())); fs.writeFileSync(path.join(c, 'person.txt'), 'mine'); for (const f of [path.join(r, 'pid.json'), path.join(c, 'person.txt')]) age(f, 40 * DAY); return c; };
     const intact = (c) => has(c, 'person.txt') && has(c, String(OLD), 'pid.json');
     const seedAt = (dir, files = { 'pid.json': JSON.stringify(deadStamp()), 'current.log': 'x\n' }) => { fs.mkdirSync(dir, { recursive: true }); for (const [f, b] of Object.entries(files)) { fs.writeFileSync(path.join(dir, f), b); age(path.join(dir, f), 30 * DAY); } return dir; };
-    const R = LS.createRemover({ logsDir: GL, bootTimeMs: Date.now() - 60 * DAY });   // a machine up for 60 days: a 30-day stamp is no evidence
+    const R = LS.createRemover({ logsDir: GL, procRoot: path.join(tmp, 'no-proc-here') });   // /proc unreadable ⇒ no evidence: an unjudgeable stamp is KEPT (§5)
     // 1. links: a linked job dir under the sweep; a linked run dir inside an unnamed job dir — the canaries outside stay whole
     const c1 = canary('c1'), c2 = canary('c2');
     fs.symlinkSync(c1, path.join(GL, 'jb-11110001'));
@@ -321,22 +337,32 @@ try {
     const wAns = await R.whole(['jb-11110009', 'jb-1111000a']);
     ok(intact(c3) && !fs.existsSync(path.join(GL, 'jb-11110009')) && (wAns.gone || []).includes('jb-11110009'), 'whole() over a job dir that is a LINK unlinks the link alone (as the release did) — the canary outside is whole, the id is gone');
     ok(intact(c4) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
-    // 7. «KEPT UNTIL EVIDENCE»: the same unjudgeable stamps on a machine booted since they were written cannot name a live process
-    const GE = path.join(g, 'evidence'), JE = path.join(GE, 'jb-1111000e'); fs.mkdirSync(JE, { recursive: true });
-    const evDir = seedAt(path.join(JE, String(OLD + 1)), { 'current.log': 'x\n' }); fs.mkdirSync(path.join(evDir, 'pid.json')); age(path.join(evDir, 'pid.json'), 30 * DAY);
-    const evObj = seedAt(path.join(JE, String(OLD + 2)), { 'pid.json': '{}', 'current.log': 'x\n' });
-    const evFresh = seedAt(path.join(JE, String(OLD + 3)), { 'pid.json': '{}', 'current.log': 'x\n' }); fs.utimesSync(path.join(evFresh, 'pid.json'), new Date(), new Date()); age(path.join(evFresh, 'current.log'), 30 * DAY);
-    // THE MARGIN (a day: the store's clock is not this machine's): before the boot by MORE than a day ⇒ evidence; by less ⇒ kept
-    const bootE = Date.now() - 3 * DAY;
-    const evIn = seedAt(path.join(JE, String(OLD + 4)), { 'pid.json': '{}', 'current.log': 'x\n' }); { const t = (bootE - DAY + 3600e3) / 1000; fs.utimesSync(path.join(evIn, 'pid.json'), t, t); }   // 23 h before the boot
-    const evOut = seedAt(path.join(JE, String(OLD + 5)), { 'pid.json': '{}', 'current.log': 'x\n' }); { const t = (bootE - DAY - 3600e3) / 1000; fs.utimesSync(path.join(evOut, 'pid.json'), t, t); }   // 25 h before the boot
-    const RE = LS.createRemover({ logsDir: GE, bootTimeMs: bootE });   // booted three days ago
+    // 7. «KEPT UNTIL EVIDENCE», NO CLOCK (round 3 §5): an unjudgeable stamp's run is removed only when NO running process's argv
+    // names its run dir (the wrapper, its one writer, by the trailing components job-logs/<id>/<runTs>); a stamp that says THIS boot
+    // is never evidence of an end; /proc unreadable ⇒ kept; another instance's wrapper of the same id + stamp keeps ours
+    const GE = path.join(g, 'evidence', 'job-logs'), JE = path.join(GE, 'jb-1111000e'); fs.mkdirSync(JE, { recursive: true });   // a data dir's own job-logs/ (the argv is matched by job-logs/<id>/<runTs>)
+    const evNamed = seedAt(path.join(JE, String(OLD + 1)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const evStranger = seedAt(path.join(JE, String(OLD + 2)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const evNone = seedAt(path.join(JE, String(OLD + 3)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const evThisBoot = seedAt(path.join(JE, String(OLD + 4)), { 'pid.json': JSON.stringify({ pid: process.pid, bootId: PI.bootIdOf() }), 'current.log': 'x\n' });   // no starttime: unknown identity — but THIS boot
+    const holdArgv = (p) => { const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', p], { stdio: 'ignore' }); kids.push(c); return c; };
+    const nm = holdArgv(evNamed + '/spec.' + (OLD + 1) + '.json');   // the wrapper's own second argument: <ctlDir>/spec.<runTs>.json
+    const st2 = holdArgv('/elsewhere/a-copied/data/job-logs/jb-1111000e/' + (OLD + 2));   // ANOTHER instance's wrapper, the same id + stamp
+    await until(() => { try { return fs.readFileSync(`/proc/${st2.pid}/cmdline`, 'latin1').includes('jb-1111000e'); } catch { return false; } }, 3000, 10);
+    const RE = LS.createRemover({ logsDir: GE });
     await RE.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
-    ok(!has(evDir) && !has(evObj) && has(evFresh), 'KEPT UNTIL EVIDENCE: an unjudgeable stamp written before this machine\'s boot names no live process — its run goes; one written since the boot stays');
-    ok(has(evIn) && !has(evOut), 'THE MARGIN IS A DAY, pinned on both sides: a stamp 23 h before the boot is KEPT (a store clock behind could write it after the boot), one 25 h before goes');
-    const JW = path.join(GE, 'jb-1111000f'); const wObj = seedAt(path.join(JW, String(OLD)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    ok(has(evNamed) && !has(evNone), 'KEPT UNTIL EVIDENCE, NO CLOCK: an unjudgeable stamp\'s run named by a running process\'s argv is KEPT; with no process naming it, it goes');
+    ok(has(evStranger), 'the stranger\'s side: another instance\'s wrapper with the same job id and run stamp (a copied data dir) KEEPS our run — the safe side');
+    ok(has(evThisBoot), 'a stamp that says THIS boot (its boot id) is never evidence of an end, even with no process naming it');
+    nm.kill('SIGKILL'); st2.kill('SIGKILL'); await until(() => { try { fs.statSync('/proc/' + nm.pid); return false; } catch { return true; } }, 3000, 10);
+    const JW2 = path.join(GE, 'jb-1111000f'); const wObj = seedAt(path.join(JW2, String(OLD)), { 'pid.json': '{}', 'current.log': 'x\n' });
     const wAns2 = await RE.whole(['jb-1111000f']);
-    ok(!has(JW) && (wAns2.gone || []).includes('jb-1111000f'), '…and a whole-dir verdict takes such a run too (the release removed it; round 1 kept it for ever)');
+    ok(!has(JW2) && (wAns2.gone || []).includes('jb-1111000f'), '…and a whole-dir verdict takes such a run too when nothing names it (the release removed it; round 1 kept it for ever)');
+    const RX = LS.createRemover({ logsDir: GE, procRoot: path.join(tmp, 'no-proc-here') });
+    const evNoProc = seedAt(path.join(JE, String(OLD + 5)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    await RX.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
+    ok(has(evNoProc), 'THE SAFE SIDE, PINNED: a /proc that cannot be listed is no evidence — the unjudgeable run is KEPT');
+    RX.stop();
     RE.stop();
     R.stop();
   } else ok(false, 'the guards are driven (no remover on this tree)');
@@ -655,7 +681,7 @@ try {
       ok(has(n1) && has(n2) && (wAns.keptWhy || {})['jb-4e5ed001'] === 'named', 'THE VERDICT IS TAKEN WHEN THE REMOVAL RUNS: a live record naming the id again by then keeps both of its runs (the batch says «named»)');
     } else ok(false, 'the verdict is taken when the removal runs (no remover on this tree)');
     // b. THE ✕'S PROMISE IS TRUE OR NOT MADE: a run still running / a run whose stamp cannot be judged ⇒ «kept», with why
-    const x = mkDir('x4'); const { jm: X } = boot(x, { bootTimeMs: Date.now() - 60 * DAY });
+    const x = mkDir('x4'); const { jm: X } = boot(x, { procRoot: path.join(tmp, 'no-proc-here') });
     if (typeof X.logsGone === 'function') {
       const liveX = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(liveX); await until(() => PI.identityOf(liveX.pid) != null, 3000);
       const rec = (id) => ({ id, kind: 'task', name: id, state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 2 * DAY, endedAt: Date.now() - 2 * DAY }], archivedAt: Date.now(), archivedWhy: 'done' });

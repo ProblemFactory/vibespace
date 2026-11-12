@@ -1717,7 +1717,16 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
 - **The counting pass counts BY NAME:** run dirs that STARTED more than 14 days ago and no record lists. Past B it reads directories only (no stat, no /proc), inside the normal timeout. The done line names the same run dirs: removed + kept (young by their newest file, live, unjudgeable — the last, complete pass's `keptOld`), equal to the start's count plus what crossed the line meanwhile. Job dirs are counted apart.
 - **THE PAUSE:** the setting `jobs.logsSweep` (boolean, default on, advanced, Background Work). jobs-wiring reads it with `logsSweepOn`. Off gates `sweepLogs` (the boot pass, the hourly pass, an open catch-up) and is said once per pause; never `_logsWhole`. The catch-up record waits, and the next hourly pass after it is turned on resumes it.
 
-**«KEPT UNTIL EVIDENCE» (round 2).** A stamp that cannot be judged keeps its run only while it could still name a live process. Written before this machine's boot BY MORE THAN A DAY (`EVIDENCE_MARGIN_MS`; `/proc/stat` btime, read by the child) ⇒ no process it names runs ⇒ gone. Why a day: the stamp's time is the STORE's clock (a network mount stamps with its server's), the boot instant is this machine's and moves when its clock is set; a day is more than any time-zone mistake (≤ 14 h) and far past the 2 s store skew the data-move kit measures and refuses. In a CONTAINER the kernel's boot is the HOST's: a stamp from before a container restart is not «before boot», so that run is KEPT — the safe side, not a hole. Gone for the sweep and for whole() alike (the release removed such dirs; round 1 kept them for ever). A suite hands its own boot instant (`deps.logsSweep.bootTimeMs`).
+**«KEPT UNTIL EVIDENCE», NO CLOCK (round 2, rebuilt in round 3 §5).** A stamp that cannot be judged keeps its run only while it could still name a live writer. Round 2's «written before this machine's boot by a day» compared the STORE's clock (the stamp's mtime) with this machine's boot: a store a day behind, or a clock stepped forward, read a live run's stamp as «before boot». Now NO clock:
+- **A stamp that says THIS boot** (a readable boot id equal to this boot) is never evidence of an end.
+- **An unjudgeable stamp** goes only when NO running process's argv names its run dir. The child walks /proc once a batch, only when such a stamp occurs (`namedRuns`), and matches the trailing components `job-logs/<jb-id>/<runTs>`.
+- **/proc that cannot be listed ⇒ KEPT** (pinned).
+- **Why a miss is evidence HERE** (for the identity census's argv-vs-path rows, when it meets this site):
+  - the run dir has ONE writer, its wrapper;
+  - the wrapper's argv is `node job-wrapper.js <ctlDir> <specPath> --proto=N` for its whole life (it sets no title; the hub spawns it directly with the absolute run dir — a relative or respelled data dir still leaves the trailing components);
+  - the walk is read whole;
+  - an unreadable /proc is never a miss.
+- **The stranger's side:** another instance's wrapper with the same id and run stamp (a copied data dir) KEEPS our run — the safe side, never a removal.
 
 **THE ✕ (`rmArchived`).**
 - The archive write first, as before. Then `_logsWhole([id])` goes into `_logsGone`, which resolves `{gone}` · `{kept: 'running' | 'unjudgeable' | 'named'}` · `{pending}`.

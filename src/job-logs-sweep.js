@@ -32,12 +32,7 @@ const GAP_MS = 30_000;               // G — between two passes while a catch-u
 const BOOT_DELAY_MS = 120_000;       // the first pass after a boot (a hub that restarts more often than hourly still sweeps)
 const BATCH_TIMEOUT_MS = 120_000;    // a batch past this is terminated, said once, queued again (≤ 2 tries)
 const IDLE_MS = 1000;                // an idle worker lingers this long (unref'd) for the next batch, then is terminated
-// «KEPT UNTIL EVIDENCE»: a stamp that cannot be judged names no live process only when it was written BEFORE THIS MACHINE'S BOOT BY
-// MORE THAN A DAY. The stamp's time is the STORE's clock (a network mount stamps with its server's), the boot instant is this
-// machine's and moves when its clock is set: a day is more than any time-zone mistake (≤ 14 h) and far past the store skew the
-// data-move kit refuses (2 s, measured on this mount). In a CONTAINER the kernel's boot is the HOST's: a stamp from before a
-// container restart is NOT «before boot» — that run is KEPT (the safe side), never a hole.
-const EVIDENCE_MARGIN_MS = 86_400_000;
+// «KEPT UNTIL EVIDENCE» (round 3 §5): no clock — src/job-logs-sweep-worker.js namedRuns (a running process's argv naming the run dir)
 // a remover whose hub ended stops between two run dirs and leaves what it removed in this file in the data dir (the next engine
 // counts it ONCE: its name is kept in the record until the file is gone)
 const ORPHAN_PREFIX = 'jobs-remover-orphan-';
@@ -99,7 +94,7 @@ const words = {
 /** THE MAIN-THREAD SIDE: one queue, one CHILD at a time (started for a batch; idle, it lingers IDLE_MS unref'd, then goes), a
  *  timeout per batch. whole(ids) → Promise<{removed, entries, keptAlive}>; sweep(args) → Promise<answer>; settled() →
  *  Promise once nothing is queued or in flight. A stopped remover answers {error:'stopped'} and starts nothing. */
-function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS, idleMs = IDLE_MS, wedgedMs = WEDGED_MS, workerPath = path.join(__dirname, 'job-logs-sweep-worker.js'), forkImpl = null, filterWhole = null, bootTimeMs = null } = {}) {
+function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS, idleMs = IDLE_MS, wedgedMs = WEDGED_MS, workerPath = path.join(__dirname, 'job-logs-sweep-worker.js'), forkImpl = null, filterWhole = null, procRoot = null } = {}) {
   // round 2 law «the hub's exit never waits for the remover»: a CHILD PROCESS, not a worker thread — a process's exit joins its
   // threads (one wedged in a storage call held a standalone exit until it was killed), never its children
   const queue = [];
@@ -169,7 +164,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
       if (named.size) { cur.named = [...named]; cur.msg = { ...cur.msg, ids: cur.msg.ids.filter((id) => !named.has(id)) }; }
       if (!cur.msg.ids.length) { const it = cur; cur = null; it.resolve({ removed: 0, entries: 0, keptAlive: 0, gone: [], kept: [], keptWhy: Object.fromEntries((it.named || []).map((id) => [id, 'named'])) }); next(); return; }
     }
-    if (bootTimeMs != null) cur.msg = { ...cur.msg, bootTimeMs };   // a suite's machine-boot instant (the product's: the child reads /proc/stat)
+    if (procRoot != null) cur.msg = { ...cur.msg, procRoot };   // a suite's stand-in for /proc (the product's: /proc)
     try { if (!worker) worker = startChild(); else refs(worker, true); } catch (e) { const it = cur; cur = null; it.resolve({ error: e.message }); next(); return; }
     const tmo = cur.timeoutMs || timeoutMs;
     timer = setTimeout(() => fail(`no answer in ${Math.round(tmo / 1000)} s`), tmo);
@@ -195,4 +190,4 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   };
 }
 
-module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, EVIDENCE_MARGIN_MS, ORPHAN_PREFIX, JOB_NAME, RUN_NAME, RECOVERED_NOTE, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };
+module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, ORPHAN_PREFIX, JOB_NAME, RUN_NAME, RECOVERED_NOTE, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };

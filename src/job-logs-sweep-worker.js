@@ -18,10 +18,26 @@ const S = require('./job-logs-sweep.js');
 
 const logsDir = process.argv[2];
 const BOOT = PI.bootIdOf();
-// THIS MACHINE'S BOOT (round 2: «kept for ever» became «kept until evidence»): a stamp written before it cannot name a live
-// process. /proc/stat `btime` (the kernel answers); a suite may hand its own instant (msg.bootTimeMs)
-const BOOT_AT = (() => { try { const m = /^btime (\d+)$/m.exec(fs.readFileSync('/proc/stat', 'utf8')); return m ? Number(m[1]) * 1000 : null; } catch { return null; } })();
-let bootAt = BOOT_AT;
+// «KEPT UNTIL EVIDENCE» WITH NO CLOCK (round 3 §5 — round 2's «before this machine's boot by a day» compared the STORE's clock with
+// this machine's): a stamp that cannot be judged names no live writer when NO running process's argv names that run dir. The
+// wrapper is the run dir's ONLY writer and its argv is `node job-wrapper.js <ctlDir> <specPath>` for its whole life (it never sets
+// a title); matched by the trailing components `job-logs/<jb-id>/<runTs>` (a respelled or relative data dir still matches; another
+// instance's wrapper of the same id and stamp — a copied data dir — KEEPS ours: the safe side). The walk of /proc is read WHOLE
+// (one per batch, only when an unjudgeable stamp occurs); a /proc that cannot be listed ⇒ no evidence ⇒ KEPT.
+// (For the identity census: a MISS here is evidence because of those four facts — the one writer, its argv for life, the
+// trailing components, the whole walk — and only then; /proc unreadable is never a miss.)
+let procRoot = '/proc', writers = null;   // writers: Set of `<id>/<runTs>` named by a running process's argv; false = /proc unreadable
+const RUN_IN_ARGV = /(?:^|\/)job-logs\/(jb-[0-9a-z]{1,40})\/(\d{1,16})(?:\/|$)/;
+function namedRuns() {
+  if (writers !== null) return writers;
+  let pids; try { pids = fs.readdirSync(procRoot).filter((n) => /^\d+$/.test(n)); } catch { writers = false; return writers; }
+  const set = new Set();
+  for (const pid of pids) {
+    let raw; try { raw = fs.readFileSync(path.join(procRoot, pid, 'cmdline'), 'latin1'); } catch { continue; }   // gone meanwhile, or not ours to read
+    for (const a of raw.split('\0')) { const m = RUN_IN_ARGV.exec(a); if (m) set.add(`${m[1]}/${m[2]}`); }
+  }
+  writers = set; return writers;
+}
 // ITS HUB (round 2): the process that forked it. The production unit stops with KillMode=process and a hub can be SIGKILLed (the
 // OOM killer, a crash, the unit's timeout) — nobody kills this child then; it checks between two run dirs (getppid: the parent's
 // death re-parents it) and stops at once, so no remover outlives its hub by more than the one call it is in, and two removers
@@ -51,13 +67,15 @@ function aliveOf(runDir) {
 function aliveOfStamp(runDir) {
   const f = path.join(runDir, 'pid.json'), st = lst(f);
   if (!st) return false;
-  // a stamp that cannot be judged keeps its run UNTIL EVIDENCE: written before this machine's boot ⇒ no process it names runs
-  const unproven = () => (bootAt != null && st.mtimeMs < bootAt - S.EVIDENCE_MARGIN_MS ? false : null);   // before the boot by MORE THAN A DAY (src/job-logs-sweep.js EVIDENCE_MARGIN_MS)
+  // a stamp that cannot be judged keeps its run UNTIL EVIDENCE — no running process's argv names this run dir (no clock: §5)
+  const runKey = path.basename(path.dirname(runDir)) + '/' + path.basename(runDir);
+  const unproven = () => { const ws = namedRuns(); return ws === false || ws.has(runKey) ? null : false; };
   if (!st.isFile()) return unproven();
   let stamp; try { stamp = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return unproven(); }
   if (!stamp || !stamp.pid) return unproven();
   if (stamp.bootId && BOOT && stamp.bootId !== BOOT) return false;
   const v = PI.aliveIdentity(stamp);
+  if (v === null && stamp.bootId && BOOT && stamp.bootId === BOOT) return null;   // a stamp that says THIS boot is never evidence of an end (§5)
   return v === null ? unproven() : v;
 }
 /** every entry under `dir` (lstat; a sub dir walked): its count and its newest mtime — null when `dir` cannot be read */
@@ -190,7 +208,7 @@ function forget({ dir, names = [] }) { let n = 0; for (const name of names) { if
 process.on('disconnect', () => process.exit(0));   // the hub went (or killed its remover): nothing is waited for
 process.on('message', (msg) => {
   if (hubGone()) orphaned(null);   // round 3 §4: a batch from a hub that is gone is never started
-  bootAt = msg && Number.isFinite(msg.bootTimeMs) ? msg.bootTimeMs : BOOT_AT;
+  procRoot = msg && typeof msg.procRoot === 'string' ? msg.procRoot : '/proc'; writers = null;   // a fresh walk per batch (a suite may point it elsewhere)
   orphanDir = msg && typeof msg.orphanDir === 'string' ? msg.orphanDir : null; orphanSeq = msg && msg.seq;
   let out;
   try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : msg && msg.op === 'forget' ? forget(msg) : { error: 'unknown op' }; }
