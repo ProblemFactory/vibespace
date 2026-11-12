@@ -255,6 +255,7 @@ function registerWsHandler(wss, ctx) {
   const missing = WS_CTX_CONTRACT.filter((k) => !(k in ctx));
   if (missing.length) throw new Error('[ws-handler] ctx contract violated — missing: ' + missing.join(', '));
   const {
+    getDeliver = () => null,
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
@@ -546,6 +547,9 @@ function registerWsHandler(wss, ctx) {
       }
       try { require('./server/helper-asks').forget(session); } catch { } // lane S1 verify r1: a killed parent's helper asks wait for nobody — timers cleared, For-you items resolved
       try { require('./server/main-asks').forget(session); } catch { } // lane parked-ask-inbox: a killed conversation's own asks — items resolved
+      // lane queued-is-not-woke round 3: the kill road removes the session BEFORE its pty exits (session-stdout's teardown never
+      // reaches the ladder) — the frames its wrapper held are handed back AT THE ACT (returned only on evidence newer than its last turn start)
+      try { const qc = session.claudeSessionId || session.backendSessionId; if (qc) getDeliver()?.noteProcessGone?.(qc, 'the conversation was terminated'); } catch { }
       try { getExitProxy()?.onSessionEnd?.(session, data.sessionId); } catch { } // verify-r2: its exit pairs are dropped with their connections, its waiting asks settled
       activeSessions.delete(data.sessionId);
       refreshWebuiPids();

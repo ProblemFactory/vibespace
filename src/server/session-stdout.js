@@ -221,6 +221,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     try { midTurn = midTurn || (session._normalizer?.backgroundTasks?.() || []).length > 0; } catch { }
     session._isStreaming = false;
     noteTurnFlight(session, Date.now()); // nothing is in flight from a dead process (lane cache-warmth-tiles r3)
+    // lane queued-is-not-woke round 2: the wrapper is GONE (its socket with it) — what it held of ours is handed back BY THE
+    // HUB to the next-turn road and its reservations returned (never «waiting for the current turn» on a stopped conversation)
+    try { const qc = session.claudeSessionId || session.backendSessionId; if (qc) deliverRef?.noteProcessGone?.(qc); } catch (e) { console.warn(`[deliver] ${id}: queued hand-back failed: ${e.message}`); }
     // THE THIRD EXIT OF THE COMPACTION CLAIM (§2.11, round 7). `_streamingKind
     // === 'compacting'` is a statement about a process that is now gone, and
     // this path clears `_isStreaming` but used to leave the kind set — so a

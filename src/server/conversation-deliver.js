@@ -107,7 +107,7 @@ const RETRY_CAP = STASH_CAP;   // the hand-over's sender (src/notification-sende
 // cannot name. It is charged to a NAMED bucket (`host:<id>` / `unattributed`)
 // rather than guessed at or waved through — the instance/day ceiling still
 // applies to it, and the name says what we do not know.
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
@@ -1316,7 +1316,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // a charged peer message written first would consume the notification's
   // entry and charge it, and the notification's own answer would then find an
   // empty queue.
-  const unsettled = new Map();   // cid -> [{withheld, at}]
+  const unsettled = new Map();   // cid -> [{withheld, at, qid}]
+  // THE QUEUED WAKE (lane queued-is-not-woke, law 1): a frame written to a wrapper whose conversation is IN A TURN waits in
+  // that wrapper's queue — it is not «woke», not «read», not charged until a turn carries it (src/server/queued-wakes.js)
+  // reservationState: the guard's word before any marked copy; stashHas: a handed-back frame's words still wait (round 4)
+  const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
   /** Give a withheld frame's authorization hold back to the guard (r5). A
    *  stranded frame gets it too: the wrapper died holding our money open, and
    *  the guard's own TTL would give it back anyway — this just does it the
@@ -1326,11 +1330,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!rec || !rec.hold || !releaseSpend) return;
     try { releaseSpend(rec); } catch (e) { log('[deliver] releasing the spend hold failed:', e.message); }
   }
-  function noteFrameWritten(cid, withheld) {
+  function noteFrameWritten(cid, withheld, qid = null) {
     if (!cid) return;
     const now = Date.now();
-    const q = (unsettled.get(cid) || []).filter((e) => now - e.at < SETTLE_TTL_MS);
-    q.push({ withheld: withheld || null, at: now });
+    const q = (unsettled.get(cid) || []).filter((e) => now - e.at < SETTLE_TTL_MS || (e.qid && (queued.unanswered(e.qid), false)));
+    q.push({ withheld: withheld || null, at: now, ...(qid ? { qid } : {}) });
     unsettled.set(cid, q);
     if (unsettled.size > 200) {           // bounded: a wrapper that never answers must not grow this
       for (const [k, v] of unsettled) if (!v.some((e) => now - e.at < SETTLE_TTL_MS)) unsettled.delete(k);
@@ -1366,9 +1370,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // a STRANDED frame (older than one wrapper round-trip by a wide margin) may
     // not absorb this answer — drop it and keep looking
     let e = null;
-    while (q.length) { const c = q.shift(); if (now - c.at < SETTLE_TTL_MS) { e = c; break; } giveBack(c); }
+    while (q.length) { const c = q.shift(); if (now - c.at < SETTLE_TTL_MS) { e = c; break; } if (c.qid) queued.unanswered(c.qid); else giveBack(c); }
     if (!q.length) unsettled.delete(cid);
     if (!e) return null;
+    if (e.qid) { const v = queued.answer(e.qid, { ok, mode }); return v === 'carried' ? 'charged' : v === 'queued' ? 'queued' : v === 'back' ? 'undelivered' : null; }
     if (!e.withheld) return 'already-charged';
     if (ok !== false && mode !== 'steered' && noteSpend) {
       // it did NOT steer: the notification became its own turn after all
@@ -1386,6 +1391,75 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  thing on this machine that can name the credential slot a turn would
    *  bill. (findRpcPeer answers a narrower question: a codex session whose
    *  wrapper adverts the peer lane.) */
+  // ── THE QUEUED WAKE MEETS THE TRUTH AGAIN (lane queued-is-not-woke round 2) ──
+  /** The conversation's wrapper process is GONE (session-stdout's teardown; the boot sweep): every frame it held is handed
+   *  back BY THE HUB to the next-turn road (the stash — delivered once, at the next turn) and its reservation returned. */
+  /** the hub's own hand-back: the words to the stash WITH a ref (its drain names the frame — the row reads «read» only then) */
+  const heldBackStash = (cid) => (e, w) => { stashFor(cid, { source: 'agent', kind: w.kind === 'notification' ? 'notification' : 'peer', fromName: w.fromName || null, text: w.text, ref: w.ref }); };
+  /** WHO HOLDS IT: the wrapper process of the conversation's live session (its own sidecar's pid); null = no process;
+   *  undefined = it cannot be told (nothing is judged). A frame the old process held is never «carried» by another. */
+  function holderOf(cid) {
+    const s = localSessionFor(cid);
+    if (!s || !s.pty) return null;
+    try {
+      let wid = null;
+      for (const [w, x] of activeSessions || []) if (x === s) { wid = w; break; }
+      const wc = wid ? wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath) : null;
+      return wc && wc.pid ? String(wc.pid) : undefined;
+    } catch { return undefined; }
+  }
+  function checkHolder(cid) {
+    const back = queued.noteHolder(cid, holderOf(cid), heldBackStash(cid));
+    if (back.length) log(`[deliver] ${cid}: ${back.length} queued frame(s) handed back by the hub — the process that held them is gone or replaced; they ride the next turn`);
+  }
+  // a held-back frame's words were HANDED by the stash (its drain names the ref) ⇒ that record is read now
+  onStash((ev, cid, entries) => {
+    try {
+      if (ev === 'drained') queued.noteStashDrained(cid, (entries || []).map((e) => e && e.ref));
+      else if (ev === 'evicted') queued.noteStashEvicted(cid, (entries || []).map((e) => e && e.ref));   // round 3: an evicted hand-back leaves (said)
+    } catch (e) { log('[deliver] queued stash note failed:', e.message); }
+  });
+  const turnStartListeners = new Set();
+  /** Is a process alive? true / false / undefined (cannot be told) — a FACT about the holder's process, never «not attached yet». */
+  const pidAlive = (pid) => { const n = Number(pid); if (!Number.isInteger(n) || n <= 0) return undefined; try { process.kill(n, 0); return true; } catch (e) { return e && e.code === 'ESRCH' ? false : e && e.code === 'EPERM' ? true : undefined; } };
+  function noteProcessGone(cid, why = 'its process is gone') {
+    if (!cid) return [];
+    const back = queued.handBackGone(cid, heldBackStash(cid), why);
+    if (back.length) log(`[deliver] ${cid}: ${back.length} queued frame(s) handed back by the hub (${why}) — they ride the next turn`);
+    return back;
+  }
+  /** A session (re)attached — at boot or a reconnect: a wrapper that holds frames of ours is ASKED for its queue (the
+   *  queue-resync verb its sidecar adverts), so an entry its turn carried while the hub was down settles from the answer. */
+  function noteAttached(session) {
+    try {
+      const cid = addressableId(session);
+      if (!cid || !session.pty || !queued.heldCids().includes(cid)) return false;
+      let wid = null;
+      for (const [w, x] of activeSessions || []) if (x === session) { wid = w; break; }
+      const wc = wid ? wrapperCaps(path.join(dataDir, 'session-buffers'), wid, session.socketPath) : null;
+      if (!wc || !wc.queueResync) return false;
+      session.pty.write(JSON.stringify({ type: 'queue-resync' }) + '\n');
+      return true;
+    } catch (e) { log('[deliver] queue re-ask failed:', e.message); return false; }
+  }
+  /** At boot (after a grace for the restore) and on demand: each conversation holding frames — no live process ⇒ handed
+   *  back by the hub; a live one ⇒ asked for its queue. */
+  function sweepQueued() {
+    for (const cid of queued.heldCids()) {
+      const s = localSessionFor(cid);
+      if (s && s.pty) { noteAttached(s); continue; }
+      // round 3: no attached process is NOT «gone» (a pipe session joins late; a re-attach backoff nulls the pty) — the holder's
+      // pid decides: alive ⇒ kept (asked at its attach); dead ⇒ the guard's word (converted = it ran), else unknown (counted)
+      const r = queued.bootSettle(cid, { alive: pidAlive, converted: (id) => { try { return reservationState ? reservationState(id) : null; } catch { return null; } }, stash: heldBackStash(cid) });
+      if (r.length) log(`[deliver] ${cid}: at boot ${r.length} held frame(s) settled (${r.join(', ')}) — their process ended while the hub was down`);
+    }
+  }
+  if (queued.heldCids().length) { const t = clock.setTimeout(() => { try { sweepQueued(); } catch (e) { log('[deliver] queued sweep failed:', e.message); } }, 60 * 1000); t?.unref?.(); }
+  // round 4: the age bound in a running hub — hourly, unref'd, on the REAL timer (never the retry clock: its tests read every
+  // timer armed on it), so an entry kept at boot whose wrapper never attaches leaves too
+  const ageTick = () => { try { queued.ageOut(); } catch (e) { log('[deliver] queued age check failed:', e.message); } const t = setTimeout(ageTick, 3600 * 1000); t?.unref?.(); };
+  { const t = setTimeout(ageTick, 3600 * 1000); t?.unref?.(); }
+
   function localSessionFor(cid) {
     if (!activeSessions) return null;
     try {
@@ -1538,7 +1612,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           undo1 = armTurn();
           const busy = busyOf(cid);
           const r = await peerMsg.postToPeer(peer, text);
-          if (r.ok) { spent(); cardOk(); return { ok: true, lane: 'message', kind, peerName: peer.name || null }; }
+          if (r.ok) { spent(); cardOk(); return { ok: true, lane: 'message', kind, peerName: peer.name || null, ...(busy === true ? { intoTurn: true } : {}) }; }   // intoTurn (lane queued-is-not-woke): the CLI takes it INTO its running turn — charged as master (ruled)
           undo1();
           const where = `phase ${r.phase || '?'}, ${Number(r.elapsedMs) || 0} ms${Number(r.late) > 0 ? `, our loop was ${Number(r.late)} ms late` : ''}, target mid-turn: ${busy === null ? 'unknown' : busy ? 'yes' : 'no'}`;
           // THE RETRY PARK (see the header): a TRANSIENT miss while the pid still lives is parked for the caller
@@ -1604,6 +1678,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // no free lane right now ⇒ noWake refuses here rather than opening a
         // turn (the frame is not written; the hold goes back in `finally`)
         if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: rpc.s._isStreaming ? 'this message would not join the running turn — a delivery now would open a billed turn after it' : 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
+        // a bound on a money record refuses at the send, by name (round 2) — before any frame, the hold given back in `finally`
+        const queuedFull = !steersIntoRunningTurn && rpc.s._isStreaming === true ? queued.full(cid) : null;
+        if (queuedFull) return { ok: false, lane: 'rpc-queue', kind, refused: 'queued-full', reason: queuedFull };
         try {
           rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
@@ -1613,6 +1690,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // says the frame opened a turn after all, and released when it confirms
           // the steer — so the money is NOT settled here, it is handed on
           if (steersIntoRunningTurn) { machineTurn(); money.settled = true; noteFrameWritten(cid, charged); }
+          else if (rpc.s._isStreaming === true) {
+            // IN A TURN (lane queued-is-not-woke, law 1): the wrapper QUEUES this frame behind the running turn — said as
+            // waiting, the group's mark held, the charge OWED until a turn carries it (or released when it is handed back)
+            machineTurn(); lastPostAt.set(cid, clock.now()); money.settled = true;
+            const since = Number.isFinite(rpc.s._turnOpenedAt) ? rpc.s._turnOpenedAt : null;   // the turn it waits behind (acp-events / codex-events stamp it)
+            const qe = queued.noteWritten(cid, { charged, text, kind, fromName: opts.fromName || null, mark: opts.wakeMark || null, since, peerName: rpc.s.name || null, holder: rpc.wc && rpc.wc.pid ? String(rpc.wc.pid) : null });   // the hold becomes the RESERVATION; the holder = the wrapper process that took it (round 2)
+            noteFrameWritten(cid, null, qe.id);
+            return { ok: true, lane: 'rpc-queue', kind, steered: false, queued: true, since, peerName: rpc.s.name || null };
+          }
           else { spent(); noteFrameWritten(cid, null); }
           return { ok: true, lane: 'rpc-queue', kind, steered: steersIntoRunningTurn, peerName: rpc.s.name || null };
         } catch (e) { log('[deliver] rpc-queue write failed (falling through): ' + e.message); }
@@ -1698,6 +1784,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
+    // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records
+    // fresh: the wrapper's own dated listing (round 4) — the only queue listing that can prove a frame did not run
+    noteQueueItems: (cid, items, opts = {}) => { checkHolder(cid); queued.noteQueue(cid, items, holderOf(cid) || undefined, { fresh: !!(opts && opts.fresh) }); }, noteTurnStarted: (cid) => { checkHolder(cid); queued.noteTurnStarted(cid); for (const fn of turnStartListeners) { try { fn(cid); } catch (e) { log('[deliver] a turn-start listener threw:', e.message); } } },
+    onTurnStarted: (fn) => { turnStartListeners.add(fn); return () => turnStartListeners.delete(fn); }, noteConversationEnded: (cid, why) => queued.dropConversation(cid, why), onQueuedDropped: (fn) => queued.onDropped(fn), noteTurnEnded: (cid) => queued.noteTurnEnded(cid),
+    noteHandedBack: (cid, text, reason) => queued.noteHandedBack(cid, text, reason, heldBackStash(cid)), onCarried: (fn) => queued.onCarried(fn), onHandedBack: (fn) => queued.onHandedBack(fn), queuedEntries: (cid) => queued.entriesFor(cid),
+    noteProcessGone, noteAttached, sweepQueued,   // round 2: the wrapper gone ⇒ the HUB hands back; a (re)attach ⇒ the hub ASKS for the queue
     parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,   // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
     onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,

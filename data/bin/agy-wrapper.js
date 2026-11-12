@@ -746,7 +746,7 @@ let dropSeq = 0;                  // the put-back record's id: `${pid}-${n}` —
 function publishQueue() {
   const items = promptQueue.map((q) => ({ id: q.id, msgId: q.opts?.msgId || '', preview: preview(q.text), ...(!q.opts?.peer && !q.opts?.nudge && !q.opts?.retry && q.text && q.text.length <= 20000 ? { text: q.text } : {}), ts: q.ts || null, kind: q.opts?.peer ? 'peer' : (q.opts?.nudge || q.opts?.retry) ? 'system' : 'user', from: q.opts?.peerFrom || null }));
   meta.queue = items; scheduleMeta();
-  record('queue_changed', { items, turn_id: meta.activePromptId || null, verbs: QUEUE_VERBS });
+  record('queue_changed', { items, turn_id: meta.activePromptId || null, verbs: QUEUE_VERBS, fresh: true });   // fresh: the wrapper's own queue, stated as it is now (lane queued-is-not-woke round 4)
 }
 function drainPromptQueue() {
   if (activePrompt || !promptQueue.length || restarting || !child) return;

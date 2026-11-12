@@ -1870,10 +1870,21 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
     await L.deliver.deliverToConversation('cid-1', 'job', { kind: 'notification', spendReason: 'job-notification' });
     ok('§5b POSITIVE CONTROL: an IDLE target opens a turn, and it IS charged', L.charged() === 1, String(L.charged()));
   }
-  {   // POSITIVE CONTROL 2: a HUMAN peer message queues as its own turn, always
+  {   // POSITIVE CONTROL 2 (restated — lane queued-is-not-woke, law 1 round 2, 主开发's ruling 2026-11-12): a HUMAN peer message
+      // mid-turn queues as its own turn afterwards — its unit RESERVED at the send (a stamp named by the frame's id, counted
+      // like a spent turn), the turn that carries it IS that unit (never free, never at the stdin write: the 2026-11-11 incident's three charges for turns that
+      // never ran)
     const L = mkLadder();
-    await L.deliver.deliverToConversation('cid-1', 'hi', { kind: 'peer', spendReason: 'peer-message' });
-    ok('§5b POSITIVE CONTROL: a human PEER message is charged even mid-turn (queued ⇒ its own turn afterwards)', L.charged() === 1, String(L.charged()));
+    const r = await L.deliver.deliverToConversation('cid-1', 'hi', { kind: 'peer', spendReason: 'peer-message' });
+    const atSend = L.charged();
+    const settled = L.deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'queued' });
+    L.deliver.noteQueueItems('cid-1', [{ id: 'q1' }]);   // the wrapper's queue holds it (its queue_changed)
+    const whileQueued = L.charged();
+    L.deliver.noteTurnEnded('cid-1'); L.deliver.noteQueueItems('cid-1', []); L.deliver.noteTurnStarted('cid-1');   // its turn starts
+    const carried = L.charged();
+    L.deliver.noteTurnStarted('cid-1');
+    ok('§5b POSITIVE CONTROL (law 1 round 2 — a RESERVATION): a human PEER message mid-turn is queued and its unit TAKEN at the send (counted like a spent turn); the wrapper\'s «queued», the turn that carries it and a later turn add nothing — ONE unit',
+      r.ok === true && r.queued === true && atSend === 1 && settled === 'queued' && whileQueued === 1 && carried === 1 && L.charged() === 1, JSON.stringify({ r, atSend, settled, whileQueued, carried, after: L.charged() }));
   }
   {   // POSITIVE CONTROL 3: claude's cli-inbox lane is never treated as free
     const dataDir = tmpdir('vs-spend-steer-cl-');
@@ -1898,6 +1909,271 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
     ok('§5b …but a steer that FELL BACK to the queue really did open a turn, and is charged THEN',
       L.deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'queued' }) === 'charged' && L.charged() === 1);
     ok('§5b an unknown conversation settles to nothing (no phantom charges)', L.deliver.settleRpcDelivery('cid-nope', { ok: true, mode: 'queued' }) === null);
+  }
+
+  // ── §5c THE RESERVATION (lane queued-is-not-woke, law 1 round 2 — 主开发's panel, 2026-11-12): A FRAME QUEUED BEHIND A
+  // RUNNING TURN TAKES ITS UNIT AT THE SEND. The panel drove the release with the real guard at cap 3: the hold went back at
+  // «queued», every later authorize allowed again, and the wrapper ran eight billed turns («spent 8 … (cap 3)»). The law: an
+  // owed charge is a RESERVATION — a stamp named by the frame's id, counted by every authorize like a spent turn, the
+  // carrying turn that same unit (idempotent by the id), returned only when the frame is handed back or refused.
+  {
+    const A2 = require(path.join(REPO, 'src/spend-authorizer.js'));
+    const id = { key: 'slot-R', name: 'R' };
+    let st = A2.emptyBudget();
+    st = A2.noteUnattendedSpend(st, { identity: id, reason: 'peer-message', rid: 'qw-1' }).state;
+    st = A2.noteUnattendedSpend(st, { identity: id, reason: 'peer-message', rid: 'qw-1' }).state;
+    ok('§5c a reservation is ONE unit by its id — a second note for the same id adds nothing (a crash between a carry and its persist never charges twice)', (st.identities['slot-R'] || []).length === 1 && st.identities['slot-R'][0].rid === 'qw-1');
+    const back = A2.returnReservation(st, { rid: 'qw-1' });
+    ok('§5c …returned by its id: the windows are empty again', back.returned === 1 && !(back.state.identities['slot-R'] || []).length && !(back.state.instance || []).some((t) => t && t.rid === 'qw-1'));
+    ok('§5c …an id never stamped returns nothing', A2.returnReservation(st, { rid: 'qw-nope' }).returned === 0);
+    // THE CEILING, driven: the REAL guard at 3 an hour, the REAL ladder, an Antigravity conversation in a turn
+    const mk = () => {
+      const dataDir = tmpdir('vs-spend-reserve-');
+      fs.mkdirSync(path.join(dataDir, 'session-buffers'), { recursive: true });
+      const settings = { 'spend.unattendedPerIdentityHour': 3 };
+      const guard = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ({ key: 'slot-A', name: 'Alpha' }), getUserTodos: () => null, log: () => { } });
+      const frames = [];
+      const S = { backend: 'antigravity', mode: 'chat', backendSessionId: 'cid-r', name: 'busy', host: null, socketPath: path.join(dataDir, 'cw-w1'), _isStreaming: true, _turnStateSeen: true, pty: { write: (x) => frames.push(JSON.parse(String(x))) } };
+      fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ pid: process.pid, startedAt: Date.now(), mode: 'chat', backend: 'antigravity', caps: { peerMessage: true, notificationSteer: false } }));
+      const deliver = deliverMod.create({
+        dataDir, activeSessions: new Map([['w1', S]]), serverSetting: () => undefined, getHosts: () => null, getConvIndex: () => null, emitPeerCard: () => { },
+        peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
+        authorizeSpend: (req) => guard.authorize(req), noteSpend: (rec) => guard.note(rec), releaseSpend: (rec) => guard.release(rec), log: () => { },
+      });
+      const hour = () => (guard.snapshot().budget.identities['slot-A'] || []).length;
+      return { guard, deliver, frames, hour };
+    };
+    {
+      const L = mk();
+      const rs = [];
+      for (let i = 0; i < 8; i++) { const r = await L.deliver.deliverToConversation('cid-r', 'wake ' + i, { kind: 'peer', spendReason: 'peer-message' }); rs.push(r); if (r.ok) { L.deliver.noteQueueItems('cid-r', L.frames.map((_, k) => ({ id: 'q' + k }))); L.deliver.settleRpcDelivery('cid-r', { ok: true, mode: 'queued' }); } }
+      ok('§5c THE CEILING: cap 3, a conversation in a turn — sends 1 to 3 queued, sends 4 and on REFUSED at the send by name (the hour cap), 3 frames written',
+        rs.slice(0, 3).every((r) => r.ok && r.queued) && rs.slice(3).every((r) => !r.ok && r.refused === 'spend' && r.why === 'hour-cap') && L.frames.length === 3, JSON.stringify(rs.map((r) => r.ok ? 'Q' : r.why)));
+      ok('§5c …the hour reads 3 while they wait', L.hour() === 3);
+      for (const left of [['q1', 'q2'], ['q2'], []]) { L.deliver.noteTurnEnded('cid-r'); L.deliver.noteQueueItems('cid-r', left.map((id) => ({ id }))); L.deliver.noteTurnStarted('cid-r'); }
+      ok('§5c …the turn ends: exactly 3 turns billed, the hour reads 3 (each carried turn is its reserved unit)', L.hour() === 3 && L.deliver.queuedEntries('cid-r').length === 0, String(L.hour()));
+    }
+    {
+      const L = mk();
+      for (let i = 0; i < 3; i++) { await L.deliver.deliverToConversation('cid-r', 'stop ' + i, { kind: 'peer', spendReason: 'peer-message' }); L.deliver.settleRpcDelivery('cid-r', { ok: true, mode: 'queued' }); }
+      const before = L.hour();
+      L.deliver.noteQueueItems('cid-r', []); for (const f of L.frames) L.deliver.noteHandedBack('cid-r', f.text, 'dropped by Stop before it was delivered');
+      ok('§5c …Stop instead: 0 billed — the 3 reservations returned (the hour 3 → 0)', before === 3 && L.hour() === 0, JSON.stringify({ before, after: L.hour() }));
+    }
+  }
+
+  // ── §5d THE RESERVATION, ROUND 3 (主开发's panel on 09f128868): a give-back never forgives a spent turn; a carried reservation
+  // is CONVERTED (never returnable); ids never repeat; both bounds refuse — rows here, with caps ABOVE the defaults and a
+  // ledger that holds spent stamps too
+  {
+    const A3 = require(path.join(REPO, 'src/spend-authorizer.js'));
+    const QW = require(path.join(REPO, 'src/server/queued-wakes.js'));
+    const big = (extra = {}) => { const dataDir = tmpdir('vs-spend-r3-'); const settings = { 'spend.unattendedPerIdentityHour': 5000, 'spend.unattendedPerIdentityDay': 1000, 'spend.unattendedPerInstanceDay': 10000, ...extra }; return { dataDir, guard: guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ({ key: 'slot-B', name: 'Big' }), getUserTodos: () => null, log: () => { } }) }; };
+    const id = { key: 'slot-B', name: 'Big' };
+    const day = (g) => (g.snapshot().budget.identities['slot-B'] || []).length;
+    // MUST 1: day cap 1 000, 900 spent, ONE queued wake handed back ⇒ exactly 100 allowed after it (the release forgave nothing)
+    {
+      // 900 turns spent across the day (the hour cap is clamped at 200, so they sit 2–22 h back), loaded from the guard's own file
+      const dataDir = tmpdir('vs-spend-r3-must1-');
+      const L3 = { perIdentityHour: 200, perIdentityDay: 1000, perInstanceDay: 10000 };
+      let st = A3.emptyBudget(); const t0 = Date.now();
+      for (let i = 0; i < 900; i++) st = A3.noteUnattendedSpend(st, { identity: id, reason: 'peer-message', at: t0 - 2 * 3600e3 - i * 60e3, limits: L3 }).state;
+      fs.writeFileSync(path.join(dataDir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: st }));
+      const settings = { 'spend.unattendedPerIdentityHour': 200, 'spend.unattendedPerIdentityDay': 1000, 'spend.unattendedPerInstanceDay': 10000 };
+      const guard = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => id, getUserTodos: () => null, log: () => { } });
+      const v = guard.authorize({ reason: 'peer-message', identity: id });
+      guard.note({ reason: 'peer-message', identity: id, hold: v.hold, reservation: 'qw-r3-stop' });
+      const returned = guard.release({ reservation: 'qw-r3-stop' });
+      let allowed = 0;
+      for (let i = 0; i < 400; i++) { const a = guard.authorize({ reason: 'peer-message', identity: id }); if (!a.ok) break; allowed++; guard.note({ reason: 'peer-message', identity: id, hold: a.hold }); }
+      ok('§5d MUST 1: day cap 1 000, 900 spent, one Stop (a reservation returned) ⇒ EXACTLY 100 allowed after it — a give-back keeps what the largest caps could count and forgives no spent turn', returned === true && allowed === 100 && day(guard) === 1000, JSON.stringify({ returned, allowed, day: day(guard) }));
+    }
+    {
+      let st = A3.emptyBudget();
+      for (let i = 0; i < 950; i++) st = A3.noteUnattendedSpend(st, { identity: id, reason: 'peer-message', limits: { perIdentityDay: 2000, perIdentityHour: 5000, perInstanceDay: 10000 } }).state;
+      st = A3.noteUnattendedSpend(st, { identity: id, reason: 'peer-message', rid: 'qw-x', limits: { perIdentityDay: 2000, perIdentityHour: 5000, perInstanceDay: 10000 } }).state;
+      const back = A3.returnReservation(st, { rid: 'qw-x', limits: { perIdentityDay: 2000, perIdentityHour: 5000, perInstanceDay: 10000 } });
+      ok('§5d a return drops ONLY its id: 950 spent stamps stay (never cut to the default retention)', back.returned === 1 && back.state.identities['slot-B'].length === 950, String(back.state.identities['slot-B'].length));
+    }
+    // THE CENSUS (round 4, MUST 2): EVERY file that can call the prune — src/, server.js, data/bin/, tools/, scripts/ (tests
+    // aside) — and EVERY reference to it: a call keeps LOAD_RETENTION (never the live limits, never null, never none), and
+    // no alias (a destructured or re-bound prune escapes a textual census); a mention after `//` or on a JSDoc ` *` line is prose
+    {
+      const roots = ['src', 'data/bin', 'tools', 'scripts'];
+      // git grep reads EVERY tracked file under the roots (in C, ~20 ms); the files that name the prune are judged below. No git
+      // (a tree without .git and no shim) ⇒ the same set walked from the disk
+      let files = null, readBy = 'git grep over every tracked file';
+      try { const out = execFileSync('git', ['-C', REPO, 'grep', '-n', 'pruneBudget', '--', ...roots, 'server.js'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString(); files = [...new Set(out.split('\n').filter(Boolean).map((l) => l.slice(0, l.indexOf(':'))))]; } catch { files = null; }
+      if (!files) {
+        readBy = 'a walk of the disk'; files = ['server.js'];
+        const walk = (rel) => { let st; try { st = fs.statSync(path.join(REPO, rel)); } catch { return; } if (st.isDirectory()) { for (const n of fs.readdirSync(path.join(REPO, rel))) { if (n === 'node_modules' || n.startsWith('.')) continue; walk(path.join(rel, n)); } } else if (/\.(c|m)?js$/.test(rel) || (rel.startsWith('data/bin/') && !/\.\w+$/.test(rel))) files.push(rel); };
+        for (const r of roots) walk(r);
+      }
+      const scanned = files.filter((rel) => !/^scripts\/(test-|fixtures\/)/.test(rel));
+      const prose = (src, at) => { const line = src.slice(src.lastIndexOf('\n', at) + 1, at); return /\/\//.test(line) || /^\s*\*/.test(line); };
+      const KEEP = new Set(['LOAD_RETENTION', 'A.LOAD_RETENTION']);
+      const calls = [], bad = [];
+      for (const rel of scanned) {
+        let src; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; }
+        const re = /\bpruneBudget\b/g; let m;
+        while ((m = re.exec(src))) {
+          const at = m.index, after = src.slice(at + 'pruneBudget'.length);
+          if (prose(src, at)) continue;
+          if (rel === 'src/spend-authorizer.js' && /function $/.test(src.slice(Math.max(0, at - 9), at))) continue;   // the definition
+          if (rel === 'src/spend-authorizer.js' && /^\s*,/.test(after) && src.lastIndexOf('module.exports', at) > src.lastIndexOf('}', at)) continue;   // the export list
+          if (!/^\s*\(/.test(after)) { bad.push({ rel, why: 'an alias or a reference', text: src.slice(Math.max(0, at - 30), at + 40) }); continue; }
+          let depth = 0, k = at + src.slice(at).indexOf('(') + 1; const args = []; let cur = '';
+          for (; k < src.length; k++) { const c = src[k]; if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { if (depth === 0) break; depth--; } if (c === ',' && depth === 0) { args.push(cur.trim()); cur = ''; } else cur += c; }
+          args.push(cur.trim());
+          calls.push({ rel, args });
+          if (args.length !== 3 || !KEEP.has(args[2])) bad.push({ rel, why: args.length < 3 ? 'no retention' : 'not LOAD_RETENTION', text: 'pruneBudget(' + args.join(', ') + ')' });
+        }
+      }
+      ok(`§5d CENSUS (round 4): src/, data/bin/, tools/, scripts/ (tests aside) and server.js read by ${readBy} — ${scanned.length} name the prune; every pruneBudget call (${calls.length}) keeps LOAD_RETENTION — none, null, the live limits and an alias are red`, scanned.includes('src/spend-authorizer.js') && scanned.includes('src/server/spend-guard.js') && calls.length >= 5 && bad.length === 0, JSON.stringify({ bad, scanned }));
+      // the census reads what it claims: the panel's M8b / M8c / M8d, each in a copy of the text, is found
+      const probe = (rel, src) => { const out = []; const re = /\bpruneBudget\b/g; let m; while ((m = re.exec(src))) { const after = src.slice(m.index + 11); if (!/^\s*\(/.test(after)) { out.push('alias'); continue; } const a = after.slice(after.indexOf('(') + 1); let d = 0, cur = '', args = []; for (const c of a) { if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') { if (d === 0) break; d--; } if (c === ',' && d === 0) { args.push(cur.trim()); cur = ''; } else cur += c; } args.push(cur.trim()); if (args.length !== 3 || !KEEP.has(args[2])) out.push(args.join(',')); } return out; };
+      ok('§5d CENSUS reads what it claims: a null third argument (M8b), a bare call in queued-wakes.js (M8c) and a destructured alias (M8d) are each found',
+        probe('x', 'const s = pruneBudget(state, now, null);').length === 1 && probe('x', "void require('../spend-authorizer.js').pruneBudget({}, 0);").length === 1 && probe('x', 'const { pruneBudget: pb_ } = A; state = pb_(state, now);').includes('alias')
+        && probe('x', 'const s = pruneBudget(state, now, limits());').length === 1 && probe('x', 'A.pruneBudget(state, Date.now(), A.LOAD_RETENTION)').length === 0);
+      const sa = read('src/spend-authorizer.js').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).map((l) => l.replace(/\s\/\/ .*$/, '')).join('\n');
+      ok('§5d …and a stamp list is cut only to the retention: every stampCap call outside the prune\'s own body passes LOAD_RETENTION (the default constant aside)', (sa.match(/stampCap\(([^)]*)\)/g) || []).every((c) => /stampCap\((LOAD_RETENTION|limits|null)\)/.test(c)) && (sa.match(/stampCap\(LOAD_RETENTION\)/g) || []).length === 1 && (sa.match(/stampCap\(limits\)/g) || []).length === 2, JSON.stringify(sa.match(/stampCap\(([^)]*)\)/g)));
+    }
+    // MUST 2 (1): a CARRIED reservation is converted — a return after it returns nothing, across a guard reload too
+    {
+      const { dataDir, guard } = big();
+      guard.note({ reason: 'peer-message', identity: id, reservation: 'qw-r3-c' });
+      guard.note({ reason: 'peer-message', identity: id, reservation: 'qw-r3-c', carried: true });
+      const before = day(guard);
+      const back = guard.release({ reservation: 'qw-r3-c' });
+      guard.flush();   // round 4: the guard's own debounce (as durable as any spent turn) — the reload reads what it wrote
+      const g2 = guardMod.create({ dataDir, serverSetting: () => undefined, identityOf: () => id, getUserTodos: () => null, log: () => { } });   // a reload from the disk
+      g2.note({ reason: 'peer-message', identity: id, reservation: 'qw-r3-c' });
+      ok('§5d a carried reservation is CONVERTED: one unit, a return of its id returns nothing, and after a reload a repeated note of that id adds nothing (the converted mark reached the disk)', before === 1 && back === false && day(guard) === 1 && (g2.snapshot().budget.identities['slot-B'] || []).length === 1 && g2.reservationState('qw-r3-c') === 'converted', JSON.stringify({ before, back, after: day(guard), reloaded: (g2.snapshot().budget.identities['slot-B'] || []).length }));
+    }
+    // ids never repeat across processes (a boot tag per process): two frames are two units
+    {
+      const d = tmpdir('vs-spend-r3-ids-');
+      const q1 = QW.create({ dataDir: d, writer: { dirty() { } } }), q2 = QW.create({ dataDir: d, writer: { dirty() { } } });
+      const a = q1.noteWritten('cid-z', { text: 'one' }), b = q2.noteWritten('cid-z', { text: 'two' });
+      ok('§5d frame ids never repeat across processes (each boot tags its ids): two frames, two ids — never one stamp for two turns', a.id !== b.id && !/^qw-0-/.test(a.id), JSON.stringify([a.id, b.id]));
+    }
+    // both bounds REFUSE (by name) — never drop the oldest owed frame
+    {
+      const q = QW.create({ dataDir: tmpdir('vs-spend-r3-bound-'), writer: { dirty() { } } });
+      for (let i = 0; i < QW.PER_CONVERSATION_MAX; i++) q.noteWritten('cid-one', { text: 'n' + i });
+      const perConv = q.full('cid-one');
+      for (let c = 0; c < QW.MAX_ENTRIES / QW.PER_CONVERSATION_MAX - 1; c++) for (let i = 0; i < QW.PER_CONVERSATION_MAX; i++) q.noteWritten('cid-' + c, { text: 'm' + i });
+      const hub = q.full('cid-new');
+      ok(`§5d the bounds REFUSE by name — ${QW.PER_CONVERSATION_MAX} frames behind one turn, ${QW.MAX_ENTRIES} live on the hub — and nothing is dropped (${q.count()} held)`, /bound is 50/.test(perConv || '') && /bound is 500/.test(hub || '') && q.count() === QW.MAX_ENTRIES, JSON.stringify({ perConv, hub, n: q.count() }));
+    }
+    // the refusal names promised turns as promised
+    {
+      const { guard } = big({ 'spend.unattendedPerIdentityHour': 3 });
+      for (let i = 0; i < 3; i++) guard.note({ reason: 'peer-message', identity: id, reservation: 'qw-p' + i });
+      const v = guard.authorize({ reason: 'job-notification', identity: id });
+      ok('§5d a refusal over reserved turns says them as PROMISED: «spent or promised 3 … 3 of them waiting behind running turns»', !v.ok && /has spent or promised 3 unattended turns this hour, 3 of them waiting behind running turns \(cap 3\)/.test(v.detail || ''), v.detail);
+    }
+  }
+  // ── §5e THE RESERVATION, ROUND 4 (主开发's panel on 6ca9575ee): a prune never forgives (the owner lowers the caps, then raises
+  // them); the send road writes like the release; a drain never stamps, a live carry always counts; the converted mark on both
+  // lists; the words over promised turns
+  {
+    const A4 = require(path.join(REPO, 'src/spend-authorizer.js'));
+    const ID4 = { key: 'slot-1', name: 'slot one' };
+    // MUST 2 — the panel's d3b-lowered, both shapes: 1 500 spent across the day, one queued wake, the owner LOWERS both day caps
+    // (500 / 800), Stop hands the frame back (and, the second shape, an attended press while lowered), the caps go back up
+    for (const variant of ['Stop only', 'an attended press while lowered']) {
+      const dir = tmpdir('vs-spend-r4-d3b-');
+      const st4 = { 'spend.unattendedPerIdentityHour': 200, 'spend.unattendedPerIdentityDay': 2000, 'spend.unattendedPerInstanceDay': 2000 };
+      const T0 = Date.now(), H = 3600e3;
+      // 1 500 spent turns across the day, through the guard's own file (the panel's 1 500 notes, without 1 500 prunes)
+      const spent = Array.from({ length: 1500 }, (_, i) => ({ at: T0 - 23 * H + i * 50e3, reason: 'job-notification' }));
+      fs.writeFileSync(path.join(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: { v: 1, identities: { 'slot-1': spent }, instance: spent, notices: {}, attended: [] } }));
+      const g = guardMod.create({ dataDir: dir, serverSetting: (k) => st4[k], identityOf: () => ID4, log: () => { } });
+      const v = g.authorize({ reason: 'peer-message', identity: ID4, now: T0 });
+      g.note({ reason: 'peer-message', identity: v.identity, hold: v.hold, reservation: 'qw-l-1', now: T0 });
+      const c = (now) => g.authorize({ reason: 'auto-resume', identity: ID4, hold: false, now }).counts.day;
+      const atSend = c(T0 + 1);
+      st4['spend.unattendedPerIdentityDay'] = 500; st4['spend.unattendedPerInstanceDay'] = 800;
+      if (variant !== 'Stop only') g.note({ reason: 'owner-channel-send', identity: ID4, now: T0 + 500 });
+      const ret = g.release({ reservation: 'qw-l-1', now: T0 + 1000 });
+      const lowered = c(T0 + 1100);
+      st4['spend.unattendedPerIdentityDay'] = 2000; st4['spend.unattendedPerInstanceDay'] = 2000;
+      const raised = c(T0 + 1200);
+      ok(`§5e MUST 2 (d3b, ${variant}): 1 500 spent + one reservation, the day caps lowered to 500 / 800, the reservation returned, the caps raised the same day ⇒ the day still reads 1 500 — allowed after the raise ${2000 - raised} = the unpruned ledger's (nothing forgiven; the release, which never returns the unit, says 499)`,
+        atSend === 1501 && ret === true && lowered === 1500 && raised === 1500, JSON.stringify({ atSend, ret, lowered, raised, allowedAfterRaise: 2000 - raised }));
+    }
+    // MODERATE 3 — the panel's d4 burst: 30 queued wakes and their 30 carries write NOTHING inside the calls; the guard's own
+    // debounce coalesces them (the release: one write per window)
+    {
+      const dir = tmpdir('vs-spend-r4-burst-');
+      const g = guardMod.create({ dataDir: dir, serverSetting: (k) => ({ 'spend.unattendedPerIdentityHour': 200 })[k], identityOf: () => ID4, log: () => { } });
+      const fsm = require('fs'); const origRename = fsm.renameSync, origST = global.setTimeout;
+      let writes = 0, armed = 0;
+      fsm.renameSync = function (a, b) { if (String(b).endsWith('spend-budget.json')) writes++; return origRename.apply(this, arguments); };
+      global.setTimeout = function (fn, ms) { if (ms === 500) armed++; return origST.apply(this, arguments); };
+      let inSends = 0, inCarries = 0; const rids = [];
+      try {
+        for (let i = 0; i < 30; i++) { const v = g.authorize({ reason: 'peer-message', identity: ID4 }); const w0 = writes; g.note({ reason: 'peer-message', identity: v.identity, hold: v.hold, reservation: 'qw-b-' + i }); inSends += writes - w0; rids.push('qw-b-' + i); }
+        const armedAfterSends = armed;
+        g.flush();
+        const afterSends = writes;
+        for (const rid of rids) { const w0 = writes; g.note({ reason: 'peer-message', identity: ID4, reservation: rid, carried: true }); inCarries += writes - w0; }
+        const armedAfterCarries = armed - armedAfterSends;
+        g.flush();
+        ok('§5e MODERATE 3 (d4 burst): 30 queued wakes — 0 writes of spend-budget.json inside the send calls, ONE debounce armed (one write, the release\'s count); their 30 carries — 0 writes inside, one debounce; the hour 30',
+          inSends === 0 && armedAfterSends === 1 && afterSends === 1 && inCarries === 0 && armedAfterCarries === 1 && writes === 2 && (g.snapshot().budget.identities['slot-1'] || []).length === 30, JSON.stringify({ inSends, armedAfterSends, afterSends, inCarries, armedAfterCarries, writes }));
+      } finally { fsm.renameSync = origRename; global.setTimeout = origST; }
+      const gsrc = read('src/server/spend-guard.js');
+      const noteBody = gsrc.slice(gsrc.indexOf('  function note({'), gsrc.indexOf('  function release({'));
+      ok('§5e …the guard\'s note() never writes in the call: no flush() in its body (round 3\'s two synchronous writes per wake are gone)', noteBody.length > 200 && !/\bflush\(\)/.test(noteBody) && /persist\(\);/.test(noteBody));
+    }
+    // MODERATE 4 — the panel's M7f both ways, and M7g
+    {
+      const L4 = { perIdentityHour: 200, perIdentityDay: 2000, perInstanceDay: 10000 };
+      let st = A4.emptyBudget();
+      const live = A4.noteUnattendedSpend(st, { identity: ID4, reason: 'peer-message', rid: 'qw-never', carried: true, limits: L4 });
+      const drain = A4.noteUnattendedSpend(st, { identity: ID4, reason: 'peer-message', rid: 'qw-never', carried: true, drain: true, limits: L4 });
+      ok('§5e MODERATE 4 (M7f): a LIVE carry of a frame never stamped adds exactly 1 (converted, counted in the window it runs in); a stash DRAIN of the same adds 0 (it rides somebody else\'s turn)',
+        (live.state.identities['slot-1'] || []).length === 1 && live.state.identities['slot-1'][0].conv === true && live.state.instance.length === 1 && (drain.state.identities['slot-1'] || []).length === 0 && drain.state.instance.length === 0);
+      st = A4.noteUnattendedSpend(st, { identity: ID4, reason: 'peer-message', rid: 'qw-g', limits: L4 }).state;
+      // through the DISK, as every boot reads it: in memory the two lists share ONE stamp object (marking one marks both); a
+      // reloaded ledger holds two — the mark must reach the instance's copy too (the panel's M7g survived in memory)
+      st = JSON.parse(JSON.stringify(st));
+      const drained = A4.noteUnattendedSpend(st, { identity: ID4, reason: 'peer-message', rid: 'qw-g', carried: true, drain: true, limits: L4 }).state;
+      const conv = A4.noteUnattendedSpend(st, { identity: ID4, reason: 'peer-message', rid: 'qw-g', carried: true, limits: L4 }).state;
+      const back = A4.returnReservation(conv, { rid: 'qw-g' });
+      ok('§5e (M7g) the converted mark lands on BOTH lists of a RELOADED ledger (the identity\'s and the instance\'s copies): a return after the carry leaves both counts at 1; a drain of a stamp still there converts both too',
+        conv.identities['slot-1'][0].conv === true && conv.instance[0].conv === true && back.returned === 0 && back.state.identities['slot-1'].length === 1 && back.state.instance.length === 1 && drained.identities['slot-1'][0].conv === true && drained.instance[0].conv === true);
+    }
+    // SMALL — a carry with no identity finds its reservation (never left «promised»); the words over promised turns
+    {
+      const L4 = { perIdentityHour: 3, perIdentityDay: 2000, perInstanceDay: 10000 };
+      let st = A4.noteUnattendedSpend(A4.emptyBudget(), { identity: ID4, reason: 'peer-message', rid: 'qw-ni', limits: L4 }).state;
+      st = A4.noteUnattendedSpend(st, { identity: null, reason: 'peer-message', rid: 'qw-ni', carried: true, limits: L4 }).state;
+      ok('§5e SMALL: a carry with NO identity still converts its reservation (looked for under every identity) — never left «promised»', A4.reservationState(st, 'qw-ni') === 'converted' && A4.spendCounts(st, 'slot-1').promisedDay === 0 && st.identities['slot-1'].length === 1);
+      let pr = A4.emptyBudget();
+      pr = A4.noteUnattendedSpend(pr, { identity: ID4, reason: 'peer-message', limits: L4 }).state;
+      for (let i = 0; i < 2; i++) pr = A4.noteUnattendedSpend(pr, { identity: ID4, reason: 'peer-message', rid: 'qw-pr' + i, limits: L4 }).state;
+      const vp = A4.authorizeUnattendedSpend({ state: pr, identity: ID4, reason: 'job-notification', limits: L4 });
+      let sp = A4.emptyBudget(); for (let i = 0; i < 3; i++) sp = A4.noteUnattendedSpend(sp, { identity: ID4, reason: 'peer-message', limits: L4 }).state;
+      const vs = A4.authorizeUnattendedSpend({ state: sp, identity: ID4, reason: 'job-notification', limits: L4 });
+      const tp = vp && A4.refusalText(vp), ts = vs && A4.refusalText(vs);
+      const ip = vp && A4.refusalI18n(vp), is = vs && A4.refusalI18n(vs);
+      const promisedLine = (r) => (r ? r.detail.filter((d) => d && d.key === 'Of these, {n} are messages waiting behind running turns — counted now, given back if they never run.') : []);
+      ok('§5e SMALL: «Spent or promised by» over promised stamps (2 of 3 waiting), «Spent by» over spent ones; the For-you notice adds «Of these, 2 are messages waiting behind running turns …» beside its «Spent by» rows',
+        !!vp && !vp.ok && /Spent or promised by: /.test(tp) && !!vs && !vs.ok && /Spent by: /.test(ts) && !/promised/.test(ts) && promisedLine(ip).length === 1 && promisedLine(ip)[0].params.n === 2 && promisedLine(is).length === 0, JSON.stringify({ tp, ts, ip: promisedLine(ip) }));
+      const dz = read('src/lib/i18n-zh.js'), dj = read('src/lib/i18n-ja.js');
+      ok('§5e …and the new line is in both dictionaries', dz.includes('"Of these, {n} are messages waiting behind running turns — counted now, given back if they never run.":') && dj.includes('"Of these, {n} are messages waiting behind running turns — counted now, given back if they never run.":'));
+    }
+    // SMALL — the 80 % notice on the carried path: a live carry whose stamp was gone crosses 80 % ⇒ the notice is filed
+    {
+      const dir = tmpdir('vs-spend-r4-80-');
+      const g = guardMod.create({ dataDir: dir, serverSetting: (k) => ({ 'spend.unattendedPerIdentityHour': 5 })[k], identityOf: () => ID4, getUserTodos: () => null, log: () => { } });
+      for (let i = 0; i < 3; i++) g.note({ reason: 'peer-message', identity: ID4 });
+      const w = g.note({ reason: 'peer-message', identity: ID4, reservation: 'qw-80', carried: true });
+      ok('§5e SMALL: the 80 % notice on the CARRIED path — a live carry of a never-stamped frame takes the hour to 4 of 5 and the guard answers the crossing (no early return)', !!w && w.scope === 'hour' && w.used === 4 && w.limit === 5, JSON.stringify(w));
+    }
   }
   // ── r2 round 2: A MODE-LESS ANSWER IS NOT AN ANSWER ABOUT OUR FRAME ───────
   // Reproduced: a Stop landing between our write and the wrapper's reply emits
@@ -1926,11 +2202,11 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
   }
   {   // …and the queue holds EVERY frame, so an earlier answer cannot take a later frame's entry
     const L = mkLadder();
-    await L.deliver.deliverToConversation('cid-1', 'typed by a human', { kind: 'peer', spendReason: 'peer-message' });      // charged on the spot
+    await L.deliver.deliverToConversation('cid-1', 'typed by a human', { kind: 'peer', spendReason: 'peer-message' });      // queued behind the turn: owed (law 1)
     await L.deliver.deliverToConversation('cid-1', 'job', { kind: 'notification', spendReason: 'job-notification' });      // predicted free
-    ok('§5b both frames are tracked, not only the predicted-free one', L.deliver._unsettledCount('cid-1') === 2 && L.charged() === 1);
-    ok('§5b the FIRST answer belongs to the first frame, which was already charged (no second charge)',
-      L.deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'queued' }) === 'already-charged' && L.charged() === 1);
+    ok('§5b both frames are tracked, not only the predicted-free one (law 1 round 2: the peer frame\'s unit reserved at once)', L.deliver._unsettledCount('cid-1') === 2 && L.charged() === 1);
+    ok('§5b the FIRST answer belongs to the first frame — «queued»: its reservation stands, no second unit',
+      L.deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'queued' }) === 'queued' && L.charged() === 1);
     ok('§5b …and the notification keeps its own answer: steered ⇒ still free',
       L.deliver.settleRpcDelivery('cid-1', { ok: true, mode: 'steered' }) === 'free' && L.charged() === 1);
   }
@@ -3160,7 +3436,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
   // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
   const gsrc = read('src/server/spend-guard.js');
-  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason \}\)/.test(gsrc));
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2)
   {
     const dir = tmpdir('vs-spend-reason-');
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });

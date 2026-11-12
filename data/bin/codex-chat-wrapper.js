@@ -2004,7 +2004,7 @@ function queueItemsFrom(data) {
 }
 
 /** Publish the queue to every consumer (client strip, attach replay, sidecar). */
-function publishQueue(items, { force = false } = {}) {
+function publishQueue(items, { force = false, fresh = false } = {}) {
   // THE LATCH (see queueSweepActive): while Stop empties the queue the only
   // truthful publish is the one the sweep itself makes when it is done. Every
   // other publisher — a per-delete queue/changed refresh, the turn/started
@@ -2019,7 +2019,9 @@ function publishQueue(items, { force = false } = {}) {
   // `verbs` rides EVERY publication: for a REMOTE session the orchestrator
   // cannot read this machine's sidecar, so the in-band list is the only advert
   // it will ever see (a publication with no `verbs` = a pre-verb-table build).
-  emitTaskEvent('queue_changed', { items, turn_id: meta.activeTurnId || null, verbs: QUEUE_VERBS_SERVED });
+  // `fresh` (lane queued-is-not-woke round 4): THIS listing is a real thread/queue/list read, made now — the hub may date it
+  // after the turn start it saw; a re-statement of the cached list (the turn-start republish, a resync) is no such evidence
+  emitTaskEvent('queue_changed', { items, turn_id: meta.activeTurnId || null, verbs: QUEUE_VERBS_SERVED, ...(fresh ? { fresh: true } : {}) });
 }
 
 /** RE-STATE THE QUEUE, EVEN IF IT HAS NOT CHANGED (`queue-resync`, 2026-09-09).
@@ -2123,7 +2125,7 @@ async function refreshQueue({ timeoutMs = 15000 } = {}) {
         const live = new Set(rows.map((q) => asString(q?.clientUserMessageId)));
         for (const cid of [...queueMeta.keys()]) if (!live.has(cid)) queueMeta.delete(cid);
       }
-      publishQueue(items);
+      publishQueue(items, { fresh: listed.complete === true });   // a complete real read = fresh evidence (round 4)
     } while (queueRefreshAgain);
   } catch (e) {
     // A degrade path that logs the message VERBATIM (the 2.284.2 lesson):

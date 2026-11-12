@@ -167,7 +167,14 @@ const wokeLine = (r0) => {
   const r = held.length ? { ...r0, refused: r0.refused.filter((x) => !(x && x.parked)) } : r0;
   const bits = [];
   const woke = r.woke || [];
-  bits.push(`${wakeCount(woke.length)}${woke.length ? ': ' + woke.join(', ') : ''}`);
+  // lane queued-is-not-woke (law 1): the sender is told what the addressee DID — a wake that joined a running turn says so,
+  // and one its wrapper QUEUED behind a running turn is waiting (not woke, not read, not billed until a turn carries it)
+  const into = new Set(r.intoTurn || []);
+  const plain = woke.filter((n) => !into.has(n));
+  if (plain.length || (!into.size && !(r.queued && r.queued.length))) bits.push(`${wakeCount(plain.length)}${plain.length ? ': ' + plain.join(', ') : ''}`);
+  if (into.size) bits.push(`handed into ${[...into].map((n) => `${n}'s`).join(', ')} running turn${into.size === 1 ? '' : 's'} = ${plural(into.size, 'billed turn', 'billed turns')}`);
+  const hm = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
+  if (r.queued && r.queued.length) bits.push(`waiting (not billed yet): ${r.queued.map((x) => `${x.name}'s current turn${Number.isFinite(x.since) ? ` (running since ${hm(x.since)})` : ''}`).join(', ')} — read and billed when a turn carries it`);
   if (r.refused && r.refused.length) bits.push(`${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they get it on their next turn instead`);
   if (held.length) bits.push(`${plural(held.length, 'wake', 'wakes')} held (not billed yet) — ${held.map((x) => `${x.name}: ${x.reason}`).join('; ')}`);
   if (r.nextTurn && r.nextTurn.length) bits.push(`on their next turn (free): ${r.nextTurn.join(', ')}`);
@@ -190,12 +197,12 @@ const deliveryClause = (rows) => {
   const hhmm = (ms) => (Number.isFinite(ms) ? ' ' + new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
   // lane pair-group-fate: an ENDED addressee is said (never "waiting" for ever); a stopped one still waits for its resume
   const day = (ms) => (Number.isFinite(ms) ? ' ' + new Date(ms).toISOString().slice(0, 10) : '');
-  const word = (x) => (x.state === 'undeliverable' ? `not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}` : x.state === 'waiting' && x.stopped ? `${x.name} is stopped — delivered when it resumes` : x.state === 'waiting' ? `waiting for ${x.name}'s next turn` : x.state === 'handed' ? `read by ${x.name}${hhmm(x.at)}` : x.state === 'muted' ? `${x.name} is muted (never reads it)` : x.state === 'left' ? `${x.name} left` : '');
+  const word = (x) => (x.state === 'undeliverable' ? (x.why === 'dropped' ? `not delivered — the copy for ${x.name} was dropped before a turn read it; send it again` : `not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}`) : x.state === 'waiting' && x.stopped ? `${x.name} is stopped — delivered when it resumes` : x.state === 'queued' ? `waiting for ${x.name}'s current turn${Number.isFinite(x.since) ? ` (running since${hhmm(x.since)})` : ''}` : x.state === 'waiting' ? `waiting for ${x.name}'s next turn` : x.state === 'handed' ? `read by ${x.name}${hhmm(x.at)}` : x.state === 'muted' ? `${x.name} is muted (never reads it)` : x.state === 'left' ? `${x.name} left` : '');
   if (rows.length === 1) { const w = word(rows[0]); return w ? ' — ' + w : ''; }
   const names = (s) => rows.filter((x) => x.state === s).map((x) => x.name);
   const parts = [];
   const named = (s) => rows.filter((x) => x.state === s).map((x) => x.name + (s === 'handed' ? hhmm(x.at) : ''));
-  for (const [s, label] of [['waiting', 'waiting'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left'], ['undeliverable', 'not delivered (ended)']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
+  for (const [s, label] of [['waiting', 'waiting'], ['queued', 'waiting for a current turn'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left'], ['undeliverable', 'not delivered (ended)']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
   return parts.length ? ' — ' + parts.join(' · ') : '';
 };
 
@@ -246,6 +253,7 @@ const deliveryClause = (rows) => {
     const wk = rec.wake || {};
     if (r.replay) console.log(`  nothing re-sent, nobody woken (not billed)${wk.reason ? ' — ' + wk.reason : ''}`);
     else if (wk.billed) console.log(`  ${wakeCount(1)}${wk.identity ? ' (on ' + wk.identity.name + ')' : ''} — the brief is its next turn`);
+    else if (wk.delivered === 'queued') console.log(`  waiting (not billed yet) for ${worker}'s current turn${Number.isFinite(wk.since) ? ` (running since ${new Date(wk.since).toISOString().slice(11, 16)}Z)` : ''} — the brief is in its queue; read and billed when a turn carries it`);   // lane queued-is-not-woke
     else if (wk.delivered === 'paced') console.log(`  held, not billed yet — ${wk.reason || 'paced'}: the wake goes when the window ends (sooner, free, only if the worker starts a turn first)`);
     else console.log(`  not woken (not billed)${wk.reason ? ' — ' + wk.reason : ''} — the brief reaches it on its next turn`);
     if (rec.reply && rec.reply.notify) console.log(`  the worker's reply ${rec.reply.words}${r.group ? ` — change it with: vibespace-msg group notify ${r.group.id} <next-turn|mention|always|mute>` : ''}`);

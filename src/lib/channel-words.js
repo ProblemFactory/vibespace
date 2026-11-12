@@ -385,7 +385,11 @@ export function notifyModeText(mode) {
  *  billed; the message rides their next report), how many read it next turn. */
 export function wakeEchoText(r) {
   const w = wakeCount(r);
-  const parts = [w.woke ? t('woke {n} agent(s) = {n} billed turn(s)', { n: w.woke }) : t('woke nobody — no billed turn')];
+  const parts = [];
+  if (w.woke || (!w.into && !w.queued)) parts.push(w.woke ? t('woke {n} agent(s) = {n} billed turn(s)', { n: w.woke }) : t('woke nobody — no billed turn'));
+  // lane queued-is-not-woke: a hand-in to a running turn is billed; a queued one waits, its unit reserved — never «no billed turn»
+  if (w.into) parts.push(t('{n} handed into a running turn = {n} billed turn(s)', { n: w.into }));
+  if (w.queued) parts.push(t('{n} waiting behind a running turn — billed when a turn carries it', { n: w.queued }));
   if (w.refused) parts.push(t('{n} wake(s) not sent (not billed — they get it next turn)', { n: w.refused }));
   if (w.paced) parts.push(t('{n} wake(s) held by the wake pace — sent when the window ends', { n: w.paced }));
   if (w.later) parts.push(t('{n} will read it on their next turn', { n: w.later }));
@@ -407,7 +411,9 @@ export function deliveryRowText(row, { t = tDevice, time = hhmmLocal } = {}) {
   switch (row.state) {
     // lane pair-group-fate: a stopped addressee still waits (a resume delivers it); an ended one is said, never "waiting"
     case 'waiting': return row.stopped ? t('{name} is stopped — delivered when it resumes', { name }) : t('Waiting for {name}\'s next turn', { name });
-    case 'undeliverable': return row.why === 'gone' ? t('Not delivered — {name}\'s conversation is gone', { name }) : Number.isFinite(row.at) ? t('Not delivered — {name}\'s conversation was archived {when}', { name, when: new Date(row.at).toLocaleDateString() }) : t('Not delivered — {name}\'s conversation was archived', { name });
+    // lane queued-is-not-woke (law 1): its wake waits in the addressee's queue behind a RUNNING turn — never «read» before a turn carries it
+    case 'queued': return Number.isFinite(row.since) ? t('Waiting for {name}\'s current turn (running since {time})', { name, time: time(row.since) }) : t('Waiting for {name}\'s current turn', { name });
+    case 'undeliverable': return row.why === 'dropped' ? t('Not delivered — the copy for {name} was dropped before a turn read it; send it again', { name }) : row.why === 'gone' ? t('Not delivered — {name}\'s conversation is gone', { name }) : Number.isFinite(row.at) ? t('Not delivered — {name}\'s conversation was archived {when}', { name, when: new Date(row.at).toLocaleDateString() }) : t('Not delivered — {name}\'s conversation was archived', { name });
     case 'handed': return Number.isFinite(row.at) ? t('Read by {name} · {time}', { name, time: time(row.at) }) : t('Read by {name}', { name });
     case 'muted': return t('{name} is muted and will not read it', { name });
     case 'left': return t('{name} left', { name });
@@ -445,12 +451,13 @@ export function deliveryLineText(rows, { t = tDevice, tc = tcDevice, time = hhmm
   const list = Array.isArray(rows) ? rows.filter((r) => r && DELIVERY_STATES.includes(r.state)) : [];
   if (!list.length) return null;
   const n = (state) => list.filter((r) => r.state === state).length;
-  const tone = n('waiting') ? 'waiting' : n('handed') ? 'handed' : 'none';
+  const tone = n('waiting') || n('queued') ? 'waiting' : n('handed') ? 'handed' : 'none';
   if (list.length === 1) { const s = deliveryRowText(list[0], { t, time }); return { text: s, tone, title: s }; }
   // the counts are contextual keys (`delivery::…`): "{n} waiting" is also the stash strip's "{n} 条在等" — same
   // spelling, another meaning (§16: tc, never a re-add)
   const parts = [];
   if (n('waiting')) parts.push(tc('delivery', '{n} waiting', { n: n('waiting') }));
+  if (n('queued')) parts.push(tc('delivery', '{n} waiting for a current turn', { n: n('queued') }));
   if (n('handed')) parts.push(tc('delivery', '{n} read', { n: n('handed') }));
   if (n('muted')) parts.push(tc('delivery', '{n} muted', { n: n('muted') }));
   if (n('left')) parts.push(tc('delivery', '{n} left', { n: n('left') }));

@@ -21,6 +21,9 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
   const { noteTurnEnd, sessionModelFor } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     let lineBuf = '';
+    // lane queued-is-not-woke round 2: a (re)attach of a session whose wrapper holds frames of ours ASKS it for its queue
+    // (queue-resync) — an entry its turn carried while the hub was down settles from the answer. Property access on the ref.
+    try { deliverRef?.noteAttached?.(session); } catch (e) { console.warn(`[deliver] ${id}: queue re-ask failed: ${e.message}`); }
     // THE MODE THE WRAPPER RUNS IN (lane agy-harness-fixes-2): its `session` / `config` record says it, and the hub's copy
     // follows — session-meta, the attach / status merges — and every open window's chip is told, as a confirmed claude
     // set_permission_mode is (claude-stream-json `permission-mode-ack`). agy adopts a RESUMED conversation's own mode at
@@ -90,6 +93,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
               session.backendSessionId = msg.sessionId;
               session.claudeSessionId = null;
               changed = true;
+              try { deliverRef?.noteAttached?.(session); } catch (e) { console.warn(`[deliver] ${id}: queue re-ask failed: ${e.message}`); }   // the id is known now (queued-is-not-woke)
             }
             if (msg.cwd && session.cwd !== msg.cwd) { session.cwd = msg.cwd; changed = true; }
             if (changed && session.sockName) {
@@ -110,8 +114,13 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }
           } else if (msg.kind === 'prompt_start') {
             session._isStreaming = true; newLabel = 'thinking...';
+            // lane queued-is-not-woke (law 1): the turn's start is a fact the ladder says («running since») and the edge a queued
+            // frame waits for — PROPERTY ACCESS on the lazy ref, never a call
+            session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
+            try { if (session.backendSessionId) deliverRef?.noteTurnStarted?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-start note failed: ${e.message}`); }
           } else if (msg.kind === 'prompt_end') {
             session._isStreaming = false; newLabel = '';
+            try { if (session.backendSessionId) deliverRef?.noteTurnEnded?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
             try { noteTurnEnd?.(session); } catch {}
             // the descriptor's after-turn read (antigravity: the card of a sub its OLD wrapper journaled without one — the
             // cards' addendum): its records go through THIS loop next, as if journaled (a `sub` step to its virtual
@@ -142,6 +151,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             // codex-events.js: these lazy refs are mk() Proxies over `{}`, so
             // `ref()` throws TypeError and the answer never lands.
             try { permissionRulesRef?.onWrapperRecord?.(id, msg); } catch (e) { console.warn(`[permission-rules] ${id}: answer handling failed: ${e.message}`); }
+          } else if (msg.kind === 'queue_changed') {
+            // lane queued-is-not-woke (law 1): the wrapper's queue as it stands — a queued frame is bound to its item and carried
+            // when the item leaves and a turn starts (the client's strip reads the same record through the message manager)
+            try { if (session.backendSessionId) deliverRef?.noteQueueItems?.(session.backendSessionId, msg.items, { fresh: msg.fresh === true }); } catch (e) { console.warn(`[deliver] ${id}: queue note failed: ${e.message}`); }
           } else if (msg.kind === 'peer_result') {
             // THE CODEX TWIN'S THREE HANDLERS (src/server/stdout/codex-events.js, peer_message_result — lane agy-peer-wake: the
             // antigravity row rides the rpc-queue rung, whose answer is this record). PROPERTY ACCESS on the lazy refs, never
@@ -150,9 +163,13 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             // ① same honesty rule as the codex rpc-queue lane: a promised message never silently dies
             if (msg.ok === false && msg.text) {
               console.log(`[deliver] acp wrapper delivery failed (${msg.reason || 'unknown'}) — re-stashing for ${cid}`);
+              // lane queued-is-not-woke: a MODE-LESS answer hands an earlier queued frame back (Stop / remove / exit) — its owed
+              // charge is released and its group mark says «next turn»; a moded one is this frame's own answer (the settle below)
+              let ours = false;   // a frame the ladder holds is stashed BY the ladder (with the ref its drain answers) — never twice
+              if (!msg.mode) { try { if (cid) ours = deliverRef?.noteHandedBack?.(cid, String(msg.text), msg.reason || null) === true; } catch (e) { console.warn(`[deliver] ${id}: hand-back note failed: ${e.message}`); } }
               // the codex twin's rule (channel-jump verify r2): a frame naming a remembered hand-over restores its originals
-              let restored = 0;
-              try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
+              let restored = ours ? 1 : 0;
+              try { if (cid && !ours) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
               if (!restored) {
                 try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
                 catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }

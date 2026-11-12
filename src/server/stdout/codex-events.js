@@ -22,6 +22,9 @@ function create({ engine, deliverRef, permissionRulesRef }) {
     // replays nothing, and r9 ② only took the words that reached the new engine live. Nothing to do when no attempt of
     // this session is open (the common attach costs no file read).
     try { catchUpResetCreditFromBuffer?.(session, id); } catch (e) { console.warn(`[reset-credit] ${id}: the buffer-file catch-up failed:`, e.message); }
+    // lane queued-is-not-woke round 2: a (re)attach of a session whose wrapper holds frames of ours ASKS it for its queue
+    // (queue-resync) — an entry its turn carried while the hub was down settles from the answer. Property access on the ref.
+    try { deliverRef?.noteAttached?.(session); } catch (e) { console.warn(`[deliver] ${id}: queue re-ask failed: ${e.message}`); }
     let lineBuf = '';
     const stripAnsi = (value) => String(value || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
     ptyProcess.onData((output) => {
@@ -178,8 +181,17 @@ function create({ engine, deliverRef, permissionRulesRef }) {
             let newLabel = null;
             if (msg.type === 'event_msg') {
               const evType = payload.type;
-              if (evType === 'task_started' && payload.turn_id) { session._isStreaming = true; newLabel = 'thinking...'; }
-              else if (evType === 'task_complete' || evType === 'turn_aborted' || evType === 'task_failed') { session._isStreaming = false; newLabel = ''; }
+              if (evType === 'task_started' && payload.turn_id) {
+                session._isStreaming = true; newLabel = 'thinking...';
+                // lane queued-is-not-woke (law 1): the turn's start (said as «running since»), the edge a queued frame waits for
+                session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
+                try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteTurnStarted?.(qc); } catch (e) { console.warn(`[deliver] ${id}: turn-start note failed: ${e.message}`); }
+              }
+              else if (evType === 'task_complete' || evType === 'turn_aborted' || evType === 'task_failed') {
+                session._isStreaming = false; newLabel = '';
+                try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteTurnEnded?.(qc); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
+              }
+              if (evType === 'queue_changed') { try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteQueueItems?.(qc, payload.items, { fresh: payload.fresh === true }); } catch (e) { console.warn(`[deliver] ${id}: queue note failed: ${e.message}`); } }
               else if (evType === 'goal_updated' && payload.goal) {
                 session._goal = payload.goal.objective || null;
                 session._goalElapsed = (payload.goal.timeUsedSeconds || payload.goal.time_used_seconds || 0) * 1000;
@@ -229,11 +241,14 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           if (msg.type === 'event_msg' && msg.payload?.type === 'peer_message_result' && msg.payload.ok === false && msg.payload.text) {
             const cid = session.backendSessionId || session.claudeSessionId;
             console.log(`[deliver] rpc-queue wrapper delivery failed (${msg.payload.reason || 'unknown'}) — re-stashing for ${cid}`);
+            // lane queued-is-not-woke: the words came back — a queued frame holding them is handed back (its owed charge released)
+            let ours = false;   // a frame the ladder holds is stashed BY the ladder (with the ref its drain answers) — never twice
+            try { if (cid && !msg.payload.mode) ours = deliverRef?.noteHandedBack?.(cid, String(msg.payload.text), msg.payload.reason || null) === true; } catch (e) { console.warn(`[deliver] ${id}: hand-back note failed: ${e.message}`); }
             // A HAND-OVER'S FRAME THAT CAME BACK IS ITS ORIGINAL ENTRIES (channel-jump verify r2): the frame's text names
             // its hand-over; the hub restores each entry to its own store with its own kind / label (was: ONE combined
             // notice — "1 VibeSpace notice" for five, the job results gone from their store). Property access on the ref.
-            let restored = 0;
-            try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.payload.text), { kind: msg.payload.kind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4: a peer's frame is never a hand-over)
+            let restored = ours ? 1 : 0;
+            try { if (cid && !ours) restored = deliverRef?.restoreFrame?.(cid, String(msg.payload.text), { kind: msg.payload.kind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4: a peer's frame is never a hand-over)
             if (!restored) {
               try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.payload.kind || null, fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } // kind = the wrapper's echo of the frame's PATH (S3 verify F3; an older wrapper echoes none ⇒ unknown, never guessed from the name)
               catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }

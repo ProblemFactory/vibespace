@@ -18,6 +18,7 @@
 //       text naming `deny`        → a soft-deny notice on stderr (the run continues); under --dangerously-skip-permissions
 //                                   the tool runs instead (a run_command step)
 //       text naming `fail`        → result ERROR + an AGY_ERROR line on stderr · `slow` → the turn takes $AGY_STUB_SLOW_MS
+//       text naming `stuck`       → a run_command step ACTIVE, then nothing: no DONE, no result, the process alive (lane queued-is-not-woke)
 //       text naming `subagent`    → an invoke_subagent tool step (ACTIVE, parameters {Role, TypeName} — what the owner's
 //                                   journal recorded, lane agy-subagent-cards) at step $AGY_STUB_SPAWN_STEP (the fixture
 //                                   store's task names it), then the subagent_info update DONE on the same step (shape:
@@ -157,6 +158,9 @@ async function turn(text) {
   }
   if (/\bbulk\b/.test(text)) { const chunk = 'x'.repeat(4000); for (let k = 0; k < 300; k++) out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'agent_response', text_delta: chunk } }); }
   if (/\bstray\b/.test(text)) setTimeout(() => out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'interrupted', duration_seconds: 0, num_turns: turns, usage: running() } }), 80);
+  // lane queued-is-not-woke: the 2026-11-11 incident's shape — a run_command step goes ACTIVE and NOTHING follows (no DONE,
+  // no result); the process stays alive and idle, reading stdin: a turn that never ends (Stop restarts the process)
+  if (/\bstuck\b/.test(text)) { const i = step++; modelCall(i); out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'node driver.mjs' } } } }); await new Promise(() => { }); }
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;

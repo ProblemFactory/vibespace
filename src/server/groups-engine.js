@@ -296,7 +296,7 @@ function create({
       // lane group-pending (2026-10-01): the member's report MARKER rides the view — the window's line under every
       // message ("waiting for beta's next turn" / "read by beta") and the CLI's trailing clause are judged off it
       // (PURE G.deliveryOf); it was a private fact before, so a message handed over looked exactly like one waiting
-      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member), ended: endedOf(m.member), reportedUpTo: Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null, reportedAt: Number.isFinite(m.reportedAt) ? m.reportedAt : null })),
+      members: g.members.map((m) => ({ member: m.member, name: displayName(g, m.member), notify: m.notify, joinedAt: m.joinedAt, invitedBy: m.invitedBy, live: !!sessionOf(m.member), ended: endedOf(m.member), ...(Array.isArray(m.queued) && m.queued.length ? { queued: m.queued.map((q) => ({ ...q })) } : {}), reportedUpTo: Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null, reportedAt: Number.isFinite(m.reportedAt) ? m.reportedAt : null })),
       // lane pair-group-fate: a pair closed because its other member ended; B-eba8: the awaits' states (read's clause, the window's line)
       closed: g.closed ? { member: g.closed.member, why: g.closed.why, at: g.closed.at } : null,
       awaits: g.awaits && typeof g.awaits === 'object' ? JSON.parse(JSON.stringify(g.awaits)) : {},
@@ -443,6 +443,82 @@ function create({
     settleOwed(gid, member);   // lane paced-wake-retry: a parked wake this report carried is cancelled, never a second post
   }
 
+  /** THE QUEUED WAKE (lane queued-is-not-woke, law 1): a wake the addressee's wrapper QUEUED behind its running turn. The
+   *  marker moves at once (the record is in that wrapper's queue: no report re-sends it), and a `queued` entry says what
+   *  the record really is — «waiting for <name>'s current turn» (channel-groups deliveryOf) — until a turn carries it
+   *  (markCarried: «read by», the hand-over clock = that turn) or it is handed back (markRestashed: «next turn»). */
+  // THE EARLY ANSWER (round 2, the panel's S3): the ladder may carry — or hand back — a frame before this engine's own
+  // markQueued has landed; that answer is kept here (bounded) and applied when the entry is written, never lost
+  const earlyQueued = new Map();   // `${gid}|${member}|${upTo}` -> 'carried' | 'restashed'
+  const earlyKey = (gid, member, upTo) => `${gid}|${member}|${Number(upTo)}`;
+  const noteEarly = (gid, member, upTo, what) => { earlyQueued.set(earlyKey(gid, member, upTo), what); if (earlyQueued.size > 500) earlyQueued.delete(earlyQueued.keys().next().value); };
+  async function markQueued(gid, member, upTo, { since = null } = {}) {
+    if (!Number.isFinite(upTo)) return;
+    await store.groups.update((gr) => {
+      const g = gr.groups[gid];
+      const m = g && G.memberOf(g, member);
+      if (!m) return;
+      const early = earlyQueued.get(earlyKey(gid, member, upTo)) || null;   // read INSIDE the update: the store runs them in order
+      earlyQueued.delete(earlyKey(gid, member, upTo));
+      if (early === 'carried') { if (!(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo; m.reportedAt = now(); return; }   // a turn already carried it
+      const from = Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : null;   // the records after it went out in this wake
+      if (!(Number(m.reportedUpTo) >= upTo)) m.reportedUpTo = upTo;
+      m.queued = (Array.isArray(m.queued) ? m.queued : []).filter((q) => q && Number(q.upTo) !== upTo).concat([{ from, upTo, at: now(), since: Number.isFinite(since) ? since : null, state: early === 'restashed' ? 'restashed' : 'queued' }]);   // never trimmed: the ladder bounds at the send (round 2)
+    });
+    announce([gid]);
+    settleOwed(gid, member);
+  }
+  async function markCarried(gid, member, upTo) {
+    let moved = false;
+    await store.groups.update((gr) => {
+      const g = gr.groups[gid];
+      const m = g && G.memberOf(g, member);
+      if (!m || !Array.isArray(m.queued) || !m.queued.some((q) => q && Number(q.upTo) === Number(upTo))) { noteEarly(gid, member, upTo, 'carried'); return; }
+      const rest = m.queued.filter((q) => q && Number(q.upTo) !== Number(upTo));
+      m.queued = rest.length ? rest : undefined;
+      m.reportedAt = now(); moved = true;   // the hand-over clock = the turn that carried it
+    });
+    if (moved) announce([gid]);
+  }
+  /** AN ENTRY THAT LEFT (round 4): the stash evicted its words, or it aged out — the row says «not delivered» (send it again), never «waiting» for good */
+  async function markDropped(gid, member, upTo) {
+    let moved = false;
+    await store.groups.update((gr) => {
+      const g = gr.groups[gid];
+      const m = g && G.memberOf(g, member);
+      const q = m && Array.isArray(m.queued) ? m.queued.find((x) => x && Number(x.upTo) === Number(upTo)) : null;
+      if (q && q.state !== 'dropped') { q.state = 'dropped'; q.droppedAt = now(); moved = true; }
+    });
+    if (moved) announce([gid]);
+  }
+  async function markRestashed(gid, member, upTo) {
+    let moved = false;
+    await store.groups.update((gr) => {
+      const g = gr.groups[gid];
+      const m = g && G.memberOf(g, member);
+      const q = m && Array.isArray(m.queued) ? m.queued.find((x) => x && Number(x.upTo) === Number(upTo)) : null;
+      if (!q) { noteEarly(gid, member, upTo, 'restashed'); return; }
+      if (q.state !== 'restashed') { q.state = 'restashed'; q.backAt = now(); moved = true; }
+    });
+    if (moved) announce([gid]);
+  }
+  // the ladder tells what became of a queued wake (src/server/queued-wakes.js) — a turn carried it, or it came back
+  // round 3: a `queued` row whose ladder record is GONE (msg-queued.json lost) settles at that conversation's next turn start
+  // (its frame ran then, or before) — found once at boot, never «waiting for the current turn» for good
+  const orphanQueued = new Map();   // cid -> [{gid, upTo}]
+  try {
+    const held = new Set(((deliver && typeof deliver.queuedEntries === 'function' ? deliver.queuedEntries() : []) || []).filter((e) => e.mark).map((e) => `${e.mark.gid}|${e.cid}|${e.mark.upTo}`));
+    for (const g of Object.values(all() || {})) for (const m of (g && g.members) || []) for (const q of (m && Array.isArray(m.queued) ? m.queued : [])) {
+      if (q && q.state === 'queued' && !held.has(`${g.id}|${m.member}|${Number(q.upTo)}`)) { const l = orphanQueued.get(m.member) || []; l.push({ gid: g.id, upTo: Number(q.upTo) }); orphanQueued.set(m.member, l); }
+    }
+    deliver?.onTurnStarted?.((cid) => { const l = orphanQueued.get(cid); if (!l) return; orphanQueued.delete(cid); for (const o of l) markCarried(o.gid, cid, o.upTo).catch(() => { }); });
+  } catch (e) { (log.warn || log.log || (() => {})).call(log, '[groups] the queued-row boot check failed:', e.message); }
+  try {
+    deliver?.onCarried?.((cid, e) => { if (e && e.mark) markCarried(e.mark.gid, cid, e.mark.upTo).catch((err) => (log.warn || log.log || (() => {})).call(log, '[groups] queued wake carry failed:', err.message)); });
+    deliver?.onHandedBack?.((cid, e) => { if (e && e.mark) markRestashed(e.mark.gid, cid, e.mark.upTo).catch((err) => (log.warn || log.log || (() => {})).call(log, '[groups] queued wake hand-back failed:', err.message)); });
+    deliver?.onQueuedDropped?.((cid, e) => { if (e && e.mark) markDropped(e.mark.gid, cid, e.mark.upTo).catch((err) => (log.warn || log.log || (() => {})).call(log, '[groups] queued wake drop failed:', err.message)); });
+  } catch { }
+
   const WAKE_LEAD = {
     mention: 'You were @mentioned',
     always: 'Your notify mode in this group is "always"',
@@ -520,11 +596,12 @@ function create({
         // literals spelled (the spend census reads them); ONE ladder site. r2: and only with its door's PRESS (`pressed`,
         // write-origin isPress) — an owner record woken later by nobody's press (a timer) is peer-message
         const paid = self && isPress(pressed) ? { spendReason: 'owner-group-wake' } : { spendReason: 'peer-message' };
-        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', ...paid, fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
+        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', ...paid, wakeMark: { gid, upTo: rep.upTo }, fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
     try { store.audit({ kind: 'group-wake', groupId: gid, member, why, ok: !!(r && r.ok), lane: (r && r.lane) || null, reason: r && !r.ok ? r.reason || null : null, refused: (r && r.refused) || null, spendWhy: (r && r.why) || null }); } catch { }
-    if (r && r.ok) { await markReported(gid, member, rep.upTo); return { ok: true, lane: r.lane || null }; }
+    if (r && r.ok && r.queued) { await markQueued(gid, member, rep.upTo, { since: r.since }); return { ok: true, queued: true, since: Number.isFinite(r.since) ? r.since : null, lane: r.lane || null }; }   // law 1: waiting, not woke
+    if (r && r.ok) { await markReported(gid, member, rep.upTo); return { ok: true, lane: r.lane || null, ...(r.intoTurn ? { intoTurn: true } : {}) }; }
     (log.info || log.log || (() => {})).call(log, `[groups] wake of ${member.slice(0, 8)} in ${gid} (${why}) not delivered: ${(r && r.reason) || 'refused'} — it rides that member's next report`);
     return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null };
   }
@@ -818,7 +895,7 @@ function create({
    *  end (lane paced-wake-retry, `parkPaced`); only a refusal that names no wait
    *  leaves the message to that member's next report. */
   async function wakeAll(gid, rec, candidates, mayWake = null, { pressed = null } = {}) {
-    const woke = [], refused = [], later = [];
+    const woke = [], refused = [], later = [], queued = [];
     const g0 = getGroup(gid);
     for (const m of candidates) {
       const g = getGroup(gid) || g0;
@@ -835,7 +912,8 @@ function create({
         continue;
       }
       const r = await wake(gid, m, rec, v.why, null, { pressed });
-      if (r.ok) woke.push({ member: m, name, why: v.why, lane: r.lane });
+      if (r.ok && r.queued) queued.push({ member: m, name, why: v.why, lane: r.lane, since: r.since });   // law 1: behind its running turn
+      else if (r.ok) woke.push({ member: m, name, why: v.why, lane: r.lane, ...(r.intoTurn ? { intoTurn: true } : {}) });
       else {
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to
         // floor the next legitimate one with words that said a turn was billed)
@@ -843,7 +921,7 @@ function create({
         refused.push({ member: m, name, why: v.why, reason: r.reason, refused: r.refused || null });
       }
     }
-    return { woke, refused, later };
+    return { woke, refused, later, queued };
   }
 
   // ── the verbs ────────────────────────────────────────────────────────────
@@ -880,9 +958,9 @@ function create({
     if (!res.ok) return res;
     announce([res.group.id], recs);
     const invites = recs.filter((x) => x.raw.kind === 'invite');
-    let woke = [], refused = [];
-    for (const rec of invites) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
-    return { ok: true, group: view(getGroup(res.group.id)), woke, refused, quiet: !!quiet };
+    let woke = [], refused = [], queued = [];
+    for (const rec of invites) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); queued = queued.concat(w.queued); }
+    return { ok: true, group: view(getGroup(res.group.id)), woke, refused, queued, quiet: !!quiet };
   }
   function inviteText(g, by, cid, ctx) {
     return `${displayName(g, by)} added ${displayName(g, cid)}${ctx ? ' — ' + ctx : ''}`;
@@ -922,9 +1000,9 @@ function create({
     });
     if (!res.ok) return res;
     if (recs.length) announce([res.group.id], recs);
-    let woke = [], refused = [];
-    for (const rec of recs) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
-    return { ok: true, group: view(getGroup(res.group.id)), added: recs.map((r) => displayName(res.group, r.raw.member)), already, woke, refused, quiet: !!quiet };
+    let woke = [], refused = [], queued = [];
+    for (const rec of recs) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); queued = queued.concat(w.queued); }
+    return { ok: true, group: view(getGroup(res.group.id)), added: recs.map((r) => displayName(res.group, r.raw.member)), already, woke, refused, queued, quiet: !!quiet };
   }
 
   /** leave (self) / kick (creator or owner) — a pair that drops to one is archived. */
@@ -1064,7 +1142,7 @@ function create({
     const others = res.group.members.map((m) => m.member).filter((m) => m !== from);
     const w = await wakeAll(res.group.id, rec, others, mayWake, { pressed });
     const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone, { pressed });
-    return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later, awaited: aw };
+    return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later, queued: w.queued, awaited: aw };
   }
   /** an await entry is kept a day past its `until` (read's clause), then dropped on the next write */
   function pruneAwaits(awaits, at) {
@@ -1092,7 +1170,7 @@ function create({
     for (const [asker, [vid, e]] of open) {
       // a wake wakeAll ALREADY made (the replier's --wake, an @mention, always) carried this reply: it CONSUMES the await —
       // judged before its marker moved, never a second billed turn
-      const made = w.woke.some((x) => x.member === asker);
+      const made = w.woke.concat(w.queued || []).some((x) => x.member === asker);   // a queued wake carries the reply too (law 1)
       const v = made ? { wake: true, why: replyWake ? 'both' : 'mention' } : G.awaitVerdict(g0, { raw: { kind: 'message', await: e } }, { author: { id: from }, at: rec.at, wake: replyWake }, { entry: e, liveness: livenessNow });
       const patch = { answeredAt: rec.at, verdict: v.why };
       if (v.wake && (v.why === 'await' || v.why === 'both' || v.why === 'mention')) {
@@ -1124,6 +1202,7 @@ function create({
    * same `why` re-logs nothing. ONE broadcast.
    */
   async function onConversationEnded(cid, { why = 'archived', at = null } = {}) {
+    try { deliver?.noteConversationEnded?.(cid, why); } catch { }   // lane queued-is-not-woke round 3: its held frames leave at the act, said (never reloaded at every boot)
     if (!G.isCid(cid) || !G.ENDED_WHYS.includes(why)) return { ok: false, closed: [], marked: [] };
     // AN END THAT CHANGES NOTHING WRITES NOTHING AND ANNOUNCES NOTHING (lane groups-sweep-on-change): the ledger already says
     // this end, and no unarchived group would close (a pair) or be told (a multi-member group it was not said in) — no store

@@ -471,7 +471,20 @@ console.log('§1f deliveryOf — where a record stands with each recipient (lane
   const states = (list) => list.map((x) => `${x.name}:${x.state}`).join(',');
   const withMarker = (g, cid, upTo) => { const c = JSON.parse(JSON.stringify(g)); G.memberOf(c, cid).reportedUpTo = upTo; return c; };
   const withNotify = (g, cid, notify) => { const c = JSON.parse(JSON.stringify(g)); G.memberOf(c, cid).notify = notify; return c; };
-  ok(JSON.stringify(G.DELIVERY_STATES) === '["waiting","handed","muted","left","undeliverable"]', 'DELIVERY_STATES is the closed set waiting | handed | muted | left | undeliverable (lane pair-group-fate)');
+  ok(JSON.stringify(G.DELIVERY_STATES) === '["waiting","queued","handed","muted","left","undeliverable"]', 'DELIVERY_STATES is the closed set waiting | queued | handed | muted | left | undeliverable (lane pair-group-fate; `queued` lane queued-is-not-woke: a wake its addressee\'s wrapper holds behind a running turn)');
+  {   // lane queued-is-not-woke (law 1): a member's `queued` entry covers the records its wake carried ((from, upTo]) — `queued`
+      // while its wrapper holds it (`since` = the turn), `waiting` once handed back, `waiting · stopped` when the conversation
+      // stopped (checked BEFORE the queue — round 2); a record before `from` stays handed
+    const gq = JSON.parse(JSON.stringify(mk)); const mq = G.memberOf(gq, B);
+    mq.reportedUpTo = m1.at; mq.queued = [{ from: m1.at - 1, upTo: m1.at, at: m1.at + 5, since: m1.at - 60000, state: 'queued' }];
+    const rq = G.deliveryOf(gq, m1, { log: [m1] }).find((x) => x.member === B);
+    const gr = JSON.parse(JSON.stringify(gq)); G.memberOf(gr, B).queued[0].state = 'restashed';
+    const rr = G.deliveryOf(gr, m1, { log: [m1] }).find((x) => x.member === B);
+    const rs = G.deliveryOf(gq, m1, { log: [m1], liveness: (c) => (c === B ? { state: 'stopped' } : null) }).find((x) => x.member === B);
+    const gb = JSON.parse(JSON.stringify(gq)); G.memberOf(gb, B).queued[0].from = m1.at;
+    const rb = G.deliveryOf(gb, m1, { log: [m1] }).find((x) => x.member === B);
+    ok(rq.state === 'queued' && rq.since === m1.at - 60000 && rr.state === 'waiting' && rs.state === 'waiting' && rs.stopped === true && rb.state === 'handed', 'QUEUED (lane queued-is-not-woke): a record its wake carried into a wrapper\'s queue reads `queued` (since the turn), `waiting` once handed back, `waiting · stopped` when its conversation stopped (before the queue), and a record outside the entry stays handed', JSON.stringify({ rq, rr, rs, rb }));
+  }
   const before = JSON.stringify(mk);
   ok(states(rows(mk, m1)) === 'beta:waiting,gamma:waiting' && rows(mk, m1).every((x) => x.at === null && G.isCid(x.member)), 'a fresh message: every OTHER member is a recipient and WAITING (marker null), `at` null, each row carries the conversation id');
   ok(JSON.stringify(mk) === before, '…the input group is never mutated');

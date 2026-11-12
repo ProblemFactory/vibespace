@@ -1108,7 +1108,7 @@ const deliver = require('./src/server/conversation-deliver.js').create({
   peerMsg: require('./src/peer-messaging.js'),
   getHosts: () => hosts,
   getConvIndex: () => hosts && hosts.convIndex,
-  serverSetting, activeSessions, onStashChange: () => { try { stashView.changed(); } catch { } }, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
+  serverSetting, activeSessions, onStashChange: () => { try { stashView.changed(); } catch { } }, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), reservationState: (rid) => spendGuard.reservationState(rid), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
   // 2.363.0: render the peer card at delivery time — server-posted injections
   // are body-less at the CLI, only the delivery site can show them live.
   emitPeerCard: (cid, card) => {
@@ -1506,6 +1506,7 @@ const docEngine = require('./src/server/doc-engine.js').create({ activeSessions,
 { const { turnDigest } = require('./src/server/turn-facts.js'); let lastTurns = ''; setInterval(() => { const d = turnDigest(activeSessions); if (d !== lastTurns) { lastTurns = d; broadcastActiveSessions(); } }, 1000).unref(); } // the payload's `turn` column ('running'|'idle'|'waiting' — the inbox's running dot; carried, never gating) is DERIVED: one 1 s digest over _isStreaming/_turnState, a list broadcast only when it moved — never a hook at the nine flip sites (design-user-inbox-reply D1.7)
 const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 const wsApi = registerWsHandler(wss, {
+  getDeliver: () => { try { return deliver; } catch { return null; } },   // lane queued-is-not-woke round 3: a kill hands the ladder's held frames back at the act
   poolChooser: poolChooserForModel,
   sbNoteServerOp,
   otelEnv: otelIngest.envFor,

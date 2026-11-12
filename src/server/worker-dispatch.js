@@ -158,12 +158,13 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     }
     if (ledger) { try { ledger.set(key, { from, to: cid, deliveredAt: now() }); } catch { } }   // the brief is in the worker's group: a retry is a replay
     const woke = (post.woke || []).some((w) => w.member === cid);
+    const queuedW = (post.queued || []).find((w) => w.member === cid) || null;   // lane queued-is-not-woke: behind its running turn (reserved, billed by that unit)
     const ref = (post.refused || []).find((w) => w.member === cid) || null;
     const reply = post.group && post.group.id ? await armReplyWake(ge, from, post.group.id) : null;   // verify r2 T2 FIRST: the worker's reply wakes the coordinator
     const record = M.dispatchRecord({
       target: { cid, name }, verdict, compaction, charge, waitMs, reply,
       identity: charge && charge.identity ? charge.identity : null,   // the slot the compaction's authorization resolved for this worker — the ladder's wake lands on the same identityOf(session); unknown when nothing was compacted
-      wake: { woke, paced: ref && ref.parked ? { retryInMs: ref.retryInMs, retryAt: ref.retryAt } : null, reason: woke ? null : (ref ? ref.reason : (wakeNow ? 'the worker gets it on its next turn' : verdict.why)) },
+      wake: { woke, queued: queuedW ? { since: Number.isFinite(queuedW.since) ? queuedW.since : null } : null, paced: ref && ref.parked ? { retryInMs: ref.retryInMs, retryAt: ref.retryAt } : null, reason: woke ? null : queuedW ? 'the worker is in a turn — the brief waits in its queue behind it' : (ref ? ref.reason : (wakeNow ? 'the worker gets it on its next turn' : verdict.why)) },
     });
     log(M.journalLine({ from, record, charge }));
     return { ok: true, record, post, attempt: nonce || null };

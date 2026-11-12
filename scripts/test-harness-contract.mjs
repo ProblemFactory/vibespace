@@ -1404,6 +1404,39 @@ console.log('\nstatusBar: every harness declares what its status bar shows');
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+// ── A FRAME QUEUED BEHIND A TURN (lane queued-is-not-woke, law 1 — B-580f, the 2026-11-11 incident) ──
+// Every row's DECLARED peer lane decides what a frame written into a RUNNING turn is — never a backend id. Driven through
+// the REAL delivery ladder with a session of that row in a turn: an rpc-queue wrapper QUEUES it (said waiting, owed, not
+// charged until a turn carries it); a cli-inbox CLI takes it INTO its running turn (a wake, charged as master — ruled
+// 2026-11-12); a stash-only row refuses the wake (not billed). A row whose lane has no verdict here is red by name.
+console.log('\n— a frame queued behind a turn: every row\'s peer lane says what the addressee did (law 1)');
+{
+  const DELIVER = require(path.join(REPO, 'src/server/conversation-deliver.js'));
+  const WANT = { 'rpc-queue': 'queued', 'cli-inbox': 'into-turn', 'stash-only': 'refused' };
+  const CID = 'cccccccc-0000-4000-8000-00000000000c';
+  for (const id of Object.keys(BACKEND_CAPS)) {
+    const lane = capsOf(id).peerDelivery;
+    const want = WANT[lane] || null;
+    if (!want) { ok(false, `${id}: its peer lane '${lane}' has a law-1 verdict (a frame into a running turn)`); continue; }
+    const dir = scratch('hc-queued-' + id);   // ended at exit (scratch.mjs)
+    fs.mkdirSync(path.join(dir, 'session-buffers'), { recursive: true });
+    const wid = 'w-' + id;
+    const S = { backend: id, mode: 'chat', name: 'n', host: null, socketPath: path.join(dir, 'cw-' + wid), _isStreaming: true, _turnStateSeen: true, _turnOpenedAt: 1, pty: { write() { } } };
+    if (id === 'claude') S.claudeSessionId = CID; else S.backendSessionId = CID;
+    if (lane === 'rpc-queue') fs.writeFileSync(path.join(dir, 'session-buffers', wid + '.json'), JSON.stringify({ pid: process.pid, startedAt: Date.now(), mode: 'chat', backend: id, caps: { peerMessage: true } }));
+    const money = { auth: 0, note: 0 };
+    const D = DELIVER.create({
+      dataDir: dir, activeSessions: new Map([[wid, S]]), serverSetting: () => undefined, getHosts: () => null, getConvIndex: () => null,
+      peerMsg: { findPeer: (cid) => (lane === 'cli-inbox' && cid === CID ? { name: 'n', socketPath: '/dev/null', pid: process.pid } : null), postToPeer: async () => ({ ok: true }), postChannelEvent: async () => ({ ok: false }) },
+      emitPeerCard: () => true, authorizeSpend: () => { money.auth++; return { ok: true, identity: { key: 'k' }, hold: 'h' }; }, noteSpend: () => { money.note++; }, releaseSpend: () => { }, log: () => { },
+    });
+    const r = await D.deliverToConversation(CID, 'a frame behind a running turn', { kind: 'peer', spendReason: 'peer-message' });
+    const got = r.ok && r.queued ? 'queued' : r.ok && r.intoTurn ? 'into-turn' : !r.ok ? 'refused' : 'woke';
+    const moneyOk = want === 'queued' ? money.auth === 1 && money.note === 1 : want === 'into-turn' ? money.note === 1 : money.note === 0;   // queued: the unit RESERVED at the send (round 2)
+    ok(got === want && moneyOk, `${id} (${lane}): a frame into a running turn is «${want}» — ${want === 'queued' ? 'waiting — its unit reserved at the send, the carrying turn that same unit' : want === 'into-turn' ? 'a wake into the running turn, charged once (master, ruled)' : 'the wake refused, not billed'}`, JSON.stringify({ r, money }));
+  }
+}
+
 console.log('\ntree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 

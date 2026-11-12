@@ -39,6 +39,7 @@ export const ROWS = [
   [CI, "process.kill(child.pid, 'SIGKILL'", 'handle', 'child.pid', 'a held gate child'],
   [CI, 'process.kill(o.pid, sig)', 'starttime', 'sameProcess\\(o,', 'the reaper\'s victims (own copy: rows from the same /proc pass; a starttime-less row is never signalled, said — B-5ee1)'],
   [CI, 'const alive = (pid) => { try { process.kill(pid, 0)', 'probe', 'the reaper\'s liveness wait', 'nothing'],
+  ['src/server/conversation-deliver.js', 'try { process.kill(n, 0); return true; }', 'probe', 'lane queued-is-not-woke: a held frame\'s wrapper pid (its own sidecar) at the boot sweep — a recycled pid reads ALIVE, which keeps the frame and its unit counted (fail closed); only a DEAD pid lets the hub settle it', 'nothing'],
   [CI, "process.kill(-old.pid, 'SIGTERM')", 'scan', 'looksLikeHeavyRun\\(old\\.pid\\)', 'a superseded heavy run (lock record, its cmdline read now)'],
   ['src/adapters/claude-code.js', "process.kill(session._childPid, 'SIGINT')", 'legacy', "PI\\.legacyOnce\\('interrupt'", 'interrupt (a legacy wrapper meta; with childStart it is PI.signalIdentity — the choke point\'s row)', 4, 1, `the wrapper meta's childPid: session._childIdentity (childStart + childBoot, written at the wrapper's spawn tick) goes through signalIdentity; a birth-less meta (an older wrapper) falls to isCliProcess(pid, 'claude') once, said — ${RETIRE}`],
   [AG, 'let alive = false; try { process.kill(pid, 0)', 'probe', 'a claude lock pid — discovery liveness', 'nothing'],

@@ -79,7 +79,14 @@ const piece = (s, max = Infinity) => toAgentText(s, { kind: 'line', max });
 const NOTIFY_MODES = Object.freeze(['next-turn', 'mention', 'always', 'mute']);
 const DEFAULT_NOTIFY = 'next-turn';
 /** WHERE A RECORD STANDS WITH A RECIPIENT (`deliveryOf`, lane group-pending): the closed set. */
-const DELIVERY_STATES = Object.freeze(['waiting', 'handed', 'muted', 'left', 'undeliverable']);
+const DELIVERY_STATES = Object.freeze(['waiting', 'queued', 'handed', 'muted', 'left', 'undeliverable']);
+/** lane queued-is-not-woke (law 1): a wake its addressee's wrapper QUEUED behind a running turn — at most this many held per member */
+const QUEUED_MAX = 500;   // the validator's ceiling (the ladder refuses past 50 live frames per conversation, 500 on the hub — src/server/queued-wakes.js)
+/** the member's queued entry covering a record: the record went out in that wake (`from` < at ≤ `upTo`) and no turn carried it yet */
+function queuedFor(m, at) {
+  if (!m || !Array.isArray(m.queued)) return null;
+  return m.queued.find((q) => q && Number.isFinite(Number(q.upTo)) && at <= Number(q.upTo) && !(Number.isFinite(Number(q.from)) && at <= Number(q.from))) || null;
+}
 /** A member's CONVERSATION as a fact (lane pair-group-fate): stopped is NOT ended (a resume delivers what waited). */
 const LIVENESS_STATES = Object.freeze(['running', 'stopped', 'archived', 'gone']);
 const ENDED_WHYS = Object.freeze(['archived', 'gone']);
@@ -227,6 +234,7 @@ function validateGroup(g) {
     if (!NOTIFY_MODES.includes(m.notify)) return err('bad-notify', `member ${m.member}: notify must be one of ${NOTIFY_MODES.join('|')}`);
     if (!(m.reportedUpTo === null || m.reportedUpTo === undefined || Number.isFinite(m.reportedUpTo))) return err('bad-request', `member ${m.member}: reportedUpTo`);
     if (!(m.reportedAt === null || m.reportedAt === undefined || Number.isFinite(m.reportedAt))) return err('bad-request', `member ${m.member}: reportedAt`);
+    if (!(m.queued === undefined || m.queued === null || (Array.isArray(m.queued) && m.queued.length <= QUEUED_MAX && m.queued.every((q) => q && Number.isFinite(q.upTo) && (q.state === 'queued' || q.state === 'restashed' || q.state === 'dropped'))))) return err('bad-request', `member ${m.member}: queued`);
   }
   if (g.pair !== null && g.pair !== undefined) {
     if (!Array.isArray(g.pair) || g.pair.length !== 2 || g.pair[0] >= g.pair[1]) return err('bad-request', 'pair is two sorted, distinct conversation ids');
@@ -888,16 +896,22 @@ function deliveryOf(group, rec, { log = [], liveness = null } = {}) {
     if (!m || !m.member || m.member === author) continue;
     if (!(m.member !== OWNER && m.joinedAt <= at)) continue;
     seen.add(m.member);
-    const handed = Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;
+    // law 1 (lane queued-is-not-woke): a record whose wake sits in the addressee's queue is not handed — it waits for the
+    // running turn (`queued`), or, handed back, for the next one (`waiting`)
+    const q = queuedFor(m, at);
+    const handed = !q && Number.isFinite(m.reportedUpTo) && m.reportedUpTo >= at;
     // lane pair-group-fate: a record's state is a fact about its ADDRESSEE — archived / gone ⇒ undeliverable (`at` =
     // when it ended), stopped ⇒ still waiting (a resume delivers it), said by `stopped`
     const lv = handed ? null : livenessOf(group, m.member, liveness);
     const ended = !!(lv && ENDED_WHYS.includes(lv.state));
-    const state = handed ? 'handed' : ended ? 'undeliverable' : m.notify === 'mute' ? 'muted' : 'waiting';
+    const dropped = !!(q && q.state === 'dropped');   // round 4: its words left before a turn read them — not delivered (send it again)
+    const state = handed ? 'handed' : ended ? 'undeliverable' : m.notify === 'mute' ? 'muted' : q && q.state === 'queued' && !(lv && lv.state === 'stopped') ? 'queued' : dropped ? 'undeliverable' : 'waiting';   // a STOPPED addressee is checked before the queue (round 2): «waiting — <name> is stopped»   // a mute member is never woken, so never queued
     // a handed row's `at` = the hand-over CLOCK (`reportedAt`, stamped beside the marker when it moves); a legacy row
     // stamped before the clock existed answers null — the words then say "Read by beta" without a time
     const row = { member: m.member, name: nameOf(m, m.member), state, at: handed && Number.isFinite(m.reportedAt) ? m.reportedAt : ended ? lv.at : null };
     if (ended) row.why = lv.state;
+    else if (dropped) { row.why = 'dropped'; row.at = Number.isFinite(q.droppedAt) ? q.droppedAt : null; }
+    if (state === 'queued') { row.at = Number.isFinite(q.at) ? q.at : null; row.since = Number.isFinite(q.since) ? q.since : null; }
     if (state === 'waiting' && lv && lv.state === 'stopped') row.stopped = true;
     out.push(row);
   }
@@ -1005,7 +1019,7 @@ function awaitLead(at, why) {
 module.exports = {
   LIVENESS_STATES, ENDED_WHYS, OWNERS, livenessFrom, AWAIT_MS, closePair, endedText, livenessOf, awaitVerdict, awaitState, awaitLead, awaitNote,
   sentInS, pacedWords, pacedReason, unparkedReason, blockedReason, AWAIT_FELL, LIVE_FALLS, FALL_WHY, fallWhy, RESEND_HELPS, owedOutcome,
-  NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
+  NOTIFY_MODES, DEFAULT_NOTIFY, DELIVERY_STATES, QUEUED_MAX, queuedFor, OWNER, GROUP_ADAPTER_ID, ERROR_CODES, NAME_MAX, CONTEXT_MAX, MEMBER_MAX, REPORT_BUDGET, LINE_MAX,
   WAKE_CONFIRM_ABOVE, WAKE_FLOOR_MS, SENDER_WAKES, SENDER_WINDOW_MS, PACE_SKEW_MS,
   newGroupId, pairKey, cleanName, cleanText, isCid, isGroupId, memberOf, validateGroup, makeGroup,
   addMember, removeMember, setNotify, rename, archive, mentionsIn, scanAts, atRefusal, codeSpans, foldCase, reachesReport, wakeVerdict, wakesPlanned, consentVerdict, reportFor, deliveryOf,

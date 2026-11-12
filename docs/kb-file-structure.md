@@ -1592,6 +1592,7 @@ src/lib/chat-needs-card.js _dockStrip / _dockFold + style.css html[data-vc] .cha
 src/lib/setup-flows.js _showLayoutHistory `busy` + app.js `_layoutRestoring` (lane phone-dock-restore) — the history dialog says what it reads and a failed read; a restore press says «Restoring…»; the asking page knows its own broadcast by its `rid` ⇒ kb-file-structure.md
 src/lib/agent-meta.js windowListMark / followListMarks (lane phone-take-photo) — ONE mark for the title bar's slot and every pick list (phone window list, ⧉, «+N», warmth, overlap): a harness ⇒ its mark (unknown ⇒ generic), else the type glyph; open lists follow a late harness
 src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js patchDesktopSheet · mobile-nav.js _waitDot / _patchSwitcherWaiting (lane phone-take-photo) — THE WAITING DOORS: one waiting fact shared with the taskbar, rolled up per desktop, said at every phone door, live in place
+src/server/queued-wakes.js — THE QUEUED WAKE (lane queued-is-not-woke, law 1): a frame an rpc-queue wrapper queued behind a running turn — pending → queued (bound to its queue item) → carried (charged once, read) | handed back; persisted ⇒ kb-file-structure.md
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
@@ -14450,3 +14451,91 @@ THE LAW: the models an Antigravity chat offers are what Antigravity itself repor
 ROUND 2 (acceptance of 017693b83, seven laws): A — the door lists only on a PRESS its one gate minted (`press(req, kind)` runs personVerdict; a WeakSet, used once; a caller's `{person: true}` is refused «no-press»), minted only in provider-models' cliDoor; `modelsReport` is read by the door alone. B — the explicit row: one a minute and at most 24 per account per rolling 24 h, both persisted in the cache (429 «daily-bound» says when it frees). C — the child leads its own process group and every end of the listing (exit + 150 ms drain, the cap, the 20 s timeout) SIGKILLs the group; the listing settles on exit, so rows printed before a descendant let go of the pipe are kept. D — the cache is read async, once, at most 2 MiB (a stat first); a corrupt or oversize file is said once; no synchronous fs call in the door. E — a model the person chose that the report does not list stays selected / marked, said «… — not in Antigravity's report» (both surfaces). F — every refusal / failure code has the client's own sentence; an unknown code is named. G — both surfaces send nothing for another machine (opensFor) and an unchanged answer rebuilds no row (rowsSig). STATED LIMIT: the CLI's identity is the realpath + size + mtime of the path cli-cmd answers — behind a stable launcher script, or when that path is a bare name, an update of the CLI is not seen until the floor ends; the «Refresh from …» row is the door. NOT CLOSED: whether the real agy forks helpers that inherit stdout (never run here; law C holds either way); two processes writing the cache at once (one door per hub; tmp names unique per write, last writer wins).
 ROUND 3 (the last tidy): LAW 1 — the door never signals a group it no longer holds: before the leader's exit is seen the group is ours (the timeout, the cap end it); after the exit only on proof that a member of OURS is alive (no live process holds that number — else it is reused, nothing is sent; then the pipe still held past the exit, or a proc-identity membersOf member: pgrp = the child's pid, field-22 start ≥ the child's); a plain listing that exits and closes signals nobody. LAW 2 — the mint does not travel with the door: createCliModelsDoor returns { door, mint } once; the mint goes to the ONE route registrar (provider-models), the door handed around cannot mint; a press is bound to (backend, account, kind) and lives 5 s (spent in the request that minted it); the censuses count every reference to the mint and refuse any `.press(`. A fence against an ACCIDENT (a timer someone adds, a second route), as every census here: code that deliberately forges a request object or spells `modelsReport` by concatenation runs in our own process and is not fenced. STATED LIMITS (ruled closed): the refresh bound resets with a deleted or corrupt cache file (said once); a backward clock step holds «throttled» for the length of the step; a helper that leaves the group with setsid outlives the listing and cannot be reached; a chat menu whose own GET fails starts no listing until its next opening.
 DEFERRED, named: a paired machine's own agy (a device op `agy-models` through the shared module, its capability gate, the same floors — the first cut answers the shipped list there and says so); the passive road (whether agy 1.5.5's stream `init` carries the list is unmeasured — if it does, it becomes a second SOURCE into this one cache, never a second store).
+
+## src/server/queued-wakes.js + conversation-deliver.js + groups-engine.js + channel-groups.js deliveryOf — A QUEUED MESSAGE IS NOT A WAKE (lane queued-is-not-woke, law 1 ⇒ kb-bugfix-invariants «THREE --wake MESSAGES SAID «WOKE»…»)
+
+**The rung.** conversation-deliver's rpc-queue rung writes a peer (or a non-steering notification) frame into a session `_isStreaming`. The frame is QUEUED behind the running turn:
+- `queued.noteWritten(cid, {charged, text, kind, mark: opts.wakeMark, since: s._turnOpenedAt})`;
+- the settle queue gets the entry's `qid`;
+- the answer is `{ok:true, queued:true, since}`.
+
+An idle session keeps master's road (spent at the write; the wrapper answers 'turn'). A steer keeps its predicted-free hold.
+
+**settleRpcDelivery** hands a `qid` entry's answer to the module:
+- 'turn' ⇒ carried (charged now);
+- 'queued' ⇒ queued (the guard's hold given back, the charge owed);
+- ok:false ⇒ handed back.
+
+A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, owed, unbound.
+
+**The module (src/server/queued-wakes.js).**
+- One entry per frame; states pending / queued / restashed.
+- Persisted `msg-queued.json` through the store writer (`msg-queued.write`).
+- The hub's mirror of each wrapper's queue ids and turn edges is fed by the stdout consumers:
+  - acp-events: `queue_changed` → noteQueueItems, `prompt_start` → noteTurnStarted (+ `session._turnOpenedAt` — the turn's open instant, its own field: `_turnStartedAt` is turn-state's request-out instant, two writers only), `prompt_end` → noteTurnEnded, a mode-less `peer_result {ok:false, text}` → noteHandedBack;
+  - codex-events: `task_started` / `task_complete|turn_aborted|task_failed`, `queue_changed`, `peer_message_result`.
+  - All by PROPERTY ACCESS on the lazy ref.
+- Carried = the bound item left the queue AND a turn started since the bind. Unbound: the first turn start after the running turn ended carries the oldest. Restashed: the next turn start.
+- `chargeOnce` notes the owed charge (reason + identity) exactly once; a restashed entry is never charged (the stash rides a turn somebody else paid for).
+- Events `onCarried` / `onHandedBack` ⇒ groups-engine.
+
+**groups-engine.**
+- `wakeOnce` passes `wakeMark: {gid, upTo}`. A `queued` answer ⇒ `markQueued`, which:
+  - moves `reportedUpTo` (so no report re-sends what the queue holds);
+  - appends `member.queued[] = {from, upTo, at, since, state}`.
+- `markCarried` drops the entry and stamps `reportedAt` = the carrying turn. `markRestashed` sets state 'restashed'.
+- `wakeAll` returns `queued[]` beside `woke[]`. A claude wake into a running turn carries `intoTurn`.
+- `post` / `create` / `invite` return `queued`. The view carries `member.queued`.
+
+**channel-groups (PURE).**
+- DELIVERY_STATES gains `queued`; `queuedFor(m, at)` finds the entry covering a record (`from < at ≤ upTo`).
+- deliveryOf: a covered record is `queued` (row `at` = queued at, `since` = the turn) or, restashed, `waiting`.
+- QUEUED_MAX = 50 per member; the validator accepts `queued`.
+
+**The words.**
+- vibespace-msg: «waiting (not billed yet): xray's current turn (running since HH:MMZ) — read and billed when a turn carries it»; «handed into xray's running turn» for `intoTurn`; read's clause «waiting for xray's current turn (running since HH:MMZ)».
+- channel-words: «Waiting for {name}'s current turn (running since {time})» and «{n} waiting for a current turn» (zh / ja).
+- agent-routes msgSendAnswer: `queued: [{name, since}]`, `intoTurn: [names]`; a read row carries `since`.
+
+**Round 2 — the reservation and the truth after a restart or a death.**
+- **The money.** `queued.noteWritten` turns the ladder's authorization into the RESERVATION: `noteSpend({…charged, reservation: id})`. The guard stamps `{at, reason, rid}` and is idempotent by `rid`. `carry` charges nothing; `handBack` → `releaseSpend({reservation: id})` → `A.returnReservation`.
+- **Ids** are `qw-<boot>-<n>`, never repeated across processes.
+- **The ladder's hooks.**
+  - `noteAttached(session)`, called by both consumers at attach and at agy's id adoption: a session holding frames is sent `{type:'queue-resync'}` when its sidecar adverts `queueResync`.
+  - `noteProcessGone(cid)`, called by session-stdout's real teardown when the socket is gone.
+  - `sweepQueued()`: the boot sweep (+60 s) — no process ⇒ handed back, else asked.
+  - `checkHolder(cid)` before every `noteTurnStarted` / `noteQueueItems`: an entry whose holder (the sidecar pid at the write) is not the live process is handed back.
+  - Every hub hand-back stashes WITH `ref: 'queued-wake:<id>'`, and the stash's `drained` event carries it (`noteStashDrained`).
+  - The consumers stash a mode-less hand-back themselves only when the ladder does not claim it (`noteHandedBack` → true).
+- **Bounds:** `queued.full(cid)` refuses at the send (`refused: 'queued-full'`): PER_CONVERSATION_MAX 50, MAX_ENTRIES 500. channel-groups' QUEUED_MAX (500) is only the validator's ceiling.
+- **groups-engine `earlyQueued`:** a carry or hand-back that arrives before `markQueued` is applied when the entry lands. It is read inside the store update.
+
+**Round 3 — unknown counts as owed.**
+- **The guard.** spend-authorizer `noteUnattendedSpend({rid, carried})` marks `conv` on its own stamp (or stamps one converted unit when none). `returnReservation({rid, limits})` prunes with the LIVE limits and never drops a converted stamp. `reservationState`. `spendCounts` adds `promisedHour / promisedDay / promisedInstanceDay` (the refusal says «spent or promised»). spend-guard `note({carried})` flushes at once; `release({reservation})` passes `limits()`; `reservationState(rid)` is exposed, and server.js hands it to the ladder.
+- **queued-wakes.** The entry keeps `reason`, `identity`, `holder` (the sidecar pid), `text`.
+  - `carry` converts the reservation first.
+  - `handBack` (returns, plain stash) runs only when KNOWN not run: the wrapper's answer, or a seen end with the frame in the last queue THAT holder published (`mirror.idsBy`).
+  - `unknownBack` keeps the unit and stashes once with `REPEAT_HEAD`.
+  - `bootSettle(cid, {alive, converted, stash})`: alive ⇒ kept; dead ⇒ converted ? carried : unknown.
+  - `noteHolder` ignores an absent holder.
+  - `noteStashEvicted` / `dropConversation` (the archive) remove at the act; restashed entries older than 7 days are dropped at boot.
+  - The hub bound counts live entries.
+- **The ladder.** `pidAlive` is a §85 census row (a recycled pid reads alive — fail closed). `sweepQueued` asks a live session, else `bootSettle`. `onTurnStarted` listeners, used by groups-engine for orphan rows. `noteConversationEnded`.
+- **ws-handler's kill road** calls `getDeliver().noteProcessGone(qc)` before `activeSessions.delete` (server.js passes `getDeliver`).
+
+**Round 4 — one predicate; a prune never forgives; the guard's own debounce.**
+- **queued-wakes.**
+  - `knownNotRun(e)` is the ONE test every unit-returning exit reads (handBackGone, noteHolder, dropConversation). The mirror keeps a per-conversation `seq`: `noteQueue(cid, items, holder, {fresh})` stamps `idsSeq` / `idsFresh` / `idsBy`, and `noteTurnStarted` stamps `startSeq`.
+  - `unknownBack` asks `reservationState` first (converted ⇒ carried, no copy).
+  - `carry(e, how)` passes `drain: how === 'stash'` and calls the guard for a live carry even when unreserved.
+  - `ageOut()` runs at load, in `full`, `noteTurnStarted`, `entriesFor` / `heldCids`, and from the ladder's hourly unref'd timer. It covers live entries > 7 d, and restashed ones > 7 d whose words are no longer in the stash (`stashHas`). It emits `dropped` {why: 'aged out'}; what left at load is replayed to the first `onDropped` listener.
+  - `REPEAT_HEAD` = «(This may repeat an earlier message.)».
+- **The wrappers.** agy-wrapper's `queue_changed` carries `fresh: true`. codex-chat-wrapper's `publishQueue(items, {force, fresh})` marks only the complete `thread/queue/list` read. The consumers (acp-events, codex-events) pass `{fresh}` to `noteQueueItems`. src/record-shape.js declares `fresh` on `codex:rollout:event/queue_changed` (an undeclared field is an «unknown_fields» card in the transcript).
+- **The guard.**
+  - spend-authorizer: every `pruneBudget` keeps `LOAD_RETENTION` (noteUnattendedSpend, returnReservation, the guard's load and snapshot), and `stampCap(LOAD_RETENTION)` when a stamp is added.
+  - `noteUnattendedSpend({rid, carried, drain})`: a drain with no stamp adds nothing; a carry finds its stamp under any identity.
+  - refusalText says «Spent or promised by» when the window holds promised stamps; refusalI18n adds `LINE_WORDS.promised`.
+  - spend-guard `note()` only `persist()`s (no flush in the call).
+- **groups-engine** `markDropped` (row state `dropped`), from `deliver.onQueuedDropped`. channel-groups `deliveryOf`: dropped ⇒ `undeliverable` with `why: 'dropped'`.
+
+**Tests.** test-queued-wake (fast, 105 after round 4), test-harness-contract «a frame queued behind a turn», test-spend-paths §5b (restated), test-peer-delivery agy-peer-wake ②③ (restated), test-channel-groups (the closed set).

@@ -421,5 +421,11 @@ console.log('§7 the CLI');
   srv.close();
 }
 
+{   // lane queued-is-not-woke (law 1 round 2): a brief the worker's wrapper QUEUED behind its running turn is said so — never «next turn», never «woken»
+  const verdict = M.dispatchVerdict({ callerKind: 'session', senderReach: 'messageable', targetKind: 'chat', targetState: 'idle', compactFirst: true, compactObserved: true, sharedGroup: true });
+  const q = M.dispatchRecord({ target: { cid: 'c1', name: 'w' }, verdict, compaction: { ended: true, result: 'success', waitedMs: 5 }, wake: { woke: false, queued: { since: 1794000000000 }, reason: 'the worker is in a turn — the brief waits in its queue behind it' }, identity: { key: 'slot-1', name: 'Personal' } });
+  ok(q.wake.delivered === 'queued' && q.wake.billed === false && q.wake.reserved === true && q.wake.since === 1794000000000 && /waits in its queue/.test(q.wake.reason), 'a queued brief: delivered «queued» (its unit reserved, billed by the turn that carries it), the turn it waits behind named — never «next-turn»', JSON.stringify(q.wake));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

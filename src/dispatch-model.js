@@ -213,9 +213,10 @@ function dispatchRecord({ target = null, verdict = null, compaction = null, char
   }
   const replay = steps.includes('replay');
   const woke = !!(wake && wake.woke);
-  const paced = !replay && !woke && wake && wake.paced && Number(wake.paced.retryInMs) > 0 ? wake.paced : null;
-  const delivered = replay ? 'already' : woke ? 'woken' : paced ? 'paced' : 'next-turn';
-  const w = { billed: woke, identity: woke && identity && identity.key ? { key: String(identity.key), name: String(identity.name || identity.key) } : null, delivered };
+  const queuedW = !replay && !woke && wake && wake.queued ? wake.queued : null;   // lane queued-is-not-woke: in the worker's queue, its unit reserved
+  const paced = !replay && !woke && !queuedW && wake && wake.paced && Number(wake.paced.retryInMs) > 0 ? wake.paced : null;
+  const delivered = replay ? 'already' : woke ? 'woken' : queuedW ? 'queued' : paced ? 'paced' : 'next-turn';
+  const w = { billed: woke, ...(queuedW ? { reserved: true, since: Number.isFinite(Number(queuedW.since)) ? Number(queuedW.since) : null } : {}), identity: woke && identity && identity.key ? { key: String(identity.key), name: String(identity.name || identity.key) } : null, delivered };
   if (paced) { w.retryInMs = Number(paced.retryInMs); if (Number.isFinite(Number(paced.retryAt))) w.retryAt = Number(paced.retryAt); }
   if (!woke && wake && wake.reason) w.reason = String(wake.reason);
   // the verdict promised a parked wake and nothing parked it: the sentence says what happened, never «sent in N s»

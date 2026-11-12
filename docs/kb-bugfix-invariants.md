@@ -929,6 +929,147 @@
 - (2026-11-11) THE PAGE REDREW AT EVERY VSYNC WITH NOBODY ACTING (owner's recording: the stall watch's rAF loop, ≈ 190 ms/s at 98 Hz; window-close-stall C). 不变量 = no permanent rAF: long frames from the observer, one probe a second (kb-bugfix-invariants)
 - (2026-11-11) THE LENT KEY'S OTHER ENDS: A PAGE GONE, A REFUSED CLEAN-UP, A SAME-READ START, A HUB RESTART (B-97ae walk; passkey-lend-walk). 不变量 = every ended record goes through pkEnd; a key the browser kept is SAID; a gone session takes its authenticator (measured) ⇒ kb-bugfix-invariants.md
 - (2026-11-12) A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (job-logs-sweep) — 不变量 = what no record lists leaves job-logs 14 days after its NEWEST file; never a live / listed run; ≤ 500 a pass, said twice; no removal on the main thread (kb-bugfix-invariants)
+- (2026-11-12) THREE --wake MESSAGES SAID «WOKE» AND «READ» AND WERE CHARGED WHILE AN ANTIGRAVITY WRAPPER HELD THEM SIX HOURS BEHIND A TURN THAT NEVER ENDED (queued-is-not-woke) — 不变量 = the sender is told what the addressee did; a queued frame waits, owed (kb-bugfix-invariants)
+
+## THREE --wake MESSAGES SAID «WOKE» AND «READ» AND WERE CHARGED WHILE A WRAPPER HELD THEM BEHIND A TURN THAT NEVER ENDED (2026-11-11; lane queued-is-not-woke, law 1 — row B-580f)
+
+**What happened.**
+- An Antigravity conversation issued a run_command at 10:10 PT that never started inside the CLI and never returned. The CLI stayed alive and idle; its window showed the tool card running and «thinking…» for six hours.
+- 主开发 sent it three messages with --wake (12:02, 15:52, 16:02). Each time vibespace-msg answered «woke 1 agent = 1 billed turn», the group showed «read by» that conversation, and the spend ceiling counted an unattended turn.
+- None reached the agent. Its window held them as «3 queued — runs after this turn»; pressing Stop handed them over.
+
+**Cause.** The rpc-queue rung (src/server/conversation-deliver.js) wrote the peer frame to the wrapper's stdin and returned ok. Then:
+- `spent()` charged at the write;
+- groups-engine `wakeOnce` stamped the read mark;
+- vibespace-msg counted a wake.
+
+All three were stamped before the wrapper answered. Its answer, `peer_result {ok:true, mode:'queued'}`, settled as 'already-charged' and changed nothing. agy's turn ends on one stdout event (`result`), and no timer or second witness exists — that is laws 2 and 3, still open.
+
+**The census (law 4, measured on master b6d980014 — /var/tmp/vibespace-lanes/queued-is-not-woke/census-master.md).** 60 cells: 5 harness rows × 3 roads × 4 states. They lied:
+- every rpc-queue cell in a turn (antigravity wake + notification, codex wake);
+- every live lane in a turn with no life;
+- claude cli-inbox in a turn — true words, charged for no new turn.
+
+That last one was RULED by 主开发 2026-11-12 to keep master's charge: the guard bounds text nobody typed, and a two-conversation --wake loop into running turns would never be counted otherwise. codex's notification steer is released free for the same case; it is rowed for the owner, not changed here.
+
+**Fix (law 1).** src/server/queued-wakes.js holds ONE entry per frame written into a running turn (`s._isStreaming`, not a steer). Its states:
+- `pending` — the wrapper has not answered yet;
+- `queued` — the wrapper said so; the entry is bound to the queue item the wrapper's `queue_changed` added;
+- `restashed` — Stop / remove / its exit handed the frame back. Its words ride the stash, master's road.
+
+Carried = the bound item LEFT the queue AND a turn STARTED since the bind (unbound: the first turn start after the running turn ended, oldest first). A 'turn' answer is carried at once. Through it:
+- The sender reads «waiting (not billed yet): xray's current turn (running since HH:MMZ)». The post's result lists it under `queued`, not `woke`.
+- The group row reads `queued` («waiting for xray's current turn»). The marker moves at once, so no next-turn report re-sends what the queue holds. The row reads «read by» only when the carrying turn starts; the hand-over clock is that turn.
+- The money: authorized at the send (a refusal refuses at once). The guard's hold goes back at the 'queued' answer, because holds live 3 min (A.RESERVE_TTL_MS). The charge is OWED (reason + identity), persisted, and charged ONCE when a turn carries the frame. It is released when the frame is handed back.
+- An unanswered frame stays owed (never silently free); law 2's bound speaks for it.
+- A hub restart: the entries persist (msg-queued.json, through the store writer). A bound item gone from the first queue the new hub reads is carried. A drop while the hub was down therefore reads as carried — the money-safe direction, named.
+
+**不变量.**
+- The sender is told what the addressee DID, not what the hub wrote. A frame waiting behind a running turn is said waiting, its record is not «read», and its charge is owed until a turn carries the text.
+- Exactly one road carries a record: the queue, or the stash it was handed back to — never also a report.
+
+**Pins.** test-queued-wake (46):
+- ① the incident at the engine;
+- ② the drain, one charge per carrying turn;
+- ③ Stop hands the three back once, never charged;
+- ④ a hub restart;
+- ⑤ fails closed;
+- ⑥ claude (ruled);
+- ⑦ the REAL agy wrapper over the fake agy's `stuck` turn, through the REAL acp-events consumer;
+- ⑧ codex;
+- ⑨ wiring and words;
+- ⑩ three patched-copy controls (no in-turn branch ⇒ the incident is back; no marker move ⇒ a second carrier; no queued state ⇒ «read by»).
+
+Also:
+- test-harness-contract: «a frame queued behind a turn», one row per harness, derived from its declared peer lane.
+- test-spend-paths and test-peer-delivery: master's «charged at the write» pins restated by the ruling.
+
+**Named.**
+- An OLD vibespace-msg (before this release) prints «woke 0 agents» and no waiting line for a queued wake — true, and silent about the wait.
+- A codex steer that FELL BACK to the queue keeps master's charge at its answer.
+
+**Round 2 (主开发's panel on 9309e3f9d — the money gate).** The round-1 hold went back at the 'queued' answer. The guard then held nothing for the frame, every later authorize allowed again, and the wrapper ran one billed turn per frame: the real guard at cap 3 was driven to «spent 8 … (cap 3)». The law now:
+- **An owed charge is a RESERVATION.** The ladder's authorization becomes a guard STAMP named by the frame's id (`note({reservation})`, spend-authorizer `rid`) at the write. Every authorize in the hour and the day counts it exactly like a spent turn, so a send past the ceiling is refused AT THE SEND, by name.
+- **The carrying turn IS that unit.** Nothing more is charged. A second note for the same id adds nothing, so a kill between a carry and its persist never charges twice.
+- **A hand-back RETURNS it** (`release({reservation})`, spend-authorizer `returnReservation`).
+- **After a restart the hub ASKS.** Each session holding frames is sent `queue-resync` (the verb its sidecar adverts) at every attach, and a boot sweep runs at +60 s. The answer settles each entry.
+- **A wrapper that is gone is handed back BY THE HUB** (session-stdout's teardown, the boot sweep). So is a turn start or a queue from ANOTHER process (the holder: the sidecar's pid). Either way:
+  - the words go to the stash with a ref, and the row reads «read» only when the stash's drain hands them to a turn;
+  - the reservation is returned;
+  - a stopped conversation reads «waiting — <name> is stopped», checked before the queue.
+- **The bounds refuse at the send, by name** (`refused: 'queued-full'`): 50 live frames per conversation, 500 on the hub. Nothing is ever dropped.
+- **An answer that beats groups-engine's markQueued** (a fast carry or hand-back) is kept and applied when the entry is written.
+- **The readers say the same:**
+  - the owner's toast: «N waiting behind a running turn — billed when a turn carries it» / «N handed into a running turn = N billed turn(s)»;
+  - vibespace-msg: a hand-in is never «woke 1 agent»;
+  - the worker dispatch: `delivered: 'queued'`;
+  - a channel receipt: «Queued for <agent> at HH:MM — it runs when its current turn ends».
+- **An old vibespace-msg** (pre-.397) against this hub prints «woke 0 agents» with no waiting line, and its `read` prints no clause for a `queued` row. The window shows that person «Waiting for <name>'s current turn».
+- **Named:**
+  - a pid reused by a NEW wrapper reads as the same holder;
+  - the panel's d2 S1 (a restart with no attach and no queue ever re-published) still reads «queued» — the hub's ask is what closes it in the product.
+
+**Round 3 (主开发's panel on 09f128868 — two ways money was still forgiven).**
+- **MUST 1 — a give-back never prunes a spent turn.** `returnReservation` pruned with NO limits, cutting the whole ledger to the default retention: one returned reservation forgave 637 spent turns at day caps 2 000 / 10 000. It now prunes with the live limits (the load retention when none), and drops only its own unconverted stamp.
+- **A census in test-spend-paths:** every `pruneBudget` call passes limits or the load retention.
+- **The pin:** day cap 1 000, 900 spent, one Stop ⇒ exactly 100 allowed after it.
+- **MUST 2 — unknown counts as owed.**
+  - (1) A carried reservation is CONVERTED in the guard. `note({reservation, carried: true})` marks the stamp `conv` and flushes the guard file at once, before the carry's own msg-queued.json record. A return of a converted id returns nothing, across a reload too. `reservationState(rid)` answers 'converted' | 'reserved' | null.
+  - (2) The hub hands a frame back — returns the unit and re-stashes the words plain — only on KNOWLEDGE that it did not run:
+    - the wrapper's own answer (ok:false, or a mode-less hand-back with its words);
+    - or a process end the hub SAW (session-stdout's teardown; the ws kill road, which removes the session before its pty exits, at the act), with the frame still in the last queue THAT process published (the mirror's `idsBy` = the holder pid).
+  - «Gone» is a fact about the holder's process — its pid (a sidecar's, `process.kill(pid, 0)`: alive / dead / cannot tell) — never «not attached yet» or a re-attach's null pty. A turn start or a queue from ANOTHER live pid is judged the same way.
+  - (3) When the hub cannot tell (a restart, no queue seen, the holder dead): the unit STAYS counted (it ages out). The words ride the next turn ONCE, headed «(This may repeat a message handed over while VibeSpace was restarting.)», and are read at that stash entry's drain. If the guard says the id was converted, it is simply carried, with no second copy.
+- **MODERATE.**
+  - The hub's bound counts LIVE entries only.
+  - A handed-back entry leaves:
+    - on the stash's `evicted` event (said);
+    - on an archive (groups-engine onConversationEnded → `noteConversationEnded`: dropped at the act, its unit returned only when known not run);
+    - by age (7 days, at boot).
+  - A `queued` group row whose ladder record was lost settles at that conversation's next turn start.
+  - The money gate's own suite pins the reservation with caps above the defaults and a ledger holding spent stamps: the return drops only its id; the converted mark across a reload; ids distinct across two boots; both bounds refuse.
+- **SMALL.**
+  - A refusal over reserved turns says «spent or promised N …, M of them waiting behind running turns».
+  - The bound's refusal no longer says the next-turn clause twice.
+- **Named:**
+  - an old vibespace-msg says nothing for a queued member;
+  - a recycled pid reads alive (kept, counted — fail closed);
+  - an evicted hand-back's group row keeps «waiting for the next turn» (the stash's own eviction notice says the loss);
+  - the panel's roads (d) and (bound) drive neither the kill road nor the archive road, so their entries settle only by pid and age there.
+
+**Round 4 (主开发's panel on 6ca9575ee — «known not run» forgot a turn that started after the bind; a prune forgave with the live limits).** Two sentences of round 3 are withdrawn by the panel and replaced here: «the live limits» as a prune's bound, and the synchronous writes of the guard file.
+- **MUST 1 — ONE predicate, `knownNotRun(e)` (queued-wakes.js).** A unit is returned only when the frame's queue item is in a listing that is FRESH (the wrapper read it now), stated by the process that holds the frame, and NEWER than every turn start the hub has seen for that conversation (a per-conversation event sequence: `idsSeq > startSeq`). Every exit that returns a unit reads it: the process gone (session-stdout's teardown, the ws kill road), a new holder, the conversation dropped. Anything else is UNKNOWN: the unit stays, and the words go once, marked «(This may repeat an earlier message.)». Before that copy the guard is asked: a converted frame is simply carried, with no copy.
+  - **Fresh:** agy-wrapper marks every `queue_changed` (its own queue, stated as it is). Codex marks only a COMPLETE `thread/queue/list` read. Not fresh, so no evidence: codex's re-publish of its cached queue at the turn start (codex-chat-wrapper.js ~:1364), the resync re-publish, and an old wrapper's unmarked listing.
+  - **A frame queued behind a turn the PERSON started:** a fresh listing read after that start that still holds it ⇒ known, returned plain. None ⇒ kept and marked.
+  - **Named:** an UNBOUND frame (a wrapper that publishes no queue) is carried by the first turn start after the running turn ended, the person's turn included. It is counted and never returned, but its row can read «read» one turn early.
+- **MUST 2 — a prune never forgives.** Every `pruneBudget` call (note(), a give-back, the snapshot, the load) keeps LOAD_RETENTION: what the largest caps the settings accept (CAP_MAX) could count. A stamp list is cut only to that retention when a stamp is added. Only time ages a stamp out.
+  - **d3b:** 1 500 spent and one reservation; the day caps lowered to 500 / 800; the reservation returned (and, the second shape, an attended press while lowered); the caps raised the same day ⇒ the day reads 1 500, so 500 are allowed (the release allows 499: it never returns the unit).
+  - **The census** (test-spend-paths §5d): git grep over every tracked file under src/, data/bin/, tools/, scripts/ (tests aside) and server.js. Every call must keep LOAD_RETENTION; a missing, null or live-limits retention is red, and so is an alias.
+- **MODERATE 3 — durable like the release.** Nothing is written inside the send or the carry. A reservation and a conversion ride the guard's own 500 ms debounce: 30 queued wakes and their 30 carries make 2 writes, both in a timer.
+  - **The kill-window bound:** a kill inside that window loses the stamps noted since the last write — at most the spends of one 500 ms window. That is the loss the release has for every spend.
+  - **The four states a boot can find** (the holder's process dead; a live one is kept and asked at its attach). None returns a unit that may have run:
+
+| msg-queued.json (the entry) | spend-budget.json (the stamp) | the boot |
+|---|---|---|
+| held (no carry record) | reserved | unknown — kept (counted), the words once, marked |
+| held | converted | carried — no copy, kept |
+| carried (its record landed) | reserved | nothing held — the stamp counts as promised until it ages out, never returned |
+| carried | converted | done — one unit |
+| held | lost (the kill window) | the words once, marked; the drain adds nothing — uncounted, as the release loses that window |
+
+- **MODERATE 4 — a drain never stamps; a live carry always counts.** A stash drain rides somebody else's turn. It converts the stamp if it is still there and adds nothing if it is not (U12: 0 added 25 h later). A LIVE carry of a frame whose stamp is gone (the file lost, or queued past a day) is stamped converted then, so it counts in the window it runs in. The converted mark lands on both the identity's list and the instance's.
+- **MODERATE 5 — an entry that leaves is said in its row.** The entry can be evicted from the stash, or age out (at load, or after 7 days in a running hub: at a read, a send, a turn start, or the hourly timer). Its `dropped` event moves the group row to «not delivered — the copy for <name> was dropped before a turn read it; send it again» (groups-engine `markDropped`; vibespace-msg and the window say it).
+  - (evict) 40 handed back, the stash keeps 30 ⇒ 30 read, 10 not delivered.
+  - A handed-back entry whose words still WAIT in the stash (its cap is 30, with no age bound) is not old: its row «waiting for the next turn» is true. It leaves at their drain or eviction, and by age only once the words are gone.
+- **SMALL (all fixed):**
+  - the guard is asked before any marked copy;
+  - the repeat mark is «(This may repeat an earlier message.)», 38 characters and true on every road;
+  - live entries leave by age;
+  - a carry with no identity finds its reservation under any identity;
+  - a refusal over promised stamps says «Spent or promised by», and the For-you notice adds «Of these, N are messages waiting behind running turns — counted now, given back if they never run.»;
+  - the 80 % notice is answered on the carried path (no early return).
+
+**Not closed here (laws 2 and 3, the same lane):** the wait bound (30 min, the sender's one notice); the owner's one For-you item; «nothing from <name> for M minutes»; agy's store-proven close.
 
 ## A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (the data-move rehearsal, 2026-11-12; lane job-logs-sweep, 2.369.398)
 

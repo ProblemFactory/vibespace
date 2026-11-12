@@ -2172,7 +2172,7 @@ function create(engineCtx) {
     let blocked = owed && owed.blocked ? owed.blocked : null;
     if (!blocked && stashed && !gone && cur.receiptChoiceBlocked && deliver && typeof deliver.wakeBlock === 'function') { try { blocked = deliver.wakeBlock(cid); } catch { blocked = null; } }
     const delivery = {
-      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: stashErr ? 'stash-failed' : (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
+      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, ...(r && r.ok && r.queued ? { queued: true } : {}), refused: stashErr ? 'stash-failed' : (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
       choice: cur.receiptChoice || 'next-turn', verdict: verdict.why || null, ...(gone ? { gone: true } : {}),
       ...(owed && owed.parked ? { paced: { retryAt: owed.retryAt, retryInMs: owed.retryInMs } } : {}),   // the park as a FACT (D5): the toast and the card promise only this
       ...(blocked ? { blocked: blocked.cause } : {}),

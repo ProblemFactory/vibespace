@@ -1514,7 +1514,7 @@ function receiptFateOf(p) {
   // `reconciled` (verify): its stash entry was found gone at a boot — handed
   // by an earlier message, at a time nobody recorded (no `at`)
   if (q.receiptDrainedAt) return q.receiptDrainedHow === 'reconciled' ? { kind: 'handed', who, at: null, woke: false, lane: 'next-message', reconciled: true } : { kind: 'handed', who, at: Number(q.receiptDrainedAt) || null, woke: false, lane: 'next-message' };
-  if (del.ok) return { kind: 'handed', who, at: Number(del.at) || null, woke: !!del.woke, lane: del.lane || null };
+  if (del.ok) return { kind: 'handed', who, at: Number(del.at) || null, woke: !!del.woke && !del.queued, lane: del.lane || null, ...(del.queued ? { queued: true } : {}) };   // queued: in the agent's queue behind its running turn (lane queued-is-not-woke)
   // a wake the decider asked for and the ladder refused (the spend ceiling) is SAID beside the wait
   // …and a wake-now the ENGINE downgraded before the ladder (verify r4: the proposal's wake row could not be
   // written — `row-unwritten`) is said the same way; `already-woken` / `gone` are not refusals
@@ -1531,6 +1531,7 @@ function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms))
   switch (f.kind) {
     case 'handed':
       if (!f.at) return t('Handed to {agent} with an earlier message', { agent });
+      if (f.queued) return t('Queued for {agent} at {time} — it runs when its current turn ends', { agent, time: stamp(f.at) });
       return f.woke ? t('Handed to {agent} at {time} — it was woken for it', { agent, time: stamp(f.at) }) : t('Handed to {agent} at {time}', { agent, time: stamp(f.at) });
     case 'waiting':
       // lane paced-wake-retry: the decider's wake the pace holds, and its fall (D6): the card says where the wake stands

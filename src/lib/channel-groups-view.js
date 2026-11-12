@@ -205,7 +205,8 @@ export function wakeCount(r) {
   const n = (x) => (Array.isArray(x) ? x.length : 0);
   const refused = Array.isArray(r && r.refused) ? r.refused : [];
   // lane paced-wake-retry: a wake the pace held is PARKED — sent when the window ends, never counted as refused
-  return { woke: n(r && r.woke), refused: refused.filter((x) => !(x && x.parked)).length, paced: refused.filter((x) => x && x.parked).length, later: n(r && r.later) };
+  const into = Array.isArray(r && r.woke) ? r.woke.filter((x) => x && x.intoTurn).length : 0;   // lane queued-is-not-woke: a claude hand-in is billed, never a wake
+  return { woke: n(r && r.woke) - into, into, queued: n(r && r.queued), refused: refused.filter((x) => !(x && x.parked)).length, paced: refused.filter((x) => x && x.parked).length, later: n(r && r.later) };
 }
 
 /** The panel's secondary sections, persisted in user state

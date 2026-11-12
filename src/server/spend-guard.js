@@ -286,7 +286,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   /** Charge a spend that actually happened. The identity is the one
    *  `authorize()` resolved and put on its verdict — see identityFor; `hold` is
    *  the reservation that verdict opened, converted here into the stamp. */
-  function note({ reason = null, identity: identityHint = null, session = null, hold = null, now = Date.now() } = {}) {
+  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
     sweepHolds(now);
     // convert, never double-count: the stamp below IS this hold's outcome
     if (hold) pending = A.releasePending(pending, hold);
@@ -304,9 +304,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     }
     const identity = identityFor(session, identityHint);
     // the stamp carries its producer (5b ②) so a later reader can say who spent the slot
-    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason });
+    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain });
     state = r.state;
-    persist();
+    persist();   // round 4: a reservation and a conversion are as durable as any spent turn — the guard's own debounce, never a write inside the send call or the carry callback
     if (r.warn) {
       const text = A.noticeText(r.warn);
       log(`[spend] ${text}`);
@@ -322,8 +322,11 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
    *  issued is a no-op: releasing is the money-SAFE half of the pair, so it
    *  must never be able to throw its way into a producer's error path.
    *  @returns true when a live hold was actually given back */
-  function release({ hold = null, now = Date.now() } = {}) {
+  function release({ hold = null, reservation = null, now = Date.now() } = {}) {
     sweepHolds(now);
+    // A RESERVATION RETURNED (lane queued-is-not-woke): the queued frame it was taken for was handed back before a turn
+    // carried it — its stamp leaves the windows (an id this guard never stamped returns nothing: still money-safe)
+    if (reservation) { const r = A.returnReservation(state, { rid: reservation, now }); if (!r.returned) return false; state = r.state; persist(); return true; }   // the largest caps' retention (round 4); a converted id returns nothing
     if (!hold) return false;
     const before = pending.length;
     pending = A.releasePending(pending, hold);
@@ -356,12 +359,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
 
   return {
     authorize, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
+    reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
     limits, overagePolicy,
     snapshot: () => ({
-      budget: A.pruneBudget(state, Date.now(), limits()), nudge: { ...nudge },
+      budget: A.pruneBudget(state, Date.now(), A.LOAD_RETENTION), nudge: { ...nudge },   // round 4: every prune keeps what the largest caps could count
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
       // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
-      attended: A.producerCounts(A.pruneBudget(state, Date.now(), limits()).attended),
+      attended: A.producerCounts(A.pruneBudget(state, Date.now(), A.LOAD_RETENTION).attended),
     }),
     _file: file,
   };
