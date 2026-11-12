@@ -677,7 +677,20 @@ try {
       ok(ro1.jm.readOnly && ro2.jm.readOnly && left6.length === 0 && fs.readFileSync(SF, 'utf8').startsWith('[{"id":"jb-70rn0006"') && !ro1.items.length && !ro2.items.length && !(ro2.jm._logsNoteOwed && ro2.jm._logsNoteOwed.store) && ro1.logs.concat(ro2.logs).filter((l) => /a read-only engine: nothing is set aside, noted or filed from it/.test(l)).length === 2, 'round 4 §3: a READ-ONLY engine whose read fails (torn bytes; an EIO) says it in its own log and writes NOTHING — no set-aside, no copy, no note, no item', { left6, items: ro1.items.length + ro2.items.length });
       ro1.jm.shutdown(); ro2.jm.shutdown(); try { holder.kill('SIGKILL'); } catch { }
     }
-    // N7 PAUSED, AND THE NOTE NOT WRITTEN: the paused road asks for the note too (the fact must reach the disk before a restart),
+    // N8 (round 4 acceptance) AN ENGINE WHOSE INIT FAILED holds no record set it can trust (here its lock could not be taken, so its
+  // store was never read): a direct pass and the hourly gc refuse — the run its unread store lists and an unnamed dir both stay
+  {
+    const n8 = mkDir('n8'), lT = Date.now() - 20 * DAY;
+    fs.writeFileSync(path.join(n8, 'jobs.json'), JSON.stringify([{ id: 'jb-5e7f1c08', kind: 'service', state: 'up', desiredUp: false, owner, access: acc, runs: [{ startedAt: lT, endedAt: lT + 1 }] }]));
+    const listed8 = seedRun(n8, 'jb-5e7f1c08', lT, { ageMs: 20 * DAY }), orphan8 = seedRun(n8, 'jb-0e1a0b08', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const logs8 = [], J8 = new JobManager({ dataDir: n8, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs8.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, restFactor: 1 } });
+    J8._takeLock = () => { throw new Error('stand-in: the lock could not be taken'); };   // init fails BEFORE the store is read
+    J8.init(); engines.push(J8);
+    const a8 = await J8.sweepLogs({ now: Date.now() }); await gcAt(J8, Date.now()); await settle(J8);
+    ok(!J8.ready && J8.initError && J8.jobs.size === 0 && a8 && a8.skipped === 'init-failed' && has(listed8) && has(orphan8), 'round 4 acceptance: an engine whose INIT FAILED (its store never read) — a direct pass and the hourly gc refuse: the run its store lists and a dir no record names both stay', a8);
+    J8.shutdown();
+  }
+  // N7 PAUSED, AND THE NOTE NOT WRITTEN: the paused road asks for the note too (the fact must reach the disk before a restart),
     // and while it is not written the owed re-send waits as the pass's does
     {
       const n7 = mkDir('n7'); const SF = path.join(n7, 'jobs.json'); fs.writeFileSync(SF, '[]');

@@ -1769,6 +1769,7 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - `words.failed` follows the batch's real fate («queued again» only for a whole-dir batch that is);
   - an unreadable catch-up record: its cause and file in the journal line, ONE `sweep-record-unread` item;
   - (not asked) `userTodos.whenWritten` is answered on a flush that finds memory already on disk.
+- **The acceptance's one small thing:** `sweepLogs` refuses on an engine that is not `ready` (`init-failed` / `not-ready`) — before the pause, so the paused road's owed re-send refuses too. Its store may never have been read, so «no record lists it» means nothing there. The product arms the pass's timers only after a good init; this makes a direct call refuse as well.
 
 **NAMED, not built (round 2).**
 - Two engines over ONE data dir on different machines each sweep by their own keep set (`jobs.lock` is a local pid check): a hub on another machine over a shared data dir would remove every run its own records do not list. Refusing a pass when the lock's host / boot id is not this machine's is the fix, not built.

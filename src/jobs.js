@@ -2622,6 +2622,10 @@ class JobManager {
    *  second ask shares the one in flight. `now` is injectable (like archiveSweep). */
   sweepLogs({ now: at = now(), why = 'tick' } = {}) {
     if (this.readOnly || this._logsStopped) return Promise.resolve({ skipped: this.readOnly ? 'read-only' : 'stopped' });
+    // round 4 acceptance: an engine whose init FAILED (or has not finished) holds no trustworthy record set — its store may never
+    // have been read, so «no record lists it» means nothing: the pass refuses (the product arms its timers only after a good init;
+    // this makes a direct call refuse too). Before the pause: the paused road's owed re-send is the pass's as well
+    if (!this.ready) return Promise.resolve({ skipped: this.initError ? 'init-failed' : 'not-ready' });
     // THE PAUSE (round 2 law 3): the setting jobs.logsSweep — off gates this pass (the boot's, the hourly one, the catch-up's);
     // never _logsWhole (the five removals a record or a person asks for). Said once per pause; the catch-up record waits as it is
     if (!this._logsOn()) { if (!this._logsPausedSaid) { this._logsPausedSaid = true; this.d.log('[jobs] job-logs clean-up paused by the setting jobs.logsSweep — nothing is removed by it (removing a job still removes its logs); it resumes where it stopped within the hour of being turned on'); } return this._logsOwedWhilePaused(); }
