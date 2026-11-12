@@ -15,8 +15,10 @@
 // CONTROL: the bundle rebuilt with the base's unconditional fetch planted back ⇒ ① is red (the first paint asks for both).
 //   §7 (lane ledger-boot-load follow-up) the ledger still LOADING through the real route over a hung first load: the words, no error
 //      toast, the window's own re-ask; a LOADING answer in flight at the close ⇒ 0 asks after it; reopened ⇒ ONE loop, counted
-//      as asks in flight with every answer held (a loop holds at most one), never as asks per window of time.
+//      as asks in flight with every answer held (a loop holds at most one), never as asks per window of time; the quiet that
+//      ends a count is the re-ask the fixture hands the page × 3, and every answer the page gets is checked against it.
 //      CONTROL: the window's life not checked (alive() always true) ⇒ asks after the close, two loops.
+// UWP_FACTS=<file> writes §7's facts (both legs' loops, the re-asks told, the quiet, the throttle) as JSON; VS_CPU_THROTTLE=<n> slows §7's pages.
 // UWP_TREE=<dir> bundles another tree (a base checkout: red there — the "before" numbers); UWP_SHOTS=<dir> [UWP_PREFIX=after]
 // writes <prefix>-first-paint.png, <prefix>-panel-asking.png (its ask held open), <prefix>-panel-open.png, <prefix>-classic.png
 // (the 860×600 window).
@@ -24,7 +26,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 import { writeUsageShapeLedger } from './usage-shape-fixture.mjs';
@@ -85,6 +87,16 @@ let hold = null; // set ⇒ an only=pivots ask waits for hold.release() (the pan
 let loadingMode = false, holdLoad = null;
 const hungWorker = path.join(dir, 'hung-worker.cjs'); fs.writeFileSync(hungWorker, "'use strict';\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 180000); // a first load that neither answers nor dies\n");
 const uhL = Object.assign(new UsageHistory({ dataDir, homeDir: home, firstLoadInWorker: true }), { rebuildWorkerFile: hungWorker, bootReaderWaitMs: 800 });
+// §7's QUIET IS TIED TO THE RE-ASK THIS HARNESS HANDS THE PAGE (the .397 seam, second commit). A running LOADING answer says
+// nextTryAt = now + bootReaderWaitMs (usage-history.js); the page waits max(LOADING_REASK_MIN_MS, nextTryAt − now) before it asks
+// again, 5 s for an answer with no time (usage-ledger-note.js ledgerLoadingOf). QUIET = that wait × QUIET_FACTOR: under a full hold
+// a live loop's next ask comes within one wait, so QUIET_FACTOR waits with no new ask mean every live loop has asked. Every answer
+// the page is really handed in §7 is checked against REASK_MS (row «§7 the quiet is tied …»), so a fixture or route change that
+// makes the page wait longer turns §7 red by name instead of turning the control back into a race.
+const QUIET_FACTOR = 3;
+let NOTE = null; try { NOTE = await import(pathToFileURL(path.join(tree, 'src/lib/usage-ledger-note.js')).href); } catch { }
+const REASK_MS = NOTE && typeof NOTE.ledgerLoadingOf === 'function' ? (() => { const t = Date.now(); return NOTE.ledgerLoadingOf({ code: 'LOADING', running: true, nextTryAt: t + uhL.bootReaderWaitMs }, t).reaskInMs; })() : null;
+const QUIET7 = REASK_MS ? REASK_MS * QUIET_FACTOR : 3000;
 const handlersL = {};
 require(path.join(tree, 'src/server/account-usage-routes.js')).create({ app: new Proxy({}, { get: (_t, verb) => (p, ...fns) => { handlersL[String(verb).toUpperCase() + ' ' + p] = fns[fns.length - 1]; } }), rootDir: tree, engine: {}, serverSetting: () => undefined,
   getUsageHistory: () => uhL, getAccounts: () => ({}), getHosts: () => ({}), getMounts: () => ({}), getTelemetry: () => ({}), getLoginExpiryWatch: () => null });
@@ -107,7 +119,7 @@ const srv = http.createServer(async (req, res) => {
     if (loadingMode && holdLoad) await holdLoad.p;
     let code = 200;
     await (loadingMode ? handlersL : handlers)['GET /api/usage-stats']({ query: q, on() { } }, { writableEnded: false, status(c) { code = c; return this; },
-      json(b) { const s = JSON.stringify(b); row.bytes = Buffer.byteLength(s); row.code = code; res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(s); } });
+      json(b) { const s = JSON.stringify(b); row.bytes = Buffer.byteLength(s); row.code = code; if (loadingMode && NOTE) { const n = NOTE.ledgerLoadingOf(b, Date.now()); row.reaskMs = n ? n.reaskInMs : null; } res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(s); } });
     return;
   }
   if (u.pathname === '/api/usage-stats/harvest-hosts') return json({ hosts: {} });
@@ -279,8 +291,9 @@ console.log('§7 the ledger still LOADING (ledger-boot-load follow-up): a closed
 // VS_CPU_THROTTLE=<n> slows §7's pages n× through CDP (the tree's stand-in for a slow runner).
 const THROTTLE7 = Number(process.env.VS_CPU_THROTTLE) > 1 ? Number(process.env.VS_CPU_THROTTLE) : 0;
 if (THROTTLE7) console.log(`  (§7's pages run with their CPU throttled ×${THROTTLE7} — VS_CPU_THROTTLE)`);
-// wait until no new ask has come for QUIET ms (bounded): under a full hold, the loops that will ask have asked
-const settle = async (QUIET = 3000, cap = 15000) => { const t0 = Date.now(); let n = LOG.length, at = Date.now(); while (Date.now() - t0 < cap) { await sleep(100); if (LOG.length !== n) { n = LOG.length; at = Date.now(); } else if (Date.now() - at >= QUIET) return true; } return false; };
+// wait until no new ask has come for QUIET7 ms (bounded): under a full hold, the loops that will ask have asked
+const settle = async (QUIET = QUIET7, cap = Math.max(15000, 5 * QUIET7)) => { const t0 = Date.now(); let n = LOG.length, at = Date.now(); while (Date.now() - t0 < cap) { await sleep(100); if (LOG.length !== n) { n = LOG.length; at = Date.now(); } else if (Date.now() - at >= QUIET) return true; } return false; };
+const FACTS7 = {};
 async function loadingLeg(b) {
   LOG.length = 0; loadingMode = true; holdLoad = null;
   const X = await page(b);
@@ -304,19 +317,24 @@ async function loadingLeg(b) {
   const quiet2 = await settle(); const openLoops = LOG.length - i0; // every live loop: each one ask waiting, none asking more
   holdLoad = null; relAll();
   await X.ev('window.__close()').catch(() => null); await X.closeTab(); loadingMode = false;
-  return { shown, words: String(words).slice(0, 120), toast, asksAgain, held, afterClose, closedLoops, openLoops, settled: quiet1 && quiet2 };
+  const told = LOG.filter((r) => typeof r.reaskMs === 'number').map((r) => r.reaskMs); // the re-ask every LOADING answer handed the page
+  return { shown, words: String(words).slice(0, 120), toast, asksAgain, held, afterClose, closedLoops, openLoops, settled: quiet1 && quiet2, told: told.length, maxTold: told.length ? Math.max(...told) : null };
 }
 {
-  const LD = await loadingLeg('after.js');
+  const LD = await loadingLeg('after.js'); FACTS7.LD = LD;
+  ok(REASK_MS >= 1 && QUIET7 === REASK_MS * QUIET_FACTOR && LD.told >= 2 && LD.maxTold <= REASK_MS,
+    `§7 the quiet is tied to the re-ask the fixture hands the page: ${REASK_MS} ms (bootReaderWaitMs ${uhL.bootReaderWaitMs}, floor ${NOTE && NOTE.LOADING_REASK_MIN_MS}) × ${QUIET_FACTOR} = QUIET ${QUIET7} ms; the page was told at most ${LD.maxTold} ms over ${LD.told} answers`, JSON.stringify({ REASK_MS, QUIET7, told: LD.told, maxTold: LD.maxTold }));
   ok(LD.shown && /The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words) && !LD.toast && LD.asksAgain,
     `§7 the ledger still LOADING is a state: «${LD.words}», no error toast, the window asks again by itself`, JSON.stringify(LD));
   ok(LD.held && LD.afterClose === 0, `§7 a LOADING answer in flight at the close lands after it ⇒ ${LD.afterClose} asks in the 4 s after the close (nothing a closed window awaited arms, asks or draws)`, JSON.stringify(LD));
   ok(LD.settled && LD.closedLoops === 0 && LD.openLoops === 1, `§7 reopened ⇒ ONE loop: with every answer held, ${LD.closedLoops} asks wait from the closed window and ${LD.openLoops} once reopened (each live loop holds one)`, JSON.stringify(LD));
   if (closeBuilt) {
-    const LX = await loadingLeg('noclose.js');
-    ok(LX.held && LX.afterClose > 0 && LX.settled && LX.closedLoops >= 1 && LX.openLoops >= 2, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close; with every answer held, ${LX.closedLoops} wait from the closed window and ${LX.openLoops} once reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
+    const LX = await loadingLeg('noclose.js'); FACTS7.LX = LX;
+    ok(LX.held && LX.afterClose > 0 && LX.settled && LX.closedLoops >= 1 && LX.openLoops >= 2 && LX.told >= 1 && LX.maxTold <= REASK_MS, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close; with every answer held, ${LX.closedLoops} wait from the closed window and ${LX.openLoops} once reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
   }
 }
+// UWP_FACTS=<file>: §7's facts (both legs, the quiet and the throttle) as JSON — ci.mjs keeps no output of a passing suite
+if (process.env.UWP_FACTS) { try { fs.writeFileSync(process.env.UWP_FACTS, JSON.stringify({ at: new Date().toISOString(), throttle: THROTTLE7 || 1, REASK_MS, QUIET_FACTOR, QUIET7, LD: FACTS7.LD, LX: FACTS7.LX }, null, 1) + '\n'); } catch (e) { console.log('  (UWP_FACTS not written: ' + e.message + ')'); } }
 console.log('  TABLE ' + JSON.stringify(T));
 console.log('  REQUESTS ' + JSON.stringify(SEQ));
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
