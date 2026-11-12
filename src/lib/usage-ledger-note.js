@@ -24,11 +24,23 @@ export const LEDGER_NOTE_WORDS = {
   // r5: a month back in shape stays held until its held events are in the ledger (a resume follows the drain)
   pausedDraining: 'Usage of {machine} for {month} is held: its file is back in shape — its {held} held events are being recorded, in order',
   pausedDrainFailed: 'Usage of {machine} for {month} is held: {held} held events could not be recorded ({error}) — retrying at its next harvest',
+  // ledger-boot-load follow-up: the ledger's first load not landed yet is a STATE, never «Could not load usage»
+  loading: 'The usage ledger is still loading — next try at {time}',
+  loadingRunning: 'The usage ledger is still loading — its first load is running; asked again at {time}',
 };
 /** The remedy's state → its words (a state this window does not know is said as `none`: paused, no claim). */
 export const PAUSED_WORDS = { running: 'pausedRunning', judging: 'pausedJudging', failed: 'pausedFailed', 'not-rewritten': 'pausedNotRewritten', insufficient: 'pausedStill', 'proven-over': 'pausedProvenOver', ids: 'pausedIds', none: 'pausedNone' };
 export const AS_OF_LAG_MS = 60e3; // a walk answers as of its start; more than a minute behind now ⇒ the window says when
 const hhmm = (ms) => { const x = new Date(ms); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
+const hhmmss = (ms) => { const x = new Date(ms); return [x.getHours(), x.getMinutes(), x.getSeconds()].map((v) => String(v).padStart(2, '0')).join(':'); };
+export const LOADING_REASK_MIN_MS = 1000;
+/** An answer that says the ledger is still LOADING (ledger-boot-load follow-up) → {words, vars, reaskInMs, nextTryAt}, else null:
+ *  the window shows the words (no error toast) and asks again by itself at that time. */
+export function ledgerLoadingOf(got, now = Date.now()) {
+  if (!got || got.code !== 'LOADING') return null;
+  const at = Number.isFinite(got.nextTryAt) && got.nextTryAt > now ? got.nextTryAt : now + 5000;
+  return { words: got.running ? LEDGER_NOTE_WORDS.loadingRunning : LEDGER_NOTE_WORDS.loading, vars: { time: hhmmss(at) }, reaskInMs: Math.max(LOADING_REASK_MIN_MS, at - now), nextTryAt: at };
+}
 /** The notes an answer carries: [{kind, words, vars}] (empty = nothing to say). */
 export function ledgerNote(d, now = Date.now()) {
   const out = [];

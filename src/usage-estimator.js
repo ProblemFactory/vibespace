@@ -889,10 +889,10 @@ class UsageEstimator {
     return ahead ? `it is queued behind ${ahead} fold${ahead === 1 ? '' : 's'} that spend each turn's budget first` : 'it is queued: it opens at the next turn';
   }
   /** How many queued folds the turn runs before `f` (the turn's own order). */
-  _aheadOf(f) {
-    const Q = this._relearnQueue || [], holder = this._ownFold && !this._ownFold.done ? this._ownFold : null, cmp = foldOrder(holder);
-    let n = 0; for (const q of Q) if (q !== f && !q.done && cmp(q, f) < 0) n++;
-    return n;
+  _aheadOf(f) { // the ledger-boot-load follow-up (5): the turn's own STABLE sort over the queue — a fold tied with `f` that was queued before it is ahead too
+    const holder = this._ownFold && !this._ownFold.done ? this._ownFold : null;
+    const Q = (this._relearnQueue || []).filter((q) => !q.done); if (!Q.includes(f)) Q.push(f);
+    return Q.sort(foldOrder(holder)).indexOf(f);
   }
   /** An idle turn (round 6 follow-up): ONE retry armed — RELEARN_IDLE_RETRY_MS on an unref'd timer (`relearnIdleNext`, a test's
    *  seam) — so owed folds never wait for an ask that may not come; the next ask or a fold's end arms a turn sooner. */
@@ -1335,18 +1335,20 @@ function cliRefreshDrift(est, raw, nowMs = Date.now()) {
 // hears the warm's end so every auto pool is decided again. Never throws.
 function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = null } = {}) {
   const queued = [];
-  let waiting = null, said = false, held = false;
+  let waiting = null, said = false, held = false, failSaid = false; // follow-up: a failing first load said once with its cause, and its heal
   // `prime` (hotfix usage-ledger-walk A2): a cold cost memo starts its first learn BEFORE the signal is read — the gate then
   // holds through it like through the warm (one signal: the ledger's ledgerLoading, its priming hold included)
   const loading = () => { try { if (typeof prime === 'function') prime(); } catch { } try { return ledger && typeof ledger.ledgerLoading === 'function' ? ledger.ledgerLoading() : null; } catch { return null; } };
   const wait = (l) => {
     if (!said) { said = true; log(l && l.priming ? 'the usage costs are priming (the first learn after a boot, a pricing edit or a rewritten ledger) — the anchor sweep and the automatic pool decisions wait for it' : `ledger still loading (${Math.ceil(((l && l.bytesLeft) || 0) / 1048576)} MiB left) — the anchor sweep and the automatic pool decisions wait for the whole ledger`); }
+    if (l && l.failed && !failSaid) { failSaid = true; log(`the usage ledger's first load is failing (${l.failed}; ${l.fails} ${l.fails === 1 ? 'try' : 'tries'}) — the automatic pool decisions stay skipped and the anchor sweep waits until it lands; next try at ${new Date(l.nextTryAt || Date.now()).toISOString().slice(11, 19)}Z`); }
     if (waiting) return;
     waiting = Promise.resolve(typeof ledger.whenWarm === 'function' ? ledger.whenWarm() : null).catch(() => { }).then(() => {
       waiting = null;
       const again = loading();
       if (again) { wait(again); return; }
       said = false;
+      if (failSaid) { failSaid = false; log('the usage ledger\'s first load landed after its failures — the automatic pool decisions and the anchor sweep resume'); }
       for (const fn of queued.splice(0)) { try { fn(); } catch { } }
       if (held) { held = false; try { onWhole(); } catch { } }
     });

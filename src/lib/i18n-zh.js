@@ -1646,6 +1646,8 @@ export default {
   "via pool “{name}”": "经由池“{name}”",
   "not in the ledger yet": "尚未入账",
   "the usage ledger is still loading": "用量账本仍在加载",
+  "The usage ledger is still loading — next try at {time}": "用量账本仍在加载——下次尝试：{time}",
+  "The usage ledger is still loading — its first load is running; asked again at {time}": "用量账本仍在加载——首次加载正在进行；{time} 再次查询",
   "Transfer status lost (server restarted) — it may still have completed": "传输状态丢失（服务器已重启）——操作可能仍已完成",
   "Copy as JSON": "复制为 JSON",
   "Update VibeSpace…": "更新 VibeSpace…",

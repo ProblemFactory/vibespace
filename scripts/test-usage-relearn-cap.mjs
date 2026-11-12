@@ -519,7 +519,10 @@ console.log('§24 THE FOLLOW-UP (round 6, picked): an idle turn looks again by i
   };
   const wy = why(null);
   ok(/\(its fold is still running \(\d+ of 32 chunks\) — each turn's budget goes first to the 4 folds ahead of it\)/.test(wy.bg), `THE REASON — STILL RUNNING, AND WHY IT STALLS: «${wy.bg}»`, wy);
-  ok(/\(it is queued behind 5 folds that spend each turn's budget first\)/.test(wy.qq), `THE REASON — QUEUED, BEHIND WHAT: «${wy.qq}»`, wy);
+  ok(/\(it is queued behind 6 folds that spend each turn's budget first\)/.test(wy.qq), `THE REASON — QUEUED, BEHIND WHAT (the ties counted as the turn orders them — pp, unread like qq, was queued first): «${wy.qq}»`, wy);
+  const ET = mut('tiesuncounted', "    return Q.sort(foldOrder(holder)).indexOf(f);\n", '    const cmp = foldOrder(holder); return Q.filter((q) => q !== f && cmp(q, f) < 0).length;\n');
+  const RT = ET ? why(ET.UsageEstimator) : null;
+  ok(!!RT && /queued behind 5 folds/.test(RT.qq), `RED: the ties not counted (round 6's follow-up as it was) ⇒ «${RT && RT.qq.slice(30, 100)}…» — one fold short`, RT);
   const EW = mut('stateonly', "    const ahead = this._aheadOf(f),", '    const ahead = 0 && this._aheadOf(f),');
   const RW = EW ? why(EW.UsageEstimator) : null;
   ok(!!RW && /still running \(\d+ of 32 chunks\)\)/.test(RW.bg) && /queued: it opens at the next turn/.test(RW.qq), `RED: round 6's words (the state, not why) ⇒ «${RW && RW.bg.slice(30, 90)}…» · «${RW && RW.qq.slice(30, 90)}…»`, RW);

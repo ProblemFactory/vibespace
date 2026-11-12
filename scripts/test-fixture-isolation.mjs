@@ -431,14 +431,20 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // `server.js` as the LAST argv element — `['server.js']` and a preloaded
   // `['-r', preload, 'server.js']` alike (perf chunk C: the storm harness's
   // loop-delay preload hid its server from this census for a whole chunk)
-  const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t);
+  // …and a spawn written through a NAMED CONSTANT (lane ledger-boot-load follow-up, 主开发 11:11Z — the census was blind to
+  // `const SRV = 'server.js'` / `const SRV = path.join(REPO, 'server.js')` then `spawn(node, [SRV], { env })`): the constant is
+  // followed into a spawn( call — a constant that only NAMES the file (a source read) is not a spawn
+  const serverConsts = (t) => [...t.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:path\.(?:join|resolve)\([^;]*?)?['"`](?:[^'"`;]*\/)?server\.js['"`]\)?\s*;/g)].map((m) => m[1]);
+  const spawnNames = (t) => ['[\'"`]server\\.js[\'"`]', ...serverConsts(t).map((c) => `\\b${c.replace(/\$/g, '\\$')}\\b`)];
+  const spawnsThrough = (t) => serverConsts(t).some((c) => new RegExp(`spawn\\([^;]*?\\b${c.replace(/\$/g, '\\$')}\\b`, 's').test(t));
+  const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t) || spawnsThrough(t);
   const writesTranscript = (t) => /['"`]\.claude['"`]\s*,\s*['"`]projects['"`]/.test(t) && /writeFileSync|writeSync|openSync/.test(t);
   const namesHome = (t) => {
-    // the HOME must be in the env of a server.js spawn, not merely mentioned
-    for (const m of t.matchAll(/spawn\([^;]*?['"`]server\.js['"`][^;]*?\{[^;]*?env\s*:\s*\{([^}]*)\}/gs)) {
+    // the HOME must be in the env of a server.js spawn, not merely mentioned (the literal, or a constant naming it)
+    for (const n of spawnNames(t)) for (const m of t.matchAll(new RegExp(`spawn\\([^;]*?${n}[^;]*?\\{[^;]*?env\\s*:\\s*\\{([^}]*)\\}`, 'gs'))) {
       if (!/\bHOME\s*:/.test(m[1])) return false;
     }
-    return /spawn\([^;]*?['"`]server\.js['"`]/s.test(t);
+    return spawnNames(t).some((n) => new RegExp(`spawn\\([^;]*?${n}`, 's').test(t));
   };
   // Excluded for the same reason as (a): the CONTROLS below spell the shape
   // inline. Paid for by a stronger property than any exemption note — this file
@@ -472,6 +478,12 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     const good = bad.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome');
     ok(spawnsServer(bad) && writesTranscript(bad) && !namesHome(bad), 'CONTROL (b): the PRE-FIX shape (no HOME in the spawn env) IS caught');
     ok(namesHome(good), 'CONTROL (b): adding HOME to that same spawn env is the whole fix');
+    // the constant shape (the follow-up): the census follows the constant into the spawn — and a constant that only names the
+    // file (a source read, test-ledger-boot-load's SERVER_SOURCE) is not a spawn
+    const viaConst = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SRV = path.join(wt, 'server.js');\nconst srv = spawn(process.execPath, [SRV], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });";
+    const readOnly = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SERVER_SOURCE = 'server.js';\nconst files = list.concat([SERVER_SOURCE]);";
+    ok(spawnsServer(viaConst) && writesTranscript(viaConst) && !namesHome(viaConst) && namesHome(viaConst.replace('PORT: String(PORT)', 'PORT: String(PORT), HOME: fakeHome')) && !spawnsServer(readOnly),
+      'CONTROL (b): a server spawn through a NAMED CONSTANT (`const SRV = path.join(wt, \'server.js\')`, `spawn(node, [SRV], …)`) is caught, HOME is its fix; a constant that only names the file is not a spawn');
   }
   // THE STRONGEST CONTROL: the RETIRED BYTES, not a paraphrase of them. The two
   // offenders exist verbatim in git history, so the census is run against what

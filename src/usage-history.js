@@ -271,6 +271,10 @@ const CURSOR_SLICE_MS = 20;   // lane ci-351-reds: the walk's prune pass hands t
 // moves to the next sequence number, so every mark before it is no longer held (that slot walks, master's road); the
 // sequence numbers go on rising (a mark is never re-used for another entry).
 const BOOT_RETRY_MS = 5000, BOOT_RETRY_MAX_MS = 120000; // ledger-boot-load: a failed first load in the fold worker is tried again at the next ask after 5 s, 10 s … ≤ 2 min
+// the follow-up (主开发 09:36Z): «bounded by the try» is something a person can sit through — a reader (a route, the scan, the
+// gate's wait) waits for the try under way at most this, then is answered LOADING while the try goes on (a hung worker is
+// otherwise bounded only by the fold deadline: ten minutes a try)
+const BOOT_READER_WAIT_MS = 10000;
 const ARR_CAP = 100000, ARR_NAMES_MAX = 4096;
 const HOST_INDEX_KEEP_MS = 8 * 86400e3, HOST_INDEX_MAX_ROWS = 200000; // B2 r2: the dark-host index keeps 8 days (the question asks 7); past 200 000 rows (≈ 2.4 MB) it keeps the 8 days behind its newest row
 function _logArrival(c, ev) {
@@ -714,7 +718,7 @@ class UsageHistory {
       // for good: every later scan() answered skipped, GET /api/usage-stats and the rid / mid lookups awaited scanSettled() and
       // never reached their LOADING answer, the hub's own turns were not added): on the hub's first load the walk waits for the
       // TRY under way only — between tries it goes on at once and its commit dedups by the shards' tails (the cold road below)
-      if (typeof this.whenWarm === 'function' && this._evCache) { try { if (this._booting()) { const b = this._boot; if (b && b.job) await b.job; } else await this.whenWarm(); } catch { } }
+      if (typeof this.whenWarm === 'function' && this._evCache) { try { if (this._booting()) { const b = this._boot; if (b && b.job) await this._withinTry(b.job, () => null, b); } else await this.whenWarm(); } catch { } } // follow-up: a hung try is waited for until its deadline only (the try's start + BOOT_READER_WAIT_MS)
       // ROUND 4 (true words 6): ON A COLD LEDGER — the boot's own order: the walk runs BEFORE the warm — the rows a killed walk
       // appended (its cursor write lost) are the TAIL of their shards: each shard this walk appends to has its last bytes read
       // (fs.promises, ≤ TAIL_DEDUP_MAX) and a row whose request id is there is not appended again (20 kills: bounded)
@@ -1104,6 +1108,7 @@ class UsageHistory {
       b.job = t.then(() => { this._boot = null; clearTimeout(b.timer); b.landed(); }, (e) => {
         b.job = null; b.fails++; b.err = String((e && (e.why || e.message)) || e).slice(0, 200); // the cause itself (the reload's sentence names a previous cache the boot has not)
         const wait = Math.min(BOOT_RETRY_MAX_MS, BOOT_RETRY_MS * 2 ** (b.fails - 1)); b.retryAt = Date.now() + wait;
+        { const L = this._evCache && this._evCache.loading; if (L) { L.failed = b.err; L.fails = b.fails; L.nextTryAt = b.retryAt; } } // follow-up: ledgerLoading() carries the failure — the gate says it, with its cause
         if (b.fails === 1) { // SAID ONCE, by name — the tries after it are counted in the line that says it landed
           try { console.warn(`[usage] the ledger's first load in the fold worker failed (${b.err}) — the usage figures say «loading»; it is tried again after ${Math.round(wait / 1000)} s, then doubling to ≤ ${BOOT_RETRY_MAX_MS / 60e3} min — never parsed on the main loop`); } catch { }
           try { global.__vsEvent?.('usage-first-load-failed', b.err); } catch { }
@@ -1111,7 +1116,8 @@ class UsageHistory {
         if (b.awaited) this._bootRearm(b);
       });
       b.tryP = t.then(() => { }, () => { throw this._bootErr(b); }); b.tryP.catch(() => { }); // an async reader's wait: THIS try (after b.job's handler: b.err is set)
-      if (b.nextR) { const r = b.nextR; b.next = null; b.nextR = null; b.job.then(r); } // the waits for «the next try» end with this one
+      if (b.nextR) { const r = b.nextR; b.next = null; b.nextR = null; this._withinTry(b.job, () => null).then(r); } // the waits for «the next try» end with this one (bounded)
+      b.tryAt = Date.now();
     }
     return this._evCache.events;
   }
@@ -1124,7 +1130,29 @@ class UsageHistory {
     b.timer.unref?.();
   }
   _bootErr(b) {
-    return Object.assign(new Error(`the usage ledger is still loading — its first load in the fold worker failed (${b.err}); it is tried again ${b.awaited ? 'in' : 'at the next ask after'} ${Math.max(0, Math.ceil((b.retryAt - Date.now()) / 1000))} s`), { code: 'LOADING' });
+    return Object.assign(new Error(`the usage ledger is still loading — its first load in the fold worker failed (${b.err}); it is tried again ${b.awaited ? 'in' : 'at the next ask after'} ${Math.max(0, Math.ceil((b.retryAt - Date.now()) / 1000))} s`), { code: 'LOADING', nextTryAt: b.retryAt });
+  }
+  /** A try still under way past BOOT_READER_WAIT_MS (follow-up): LOADING while it goes on — the time to ask again said. */
+  _bootRunErr(b) {
+    const next = Date.now() + (this.bootReaderWaitMs || BOOT_READER_WAIT_MS); // the window asks again then (answered at once while the try still runs past its deadline)
+    return Object.assign(new Error(`the usage ledger is still loading — its first load in the fold worker has run ${Math.round((Date.now() - (b.tryAt || b.at)) / 1000)} s and goes on; ask again at ${new Date(next).toISOString().slice(11, 19)}Z`), { code: 'LOADING', nextTryAt: next, running: true });
+  }
+  /** A wait on a try, bounded (follow-up): `p` — or, once the bound passed, `onLate()` (the try goes on). With `b` (a READER: the
+   *  scan, a route, a lookup) the bound is the TRY'S DEADLINE — its start + BOOT_READER_WAIT_MS — so the scan's wait and the
+   *  reader's after it share ONE budget (round 2 of the follow-up: in series they held a request 20 s); without (the gate's
+   *  wait, the next try's) it is BOOT_READER_WAIT_MS from now — a waiter that looks again is never answered at once (no spin). */
+  _withinTry(p, onLate, b = null) {
+    const wait = this.bootReaderWaitMs || BOOT_READER_WAIT_MS, left = b ? Math.max(0, (b.tryAt || b.at || Date.now()) + wait - Date.now()) : wait;
+    let t = null; const late = new Promise((r) => { t = setTimeout(r, left); t.unref?.(); });
+    return Promise.race([p.finally(() => clearTimeout(t)), late.then(onLate)]);
+  }
+  /** A PERSON'S RETRY (follow-up — the Usage window's Retry is attended): the first load is tried NOW, never after the
+   *  unattended backoff (5 s doubling ≤ 2 min). → true when a try is under way. */
+  retryBootLoad() {
+    if (!this._booting()) return false;
+    const b = this._boot; if (b && !b.job) { b.retryAt = Date.now(); if (b.timer) { clearTimeout(b.timer); b.timer = null; } } // the press REPLACES the re-arm timer (its failure arms the next at the doubled backoff)
+    this._loadEvents();
+    return !!(this._boot && this._boot.job);
   }
   /** A WAIT ON THE BOOT LOAD IS BOUNDED BY THE TRY (round 2 — this resolved only when a try LANDED, so a failing load kept every
    *  waiter for good): resolves when the try under way ends, landed or failed; inside a failed try's backoff, when the NEXT try
@@ -1133,7 +1161,7 @@ class UsageHistory {
   bootLoadSettled() {
     const b = this._boot; if (!b || !b.done) return Promise.resolve();
     b.awaited = true;
-    if (b.job) return b.job; // never rejects: its two handlers return
+    if (b.job) return this._withinTry(b.job, () => null); // never rejects: its two handlers return (follow-up: a hung try is waited for BOOT_READER_WAIT_MS at most)
     this._bootRearm(b);
     return b.next || (b.next = new Promise((r) => { b.nextR = r; }));
   }
@@ -1144,7 +1172,7 @@ class UsageHistory {
   _bootWait() {
     this._loadEvents();
     const b = this._boot;
-    return !b ? null : b.job ? b.tryP : Promise.reject(this._bootErr(b));
+    return !b ? null : b.job ? this._withinTry(b.tryP, () => { throw this._bootRunErr(b); }, b) : Promise.reject(this._bootErr(b)); // follow-up: a hung try ⇒ LOADING at its deadline
   }
   /** THE LOAD PASS (one implementation, two drivers): `_loadEvents` runs it to the end in one call; `warmStepped` hands
    *  the loop back at every `yield` — after each `chunkBytes` slice of a shard (each slice lands whole: its lines taken,

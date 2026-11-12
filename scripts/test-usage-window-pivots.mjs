@@ -13,6 +13,9 @@
 //      only once scrolled into view, and its rows' hover then names the origin split; back on the dashboard a Refresh
 //      carries session × origin alone (a pivot nobody draws any more is let go);
 // CONTROL: the bundle rebuilt with the base's unconditional fetch planted back ⇒ ① is red (the first paint asks for both).
+//   §7 (lane ledger-boot-load follow-up) the ledger still LOADING through the real route over a hung first load: the words, no error
+//      toast, the window's own re-ask; a LOADING answer in flight at the close ⇒ 0 asks after it; reopened ⇒ one loop.
+//      CONTROL: the window's life not checked (alive() always true) ⇒ asks after the close, two loops.
 // UWP_TREE=<dir> bundles another tree (a base checkout: red there — the "before" numbers); UWP_SHOTS=<dir> [UWP_PREFIX=after]
 // writes <prefix>-first-paint.png, <prefix>-panel-asking.png (its ask held open), <prefix>-panel-open.png, <prefix>-classic.png
 // (the 860×600 window).
@@ -49,6 +52,7 @@ const settings = new Map(), wins = new Map();
 const app = { settings: { get: (k) => settings.get(k), set: (k, v) => settings.set(k, v) },
   wm: { windows: wins, revealWindow() {}, createWindow(o) { const content = document.getElementById('win'); content.textContent = ''; const w = { id: 'w' + (wins.size + 1), type: o.type, content, onClose: null }; wins.set(w.id, w); return w; } } };
 window.__open = () => { for (const [id, w] of [...wins]) { w.onClose?.(); wins.delete(id); } return !!openUsageWindow(app); };
+window.__close = () => { for (const [id, w] of [...wins]) { w.onClose?.(); wins.delete(id); } return true; };
 window.__open();`;
   // the generated build-version.js (npm run build) is stubbed: the suite runs on a fresh checkout or a base archive too
   const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
@@ -59,6 +63,9 @@ await bundle('after.js');
 let controlBuilt = true, scrollBuilt = true;
 await bundle('control.js', CONTROL).catch((e) => { controlBuilt = false; if (tree === repo) ok(false, 'CONTROL bundle', e.message); else console.log('  (no CONTROL bundle on this tree: ' + e.message + ')'); });
 await bundle('noscroll.js', CONTROL_SCROLL).catch((e) => { scrollBuilt = false; if (tree === repo) ok(false, 'CONTROL (scroll) bundle', e.message); });
+// §7's CONTROL (ledger-boot-load follow-up): the window's life not checked — every continuation and timer as before the fix
+let closeBuilt = true;
+await bundle('noclose.js', { from: 'const alive = () => !closed;', to: 'const alive = () => true;' }).catch((e) => { closeBuilt = false; if (tree === repo) ok(false, 'CONTROL (window life) bundle', e.message); else console.log('  (no window-life CONTROL bundle on this tree: ' + e.message + ')'); });
 
 // ── the server: the REAL route over the shaped ledger; every /api/usage-stats ask logged with its bytes
 const NOW = Date.now(), DAY = 86400e3;
@@ -71,6 +78,15 @@ require(path.join(tree, 'src/server/account-usage-routes.js')).create({ app: fak
   getUsageHistory: () => uh, getAccounts: () => ({}), getHosts: () => ({}), getMounts: () => ({}), getTelemetry: () => ({}), getLoginExpiryWatch: () => null });
 const LOG = [], STRAY = [];
 let hold = null; // set ⇒ an only=pivots ask waits for hold.release() (the panel's wait note, photographed on screen)
+// §7 (ledger-boot-load follow-up): the hub's ledger still LOADING — the REAL route over a ledger whose first load in the fold
+// worker HANGS (it answers LOADING at the try's deadline, then at once: «asked again at» ≈ 0.8 s later); `holdLoad` keeps one
+// such answer in flight across the window's close
+let loadingMode = false, holdLoad = null;
+const hungWorker = path.join(dir, 'hung-worker.cjs'); fs.writeFileSync(hungWorker, "'use strict';\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 180000); // a first load that neither answers nor dies\n");
+const uhL = Object.assign(new UsageHistory({ dataDir, homeDir: home, firstLoadInWorker: true }), { rebuildWorkerFile: hungWorker, bootReaderWaitMs: 800 });
+const handlersL = {};
+require(path.join(tree, 'src/server/account-usage-routes.js')).create({ app: new Proxy({}, { get: (_t, verb) => (p, ...fns) => { handlersL[String(verb).toUpperCase() + ' ' + p] = fns[fns.length - 1]; } }), rootDir: tree, engine: {}, serverSetting: () => undefined,
+  getUsageHistory: () => uhL, getAccounts: () => ({}), getHosts: () => ({}), getMounts: () => ({}), getTelemetry: () => ({}), getLoginExpiryWatch: () => null });
 const srv = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   const json = (o) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
@@ -87,8 +103,9 @@ const srv = http.createServer(async (req, res) => {
     const row = { pivot: q.pivot || null, only: q.only || null, range: q.from ? Math.round((NOW - Number(q.from)) / DAY) + 'd' : 'all', bytes: 0, code: 0 };
     LOG.push(row);
     if (q.only === 'pivots' && hold) await hold.p;
+    if (loadingMode && holdLoad) await holdLoad.p;
     let code = 200;
-    await handlers['GET /api/usage-stats']({ query: q, on() { } }, { writableEnded: false, status(c) { code = c; return this; },
+    await (loadingMode ? handlersL : handlers)['GET /api/usage-stats']({ query: q, on() { } }, { writableEnded: false, status(c) { code = c; return this; },
       json(b) { const s = JSON.stringify(b); row.bytes = Buffer.byteLength(s); row.code = code; res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(s); } });
     return;
   }
@@ -248,6 +265,37 @@ if (scrollBuilt) {
   const V = await S.ev(PANEL);
   ok(V.canvas && !V.onScreen && V.scrollTop === 0, 'CONTROL: without the kept scroll the pivot\'s repaint throws the window back to the top (the panel off screen again) — leg ② would be red', JSON.stringify(V));
   S.close();
+}
+console.log('§7 the ledger still LOADING (ledger-boot-load follow-up): a closed window asks nothing; one loop per open window');
+// THE LISTENER LIFECYCLE: a LOADING answer that lands after the close must not arm the re-ask (the release has no such loop);
+// a reopened window runs ONE loop — the closed one's never beside it
+async function loadingLeg(b) {
+  LOG.length = 0; loadingMode = true; holdLoad = null;
+  const X = await page(b);
+  const shown = await X.until(`!!document.querySelector('.usage-ledger-loading')`, 15000);
+  const words = shown ? await X.ev(`document.querySelector('.usage-ledger-loading').textContent`) : '';
+  const toast = await X.ev(`!!document.querySelector('.global-toast-error')`).catch(() => false);
+  await sleep(4000); const open1 = LOG.length; // one open window's asks, from its first, over its first ~4 s
+  let rel = null; holdLoad = { p: new Promise((r) => { rel = r; }) }; // the next re-ask is held in flight …
+  const n0 = LOG.length, e = Date.now() + 5000; while (LOG.length === n0 && Date.now() < e) await sleep(20);
+  const held = LOG.length > n0;
+  await X.ev('window.__close()'); // … the window closes under it …
+  const atClose = LOG.length; holdLoad = null; rel(); // … and the LOADING answer lands after the close
+  await sleep(4000); const afterClose = LOG.length - atClose;
+  await X.ev('window.__open()'); const r0 = LOG.length; await sleep(4000); const reopen = LOG.length - r0; // reopened: one loop
+  X.close(); loadingMode = false;
+  return { shown, words: String(words).slice(0, 120), toast, open1, held, afterClose, reopen };
+}
+{
+  const LD = await loadingLeg('after.js');
+  ok(LD.shown && /The usage ledger is still loading — (next try at|its first load is running; asked again at) \d\d:\d\d:\d\d/.test(LD.words) && !LD.toast && LD.open1 >= 2,
+    `§7 the ledger still LOADING is a state: «${LD.words}», no error toast, the window asks again by itself (${LD.open1} asks in its first ~4 s)`, JSON.stringify(LD));
+  ok(LD.held && LD.afterClose === 0, `§7 a LOADING answer in flight at the close lands after it ⇒ ${LD.afterClose} asks in the 4 s after the close (nothing a closed window awaited arms, asks or draws)`, JSON.stringify(LD));
+  ok(LD.reopen >= 2 && LD.reopen <= LD.open1 + 1, `§7 reopened ⇒ ONE loop: ${LD.reopen} asks in 4 s, as the first window's ${LD.open1}`, JSON.stringify(LD));
+  if (closeBuilt) {
+    const LX = await loadingLeg('noclose.js');
+    ok(LX.held && LX.afterClose > 0 && LX.reopen > LD.open1 + 1, `CONTROL (the window's life not checked — alive() always true): ${LX.afterClose} asks after the close, ${LX.reopen} in 4 s reopened (the closed window's loop beside the new one) — leg §7 would be red`, JSON.stringify(LX));
+  }
 }
 console.log('  TABLE ' + JSON.stringify(T));
 console.log('  REQUESTS ' + JSON.stringify(SEQ));

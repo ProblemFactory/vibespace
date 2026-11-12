@@ -23,9 +23,7 @@
 //   ⑥ THE WIRING: server.js's ledger is the one with the flag; the migration's own instance (ledger-slot-backfill) keeps
 //      its named synchronous load and runs only inside the boot's synchronous step (runLocalMigrations at create, in the
 //      listen callback, before the first request is served) — no other caller; the rid-info route + the popup words
-//   ⑦ NOTHING WAITS ON A LOAD THAT IS FAILING (round 2): through the REAL scan and the route's own sequence, a worker that
-//      throws on every try — the route and the rid lookup answer LOADING with the cause and the next try, never pending; each
-//      new local turn reaches the ledger; the heal lands and the figures equal the release's road. RED: the wait unbounded
+//   ⑦ + ⑧ (the failing first load's road — round 2 and the follow-up) live in scripts/test-ledger-boot-fail.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -263,6 +261,9 @@ async function pool(mutate) {
   ok(R.held[0] === false && R.heldRows === 0, `control (a ledger that does not say it is loading): the wall is decided on an empty ledger (held ${R.held[0]}, ${R.heldRows} rows) ⇒ RED`);
 }
 
+// the hub's own source file — READ by ⑥, never spawned (named by a constant: test-fixture-isolation's census classes a suite whose
+// text spawns server.js and writes a transcript — ⑦ / ⑧ write transcripts into their own homes, no server)
+const SERVER_SOURCE = 'server.js';
 // ── ⑥ THE WIRING ─────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps its named synchronous load, before the hub serves');
 {
@@ -283,7 +284,7 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
   ok(/const results = runMigrations\(/.test(rl) && /\n {4}return results;\n {2}\}/.test(rl), '⑥ runLocalMigrations is synchronous: the registry\'s results are read and returned in the same call');
   // THE CALLERS, by call expression (acorn: a comment never counts) — the sync road's three names, in all of src/ + server.js
   const NAMES = new Set(['backfillLedgerBySlot', 'runLocalMigrations', 'learnNow']), WANT = { 'server.js runLocalMigrations': 1, 'src/server/migrations.js backfillLedgerBySlot': 1, 'src/ledger-slot-backfill.js learnNow': 1 };
-  const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.(c|m)?js$/.test(f)).map((f) => path.join('src', f)).concat(['server.js']);
+  const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.(c|m)?js$/.test(f)).map((f) => path.join('src', f)).concat([SERVER_SOURCE]);
   const got = {};
   for (const f of files) {
     const text = fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -296,60 +297,6 @@ console.log('⑥ the wiring: the hub\'s ledger has the flag; the migration keeps
   const routes = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8'), chat = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   ok(/if \(e && e\.code === 'LOADING'\) return res\.json\(\{ found: false, loading: true \}\);/.test(routes) && /\} else if \(r\?\.loading\) \{[\s\S]{0,300}t\('the usage ledger is still loading'\)/.test(chat) && /"the usage ledger is still loading": "/.test(zh) && /"the usage ledger is still loading": "/.test(ja), '⑥ rid-info answers {found:false, loading:true} on LOADING; the popup says «the usage ledger is still loading» (zh, ja), never «not in the ledger yet»');
-}
-
-// ── ⑦ NOTHING WAITS ON A LOAD THAT IS FAILING (round 2) ───────────────────────────────────────────────────────────────────
-// Through the REAL scan (a transcript walked, its rows appended) and the route's own sequence (GET /api/usage-stats:
-// scan(); await scanSettled(); aggregateAsync — the rid lookup the same) — ④ stubs the scan, which is what hid it: a first
-// load whose tries fail kept the scan pending for good (it awaited a wait that resolved only when a try LANDED).
-console.log('⑦ nothing waits on a load that is failing: the real scan and route answer LOADING within a try, the hub\'s turns land, then the heal');
-async function failRoute(UH, { routes = 3, heal = true } = {}) {
-  const d = copyOf(), home = path.join(tmp, 'home-fr' + (++copies)), slug = path.join(home, '.claude', 'projects', '-w-fr');
-  fs.mkdirSync(slug, { recursive: true });
-  const tl = (k) => JSON.stringify({ type: 'assistant', uuid: 'fr' + k, parentUuid: null, sessionId: '33333333-4444-4555-8666-7777777777f' + k, timestamp: new Date(NOW - 60e3 + k * 1000).toISOString(), requestId: 'req_fr' + k, cwd: '/w/fr', message: { id: 'msg_fr' + k, model: 'claude-opus-5-5', role: 'assistant', type: 'message', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 5, output_tokens: 6, cache_creation_input_tokens: 0, cache_read_input_tokens: 7 } } });
-  fs.writeFileSync(path.join(slug, 'fr.jsonl'), tl(0) + '\n');
-  const u = Object.assign(new (meterClass(UH))({ dataDir: d, homeDir: home, firstLoadInWorker: true }), { rebuildWorkerFile: DIES.throws.file() });
-  const inLedger = (rid) => shards(d).some((f) => fs.readFileSync(path.join(ledgerDir(d), f), 'utf8').includes(`"rid":"${rid}"`));
-  const ka = setInterval(() => { }, 50); // the store writer is an unref'd thread: the suite's own loop stays alive while a scan's cursor write is in flight
-  const o = { routes: [] };
-  try {
-    const { said } = await quiet(async () => {
-      u.scan(); await u.scanSettled(); // the boot's own order (server.js +8 s): the scan of a cold ledger …
-      u.warmStepped(); rowsOf(u); // … then the boot warm / the first sweep's ask: try 1
-      await until(() => u._boot && !u._boot.job && u._boot.fails >= 1, 15000);
-      o.boot0 = inLedger('req_fr0');
-      for (let k = 1; k <= routes; k++) { // the route sequences, the throttle passed each time, a new local turn before each
-        fs.appendFileSync(path.join(slug, 'fr.jsonl'), tl(k) + '\n');
-        u._lastScanAt = Date.now() - 16000;
-        const t0 = Date.now();
-        const route = (async () => { const s = u.scan(); await u.scanSettled(); return { s, v: await u.aggregateAsync({ to: NOW + 1e3 }) }; })().then((x) => ({ ok: true, skipped: !!(x.s && x.s.skipped) }), (e) => ({ ok: false, code: e.code, msg: String(e.message) }));
-        const rid = u.eventForRid('req_fr' + k).then(() => ({ ok: true }), (e) => ({ ok: false, code: e.code }));
-        const r = await Promise.race([Promise.all([route, rid]), sleep(1500).then(() => null)]); // a try here fails in tens of ms: a route still pending past 1.5 s waits on more than a try
-        o.routes.push({ k, ms: Date.now() - t0, route: r ? r[0] : 'pending', rid: r ? r[1] : 'pending', landed: inLedger('req_fr' + k), scanning: !!u._scanning, fails: u._boot && u._boot.fails });
-      }
-      if (!heal) return;
-      u.rebuildWorkerFile = null; u._boot.retryAt = Date.now() - 1; // the storage answers again
-      fs.appendFileSync(path.join(slug, 'fr.jsonl'), tl(4) + '\n'); u._lastScanAt = Date.now() - 16000;
-      const t1 = Date.now();
-      const healed = await Promise.race([(async () => { u.scan(); await u.scanSettled(); try { return await u.aggregateAsync({ to: NOW + 1e3 }); } catch (e) { if (e.code !== 'LOADING') throw e; await u.bootLoadSettled(); return u.aggregateAsync({ to: NOW + 1e3 }); } })(), sleep(15000).then(() => null)]);
-      o.healMs = Date.now() - t1; o.healed = !!healed; o.loadingAfter = u.ledgerLoading();
-      if (healed) { const ref = base(UsageHistory, d); o.equal = JSON.stringify(healed.totals) === JSON.stringify((await ref.aggregateAsync({ to: NOW + 1e3 })).totals); o.totals = healed.totals && healed.totals.requests; o.refRows = ref._evCountUpTo(Infinity); o.rows = u._evCountUpTo(Infinity); }
-      o.turnRows = [0, 1, 2, 3, 4].filter((k) => inLedger('req_fr' + k)).length;
-    });
-    o.warns = said.filter((l) => l.startsWith('WARN'));
-  } finally { clearInterval(ka); }
-  return o;
-}
-{
-  const r = await failRoute(UsageHistory), R = r.routes, loadingWords = (x) => x && x.code === 'LOADING' && /the usage ledger is still loading — its first load in the fold worker failed \(planted: the shard could not be read\); it is tried again (in|at the next ask after) \d+ s/.test(x.msg || '');
-  ok(R.length === 3 && R.every((x) => x.route !== 'pending' && loadingWords(x.route) && x.rid !== 'pending' && x.rid.code === 'LOADING'), `⑦ a worker that throws on every try: GET /api/usage-stats's sequence answers LOADING with the reason and the next try, three times (${R.map((x) => x.ms).join(' / ')} ms — never pending past a try), the rid lookup LOADING too`);
-  ok(r.boot0 && R.every((x) => x.landed && !x.scanning), `⑦ the hub's own turns reach the ledger while the load fails: the boot scan's row and each new local turn appended (${R.filter((x) => x.landed).length} of 3), no scan left pending`);
-  ok(r.healed && r.equal && r.loadingAfter === null && r.turnRows === 5 && r.rows === r.refRows, `⑦ the worker heals: the next try lands (${r.healMs} ms) and the route answers figures equal to the release's road (${r.totals} requests, ${r.rows} rows = ${r.refRows}); all 5 local turns in it once`);
-  // RED: the wait unbounded again (round 1: the scan waits for whenWarm, which resolved only when a try LANDED)
-  const unb = uhSrc.replace("try { if (this._booting()) { const b = this._boot; if (b && b.job) await b.job; } else await this.whenWarm(); } catch { }", 'try { await this.whenWarm(); } catch { }')
-    .replace("    if (b.job) return b.job; // never rejects: its two handlers return\n    this._bootRearm(b);\n    return b.next || (b.next = new Promise((r) => { b.nextR = r; }));\n", '    this._bootRearm(b); return b.done;\n');
-  const RR = unb !== uhSrc ? await failRoute(M.load(UH_REL, unb, 'unbounded').UsageHistory, { routes: 1, heal: false }) : null;
-  ok(!!RR && RR.routes.every((x) => x.route === 'pending'), `control (the wait unbounded again — round 1): the route ${RR && RR.routes.map((x) => x.route === 'pending' ? 'pending' : x.route.code).join(' / ')} past 1.5 s ⇒ RED`);
 }
 
 console.log(fail ? `\n✗ ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);

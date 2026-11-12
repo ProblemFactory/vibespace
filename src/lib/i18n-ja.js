@@ -1645,6 +1645,8 @@ export default {
   "via pool “{name}”": "プール“{name}”経由",
   "not in the ledger yet": "まだ台帳に未記帳",
   "the usage ledger is still loading": "使用量の台帳を読み込み中",
+  "The usage ledger is still loading — next try at {time}": "使用量の台帳を読み込み中 — 次の試行：{time}",
+  "The usage ledger is still loading — its first load is running; asked again at {time}": "使用量の台帳を読み込み中 — 最初の読み込みが進行中です。{time} にもう一度確認します",
   "Transfer status lost (server restarted) — it may still have completed": "転送の状態が失われました（サーバー再起動）——完了している可能性があります",
   "Click to copy": "クリックでコピー",
   "Copy as JSON": "JSON としてコピー",

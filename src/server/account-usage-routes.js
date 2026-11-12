@@ -196,6 +196,8 @@ app.get('/api/usage-stats', async (req, res) => {
     // SETTLED walk: the scan yields every MiB (perf ⑥), so a reader that did
     // not await would total a ledger the walk has not committed yet (or one a
     // scan already in flight is about to extend)
+    // ledger-boot-load follow-up: a PERSON'S Retry (retry=1, the Usage window's button) is attended — the first load is tried now
+    if (req.query.retry === '1') { try { usageHistory.retryBootLoad?.(); } catch { } }
     usageHistory.scan();
     await usageHistory.scanSettled();
     const from = req.query.from ? parseInt(req.query.from, 10) : null;
@@ -222,6 +224,8 @@ app.get('/api/usage-stats', async (req, res) => {
     req.on?.('close', () => { if (!res.writableEnded) ac.abort(); });
     let answer;
     try { answer = await usageHistory.aggregateAsync({ from, to, backend, accounts, hostFilter, pivots }, { signal: ac.signal }); } catch (e) {
+      // ledger-boot-load follow-up: LOADING is a STATE — its words and the time to ask again (the window does, by itself)
+      if (e && e.code === 'LOADING') return res.status(503).json({ error: String(e.message || e), code: 'LOADING', nextTryAt: Number.isFinite(e.nextTryAt) ? e.nextTryAt : null, running: !!e.running });
       return res.status(e && e.code === 'BUSY' ? 429 : 503).json({ error: 'usage summary failed — ' + ((e && e.message) || e) + (e && /ABORTED|FOLD_TOO_BIG|STUCK/.test(e.code || '') ? '' : '; retry'), code: (e && e.code) || null });
     }
     // the shadow comparison (design 011 L1), posted in this same synchronous

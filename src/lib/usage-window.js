@@ -8,7 +8,7 @@ import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
-import { ledgerNoteEl } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals
+import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -84,6 +84,10 @@ export function openUsageWindow(app, opts = {}) {
   root.className = 'usage-win';
   winInfo.content.appendChild(root);
 
+  // THE WINDOW'S LIFE (ledger-boot-load follow-up, 主开发 11:11Z — a closed window kept asking: a LOADING answer that landed after
+  // the close re-armed the re-ask, for the page's life): every continuation of a request and every timer checks alive() first
+  let closed = false;
+  const alive = () => !closed;
   const state = {
     range: '30d', backend: '', account: '', metric: 'cost', data: null, loading: false, view: 'dash',
     loadError: null,   // a FAILED load must never render as "no usage recorded"
@@ -127,8 +131,11 @@ export function openUsageWindow(app, opts = {}) {
   };
 
   const load = async () => {
+    if (!alive()) return; // a closed window asks nothing (the re-ask, the harvest's reply, a late Retry)
     state.loading = true; state.gen++; render();
     const qs = filterQuery();
+    if (state.attendedRetry) { state.attendedRetry = false; qs.set('retry', '1'); } // a person's Retry: the ledger's first load is tried now (never the unattended backoff)
+    clearTimeout(state.reaskT); state.reaskT = null;
     // B-f95d ②: the held pivots + the BOUNDED crosses the dashboard draws — never
     // a session/project cross nobody has scrolled to (the first paint asks for none)
     const eager = state.view === 'dash' ? panelPivots(currentPanels()).filter((k) => !unboundedPivot(k)) : [];
@@ -141,7 +148,11 @@ export function openUsageWindow(app, opts = {}) {
     state.loadError = null;
     state.pivotErr = null; // this answer carries every held pivot — a failed ask before it is moot
     const got = await fetchJson('/api/usage-stats?' + qs.toString());
-    if (!got || got.error) {
+    if (!alive()) return; // THE LISTENER LIFECYCLE: nothing a closed window awaited may arm, ask or draw — one loop per open window
+    const ldg = ledgerLoadingOf(got); // ledger-boot-load follow-up: the ledger still LOADING is a state — its words, and the window asks again at its time
+    state.ledgerLoading = ldg;
+    if (ldg) { state.data = null; state.reaskT = setTimeout(() => { state.reaskT = null; if (alive() && state.ledgerLoading) load(); }, ldg.reaskInMs); }
+    else if (!got || got.error) {
       state.data = null;
       state.loadError = got?.error || t('the server did not answer');
       showToast(t('Could not load usage: {msg}', { msg: state.loadError }), { type: 'error' });
@@ -177,6 +188,7 @@ export function openUsageWindow(app, opts = {}) {
     qs.set('only', 'pivots');
     const got = await fetchJson('/api/usage-stats?' + qs.toString());
     state.asking = false;
+    if (!alive()) return;
     if (gen !== state.gen) return; // a load went out meanwhile — it carries every held pivot
     if (!got || got.error || !got.pivots) state.pivotErr = got?.error || t('the server did not answer');
     else state.data = { ...state.data, pivots: { ...(state.data.pivots || {}), ...Object.fromEntries(missing.map((k) => [k, got.pivots[k] || []])) } };
@@ -234,6 +246,13 @@ export function openUsageWindow(app, opts = {}) {
     root.appendChild(body);
     if (keepTop) queueMicrotask(() => { body.scrollTop = keepTop; }); // once this paint has filled it
     if (state.view === 'pricing') { body.appendChild(renderPricingEditor(state, render, load)); return; }
+    if (state.ledgerLoading && !state.data) { // ledger-boot-load follow-up: a state, not a failure — no toast; the Retry is a person's (attended)
+      const box = document.createElement('div'); box.className = 'usage-empty usage-ledger-loading';
+      box.textContent = t(state.ledgerLoading.words, state.ledgerLoading.vars);
+      const again = document.createElement('button'); again.className = 'usage-btn'; again.textContent = t('Retry'); again.style.marginLeft = '8px';
+      again.onclick = () => { state.attendedRetry = true; load(); };
+      box.appendChild(again); body.appendChild(box); return;
+    }
     if (state.loading && !state.data) { body.innerHTML = `<div class="usage-empty">${t('Loading…')}</div>`; return; }
     // A FAILED load is not an empty ledger — say so and offer the retry
     if (state.loadError && !state.data) {
@@ -243,7 +262,7 @@ export function openUsageWindow(app, opts = {}) {
       const again = document.createElement('button');
       again.className = 'usage-btn'; again.textContent = t('Retry');
       again.style.marginLeft = '8px';
-      again.onclick = load;
+      again.onclick = () => { state.attendedRetry = true; load(); }; // a person's press
       box.appendChild(again);
       body.appendChild(box);
       return;
@@ -302,13 +321,14 @@ export function openUsageWindow(app, opts = {}) {
   const withPivot = (key, sec) => { pivotHere(key, sec, { note: false }); return sec; };
 
   const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { destroyCharts(root); for (const io of state.seen.splice(0)) io.disconnect(); prevClose?.(); };
+  winInfo.onClose = () => { closed = true; clearTimeout(state.reaskT); state.reaskT = null; state.ledgerLoading = null; destroyCharts(root); for (const io of state.seen.splice(0)) io.disconnect(); prevClose?.(); };
   winInfo._reloadUsage = load;
   load();
   // Remote hosts (2.127.0): kick an incremental ledger harvest over ssh on
   // window open (server-throttled 15min/host); reload once if it added events
   // so the host buckets/chips appear without a manual refresh.
   fetchJson('/api/usage-stats/harvest-hosts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => {
+    if (!alive()) return; // the harvest answered after the close: no load, no paint
     // Per-host {error} entries used to be discarded: a machine whose harvest
     // had been failing for days still showed its OLD events under the Device
     // filter with nothing marking them stale — the user read them as current.
