@@ -142,11 +142,11 @@ try {
     const ts5 = j5.runs[0].startedAt, ctl5 = path.join(d1, 'job-logs', j5.id, String(ts5)), w5 = wrapperOf(d1, j5.id, ts5);
     fs.writeFileSync(path.join(ctl5, 'pid.json'), '{ torn');   // a stamp that cannot be read
     J1.rm(j5, { orphan: true });
-    const wl = await J1._logsWhole([j5.id]);
+    const wl = typeof J1._logsWhole === 'function' ? await J1._logsWhole([j5.id]) : {};   // the release has no remover: red by name below
     ok(has(ctl5) && (wl.keptWhy || {})[j5.id] === 'unjudgeable', 'THE REAL WRAPPER: its stamp torn, its record removed — a whole-dir verdict KEEPS the run while that wrapper runs (its argv names the run dir)');
     ok(w5 && endWrapper(w5, ctl5), 'its wrapper ended (cmdline checked)');
     await until(() => PI.aliveIdentity(w5) !== true, 5000); await sleep(50);
-    await J1._logsWhole([j5.id]);
+    if (typeof J1._logsWhole === 'function') await J1._logsWhole([j5.id]);
     ok(!has(ctl5), '…and once it ended, nothing names the run dir: the same verdict removes it');
   }
   // ── THE RULES ON DISK ──────────────────────────────────────────────────────────────────────────────────────────────────

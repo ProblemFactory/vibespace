@@ -21,7 +21,7 @@ const BOOT = PI.bootIdOf();
 // «KEPT UNTIL EVIDENCE» WITH NO CLOCK (round 3 §5 — round 2's «before this machine's boot by a day» compared the STORE's clock with
 // this machine's): a stamp that cannot be judged names no live writer when NO running process's argv names that run dir. The
 // wrapper is the run dir's ONLY writer and its argv is `node job-wrapper.js <ctlDir> <specPath>` for its whole life (it never sets
-// a title); matched by the trailing components `job-logs/<jb-id>/<runTs>` (a respelled or relative data dir still matches; another
+// a title); matched by the trailing components `job-logs/<id>/<runTs>` (a respelled or relative data dir still matches; another
 // instance's wrapper of the same id and stamp — a copied data dir — KEEPS ours: the safe side). The walk of /proc is read WHOLE
 // (one per batch, only when an unjudgeable stamp occurs); a /proc that cannot be listed ⇒ no evidence ⇒ KEPT.
 // (For the identity census: a MISS here is evidence because of those four facts — the one writer, its argv for life, the
