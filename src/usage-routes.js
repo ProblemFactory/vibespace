@@ -1587,9 +1587,16 @@ app.get('/api/usage', (req, res) => {
   for (const [id, snap] of Object.entries(_accountUsage)) viewedAccounts[id] = viewSafe(id, snap);
   const viewedGlobal = _rateLimitCache ? viewSafe('__global__', _rateLimitCache) : _rateLimitCache;
   let claimsForClients = {}; try { claimsForClients = resetClaims.forClients(); } catch { claimsForClients = {}; }
+  // WHEN EACH LANE WAS LAST STATED (the age badge, r3) — and K3: it rides INSIDE each account's reading (and the machine
+  // login's), so every client assignment of `accounts` / `rateLimit` carries it (the roster's own loaders took the readings
+  // raw and drew «read 14h ago» on a lane a ⟳ had just read); the top-level map stays for the popup's merge
+  const lanesAt = (() => { const o = {}; try { for (const id of [...Object.keys(viewedAccounts), '__global__']) { const m = usageWrite.lanesReadAt(id); if (Object.keys(m).length) o[id] = m; } } catch { } return o; })();
+  const accountsOut = {};
+  for (const [id, a] of Object.entries(viewedAccounts)) accountsOut[id] = lanesAt[id] && a && typeof a === 'object' ? { ...a, lanesReadAt: lanesAt[id] } : a;
+  const globalOut = lanesAt.__global__ && viewedGlobal && typeof viewedGlobal === 'object' ? { ...viewedGlobal, lanesReadAt: lanesAt.__global__ } : viewedGlobal;
   res.json({
-    rateLimit: viewedGlobal, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: (() => { const o = {}; try { for (const id of [...Object.keys(viewedAccounts), '__global__']) { const m = usageWrite.lanesReadAt(id); if (Object.keys(m).length) o[id] = m; } } catch { } return o; })(),   // when each lane was last STATED (the age badge, r3)
-    subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: viewedAccounts,
+    rateLimit: globalOut, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: lanesAt,
+    subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: accountsOut,
     // Dead-reckoned CURRENT utilization per account key (B-fcff v2): anchor +
     // learned-rate × ledger-cost-since. Purely local computation (30s memo);
     // keys match `accounts` + '__global__'. The popup renders these as a dim

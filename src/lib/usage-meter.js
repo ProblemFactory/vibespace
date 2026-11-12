@@ -580,8 +580,8 @@ export function installUsageMeter(App, ctx = {}) {
       const laneAt = new Map((noData || !rl ? [] : quotaModel.lanesOfReading(rl)).map((x) => [x.lane, Math.max(Number(x.at) || 0, Number(statedAt[x.lane]) || 0) || null]));
       const atOf = (lane) => (lane && laneAt.get(lane)) || null;
       const freshest = Math.max(0, ...[...laneAt.values()].map((v) => Number(v) || 0));
-      if (cap && cap.state === 'read') cap.staleAge = staleLaneAge(atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt, freshest);
-      const laneAge = (at) => { const a = staleLaneAge(at, freshest); return a ? `<span class="usage-stat usage-stat-stale">${escHtml(t('read {age} ago', { age: a }))}</span>` : ''; };
+      if (cap && cap.state === 'read') cap.staleAge = staleLaneAge(atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt, freshest, Date.now(), { t });
+      const laneAge = (at) => { const a = staleLaneAge(at, freshest, Date.now(), { t }); return a ? `<span class="usage-stat usage-stat-stale">${escHtml(t('read {age} ago', { age: a }))}</span>` : ''; };
       const claimBtn = (lane, view, capName = null) => (noData || !lane || !view || view.unconfirmed || claimed[lane] || !(Number(view.reading?.utilization) >= quotaModel.RESET_SEEN_MIN_DROP / 100) ? ''
         : `<button class="usage-claim-btn" data-claim-key="${escHtml(claimKey)}" data-claim-lane="${escHtml(lane)}"${capName ? ` data-cap-name="${escHtml(capName)}"` : ''} title="${escHtml(t('Mark it as reset — unconfirmed until the next refresh reads it'))}">${escHtml(t('I reset this on Anthropic’s site'))}</button>`);
       const outcomeNotes = ((this._resetClaims?.[claimKey] && this._resetClaims[claimKey].outcomes) || []).map((o) => {

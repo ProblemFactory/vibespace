@@ -31,7 +31,8 @@ import { spawnSync } from 'node:child_process';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'b19f0ecdb';   // master under this commit (2.369.396) — a sha the repository has
 const K1R1 = 'b05ea2098';   // K1 round 1 (one basis per connected set of pools) — the per-pool leg's red tree (ref account-reset-door-k1r1)
-const MERGED397 = 'c3215f7b5';   // the .397 pre-bump tip (the door × relearn, the basis decided per call) — K1's red tree
+const MERGED397 = 'c3215f7b5';
+const REL397 = 'fd4acdc61';   // the 2.369.397 release (K1 rode it) — K2's and K3's red tree   // the .397 pre-bump tip (the door × relearn, the basis decided per call) — K1's red tree
 const ROUND1 = '18104c29c'; // this lane's round 1 (its acceptance said: not accepted) — round 2's pins are red there
 const ROUND3 = 'cedee3d11'; // round 3 (not accepted: the sibling fan-out wrote a refusal without its stamp…) — round 4's pins are red there
 const ROUND4 = 'd0c5a8799'; // round 4 (not accepted: the status rule silenced a real reset after an honest 100 %) — round 5's pins are red there
@@ -46,7 +47,7 @@ const quiet = async (fn) => { const o = console.log, w = console.warn, e = conso
 function archive(rev, tag) {
   try {
     if (spawnSync('git', ['cat-file', '-e', `${rev}^{commit}`], { cwd: REPO }).status !== 0) return null;
-    const ar = spawnSync('git', ['archive', '--format=tar', rev, 'src', 'data/bin', 'package.json'], { cwd: REPO, maxBuffer: 1 << 30 });
+    const ar = spawnSync('git', ['archive', '--format=tar', rev, 'src', 'data/bin', 'package.json', 'public/style.css', 'scripts/ci.mjs'], { cwd: REPO, maxBuffer: 1 << 30 });   // + the two files the page leg reads (K3)
     if (ar.status !== 0) return null;
     const dst = path.join(ROOT, tag); fs.mkdirSync(dst, { recursive: true });
     if (spawnSync('tar', ['-x', '-C', dst], { input: ar.stdout, maxBuffer: 1 << 26 }).status !== 0) return null;
@@ -914,6 +915,31 @@ const LEGS = {
       rows.push({ ok: nested >= 1 && s2moves === 1, text: `a pass started inside the loop (a fire whose gate ran at once): s2 moved ${s2moves}× (s1 → ${w.linkOf('s1')}, s2 → ${w.tagOf(w.am.poolCurrentFor(w.P, 's2'))})` }); }
     return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
   },
+  // K3 (主开发's read of the .397 tip — the page): a lane a PERSON marked reset says so in the claim dialog's words (never
+  // «confirms when a session uses it»); the age mark's units are the interface's; the door's CSS stands on theme variables;
+  // zh / ja name ⚙ → Update (since .397 no update arrives by itself); the row's stamp names the release the claim ships in
+  async 'page-k3'(T) {
+    const rows = [];
+    let US = null, AW = null; try { US = await esm(T, 'src/lib/usage-source.js'); AW = await esm(T, 'src/lib/account-wall-words.js'); } catch (e) { return { ok: false, detail: `the page modules: ${e.message}` }; }
+    const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+    const claimed = US.unconfirmedText({ unconfirmed: true, display: { resetAt: NOW - 60e3 }, reading: { claimedAt: NOW - 5 * 60e3 } }, { t: tt, nowMs: NOW });
+    const rolled = US.unconfirmedText({ unconfirmed: true, display: { resetAt: NOW - 60e3 }, reading: {} }, { t: tt, nowMs: NOW });
+    const zh = fs.readFileSync(path.join(T, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(T, 'src/lib/i18n-ja.js'), 'utf8');
+    const KEY = 'marked reset by you at {time} — the next refresh confirms or corrects it';
+    rows.push({ ok: claimed.startsWith('marked reset by you at') && /next refresh confirms or corrects it/.test(claimed) && !/session uses it/.test(claimed) && /session uses it/.test(rolled) && zh.includes(JSON.stringify(KEY) + ':') && ja.includes(JSON.stringify(KEY) + ':'),
+      text: `a claimed lane's ring: «${claimed}»; a rolled one: «${rolled}»; zh / ja carry the claimed words ${zh.includes(JSON.stringify(KEY) + ':') && ja.includes(JSON.stringify(KEY) + ':')}` });
+    const asked = []; const age = AW.staleLaneAge(NOW - 5 * H, NOW, NOW, { t: (k, p) => { asked.push(k); return tt('«' + k + '»', p); } });
+    rows.push({ ok: age === '«5h»' && asked.includes('{n}h'), text: `a lane 5 h older than its siblings: «${age}» (through the interface's «{n}h»)` });
+    const css = fs.readFileSync(path.join(T, 'public/style.css'), 'utf8').split('\n').filter((l) => /\.usage-claim-btn \{|\.usage-stat-stale \{|\.usage-age-badge, \.acct-donut-age \{/.test(l));
+    const literal = css.filter((l) => /#[0-9a-fA-F]{3,6}\b|border-radius: \d/.test(l));
+    rows.push({ ok: css.length === 3 && !literal.length, text: `the door's CSS: ${css.length} rules, ${literal.length} with a literal colour or radius` });
+    const lines = (src) => ['re-login these {n} accounts, or a VibeSpace update places them', 're-login {name}, or a VibeSpace update places it', 'those accounts wait for a VibeSpace update'].map((k) => { const i = src.indexOf(k + '": "'); return i < 0 ? '' : src.slice(i, src.indexOf('\n', i)); });
+    const named = [...lines(zh), ...lines(ja)], waits = named.filter((l) => /等 VibeSpace 更新|VibeSpace の更新を待/.test(l) || !l.includes('⚙'));
+    rows.push({ ok: named.every(Boolean) && !waits.length, text: `zh / ja name ⚙ → Update: ${named.length - waits.length}/${named.length}` });
+    const ci = fs.readFileSync(path.join(T, 'scripts/ci.mjs'), 'utf8');
+    rows.push({ ok: /A PERSON'S RESET CLAIM \(2\.369\.397\)/.test(ci), text: `the row's stamp ${/A PERSON'S RESET CLAIM \(2\.369\.397\)/.test(ci) ? '2.369.397' : 'not the release it ships in'}` });
+    return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
   // the smalls of round 5: «too low» toasted in every language; the journal's numbers rounded where said; the follow-up
   // refresh's own reason said; the mirror's census row says no device can write a refusal there
   async 'words-r5'(T) {
@@ -1118,7 +1144,10 @@ const LEGS = {
       notified = 0;
       const okClaim = (await quiet(() => call(post, { params: { id }, body: { lanes: [K(T).fable] } }))).r;
       const toldDevices = notified > 0;
-      const usage = (await quiet(() => call(routes['GET /api/usage'], {}))).r;
+      const UW = r('./src/usage-cache-write.js'), lanesWas = UW.lanesReadAt;
+      UW.lanesReadAt = (k) => (k === id ? { 'plan:7d': NOW - 60e3 } : {});   // a lane a write stated a minute ago (K3)
+      let usage; try { usage = (await quiet(() => call(routes['GET /api/usage'], {}))).r; } finally { UW.lanesReadAt = lanesWas; }
+      const inside = !!(usage.body && usage.body.accounts && usage.body.accounts[id] && usage.body.accounts[id].lanesReadAt && usage.body.accounts[id].lanesReadAt['plan:7d'] === NOW - 60e3);
       const q = r('./src/quota-model.js');
       const view = usage.body && usage.body.accounts && usage.body.accounts[id];
       const cap = capState(q, view);
@@ -1126,8 +1155,8 @@ const LEGS = {
       am.placeWallOf = () => ({ code: 'cli-unmeasured', cli: '2.1.322' });
       const walled = (await quiet(() => call(post, { params: { id }, body: { lanes: [K(T).week] } }))).r;
       return { ok: agent.code === 403 && unknown.code === 404 && none.code === 409 && codex.code === 409 && codex.body && codex.body.code === 'no_claim_door' && okClaim.body && okClaim.body.ok && toldDevices && cap === 'reset-unconfirmed'
-        && usage.body.resetClaims && usage.body.resetClaims[id] && stored && walled.body && walled.body.ok && walled.body.wall && walled.body.wall.code === 'cli-unmeasured' && fetched.length === 0,
-      detail: `any Bearer ${agent.code} · unknown ${unknown.code} · no reading ${none.code} · a Codex row ${codex.code} ${codex.body && codex.body.code} · claim ${JSON.stringify(okClaim.body).slice(0, 70)} · every device told ${toldDevices} · /api/usage cap ${cap} · the cache untouched ${stored} · a non-quota wall said ${JSON.stringify(walled.body && walled.body.wall)} · vendor calls ${fetched.length}` };
+        && usage.body.resetClaims && usage.body.resetClaims[id] && inside && stored && walled.body && walled.body.ok && walled.body.wall && walled.body.wall.code === 'cli-unmeasured' && fetched.length === 0,
+      detail: `the lane's read-at inside the account's reading on /api/usage ${inside} · any Bearer ${agent.code} · unknown ${unknown.code} · no reading ${none.code} · a Codex row ${codex.code} ${codex.body && codex.body.code} · claim ${JSON.stringify(okClaim.body).slice(0, 70)} · every device told ${toldDevices} · /api/usage cap ${cap} · the cache untouched ${stored} · a non-quota wall said ${JSON.stringify(walled.body && walled.body.wall)} · vendor calls ${fetched.length}` };
     } finally { nets.forEach((n, i) => { n.request = reqs[i]; }); }
   },
   // MUST 5 — GET /api/usage never throws on a bad claims file
@@ -1276,9 +1305,9 @@ if (!CONTROLS) say(`RED CONTROLS — run by the heavy row test-account-reset-doo
 const R5 = ['honest-full', 'guess-and-replace', 'words-r5'];
 const R4 = ['twin-refusal', 'old-mark', 'getusage-states', 'words-r4', 'writes-census', 'wiring'];
 const R3 = ['view', 'refusal-contradicts', 'rejection-is-a-mark', 'twin-not-measured', 'popup-key', 'same-number', 'claim-lifts-walls', 'lane-read-at', 'words-r3', 'store', 'claims-file', 'refresh-answer', 'wiring'];
-for (const [rev, tag, legs] of CONTROLS ? [[BASE, 'base', Object.keys(LEGS)], [MERGED397, 'merged397', ['one-basis', 'basis-flip']], [K1R1, 'k1r1', ['pool-own']], ...(ROUNDS ? [[ROUND1, 'round1', Object.keys(LEGS).filter((l) => l !== 'unlock')], [ROUND2, 'round2', R3], [ROUND3, 'round3', R4], [ROUND4, 'round4', R5]] : [])] : []) {
+for (const [rev, tag, legs] of CONTROLS ? [[BASE, 'base', Object.keys(LEGS)], [MERGED397, 'merged397', ['one-basis', 'basis-flip']], [K1R1, 'k1r1', ['pool-own']], [REL397, 'rel397', ['claims-file', 'route', 'page-k3', 'wiring']], ...(ROUNDS ? [[ROUND1, 'round1', Object.keys(LEGS).filter((l) => l !== 'unlock')], [ROUND2, 'round2', R3], [ROUND3, 'round3', R4], [ROUND4, 'round4', R5]] : [])] : []) {
   const T = archive(rev, tag);
-  say(`RED CONTROLS — ${legs.length} legs on ${rev}${tag === 'merged397' ? ' (the .397 pre-bump tip: the basis decided per call)' : tag === 'k1r1' ? ' (K1 round 1: one basis per connected set of pools)' : tag === 'round1' ? ' (round 1: the legs round 2 adds or re-states)' : tag === 'round2' ? ' (round 2: the legs round 3 adds or re-states)' : tag === 'round3' ? ' (round 3: the legs round 4 adds or re-states)' : tag === 'round4' ? ' (round 4: the legs round 5 adds)' : ''}`);
+  say(`RED CONTROLS — ${legs.length} legs on ${rev}${tag === 'merged397' ? ' (the .397 pre-bump tip: the basis decided per call)' : tag === 'k1r1' ? ' (K1 round 1: one basis per connected set of pools)' : tag === 'rel397' ? ' (the 2.369.397 release: the claims store off the writer, the page before K3)' : tag === 'round1' ? ' (round 1: the legs round 2 adds or re-states)' : tag === 'round2' ? ' (round 2: the legs round 3 adds or re-states)' : tag === 'round3' ? ' (round 3: the legs round 4 adds or re-states)' : tag === 'round4' ? ' (round 4: the legs round 5 adds)' : ''}`);
   if (!T) { skipped += legs.length; say(`  SKIP ${legs.length} red controls — ${rev} is not in this clone (a depth-1 checkout): COUNTED, not passed`); continue; }
   for (const leg of legs) { const r = await run(leg, T); ok(!r.ok, `${rev} is RED at ${leg}: ${r.detail}`); }
 }
@@ -1310,15 +1339,19 @@ if (CONTROLS) {
     ['ids-unwatched', 'the memo kept when what the pool compares changed', 'if (m && m.sig === sig && m.gen === gen && (', 'if (m && m.gen === gen && (', 'pool-own'],
     ['only-landing', 'only raw → estimated flips decided again', 'if (m && m.raw !== raw) {', 'if (m && m.raw === true && raw === false) {', 'pool-own'],
     ['no-passgen', 'the loop reuses its reads after a pass started inside it', 'const pr = _passGen === passGen ? passReads.get(sid) : null;', 'const pr = passReads.get(sid);', 'pool-own'],
+    ['lanes-outside', 'K3: the lane\'s read-at only top-level (the roster\'s loaders take the readings raw)', 'subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: accountsOut,', 'subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: viewedAccounts,', 'route', 'src/usage-routes.js'],
+    ['claim-session-words', 'K3: a claimed lane says «confirms when a session uses it»', '  if (claimedAt > 0) return t(', '  if (false) return t(', 'page-k3', 'src/lib/usage-source.js'],
+    ['units-raw', 'K3: the age mark\'s units raw', "return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });", "return min < 120 ? `${min}m` : min < 48 * 60 ? `${Math.round(min / 60)}h` : `${Math.round(min / 1440)}d`;", 'page-k3', 'src/lib/account-wall-words.js'],
     ['flip-silent', 'a flip said by nobody', "    console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", "    if (0) console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", 'pool-own'],
     ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool\'s basis', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],
   ];
   say('RED CONTROLS — the merged switch pass\'s wrong sides (patches the suite carries on a copy of src/)');
-  for (const [tag, what, from, to, leg] of WRONG) {
-    if (!ok(ENGSRC.split(from).length === 2, `the patch «${tag}» applies to this tree's usage-pool-engine.js (its anchor is there once)`)) continue;
+  for (const [tag, what, from, to, leg, rel = 'src/server/usage-pool-engine.js'] of WRONG) {
+    const SRC = fs.readFileSync(path.join(REPO, rel), 'utf8');
+    if (!ok(SRC.split(from).length === 2, `the patch «${tag}» applies to this tree's ${path.basename(rel)} (its anchor is there once)`)) continue;
     const MW = path.join(ROOT, 'patch-' + tag); fs.cpSync(path.join(REPO, 'src'), path.join(MW, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(MW, 'src/server/usage-pool-engine.js'), ENGSRC.replace(from, to));
-    for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(MW, f)); } catch { } }
+    fs.writeFileSync(path.join(MW, rel), SRC.replace(from, to));
+    for (const f of ['package.json', 'node_modules', 'data', 'server.js', 'public', 'scripts']) { try { fs.symlinkSync(path.join(REPO, f), path.join(MW, f)); } catch { } }
     const r = await run(leg, MW); ok(!r.ok, `${what} ⇒ RED at ${leg}: ${r.detail}`);
   }
   // 主开发's mutant on 4ea7d008f: a refusal's mark never overtaken by a newer statement

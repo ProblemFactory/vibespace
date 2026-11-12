@@ -1687,7 +1687,7 @@ export function installManageAgents(App, ctx = {}) {
         : eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
       // L3 (lane account-reset-door): a lane whose own reading is far older than the row's freshest says so ON ITSELF
       const lk = laneOfDonut(x0);
-      const stale = lk && laneAts.get(lk) ? staleLaneAge(laneAts.get(lk), Math.max(0, ...laneAts.values()), now) : '';
+      const stale = lk && laneAts.get(lk) ? staleLaneAge(laneAts.get(lk), Math.max(0, ...laneAts.values()), now, { t }) : '';
       const staleTip = stale ? ' · ' + escHtml(t('read {age} ago', { age: stale })) : '';
       return `<span class="acct-donut-col${stale ? ' acct-donut-aged' : ''}"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}${v.unconfirmed ? ' acct-donut-unconfirmed' : ''}" title="${tip}${staleTip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${stale ? `<span class="acct-donut-age" aria-hidden="true">${escHtml(stale)}</span>` : ''}${etaHtml}</span>`;
     };

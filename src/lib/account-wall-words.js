@@ -86,9 +86,10 @@ export function claimConfirmWords({ t = id, name = null, lane = null, capName = 
 /** A LANE OLDER THAN ITS SIBLINGS SAYS SO ON ITSELF (L3): its reading `readAt` is more than STALE_LANE_MS older than the
  *  freshest lane of the same account → its age in short words, else ''. */
 export const STALE_LANE_MS = 30 * 60e3;
-export function staleLaneAge(readAt, freshestAt, nowMs = Date.now()) {
+export function staleLaneAge(readAt, freshestAt, nowMs = Date.now(), { t = id } = {}) {
   const r = Number(readAt) || 0, f = Number(freshestAt) || 0;
   if (!r || !f || f - r <= STALE_LANE_MS) return '';
   const min = Math.max(1, Math.round((Number(nowMs) - r) / 60000));
-  return min < 120 ? `${min}m` : min < 48 * 60 ? `${Math.round(min / 60)}h` : `${Math.round(min / 1440)}d`;
+  // the units are the interface's (K3: «{n}m» / «{n}h» / «{n}d» — the keys every other short age uses)
+  return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });
 }

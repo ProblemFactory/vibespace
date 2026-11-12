@@ -240,9 +240,13 @@ export function resetInstantText(ms, nowMs = Date.now(), { locale = undefined } 
   return d.toDateString() === n.toDateString() ? time : `${d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })} ${time}`;
 }
 
-/** The words of an unconfirmed reset — «reset <time> · unconfirmed — confirms when a session uses it» — or ''. */
+/** The words of an unconfirmed reset — «reset <time> · unconfirmed — confirms when a session uses it» — or ''. A lane a
+ *  PERSON marked reset (its reading carries `claimedAt` — lane account-reset-door K3) says that, at that time, in the claim
+ *  dialog's own words: what confirms it is the next refresh, never «when a session uses it». */
 export function unconfirmedText(view, { t = fillParams, nowMs = Date.now(), locale = undefined } = {}) {
   if (!view || !view.unconfirmed) return '';
+  const claimedAt = Number((view.reading && view.reading.claimedAt) || view.claimedAt) || 0;
+  if (claimedAt > 0) return t('marked reset by you at {time} — the next refresh confirms or corrects it', { time: resetInstantText(claimedAt, nowMs, { locale }) });
   return t('reset {time} · unconfirmed — confirms when a session uses it', { time: resetInstantText(view.display.resetAt, nowMs, { locale }) });
 }
 
