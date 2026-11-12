@@ -11,7 +11,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In the accounts list, a long-lived token that needs nothing from you is now a small clock icon, so the account's note has its line back.
 - A long-lived token's last day is now said once on its row, not twice.
 - A restart no longer updates VibeSpace by itself — to update, press ⚙ → Update VibeSpace….
+- In the first minute after a start, while the usage history loads, a pool makes no automatic moves and usage shows the last readings without estimates.
 - When a reading shows that Anthropic reset a limit early, VibeSpace takes it at once and tells you once.
+- After you mark one model’s limit with «I reset this on Anthropic’s site», idle conversations may move away from that account.
 
 ### Fixed
 - When a page goes away or crashes in the middle of a passkey sign-in, the passkey VibeSpace lent to the tab is taken back. Before, it could stay on the tab.
@@ -22,7 +24,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Opening the plugins panel no longer freezes VibeSpace for seconds while Tailscale's status is read; it shows the last known state, then the new one.
 - A large Gmail folder no longer freezes VibeSpace for a moment every five minutes while it checks for new mail.
 - When a Gmail folder cannot be read, its row now says the sync stopped and that it will try again, instead of showing it as synced.
-- If an update stops partway, it now puts back the files it changed and says so, so the next update is not blocked.
+- If an update stops partway, it puts back the files the update itself rewrote and says so, so the next update is not blocked; the code is not rolled back.
 - VibeSpace no longer freezes for seconds after starting with a large usage history: it loads in the background while the usage window says loading.
 - Archiving, starring or renaming many conversations in a row no longer reverts when the server is slow.
 - A change the server has not taken yet stays on screen and goes again with your next change, or on its own while the page stays open.
@@ -32,7 +34,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Importing your settings is no longer undone by an older change that was still on its way.
 - Refreshing usage no longer says the vault is locked after you unlocked it.
 - Accounts that cannot refresh for the same reason get one message in your language, with the button that fixes it.
-- A limit read hours before the others on the same account shows how old its reading is.
+- A limit read more than half an hour before the others on the same account shows how old its reading is.
 - Moving a pool’s conversations to an account it cannot use now says why, and what ends it.
 - While VibeSpace is still learning how fast an account uses its limits, every pool decision reads the same numbers, so a waiting conversation is not held back.
 

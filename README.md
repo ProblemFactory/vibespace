@@ -147,13 +147,19 @@ Example: `PORT=8080 HOST=127.0.0.1 npm start`
 
 ### Updating
 
-Re-run the install command, or:
+In VibeSpace, press **⚙ → Update VibeSpace…**: it pulls, installs, builds and restarts the server for you. Agent sessions survive the restart (dtach), and the page reconnects. A restart on its own never updates VibeSpace (since 2.369.397).
+
+Or re-run the install command, or update by hand:
 ```bash
 cd ~/vibespace
 git pull
 npm install
 npm run build
 ```
+Then restart the server the way it runs:
+- the systemd user unit (`./scripts/install-service.sh`): `systemctl --user restart vibespace`
+- the `./run.sh` loop: stop the server process (its pid is in `data/server.pid`) and the loop starts it again on the new code
+- a plain `npm start`: stop it (Ctrl-C) and run `npm start` again
 
 ## How It Works
 

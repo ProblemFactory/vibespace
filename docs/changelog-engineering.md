@@ -378,6 +378,11 @@ This file is the engineers' record of every release: the lanes, the verification
     - money: xpool-gate and flipback through Q.
 - **Stated.** auto-cli-loop's drift estimate (a refresh scheduler) compares no members and stays per id. The matrix driver's `pool(P,also)` passes an argument the door no longer takes, and it is ignored.
 
+### Known in 2.369.397 — found by the merged-tip read (2026-11-12 12:18Z), shipped named; each is a first pick of the train after (K1, found by the same read, is cured in this release: account-reset-door e9e50c59d)
+- **K2 (minor).** The reset-claim store is not on the store writer: its exit flush is a synchronous fsync on the main thread, classed «exit» in the write census, which lets it pass the debt ratchet.
+- **K3 (minor).** The Agents roster can show an old «read N h ago» mark on a limit for up to one poll (about 8 s) after an accounts broadcast. Two different sentences say what confirms a claimed reset, and the age mark's units are not translated.
+- **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
+
 ## 2.369.396 — 2026-11-11
 
 ### hub-loop-stalls — EVERY HOLD GETS ITS FIRST SAMPLE; THE INSTRUMENT IS NEVER THE HOLDER; THE LOOP BEFORE THE DISK (the owner's hub on .393, 20:09Z boot: its capture and its journal)
