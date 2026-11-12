@@ -19,6 +19,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A large Gmail folder no longer freezes VibeSpace for a moment every five minutes while it checks for new mail.
 - When a Gmail folder cannot be read, its row now says the sync stopped and that it will try again, instead of showing it as synced.
 - If an update stops partway, it now puts back the files it changed and says so, so the next update is not blocked.
+- VibeSpace no longer freezes for seconds after starting with a large usage history: it loads in the background while the usage window says loading.
 
 ## 2.369.396 — 2026-11-11
 
