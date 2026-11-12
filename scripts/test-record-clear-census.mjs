@@ -937,7 +937,11 @@ const userStateWrites = (srcs) => {
       for (; i < text.length; i++) { const ch = text[i]; if (ch === '(') d++; else if (ch === ')') { d--; if (d === 0) { end = i; break; } } }
       const args = text.slice(m.index, end + 1);
       if (!/method:\s*'(?:PATCH|POST)'/.test(args)) continue;
-      const b = /body:\s*JSON\.stringify\(\s*(?:\{\s*(\[?\w+\]?)\s*:|(\w+)\s*\))/.exec(args);
+      let b = /body:\s*JSON\.stringify\(\s*(?:\{\s*(\[?\w+\]?)\s*:|(\w+)\s*\))/.exec(args);
+      if (!b) {   // (lane sidebar-echo-order r15: `body: text`, text = JSON.stringify(…) a line before — followed one step, never further)
+        const v = /body:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(args);
+        if (v) { const defs = [...text.slice(0, m.index).matchAll(new RegExp('\\b(?:const|let|var)\\s+' + v[1] + '\\s*=\\s*JSON\\.stringify\\(\\s*(?:\\{\\s*(\\[?\\w+\\]?)\\s*:|(\\w+)\\s*\\))', 'g'))]; if (defs.length) b = defs[defs.length - 1]; }
+      }
       rows.push(`${rel}|${b ? b[1] || b[2] : '?'}`);
     }
     for (const m of text.matchAll(/\bpatchUserState\s*=\s*\(\s*(\w+)\s*\)\s*=>\s*fetch\(\s*'\/api\/user-state'/g)) rows.push(`${rel}|${m[1]}`);
