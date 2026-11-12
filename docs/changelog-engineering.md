@@ -50,6 +50,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The leftover temp file (judged: removed).** A process killed inside the capture's write leaves «.<name>.<pid>.tmp», never renamed and never listed. `keptFiles` now removes such a file at the next kept write, except the one of a write in flight; no other name in the directory is touched (a reused pid's leftover too: at the prune no write of this thread is in flight).
 - **Pins.** test-cpu-capture-live Ⓙ: a preload in the watchdog THREAD stands for the hung kernel call (each stat of the install's .js files left pending, counted). Four door captures start **one** read (a740aea7b: **4**); three captures against a write that never answers start **one** write, the next two «has not been written yet» (a740aea7b: **2**, the third door refused while the second write spent its 10 s). MUTANTS «the read's guard cleared at its budget» (4 reads) and «no guard on the capture's write» (2 writes) are red by name. test-cpu-capture (fast, 61 → 65): the leftover temp files, the words. On a740aea7b's module the same names drop no temp file.
 
+### cli-self-measure follow-up — the run's folder is always one it made (pinned)
+- 主开发's mutant `mkdirSync(root, { recursive: true })` passed all 194 of test-cli-self-measure: nothing pinned the non-recursive mkdir that refuses a folder already at the run's name. test-cli-self-measure §12b now stubs the run name's randomness and plants a DIRECTORY, then a SYMLINK to another folder, at that exact name: the run refuses it (cannot-run, setup, EEXIST), forks nothing and creates nothing inside — both legs red under the mutant. Test-only.
+
 ## 2.369.395 — 2026-11-11
 
 ### cli-self-measure INCIDENT (the owner's hub, 2.369.393, 20:12Z): «cannot-run (guarded-read)» half a second after every check started
