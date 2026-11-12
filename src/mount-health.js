@@ -152,6 +152,7 @@ const HELD_TAIL = Object.freeze({
   storage: 'VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.',
   home: 'This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.',
   network: 'Calls on a network folder are watched, never refused.',
+  disk: 'This folder shows another folder of this machine through a FUSE program: its calls are watched, never refused.',   // lane mount-class-by-source
 });
 
 /** lane hub-fuse-sync-guard: the For-you item of a HOLD — a synchronous fs call that held the server's main loop on a

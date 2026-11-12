@@ -20,7 +20,8 @@
  *       return (the canary words it: src/server/fs-canary.js held()); the canary's late probe asks heldIn(from, to).
  *   THE GUARD — the main thread never waits on a storage mount.
  *     · before the syscall, a call whose path is under a STORAGE root (src/mount-path-class.js: a product storage row,
- *       any FUSE / SMB / WebDAV mount — never the mount the instance itself lives on) is REFUSED: it throws
+ *       any FUSE / SMB / WebDAV mount — never the mount the instance itself lives on, nor a view classed by what it shows
+ *       when that is not storage: the owner's workspace bindfs over NFS is 'network' wherever the hub lives) is REFUSED: it throws
  *       `EVSMOUNTSYNC` {path, mount}; the journal says it ONCE per call site (the src/ frame) with the door to take
  *       (SafeFs or async fs); telemetry counts it (⚙ Diagnostics). `mounts.mainThreadSyncGuard` = false turns the
  *       refusal into a journal line for a person who hits a false refusal; the witness stays on regardless.
@@ -82,9 +83,10 @@ const hubFrames = (stack, root, k = STACK_FRAMES) => String(stack || '').split('
 function callWords(e) {
   if (!e) return '';
   const where = !e.mount ? 'not under a mount'
-    : e.mount.kind === 'storage' ? `under storage mount «${e.mount.root}»`
+    : e.mount.kind === 'storage' ? `under storage mount «${e.mount.root}»${MPC.viewWords(e.mount)}`
     : e.mount.kind === 'home' ? `under the ${e.mount.fstype ? e.mount.fstype + ' ' : 'network '}mount «${e.mount.root}» this instance lives on (witnessed, never refused)`
-    : `under the network mount «${e.mount.root}» (witnessed, never refused)`;
+    : e.mount.kind === 'disk' ? `under the mount «${e.mount.root}»${MPC.viewWords(e.mount)} (witnessed, never refused)`
+    : `under the network mount «${e.mount.root}»${MPC.viewWords(e.mount)} (witnessed, never refused)`;
   return `${e.fn}(${e.path})${e.store ? ` (${e.store})` : ''} ${e.ms} ms${e.failed ? ' (it failed)' : ''}, ${where}${e.caller ? ` ← ${e.caller}` : ''}`;
 }
 /** PURE: the canary's line for a held loop. */
@@ -183,14 +185,14 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         if (on) {
           counts.refused++;
           try { record({ kind: 'event', name: 'srv-mount-guard-refused', detail: fn }); } catch { }
-          sayOnce(`refused ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} refused — use SafeFs/async; the mount «${mount}»`);
+          sayOnce(`refused ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} refused — use SafeFs/async; the mount «${mount}»${MPC.viewWords(hit)}`);
           liveEnd(); cur = null;
           refusal = guardError(fn, p0, hit);
           return;
         }
         counts.allowed++;
         try { record({ kind: 'event', name: 'srv-mount-guard-allowed', detail: fn }); } catch { }
-        sayOnce(`allowed ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} ran on the mount «${mount}» — ${SETTING} is off (log only); use SafeFs/async`);
+        sayOnce(`allowed ${site}`, `[mount-guard] ${fn}(${cur.path}) from ${site} ran on the mount «${mount}»${MPC.viewWords(hit)} — ${SETTING} is off (log only); use SafeFs/async`);
       } catch { /* a witness fault never reaches the caller: the call runs unwitnessed */ }
       finally {
         busy = false;
@@ -210,7 +212,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         if (ms < ringMs) return;
         counts.slow++;
         const stack = new Error().stack;
-        const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null, ...(c.root.fstype ? { fstype: c.root.fstype } : {}) } : null;
+        const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null, ...(c.root.fstype ? { fstype: c.root.fstype } : {}), ...(c.root.shows !== undefined ? { shows: c.root.shows } : {}), ...(c.root.through ? { through: c.root.through } : {}) } : null;
         const e = { fn, path: c ? c.path : shown(args[0]), ...(c && c.store ? { store: c.store } : {}), ms: Math.round(ms), at, failed: !!failed, class: mount ? 'mount' : 'local', mount,
           caller: LB.callerOf(stack, rootDir), stack: mount ? hubFrames(stack, rootDir) : null, said: false };
         ring.push(e); if (ring.length > RING_KEEP) ring.splice(0, ring.length - RING_KEEP);

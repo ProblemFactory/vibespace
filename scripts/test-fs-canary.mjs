@@ -22,6 +22,14 @@
 //      in flight ⇒ the same call, one line; THE GUARD: a storage row refused by name before the syscall, said once per
 //      site, log-only by the setting, never before the first loop turn; CONTROL: the base-shaped canary names nothing;
 //      the watchdog thread names a call still in flight (a child), with the kernel's wchan + syscall
+//   §9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source — the owner's workspace bindfs over NFS was 'home'
+//      while the instance lived on it and 'storage' once it moved to the local disk): the two real rows, before and after
+//      the move — home, then network, and a project path's existsSync / statSync / realpathSync never refused, nor the old
+//      checkout path through the view; CONTROLS refused: rclone, a bindfs over rclone, a bindfs whose source row is absent,
+//      a product storage row on a bindfs; every storageRootOf caller of src/ a row (census) + the transcript-folder decode;
+//      THE HOLD WORDS on each of the three view rows (over NFS, over storage with the guard off, over the local disk — a
+//      watched 'disk' root, never refused): three real 120 ms holds, the canary line and the For-you tail of each;
+//      ROUND 2: an rclone and a product row BELOW the NFS source, reached through the view — all five sync calls refused, named
 // Run: node scripts/test-fs-canary.mjs
 // before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
 // session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
@@ -376,6 +384,125 @@ setTimeout(() => { fs.readFileSync(p); w.stop(); }, 300);
     && KW.kernelWords('do_epoll_wait', '232 0x3', 'arm64') === 'do_epoll_wait in syscall 232', 'the kernel words: a FUSE wait in newfstatat, on the CPU, an unknown architecture by number');
   fs.rmSync(ROOT, { recursive: true, force: true });
   fs.rmSync(MNTS, { recursive: true, force: true });
+}
+
+console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source) — the owner\'s workspace bindfs over NFS, before and after the move');
+{ // 2026-11-12, the data-move read: the owner's workspace is a fuse.bindfs VIEW of a kernel NFS mount — 'home' while the
+  // instance lived on it, 'storage' the day the instance moved to the local disk ⇒ every project path refused. The two
+  // real rows of the box (addresses removed) over scratch folders; every call runs for real when the guard lets it.
+  const SW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
+  const SP = require(path.join(REPO, 'src/storage-path.js'));
+  const SS = require(path.join(REPO, 'src/session-store.js'));
+  const MH = require(path.join(REPO, 'src/mount-health.js'));
+  const { spawn } = await import('node:child_process');
+  const S = fs.mkdtempSync(path.join(os.tmpdir(), 'fscanview'));
+  const NFS = path.join(S, 'nfs'), WS = path.join(S, 'workspace'), R = path.join(S, 'rclone'), RV = path.join(S, 'rview'), Q = path.join(S, 'qview'), P = path.join(S, 'pview');
+  const CO = path.join(WS, 'AIWorkspace', 'vibespace'), N = path.join(S, 'home', 'vibespace'), PROJ = path.join(WS, 'AIWorkspace', 'my-proj');
+  const DISK = path.join(S, 'disk'), LV = path.join(S, 'lview');   // a local disk's mount + a bindfs view of it
+  for (const d of [NFS, R, RV, Q, P, DISK, LV, path.join(CO, 'data'), PROJ, path.join(S, 'home')]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [R, RV, Q, P]) fs.writeFileSync(path.join(d, 'f'), 'x');
+  fs.writeFileSync(path.join(CO, 'data', 'settings.json'), '{}');
+  const MI = [   // no '/' row: the source of Q is held by no row handed in
+    `732 42 0:69 / ${NFS} rw,noatime shared:1044 - nfs4 192.0.2.10:/volume1/w rw,vers=4.1,hard`,
+    `714 42 0:65 / ${WS} rw,relatime shared:1059 - fuse.bindfs ${NFS} rw,user_id=0,group_id=0,default_permissions,allow_other`,
+    `800 42 0:70 / ${R} rw,nosuid,nodev,relatime - fuse.rclone VSa: rw,user_id=1000,group_id=1000`,
+    `801 42 0:71 / ${RV} rw,relatime - fuse.bindfs ${R} rw`,
+    `802 42 0:72 / ${Q} rw,relatime - fuse.bindfs ${path.join(S, 'not-in-the-table')} rw`,
+    `803 42 0:73 / ${P} rw,relatime - fuse.bindfs ${NFS} rw`,
+    `850 42 259:3 / ${DISK} rw,relatime - ext4 /dev/nvme0n1p3 rw`,
+    `851 42 0:76 / ${LV} rw,relatime - fuse.bindfs ${path.join(DISK, 'data')} rw`,
+    `904 732 0:77 / ${path.join(NFS, 'drive')} rw,relatime - fuse.rclone VSd: rw,user_id=1000,group_id=1000`,   // round 2: an rclone BELOW the view's source
+  ].join('\n') + '\n';
+  const wlog = [];
+  const run = (rootDir) => { const w = SW.create({ rootDir, dataDir: path.join(rootDir, 'data'), fresh: true, armed: true, live: false, heldMs: 80, log: { warn: (l) => wlog.push(l) }, readMountinfo: () => MI, registry: () => [{ mountpoint: P, name: 'Pview', id: 'mnt-p' }, { mountpoint: path.join(NFS, 'prod'), name: 'Prod', id: 'mnt-prod' }] }); w.start(); return w; };
+  const call = (fn, p) => { try { const r = fn === 'readFileSync' ? String(fs[fn](p, 'utf8')) : fs[fn](p); return { ok: true, r }; } catch (e) { return { ok: false, code: e.code, mount: e.mount }; } };
+  const projCalls = () => ['existsSync', 'statSync', 'realpathSync'].map((fn) => [fn, call(fn, PROJ)]);
+  const said = (cs) => cs.map(([f, r]) => f + ':' + (r.ok ? 'ok' : r.code)).join(' ');
+  const rowAt = (root) => SP.roots().find((r) => r.root === root) || {};
+  let w = run(CO);
+  const before = projCalls();
+  ok(rowAt(WS).kind === 'home' && before.every(([, r]) => r.ok), `BEFORE the move (the instance on the view): the workspace bindfs is home; a project path's existsSync / statSync / realpathSync run (${said(before)})`);
+  w.stop();
+  fs.renameSync(CO, N); fs.symlinkSync(N, CO);   // THE MOVE: the checkout to the local disk, the old path a symlink to it
+  w = run(N);
+  ok(rowAt(WS).kind === 'network' && rowAt(WS).fstype === 'fuse.bindfs' && rowAt(WS).shows && rowAt(WS).shows.root === NFS && rowAt(WS).shows.fstype === 'nfs4',
+    `AFTER the move (the instance on the local disk): the SAME view is network — it shows the nfs4 mount (${JSON.stringify(rowAt(WS))})`);
+  const after = projCalls();
+  ok(after.every(([, r]) => r.ok) && after[2][1].r === PROJ, `AFTER: a project path's existsSync / statSync / realpathSync are not refused (${said(after)})`);
+  const old = call('readFileSync', path.join(CO, 'data', 'settings.json'));
+  ok(old.ok && old.r === '{}', `AFTER: a path spelled through the view to the instance's own data (the old checkout path, now a symlink) is not refused (${old.ok ? 'ok' : old.code})`);
+  ok(SW.callWords({ fn: 'statSync', path: PROJ, ms: 60, mount: rowAt(WS) }) === `statSync(${PROJ}) 60 ms, under the network mount «${WS}» — a fuse.bindfs view of the nfs4 mount «${NFS}» (witnessed, never refused)`,
+    `the witness names the true class: ${SW.callWords({ fn: 'statSync', path: PROJ, ms: 60, mount: rowAt(WS) })}`);
+  // the controls — each from its own call site (the journal says a refusal ONCE per site)
+  fs.mkdirSync(path.join(N, 'src'));
+  fs.writeFileSync(path.join(N, 'src', 'peeks.js'), "'use strict';\nconst fs = require('fs');\nexports.r = (p) => fs.statSync(p);\nexports.rv = (p) => fs.statSync(p);\nexports.q = (p) => fs.statSync(p);\nexports.p = (p) => fs.statSync(p);\n");
+  const peeks = require(path.join(N, 'src', 'peeks.js'));
+  const refused = (k, p) => { try { peeks[k](p); return null; } catch (e) { return e.code === 'EVSMOUNTSYNC' ? e.mount : `threw ${e.code}`; } };
+  const line = (k) => wlog.find((l) => l.startsWith('[mount-guard]') && l.includes(`src/peeks.js:${{ r: 3, rv: 4, q: 5, p: 6 }[k]}`)) || '';
+  ok(refused('r', path.join(R, 'f')) === R && line('r').endsWith(`the mount «${R}»`), `CONTROL: an rclone FUSE mount stays storage — refused, its words as they were: ${line('r')}`);
+  ok(refused('rv', path.join(RV, 'f')) === RV && line('rv').endsWith(`the mount «${RV}» — a fuse.bindfs view of the fuse.rclone mount «${R}»`), `CONTROL: a bindfs over an rclone mount is storage — refused, its words name what it shows: ${line('rv')}`);
+  ok(refused('q', path.join(Q, 'f')) === Q && line('q').endsWith(`the mount «${Q}» — a fuse.bindfs view whose source the mount table does not show (refused until it can be told)`), `CONTROL: a bindfs whose source row is absent is storage — refused, said so: ${line('q')}`);
+  ok(refused('p', path.join(P, 'f')) === P && rowAt(P).name === 'Pview' && rowAt(P).kind === 'storage' && line('p').endsWith(`the mount «${P}»`), `CONTROL: a product storage row on a bindfs (over the same NFS) stays storage — refused, named as the product row it is: ${line('p')}`);
+  // (c) EVERY storageRootOf CALLER, as a row: after the move a project path answers what it answered before (null)
+  const CALLERS = [
+    ['src/routes/sessions.js', 'realCwdOf — the realpath of a session\'s cwd', PROJ],
+    ['src/task-groups.js', '_realOf (membership) / _listContextFiles / _kindOf / _stat / _readText (a context row)', PROJ],
+    ['src/session-store.js', 'probeCandidate — the transcript-folder decode', PROJ],
+    ['src/server/browser-env.js', 'a project\'s agent-browser.json', path.join(PROJ, 'agent-browser.json')],
+    ['src/desktop-serve.js', 'execHere — an app\'s program path', path.join(PROJ, 'bin', 'app')],
+    ['src/ws-handler.js', 'a pending editor\'s file', path.join(PROJ, 'edit.md')],
+  ];
+  for (const [file, what, p] of CALLERS) ok(SP.storageRootOf(p) === null, `${file} ${what}: ${p.slice(S.length)} → not a storage path after the move (as before it)`);
+  const callers = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js') && rel !== 'src/storage-path.js' && /\bstorageRootOf\(/.test(fs.readFileSync(path.join(REPO, rel), 'utf8'))) callers.push(rel); } };
+  walk('src');
+  ok(JSON.stringify(callers.sort()) === JSON.stringify(CALLERS.map((c) => c[0]).sort()), `every storageRootOf caller in src/ is a row here (a new caller without a row is red): ${callers.join(' ')}`);
+  const dec = SS.recoverCwdFromProjDir(PROJ.replace(/[/._]/g, '-'));
+  ok(dec === PROJ, `the transcript-folder decode after the move probes the view again: ${dec.slice(S.length)}`);
+  // THE HOLD WORDS on each of the three view rows: a real ≥ 120 ms sync read (a FIFO a child fills) under each view — the
+  // witness words the hold (its default onHeld: the canary line); the storage view's hold runs with the guard off
+  let nf = 0;
+  const holdIn = (dir) => { const p = path.join(dir, `pipe${++nf}`); execFileSync('mkfifo', [p]); spawn('sh', ['-c', `sleep 0.12; printf 'x' > '${p}'`], { stdio: 'ignore' }); peeks.read(p); return p; };
+  fs.appendFileSync(path.join(N, 'src', 'peeks.js'), "exports.read = (p) => fs.readFileSync(p);\n");
+  delete require.cache[require.resolve(path.join(N, 'src', 'peeks.js'))];
+  Object.assign(peeks, require(path.join(N, 'src', 'peeks.js')));
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const heldWords = (p) => wlog.find((l) => l.startsWith('[canary] the main loop was held') && l.includes(`readFileSync(${p})`)) || '';
+  const pN = holdIn(PROJ); await new Promise((r) => setTimeout(r, 5));
+  ok(new RegExp(`readFileSync\\(${esc(pN)}\\) \\d{3,} ms, under the network mount «${esc(WS)}» — a fuse\\.bindfs view of the nfs4 mount «${esc(NFS)}» \\(witnessed, never refused\\) ← src/peeks\\.js:7`).test(heldWords(pN)),
+    `the hold words over NFS: ${heldWords(pN)}`);
+  w.setGuard(() => false);
+  const pS = holdIn(RV); await new Promise((r) => setTimeout(r, 5));
+  w.setGuard(() => true);
+  ok(new RegExp(`readFileSync\\(${esc(pS)}\\) \\d{3,} ms, under storage mount «${esc(RV)}» — a fuse\\.bindfs view of the fuse\\.rclone mount «${esc(R)}» ← src/peeks\\.js:7`).test(heldWords(pS)),
+    `the hold words over storage (the guard off): ${heldWords(pS)}`);
+  const pD = holdIn(LV); await new Promise((r) => setTimeout(r, 5));
+  ok(new RegExp(`readFileSync\\(${esc(pD)}\\) \\d{3,} ms, under the mount «${esc(LV)}» — a fuse\\.bindfs view of the ext4 mount «${esc(DISK)}» \\(witnessed, never refused\\) ← src/peeks\\.js:7`).test(heldWords(pD)),
+    `the hold words over the local disk — a watched root, never refused: ${heldWords(pD)}`);
+  ok(rowAt(LV).kind === 'disk' && SP.storageRootOf(path.join(LV, 'x')) === null, 'the view of the local disk is a disk root: witnessed, never a storage path');
+  const tails = ['network', 'storage', 'disk'].map((k) => { const it = MH.heldItem({ mountpoint: { network: WS, storage: RV, disk: LV }[k], kind: k, fn: 'readFileSync', path: 'x', ms: 6000, suspects: [] }); return it.detail.split('\n').pop(); });
+  ok(tails[0] === MH.HELD_TAIL.network && tails[1] === MH.HELD_TAIL.storage && tails[2] === MH.HELD_TAIL.disk && /shows another folder of this machine through a FUSE program/.test(tails[2]), `the For-you item's last words for each view row: ${tails.join(' | ')}`);
+  // ROUND 2 — A STORAGE MOUNT BELOW A VIEW'S SOURCE IS STORAGE THROUGH THE VIEW (the verifier's two scenes, guard-new.log):
+  // bindfs crosses into what is mounted below its source, so the rclone at NFS/drive and the product row NFS/prod are
+  // reached at WS/drive and WS/prod — refused there as at their own spelling, named
+  fs.appendFileSync(path.join(N, 'src', 'peeks.js'), "exports.d = (p) => fs.statSync(p);\nexports.pr = (p) => fs.statSync(p);\n");
+  delete require.cache[require.resolve(path.join(N, 'src', 'peeks.js'))];
+  Object.assign(peeks, require(path.join(N, 'src', 'peeks.js')));
+  const five = (p) => ['existsSync', 'statSync', 'realpathSync', 'readdirSync', 'readFileSync'].map((fn) => [fn, call(fn, p)]);
+  const lineAt = (n) => wlog.find((l) => l.startsWith('[mount-guard]') && l.includes(`src/peeks.js:${n}`)) || '';
+  const drive = path.join(WS, 'drive'), prod = path.join(WS, 'prod');
+  const fd = five(path.join(drive, 'f')), fp = five(path.join(prod, 'f'));
+  ok(fd.every(([, r]) => !r.ok && r.code === 'EVSMOUNTSYNC' && r.mount === drive) && SP.storageRootOf(path.join(drive, 'f')).root === drive && refused('d', path.join(drive, 'f')) === drive
+    && lineAt(8).endsWith(`the mount «${drive}» — the fuse.rclone mount «${path.join(NFS, 'drive')}» reached through the fuse.bindfs view «${WS}»`),
+    `an rclone BELOW the NFS source, reached through the view: all five sync calls refused (${said(fd)}), named: ${lineAt(8)}`);
+  ok(fp.every(([, r]) => !r.ok && r.code === 'EVSMOUNTSYNC' && r.mount === prod) && SP.storageRootOf(path.join(prod, 'f')).name === 'Prod' && refused('pr', path.join(prod, 'f')) === prod
+    && lineAt(9).endsWith(`the mount «${prod}» — the storage folder «${path.join(NFS, 'prod')}» reached through the fuse.bindfs view «${WS}»`),
+    `a product storage row BELOW the NFS source, reached through the view: all five refused (${said(fp)}), named: ${lineAt(9)}`);
+  const own = five(path.join(NFS, 'drive', 'f'));
+  ok(own.every(([, r]) => !r.ok && r.code === 'EVSMOUNTSYNC' && r.mount === path.join(NFS, 'drive')) && after.every(([, r]) => r.ok), 'the same rclone at its own spelling is refused too; a project path beside it through the view still runs');
+  w.stop();
+  SP.setRoots([]);
+  fs.rmSync(S, { recursive: true, force: true });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

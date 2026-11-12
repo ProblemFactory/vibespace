@@ -8346,6 +8346,7 @@ export default {
   "VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.": "VibeSpace はメインループからストレージフォルダーを待つことを拒否します。この呼び出しが実行されたのは、保護がオフ（mounts.mainThreadSyncGuard）だったか、サーバーの起動中だったためです。", // lane hub-fuse-sync-guard
   "This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.": "ここは VibeSpace 自身が置かれているネットワークフォルダーです。ここでの呼び出しは記録されるだけで、拒否されることはありません。", // lane hub-fuse-sync-guard
   "Calls on a network folder are watched, never refused.": "ネットワークフォルダーでの呼び出しは記録されるだけで、拒否されることはありません。", // lane hub-fuse-sync-guard
+  "This folder shows another folder of this machine through a FUSE program: its calls are watched, never refused.": "このフォルダーは FUSE プログラムを通してこのマシンの別のフォルダーを見せています。ここでの呼び出しは記録されるだけで、拒否されることはありません。", // lane mount-class-by-source
   "page asks for a sign-in": "ページがサインインを要求", // lane browser-ui-prompts
   "Permission {kind} granted to {origin} by the agent": "エージェントが {origin} に {kind} の権限を許可しました", // lane browser-ui-prompts-r2
   "Permission {kind} denied for {origin} by the agent": "エージェントが {origin} の {kind} の権限を拒否しました", // lane browser-ui-prompts-r2

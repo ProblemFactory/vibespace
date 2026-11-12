@@ -8347,6 +8347,7 @@ export default {
   "VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.": "VibeSpace 拒绝在主循环里等待存储文件夹；这次调用之所以执行，是因为保护开关已关闭（mounts.mainThreadSyncGuard）或服务器还在启动。", // lane hub-fuse-sync-guard
   "This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.": "这是 VibeSpace 自身所在的网络文件夹：这里的调用只会被记录，从不拒绝。", // lane hub-fuse-sync-guard
   "Calls on a network folder are watched, never refused.": "网络文件夹上的调用只会被记录，从不拒绝。", // lane hub-fuse-sync-guard
+  "This folder shows another folder of this machine through a FUSE program: its calls are watched, never refused.": "这个文件夹通过 FUSE 程序呈现本机的另一个文件夹：这里的调用只会被记录，从不拒绝。", // lane mount-class-by-source
   "page asks for a sign-in": "网页要求登录", // lane browser-ui-prompts
   "Permission {kind} granted to {origin} by the agent": "agent 已允许 {origin} 使用 {kind} 权限", // lane browser-ui-prompts-r2
   "Permission {kind} denied for {origin} by the agent": "agent 已拒绝 {origin} 的 {kind} 权限", // lane browser-ui-prompts-r2

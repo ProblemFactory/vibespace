@@ -12,6 +12,13 @@
 //      sibling sharing the root's prefix is not
 //   ⑤ storage-path: no roots set ⇒ null everywhere (the device daemon, a child); set ⇒ storageRootOf names the storage
 //      root and never a home / network one
+//   ⑥ A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source): the box's two real rows — the instance on the view
+//      ⇒ home, on the local disk ⇒ network, every project path the same before and after; over the local disk 'disk' (a
+//      watched root, never refused — the watch follows the daemon, only the refusal follows the source); the
+//      controls stay storage (rclone, sshfs, a bindfs over them, a source not a path or absent, a product row, a product
+//      folder); the match (escapes, `bindfs /d /d`, a view of a view, a loop ⇒ storage); the words
+//      ROUND 2 (law 3 made exact): a storage mount or product row BELOW a view's source is storage through the view; equal
+//      mount points ⇒ the last row before the view; rows after it inside it never its source; no depth rule; disk words
 // Run: node scripts/test-mount-path-class.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -99,6 +106,87 @@ SP.setRoots(roots, { rootDir: ROOT_DIR, dataDir: DATA_DIR, home: HOME });
 ok(SP.storageRootOf(`${HOME}/vibespace-mounts/NAS/x`).root === `${HOME}/vibespace-mounts/NAS` && SP.storageRootOf(`${HOME}/workspace/proj`) === null && SP.rootOf(`${HOME}/workspace/proj`).kind === 'home' && SP.storageRootOf('/mnt/nas_public/a') === null, 'storageRootOf names a storage root, never the home bindfs or a network NFS');
 ok(SP.storageRootOf(`${DATA_DIR}/x`) === null && SP.roots().length === 10, 'the instance\'s own data is never a storage path');
 SP.setRoots([]);
+
+console.log('⑥ A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)');
+{ // the box's two real rows (addresses removed) — the line order of the box: the NFS row first, though the view's mount id
+  // (714) is lower than the NFS mount's (732): ids are reused, the line order is the mount order
+  const NFS_ROW = '732 42 0:69 / /mnt/nfs_workspace rw,noatime shared:1044 - nfs4 192.0.2.10:/volume1/w rw,vers=4.1,hard';
+  const VIEW_ROW = `714 42 0:65 / ${HOME}/workspace rw,relatime shared:1059 - fuse.bindfs /mnt/nfs_workspace rw,user_id=0,group_id=0,default_permissions,allow_other`;
+  const DISK = '1 0 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw';
+  const R = (lines, o = {}) => MPC.rootsOf({ mounts: MPC.parseMountinfo(lines.join('\n')), ...o });
+  const atIn = (roots, p) => roots.find((r) => r.root === p);
+  const CO = `${HOME}/workspace/AIWorkspace/vibespace`, N = `${HOME}/vibespace`;
+  const before = R([DISK, NFS_ROW, VIEW_ROW], { rootDir: CO, dataDir: `${CO}/data` });
+  const after = R([DISK, NFS_ROW, VIEW_ROW], { rootDir: N, dataDir: `${N}/data` });
+  ok(atIn(before, `${HOME}/workspace`).kind === 'home' && atIn(after, `${HOME}/workspace`).kind === 'network', 'the two real rows: the instance ON the view ⇒ home; the instance on the local disk ⇒ network (it shows the nfs4 mount)');
+  ok(JSON.stringify(atIn(after, `${HOME}/workspace`).shows) === JSON.stringify({ root: '/mnt/nfs_workspace', fstype: 'nfs4' }) && atIn(after, '/mnt/nfs_workspace').kind === 'network', 'the view\'s row says what it shows; the NFS mount itself stays network');
+  const ctxA = { mountRoots: after, rootDir: N, dataDir: `${N}/data`, home: HOME };
+  SP.setRoots(after, { rootDir: N, dataDir: `${N}/data`, home: HOME });
+  ok(SP.storageRootOf(`${HOME}/workspace/AIWorkspace/proj/a.md`) === null && SP.storageRootOf(`${CO}/data/settings.json`) === null && MPC.rootOf(`${CO}/data/x`, ctxA).kind === 'network',
+    'law 2 — every project path, and the old checkout path through the view, answers as before the move: never a storage path');
+  SP.setRoots([]);
+  const shuffled = R([DISK, VIEW_ROW, NFS_ROW], { rootDir: N });
+  ok(atIn(shuffled, `${HOME}/workspace`).kind === 'network', 'a source mount listed AFTER the view (remounted since) is still its source: the view shows it');
+  // over the machine's own disk: a WATCHED root (a stopped FUSE daemon holds every reader), never a storage one
+  const local = R([DISK, `90 1 0:80 / ${HOME}/data rw - fuse.bindfs /srv/data rw`], { rootDir: N });
+  SP.setRoots(local, { rootDir: N });
+  ok(atIn(local, `${HOME}/data`).kind === 'disk' && JSON.stringify(atIn(local, `${HOME}/data`).shows) === JSON.stringify({ root: '/', fstype: 'ext4' }) && MPC.pathClass(`${HOME}/data/x`, { mountRoots: local }) === 'mount' && SP.storageRootOf(`${HOME}/data/x`) === null,
+    'a bindfs over the local disk is a watched root (disk: witnessed, never refused) — it shows the ext4 mount «/»');
+  SP.setRoots([]);
+  ok(atIn(R([DISK, `90 1 0:80 / ${N} rw - fuse.bindfs /srv/data rw`], { rootDir: N }), N).kind === 'home', 'a view of the local disk the instance lives on is still home');
+  // the controls: storage stays storage
+  const rcl = `800 1 0:70 / /mnt/r rw - fuse.rclone VSa: rw`, sshfs = '810 1 0:75 / /mnt/s rw - fuse.sshfs u@h:/x rw';
+  const ctl = R([DISK, NFS_ROW, rcl, sshfs, `801 1 0:71 / ${HOME}/rv rw - fuse.bindfs /mnt/r/sub rw`, `802 1 0:72 / ${HOME}/q rw - fuse.bindfs bindfs rw`, `803 1 0:73 / ${HOME}/p rw - fuse.bindfs /mnt/nfs_workspace rw`, `804 1 0:74 / ${HOME}/sv rw - fuse.bindfs /mnt/s rw`],
+    { rootDir: N, registry: [{ mountpoint: `${HOME}/p`, name: 'P', id: 'mnt-p' }] });
+  ok(atIn(ctl, '/mnt/r').kind === 'storage' && atIn(ctl, '/mnt/s').kind === 'storage', 'an rclone and an sshfs mount stay storage');
+  ok(atIn(ctl, `${HOME}/rv`).kind === 'storage' && atIn(ctl, `${HOME}/rv`).shows.fstype === 'fuse.rclone' && atIn(ctl, `${HOME}/sv`).kind === 'storage', 'a bindfs over an rclone (or sshfs) mount is storage');
+  ok(atIn(ctl, `${HOME}/q`).kind === 'storage' && atIn(ctl, `${HOME}/q`).shows === null, 'a bindfs whose source is not a path (an fsname given by hand) cannot be told ⇒ storage');
+  ok(atIn(ctl, `${HOME}/p`).kind === 'storage' && atIn(ctl, `${HOME}/p`).name === 'P' && atIn(ctl, `${HOME}/p`).id === 'mnt-p', 'a product storage row on a bindfs (over NFS) stays storage');
+  ok(atIn(R([NFS_ROW, VIEW_ROW], { rootDir: N }), `${HOME}/workspace`).kind === 'network' && atIn(R([VIEW_ROW], { rootDir: N }), `${HOME}/workspace`).kind === 'storage'
+    && atIn(R([`90 1 0:80 / ${HOME}/d rw - fuse.bindfs /srv/data rw`], { rootDir: N }), `${HOME}/d`).kind === 'storage', 'a bindfs whose source row is absent from the rows handed in is storage (no / row: nothing holds it)');
+  ok(atIn(R([DISK, `90 1 0:80 / ${HOME}/u rw - fuse.bindfs ${HOME}/vibespace-mounts/Gone/x rw`], { rootDir: N, registry: [{ mountpoint: `${HOME}/vibespace-mounts/Gone` }] }), `${HOME}/u`).kind === 'storage', 'a view of a product storage folder (mounted or not) is storage');
+  // the match: escapes, an overlay of its own source, a view of a view, a loop
+  ok(atIn(R([DISK, '91 1 0:81 / /mnt/my\\040nfs rw - nfs4 192.0.2.10:/v rw', `92 1 0:82 / ${HOME}/w2 rw - fuse.bindfs /mnt/my\\040nfs/a rw`], { rootDir: N }), `${HOME}/w2`).kind === 'network', 'the source\'s octal escapes are undone before the match');
+  ok(atIn(R([DISK, '93 1 0:83 / /srv/d rw - fuse.bindfs /srv/d rw'], { rootDir: N }), '/srv/d').kind === 'disk' && atIn(R([DISK, '94 1 0:84 / /srv/n rw - nfs4 192.0.2.10:/n rw', '95 1 0:85 / /srv/n rw - fuse.bindfs /srv/n rw'], { rootDir: N }), '/srv/n').kind === 'network',
+    '`bindfs /d /d` (an overlay of its own source) shows what lies beneath it: the local disk ⇒ disk; an NFS mount ⇒ network');
+  ok(atIn(R([DISK, NFS_ROW, `96 1 0:86 / /v1 rw - fuse.bindfs /mnt/nfs_workspace rw`, `97 1 0:87 / /v2 rw - fuse.bindfs /v1/x rw`], { rootDir: N }), '/v2').kind === 'network', 'a view of a view is followed to what it shows');
+  ok(atIn(R([DISK, '98 1 0:88 / /a rw - fuse.bindfs /b rw', '99 1 0:89 / /b rw - fuse.bindfs /a rw'], { rootDir: N }), '/a').kind === 'storage', 'two views showing each other (a loop) cannot be told ⇒ storage');
+  // ROUND 2 — law 3 made exact: a path is refused when what it REACHES is storage, by whichever spelling (bindfs crosses
+  // into every mount below its source): the verifier's three storage-below arrangements, 0 differences from the law
+  const below = (extra, o = {}) => R([DISK, NFS_ROW, VIEW_ROW, ...extra], { rootDir: N, ...o });
+  const rUnderNfs = below(['900 732 0:90 / /mnt/nfs_workspace/drive rw - fuse.rclone VSd: rw']);
+  SP.setRoots(rUnderNfs, { rootDir: N, home: HOME });
+  ok(atIn(rUnderNfs, `${HOME}/workspace/drive`).kind === 'storage' && SP.storageRootOf(`${HOME}/workspace/drive/x`).root === `${HOME}/workspace/drive` && SP.storageRootOf('/mnt/nfs_workspace/drive/x').root === '/mnt/nfs_workspace/drive'
+    && SP.storageRootOf(`${HOME}/workspace/proj/x`) === null, 'an rclone mounted below the NFS source is storage THROUGH the view (and at its own spelling); the rest of the view stays network');
+  SP.setRoots([]);
+  ok(MPC.viewWords(atIn(rUnderNfs, `${HOME}/workspace/drive`)) === ` — the fuse.rclone mount «/mnt/nfs_workspace/drive» reached through the fuse.bindfs view «${HOME}/workspace»`, 'its words name the mount reached and the view it is reached through');
+  const rUnderExt4 = R([DISK, `90 1 0:80 / ${HOME}/data rw - fuse.bindfs /srv/data rw`, '91 1 0:81 / /srv/data/r rw - fuse.rclone VSe: rw'], { rootDir: N });
+  ok(atIn(rUnderExt4, `${HOME}/data/r`).kind === 'storage' && atIn(rUnderExt4, `${HOME}/data`).kind === 'disk', 'an rclone below a local-disk source is storage through the view; the view stays disk');
+  const regUnderNfs = below([], { registry: [{ mountpoint: '/mnt/nfs_workspace/prod', name: 'Prod', id: 'mnt-prod' }] });
+  ok(atIn(regUnderNfs, `${HOME}/workspace/prod`).kind === 'storage' && atIn(regUnderNfs, `${HOME}/workspace/prod`).name === 'Prod' && atIn(regUnderNfs, `${HOME}/workspace/prod`).id === 'mnt-prod'
+    && MPC.viewWords(atIn(regUnderNfs, `${HOME}/workspace/prod`)) === ` — the storage folder «/mnt/nfs_workspace/prod» reached through the fuse.bindfs view «${HOME}/workspace»`, 'a product storage row below the NFS source (not mounted) is storage through the view, named');
+  const homeBelow = R([DISK, NFS_ROW, VIEW_ROW, '900 732 0:90 / /mnt/nfs_workspace/drive rw - fuse.rclone VSd: rw', '901 732 0:91 / /mnt/nfs_workspace/nas2 rw - nfs4 192.0.2.11:/x rw'], { rootDir: CO, dataDir: `${CO}/data` });
+  ok(atIn(homeBelow, `${HOME}/workspace`).kind === 'home' && !atIn(homeBelow, `${HOME}/workspace/drive`) && !atIn(homeBelow, `${HOME}/workspace/nas2`) && atIn(homeBelow, '/mnt/nfs_workspace/drive').kind === 'storage',
+    'a view the instance lives on derives nothing: home wins through it, as on the release (the rclone is refused at its own spelling)');
+  ok(!atIn(below(['902 714 0:92 / /mnt/nfs_workspace/x rw - nfs4 192.0.2.12:/y rw']), `${HOME}/workspace/x`) && atIn(below(['903 714 0:93 / /mnt/nfs_workspace/s rw - ext4 /dev/sdc1 rw']), `${HOME}/workspace/s`).kind === 'disk',
+    'below a network view an NFS adds nothing, a local stick is a disk part (named by its own type)');
+  ok(atIn(below([`904 714 0:94 / ${HOME}/workspace/drive rw - nfs4 192.0.2.13:/z rw`, '900 732 0:90 / /mnt/nfs_workspace/drive rw - fuse.rclone VSd: rw']), `${HOME}/workspace/drive`).kind === 'network', 'a real row at the derived spelling wins (it is what that spelling shows)');
+  // equal mount points: the last row listed BEFORE the view is what it entered (a mount put over its source later is not)
+  ok(atIn(R([DISK, '50 1 0:50 / /srv/r rw - fuse.rclone VSf: rw', `51 1 0:51 / ${HOME}/rv2 rw - fuse.bindfs /srv/r rw`, '52 1 259:9 / /srv/r rw - ext4 /dev/sdd1 rw'], { rootDir: N }), `${HOME}/rv2`).kind === 'storage',
+    'a local mount put over an rclone source AFTER the view started does not change it: still storage (the view serves the rclone)');
+  ok(atIn(R([DISK, '53 1 0:53 / /srv/s rw - nfs4 192.0.2.14:/s rw', '54 1 0:54 / /srv/s rw - fuse.rclone VSg: rw', `55 1 0:55 / ${HOME}/sv2 rw - fuse.bindfs /srv/s rw`], { rootDir: N }), `${HOME}/sv2`).kind === 'storage'
+    && atIn(R([DISK, '54 1 0:54 / /srv/s rw - fuse.rclone VSg: rw', '53 1 0:53 / /srv/s rw - nfs4 192.0.2.14:/s rw', `55 1 0:55 / ${HOME}/sv2 rw - fuse.bindfs /srv/s rw`], { rootDir: N }), `${HOME}/sv2`).kind === 'network',
+    'two rows at the source\'s mount point, both before the view: the LAST listed is what it shows (rclone over NFS ⇒ storage, NFS over rclone ⇒ network)');
+  ok(atIn(R([DISK, '60 1 0:60 / /d rw - fuse.bindfs /d/sub rw', '61 60 0:61 / /d/sub rw - fuse.rclone VSh: rw'], { rootDir: N }), '/d').kind === 'disk', 'a row listed after the view inside its own mount point is never its source (`bindfs /d/sub /d`, then an rclone at /d/sub ⇒ the view shows /)');
+  { const chain = [DISK, NFS_ROW, '70 1 0:70 / /c0 rw - fuse.bindfs /mnt/nfs_workspace rw'];
+    for (let k = 1; k <= 12; k++) chain.push(`${70 + k} 1 0:${70 + k} / /c${k} rw - fuse.bindfs /c${k - 1} rw`);
+    ok(atIn(R(chain, { rootDir: N }), '/c12').kind === 'network', 'a chain of 13 views is followed to what it shows (no depth rule: the seen set ends a loop)'); }
+  ok(MPC.viewWords(atIn(R([DISK, '80 1 0:20 / /tmp rw - tmpfs tmpfs rw', `81 1 0:81 / ${HOME}/t rw - fuse.bindfs /tmp/x rw`], { rootDir: N }), `${HOME}/t`)) === ' — a fuse.bindfs view of the tmpfs mount «/tmp»', 'a disk view\'s words name the type it shows (tmpfs here)');
+  // the words: only a view's own row adds any
+  ok(MPC.viewWords(atIn(after, `${HOME}/workspace`)) === ' — a fuse.bindfs view of the nfs4 mount «/mnt/nfs_workspace»' && MPC.viewWords(atIn(ctl, `${HOME}/q`)) === ' — a fuse.bindfs view whose source the mount table does not show (refused until it can be told)'
+    && MPC.viewWords(atIn(local, `${HOME}/data`)) === ' — a fuse.bindfs view of the ext4 mount «/»'
+    && MPC.viewWords(atIn(ctl, `${HOME}/p`)) === '' && MPC.viewWords(atIn(ctl, '/mnt/r')) === '' && MPC.viewWords(atIn(before, `${HOME}/workspace`)) === '', 'the words name what a view shows; a product row, a plain mount and home add nothing');
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
