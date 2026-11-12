@@ -45,6 +45,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { diffListings } from './cdp-protocol-fetch.mjs';
+import { extract, knownNames, versionBeside } from './agent-browser-cdp-census.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const C = require('../src/cdp-census.js');
@@ -240,6 +241,29 @@ const sc = bumped.domains.find((d) => d.domain === 'Page').commands.find((c) => 
 bumped.domains.find((d) => d.domain === 'Storage').events.push({ name: 'zzzEvent', params: [] });
 const dB = diffListings(bumped, f154);
 ok(dB.params.changed.length === 1 && dB.params.changed[0].method === 'Page.startScreencast' && dB.params.changed[0].added.join() === 'sendLastFrame?' && dB.events.removed.join() === 'Storage.zzzEvent', '⑥ where both sides recorded them, a changed parameter list and a removed event are named');
+
+// ═══ ⑨ what OUR driver sends on a mediated lease (lane chrome-157 r2 — 主开发's condition 6 as a fast pin) ═══
+console.log('— ⑨ the CDP methods agent-browser sends (names only, read from its binary — never run): every one has a census row');
+{
+  const TV = require('../src/browser-verbs.js').TABLE_VERSION;
+  const ABF = JSON.parse(fs.readFileSync(path.join(FIX, 'browser-verbs', `cdp-methods-${TV}.json`), 'utf8'));
+  ok(ABF.version === TV && ABF.methods.length >= 60 && ABF.events.length >= 20 && /never run/.test(ABF.extractedFrom), `⑨ the driver's method fixture is for the version the verbs table was measured on (${TV}): ${ABF.methods.length} methods, ${ABF.events.length} events — a table bump without a new extraction is red`);
+  const bad = ABF.methods.filter((m) => !C.hasRow(m) || [false, true].some((p) => /^(method_unclassified|bad_message):/.test(verdict(M, m, { paused: p }))));
+  ok(bad.length === 0, `⑨ every method agent-browser ${TV} sends has a census row — none refused method_unclassified or bad_message in either state (a rowless one would be an OUTAGE for every agent on a shared profile, not a probe's -32601)`, bad.join(', '));
+  ok(Object.keys(ABF.notCdp).length > 0 && Object.values(ABF.notCdp).every((r) => /^page JS — /.test(r)), `⑨ the ${Object.keys(ABF.notCdp).length} Domain.word strings that are no known CDP name are each judged by hand (page JavaScript — CSS.escape, localStorage.getItem, a component's displayName…), none UNJUDGED`);
+  // the extractor's own control: a run-together string table (the lane's first extraction found 20 fused fragments)
+  const syn = 'zz.contentSizePage.captureScreenshotInput.dispatchKeyEventkeyDownDOM.getDocumentDOMEmulation.setTimezoneOverridedeviceScaleFactorEmulation.setDeviceMetricsOverride Page.zzzRowlessThing localStorage.getItem(';
+  const ex = extract(syn, knownNames(REPO));
+  ok(['DOM.getDocument', 'Emulation.setDeviceMetricsOverride', 'Emulation.setTimezoneOverride', 'Input.dispatchKeyEvent', 'Page.captureScreenshot'].every((m) => ex.methods.includes(m)) && ex.unmatched.includes('Page.zzzRowlessThing') && ex.unmatched.includes('Storage.getItem'),
+    '⑨ the extractor reads a run-together string table: names that follow another string with no gap, after a greedy neighbour, and a Domain.word no Chrome lists stays UNMATCHED (never silently dropped)', JSON.stringify(ex));
+  // re-extracted when the binary is here (VS_AGENT_BROWSER_BIN, or the instance's own install) — else the fixture is the evidence
+  const bin = process.env.VS_AGENT_BROWSER_BIN || path.join(REPO, `data/browser-tools/agent-browser-${TV}/node_modules/agent-browser/bin/agent-browser-linux-x64`);
+  if (fs.existsSync(bin) && versionBeside(bin) === TV) {
+    const r = extract(fs.readFileSync(bin), knownNames(REPO));
+    ok(r.methods.join() === ABF.methods.join() && r.events.join() === ABF.events.join() && r.unmatched.every((n) => Object.prototype.hasOwnProperty.call(ABF.notCdp, n)),
+      `⑨ re-extracted from ${path.basename(bin)} ${TV} (read as bytes): the same ${r.methods.length} methods and ${r.events.length} events, every unmatched name already judged`, JSON.stringify({ methods: r.methods.length, events: r.events.length, newUnmatched: r.unmatched.filter((n) => !(n in ABF.notCdp)) }));
+  } else console.log(`  · ⑨ no agent-browser ${TV} binary here (VS_AGENT_BROWSER_BIN unset, ${path.relative(REPO, bin)} absent) — the checked-in fixture is the evidence; scripts/agent-browser-cdp-census.mjs <binary> --write re-reads it`);
+}
 
 // ═══ CONTROLS ═══════════════════════════════════════════════════════════════
 console.log('— CONTROLS: patched census copies — a new row removed, an until mark dropped, a surviving row mis-marked, a chrome mark dropped, a view classed read');
