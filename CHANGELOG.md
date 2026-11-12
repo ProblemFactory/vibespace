@@ -20,6 +20,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a Gmail folder cannot be read, its row now says the sync stopped and that it will try again, instead of showing it as synced.
 - If an update stops partway, it now puts back the files it changed and says so, so the next update is not blocked.
 - VibeSpace no longer freezes for seconds after starting with a large usage history: it loads in the background while the usage window says loading.
+- Archiving, starring or renaming many conversations in a row no longer reverts when the server is slow.
+- A change the server has not taken yet stays on screen and goes again with your next change, or on its own while the page stays open.
+- A change made while a page is still loading is saved too.
+- When two devices change the same conversation, the later change stands; a laptop waking from sleep no longer puts back its old screen.
+- A change made more than a week before it reaches the server is not kept, and the page says so where it shows something else because of it.
+- Importing your settings is no longer undone by an older change that was still on its way.
 
 ## 2.369.396 — 2026-11-11
 
