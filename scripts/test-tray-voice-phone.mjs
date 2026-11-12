@@ -10,7 +10,8 @@
 // A throwaway server in a git worktree (test-mobile-back-chrome's harness: the built public/ overlaid, two For-you asks
 // seeded) and headless Chrome over raw CDP at the owner's 448×850, DPR 3, an Android UA, touch, hover:none / pointer:coarse.
 // The microphone, MediaRecorder and /api/voice/* are stubbed IN THE PAGE (never a vendor call; the request that leaves the
-// page is counted — what the hub would have logged).
+// page is counted — what the hub would have logged), and so is the voice-input row of the hub's plugins-updated broadcast
+// (since rank 13 a kept plugin status broadcasts its change; the scratch hub has no key, so its row says off).
 //   ① THE OWNER'S SEQUENCE: the sheet (the phone's badge now opens its page — the same rows; lane foryou-honest) → its row → Reply → the microphone → 2.4 s → the stop HELD on 「0:02」 until the capsule
 //      has redrawn under the finger (asserted: the span it went down on left the page before the lift — the field's shape)
 //      ⇒ the tray stays open, ONE request left the page, the words are in the reply box (the same node, still focused),
@@ -134,6 +135,27 @@ const VOICE_STUB = `(() => {
     if (s.includes('/api/voice/teach')) return Promise.resolve(json({}));
     return real(u, o);
   };
+  // THE VOICE ROW OF THE BROADCAST, STUBBED TOO (hub-sync-holds seam for 2.369.397): a plugin's status is a kept fact since
+  // rank 13, and the refresh that changes one BROADCASTS plugins-updated with every row — the voice-input row says the
+  // scratch hub's truth (no Dropline key, so off) and the page's one voice fact obeys it (src/lib/voice-input.js
+  // noteVoicePlugins). Voice «on» stays the PAGE's premise, like /api/voice/status above: the /ws frames of that type answer
+  // the row as on. Never a key in the scratch hub — a keyed hub arms its own Dropline roads (src/server/dropline-client.js's
+  // base is fixed, the teach engine flushes on a timer): one stray call would be a vendor request.
+  const RealWS = window.WebSocket;
+  window.__voiceRows = 0;
+  const voiceOn = (data) => {
+    if (typeof data !== 'string' || data.indexOf('"plugins-updated"') < 0) return data;
+    try {
+      const m = JSON.parse(data);
+      if (!m || m.type !== 'plugins-updated' || !Array.isArray(m.plugins)) return data;
+      m.plugins = m.plugins.map((p) => (p && p.id === 'voice-input' ? (window.__voiceRows++, { ...p, enabled: true, configured: true, running: true }) : p));
+      return JSON.stringify(m);
+    } catch { return data; }
+  };
+  window.WebSocket = class extends RealWS {
+    set onmessage(fn) { super.onmessage = typeof fn === 'function' && String(this.url).endsWith('/ws') ? (e) => fn(new MessageEvent('message', { data: voiceOn(e.data), origin: e.origin })) : fn; }
+    get onmessage() { return super.onmessage; }
+  };
 })();`;
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: VOICE_STUB });
 await cdp('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 3, mobile: true });
@@ -160,7 +182,7 @@ const boot = async () => {
   await evalJs('app.ready.then(() => true)');
   await waitFor('!app.layoutManager._restoring', 15000);
   await sleep(1200);
-  return evalJs(`(() => { const rec = typeof window.__vsOp === 'function'; window.__ops = []; const o = window.__vsOp; window.__vsOp = (n, d) => { window.__ops.push({ op: n, ...(d || {}) }); return o && o(n, d); }; return { rec, mobile: app.isMobile, touch: app.isTouch, absent: document.documentElement.classList.contains('voice-absent'), state: history.state }; })()`);
+  return evalJs(`(() => { const rec = typeof window.__vsOp === 'function'; window.__ops = []; const o = window.__vsOp; window.__vsOp = (n, d) => { window.__ops.push({ op: n, ...(d || {}) }); return o && o(n, d); }; return { rec, voiceRows: window.__voiceRows | 0, mobile: app.isMobile, touch: app.isTouch, absent: document.documentElement.classList.contains('voice-absent'), state: history.state }; })()`);
 };
 /** the tray open, Reply on its first ask: the box focused (the keyboard up on a phone) */
 const openReply = async () => {
