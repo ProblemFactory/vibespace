@@ -191,7 +191,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
     held: () => !!wedged,
     // a stop never waits for the child: it is killed and left to the kernel (a child wedged in a storage call ends when the call
     // does; the hub's own exit does not join it)
-    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.kill('SIGKILL'); } catch { } try { w && refs(w, false); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped' }); next(); },
+    stop() { stopped = true; const w = worker; worker = null; if (timer) { clearTimeout(timer); timer = null; } if (idleT) { clearTimeout(idleT); idleT = null; } if (wedgedT) { clearTimeout(wedgedT); wedgedT = null; } try { w && w.kill('SIGKILL'); } catch { } try { w && refs(w, false); } catch { } const it = cur; cur = null; if (it) it.resolve({ error: 'stopped', ...(it.progress ? { partial: it.progress } : {}) }); next(); },   // round 3 §8: a stopped batch answers what it removed
   };
 }
 

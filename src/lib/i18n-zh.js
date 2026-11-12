@@ -3024,6 +3024,7 @@ export default {
   "Background job {id}": "后台任务 {id}",
   "Background Work engine failed to start: {error}": "后台工作引擎启动失败：{error}",
   "Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.": "后台工作的存储已损坏 — 记录已按「未核实」恢复；请在任务面板里处理。原始内容保存在 {file}；在移走或删除这个文件之前，旧的任务日志不会被清理。",
+  "{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.": "{file} 在数据文件夹里的名字像是被搁置的任务记录文件，所以它在那里时旧的任务日志不会被清理 — 如果不需要，请把它移走。",
   "Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.": "{file} 里的任务记录无法读取。在移走或删除这个文件之前，旧的任务日志不会被清理 — 取出你需要的内容后把它移走，清理会自动继续。",
   "Background job {name} has a notice for you — open it in the Jobs panel": "后台任务 {name} 有一条给你的通知 — 请在任务面板里打开它",
   "global setting": "全局设置",

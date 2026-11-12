@@ -3023,6 +3023,7 @@ export default {
   "Background job {id}": "バックグラウンドジョブ {id}",
   "Background Work engine failed to start: {error}": "バックグラウンド作業エンジンの起動に失敗しました：{error}",
   "Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.": "バックグラウンド作業のストアが破損していました — 記録は未確認として復元されました。ジョブパネルで解決してください。元の内容は {file} に保存されています。このファイルを移動または削除するまで、古いジョブのログは片付けられません。",
+  "{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.": "データフォルダーの {file} は退避されたジョブ記録ファイルのような名前なので、それがある間は古いジョブのログを片付けません — 不要なら移動してください。",
   "Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.": "{file} のジョブの記録を読み取れませんでした。このファイルを移動または削除するまで、古いジョブのログは片付けられません — 必要な内容を取り出したら移動してください。片付けは自動で再開します。",
   "Background job {name} has a notice for you — open it in the Jobs panel": "バックグラウンドジョブ {name} からあなたへの通知があります — ジョブパネルで開いてください",
   "forced ON for this job": "このジョブでは強制オン",

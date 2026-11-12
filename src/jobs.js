@@ -2544,7 +2544,7 @@ class JobManager {
     // round 2: the record FIRST (read in the child, its shape validated) — what was owed before a restart is re-sent below, and a
     // catch-up of an odd shape steers nothing
     if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
-    if (this._logsState === null) return { error: 'the catch-up record could not be read — nothing removed (a fresh record would overwrite what it owes)' };   // a MISSING record reads as none (adopted empty); a failed read waits
+    if (this._logsState === null) { const e = 'the catch-up record could not be read — nothing removed (a fresh record would overwrite what it owes)'; if (this._logsLastErr !== e) { this._logsLastErr = e; this.d.log(`[jobs] job-logs: ${e}`); } return { error: e }; }   // a MISSING record reads as none (adopted empty); a failed read waits
     if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);   // what the storage did not take last time, first
     // the runs the hub still holds work for: a scope reap that has not finished re-reads its run's pid.json every tick
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
@@ -2575,8 +2575,8 @@ class JobManager {
     const st = this._logsState;
     if (!st.catchUp && ans.more) { // more than one pass owes: THE CATCH-UP opens — said once, with its count
       st.catchUp = { startedAt: at, counted: ans.nameOld, removed: 0, entries: 0, jobDirs: 0, passes: 0 };
-      this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));
       this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: on disk at the open — a restart resumes it, never a second start line
+      this.d.log(LS.words.start({ counted: st.catchUp.counted, max: cfg.max, gapMs: cfg.gapMs }));   // round 3 §8: said AFTER the record is on disk (a kill between never says it twice)
     }
     const cu = st.catchUp;
     if (cu) { cu.removed += ans.removed; cu.entries += ans.entries; cu.jobDirs = (cu.jobDirs || 0) + (ans.jobDirs || 0); cu.passes++; }
@@ -2612,7 +2612,9 @@ class JobManager {
     if (this._logsState === null) this._logsAdopt(ans.state);   // the record as read by this pass — what was said before the restart
     if ((this._logsState.heldNow || []).join() !== files.join()) { this._logsState.heldNow = files.slice(0, 20); this._logsSave(); }   // the hold in the record: «resumes» is said even after a restart
     const said = new Set([...this._logsState.heldSaid, ...this._logsSaidNow]);
-    for (const f of files) if (!said.has(f)) { this._forYou(null, M.forYouCopy(null, 'records-held', { file: path.join(this.d.dataDir, f) })); this._logsSaidNow.add(f); }
+    // round 3 §8: a name this hub gives a set-aside (`<store>.corrupt-<ms>`) is «records that could not be read»; any other name was a
+    // person's — its item says only what is true of it. Names only, never the data folder's path (round 3 §6)
+    for (const f of files) if (!said.has(f)) { this._forYou(null, M.forYouCopy(null, /^jobs(?:-archive)?\.json\.corrupt-\d+$/.test(f) ? 'records-held' : 'set-aside-other', { file: f })); this._logsSaidNow.add(f); }
     this._logsMergeSaid();
     if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));
   }
@@ -2633,7 +2635,13 @@ class JobManager {
   _logsEnsureMerged() {
     if (this.readOnly) return;
     if (this._logsState) { this._logsMergeSaid(); return; }
-    if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile, this.d.dataDir).then((a) => { if (this._logsState === null && a && !a.error) { this._logsAdopt(a.state); return this._logsOrphans(a.orphans || []); } this._logsMergeSaid(); }).catch(() => { }).finally(() => { this._logsStateP = null; });
+    if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile, this.d.dataDir).then((a) => {
+      if (a && a.recordSetAside) this.d.log(`[jobs] job-logs: the catch-up record did not parse — set aside as ${a.recordSetAside}; a fresh one is started`);
+      for (const n of (a && a.cutCounts) || []) this.d.log(`[jobs] job-logs: an orphaned remover's count file was cut while it was written (${n}) — its count is lost; forgotten`);
+      for (const n of (a && a.badCounts) || []) this.d.log(`[jobs] job-logs: ${n} does not hold a remover's count (not counted) — forgotten`);
+      if (this._logsState === null && a && !a.error) { this._logsAdopt(a.state); return this._logsOrphans(a.orphans || []); }
+      this._logsMergeSaid();
+    }).catch(() => { }).finally(() => { this._logsStateP = null; });
   }
   /** what an orphaned remover removed before it stopped (its hub died mid-batch): counted ONCE into the open catch-up — its name
    *  kept in the record (durably) before its file is forgotten, so a restart between the two never counts it twice */

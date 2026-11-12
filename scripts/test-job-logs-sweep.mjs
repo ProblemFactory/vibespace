@@ -511,7 +511,7 @@ try {
       const R2 = LS.createRemover({ logsDir: path.join(pc, 'job-logs'), timeoutMs: 350, wedgedMs: 2000, workerPath: slow1 });
       const cutAns = await R2.sweep({ keep: { named: ['jb-0ld0000c'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
       const goneOnDisk = 600 - runsOn(pc, 'jb-0ld0000c').length;
-      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 100 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed < 300, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said every hundred; a message in flight at the kill may lag one)`);
+      ok(cutAns.error && cutAns.partial && cutAns.partial.removed >= 1 && cutAns.partial.removed <= goneOnDisk && goneOnDisk - cutAns.partial.removed <= 3, `the REAL remover's progress: a pass cut at its timeout answers what it removed so far, never more (${cutAns.partial && cutAns.partial.removed} said, ${goneOnDisk} gone — said after every removal; a message in flight at the kill may lag)`);
       R2.stop();
     }
     // d. a pass cut at its timeout RESTS (≥ 5 min, ≥ 10× its timeout) and keeps the count of what it removed before it was ended
@@ -693,6 +693,63 @@ try {
     ok(forked.length === 1 && ended, 'an IDLE child ends after its linger: no process is parked between two passes');
     R.stop();
   }
+
+
+  // ── §8 THE SMALL THINGS (round 3 §8) ───────────────────────────────────────────────────────────────────────────────────
+  lap('§8 the small things');
+  if (LS) {
+    const W8 = require(path.join(ROOT, 'src/store-writer.js'));
+    // a. the start line is said only once the record holding the open catch-up is ON DISK
+    const s8 = mkDir('s8'); fs.mkdirSync(path.join(s8, 'job-logs'), { recursive: true });
+    const sb = Date.now() - 50 * DAY; for (let i = 0; i < 30; i++) seedRun(s8, 'jb-0ld00012', sb + i * 1000, { ageMs: 30 * DAY });
+    let onDiskAtStart = null; const logs8 = [];
+    const J8 = new JobManager({ dataDir: s8, broadcast() { }, notifyUser() { return { ok: true }; }, memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, restFactor: 1, max: 10, gapMs: 3600e3 },
+      log: (...a) => { const l = a.join(' '); logs8.push(l); if (/job-logs catch-up: 30 run dir/.test(l)) { try { onDiskAtStart = JSON.parse(fs.readFileSync(path.join(s8, 'jobs-logs-sweep.json'), 'utf8')); } catch { onDiskAtStart = false; } } } });
+    J8.init(); engines.push(J8); await J8.sweepLogs({ why: 'boot' });
+    ok(onDiskAtStart && onDiskAtStart.catchUp && onDiskAtStart.catchUp.counted === 30, 'the catch-up\'s start line is said only once its record is ON DISK (a kill between never says it twice)');
+    // b. a batch ended by a STOP keeps its count (progress after every removal)
+    const slow8 = path.join(tmp, 'slow8-child.cjs');
+    fs.writeFileSync(slow8, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 15; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+    const t8 = mkDir('t8'); fs.mkdirSync(path.join(t8, 'job-logs'), { recursive: true });
+    const tb = Date.now() - 50 * DAY; for (let i = 0; i < 40; i++) seedRun(t8, 'jb-0ld00013', tb + i * 1000, { ageMs: 30 * DAY });
+    const { jm: T8 } = boot(t8, { max: 10, gapMs: 20, workerPath: slow8 });
+    T8.sweepLogs({ why: 'boot' });
+    await until(() => T8._logsState && T8._logsState.catchUp && T8._logsState.catchUp.passes >= 1 && runsOn(t8, 'jb-0ld00013').length <= 27, 10000, 2);   // mid the second pass
+    T8.shutdown(); await settle(T8); await sleep(50);
+    await W8.storeWriter().durable(path.join(t8, 'jobs-logs-sweep.json'));
+    let r8 = null; try { r8 = JSON.parse(fs.readFileSync(path.join(t8, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+    const gone8 = 40 - runsOn(t8, 'jb-0ld00013').length;
+    ok(r8 && r8.catchUp && r8.catchUp.removed >= gone8 - 1 && r8.catchUp.removed <= gone8, `a batch ended by a STOP keeps its count: the record says ${r8 && r8.catchUp && r8.catchUp.removed}, ${gone8} gone (a message in flight at the stop may lag one)`);
+    // c. a catch-up record that cannot be READ makes the pass wait (said once, nothing removed, nothing overwritten); one that does not
+    // PARSE is set aside and a fresh one starts
+    const c8 = mkDir('c8'); fs.mkdirSync(path.join(c8, 'jobs-logs-sweep.json'));   // a directory in its place: EISDIR
+    const c8Run = seedRun(c8, 'jb-0e1a00c8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: C8, logs: LC8 } = boot(c8);
+    await sweepAt(C8, Date.now()); await sweepAt(C8, Date.now());
+    ok(has(c8Run) && fs.statSync(path.join(c8, 'jobs-logs-sweep.json')).isDirectory() && LC8.filter((l) => /the catch-up record could not be read/.test(l)).length === 1, 'a catch-up record that cannot be READ (a directory in its place): the pass WAITS — nothing removed, nothing overwritten, said once');
+    const d8 = mkDir('d8'); fs.writeFileSync(path.join(d8, 'jobs-logs-sweep.json'), '{ "catchUp": { torn');
+    const d8Run = seedRun(d8, 'jb-0e1a00d8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+    const { jm: D8, logs: LD8 } = boot(d8); await sweepAt(D8, Date.now());
+    ok(!has(d8Run) && fs.readdirSync(d8).some((n) => /^jobs-logs-sweep\.json\.corrupt-\d+$/.test(n)) && LD8.some((l) => /the catch-up record did not parse — set aside as/.test(l)), 'a catch-up record that does not PARSE is set aside (said) and a fresh one starts — the pass goes on');
+    // d. the orphan files: a cut write's .tmp is forgotten (said: its count is lost); a count that is not a remover's is never taken
+    // verbatim; the forget comes only AFTER the record holding the count is on disk
+    const e8 = mkDir('e8'); fs.mkdirSync(path.join(e8, 'job-logs'), { recursive: true });
+    const eb = Date.now() - 50 * DAY; for (let i = 0; i < 4; i++) seedRun(e8, 'jb-0ld00014', eb + i * 1000, { ageMs: 30 * DAY });
+    fs.writeFileSync(path.join(e8, LS.ORPHAN_PREFIX + '11-1.json.tmp'), '{"removed": 4');
+    fs.writeFileSync(path.join(e8, LS.ORPHAN_PREFIX + '12-1.json'), JSON.stringify({ removed: -5, entries: 'lots' }));
+    fs.writeFileSync(path.join(e8, LS.ORPHAN_PREFIX + '13-1.json'), JSON.stringify({ removed: 2, entries: 6, jobDirs: 0 }));
+    fs.writeFileSync(path.join(e8, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: { startedAt: Date.now() - 3600e3, counted: 10, removed: 4, entries: 12, jobDirs: 0, passes: 1 }, last: null, heldSaid: [], owed: [], heldNow: [], orphansCounted: [] }));
+    const { jm: E8, logs: LE8 } = boot(e8, { max: 20, gapMs: 15 });
+    let recAtForget = null; const realF = E8._logsRemover(); const of = realF.forget; realF.forget = (dir, names) => { try { recAtForget = JSON.parse(fs.readFileSync(path.join(e8, 'jobs-logs-sweep.json'), 'utf8')); } catch { } return of(dir, names); };
+    await E8.sweepLogs({ why: 'boot' }); await settle(E8);
+    ok(LE8.some((l) => /count file was cut while it was written \(jobs-remover-orphan-11-1\.json\.tmp\)/.test(l)) && LE8.some((l) => /jobs-remover-orphan-12-1\.json does not hold a remover's count/.test(l)) && !fs.readdirSync(e8).some((n) => n.startsWith(LS.ORPHAN_PREFIX)), 'an orphan\'s cut write (.tmp) is forgotten and said; a count that is not a whole number of a batch is never taken verbatim (said, forgotten)');
+    ok(recAtForget && (recAtForget.orphansCounted || []).includes(LS.ORPHAN_PREFIX + '13-1.json') && recAtForget.catchUp && recAtForget.catchUp.removed >= 6, 'an orphan\'s file is FORGOTTEN only once the record holding its count is on disk (read from the disk at the forget)');
+    // e. a set-aside-named file a PERSON made: its item says only what is true of it
+    const f8 = mkDir('f8'); fs.writeFileSync(path.join(f8, 'jobs.json.corrupt-backup'), 'a person\'s copy');
+    const { jm: F8, items: IF8 } = boot(f8); await sweepAt(F8, Date.now());
+    const it8 = IF8.find((n) => n && n.fact === 'set-aside-other');
+    ok(it8 && it8.words.params.file === 'jobs.json.corrupt-backup' && /named like a set-aside job record file/.test(it8.words.key) && !IF8.some((n) => n && n.fact === 'records-held'), 'a set-aside-named file a PERSON made holds the clean-up with true words («named like a set-aside job record file — move it away if you do not need it»), never «unreadable job records»');
+  } else ok(false, 'the small things (no remover on this tree)');
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────
   lap('P4 the catch-up');

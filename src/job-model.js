@@ -725,6 +725,7 @@ const FOR_YOU_WORDS = Object.freeze({
   // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
   'engine-failed': 'Background Work engine failed to start: {error}',
   'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.',   // lane job-logs-sweep r2: ONE item for the cause carries the clean-up's hold
+  'set-aside-other': '{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.',   // round 3 §8: a file a person named so (not one this hub set aside) — true words
   'records-held': 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.',   // lane job-logs-sweep r2: a set-aside the owner was never told of (the archive's; one from before this version)
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
@@ -769,6 +770,7 @@ function forYouWords(job, kind, opts) {
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
+  if (kind === 'set-aside-other') return { fact: 'set-aside-other', words: { key: FOR_YOU_WORDS['set-aside-other'], params: { file: String(file || 'a file') } }, urgency: 'normal' };
   if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };

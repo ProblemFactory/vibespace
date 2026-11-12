@@ -102,7 +102,7 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   // counting pass walks on past `max` with readdirs only: no stat, no /proc — round 2 law 3); keptOld = of those, the ones the full
   // verdict kept (young by their newest file, live, unjudgeable) — the done line's «kept» (a complete pass's figure)
   const out = { removed: 0, entries: 0, jobDirs: 0, nameOld: 0, keptOld: 0, unnamedJobs: 0, failed: 0, more: false, kept: { listed: 0, held: 0, skeleton: 0, young: 0, alive: 0, unproven: 0 } };
-  const progress = () => { if (seq != null && out.removed % 100 === 0) { try { process.send({ seq, progress: { removed: out.removed, entries: out.entries, jobDirs: out.jobDirs } }); } catch { } } };   // a pass cut at its timeout keeps its count
+  const progress = () => { if (seq != null) { try { process.send({ seq, progress: { removed: out.removed, entries: out.entries, jobDirs: out.jobDirs } }); } catch { } } };   // a pass cut at its timeout keeps its count
   if (stateFile) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } out.state = st && typeof st === 'object' ? st : null; }
   if (count === 'auto') count = !(out.state && out.state.catchUp);
   out.counted = !!count;
@@ -165,11 +165,24 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
 
 /** the catch-up's record, read here (never on the main thread): its parsed object, or null (none, or bytes that do not parse) */
 function stateOf({ stateFile, orphanDir: od = null }) {
-  let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; }
-  const orphans = [];
-  if (od) { let names = []; try { names = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX) && n.endsWith('.json')); } catch { }
-    for (const n of names) { let o = null; try { o = JSON.parse(fs.readFileSync(path.join(od, n), 'utf8')); } catch { } orphans.push({ name: n, removed: o && Number.isFinite(o.removed) ? o.removed : 0, entries: o && Number.isFinite(o.entries) ? o.entries : 0, jobDirs: o && Number.isFinite(o.jobDirs) ? o.jobDirs : 0 }); } }
-  return { state: st && typeof st === 'object' ? st : null, orphans };
+  // round 3 §8: ONLY «not there» is «no record»; a record that cannot be READ (EACCES, EIO, a directory) is an error — the pass
+  // waits (a fresh record would overwrite its open catch-up and what it owes); bytes that do not parse are set aside and a fresh
+  // record starts (the catch-up's bookkeeping only — never a job record)
+  let st = null, recordSetAside = null, raw = null;
+  try { raw = fs.readFileSync(stateFile, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') return { error: `the catch-up record could not be read: ${(e && (e.code || e.message)) || e}` }; }
+  if (raw != null) { try { st = JSON.parse(raw); } catch { const to = `${stateFile}.corrupt-${Date.now()}`; try { fs.renameSync(stateFile, to); recordSetAside = path.basename(to); } catch (re) { return { error: `the catch-up record did not parse and could not be set aside: ${(re && re.code) || re}` }; } } }
+  const orphans = [], cutCounts = [], badCounts = [];
+  const count = (v) => (Number.isInteger(v) && v >= 0 && v <= 100000 ? v : null);   // a count a remover wrote: a whole number of a batch's size, never verbatim
+  if (od) { let all = []; try { all = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX)); } catch { }
+    for (const n of all) {
+      if (n.endsWith('.json.tmp')) { try { fs.unlinkSync(path.join(od, n)); cutCounts.push(n); } catch { } continue; }   // a write cut by a death: no count in it
+      if (!n.endsWith('.json')) continue;
+      let o = null; try { o = JSON.parse(fs.readFileSync(path.join(od, n), 'utf8')); } catch { }
+      const c = o && typeof o === 'object' ? { removed: count(o.removed), entries: count(o.entries), jobDirs: count(o.jobDirs == null ? 0 : o.jobDirs) } : null;
+      if (!c || c.removed == null || c.entries == null || c.jobDirs == null) { try { fs.unlinkSync(path.join(od, n)); badCounts.push(n); } catch { } continue; }
+      orphans.push({ name: n, ...c });
+    } }
+  return { state: st && typeof st === 'object' ? st : null, orphans, recordSetAside, cutCounts, badCounts };
 }
 /** an orphan's files, once the record that counted them is on disk — only names of that prefix, in that dir */
 function forget({ dir, names = [] }) { let n = 0; for (const name of names) { if (typeof name !== 'string' || !name.startsWith(S.ORPHAN_PREFIX) || name.includes('/')) continue; try { fs.unlinkSync(path.join(dir, name)); n++; } catch { } } return { forgotten: n }; }
