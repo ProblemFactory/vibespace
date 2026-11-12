@@ -262,7 +262,7 @@ try {
   lap('§S static');
   const JS = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   ok(!/\bfs\.(rmSync|rmdirSync|unlinkSync|promises\.rm)\([^)]*logsDir/.test(JS) && !/rmSync\(/.test(JS), 'jobs.js removes nothing under job-logs itself (no rmSync left): every removal is the remover\'s');
-  const wholeSites = (JS.replace(/async _logsPass\([\s\S]*?\n  \}\n/, '').match(/this\._logsWhole\(/g) || []).length;   // the pass's own re-send of what is owed is not a verdict
+  const wholeSites = (JS.replace(/async _logsPass\([\s\S]*?\n  \}\n/, '').replace(/async _logsOwedWhilePaused\([\s\S]*?\n  \}\n/, '').match(/this\._logsWhole\(/g) || []).length;   // the re-sends of what is owed (the pass's, the pause's) are not verdicts
   ok(wholeSites === 4, 'the whole-dir verdicts reach the remover at exactly four sites (the gc\'s two legs, the archive cap, the ✕, the boot collapse)', wholeSites);
   const WW = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), AR = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), CLI = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8'), PANEL = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8');
   const ROUTE = '.then((v) => res.json({ success: true, ...r, ...(v.gone ? {} : v.kept && v.kept !== \'pending\' ? { logsKept: v.kept } : { logsPending: true }) }))';
@@ -533,6 +533,14 @@ try {
     const peArc = 'jb-a8c0ffee'; PE._writeArchive([{ id: peArc, kind: 'task', name: 'arch', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
     seedRun(pe, peArc, Date.now() - DAY); PE.rmArchived(peArc);
     ok(typeof PE.logsGone === 'function' && (await PE.logsGone(peArc)).gone === true && !has(pe, 'job-logs', peArc), '…while the ✕ (a removal a person asks for) still removes its logs');
+    // round 3 §7: A PERSON'S REMOVAL IS NOT PAUSED — a ✕ the storage held, owed, is finished by the next hourly gc while paused
+    if (typeof PE._logsRemover === 'function') {
+      const realE = PE._logsRemover(); PE._logsRm = { ...realE, whole: async () => ({ error: 'held', held: true, gone: [] }), state: (...a) => realE.state(...a), sweep: (...a) => realE.sweep(...a), forget: (...a) => realE.forget(...a), settled: () => realE.settled(), busy: () => realE.busy(), held: () => true, stop: () => realE.stop() };
+      PE._writeArchive([{ id: 'jb-a8c0ffe7', kind: 'task', name: 'arch7', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
+      const owed7 = seedRun(pe, 'jb-a8c0ffe7', Date.now() - DAY); PE.rmArchived('jb-a8c0ffe7'); const v7 = await PE.logsGone('jb-a8c0ffe7');
+      PE._logsRm = realE; await gcAt(PE, Date.now());
+      ok(v7.pending && !has(owed7) && !PE._logsOwed.has('jb-a8c0ffe7') && has(peRun), 'A PERSON\'S REMOVAL IS NOT PAUSED: a held ✕, owed, is finished by the next hourly gc while the clean-up stays paused (the clean-up\'s own run dir is still kept)');
+    } else ok(false, 'a person\'s removal is not paused (no remover on this tree)');
     on = true; await gcAt(PE, Date.now());
     ok(!has(peRun), 'turned ON again: the next hourly pass resumes and removes');
     const SCH = fs.readFileSync(path.join(ROOT, 'src/lib/settings-schema.js'), 'utf8'), WIR = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');

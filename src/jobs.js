@@ -2532,7 +2532,7 @@ class JobManager {
     if (this.readOnly || this._logsStopped) return Promise.resolve({ skipped: this.readOnly ? 'read-only' : 'stopped' });
     // THE PAUSE (round 2 law 3): the setting jobs.logsSweep — off gates this pass (the boot's, the hourly one, the catch-up's);
     // never _logsWhole (the five removals a record or a person asks for). Said once per pause; the catch-up record waits as it is
-    if (!this._logsOn()) { if (!this._logsPausedSaid) { this._logsPausedSaid = true; this.d.log('[jobs] job-logs clean-up paused by the setting jobs.logsSweep — nothing is removed by it (removing a job still removes its logs); it resumes where it stopped within the hour of being turned on'); } return Promise.resolve({ skipped: 'paused' }); }
+    if (!this._logsOn()) { if (!this._logsPausedSaid) { this._logsPausedSaid = true; this.d.log('[jobs] job-logs clean-up paused by the setting jobs.logsSweep — nothing is removed by it (removing a job still removes its logs); it resumes where it stopped within the hour of being turned on'); } return this._logsOwedWhilePaused(); }
     this._logsPausedSaid = false;
     if (this._logsPassP) return this._logsPassP;
     const p = this._logsPass(at, why).finally(() => { if (this._logsPassP === p) this._logsPassP = null; });
@@ -2587,6 +2587,13 @@ class JobManager {
     if (cu) await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: a catch-up pass's count is on disk before the next — a hub killed between passes loses none (the batch in flight is the orphan file's)
     if (st.catchUp) this._logsNext(Math.max(cfg.gapMs, cfg.restFactor * (ans.ms || 0)));   // round 2: a slow pass earns a longer rest
     return ans;
+  }
+  /** round 3 §7: A PERSON'S REMOVAL IS NOT PAUSED — what a ✕ or a record's verdict owes is re-sent while the clean-up is paused (the
+   *  record first, so what an earlier process owed is known); the pause is for the clean-up nobody asked for */
+  async _logsOwedWhilePaused() {
+    if (this._logsState === null) { this._logsEnsureMerged(); if (this._logsStateP) await this._logsStateP; }
+    if (this._logsOwed.size) await this._logsWhole([...this._logsOwed]);
+    return { skipped: 'paused' };
   }
   _logsOn() { try { return !(this.d && typeof this.d.logsSweepOn === 'function' && this.d.logsSweepOn() === false); } catch { return true; } }   // the setting jobs.logsSweep (jobs-wiring)
   _logsNext(ms) {
