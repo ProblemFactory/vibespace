@@ -14,7 +14,8 @@
 //   §22 A FIRST LEARN IS NEVER STARVED BY RE-FOLDS (round 5: a cold boot under a ledger row every pass — the identities with
 //       no rates go before the re-folds of those that serve stale ones) · §23 THE HOLDER OF THE ONE SLOT ALWAYS RUNS (round 6:
 //       a restart with a partial seed — every identity learns, every seeded one refreshes, no turn spends nothing; the reason
-//       lines read from the state, in §21)
+//       lines read from the state, in §21) · §24 the follow-up: an idle turn looks again by itself; the reason lines name what is
+//       ahead in the turn
 // Each row with its planted RED (scripts/mutant-copy.mjs). Run: node scripts/test-usage-relearn-cap.mjs (~7 s, no network)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -463,9 +464,64 @@ console.log('§23 THE HOLDER OF THE ONE SLOT ALWAYS RUNS — a restart with a pa
   const SCALE = 0.25, PER = 2, ps = partial(null, SCALE, PER, 160), BOUND = Math.ceil((2 * ps.lines) / (PER * STEP)) + 6; // every line folded twice at most (the seeded re-folds + the first learns) at the pass's budget, + 6 passes
   ok(ps.seeded === 20 && ps.holder0 && ps.holder0.seededRates && ps.all >= 0 && ps.all <= BOUND && ps.without === 0 && ps.stillSeeded === 0 && ps.idle === 0, `A RESTART WITH A PARTIAL SEED (the owner's 27 × ${SCALE}, ${ps.lines} lines, rates.json 20 of 27; the largest past the cache's cap): the slot taken at boot by a SEEDED identity's re-fold (${ps.holder0 && ps.holder0.key}) — all 27 learned and every seeded one refreshed at pass ${ps.all} (stated bound ${BOUND}: every line twice at ${PER} turns of ${STEP} a pass, + 6); ${ps.idle} turns spent nothing`, ps);
   const M = mutantCopies('usage-relearn-stepped-wall', REPO), src = read('src/usage-estimator.js');
-  const a = "      if (Q.length > 1) Q.sort((x, y) => ((x.first ? 0 : x === holder ? 1 : 2) - (y.first ? 0 : y === holder ? 1 : 2)) || (", b = "      for (let ended = true; ended && Q.length && (this._turnLeft ?? 1) > 0;) { ended = false; for (let i = 0; i < Q.length && (this._turnLeft ?? 1) > 0; i++) if (this._foldRun(Q[i])) { Q.splice(i--, 1); ended = true; } }";
-  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', src.replace(a, "      if (Q.length > 1) Q.sort((x, y) => ((x.first ? 0 : 1) - (y.first ? 0 : 1)) || (").replace(b, '      while (Q.length && (this._turnLeft ?? 1) > 0) { if (this._foldRun(Q[0])) Q.shift(); else break; }'), 'wall')) : null; // round 5's turn: first learns first, the turn stops at its head
+  const a = "const foldOrder = (holder) => (x, y) => ((x.first ? 0 : x === holder ? 1 : 2) - (y.first ? 0 : y === holder ? 1 : 2)) || (", b = "      for (let ended = true; ended && Q.length && (this._turnLeft ?? 1) > 0;) { ended = false; for (let i = 0; i < Q.length && (this._turnLeft ?? 1) > 0; i++) if (this._foldRun(Q[i])) { Q.splice(i--, 1); ended = true; } }";
+  const EM = src.includes(a) && src.includes(b) ? require(M.write('src/usage-estimator.js', src.replace(a, "const foldOrder = (holder) => (x, y) => ((x.first ? 0 : 1) - (y.first ? 0 : 1)) || (").replace(b, '      while (Q.length && (this._turnLeft ?? 1) > 0) { if (this._foldRun(Q[0])) Q.shift(); else break; }'), 'wall')) : null; // round 5's turn: first learns first, the turn stops at its head
   const R = EM ? partial(EM.UsageEstimator, SCALE, PER, 160) : null;
   ok(!!R && R.all < 0 && R.without > 0 && R.idle > 0 && /its head org:q\d+: it waits behind org:q\d+'s fold/.test(R.idleLine), `RED: round 5's turn (the queue stops at a head that cannot open) ⇒ after ${R && R.passes} passes ${R && R.without} identities never learned, ${R && R.stillSeeded} still on the seed; ${R && R.idle} turns spent nothing, said once: «${R && R.idleLine}»`, R);
+}
+console.log('§24 THE FOLLOW-UP (round 6, picked): an idle turn looks again by itself; the reason lines name what is ahead in the turn');
+{
+  const T0 = NOW - 40 * DAY;
+  const mk = (dir, key, n, acct) => { const out = []; let prev = null; for (let j = 0; j < n; j++) { const fetchedAt = Math.floor(T0 + j * ((39 * DAY) / n)); out.push(JSON.stringify({ ts: fetchedAt + 500, fetchedAt, source: 'statusline', accountId: acct, identityKey: key, buckets: bucketsAt(fetchedAt), prevFetchedAt: prev, costSince: prev ? { total: 1 + (j % 7) * 0.1, byFamily: { fable: 0.4, opus: 0.6, sonnet: 0, haiku: 0, other: 0 }, requests: 3 } : null })); prev = fetchedAt; } const f = path.join(dir, 'anchors-' + key.replace(/[^\w.@-]/g, '_').slice(0, 80) + '.ndjson'); fs.writeFileSync(f, out.join('\n') + '\n'); return fs.statSync(f).size; };
+  // (1) AN IDLE TURN LOOKS AGAIN BY ITSELF: a planted defect (a ghost holds the slot, in no queue) makes a turn spend nothing; the
+  // defect clears with NO fold's end and NO ask (a hub nobody watches) — the one retry arms the turn that folds what is owed
+  const idle = (UE) => {
+    const w = world(REPO, { seed: 123, rows: 2000 }), keys = ['org:i0', 'org:i1', 'org:i2'];
+    for (const k of keys) mk(w.adir, k, 600, 'sub-a');
+    const est = new (UE || w.est.constructor)({ anchorsDir: w.adir, usageHistory: w.uh, resolveIdentity: () => null, lagS: 20 }); est.primeOpts = { syncMaxRows: 1e9 }; est.primeIfCold();
+    const S = stepper(est), retries = []; est.relearnIdleNext = (fn) => retries.push(fn); est.reloadRates();
+    const said = [], cw = console.warn; console.warn = (...a) => said.push(a.join(' '));
+    try {
+      est._ownFold = { key: 'org:ghost', done: false }; // the planted defect: a holder no turn can reach
+      for (const k of keys) est.ratesFor(k); // three cold first learns, queued unread behind it
+      let t = 0; while (S.q.length && t < 10) { S.turn(); t++; }
+      const at = { idle: est.turnsIdle || 0, armed: S.q.length, retries: retries.length };
+      est._ownFold = null; // the defect clears — no fold ends, nobody asks
+      for (let r = 0; r < 20 && retries.length; r++) { retries.shift()(); let u = 0; while (S.q.length && u < 50) { S.turn(); u++; } }
+      at.landed = keys.filter((k) => (est._rateCache.get(k) || {}).rates).length; at.line = (said.find((l) => /a relearn turn spent nothing/.test(l)) || '').slice(0, 150);
+      return at;
+    } finally { console.warn = cw; rmWorld(w); }
+  };
+  const id = idle(null);
+  ok(id.idle >= 1 && id.armed === 0 && id.retries === 1 && id.landed === 3, `AN IDLE TURN LOOKS AGAIN BY ITSELF: a planted ghost holder ⇒ ${id.idle} turn spent nothing («${id.line}…»), no turn armed, ONE retry armed (1 s, unref'd — never a spin); the defect cleared with no ask and no fold's end ⇒ all ${id.landed} owed folds landed`, id);
+  const src = read('src/usage-estimator.js');
+  const mut = (tag, from, to) => { const M = mutantCopies('usage-relearn-stepped-' + tag, REPO); return src.includes(from) ? require(M.write('src/usage-estimator.js', src.replace(from, to), tag)) : null; };
+  const EI = mut('noretry', '  _idleRetry() {\n', '  _idleRetry() { return;\n');
+  const RI = EI ? idle(EI.UsageEstimator) : null;
+  ok(!!RI && RI.retries === 0 && RI.landed === 0, `RED: round 6's idle turn (no retry) ⇒ ${RI && RI.landed} of 3 owed folds landed once the defect cleared — they wait for an ask that a hub nobody watches may not make`, RI);
+  // (3) THE REASON NAMES WHAT IS AHEAD: one chunk a turn (relearnStepLines 250), the clock moved by hand, no turn run
+  const why = (UE) => {
+    const w = world(REPO, { seed: 125, rows: 2000 }), ms = ['bg', 's0', 's1', 's2', 's3', 'pp', 'qq'], ks = ms.map((m) => 'org:' + m);
+    const sizes = ks.map((k, i) => mk(w.adir, k, [8000, 400, 400, 400, 400, 6000, 6000][i], ms[i]));
+    const est = new (UE || w.est.constructor)({ anchorsDir: w.adir, usageHistory: w.uh, resolveIdentity: (a) => ({ identityKey: ks[ms.indexOf(a)] || null }), lagS: 20 });
+    est.primeOpts = { syncMaxRows: 1e9 }; est.primeIfCold(); est.relearnStepLines = 250; // every file cached (no holder): the order alone decides
+    est._lineCache.delete('org:pp'); est._lineCache.delete('org:qq'); // …but pp and qq cold (their open is a read under the turn's budget)
+    const S = stepper(est), said = [], cw = console.warn, cl = console.log; console.warn = (...a) => said.push(a.join(' ')); console.log = () => { };
+    const realNow = Date.now; let shift = 0; Date.now = () => realNow() + shift;
+    try {
+      est.basisRaw(ms.slice(0, 5)); // bg opens and folds the turn's one chunk; the four small ones open with nothing left of the budget
+      est._coldBytes = 1e12; est.basisRaw(['pp']); est.basisRaw(['qq']); // pp and qq asked when the turn's cold-read budget was spent: queued unread
+      shift = 61e3; est.basisRaw(ms.slice(0, 6)); // the 60 s lines: bg (and the small ones, and pp)
+      est._coldBytes = 0; est.basisRaw(['qq']); // a turn's budget back, no turn run yet: qq — behind what?
+    } finally { Date.now = realNow; console.warn = cw; console.log = cl; }
+    const lineOf = (k) => (said.find((l) => l.includes(`[usage] ${k} has no rates after`)) || '').slice(0, 200);
+    rmWorld(w); return { bg: lineOf('org:bg'), qq: lineOf('org:qq') };
+  };
+  const wy = why(null);
+  ok(/\(its fold is still running \(\d+ of 32 chunks\) — each turn's budget goes first to the 4 folds ahead of it\)/.test(wy.bg), `THE REASON — STILL RUNNING, AND WHY IT STALLS: «${wy.bg}»`, wy);
+  ok(/\(it is queued behind 5 folds that spend each turn's budget first\)/.test(wy.qq), `THE REASON — QUEUED, BEHIND WHAT: «${wy.qq}»`, wy);
+  const EW = mut('stateonly', "    const ahead = this._aheadOf(f),", '    const ahead = 0 && this._aheadOf(f),');
+  const RW = EW ? why(EW.UsageEstimator) : null;
+  ok(!!RW && /still running \(\d+ of 32 chunks\)\)/.test(RW.bg) && /queued: it opens at the next turn/.test(RW.qq), `RED: round 6's words (the state, not why) ⇒ «${RW && RW.bg.slice(30, 90)}…» · «${RW && RW.qq.slice(30, 90)}…»`, RW);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

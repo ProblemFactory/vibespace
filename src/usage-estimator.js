@@ -395,6 +395,13 @@ function linesMeta(lines) {
   }
   return { named: [...named], lastGlobalTs, lastTs, last: lines.length ? lines[lines.length - 1] : null, n: lines.length };
 }
+// round 6 follow-up: a turn that spent nothing while folds are owed looks again after this (one unref'd timer: never a spin — a hub
+// with no auto pool and no fresh reading may not ask for minutes: the auto pools' tick asks every 30 s, the anchor sweep only on a new reading)
+const RELEARN_IDLE_RETRY_MS = 1000;
+/** THE TURN'S ORDER (round 5 + 6): first learns, then the fold that holds the one slot for uncached lines (it inherits the priority
+ *  of the first learns that wait for its slot), then the re-folds — each class the smallest left first (an unread fold last). ONE
+ *  comparator: the turn sorts by it and the reason lines count the folds ahead by it. */
+const foldOrder = (holder) => (x, y) => ((x.first ? 0 : x === holder ? 1 : 2) - (y.first ? 0 : y === holder ? 1 : 2)) || ((x.steps ? x.nLines - x.chunks * RELEARN_CHUNK_LINES : Infinity) - (y.steps ? y.nLines - y.chunks * RELEARN_CHUNK_LINES : Infinity));
 const BASIS_HOLD_MAX_MS = 60000; // round 4b: a member's first learn holds its pool's basis raw at most this long (a throw: not at all)
 const COLD_READ_TURN_BYTES = 4 * 1024 * 1024; // round 3: cold anchor files read whole in one loop turn stop opening past this (≈ 35 ms of parse; the turn's FIRST cold read is never deferred, whatever its size)
 const FOLD_RETRY_MS = 5000, FOLD_RETRY_MAX_MS = 5 * 60e3; // a fold that THROWS (a malformed record): said once, tried again after 5 s doubling ≤ 5 min
@@ -873,12 +880,25 @@ class UsageEstimator {
   /** What a fold that has not moved waits for — from the state, never a guess (round 6). */
   _waitWhy(f) {
     if (!f) return 'no fold of it under way';
-    if (f.steps) return `its fold is still running (${f.chunks} of ${Math.max(1, Math.ceil(f.nLines / RELEARN_CHUNK_LINES))} chunks)`;
+    const ahead = this._aheadOf(f), first = (n) => `${n} fold${n === 1 ? '' : 's'} ahead of it`; // follow-up: the state AND why it stalls
+    if (f.steps) return `its fold is still running (${f.chunks} of ${Math.max(1, Math.ceil(f.nLines / RELEARN_CHUNK_LINES))} chunks)${ahead ? ` — each turn's budget goes first to the ${first(ahead)}` : ''}`;
     const own = this._ownFold && !this._ownFold.done && this._ownFold !== f ? this._ownFold : null;
     if (own) return `it waits behind ${own.key}'s fold (the one fold that holds lines outside the cache)`;
     if (!f.first && this._firstsQueued(f)) return 'it waits for the first learns queued before it';
     if ((this._coldBytes || 0) >= COLD_READ_TURN_BYTES && !this._readsNoFile(f.key)) return "it waits for a turn's cold-read budget";
-    return 'it is queued, not yet opened';
+    return ahead ? `it is queued behind ${ahead} fold${ahead === 1 ? '' : 's'} that spend each turn's budget first` : 'it is queued: it opens at the next turn';
+  }
+  /** How many queued folds the turn runs before `f` (the turn's own order). */
+  _aheadOf(f) {
+    const Q = this._relearnQueue || [], holder = this._ownFold && !this._ownFold.done ? this._ownFold : null, cmp = foldOrder(holder);
+    let n = 0; for (const q of Q) if (q !== f && !q.done && cmp(q, f) < 0) n++;
+    return n;
+  }
+  /** An idle turn (round 6 follow-up): ONE retry armed — RELEARN_IDLE_RETRY_MS on an unref'd timer (`relearnIdleNext`, a test's
+   *  seam) — so owed folds never wait for an ask that may not come; the next ask or a fold's end arms a turn sooner. */
+  _idleRetry() {
+    if (this._idleRetryArmed) return; this._idleRetryArmed = true;
+    (this.relearnIdleNext || ((fn) => { const t = setTimeout(fn, RELEARN_IDLE_RETRY_MS); t.unref?.(); }))(() => { this._idleRetryArmed = false; if (!this._closed && this._relearnQueue && this._relearnQueue.length) this._armTurn(); });
   }
   /** A turn that spent nothing while `n` folds are owed (round 6): counted, said once a process — never a silent stall. */
   _turnIdle(head, n) {
@@ -978,7 +998,7 @@ class UsageEstimator {
       // wall, and a fold that ended (the slot freed) lets the turn look again from the head
       for (const f of Q) this._ownJudge(f); // every queued fold's ownership judged at the turn's start (the holder runs first: one behind it must not keep lines the cache let go)
       const holder = this._ownFold && !this._ownFold.done ? this._ownFold : null;
-      if (Q.length > 1) Q.sort((x, y) => ((x.first ? 0 : x === holder ? 1 : 2) - (y.first ? 0 : y === holder ? 1 : 2)) || ((x.steps ? x.nLines - x.chunks * RELEARN_CHUNK_LINES : Infinity) - (y.steps ? y.nLines - y.chunks * RELEARN_CHUNK_LINES : Infinity)));
+      if (Q.length > 1) Q.sort(foldOrder(holder));
       for (let ended = true; ended && Q.length && (this._turnLeft ?? 1) > 0;) { ended = false; for (let i = 0; i < Q.length && (this._turnLeft ?? 1) > 0; i++) if (this._foldRun(Q[i])) { Q.splice(i--, 1); ended = true; } }
       for (let k = Q.length - 1; k >= 0; k--) if (Q[k].done) Q.splice(k, 1);
       // A TURN THAT SPENDS NOTHING WHILE FOLDS ARE OWED is a defect (round 6): said once — the head and what it waits for — and
@@ -986,7 +1006,7 @@ class UsageEstimator {
       const idle = Q.length > 0 && Q.length === n0 && left0 > 0 && (this._turnLeft ?? left0) === left0;
       if (idle) this._turnIdle(Q[0], Q.length);
       this._turnLeft = this.relearnStepLines || RELEARN_STEP_LINES; // the next turn's budget
-      if (Q.length && !idle) this._armTurn();
+      if (Q.length && !idle) this._armTurn(); else if (Q.length) this._idleRetry(); // follow-up: an idle turn looks again after 1 s (never a spin)
     });
   }
   /** THE FIRST LEARN IS ONE SWEEP (hotfix usage-ledger-walk ③): once per cost-memo epoch (a boot, a pricing edit, a
