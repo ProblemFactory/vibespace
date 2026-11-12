@@ -9,6 +9,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Time a server spent waiting on a disk is shown on the code that waited, and a server that was busy is no longer reported as a disk that stopped answering.
 - On slow or network storage the server no longer pauses for seconds while it saves its lists and usage data; those saves now run in the background.
 - If the disk stops answering, repeated CPU captures no longer pile up stuck reads, and a capture cut off while saving no longer leaves a hidden file.
+- VibeSpace stays responsive with hundreds of agent groups.
+- Starring, renaming or changing a conversation's settings no longer freezes VibeSpace for a moment or redraws every agent group list.
 
 ## 2.369.395 — 2026-11-11
 
