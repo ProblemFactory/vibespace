@@ -22,8 +22,13 @@ const BOOT = PI.bootIdOf();
 const lst = (p) => { try { return fs.lstatSync(p); } catch { return null; } };
 
 /** the run's wrapper, judged by its own stamp: true (it runs) · false (gone, recycled, a zombie, another machine boot, or no
- *  stamp at all — its wrapper never started) · null (a stamp that cannot be read or judged — such a run is KEPT) */
+ *  stamp at all — its wrapper never started) · null (a stamp that cannot be read or judged — such a run is KEPT). A stamp of
+ *  ANY shape never throws out of here (round 2: a `null` stamp past a dropped guard threw, and every run after it in the walk
+ *  went unremoved — the catch-up never ended) */
 function aliveOf(runDir) {
+  try { return aliveOfStamp(runDir); } catch { return null; }
+}
+function aliveOfStamp(runDir) {
   const f = path.join(runDir, 'pid.json'), st = lst(f);
   if (!st) return false;
   if (!st.isFile()) return null;
@@ -51,7 +56,8 @@ function whole({ ids = [] }) {
     if (!S.JOB_NAME.test(id)) continue;
     const jobDir = path.join(logsDir, id), st = lst(jobDir);
     if (!st) { out.gone.push(id); continue; }
-    if (!st.isDirectory()) continue;
+    // a LINK (or a file) under a job's name: the link itself goes, never what it points at — the release's rmSync did the same
+    if (!st.isDirectory()) { try { fs.unlinkSync(jobDir); out.removed++; out.entries++; out.gone.push(id); } catch { out.kept.push(id); } continue; }
     let ents; try { ents = fs.readdirSync(jobDir, { withFileTypes: true }); } catch { continue; }
     let keptHere = 0;
     for (const e of ents) {

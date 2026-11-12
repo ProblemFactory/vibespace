@@ -254,7 +254,57 @@ try {
   ok(/if \(rmAns && rmAns\.logsPending\) \{[^\n]*\n\s*console\.log\('removed — its log files are still being deleted in the background'\);\n\s*\} else console\.log\('removed'\);/.test(CLI) && /act === 'rm' && r\?\.logsPending\) showToast\(t\('Removed\. Its log files are still being deleted in the background\.'\)\)/.test(PANEL), 'what the person reads past the bound: the panel\'s toast «Removed. Its log files are still being deleted in the background.», the CLI\'s «removed — its log files are still being deleted in the background»');
   ok(!/_loadArchive\(/.test((JS.match(/async _logsPass\([\s\S]*?\n  \}\n/) || [''])[0]) && /async _logsPass\(/.test(JS), 'the pass never calls _loadArchive (its synchronous read): the archive from memory, or the worker reads it');
   const WK = (() => { try { return fs.readFileSync(path.join(ROOT, 'src/job-logs-sweep-worker.js'), 'utf8'); } catch { return ''; } })();
-  ok(/if \(isMainThread\) throw/.test(WK) && /lstatSync/.test(WK) && !/statSync\(/.test(WK.replace(/lstatSync/g, '')), 'the worker throws on the main thread and judges with lstat only (a link is never followed)');
+  ok(/if \(isMainThread\) throw/.test(WK) && /lstatSync/.test(WK) && !/statSync\(/.test(WK.replace(/lstatSync/g, '')), 'the worker throws on the main thread and calls no stat that follows a link (that a link is never FOLLOWED is §G\'s legs, driven)');
+
+
+  // ── §G THE GUARDS, EACH DRIVEN (round 2 §2: nine mutants left the suite green while a deletion changed) ───────────────
+  lap('§G the guards');
+  if (LS) {
+    const g = path.join(tmp, 'guards'), GL = path.join(g, 'job-logs'), out = path.join(tmp, 'outside');
+    fs.mkdirSync(GL, { recursive: true }); fs.mkdirSync(out, { recursive: true });
+    const OLD = Date.now() - 40 * DAY, age = (p, ms) => { const t = (Date.now() - ms) / 1000; fs.utimesSync(p, t, t); };
+    const canary = (name) => { const c = path.join(out, name), r = path.join(c, String(OLD)); fs.mkdirSync(r, { recursive: true }); fs.writeFileSync(path.join(r, 'pid.json'), JSON.stringify(deadStamp())); fs.writeFileSync(path.join(c, 'person.txt'), 'mine'); for (const f of [path.join(r, 'pid.json'), path.join(c, 'person.txt')]) age(f, 40 * DAY); return c; };
+    const intact = (c) => has(c, 'person.txt') && has(c, String(OLD), 'pid.json');
+    const seedAt = (dir, files = { 'pid.json': JSON.stringify(deadStamp()), 'current.log': 'x\n' }) => { fs.mkdirSync(dir, { recursive: true }); for (const [f, b] of Object.entries(files)) { fs.writeFileSync(path.join(dir, f), b); age(path.join(dir, f), 30 * DAY); } return dir; };
+    const R = LS.createRemover({ logsDir: GL });
+    // 1. links: a linked job dir under the sweep; a linked run dir inside an unnamed job dir — the canaries outside stay whole
+    const c1 = canary('c1'), c2 = canary('c2');
+    fs.symlinkSync(c1, path.join(GL, 'jb-11110001'));
+    fs.mkdirSync(path.join(GL, 'jb-11110002')); fs.symlinkSync(path.join(c2, String(OLD)), path.join(GL, 'jb-11110002', String(OLD + 1))); { const t = (Date.now() - 30 * DAY) / 1000; fs.lutimesSync(path.join(GL, 'jb-11110002', String(OLD + 1)), t, t); }
+    // 2. names that are not the sweep's, aged 30 days
+    const bk = seedAt(path.join(GL, 'backup', String(OLD))); fs.mkdirSync(path.join(GL, 'lost+found')); age(path.join(GL, 'lost+found'), 30 * DAY);
+    const hexRun = seedAt(path.join(GL, 'jb-11110003', '0x10')), expRun = seedAt(path.join(GL, 'jb-11110003', '1e3'));
+    // 3. stamps that cannot be judged — and a dead run sorted AFTER the null stamp (a stamp of any shape never stops the walk)
+    const J5 = path.join(GL, 'jb-11110005'), stampFile = path.join(out, 'dead-stamp.json'); fs.writeFileSync(stampFile, JSON.stringify(deadStamp()));
+    const stDir = seedAt(path.join(J5, String(OLD + 1)), { 'current.log': 'x\n' }); fs.mkdirSync(path.join(stDir, 'pid.json')); age(path.join(stDir, 'pid.json'), 30 * DAY);
+    const stLink = seedAt(path.join(J5, String(OLD + 2)), { 'current.log': 'x\n' }); fs.symlinkSync(stampFile, path.join(stLink, 'pid.json')); { const t = (Date.now() - 30 * DAY) / 1000; fs.lutimesSync(path.join(stLink, 'pid.json'), t, t); }   // old ENTRIES: only the stamp's judge decides
+    const stObj = seedAt(path.join(J5, String(OLD + 3)), { 'pid.json': '{}', 'current.log': 'x\n' });
+    const stNull = seedAt(path.join(J5, String(OLD + 4)), { 'pid.json': 'null', 'current.log': 'x\n' });
+    const deadAfter = seedAt(path.join(J5, String(OLD + 5)));
+    const stNoStart = seedAt(path.join(J5, String(OLD + 6)), { 'pid.json': JSON.stringify({ pid: process.pid }), 'current.log': 'x\n' });
+    const stPid1 = seedAt(path.join(J5, String(OLD + 7)), { 'pid.json': JSON.stringify({ pid: 1 }), 'current.log': 'x\n' });
+    // 4. a run whose only young file sits two levels down
+    const nested = seedAt(path.join(GL, 'jb-11110006', String(OLD))); fs.mkdirSync(path.join(nested, 'a', 'b'), { recursive: true }); fs.writeFileSync(path.join(nested, 'a', 'b', 'young.txt'), 'now'); age(path.join(nested, 'a'), 30 * DAY);
+    // 5. a YOUNG empty unnamed job dir (a spawn between its two mkdirs) and an old empty NAMED one
+    fs.mkdirSync(path.join(GL, 'jb-11110007')); fs.mkdirSync(path.join(GL, 'jb-11110008')); age(path.join(GL, 'jb-11110008'), 30 * DAY);
+    const gAns = await R.sweep({ keep: { named: ['jb-11110008'], listed: [], skeleton: [], held: [] }, cutoff: Date.now() - 14 * DAY, max: 1000 });
+    ok(!gAns.error && intact(c1) && (() => { try { return fs.lstatSync(path.join(GL, 'jb-11110001')).isSymbolicLink(); } catch { return false; } })(), 'a job dir that is a LINK is never walked: the canary outside the tree is whole, the link stays');
+    const isLink = (p) => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+    ok(intact(c2) && isLink(path.join(GL, 'jb-11110002', String(OLD + 1))), 'a run dir that is a LINK is never the sweep\'s: the link stays, the canary it points at is whole');
+    ok(has(bk) && has(GL, 'lost+found') && has(hexRun) && has(expRun), 'names that are not the sweep\'s stay at 30 days: backup/<ts>, lost+found, 0x10 and 1e3 inside a job dir');
+    ok(has(stDir) && has(stLink) && has(stObj) && has(stNull) && has(stNoStart) && has(stPid1), 'stamps that cannot be judged keep their run: a directory, a link to a dead stamp (never followed), {}, null, a pid without a start time, pid 1');
+    ok(!has(deadAfter), 'a dead run sorted AFTER the null stamp is removed in the same pass (a stamp of any shape never stops the walk)');
+    ok(has(nested), 'a run whose only young file is two levels down stays (its newest entry is its age, at any depth)');
+    ok(has(GL, 'jb-11110007') && has(GL, 'jb-11110008'), 'a young empty unnamed job dir stays (a spawn between its mkdirs); an empty job dir a record names stays');
+    // 6. whole() ALONE over a link (its own guard — a second door out of the tree) and over a job dir holding a run link
+    const c3 = canary('c3'), c4 = canary('c4');
+    fs.symlinkSync(c3, path.join(GL, 'jb-11110009'));
+    fs.mkdirSync(path.join(GL, 'jb-1111000a')); fs.symlinkSync(path.join(c4, String(OLD)), path.join(GL, 'jb-1111000a', String(OLD)));
+    const wAns = await R.whole(['jb-11110009', 'jb-1111000a']);
+    ok(intact(c3) && !fs.existsSync(path.join(GL, 'jb-11110009')) && (wAns.gone || []).includes('jb-11110009'), 'whole() over a job dir that is a LINK unlinks the link alone (as the release did) — the canary outside is whole, the id is gone');
+    ok(intact(c4) && !has(GL, 'jb-1111000a'), 'whole() over a job dir holding a run LINK unlinks the link alone — its target stays whole');
+    R.stop();
+  } else ok(false, 'the guards are driven (no remover on this tree)');
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────
   lap('P4 the catch-up');
