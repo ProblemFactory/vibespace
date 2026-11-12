@@ -190,6 +190,14 @@ const typeText = async (text) => { await cdp('Input.insertText', { text }); awai
 /** one leg: a throw is a NAMED ✗ with where it threw, and the walk goes on */
 const ONLY = String(process.env.DY_ONLY || '').split(',').filter(Boolean);   // (a debugging walk of named legs: DY_ONLY=㉗,㉘)
 const step = async (name, fn) => { if (ONLY.length && !ONLY.includes(name)) return; try { await fn(); } catch (e) { check(`${name}: the leg ran to its end`, false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); } };
+// THE SETTLED HANDLER COUNT (hub-sync-holds seam, the .397 train — ㉞ went red on the train with h2 = h1 − 1): a panel's
+// broadcast listener may end LAZILY, at the next socket message after its body left the page (src/lib/plugins-ui.js, rank 13:
+// «the listener ends with the panel»), so a bare app.ws.globalHandlers.length is decided by whichever message lands in the
+// leg's window. Before EVERY reading, ONE synthetic message of a type no handler knows is handed to every global handler over
+// a copy, as src/lib/ws.js dispatches: each listener already due to leave leaves, a live one (its body on the page) stays.
+// Deterministic — no sleep, no retry. Every reading and every wait on the count goes through it (21 in this suite).
+const SETTLED_FN = `() => { const m = { type: 'vs-test-settle' }; for (const h of app.ws.globalHandlers.slice()) { try { h(m); } catch { } } return app.ws.globalHandlers.length; }`;
+const HANDLERS = `(${SETTLED_FN})()`;
 
 await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
@@ -516,16 +524,16 @@ await step('⑮', async () => {
   check('⑮ the same form opened again (its opener pressed a second time): ONE window — the same one, raised in front — holding «AAA»', o.ok && again.pressed && s.windows === 1 && s.same && s.active && s.roots === 1 && s.value === 'AAA', { o, again, ...s });
   { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); }
   // a form whose open registers a broadcast handler (the Browser switcher), opened twice
-  const h0 = await evalJs('app.ws.globalHandlers.length');
+  const h0 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.openBrowserSwitcher({ profileId: 'bp-dy' }); return true; })()`);
   await waitFor(`!!document.getElementById('browser-switcher-dialog')`, 8000);
-  const h1 = await evalJs('app.ws.globalHandlers.length');
+  const h1 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.openBrowserSwitcher({ profileId: 'bp-dy' }); return true; })()`);
   await sleep(500);
-  const h2 = await evalJs(`({ n: app.ws.globalHandlers.length, wins: [...app.wm.windows.values()].filter((w) => w.type === 'form' && w.element.dataset.form === 'browser-switcher-dialog').length })`);
+  const h2 = await evalJs(`({ n: ${HANDLERS}, wins: [...app.wm.windows.values()].filter((w) => w.type === 'form' && w.element.dataset.form === 'browser-switcher-dialog').length })`);
   await evalJs(`(() => { const w = document.getElementById('browser-switcher-dialog')?.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.closeWindow(x.id); return true; })()`);
   await sleep(300);
-  const h3 = await evalJs('app.ws.globalHandlers.length');
+  const h3 = await evalJs(HANDLERS);
   check('⑮ …a form whose open registers a broadcast handler, opened twice: ONE window and ONE handler (the second open\'s released at once); closed: back where it was', h1 === h0 + 1 && h2.n === h1 && h2.wins === 1 && h3 === h0, { h0, h1, h2, h3 });
   // a GUARDED form opened again keeps what was typed AND its guard
   const mk = `(() => { const sh = __dy.api().createModalShell({ id: 'guarded', title: 'A guarded form', kind: 'form', escapeToClose: true, unsaved: { isDirty: () => !!document.querySelector('#plugin-dyprobe-guarded .g-in')?.value, save: async () => true } }); if (!sh.raised) sh.body.innerHTML = '<label>Name <input class="g-in"></label>'; return true; })()`; // (a re-open is RAISED: its caller reads \`raised\` and draws nothing — r3)
@@ -700,16 +708,16 @@ await step('㉑', async () => {
 await step('㉒', async () => {
   const r = await evalJs(`(async () => {
     const wait = () => new Promise((res) => setTimeout(res, 400));
-    const h0 = app.ws.globalHandlers.length;
+    const h0 = ${HANDLERS};
     const a = app.openBrowserSwitcher({ profileId: 'pA' }); await wait();
-    const h1 = app.ws.globalHandlers.length;
+    const h1 = ${HANDLERS};
     const b = app.openBrowserSwitcher({ profileId: 'pB' }); await wait();
-    const h2 = app.ws.globalHandlers.length;
+    const h2 = ${HANDLERS};
     const root = document.getElementById('browser-switcher-dialog');
     const bLive = !!b && !!b.overlay && b.overlay === root && root.isConnected;
     const w = root && root.closest('.window');
     const b2 = app.openBrowserSwitcher({ profileId: 'pB' }); await wait();
-    const h3 = app.ws.globalHandlers.length;
+    const h3 = ${HANDLERS};
     return { h0, h1, h2, h3, aClosed: a.state().closed, bClosed: b.state().closed, bLive, front: !!w && w.classList.contains('window-active'), same: !!b2 && b2.overlay === root, roots: document.querySelectorAll('#browser-switcher-dialog').length };
   })()`);
   check('㉒ the switcher for pA, then for pB ⇒ pB\'s switcher is the one open and in front, pA\'s closed through its door (c3ed5f0a: pA raised, pB\'s handle closed)', !r.bClosed && r.aClosed && r.bLive && r.front && r.roots === 1, r);
@@ -772,15 +780,15 @@ await step('㉔', async () => {
 
 // ── ㉕ a running «Set up <machine>» (no Escape, no backdrop) is never closed by a neighbour: Connect storage opens BESIDE it, its live-log handler kept ──
 await step('㉕', async () => {
-  const h0 = await evalJs('app.ws.globalHandlers.length');
+  const h0 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy', name: 'box1' }); return true; })()`);
   const shown = await waitFor(`!!${byTitle('Set up box1')}?.querySelector('.bs-start')`, 10000);
-  await waitFor(`app.ws.globalHandlers.length > ${h0}`, 6000);   // (its live-log handler registers after the view is drawn)
-  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await waitFor(`${HANDLERS} > ${h0}`, 6000);   // (its live-log handler registers after the view is drawn)
+  const h1 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.sidebar._showAddMountDialog(); return true; })()`);
   await waitFor(`!!${byTitle('Connect storage')}`, 10000);
   await sleep(600);
-  const r = await evalJs(`({ setup: !!${byTitle('Set up box1')}, storage: !!${byTitle('Connect storage')}, h2: app.ws.globalHandlers.length })`);
+  const r = await evalJs(`({ setup: !!${byTitle('Set up box1')}, storage: !!${byTitle('Connect storage')}, h2: ${HANDLERS} })`);
   check('㉕ «Set up box1» running, then «Connect storage» ⇒ BOTH open and the set-up\'s live-log handler kept (c3ed5f0a: the shared id\'s door closed the set-up, handlers 28 → 27)', shown && r.setup && r.storage && h1 === h0 + 1 && r.h2 === h1, { shown, h0, h1, ...r });
   await closeForms(); await sleep(400);
 });
@@ -902,18 +910,18 @@ await step('㉜', async () => {
 // ── ㉝ Reach & policy re-opened for the same conversation ⇒ RAISED, its broadcast handlers +0 (the real showReachDialog) ──
 await step('㉝', async () => {
   await evalJs(`(() => { window.__dyReFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/channels\\/lark\\/c-dy(\\?|$)/.test(s) && (!o || !o.method || o.method === 'GET')) return Promise.resolve(new Response(JSON.stringify({ conversation: { adapterId: 'lark', id: 'c-dy', title: 'ops', policy: null, reach: { entries: [], requests: [] } } }), { headers: { 'Content-Type': 'application/json' } })); return window.__dyReFetch(u, o); }; return true; })()`);
-  const h0 = await evalJs('app.ws.globalHandlers.length');
+  const h0 = await evalJs(HANDLERS);
   await evalJs(`(() => { __dyProbe.showReachDialog(app, { adapterId: 'lark', id: 'c-dy', title: 'ops' }); return true; })()`);
   await waitFor(`!!document.getElementById('chan-reach-dialog')`, 8000);
   await sleep(500);
-  const h1 = await evalJs('app.ws.globalHandlers.length');
+  const h1 = await evalJs(HANDLERS);
   await evalJs(`(() => { __dyProbe.showReachDialog(app, { adapterId: 'lark', id: 'c-dy', title: 'ops' }); return true; })()`);
   await sleep(800);
-  const h2 = await evalJs('app.ws.globalHandlers.length');
+  const h2 = await evalJs(HANDLERS);
   const roots = await evalJs(`document.querySelectorAll('#chan-reach-dialog').length`);
   await evalJs(`(() => { document.querySelector('#chan-reach-dialog .dialog-close')?.click(); return true; })()`);
   await sleep(500);
-  const h3 = await evalJs('app.ws.globalHandlers.length');
+  const h3 = await evalJs(HANDLERS);
   check('㉝ Reach & policy re-opened for the same conversation ⇒ RAISED (one dialog) and the broadcast handlers +0; closed ⇒ back to where they were (c3ed5f0a: +1 per re-open, re-fetching into a detached body)', h1 > h0 && h2 === h1 && roots === 1 && h3 === h0, { h0, h1, h2, h3, roots });
   await evalJs(`(() => { window.fetch = window.__dyReFetch; delete window.__dyReFetch; return true; })()`);
 });
@@ -921,19 +929,26 @@ await step('㉝', async () => {
 // ── ㉞ (r4) a form opened BESIDE an undismissable one is found by its key: Set up box1 running, Set up box2 beside it, Set up box2 again ⇒ box2's RAISED (two set-ups, handlers +0) ──
 await step('㉞', async () => {
   const setups = `[...document.querySelectorAll('.dialog-form, .dialog-overlay')].filter((r) => r.isConnected && /^Set up /.test(r.querySelector(':scope > .dialog > .dialog-header h3')?.textContent || '')).map((r) => r.id + '=' + r.querySelector(':scope > .dialog > .dialog-header h3').textContent)`;
-  const h0 = await evalJs('app.ws.globalHandlers.length');
+  const h0 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy1', name: 'box1' }); return true; })()`);
   await waitFor(`!!${byTitle('Set up box1')}?.querySelector('.bs-start')`, 10000);
-  await waitFor(`app.ws.globalHandlers.length > ${h0}`, 6000);
+  await waitFor(`${HANDLERS} > ${h0}`, 6000);
   await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy2', name: 'box2' }); return true; })()`);
   await waitFor(`!!${byTitle('Set up box2')}?.querySelector('.bs-start')`, 10000);
-  await waitFor(`app.ws.globalHandlers.length > ${h0 + 1}`, 6000);
-  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await waitFor(`${HANDLERS} > ${h0 + 1}`, 6000);
+  const h1 = await evalJs(HANDLERS);
   await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy2', name: 'box2' }); return true; })()`);
   await sleep(1200);
-  const r = await evalJs(`({ setups: ${setups}, h2: app.ws.globalHandlers.length, front: (() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w ? w.title : null; })() })`);
+  const r = await evalJs(`({ setups: ${setups}, h2: ${HANDLERS}, front: (() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w ? w.title : null; })() })`);
   await shot('34-beside-raised');
   check('㉞ Set up box1 running, Set up box2 beside it, then Set up box2 AGAIN ⇒ box2\'s set-up RAISED — two set-up forms, its live-log handler not doubled (981f70d6: a third «host-setup-dialog-3», a second Start and handler for box2)', r.setups.length === 2 && r.setups.filter((x) => /=Set up box2$/.test(x)).length === 1 && r.h2 === h1, { h0, h1, ...r });
+  // ㉞ CONTROL (the shape 981f70d6 had — «a second Start and handler for box2»): box2 asked under ANOTHER key is not raised,
+  // so a second set-up form for box2 registers its own live-log handler — the settled count reads +1: the settling takes only
+  // a listener already due to leave, never a live one, so the leg can still go red
+  await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy2-twin', name: 'box2' }); return true; })()`);
+  await waitFor(`${HANDLERS} > ${r.h2}`, 6000);
+  const hc = await evalJs(HANDLERS);
+  check('㉞ CONTROL: box2 opened again under another key (not raised — the 981f70d6 shape) ⇒ its second live-log handler counts: the settled count reads h2 + 1', hc === r.h2 + 1, { h2: r.h2, hc });
   await closeForms(); await sleep(400);
 });
 
