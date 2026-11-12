@@ -725,6 +725,8 @@ const FOR_YOU_WORDS = Object.freeze({
   // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
   'engine-failed': 'Background Work engine failed to start: {error}',
   'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.',   // lane job-logs-sweep r2: ONE item for the cause carries the clean-up's hold
+  'records-unread': 'Job records in {store} could not be read when VibeSpace started ({error}). Old job logs are not cleaned up until {note} is moved or deleted — first check that {store} reads as it should.',   // r3 §1: a read that failed — the NOTE holds the clean-up
+  'records-unread-unnoted': 'Job records in {store} could not be read when VibeSpace started ({error}), and no note of it could be written — old job logs are not cleaned up while VibeSpace runs; check that {store} reads as it should before it restarts.',   // r3 §1: even the note failed — this process only
   'set-aside-other': '{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.',   // round 3 §8: a file a person named so (not one this hub set aside) — true words
   'records-held': 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.',   // lane job-logs-sweep r2: a set-aside the owner was never told of (the archive's; one from before this version)
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
@@ -757,7 +759,7 @@ function forYouCopy(job, kind, opts = {}) {
   return c;
 }
 function forYouWords(job, kind, opts) {
-  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null } = opts || {};
+  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null, store = null, note = null } = opts || {};
   if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
@@ -770,6 +772,8 @@ function forYouWords(job, kind, opts) {
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
+  if (kind === 'records-unread') return { fact: 'records-unread', words: { key: FOR_YOU_WORDS['records-unread'], params: { store: String(store || 'a job record file'), note: String(note || 'its note'), error: String(error || 'unreadable').slice(0, 60) } }, urgency: 'high' };
+  if (kind === 'records-unread-unnoted') return { fact: 'records-unread-unnoted', words: { key: FOR_YOU_WORDS['records-unread-unnoted'], params: { store: String(store || 'a job record file'), error: String(error || 'unreadable').slice(0, 60) } }, urgency: 'high' };
   if (kind === 'set-aside-other') return { fact: 'set-aside-other', words: { key: FOR_YOU_WORDS['set-aside-other'], params: { file: String(file || 'a file') } }, urgency: 'normal' };
   if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };

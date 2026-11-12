@@ -644,9 +644,13 @@ class UserTodoManager {
     timedSync('user-todos.write', () => { fs.writeFileSync(tmp, json); fs.renameSync(tmp, this._file); });
     this._lastWritten = json;
     this._dirty = false;
+    const ws = this._writtenWaiters; this._writtenWaiters = null; if (ws) for (const r of ws) { try { r(true); } catch { } }
   }
 
   flush() { if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flush(); }
+  /** lane job-logs-sweep r3 §6: a promise resolved once what is in memory NOW has been written by the debounced write (a caller that
+   *  records «I told the owner» does it after the item is on disk); resolved at once when nothing is pending */
+  whenWritten() { if (!this._dirty) return Promise.resolve(true); return new Promise((resolve) => { (this._writtenWaiters || (this._writtenWaiters = [])).push(resolve); }); }
 
   _notify() { try { this._onChange(this.snapshot()); } catch { } }
 

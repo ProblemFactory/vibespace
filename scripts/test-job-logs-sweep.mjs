@@ -45,6 +45,8 @@ const settle = async (jm) => { if (typeof jm.logsSettled === 'function') await j
 const sweepAt = async (jm, at) => { if (typeof jm.sweepLogs === 'function') await jm.sweepLogs({ now: at }); else await jm._gc({ now: at }); await settle(jm); };
 const gcAt = async (jm, at) => { await jm._gc({ now: at }); await settle(jm); };   // THE HOURLY ROAD with its clock
 const T0 = Date.now(); const lap = (name) => console.log(`${name}  (+${Date.now() - T0} ms)`);
+const fill = (w) => String(w.key).replace(/\{(\w+)\}/g, (m, k) => (w.params && w.params[k] !== undefined ? String(w.params[k]) : m));
+const W8w = () => require(path.join(ROOT, 'src/store-writer.js'));
 // A SLOW STORAGE (the owner's data/ is a network mount): the REAL worker, every rmSync made to cost SLOW_MS on the thread that
 // calls it — the worker's thread in the product's shape, the main thread in the control's
 const SLOW_MS = 0.2;
@@ -445,14 +447,97 @@ try {
     fs.readFileSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf.call(this, f, ...a); };
     fs.renameSync = function (f, ...a) { if (String(f) === AF) throw Object.assign(new Error('EIO: i/o error, rename'), { code: 'EIO' }); return rn.call(this, f, ...a); };
     try { JH6.archive = null; JH6._loadArchive(); } finally { fs.readFileSync = rf; fs.renameSync = rn; }
-    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && setAsides(h6).length === 0 && JH6.archive.length === 0, 'an EIO read whose set-aside also failed: no file is left behind — the process notes it (law: only «not there» means «no records»)');
-    fs.chmodSync(AF, 0o000);
+    const notes6 = () => fs.readdirSync(h6).filter((n) => /^jobs-archive\.json\.corrupt-unread-\d+$/.test(n));
+    ok(JH6._logsUnread && JH6._logsUnread.archive === 'EIO' && notes6().length === 1 && JH6.archive.length === 0, 'round 3 §1: an EIO read whose set-aside also failed leaves a NOTE on disk before the load returns (`jobs-archive.json.corrupt-unread-<ms>`)');
+    JH6._writeArchive([]);   // THE HUB'S OWN OVERWRITE (the boot sweep, any save): its empty list over the unread file
+    await sweepAt(JH6, Date.now()); await sweepAt(JH6, Date.now());
+    ok(has(h6Listed) && has(h6Orphan), 'THE HOLD HAS A FILE: after the hub\'s own overwrite a read SUCCEEDS on its empty list — and the pass still removes NOTHING (the note holds it)');
+    fs.writeFileSync(AF, JSON.stringify([{ id: 'jb-a7c0ffee', kind: 'task', state: 'done', runs: [{ startedAt: a6Ts, endedAt: a6Ts + 1 }] }]));   // a person restores the records…
+    for (const n of notes6()) fs.renameSync(path.join(h6, n), path.join(tmp, n + '.h6'));   // …and moves the note
     await sweepAt(JH6, Date.now());
-    ok(has(h6Listed) && has(h6Orphan), 'while the worker cannot read it either, the pass removes NOTHING');
-    fs.chmodSync(AF, 0o644);
-    await sweepAt(JH6, Date.now());
-    ok(has(h6Listed) && !has(h6Orphan), 'the read that succeeds at the next pass lifts it by itself: the file\'s listed run stays, a run no record names goes');
+    ok(has(h6Listed) && !has(h6Orphan), 'lifted ONLY by a person moving the note: the file\'s records (re-read by the child, memory holds none) keep their run, a run no record names goes');
     ok(LH6.filter((l) => /archive could not be read: EACCES/.test(l)).length <= 1, 'the same failure is said once, not every pass');
+    // H6b THE RESTART ROAD (round 3 §1): an EIO at boot leaves a note; the hub's own overwrite; a NEW engine loads the hub-written
+    // file cleanly — its boot pass removes nothing (the note is on disk), for the archive and for the store
+    for (const which of ['archive', 'store']) {
+      const hr = mkDir('h6b-' + which), rT = Date.now() - 20 * DAY;
+      const SF2 = path.join(hr, which === 'archive' ? 'jobs-archive.json' : 'jobs.json');
+      fs.writeFileSync(SF2, JSON.stringify([{ id: 'jb-4e5ta' + (which === 'archive' ? 'a01' : 's01'), kind: which === 'archive' ? 'task' : 'service', state: which === 'archive' ? 'done' : 'up', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: rT, endedAt: rT + 1 }], ...(which === 'archive' ? { archivedAt: Date.now() - DAY, archivedWhy: 'done' } : {}) }]));
+      const rRun = seedRun(hr, 'jb-4e5ta' + (which === 'archive' ? 'a01' : 's01'), rT, { ageMs: 20 * DAY });
+      const ex = fs.existsSync, rf2 = fs.readFileSync;
+      fs.readFileSync = function (f, ...a) { if (String(f) === SF2) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return rf2.call(this, f, ...a); };
+      fs.existsSync = function (f, ...a) { if (String(f) === SF2) return false; return ex.call(this, f, ...a); };
+      let J1r; try { J1r = boot(hr).jm; if (which === 'archive') { J1r.archive = null; J1r._loadArchive(); } } finally { fs.readFileSync = rf2; fs.existsSync = ex; }
+      if (which === 'archive') J1r._writeArchive([]); else { J1r._dirty = true; J1r._save(); }   // the hub's own overwrite: its empty list
+      J1r.shutdown();
+      const { jm: J2r, logs: L2r } = boot(hr, { bootDelayMs: 20 });
+      await until(() => L2r.some((l) => /job-logs clean-up HELD/.test(l)), 5000, 10); await settle(J2r);
+      ok(has(rRun) && L2r.some((l) => new RegExp('HELD: ' + path.basename(SF2).replace(/\./g, '\\.') + '\\.corrupt-unread-').test(l)), `THE RESTART ROAD (${which}): the next engine loads the hub-written file cleanly, and its boot pass removes NOTHING — the note on disk holds it`);
+    }
+    // H6c THE ARCHIVE'S RENAME ALONE FAILS (no second fault): a torn archive whose set-aside rename is refused — its bytes are COPIED
+    // aside, the copy holds the pass, the item names the copy (a name, never a path)
+    {
+      const ha = mkDir('h6c'); const AF3 = path.join(ha, 'jobs-archive.json'); fs.writeFileSync(AF3, '[{"id":"jb-a8c0ffe9","runs":[{"startedAt":1');
+      const haRun = seedRun(ha, 'jb-0e1a00c9', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      const { jm: JA, items: IA } = boot(ha);
+      const rn2 = fs.renameSync; fs.renameSync = function (f, ...a) { if (String(f) === AF3) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn2.call(this, f, ...a); };
+      try { JA.archive = null; JA._loadArchive(); } finally { fs.renameSync = rn2; }
+      await sweepAt(JA, Date.now());
+      const copies = fs.readdirSync(ha).filter((n) => /^jobs-archive\.json\.corrupt-\d+$/.test(n));
+      const it6 = IA.find((n) => n && n.fact === 'records-held');
+      ok(copies.length === 1 && fs.readFileSync(path.join(ha, copies[0]), 'utf8') === fs.readFileSync(AF3, 'utf8') && has(haRun) && it6 && it6.words.params.file === copies[0], 'THE ARCHIVE\'S RENAME ALONE FAILS: its bytes are COPIED aside, the copy holds the pass, and the item names the copy (a name, never a path)');
+    }
+    // H6d THREE RESTARTS THROUGH ONE TRANSIENT READ FAILURE: one note, one item; the words stay true once the store reads again
+    {
+      const h3x = mkDir('h6d'); const SF3 = path.join(h3x, 'jobs-archive.json'); fs.writeFileSync(SF3, '[]');
+      const allItems = [];
+      for (let k = 0; k < 3; k++) {
+        const ex = fs.existsSync, rf3 = fs.readFileSync;
+        fs.readFileSync = function (f, ...a) { if (String(f) === SF3) throw Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' }); return rf3.call(this, f, ...a); };
+        fs.existsSync = function (f, ...a) { if (String(f) === SF3) return false; return ex.call(this, f, ...a); };
+        let Jk, Ik; try { const b = boot(h3x); Jk = b.jm; Ik = b.items; Jk.archive = null; Jk._loadArchive(); } finally { fs.readFileSync = rf3; fs.existsSync = ex; }
+        if (Jk._logsStateP) await Jk._logsStateP; await sleep(700);   // the For-you store's own write (500 ms debounce) lands before «said»
+        await W8w().storeWriter().durable(path.join(h3x, 'jobs-logs-sweep.json'));
+        allItems.push(...Ik.filter((n) => n && /^records-unread/.test(n.fact))); Jk.shutdown();
+      }
+      const notes = fs.readdirSync(h3x).filter((n) => /corrupt-unread-/.test(n));
+      ok(notes.length === 1 && allItems.length === 1 && /first check that jobs-archive\.json reads as it should/.test(fill(allItems[0].words)) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words true once the store reads again («first check that it reads as it should»), a name not a path`);
+    }
+    // H6e «SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: a restart before that tells again (twice at worst, never never)
+    {
+      const hw = mkDir('h6e'); fs.writeFileSync(path.join(hw, 'jobs.json.corrupt-123'), 'torn bytes');
+      let release = null; const written = new Promise((r) => { release = r; });
+      const logsW = [], itemsW = [];
+      const JW = new JobManager({ dataDir: hw, broadcast() { }, log: (...a) => logsW.push(a.join(' ')), memoryRungs: [], logsSweep: { bootDelayMs: 3600e3, restFactor: 1 }, notifyUser(n) { itemsW.push(n); return { ok: true, written: () => written }; } });
+      JW.init(); engines.push(JW);
+      await sweepAt(JW, Date.now()); await W8w().storeWriter().durable(path.join(hw, 'jobs-logs-sweep.json'));
+      let before = null; try { before = JSON.parse(fs.readFileSync(path.join(hw, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+      release(true); await sleep(30); if (JW._logsStateP) await JW._logsStateP; await W8w().storeWriter().durable(path.join(hw, 'jobs-logs-sweep.json'));
+      let after = null; try { after = JSON.parse(fs.readFileSync(path.join(hw, 'jobs-logs-sweep.json'), 'utf8')); } catch { }
+      ok(itemsW.length === 1 && before && !(before.heldSaid || []).includes('jobs.json.corrupt-123') && after && (after.heldSaid || []).includes('jobs.json.corrupt-123'), '«SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: before its write the record holds no «said», after it, it does (a crash between tells twice, never never)');
+    }
+    // H6f THE STORE'S RENAME FAILS: its bytes are copied aside and its item names the COPY — never the live jobs.json
+    {
+      const hs = mkDir('h6f'); const SF4 = path.join(hs, 'jobs.json'); fs.writeFileSync(SF4, '[{"id":"jb-5e7f1cef","kind":"service","runs":[{"startedAt":1');
+      const rn4 = fs.renameSync; fs.renameSync = function (f, ...a) { if (String(f) === SF4) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); return rn4.call(this, f, ...a); };
+      let IS; try { IS = boot(hs).items; } finally { fs.renameSync = rn4; }
+      const sc6 = IS.find((n) => n && n.fact === 'store-corrupt'); const copy = fs.readdirSync(hs).find((n) => /^jobs\.json\.corrupt-\d+$/.test(n));
+      ok(sc6 && copy && sc6.words.params.file === copy && sc6.words.params.file !== 'jobs.json' && !/\//.test(sc6.words.params.file), 'THE WORDS NEVER TELL THE OWNER TO DELETE A LIVE STORE: a failed rename copies the bytes aside and the item names the copy, never jobs.json');
+    }
+    // H6g EVEN THE NOTE CANNOT BE WRITTEN: this process holds, and the item says so
+    {
+      const hn = mkDir('h6g'); const SF5 = path.join(hn, 'jobs-archive.json'); fs.writeFileSync(SF5, '[]');
+      const hnOrphan = seedRun(hn, 'jb-0e1a00e9', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
+      const { jm: JN, items: IN } = boot(hn);
+      const ex = fs.existsSync, rf5 = fs.readFileSync, wf5 = fs.writeFileSync;
+      fs.readFileSync = function (f, ...a) { if (String(f) === SF5) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return rf5.call(this, f, ...a); };
+      fs.existsSync = function (f, ...a) { if (String(f) === SF5) return false; return ex.call(this, f, ...a); };
+      fs.writeFileSync = function (f, ...a) { if (/corrupt-unread-/.test(String(f))) throw Object.assign(new Error('EROFS'), { code: 'EROFS' }); return wf5.call(this, f, ...a); };
+      try { JN.archive = null; JN._loadArchive(); } finally { fs.readFileSync = rf5; fs.existsSync = ex; fs.writeFileSync = wf5; }
+      fs.writeFileSync(SF5, '[]');   // the store is plain again for the child's read
+      await sweepAt(JN, Date.now());
+      ok(IN.some((n) => n && n.fact === 'records-unread-unnoted') && JN._logsUnread.archive === 'EIO', 'EVEN THE NOTE CANNOT BE WRITTEN: this process holds (the child re-reads the store), and the item says no note could be written');
+    }
     // H7 THE STORE READ FAILED WITH NO SET-ASIDE: a stand-in EIO at boot whose stat failed too (nothing to set aside, no
     // skeletons) — the worker reads the store at the pass
     const h7 = mkDir('h7'); const s7Ts = Date.now() - 20 * DAY;
@@ -464,7 +549,11 @@ try {
     fs.existsSync = function (f, ...a) { if (String(f) === SF) return false; return ex.call(this, f, ...a); };
     let JH7; try { JH7 = boot(h7).jm; } finally { fs.readFileSync = rf; fs.existsSync = ex; }
     await sweepAt(JH7, Date.now());
-    ok(JH7._logsUnread && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && setAsides(h7).length === 0 && has(h7Listed) && !has(h7Orphan), 'a STORE read that failed at boot with no set-aside (memory holds no record of it): the worker reads the store at the pass — its listed run stays, a run no record names goes');
+    const notes7 = () => fs.readdirSync(h7).filter((n) => /^jobs\.json\.corrupt-unread-\d+$/.test(n));
+    ok(JH7._logsUnread && JH7._logsUnread.store === 'EIO' && JH7.jobs.size === 0 && notes7().length === 1 && has(h7Listed) && has(h7Orphan), 'a STORE read that failed at boot with nothing to set aside (the stat failed too): a NOTE on disk, and the pass removes nothing');
+    for (const n of notes7()) fs.renameSync(path.join(h7, n), path.join(tmp, n + '.h7'));
+    await sweepAt(JH7, Date.now());
+    ok(has(h7Listed) && !has(h7Orphan), '…the note moved by a person: the child reads the store (memory holds no record of it) — its listed run stays, a run no record names goes');
   }
 
 
@@ -620,10 +709,10 @@ try {
     } else ok(false, '«resumes» after a restart (no law on this tree)');
     // f. §S, stronger: every removal call of jobs.js is a listed site; no alias of a removing fs call; the record never written by hand
     const JS4 = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-    const REMOVALS_OK = ['fs.renameSync(this.archiveFile', 'fs.renameSync(this.file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile'];
+    const REMOVALS_OK = ['fs.renameSync(file', 'fs.renameSync(tmp', 'fs.unlinkSync(path.join(dir', 'fs.unlinkSync(specPath', 'fs.unlinkSync(this.lockFile'];
     const removals = [...JS4.matchAll(/fs\.(?:unlink|rm|rmdir|rename)Sync\(\s*[^,)]*|fs\.promises\.(?:rm|unlink|rmdir|rename)\(\s*[^,)]*/g)].map((m) => m[0]);
     const strangers = removals.filter((r) => !REMOVALS_OK.includes(r));
-    ok(removals.length === 7 && !strangers.length, `jobs.js's removal calls are exactly the listed seven (the set-aside renames, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
+    ok(removals.length === 6 && !strangers.length, `jobs.js's removal calls are exactly the listed six (the set-aside rename of a store, the atomic writes' renames, the spill files, a failed spawn's own spec, the lock) — none under job-logs by another helper${strangers.length ? ': ' + strangers.join(' | ') : ''}`);
     ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js');
     const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');

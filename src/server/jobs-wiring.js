@@ -56,7 +56,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
           urgency: urgency || 'normal', by: 'agent', jobId, jobFact: jobId ? fact : null, filerKey: forYouKey,
           sessionName: ownerCid && sessName ? sessName : null, jobName: jobName || (ownerCid && sessName ? 'job' : 'background job'),
         });
-        return { ok: true, id: (it && it.id) || null };
+        return { ok: true, id: (it && it.id) || null, written: () => (typeof userTodos.whenWritten === 'function' ? userTodos.whenWritten() : Promise.resolve(true)) };   // lane job-logs-sweep r3 §6: «said» after the item is on disk
       } catch (e) {
         // THE STORE'S VERDICT, RETURNED (lane job-notify-user r2): the engine journals it — the Delivery log said
         // «user-inbox ✓» for a copy the store refused (an urgency outside its set, a conversation at its open cap)
