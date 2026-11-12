@@ -398,6 +398,29 @@ try {
     const h5bOrphan = seedRun(h5b, 'jb-0e1a0015', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: JH5b } = boot(h5b); await sweepAt(JH5b, Date.now());
     ok(has(h5bOrphan), 'the worker refuses an archive that parses to a non-list even when it iterates (a JSON string) — nothing removed');
+    // H5c READ FIRST, THEN ASK WHETHER ANYTHING WAS SET ASIDE (round 3 §2): the child's archive read is held open until the main
+    // thread sets the torn archive aside (a list) — or sets it aside AND writes a fresh one in the same call (the archive sweep)
+    for (const scene of ['race', 'race-write']) {
+      const hr = mkDir('h-' + scene), fl = path.join(tmp, 'flags-' + scene); fs.mkdirSync(fl, { recursive: true });
+      const aTs = Date.now() - 25 * DAY, AF2 = path.join(hr, 'jobs-archive.json');
+      const full = JSON.stringify([{ id: 'jb-a8ace001', kind: 'task', name: 'arc', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: aTs, endedAt: aTs + 9e3 }], archivedAt: Date.now() - DAY, archivedWhy: 'done' }]);
+      fs.writeFileSync(AF2, full.slice(0, full.length - 11));   // torn
+      const listedR = seedRun(hr, 'jb-a8ace001', aTs, { ageMs: 24 * DAY }), orphanR = seedRun(hr, 'jb-0e1a00a8', Date.now() - 40 * DAY, { ageMs: 39 * DAY });
+      if (scene === 'race-write') fs.writeFileSync(path.join(hr, 'jobs.json'), JSON.stringify([{ id: 'jb-d0e00001', kind: 'task', name: 'due', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [{ startedAt: Date.now() - 3 * DAY, endedAt: Date.now() - 3 * DAY, exit: 0 }] }]));
+      const blockW = path.join(tmp, 'block-archive-' + scene + '.cjs');
+      fs.writeFileSync(blockW, `const fs = require('fs'); const rf = fs.readFileSync; const sab = new Int32Array(new SharedArrayBuffer(4));\nfs.readFileSync = function (p, ...a) { if (String(p) === ${JSON.stringify(AF2)} && !fs.existsSync(${JSON.stringify(path.join(fl, 'go'))})) { rf.call(fs, '/proc/self/stat'); fs.writeFileSync(${JSON.stringify(path.join(fl, 'at-read'))}, '1'); const t = Date.now() + 8000; while (!fs.existsSync(${JSON.stringify(path.join(fl, 'go'))}) && Date.now() < t) Atomics.wait(sab, 0, 0, 10); } return rf.call(this, p, ...a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+      let doneH = 1e5;   // nothing is due at the boot: the set-aside (+ fresh write) happens only at the leg's own call
+      const { jm: JR, logs: LR } = boot(hr, { workerPath: blockW }, { archivePolicy: () => ({ doneAfterHours: doneH, failedAfterDays: 7 }) });
+      const asideAtBoot = fs.readdirSync(hr).some((n) => /\.corrupt-/.test(n));
+      if (typeof JR.sweepLogs !== 'function') { ok(false, `${scene}: the set-aside is asked after the reads (no law on this tree)`); continue; }
+      JR.archive = null;   // the boot did not load it: the child reads the file
+      const passP = JR.sweepLogs({ why: 'tick' });
+      await until(() => has(fl, 'at-read'), 8000, 5);
+      if (scene === 'race') JR.archivedList(); else { doneH = 24; JR.archiveSweep({ now: Date.now(), why: 'tick' }); }   // the set-aside (+ a fresh write) while the child reads
+      fs.writeFileSync(path.join(fl, 'go'), '1');
+      await passP; await settle(JR);
+      ok(!asideAtBoot && has(listedR) && has(orphanR) && LR.some((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-/.test(l)) && (scene === 'race' || fs.existsSync(AF2)), `READ FIRST, THEN ASK (${scene}): a set-aside made while the child read${scene === 'race-write' ? ' — and a fresh archive written in the same call' : ''} holds the pass; nothing removed`);
+    }
     // H6 A READ THAT FAILED WITH NO SET-ASIDE (a stand-in in code: EIO on the read, the rename refused) — this process holds,
     // and the next pass reads the file again in the worker: a read that succeeds keeps its records by itself
     const h6 = mkDir('h6'); const a6Ts = Date.now() - 20 * DAY;

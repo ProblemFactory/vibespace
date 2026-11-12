@@ -105,14 +105,6 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
   if (count === 'auto') count = !(out.state && out.state.catchUp);
   out.counted = !!count;
   const listed = new Set(keep.listed || []), held = new Set(keep.held || []), skel = new Set(keep.skeleton || []), named = new Set(keep.named || []);
-  // THE HELD FACT (round 2 law 1): a record store of jobs SET ASIDE in the data dir (`jobs.json.corrupt-*`,
-  // `jobs-archive.json.corrupt-*` — the bytes the hub could not read, kept by its load) — the pass removes NOTHING while one is
-  // there: on every road and after every restart, because the fact is the file, never a variable. A person moving or deleting
-  // it is what lifts it. A data dir that cannot be listed holds the pass too.
-  if (setAside && setAside.dir) {
-    let names; try { names = fs.readdirSync(setAside.dir).filter((n) => (setAside.prefixes || []).some((p) => n.startsWith(p))); } catch (e) { out.error = 'the data dir could not be listed: ' + (e.code || e.message); out.ms = Date.now() - t0; return out; }
-    if (names.length) { out.heldBy = 'set-aside'; out.heldFiles = names.sort(); out.ms = Date.now() - t0; return out; }
-  }
   // a store the hub could not read (`storeFile`, its load failed with no set-aside) and the archive it has not loaded or could
   // not read (`archiveFile`) are read HERE, never on the main thread: their records name and list as memory's do. ONLY «the
   // file is not there» reads as no records; a read that fails, or bytes that are not a list, keep the walk from removing anything
@@ -128,6 +120,15 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
       for (const x of k.named) named.add(x); for (const x of k.listed) listed.add(x); for (const x of k.skeleton) skel.add(x);
     }
   } catch (e) { out.error = e.message; out.ms = Date.now() - t0; return out; }
+  // THE HELD FACT (round 2 law 1; round 3: LAST, after every read — a set-aside the main thread made while this child read, or
+  // the archive sweep's set-aside + fresh write in one call, is seen here, never read as «no file»): a record store of jobs SET ASIDE in the data dir (`jobs.json.corrupt-*`,
+  // `jobs-archive.json.corrupt-*` — the bytes the hub could not read, kept by its load) — the pass removes NOTHING while one is
+  // there: on every road and after every restart, because the fact is the file, never a variable. A person moving or deleting
+  // it is what lifts it. A data dir that cannot be listed holds the pass too.
+  if (setAside && setAside.dir) {
+    let names; try { names = fs.readdirSync(setAside.dir).filter((n) => (setAside.prefixes || []).some((p) => n.startsWith(p))); } catch (e) { out.error = 'the data dir could not be listed: ' + (e.code || e.message); out.ms = Date.now() - t0; return out; }
+    if (names.length) { out.heldBy = 'set-aside'; out.heldFiles = names.sort(); out.ms = Date.now() - t0; return out; }
+  }
   let jobs; try { jobs = fs.readdirSync(logsDir, { withFileTypes: true }); } catch (e) { if (e.code !== 'ENOENT') out.error = e.message; out.ms = Date.now() - t0; return out; }
   walk: for (const je of jobs) {
     if (!je.isDirectory() || !S.JOB_NAME.test(je.name)) continue;
