@@ -26,7 +26,9 @@ let bootAt = BOOT_AT;
 // OOM killer, a crash, the unit's timeout) — nobody kills this child then; it checks between two run dirs (getppid: the parent's
 // death re-parents it) and stops at once, so no remover outlives its hub by more than the one call it is in, and two removers
 // never delete in one data dir at once (the next hub starts ≥ 5 s later and passes 2 min after its boot)
-const HUB = process.ppid;
+// round 3 §4: the hub's pid is what the hub HANDED it (argv[3]) — never getppid read ~20 ms after the fork (a hub that died in that
+// window left a child whose «hub» was the reaper); a child whose parent already differs at a batch's start refuses the batch
+const HUB = Number(process.argv[3]) > 1 ? Number(process.argv[3]) : process.ppid;
 const hubGone = () => process.ppid !== HUB;
 let orphanDir = null, orphanSeq = null;
 /** the hub ended mid-batch: what this batch removed is left in a file for the next engine (counted once), then exit */
@@ -174,6 +176,7 @@ function forget({ dir, names = [] }) { let n = 0; for (const name of names) { if
 
 process.on('disconnect', () => process.exit(0));   // the hub went (or killed its remover): nothing is waited for
 process.on('message', (msg) => {
+  if (hubGone()) orphaned(null);   // round 3 §4: a batch from a hub that is gone is never started
   bootAt = msg && Number.isFinite(msg.bootTimeMs) ? msg.bootTimeMs : BOOT_AT;
   orphanDir = msg && typeof msg.orphanDir === 'string' ? msg.orphanDir : null; orphanSeq = msg && msg.seq;
   let out;

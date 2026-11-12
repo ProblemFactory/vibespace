@@ -136,7 +136,9 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   /** the remover's child: our own script, its env BUILT (a PATH only — the hub's environment and its secrets never reach it),
    *  an IPC channel and nothing else, a bounded heap */
   function startChild() {
-    const w = forkImpl ? forkImpl(workerPath, [logsDir], {}) : fork(workerPath, [logsDir], { env: { PATH: process.env.PATH || '/usr/bin:/bin' }, execArgv: ['--max-old-space-size=96'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    // round 3 §4: the hub HANDS the child its own pid (argv[3]) — the child never learns «its hub» from getppid after a window in
+    // which the hub may already have died (it would take the reaper for its hub, never stop, and leave no count)
+    const w = forkImpl ? forkImpl(workerPath, [logsDir, String(process.pid)], {}) : fork(workerPath, [logsDir, String(process.pid)], { env: { PATH: process.env.PATH || '/usr/bin:/bin' }, execArgv: ['--max-old-space-size=96'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     w.on('message', (m) => {
       if (w === worker && cur && m && m.seq === cur.msg.seq) { if (m.progress && !('removed' in m && 'more' in m)) { cur.progress = m.progress; return; } finish(m); }
     });

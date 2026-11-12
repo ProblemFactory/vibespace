@@ -648,6 +648,23 @@ try {
     const done5 = LN5.find((l) => /catch-up done/.test(l)) || '';
     ok(/catch-up done: 60 run dir\(s\) removed/.test(done5) && LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l)) && !orphanFile(), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk', { done5 });
   } else ok(false, 'no remover outlives its hub (no remover on this tree)');
+  // THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT (round 3 §4): the hub is killed THE MOMENT its child's pid appears (said
+  // once its batch message is written), while the child is still starting (a stand-in delays its start 400 ms) — the child,
+  // reading its batch from a hub already gone, must never run it
+  if (LS) {
+    const o7 = mkDir('o7'); fs.mkdirSync(path.join(o7, 'job-logs'), { recursive: true });
+    const b7 = Date.now() - 50 * DAY; for (let i = 0; i < 20; i++) seedRun(o7, 'jb-0ld00011', b7 + i * 1000, { ageMs: 30 * DAY });
+    const lateChild = path.join(tmp, 'late-start-child.cjs');
+    const walked = path.join(tmp, 'o7-walked');
+    fs.writeFileSync(lateChild, `const fs = require('fs'); const rd = fs.readdirSync; fs.readdirSync = function (p, ...a) { if (String(p) === ${JSON.stringify(path.join(o7, 'job-logs'))}) fs.writeFileSync(${JSON.stringify(walked)}, '1'); return rd.call(this, p, ...a); };\nconst sab = new Int32Array(new SharedArrayBuffer(4)); Atomics.wait(sab, 0, 0, 400);   // a slow start: the hub dies meanwhile\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+    const hub7 = path.join(tmp, 'hub7.cjs');
+    fs.writeFileSync(hub7, `const cp = require('child_process'); const LS = require(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep.js'))});\nconst R = LS.createRemover({ logsDir: ${JSON.stringify(path.join(o7, 'job-logs'))}, workerPath: ${JSON.stringify(lateChild)}, forkImpl: (p, a) => { const c = cp.fork(p, a, { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); globalThis.kid = c; return c; } });\nR.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now(), max: 100 });\nsetTimeout(() => process.stdout.write('CHILD ' + globalThis.kid.pid + '\\n'), 30);   // the batch message is WRITTEN by now; the child is still starting\nsetInterval(() => { }, 1000);\n`);
+    const h7 = spawn(process.execPath, [hub7], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(h7);
+    let o7out = ''; const childPid = await new Promise((resolve) => { const k = setTimeout(() => resolve(0), 8000); h7.stdout.on('data', (d) => { o7out += d; const m = /CHILD (\d+)/.exec(o7out); if (m) { clearTimeout(k); try { process.kill(h7.pid, 'SIGKILL'); } catch { } resolve(Number(m[1])); } }); });
+    const gone = await until(() => { try { fs.statSync('/proc/' + childPid); return false; } catch { return true; } }, 8000, 10);   // the child's own end
+    const left7 = runsOn(o7, 'jb-0ld00011').length;
+    ok(childPid > 0 && gone && left7 === 20 && !fs.readdirSync(o7).some((n) => n.startsWith(LS.ORPHAN_PREFIX)) && !fs.existsSync(walked), `THE CHILD KNOWS ITS HUB BY WHAT THE HUB TELLS IT: its hub killed the moment the child appeared, the child refused to START the batch (it never listed job-logs) and ended (${20 - left7} of 20 removed)`);
+  }
   // a restart BETWEEN the count and the forget: the orphan's name is in the record, its file still there — never counted twice
   if (LS) {
     const o6 = mkDir('o6'); fs.mkdirSync(path.join(o6, 'job-logs'), { recursive: true });
