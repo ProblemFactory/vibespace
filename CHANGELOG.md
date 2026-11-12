@@ -4,6 +4,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.397 — 2026-11-12
 
+### Changed
+- In the accounts list, a long-lived token that needs nothing from you is now a small clock icon, so the account's note has its line back.
+- A long-lived token's last day is now said once on its row, not twice.
+
 ### Fixed
 - When a page goes away or crashes in the middle of a passkey sign-in, the passkey VibeSpace lent to the tab is taken back. Before, it could stay on the tab.
 - If the browser ever keeps a passkey VibeSpace lent to a tab, VibeSpace now tells you which tab to close, and the notice goes once the passkey is gone.
