@@ -1735,6 +1735,23 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - the panel toasts «Removed. Its log files are still being deleted in the background.»;
   - the CLI says «removed — its log files are still being deleted in the background».
 
+**ROUND 3 (49d128a94 not accepted; readers in int359/acc-398/jls2).**
+- **§1 the hold that has no file gets one:** a failed records read leaves its fact on disk before the load returns, through `_logsHeldFile` (the bytes renamed or copied aside, else ONE note `<store>.corrupt-unread-<ms>` per store). It is lifted only by a person moving it. The child also re-reads that store each pass (memory holds none of its records).
+- **§2 read first, then ask:** the child lists set-asides AFTER every read, so the archive tick's set-aside + fresh write in one call is held too.
+- **§3 a record whose `runs` is not a list:** its job is kept whole and said once; `keepSetOf` never throws; a pass that throws never fails the gc; the gc's archive leg keeps it too.
+- **§4 the hub hands its child its own pid** (argv[3]); a batch from a gone hub is never started.
+- **§5 evidence with no clock:** see «KEPT UNTIL EVIDENCE» above.
+- **§6 the words:** each item names the file that holds what it says (never the live store), names only; «said» is marked after the For-you store has WRITTEN the item (`userTodos.whenWritten`, handed back by the wiring as `written`).
+- **§7 a person's removal is not paused:** owed ✕s are re-sent while the clean-up is paused.
+- **§8 the small things:**
+  - the start line is said after the record is durable;
+  - a batch keeps its count (progress after every removal);
+  - an unreadable catch-up record makes the pass wait, and a torn one is set aside;
+  - orphan files are cleaned and validated;
+  - a person's `*.corrupt-*` file gets true words.
+- **§9 the tier rule:** the PURE half stays fast (test-job-logs-sweep, 0.1 s); every leg that forks is test-job-logs-sweep-heavy.
+- **A TIMING FACT, not a guarantee (asked to be said, no lock):** «two removers never delete in one data dir at once» rests on timing. An orphan stops before its next run dir; the next hub starts ≥ 5 s later and passes 2 min after its boot. The readers measured the overlap as an orphan's LAST call beside the next hub's remover: harmless, because the verdict is taken per run dir, both sides judge the same dir removable, and `rmSync` with `force` tolerates the other having removed it first.
+
 **NAMED, not built (round 2).**
 - Two engines over ONE data dir on different machines each sweep by their own keep set (`jobs.lock` is a local pid check): a hub on another machine over a shared data dir would remove every run its own records do not list. Refusing a pass when the lock's host / boot id is not this machine's is the fix, not built.
 - The keep set's cost at the archive's real cap: 2 000 archived records × ≤ 20 runs ≈ 40 000 `<id>/<runTs>` strings built on the main thread and cloned to the child once a pass (hourly, or every rest of a catch-up) — measured 19.1 ms worst loop delay on the owner's shape with a 2 000-record archive.
