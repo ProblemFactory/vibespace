@@ -1513,6 +1513,8 @@ app.get('/api/usage/probe-log', (req, res) => {
 // bills nothing and calls no vendor (the client then presses the SAME ⟳ for that account — the road a person's press already
 // has); an agent's token is refused. The answer names a wall that is NOT a quota (`wall`: the pool's verdict — the CLI not
 // measured, the vault, the login): the claim stands for the quota, and that cause still keeps the account unplaceable.
+// the store writer's own sentence for an act kept in memory, not on disk yet (src/agent-routes/status.js — one sentence, one key)
+const NOT_DURABLE_WORDS = 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.';
 app.post('/api/accounts/:id/reset-claim', (req, res) => {
   if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only — a reset claim is a person\'s word about the vendor\'s site', code: 'agent_forbidden' });
   const key = String(req.params.id || '');
@@ -1530,17 +1532,23 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   try { wall = !isGlobal && typeof accounts.placeWallOf === 'function' ? accounts.placeWallOf(key) : null; } catch { wall = null; }
   let odMode = 'manual';
   try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
-  // A PERSON'S ACT IS ON DISK BEFORE ITS ANSWER (K2): the claims store's next write through the store writer
+  // A PERSON'S ACT IS ON DISK BEFORE ITS ANSWER (K2): the claims store's next write through the store writer. Not on disk
+  // (law F — store-writer.js: a failed act is SAID): 503 `not-durable` with the store writer's own sentence, the claim beside
+  // it (applied: in memory, the pool reads it) — the page says both (account-wall-words claimAnsweredWords)
+  const body = { ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' };
+  const notDurable = () => res.status(503).json({ ...body, code: 'not-durable', error: NOT_DURABLE_WORDS });
   resetClaims.persisted().then((durable) => {
   console.log(`[reset-claim] ${keyName(key)}: a person says ${r.lanes.join(', ')} ${r.lanes.length === 1 ? 'was' : 'were'} reset on the vendor's site — reset, unconfirmed until ${r.lanes.length === 1 ? 'its' : 'their'} next reading${wall ? ` (and it stays unplaceable: ${unplaceableText(wall)})` : ''}`);
-  res.json({ ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off', ...(durable ? {} : { durable: false }) });
-  });
+  if (durable === false) return notDurable();
+  res.json(body);
+  }, notDurable);   // the wait itself failed: nothing says it is on disk
 });
 app.post('/api/accounts/:id/reset-claim/dismiss', (req, res) => {
   if (pressBearer(req.headers)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
   const lane = req.body && typeof req.body.lane === 'string' ? req.body.lane.slice(0, 80) : null;
   const ok = resetClaims.dismiss(String(req.params.id || ''), lane);
-  (ok ? resetClaims.persisted() : Promise.resolve(true)).then((durable) => res.json({ ok, ...(durable ? {} : { durable: false }) }));
+  const notDurable = () => res.status(503).json({ ok, code: 'not-durable', error: NOT_DURABLE_WORDS });   // the dismissal applied, not on disk yet (law F)
+  (ok ? resetClaims.persisted() : Promise.resolve(true)).then((durable) => (durable === false ? notDurable() : res.json({ ok })), notDurable);
 });
 
 app.post('/api/usage/repair-identity', (req, res) => {

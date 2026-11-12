@@ -1152,11 +1152,29 @@ const LEGS = {
       const view = usage.body && usage.body.accounts && usage.body.accounts[id];
       const cap = capState(q, view);
       const stored = JSON.parse(fs.readFileSync(path.join(cacheDir, id + '.json'), 'utf8')).scopedWeekly[0].resetsAt === RC;
+      // K2 (主开发 22:40Z — the store writer's law F, «a failed act is SAID»): the writer answers FALSE for the claims file ⇒
+      // the route answers 503 `not-durable` with the claim beside it, the claim is APPLIED (the reading shows it claimed), the
+      // page's words say both facts; the dismissal the same
+      const SW = r('./src/store-writer.js').storeWriter(), durWas = SW.durable;
+      let nd = null, ndUsage = null, ndDismiss = null;
+      try {
+        SW.durable = (f, o) => (/usage-reset-claims\.json$/.test(String(f)) ? Promise.resolve(false) : durWas.call(SW, f, o));
+        nd = (await quiet(() => call(post, { params: { id }, body: { lanes: [K(T).five] } }))).r;
+        ndUsage = (await quiet(() => call(routes['GET /api/usage'], {}))).r;
+        try { r('./src/usage-reset-claim.js').at(dataDir).noteLanesRead(id, [{ lane: K(T).fable, at: Date.now() + 5000, usedPct: 97 }]); } catch { }   // an outcome to dismiss (the Fable claim contradicted — read after the claim, on the real clock)
+        ndDismiss = (await quiet(() => call(routes['POST /api/accounts/:id/reset-claim/dismiss'] || (() => { }), { params: { id }, body: { lane: K(T).fable } }))).r;
+      } finally { SW.durable = durWas; }
+      let AWW = null; try { AWW = await esm(T, 'src/lib/account-wall-words.js'); } catch { }
+      const ndSaid = AWW && typeof AWW.claimAnsweredWords === 'function' && nd && nd.body ? AWW.claimAnsweredWords(nd.body, { what: 'the 5-hour window' }) : null;
+      const ndWords = ndSaid ? [ndSaid.text, ndSaid.disk].filter(Boolean).join(' | ') : '';   // the page's toasts: marked, then not on disk yet
+      const ndClaimed = !!(ndUsage && ndUsage.body && ndUsage.body.resetClaims && ndUsage.body.resetClaims[id] && Number(ndUsage.body.resetClaims[id].lanes[K(T).five]) > 0);
+      const ndOk = !!(nd && nd.code === 503 && nd.body && nd.body.code === 'not-durable' && nd.body.ok === true && /not on disk yet/.test(String(nd.body.error))) && ndClaimed
+        && /^Marked the 5-hour window as reset/.test(ndSaid ? ndSaid.text : '') && /not on disk yet/.test(ndSaid ? ndSaid.disk || '' : '') && !!(ndDismiss && ndDismiss.code === 503 && ndDismiss.body && ndDismiss.body.code === 'not-durable');
       am.placeWallOf = () => ({ code: 'cli-unmeasured', cli: '2.1.322' });
       const walled = (await quiet(() => call(post, { params: { id }, body: { lanes: [K(T).week] } }))).r;
       return { ok: agent.code === 403 && unknown.code === 404 && none.code === 409 && codex.code === 409 && codex.body && codex.body.code === 'no_claim_door' && okClaim.body && okClaim.body.ok && toldDevices && cap === 'reset-unconfirmed'
-        && usage.body.resetClaims && usage.body.resetClaims[id] && inside && stored && walled.body && walled.body.ok && walled.body.wall && walled.body.wall.code === 'cli-unmeasured' && fetched.length === 0,
-      detail: `the lane's read-at inside the account's reading on /api/usage ${inside} · any Bearer ${agent.code} · unknown ${unknown.code} · no reading ${none.code} · a Codex row ${codex.code} ${codex.body && codex.body.code} · claim ${JSON.stringify(okClaim.body).slice(0, 70)} · every device told ${toldDevices} · /api/usage cap ${cap} · the cache untouched ${stored} · a non-quota wall said ${JSON.stringify(walled.body && walled.body.wall)} · vendor calls ${fetched.length}` };
+        && usage.body.resetClaims && usage.body.resetClaims[id] && inside && ndOk && stored && walled.body && walled.body.ok && walled.body.wall && walled.body.wall.code === 'cli-unmeasured' && fetched.length === 0,
+      detail: `the lane's read-at inside the account's reading on /api/usage ${inside} · the writer answering false: the claim ${nd ? nd.code : '-'} ${nd && nd.body ? nd.body.code || 'no code' : ''}, applied ${ndClaimed}, the page says «${ndWords.slice(0, 150)}»; the dismissal ${ndDismiss ? ndDismiss.code : '-'} ${ndDismiss && ndDismiss.body ? ndDismiss.body.code || 'no code' : ''} · any Bearer ${agent.code} · unknown ${unknown.code} · no reading ${none.code} · a Codex row ${codex.code} ${codex.body && codex.body.code} · claim ${JSON.stringify(okClaim.body).slice(0, 70)} · every device told ${toldDevices} · /api/usage cap ${cap} · the cache untouched ${stored} · a non-quota wall said ${JSON.stringify(walled.body && walled.body.wall)} · vendor calls ${fetched.length}` };
     } finally { nets.forEach((n, i) => { n.request = reqs[i]; }); }
   },
   // MUST 5 — GET /api/usage never throws on a bad claims file
@@ -1341,6 +1359,8 @@ if (CONTROLS) {
     ['no-passgen', 'the loop reuses its reads after a pass started inside it', 'const pr = _passGen === passGen ? passReads.get(sid) : null;', 'const pr = passReads.get(sid);', 'pool-own'],
     ['lanes-outside', 'K3: the lane\'s read-at only top-level (the roster\'s loaders take the readings raw)', 'subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: accountsOut,', 'subscriptionSignedOut: _oauthSignedOut, subscriptionSignedOutCause: _oauthSignedOutCause, accounts: viewedAccounts,', 'route', 'src/usage-routes.js'],
     ['claim-session-words', 'K3: a claimed lane says «confirms when a session uses it»', '  if (claimedAt > 0) return t(', '  if (false) return t(', 'page-k3', 'src/lib/usage-source.js'],
+    ['not-durable-unsaid', 'K2: a claim not on disk answered as on disk (no code)', "const notDurable = () => res.status(503).json({ ...body, code: 'not-durable', error: NOT_DURABLE_WORDS });", 'const notDurable = () => res.json(body);', 'route', 'src/usage-routes.js'],
+    ['page-unsaid', 'K2: the page says only «Marked … as reset» over a not-durable answer', "return r && r.code === 'not-durable' ? t('", "return r && r.code === 'never' ? t('", 'route', 'src/lib/account-wall-words.js'],
     ['units-raw', 'K3: the age mark\'s units raw', "return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });", "return min < 120 ? `${min}m` : min < 48 * 60 ? `${Math.round(min / 60)}h` : `${Math.round(min / 1440)}d`;", 'page-k3', 'src/lib/account-wall-words.js'],
     ['flip-silent', 'a flip said by nobody', "    console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", "    if (0) console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", 'pool-own'],
     ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool\'s basis', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],

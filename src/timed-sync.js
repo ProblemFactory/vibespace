@@ -27,8 +27,8 @@ const row = (kind, store, file, sites = []) => Object.freeze({ kind, store, file
 const STORES = Object.freeze({
   'session-meta.write': row('write', 'session-meta/<sock>', 'src/server/session-stdout.js', ['writeSessionMeta']),
   'session-meta.read': row('read', 'session-meta/<sock>', 'src/server/session-stdout.js'),
-  'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),
-  'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)   // through the store writer (lane hub-loop-stalls commit 2)
+  'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),   // through the store writer (lane hub-loop-stalls commit 2)
+  'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)
   'session-status.read': row('read', 'session-status', 'src/session-status.js'),
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_flush']),
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),

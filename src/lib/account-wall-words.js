@@ -83,6 +83,20 @@ export function claimConfirmWords({ t = id, name = null, lane = null, capName = 
   };
 }
 
+/** A PERSON'S ACT NOT ON DISK YET IS SAID (K2 — store-writer law F): the release's one sentence (the status route's, the
+ *  channels index's — src/lib/channel-words.js), or '' when the answer is not `not-durable`. */
+export function notOnDiskWords(r, { t = id } = {}) {
+  return r && r.code === 'not-durable' ? t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.') : '';
+}
+/** WHAT THE PAGE SAYS ONCE A CLAIM ANSWERED (K2): the limit is marked reset — unconfirmed (a wall that is not a quota beside
+ *  it) — and, when the claim did not reach the disk, that too: `disk`, its own toast (both facts, never one).
+ *  {text, type, duration, door, disk} */
+export function claimAnsweredWords(r, { t = id, what = '', name = null } = {}) {
+  const disk = notOnDiskWords(r, { t });
+  if (r && r.wall) { const w = wallWords(r.wall, { t, name }); return { text: t('Marked {what} as reset — unconfirmed. It still cannot be used now: {why}', { what, why: w.text }), type: 'error', duration: 10000, door: w.door, disk }; }
+  return { text: t('Marked {what} as reset — unconfirmed until its next reading', { what }), type: null, duration: 7000, door: null, disk };
+}
+
 /** A LANE OLDER THAN ITS SIBLINGS SAYS SO ON ITSELF (L3): its reading `readAt` is more than STALE_LANE_MS older than the
  *  freshest lane of the same account → its age in short words, else ''. */
 export const STALE_LANE_MS = 30 * 60e3;

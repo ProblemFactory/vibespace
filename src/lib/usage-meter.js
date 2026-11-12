@@ -20,7 +20,7 @@ import { overageState, spendControlState } from '../spend-authorizer.js';
 // GPT-5.3-Codex-Spark model cap and `premium`, and the file on disk held the
 // Spark limit at 0 % while the plan limit — the one at 5 % — was gone.
 import * as quotaModel from '../quota-model.js';
-import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge } from './account-wall-words.js'; // PURE (lane account-reset-door)
+import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge, claimAnsweredWords, notOnDiskWords } from './account-wall-words.js'; // PURE (lane account-reset-door)
 import { showUnlock } from './vault-unlock.js'; // a vault wall's door: Unlock… in the toast itself
 
 export function installUsageMeter(App, ctx = {}) {
@@ -159,10 +159,9 @@ export function installUsageMeter(App, ctx = {}) {
     const r = await fetchJson('/api/accounts/' + encodeURIComponent(key) + '/reset-claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanes }) });
     if (!r || !r.ok) { showToast(r?.code === 'no-reading' ? t('{name} has no reading yet — nothing to mark as reset', { name }) : r?.code === 'too-low' ? t('That limit is under 5 % — its next reading could show no reset, so it cannot be marked as reset') : (r?.error || t('Could not mark it as reset')), { type: 'error' }); return; }   // r5: «too low» in every language
     const what = lane ? laneWords(lane, { t, capName }) : t('every limit of {name}', { name });
-    if (r.wall) {
-      const w = wallWords(r.wall, { t, name });
-      showToast(t('Marked {what} as reset — unconfirmed. It still cannot be used now: {why}', { what, why: w.text }), { type: 'error', duration: 10000, action: this._wallDoorAction(w.door) });
-    } else showToast(t('Marked {what} as reset — unconfirmed until its next reading', { what }), { duration: 7000 });
+    const said = claimAnsweredWords(r, { t, what, name });   // K2: marked — and, when it did not reach the disk, that too
+    showToast(said.text, { ...(said.type ? { type: said.type } : {}), duration: said.duration, ...(said.door ? { action: this._wallDoorAction(said.door) } : {}) });
+    if (said.disk) showToast(said.disk, { type: 'error', duration: 12000 });   // …and not on disk yet (the store writer's own sentence)
     if (r.refresh) {   // the refresh the dialog promised: what it answered is said (r4), never dropped
       let rr = null; try { rr = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: key }) }); } catch (e) { rr = { error: String((e && e.message) || e) }; }
       if (rr && rr.error) { if (rr.wall) { const w = wallWords(rr.wall, { t, name }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door) }); } else showToast(t('{name} was not refreshed: {why}', { name, why: String(rr.error).slice(0, 300) }), { type: 'error', duration: 9000 }); }   // r5: the refresh's own reason, said
@@ -171,7 +170,8 @@ export function installUsageMeter(App, ctx = {}) {
     if (data) { this._applyUsage(data); this._renderUsage(); }
   },
   async _dismissClaimOutcome(key, lane) {
-    try { await fetchJson('/api/accounts/' + encodeURIComponent(key) + '/reset-claim/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane }) }); } catch { }
+    let r = null; try { r = await fetchJson('/api/accounts/' + encodeURIComponent(key) + '/reset-claim/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lane }) }); } catch { }
+    const disk = notOnDiskWords(r, { t }); if (disk) showToast(disk, { type: 'error', duration: 9000 });   // K2: dismissed, not on disk yet — said
     const data = await fetchJson('/api/usage');
     if (data) { this._applyUsage(data); this._renderUsage(); }
   },
