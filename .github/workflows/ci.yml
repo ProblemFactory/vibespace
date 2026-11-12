@@ -120,7 +120,14 @@ jobs:
   # the self-hosted half (xpra / Xvfb / x11vnc / LibreOffice / codex / opencode /
   # bwrap / FUSE — 48 suites that only SKIPPED here) is the desktop batch on
   # AIDev (`node scripts/ci-remote.mjs --host aidev --batch desktop --lanes 8`).
-  # SIX shards, packed LONGEST-FIRST (LPT) by this runner's own per-suite times
+  # SEVEN shards since 2026-11-12 (int397 seam, the coordinator's ruling): the .397 prep mirror
+  # (Actions run 43213079096) lost heavy 1/6 and 4/6 to the 45-min limit, each with one suite in
+  # flight. With the runner times refreshed from that run (13 hosted heavies had none — test-store-
+  # writer in shard 1's serial group counted as 0 s), six shards pack to 4064 s of suites each; that
+  # run's own walls are 1.07–1.30 × (suites / 2 lanes), so six predict 37–45 min — the worst case
+  # touches the limit. Seven pack to 3483 s each: 32–39 min. A shard near its limit is still a
+  # REFRESH first; a shard is added only when a refreshed packing cannot hold the limit.
+  # Before that: SIX shards, packed LONGEST-FIRST (LPT) by this runner's own per-suite times
   # checked in at scripts/fixtures/ci-shard-timings.json (refreshed by int365
   # seam E from Actions runs 41116833934 + 41126166074 + 41131886559): ≈ 3239 s
   # of suites each ≈ 27 min over two lanes. The times of 2026-10-03 had grown
@@ -141,12 +148,12 @@ jobs:
   # must not cancel the others (the tier reports ALL the damage). `heavy`
   # below is the ONE status that reads green/red for the whole tier.
   heavy-shards:
-    name: heavy ${{ matrix.shard }}/6
+    name: heavy ${{ matrix.shard }}/7
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     timeout-minutes: 45
     # every setup step bounded — the fast job's rule and numbers
     steps:
@@ -209,7 +216,7 @@ jobs:
       # kernel OOM killer is SIGKILL) is a RED here, not a supersession — that
       # confusion is what once showed this job a green tick for a tier that
       # crashed and then ran nothing.
-      - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/6
+      - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
           VS_UI_SHOTS_DIR: ${{ runner.temp }}/vs-shots

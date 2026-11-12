@@ -24,7 +24,7 @@ console.log('\n§8b shards — every heavy suite in exactly one slice, the seria
   const { shardPlan, shardCensus, parseShard, SERIAL } = await import('./ci.mjs');
   const heavy = SUITES.filter((s) => s.tier === 'heavy');
   const srcOf = (name) => { try { return fs.readFileSync(path.join(REPO, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
-  for (const n of [1, 2, 3, 4, 6]) {
+  for (const n of [1, 2, 3, 4, 6, 7]) {
     const p = shardPlan(heavy, n, { sourceOf: srcOf });
     const problems = shardCensus(heavy, p.shards, p.serial);
     ok(p.shards.length === n && !problems.length && p.shards.every((s) => s.length),
@@ -76,10 +76,10 @@ console.log('\n§8b shards — every heavy suite in exactly one slice, the seria
 // The hosted Actions shards run what a hosted runner can; the self-hosted DESKTOP batch (AIDev, ci-remote.mjs --batch
 // desktop) runs the suites that drive xpra / Xvfb / x11vnc / LibreOffice or a real binary the hosted image lacks. The
 // split is DERIVED from each suite's code (ci.mjs hostOf) — this section holds it to a partition, every self-hosted
-// suite to the program that put it there, the provision script to a row per program, the 6 hosted shards to an LPT
+// suite to the program that put it there, the provision script to a row per program, the 7 hosted shards to an LPT
 // balance over the checked-in runner times, the hub to its LOAD RULE (4 lanes; no full tier by day), the lanes to their
 // private env; and PRINTS the derivation against the design's census with a computed reason per differing name.
-console.log('\n§8c hosts — the self-hosted desktop batch + the 6 hosted shards partition the tier; the hub\'s LOAD RULE');
+console.log('\n§8c hosts — the self-hosted desktop batch + the 7 hosted shards partition the tier; the hub\'s LOAD RULE');
 {
   const C = await import('./ci.mjs');
   const heavy = SUITES.filter((s) => s.tier === 'heavy');
@@ -138,27 +138,27 @@ console.log('\n§8c hosts — the self-hosted desktop batch + the 6 hosted shard
   for (const [n, h] of [['test-desktop-xpra-window-open', 'desktop'], ['test-opencode-s9', 'binary'], ['test-node-bootstrap', 'binary'], ['test-channels-i18n', 'hosted'], ['test-toast-pass-through', 'hosted']]) {
     ok(plan.verdicts.get(n) && plan.verdicts.get(n).host === h, `CONTROL: ${n} is ${h} (${plan.verdicts.get(n) && (plan.verdicts.get(n).programs.join(',') || 'names none it runs')})`);
   }
-  // the hosted half: 6 shards, LPT over the checked-in runner times
+  // the hosted half: 7 shards (since 2026-11-12, int397 — six could not hold the 45-min limit), LPT over the checked-in runner times
   const tm = C.shardTimings(REPO);
   const hosted = plan.hosted;
   ok(tm && hosted.filter((s) => s.name in tm).length >= hosted.length * 0.9, `scripts/fixtures/ci-shard-timings.json times the hosted set (${tm ? hosted.filter((s) => s.name in tm).length : 0} of ${hosted.length})`);
-  const lp = C.shardPlan(hosted, 6, { sourceOf: srcOf, timings: tm || {} });
-  const fnv = C.shardPlan(hosted, 6, { sourceOf: srcOf });
+  const lp = C.shardPlan(hosted, 7, { sourceOf: srcOf, timings: tm || {} });
+  const fnv = C.shardPlan(hosted, 7, { sourceOf: srcOf });
   const loadOf = (sh) => sh.reduce((a, s) => a + (tm && tm[s.name] || 0), 0);
   ok(!C.shardCensus(hosted, lp.shards, lp.serial).length && lp.serial.every((n) => lp.shards[0].some((s) => s.name === n)) && lp.shards.every((x) => x.length),
-    `6 hosted shards (LPT): ${lp.shards.map((x) => x.length).join(' + ')} = ${hosted.length}, each once, the serial group (${lp.serial.join(', ')}) whole in shard 1`);
+    `7 hosted shards (LPT): ${lp.shards.map((x) => x.length).join(' + ')} = ${hosted.length}, each once, the serial group (${lp.serial.join(', ')}) whole in shard 1`);
   ok(Math.max(...lp.loads) / Math.min(...lp.loads) < 1.1, `LPT balances them: ${lp.loads.map((x) => Math.round(x / 1000)).join(' / ')} s of suites (max/min < 1.1)`);
   ok(Math.max(...fnv.shards.map(loadOf)) > Math.max(...lp.loads), `CONTROL: the name-hash split of the same set is worse (max ${Math.round(Math.max(...fnv.shards.map(loadOf)) / 1000)} s vs ${Math.round(Math.max(...lp.loads) / 1000)} s)`);
   const sp = (p) => p.shards.map((x) => x.map((y) => y.name).sort().join()).join('|');
-  ok(sp(C.shardPlan([...hosted].reverse(), 6, { sourceOf: srcOf, timings: tm || {} })) === sp(lp), 'the SAME table and times give the SAME split (every matrix job agrees) — not a function of the table order');
-  const grown = C.shardPlan([...hosted, { name: 'test-zz-added-suite', tier: 'heavy' }], 6, { sourceOf: srcOf, timings: tm || {} });
+  ok(sp(C.shardPlan([...hosted].reverse(), 7, { sourceOf: srcOf, timings: tm || {} })) === sp(lp), 'the SAME table and times give the SAME split (every matrix job agrees) — not a function of the table order');
+  const grown = C.shardPlan([...hosted, { name: 'test-zz-added-suite', tier: 'heavy' }], 7, { sourceOf: srcOf, timings: tm || {} });
   ok(grown.shards.every((x, k) => lp.shards[k].every((y) => x.some((z) => z.name === y.name))), 'an UNMEASURED new suite takes its name-hash slot and moves no measured one');
   // the two runners together: the hosted shards + the self-hosted batch = the tier, each suite once
   const together = [...lp.shards.flat().map((s) => s.name), ...names(plan.self)];
-  ok(together.length === heavy.length && new Set(together).size === heavy.length, `the 6 hosted shards + the desktop batch run ${together.length} = the ${heavy.length} heavy suites, each exactly once`);
+  ok(together.length === heavy.length && new Set(together).size === heavy.length, `the 7 hosted shards + the desktop batch run ${together.length} = the ${heavy.length} heavy suites, each exactly once`);
   const wf = readR('.github/workflows/ci.yml');
-  const hostedRun = /node scripts\/ci\.mjs --heavy --dirty-ok --host=hosted --shard \$\{\{ matrix\.shard \}\}\/6/;
-  ok(hostedRun.test(wf) && /shard:\s*\[1, 2, 3, 4, 5, 6\]/.test(wf) && /branches: \[master, 'ci\/\*\*'\]/.test(wf), 'ci.yml runs the HOSTED half as 6 shards (and a ci/** push gets the same mirror)');
+  const hostedRun = /node scripts\/ci\.mjs --heavy --dirty-ok --host=hosted --shard \$\{\{ matrix\.shard \}\}\/7/;
+  ok(hostedRun.test(wf) && /shard:\s*\[1, 2, 3, 4, 5, 6, 7\]/.test(wf) && /branches: \[master, 'ci\/\*\*'\]/.test(wf), 'ci.yml runs the HOSTED half as 7 shards (and a ci/** push gets the same mirror)');
   ok(!hostedRun.test(wf.replace('--host=hosted ', '')), 'CONTROL: a workflow without --host=hosted fails that census (it would rerun the self-hosted suites as skips)');
   // the hub's LOAD RULE: 4 lanes, forced or not; only a second machine's run goes past it
   ok(C.HUB_MAX_LANES === 4 && C.laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: '8' } }) === 4 && C.laneCount({ cpus: 128, env: {} }) === 4
@@ -193,10 +193,10 @@ console.log('\n§8c hosts — the self-hosted desktop batch + the 6 hosted shard
     '`ci.mjs --hosts` prints the partition and the design diff (exit 0)');
   ok(cli(['--heavy', '--host=laptop', '--shard', '1/6', '--dry-run']).status === 2, '--host=laptop is a loud exit 2');
   // ONE slice through the CLI is enough to hold it to the in-process split above (the partition is asserted there)
-  const d4 = cli(['--heavy', '--host=hosted', '--shard', '4/6', '--dry-run']);
+  const d4 = cli(['--heavy', '--host=hosted', '--shard', '4/7', '--dry-run']);
   const listed4 = d4.status === 0 ? d4.stdout.split('\n').filter((l) => /^  test-/.test(l)).map((l) => l.trim()) : [];
   ok(listed4.length > 20 && listed4.slice().sort().join() === names(lp.shards[3]).sort().join() && /\(--host=hosted\) — LPT: \d+ s of suites/.test(d4.stdout),
-    `--heavy --host=hosted --shard 4/6 --dry-run lists exactly LPT slice 4 (${listed4.length} suites) — the matrix job and this gate cut the same split`);
+    `--heavy --host=hosted --shard 4/7 --dry-run lists exactly LPT slice 4 (${listed4.length} suites) — the matrix job and this gate cut the same split`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

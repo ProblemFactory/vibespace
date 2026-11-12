@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // THE MIRROR VERDICT (B-e381, lane ci-heavy-verdict r4, 2026-11-10). The CI mirror runs the HOSTED half of the heavy tier (ci.yml:
-// `--host=hosted --shard i/6`); the self-hosted half runs on the box. `ci.mjs --heavy-verdict <sha> --gh-run <id>` writes the mirror's
+// `--host=hosted --shard i/n`, n read from the workflow); the self-hosted half runs on the box. `ci.mjs --heavy-verdict <sha> --gh-run <id>` writes the mirror's
 // verified run as `<sha>.mirror.green` LISTING the hosted heavy suites of the commit's own plan, and heavyBlocker clears a red only when
 // every suite that failed in it has since run green on a descendant (主开发's law). Every refusal writes NOTHING.
 //   §1 THE JUDGE (pure) — every condition refused by name; every job of a needed name; a paged job list refused.
@@ -67,19 +67,20 @@ ok(refused(judgeMirrorRun({ sha: 'a'.repeat(9), slug: SLUG, run: runOf(), jobs: 
 ok(refused(judge({ run: { status: 'in_progress', conclusion: null } }), /is in_progress, not completed/), 'a run in progress is refused');
 ok(refused(judge({ run: { conclusion: 'failure' } }), /conclusion is failure, not success/), 'a failed run is refused');
 ok(refused(judge({ run: { conclusion: 'cancelled' } }), /conclusion is cancelled/), 'a cancelled run is refused');
-const ONE_FAILED = { jobs: jobsOf(undefined, { 'heavy 3/6': 'failure' }) };   // the run says success, the job list does not: only the per-job check sees it
-ok(refused(judge(ONE_FAILED), /«heavy 3\/6» is failure, not success/), 'ONE failed heavy shard is refused by name — even under a run reading success (the per-job check)');
-ok(refused(judge({ jobs: jobsOf(undefined, { 'heavy 5/6': 'skipped' }) }), /«heavy 5\/6» is skipped/), 'a SKIPPED shard is refused');
-ok(refused(judge({ jobs: jobsOf(undefined, { 'heavy 6/6': null }) }), /no job «heavy 6\/6»/), 'a MISSING shard is refused');
+const N = SH ? SH.n : 6, hj = (k) => `heavy ${k}/${N}`;   // the shard jobs' names follow the tree's own matrix (int397: six → seven)
+const ONE_FAILED = { jobs: jobsOf(undefined, { [hj(3)]: 'failure' }) };   // the run says success, the job list does not: only the per-job check sees it
+ok(refused(judge(ONE_FAILED), new RegExp(`«heavy 3/${N}» is failure, not success`)), 'ONE failed heavy shard is refused by name — even under a run reading success (the per-job check)');
+ok(refused(judge({ jobs: jobsOf(undefined, { [hj(5)]: 'skipped' }) }), new RegExp(`«heavy 5/${N}» is skipped`)), 'a SKIPPED shard is refused');
+ok(refused(judge({ jobs: jobsOf(undefined, { [hj(N)]: null }) }), new RegExp(`no job «heavy ${N}/${N}»`)), 'a MISSING shard is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { heavy: null }) }), /no job «heavy»/), 'a missing heavy GATE is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { fast: 'failure' }) }), /«fast» is failure/), 'a failed fast job is refused');
-{ const dupBad = [...jobsOf(), { name: 'heavy 2/6', status: 'completed', conclusion: 'failure' }], dupOk = [...jobsOf(), { name: 'heavy 2/6', status: 'completed', conclusion: 'success' }];
-  ok(refused(judge({ jobs: dupBad }), /«heavy 2\/6» is failure \(one of 2 jobs of that name\)/), 'a DUPLICATE job name with one failure is refused — every job of a needed name must be success');
+{ const dupBad = [...jobsOf(), { name: hj(2), status: 'completed', conclusion: 'failure' }], dupOk = [...jobsOf(), { name: hj(2), status: 'completed', conclusion: 'success' }];
+  ok(refused(judge({ jobs: dupBad }), new RegExp(`«heavy 2/${N}» is failure \\(one of 2 jobs of that name\\)`)), 'a DUPLICATE job name with one failure is refused — every job of a needed name must be success');
   ok(judge({ jobs: dupOk }).ok, '…two jobs of one name, both success, are accepted'); }
 ok(refused(judge({ total: 120 }), /job list is paged \(\d+ of 120\)/), 'a PAGED job list (total_count above what came back) is refused — every job must be seen');
 { const four = WF.replace(/shard:\s*\[[\d,\s]+\]/, 'shard: [1, 2, 3, 4]').replace(/name:\s*heavy \$\{\{ matrix\.shard \}\}\/\d+/, 'name: heavy ${{ matrix.shard }}/4');
   ok(judge({ workflow: four, jobs: jobsOf(4) }).ok, 'the shard count is READ from the workflow at the sha: a 4-shard ci.yml with heavy 1/4…4/4 is accepted');
-  ok(refused(judge({ jobs: jobsOf(4) }), /no job «heavy 1\/6»/), '…and the 6-shard workflow with 4 shards run is refused'); }
+  ok(refused(judge({ jobs: jobsOf(4) }), new RegExp(`no job «heavy 1/${N}»`)), `…and the ${N}-shard workflow with 4 shards run is refused`); }
 ok(refused(judge({ workflow: 'name: ci\njobs: {}\n' }), /defines no readable heavy matrix/), 'a workflow with no readable matrix is refused');
 ok(repoSlugOf('git@github.com:ProblemFactory/vibespace.git') === SLUG && repoSlugOf('https://github.com/ProblemFactory/vibespace') === SLUG
   && repoSlugOf('ssh://git@github.com/ProblemFactory/vibespace.git') === SLUG && repoSlugOf('/srv/mirror/vibespace.git') === null, 'the origin\'s owner/name reads from ssh and https remotes; a non-GitHub path is none');
@@ -104,7 +105,7 @@ const empty = (d) => !fs.existsSync(d) || fs.readdirSync(d).length === 0;
   const v = heavyVerdict({ sha: tip.slice(0, 12), runId: '7', repoRoot: R, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf()) });
   ok(v.ok && v.rec.sha === tip, 'an abbreviated sha on the command line is resolved to the full 40 hex BEFORE it is compared'); }
 const cases = [
-  ['the judge: ONE failed shard', { gh: ghFor(runOf({ head_sha: tip }), jobsOf(undefined, { 'heavy 2/6': 'failure' })) }, /«heavy 2\/6» is failure/],
+  ['the judge: ONE failed shard', { gh: ghFor(runOf({ head_sha: tip }), jobsOf(undefined, { [hj(2)]: 'failure' })) }, new RegExp(`«heavy 2/${N}» is failure`)],
   ['the judge: another repository', { gh: ghFor(runOf({ head_sha: tip, repository: { full_name: 'x/y' } }), jobsOf()) }, /belongs to x\/y/],
   ['the judge: headSha of another commit', { gh: ghFor(runOf({ head_sha: base }), jobsOf()) }, /headSha [0-9a-f]{40} is not/],
   ['the judge: a paged job list', { gh: ghFor(runOf({ head_sha: tip }), jobsOf(), null, 140) }, /paged/],
@@ -129,7 +130,7 @@ for (const [label, c, re] of cases) {
   const v = heavyVerdict({ sha: tip, runId: '1', repoRoot: R, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf()) });
   ok(v.ok && fs.readFileSync(target, 'utf-8') === 'victim\n' && !fs.lstatSync(v.file).isSymbolicLink(), 'a SYMLINK standing at the marker path is removed, never written through (its target untouched)'); }
 { const parent = path.join(ROOT, 'never-made', 'markers');
-  const v = heavyVerdict({ sha: tip, runId: '1', repoRoot: R, dir: parent, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(undefined, { 'heavy 1/6': 'failure' })) });
+  const v = heavyVerdict({ sha: tip, runId: '1', repoRoot: R, dir: parent, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(undefined, { [hj(1)]: 'failure' })) });
   ok(!v.ok && !fs.existsSync(parent) && !fs.existsSync(path.dirname(parent)), 'a REFUSED verdict leaves no directory behind (the marker dir is made only to write)'); }
 { const R2 = makeRepo('noorigin'); const t2 = commit(R2, MIRROR_WORKFLOW, WF, 'wf'); const dir = scratch('mk-no2');
   const v = heavyVerdict({ sha: t2, runId: '1', repoRoot: R2, dir, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: t2 }), jobsOf()) });
