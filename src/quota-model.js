@@ -314,7 +314,7 @@ function memberProofState(x, nowMs) {
 //    stated or measured, and every refusal mark) — and a refusal's carries `refusedAt` ≥ it;
 //  · a DIRECT writer's own bucket (the shipped statusline writes the file itself, every window it renders stamped `asOf`)
 //    is its own reading — a refusal never reaches one (refusals go through the write path, typed);
-//  · neither (a file written by 2.369.395 or earlier, or a window no write here stated): a 100 % is a MARK — the safe
+//  · neither (a file written by 2.369.396 or earlier, or a window no write here stated): a 100 % is a MARK — the safe
 //    update: a real reset of such a lane is not said until this tree has read that lane itself once (kb-bugfix-invariants).
 const LANE_RE = /^(?:plan:(?:5h|7d)|model:[a-z0-9][\w.-]{0,59})$/;
 function isLaneKey(v) { return typeof v === 'string' && LANE_RE.test(v); }

@@ -29,7 +29,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BASE = 'b6d980014';   // master under this commit (2.369.395) — a sha the repository has
+const BASE = 'b19f0ecdb';   // master under this commit (2.369.396) — a sha the repository has
 const ROUND1 = '18104c29c'; // this lane's round 1 (its acceptance said: not accepted) — round 2's pins are red there
 const ROUND3 = 'cedee3d11'; // round 3 (not accepted: the sibling fan-out wrote a refusal without its stamp…) — round 4's pins are red there
 const ROUND4 = 'd0c5a8799'; // round 4 (not accepted: the status rule silenced a real reset after an honest 100 %) — round 5's pins are red there
@@ -148,7 +148,7 @@ function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0 } = {}) {
   const mkSession = (sid, member) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-fable-5-1' }; sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[member], { why: 'drill' }); return s; };
   const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
   const claim = (tag, lanes) => (claimMod ? claimMod.at(dataDir).claim(id[tag], lanes, JSON.parse(fs.readFileSync(path.join(cacheDir, id[tag] + '.json'), 'utf8'))) : { ok: false, code: 'no-module' });
-  return { r, eng, am, P, id, sessions, arms, mkSession, tagOf, claim, cacheDir, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)) };
+  return { r, eng, am, P, id, sessions, arms, mkSession, tagOf, claim, cacheDir, est: app.locals.usageEstimator, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)) };
 }
 async function enginePass(T, { switchFirst }) {
   const w = engineWorld(T);
@@ -672,7 +672,7 @@ const LEGS = {
     }
     return { ok: rows.every((x) => x.ok), detail: `an honest 100 %, then 3 % at the same reset instant — ${rows.filter((x) => x.ok).length}/10: ` + rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' | ') };
   },
-  // THE UPDATE reads the SAFE way (law 4): a file written by 2.369.395 or earlier carries no word of its own — its 100 % is a
+  // THE UPDATE reads the SAFE way (law 4): a file written by 2.369.396 or earlier carries no word of its own — its 100 % is a
   // mark, whatever wrote it: a refusal's source, a mirrored 100 % with a reading's source, an honest 100 % (status «limited»
   // as master's parsers write it). Then a real 3 % (the OAuth answer's write): NOTHING is announced, the wall stays.
   async 'update-marks'(T) {
@@ -725,6 +725,45 @@ const LEGS = {
     let gb = null; try { const o = JSON.parse(fs.readFileSync(path.join(ew.cacheDir, ew.id.A + '.json'), 'utf8')); for (const l of o.limits || []) for (const x of l.windows || []) if (l.limitId === 'plan' && x.kind === '5h') gb = x; } catch { }
     out.push({ ok: !!gb && laneUsedOf(gb) >= 100 && gb.refusedAt != null, text: `the banner's guessed bump: ${gb ? `${laneUsedOf(gb)} % refusedAt ${gb.refusedAt != null}` : 'no 5h window'}` });
     return { ok: out.every((x) => x.ok), detail: out.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
+  // 主开发's green mutant on 4ea7d008f («a refusal's mark is never overtaken»): a lane REFUSED, then honestly READ at 100 %
+  // later (a newer statement), then read at 3 % at the same reset — said once; and its mirror: read at 100 %, then
+  // refused, then 61 % — nothing said (the later of the two stamps decides)
+  async 'refusal-then-reading'(T) {
+    const r = reqOf(T), W = r('./src/usage-cache-write.js');
+    const dir = fs.mkdtempSync(path.join(ROOT, 'rtr-')), R5 = S + 2 * 3600, R7 = S + 3 * 86400;
+    const heard = []; if (typeof W.onVendorReset === 'function') W.onVendorReset((e) => { if (e && /^rtr-/.test(e.key)) for (const x of e.resets || []) heard.push(`${e.key}:${x.lane}:${Math.round(x.before)}->${Math.round(x.after)}`); });
+    const seed = (key) => fs.writeFileSync(path.join(dir, key + '.json'), JSON.stringify({ fetchedAt: NOW - H, source: 'on-demand', fiveHour: { utilization: 0.4, resetsAt: R5 }, sevenDay: { utilization: 0.08, resetsAt: R7 } }));
+    const read = (key, five, at) => quiet(() => { const u = { fetchedAt: at, source: 'on-demand', fiveHour: { utilization: five, status: five >= 1 ? 'limited' : 'allowed', resetsAt: R5 }, sevenDay: { utilization: 0.08, resetsAt: R7 } }; return W.writeCacheObject({ cacheDir: dir, key, obj: u, measuredAt: at, source: 'on-demand', backend: 'claude', stated: u }); });
+    const refuse = (key, at) => quiet(() => r('./src/rate-limit-capture.js').captureRateLimitEvent({ cacheDir: dir, key, identityIds: [key], ev: { kind: 'fiveHour', status: 'rejected', utilization: null, resetsAt: R5, overage: {} }, now: at }));
+    seed('rtr-a'); await refuse('rtr-a', NOW); await read('rtr-a', 1, NOW + 1000); await read('rtr-a', 0.03, NOW + 2000);
+    const a = heard.filter((h) => h.startsWith('rtr-a:'));
+    seed('rtr-b'); await read('rtr-b', 1, NOW); await refuse('rtr-b', NOW + 1000); await read('rtr-b', 0.61, NOW + 2000);
+    const b = heard.filter((h) => h.startsWith('rtr-b:'));
+    return { ok: a.length === 1 && /plan:5h:100->3$/.test(a[0]) && b.length === 0, detail: `refused, then read at 100 %, then 3 %: said [${a.join(',')}] · read at 100 %, then refused, then 61 %: said [${b.join(',')}]` };
+  },
+  // THE MERGED SWITCH PASS (lane account-reset-door × usage-relearn-stepped round 4): it reads through the ONE door, and its
+  // basis — raw or estimated — is decided ONCE for everything one decision compares. «cold»: a cold boot (A still learning,
+  // both members listed) ⇒ the pass reads every member raw. «outside»: A has left the membership but still bills a
+  // conversation, and is still learning ⇒ the basis is asked WITH A, and nobody is estimated beside it. Counted inside the
+  // switch decision only (the sealed orders' snapshot is the membership's own decision).
+  async 'switch-basis'(T) {
+    const rows = [];
+    for (const kase of ['cold', 'outside']) {
+      const w = engineWorld(T, { def: 'B', fableA: 0.3, fableB: 0.3 });
+      const est = w.est;
+      if (!est || typeof est.basisRaw !== 'function') return { ok: false, detail: 'no basis door (usageEstimator.basisRaw)' };
+      w.mkSession('s1', 'A');
+      if (kase === 'outside') w.am.updatePool(w.P, { members: [w.id.B] });
+      const learning = w.id.A, asked = [], estimated = [];
+      const origEst = est.estimateFor.bind(est);
+      est.basisRaw = (ids) => { asked.push([...(ids || [])]); return (ids || []).includes(learning); };
+      est.estimateFor = (id, raw, nowMs) => { const st = new Error().stack || ''; if (st.includes('maybePoolAutoSwitchForPool') && !st.includes('pushSealedOrders')) estimated.push(id); return origEst(id, raw, nowMs); };
+      await quiet(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }));
+      const withA = asked.some((ids) => ids.includes(learning));
+      rows.push({ ok: withA && estimated.length === 0, text: `${kase === 'cold' ? 'a cold boot, A still learning (both members)' : 'A outside the membership, still learning, billing s1'}: the basis asked ${withA ? 'WITH' : 'without'} A; estimated in the decision: ${estimated.length ? '[' + [...new Set(estimated.map(w.tagOf))].join(',') + '] beside raw — MIXED' : 'nobody (all raw)'}` });
+    }
+    return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
   },
   // the smalls of round 5: «too low» toasted in every language; the journal's numbers rounded where said; the follow-up
   // refresh's own reason said; the mirror's census row says no device can write a refusal there
@@ -1051,7 +1090,7 @@ const LEGS = {
       return cacheReadCensus(T, { [f]: copy }).bad.length > 0; });
     const pins = {
       oneDoor: !unrowed.length && plantedRed.every(Boolean),
-      switchPassOnTheDoor: /const readCache = poolReadCache\(poolId, now\);/.test(eng),
+      switchPassOnTheDoor: /const readCache = poolReadCache\(poolId, now, \{ also: basisIds \}\);/.test(eng),   // the door, its basis over every id the pass compares (× usage-relearn-stepped)
       sealedOrdersOnTheDoor: /const ownFileReading = poolReadReading\(\{ group: false \}\);/.test(eng) && /readCache: ownFileReading,/.test(eng),
       placementWhenDecided: /claimDecided\(/.test(eng) && /moved onto \$\{nameOf\(ds\.to\)\} on your reset claim/.test(eng),
       wallsByLane: /lane && lanes\.has\(lane\) && m\.delete\(id\)/.test(eng),
@@ -1104,6 +1143,30 @@ if (CONTROLS) {
     fs.writeFileSync(path.join(M, 'src/quota-model.js'), QMSRC.replace(ANCH, ANCH + '  return set;   // the patch: no refusal stamp\n'));
     for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M, f)); } catch { } }
     for (const leg of ['rejection-is-a-mark', 'twin-refusal', 'guess-and-replace']) { const r = await run(leg, M); ok(!r.ok, `with no refusal stamp ⇒ RED at ${leg}: ${r.detail}`); }
+  }
+  // THE MERGED PASS'S WRONG SIDES (lane account-reset-door × usage-relearn-stepped): patches of src/server/usage-pool-engine.js
+  const ENGSRC = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  const WRONG = [
+    ['no-also', 'the door without the pass\'s own ids (this lane\'s side alone: the membership\'s basis)', 'const readCache = poolReadCache(poolId, now, { also: basisIds });', 'const readCache = poolReadCache(poolId, now);', 'switch-basis'],
+    ['no-basis', 'the door without a basis (estimated whatever is still learning)', 'rawBasis = !!(m.length && usageEstimator.basisRaw && usageEstimator.basisRaw(m));', 'rawBasis = false;', 'switch-basis'],
+    ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now, { also: basisIds });', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],
+  ];
+  say('RED CONTROLS — the merged switch pass\'s wrong sides (patches the suite carries on a copy of src/)');
+  for (const [tag, what, from, to, leg] of WRONG) {
+    if (!ok(ENGSRC.split(from).length === 2, `the patch «${tag}» applies to this tree's usage-pool-engine.js (its anchor is there once)`)) continue;
+    const MW = path.join(ROOT, 'patch-' + tag); fs.cpSync(path.join(REPO, 'src'), path.join(MW, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(MW, 'src/server/usage-pool-engine.js'), ENGSRC.replace(from, to));
+    for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(MW, f)); } catch { } }
+    const r = await run(leg, MW); ok(!r.ok, `${what} ⇒ RED at ${leg}: ${r.detail}`);
+  }
+  // 主开发's mutant on 4ea7d008f: a refusal's mark never overtaken by a newer statement
+  const OVR = 'mark: refusedAt != null ? !(statedAt != null && statedAt > refusedAt) : ';
+  say('RED CONTROL — a refusal\'s mark never overtaken (`refusedAt != null ? true`), a patch the suite carries');
+  if (ok(QMSRC.split(OVR).length === 2, 'the patch «never overtaken» applies to this tree\'s quota-model.js (its anchor is there once)')) {
+    const M2 = path.join(ROOT, 'patch-ovr'); fs.cpSync(path.join(REPO, 'src'), path.join(M2, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(M2, 'src/quota-model.js'), QMSRC.replace(OVR, 'mark: refusedAt != null ? true : '));
+    for (const f of ['package.json', 'node_modules', 'data', 'server.js']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M2, f)); } catch { } }
+    const r = await run('refusal-then-reading', M2); ok(!r.ok, `a refusal's mark never overtaken ⇒ RED at refusal-then-reading: ${r.detail}`);
   }
 }
 say(`  [${(performance.now() - T0).toFixed(0)} ms — the slowest legs: ${Object.entries(legMs).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ')}]`);
