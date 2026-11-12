@@ -12,6 +12,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace stays responsive with hundreds of agent groups.
 - Starring, renaming or changing a conversation's settings no longer freezes VibeSpace for a moment or redraws every agent group list.
 - VibeSpace stays responsive while a remote machine sleeps or conversations stream: the usage estimates read only what is new.
+- When nothing on the page changes, VibeSpace no longer keeps redrawing it, which took a share of the computer's time all day.
 - Closing a window no longer freezes VibeSpace for about a second while the notice that its conversation keeps running finds its place.
 - With a text box such as Report a problem focused, the page no longer slows down while the microphone beside it keeps checking where to stand.
 - Problem reports include the page's long pauses and your last clicks and keys again after a Doc window was opened.
