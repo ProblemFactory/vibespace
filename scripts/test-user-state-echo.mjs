@@ -201,6 +201,10 @@ function createWorld({ seed = 1, sessions, lag = null } = {}) {
         if (opts.signal) { if (opts.signal.aborted) return reject(new TypeError('The operation was aborted')); opts.signal.addEventListener('abort', () => reject(new TypeError('The operation was aborted')), { once: true }); }
         const reach = (page.__lag || lag || w.defaultLag)(method, body);
         at(now + reach.toServer, () => {
+          // round 15 (the .397 hosted mirror): a CLOSED tab's request still on its way is CANCELLED by the browser — unless it is a keepalive
+          // request, which the browser completes after the tab is gone. Rounds 4–14 let every one land here, and only real Chrome on a slower
+          // machine showed it (the last one to three of five acts lost at a close)
+          if (page.__dead && !opts.keepalive) { w.cancelled = (w.cancelled || 0) + 1; return; }
           const opsDoor = method === 'patch' && /\/api\/user-state\/batches$/.test(url);
           const h = method === 'get' ? H.get : method === 'post' ? H.post : opsDoor ? H.ops : H.patch;
           if (method === 'patch') { if (body && body.batches) w.opsRequests++; else w.wholeRequests++; }   // counted by what the body IS
@@ -1273,7 +1277,12 @@ async function pageLoss(src, { acts, leaveAfter = 50, delay = 200, kill = false,
   ];
   const got = [];
   for (const [name, acts, o = {}] of scenes) got.push({ name, tip: await pageLoss(STATE_SRC, { acts, ...o, seed: 77 }), base: await pageLoss(BASE_SRC, { acts, ...o, seed: 77 }) });
-  ok(got.every((g) => g.tip === 0 && !(g.base === 0 && g.tip > 0)), `PAGE LOSS = MASTER — the verifier's size scenes (its seven + its pagehide control): lost ${got.map((g) => g.tip).join('/')} here (${got.map((g) => g.base).join('/')} on master's page)`, got);
+  // round 15: the browser now CANCELS a closed tab's plain request still on its way (this harness models it — the .397 hosted mirror);
+  // a request that fits 48 KiB goes keepalive and lands. So: never more lost than on master's page; what fits survives a kill or a
+  // close (three stars: 0 here, 3 on master's); a star sent BEFORE a select-all survives it (the select-all's request is past the
+  // budget: plain, lost as on master's); a change riding a request past the budget is lost with it (named)
+  ok(got.every((g) => g.tip <= g.base) && got[6].tip === 0 && got[7].tip === 0 && got[6].base === 3 && got[1].tip === got[1].base - 1,
+    `PAGE LOSS ≤ MASTER — the verifier's size scenes (its seven + its pagehide control), a closed tab's plain request cancelled, a request that fits keepalive: lost ${got.map((g) => g.tip).join('/')} here (${got.map((g) => g.base).join('/')} on master's page)`, got);
 }
 {
   // ARRIVAL: every permutation of 4 batches of ONE page issued together — acts on the SAME item among them — each also delivered
@@ -1362,13 +1371,16 @@ console.log('§14 round 5: every request carries everything the page has not see
 const OWN_DIR = globalThis.__UEO_MUTANTS.OWN_ONLY.dir;
 const withOps = (src, dir) => src.replace("from '../user-state-ops.js'", `from '${pathToFileURL(path.join(dir, 'user-state-ops.cjs')).href}'`);
 const OWN_SRC = withOps(STATE_SRC, OWN_DIR);
-/** the first PATCH of the page fails (503 / a network error / never answers — it never arrives); the rest go */
+/** the first PATCH of the page fails (503 / a network error / never answers — it never arrives); the rest go. A network error fails
+ *  every PATCH until it is reported too (round 15: the page's plain fetch, tried in the same send after the refused keepalive, meets
+ *  the same dead network) */
 const failFirst = (w, p, fail, after = 30) => {
   const f = p.__fetch.bind(p);
-  let first = true;
+  let first = true, failedAt = null;
   p.__fetch = (url, opts) => {
+    if (fail === 'neterr' && failedAt != null && w.now() <= failedAt + after && opts && opts.method === 'PATCH') { w.requests++; return Promise.reject(new TypeError('Failed to fetch')); }
     if (first && opts && opts.method === 'PATCH') {
-      first = false; w.requests++;
+      first = false; w.requests++; failedAt = w.now();
       if (fail === 'hang') return new Promise(() => { });
       return new Promise((res, rej) => w.at(w.now() + after, () => (fail === 'neterr' ? rej(new TypeError('Failed to fetch')) : res({ ok: false, status: Number(fail) || 503, json: async () => ({ error: 'busy' }) })), 'fail'));
     }
@@ -1461,7 +1473,8 @@ const failFirst = (w, p, fail, after = 30) => {
     return w.sessions.slice(0, K).filter((x) => !st.archivedSessions.includes(x.sessionKey)).length;
   };
   // (a) a select-all whose ops pass this page's request bound, its whole key under master's: the page closed before the hub
-  //     answers loses the part past the bound (master keeps it); a page that stays lands all of it
+  //     answers loses the part past the bound — its first request fits the keepalive budget and lands (round 15: master's whole key,
+  //     a plain request still on its way, is cancelled with the tab — all lost there); a page that stays lands all of it
   const a = { K: 600, closeAfter: 300 };
   const aTip = await scene(STATE_SRC, a), aBase = await scene(BASE_SRC, a), aStay = await scene(STATE_SRC, { K: 600 });
   // (b) a hub whose WHOLE archived list is past master's body bound: master's every archive click is refused (it carries the
@@ -1469,8 +1482,8 @@ const failFirst = (w, p, fail, after = 30) => {
   const b = { K: 50, preArchived: 1120 };
   const bTip = await scene(STATE_SRC, b), bBase = await scene(BASE_SRC, b);
   const perOp = Buffer.byteLength(JSON.stringify({ key: 'archivedSessions', item: 'claude:00000000-0000-4000-8000-000000000000', value: true })) + 1;
-  ok(aTip > 0 && aTip < a.K && aBase === 0 && aStay === 0 && bTip === 0 && bBase === b.K,
-    `A BACKLOG LARGER THAN ONE REQUEST (both bounds scaled by 1/${F}: this page's request ${TIP_REQ} B, master's route ${MASTER_LIMIT} B): a select-all of ${a.K} closed 300 ms into a 2 s answer loses ${aTip} here (the part past one request) and ${aBase} on master's page; kept whole when the page stays (${aStay} lost). Where master's WHOLE key is past its bound (${b.preArchived} archived), master loses all ${bBase} of a ${b.K} select-all, this page ${bTip}. At the real bounds: a request carries ${UO.MAX_BODY_BYTES} B ≈ ${Math.floor(UO.MAX_BODY_BYTES / perOp)} archive ops; master's 50 MB ≈ 1.1 M ids`, { aTip, aBase, aStay, bTip, bBase });
+  ok(aTip > 0 && aTip < a.K && aBase === a.K && aStay === 0 && bTip === 0 && bBase === b.K,
+    `A BACKLOG LARGER THAN ONE REQUEST (both bounds scaled by 1/${F}: this page's request ${TIP_REQ} B, master's route ${MASTER_LIMIT} B): a select-all of ${a.K} closed 300 ms into a 2 s answer loses ${aTip} here (the part past one request; the first, keepalive, lands) and ${aBase} on master's page (its plain whole key cancelled with the tab); kept whole when the page stays (${aStay} lost). Where master's WHOLE key is past its bound (${b.preArchived} archived), master loses all ${bBase} of a ${b.K} select-all, this page ${bTip}. At the real bounds: a request carries ${UO.MAX_BODY_BYTES} B ≈ ${Math.floor(UO.MAX_BODY_BYTES / perOp)} archive ops; master's 50 MB ≈ 1.1 M ids`, { aTip, aBase, aStay, bTip, bBase });
 }
 {
   // THE HARD WALK (the verifier's UEO_HARD: 22 reds in 300 seeds on round 4): 5xx streaks, hung requests, tabs closed in them —
@@ -1617,8 +1630,10 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
   await w.run(w.now() + 60000);
   const st = w.serverState();
   const PROBES = 40, LISTENED = 32;   // the STATED bounds (kb, the report): a lowered PROBES_MAX / IN_FLIGHT_MAX is red here
-  ok(tries === 1 + PROBES && most === LISTENED && st.archivedSessions.length === 61,
-    `SMALLER 2 — BOUNDED BY COUNT: the hub unreachable for an hour ⇒ ${tries} requests (1 + the stated ${PROBES} paced re-sends, then none until an act, a reconnect or a state); 60 acts with requests that never answer ⇒ at most ${most} listened to (the stated ${LISTENED}); back online, all 61 land`, { tries, most, archived: st.archivedSessions.length });
+  // (round 15: each send is a keepalive request and — refused by the dead network — its plain fallback in the same send: TWO requests an
+  // attempt while the hub is unreachable; the attempts are still 1 + the stated paced re-sends)
+  ok(tries === 2 * (1 + PROBES) && most === LISTENED && st.archivedSessions.length === 61,
+    `SMALLER 2 — BOUNDED BY COUNT: the hub unreachable for an hour ⇒ ${tries} requests (1 + the stated ${PROBES} paced re-sends, each a keepalive and its plain fallback, then none until an act, a reconnect or a state); 60 acts with requests that never answer ⇒ at most ${most} listened to (the stated ${LISTENED}); back online, all 61 land`, { tries, most, archived: st.archivedSessions.length });
 }
 {
   // SMALLER 4: a refusal with no reason says a whole sentence — never one that ends in «: »
@@ -3264,6 +3279,114 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
   for (let t = 0; t < 4; t++) await new Promise((r) => setImmediate(r));
   ok(sent.length === 2 && sent[1].ids !== sent[0].ids,
     `ROUND 14 — AFTER A WHOLE-BODY REFUSAL THE REST GOES AT ONCE: part 1 refused whole ⇒ ${sent.length - 1} request at once (${sent[1] ? sent[1].ids.split('+')[0] : 'none'})`, { sent: sent.map((x) => x.ids.slice(0, 40)) });
+}
+
+{
+  // ROUND 15 (the .397 hosted mirror, test-user-state-echo-chrome red on both tries) — A REQUEST THAT FITS GOES KEEPALIVE: the browser
+  // completes it after the tab is gone (a plain one still on its way is cancelled — this harness now models that). Five quick acts and the
+  // tab closed while every request is still on its way ⇒ all five keepalive, every act on disk, each once; a select-all of 3 000 (one
+  // request past the budget) goes plain; the page's keepalive bodies in flight never pass 48 KiB
+  const Sb = await loadPage(STATE_SRC);
+  const w = createWorld({ seed: 575, sessions: mkSessions(3010, 4) });
+  const P = await addPage(w, Sb, 'P');
+  await w.run(w.now() + 600);
+  w.defaultLag = () => ({ toServer: 400, toPage: 20, drop: false });   // (every request still on its way 400 ms after it leaves)
+  const reqs = [];
+  let inKeep = 0, maxKeep = 0;
+  const f = P.__fetch.bind(P);
+  P.__fetch = (url, opts) => {
+    const bytes = Buffer.byteLength(String((opts && opts.body) || '')), keep = !!(opts && opts.keepalive);
+    if (opts && opts.method === 'PATCH') { reqs.push({ bytes, keep }); if (keep) { inKeep += bytes; maxKeep = Math.max(maxKeep, inKeep); } }
+    const done = () => { if (keep && opts.method === 'PATCH') inKeep -= bytes; };
+    return f(url, opts).then((r) => { done(); return r; }, (e) => { done(); throw e; });
+  };
+  const S = w.sessions;
+  const r0 = w.serverState(), rev0 = UO.revOf(r0);
+  P.toggleArchive(S[1]); P.toggleArchive(S[2]); P.toggleArchive(S[3]); P.toggleStar(S[4]); P.setCustomName(S[5], 'closed at once');
+  const five = reqs.slice(), cancelled0 = w.cancelled || 0;
+  endPage(w, P);   // the tab closed AT ONCE — every request still on its way
+  await w.run(w.now() + 3000);
+  const st = w.serverState();
+  const landed = [1, 2, 3].every((i) => st.archivedSessions.includes(S[i].sessionKey)) && st.starredSessions.includes(S[4].sessionKey) && st.customNames[S[5].sessionKey] === 'closed at once';
+  // a select-all of 3 000 on a fresh page: its one request past the budget goes plain
+  const Q = await addPage(w, Sb, 'Q');
+  await w.run(w.now() + 600);
+  const g = Q.__fetch.bind(Q), big = [];
+  Q.__fetch = (url, opts) => { if (opts && opts.method === 'PATCH') big.push({ bytes: Buffer.byteLength(String(opts.body || '')), keep: !!opts.keepalive }); return g(url, opts); };
+  Q.archiveSessions(S.slice(10, 3010));
+  await w.run(w.now() + 3000);
+  ok(five.length === 5 && five.every((x) => x.keep) && landed && UO.revOf(st) - rev0 === 5 && (w.cancelled || 0) === cancelled0 && maxKeep <= 49152 && big.length >= 1 && big[0].bytes > 49152 && !big[0].keep,
+    `ROUND 15 — A REQUEST THAT FITS GOES KEEPALIVE: five acts, the tab closed with all five on their way ⇒ ${five.filter((x) => x.keep).length} keepalive (${five.map((x) => x.bytes).join(' / ')} B), every act on disk ${landed}, ${UO.revOf(st) - rev0} writes, ${(w.cancelled || 0) - cancelled0} cancelled; keepalive in flight at most ${maxKeep} B (≤ 49 152); a select-all of 3 000 ⇒ ${big[0] ? big[0].bytes : 0} B plain (${big[0] && !big[0].keep})`, { five, maxKeep, big: big.slice(0, 2), landed });
+}
+
+{
+  // ROUND 15 — THE KEEPALIVE BUDGET: (c) it binds, in bytes — renames of 1.5 KB (500 three-byte characters) made while the hub answers nothing (every request carries every
+  // unconfirmed batch, so they grow) ⇒ keepalive until 48 KiB are in flight, then plain; never more than 48 KiB in flight; (d) it is
+  // given back — 300 one-op acts, each answered before the next ⇒ every one keepalive; (e) a keepalive the browser refuses ⇒ the next
+  // send plain, then keepalive again once a send succeeds
+  const Sb = await loadPage(STATE_SRC);
+  const watch = (p, rejectFirstKeep = false) => {
+    const seen = { reqs: [], inKeep: 0, maxKeep: 0, refused: 0 };
+    const f = p.__fetch.bind(p);
+    p.__fetch = (url, opts) => {
+      if (!opts || opts.method !== 'PATCH') return f(url, opts);
+      const bytes = Buffer.byteLength(String(opts.body || '')), keep = !!opts.keepalive;
+      seen.reqs.push({ bytes, keep });
+      if (keep && rejectFirstKeep && !seen.refused) { seen.refused++; return Promise.reject(new TypeError('Failed to fetch (the keepalive quota)')); }
+      if (keep) { seen.inKeep += bytes; seen.maxKeep = Math.max(seen.maxKeep, seen.inKeep); }
+      const done = () => { if (keep) seen.inKeep -= bytes; };
+      return f(url, opts).then((r) => { done(); return r; }, (e) => { done(); throw e; });
+    };
+    return seen;
+  };
+  const w = createWorld({ seed: 576, sessions: mkSessions(400, 4) });
+  const R = await addPage(w, Sb, 'R');
+  await w.run(w.now() + 600);
+  const c = watch(R);
+  w.defaultLag = () => ({ toServer: 120000, toPage: 20, drop: false });   // (the hub takes nothing for two minutes)
+  for (let i = 0; i < 40; i++) R.setCustomName(w.sessions[i], '中'.repeat(500) + i);   // (1.5 KB of UTF-8 in 500 characters: the budget counts BYTES)
+  const cKeep = c.reqs.filter((x) => x.keep).length, cPlain = c.reqs.length - cKeep, cMax = c.maxKeep;
+  await w.run(w.now() + 200000);
+  w.defaultLag = () => ({ toServer: 20, toPage: 20, drop: false });
+  const S = await addPage(w, Sb, 'S');
+  await w.run(w.now() + 600);
+  const d = watch(S);
+  for (let i = 0; i < 300; i++) { S.toggleStar(w.sessions[i]); await w.run(w.now() + 100); }
+  const T = await addPage(w, Sb, 'T');
+  await w.run(w.now() + 600);
+  const e = watch(T, true);
+  T.toggleArchive(w.sessions[1]);
+  await w.run(w.now() + 30000);   // (the refused send is re-sent on the pace — plain)
+  T.toggleArchive(w.sessions[2]);
+  await w.run(w.now() + 3000);
+  const eKinds = e.reqs.map((x) => (x.keep ? 'K' : 'P')).join('');
+  ok(cKeep >= 5 && cPlain >= 5 && cMax <= 49152 && cMax > 40000 && d.reqs.length >= 300 && d.reqs.every((x) => x.keep) && e.refused === 1 && /^KPK/.test(eKinds),
+    `ROUND 15 — THE KEEPALIVE BUDGET: 40 renames of 1.5 KB with the hub answering nothing ⇒ ${cKeep} keepalive then ${cPlain} plain, at most ${cMax} B in flight (≤ 49 152); 300 acts each answered ⇒ ${d.reqs.filter((x) => x.keep).length} of ${d.reqs.length} keepalive (the budget given back); a refused keepalive ⇒ «${eKinds}» (the next plain, then keepalive again)`, { cKeep, cPlain, cMax, dKeep: d.reqs.filter((x) => x.keep).length, eKinds });
+}
+
+{
+  // ROUND 15 — EXACTLY ONCE WHEN A CLOSED TAB'S REQUESTS LAND AFTER A NEWER PAGE'S (主开发's condition 2): P archives X and stars Y and its
+  // tab closes with both requests on their way (keepalive, 3 s to the hub); a new page Q of the same person (a new id) loads and archives
+  // Z, which lands first; then P's two requests land (the second carries both acts) ⇒ X and Y once each — three writes in all, P's first
+  // act carried twice and held once (its batch id) — and Q's view converges on X, Y, Z
+  const Sb = await loadPage(STATE_SRC);
+  const w = createWorld({ seed: 577, sessions: mkSessions(10) });
+  const S = w.sessions;
+  const P = await addPage(w, Sb, 'P');
+  await w.run(w.now() + 600);
+  const rev0 = UO.revOf(w.serverState()), dup0 = w.dup;
+  P.__lag = () => ({ toServer: 3000, toPage: 20, drop: false });
+  P.toggleArchive(S[1]); P.toggleStar(S[2]);
+  endPage(w, P);
+  const Q = await addPage(w, Sb, 'Q');
+  await w.run(w.now() + 400);
+  Q.toggleArchive(S[3]);
+  await w.run(w.now() + 8000);
+  const st = w.serverState(), k = (i) => S[i].sessionKey;
+  const once = st.archivedSessions.filter((x) => x === k(1)).length === 1 && st.starredSessions.filter((x) => x === k(2)).length === 1;
+  const qSees = Q._archivedIds.has(k(1)) && Q._starredIds.has(k(2)) && Q._archivedIds.has(k(3));
+  ok(once && st.archivedSessions.includes(k(3)) && UO.revOf(st) - rev0 === 3 && w.dup - dup0 === 1 && qSees && pendingOf(Q) === 0,
+    `ROUND 15 — EXACTLY ONCE WHEN A CLOSED TAB'S REQUESTS LAND AFTER A NEWER PAGE'S: X archived and Y starred once (${once}), Z kept; ${UO.revOf(st) - rev0} writes, ${w.dup - dup0} held (P's first act, carried twice); the new page shows all three (${qSees})`, { revs: UO.revOf(st) - rev0, dup: w.dup - dup0, qSees });
 }
 
 // ════════ §8 THE MUTANTS ════════

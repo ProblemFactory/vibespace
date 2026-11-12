@@ -3,7 +3,11 @@
 // inc-mwbn2xp8-ks0b): a page hands each user-state act to the network AT THE ACT, in a request that carries every batch of the
 // page not yet confirmed, oldest first (src/user-state-ops.js createSync), so a page closed right after its acts loses none of
 // them — as on master. This suite drives the REAL page in headless Chrome against a throwaway server: five acts (three
-// archives, a star, a rename) and the tab CLOSED at once — the hub receives every one, each once.
+// archives, a star, a rename) and the tab CLOSED at once — the hub receives every one, each once (round 15: each request that fits goes
+// keepalive — the browser completes it after the tab is gone; the .397 hosted mirror, slower than the box, lost the last ones without it).
+// THE OVER-BUDGET ROAD, its own row: a select-all whose request is past the 48 KiB keepalive budget goes as a plain fetch, as on master —
+// what it promises is that the act was handed to the network and lands at most once, all or nothing (lost if the tab closes before its
+// upload ends — named).
 // Throwaway server in a git worktree (own data dir + EMPTY fake HOME) + headless chrome over raw CDP.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -88,6 +92,18 @@ try {
   check('acts made and the tab closed AT ONCE: the hub received every one (three archives, a star, a rename)', keys.slice(0, 3).every((k) => after.archivedSessions.includes(k)) && after.starredSessions.includes(keys[3]) && after.customNames[keys[4]] === 'closed at once', { archived: after.archivedSessions, starred: after.starredSessions, names: after.customNames });
   check(`…each once: five writes (stateRev ${UO.revOf(before)} → ${UO.revOf(after)})`, UO.revOf(after) - UO.revOf(before) === 5, { revs: [UO.revOf(before), UO.revOf(after)] });
   try { p.ws.close(); } catch {}
+  // THE OVER-BUDGET ROAD: one act — a select-all of 900 (its request ~80 KB, past the keepalive budget) — and the tab closed at once
+  const q = await newPage();
+  const before2 = await userState();
+  const many = Array.from({ length: 900 }, (_, i) => `claude:f${String(i).padStart(7, '0')}-0000-4000-8000-000000000000`);
+  const inflight2 = await q.evl(`(() => { app.sidebar.archiveSessions(${JSON.stringify(many)}.map((k) => ({ sessionKey: k }))); return app.sidebar.__userSync.inFlight(); })()`);
+  await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${q.id}`);
+  await sleep(4000);
+  const after2 = await userState();
+  const landed2 = many.filter((k) => after2.archivedSessions.includes(k)).length, writes2 = UO.revOf(after2) - UO.revOf(before2);
+  check(`the over-budget road (a select-all of 900, past the keepalive budget, the tab closed at once): handed to the network (${inflight2} request), all or nothing and at most once — ${landed2} of 900 landed in ${writes2} write(s)`,
+    inflight2 === 1 && (landed2 === 0 || landed2 === 900) && writes2 === (landed2 ? 1 : 0), { inflight2, landed2, writes2 });
+  try { q.ws.close(); } catch {}
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 }

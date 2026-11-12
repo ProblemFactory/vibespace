@@ -235,6 +235,14 @@ export function installSidebarState(SidebarClass) {
     // this page's unconfirmed acts live and die with this PAGE — its id is made per page LOAD, in memory; nothing about an act in
     // flight is stored or shared with another page. EVERY ACT IS ON THE WIRE AT THE ACT (round 4), in a request that carries every
     // batch this page has not seen confirmed, oldest first (round 5 — a later act carries an earlier one whose request failed)
+    // round 15 (.397's hosted mirror): a request that fits goes KEEPALIVE — the browser completes it after the tab is gone. A plain
+    // fetch still uploading when its tab closes is CANCELLED: the runner, slower than the box, lost the last one to three of five acts
+    // made just before a close (master's plain fetch loses them the same way). The budget is this page's keepalive bodies in flight,
+    // under the browser's 64 KiB a page (shared with the telemetry beacons — round 3 measured it); past it (a select-all's 0.44 MiB
+    // parts) the plain fetch, as on master — that road is NAMED. A keepalive the browser refuses (its quota, or the network) falls back
+    // to the plain fetch IN THE SAME SEND: never a dropped act (主开发's ruling; a duplicate is held by its batch id)
+    const KEEP_BYTES = 48 * 1024;
+    let keepBytes = 0;
     const sync = createSync({
       ...doors,
       pageId: ('pg' + rnd()).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24),
@@ -243,7 +251,16 @@ export function installSidebarState(SidebarClass) {
       send: async (body, { signal } = {}) => {
         // round 7, C1: ops only, to the OPS DOOR — a server without it answers 404, a failure like any other (kept, retried; a 404 streak
         // past the engine's while is said — 'not-taken' — and taken back when the acts land)
-        const res = await fetch('/api/user-state/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+        const text = JSON.stringify(body);
+        const size = text.length > KEEP_BYTES ? Infinity : new TextEncoder().encode(text).length;   // (its exact UTF-8 bytes — a string longer than the budget is past it in any encoding)
+        let kept = size <= KEEP_BYTES - keepBytes ? size : 0;
+        keepBytes += kept;
+        const go = (keepalive) => fetch('/api/user-state/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: text, signal, ...(keepalive ? { keepalive: true } : {}) });
+        let res;
+        try {
+          try { res = await go(kept > 0); }
+          catch (e) { if (!kept) throw e; keepBytes -= kept; kept = 0; res = await go(false); }   // (a refused keepalive: the plain fetch, now)
+        } finally { keepBytes -= kept; }
         let j = null;
         try { j = await res.json(); } catch { }
         const list = (k) => (j && Array.isArray(j[k]) ? j[k] : []);
