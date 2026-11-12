@@ -69,15 +69,19 @@ const wholeKeeps = (alive) => alive !== false;
 /** THE KEEP SET, built on the main thread from memory (no disk): plain arrays (a structured clone to the worker).
  *  named = every id a record holds (store + archive); listed = `<id>/<runTs>` of every run a record lists; skeleton = ids
  *  of recovered skeletons; held = `<id>/<runTs>` of every run the hub holds work for. */
+/** round 3 §3: a record whose `runs` is there but is not a list (an object, a number, a string) cannot say which runs it lists —
+ *  «records that cannot be read»: every dir of that job is KEPT (it rides `skeleton`) and its id is in `unreadable` (said once);
+ *  never a throw (one such record stopped every pass and the hourly gc's other work), never a quiet «lists nothing» */
 function keepSetOf({ jobs = [], archive = [], held = [] } = {}) {
-  const named = [], listed = [], skeleton = [];
-  for (const j of [...jobs, ...archive]) {
+  const named = [], listed = [], skeleton = [], unreadable = [];
+  for (const j of [...(Array.isArray(jobs) ? jobs : []), ...(Array.isArray(archive) ? archive : [])]) {
     if (!j || typeof j.id !== 'string') continue;
     named.push(j.id);
     if (isSkeleton(j)) skeleton.push(j.id);
-    for (const r of j.runs || []) if (r && r.startedAt != null) listed.push(`${j.id}/${r.startedAt}`);
+    if (j.runs != null && !Array.isArray(j.runs)) { skeleton.push(j.id); unreadable.push(j.id); continue; }
+    for (const r of j.runs || []) if (r && typeof r === 'object' && r.startedAt != null) listed.push(`${j.id}/${r.startedAt}`);
   }
-  return { named, listed, skeleton, held: held.filter((k) => typeof k === 'string') };
+  return { named, listed, skeleton, unreadable, held: (Array.isArray(held) ? held : []).filter((k) => typeof k === 'string') };
 }
 
 /** THE WORDS (the journal: ids and counts only, never a name) */

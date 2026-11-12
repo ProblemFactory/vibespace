@@ -421,6 +421,20 @@ try {
       await passP; await settle(JR);
       ok(!asideAtBoot && has(listedR) && has(orphanR) && LR.some((l) => /job-logs clean-up HELD: jobs-archive\.json\.corrupt-/.test(l)) && (scene === 'race' || fs.existsSync(AF2)), `READ FIRST, THEN ASK (${scene}): a set-aside made while the child read${scene === 'race-write' ? ' — and a fresh archive written in the same call' : ''} holds the pass; nothing removed`);
     }
+    // H5d A RECORD THAT CANNOT BE READ HOLDS, IT NEVER THROWS THE PASS (round 3 §3): `runs` as an object, a number, a string —
+    // in the store and in the archive; the hourly gc completes its other work (a done task past 14 days collected beside them)
+    {
+      const hu = mkDir('h5d'); const uTs = Date.now() - 30 * DAY;
+      const rec = (id, runs, extra = {}) => ({ id, kind: 'task', name: id, state: 'done', owner, access: { view: 'all', control: 'session' }, runs, ...extra });
+      fs.writeFileSync(path.join(hu, 'jobs.json'), JSON.stringify([rec('jb-0b1ec701', { a: { startedAt: uTs } }), rec('jb-0b1ec702', 7), rec('jb-d0e5d0e5', [{ startedAt: uTs - 1000, endedAt: Date.now() - 15 * DAY, exit: 0 }])]));
+      fs.writeFileSync(path.join(hu, 'jobs-archive.json'), JSON.stringify([rec('jb-0b1ec703', 'not runs', { archivedAt: Date.now() - DAY, archivedWhy: 'done' })]));
+      const u1 = seedRun(hu, 'jb-0b1ec701', uTs, { ageMs: 30 * DAY }), u2 = seedRun(hu, 'jb-0b1ec702', uTs, { ageMs: 30 * DAY }), u3 = seedRun(hu, 'jb-0b1ec703', uTs, { ageMs: 30 * DAY }), gcDone = seedRun(hu, 'jb-d0e5d0e5', uTs - 1000, { ageMs: 15 * DAY });
+      const { jm: JU, logs: LU } = boot(hu);
+      let threw = null; try { await gcAt(JU, Date.now()); await gcAt(JU, Date.now()); } catch (e) { threw = e; }
+      ok(!threw && has(u1) && has(u2) && has(u3), 'A RECORD THAT CANNOT BE READ HOLDS: `runs` as an object, a number, a string (store and archive) — every dir of that job is kept, and the gc never throws');
+      ok(!JU.jobs.has('jb-d0e5d0e5') && !has(gcDone), '…and the hourly gc completes its OTHER work beside them (a done task past 14 days collected)');
+      ok(['jb-0b1ec701', 'jb-0b1ec702', 'jb-0b1ec703'].every((id) => LU.filter((l) => l.includes(`the record ${id} lists its runs in a shape that cannot be read`)).length === 1), 'each such record is said ONCE in the journal, by its id');
+    }
     // H6 A READ THAT FAILED WITH NO SET-ASIDE (a stand-in in code: EIO on the read, the rename refused) — this process holds,
     // and the next pass reads the file again in the worker: a read that succeeds keeps its records by itself
     const h6 = mkDir('h6'); const a6Ts = Date.now() - 20 * DAY;
@@ -682,8 +696,10 @@ try {
   ok(done4, 'the hub catches up BY ITSELF: the 5 000 dropped runs are gone, the 20 listed stay', `${runsOn(d4, t4.id).length} left`);
   ok(t4.listed.every((t) => has(d4, 'job-logs', t4.id, t)), 'nothing a record lists was touched');
   const real4 = answers4.filter((a) => !a.skipped && !a.error);
-  ok(real4.length >= 10 && real4.every((a) => a.removed <= 500), `PACED: at most 500 a pass (${real4.length} passes: ${real4.map((a) => a.removed).join(' ')})`);
-  ok(real4.length >= 2 && real4.slice(1).every((a, i) => a.at - real4[i].at >= 25), 'each pass after the gap (≥ 25 ms between passes here; 30 s in the product)');
+  // round 3 §9: a COUNT, never a pace — every pass it answered removed ≤ 500, and the product's own done line says ≥ 10 passes
+  const passesSaid = (() => { const m = /— (\d+) pass\(es\) since/.exec(L4.find((l) => /catch-up done/.test(l)) || ''); return m ? Number(m[1]) : 0; })();
+  ok(real4.length >= 1 && real4.every((a) => a.removed <= 500) && passesSaid >= 10, `PACED: at most 500 a pass (${real4.map((a) => a.removed).join(' ')}), ${passesSaid} passes said by the done line for 5 000`);
+  ok(typeof J4._logsRestMs === 'number' && J4._logsRestMs >= 25, `each rest armed is at least the gap (${J4._logsRestMs} ms here; 30 s in the product) — the armed value, not a clock`);
   ok(done4 && worstMs < 60, `OFF THE LOOP (a slow storage: ${SLOW_MS} ms a removal): the main loop's worst delay over the whole catch-up ${worstMs.toFixed(1)} ms (< 60 ms; a pass of 500 is ≥ ${500 * SLOW_MS} ms of removals)`);
   const jl4 = L4.filter((l) => /job-logs/.test(l));
   ok(jl4.length === 2 && /catch-up: 5,000 run dir\(s\) that started more than 14 days ago and no record lists — removing at most 500 per pass off the main thread, resting at least 25 ms/.test(jl4[0]) && /catch-up done: 5,000 run dir\(s\) removed \(15,000 entries\) and 0 job dir\(s\) no record names; 0 kept .* — \d+ pass\(es\)/.test(jl4[1]), 'SAID TWICE: once at the start with the count, once when done with the total — nothing in between', jl4);

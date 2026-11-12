@@ -2487,12 +2487,14 @@ class JobManager {
     // dirs follow the SAME 14-day retention as a live record's (triage §13)
     try {
       for (const rec of this._loadArchive()) {
-        if (M.terminalAt(rec) < cutoff) whole.push(rec.id);
+        if ((rec.runs == null || Array.isArray(rec.runs)) && M.terminalAt(rec) < cutoff) whole.push(rec.id);   // round 3 §3: a record whose runs cannot be read has no end to age by — kept
       }
     } catch { }
     // lane job-logs-sweep: the two legs' verdicts stay theirs; their removals and THE LAW's pass run in the remover's worker
     if (whole.length) this._logsWhole(whole);
-    if (!this._logsGapT) await this.sweepLogs({ now: at, why: 'gc' });   // an open catch-up keeps its own pace (its timer armed); a stalled one is picked up here
+    // an open catch-up keeps its own pace (its timer armed); a stalled one is picked up here. Round 3 §3: a pass that throws never
+    // fails the gc (its other work is done above)
+    if (!this._logsGapT) { try { await this.sweepLogs({ now: at, why: 'gc' }); } catch (e) { this.d.log('[jobs] job-logs pass (gc) threw:', e && e.message); } }
   }
 
   // ── data/job-logs: THE REMOVER (lane job-logs-sweep, 2026-11-12; src/job-logs-sweep.js states the law) ───────────────
@@ -2548,6 +2550,7 @@ class JobManager {
     const held = [...this._reapLater].map(([run, v]) => (run && v && v.job ? `${v.job.id}/${run.startedAt}` : null)).filter(Boolean);
     // the archive from memory when it is loaded; otherwise the worker reads its file (never _loadArchive's synchronous read here)
     const keep = LS.keepSetOf({ jobs: [...this.jobs.values()], archive: this.archive || [], held });
+    for (const id of keep.unreadable) if (!(this._logsUnreadSaid || (this._logsUnreadSaid = new Set())).has(id)) { this._logsUnreadSaid.add(id); this.d.log(`[jobs] job-logs: the record ${id} lists its runs in a shape that cannot be read — every dir of it is kept`); }   // round 3 §3: said once, by id
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
     const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,   // `counting` walks on past B by NAME only (no stat, no /proc)
       archiveFile: this.archive && !this._logsUnread.archive ? null : this.archiveFile, storeFile: this._logsUnread.store ? this.file : null,
