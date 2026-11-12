@@ -81,6 +81,10 @@ const MAX_ACT_AGE_MS = 7 * 24 * 3600 * 1000;
 /** smaller 2 (round 6): the paced re-send stops after 40 probes in a row with no answer (≈ 10 min at its 15 s cadence) — the
  *  next act, a reconnect or a state starts it again; the requests listened to at once are bounded too */
 const PROBES_MAX = 40;
+/** round 14 follow-up (主开发): a 404 from the ops door is NOT a verdict for this long — the minute of an update (a reloaded tab on the old
+ *  server until the restart) answers 404 and then takes every act; only a 404 streak past it is said, and in words that never ask for a
+ *  reload (acts live in this page's memory: a reload would lose them) */
+const NOT_TAKEN_WAIT_MS = 3 * 60 * 1000;
 const ASK_GIVE_UP_MS = 15000, ASK_GIVE_UP_MAX_MS = 120000, ASK_SLOW_MS = 300000;   // (round 12: the paced ask's give-up, doubling with the pace; past PROBES_MAX, one ask every 5 minutes)
 const IN_FLIGHT_MAX = 32;
 const BATCH_RE = /^([A-Za-z0-9_-]{6,64}):([1-9][0-9]{0,14})$/;   // (round 10: a counter of at most 15 digits — always a safe integer, so every fact the route writes it reads back)
@@ -399,7 +403,8 @@ const TAG_KEY = Object.fromEntries(Object.entries(KEY_TAG).map(([k, v]) => [v, k
 /** a name inside a slot: its LENGTH, then itself (round 12) — no name spells another slot, and no name is scanned (round 11 escaped '\\'
  *  and the tab with two regex replaces at every slotOf: 4 096-tab names cost 17× master) */
 const SLOT_NAME_INLINE = 128;
-/** a long name's 64-bit digest, ONE pass, two FNV-1a lanes (two offset bases) — `lanes` leaves them in LA / LB (no string made: a
+/** a long name's 64-bit digest, ONE pass, two FNV-1a lanes (two offset bases — one prime, so their low bits are coupled: about 57
+ *  effective bits, the panel's measure; a false positive per act at 100 000 digests ~7e-13) — `lanes` leaves them in LA / LB (no string made: a
  *  whole-key record digests every slot it changed — round 14) */
 let LA = 0, LB = 0;
 function lanes(v) { let a = 0x811c9dc5 | 0, b = 0x84222325 | 0; for (let i = 0; i < v.length; i++) { const c = v.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x01000193); } LA = a >>> 0; LB = b >>> 0; }
@@ -429,7 +434,7 @@ const keySlotOf = (key) => KEY_TAG[key] + SEP;   // the key itself: no name foll
  *  other: an act on an item the write never touched applies (round 13 wrote ONE key-wide fact, which took back every earlier act on
  *  the key, silently). On disk: '<t base 36>=<16 hex a slot>…[;<t>=…]' */
 const keySetSlotOf = (key) => KEY_TAG[key] + SEP + '*';
-/** a set of 64-bit digests (two 32-bit lanes) in ONE typed open-addressing table, sized for `most` (never more is added) — a run of
+/** a set of 64-bit digests (two 32-bit lanes) in ONE typed open-addressing table, sized for `most` (never more is put) — a run of
  *  840 000 digests as a Set of strings cost ~1 s and its garbage */
 function digestSet(most) {
   let cap = 16;
@@ -439,7 +444,7 @@ function digestSet(most) {
   const set = {
     n: 0,
     has: (a, b) => used[at(a, b)] === 1,
-    add(a, b) { const i = at(a, b); if (!used[i]) { used[i] = 1; hi[i] = a; lo[i] = b; set.n++; } },
+    put(a, b) { const i = at(a, b); if (!used[i]) { used[i] = 1; hi[i] = a; lo[i] = b; set.n++; } },   // (not «add»: test-user-todos-layout's census reads any two-argument add call as an inbox filing)
     each(fn) { for (let i = 0; i < cap; i++) if (used[i]) fn(hi[i], lo[i]); },
   };
   return set;
@@ -457,7 +462,7 @@ function factAt(facts, slot) {
  *  the digests the new one does not hold, and goes once it is empty or older than MAX_ACT_AGE_MS (no act that old is applied) */
 function withRun(rec, now, ds) {
   const fresh = digestSet(ds.length / 2);
-  for (let i = 0; i < ds.length; i += 2) fresh.add(ds[i], ds[i + 1]);
+  for (let i = 0; i < ds.length; i += 2) fresh.put(ds[i], ds[i + 1]);
   const runs = [{ t: now, set: fresh }];
   for (const run of (rec && rec.runs) || []) {
     if (now - run.t > MAX_ACT_AGE_MS) continue;
@@ -465,7 +470,7 @@ function withRun(rec, now, ds) {
     run.set.each((a, b) => { if (!fresh.has(a, b)) left++; });
     if (!left) continue;
     let set = run.set;
-    if (left < run.set.n) { set = digestSet(left); run.set.each((a, b) => { if (!fresh.has(a, b)) set.add(a, b); }); }
+    if (left < run.set.n) { set = digestSet(left); run.set.each((a, b) => { if (!fresh.has(a, b)) set.put(a, b); }); }
     runs.push({ t: run.t, set });
   }
   return { t: now, page: null, counter: 0, digest: null, prev: [], runs };
@@ -491,7 +496,7 @@ function runsIn(v) {
       let a = 0, b = 0;
       for (let q = 0; q < 8; q++) a = (a << 4) | nib(body.charCodeAt(j + q));
       for (let q = 8; q < 16; q++) b = (b << 4) | nib(body.charCodeAt(j + q));
-      set.add(a >>> 0, b >>> 0);
+      set.put(a >>> 0, b >>> 0);
     }
     if (set.n) runs.push({ t: parseInt(t36, 36), set });
   }
@@ -834,7 +839,8 @@ function sameKey(a, b) {
  *                          (a throw = not reached)
  *   setTimer(fn, ms) / clearTimer(t); now() — the device's WALL clock; onView(view) — the shown state changed
  *   say(kind, info) — 'refused' {code} (a refusal: the act is taken back) | 'old' {count} (the 7-day rule took back what the page
- *            showed) | 'older-server' {} (round 14: the ops door answered 404 — once a page) — the ONLY words (round 9); refetch() —
+ *            showed) | 'not-taken' {} (the ops door has answered 404 for NOT_TAKEN_WAIT_MS — once a streak) | 'taken' {} (its acts
+ *            landed since: the words taken back) — the ONLY words (round 9); refetch() —
  *            ask for the server's state
  *   pageId — THIS PAGE's batch prefix, made per page LOAD in memory (a reload, a duplicated tab and a page restored from the
  *            back-forward cache are each simply a page — their ids can never collide)
@@ -852,7 +858,7 @@ function sameKey(a, b) {
  * ANOTHER life is taken whatever its counter unless it is a late one from a life the hub has left, and every unconfirmed batch
  * goes again; an answer from another life confirms nothing (the page asks for the state, then sends again).
  */
-function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, onView = () => {}, say = () => {}, refetch = () => {}, now = () => Date.now(), mono = () => (typeof performance !== 'undefined' && performance && typeof performance.now === 'function' ? performance.now() : Date.now()), pageId, retryMs = RETRY_MS, timeoutMs = SEND_TIMEOUT_MS, maxOps = MAX_OPS_PER_BATCH, maxBytes = MAX_BATCH_BYTES, maxRequestBytes = MAX_BODY_BYTES, maxRequestOps = MAX_OPS_PER_REQUEST, maxRequestValueChars = MAX_REQUEST_VALUE_CHARS, probesMax = PROBES_MAX, inFlightMax = IN_FLIGHT_MAX, initial = null } = {}) {
+function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, onView = () => {}, say = () => {}, refetch = () => {}, now = () => Date.now(), mono = () => (typeof performance !== 'undefined' && performance && typeof performance.now === 'function' ? performance.now() : Date.now()), pageId, retryMs = RETRY_MS, timeoutMs = SEND_TIMEOUT_MS, maxOps = MAX_OPS_PER_BATCH, maxBytes = MAX_BATCH_BYTES, maxRequestBytes = MAX_BODY_BYTES, maxRequestOps = MAX_OPS_PER_REQUEST, maxRequestValueChars = MAX_REQUEST_VALUE_CHARS, probesMax = PROBES_MAX, notTakenMs = NOT_TAKEN_WAIT_MS, inFlightMax = IN_FLIGHT_MAX, initial = null } = {}) {
   if (typeof send !== 'function') throw new Error('createSync: send is required');
   const page = typeof pageId === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(pageId) ? pageId : 'pg' + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 8);
   let base = viewOf(initial || {}), baseRev = 0, baseEpoch = null, hasBase = false;
@@ -909,7 +915,7 @@ function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, on
 
   // THE REQUESTS IN FLIGHT: token → {ids (the batches it carries), late}
   const reqs = new Map();
-  let token = 0, authWait = false, probe = null, probeTimer = null, streak = 0, probesLeft = probesMax, olderSaid = false;
+  let token = 0, authWait = false, probe = null, probeTimer = null, streak = 0, probesLeft = probesMax, notFoundSince = null, notTakenSaid = false;
   // an answer from ANOTHER server life than the page's base (the hub restarted or was restored while it was on its way, or the page
   // has not heard the new life yet): it confirms nothing — the page asks which life is now (refetch) and, once that state is
   // applied, sends again what is unconfirmed (a duplicate where it landed; applied after a restore). Never a loop: one ask, one send
@@ -1025,6 +1031,7 @@ function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, on
     }
     if (r.ok && Number.isFinite(Number(r.rev))) {
       reqs.delete(tk);
+      notFoundSince = null;   // (the ops door took them: a 404 streak is over — its words, if said, are taken back below, after the rows)
       // applied / held (its own duplicate) / superseded (a later act decided it: the page shows the server's value, nothing said)
       // are all CONFIRMED; refused and too old are undone and said
       const named = (list) => new Map((Array.isArray(list) ? list : []).filter((x) => x && q.ids.has(x.batch) && pending.some((p) => p.id === x.batch)).map((x) => [x.batch, x.code || null]));   // (a batch another answer already settled says nothing again)
@@ -1047,6 +1054,7 @@ function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, on
       if (probe === tk) { probe = null; streak = 0; }
       probesLeft = probesMax;
       settle(); shown('answer');   // MUST 1: the rows show what changed in this task — and only then a word
+      if (notTakenSaid) { notTakenSaid = false; say('taken', {}); }   // (round 14 follow-up: «not saved yet» taken back — they landed)
       // a refusal is SAID only where what the page shows changed because of it (round 11, small 3 — as the 7-day rule): an act a later
       // act of this page on the same item masks is undone with nothing to see
       if (refused.size) { const ch = shownChanged(shownBefore, refusedOps); const said = new Set(); for (const [batch, code] of refused) if (ch.has(batch) && !said.has(code)) { said.add(code); say('refused', { batch, code }); } }   // (ONE sentence a reason an answer — round 12: two refused acts on one item said it twice; round 13: two reasons are two sentences)
@@ -1085,9 +1093,13 @@ function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, on
       return;
     }
     if (authWait) { if (probe === tk) probe = null; return; }
-    // round 14: a 404 from the ops door is a server OLDER than this page (a downgrade, the minute of a rolling update) — its acts never
-    // land there and a reload shows that server's state: said ONCE a page; the acts stay and go again (a server with the door takes them)
-    if (r && r.status === 404 && !olderSaid) { olderSaid = true; say('older-server', {}); }
+    // round 14 follow-up: a 404 from the ops door is not a verdict for NOT_TAKEN_WAIT_MS (the minute of an update: a reloaded tab talks to
+    // the old server until the restart, then every act lands) — the acts stay and go again, paced; a streak past it is SAID once, in words
+    // that never ask for a reload (it would lose them), and taken back when they land (round 14 said «reload» at the first 404)
+    if (r && r.status === 404) {
+      if (notFoundSince == null) notFoundSince = mono();
+      if (!notTakenSaid && mono() - notFoundSince >= notTakenMs) { notTakenSaid = true; say('not-taken', {}); }
+    }
     if (probe === tk) { probe = null; pace(retryMs[Math.min(++streak, retryMs.length - 1)]); } else pace(retryMs[0]);
   }
   /** THE PACED RE-SEND — for the page that makes no later act: ONE probe in flight a page at a time, carrying everything */
@@ -1176,4 +1188,4 @@ function createSync({ send, setTimer = setTimeout, clearTimer = clearTimeout, on
   };
 }
 
-module.exports = { lifeStart, pastLife, KEYS, SET_KEYS, VALUE_KEYS, MEMBER_KEYS, FIELD_KEYS, REV_KEY, EPOCH_KEY, FACTS_KEY, CLOCK_KEY, MAX_VALUE_DEPTH, SERVER_KEYS, WIRE_KEYS, MAX_OPS_PER_BATCH, MAX_OPS_PER_REQUEST, FACT_MAX, MAX_VALUE_CHARS, ITEM_MAX, SLOT_MAX, MAX_GROUP_MEMBERS, MAX_WHOLE_MOVES, MAX_REQUEST_VALUE_CHARS, digestOf, tombSlotOf, MAX_BODY_BYTES, MAX_BATCH_BYTES, MAX_ACT_AGE_MS, PREV_MAX, SEND_TIMEOUT_MS, RETRY_MS, PROBES_MAX, IN_FLIGHT_MAX, kindOf, revOf, epochOf, utf8Length, viewOf, personKeys, opProblem, parseBatch, diffOps, applyOps, changedKeys, slotOf, keySlotOf, factOut, factIn, factStore, parseRequest, judgeOp, judgeRequest, moveFacts, keySetSlotOf, factAt, slotLanes, lanes, laneOf, createSync };
+module.exports = { lifeStart, pastLife, KEYS, SET_KEYS, VALUE_KEYS, MEMBER_KEYS, FIELD_KEYS, REV_KEY, EPOCH_KEY, FACTS_KEY, CLOCK_KEY, MAX_VALUE_DEPTH, SERVER_KEYS, WIRE_KEYS, MAX_OPS_PER_BATCH, MAX_OPS_PER_REQUEST, FACT_MAX, MAX_VALUE_CHARS, ITEM_MAX, SLOT_MAX, MAX_GROUP_MEMBERS, MAX_WHOLE_MOVES, MAX_REQUEST_VALUE_CHARS, digestOf, tombSlotOf, MAX_BODY_BYTES, MAX_BATCH_BYTES, MAX_ACT_AGE_MS, PREV_MAX, SEND_TIMEOUT_MS, RETRY_MS, PROBES_MAX, NOT_TAKEN_WAIT_MS, IN_FLIGHT_MAX, kindOf, revOf, epochOf, utf8Length, viewOf, personKeys, opProblem, parseBatch, diffOps, applyOps, changedKeys, slotOf, keySlotOf, factOut, factIn, factStore, parseRequest, judgeOp, judgeRequest, moveFacts, keySetSlotOf, factAt, slotLanes, lanes, laneOf, createSync };

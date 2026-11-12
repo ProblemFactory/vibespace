@@ -241,8 +241,8 @@ export function installSidebarState(SidebarClass) {
       refetch: (o) => { try { return this._fetchUserState(o && o.paced ? { tries: 1, signal: o.signal } : undefined); } catch { return null; } },   // the server's state (an answer from another life confirms nothing; round 11: the engine's paced asks, one GET each)
       initial: this._userStateDisplayCopy(),   // what the page last SHOWED: replaced by the first server state, NEVER sent
       send: async (body, { signal } = {}) => {
-        // round 7, C1: ops only, to the OPS DOOR — a server without it answers 404, a failure like any other (kept, retried; round 14:
-        // said once a page — the engine's 'older-server')
+        // round 7, C1: ops only, to the OPS DOOR — a server without it answers 404, a failure like any other (kept, retried; a 404 streak
+        // past the engine's while is said — 'not-taken' — and taken back when the acts land)
         const res = await fetch('/api/user-state/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
         let j = null;
         try { j = await res.json(); } catch { }
@@ -306,10 +306,14 @@ export function installSidebarState(SidebarClass) {
       // round 13: what THIS page refused never left it — never «the server refused»
       if (info && info.local) showToast(reason ? tr('This page did not keep a change ({reason})', { reason: tr(reason) }) : tr('This page did not keep a change.'), { type: 'error' });
       else showToast(reason ? tr('The server refused a change ({reason}), so it was undone here', { reason: tr(reason) }) : tr('The server refused a change, so it was undone here.'), { type: 'error' });   // (the rows were repainted before it — round 10)
-    } else if (kind === 'older-server') {
-      // round 14: the ops door answered 404 — a server older than this page (a downgrade, the minute of a rolling update): its acts
-      // never land there, and a reload shows that server's state; said once a page (the engine's)
-      showToast(tr('This server is older than this page, so changes made here are not saved — reload the page'), { type: 'error' });
+    } else if (kind === 'not-taken') {
+      // round 14 follow-up: the ops door has answered 404 for the engine's while (a server older than this page, or one restarting): the
+      // acts are kept in THIS page — never «reload» (a reload loses them); taken back when they land
+      this._userStateNotTaken = showToast(tr('These changes are not saved yet — the server does not take them (it may be restarting or older than this page); they are kept here while this page stays open'), { type: 'error' });
+    } else if (kind === 'taken') {
+      try { const el = this._userStateNotTaken; if (el && typeof el.remove === 'function') el.remove(); } catch { }
+      this._userStateNotTaken = null;
+      showToast(tr('The changes kept on this page are saved now'), { type: 'info' });
     } else if (kind === 'old') {
       // one sentence, true whether the act was never applied or applied once and beaten since — said only where what the page
       // shows changed because of it; the count agrees with its noun

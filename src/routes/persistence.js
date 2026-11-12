@@ -878,7 +878,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
     // (an older page before its first fetch POSTs its whole copy — round 10: its gaps are no acts. MASTER'S ROAD (round 13): it takes
-    // what master takes — no bound master does not have; past MAX_WHOLE_MOVES changed items the write is ONE fact a key, as an import)
+    // what master takes — no bound master does not have; past MAX_WHOLE_MOVES changed items the write is ONE record a key naming the items it changed — round 14)
     try { writeUserState(data, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) {
       return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` });
     }
@@ -905,7 +905,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (UO.WIRE_KEYS.some((k) => Object.prototype.hasOwnProperty.call(data, k)) || Object.prototype.hasOwnProperty.call(data, 'ops'))
       return res.status(400).json({ error: 'ops go to PATCH /api/user-state/batches — this door takes whole top-level keys' });
     // MASTER'S ROAD (round 13): an older page's whole key takes what master takes — no bound master does not have; past MAX_WHOLE_MOVES
-    // changed items the write is ONE fact a key, as an import (a different record, never a refusal)
+    // changed items the write is ONE record a key naming the items it changed (round 14 — never a refusal)
     readUserState();
     try { writeUserState({ ...readUserState(), ...data }, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) { return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` }); }
     res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });

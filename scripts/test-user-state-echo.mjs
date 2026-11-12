@@ -1021,8 +1021,8 @@ for (const kind of ['restore (a LOWER counter)', 'restart (the SAME file)']) {
 // ════════ §12 ROUND 2, SMALLER ════════
 console.log('§12 round 2, smaller: an older server, a sign-in, the migration, the bounds, exactly once across a restart');
 {
-  // (1) a page that outlives a rollback to an older server (no ops door): round 7, C1 — never whole keys; kept; round 14: its 404 SAID
-  // once a page («This server is older than this page …» — the acts never land there and a reload shows its state)
+  // (1) a page that outlives a rollback to an older server (no ops door): round 7, C1 — never whole keys; kept; round 14 follow-up: a
+  // 404 streak past 3 minutes SAID once («These changes are not saved yet …» — kept while the page stays open; never «reload»)
   const Sb = await loadPage(STATE_SRC);
   const w = createWorld({ seed: 121, sessions: mkSessions(4) });
   let oldState = { stateVersion: 2, starredSessions: [], archivedSessions: [], archivedFolders: [], customNames: {}, sessionModes: {}, sessionConfigs: {}, sessionGroups: {}, groupFolders: {} };
@@ -1037,8 +1037,8 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   await w.run(w.now() + 600000);   // ten virtual minutes: a page that retried for ever is RED here, not a hang
   oldState = { ...oldState, starredSessions: [w.sessions[2].sessionKey] }; oldBroadcast();   // another (old) page stars #2
   await w.run(w.now() + 600000);   // ten virtual minutes: a page that retried for ever is RED here, not a hang
-  ok(bodies.length === 0 && !oldState.archivedSessions.includes(w.sessions[1].sessionKey) && A._archivedIds.has(w.sessions[1].sessionKey) && pendingOf(A) >= 1 && A.__toasts.length === 1 && /^This server is older than this page, so changes made here are not saved/.test(A.__toasts[0].text) && A._starredIds.has(w.sessions[2].sessionKey) && Object.keys(oldState).every((k) => !['batches', 'born', 'seq'].includes(k)),
-    'OLDER SERVER (round 7, C1): a page of this release NEVER speaks whole keys — its refused ops door is a failure like any other: the act kept on the page and retried within the bounds, its 404 said ONCE in twenty minutes (round 14), nothing written to the old file (no whole keys, no junk key), no «older VibeSpace» sentence; the other page\'s change is shown', { bodies, toasts: A.__toasts.map((x) => x.text), pending: pendingOf(A) });
+  ok(bodies.length === 0 && !oldState.archivedSessions.includes(w.sessions[1].sessionKey) && A._archivedIds.has(w.sessions[1].sessionKey) && pendingOf(A) >= 1 && A.__toasts.length === 1 && /^These changes are not saved yet — the server does not take them/.test(A.__toasts[0].text) && !/reload/i.test(A.__toasts[0].text) && A._starredIds.has(w.sessions[2].sessionKey) && Object.keys(oldState).every((k) => !['batches', 'born', 'seq'].includes(k)),
+    'OLDER SERVER (round 7, C1): a page of this release NEVER speaks whole keys — its refused ops door is a failure like any other: the act kept on the page and retried within the bounds, its 404 streak said ONCE in twenty minutes, past 3 min and never «reload» (round 14 follow-up), nothing written to the old file (no whole keys, no junk key), no «older VibeSpace» sentence; the other page\'s change is shown', { bodies, toasts: A.__toasts.map((x) => x.text), pending: pendingOf(A) });
 }
 {
   // (2) 401: «sign in again», never retried as «did not answer» on a timer; sent at the next good GET
@@ -1842,7 +1842,7 @@ const DAY_MS = 86400000;
     await w.run(w.now() + 120000);
     const st = onDisk(w);
     const known = ['stateVersion', 'starredSessions', 'archivedSessions', 'archivedFolders', 'customNames', 'sessionModes', 'sessionConfigs', 'sessionGroups', 'groupFolders', UO.REV_KEY, UO.FACTS_KEY, UO.CLOCK_KEY];
-    rows.push({ cell, whole: w.wholeRequests, junk: Object.keys(st).filter((k) => !known.includes(k)), notSaved: me.__toasts.filter((x) => /Not saved yet/.test(x.text)).length, older: me.__toasts.some((x) => /older VibeSpace/.test(x.text)), kept: pendingOf(me) });
+    rows.push({ cell, whole: w.wholeRequests, junk: Object.keys(st).filter((k) => !known.includes(k)), notSaved: me.__toasts.filter((x) => /Not saved yet/.test(x.text)).length, older: me.__toasts.some((x) => /saved|server|older|reload/i.test(x.text)), kept: pendingOf(me) });   // (round 14 follow-up: any word on saving or the server — round 7 grepped «older VibeSpace», which no sentence says any more)
   }
   // a relay's 404 during a restart (the hub itself takes ops)
   const Sb = await loadPage(STATE_SRC);
@@ -1857,7 +1857,7 @@ const DAY_MS = 86400000;
   w.H.ops = realOps;
   me._fetchUserState();
   await w.run(w.now() + 60000);
-  const relay = { whole: w.wholeRequests, older: me.__toasts.some((x) => /older VibeSpace/.test(x.text)), landed: w.serverState().archivedSessions.includes(w.sessions[1].sessionKey) };
+  const relay = { whole: w.wholeRequests, older: me.__toasts.some((x) => /saved|server|older|reload/i.test(x.text)), landed: w.serverState().archivedSessions.includes(w.sessions[1].sessionKey) };
   ok(rows.every((r) => r.whole === 0 && !r.junk.length && r.notSaved === 0 && !r.older && r.kept >= 1),
     `C1 — THE OLDER-SERVER ROAD IS GONE: the rollback cells A / B / C (an act after the old hub is up / while it is down / both) keep the acts on the page, nothing said (round 9) (${rows.map((r) => `${r.cell} ${r.kept} kept`).join(', ')}), 0 whole-key requests, the old file gains no key`, rows);
   ok(relay.whole === 0 && !relay.older && relay.landed,
@@ -2342,11 +2342,12 @@ const refusing = (w, p, until, status = 503) => { const f = p.__fetch.bind(p); p
 }
 {
   // ROUND 9 — THE WORDS: the 7-day sentence and a refusal's reasons in zh / ja (more than 7 days; «not kept»); no answer at all says
-  // nothing (no sentence about waiting); round 14: a 404 — a server without the ops door — says its ONE sentence, in zh / ja too
+  // nothing (no sentence about waiting); a 404 for 20 s neither (round 14 follow-up: only a streak past 3 minutes is said); the
+  // not-yet-saved sentence and its taking back exist in zh / ja
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const sentence = (src, key) => { const m = new RegExp(JSON.stringify(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*("(?:[^"\\\\]|\\\\.)*")').exec(src); return m ? JSON.parse(m[1]) : null; };
   const k1 = "A change made more than 7 days ago was not kept — this page now shows the server's", kn = "{n} changes made more than 7 days ago were not kept — this page now shows the server's";
-  const words = [sentence(zh, k1), sentence(zh, kn), sentence(ja, k1), sentence(ja, kn), sentence(zh, 'The server refused a change ({reason}), so it was undone here'), sentence(ja, 'The server refused a change ({reason}), so it was undone here'), sentence(zh, 'This server is older than this page, so changes made here are not saved — reload the page'), sentence(ja, 'This server is older than this page, so changes made here are not saved — reload the page')];
+  const words = [sentence(zh, k1), sentence(zh, kn), sentence(ja, k1), sentence(ja, kn), sentence(zh, 'The server refused a change ({reason}), so it was undone here'), sentence(ja, 'The server refused a change ({reason}), so it was undone here'), sentence(zh, 'These changes are not saved yet — the server does not take them (it may be restarting or older than this page); they are kept here while this page stays open'), sentence(ja, 'These changes are not saved yet — the server does not take them (it may be restarting or older than this page); they are kept here while this page stays open'), sentence(zh, 'The changes kept on this page are saved now'), sentence(ja, 'The changes kept on this page are saved now')];
   const said = [];
   for (const how of ['404', 'none']) {
     const Sb = await loadPage(STATE_SRC);
@@ -2359,8 +2360,8 @@ const refusing = (w, p, until, status = 503) => { const f = p.__fetch.bind(p); p
     await w.run(w.now() + 20000);
     said.push(p.__toasts.length);
   }
-  ok(/超过 7 天/.test(words[0]) && /没有保留/.test(words[0]) && /超过 7 天/.test(words[1]) && /7 日より前/.test(words[2]) && /保持されませんでした/.test(words[2]) && /7 日より前/.test(words[3]) && /\{reason\}/.test(words[4]) && /\{reason\}/.test(words[5]) && /重新加载/.test(words[6] || '') && /再読み込み/.test(words[7] || '') && said.join() === '1,0',
-    `ROUND 9 — THE WORDS: zh «${words[0]}» / ja «${words[2]}» (MORE than 7 days, «not kept»); a refusal's template carries its reason in both; a 404 and no answer say ${said.join(' / ')} words (round 14: a server without the ops door, «${words[6]}» / «${words[7]}»)`, { words, said });
+  ok(/超过 7 天/.test(words[0]) && /没有保留/.test(words[0]) && /超过 7 天/.test(words[1]) && /7 日より前/.test(words[2]) && /保持されませんでした/.test(words[2]) && /7 日より前/.test(words[3]) && /\{reason\}/.test(words[4]) && /\{reason\}/.test(words[5]) && /尚未保存/.test(words[6] || '') && /まだ保存されていません/.test(words[7] || '') && !/重新加载/.test(words[6] || '') && !/再読み込み/.test(words[7] || '') && /已保存/.test(words[8] || '') && /保存されました/.test(words[9] || '') && said.join() === '0,0',
+    `ROUND 9 — THE WORDS: zh «${words[0]}» / ja «${words[2]}» (MORE than 7 days, «not kept»); a refusal's template carries its reason in both; a 404 for 20 s and no answer say ${said.join(' / ')} words (round 14 follow-up: past 3 min «${words[6]}» / «${words[7]}», taken back «${words[8]}» / «${words[9]}»)`, { words, said });
 }
 
 // ════════ §19 ROUND 9 — THE MARK AT BOOT; JUDGING A REQUEST COSTS ITS OPS; AN OMISSION IS NOT AN ACT; AN ID IS ITS OPS; THE MARK'S FRACTIONS ════════
@@ -3162,30 +3163,65 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
     `ROUND 14 — THE FORK-TITLE ROAD REFUSES BEFORE THE WINDOW'S TITLE: a fork title of 16 383 characters ⇒ ${longReqs} requests, ${longTitles} window titles, the row «${String(longName).slice(0, 12)}», «${(toasts[0] || '').slice(0, 70)}»; a short one ⇒ the title «${titles.join()}», on disk «${onDisk}»`, { longReqs, longTitles, toasts, titles, onDisk });
 }
 {
-  // ROUND 14, small 5(c) — A SERVER WITHOUT THE OPS DOOR (a downgrade; the minute of a rolling update — page13 roll13 D: 52 requests
-  // answered 404 over 11 min, the acts shown, never landed, gone at the reload, nothing said): its 404 is SAID once a page, the acts
-  // stay shown and go again (a server with the door takes them); a 503 says nothing (the hub is there, it could not write — it is re-sent)
-  const cell = async (status) => {
+  // ROUND 14, small 5(c) + its follow-up — A SERVER WITHOUT THE OPS DOOR (a downgrade; the minute of an update — page13 roll13 D: 52
+  // requests answered 404 over 11 min, the acts shown, never landed, gone at the reload, nothing said). A 404 is not a verdict for 3
+  // minutes (the panel's roll14 U: a reloaded tab on the old server for a minute, every act on disk at 60.1 s — round 14 said «reload»
+  // at 1.0 s): a streak of a minute says nothing; one past 3 minutes is said ONCE, and taken back when the acts land; a 503 says nothing
+  const cell = async (status, forMs) => {
     const words = [], timers = [];
-    let sends = 0;
-    const eng = UO.createSync({ pageId: 'pgolder' + status, setTimer: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, clearTimer: (t) => { if (t) t.fn = null; }, say: (k) => words.push(k),
-      send: () => { sends++; return Promise.resolve({ ok: false, refused: false, status, code: null }); } });
+    let sends = 0, clock = 0, up = false, oks = 0;
+    const eng = UO.createSync({ pageId: 'pgolder' + status + 'x' + forMs, now: () => clock, mono: () => clock, timeoutMs: 3600000,   // (a send bound apart from the pace's 15 s)
+      setTimer: (fn, ms) => { const t = { fn, ms, at: clock + ms }; timers.push(t); return t; }, clearTimer: (t) => { if (t) t.fn = null; }, say: (k) => words.push(k + '@' + Math.round(clock / 1000)),
+      send: () => { sends++; if (up) oks++; return Promise.resolve(up ? { ok: true, rev: 9, epoch: 'epmwolder0-aaaa', refused: [], old: [], superseded: [] } : { ok: false, refused: false, status, code: null }); } });
+    const settle = async () => { for (let t = 0; t < 3; t++) await new Promise((r) => setImmediate(r)); };
     eng.apply({ stateRev: 1, stateEpoch: 'epmwolder0-aaaa', starredSessions: [] });
     eng.record([{ key: 'starredSessions', item: 'claude:x', value: true }]);
-    for (let t = 0; t < 3; t++) await new Promise((r) => setImmediate(r));
+    await settle();
     eng.record([{ key: 'starredSessions', item: 'claude:y', value: true }]);
-    for (let i = 0; i < 6; i++) {
-      for (let t = 0; t < 3; t++) await new Promise((r) => setImmediate(r));
-      const t = timers.find((x) => x.fn && x.ms < UO.SEND_TIMEOUT_MS);
+    await settle();
+    let at = null;
+    for (let i = 0; i < 80; i++) {   // (the pace's timers fire in their time; the hub has the door again at `forMs`)
+      const t = timers.filter((x) => x.fn && x.ms < 3600000).sort((x, y) => x.at - y.at)[0];
       if (!t) break;
+      clock = Math.max(clock, t.at);
+      if (!up && clock >= forMs) { up = true; at = clock; }
       const fn = t.fn; t.fn = null; fn();
+      await settle();
+      if (oks) break;
     }
-    for (let t = 0; t < 3; t++) await new Promise((r) => setImmediate(r));
-    return { words, sends, shown: eng.view().starredSessions.length, pending: eng.pending() };
+    await settle();
+    return { words, sends, landed: oks > 0, at: at && Math.round(at / 1000) };   // (landed: the hub with the door took them — the page keeps them pending until a state that holds them)
   };
-  const c404 = await cell(404), c503 = await cell(503);
-  ok(c404.words.join() === 'older-server' && c404.sends >= 4 && c404.shown === 2 && c404.pending === 2 && c503.words.length === 0 && c503.sends >= 4 && c503.pending === 2,
-    `ROUND 14 — A SERVER WITHOUT THE OPS DOOR IS SAID ONCE: two acts, ${c404.sends} sends answered 404 ⇒ «${c404.words.join(' | ')}», ${c404.shown} shown, ${c404.pending} kept to go again; the same answered 503 ⇒ ${c503.words.length} words, ${c503.pending} kept`, { c404, c503 });
+  const minute = await cell(404, 60000), long = await cell(404, 300000), c503 = await cell(503, 300000);
+  const saidAt = long.words.length ? Number(long.words[0].split('@')[1]) : -1;
+  ok(minute.words.length === 0 && minute.landed && long.words.length === 2 && /^not-taken@/.test(long.words[0]) && saidAt >= UO.NOT_TAKEN_WAIT_MS / 1000 && /^taken@/.test(long.words[1]) && long.landed && c503.words.length === 0 && c503.landed,
+    `ROUND 14 — A 404 IS NOT A VERDICT FOR ${UO.NOT_TAKEN_WAIT_MS / 60000} MIN: the ops door 404 for a minute ⇒ «${minute.words.join(' | ')}», the acts landed (${minute.landed}); for 5 min ⇒ «${long.words.join(' | ')}» (said at ${saidAt} s, taken back when they landed at ${long.at} s); 503s for 5 min ⇒ ${c503.words.length} words`, { minute, long, c503 });
+}
+{
+  // ROUND 14 FOLLOW-UP — THE WORDS ON THE PAGE (the panel's roll14 U / roll14r): the ops door answers 404 (a tab on the old server) for a
+  // minute, then the hub restarts with it ⇒ no word, every act on disk; for 5 minutes ⇒ «These changes are not saved yet …» ONCE, never
+  // «reload», then «The changes kept on this page are saved now» once when they land
+  const run = async (forMs) => {
+    const Sb = await loadPage(STATE_SRC);
+    const w = createWorld({ seed: 574, sessions: mkSessions(4) });
+    const me = await r7page(w, Sb, 'me');
+    await w.run(1000);
+    w.defaultLag = () => ({ toServer: 30, toPage: 30, drop: false });
+    const realOps = w.H.ops;
+    w.H.ops = (req, res) => res.status(404).json({ error: 'Cannot PATCH /api/user-state/batches' });
+    me.toggleArchive(w.sessions[1]);
+    await w.run(w.now() + 500);
+    me.toggleStar(w.sessions[2]);
+    await w.run(w.now() + forMs);
+    w.H.ops = realOps;
+    me._fetchUserState();   // (the restart's reconnect GET)
+    await w.run(w.now() + 60000);
+    const st = w.serverState();
+    return { words: me.__toasts.map((x) => x.text).filter((t) => /saved|server|reload/i.test(t)), landed: st.archivedSessions.includes(w.sessions[1].sessionKey) && st.starredSessions.includes(w.sessions[2].sessionKey) && pendingOf(me) === 0 };
+  };
+  const minute = await run(60000), five = await run(300000);
+  ok(minute.words.length === 0 && minute.landed && five.words.length === 2 && /^These changes are not saved yet — the server does not take them \(it may be restarting or older than this page\); they are kept here while this page stays open$/.test(five.words[0]) && five.words[1] === 'The changes kept on this page are saved now' && five.landed,
+    `ROUND 14 FOLLOW-UP — THE PAGE NEVER SAYS «RELOAD»: the old server for a minute ⇒ ${minute.words.length} words, every act on disk (${minute.landed}); for 5 minutes ⇒ «${(five.words[0] || '').slice(0, 60)}…», then «${five.words[1] || ''}», every act on disk (${five.landed})`, { minute, five });
 }
 {
   // ROUND 14, small 5(d) — A PACED RE-SEND NEVER GOES BESIDE A WINDOW IN FLIGHT (page13 split13 e503echo: part 2's 503 armed the pace; an
