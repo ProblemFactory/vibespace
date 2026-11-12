@@ -958,17 +958,23 @@ The five removers that did exist deleted whole directories synchronously on the 
    - The ✕'s promise is true or not made: it answers once the dir is gone; with what stays and why (a run still running, a run that could not be checked); or past 10 s with `logsPending` — and then the removal is owed in the record, durably, re-sent before every pass.
    - A stamp that cannot be judged is kept until evidence, with NO clock (round 3): it goes only when no running process's argv names its run dir (its one writer, the wrapper, matched by `job-logs/<id>/<runTs>`); a stamp of this boot is never evidence of an end; an unreadable /proc keeps it.
    - No remover outlives its hub by more than the call it is in: the child checks its hub between two run dirs and stops at once, leaving its count for the next engine (counted once).
+5. **The pass never reads the archive synchronously on the main thread.** It uses the archive in memory when loaded; otherwise the thread reads it, and an unreadable archive removes nothing.
+6. **«No record names it» is a fact the hub holds (round 2).** While a record store of jobs is SET ASIDE (`jobs*.json.corrupt-*` in the data dir — the fact on disk, seen by every pass on every road and after every restart) or a read of one failed in this process, the law's pass removes nothing. Only «the file is not there» means «no records». The owner hears it ONCE: on the torn store's own item, on a torn archive's first item (records first, the clean-up second), and once for a set-aside never told of. Moving the file lifts it.
+
 7. **Round 3:**
-   - only ENOENT means «no records», and a failed read's fact is ON DISK before any write of that store (set-aside, copy or note), lifted only by a person;
+   - only ENOENT means «no records», and a failed read's fact is ON DISK before any write of that store (set-aside, copy or note — round 4: the note is the child's, this process holding until it lands), lifted only by a person;
    - the set-aside check is the LAST thing before the walk;
    - a record that cannot be read holds, never throws;
    - the hub hands its child its pid;
    - items say what is true and name files, never paths, «said» after the For-you store wrote them;
    - a person's removal is never paused.
-5. **The pass never reads the archive synchronously on the main thread.** It uses the archive in memory when loaded; otherwise the thread reads it, and an unreadable archive removes nothing.
-6. **«No record names it» is a fact the hub holds (round 2).** While a record store of jobs is SET ASIDE (`jobs*.json.corrupt-*` in the data dir — the fact on disk, seen by every pass on every road and after every restart) or a read of one failed in this process, the law's pass removes nothing. Only «the file is not there» means «no records». The owner hears it ONCE: on the torn store's own item, on a torn archive's first item (records first, the clean-up second), and once for a set-aside never told of. Moving the file lifts it.
+8. **Round 4:**
+   - a failed read with nothing set aside HOLDS this process's pass at once — before the owed re-send and before the walk — until its note is on disk; the note is the remover child's (O_EXCL), tried again before every pass (paused or not) and, still owed at the exit, written by the exit itself;
+   - ONE note per store by a fixed name (`<store>.corrupt-unread`): «a note already stands» files nothing, whatever the data dir's listing says; a person's file that merely starts like it is a person's;
+   - the failed load on the main thread makes only the release's calls; a read-only engine writes nothing;
+   - a stop on the real exit keeps its batch's count; the catch-up opens with its first pass; the journal's words follow a batch's real fate; an unreadable catch-up record says its cause and files one item.
 
-**Pins.** scripts/test-job-logs-sweep.mjs, red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
+**Pins.** scripts/test-job-logs-sweep.mjs (fast, PURE) and scripts/test-job-logs-sweep-heavy.mjs (real processes), red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
 
 ## BATCH ARCHIVE KEPT ROLLING BACK (the owner's incident inc-mwbn2xp8-ks0b, 2026-11-11 04:49Z: «我的批量操作一直在回滚»; lane sidebar-echo-order, .397)
 

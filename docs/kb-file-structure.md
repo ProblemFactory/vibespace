@@ -1736,7 +1736,7 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - the CLI says «removed — its log files are still being deleted in the background».
 
 **ROUND 3 (49d128a94 not accepted; readers in int359/acc-398/jls2).**
-- **§1 the hold that has no file gets one:** a failed records read leaves its fact on disk before the load returns, through `_logsHeldFile` (the bytes renamed or copied aside, else ONE note `<store>.corrupt-unread-<ms>` per store). It is lifted only by a person moving it. The child also re-reads that store each pass (memory holds none of its records).
+- **§1 the hold that has no file gets one:** a failed records read leaves its fact on disk, through `_logsHeldFile` (the bytes renamed or copied aside before the load returns, else ONE note per store — round 4: `<store>.corrupt-unread`, written by the child, this process holding until it lands). It is lifted only by a person moving it. The child also re-reads that store each pass (memory holds none of its records).
 - **§2 read first, then ask:** the child lists set-asides AFTER every read, so the archive tick's set-aside + fresh write in one call is held too.
 - **§3 a record whose `runs` is not a list:** its job is kept whole and said once; `keepSetOf` never throws; a pass that throws never fails the gc; the gc's archive leg keeps it too.
 - **§4 the hub hands its child its own pid** (argv[3]); a batch from a gone hub is never started.
@@ -1751,6 +1751,24 @@ src/desktop-switch.js windowWaits / waitingElsewhere · desktop-switch-sheet.js 
   - a person's `*.corrupt-*` file gets true words.
 - **§9 the tier rule:** the PURE half stays fast (test-job-logs-sweep, 0.1 s); every leg that forks is test-job-logs-sweep-heavy.
 - **A TIMING FACT, not a guarantee (asked to be said, no lock):** «two removers never delete in one data dir at once» rests on timing. An orphan stops before its next run dir; the next hub starts ≥ 5 s later and passes 2 min after its boot. The readers measured the overlap as an orphan's LAST call beside the next hub's remover: harmless, because the verdict is taken per run dir, both sides judge the same dir removable, and `rmSync` with `force` tolerates the other having removed it first.
+
+**ROUND 4 (eaa865fb7 not accepted; readers wf_b4d68433).**
+- **§1 «this process holds» holds.** `_logsHeldFile` sets `_logsNoteOwed[what]` = {error, at} at the failed load (before it returns) when no file holds the bytes. While any note is owed, `_logsPass` answers `{heldBy: 'unread-unnoted'}` before the owed re-send and before the walk (`_logsHeldUnnoted`: said once per process and set of stores; an open catch-up rests), and the paused road re-sends no owed removal either. The ✕ and a record's own verdicts (`_logsWhole`) go on.
+- **The note is the child's.** `_logsNoteSoon` → the remover's `note` op: an O_EXCL write of `<store>.corrupt-unread` = {store, error, at}, chained one at a time. It is asked at the load, again before every pass (paused or not), and if still owed at the hub's exit `shutdown()` writes it itself (`_logsNoteAtExit`: ONE wx write, before the exit's own write of that store, on a loop that serves nothing any more).
+  - 'written' ⇒ the `records-unread` item, «said» keyed `<note>@<at>` (a note a person moved and a later failure wrote again is told again);
+  - 'stood' (EEXIST) ⇒ not a new failure: nothing filed;
+  - refused ⇒ `records-unread-unnoted`, once per process.
+- **The window left, named (as ruled: «the hold rides item 1 until then»):** between the failed load and the child's note — one fork and one write: 28 ms median, 32 ms the most over seven boots on local disk at load 4–5 — a CRASH after this hub's own write of that store loses the fact (on the archive road the boot archive sweep writes inside init). A graceful exit closes it (`_logsNoteAtExit`).
+- **§2 one note per store, whatever the directory says:** the fixed name; no listing anywhere on the note road. The pass knows the note by its EXACT name: the child's `notesOf` reads its {at, error} for the item's words and its «said» key; `…corrupt-unread-mine.txt` is a person's file (`set-aside-other`).
+- **§3 the smalls:**
+  - the failed load's branch on the main thread makes the release's calls only (its read, one existsSync, the rename; a copy only for bytes that do not parse);
+  - a READ-ONLY engine writes nothing — no set-aside, copy, note or item (the release's rename there is gone too); it says the failure in its own log;
+  - `records-unread` says WHEN («(2026-11-12 14:03 UTC: EIO)», a later load too) and what a person can see after the hub's own write («fewer jobs … keep the note until it is restored»);
+  - a stop on the real exit puts the in-flight batch's count into the open catch-up before shutdown's exitFlush (`createRemover().stop()` returns it as its progress said it; the pass never adds a stopped batch again);
+  - the catch-up opens WITH its first pass in the record made durable before the start line;
+  - `words.failed` follows the batch's real fate («queued again» only for a whole-dir batch that is);
+  - an unreadable catch-up record: its cause and file in the journal line, ONE `sweep-record-unread` item;
+  - (not asked) `userTodos.whenWritten` is answered on a flush that finds memory already on disk.
 
 **NAMED, not built (round 2).**
 - Two engines over ONE data dir on different machines each sweep by their own keep set (`jobs.lock` is a local pid check): a hub on another machine over a shared data dir would remove every run its own records do not list. Refusing a pass when the lock's host / boot id is not this machine's is the fix, not built.

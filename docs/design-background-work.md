@@ -194,8 +194,11 @@ CLIENT `src/lib/jobs-panel.js` (+ `src/lib/job-interact.js` §6.4) · M2 DEVICE
   A run directory no record lists (the record keeps the last 20 runs; a removed
   job lists none) leaves 14 days after its NEWEST file — never a run whose
   wrapper lives, never a listed one — and nothing under `data/job-logs` is
-  removed on the main thread: one remover thread, ≤ 500 run dirs a pass, a
+  removed on the main thread: one remover child process, ≤ 500 run dirs a pass, a
   catch-up said twice (lane job-logs-sweep, 2.369.398; src/job-logs-sweep.js).
+  A record store that could not be read holds it: its bytes set aside, else ONE
+  note `<store>.corrupt-unread` the remover writes — this process holding until
+  the note is on disk — lifted only by a person moving the file.
 - **Ports integration**: registered `ports` suppress the "new port" toast
   (service row instead; annotation waits on engine-ready); orphan detector
   consults the registry; orphan toast gains **"Track this"** (adopts as
