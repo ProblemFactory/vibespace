@@ -66,7 +66,7 @@ import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
+const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has)
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
