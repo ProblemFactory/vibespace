@@ -326,6 +326,58 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Ruled (as built).** A claimed member takes the proving rung ahead of measured members (the reset-unconfirmed law: one spawn proves it — for a long-lived token that spawn is the only reading there will ever be). A claim on a cap the request does not draw makes the member spare-rich, and the spare-lane law moves spawns and idle conversations off it — as a real reset of that cap would (a hot pool's EDF moves a conversation off a claimed member exactly as off a member whose cap truly reset — the drill's control world).
 - **Not done here:** the billing switcher still offers a LOCAL account the pool cannot place without its cause (the gather, the pool's pick, says it); the roster's per-lane act (the popup has it, the roster row has the whole-account one).
 
+### account-reset-door K1 — the basis is a fact of ONE pool (主开发's read of the .397 tip c3215f7b5, 12:19Z; round 2, 13:12Z; the first pick after .397)
+- **The finding (moderate; rebuilt: stands; the release does not have it).** On the .397 tip, `poolReadCache` decided raw-or-estimated per CALL, over the membership of the pool it was handed plus `also`.
+  - The readers that hand no pool read an empty set: the verdict on a pool or a member scope, memberServable, the new-member wake and the gate's target check. So they estimated everyone except a member on its first learn, while the switch pass and the chooser read everyone raw.
+  - Driven: the gate HELD a continue and re-armed it two hours out, on the very member the switch had kept the conversation on.
+- **Round 1 (b05ea2098) went too wide, and is withdrawn.** It used one basis per CONNECTED SET of pools.
+  - A learner in another pool that shares a member, even two hops away, put this pool raw.
+  - A pool with no member list connected every pool to every other.
+  - A conversation that runs directly on an account read raw, and fired on a member that its burn had spent.
+- **THE LAW, round 2.** A decision compares the members of ONE pool, and every reading inside it stands on that pool's basis, decided by what THAT pool compares.
+  - What a pool compares: its membership, read now, plus the ids its own last switch pass compared beyond it (the default's current member and each of its conversations' billing member).
+  - Nothing another pool compares moves it. A member in two pools may read raw inside one pool's decision and estimated inside the other's at the same instant; no decision mixes.
+  - **A reader that knows its pool names it** (`poolBasisRaw(poolId)` through `poolReadCache(poolId)`):
+    - quotaVerdictFor on a pool scope reads that pool's basis;
+    - a member scope asked for a pooled session reads the session's pool's basis: the gate's target check and the link's own verdict (`sessionPoolOf`);
+    - memberServable for the For-you checking card reads the session's pool's basis;
+    - the new-member wake reads each scope it fires in on that scope's basis.
+  - **A reader with no pool reads as the release reads**: estimated where the estimator has an estimate. That covers a conversation that runs directly on an account, the projection's re-read and the Usage rings. That rule starts no turn and moves no conversation, and with nobody learning in a pool, that pool's every number is the release's.
+  - Round 1's rings door, its 5 s look and `accounts.poolIds()` are gone; the rings are the release's.
+- **ONE INSTANT, per pool.** A pool's fact is held for the rest of the synchronous run that read it, and kept 1 s across runs, while nothing it compares and nothing the estimator says has moved.
+  - It is built again at once when the pool's id set changes (its membership, or its pass's compared ids), or when `basisGen` moves (rates landed, a fold threw).
+  - A basis change the estimator does not announce is seen at the next build, within a second: the 60 s bound, a turn's cold-read budget, the ledger's load.
+- **A FLIP.** A flip found by the pool's own pass is said by that pass («this pass decides on that basis»), and that pass decides on it. A flip found by any other reader is decided by a FORCED pass of that pool in the next turn, never inside the reader's run («the pool decides again on that basis»); a hot pool's move fires the armed continue. Both directions are decided.
+  - The words are true after the 60 s bound too: «no id it compares holds it raw any more — its members are estimated again».
+- **THE LINKS.** The switch pass reads each conversation's link and billing member once, after the cross asks settle, and its loop decides on those very reads.
+  - A pass started inside the loop ends the reuse (`_passGen`), for example a fire whose gate runs at once.
+  - Readers outside a pass read no link. readlinks per steady tick equal the release's: 243 at 8 members × 40 conversations, 249 at nine accounts in three pools (the .397 tip: 323 and 329).
+- **What a person gets in the gate's run.** The target check, the forced re-decision, the final verdict and the link check run in one synchronous run after the gate's last await, so they read one fact.
+  - A learn that lands DURING the gate's probe is seen by the run after it: on the newer fact the forced re-decision moves s1 to C, and the continue goes to C.
+  - Should a learn land inside the run itself (a reader driving a fold slice), the fact is built again. The re-decision, the verdict and the link check then stand on the newer fact, and the person gets that one; the target check only decided whether to re-decide.
+- **What the one basis costs in that minute.** The continue goes to the member the RAW reading allows: A, at 88 % read 2 h ago, though its burn says 96 %. The release would have gone to C. A refusal walls A for that conversation (SESSION_WALL_MS), and the next pass moves it.
+- **Pins** (scripts/test-account-reset-door.mjs: legs one-basis, basis-flip, pool-own and switch-basis; the heavy controls row, ALL PASS 127):
+  - **one-basis.** With C learning, the pool's reader reads A:88r B:50r C:30r. The chooser, the switch, the verdict and the gate all name A, with no re-arm. The pooled session's member scope equals the pool scope. A pool that shares B reads B:58e. A reader with no pool reads the release's numbers. With nobody learning, every number is the release's.
+  - **basis-flip.** A learn landing during the gate's probe sends the continue to C. A landing no gate asks about is decided again, and said once. One run reads one fact, 2 s on its clock. basisGen moves.
+  - **pool-own:**
+    - a learner in another pool: P is estimated and decides as the release;
+    - a pool with no member list reads raw, and a listed pool beside it reads estimated;
+    - a direct conversation is HELD and re-armed, as on the release;
+    - a flip's pass is forced, even right after a default switch;
+    - a flip the pool's own pass finds is said once, with no second pass;
+    - a reader that finds a flip moves nothing inside its run;
+    - D, learning, joining inside the memo's second makes the next pass and the next reader decide raw, and the flip is said;
+    - a pass started inside the loop: s2 moves once.
+  - **switch-basis.** The default's link on a member the pool no longer lists is compared.
+  - **RED trees:** b19f0ecdb (the release), c3215f7b5 (the gate HELD), and b05ea2098, ref account-reset-door-k1r1 (P raw because of Q's learner; the direct conversation fired).
+  - **RED patches:** verdict-no-pool, no-gen, no-hold, no-kick, kick-unforced, kick-self, kick-sync, ids-unwatched, only-landing, no-passgen, flip-silent, default-not-compared, no-pass-ids, no-basis and local-copy. Each is RED on its own row.
+  - **The verifiers' drivers on this tree** (copies, scratch under the lane), each equal to the release's decisions:
+    - shapes S1, S2 and S9;
+    - direct D1–D6;
+    - xp: gate shared, chain and no-share; begin-neg;
+    - money: xpool-gate and flipback through Q.
+- **Stated.** auto-cli-loop's drift estimate (a refresh scheduler) compares no members and stays per id. The matrix driver's `pool(P,also)` passes an argument the door no longer takes, and it is ignored.
+
 ## 2.369.396 — 2026-11-11
 
 ### hub-loop-stalls — EVERY HOLD GETS ITS FIRST SAMPLE; THE INSTRUMENT IS NEVER THE HOLDER; THE LOOP BEFORE THE DISK (the owner's hub on .393, 20:09Z boot: its capture and its journal)

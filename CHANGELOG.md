@@ -34,6 +34,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Accounts that cannot refresh for the same reason get one message in your language, with the button that fixes it.
 - A limit read hours before the others on the same account shows how old its reading is.
 - Moving a pool’s conversations to an account it cannot use now says why, and what ends it.
+- While VibeSpace is still learning how fast an account uses its limits, every pool decision reads the same numbers, so a waiting conversation is not held back.
 
 ## 2.369.396 — 2026-11-11
 
