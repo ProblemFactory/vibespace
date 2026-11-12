@@ -162,8 +162,8 @@ console.log('③ the relay surface reaches whichever plugin DECLARES relay');
 console.log('④ CONTROL: the pre-fix id dispatch restored in a copy of src/plugins.js');
 {
   const src = fs.readFileSync(realCore, 'utf8');
-  const a = "  start(id) { return this._verb(id, 'start')(); }\n";
-  const b = "  start(id) {\n    if (id === 'frp') return this._verb(id, 'start')();\n    if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);\n    return this._verb(id, 'start')();\n  }\n";
+  const a = "  start(id) { return this._act(id, 'start'); }\n"; // an act since lane hub-sync-holds round 3
+  const b = "  start(id) {\n    if (id === 'frp') return this._act(id, 'start');\n    if (id !== 'tailscale') throw new Error('unknown plugin: ' + id);\n    return this._act(id, 'start');\n  }\n";
   ok('CONTROL: the patch applies (start only)', src.split(a).length === 2);
   const mut = M.load(CORE_REL, src.replace(a, b), 'id-dispatch');
   const red = await drive(mut.PluginManager, 'control');

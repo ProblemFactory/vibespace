@@ -51,7 +51,7 @@ const SB = require('./secret-box.js');       // the data dir's vault (a plugin's
 const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'], 'browser-engine': ['probe', 'launchOptions'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
 // statusAsync (lane hub-sync-holds, rank 13): the fresh answer of a status that needs a child — async, bounded; status() then
-// answers the KEPT one with no child (a snapshot or a broadcast never execs)
+// answers the KEPT one with no child (a snapshot or a broadcast runs no synchronous child)
 const STATUS_BOUND_MS = 20000;
 const OPTIONAL_VERBS = ['statusAsync', 'setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
@@ -85,7 +85,7 @@ class PluginManager {
     this._watchers = new Set(); // lane tailnet-names r4: watch() — what follows a plugin's state AND its rows (the tailnet door)
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { this._state = { plugins: {} }; }
     this._defs = new Map(); this._verbs = new Map();
-    this._fresh = new Map(); // id → the status refresh in flight (ONE at a time — rank 13)
+    this._fresh = new Map(); this._freshTok = new Map(); // id → the refresh in flight (with its AbortController) and its token — an act supersedes it (round 3) // id → the status refresh in flight (ONE at a time — rank 13)
     this._statusFailed = new Map(); // id → {at, why}: the last refresh did not answer — the kept answer stands, said as stale
     this._statusBoundMs = Number(opts.statusBoundMs) > 0 ? Number(opts.statusBoundMs) : STATUS_BOUND_MS;
     for (const def of plugins) {
@@ -240,7 +240,7 @@ class PluginManager {
     return out;
   }
 
-  /** ONE pass over every plugin → the panel rows AND the compact service rows. A plugin's status() is sync and runs NO child
+  /** ONE pass over every plugin → the panel rows AND the compact service rows. A plugin's status() is sync and runs NO synchronous child
    *  (lane hub-sync-holds, rank 13: tailscale's ran pgrep + sudo + `tailscale status --json` here, 4.7–4.9 s on the owner's
    *  hub): a status that needs one is a KEPT fact, refreshed by refreshStatus() — never by a snapshot or a broadcast. */
   _snapshot() {
@@ -297,13 +297,14 @@ class PluginManager {
     // child it holds is killed) and writes nothing, so a later ask never runs beside it (tailscale's worst case: which 5 +
     // pgrep 5 + sudo -n 3 + sudo -n 3 + which 5 + status --json 5 = 26 s, over the 20 s bound — the abort is what holds)
     const ac = new AbortController();
+    const tok = {}; this._freshTok.set(id, tok); const mine = () => this._freshTok.get(id) === tok; // superseded by an act ⇒ writes and says nothing
     const bound = new Promise((resolve, reject) => { timer = setTimeout(() => { const e = new Error(`its status took over ${ms} ms`); ac.abort(e); reject(e); }, ms); if (timer.unref) timer.unref(); });
     // a refresh that does not answer: the KEPT answer stands, marked stale (`statusError`, its time) — retried at the next ask
     // (a press, the plugin's own event, the next boot), never by a timer; each child it started ends at its own timeout
     const p = Promise.race([Promise.resolve().then(() => v.statusAsync({ signal: ac.signal })), bound])
-      .then(() => { this._statusFailed.delete(id); }, (e) => { const why = String((e && e.message) || e).slice(0, 200); this._statusFailed.set(id, { at: Date.now(), why }); console.warn(`[plugins] ${id}: its status was not read again — ${why}`); })
-      .then(() => { clearTimeout(timer); this._fresh.delete(id); const now = this._statusOr(id); if (JSON.stringify(now) !== JSON.stringify(was)) this._notify(); return now; });
-    this._fresh.set(id, p);
+      .then(() => { if (mine()) this._statusFailed.delete(id); }, (e) => { if (!mine()) return; const why = String((e && e.message) || e).slice(0, 200); const prev = this._statusFailed.get(id); this._statusFailed.set(id, prev && prev.why === why ? prev : { at: Date.now(), why }); /* round 3: the stamp moves only when the answer changes — no redraw → GET → refresh loop */ console.warn(`[plugins] ${id}: its status was not read again — ${why}`); })
+      .then(() => { clearTimeout(timer); if (!mine()) return this._statusOr(id); this._fresh.delete(id); this._freshTok.delete(id); const now = this._statusOr(id); if (JSON.stringify(now) !== JSON.stringify(was)) this._notify(); return now; });
+    this._fresh.set(id, Object.assign(p, { ac }));
     return p;
   }
   /** every kept status asked again (a person opened the panel) — nothing waits for it; the broadcast follows a change */
@@ -348,20 +349,32 @@ class PluginManager {
         const st = this.status(id);
         if (!st.running && st.installed && st.mode !== 'system') {
           console.log(`[plugins] boot replay: starting ${id}`);
-          this.start(id);
+          const r = this.start(id); if (r && typeof r.catch === 'function') r.catch((e) => console.warn(`[plugins] boot replay ${id} failed:`, e.message)); // an async verb's refusal is said too
         }
       } catch (e) { console.warn(`[plugins] boot replay ${id} failed:`, e.message); }
     }
   }
 
-  async install(id) { return this._verb(id, 'install')(); }
-  start(id) { return this._verb(id, 'start')(); }
-  stop(id) { return this._verb(id, 'stop')(); }
+  /** round 3: an ACT supersedes the refresh in flight — it read the state BEFORE the act (a Stop pressed mid-refresh left the
+   *  row «connected»), so it is aborted and its answer dropped (it writes and says nothing); a fresh read follows the act */
+  _supersede(id) { const f = this._fresh.get(id); if (f && f.ac) { try { f.ac.abort(new Error('superseded by an act')); } catch { } } this._fresh.delete(id); this._freshTok.delete(id); }
+  // the act keeps its VERB's contract: a sync verb throws / returns in place (a caller catches a refusal where it calls — frp's
+  // revoked identity), an async one returns its promise; either way the fresh read follows it
+  _act(id, verb) {
+    const fn = this._verb(id, verb); this._supersede(id);
+    const after = () => { this.refreshStatus(id).catch(() => { }); };
+    let r; try { r = fn(); } catch (e) { after(); throw e; }
+    if (r && typeof r.then === 'function') return r.finally(after);
+    after(); return r;
+  }
+  async install(id) { return this._act(id, 'install'); }
+  start(id) { return this._act(id, 'start'); }
+  stop(id) { return this._act(id, 'stop'); }
   /** the plugin's KEPT status (sync, no child — rank 13); a last refresh that did not answer is said with it (`statusError`) */
   status(id) { const st = this._verb(id, 'status')(); const f = this._statusFailed && this._statusFailed.get(id); return f ? { ...st, statusError: { at: f.at, why: f.why } } : st; }
   // Guided setup: the plugin's setup verb (tailscale: `tailscale up` prints the auth URL — captured for the UI,
   // the Drive-OAuth pattern: user opens the link, approves, the card polls status).
-  loginStart(id) { return this._verb(id, 'setup')(); }
+  loginStart(id) { return this._act(id, 'setup'); }
 
   // ── the RELAY surface (B-0b60 public URLs; port-forward + instance-url call these) — whichever plugin
   //    declares provides: ['relay'] answers ──

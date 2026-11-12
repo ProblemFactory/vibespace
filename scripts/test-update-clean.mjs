@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { census } from './update-door-census.mjs';
 
@@ -31,7 +31,7 @@ console.log('① the update-door census — the ONE road that updates VibeSpace 
 {
   // [file, scope, n, class, why] — class: door (the ONE update road, a person's act)
   const ROWS = [
-    ['src/server/ops-routes.js', 'create > route:POST /api/self-update', 1, 'door', 'THE update road — ⚙ → Update VibeSpace… (a person\'s act): it fetches the newest scripts/update.sh and runs it in a shell terminal (pull, install, build, restart); never on a boot, never on a timer'],
+    ['src/server/ops-routes.js', 'create > route:POST /api/self-update', 2, 'door', 'THE update road and its ONE caller — ⚙ → Update VibeSpace… (a person\'s act, POST /api/self-update): it checks scripts/update.sh is there, fetches the newest one and runs it in a shell terminal (pull, install, build, restart); never on a boot, never on a timer'],
   ];
   const key = (s) => `${s.file}|${s.scope}`;
   const judge = (sites, rows) => {
@@ -43,7 +43,7 @@ console.log('① the update-door census — the ONE road that updates VibeSpace 
   };
   const t0 = Date.now(); const C = census(REPO); const took = Date.now() - t0;
   const problems = judge(C.sites, ROWS);
-  ok(`every call that would update VibeSpace's own checkout or bundle is a row (${C.sites.length} site(s) over ${C.files} files, ${took} ms) — and the ONE door is ⚙ → Update`, !problems.length && ROWS.filter((r) => r[3] === 'door').length === 1, problems);
+  ok(`every call that would update VibeSpace's own checkout or bundle — or names its door, update.sh — is a row (${C.sites.length} site(s) over ${C.files} files, ${took} ms) — and the ONE door is ⚙ → Update`, !problems.length && ROWS.filter((r) => r[3] === 'door').length === 1, problems);
   ok('every row says what it is and why', ROWS.every((r) => ['door'].includes(r[3]) && String(r[4]).length > 40));
   // CONTROLS — each a plant the census must see (a pull that comes back through a module, async, behind the old guard: the panel's M1c)
   const plant = (rel, src) => judge(census(REPO, { patch: { [rel]: src } }).sites, ROWS).filter((p) => p.startsWith('UNROWED') && p.includes(rel));
@@ -52,6 +52,12 @@ console.log('① the update-door census — the ONE road that updates VibeSpace 
   const c3 = plant('src/server/x-shell.js', "const cp = require('child_process');\nfunction go() { cp.exec('git pull --ff-only && npm install', () => { }); }\nmodule.exports = { go };\n");
   const c4 = plant('src/server/x-build.js', "const { spawn } = require('child_process');\nexports.build = () => spawn('npm', ['run', 'build'], { stdio: 'ignore' });\n");
   const c5 = plant('src/server/x-words.js', "const { execFile } = require('child_process');\nexports.v = () => execFile('node', ['--version'], (e) => { if (e) console.log('run npm install, then git pull'); });\n");
+  // round 3 — THE DOOR'S CALLERS (the panel's plant: «update.sh 20 s after boot» passed every pin)
+  const c6 = plant('server.js', fs.readFileSync(path.join(REPO, 'server.js'), 'utf8') + "\nsetTimeout(() => require('child_process').spawn('bash', ['scripts/update.sh'], { cwd: __dirname, stdio: 'ignore' }), 20000);\n");
+  const c7 = plant('src/server/x-later.js', "const path = require('path'); const { spawn } = require('child_process');\nexports.later = () => setTimeout(() => spawn('bash', [path.join(__dirname, '..', '..', 'scripts', 'update.sh')]), 20000);\n");
+  const c8 = plant('src/server/x-exec.js', "const cp = require('child_process');\nexports.go = () => cp.execFile('scripts/update.sh', () => { });\n");
+  const c9 = plant('src/server/x-var.js', "const path = require('path'); const { spawn } = require('child_process');\nconst UPDATE = path.resolve(__dirname, '../../scripts/update.sh');\nexports.go = () => spawn('bash', [UPDATE]);\n");
+  ok('CONTROLS (round 3, the door\'s callers): update.sh spawned from a timer 20 s after the boot in server.js (the panel\'s plant) RED; a path.join spelling on a timer RED; cp.execFile(\'scripts/update.sh\') RED; the path held in a variable RED (its declaration names the door)', c6.length === 1 && c7.length === 1 && c8.length === 1 && c9.length === 1, { c6, c7, c8, c9 });
   ok('CONTROLS: an async execFile(\'git\', [... \'pull\']) in a new module (the panel\'s M1c) RED; a helper run(\'git\', [... \'fetch\']) RED; cp.exec(\'git pull … && npm install\') RED; spawn(\'npm\', [\'run\', \'build\']) RED; words inside a callback body are not a site (green)', c1.length === 1 && c2.length === 1 && c3.length === 1 && c4.length === 1 && c5.length === 0, { c1, c2, c3, c4, c5 });
 }
 
@@ -63,7 +69,7 @@ console.log('② the update road (scripts/update.sh) leaves the checkout clean �
   fs.writeFileSync(path.join(STUB, 'npm'), `#!${process.execPath}
 const fs = require('fs'); const a = process.argv.slice(2);
 if (a[0] === 'install') { const f = 'package-lock.json'; fs.writeFileSync(f, fs.readFileSync(f, 'utf-8').replace(/,\\n {6}"peer": true/, '')); process.exit(0); }
-if (a[0] === 'run' && a[1] === 'build') { if (process.env.STUB_BUILD_FAILS) { fs.writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: "9.9.9" };\\n'); process.exit(1); } const v = JSON.parse(fs.readFileSync('package.json', 'utf-8')).version; fs.writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: "' + v + '-built" };\\n'); process.exit(0); }
+if (a[0] === 'run' && a[1] === 'build') { if (process.env.STUB_BUILD_WAITS) { fs.writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: "9.9.8" };\\n'); fs.writeFileSync(process.env.STUB_BUILD_WAITS, 'building'); setTimeout(() => process.exit(0), 500); return; } if (process.env.STUB_BUILD_FAILS) { fs.writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: "9.9.9" };\\n'); process.exit(1); } const v = JSON.parse(fs.readFileSync('package.json', 'utf-8')).version; fs.writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: "' + v + '-built" };\\n'); process.exit(0); }
 process.exit(2);
 `, { mode: 0o755 });
   fs.writeFileSync(path.join(STUB, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0o755 }); // no unit: «restart your server process»
@@ -95,6 +101,16 @@ process.exit(2);
   const said = /✗ The update stopped \(exit 1\)\. The files it rewrites \(package-lock\.json, src\/agentd\/version\.js\) were put back/.test(u3.out);
   put('1.0.5'); const b3 = bare();
   ok('a FAILED build: the update ends non-zero, the tree is CLEAN (the EXIT trap puts back what it rewrote) and it SAYS so — an admin\'s bare pull after it succeeds', s3.rc !== 0 && s3.porc === '' && said && b3 === 0 && g(I, 'log', '-1', '--format=%s') === 'v1.0.5', { s3, said, bare: b3, tail: u3.out.slice(-400) });
+  // round 3: a SIGHUP to the update's bash mid-build (the terminal closed) — the tree put back AND the failure said
+  put('1.0.6'); const MARK = path.join(U, 'building');
+  const hupped = await new Promise((resolve) => {
+    const c = spawn('bash', ['scripts/update.sh'], { cwd: I, env: { ...UENV, STUB_BUILD_WAITS: MARK }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+    const poll = setInterval(() => { if (fs.existsSync(MARK)) { clearInterval(poll); c.kill('SIGHUP'); } }, 20); // our own child, by its handle
+    c.on('exit', (code, sig) => { clearInterval(poll); resolve({ code, sig, out }); });
+  });
+  const s6 = { rc: hupped.code, porc: g(I, 'status', '--porcelain'), said: /✗ The update stopped \(exit 129\)\. The files it rewrites/.test(hupped.out) };
+  ok('a SIGHUP to the update mid-build (the terminal closed): the tree is put back AND the failure is said (exit 129) — the panel saw it silent', s6.rc === 129 && s6.porc === '' && s6.said, { s6, tail: hupped.out.slice(-300) });
   const SH = fs.readFileSync(path.join(REPO, 'scripts', 'update.sh'), 'utf8');
   ok('the trap is installed only AFTER the single-flight lock (an «Another update is already running» exit never touches the tree the running one builds)', SH.indexOf('trap on_exit EXIT') > SH.indexOf('flock -n 9') && SH.indexOf('trap on_exit EXIT') < SH.indexOf('if ! git pull --ff-only; then'));
 }

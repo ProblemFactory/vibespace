@@ -188,6 +188,11 @@ class GmailSync {
         w.error = String(e.message || e).slice(0, 300);
       }
       if (w.stopped) return;
+      // round 3: a pass that ENDS IN ERROR (or a new error) and the pass that HEALS it are pushed at once (mounts-updated) — an
+      // open mounts panel says «Sync stopped: …» while passes fail, never the last «Checking for new mail…» it drew
+      const end = w.state === 'error' ? 'error:' + w.error : 'ok';
+      if (end !== w.lastEnd && (end !== 'ok' || (w.lastEnd || '').startsWith('error:'))) { try { this._onProgress(); } catch { } }
+      w.lastEnd = end;
       // a failed pass (a folder that could not be read, the API) is tried again after 120 s — never LATER than a normal pass
       // would come (rank 16 round 2: a walk that did not finish is retried; mounts set no pollSeconds, so 300 s ⇒ 120 s)
       const poll = w.cfg.pollSeconds || 300;
@@ -386,7 +391,7 @@ class GmailSync {
     }
 
     // Incremental: ids gathered from history.list above → download them.
-    const todo = ids.filter((id) => !seen.has(id));
+    const todo = [...new Set(ids)].filter((id) => !seen.has(id)); // round 3: an id history lists twice is fetched ONCE (so on the incremental road too)
     if (todo.length) this._progress(w, todo.length, 0);
     let done = 0;
     for (const id of todo) {

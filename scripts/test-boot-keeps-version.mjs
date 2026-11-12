@@ -89,23 +89,51 @@ fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(WORK2, 'node_modules')
 const head2 = git(WORK2, 'rev-parse', 'HEAD');
 const BIN2 = path.join(BASE, 'bin2'), LOG2 = path.join(BASE, 'children2.log'), TMP2 = path.join(BASE, 'tmp2'), HOME2 = path.join(BASE, 'home2');
 for (const d of [BIN2, TMP2, HOME2]) fs.mkdirSync(d, { recursive: true });
-for (const name of ['git', 'npm']) fs.writeFileSync(path.join(BIN2, name), `#!/bin/sh\necho "${name} $*" >> '${LOG2}'\nexit 1\n`, { mode: 0o755 });
+for (const name of ['git', 'npm', 'systemctl']) fs.writeFileSync(path.join(BIN2, name), `#!/bin/sh\necho "${name} $*" >> "\${HSH_CHILD_LOG:-${LOG2}}"\nexit 1\n`, { mode: 0o755 }); // systemctl too: update.sh's restart step must never reach the box's own units
 const oldGuard = [TMP2, '/tmp'].some((t) => (path.resolve(WORK2) + path.sep).startsWith(path.resolve(t) + path.sep)); // server.js's own test, with its TMPDIR
 ok('the second checkout is one the OLD guard would NOT call throwaway (outside /tmp and outside the server\'s os.tmpdir()) and is one commit BEHIND its origin', !oldGuard && git(WORK2, 'rev-list', '--count', 'HEAD..origin/master') === '1', { WORK2, TMP2, oldGuard });
+// THE BOOT'S CLOCK (round 3): a preload records every timer the boot ARMS (its first 15 s) and runs it 50× sooner, so the watch
+// below covers the LONGEST one — an update armed on any timer after listen fires inside it (the panel's plant: update.sh 20 s in)
+const CLOCK = path.join(BASE, 'boot-clock.cjs');
+fs.writeFileSync(CLOCK, `const fs = require('fs'); const LOG = process.env.HSH_CLOCK_LOG, F = 50, t0 = Date.now(), WINDOW = 15000;
+const wrap = (orig, kind) => function (fn, ms, ...a) { const d = Number(ms) || 0; if (Date.now() - t0 < WINDOW && d > 1000) { try { fs.appendFileSync(LOG, kind + ' ' + d + '\\n'); } catch { } return orig.call(this, fn, Math.max(20, Math.round(d / F)), ...a); } return orig.call(this, fn, ms, ...a); };
+global.setTimeout = wrap(global.setTimeout, 'timeout'); global.setInterval = wrap(global.setInterval, 'interval');
+`);
+const armed = (log) => { try { return fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => { const [kind, ms] = l.split(' '); return { kind, ms: Number(ms) }; }); } catch { return []; } };
+const watchBoot = async (srvPort, clockLog) => { // until the longest armed timer (50× sooner) has had its turn, + 2 s; capped at 30 s
+  const t0 = Date.now(); let need = 2000;
+  while (Date.now() - t0 < Math.min(30000, need)) { const a = armed(clockLog); need = 2000 + Math.max(0, ...a.map((x) => x.ms / 50)); await sleep(250); }
+  const a = armed(clockLog); const top = a.reduce((m, x) => (x.ms > m.ms ? x : m), { kind: '-', ms: 0 });
+  return { watchedMs: Date.now() - t0, timers: a.length, longest: top, covered: top.ms / 50 + 2000 <= 30000 };
+};
 const PORT2 = await freePort();
 const env2 = { PATH: `${BIN2}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: HOME2, TMPDIR: TMP2, LANG: 'C.UTF-8', ...(await vncEnv()), PORT: String(PORT2), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_CHANGELOG_FIXTURE_DIR: CANON, VIBESPACE_NODE_MIRROR: 'http://127.0.0.1:9', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
-const srv2 = spawn(process.execPath, ['server.js'], { cwd: WORK2, env: env2, stdio: ['ignore', 'pipe', 'pipe'] });
+const CLOCK2 = path.join(BASE, 'clock2.log');
+const srv2 = spawn(process.execPath, ['-r', CLOCK, 'server.js'], { cwd: WORK2, env: { ...env2, HSH_CLOCK_LOG: CLOCK2 }, stdio: ['ignore', 'pipe', 'pipe'] });
 let log2 = ''; srv2.stdout.on('data', (d) => { log2 += d; }); srv2.stderr.on('data', (d) => { log2 += d; });
 process.on('exit', () => { try { if (srv2.exitCode == null && srv2.signalCode == null) srv2.kill('SIGKILL'); } catch { } });
 let up2 = false; const t2 = Date.now();
 for (let i = 0; i < 240 && !up2; i++) { try { await fetch(`http://127.0.0.1:${PORT2}/api/home`); up2 = true; } catch { await sleep(250); } }
-await sleep(2000); // the boot's own async steps after listen (an update behind a guard would have started by now)
+const w2 = up2 ? await watchBoot(PORT2, CLOCK2) : { watchedMs: 0, timers: 0, longest: { kind: '-', ms: 0 } };
 const calls2 = fs.existsSync(LOG2) ? fs.readFileSync(LOG2, 'utf8').split('\n').filter(Boolean) : [];
-ok(`a boot from that root spawned NO git and NO npm at all — ${calls2.length} call(s) in its first ${Math.round((Date.now() - t2) / 1000)} s (stand-ins on its private PATH, each logged)`, up2 && calls2.length === 0 && !/\[auto-update\]|git pull/.test(log2), { up2, calls2, log: log2.split('\n').filter((l) => /auto-update|git pull|Error/.test(l)).slice(0, 8) });
+ok(`a boot from that root spawned NO git, npm or systemctl at all — ${calls2.length} call(s), watched ${w2.covered ? 'past the LONGEST timer the boot armed' : 'for 30 s (capped: a timer over 25 min is NOT watched — named)'} (${w2.longest.ms} ms, a ${w2.longest.kind}; ${w2.timers} timers over 1 s armed in its first 15 s, each run 50× sooner — watched ${Math.round(w2.watchedMs / 1000)} s)`, up2 && w2.timers > 0 && calls2.length === 0 && !/\[auto-update\]|git pull/.test(log2), { up2, calls2, w2, log: log2.split('\n').filter((l) => /auto-update|git pull|Error/.test(l)).slice(0, 8) });
 const v2 = up2 ? await (await fetch(`http://127.0.0.1:${PORT2}/api/version?fresh=1`)).json() : null;
 ok(`…its version is the one it had (HEAD unchanged) and the «a newer version exists» notice still tells (version ${version}, latest ${newer})`, git(WORK2, 'rev-parse', 'HEAD') === head2 && !!v2 && v2.version === version && v2.latest === newer, v2);
 srv2.kill('SIGTERM');
 await new Promise((r) => { const t = setTimeout(r, 5000); srv2.once('exit', () => { clearTimeout(t); r(); }); });
+// LEG 3 — THE CONTROL: the same checkout with the panel's plant (update.sh spawned 20 s after the boot) — the same watch SEES it
+fs.mkdirSync(path.join(WORK2, 'scripts'), { recursive: true }); fs.copyFileSync(path.join(REPO, 'scripts', 'update.sh'), path.join(WORK2, 'scripts', 'update.sh'));
+fs.appendFileSync(path.join(WORK2, 'server.js'), "\nsetTimeout(() => require('child_process').spawn('bash', ['scripts/update.sh'], { cwd: __dirname, stdio: 'ignore' }), 20000); // CONTROL PLANT (test-boot-keeps-version leg 3)\n");
+const LOG3 = path.join(BASE, 'children3.log'), CLOCK3 = path.join(BASE, 'clock3.log'), PORT3 = await freePort();
+const srv3 = spawn(process.execPath, ['-r', CLOCK, 'server.js'], { cwd: WORK2, env: { ...env2, ...(await vncEnv()), PORT: String(PORT3), HSH_CLOCK_LOG: CLOCK3, HSH_CHILD_LOG: LOG3 }, stdio: ['ignore', 'pipe', 'pipe'] });
+process.on('exit', () => { try { if (srv3.exitCode == null && srv3.signalCode == null) srv3.kill('SIGKILL'); } catch { } });
+let up3 = false;
+for (let i = 0; i < 240 && !up3; i++) { try { await fetch(`http://127.0.0.1:${PORT3}/api/home`); up3 = true; } catch { await sleep(250); } }
+const w3 = up3 ? await watchBoot(PORT3, CLOCK3) : { watchedMs: 0, timers: 0, longest: { kind: '-', ms: 0 } };
+const calls3 = fs.existsSync(LOG3) ? fs.readFileSync(LOG3, 'utf8').split('\n').filter(Boolean) : [];
+ok(`CONTROL: the panel's plant (update.sh spawned 20 s after the boot) is SEEN by the same watch — ${calls3.length} stand-in call(s) (e.g. ${JSON.stringify(calls3[0] || '')}), none a real program`, up3 && calls3.some((l) => /^git /.test(l)), { up3, calls3: calls3.slice(0, 6), w3 });
+srv3.kill('SIGTERM');
+await new Promise((r) => { const t = setTimeout(r, 5000); srv3.once('exit', () => { clearTimeout(t); r(); }); });
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -11,6 +11,8 @@
 // next census, not this one); a walk through a helper defined in ANOTHER file; mutual recursion; a computed require
 // (`require('child_' + 'process')`) or process.binding; ESM import forms (src/ is CommonJS); a `recursive:` given by a variable
 // or an options object held in a variable.
+// NOT SCOPE-AWARE (said): the alias table is per FILE — a destructured alias's name (`const { spawnSync: s } = …`) flags an unrelated
+// variable of the same name elsewhere in that file as a site: a FALSE site (a row to argue), never a missed one.
 // Run: node scripts/test-loop-child-census.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,7 +40,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/safe-fs-worker.js', 'contextFiles > walk', 'walk', 1, DEBT, 'per act — a context listing; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js — test-sync-fs-census rows the same site)'],
     ['src/safe-fs-worker.js', 'folderCensus > walk', 'walk', 1, DEBT, 'per act — a folder census; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js)'],
     ['src/proc-identity.js', 'psOf', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD): /proc is the rung above it (test-architecture\'s process-table allowlist)'],
-    ['src/proc-identity.js', 'startToken', 'child:spawnSync', 1, DEBT, 'per spawn — opencode-serve\'s spawn tick, when /proc/<pid>/stat cannot be read (macOS / BSD, and on Linux an exited pid): ps -o lstart= with NO timeout (named, not bounded here: data/bin/vibespace-remote-keeper carries this code byte for byte — a bound changes both, test-pid-identity)'],
+    ['src/proc-identity.js', 'startToken', 'child:spawnSync', 1, DEBT, 'per spawn — opencode-serve\'s spawn tick — and per verdict on a RECORDED pid (tokenVerdict), whenever /proc/<pid>/stat cannot be read (macOS / BSD, and on Linux an exited pid): ps -o lstart= with NO timeout (named, not bounded here: data/bin/vibespace-remote-keeper carries this code byte for byte — a bound changes both, test-pid-identity)'],
     ['src/discovery-facts.js', 'listOpenRolloutPathsViaLsof', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD codex liveness), ONE per scan'],
     ['src/cli-identity.js', 'readPsIdentity', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl` (a suite injects one): `ps -p <pid> -o uid=,args=` whenever /proc has no answer — macOS / BSD, and on Linux an EXITED pid; no hub caller of procCmdline / procUid today (the acceptance panel read it), memoised 1 s'],
     ['src/cli-identity.js', 'parentIndex', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl`: ONE `ps -eo pid=,ppid=` per sweep for the whole table — NO-/proc fallback only'],
@@ -70,7 +72,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     // round 2 — the four walks the census SEES now (the iterative shape)
     ['src/agentd/agentd.js', 'du', 'walk', 1, OFF, 'the device agent — its OWN process (agentd), never the hub\'s loop'],
     ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree'],
-    ['src/server/browser-builds-keeper.js', 'create > treeOf', 'walk', 1, DEBT, 'per act — the Chrome builds picker\'s facts (each build\'s size, up to 20 000 entries, an lstat each) and each unpacked download\'s file count'],
+    ['src/server/browser-builds-keeper.js', 'create > treeOf', 'walk', 1, DEBT, 'per second while a build downloads — the builds picker reads its facts every second during a download (each build\'s size, up to 20 000 entries, an lstat each) — and per act (a picker read, an unpacked download\'s file count)'],
     ['src/usage-routes.js', 'setupUsage > listRecentCodexJsonlFiles', 'walk', 1, DEBT, 'per GET /api/usage — the usage snapshot\'s refresh (about every 30 s while a page shows it), pruned to 14 days of date dirs'],
   ];
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28

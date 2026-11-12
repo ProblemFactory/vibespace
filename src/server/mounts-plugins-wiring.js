@@ -572,7 +572,7 @@ app.get('/vibespace-node/:version/:file', async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
-// lane hub-sync-holds (rank 13): the panel's rows are the KEPT statuses (no child on this turn); opening it is a person's press,
+// lane hub-sync-holds (rank 13): the panel's rows are the KEPT statuses (no synchronous child on this turn); opening it is a person's press,
 // so every kept status is asked again (async, bounded) and a change reaches the panel by its broadcast
 app.get('/api/plugins', (req, res) => {
   try { res.json({ plugins: plugins.list() }); plugins.refreshAll(); } catch (e) { res.status(500).json({ error: e.message }); }

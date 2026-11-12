@@ -254,7 +254,7 @@ export function installPluginsUI(App) {
           }
           // the switch waits for a FIRST answer only while one may still come (no statusError); a running daemon can always be
           // stopped, even when whether it is installed is not known
-          swOn = !!p.enabled || running; swDisabled = (!!p.checking && !p.statusError) || p.mode === 'system' || (!p.installed && !running) || (isRelay && p.configured === false);
+          swOn = !!p.enabled || running; swDisabled = (!!p.checking && !p.statusError) || p.mode === 'system' || (!p.installed && !running && !p.statusError) || (isRelay && p.configured === false); // round 3: «Status unknown» frees the switch (installed is not known) — a start that finds nothing says so
           onSwitch = async (on, cb) => {
             if (!on) {
               // verify-r6 D1: an OPTIONS OBJECT (two positional strings rendered a blank "Confirm / OK" dialog)

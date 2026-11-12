@@ -361,7 +361,7 @@ function nodeOwn() {
 const RUNTIME = require('../node-runtime');
 if (nodeOwn()) { RUNTIME.reexecOnOwnRuntime({ root: ROOT, log: () => { } }); delete process.env.VIBESPACE_RUNTIME_REEXEC; }
 function provisionOwnRuntime() {
-  // a scratch root under the temp dir (a suite's daemon) never downloads — the same rule as the hub's boot pull
+  // a scratch root under the temp dir (a suite's daemon) never downloads (the hub's boot pull, which once had the same rule, is gone)
   if (!nodeOwn() || process.platform === 'win32' || process.env.VIBESPACE_RUNTIME_SWITCH === '0' || [os.tmpdir(), '/tmp'].some((t) => (path.resolve(ROOT) + path.sep).startsWith(path.resolve(t) + path.sep))) return;
   const RFL = require('../runtime-floor');
   const v = RFL.verdict(process.version), have = RUNTIME.currentOf(ROOT);

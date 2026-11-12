@@ -2,7 +2,7 @@
 // lane hub-sync-holds — NOTHING SYNCHRONOUS RUNS A CHILD OR WALKS A TREE ON THE HUB'S LOOP (the owner's hub, 2026-11-11: the
 // profile named each a hold of the main loop). FAST, in-process: a scratch HOME, stand-in commands on PATH, no network, no
 // real agent CLI, no sudo (a stand-in answers to that name), nothing signalled.
-//   §13 rank 13 — a plugin's STATUS is a kept fact: a snapshot / a broadcast runs no child; the fresh answer is ONE async
+//   §13 rank 13 — a plugin's STATUS is a kept fact: a snapshot / a broadcast runs no synchronous child; the fresh answer is ONE async
 //       refresh with timeouts (tailscale ran pgrep + sudo -n + `tailscale status --json` on every snapshot: 4.7–4.9 s)
 //   §16 rank 16 — the mail folder IS the index: every pass reads it ONCE, async, a failed walk never an answer (each 300 s pass re-listed
 //       the whole tree with readdirSync: 1.5–1.7 s per mailbox, growing with it)
@@ -45,7 +45,7 @@ const longestTurn = async (fn) => {
 };
 const BOUND_MS = 250; // the boot law's hold (CLAUDE.md «Never block the event loop»): no step holds a turn this long
 
-console.log('§13 rank 13 — a plugin snapshot runs no child; its status is a kept fact, refreshed async');
+console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its status is a kept fact, refreshed async');
 {
   const { PluginManager } = require(path.join(REPO, 'src/plugins.js'));
   const REAL = require(path.join(REPO, 'src/plugins/tailscale.js'));
@@ -59,7 +59,7 @@ console.log('§13 rank 13 — a plugin snapshot runs no child; its status is a k
   ok(`§13 the fresh status is ONE async refresh: it takes the children's time (≥ ${SLOW_MS} ms) while no turn of the loop exceeds ${BOUND_MS} ms`, !!fresh.out && fresh.ms >= SLOW_MS - 200 && fresh.worstBeatMs < BOUND_MS && fresh.maxDelayMs < BOUND_MS, { ms: fresh.ms, worstBeat: fresh.worstBeatMs, maxDelay: fresh.maxDelayMs });
   const after = await longestTurn(() => pm.list());
   const row2 = (after.out || []).find((p) => p.id === 'tailscale') || {};
-  ok('§13 the next snapshot answers the KEPT fact (the refresh\'s answer, no «checking»), again with no child on its turn', after.ms < BOUND_MS && row2.checking === undefined && row2.running === false && row2.sudo === false, { ms: after.ms, row: row2 });
+  ok('§13 the next snapshot answers the KEPT fact (the refresh\'s answer, no «checking»), again with no synchronous child on its turn', after.ms < BOUND_MS && row2.checking === undefined && row2.running === false && row2.sudo === false, { ms: after.ms, row: row2 });
   // ONE refresh at a time: two asks while one is in flight share it
   let both = null;
   if (typeof pm.refreshStatus === 'function') { const a = pm.refreshStatus('tailscale'), b = pm.refreshStatus('tailscale'); both = a === b; await a; }
@@ -144,18 +144,82 @@ console.log('§13 rank 13 — a plugin snapshot runs no child; its status is a k
     } finally { process.env.PATH = pathWas; }
     ok('§13 frp BEFORE its first `which`: the row says «Checking…» (checking, so no Install is offered) — then, read, installed with no «checking»', before.checking === true && !!fresh && fresh.installed === true && fresh.checking === undefined, { before: { checking: before.checking, installed: before.installed }, fresh: fresh && { checking: fresh.checking, installed: fresh.installed } });
   }
-  { // 4. never refreshed by a timer: the census of refresh callers (any new caller — a timer's or not — is red until it is argued here)
-    const rows = []; const files = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => path.join('src', f))];
-    for (const f of files) {
-      const lines = fs.readFileSync(path.join(REPO, f), 'utf8').split('\n');
-      lines.forEach((l, i) => { if (/^\s*(\/\/|\*)/.test(l)) return; if (/\b(this|plugins|getPlugins\(\)\??)\.refreshStatus\(/.test(l)) rows.push(`${f}:refreshStatus:${/setTimeout|setInterval/.test(l) ? 'TIMER' : 'call'}`); if (/(\bplugins|\bthis|getPlugins\(\)\??)\.refreshAll\(/.test(l)) rows.push(`${f}:refreshAll:${/setTimeout|setInterval/.test(l) ? 'TIMER' : 'call'}`); });
-    }
-    const want = ['src/plugins.js:refreshStatus:call', 'src/plugins.js:refreshStatus:call', 'src/plugins.js:refreshAll:call', 'src/server/mounts-plugins-wiring.js:refreshAll:call', 'src/server/mounts-plugins-wiring.js:refreshStatus:call'].sort();
-    // the receivers that are the plugin manager: `this` (plugins.js), `plugins`, `getPlugins()` (auto-resume's own refreshStatus is another object)
-    ok('§13 NEVER refreshed by a timer — the plugin manager\'s refresh callers are exactly: the plugin\'s own event (h.notify), refreshAll\'s loop, bootReplay, GET /api/plugins, GET …/status; none on a timer line', JSON.stringify(rows.sort()) === JSON.stringify(want), rows);
+  { // 4. never refreshed by a timer: the census of the manager's refresh callers, on the SYNTAX TREE (round 3 — the line-text
+    // grep missed a call inside a timer's callback written on another line): every call of refreshStatus / refreshAll whose
+    // receiver is the manager (`this` in plugins.js, `plugins`, `getPlugins()`) is a row by its scope; one inside a
+    // setTimeout / setInterval / setImmediate callback is red by name. A plant proves it.
+    const { walk, scopeOf } = await import(path.join(REPO, 'scripts/sync-fs-census.mjs'));
+    const A = createRequire(path.join(REPO, 'package.json'))('acorn');
+    const TIMER = new Set(['setTimeout', 'setInterval', 'setImmediate']);
+    const callers = (patch = {}) => {
+      const rows = []; const files = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => path.join('src', f)), ...Object.keys(patch)];
+      for (const f of [...new Set(files)]) {
+        const src = patch[f] !== undefined ? patch[f] : fs.readFileSync(path.join(REPO, f), 'utf8'); if (!/refresh(?:Status|All)\(/.test(src)) continue;
+        const code = src.replace(/^#!.*/, ''); let ast; try { ast = A.parse(code, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, locations: true }); } catch { ast = A.parse(code, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); }
+        walk(ast, (n, ps) => {
+          if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return; const k = n.callee.property.name; if (k !== 'refreshStatus' && k !== 'refreshAll') return;
+          const o = n.callee.object; if (!(o.type === 'ThisExpression' || (o.type === 'Identifier' && o.name === 'plugins') || (o.type === 'CallExpression' && o.callee.type === 'Identifier' && o.callee.name === 'getPlugins'))) return;
+          const timer = ps.some((a) => a.type === 'CallExpression' && ((a.callee.type === 'Identifier' && TIMER.has(a.callee.name)) || (a.callee.type === 'MemberExpression' && !a.callee.computed && TIMER.has(a.callee.property.name))));
+          rows.push(`${f}|${scopeOf(ps)}|${k}${timer ? '|TIMER' : ''}`);
+        });
+      }
+      return rows.sort();
+    };
+    const want = ['src/plugins.js|PluginManager.constructor > notify|refreshStatus', 'src/plugins.js|PluginManager.refreshAll|refreshStatus', 'src/plugins.js|PluginManager.bootReplay|refreshAll', 'src/plugins.js|PluginManager._act > after|refreshStatus', 'src/server/mounts-plugins-wiring.js|create > route:GET /api/plugins|refreshAll', 'src/server/mounts-plugins-wiring.js|create > route:GET /api/plugins/:id/status|refreshStatus'].sort();
+    const now = callers();
+    const pl = fs.readFileSync(path.join(REPO, 'src/plugins.js'), 'utf8');
+    const planted = callers({ 'src/plugins.js': pl.replace('  bootReplay() {\n', '  bootReplay() {\n    setInterval(() => {\n      this.refreshAll();\n    }, 60000);\n') });
+    ok('§13 NEVER refreshed by a timer — on the syntax tree, the manager\'s refresh callers are exactly: its own event (h.notify), refreshAll\'s loop, bootReplay, an act\'s fresh read (_act), GET /api/plugins, GET …/status — none inside a timer\'s callback (a planted setInterval → refreshAll, the call on its own line, is RED)', JSON.stringify(now) === JSON.stringify(want) && planted.some((r) => /bootReplay\|refreshAll\|TIMER$/.test(r)), { now, planted: planted.filter((r) => /TIMER/.test(r)) });
   }
+
   const UI = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
-  ok('§13 the panel: a first answer that FAILED says «Status unknown» and frees the switch (a running daemon can always be stopped); the stale mark is a visible line on the row, not only a hover title; no tailscale command ⇒ its own words, no «Log in…»', /p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI) && /swDisabled = \(!!p\.checking && !p\.statusError\) \|\| p\.mode === 'system' \|\| \(!p\.installed && !running\)/.test(UI) && /if \(p\.statusError\) \{\n\s+const stale = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact', textContent: t\('Not read again just now \(\{why\}\)/.test(UI) && /p\.backendState !== 'Running' && p\.cli !== false/.test(UI));
+  ok('§13 the panel: a first answer that FAILED says «Status unknown» and frees the switch (a running daemon can always be stopped); the stale mark is a visible line on the row, not only a hover title; no tailscale command ⇒ its own words, no «Log in…»', /p\.checking \? \(p\.statusError \? t\('Status unknown — it could not be read'\) : t\('Checking…'\)\)/.test(UI) && /swDisabled = \(!!p\.checking && !p\.statusError\) \|\| p\.mode === 'system' \|\| \(!p\.installed && !running && !p\.statusError\)/.test(UI) && /if \(p\.statusError\) \{\n\s+const stale = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact', textContent: t\('Not read again just now \(\{why\}\)/.test(UI) && /p\.backendState !== 'Running' && p\.cli !== false/.test(UI));
+}
+
+{ // §13 round 3 — the accepted round's small items, each pinned
+  const { PluginManager } = require(path.join(REPO, 'src/plugins.js'));
+  const WK = require(path.join(REPO, 'src/plugins/which-kept.js'));
+  const until = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch { } await sleep(20); } return false; };
+  { // (a) a FAILED status keeps its stamp while the answer is the same: no broadcast → redraw → GET → refresh loop
+    let calls = 0; const sent = [];
+    const FAIL = { id: 'acme-fail', label: 'Fail', description: 'x', provides: [], create: () => ({ install() { }, start() { }, stop() { }, status() { return { kept: true }; }, statusAsync() { calls++; return Promise.reject(new Error('probe failed')); } }) };
+    const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'fail-')), plugins: [FAIL], broadcast: (m) => sent.push(m.type) });
+    const a = await pm.refreshStatus('acme-fail'); await sleep(5); const b = await pm.refreshStatus('acme-fail'); await sleep(5); const c = await pm.refreshStatus('acme-fail'); // asks ms apart: a stamp that moved would differ
+    ok('§13 (a) a status that keeps FAILING the same way keeps its stamp: three asks, ONE broadcast (the first) — no panel loop of redraw → GET → refresh', calls === 3 && sent.filter((t) => t === 'plugins-updated').length === 1 && a.statusError && c.statusError && a.statusError.at === c.statusError.at, { calls, sent, at: [a.statusError && a.statusError.at, c.statusError && c.statusError.at] });
+  }
+  { // (b) an ACT supersedes the refresh in flight: a Stop pressed while a refresh reads the old state
+    const st = { running: true }; let keptRow = { running: true };
+    const P = { id: 'acme-act', label: 'Act', description: 'x', provides: [], create: () => ({ install() { }, start() { st.running = true; }, stop() { st.running = false; }, status() { return keptRow; },
+      async statusAsync({ signal } = {}) { const read = st.running; await sleep(120); if (signal && signal.aborted) throw signal.reason; keptRow = { running: read }; return keptRow; } }) };
+    const pm = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'act-')), plugins: [P] });
+    const inflight = pm.refreshStatus('acme-act'); await sleep(30);
+    await pm.stop('acme-act');
+    await inflight.catch(() => { }); await until(() => pm.status('acme-act').running === false, 2000); await sleep(150);
+    const row = pm.status('acme-act');
+    { const R = { id: 'acme-refuse', label: 'R', description: 'x', provides: [], create: () => ({ install() { }, start() { throw Object.assign(new Error('refused by name'), { code: 'refused' }); }, stop() { }, status() { return {}; } }) };
+      const pr = new PluginManager({ dataDir: fs.mkdtempSync(path.join(tmp, 'refuse-')), plugins: [R] }); let se = null, ret;
+      try { ret = pr.start('acme-refuse'); } catch (e) { se = e; }
+      ok('§13 (b) an act keeps its VERB\'s contract: a sync verb\'s refusal is thrown IN PLACE (a caller\'s try / catch holds it — test-frp-plugin\'s revoked identity), never turned into a rejected promise', !!se && se.code === 'refused' && ret === undefined, { se: se && se.code, ret: typeof ret }); }
+    ok('§13 (b) a Stop pressed while a refresh is in flight: that refresh (it read «running» before the act) is dropped, a fresh read follows the act — the row says stopped, not «connected» until the next ask', row.running === false && !row.statusError, row);
+  }
+  { // (c) an aborted ask kills its `which` too — and a child that ignores SIGTERM is SIGKILLed after a grace (our own child)
+    const DIR = path.join(tmp, 'which-stubborn'); fs.mkdirSync(DIR); const PIDF = path.join(DIR, 'pid');
+    fs.writeFileSync(path.join(DIR, 'which'), `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(PIDF)}, String(process.pid)); process.on('SIGTERM', () => { }); setTimeout(() => { }, 20000);\n`, { mode: 0o755 });
+    const pathWas = process.env.PATH; process.env.PATH = `${DIR}:${pathWas}`;
+    const ac = new AbortController(); const t0 = Date.now();
+    const p = WK.whichNow('vs-no-such-cmd-c', { signal: ac.signal });
+    await until(() => fs.existsSync(PIDF)); const pid = Number(fs.readFileSync(PIDF, 'utf8'));
+    ac.abort(new Error('the ask was abandoned')); const got = await p; process.env.PATH = pathWas;
+    const gone = await until(() => !fs.existsSync(`/proc/${pid}`), WK.GRACE_MS + 2000);
+    ok(`§13 (c) an aborted ask kills its \`which\` child — one that IGNORES SIGTERM is SIGKILLed after the ${WK.GRACE_MS} ms grace; the abandoned lookup records nothing (the name stays unknown)`, gone && got === null && !WK.whichKnown('vs-no-such-cmd-c'), { pid, gone, got, known: WK.whichKnown('vs-no-such-cmd-c'), ms: Date.now() - t0 });
+  }
+  { // (d) a `which` that cannot be SPAWNED: no unhandled rejection, the name not poisoned — the next ask answers
+    let unhandled = 0; const onU = () => { unhandled++; }; process.on('unhandledRejection', onU);
+    const real = WK._seam.get(); WK._seam.set(() => { throw Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' }); });
+    const first = await WK.whichNow('node'); const kept = WK.whichKept('node'); await sleep(50);
+    WK._seam.set(real); const second = await WK.whichNow('node'); await sleep(20); process.off('unhandledRejection', onU);
+    ok('§13 (d) a `which` that could not be SPAWNED answers null with NO unhandled rejection and leaves the name unknown — the next ask (the spawn working again) answers the real path', first === null && unhandled === 0 && !!second && /node$/.test(second) && WK.whichKnown('node'), { first, kept, second, unhandled });
+  }
 }
 
 console.log('§16 rank 16 — the mail folder IS the index: every pass reads it once, async, off the loop; a walk that did not finish is never an answer');
@@ -279,6 +343,27 @@ console.log('§16 rank 16 — the mail folder IS the index: every pass reads it 
       const done = await until(() => w.state === 'idle' && b.got[A] && b.got[B]);
       gs.stop('t');
       ok('§16 within a pass the set grows by what the sync writes: an id listed twice on one seed page is downloaded ONCE', done && b.got[A] === 1 && b.got[B] === 1 && w.count === 2, { done, got: b.got, count: w.count });
+    }
+    { // round 3 (a): a pass that ENDS IN ERROR, and the one that HEALS it, are PUSHED at once — an open panel never keeps «Checking…»
+      const dir = path.join(tmp, 'mail-push'), b = box([]); plant(dir, [hex(0xb9000000, 0)]); stateOf(dir, { historyId: '900', email: 'stand-in@example.invalid' });
+      const pushes = []; let w = null;
+      const gs = new GmailSync({ onProgress: () => pushes.push(w ? w.state : '?') }); gs._api = api(b); w = gs.start(cfgOf('p', dir));
+      const first = await until(() => w.state === 'idle' && w.count === 1); const before = pushes.length;
+      fs.chmodSync(dir, 0o000); locked.push(dir);
+      const failed = await until(() => w.state === 'error'); await sleep(200); const atError = pushes.slice(before);
+      fs.chmodSync(dir, 0o755);
+      const healed = await until(() => w.state === 'idle'); await sleep(100); const afterHeal = pushes.slice(before);
+      gs.stop('p');
+      ok('§16 (round 3) a pass that ENDS IN ERROR is pushed at once (mounts-updated — an open panel says «Sync stopped»), repeated failures with the same words push nothing more, and the pass that HEALS it is pushed', first && failed && healed && atError.filter((x) => x === 'error').length === 1 && afterHeal.filter((x) => x === 'error').length === 1 && afterHeal.slice(atError.length).includes('idle'), { atError, afterHeal });
+    }
+    { // round 3 (b): an id history.list names twice is fetched ONCE on the incremental road too
+      const dir = path.join(tmp, 'mail-dup-inc'), b = box([]); plant(dir, [hex(0xba000000, 0)]); stateOf(dir, { historyId: '900', email: 'stand-in@example.invalid' });
+      const gs = new GmailSync({}); gs._api = api(b); const w = gs.start(cfgOf('d', dir));
+      const first = await until(() => w.state === 'idle' && w.count === 1);
+      const X = hex(0xba000000, 9); b.history.push(X, X);
+      const done = await until(() => b.history.length === 0 && w.state === 'idle' && w.count === 2);
+      gs.stop('d');
+      ok('§16 (round 3) an id history.list names TWICE is fetched once on the incremental road (the seed page was already so)', first && done && b.got[X] === 1, { first, done, got: b.got[X] });
     }
     { // ONE walk at a time: start() walks nothing of its own; the first pass walks once; two asks in flight share one walk
       GAP = 60000; // the loop parked after its first pass

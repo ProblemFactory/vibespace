@@ -63,6 +63,9 @@ on_exit() {
   exit "$rc"
 }
 trap on_exit EXIT
+# a signal (the terminal closed — SIGHUP; Ctrl-C; a TERM) exits WITH its status, so on_exit says the failure too (round 3: SIGHUP
+# mid-build put the files back but printed nothing)
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
 echo "== VibeSpace update: $(git rev-parse --short HEAD) @ $(git rev-parse --abbrev-ref HEAD)"
 # Derived/generated tracked files dirty the working tree and block the ff-only
 # pull. package-lock.json: an in-container npm (different version) rewrites it.

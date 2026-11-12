@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
-const { whichKept, whichNow, whichKnown } = require('./which-kept.js'); // lane hub-sync-holds: where frpc lives, KEPT — never a child on the loop's turn
+const { whichKept, whichNow, whichKnown } = require('./which-kept.js'); // lane hub-sync-holds: where frpc lives, KEPT — never a synchronous child on the loop's turn
 const { pidCmdline, pidAlive } = require('./proc.js');
 const { replaceShredding } = require('../secret-file.js');   // lane vault-e2e-password-fix-r2: an older frpc.toml held the token
 const os = require('os');
@@ -31,7 +31,7 @@ module.exports = {
   provides: ['relay', 'reminders'],   // reminders: a public name the relay refused is ONE For-you item (lane relay-token-per-instance)
   create(h) {
     const frpDir = () => h.dir;
-    // OUR frpc, else the PATH's — the kept answer (status() is sync and runs no child: rank 13); statusAsync() refreshes it
+    // OUR frpc, else the PATH's — the kept answer (status() is sync and runs no synchronous child: rank 13); statusAsync() refreshes it
     const frpBin = () => { const local = path.join(frpDir(), 'bin', 'frpc'); return fs.existsSync(local) ? local : whichKept('frpc'); };
     // …and a FRESH answer where a decision acts on it (the boot's install-or-start): the kept one is empty before its first read,
     // and an empty answer there would download a frpc the PATH already has

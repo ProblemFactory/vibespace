@@ -27,14 +27,19 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
-const { whichKept, whichNow } = require('./which-kept.js'); // lane hub-sync-holds: where a command lives, KEPT — never a child on the loop's turn
+const { whichKept, whichNow, graceKill, GRACE_MS } = require('./which-kept.js'); // lane hub-sync-holds: where a command lives, KEPT — never a synchronous child on the loop's turn
 // ONE async child with a timeout → {code, out} (code null on spawn failure / timeout) — never a sync child on the hub's loop (rank 13)
 // an async child with its timeout — it NEVER throws or rejects (rank 13 round 2: a probe with nothing to run answers what it
 // knows): no program ⇒ {code: null}; an aborted ask (`signal`, the manager's bound) starts nothing and kills the child it holds
 const run = (prog, args, ms, signal) => new Promise((resolve) => {
   if (!prog || (signal && signal.aborted)) return resolve({ code: null, out: '' });
-  try { execFile(prog, args, { encoding: 'utf-8', timeout: ms, maxBuffer: 16 << 20, ...(signal ? { signal } : {}) }, (err, out) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : null) : 0, out: String(out || '') })); }
-  catch { resolve({ code: null, out: '' }); }
+  let c = null;
+  const onAbort = () => graceKill(c, GRACE_MS); // round 3: a child that ignores SIGTERM is SIGKILLed after a grace (our own, by its handle)
+  if (signal) signal.addEventListener('abort', onAbort, { once: true }); // before the spawn: it runs before execFile's own abort handling
+  try {
+    c = execFile(prog, args, { encoding: 'utf-8', timeout: ms, maxBuffer: 16 << 20, ...(signal ? { signal } : {}) }, (err, out) => { if (signal) signal.removeEventListener('abort', onAbort); resolve({ code: err ? (typeof err.code === 'number' ? err.code : null) : 0, out: String(out || '') }); });
+  } catch { if (signal) signal.removeEventListener('abort', onAbort); return resolve({ code: null, out: '' }); }
+  graceKill(c, ms + GRACE_MS);
 });
 const { pidCmdline, pidAlive } = require('./proc.js');
 const DNS = require('../tailscale-dns.js');
@@ -53,7 +58,7 @@ module.exports = {
     const tsDir = () => h.dir;
     // where a binary lives: OUR copy, else the PATH's — the kept answer (sync callers) or a fresh one (async callers)
     const tsBin = (name) => { const local = path.join(tsDir(), 'bin', name); return fs.existsSync(local) ? local : whichKept(name); };
-    const tsBinNow = async (name) => { const local = path.join(tsDir(), 'bin', name); return fs.existsSync(local) ? local : whichNow(name); };
+    const tsBinNow = async (name, signal) => { const local = path.join(tsDir(), 'bin', name); return fs.existsSync(local) ? local : whichNow(name, { signal }); };
     const tsSock = () => path.join(tsDir(), 'tailscaled.sock');
     const tsPidFile = () => path.join(tsDir(), 'tailscaled.pid');
     const tsOurDaemonPid = () => {
@@ -341,7 +346,7 @@ module.exports = {
       async statusAsync({ signal } = {}) {
         const live = () => { if (signal && signal.aborted) throw (signal.reason || new Error('aborted')); };
         const rec = h.peek();
-        const installed = !!(await tsBinNow('tailscaled')); live();
+        const installed = !!(await tsBinNow('tailscaled', signal)); live();
         const sysPid = await systemTailscaled(signal); live();
         const tunOk = await tunUsable(signal); live();
         const sudoOk = await sudoAvailable(signal); live();
@@ -355,7 +360,7 @@ module.exports = {
           upFlags: h.setting('upFlags') || '',
           socksPort: SOCKS_PORT,
         };
-        const cli = await tsBinNow('tailscale'); live();
+        const cli = await tsBinNow('tailscale', signal); live();
         const probe = async (sockArg) => {
           if (!cli) return null; // no tailscale command: the row answers what it knows (running or not, `cli: false`)
           const r = await run(cli, [...(sockArg ? [`--socket=${sockArg}`] : []), 'status', '--json'], 5000, signal);
