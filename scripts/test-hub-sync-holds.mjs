@@ -147,7 +147,9 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
   { // 4. never refreshed by a timer: the census of the manager's refresh callers, on the SYNTAX TREE (round 3 — the line-text
     // grep missed a call inside a timer's callback written on another line): every call of refreshStatus / refreshAll whose
     // receiver is the manager (`this` in plugins.js, `plugins`, `getPlugins()`) is a row by its scope; one inside a
-    // setTimeout / setInterval / setImmediate callback is red by name. A plant proves it.
+    // setTimeout / setInterval / setImmediate callback is red by name. A plant proves it. NAMED (planted green by the acceptance
+    // panel): a BOUND method handed to a timer (`setInterval(this.refreshAll.bind(this), …)` — no call of it here); an ALIAS of
+    // `this` (`const self = this; … self.refreshAll()`); a plugin's OWN notify on a timer (h.notify refreshes that plugin).
     const { walk, scopeOf } = await import(path.join(REPO, 'scripts/sync-fs-census.mjs'));
     const A = createRequire(path.join(REPO, 'package.json'))('acorn');
     const TIMER = new Set(['setTimeout', 'setInterval', 'setImmediate']);

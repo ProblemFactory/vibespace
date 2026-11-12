@@ -53,7 +53,10 @@ function whichKept(name, { maxAgeMs = MAX_AGE_MS } = {}) {
   if (!k || Date.now() - k.at > maxAgeMs) refresh(name);
   return k ? k.path : null;
 }
-/** a fresh answer (async, bounded by the child's timeout; `signal` — the asker's abort — kills its child) */
+/** a fresh answer (async, bounded by the child's timeout; `signal` — the asker's abort — kills its child). NAMED: the lookup is
+ *  SHARED by name, so an ask that joins a `which` the kept read (whichKept) started first does not hand that child its signal —
+ *  aborted, the ask stops waiting on it, but the child runs on to its own 5 s timeout (+ the 1 s grace): one orphan for up to
+ *  6 s, nothing started beside it. */
 function whichNow(name, { signal } = {}) { return refresh(name, signal); }
 /** has a lookup of this name FINISHED once? Before it, a caller says «checking» — never «not found» (rank 13 round 2) */
 function whichKnown(name) { const k = kept.get(name); return !!(k && k.at); }

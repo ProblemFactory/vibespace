@@ -31,7 +31,7 @@ console.log('① the update-door census — the ONE road that updates VibeSpace 
 {
   // [file, scope, n, class, why] — class: door (the ONE update road, a person's act)
   const ROWS = [
-    ['src/server/ops-routes.js', 'create > route:POST /api/self-update', 2, 'door', 'THE update road and its ONE caller — ⚙ → Update VibeSpace… (a person\'s act, POST /api/self-update): it checks scripts/update.sh is there, fetches the newest one and runs it in a shell terminal (pull, install, build, restart); never on a boot, never on a timer'],
+    ['src/server/ops-routes.js', 'create > route:POST /api/self-update', 2, 'door', 'THE update road and its ONE caller — ⚙ → Update VibeSpace… (a person\'s act, POST /api/self-update): it checks scripts/update.sh is there, fetches the newest one and runs it as a DETACHED bash, its output in data/update.log (pull, install, build, restart); never on a boot, never on a timer'],
   ];
   const key = (s) => `${s.file}|${s.scope}`;
   const judge = (sites, rows) => {

@@ -17,7 +17,10 @@
 // NOT FOLLOWED (said, so the next gap is named, never assumed covered): a command assembled from variables only (no literal
 // names git / npm, the verb or update.sh — the program in a variable, `sh -c` with its command in a variable, a helper handed
 // an argv ARRAY built elsewhere, npm's own npm-cli.js run through node); a spawn reached through a computed callee whose
-// arguments carry no such literal; what any OTHER script a call runs does inside it.
+// arguments carry no such literal; what any OTHER script a call runs does inside it. Planted GREEN by the acceptance panel and
+// named here: a POST to the hub's own /api/self-update (an HTTP call, no spawn); the route's second script name
+// (data/.update-latest.sh — a name that is not update.sh); a symlink to update.sh under another name; a cron line written at
+// boot (a file write, no spawn); a *.cjs / *.mjs module (the census reads tracked .js files only).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';

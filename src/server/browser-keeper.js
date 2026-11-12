@@ -570,7 +570,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // recorded as its own browser there (`rec.browser.pid`) was locked by that browser, so the lock's hostname is this volume's
     // previous name — bounded to a LEGACY record (no lineage at all) on its own directory (PURE legacyLockWitness). Read BEFORE the
     // boot's reconcile retires an ephemeral record (the directory then remembers what the record proved).
-    // verify r8 (T2 ⑥ / ①): the fleet's other order — the new pod's boot pull refused ⇒ the .199 keeper boots first there and NULLS
+    // verify r8 (T2 ⑥ / ①): the fleet's other order (as it was — no boot pulls since 2.369.397) — the new pod's boot pull refused ⇒ the .199 keeper boots first there and NULLS
     // `rec.browser` (its reapOrphan) — leaves the record's `cdpUrl`; the directory's own `DevToolsActivePort` (Chrome's, MEASURED equal
     // to it on 0.38.1 + Chrome 154, surviving a SIGKILL) is the second witness form; the lock's ctime / the port file's mtime are
     // handed in so a fact from BEFORE the record's own life (a reused pid) is never its witness. The directory judged is the record's

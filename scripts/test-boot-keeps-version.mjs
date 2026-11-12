@@ -93,7 +93,9 @@ for (const name of ['git', 'npm', 'systemctl']) fs.writeFileSync(path.join(BIN2,
 const oldGuard = [TMP2, '/tmp'].some((t) => (path.resolve(WORK2) + path.sep).startsWith(path.resolve(t) + path.sep)); // server.js's own test, with its TMPDIR
 ok('the second checkout is one the OLD guard would NOT call throwaway (outside /tmp and outside the server\'s os.tmpdir()) and is one commit BEHIND its origin', !oldGuard && git(WORK2, 'rev-list', '--count', 'HEAD..origin/master') === '1', { WORK2, TMP2, oldGuard });
 // THE BOOT'S CLOCK (round 3): a preload records every timer the boot ARMS (its first 15 s) and runs it 50× sooner, so the watch
-// below covers the LONGEST one — an update armed on any timer after listen fires inside it (the panel's plant: update.sh 20 s in)
+// below runs up to 30 s on that clock. A real boot arms two 6 h intervals at load (432 s at 50×), so the watch takes its CAPPED branch
+// and SEES an update armed up to about 25 minutes after the boot (the panel's plant: update.sh 20 s in); a later one is the static
+// update-door census's (scripts/update-door-census.mjs) to catch — the pin's own line says which branch it took
 const CLOCK = path.join(BASE, 'boot-clock.cjs');
 fs.writeFileSync(CLOCK, `const fs = require('fs'); const LOG = process.env.HSH_CLOCK_LOG, F = 50, t0 = Date.now(), WINDOW = 15000;
 const wrap = (orig, kind) => function (fn, ms, ...a) { const d = Number(ms) || 0; if (Date.now() - t0 < WINDOW && d > 1000) { try { fs.appendFileSync(LOG, kind + ' ' + d + '\\n'); } catch { } return orig.call(this, fn, Math.max(20, Math.round(d / F)), ...a); } return orig.call(this, fn, ms, ...a); };

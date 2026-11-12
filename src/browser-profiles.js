@@ -2743,6 +2743,7 @@ function dirHostsOf(map, dir, opts = {}) { return lineageVerdict(map, dir, opts)
  *  the lock's ctime / the port file's mtime ≥ `rec.startedAt` − `slackMs` (5 s: the record is stamped BEFORE its daemon spawns and
  *  Chrome writes the lock after, on the same node's clock — a lock that predates the record could not be its browser's: a reused pid;
  *  plv8-t1 S71) — `lockAt` / `devtools.at` are the keeper's lstat facts, absent ⇒ not judged.
+ *  (Since 2.369.397 no boot pulls on any pod — the «boot pull» above is the fleet's order as it was, before lane hub-sync-holds 12a.)
  *  → `{host, form: 'pid' | 'devtools'}` (the host cleaned) or null. */
 function legacyLockWitness({ rec = null, lock = null, lockAt = null, devtools = null, dir = '', hostname = '', slackMs = 5000 } = {}) {
   const r = rec && typeof rec === 'object' ? rec : null;
