@@ -102,6 +102,7 @@ const ROWS = [
   ["src/hosts.js","*",20,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/claude-oat-probe.js","*",15,"not-main","—","—","lane cli-self-measure (.393; classified at hub-loop-stalls commit 2's rebase): the long-lived-token measurement runs only in its OWN process — the release script, or the hub FORKS it (src/server/cli-self-measure.js) — over a scratch HOME"],
   ["src/incident.js","*",8,"not-main","—","—","runs in the incident freeze worker (src/server/incident-freeze-worker.js)"],
+  ["src/job-logs-sweep-worker.js","*",2,"not-main","—","—","lane job-logs-sweep round 2: the job-logs remover's CHILD process (src/job-logs-sweep.js forks it; it throws without its IPC channel) — a remover whose hub ended leaves its counts in <dataDir>/jobs-remover-orphan-<pid>-<seq>.json (temp + rename), read and forgotten by the next engine"],
   ["src/input-inject.js","*",2,"not-main","—","—","runs inside the device agent (src/agentd/agentd.js)"],
   ["src/jobs.js","*",15,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/kept-copies.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

@@ -22,6 +22,21 @@ const BOOT = PI.bootIdOf();
 // process. /proc/stat `btime` (the kernel answers); a suite may hand its own instant (msg.bootTimeMs)
 const BOOT_AT = (() => { try { const m = /^btime (\d+)$/m.exec(fs.readFileSync('/proc/stat', 'utf8')); return m ? Number(m[1]) * 1000 : null; } catch { return null; } })();
 let bootAt = BOOT_AT;
+// ITS HUB (round 2): the process that forked it. The production unit stops with KillMode=process and a hub can be SIGKILLed (the
+// OOM killer, a crash, the unit's timeout) — nobody kills this child then; it checks between two run dirs (getppid: the parent's
+// death re-parents it) and stops at once, so no remover outlives its hub by more than the one call it is in, and two removers
+// never delete in one data dir at once (the next hub starts ≥ 5 s later and passes 2 min after its boot)
+const HUB = process.ppid;
+const hubGone = () => process.ppid !== HUB;
+let orphanDir = null, orphanSeq = null;
+/** the hub ended mid-batch: what this batch removed is left in a file for the next engine (counted once), then exit */
+function orphaned(out) {
+  if (orphanDir && out && out.removed) {
+    const f = path.join(orphanDir, `${S.ORPHAN_PREFIX}${process.pid}-${orphanSeq}.json`);
+    try { fs.writeFileSync(f + '.tmp', JSON.stringify({ removed: out.removed, entries: out.entries, jobDirs: out.jobDirs, at: Date.now() })); fs.renameSync(f + '.tmp', f); } catch { }
+  }
+  process.exit(0);
+}
 const lst = (p) => { try { return fs.lstatSync(p); } catch { return null; } };
 
 /** the run's wrapper, judged by its own stamp: true (it runs) · false (gone, recycled, a zombie, another machine boot, or no
@@ -35,7 +50,7 @@ function aliveOfStamp(runDir) {
   const f = path.join(runDir, 'pid.json'), st = lst(f);
   if (!st) return false;
   // a stamp that cannot be judged keeps its run UNTIL EVIDENCE: written before this machine's boot ⇒ no process it names runs
-  const unproven = () => (bootAt != null && st.mtimeMs < bootAt ? false : null);
+  const unproven = () => (bootAt != null && st.mtimeMs < bootAt - S.EVIDENCE_MARGIN_MS ? false : null);   // before the boot by MORE THAN A DAY (src/job-logs-sweep.js EVIDENCE_MARGIN_MS)
   if (!st.isFile()) return unproven();
   let stamp; try { stamp = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return unproven(); }
   if (!stamp || !stamp.pid) return unproven();
@@ -67,6 +82,7 @@ function whole({ ids = [] }) {
     let ents; try { ents = fs.readdirSync(jobDir, { withFileTypes: true }); } catch { continue; }
     let keptHere = 0, unjudged = 0;
     for (const e of ents) {
+      if (hubGone()) orphaned(null);   // a whole-dir batch: nothing to count
       const p = path.join(jobDir, e.name);
       if (e.isDirectory() && S.RUN_NAME.test(e.name)) { const a = aliveOf(p); if (S.wholeKeeps(a)) { keptHere++; if (a !== true) unjudged++; continue; } }
       const sc = e.isDirectory() ? scan(p) : null;
@@ -121,6 +137,7 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
     const runs = ents.filter((e) => e.isDirectory() && S.RUN_NAME.test(e.name)).map((e) => e.name).sort((a, b) => Number(a) - Number(b));
     let removedHere = 0;
     for (const r of runs) {
+      if (hubGone()) orphaned(out);   // between two run dirs: the hub is still there, or this child stops now
       const runDir = path.join(jobDir, r), k = `${id}/${r}`;
       const byName = !listed.has(k) && !held.has(k) && !skel.has(id) && Number(r) < cutoff;
       if (byName) out.nameOld++;
@@ -144,13 +161,22 @@ function sweep({ keep = {}, cutoff, max = S.PASS_MAX, count = false, stateFile =
 }
 
 /** the catch-up's record, read here (never on the main thread): its parsed object, or null (none, or bytes that do not parse) */
-function stateOf({ stateFile }) { let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; } return { state: st && typeof st === 'object' ? st : null }; }
+function stateOf({ stateFile, orphanDir: od = null }) {
+  let st = null; try { st = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { st = null; }
+  const orphans = [];
+  if (od) { let names = []; try { names = fs.readdirSync(od).filter((n) => n.startsWith(S.ORPHAN_PREFIX) && n.endsWith('.json')); } catch { }
+    for (const n of names) { let o = null; try { o = JSON.parse(fs.readFileSync(path.join(od, n), 'utf8')); } catch { } orphans.push({ name: n, removed: o && Number.isFinite(o.removed) ? o.removed : 0, entries: o && Number.isFinite(o.entries) ? o.entries : 0, jobDirs: o && Number.isFinite(o.jobDirs) ? o.jobDirs : 0 }); } }
+  return { state: st && typeof st === 'object' ? st : null, orphans };
+}
+/** an orphan's files, once the record that counted them is on disk — only names of that prefix, in that dir */
+function forget({ dir, names = [] }) { let n = 0; for (const name of names) { if (typeof name !== 'string' || !name.startsWith(S.ORPHAN_PREFIX) || name.includes('/')) continue; try { fs.unlinkSync(path.join(dir, name)); n++; } catch { } } return { forgotten: n }; }
 
 process.on('disconnect', () => process.exit(0));   // the hub went (or killed its remover): nothing is waited for
 process.on('message', (msg) => {
   bootAt = msg && Number.isFinite(msg.bootTimeMs) ? msg.bootTimeMs : BOOT_AT;
+  orphanDir = msg && typeof msg.orphanDir === 'string' ? msg.orphanDir : null; orphanSeq = msg && msg.seq;
   let out;
-  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : { error: 'unknown op' }; }
+  try { out = msg && msg.op === 'whole' ? whole(msg) : msg && msg.op === 'sweep' ? sweep({ ...msg, seq: msg.seq }) : msg && msg.op === 'state' ? stateOf(msg) : msg && msg.op === 'forget' ? forget(msg) : { error: 'unknown op' }; }
   catch (e) { out = { error: (e && e.message) || String(e) }; }
   try { process.send({ ...out, seq: msg && msg.seq }); } catch { }
 });

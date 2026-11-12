@@ -324,9 +324,14 @@ try {
     const evDir = seedAt(path.join(JE, String(OLD + 1)), { 'current.log': 'x\n' }); fs.mkdirSync(path.join(evDir, 'pid.json')); age(path.join(evDir, 'pid.json'), 30 * DAY);
     const evObj = seedAt(path.join(JE, String(OLD + 2)), { 'pid.json': '{}', 'current.log': 'x\n' });
     const evFresh = seedAt(path.join(JE, String(OLD + 3)), { 'pid.json': '{}', 'current.log': 'x\n' }); fs.utimesSync(path.join(evFresh, 'pid.json'), new Date(), new Date()); age(path.join(evFresh, 'current.log'), 30 * DAY);
-    const RE = LS.createRemover({ logsDir: GE, bootTimeMs: Date.now() - DAY });   // booted a day ago
+    // THE MARGIN (a day: the store's clock is not this machine's): before the boot by MORE than a day ⇒ evidence; by less ⇒ kept
+    const bootE = Date.now() - 3 * DAY;
+    const evIn = seedAt(path.join(JE, String(OLD + 4)), { 'pid.json': '{}', 'current.log': 'x\n' }); { const t = (bootE - DAY + 3600e3) / 1000; fs.utimesSync(path.join(evIn, 'pid.json'), t, t); }   // 23 h before the boot
+    const evOut = seedAt(path.join(JE, String(OLD + 5)), { 'pid.json': '{}', 'current.log': 'x\n' }); { const t = (bootE - DAY - 3600e3) / 1000; fs.utimesSync(path.join(evOut, 'pid.json'), t, t); }   // 25 h before the boot
+    const RE = LS.createRemover({ logsDir: GE, bootTimeMs: bootE });   // booted three days ago
     await RE.sweep({ keep: { named: [], listed: [], skeleton: [], held: [] }, cutoff: Date.now() + 1, max: 100 });
     ok(!has(evDir) && !has(evObj) && has(evFresh), 'KEPT UNTIL EVIDENCE: an unjudgeable stamp written before this machine\'s boot names no live process — its run goes; one written since the boot stays');
+    ok(has(evIn) && !has(evOut), 'THE MARGIN IS A DAY, pinned on both sides: a stamp 23 h before the boot is KEPT (a store clock behind could write it after the boot), one 25 h before goes');
     const JW = path.join(GE, 'jb-1111000f'); const wObj = seedAt(path.join(JW, String(OLD)), { 'pid.json': '{}', 'current.log': 'x\n' });
     const wAns2 = await RE.whole(['jb-1111000f']);
     ok(!has(JW) && (wAns2.gone || []).includes('jb-1111000f'), '…and a whole-dir verdict takes such a run too (the release removed it; round 1 kept it for ever)');
@@ -578,6 +583,54 @@ try {
     ok(!/=\s*fs\.(?:unlink|rm|rmdir|rename|write\w*|append\w*)Sync\b(?!\s*\()/.test(JS4) && !/\{[^}]*\b(?:unlinkSync|rmSync|rmdirSync|renameSync)\b[^}]*\}\s*=\s*(?:require\(['"](?:node:)?fs['"]\)|fs)\b/.test(JS4), 'no alias of a removing or writing fs call in jobs.js');
     const saveBody = (JS4.match(/  _logsSave\(\) \{[\s\S]*?\n  \}\n/) || [''])[0];
     ok(saveBody && !/\bfs\.|writeJsonAtomic/.test(saveBody) && !/(?:writeJsonAtomic|writeFileSync|appendFileSync|renameSync|copyFileSync)\([^)]*logsSweepFile/.test(JS4), 'the catch-up record is written by the store writer alone: _logsSave holds no fs call, and no write anywhere names its file');
+  }
+
+
+  // ── §O NO REMOVER OUTLIVES ITS HUB (round 2 note 1) — real processes: a hub SIGKILLed while its child is mid-batch ───────
+  lap('§O no remover outlives its hub');
+  if (LS) {
+    const slow15 = path.join(tmp, 'slow15-child.cjs');
+    fs.writeFileSync(slow15, `const fs = require('fs'); const rm = fs.rmSync; fs.rmSync = function (...a) { const t = performance.now() + 15; while (performance.now() < t) { } return rm.apply(this, a); };\nrequire(${JSON.stringify(path.join(ROOT, 'src/job-logs-sweep-worker.js'))});\n`);
+    const o5 = mkDir('o5'); fs.mkdirSync(path.join(o5, 'job-logs'), { recursive: true });
+    const ob = Date.now() - 50 * DAY; for (let i = 0; i < 60; i++) seedRun(o5, 'jb-0ld0000f', ob + i * 1000, { ageMs: 30 * DAY });
+    fs.writeFileSync(path.join(o5, 'jobs.json'), JSON.stringify([{ id: 'jb-0ld0000f', kind: 'task', name: 'often run', state: 'done', owner, access: { view: 'all', control: 'session' }, runs: [] }]));
+    const hubS = path.join(tmp, 'a-hub.cjs');
+    fs.writeFileSync(hubS, `const { JobManager } = require(${JSON.stringify(path.join(ROOT, 'src/jobs.js'))});\nconst jm = new JobManager({ dataDir: ${JSON.stringify(o5)}, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => process.stdout.write(a.join(' ') + '\\n'), memoryRungs: [], logsSweep: { max: 20, gapMs: 30, restFactor: 1, bootDelayMs: 20, workerPath: ${JSON.stringify(slow15)} } });\njm.init(); setInterval(() => { }, 1000);\n`);
+    const left = () => runsOn(o5, 'jb-0ld0000f').length;
+    const hub = spawn(process.execPath, [hubS], { stdio: ['ignore', 'pipe', 'ignore'] }); kids.push(hub);
+    let out = ''; hub.stdout.on('data', (d) => { out += d; });
+    const mid = await until(() => /catch-up: 60 run dir/.test(out) && left() <= 37 && left() >= 22, 15000, 2);   // pass 1 counted + recorded, pass 2 mid-way
+    try { process.kill(hub.pid, 'SIGKILL'); } catch { }
+    const atKill = left();
+    const orphanFile = () => fs.readdirSync(o5).find((n) => n.startsWith(LS.ORPHAN_PREFIX) && n.endsWith('.json'));
+    await until(() => !!orphanFile(), 5000, 5);   // the child's own evidence that it stopped
+    await sleep(60); const afterStop = left();
+    let orphan = null; try { orphan = JSON.parse(fs.readFileSync(path.join(o5, orphanFile()), 'utf8')); } catch { }
+    ok(mid && orphan && afterStop >= atKill - 1, `NO REMOVER OUTLIVES ITS HUB: SIGKILLed mid-batch, its child stops within one run dir (${atKill} left at the kill, ${afterStop} once it stopped) and leaves what it removed (${orphan && orphan.removed})`, { mid, atKill, afterStop });
+    const { jm: N5, logs: LN5 } = boot(o5, { max: 20, gapMs: 15, bootDelayMs: 20 });
+    await until(() => left() === 0 && N5._logsState && !N5._logsState.catchUp && LN5.some((l) => /catch-up done/.test(l)), 15000, 10);
+    const done5 = LN5.find((l) => /catch-up done/.test(l)) || '';
+    ok(/catch-up done: 60 run dir\(s\) removed/.test(done5) && LN5.some((l) => /a remover whose hub ended removed \d+ run dir\(s\) before it stopped — counted in the catch-up/.test(l)) && !orphanFile(), 'the NEXT engine counts what the orphan removed exactly once: the catch-up\'s done line says all 60, and the orphan\'s file is forgotten after its count is on disk', { done5 });
+  } else ok(false, 'no remover outlives its hub (no remover on this tree)');
+  // a restart BETWEEN the count and the forget: the orphan's name is in the record, its file still there — never counted twice
+  if (LS) {
+    const o6 = mkDir('o6'); fs.mkdirSync(path.join(o6, 'job-logs'), { recursive: true });
+    const b6 = Date.now() - 50 * DAY; for (let i = 0; i < 5; i++) seedRun(o6, 'jb-0ld00010', b6 + i * 1000, { ageMs: 30 * DAY });
+    const oname = LS.ORPHAN_PREFIX + '424242-7.json';
+    fs.writeFileSync(path.join(o6, oname), JSON.stringify({ removed: 3, entries: 9, jobDirs: 0, at: Date.now() }));
+    fs.writeFileSync(path.join(o6, 'jobs-logs-sweep.json'), JSON.stringify({ catchUp: { startedAt: Date.now() - 3600e3, counted: 10, removed: 5, entries: 15, jobDirs: 0, passes: 2 }, last: null, heldSaid: [], owed: [], heldNow: [], orphansCounted: [oname] }));
+    const { jm: N6, logs: LN6 } = boot(o6, { max: 20, gapMs: 15, bootDelayMs: 20 });
+    await until(() => LN6.some((l) => /catch-up done/.test(l)), 10000, 10);
+    ok(LN6.some((l) => /catch-up done: 10 run dir\(s\) removed/.test(l)) && !fs.existsSync(path.join(o6, oname)), 'a restart between an orphan\'s count and its forget: its name in the record keeps it from being counted twice (done: 5 + 5 = 10), and its file is forgotten', LN6.filter((l) => /job-logs/.test(l)));
+  }
+  // an IDLE child ends — no process parked between two passes
+  if (LS) {
+    const cpm = await import('node:child_process'); const forked = [];
+    const R = LS.createRemover({ logsDir: path.join(tmp, 'idle-nowhere'), idleMs: 50, forkImpl: (...a) => { const c = cpm.fork(a[0], a[1], { env: { PATH: process.env.PATH }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }); forked.push(c); return c; } });
+    await R.whole(['jb-1d1e0001']); await R.settled();
+    const ended = await new Promise((resolve) => { const c = forked[0]; if (!c) return resolve(false); if (c.exitCode !== null || c.signalCode !== null) return resolve(true); const k = setTimeout(() => resolve(false), 5000); c.once('exit', () => { clearTimeout(k); resolve(true); }); });
+    ok(forked.length === 1 && ended, 'an IDLE child ends after its linger: no process is parked between two passes');
+    R.stop();
   }
 
   // ── P4 THE CATCH-UP over 5 000 seeded dropped runs ─────────────────────────────────────────────────────────────────────

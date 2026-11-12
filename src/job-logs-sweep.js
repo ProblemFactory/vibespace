@@ -24,6 +24,7 @@
 // PURE here (the verdict, the keep set, the words) + the main-thread side of the worker (a queue; no fs call of its own).
 // scripts/test-job-logs-sweep.mjs pins it.
 const path = require('path');
+const { fork } = require('child_process');   // the remover's child (round 2): a spawn site — scripts/spawn-env-census.mjs judges its built env
 
 const RETENTION_MS = 14 * 86400e3;   // a finished task's (src/jobs.js _gc): the same 14 days for a run no record lists
 const PASS_MAX = 500;                // B — run dirs removed per pass (≈ 2 000 entries on the owner's shape)
@@ -31,6 +32,15 @@ const GAP_MS = 30_000;               // G — between two passes while a catch-u
 const BOOT_DELAY_MS = 120_000;       // the first pass after a boot (a hub that restarts more often than hourly still sweeps)
 const BATCH_TIMEOUT_MS = 120_000;    // a batch past this is terminated, said once, queued again (≤ 2 tries)
 const IDLE_MS = 1000;                // an idle worker lingers this long (unref'd) for the next batch, then is terminated
+// «KEPT UNTIL EVIDENCE»: a stamp that cannot be judged names no live process only when it was written BEFORE THIS MACHINE'S BOOT BY
+// MORE THAN A DAY. The stamp's time is the STORE's clock (a network mount stamps with its server's), the boot instant is this
+// machine's and moves when its clock is set: a day is more than any time-zone mistake (≤ 14 h) and far past the store skew the
+// data-move kit refuses (2 s, measured on this mount). In a CONTAINER the kernel's boot is the HOST's: a stamp from before a
+// container restart is NOT «before boot» — that run is KEPT (the safe side), never a hole.
+const EVIDENCE_MARGIN_MS = 86_400_000;
+// a remover whose hub ended stops between two run dirs and leaves what it removed in this file in the data dir (the next engine
+// counts it ONCE: its name is kept in the record until the file is gone)
+const ORPHAN_PREFIX = 'jobs-remover-orphan-';
 const WEDGED_MS = 2000;              // a terminated thread not ended this long after is WEDGED (a syscall the storage never answers)
 const JOB_NAME = /^jb-[0-9a-z]{1,40}$/;
 const RUN_NAME = /^\d{1,16}$/;
@@ -88,7 +98,6 @@ const words = {
 function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS, idleMs = IDLE_MS, wedgedMs = WEDGED_MS, workerPath = path.join(__dirname, 'job-logs-sweep-worker.js'), forkImpl = null, filterWhole = null, bootTimeMs = null } = {}) {
   // round 2 law «the hub's exit never waits for the remover»: a CHILD PROCESS, not a worker thread — a process's exit joins its
   // threads (one wedged in a storage call held a standalone exit until it was killed), never its children
-  const fork = forkImpl || require('child_process').fork;
   const queue = [];
   let worker = null, cur = null, timer = null, idleT = null, seq = 0, stopped = false;
   // a child killed past its timeout that has not ENDED yet — wedged in a syscall (a storage that stopped answering: an
@@ -123,7 +132,7 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   /** the remover's child: our own script, its env BUILT (a PATH only — the hub's environment and its secrets never reach it),
    *  an IPC channel and nothing else, a bounded heap */
   function startChild() {
-    const w = fork(workerPath, [logsDir], { env: { PATH: process.env.PATH || '/usr/bin:/bin' }, execArgv: ['--max-old-space-size=96'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const w = forkImpl ? forkImpl(workerPath, [logsDir], {}) : fork(workerPath, [logsDir], { env: { PATH: process.env.PATH || '/usr/bin:/bin' }, execArgv: ['--max-old-space-size=96'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     w.on('message', (m) => {
       if (w === worker && cur && m && m.seq === cur.msg.seq) { if (m.progress && !('removed' in m && 'more' in m)) { cur.progress = m.progress; return; } finish(m); }
     });
@@ -169,7 +178,8 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   return {
     whole: (ids) => ask({ op: 'whole', ids: [...new Set((Array.isArray(ids) ? ids : [ids]).filter((id) => typeof id === 'string' && JOB_NAME.test(id)))] }),
     sweep: (args, opts) => ask({ op: 'sweep', ...args }, opts),   // opts.timeoutMs: the counting pass walks the whole tree
-    state: (stateFile) => ask({ op: 'state', stateFile }),   // the catch-up's record, read off the main thread
+    state: (stateFile, orphanDir = null) => ask({ op: 'state', stateFile, orphanDir }),   // the catch-up's record (+ what an orphaned remover left), read off the main thread
+    forget: (dir, names) => ask({ op: 'forget', dir, names }),   // an orphan's counts, once the record that counted them is on disk
     settled: () => (cur || queue.length ? new Promise((r) => idle.push(r)) : Promise.resolve()),
     busy: () => !!cur || queue.length > 0,
     held: () => !!wedged,
@@ -179,4 +189,4 @@ function createRemover({ logsDir, log = () => { }, timeoutMs = BATCH_TIMEOUT_MS,
   };
 }
 
-module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, JOB_NAME, RUN_NAME, RECOVERED_NOTE, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };
+module.exports = { RETENTION_MS, PASS_MAX, GAP_MS, BOOT_DELAY_MS, BATCH_TIMEOUT_MS, IDLE_MS, WEDGED_MS, EVIDENCE_MARGIN_MS, ORPHAN_PREFIX, JOB_NAME, RUN_NAME, RECOVERED_NOTE, isSkeleton, runVerdict, wholeKeeps, keepSetOf, words, createRemover };

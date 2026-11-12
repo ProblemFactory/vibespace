@@ -2551,7 +2551,7 @@ class JobManager {
     const loaded = this._logsState !== null, counting = loaded ? !this._logsState.catchUp : true;
     const ans = await this._logsRemover().sweep({ keep, cutoff: at - cfg.retentionMs, max: cfg.max, count: loaded ? counting : 'auto', stateFile: loaded ? null : this.logsSweepFile,   // `counting` walks on past B by NAME only (no stat, no /proc)
       archiveFile: this.archive && !this._logsUnread.archive ? null : this.archiveFile, storeFile: this._logsUnread.store ? this.file : null,
-      setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] } },
+      setAside: { dir: this.d.dataDir, prefixes: [path.basename(this.file) + '.corrupt-', path.basename(this.archiveFile) + '.corrupt-'] }, orphanDir: this.d.dataDir },
       { timeoutMs: cfg.timeoutMs });   // round 2: the counting pass has the same timeout — past B it only reads directories
     if (ans && !ans.error && ans.heldBy) { this._logsHeld(ans, cfg); return ans; }   // a set-aside record store: nothing removed, said once
     if (!ans || ans.error) {
@@ -2581,6 +2581,7 @@ class JobManager {
     st.last = { at, why, removed: ans.removed, entries: ans.entries, more: !!ans.more, ms: ans.ms };
     if (cu && !ans.more) { this.d.log(LS.words.done({ ...cu, kept: ans.keptOld || 0 })); st.catchUp = null; } // …and once when it is done, with its total (the last, complete pass's «kept»)
     this._logsSave();
+    if (cu) await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { });   // round 2: a catch-up pass's count is on disk before the next — a hub killed between passes loses none (the batch in flight is the orphan file's)
     if (st.catchUp) this._logsNext(Math.max(cfg.gapMs, cfg.restFactor * (ans.ms || 0)));   // round 2: a slow pass earns a longer rest
     return ans;
   }
@@ -2611,7 +2612,8 @@ class JobManager {
     const cu = r && r.catchUp;
     this._logsState = { catchUp: cu && typeof cu === 'object' && ['startedAt', 'counted', 'removed', 'entries', 'passes'].every((k) => fin(cu[k])) ? { jobDirs: 0, ...cu } : null,
       last: r && r.last && typeof r.last === 'object' ? r.last : null, heldSaid: Array.isArray(r && r.heldSaid) ? r.heldSaid.filter((x) => typeof x === 'string').slice(-100) : [],
-      owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [] };
+      owed: Array.isArray(r && r.owed) ? r.owed.filter((x) => typeof x === 'string' && LS.JOB_NAME.test(x)).slice(-LOGS_OWED_MAX) : [], heldNow: Array.isArray(r && r.heldNow) ? r.heldNow.filter((x) => typeof x === 'string').slice(0, 20) : [],
+      orphansCounted: Array.isArray(r && r.orphansCounted) ? r.orphansCounted.filter((x) => typeof x === 'string').slice(-50) : [] };
     for (const id of this._logsState.owed) this._logsOwed.add(id);   // what an earlier process owed survives its restart
   }
   /** a set-aside's item was filed: its file is «said» — on disk at once (durably), so a restart never files it twice */
@@ -2621,7 +2623,24 @@ class JobManager {
   _logsEnsureMerged() {
     if (this.readOnly) return;
     if (this._logsState) { this._logsMergeSaid(); return; }
-    if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile).then((a) => { if (this._logsState === null && a && !a.error) this._logsAdopt(a.state); this._logsMergeSaid(); }).catch(() => { }).finally(() => { this._logsStateP = null; });
+    if (!this._logsStateP) this._logsStateP = this._logsRemover().state(this.logsSweepFile, this.d.dataDir).then((a) => { if (this._logsState === null && a && !a.error) { this._logsAdopt(a.state); return this._logsOrphans(a.orphans || []); } this._logsMergeSaid(); }).catch(() => { }).finally(() => { this._logsStateP = null; });
+  }
+  /** what an orphaned remover removed before it stopped (its hub died mid-batch): counted ONCE into the open catch-up — its name
+   *  kept in the record (durably) before its file is forgotten, so a restart between the two never counts it twice */
+  async _logsOrphans(orphans) {
+    const st = this._logsState; if (!st) return;
+    st.orphansCounted = (st.orphansCounted || []).filter((n) => orphans.some((o) => o.name === n));   // a name whose file is gone is done
+    let grew = false;
+    for (const o of orphans) {
+      if (st.orphansCounted.includes(o.name)) continue;
+      if (st.catchUp) { st.catchUp.removed += o.removed; st.catchUp.entries += o.entries; st.catchUp.jobDirs = (st.catchUp.jobDirs || 0) + o.jobDirs; }
+      this.d.log(`[jobs] job-logs: a remover whose hub ended removed ${o.removed} run dir(s) before it stopped — ${st.catchUp ? 'counted in the catch-up' : 'said here'}`);
+      st.orphansCounted.push(o.name); grew = true;
+    }
+    this._logsMergeSaid();
+    if (grew) { this._logsSave(); await require('./store-writer.js').storeWriter().durable(this.logsSweepFile).catch(() => { }); }
+    const done = orphans.map((o) => o.name).filter((n) => st.orphansCounted.includes(n));
+    if (done.length) await this._logsRemover().forget(this.d.dataDir, done);
   }
   _logsMergeSaid() {
     const st = this._logsState; if (!st) return;
