@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - In the accounts list, a long-lived token that needs nothing from you is now a small clock icon, so the account's note has its line back.
 - A long-lived token's last day is now said once on its row, not twice.
+- A restart no longer updates VibeSpace by itself — to update, press ⚙ → Update VibeSpace….
 
 ### Fixed
 - When a page goes away or crashes in the middle of a passkey sign-in, the passkey VibeSpace lent to the tab is taken back. Before, it could stay on the tab.
@@ -14,6 +15,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If a page does not take your Cancel of a passkey sign-in, VibeSpace now says it could not cancel it, instead of saying nothing is waiting.
 - A passkey sign-in that a page starts right after you cancel one is no longer cancelled along with it.
 - Relearning how fast each account uses its limits no longer pauses VibeSpace: it happens a little at a time.
+- Opening the plugins panel no longer freezes VibeSpace for seconds while Tailscale's status is read; it shows the last known state, then the new one.
+- A large Gmail folder no longer freezes VibeSpace for a moment every five minutes while it checks for new mail.
+- When a Gmail folder cannot be read, its row now says the sync stopped and that it will try again, instead of showing it as synced.
+- If an update stops partway, it now puts back the files it changed and says so, so the next update is not blocked.
 
 ## 2.369.396 — 2026-11-11
 
