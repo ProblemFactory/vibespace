@@ -1977,6 +1977,7 @@ const I_RECV = {
   'src/server/helper-asks.js|session': ['session', 'a session\'s name'], 'src/server/integration-store.js|row': ['integration', 'an integration row label'], 'src/server/login-expiry-watch.js|a': ['account', 'an account'],
   'src/server/mounts-plugins-wiring.js|session': ['session', 'a session\'s name'], 'src/server/path-mounts.js|p': ['mount', 'a path mount\'s name'], 'src/server/plugin-install.js|a': ['plugin', 'a release asset'], 'src/server/plugin-install.js|asset': ['plugin', 'a release asset'],
   'src/server/spend-guard.js|identity': ['account', 'a billing identity'], 'src/server/stash-handover.js|r': ['delivery', 'the ladder\'s refusal reason'],
+  'src/server/usage-pool-engine.js|p': ['account', 'a pool account — account-reset-door K1\'s sayBasisFlip prints its name in a [pool] journal line, as the spawn lines print |a\'s (the .397 train\'s seam)'],
   'src/server/usage-pool-engine.js|a': ['account', 'an account / pool'], 'src/server/usage-pool-engine.js|cap': ['quota', 'a cap\'s name'], 'src/server/usage-pool-engine.js|desc': ['quota', 'a reset credit\'s description'],
   'src/server/usage-pool-engine.js|d': ['quota', 'a pool decision\'s reason'], 'src/server/usage-pool-engine.js|hit': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|restartPending': ['account', 'an account'],
   'src/server/usage-pool-engine.js|row': ['account', 'a slot transition\'s from'], 'src/server/usage-pool-engine.js|session': ['session', 'a session\'s name'], 'src/server/usage-pool-engine.js|sh': ['account', 'a lag shadow\'s from'],
