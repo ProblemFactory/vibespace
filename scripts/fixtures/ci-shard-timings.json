@@ -302,6 +302,7 @@
   "test-stage-overlap": 160201,
   "test-stdout-registry": 27459,
   "test-store-writer": 201516,
+  "test-stream-leg-fallback": 20000,
   "test-stream-mic-op": 13097,
   "test-stream-op": 115919,
   "test-stream-sound-op": 18853,

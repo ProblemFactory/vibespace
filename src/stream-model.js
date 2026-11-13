@@ -41,10 +41,23 @@
  *                                    the hub relay's port (TURN-shaped — a firewall that blocks every inbound UDP to the agent
  *                                    lets in the answers to what it sent): an authenticated PING / PONG (HMAC over a counter +
  *                                    a nonce, the mac handed in — this file imports no crypto) and DATA (the browser's address +
- *                                    its datagram); relayPathOf(page, relay) = direct | udp | link (the strip's words)
+ *                                    its datagram); relayPathOf(page, relay) = direct | udp | link (the strip's words) ·
+ *                                    legSeqFlags(seq) / legSeqOf(flags) — THE TAKE'S NUMBER in a WORD's / a PING's flags (r3)
  *   legElect(el, ev)                 THE PATH ELECTION (lane stream-leg-flap): ONE per relayed session, with hysteresis — the hub
  *                                    takes the leg once when it comes up and leaves it only when it is MEASURED dead (silent
- *                                    for its bound), never because the device link spoke too
+ *                                    for its bound), never because the device link spoke too; lane stream-udp-leg-fallback: a
+ *                                    leg that carried NOTHING for legFirstMs after the browser's first datagram is dead too (R1),
+ *                                    a daemon that answers probes is taken only when the hub's PROBE made the round trip (R2),
+ *                                    and legFlapMax falls within legFlapMs pin the session to the device link (R3)
+ *   legVerdictOf(hub, daemon)        THE LEG'S VERDICT (lane stream-udp-leg-fallback R2): up | probing | dead + the reason both
+ *                                    halves' counts name (no_socket, bind_failed, flapping, carried_nothing, probe_lost,
+ *                                    unreachable, firewall?, silent) — the record's and the hub log's · legProbeBytes() — the
+ *                                    probe's size: the LARGEST datagram the leg carries (src/stream-h264.js maxDatagram + the
+ *                                    leg's DATA head), derived (r2)
+ *   legFallStep(seen, relay, state) THE PAGE'S SHARE OF R1: a fall the hub records while the page still connects ⇒ an ICE
+ *                                    restart now, never at the connect budget (a browser gave the dead pair up)
+ *   streamRoadOf(page, relay)        THE ROAD (lane stream-udp-leg-fallback R4): which way the picture comes for the window's chip
+ *                                    (direct | udp | link), the fallback's reason, and whether any road answered at all
  *   stallStep(w, facts)              THE STALL (lane stream-leg-flap): a playing picture that decodes nothing while the machine
  *                                    says it sends ⇒ the window says so and offers the stream again (never «0 fps» for ever)
  *   firewallRuleCommand(program)     the admin line that opens the DIRECT path on a Windows machine (copied by its owner, never
@@ -55,6 +68,7 @@
  */
 const B = require('./desktop-backends.js');
 const SW = require('./stream-window.js');
+const H264 = require('./stream-h264.js'); // PURE: the packetizer's payload bound + werift's wire overhead (legProbeBytes)
 
 const STREAM_CODEC = Object.freeze({
   mimeType: 'video/H264',
@@ -97,7 +111,7 @@ const streamCodecsOf = ({ hdr = false } = {}) => (hdr ? [STREAM_CODEC_AV1, STREA
 const STREAM_SOURCES = Object.freeze(['screen', 'fake', 'window']); // 'window' = ONE window of the machine (lane stream-p3m-build on a Mac; stream-p2w-build on Windows)
 const MAC_CAPABILITY = 'stream-mac';       // the agent captures a Mac's screen through its helper (an older Mac agent already says stream-screen)
 const WINDOW_CAPABILITY = SW.WINDOW_CAPABILITY; // 'stream-window': the agent captures ONE window — the one word of both platforms (src/stream-window.js; int304)
-const STREAM_LIMITS = Object.freeze({
+const STREAM_LIMITS = ((l) => Object.freeze({ ...l, legTrialMaxMs: l.legFirstMs + l.legEchoMs }))({ // legTrialMaxMs DERIVED — THE TRIAL'S BOUND below
   maxKbpsDefault: 8000, maxKbpsMin: 300, maxKbpsMax: 50000,
   sessionsCap: 4,             // a daemon serves at most a stream per display + one (a phone beside them), never more than this — streamCapOf
   orphanMs: 20000,            // a session whose device link died waits this long for the hub's re-arm, then stops
@@ -117,6 +131,19 @@ const STREAM_LIMITS = Object.freeze({
   // picture (= legMissMax × legLiveMs: three PING periods, the daemon's own verdict), legStaleMs when it carried none (an idle
   // leg PINGs every legKeepaliveMs: two of them + 5 s)
   legKeepaliveMs: 15000, legLiveMs: 2000, legEchoMs: 2000, legMissMax: 3, legProbeMs: 500, legReprobeMs: 5000, legDeadMs: 6000, legStaleMs: 35000, legTargets: 6,
+  // THE FIRST DATA (lane stream-udp-leg-fallback R1 — 2026-10-26 the owner's Mac: «leg up» at the offer, then 45 s of a black
+  // pane: the daemon's PINGs kept the idle bound fresh while the leg carried nothing): a leg the hub took that sent NOTHING back
+  // legFirstMs after the browser's first datagram went out on it is dead, however many PINGs it answers ⇒ the device link
+  // (inside the page's connectMs, so the page never asks a restart). THE PROBE (R2): the hub takes a daemon that answers probes
+  // only when ITS PROBE came back — legProbeBytes() long, the largest datagram the leg carries (r2: derived from the packetizer's
+  // bound, never a literal here); the daemon PINGs every legReadyMs while it waits for the hub's word; legProbeMax lost in a row =
+  // dead, named. THE DAMPER (R3): legFlapMax falls within legFlapMs ⇒ the device link for the rest of the session (re-probes back
+  // off legReprobeMs × 2^(falls − 1) until then). THE TRIAL'S BOUND (r2 — one lost trial-ending TAKE kept every datagram on both
+  // roads for the session): a daemon on trial whose first DATA went out legTrialMaxMs ago (= legFirstMs + legEchoMs: past the
+  // hub's own first-data deadline, so the hub has taken the leg or left it) without the hub's plain TAKE leaves the trial itself.
+  // THE DAEMON'S CLOCK (r3): its leg ticks every legTickMs (the misses, the bound, the PING cadence) — the hub calls a trial «still
+  // on trial» only past that bound + one tick + one round trip + one stats push (statsMs), what it cannot see of the daemon
+  legFirstMs: 7000, legReadyMs: 1000, legProbeMax: 3, legFlapMax: 3, legFlapMs: 120000, legTickMs: 250,
   // THE STALL (lane stream-leg-flap — stallStep): a PLAYING picture that decoded no frame for stallMs while the machine says it
   // sent some = stalled ⇒ said and offered again. Longer than the leg's own way back (a dead leg: the daemon's three misses
   // ≤ legLiveMs + legMissMax × legEchoMs ≈ 8 s, then a key frame over the device link), so it never races the election
@@ -419,14 +446,30 @@ function relayCandidates(ips, port) {
 // an authenticated PING teaches the hub the daemon's (ip, port) and is answered by a PONG; from then on the browser's
 // datagrams and the agent's answers ride plain UDP as DATA. Every packet starts with the magic 'VSR1' — never a STUN (0–3),
 // DTLS (20–63) or RTP / RTCP (128–191) first byte (RFC 7983), so ONE hub socket tells the daemon from the browsers.
-const LEG = Object.freeze({ magic: Object.freeze([0x56, 0x53, 0x52, 0x31]), PING: 1, PONG: 2, DATA: 3, UP: 1, headBytes: 18, macBytes: 16, nonceBytes: 8, keyBytes: 32, dataHead: 11 });
+// lane stream-udp-leg-fallback: THE PROBE (hub → daemon) and its ECHO (daemon → hub) — control packets padded to the largest
+// datagram the leg carries (legProbeBytes), so «leg up» is a datagram of the size the leg must carry that made the round trip at
+// the HUB's asking — and the hub's WORD (TAKE: the hub forwards on the leg, send yours there — with TRIAL: on the leg AND over the
+// device link until the hub heard the leg carry, make before break / LEAVE: the hub left it, use the device link). A daemon that
+// answers says so in its PING flags (ANSWERS); a hub that words says so in its PONG flags (WORDS) — an older daemon ignores
+// both (its parser drops types 4–6), an older hub never sends them: each side keeps the .358 behaviour with an older peer.
+// r2: A WORD IS A STATE, said until the other side shows it heard — the daemon's PING says its road (UP: up · UP + TRIAL: on
+// trial · neither: the device link), and the hub says LEAVE again while it flags UP, TAKE again while it flags TRIAL.
+// r3: THE TAKE'S NUMBER — a WORD carries the hub's take (1 … seqMax, the flags' bits seqShift and up), the daemon's PING echoes
+// the last it heard (0: none) and its facts say it (`takeSeq`): the hub judges a trial only by facts of the take it is in. The
+// low bits keep their meaning — an older peer reads only those.
+const LEG = Object.freeze({ magic: Object.freeze([0x56, 0x53, 0x52, 0x31]), PING: 1, PONG: 2, DATA: 3, PROBE: 4, ECHO: 5, WORD: 6, UP: 1, ANSWERS: 2, WORDS: 2, TAKE: 1, LEAVE: 2, TRIAL: 4, seqShift: 3, seqMax: 31, headBytes: 18, macBytes: 16, nonceBytes: 8, keyBytes: 32, dataHead: 11 });
 const isLegPacket = (b) => b instanceof Uint8Array && b.length >= 5 && b[0] === LEG.magic[0] && b[1] === LEG.magic[1] && b[2] === LEG.magic[2] && b[3] === LEG.magic[3];
-/** A PING (daemon → hub) or a PONG (hub → daemon): 'VSR1' · type · flags (UP = the daemon sends its datagrams on the leg) ·
+/** A PING (daemon → hub) or a PONG (hub → daemon): 'VSR1' · type · flags (UP = the daemon sends its datagrams on the leg; r2: + TRIAL = on trial, the device link too) ·
  *  counter (u32, strictly rising per session — the hub's replay bound) · nonce (8 random bytes; the PONG echoes both) · mac
- *  = `mac(the first 18 bytes)` cut to 16 (HMAC-SHA256 under the session's key — handed in). → Uint8Array(34) | null */
-function legControl(type, { flags = 0, counter, nonce, mac } = {}) {
-  if ((type !== LEG.PING && type !== LEG.PONG) || !Number.isInteger(counter) || counter < 0 || counter > 0xffffffff || !(nonce instanceof Uint8Array) || nonce.length !== LEG.nonceBytes || typeof mac !== 'function') return null;
-  const out = new Uint8Array(LEG.headBytes + LEG.macBytes);
+ *  = `mac(the first 18 bytes)` cut to 16 (HMAC-SHA256 under the session's key — handed in). → Uint8Array(34) | null
+ *  lane stream-udp-leg-fallback: a WORD (hub → daemon, its own rising counter) is the same 34 bytes; a PROBE / ECHO is padded
+ *  with zeros to `bytes` (34 … dataHead + relayMaxDatagram; the ECHO echoes the PROBE's counter, nonce and size). */
+function legControl(type, { flags = 0, counter, nonce, mac, bytes = 0 } = {}) {
+  const padded = type === LEG.PROBE || type === LEG.ECHO;
+  if ((type !== LEG.PING && type !== LEG.PONG && type !== LEG.WORD && !padded) || !Number.isInteger(counter) || counter < 0 || counter > 0xffffffff || !(nonce instanceof Uint8Array) || nonce.length !== LEG.nonceBytes || typeof mac !== 'function') return null;
+  const size = padded ? Math.max(LEG.headBytes + LEG.macBytes, Number(bytes) || 0) : LEG.headBytes + LEG.macBytes;
+  if (!Number.isInteger(size) || size > LEG.dataHead + STREAM_LIMITS.relayMaxDatagram) return null;
+  const out = new Uint8Array(size);
   out.set(LEG.magic, 0); out[4] = type; out[5] = flags & 0xff;
   new DataView(out.buffer).setUint32(6, counter >>> 0);
   out.set(nonce, 10);
@@ -435,6 +478,14 @@ function legControl(type, { flags = 0, counter, nonce, mac } = {}) {
   out.set(m.subarray(0, LEG.macBytes), LEG.headBytes);
   return out;
 }
+/** THE TAKE'S NUMBER (r3 — a re-take's trial was judged by the facts of the take before it): `seq` (0 … seqMax) → the flag bits
+ *  that carry it, beside a WORD's TAKE / LEAVE / TRIAL or a PING's UP / ANSWERS / TRIAL; a packet's flags → the number. */
+const legSeqFlags = (seq) => ((Number(seq) & LEG.seqMax) << LEG.seqShift) & 0xff;
+const legSeqOf = (flags) => (Number(flags) >> LEG.seqShift) & LEG.seqMax;
+/** THE PROBE'S SIZE (lane stream-udp-leg-fallback r2 — a 1200-byte probe passed a path that would drop every full picture
+ *  packet, and the leg was taken): the LARGEST datagram the leg carries — the DATA head + the largest datagram werift sends for
+ *  the packetizer's largest payload (src/stream-h264.js maxDatagram). Derived, never a second literal. → bytes */
+const legProbeBytes = () => LEG.dataHead + H264.maxDatagram();
 /** DATA: 'VSR1' · 3 · the browser's IPv4 (4) · its port (u16) · the datagram. No mac — like TURN's ChannelData the 5-tuple is
  *  the proof (the hub takes DATA only from the address an authenticated PING came from, the daemon only from the hub address
  *  that answered its PING), and the payload is DTLS / SRTP, sealed end to end. → Uint8Array | null (relayFrame's bounds) */
@@ -446,6 +497,7 @@ function legData(ip, port, payload) {
   out.set(fr.subarray(2), 5);
   return out;
 }
+const CONTROL_TYPES = Object.freeze({ [LEG.PING]: 'ping', [LEG.PONG]: 'pong', [LEG.PROBE]: 'probe', [LEG.ECHO]: 'echo', [LEG.WORD]: 'word' });
 /** Constant time over the mac's bytes. */
 function sameBytes(a, b) {
   if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) return false;
@@ -453,8 +505,8 @@ function sameBytes(a, b) {
   for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
   return d === 0;
 }
-/** A leg packet → { type: 'ping' | 'pong', flags, counter, nonce, ok } (ok = its mac holds under `mac`) | { type: 'data', ip,
- *  port, payload } | null (not a leg packet, or malformed). */
+/** A leg packet → { type: 'ping' | 'pong' | 'probe' | 'echo' | 'word', flags, counter, nonce, bytes, ok } (ok = its mac holds
+ *  under `mac`) | { type: 'data', ip, port, payload } | null (not a leg packet, or malformed). */
 function legParse(b, mac) {
   if (!isLegPacket(b)) return null;
   const t = b[4];
@@ -462,11 +514,14 @@ function legParse(b, mac) {
     if (b.length < LEG.dataHead + 1 || b.length > LEG.dataHead + STREAM_LIMITS.relayMaxDatagram) return null;
     return { type: 'data', ip: `${b[5]}.${b[6]}.${b[7]}.${b[8]}`, port: (b[9] << 8) | b[10], payload: b.subarray(LEG.dataHead) };
   }
-  if ((t !== LEG.PING && t !== LEG.PONG) || b.length !== LEG.headBytes + LEG.macBytes) return null;
+  const name = CONTROL_TYPES[t];
+  if (!name) return null;
+  const padded = t === LEG.PROBE || t === LEG.ECHO;
+  if (padded ? b.length < LEG.headBytes + LEG.macBytes || b.length > LEG.dataHead + STREAM_LIMITS.relayMaxDatagram : b.length !== LEG.headBytes + LEG.macBytes) return null;
   const want = typeof mac === 'function' ? mac(b.subarray(0, LEG.headBytes)) : null;
   return {
-    type: t === LEG.PING ? 'ping' : 'pong', flags: b[5], counter: new DataView(b.buffer, b.byteOffset, b.length).getUint32(6), nonce: b.subarray(10, 18),
-    ok: want instanceof Uint8Array && want.length >= LEG.macBytes && sameBytes(want.subarray(0, LEG.macBytes), b.subarray(LEG.headBytes)),
+    type: name, flags: b[5], counter: new DataView(b.buffer, b.byteOffset, b.length).getUint32(6), nonce: b.subarray(10, 18), bytes: b.length,
+    ok: want instanceof Uint8Array && want.length >= LEG.macBytes && sameBytes(want.subarray(0, LEG.macBytes), b.subarray(LEG.headBytes, LEG.headBytes + LEG.macBytes)),
   };
 }
 /** May the hub take this PING? `lastCounter` = the highest it took for the session. → { take, code: forged | replayed } */
@@ -497,18 +552,101 @@ function relayPathOf(page, relay) {
  *                   leg's silence decides
  *    'judge'        the browser's datagram asks for a path: the elected leg is DEAD after its silence bound — legDeadMs
  *                   when it carried the picture (DATA within a keepalive of its last sign), legStaleMs when idle
- *  → { via, aliveAt, dataAt, changed, why } (why = the log's words for a change) */
-function legElect(el, ev, { deadMs = STREAM_LIMITS.legDeadMs, idleMs = STREAM_LIMITS.legStaleMs, keepaliveMs = STREAM_LIMITS.legKeepaliveMs } = {}) {
+ *  lane stream-udp-leg-fallback (the owner's Mac 2026-10-26: «leg up» at the offer, the page black 45 s, no fallback):
+ *    'echo'         THE PROBE made the round trip (R2 — the hub's own datagram of the largest packet's size, answered by the
+ *                   daemon's leg): takes the leg like 'up'; a daemon that answers probes is taken ONLY so (`ev.why` = the words)
+ *    'alive'        such a daemon's PING flagged UP: a sign of life on the elected leg, never a reason to take it (a claim)
+ *    'ask'          a browser's datagram went out on the leg: the first one since the leg was taken, with no DATA back yet,
+ *                   starts THE FIRST-DATA clock
+ *    'judge'        … and THE FIRST DATA (R1): a taken leg that sent nothing back legFirstMs after that first datagram is dead
+ *                   («the leg carried nothing for 7 s») however many PINGs it answers — exactly as a leg silent mid-stream
+ *  Every fall is counted: legFlapMax within legFlapMs PIN the session to the device link (R3 — nothing takes the leg again).
+ *  → { via, aliveAt, dataAt, takenAt, askAt, falls, pinned, changed, why, fell } (why = the log's words for a change; fell =
+ *  null | 'nothing' | 'silent' — the cause of a fall) */
+function legElect(el, ev, { deadMs = STREAM_LIMITS.legDeadMs, idleMs = STREAM_LIMITS.legStaleMs, keepaliveMs = STREAM_LIMITS.legKeepaliveMs, firstMs = STREAM_LIMITS.legFirstMs, flapMax = STREAM_LIMITS.legFlapMax, flapMs = STREAM_LIMITS.legFlapMs } = {}) {
   const via = el && el.via === 'udp' ? 'udp' : 'link';
-  const aliveAt = Number(el && el.aliveAt) || 0, dataAt = Number(el && el.dataAt) || 0;
+  const aliveAt = Number(el && el.aliveAt) || 0, dataAt = Number(el && el.dataAt) || 0, takenAt = Number(el && el.takenAt) || 0, askAt = Number(el && el.askAt) || 0;
+  const falls = Array.isArray(el && el.falls) ? el.falls.filter((t) => Number.isFinite(t)) : [];
+  const pinned = (el && el.pinned) || null;
   const at = Number(ev && ev.at) || 0, type = ev && ev.type;
-  const keep = { via, aliveAt, dataAt, changed: false, why: null };
-  if (type === 'up' || type === 'data') return { via: 'udp', aliveAt: at, dataAt: type === 'data' ? at : dataAt, changed: via !== 'udp', why: via !== 'udp' ? (type === 'data' ? 'leg data' : 'leg up') : null };
+  const keep = { via, aliveAt, dataAt, takenAt, askAt, falls, pinned, changed: false, why: null, fell: null };
+  if (type === 'up' || type === 'data' || type === 'echo') {
+    if (via === 'udp') return { ...keep, aliveAt: at, dataAt: type === 'data' ? at : dataAt, askAt: type === 'data' ? 0 : askAt };
+    if (pinned) return keep; // R3: the device link for the rest of the session
+    return { ...keep, via: 'udp', aliveAt: at, dataAt: type === 'data' ? at : dataAt, takenAt: at, askAt: 0, changed: true, why: (ev && ev.why) || (type === 'data' ? 'leg data' : 'leg up') };
+  }
+  if (type === 'alive') return via === 'udp' ? { ...keep, aliveAt: at } : keep;
+  if (type === 'ask') return via === 'udp' && !askAt && takenAt && dataAt < takenAt ? { ...keep, askAt: at } : keep;
   if (type === 'judge' && via === 'udp') {
-    const bound = dataAt && aliveAt - dataAt < keepaliveMs ? deadMs : idleMs;
-    if (at - aliveAt >= bound) return { ...keep, via: 'link', changed: true, why: `the leg was silent ${Math.round((at - aliveAt) / 1000)} s` };
+    let fell = null, why = null;
+    if (askAt && takenAt && dataAt < takenAt && at - askAt >= firstMs) { fell = 'nothing'; why = `the leg carried nothing for ${Math.round((at - askAt) / 1000)} s`; }
+    else {
+      const bound = dataAt && aliveAt - dataAt < keepaliveMs ? deadMs : idleMs;
+      if (at - aliveAt >= bound) { fell = 'silent'; why = `the leg was silent ${Math.round((at - aliveAt) / 1000)} s`; }
+    }
+    if (fell) {
+      const recent = [...falls.filter((t) => at - t < flapMs), at];
+      const pin = recent.length >= flapMax ? { at, falls: recent.length, why: `it fell back ${recent.length} times within ${Math.round(flapMs / 60000)} min` } : null;
+      return { ...keep, via: 'link', askAt: 0, falls: recent, pinned: pin, changed: true, why: pin ? `${why} — the device link for the rest of the session: ${pin.why}` : why, fell };
+    }
   }
   return keep;
+}
+
+/** THE LEG'S VERDICT (lane stream-udp-leg-fallback R2 — «leg up» is a measured fact; a dead leg says WHY): both halves' counts →
+ *  { state: 'up' | 'probing' | 'dead', code (the reason), words } — the session record's and the hub log's. `hub` = the relay's leg record
+ *  { via, pings (authenticated PINGs heard), echoes, probeLost (lost in a row), fell (the last fall's cause), pinned }; `daemon` =
+ *  the daemon's own leg facts (its stats push — undefined: not heard yet; null: it opened no leg) { state, bindError, pings, pongs,
+ *  probes, lastSendError }. Read in this order:
+ *    no_socket        the daemon's stats say it opened no leg (an agent without one, or a spec it refused)
+ *    bind_failed      its socket did not bind (the errno)
+ *    flapping         pinned (R3): it fell back legFlapMax times within legFlapMs
+ *    carried_nothing  the last fall was THE FIRST DATA's (R1): the browser's datagrams went out on it, nothing came back
+ *    probe_lost       legProbeMax probes in a row unanswered while its PINGs arrive — the leg drops packets of the probe's size
+ *                     (`bytes`: the largest the leg carries) while 34-byte PINGs pass; the daemon's count says which way they died
+ *    firewall?        the daemon gave up on its PINGs, and this hub heard and answered them: what comes IN to the machine is dropped
+ *    unreachable      the daemon gave up on its PINGs, and none ever reached this hub
+ *    silent           the last fall was the silence bound's */
+function legVerdictOf(hub, daemon) {
+  const h = hub || {}, d = daemon || {};
+  const n = (v) => (Number.isFinite(v) ? v : 0);
+  const B = legProbeBytes(), C = LEG.headBytes + LEG.macBytes;
+  if (h.via === 'udp') return { state: 'up', code: null, words: n(h.echoes) ? `the hub's ${B}-byte probe made the round trip` : 'the daemon says its leg is up' };
+  if (daemon === null) return { state: 'dead', code: 'no_socket', words: 'the machine\'s agent opened no udp leg' };
+  if (d.bindError) return { state: 'dead', code: 'bind_failed', words: `its udp socket did not bind (${String(d.bindError).slice(0, 40)})` };
+  if (h.pinned) return { state: 'dead', code: 'flapping', words: `${String(h.pinned.why || 'it kept falling back')} — the device link for the rest of the session` };
+  if (h.fell === 'nothing') return { state: 'dead', code: 'carried_nothing', words: `the browser's datagrams went out on it and nothing came back for ${STREAM_LIMITS.legFirstMs / 1000} s` };
+  if (n(h.probeLost) >= STREAM_LIMITS.legProbeMax) return { state: 'dead', code: 'probe_lost', bytes: B, words: n(d.probes) ? `the leg drops ${B}-byte packets toward the hub; ${C}-byte pings pass (the machine answered the hub's probes, none of its answers arrived)` : `the leg drops ${B}-byte packets; ${C}-byte pings pass (${n(h.probeLost)} of the hub's probes in a row never reached the machine)` };
+  if (d.state === 'down' && n(d.pings) && !n(d.pongs)) return n(h.pings)
+    ? { state: 'dead', code: 'firewall?', words: `this hub answered ${n(h.pings)} of its PINGs and none reached the machine (its firewall drops what comes in?)` }
+    : { state: 'dead', code: 'unreachable', words: `none of its ${n(d.pings)} PINGs reached this hub${d.lastSendError ? ` (its last send error: ${String(d.lastSendError).slice(0, 40)})` : ''}` };
+  if (h.fell === 'silent') return { state: 'dead', code: 'silent', words: 'it went silent' };
+  return { state: 'probing', code: null, words: null };
+}
+
+/** THE PAGE'S SHARE OF R1 (lane stream-udp-leg-fallback — measured end to end: a browser gives a pair that never answered up
+ *  within seconds and then sends nothing, so the hub's fall at legFirstMs met no check until the page's own connect budget): the
+ *  hub's record counts one more fall (`relay.leg.falls`) while the page is still CONNECTING ⇒ the page asks an ICE restart now —
+ *  fresh checks meet the device link. `seen` = the falls the page already acted on. → { seen, restart } */
+function legFallStep(seen, relay, state) {
+  const had = Number(seen) || 0, falls = relay && relay.leg ? Number(relay.leg.falls) || 0 : 0;
+  if (falls <= had) return { seen: had, restart: false };
+  return { seen: falls, restart: state === 'connecting' && relay.via === 'link' };
+}
+
+/** THE ROAD (lane stream-udp-leg-fallback R4 — the window says which way the picture comes, and why when it fell back): `page` =
+ *  statsOf's answer, `relay` = the hub's relay facts (the long poll's `relay`). → { road: 'direct' (a host pair) | 'udp' (the
+ *  hub relay over the daemon's leg) | 'link' (over the device link) | null, code (the leg's verdict when the device link carries
+ *  it because the leg is dead), pinned, via (the hub relay's road now, whatever the pair), answered (some road delivered the machine's
+ *  datagrams: «reconnecting…» only without) }.
+ *  A relayed road is named once the page's pair is the relay's, or before that once the leg fell back (its reason says why). */
+function streamRoadOf(page, relay) {
+  const direct = !!(page && page.path && page.path !== 'relay');
+  const via = relay && (relay.via === 'udp' || relay.via === 'link') ? relay.via : null;
+  const v = relay && relay.leg && relay.leg.verdict;
+  const dead = !!(v && v.state === 'dead' && via === 'link');
+  const road = direct ? 'direct' : page && page.path === 'relay' ? via : dead ? 'link' : null;
+  return { road, code: road === 'link' && dead ? v.code || null : null, pinned: !!(relay && relay.leg && relay.leg.pinned), via, answered: direct || !!(relay && Number(relay.down) > 0) };
 }
 
 /** THE STALL (lane stream-leg-flap — the owner's black «串流 · 2 个显示器 · 0 fps»: a picture PLAYING whose frames stopped while
@@ -557,5 +695,5 @@ function firewallRuleCommand(program) {
 module.exports = {
   STREAM_CODEC, STREAM_CODEC_AV1, streamCodecsOf, isMdnsCandidate, liteSessionSdp, STREAM_SOURCES, MAC_CAPABILITY, WINDOW_CAPABILITY, STREAM_LIMITS, streamCapOf, videoKbpsOf, RUNG_ID, streamRungVerdict, streamSourceOf, STREAM_STATES, STREAM_EVENTS, streamStep, fallbackVerdict, NEVER_SILENT, endingVerdict,
   videoToSource, INPUT_KINDS, inputEventOf, wheelUnitsOf, statsOf, relayFrame, relayUnframe, relayCandidates,
-  LEG, isLegPacket, legControl, legData, legParse, legPingVerdict, relayPathOf, legElect, stallStep, streamNumbersOf, directInboundOf, firewallRuleCommand,
+  LEG, isLegPacket, legControl, legSeqFlags, legSeqOf, legProbeBytes, legData, legParse, legPingVerdict, relayPathOf, legElect, legVerdictOf, legFallStep, streamRoadOf, stallStep, streamNumbersOf, directInboundOf, firewallRuleCommand,
 };

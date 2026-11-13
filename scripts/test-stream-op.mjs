@@ -53,6 +53,13 @@
 //      back UP and carries it; silenced mid-run ⇒ the device link takes over after THREE unanswered PINGs (≤ 2 s + 3 × 2 s —
 //      lane stream-leg-flap: one lost PONG is a lossy leg, not a dead one), the hub follows once the leg is silent its 6 s,
 //      and the pictures keep coming
+//   §11 THE LEG THAT CARRIES NOTHING, end to end (lane stream-udp-leg-fallback — the owner's Mac 2026-10-26: «leg up» at the
+//      offer, 45 s black, `connect_timeout`): §10's dialled daemon, its leg pointed at a MIDDLEBOX (the hub's `legSpec` seam);
+//      only the 34-byte control datagrams cross ⇒ the hub never takes the leg (its probe never came back — r2: the largest leg
+//      DATA's size, and the biggest DATA the real daemon sends is never larger) and the
+//      stand-in's first picture arrives over the device link at once, the record says dead · probe_lost; the probe crosses
+//      but no DATA does ⇒ taken, then «the leg carried nothing for 7 s», LEAVE, and the first picture inside the page's 15 s
+//      — RED CONTROL: the .358 hub (its election, the daemon's claim) in the incident's shape — no picture in 20 s
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -877,6 +884,65 @@ console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — 
   const nFell = C.marks.length; await sleep(1500);
   ok(fell && fellMs <= 9000 && hubFell && hubMs <= SM.STREAM_LIMITS.legDeadMs + 1500 && C.marks.length - nFell >= 40, `silenced mid-run: three PINGs in a row unanswered — the daemon takes the device link ${fellMs} ms after (≤ 2 s + 3 × 2 s), the hub ${hubMs} ms later (its 6 s silence bound), and the pictures keep coming (${C.marks.length - nFell} in 1.5 s)`);
   await C.wr.stop(C.s.key); C.wr.shutdown(); C.b.pc.close();
+
+  console.log('§11 THE LEG THAT CARRIES NOTHING, end to end (lane stream-udp-leg-fallback): the leg through a middlebox that drops by rule');
+  // THE .358 ELECTION (copied — src/stream-model.js legElect at 2.369.358): taken at a PING flagged UP, left only when silent
+  const BASE_ELECT = (el, ev) => {
+    const via = el && el.via === 'udp' ? 'udp' : 'link', aliveAt = Number(el && el.aliveAt) || 0, dataAt = Number(el && el.dataAt) || 0, at = ev.at;
+    if (ev.type === 'up' || ev.type === 'data') return { via: 'udp', aliveAt: at, dataAt: ev.type === 'data' ? at : dataAt, changed: via !== 'udp', why: via !== 'udp' ? 'leg up' : null };
+    if (ev.type === 'judge' && via === 'udp' && at - aliveAt >= (dataAt && aliveAt - dataAt < SM.STREAM_LIMITS.legKeepaliveMs ? SM.STREAM_LIMITS.legDeadMs : SM.STREAM_LIMITS.legStaleMs)) return { via: 'link', aliveAt, dataAt, changed: true, why: 'the leg was silent' };
+    return { via, aliveAt, dataAt, changed: false, why: null };
+  };
+  const controlOnly = (b) => b.length <= SM.LEG.headBytes + SM.LEG.macBytes, dataDead = (b) => b[4] !== SM.LEG.DATA;
+  /** One relayed session whose leg rides the middlebox; → the first picture's ms after the answer, the hub's lines, its record. */
+  async function legRun(pass, opts = {}, { waitMs = 15000, holdMs = 0 } = {}) {
+    const mbA = dgram.createSocket('udp4'), mbB = dgram.createSocket('udp4');
+    await Promise.all([new Promise((r) => mbA.bind(0, '127.0.0.1', r)), new Promise((r) => mbB.bind(0, '127.0.0.1', r))]);
+    let target = 0, daemonAt = null, maxData = 0; const lines = [];
+    mbA.on('message', (b, from) => { daemonAt = from; if (b[4] === SM.LEG.DATA) maxData = Math.max(maxData, b.length); if (target && pass(b)) mbB.send(b, target, '127.0.0.1'); }); // r2: the largest DATA the real daemon put on the leg
+    mbB.on('message', (b) => { if (daemonAt && pass(b)) mbA.send(b, daemonAt.port, daemonAt.address); });
+    const wr = DW.create({ access: accessOf(FIXTURE), direct: false, ips: () => ['127.0.0.1'], log: { log: (m) => { if (/ relay via | udp leg dead /.test(m)) lines.push([Date.now(), m.replace(/^\[stream\] \S+ session (?:\(being offered\)|\S+) /, '')]); }, warn() { } },
+      legSpec: (spec) => { target = spec.port; return { ...spec, port: mbA.address().port, hosts: ['127.0.0.1'] }; }, ...opts });
+    const s = await wr.start('win-l', { maxKbps: 1500 });
+    const b = standIn(); const marks = [];
+    b.pc.onTrack.subscribe((tr) => tr.onReceiveRtp.subscribe((r) => { if (r.header.marker) marks.push(Date.now()); }));
+    b.pc.onIceCandidate.subscribe((c) => { if (c) wr.candidate(s.key, c.toJSON()).catch(() => { }); });
+    await b.pc.setRemoteDescription(s.offer); await b.pc.setLocalDescription(await b.pc.createAnswer());
+    const tAns = Date.now();
+    await wr.answer(s.key, b.pc.localDescription.sdp);
+    // the page's restart (src/stream-model.js streamStep: ICE `failed` while connecting ⇒ an ICE-restart offer, budget 2): werift
+    // gives a pair up within seconds, as a browser does — what the page does next is what the hub's fall must meet
+    let restarts = 0; const states = [];
+    b.pc.connectionStateChange.subscribe((st) => states.push(`${Date.now() - tAns} ms pc ${st}`));
+    b.pc.iceConnectionStateChange.subscribe(async (st) => {
+      states.push(`${Date.now() - tAns} ms ice ${st}`);
+      if (st !== 'failed' || restarts >= SM.STREAM_LIMITS.restartBudget) return;
+      restarts++;
+      try { const rs = await wr.restart(s.key); await b.pc.setRemoteDescription(rs.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await wr.answer(s.key, b.pc.localDescription.sdp); } catch { /* the next failure asks again */ }
+    });
+    // …and the page's long poll (src/stream-model.js legFallStep): a fall the hub records while it still connects ⇒ the restart now
+    let fallsSeen = 0, polling = true;
+    const asks = (async () => { while (polling) { const p = await wr.poll(s.key, 0, -1, 0).catch(() => null); const lf = SM.legFallStep(fallsSeen, p && p.relay, marks.length ? 'playing' : 'connecting'); fallsSeen = lf.seen;
+      if (lf.restart && restarts < SM.STREAM_LIMITS.restartBudget) { restarts++; states.push(`${Date.now() - tAns} ms restart (the hub's fall)`); try { const rs = await wr.restart(s.key); await b.pc.setRemoteDescription(rs.offer); await b.pc.setLocalDescription(await b.pc.createAnswer()); await wr.answer(s.key, b.pc.localDescription.sdp); } catch { /* the next fall */ } }
+      await sleep(250); } })();
+    await until(() => marks.length >= 10, waitMs);
+    polling = false; await asks;
+    if (holdMs) await sleep(Math.max(0, holdMs - (Date.now() - tAns)));
+    const relay = (await wr.poll(s.key, 0, -1, 0)).relay;
+    await wr.stop(s.key); wr.shutdown(); b.pc.close(); mbA.close(); mbB.close();
+    return { firstMs: marks.length ? marks[0] - tAns : null, n: marks.length, marks: marks.map((at) => at - tAns), relay, restarts, states, maxData, lines: lines.map(([at, m]) => `${at - tAns} ms ${m}`) };
+  }
+  const R2 = await legRun(controlOnly, {}, { holdMs: 9000 });
+  ok(R2.firstMs !== null && R2.firstMs < 3000 && !R2.lines.some((l) => /udp leg/.test(l) && /relay via/.test(l)) && R2.relay.via === 'link' && R2.relay.leg.verdict.code === 'probe_lost' && R2.relay.leg.echoes === 0 && R2.lines.filter((l) => new RegExp(`udp leg dead \\(probe_lost ${SM.legProbeBytes()} B\\)`).test(l)).length === 1,
+    `only the control datagrams cross: never taken — the first picture ${R2.firstMs} ms after the answer, over the device link; ONE line names it (probe_lost)`, { firstMs: R2.firstMs, lines: R2.lines, verdict: R2.relay.leg && R2.relay.leg.verdict });
+  const R1 = await legRun(dataDead, {}, { holdMs: 10000 });
+  const fellAt = (R1.lines.find((l) => /carried nothing for 7 s/.test(l)) || '').match(/^(-?\d+) ms/), fallMs = fellAt ? Number(fellAt[1]) : null;
+  const after = fallMs === null ? 0 : R1.marks.filter((t) => t > fallMs).length;
+  ok(R1.firstMs !== null && R1.firstMs < 3000 && fallMs !== null && fallMs >= SM.STREAM_LIMITS.legFirstMs - 1000 && after >= 10 && R1.restarts === 0 && new RegExp(`leg up — the hub's ${SM.legProbeBytes()}-byte probe made the round trip`).test(R1.lines[0] || ''),
+    `the probe crosses, no DATA does: taken ON TRIAL — the first picture ${R1.firstMs} ms after the answer over the device link (make before break), «the leg carried nothing for 7 s» at ${fallMs} ms, and the picture never stopped (${after} pictures after the fall, no restart)`, { firstMs: R1.firstMs, lines: R1.lines, restarts: R1.restarts, states: R1.states, after });
+  ok(R1.maxData > 0 && R1.maxData <= SM.legProbeBytes(), `r2: the largest DATA the REAL daemon put on the leg (its DTLS flights, SCTP and sealed RTP — this fixture's pictures never fill a payload; test-desktop-webrtc §14e seals a full one) is ${R1.maxData} bytes — the hub's probe is ${SM.legProbeBytes()}: never smaller than what the leg carried`, { maxData: R1.maxData });
+  const RB = await legRun(controlOnly, { legProbe: false, elect: BASE_ELECT }, { waitMs: 20000 });
+  ok(RB.n === 0 && RB.relay.via === 'udp' && RB.lines.length === 1 && /\(leg up\)$/.test(RB.lines[0]), `RED CONTROL — the .358 hub in the incident's shape: «(leg up)» and not one picture in 20 s, still on the leg (the owner's black pane)`, { n: RB.n, via: RB.relay.via, lines: RB.lines });
   dmL.stop(); endDaemonsOf(rootL); capped.close(); hubHttp.close();
 }
 
