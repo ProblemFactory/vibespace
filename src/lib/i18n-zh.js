@@ -3469,6 +3469,7 @@ export default {
   "Remove {n} files ({size}) of conversations that no longer exist? This cannot be undone.": "删除已不存在的对话的 {n} 个文件（{size}）？此操作无法撤销。",
   "What would be removed changed — look again": "要删除的内容已经变了——请重新查看",
   "Removed {n} files ({size})": "已删除 {n} 个文件（{size}）",
+  "Could not check whether {n} conversations still exist — their files are kept": "无法确认 {n} 个对话是否还存在——它们的文件会保留",
   "Still finding this picture in the conversation…": "仍在对话记录里查找这张图片…",
   "This picture was removed from the conversation's record when the record was rescued": "这张图片在修复对话记录时已从记录中移除",
   "This picture is no longer in the conversation's record": "这张图片已不在对话记录里",

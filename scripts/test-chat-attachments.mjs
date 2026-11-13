@@ -232,9 +232,11 @@ console.log('⑤ the index\'s cost — measured');
   const r = await fetch(`${slow.base}/api/chat-picture/${TX}/${U(1)}/0`), j = await r.json();
   slow.close();
   ok(r.status === 503 && j.code === 'finding' && j.retryMs === ROUTES.RETRY_MS && r.headers.get('retry-after') === '2', 'past the DEADLINE the route answers 503 `finding` + retryMs — the page is never held; the reading goes on', j);
-  let ran = 0;
-  const dl = await serve({ store, transcripts: { picture: () => { ran++; return sleep(60).then(() => ({ gone: 'missing' })); } }, deadlineMs: 25 });
+  let ran = 0, release; const held = new Promise((r) => { release = r; });
+  // the readings are HELD until every ask has been answered (the way ⑥ holds them): the count depends on no arrival timing
+  const dl = await serve({ store, transcripts: { picture: () => { ran++; return held.then(() => ({ gone: 'missing' })); } }, deadlineMs: 25 });
   const st12 = await Promise.all([...Array(12)].map((_, i) => fetch(`${dl.base}/api/chat-picture/${TX}/${U(1)}/${i}`).then((x) => x.status)));
+  release();
   for (let i = 0; i < 50 && dl.api.stats().running; i++) await sleep(5);
   const dls = dl.api.stats(); dl.close();
   ok(st12.every((x) => x === 503) && ran === ROUTES.MAX_AT_ONCE && dls.ran === ROUTES.MAX_AT_ONCE && dls.left === 12 - ROUTES.MAX_AT_ONCE, 'a request answered at its DEADLINE withdraws its job if it has not started — twelve asks past a 25 ms deadline run only the 3 readings already started (the reader\'s minor: all 12 ran, 9 for nobody)', { st12, ran, dls });
@@ -331,19 +333,42 @@ console.log('⑦ files a person dropped');
   seed('cw-nolink');                                                 // nobody names it
   seed('cw-notx', { backend: 'claude', tx: null });                  // a link that names no transcript: unknown
   seed('cw-noproof', { backend: 'antigravity', tx: 'agy-conv-1' });  // a harness whose locate is no proof: unknown
-  const locate = (backend, id) => require(path.join(REPO, 'src/adapters/codex.js')).transcriptWorkerCall('locate', { backend, id, cwd: '' }, () => null);
-  const HK = CA.hubKnowledge({ activeSessions: live, metaDir: meta, locate });
+  const HK = CA.hubKnowledge({ activeSessions: live, metaDir: meta });   // the hub's REAL knowledge: the transcript trees (this HOME's) and each harness's proof
   const os2 = CA.create({ root: or, ...HK, log: quiet });
   const ob = await os2.orphans();
   ok(ob.ids.sort().join() === 'cw-deleted,cw-nolink' && ob.files === 2, 'LAW 5 (the MUST): a TERMINATED conversation (no record, its transcript here), one a RESTART kept as stopped (.json.stopped), an ARCHIVED one, a live one, a kept one, a keeper\'s .orphan, a link naming no transcript and a harness whose locate is no proof all KEEP their files — only a DELETED conversation (its transcript proven gone) and a folder nobody names are offered', ob);
   const terminate = scratch('cap-term'); fs.mkdirSync(path.join(terminate, 'cw-t2', 'files'), { recursive: true }); fs.writeFileSync(path.join(terminate, 'cw-t2', 'files', 't.png'), PNG(41));
   const lv = new Map([['cw-t2', { backend: 'claude', backendSessionId: TX }]]);
-  const ts2 = CA.create({ root: terminate, ...CA.hubKnowledge({ activeSessions: lv, metaDir: meta, locate }), log: quiet });
+  const ts2 = CA.create({ root: terminate, ...CA.hubKnowledge({ activeSessions: lv, metaDir: meta }), log: quiet });
   await ts2.usage(); await ts2.orphans();   // the hub sees the folder while it lists the conversation: its link is written
   await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(path.join(terminate, 'cw-t2', CA.LINK_FILE));
   lv.delete('cw-t2');                       // terminated: the live session and its record go
   const after = await ts2.orphans();
   ok(after.conversations === 0 && JSON.parse(fs.readFileSync(path.join(terminate, 'cw-t2', CA.LINK_FILE), 'utf8')).tx === TX, 'the flow: a folder seen while its conversation is listed gets its link; TERMINATED afterwards, it is still known by its transcript — nothing offered', after);
+  // THE CLOSURE (主开发 15:15Z): a door that cannot READ offers nothing it cannot prove — absence is proven only by a read that
+  // SUCCEEDED. Each row asks a FRESH knowledge (no memo) over folders whose links name a terminated conversation (its
+  // transcript here) and a deleted one (its transcript gone); the normal answer offers only the deleted one
+  {
+    const ro = scratch('cap-readfail'); fs.mkdirSync(ro, { recursive: true });
+    const seedR = (id, tx) => { fs.mkdirSync(path.join(ro, id, 'files'), { recursive: true }); fs.writeFileSync(path.join(ro, id, 'files', 'f.png'), PNG(43)); fs.writeFileSync(path.join(ro, id, CA.LINK_FILE), JSON.stringify({ v: 1, conv: id, backend: 'claude', tx })); };
+    seedR('cw-r-terminated', TX); seedR('cw-r-deleted', GONE_TX);
+    const ask = async () => CA.create({ root: ro, ...CA.hubKnowledge({ activeSessions: new Map(), metaDir: meta }), log: quiet }).orphans();
+    const projects = path.join(HOME, '.claude', 'projects');
+    const normal = await ask();
+    const rows = {};
+    try { fs.chmodSync(projects, 0o000); rows.projectsUnreadable = await ask(); } finally { fs.chmodSync(projects, 0o755); }
+    try { fs.renameSync(projects, projects + '.away'); rows.projectsAbsent = await ask(); } finally { fs.renameSync(projects + '.away', projects); }
+    const lk = path.join(ro, 'cw-r-deleted', CA.LINK_FILE);
+    try { fs.chmodSync(lk, 0o000); rows.linkUnreadable = await ask(); } finally { fs.chmodSync(lk, 0o600); }
+    const whole = fs.readFileSync(lk, 'utf8');
+    try { fs.writeFileSync(lk, whole.slice(0, 20)); rows.linkHalfWritten = await ask(); } finally { fs.writeFileSync(lk, whole); }
+    try { fs.chmodSync(meta, 0o000); rows.recordsUnreadable = await ask(); } finally { fs.chmodSync(meta, 0o755); }
+    const offered = Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.ids.join() || '(nothing)']));
+    ok(normal.ids.join() === 'cw-r-deleted' && normal.unchecked === 0 && Object.values(rows).every((r) => r.ids.length === 0 && r.files === 0 && r.unchecked > 0),
+      'THE CLOSURE: a door that cannot READ offers NOTHING it cannot prove — the projects tree unreadable or absent, a link unreadable or half-written, the session records unreadable: nothing offered, each said as «could not check» (the normal answer offers only the deleted conversation)', { normal: normal.ids, offered, unchecked: Object.fromEntries(Object.entries(rows).map(([k, v]) => [k, v.unchecked])) });
+    const ui = read('src/lib/settings-ui.js');
+    ok(/if \(o && Number\(o\.unchecked\) > 0\) \{/.test(ui) && /t\('Could not check whether \{n\} conversations still exist — their files are kept', \{ n: Number\(o\.unchecked\) \}\)/.test(ui) && read('src/lib/i18n-zh.js').includes('"Could not check whether {n} conversations still exist — their files are kept": "'), 'Settings SAYS «could not check» (zh / ja) for the folders a failed read kept');
+  }
   const wrong = await os2.removeOrphans({ files: 3, bytes: ob.bytes }), right = await os2.removeOrphans({ files: ob.files, bytes: ob.bytes });
   ok(wrong.changed === true && right.removed === 2 && !fs.existsSync(path.join(or, 'cw-deleted')) && ['cw-live', 'cw-kept', 'cw-archived', 'cw-stopped', 'cw-orphan', 'cw-terminated', 'cw-notx', 'cw-noproof'].every((id) => fs.existsSync(path.join(or, id, 'files', `${id}.png`))), 'the Remove door acts ONLY on the count and size it named (anything else ⇒ «changed», nothing removed) — and only on the proven-gone', { wrong, right });
   const S2 = await serve({ store: CA.create({ root: or, knownIds: async () => new Set(), log: quiet }), transcripts: svc });
@@ -353,8 +378,9 @@ console.log('⑦ files a person dropped');
   S2.close();
   ok(oo.files >= 1 && !('ids' in oo) && rm409.status === 409, 'the routes: the orphans\' count and size (never their ids); a removal naming other numbers ⇒ 409 changed');
   const wiring = read('src/server/mounts-plugins-wiring.js');
-  ok(/\.\.\.CAM\.hubKnowledge\(\{ activeSessions, metaDir: path\.join\(rootDir, 'data', 'session-meta'\),/.test(wiring) && /transcriptWorkerCall\('locate', \{ backend, id: tx, cwd: '' \}, \(\) => null\)/.test(wiring) && /chatAttachments\.sweepTemps\(\)/.test(wiring) && String(CA.RECORD_RE) === String(/^(.+)\.json(?:\.orphan|\.stopped)?$/),
-    'the hub wires THAT knowledge (live sessions, the session records in every form, the transcript worker\'s locate); the sweep runs at start');
+  const storeSrc = read('src/server/chat-attachments.js');
+  ok(/\.\.\.CAM\.hubKnowledge\(\{ activeSessions, metaDir: path\.join\(rootDir, 'data', 'session-meta'\) \}\)/.test(wiring) && /transcripts = transcriptIndexes, proofOf = locateIsProof,/.test(storeSrc) && /claudeTranscriptIndex\(\), require\('\.\.\/adapters\/codex\.js'\)\.codexTranscriptIndex\(\)/.test(storeSrc) && /c\.ok && c\.topReadable === true && x\.ok \? false : null/.test(storeSrc) && /chatAttachments\.sweepTemps\(\)/.test(wiring) && String(CA.RECORD_RE) === String(/^(.+)\.json(?:\.orphan|\.stopped)?$/),
+    'the hub wires THAT knowledge (live sessions, the session records in every form, the transcript trees read WHOLE — the channels\' pair-sweep walks — and each harness\'s proof); the sweep runs at start');
   const agy = read('data/bin/agy-wrapper.js');
   ok(/Object\.prototype\.hasOwnProperty\.call\(PICTURE_EXT, mt\) \? PICTURE_EXT\[mt\] : null/.test(agy) && /fs\.linkSync\(tmp, fp\)/.test(agy) && /backend: 'antigravity', tx: null/.test(agy), 'the Antigravity wrapper: an extension only from an OWN entry; a pasted picture written as a temp file linked to its name; its folder\'s link written (the hub fills the transcript)');
 }

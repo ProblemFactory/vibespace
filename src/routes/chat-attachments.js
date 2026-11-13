@@ -117,8 +117,9 @@ function registerChatAttachmentRoutes(app, { store, transcripts, hostKnown = () 
   app.get('/api/chat-attachments/usage', async (req, res) => {
     try { res.json(await store.usage()); } catch (e) { res.status(500).json({ error: 'unreadable', code: 'unreadable' }); }
   });
+  // the folders of conversations PROVEN gone + `unchecked`: folders kept because a read failed (said in Settings)
   app.get('/api/chat-attachments/orphans', async (req, res) => {
-    try { const o = await store.orphans(); res.json({ conversations: o.conversations, files: o.files, bytes: o.bytes }); } catch (e) { res.status(500).json({ error: 'unreadable', code: 'unreadable' }); }
+    try { const o = await store.orphans(); res.json({ conversations: o.conversations, files: o.files, bytes: o.bytes, unchecked: o.unchecked || 0 }); } catch (e) { res.status(500).json({ error: 'unreadable', code: 'unreadable' }); }
   });
   app.post('/api/chat-attachments/orphans/remove', async (req, res) => {
     const files = Number(req.body && req.body.files), bytes = Number(req.body && req.body.bytes);

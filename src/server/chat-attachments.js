@@ -74,8 +74,12 @@ function writeLink(root, conv, of = {}, writer = null) {
   w.dirty(file, { name: 'chat-attachments-link.write', mode: 0o600, produce: () => JSON.stringify(link) });
   return file;
 }
+/** the folder's link: the link | null (NO link: the file is not there — ENOENT, a read that SUCCEEDED in saying so) |
+ *  {unreadable: true} (any other read error, or bytes that do not parse — a half-written file: nothing is proven) */
 async function readLink(root, conv) {
-  try { const j = JSON.parse(await fsp.readFile(path.join(root, conv, LINK_FILE), 'utf8')); return j && typeof j === 'object' ? j : null; } catch { return null; }
+  let text;
+  try { text = await fsp.readFile(path.join(root, conv, LINK_FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? null : { unreadable: true, code: (e && e.code) || 'error' }; }
+  try { const j = JSON.parse(text); return j && typeof j === 'object' && !Array.isArray(j) ? j : { unreadable: true, code: 'shape' }; } catch { return { unreadable: true, code: 'parse' }; }
 }
 
 /** every file under `dir` (recursive) → [{file, size, mtimeMs}] — off the loop */
@@ -95,7 +99,9 @@ async function walk(dir) {
  * The store over `root` (data/chat-attachments). The server wires what the hub knows:
  *   knownIds() → a Set of every conversation id the hub lists (live sessions + session records in every form);
  *   linkOf(conv) → {backend, tx} of a conversation the hub lists (its live session or its record), or null;
- *   located(backend, tx) → true (its transcript is here) | false (its harness's locate PROVES it is not) | null (unknown).
+ *   located(backend, tx) → true (its transcript is here) | false (PROVEN absent: a read that succeeded, a harness whose
+ *     locate is proof) | 'never' (a harness whose locate proves nothing: kept) | null (a read failed: kept, said «unchecked»).
+ *   knownIds THROWS when the records could not be read: the door then offers nothing.
  */
 function create({ root, knownIds = async () => new Set(), linkOf = async () => null, located = async () => null, log = console, now = Date.now, writer } = {}) {
   if (!root) throw new Error('chat-attachments: root is required');
@@ -117,8 +123,8 @@ function create({ root, knownIds = async () => new Set(), linkOf = async () => n
       try { await fsp.unlink(f.file); removed++; } catch { }
     }
     if (removed) log.log?.(`[chat-attachments] removed ${removed} unfinished file${removed === 1 ? '' : 's'} a stop left behind`);
-    const known = await knownIds().catch(() => new Set());
-    for (const c of await convDirs()) if (known && known.has(c)) await refresh(c);
+    const known = await knownIds().catch(() => null);
+    if (known) for (const c of await convDirs()) if (known.has(c)) await refresh(c);
     return removed;
   }
   const isPersonFile = (f) => !isTemp(f.file) && path.basename(f.file) !== LINK_FILE;
@@ -133,22 +139,29 @@ function create({ root, knownIds = async () => new Set(), linkOf = async () => n
     return { files, bytes, conversations };
   }
   /** is `conv`'s conversation PROVEN gone? (listed nowhere, and its link's transcript proven absent — or no link at all) */
-  async function provenGone(conv, known) {
-    if (known && known.has(conv)) { await refresh(conv); return false; }
+  /** 'gone' (proven) | 'kept' (named, or by design never provable) | 'unchecked' (a read FAILED: nothing is proven) */
+  async function verdictOf(conv, known) {
+    if (known.has(conv)) { await refresh(conv); return 'kept'; }
     const l = await readLink(root, conv);
-    if (!l) return true;                                   // no link: nobody names this folder
-    if (!l.backend || !l.tx) return false;                 // a link that names no transcript: unknown ⇒ kept
+    if (l && l.unreadable) return 'unchecked';            // a link that could not be read: not «no link»
+    if (!l) return 'gone';                                 // no link (ENOENT): nobody names this folder
+    if (!l.backend || !l.tx) return 'kept';                // a link that names no transcript: never proven ⇒ kept
     let here = null; try { here = await located(l.backend, l.tx); } catch { here = null; }
-    return here === false;                                 // only a locate that PROVES absence
+    if (here === true || here === 'never') return 'kept';
+    if (here === false) return 'gone';                     // only a read that SUCCEEDED proves absence
+    return 'unchecked';                                    // the transcript trees were not read whole: unknown ⇒ kept
   }
-  /** the folders of conversations proven gone: {conversations, files, bytes, ids} */
+  /** the folders of conversations PROVEN gone: {conversations, files, bytes, ids, unchecked} — `unchecked` = folders kept
+   *  because a read failed (the person is told «could not check»); the hub's records unreadable ⇒ nothing is offered */
   async function orphans() {
-    const known = await knownIds();
-    const ids = [];
-    for (const c of await convDirs()) if (await provenGone(c, known)) ids.push(c);
+    const dirs = await convDirs();
+    let known;
+    try { known = await knownIds(); } catch { return { conversations: 0, files: 0, bytes: 0, ids: [], unchecked: dirs.length, why: 'records-unreadable' }; }
+    const ids = []; let unchecked = 0;
+    for (const c of dirs) { const v = await verdictOf(c, known || new Set()); if (v === 'gone') ids.push(c); else if (v === 'unchecked') unchecked++; }
     let files = 0, bytes = 0;
     for (const c of ids) { const n = countOf(await walk(path.join(root, c))); files += n.files; bytes += n.bytes; }
-    return { conversations: ids.length, files, bytes, ids };
+    return { conversations: ids.length, files, bytes, ids, unchecked };
   }
   /** the Remove door: acts only on exactly what it named ({files, bytes} as `orphans` answered); else {changed} */
   async function removeOrphans({ files, bytes } = {}) {
@@ -177,12 +190,30 @@ function create({ root, knownIds = async () => new Set(), linkOf = async () => n
  */
 const RECORD_RE = /^(.+)\.json(?:\.orphan|\.stopped)?$/;
 const RECORD_FORMS = ['.json', '.json.stopped', '.json.orphan'];
-function hubKnowledge({ activeSessions = new Map(), metaDir, locate = async () => null } = {}) {
+/** the transcript trees walked ONCE per door question, off the loop and bounded — the same two walks the channels' pair
+ *  sweep reads (src/session-store.js claudeTranscriptIndex, src/adapters/codex.js codexTranscriptIndex): an id is ABSENT only
+ *  when both trees were read whole AND the projects directory itself was read; anything else is unknown */
+async function transcriptIndexes() {
+  const [c, x] = await Promise.all([require('../session-store.js').claudeTranscriptIndex(), require('../adapters/codex.js').codexTranscriptIndex()]);
+  return { has: (id) => (c.has(id) || x.has(id) ? true : (c.ok && c.topReadable === true && x.ok ? false : null)) };
+}
+/** a harness's absence proves something only where its descriptor says its locate is proof (a conversation IS its file) */
+function locateIsProof(backend) {
+  try { const h = require('../harnesses').list().find((x) => x && x.id === backend); return !!(h && h.store && h.store.locateIsProof === true); } catch { return false; }
+}
+function hubKnowledge({ activeSessions = new Map(), metaDir, transcripts = transcriptIndexes, proofOf = locateIsProof, memoMs = 5000 } = {}) {
   const linkOfSession = (s) => ({ backend: (s && s.backend) || 'claude', tx: (s && (s.backendSessionId || s.claudeSessionId)) || null });
+  let index = null, indexAt = 0;
+  const indexNow = () => {   // ONE walk of the transcript trees per door question (a few seconds' memo), shared by every folder
+    if (!index || Date.now() - indexAt > memoMs) { indexAt = Date.now(); index = Promise.resolve().then(transcripts).catch(() => ({ has: () => null })); }
+    return index;
+  };
   return {
     knownIds: async () => {
       const ids = new Set(activeSessions.keys());
-      try { for (const f of await fsp.readdir(metaDir)) { const m = RECORD_RE.exec(f); if (m) ids.add(m[1]); } } catch { }
+      let names;
+      try { names = await fsp.readdir(metaDir); } catch (e) { if (e && e.code === 'ENOENT') names = []; else throw Object.assign(new Error('the session records could not be read'), { code: (e && e.code) || 'error' }); }
+      for (const f of names) { const m = RECORD_RE.exec(f); if (m) ids.add(m[1]); }
       return ids;
     },
     linkOf: async (conv) => {
@@ -192,8 +223,15 @@ function hubKnowledge({ activeSessions = new Map(), metaDir, locate = async () =
       for (const ext of RECORD_FORMS) { try { return linkOfSession(JSON.parse(await fsp.readFile(path.join(metaDir, conv + ext), 'utf8'))); } catch { } }
       return null;
     },
-    located: async (backend, tx) => { try { const r = await locate(backend, tx); return r === true ? true : r === false ? false : null; } catch { return null; } },
+    // true: its transcript is here · false: PROVEN absent — the harness's locate is proof AND the trees were read whole ·
+    // null: unknown (a tree unreadable, a walk past its bound, a harness whose locate proves nothing)
+    located: async (backend, tx) => {
+      let r = null; try { r = (await indexNow()).has(tx); } catch { r = null; }
+      if (r === true) return true;
+      if (proofOf(backend) !== true) return 'never';   // a harness whose locate proves nothing: never offered (no read failed)
+      return r === false ? false : null;
+    },
   };
 }
 
-module.exports = { create, hubKnowledge, placeFile, writeLink, readLink, isTemp, convOk, CONV_RE, TMP_SUFFIX, TMP_RE, TMP_AGE_MS, LINK_FILE, RECORD_RE };
+module.exports = { create, hubKnowledge, transcriptIndexes, locateIsProof, placeFile, writeLink, readLink, isTemp, convOk, CONV_RE, TMP_SUFFIX, TMP_RE, TMP_AGE_MS, LINK_FILE, RECORD_RE };
