@@ -69,6 +69,49 @@ This file is the engineers' record of every release: the lanes, the verification
   - leg page-k3: the claimed ring's words, and a rolled one's; zh / ja; the units through `t()`; the CSS with no literal colour or radius; zh / ja naming ⚙; the stamp.
   - RED: the 2.369.397 release fd4acdc61 at store, route, page-k3 and wiring; patches lanes-outside, claim-session-words and units-raw.
 
+### mount-class-by-source — A VIEW OF A MOUNT IS CLASSED BY WHAT IT SHOWS (the data-move read: the owner's checkout leaves the NAS for the local disk)
+- **The finding.** src/mount-path-class.js `rootsOf` classed a fuse.bindfs mount by WHERE THE INSTANCE LIVED: 'home' while it held rootDir / dataDir, otherwise 'storage' (STORAGE_FSTYPE matches every fuse.*).
+  - The owner's workspace is a bindfs VIEW of the kernel NFS mount /mnt/nfs_workspace, and the instance lived on it: 'home', witnessed, never refused.
+  - Read by two drivers on the released tree: the day the instance moves to the local disk, the SAME view turns 'storage'. The guard then refuses every main-thread sync call on a project path (EVSMOUNTSYNC), and every storageRootOf caller takes its storage road, with nothing said.
+  - Where the hub lives changed what it may touch.
+- **The law.** A passthrough view (VIEW_FSTYPE = fuse.bindfs, one constant) is classed by the mount its source lives on:
+  - over NFS: 'network';
+  - over a storage mount, or under a product storage row: 'storage';
+  - over anything that is neither network nor FUSE (a local disk, tmpfs, an NTFS stick …): the new kind 'disk' — witnessed (a stopped FUSE daemon holds every reader, whatever it shows), never refused. This is 主开发's ruling on the first post; «no root» would have worded such a hold «not under a mount». Only the REFUSAL follows the source; the WATCH follows the daemon.
+  - **below the source (round 2, law 3 made exact: a path is refused when what it REACHES is storage, by whichever spelling).** bindfs crosses into every mount below its source, so each mount listed below a view's source, and each product storage row there, is a DERIVED root at the view's spelling, with the class it has when reached; its row carries `shows` and `through`. A storage view already refuses all of it; a view the instance lives on derives nothing (home wins, as on the release); a real row at the same spelling wins.
+  - A source that cannot be told stays 'storage', and so do a product storage row (whatever it is made of), rclone and sshfs.
+  - 'home' still wins when the instance lives on the view.
+  - The module stays PURE (rows in, classes out).
+- **The source and the match** (no disk touched):
+  - bindfs (1.18.4) passes its source through realpath(3) at start and shows it as the row's fsname: absolute, symlink-free, as of mount time, octal-escaped. A source that is not absolute (an fsname given by hand) cannot be told.
+  - The match is the longest mount point holding the source among the rows handed in. Never matched: the view itself, or a row listed after it at or under its own mount point (`bindfs /d /d` shows what lies beneath).
+  - Equal mount points (round 2): the last row listed BEFORE the view — what it entered when it started; a mount put over its source afterwards does not change what it serves. None before ⇒ the last listed. LINE order is mount order; mount ids are reused (the box: view 714, its NFS 732).
+  - '/' holds a source. A view of a view is followed; a loop ⇒ storage (round 2: no depth rule — the seen set ends every loop). A view's row carries `shows` {root, fstype}.
+  - NOT FOLLOWED, said in the module: a source lazily unmounted while the view still serves it; a view that started BEFORE its source's mount (it reads that mount though it serves the folder beneath — the rows cannot tell it from a remount, and both are watched, never refused); mergerfs / fuse-overlayfs / gocryptfs (they stay 'storage' until named).
+- **The words.**
+  - PURE `viewWords(row)` adds «— a fuse.bindfs view of the nfs4 mount «…»» (or «of the storage folder «…»», or «whose source the mount table does not show (refused until it can be told)») to the witness's line and to the guard's refusal and log-only lines, for a view's own row only.
+  - Every other row's words are byte for byte as they were (test-fs-canary and test-sync-fs-guard-server pin «the mount «…»$»).
+  - A derived root adds «— the fuse.rclone mount «…» reached through the fuse.bindfs view «…»» (or «the storage folder «…»»).
+  - callWords for 'disk' names the type shown: «under the mount «…» — a fuse.bindfs view of the ext4 mount «…» (witnessed, never refused)» (round 2: never «this machine's own disk», untrue of tmpfs or a stick).
+  - mount-health HELD_TAIL.disk: «This folder shows another folder of this machine through a FUSE program: its calls are watched, never refused.» (zh + ja).
+- **The standing sweep.**
+  - Agree by construction (they read the classifier's rows): storage-path's storageRootOf, the canary, and the For-you hold item.
+  - local-index netMountOf / landedPathOf, mounts.js _onNetworkFs and vfs-cache-place's statfs answer «is it a network or FUSE file system» (where the index or a cache may live). They say yes on every view row, and so does the classifier now (the 'disk' row is a root): no row parts.
+  - The mounts panel shows the product's own records (all 'storage' still).
+- **The storageRootOf callers, as rows**, on the owner's box after the move. Each answers what it answered before the move: realCwdOf, task-groups `_realOf` and the Context reads, the transcript-folder decode, a project's agent-browser.json, execHere, the pending editor. A census in test-fs-canary §9 makes a new caller without a row red.
+- **Round 2 (the verifier: the release as the oracle over 155 mount tables, 39 730 probe paths; the guard end to end).**
+  - MUST, fixed: an rclone / a product row BELOW the NFS source was reached through the view as «network» (five sync calls ran). It is now a derived storage root, refused and named.
+  - Small 1, fixed: a local mount over an rclone source after the view started read «disk» — the last row before the view now decides.
+  - Small 2, fixed: the disk words name the type shown; the tail is softened.
+  - Small 3, fixed: two surviving mutants (rows after the view not skipped; equal mount points first-wins) now pinned; the depth rule removed.
+  - Small 4, named: a view started before its NFS was mounted reads «network» where it serves the disk beneath (24 paths, watched either way).
+  - The verifier's sweep re-run on the amend: 0 differences outside a view, 0 regressions; new ≠ truth only the 24 of small 4. Its guard driver: all eight scenes hold.
+- **Gates.**
+  - test-mount-path-class ⑥ (29 pins) and test-fs-canary §9 (25 pins).
+  - On the release's classifier and witness swapped back in: 5 ✗ and then a crash (`viewWords` absent) in the first; 13 ✗ in the second. The controls are green there by nature.
+  - Each control is red under its own mutant (lane battery).
+  - test-fs-canary restated 6.7 → 6.95 s (§9's three 120 ms holds), proportionally: against the 2.369.397 copy on one box, three alternating runs, 14.90 s → 15.45 s (×1.037). The .397 stated fast sum is 1065.85 of 1066 s.
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 

@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A limit you marked as reset now says when you marked it, and that the next refresh confirms or corrects it.
 - A limit's age mark now uses the interface's units, and in Chinese and Japanese a note that waits on a Claude Code check names ⚙ → Update VibeSpace….
 - If a limit you mark as reset cannot be written to disk yet, VibeSpace now says so beside the mark.
+- When VibeSpace runs from this computer's own disk, projects in a folder that shows a network folder or this disk are no longer refused without a word.
 
 ### Maintenance
 - Test and release tooling only; nothing changes for you.
