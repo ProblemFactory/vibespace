@@ -208,6 +208,7 @@ export function effortLabel(backend, value, { capitalize = false } = {}) {
   const v = String(value || '');
   const extra = BACKEND_META[backend]?.ui?.effortExtras?.find((x) => x.value === v);
   // the level's words (the door); a level it does not know keeps the harness's own label / spelling (never hidden)
+  // ui-words: a level the door has no word for keeps the harness's own spelling, shown as itself
   const base = hasWord('effort', v) ? valueWord('effort', v, t) : capitalize ? (extra?.label || v.charAt(0).toUpperCase() + v.slice(1)) : v;
   const hint = BACKEND_META[backend]?.effortHints?.[v] || extra?.hint;
   return hint ? `${base} — ${t(hint)}` : base;

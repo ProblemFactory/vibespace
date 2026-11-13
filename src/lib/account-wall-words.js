@@ -70,6 +70,7 @@ export function laneWords(lane, { t = id, capName = null } = {}) {
   if (lane === 'plan:5h') return t('the 5-hour limit');
   if (lane === 'plan:7d') return t('the weekly limit');
   const n = capName || String(lane || '').replace(/^model:/, '').replace(/-/g, ' ');
+  // ui-words: a model family's name (a brand: «Opus») inside a worded sentence
   return t('the {name} weekly limit', { name: n ? n.charAt(0).toUpperCase() + n.slice(1) : '?' });
 }
 

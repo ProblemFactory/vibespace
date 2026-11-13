@@ -8,6 +8,7 @@ import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM, copyText } from '
 import { openTerminalLink, TERMINAL_LINK_HANDLER } from './terminal-links.js'; // lane signin-card-real-screen: ONE opener for both link roads (plain text + OSC-8)
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { themeWord } from './value-words.js'; // a theme's name in the reader's words (lane ui-language)
 import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
 
 // Web fonts loaded via Google Fonts (always available)
@@ -701,7 +702,7 @@ class TerminalSession {
     const themeLabel = document.createElement('label'); themeLabel.textContent = 'Theme';
     const themeSel = document.createElement('select');
     themeSel.appendChild(opt('', 'Default'));
-    for (const name of Object.keys(THEMES)) { themeSel.appendChild(opt(name, name.charAt(0).toUpperCase() + name.slice(1))); }
+    for (const name of Object.keys(THEMES)) { themeSel.appendChild(opt(name, themeWord(name, t))); }
     themeSel.value = this.overrides.theme || '';
     themeSel.onchange = () => { this.applyOverride('theme', themeSel.value || null); };
 

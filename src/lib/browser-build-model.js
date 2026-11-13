@@ -206,6 +206,7 @@ export function cardBuildLine({ buildChoice = true, choice = null, running = nul
   const base = c.kind === 'default' ? choiceWords(c, t) : t(i18nKey('{build} (pinned)'), { build: choiceWords(c, t) });
   const r = typeof running === 'string' && running ? running : null;
   const text = live && r ? t(i18nKey('{choice} · running Chrome {version}'), { choice: base, version: r }) : base;
+  // ui-words: the first letter of a sentence t() already worded (it may start with a build's name)
   return { text: text.charAt(0).toUpperCase() + text.slice(1), warn: false };
 }
 

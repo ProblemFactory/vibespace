@@ -101,11 +101,12 @@ export function modelLabelWords(m, t) {
  *  channel options read THIS — they kept two copies of the English before). */
 export function pushClaimOptions(t) { return ['unknown', 'shared', 'exclusive'].map((v) => [v, valueWord('push-claim', v, t)]); }
 
-/** A theme key → its name: a built-in's words, a custom theme's own name (`custom-<name>`), else the key. */
-export function themeWord(key, t) {
+/** A theme key → its name: a built-in's words, a custom theme's own name (`custom-<name>`), else the name the theme came
+ *  with (`label` — a plugin theme's own, ThemeManager.getPluginThemes), else the key. Never the key capitalised. */
+export function themeWord(key, t, label = null) {
   const k = String(key || '');
   if (k.startsWith('custom-')) return k.slice(7);
-  return hasWord('theme', k) ? valueWord('theme', k, t) : k;
+  return hasWord('theme', k) ? valueWord('theme', k, t) : (label ? String(label) : k);
 }
 
 /** A STORED default name, worded at display (never in storage — kb §16): a desktop minted as «Desktop 3», the default

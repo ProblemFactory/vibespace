@@ -41,6 +41,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Built-in plugins' names and descriptions, and the voice input sheet's title, are in your language.
 - Spending settings, the task group window and the diagnostics report use your language's words where English had stayed.
 - The For you list's one-line preview drops a leading heading or quote mark and backticks; the detail still shows the text exactly as written.
+- The theme's name in the ⚙ menu's Appearance row, the Theme Editor's base list and a terminal's theme list is shown in your language.
 
 ## 2.369.402 — 2026-11-14
 

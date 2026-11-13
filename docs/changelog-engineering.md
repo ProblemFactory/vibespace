@@ -99,6 +99,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - **for-you-6 (主开发's ruling: the pane stays never-markdown):** inbox-window-layout `rowPreview` — the LIST row drops the line's leading heading / quote mark and a backtick pair's backticks, never an underscore (`B __tests__/` stays). test-inbox-window-model's pins and its red control follow (the base strip now agrees on two rows, so ≥ 4 red).
 - **The baseline:** ① 482 → **480**.
 
+### ui-language follow-up — a theme id is worded, never capitalised by hand (L3 ui-plain-words' hand-off)
+- **The three theme menus** go through value-words `themeWord`: the ⚙ Appearance head row's caption (appearance-panel `appearanceCaption`), the Theme Editor's base list and a terminal's theme list. Before, each wrote `name.charAt(0).toUpperCase() + name.slice(1)`, which showed «Dark» in a Chinese interface.
+- **`themeWord(key, t, label)`:** a plugin theme (`plugin-<x>`) reads the label it was registered with (ThemeManager.getPluginThemes), never its key capitalised.
+- **test-ui-language ⑥(d), zero tolerance:** a value capitalised by hand (`x.charAt(0).toUpperCase()`, `x[0].toUpperCase()`) anywhere in the browser bundle is RED. The six first letters that are not a value's carry `// ui-words: <why>` on the line above: a worded sentence's, the agent's own sentence, a model family, a vendor slug, and a level the door has no word for. A planted control holds both spellings.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

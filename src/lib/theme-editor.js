@@ -1,6 +1,7 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
 import { showToast, showConfirmDialog, uiScale, escHtml } from './utils.js';
 import { t, tc } from './i18n.js'; // lane ui-language (the walk's gear-and-system-2: the Theme Editor was English in every language)
+import { themeWord } from './value-words.js'; // a built-in theme's name in the reader's words (lane ui-language)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 
 // All CSS custom properties that themes define
@@ -163,7 +164,7 @@ class ThemeEditor {
     fromSel.className = 'theme-editor-select';
     for (const name of BUILTIN_THEMES) {
       const o = document.createElement('option');
-      o.value = name; o.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      o.value = name; o.textContent = themeWord(name, t);
       fromSel.appendChild(o);
     }
     const customNames = Object.keys(this._customThemes);
