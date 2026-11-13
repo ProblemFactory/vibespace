@@ -69,7 +69,6 @@ export const VALUE_SETS = Object.freeze({
   'model-note': Object.freeze({ latest: i18nKey('latest'), 'latest, 200k': i18nKey('latest, 200k context'), 'latest, 1M context': i18nKey('latest, 1M context') }),
 });
 
-/** The words of `value` in set `set` — the reader's language through `t`, else the value itself (never hidden). */
 /** A table's key through the page's `t`. A one-word key that another surface may spell with another meaning carries its set
  *  as a CONTEXT (`theme::Light`, `msg-role::Assistant` — the closure round's collision finding); with no row for it (English,
  *  a stub translator) the word is the key without its context. */
@@ -78,6 +77,7 @@ function wordOf(k, t) {
   const i = typeof k === 'string' ? k.indexOf('::') : -1;
   return w === k && i > 0 ? k.slice(i + 2) : w;
 }
+/** The words of `value` in set `set` — the reader's language through `t`, else the value itself (never hidden). */
 export function valueWord(set, value, t, { backend = null } = {}) {
   const v = value == null ? '' : String(value);
   if (set === 'job-state') return Object.prototype.hasOwnProperty.call(JOB_STATE_WORDS, v) ? t(JOB_STATE_WORDS[v]) : v;
