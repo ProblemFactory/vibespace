@@ -6,6 +6,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - A chat shows one connection notice, updated in place, and none if you only unlocked your phone.
+- The «Set up once: install TightVNC Server» line of a Windows machine now has its Install button however you open it, and so does its virtual microphone.
+- A stream no longer stops at an old ffmpeg on the machine's PATH when a working one is in VibeSpace's ffmpeg folder.
 
 ## 2.369.398 — 2026-11-12
 
