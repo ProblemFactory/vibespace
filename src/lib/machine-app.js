@@ -217,7 +217,16 @@ export function windowStreamText(code, { title = '', machine = '', why = '' } = 
   if (code === 'helper_changed_regrant') return t('the Mac’s screen helper was updated and needs its Screen Recording switch again');
   if (code === 'helper_signed_regrant') return t('the Mac’s signed screen helper replaced the old one and needs its Screen Recording switch one last time'); // lane apple-signing
   if (code === 'helper_unsigned') return t('the screen helper the hub offered the Mac was refused: it is not signed by the VibeSpace release team');
+  if (code === 'screen_locked') return t('the Mac stayed locked too long — unlock it, then try again'); // lane mac-locked-capture
   return t('The stream of “{title}” stopped: {why}', { title, why: why || code || '?' });
+}
+/** THE LOCK (lane mac-locked-capture): what a stream window says while the Mac's screen is locked — its capture waits, the picture
+ *  comes back by itself at the unlock (`p` = the stream view's `paused`: { why: 'locked', since } — the machine's clock; shown as a
+ *  24-hour HH:MM — no locale import: the suites bundle this file over an i18n stub of `t` alone). */
+export function lockedText(p) {
+  const d = p && Number.isFinite(p.since) ? new Date(p.since) : null;
+  const at = d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : null;
+  return at ? t('The Mac is locked (since {time}) — the picture comes back by itself once it is unlocked', { time: at }) : t('The Mac is locked — the picture comes back by itself once it is unlocked');
 }
 
 /**
@@ -300,11 +309,11 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     sized = key;
     app.wm.resizeWindowTo(winInfo.id, { w: (size.w + chrome.w) / s, h: (size.h + chrome.h) / s });
   };
-  function showSay(text, { again = false, need = null } = {}) {
+  function showSay(text, { again = false, need = null, quiet = false } = {}) {
     say.style.display = text ? 'flex' : 'none';
     sayText.textContent = text || '';
     sayActs.replaceChildren();
-    if (!text) return;
+    if (!text || quiet) return; // quiet: words only (THE LOCK — nothing to press, the picture comes back by itself)
     // lane machine-needs-at-pairing pick 2: no ffmpeg that passes on this Windows machine ⇒ 「取得 FFmpeg …」 first on the same line
     if (need && ffmpegNeedCode(need) && m.setup === 'win32') sayActs.append(ffmpegDoor(m.hostId, { machine: nameOf(m), say: (x) => { sayText.textContent = x; }, onDone: () => connect() }));
     // the Mac's switch or its helper (M3 / M5): the right pane — or the Command Line Tools' installer — on the same line
@@ -337,6 +346,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
       onStatus: () => drawStats(),
       onSource: (src) => { const w = src && src.window; if (w && w.title) { title = w.title; app.wm.setTitle(winInfo.id, t('{app} on {machine}', { app: title, machine })); } drawStrip(); },
       onStats: (page, agent) => { const sc = agent && agent.screen; const h = (sc && sc.held) || null; if (h !== held) { held = h; drawStrip(); } drawStats(); fit(); },
+      onPaused: (p) => { if (!ended) showSay(p ? lockedText(p) : null, { quiet: true }); }, // lane mac-locked-capture: THE LOCK — said, then gone at the unlock
       // ended by the machine, the hub, the picker's 停止 or another window — a Mac's minimized window ENDS (SCK sends no
       // picture — lane stream-p3m-build; Windows holds it): its own words
       onFallback: (code, why) => {

@@ -48,12 +48,22 @@
  * THE SOURCE: `vibespace-screen --disclaim capture …` → FLV on stdout (SP.flvReader — no new parser), `key` / `bps <n>` on
  *   stdin (a key on the SAME frame; the bitrate LIVE — no encoder restart), JSON lines on stderr (started
  *   → the input's target, frame → a window that moved, stats once a second, end {code}). ENDINGS BY NAME: the helper's end code
- *   (window_minimized, window_gone, display_gone, screen_permission, encoder_failed, capture_failed); an exit without one =
- *   capture_exited (its last stderr line logged). GONE MEANS GONE (lane stream-fallback-never-silent — incident
+ *   (window_minimized, window_gone, display_gone, screen_permission, encoder_failed, capture_failed, enumeration_timeout,
+ *   start_timeout — lane mac-locked-capture's bounds); an exit without one = capture_exited (its last stderr line logged). GONE MEANS GONE (lane stream-fallback-never-silent — incident
  *   inc-mvf7z2a3-9sxi): the helper names EVERY SCStream stop display_gone / window_gone (measured: -3805 «application connection
  *   interrupted» the moment a sibling capture ended), so that word is believed only when two facts reads 1 s apart lack the
  *   display / window (SP.judgeGone); else the SAME session captures again in place — a new helper, the same sid, the rate it had
  *   reached — twice a minute at most (SP.captureRestart), then it ends capture_interrupted.
+ * THE LOCK (lane mac-locked-capture — measured on the owner's Mac, macOS 27.0.1: a capture started on a LOCKED screen waited in
+ *   ScreenCaptureKit for good, a running one was interrupted ~30 s after the lock and its capture started again waited the same
+ *   way, nothing healed at the unlock — the window stayed black): the lock is a STATE of the session (SP.LOCK_RULE), never its
+ *   end. The helper's `end locked` (it checks before any ScreenCaptureKit call, and when a bound fires), the plan's facts saying
+ *   locked at the start, or ANY ending whose forced facts read says locked (the judge's first read for a gone word) ⇒ no helper
+ *   runs; the facts are read every LOCK_RULE.everyMs; the first read that says unlocked captures again IN PLACE (a new helper, the
+ *   same session, a key frame first) — the page's picture comes back without a click. Past LOCK_RULE.maxMs the session ends
+ *   `screen_locked`. A helper that never says `started` within LOCK_RULE.startMs is ended `start_timeout` (the agent's own bound —
+ *   then judged the same way). The host hears every change (`start`'s third hook) and reads `paused()` —
+ *   { why: 'locked', since, checks } | null — into each stream-stats push (src/agentd/stream-host.js).
  * THE RATE (lane stream-mac-rate — 「mac画面有了但是压缩的厉害」: the owner's 1440p60 went 8000 → 300 kbps 2.2 s in and stayed —
  *   werift's estimate obeyed, which counts ~one packet a picture: THE ESTIMATE): src/stream-plan.js THE RATE, the window road's rule —
  *   SP.rateFollower with MAC_RATE_RULE: never under the picture's floor (plan.floor — kbpsFloor of its pixels × its rate), an
@@ -239,7 +249,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   return { paths: P, version, ensure, sawTcc, sawDoor, onTcc, rowAsked, spawnPlan, installed, run };
 }
 
-function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null, codesign = MI.MAC_CODESIGN, agentVersion = AGENT_VERSION } = {}) {
+function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null, codesign = MI.MAC_CODESIGN, agentVersion = AGENT_VERSION, lockRule = SP.LOCK_RULE } = {}) {
   const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env, codesign, agentVersion });
   let memo = null, inflight = null;
   async function readFacts() {
@@ -331,16 +341,18 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
   }
 
   function macSource(plan, maxKbps, f = {}) {
-    const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null, captureRestarts: 0 };
+    const st = { aus: 0, keyWaitMs: null, keysAnswered: 0, rateChanges: 0, helper: null, captureRestarts: 0, locks: 0, resumes: 0 };
     const rate = SP.rateFollower({ kbps: plan.kbps, cap: maxKbps, floor: plan.floor || 0, rule: SP.MAC_RATE_RULE }); // THE RATE (src/stream-plan.js)
     let child = null, onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, started = null, target = null, ended = null;
     let aud = null, withAudio = false; // lane speaker-passthrough-v1: THE SOUND's capture (source.audio) · the helper runs with --audio
+    let lock = null, onPause = null, startedBy = null; // THE LOCK: { since, checks, timer } while the screen is locked · the host's hook · the child whose `started` came
     const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const tail = [];
     const say = (line) => { if (child && child.stdin && !child.stdin.destroyed) { try { child.stdin.write(line + '\n'); } catch { /* its exit says it */ } } };
     function finish(code, why) {
       if (stopped) return;
       stopped = true;
+      if (lock) { clearTimeout(lock.timer); lock = null; }
       if (child && child.exitCode == null) { try { child.kill(); } catch { /* gone */ } }
       log(`[stream] mac screen source ended: ${code}${why ? ` (${why})` : ''}`);
       try { onEnd && onEnd(code); } catch { /* the host's */ }
@@ -349,7 +361,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       let o = null;
       try { o = JSON.parse(l); } catch { tail.push(l.slice(0, 200)); if (tail.length > TAIL) tail.shift(); return; }
       if (!o || typeof o !== 'object') return;
-      if (o.t === 'started') { started = o; target = SP.macInputTarget(o); if (aud && aud.waiter && o.audio === true) aud.waiter({ on: true }); }
+      if (o.t === 'started') { started = o; startedBy = child; target = SP.macInputTarget(o); if (aud && aud.waiter && o.audio === true) aud.waiter({ on: true }); }
       else if (o.t === 'audio') { if (aud && aud.waiter) aud.waiter(o); else if (aud && aud.state === 'live' && o.on === false && o.error) audioEnded('capture_failed', String(o.error).slice(0, 200)); }
       else if (o.t === 'frame' && started) { started = { ...started, frame: o.frame }; target = SP.macInputTarget(started); }
       else if (o.t === 'stats') st.helper = o;
@@ -362,6 +374,10 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       // its end line may trail the exit: judged once its stderr closed (200 ms at most)
       c.on('exit', (code, sig) => { if (stopped || c !== child) return; let once = false; const go = () => { if (!once) { once = true; died(c, code, sig); } }; if (c.stderr.readableEnded) go(); else { c.stderr.once('close', go); setTimeout(go, 200).unref?.(); } });
       if (c.stdin) c.stdin.on('error', () => { /* its exit says it */ });
+      // THE LOCK's belt: a helper silent past startMs is ended BY NAME — one without the bounds waits in ScreenCaptureKit for good
+      const bound = setTimeout(() => { if (stopped || c !== child || startedBy === c || c.exitCode != null || ended) return; ended = { code: 'start_timeout', error: `the screen helper said nothing for ${lockRule.startMs / 1000} s (ScreenCaptureKit did not answer)` }; try { c.kill(); } catch { /* its exit says it */ } }, lockRule.startMs);
+      bound.unref?.();
+      c.on('exit', () => clearTimeout(bound));
       let buf = '';
       c.stderr.setEncoding('utf8');
       c.stderr.on('data', (d) => { if (c !== child) return; buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) onLine(l); } if (buf.length > 65536) buf = ''; });
@@ -385,21 +401,65 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     function died(c, code, sig) {
       if (stopped || c !== child) return;
       const said = ended, gone = plan.kind === 'window' ? 'window_gone' : 'display_gone';
-      if (!said || said.code !== gone) { finish(said ? said.code : 'capture_exited', said ? said.error : `the screen helper exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`); return; }
+      if (said && said.code === 'locked') { lockedNow(said.error); return; } // THE LOCK: the helper saw it (at its start, or when a bound fired)
+      if (!said || said.code !== gone) { unlessLocked(c, said ? said.code : 'capture_exited', () => finish(said ? said.code : 'capture_exited', said ? said.error : `the screen helper exit ${code == null ? sig : code}${tail.length ? ': ' + tail[tail.length - 1] : ''}`)); return; }
       const want = plan.kind === 'window' ? { window: plan.window.id } : { display: plan.display.id };
       const what = plan.kind === 'window' ? `window ${plan.window.id}` : `display ${plan.display.id}`;
-      SP.judgeGone(() => facts({ force: true }), want, (ms) => new Promise((r) => { setTimeout(r, ms); })).then((v) => {
+      let first = null; // THE LOCK: the judge's first read says whether the screen is locked
+      SP.judgeGone(() => facts({ force: true }).then((x) => { if (!first) first = x; return x; }), want, (ms) => new Promise((r) => { setTimeout(r, ms); })).then((v) => {
         if (stopped || c !== child) return;
+        if (first && first.ok && first.locked === true) { lockedNow(`the helper said ${said.code} on a locked screen (${said.error})`); return; } // ScreenCaptureKit interrupts a capture on a locked screen; started again there it waits for good
         if (v === 'gone') { finish(said.code, said.error); return; }
         const seen = v === 'present' ? 'still list' : 'could not be read for';
         if (!SP.captureRestart(restartsAt, now())) { finish('capture_interrupted', `the helper said ${said.code} again while the facts ${seen} ${what} (${said.error})`); return; }
-        restartsAt.push(now()); st.captureRestarts++; ended = null;
+        restartsAt.push(now()); st.captureRestarts++;
         log(`[stream] mac screen source: the helper said ${said.code} (${said.error}) but the facts ${seen} ${what} — capturing it again in place (${st.captureRestarts})`);
-        if (keyAskedAt == null) keyAskedAt = now(); // the new helper's first picture is a key frame
-        try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); return; }
-        if (rate.kbps !== plan.kbps) say(`bps ${rate.kbps * 1000}`); // the rate the session had reached, not the plan's
-        if (aud && aud.state === 'live') { aud.fresh = true; if (!withAudio) say('audio on'); } // lane speaker-passthrough-v1: the sound comes back with it
+        again();
       });
+    }
+    /** The capture again IN PLACE (a new helper, this session): its first picture a key frame, the rate the session had reached
+     *  (not the plan's), the sound back with it (lane speaker-passthrough-v1) — after a gone word the facts refuted, or the unlock. */
+    function again() {
+      ended = null;
+      if (keyAskedAt == null) keyAskedAt = now();
+      try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); return; }
+      if (rate.kbps !== plan.kbps) say(`bps ${rate.kbps * 1000}`);
+      if (aud && aud.state === 'live') { aud.fresh = true; if (!withAudio) say('audio on'); }
+      if (aud && aud.deferred) { aud.deferred = false; say('audio on'); } // asked while the screen was locked
+    }
+    // ── THE LOCK (lane mac-locked-capture) ──
+    const paused = () => (lock ? { why: 'locked', since: lock.since, checks: lock.checks } : null);
+    const tell = () => { try { onPause && onPause(paused()); } catch { /* the host's */ } };
+    /** An ending on a LOCKED screen is the lock — one forced facts read says it (a helper without the bounds fails or waits there);
+     *  else `fn`, the ending by its own name. */
+    function unlessLocked(c, code, fn) {
+      facts({ force: true }).then((x) => { if (stopped || c !== child) return; if (x && x.ok && x.locked === true) lockedNow(`the capture ended ${code} on a locked screen`); else fn(); });
+    }
+    /** No helper runs while the screen is locked: the facts every everyMs (watch), the session goes on (the host is told). */
+    function lockedNow(why) {
+      if (stopped) return;
+      if (!lock) {
+        lock = { since: now(), checks: 0, timer: null }; st.locks++;
+        log(`[stream] mac screen source: the Mac's screen is locked (${why}) — no capture until it is unlocked (its facts every ${lockRule.everyMs / 1000} s, ${Math.round(lockRule.maxMs / 60000)} min at most)`);
+        tell();
+      }
+      clearTimeout(lock.timer);
+      lock.timer = setTimeout(watch, lockRule.everyMs); lock.timer.unref?.();
+    }
+    async function watch() {
+      const l = lock;
+      if (stopped || !l) return;
+      l.checks++;
+      const x = await facts({ force: true });
+      if (stopped || lock !== l) return;
+      const v = SP.lockStep({ since: l.since, now: now(), locked: x && x.ok && typeof x.locked === 'boolean' ? x.locked : null }, lockRule);
+      if (v === 'end') { finish('screen_locked', `the Mac's screen stayed locked ${Math.round((now() - l.since) / 60000)} min — unlock it, then stream again`); return; }
+      if (v === 'watch') { l.timer = setTimeout(watch, lockRule.everyMs); l.timer.unref?.(); return; }
+      lock = null; st.resumes++;
+      log(`[stream] mac screen source: the Mac's screen is unlocked after ${Math.round((now() - l.since) / 1000)} s — capturing it again in place`);
+      keyAskedAt = now(); // the new helper's first picture is a key frame (the lock's wait is no key wait)
+      tell();
+      again();
     }
     // ── THE SOUND (lane speaker-passthrough-v1) ──
     function onAudio(ev) {
@@ -430,6 +490,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       return {
         start() {
           if (stopped) return Promise.resolve(named('not_found', 'the picture ended'));
+          if (lock) return Promise.resolve(named('screen_locked', 'the Mac\'s screen is locked — its sound comes with the picture once it is unlocked')); // THE LOCK
           aud = a; a.state = 'starting'; a.runs++; a.startedAt = now(); a.fresh = true; a.code = null; a.error = null; a.ended = null;
           return new Promise((resolve) => {
             const done = (v) => { clearTimeout(timer); a.waiter = null; if (v.ok) { a.state = 'live'; log(`[stream] mac sound on (SCK capturesAudio${a.relaunched ? ', the capture started again with --audio' : ''})`); } else { a.state = 'failed'; a.code = v.code; a.error = v.error; } resolve(v); };
@@ -462,18 +523,22 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       // (lane desktop-display-modes: + primary, HDR and the real pixels pw × ph — the Windows rows' shape; x/y/w/h stay points)
       ...(f.tcc ? { tcc: { accessibility: f.tcc.accessibility } } : {}), // lane desktop-display-modes commit 2: the page's Accessibility banner goes when a start's facts say granted
       ...(plan.kind === 'display' && plan.display ? { display: plan.display.id, displays: (f.displays || []).map((d) => ({ id: d.id, main: !!d.main, primary: !!d.main, x: d.x, y: d.y, w: d.w, h: d.h, pw: d.pw, ph: d.ph, hdr: !!d.hdr, name: d.name || null })) } : {}),
-      start(onAccessUnit, onEnded) {
+      start(onAccessUnit, onEnded, onPaused) {
         if (onAu || stopped) return;
-        onAu = onAccessUnit; onEnd = onEnded || null; t0 = now(); rate.begin(t0);
+        onAu = onAccessUnit; onEnd = onEnded || null; onPause = onPaused || null; t0 = now(); rate.begin(t0);
         if (keyAskedAt == null) keyAskedAt = t0; // the helper's first picture is a key frame
-        try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
-        if (aud && aud.deferred) { aud.deferred = false; say('audio on'); } // lane speaker-passthrough-v1: the sound asked before the picture started
+        if (f.locked === true) lockedNow('the facts of the offer say so'); // THE LOCK: never a helper spawned onto a locked screen
+        else {
+          try { startHelper(); } catch (e) { finish('capture_failed', String((e && e.message) || e)); }
+          if (aud && aud.deferred) { aud.deferred = false; say('audio on'); } // lane speaker-passthrough-v1: the sound asked before the picture started
+        }
         log(`[stream] mac screen source: ${plan.kind} ${plan.kind === 'window' ? plan.window.id : plan.display.id} ${plan.w}×${plan.h} @ ${plan.fps} fps (${plan.rung}), VideoToolbox ${rate.kbps} kbps (floor ${rate.floor})`);
       },
-      stop() { if (stopped) return; stopped = true; say('quit'); const c = child; if (c) setTimeout(() => { if (c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } }, 1000).unref?.(); },
+      paused, // THE LOCK: { why: 'locked', since, checks } | null — read into every stream-stats push
+      stop() { if (stopped) return; stopped = true; if (lock) { clearTimeout(lock.timer); lock = null; } say('quit'); const c = child; if (c) setTimeout(() => { if (c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } }, 1000).unref?.(); },
       requestKeyframe() { if (keyAskedAt == null) keyAskedAt = now(); say('key'); },
       setTargetKbps(want) {
-        if (!onAu || stopped) return;
+        if (!onAu || stopped || lock) return; // THE LOCK: nothing is sent — no estimate judges it
         const d = rate.estimate(want, now());
         if (!d.change) return;
         st.rateChanges++;
@@ -485,6 +550,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
         return { mode: plan.mode, encoder: plan.encoder.label, encoderId: plan.encoder.id, note: plan.note, kind: plan.kind, display: plan.display ? plan.display.id : null, window: plan.window, w: plan.w, h: plan.h, rung: plan.rung, white: null, kbps: rate.kbps, floor: rate.floor, rate: rate.last,
           encodeMs: h.encMs == null ? null : h.encMs, captureMs: h.capMs == null ? null : h.capMs, timing: 'helper', lowLatency: h.lowLatency == null ? null : h.lowLatency,
           captured: h.captured || 0, idle: h.idle || 0, repeats: h.repeats || 0, aus: st.aus, dropped: h.dropped || 0, restarts: 0, captureRestarts: st.captureRestarts, rateChanges: st.rateChanges, keyWaitMs: st.keyWaitMs, keysAnswered: st.keysAnswered,
+          locked: paused(), locks: st.locks, resumes: st.resumes, // THE LOCK (lane mac-locked-capture)
           ecoqos: 'n/a' }; // lane stream-sdr-ecoqos: Windows' power throttling (EcoQoS) is not a Mac's — nothing opted out here, no details row
       },
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */

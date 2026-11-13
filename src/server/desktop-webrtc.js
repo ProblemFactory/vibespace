@@ -49,8 +49,11 @@
  *                            no new poll within STREAM_LIMITS.goneMs ⇒ stopped `viewer_gone`, so the machine ends the capture in
  *                            seconds, not at the idle sweep
  *   • stopWindow(host, id)   every session of that host streaming that window (the picker's 停止 — any browser's)
- *   • facts(hostId)          THE RECORD: per session { key, sid, codec, source, startedAt, state, stats, path, ended } — facts,
- *                            never a decision
+ *   • facts(hostId)          THE RECORD: per session { key, sid, codec, source, startedAt, state, stats, path, ended, paused,
+ *                            resumes } — facts, never a decision
+ * THE LOCK (lane mac-locked-capture): a stream-stats push's `paused` ({ why: 'locked', since } — a Mac whose screen is locked: its
+ * capture waits, src/agentd/stream-mac.js) is the session's `paused` (+ `at`, this hub's clock), the long poll's too; at each change
+ * ONE line of the stream family — `session <sid> stopped (locked) …` / `session <sid> resumed (…)` — the session itself goes on.
  * THE RELAY (NAT — direct first, else the hub forwards): per session ONE UDP socket on this hub; each datagram is framed
  * (src/stream-model.js relayFrame) onto ONE `tcpForward` to the agent's relay port, where the stream host's shims hand it to
  * werift. Its candidates are `typ relay` (the lowest priority: ICE takes a direct pair whenever one works). Bounded: a stalled
@@ -300,7 +303,16 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       leg: g ? { addr: g.addr ? `${g.addr.ip}:${g.addr.port}` : null, pings: g.pings, forged: g.forged, replayed: g.replayed, stray: g.stray, up: g.up, down: g.down, heardMsAgo: g.heardAt ? now() - g.heardAt : null, quiet: g.quiet, held: g.held, changes: g.changes.slice(),
         measured: g.measured, trial: g.trial, peer: g.peer, takeSeq: g.takeSeq, peerSeq: g.peerSeq, retakes: g.retakes, dup: g.dup, probes: g.probes, echoes: g.echoes, probeLost: g.probeLost, rttMs: g.rttMs, falls: g.fallsTotal, pinned: g.pinned ? { at: g.pinned.at, falls: g.pinned.falls, why: g.pinned.why } : null, muted: g.muted, verdict: verdictOf(s, g) } : null }; // lane stream-udp-leg-fallback: the leg's health, measured
   };
-  const view = (s) => ({ key: s.key, sid: s.sid, hostId: s.hostId, codec: s.codec, source: s.source, windowId: s.windowId, startedAt: s.startedAt, state: s.state, stats: s.stats, path: s.path, ended: s.ended, relay: relayFacts(s) });
+  const view = (s) => ({ key: s.key, sid: s.sid, hostId: s.hostId, codec: s.codec, source: s.source, windowId: s.windowId, startedAt: s.startedAt, state: s.state, stats: s.stats, path: s.path, ended: s.ended, relay: relayFacts(s), paused: s.paused || null, resumes: s.resumes || 0 });
+  /** THE LOCK: the machine's capture paused (`p` = { why, since }) or resumed (null) — on the record, one log line a change. */
+  function pausedNow(s, p) {
+    const was = s.paused || null;
+    const next = p && typeof p === 'object' ? { why: String(p.why || 'paused').slice(0, 24), since: Number.isFinite(p.since) ? p.since : null, at: was ? was.at : now() } : null;
+    s.paused = next;
+    if (!!was === !!next) return;
+    if (next) log.log?.(`[stream] ${s.hostId}: session ${s.sid} stopped (${next.why}) — the capture waits; the picture comes back by itself (the session goes on)`);
+    else { s.resumes = (s.resumes || 0) + 1; log.log?.(`[stream] ${s.hostId}: session ${s.sid} resumed (${was.why} ${Math.round((now() - was.at) / 1000)} s)`); }
+  }
 
   function onPush(s, m) {
     if (m.op === 'stream-ice') {
@@ -313,6 +325,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     if (m.op === 'stream-stats') {
       if (m.stats) s.stats = m.stats;
       if (m.state) s.state = m.state;
+      if (m.paused !== undefined) pausedNow(s, m.paused); // lane mac-locked-capture
       if (m.ended && !s.ended) { s.ended = m.ended; closeRelay(s); ended(s, m.ended); }
       verdictStep(s); // the daemon's own leg facts (no socket, a bind error, its PINGs unanswered) name a dead leg
       if (s.relay && s.relay.leg) trialStep(s, s.relay.leg); // …and how its trial ended (r2)
@@ -663,7 +676,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
     }
     const from = Math.max(0, Math.min(s.cands.length, Number(n) || 0));
     const ho = handover && typeof handover.factsOf === 'function' ? handover.factsOf(s.key, s.hostId) : null; // lane desktop-handover: the strip's lease words + the agent's pointer
-    return { key, seq: s.seq, n: s.cands.length, cands: s.cands.slice(from), state: s.state, stats: s.stats, ended: s.ended, relay: relayFacts(s), ...(ho ? { handover: ho } : {}) };
+    return { key, seq: s.seq, n: s.cands.length, cands: s.cands.slice(from), state: s.state, stats: s.stats, ended: s.ended, relay: relayFacts(s), paused: s.paused || null, ...(ho ? { handover: ho } : {}) };
   }
   /** The page's own read of its path (getStats — direct | relay) is told here so the record says it. */
   function notePath(key, p) { const s = sessions.get(String(key || '')); if (s && (p === 'direct' || p === 'relay')) s.path = p; }

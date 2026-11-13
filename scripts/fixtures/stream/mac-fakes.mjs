@@ -22,6 +22,12 @@
 //                                  live switch macOS refused), and while on it writes cfg.opus's packets (a file of u32LE-length-
 //                                  framed Opus packets) as FLV AUDIO tags (0x91 'Opus' + the packet — the real helper's shape) every
 //                                  20 ms beside the pictures; `--audio` = on from the start (its `started` line says audio: true)
+//                                  lane mac-locked-capture: THE LOCK — cfg.lockFile = a token file: while it exists the screen is
+//                                  LOCKED — `facts` says locked: true; a capture that starts ends `locked` at once (the lane's
+//                                  helper: before ScreenCaptureKit), or with cfg.lockMode 'park' WAITS for good (the helper before
+//                                  it, measured: no line, its stdin unread, 0 % CPU — only a signal ends it; logged {parked, pid});
+//                                  a capture that runs when it appears ends cfg.lockEnds (default display_gone — ScreenCaptureKit
+//                                  interrupts it, the helper names that stop display_gone). Every run's argv line carries its pid
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
 //   writeFakeCodesign(dir)         lane apple-signing: a fake /usr/bin/codesign for the daemon legs (the bundle copy's literal is
 //                                  pointed at it): `--verify` / `-dv` / `-dr -` judge a file by a marker line
@@ -56,7 +62,7 @@ ${cfg.identityLine ? `// VS_FAKE_IDENTITY ${cfg.identityLine}\n` : ''}const fs =
 const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8'));
 let a = process.argv.slice(2);
 const log = (o) => { if (cfg.log) fs.appendFileSync(cfg.log, JSON.stringify(o) + '\\n'); };
-log({ argv: a });
+log({ argv: a, pid: process.pid });
 if (a[0] === '--disclaim') a = a.slice(1); // a real helper re-spawns ITSELF disclaimed here; the fake records that it was asked to
 const say = (o) => process.stderr.write(JSON.stringify(o) + '\\n');
 const opt = (k) => { const i = a.indexOf('--' + k); return i >= 0 ? a[i + 1] : null; };
@@ -65,11 +71,16 @@ if (a[0] === 'version') { process.stdout.write(cfg.version + '\\n'); process.exi
 const take = (f) => { try { fs.unlinkSync(f); return true; } catch { return false; } };
 const count = (f) => { try { const n = Number(fs.readFileSync(f, 'utf8')) || 0; if (n <= 0) return false; fs.writeFileSync(f, String(n - 1)); return true; } catch { return false; } };
 if (a[0] === 'facts' && cfg.factsFail && count(cfg.factsFail)) { process.stderr.write('fake facts: the shareable content could not be read\\n'); process.exit(1); }
-if (a[0] === 'facts') { process.stdout.write(JSON.stringify({ t: 'facts', version: cfg.reports || cfg.version, disclaimed: true, ...cfg.facts, tcc: cfg.tcc }) + '\\n'); process.exit(0); }
+const isLocked = () => !!(cfg.lockFile && fs.existsSync(cfg.lockFile)); // lane mac-locked-capture
+if (a[0] === 'facts') { process.stdout.write(JSON.stringify({ t: 'facts', version: cfg.reports || cfg.version, disclaimed: true, ...cfg.facts, ...(cfg.lockFile ? { locked: isLocked() } : {}), tcc: cfg.tcc }) + '\\n'); process.exit(0); }
 if (a[0] === 'input') {
   process.stdout.write('ready\\n');
   const answer = () => { if (!cfg.inputLive) return cfg.inputAnswer || 'ok'; try { return JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8')).inputAnswer || 'ok'; } catch { return cfg.inputAnswer || 'ok'; } };
   lines((l) => { log({ input: l, pid: process.pid }); const out = (l[0] === 'P' ? 'ok' : answer()) + '\\n'; if (cfg.inputDelayMs && l[0] !== 'P') setTimeout(() => process.stdout.write(out), cfg.inputDelayMs); else process.stdout.write(out); });
+} else if (a[0] === 'capture' && isLocked()) { // lane mac-locked-capture: a capture started on a LOCKED screen
+  log({ parked: cfg.lockMode === 'park', pid: process.pid });
+  if (cfg.lockMode === 'park') setInterval(() => { }, 1 << 30); // the helper before the lane: ScreenCaptureKit never answered
+  else { say({ t: 'end', code: 'locked', error: 'the screen is locked — the capture starts once it is unlocked' }); process.exit(3); }
 } else if (a[0] === 'capture') {
   if (cfg.tcc.screen !== 'granted') { say({ t: 'end', code: 'screen_permission', error: 'Screen Recording is off for vibespace-screen' }); process.exit(3); }
   const [w, h] = String(opt('size') || '1280x720').split('x').map(Number), fps = Number(opt('fps')) || 30, win = opt('window');
@@ -96,6 +107,7 @@ if (a[0] === 'input') {
   if (withAudio) audioOn();
   setInterval(() => {
     if (cfg.dieAfter && sent >= cfg.dieAfter) process.exit(1);
+    if (isLocked()) { say({ t: 'end', code: cfg.lockEnds || 'display_gone', error: 'the capture stopped: the stream was interrupted (the fake: the screen locked)' }); process.exit(3); } // lane mac-locked-capture
     if (cfg.endAfter && sent >= cfg.endAfter && (!cfg.endOnce || take(cfg.endOnce))) { say({ t: 'end', code: cfg.endCode, error: 'the fake ended it' }); process.exit(3); }
     if (cfg.moveAfter && sent === cfg.moveAfter) say({ t: 'frame', frame: cfg.movedFrame });
     if (next != null) { n = next; next = null; }
