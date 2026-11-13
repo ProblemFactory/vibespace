@@ -246,9 +246,14 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
   // a method's own text, its module-level names handed in (the page's translator, escHtml, the toast — recorded)
   const make = (src, fallback, deps = {}) => { const d = { desktopDoors: M.desktopDoors, doorItems: M.doorItems, storedNameWords: VW.storedNameWords, t: tr, escHtml: esc, showToast: (m) => { toasts.push(m); }, ...deps }; const body = src || fallback; return new Function(...Object.keys(d), `return ${/^async /.test(body) ? 'async function ' + body.slice(6) : 'function ' + body}`)(...Object.values(d)); }; // eslint-disable-line no-new-func — the methods' own text
   const deskItems = make(deskItemsSrc, '_deskItems() { return []; }'), doorLabel = make(doorLabelSrc, "_doorLabel() { return ''; }"), doorRefused = make(doorRefusedSrc, '_doorRefused() { return false; }');
+  // lane ui-language (the reader's round): a desktop's name reaches a door's words through THE one door, the manager's nameOf
+  // (one-line methods: their own text too)
+  const oneLine = (name) => { const m = new RegExp(`\\n  (${name}\\([^\\n]*\\) \\{[^\\n]*\\})\\n`).exec(dmSrc); return m ? m[1] : null; };
+  const nameOfSrc = oneLine('nameOf'), doorParamsSrc = oneLine('_doorParams');
+  const nameOf = make(nameOfSrc, "nameOf(d) { return d && typeof d === 'object' ? d.name : d; }"), doorParams = make(doorParamsSrc, '_doorParams(p) { return p; }');
   const world = (desktops, renamed = true) => {
     const calls = [];
-    const self = { _desktops: desktops.map((d) => ({ ...d })), _doorRefused: doorRefused, _startRename: (d) => { calls.push('rename ' + d.id); return Promise.resolve(renamed); }, deleteDesktop: (id) => { calls.push('delete ' + id); return Promise.resolve(); }, reorderDesktop: (a, b) => { calls.push('reorder ' + a + ' before ' + b); } };
+    const self = { _desktops: desktops.map((d) => ({ ...d })), _doorRefused: doorRefused, nameOf, _doorParams: doorParams, _startRename: (d) => { calls.push('rename ' + d.id); return Promise.resolve(renamed); }, deleteDesktop: (id) => { calls.push('delete ' + id); return Promise.resolve(); }, reorderDesktop: (a, b) => { calls.push('reorder ' + a + ' before ' + b); } };
     return { self, calls };
   };
   // ONE drawn menu against the table: exactly its 'item' doors, in its order, with its label; an open one acts, a shut one
@@ -320,6 +325,31 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
   const w0 = world(D4).self;
   ok(doorLabel.call(w0, 'new') === 'New desktop' && doorLabel.call(w0, 'switch', 'd2') === 'Switch desktop — Desk B' && doorLabel.call(w0, 'nope') === '', '_doorLabel reads the table (run on its own source text)');
   ok(doorLabel.call(w0, 'switch', 'zz', 'Old desk') === '“Old desk” is no longer there', 'r2 ①③: a row whose desktop is gone says the switch door\'s why, by the name it showed', doorLabel.call(w0, 'switch', 'zz', 'Old desk'));
+  // THE READER'S ROUND (13:41Z, F5): «Desktop N» was worded site by site — the phone tabs, the switch door's words, the gone why
+  // and the rename «meanwhile» line still printed the stored English. Every one goes through the manager's nameOf now.
+  {
+    const mk = (x, p) => '‹' + tr(x, p) + '›';
+    const nameOfM = make(nameOfSrc, "nameOf(d) { return d && typeof d === 'object' ? d.name : d; }", { t: mk }), dpM = make(doorParamsSrc, '_doorParams(p) { return p; }', { t: mk });
+    const dlM = make(doorLabelSrc, "_doorLabel() { return ''; }", { t: mk }), drM = make(doorRefusedSrc, '_doorRefused() { return false; }', { t: mk, showToast: (m) => { said.push(m); } });
+    const said = [], wM = { _desktops: [{ id: 'd1', name: 'Desktop 1' }, { id: 'd2', name: 'Desk B' }], nameOf: nameOfM, _doorParams: dpM };
+    const sw = dlM.call(wM, 'switch', 'd1'), gone = dlM.call(wM, 'switch', 'zz', 'Desktop 3'), own = dlM.call(wM, 'switch', 'd2');
+    drM.call(wM, { id: 'zz', name: 'Desktop 3' }, 'switch');
+    ok(!!nameOfSrc && !!doorParamsSrc && sw.includes('‹Desktop 1›') && gone.includes('‹Desktop 3›') && said.some((m) => m.includes('‹Desktop 3›')) && own.includes('Desk B') && !own.includes('‹Desk B›'),
+      'F5: a stored default name reaches the switch door\'s words, the gone why and its toast WORDED (‹Desktop 1›) — a person\'s own name as typed', { sw, gone, own, said });
+    // every surface: no desktop's stored name drawn (a textContent / title / a t() name param) past the door
+    const raw = [];
+    for (const [f, src] of [['src/lib/desktop-manager.js', dmSrc], ['src/lib/mobile-nav.js', mn], ['src/lib/desktop-switch-sheet.js', sh]]) {
+      const lines = src.split('\n');
+      lines.forEach((ln, k) => {
+        if (k > 0 && /\/\/\s*ui-words:\s*\S.{6,}/.test(lines[k - 1])) return;   // a line that says why it is already worded
+        // a drawn sink: a textContent / title / innerHTML written with the name, or a t() whose params carry it (row DATA and the
+        // table's verdict inputs keep the stored name — the table compares it)
+        const drawn = (/(?:textContent|title|innerHTML)\s*=[^;]*\b(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln) || /\bt\([^;]*\b(?:name|was|now):\s*(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln));
+        if (drawn && !/nameOf\(|storedNameWords\(|_doorLabel\(|_doorRefused\(/.test(ln)) raw.push(`${f}:${k + 1} ${ln.trim().slice(0, 110)}`);
+      });
+    }
+    ok(raw.length === 0, 'F5: no surface draws a desktop\'s STORED name past the door (desktop-manager, mobile-nav, the switch sheet — the phone tab read «Desktop 1 (3)» in zh)', raw);
+  }
   // the acts: the manager's own handlers, through the done/after guard, on the phone tier as on the desk
   const { self, calls } = world(D4); let afters = 0;
   const items = deskItems.call(self, self._desktops[1], { tier: 'phone', after: () => { afters++; } });
@@ -357,7 +387,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
     const runRename = async ({ gone = false, mark = false, elsewhere = null } = {}) => {
       const seen = { dialog: null, renamed: [], toasts: [] };
       const t1 = mark ? (x, p) => '‹' + tr(x, p) + '›' : tr, sink = (m) => { seen.toasts.push(m); };
-      const self = { _desktops: D4.map((d) => ({ ...d })), renameDesktop: (id, n) => { seen.renamed.push(id + '=' + n); } };
+      const self = { _desktops: D4.map((d) => ({ ...d })), renameDesktop: (id, n) => { seen.renamed.push(id + '=' + n); }, nameOf, _doorParams: doorParams };
       self._doorRefused = make(doorRefusedSrc, '_doorRefused() { return false; }', { t: t1, showToast: sink });
       const dlg = async (o) => { seen.dialog = o; if (gone) self._desktops = self._desktops.filter((d) => d.id !== 'd2'); if (elsewhere) self._desktops = self._desktops.map((d) => (d.id === 'd2' ? { ...d, name: elsewhere } : d)); return 'Taxes'; };
       seen.ret = await make(startRenameSrc, 'async _startRename() { return true; }', { t: t1, showToast: sink, showInputDialog: dlg }).call(self, { id: 'd2', name: 'Desk B' });

@@ -1876,11 +1876,18 @@ export class DesktopManager {
       : { door: d.id, label: d.label, off: d.why }));   // lane ui-controls-and-bugs: the menu's OFF row (the why in words, ONE grammar for every menu) // a shut door says why (never greyed with no words)
   }
 
+  /** A desktop's name as a person reads it: a stored default («Desktop 3») in the reader's words, any other name as typed —
+   *  THE one door for a desktop's name on every surface (lane ui-language; the reader's round found the phone tabs, the switch
+   *  door's words and the rename «meanwhile» line printing the stored English). Takes a desktop or a name. */
+  nameOf(desk) { return storedNameWords('desktop', desk && typeof desk === 'object' ? desk.name : desk, t); }
+  /** A door's params with the desktop's `{name}` through nameOf (the table keeps the stored name — its verdicts compare it). */
+  _doorParams(p) { return p && typeof p.name === 'string' ? { ...p, name: this.nameOf(p.name) } : p; }
+
   /** A door's words from THE table (desktopDoors) — the «+»'s ('new'), a row's / tile's switch title ('switch'): its label,
    *  or when it is shut its why (a row whose desktop is gone, by the `name` it showed — r2 ①③). */
   _doorLabel(id, deskId = null, name = '') {
     const d = desktopDoors({ desk: deskId, name, desktops: this._desktops }).find((x) => x.id === id);
-    return d ? t(d.enabled ? d.label : d.why, d.params) : '';
+    return d ? t(d.enabled ? d.label : d.why, this._doorParams(d.params)) : '';
   }
 
   /** THE VERDICT AT THE ACT (r2 ②: a door's verdict was frozen when its menu opened — another screen deleted the desktop or
@@ -1889,7 +1896,7 @@ export class DesktopManager {
   _doorRefused(desk, id) {
     const d = desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops }).find((x) => x.id === id);
     if (!d || d.enabled) return false;
-    showToast(t(d.why, d.params), { type: 'warn', duration: 6000 });
+    showToast(t(d.why, this._doorParams(d.params)), { type: 'warn', duration: 6000 });
     return true;
   }
 
@@ -1972,7 +1979,7 @@ export class DesktopManager {
     const typed = name.trim(), live = this._desktops.find((d) => d.id === desk.id);
     // renamed on ANOTHER screen while the dialog was open (r3 ⑤): the typed name lands — the person's own last act — and the
     // name it replaces is SAID, never overwritten in silence (renamed there to the same name: nothing to say)
-    if (live.name !== now.name && live.name !== typed) showToast(t(w.meanwhile, { was: now.name, now: live.name, name: typed }), { type: 'warn', duration: 8000 });
+    if (live.name !== now.name && live.name !== typed) showToast(t(w.meanwhile, { was: this.nameOf(now), now: this.nameOf(live), name: typed }), { type: 'warn', duration: 8000 });
     this.renameDesktop(desk.id, typed);
     return true;
   }

@@ -22,7 +22,7 @@ import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { themeWord } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
+import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
 import { installManageAgents } from './manage-agents.js';
@@ -146,7 +146,7 @@ const BACKEND_SESSION_OPTIONS = {
 // `available-models-dirty` broadcast (the hub read a new Claude Code's own model list) apply through ONE function
 const applyAvailableModels = (data) => {
   if (!data) return;
-  const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || t('Default') }));
+  const toSchemaOptions = (models) => modelOptions(models, t);   // lane ui-language: the default row is the page's «Default»
   // EVERY harness's offered models, one rule (lane dc-harness-tail): claude's from bootstrap/v1/models, codex's from
   // its cache, an ACP agent's learned server-side from session/config records (S8)
   for (const be of Object.keys(data)) {

@@ -856,7 +856,7 @@ class FileExplorer {
   _formatDate(ms) {
     if (!ms) return '';
     const d = new Date(ms);
-    return when(d, { full: true });   // lane ui-language: the ONE formatter (a hand-built US «11/12/2026 7:35 PM» before)
+    return when(d);   // lane ui-language: the ONE formatter, the near shape 主开发 ruled (today «06:33», this year «11/12 06:33»)
   }
 
   _renderItems() {

@@ -17,7 +17,7 @@
 //
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
-import { t, resolveLang, deviceLocale } from './i18n.js';
+import { t, resolveLang } from './i18n.js';
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
@@ -82,7 +82,7 @@ export function inboxModel(app) {
   // lane vault-key-row-compact: a param may be WORDS (`{key}` — a verb's own words): said in this language before the sentence is filled
   // lane owner-press-attended: a param may be an INSTANT (`{at}` — an epoch): said in this device's zone, never the hub's;
   // r2: or an INSTANT CLAUSE (`{at, key, gone}`) said «… now» once it has passed — ONE renderer, user-todos-layout saidLine
-  const said = (l) => saidLine(l, t, { locale: deviceLocale() });
+  const said = (l) => saidLine(l, t);
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : itemTextOf(i, said));
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
   // lane vault-use-grants round 7: a plain-detail line is run through t() ONLY for an item whose registry row DECLARES

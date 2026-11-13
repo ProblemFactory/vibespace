@@ -88,6 +88,15 @@ ok('the detail carries the whole request + the way out (answer, or Stop it); the
     && typeof M.inboxItemFor(M.mainAskOf({ requestId: 'r', toolName: 'Bash', input: { command: 'ls' } }), {}).i18n.text.params.name === 'object',
     JSON.stringify(lines));
   ok('no row of the table carries a backtick (the tray draws text: a `…` showed raw)', Object.values(M.MAIN_ASK_KINDS).every((r) => !/`/.test(r.en + r.zh + r.ja)));
+  // the reader's round (13:41Z, F9): an item filed by .398 carries the OLD key in its stored i18n.text — it keeps zh / ja rows (the
+  // current words, no backtick) for one release, so an ask waiting across the update does not turn English
+  {
+    const OLD = '{name} is waiting for you: permission to run `{line}`';
+    const rowOf = (src, k) => { const m = new RegExp('^\\s*' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*("(?:[^"\\\\]|\\\\.)*")', 'm').exec(src); return m ? JSON.parse(m[1]) : null; };
+    const zr = rowOf(zh, OLD), jr = rowOf(ja, OLD);
+    ok('an item filed before the update (its stored key the old command row) still reads in zh / ja — a LEGACY key with the current words, no backtick',
+      Array.isArray(M.LEGACY_KEYS) && M.LEGACY_KEYS.includes(OLD) && zr === M.MAIN_ASK_KINDS.command.zh && jr === M.MAIN_ASK_KINDS.command.ja && !/`/.test(zr + jr), { zr, jr });
+  }
 }
 ok('a settled or stale permission is no ask', M.mainAskOf({ requestId: 'r', resolved: 'allowed' }) === null && M.mainAskOf({ requestId: 'r', stale: true }) === null);
 

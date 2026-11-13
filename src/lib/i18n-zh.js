@@ -381,7 +381,7 @@ export default {
   "Change #{id}": "变更 #{id}",
   "Code change": "代码变更",
   "Harness drift": "Harness 漂移",
-  "Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.": "harness 发出而 VibeSpace 不认识的记录，以及带着未声明字段的已知记录。每行一条痕迹；引入它的 CLI 版本写在 详情里。",
+  "Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.": "harness 发出而 VibeSpace 不认识的记录，以及带着未声明字段的已知记录。每行一条痕迹；引入它的 CLI 版本写在详情里。",
   "breadcrumb": "痕迹",
   "first seen": "首见",
   "New fields on a known record": "已知记录上的新字段",
@@ -12812,4 +12812,8 @@ export default {
   "count": "次数",
   "median": "中位数",
   "max": "最大",
+  "OpenCode background service": "OpenCode 后台服务",
+  "{name} is waiting for you: permission to run `{line}`": "{name} 在等你允许运行：{line}",
+  "1 day": "1 天",
+  "cached": "缓存",
 };

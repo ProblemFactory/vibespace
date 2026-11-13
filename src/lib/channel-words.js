@@ -591,6 +591,12 @@ export function attachmentReasonText(code, { t = tDevice } = {}) {
 /** A group's SYSTEM record in the reader's words (create / invite / leave / kick / rename / archive) — `by` / `member` are the
  *  names the caller resolved; null for a kind this table does not word (the caller shows the record's own text). The group
  *  window and the Channels panel's preview both read it (lane ui-language). */
+/** A group row's last line as the Channels list draws it: a SYSTEM line (its structure rides as `lastRaw` — groups-engine, copied
+ *  onto the row by channel-groups-view groupListRows) in the reader's words; a message as written. PURE over the row. */
+export function groupLastLine(r) {
+  const raw = r && r.lastRaw;
+  return (raw && groupSysWords(raw, raw.by, raw.member)) || (r && r.lastText) || '';
+}
 export function groupSysWords(raw, by, member) {
   raw = raw || {};
   switch (raw.kind) {

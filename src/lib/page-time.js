@@ -35,7 +35,7 @@ const cjk = () => { const l = resolveLang(); return l === 'zh' || l === 'ja'; };
 const CACHE = new Map();
 function fmt(opts) {
   const z = zoneOpt();
-  const key = JSON.stringify([deviceLocale() || '', z.timeZone || '', opts]);
+  const key = JSON.stringify([deviceLocale() || '', z.timeZone || deviceZone() || '', opts]);   // the device's zone too: a formatter is never reused across a zone change
   let f = CACHE.get(key);
   if (!f) {
     try { f = new Intl.DateTimeFormat(deviceLocale(), { ...opts, ...z, ...(cjk() && opts.hour ? { hourCycle: 'h23' } : {}) }); } catch { f = new Intl.DateTimeFormat(undefined, opts); }
@@ -86,12 +86,14 @@ export function clockOf(ms, { seconds = false } = {}) {
   return n == null ? '' : fmt(TIME(seconds)).format(new Date(n)) + zoneTail(n);
 }
 
+/** «1 day» / «{n} days» (en grammar: the reader's round found «1 days ago»; zh / ja say the number either way). */
+const dayWords = (n) => (n === 1 ? t('1 day') : t('{n} days', { n }));
 /** A duration in the reader's units — the two largest that are not zero («2 天 23 小时», «1 小时 59 分钟»). */
 export function span(ms) {
   const s = Math.max(0, Math.round(Math.abs(Number(ms) || 0) / 1000));
   const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   const parts = [];
-  if (d) parts.push(t('{n} days', { n: d }));
+  if (d) parts.push(dayWords(d));
   if (h) parts.push(t('{n} h', { n: h }));
   if (m && !d) parts.push(t('{n} min', { n: m }));
   if (!d && !h && (sec || !m)) parts.push(t('{n} sec', { n: sec }));
@@ -103,13 +105,16 @@ export function ago(ms, { now = Date.now() } = {}) {
   if (n == null) return '';
   const d = Math.max(0, now - n);
   if (d < 45000) return t('just now');
-  const one = d >= 86400000 ? t('{n} days', { n: Math.round(d / 86400000) }) : d >= 3600000 ? t('{n} h', { n: Math.round(d / 3600000) }) : t('{n} min', { n: Math.round(d / 60000) });
+  // the unit is chosen AFTER rounding (59:40 is «1 h», never «60 min»; 23:40 h is «1 day»)
+  const mins = Math.round(d / 60000), hours = Math.round(d / 3600000);
+  const one = mins < 60 ? t('{n} min', { n: Math.max(1, mins) }) : hours < 24 ? t('{n} h', { n: hours }) : dayWords(Math.round(d / 86400000));
   return t('{span} ago', { span: one });
 }
-/** «还有 1 小时 59 分钟» — what is left until `ms`. */
+/** «还有 1 小时 59 分钟» — what is left until `ms`; an instant already past says when it was («4 分钟前»), never «in 0 sec». */
 export function until(ms, { now = Date.now() } = {}) {
   const n = valid(ms);
-  return n == null ? '' : t('in {span}', { span: span(Math.max(0, n - now)) });
+  if (n == null) return '';
+  return n <= now ? ago(n, { now }) : t('in {span}', { span: span(n - now) });
 }
 /** A number in the device's locale. */
 export function num(n, opts = undefined) {

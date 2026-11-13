@@ -270,7 +270,7 @@ export function installPluginsUI(App) {
             if (!on) {
               // verify-r6 D1: an OPTIONS OBJECT (two positional strings rendered a blank "Confirm / OK" dialog)
               const ok = await showConfirmDialog({
-                title: t('Stop {name}?', { name: p.label }),
+                title: t('Stop {name}?', { name: t(p.label) }),
                 message: isRelay ? t('Public URLs from this instance will stop working until you start it again.') : t('Tailnet connections from this instance will drop. The login persists — starting again reconnects without re-auth.'),
                 confirmText: t('Stop'),
                 danger: true,
@@ -282,12 +282,12 @@ export function installPluginsUI(App) {
           };
           if (!p.checking && !p.installed && p.mode !== 'system' && !(isRelay && p.configured === false)) {
             install = document.createElement('button'); install.className = 'mounts-btn plugin-install'; install.textContent = t('Install');
-            install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: p.label })); await api('install'); showToast(t('Installed')); });
+            install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: t(p.label) })); await api('install'); showToast(t('Installed')); });
           }
         }
         list.appendChild(pluginRow({ id: p.id, label: t(p.label), description: t(p.description),   // a built-in's label is a declared word (lane ui-language) tone, chip, chipTitle, onChip,
-          sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: p.label }), onChange: (on, cb) => onSwitch(on, cb) }),
-          install, fact, gear: this._pluginGear(p.id, p.label) }));
+          sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: t(p.label) }), onChange: (on, cb) => onSwitch(on, cb) }),
+          install, fact, gear: this._pluginGear(p.id, t(p.label)) }));
       }
       await renderManifestPlugins(body);
     };
