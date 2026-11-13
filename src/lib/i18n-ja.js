@@ -9744,7 +9744,7 @@ export default {
   "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "このリストはデバイスが保持します。変えられるのはデバイスでコマンドを再実行したときだけで、この VibeSpace からは変えられません。", // lane device-allow-flags
   "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "クラスタインスタンスでは SOCKS・LAN・キーボード・マウスは最初オフです。", // lane device-allow-flags
   // lane pair-dialog-polish (.399): the pairing command sheet — ① ② ③, the allow items' plain words, this system's install facts
-  "Paired as \"{id}\". Put it on the device in three steps:": "「{id}」としてペアリングしました。次の 3 ステップでデバイスに入れます：",
+  "Paired as \"{id}\". Put it on the device in four steps:": "「{id}」としてペアリングしました。次の 4 ステップでデバイスに入れます：",
   "Choose the device’s system": "デバイスのシステムを選ぶ",
   "Copy the command": "コマンドをコピーする",
   "Run it in Terminal on the Mac.": "Mac の「ターミナル」で実行します。",

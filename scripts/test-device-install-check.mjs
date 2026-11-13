@@ -369,7 +369,7 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
     const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
     const M = mutantCopies('installretire', REPO);
     const isrc = fs.readFileSync(path.join(REPO, 'scripts/vibespace-agentd-install.sh'), 'utf8');
-    const base = isrc.replace(/\nretire_siblings\n$/, '\n:\n');
+    const base = isrc.replace(/\nretire_siblings\n/, '\n:\n'); // the CALL line (machine-needs pick 3b: the setup block now follows it, so it is no longer the script's last line)
     ok(base !== isrc, '(q) the patch applies');
     const copy = path.join(M.dir, 'vibespace-agentd-install-noretire.sh'); fs.writeFileSync(copy, base, { mode: 0o755 }); M.files.push(copy);
     const wq = world('noretire');

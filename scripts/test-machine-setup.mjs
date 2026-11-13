@@ -111,7 +111,10 @@ console.log('⑤ THE READER\'S LIST ON PICK 3 (主开发 15:15Z — pick 3d)');
   // step ②'s words: what will be installed, from where, with whose key, what persists, what runs as administrator / root
   const sm = read('src/lib/sidebar-mounts.js');
   const ffRow = (sm.match(/tr\('\{app\} \(\{publisher\}, \{mb\} MB, \{licence\}\)[^\n]*/) || [''])[0], xRow = (sm.match(/tr\('From the distribution, or from xpra\.org[^\n]*/) || [''])[0];
-  ok(/from its release on GitHub \(\{where\}\) into \{folder\}/.test(ffRow) && /VibeSpace did not build it/.test(ffRow) && /as administrator/.test(ffRow) && /where: FFI\.FFMPEG\.url/.test(ffRow) && /folder: FFI\.FFMPEG_FOLDER/.test(ffRow), 'step ② (Windows): the ffmpeg row says where from (its release address) and where it lands, that VibeSpace did not build it, and who runs it — from the PURE row', ffRow.slice(0, 200));
+  ok(/from its release on GitHub \(\{where\}\) into \{folder\}/.test(ffRow) && /VibeSpace did not build it/.test(ffRow) && /as administrator/.test(ffRow) && /where: FFI\.FFMPEG\.url\.replace\(\/\^https:\\\/\\\/\(github\\\.com/.test(ffRow) && /folder: FFI\.FFMPEG_FOLDER/.test(ffRow), 'step ② (Windows): the ffmpeg row says where from (its release address) and where it lands, that VibeSpace did not build it, and who runs it — from the PURE row', ffRow.slice(0, 200));
+  // the sheet's own count (pick 3g): step ② «what this device will be used for» made the pairing FOUR steps — the intro says so in every language
+  const zhD = read('src/lib/i18n-zh.js'), jaD = read('src/lib/i18n-ja.js');
+  ok(/tr\('Paired as "\{id\}"\. Put it on the device in four steps:'/.test(sm) && !/in three steps/.test(sm) && zhD.includes('分四步装到设备上') && jaD.includes('次の 4 ステップ'), 'the sheet\'s intro says FOUR steps (system, what for, copy, run) — en / zh / ja');
   ok(M.XPRA_APT_PACKAGES.every((p) => new RegExp(`\\b${p}\\b`).test(xRow)) && /stays an apt source/.test(xRow) && new RegExp(`held at ${M.XPRA_PIN_MAJOR}\\.x`).test(xRow) && /one sudo/.test(xRow) && /SHA-256/.test(xRow), 'step ② (Linux): the xpra row names every package the plan installs (XPRA_APT_PACKAGES), that xpra.org stays an apt source, the 6.x hold, the key file\'s SHA-256, and the one sudo', xRow.slice(0, 200));
 }
 
