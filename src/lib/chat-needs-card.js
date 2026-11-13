@@ -158,6 +158,9 @@ export class NeedsCards {
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
+    // the OPENED strip's own observers (its place's ResizeObserver, its column's MutationObserver) end with the view too — a window
+    // closed or a view replaced while the strip stood open (the .400 closure: law c, no observer outlives its window)
+    try { const d = this.view?._attnDock; if (d && (d._cadRO || d._cadMO)) this._dockOver(d, false); } catch { }
     clearTimeout(this._dockMarkT); // r11: the dock's mark
     this._mo = null;
   }

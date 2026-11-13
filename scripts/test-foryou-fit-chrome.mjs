@@ -326,7 +326,8 @@ try {
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     // the .400 merged-tip read's THIRD minor: an ask's attached files (--artifact) are drawn in the OPENED strip — after its
     // options, with its detail, the first option still in view at the strip's top (two real files in the conversation's folder)
-    const artP = ['季度报告-final-v3.docx', 'notes-for-review.md'].map((n) => path.join(CWD, n));
+    const LONG_NAME = ('quarterly-review-of-the-attachment-chips-' .repeat(5)).slice(0, 197) + '.md'; // 200 characters: its chip stays inside the strip (the closure verifier's iii-d)
+    const artP = ['季度报告-final-v3.docx', 'notes-for-review.md', LONG_NAME].map((n) => path.join(CWD, n));
     for (const f of artP) fs.writeFileSync(f, 'attached for the strip leg\n');
     await resolveAll();
     const artR = await post({ add: { text: ITEMS.zh.text + ' #arts', options: optsOf('zh', 3), detail: detail.slice(0, 300), urgency: 'high', artifacts: artP } });
@@ -336,9 +337,10 @@ try {
     const ar = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock.cad-open'); if (!d) return null; const R = (e) => e.getBoundingClientRect(), dr = R(d);
       const opts = [...d.querySelectorAll('.ut-opt')].filter((e) => e.getClientRects().length), chips = [...d.querySelectorAll('.ut-arts .ut-art')].filter((e) => e.getClientRects().length), box = d.querySelector('.ut-arts');
       const last = opts[opts.length - 1], first = opts[0];
-      return { chips: chips.length, names: chips.map((c) => c.textContent.trim()).slice(0, 2), after: !!box && !!last && R(box).top >= R(last).bottom - 1, firstIn: !!first && R(first).top >= dr.top - 1 && R(first).bottom <= dr.bottom + 1, scroll: Math.round(d.scrollTop) }; })()`);
+      const longChip = chips.find((c) => c.textContent.trim().length > 150), lr = longChip ? R(longChip) : null;
+      return { chips: chips.length, names: chips.map((c) => c.textContent.trim().slice(0, 40)).slice(0, 3), longIn: !!lr && lr.right <= dr.right + 1 && lr.left >= dr.left - 1, sideways: d.scrollWidth > d.clientWidth + 1, after: !!box && !!last && R(box).top >= R(last).bottom - 1, firstIn: !!first && R(first).top >= dr.top - 1 && R(first).bottom <= dr.bottom + 1, scroll: Math.round(d.scrollTop) }; })()`);
     await shot('open-500-arts.png');
-    check(`② an ask with two attached files, OPENED: both chips drawn (${ar && ar.chips}: ${ar && ar.names.join(' · ')}) AFTER its last option, the first option in view at the strip's top`, !!artId && !!ar && ar.chips === 2 && ar.after && ar.firstIn && ar.scroll === 0, { artId, err: artR && artR.error, ar });
+    check(`② an ask with three attached files (one a 200-character name), OPENED: every chip drawn (${ar && ar.chips}: ${ar && ar.names.join(' · ')}) AFTER its last option, the long one's chip inside the strip (${ar && ar.longIn}) with no sideways scroll (${ar && !ar.sideways}), the first option in view at the strip's top`, !!artId && !!ar && ar.chips === 3 && ar.after && ar.longIn && !ar.sideways && ar.firstIn && ar.scroll === 0, { artId, err: artR && artR.error, ar });
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     const five = await fileAsk('zh', 5, detail.slice(0, 200));
     await winW(SID, 500, 820); await waitFor(`!!document.querySelector('.chat-attn-dock .cad-rows > .ut-item[data-id="${five}"]')`, 8000); await sleep(500); await shot('five-500-closed.png');

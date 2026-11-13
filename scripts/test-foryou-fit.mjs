@@ -139,10 +139,19 @@ const noMO = overBody.replace(/\n      if \(typeof MutationObserver === 'functio
 check('③f CONTROL: the strip that watches only what stood below it at the open (cdfed28ee\'s) is refused', noMO !== overBody && !watchesColumn(noMO));
 //   (iii) the opened item draws what the ask ATTACHED (its --artifact chips): the strip's hide rule keeps a list of parts, and the
 //   chips were never on it — opened, they are shown after the options (an order ≥ the options'), never before them
-const artsShown = (rules) => rules.some((r) => selectorList(r.sel).some((x) => /\.cad-open\b/.test(x) && /\.cad-rows\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x)))
+const artsOpenRule = (rules) => rules.some((r) => selectorList(r.sel).some((x) => /\.cad-open\b/.test(x) && /\.cad-rows\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x)))
   && /display:\s*flex\s*!important/.test(r.body) && /(?:^|;)\s*order:\s*(\d+)/.test(r.body) && Number(/(?:^|;)\s*order:\s*(\d+)/.exec(r.body)[1]) >= 6);
+// …and NO rule that names the strip's .ut-arts hides it again (the closure verifier's iii-c: a later rule at equal specificity won)
+const artsHidden = (rules) => rules.filter((r) => selectorList(r.sel).some((x) => /\.(cad-rows|chat-attn-dock)\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x).replace(/:[\w-]+(\([^)]*\))?/g, ''))) && /display:\s*none/.test(r.body)).map((r) => r.sel);
+const artsShown = (rules) => artsOpenRule(rules) && artsHidden(rules).length === 0;
 check('③f the opened strip draws the ask\'s attached chips (.ut-arts) after its options — display flex !important at an order ≥ the options\' 6', artsShown(RULES));
 check('③f CONTROL: without that rule (e0c3fcba2\'s sheet) the chips stay hidden in the opened item — refused', !artsShown(RULES.filter((r) => !/\.ut-arts\b/.test(r.sel) || !/\.cad-open\b/.test(r.sel))));
+check('③f CONTROL (the closure verifier\'s iii-c): a LATER rule that hides the opened strip\'s chips again is refused', !artsShown([...RULES, ...cssRules('.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-arts { display: none !important; }', 'planted')]));
+// (iv) the view's stop() ends the opened strip's observers (the .400 closure, law c: no observer outlives its window)
+const stopBody = (x) => { const i = x.indexOf('  stop() {'), j = x.indexOf('\n  }\n', i); return i > 0 ? x.slice(i, j) : ''; };
+const stopEnds = (x) => /const d = this\.view\?\._attnDock; if \(d && \(d\._cadRO \|\| d\._cadMO\)\) this\._dockOver\(d, false\);/.test(stopBody(x));
+check('③f the view\'s stop() ends the OPENED strip\'s observers (its place and its column) — through _dockOver(off), as a close does', stopEnds(NC));
+check('③f CONTROL: a stop() that leaves them (a91f4bc8b\'s) is refused', !stopEnds(NC.replace(/\n    \/\/ the OPENED strip's own observers[^\n]*\n[^\n]*\n    try \{ const d = this\.view\?\._attnDock;[^\n]*\n/, '\n')));
 
 // ③b ONE ORDER wherever an item opens (主开发 13:34Z — the owner: «这样我都看不到推荐回复选项»): the question, its OPTIONS, then the detail
 check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the strip, the card) draws its options BEFORE its detail fold',
