@@ -4,9 +4,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.400 — 2026-11-13
 
+### Changed
+- The Agent browser knows Chrome 157's new commands.
+
 ### Fixed
 - A question's reply options are shown whole at every window size, wrapping onto more lines instead of being cut off; «Reply:» is said once before them.
 - Pressing a question in the strip above the message box opens it right there, with its details and every option; «Show it in the conversation» goes to it.
+
+### Security
+- On a browser with Separate tabs, an agent can no longer send a browser command VibeSpace does not know yet; it is refused by name.
 
 ## 2.369.399 — 2026-11-13
 
