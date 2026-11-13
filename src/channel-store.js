@@ -1174,18 +1174,21 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 
   /** readTail's ASYNC twin (lane queued-is-not-woke laws 2 + 3, shape C — the wait reading's log read, OFF THE LOOP): the same backward window
    *  walk, order and patches, through a FileHandle — no synchronous call. An unreadable log throws (never an empty read):
-   *  its caller says nothing until it can read. */
-  async function readTailAsync(adapterId, convId, { limit = 50 } = {}) {
+   *  its caller says nothing until it can read. `maxBytes` bounds what it reads and `windowBytes` each window (the wait
+   *  reading: 64 KB windows, 256 KB in all — every parse a small slice of the loop). → {records, whole: it reached the start} */
+  async function readTailAsync(adapterId, convId, { limit = 50, maxBytes = Infinity, windowBytes = TAIL_BYTES } = {}) {
     const fp = logPath(adapterId, convId);
     const want = Math.max(1, limit);
     const out = [];
     let fh;
-    try { fh = await fs.promises.open(fp, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+    try { fh = await fs.promises.open(fp, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return { records: [], whole: true }; throw e; }
+    let end = 0;
     try {
-      let end = (await fh.stat()).size;
-      let carry = Buffer.alloc(0);
-      while (end > 0 && out.length < want) {
-        const start = Math.max(0, end - TAIL_BYTES);
+      end = (await fh.stat()).size;
+      let carry = Buffer.alloc(0), read = 0;
+      while (end > 0 && out.length < want && read < maxBytes) {
+        const start = Math.max(0, end - Math.max(1, Math.min(windowBytes, maxBytes - read)));
+        read += end - start;
         const buf = Buffer.allocUnsafe(end - start);
         await fh.read(buf, 0, buf.length, start);
         let chunk = carry.length ? Buffer.concat([buf, carry]) : buf;
@@ -1203,7 +1206,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       }
     } finally { try { await fh.close(); } catch {} }
     out.sort(cmpRecord);
-    return patched(adapterId, convId, out.slice(-want));
+    return { records: patched(adapterId, convId, out.slice(-want)), whole: end <= 0 };
   }
 
   /**

@@ -354,8 +354,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     emitStash('drained', cid, q);
     return q;
   }
-  /** the conversations holding an entry in `slot` (the watch asks them when their set empties) */
-  const slotHolders = (slot) => Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].some((e) => e && e.slot === slot));
+  /** the conversations holding an entry in `slot`, or a set it handed (the watch asks them when their set empties) */
+  const slotHolders = (slot) => [...new Set([...Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].some((e) => e && e.slot === slot)), ...Object.keys(slots).filter((cid) => slots[cid] && slots[cid][slot])])];
   /** a keyed slot's entry that went out: its set is the one it HANDED (written with the drain's own stash write) */
   function noteSlotsHanded(cid, took) {
     for (const e of took || []) if (e && e.slot) (slots[cid] || (slots[cid] = {}))[e.slot] = { handed: e.setKey || '[]', at: Date.now() };
@@ -364,18 +364,21 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  waiting entry, 主开发 13:35Z / 13:42Z a). Never counted against STASH_CAP, never evicted, so it never evicts; rendered
    *  whole (`whole`). It is filed again ONLY when its `set` differs from the entry standing there, or — with none there —
    *  from the set it last HANDED (never the same set twice). `envelope` null: the slot's entry leaves (nothing left to say).
-   *  A slot entry claimed by a hand-over in flight is left alone (the next call decides). → {filed, removed} */
-  function stashSlot(cid, slot, envelope, { set = [] } = {}) {
+   *  A slot entry claimed by a hand-over in flight is left alone (the next call decides). `forget` with a null envelope: the
+   *  set it handed is forgotten too (the set emptied — the same member waiting again is a new wait). → {filed, removed} */
+  function stashSlot(cid, slot, envelope, { set = [], forget = false } = {}) {
     if (!cid || !slot) return { filed: false, removed: false };
     const setKey = JSON.stringify([...new Set((set || []).map(String))].sort());
     const q = stash[cid] || [];
     if (q.some((e) => e && e.slot === slot && e.ho)) return { filed: false, removed: false };
     const i = q.findIndex((e) => e && e.slot === slot);
     if (!envelope) {
-      if (i < 0) return { filed: false, removed: false };
+      const forgot = !!(forget && slots[cid] && slots[cid][slot]);
+      if (forgot) { delete slots[cid][slot]; if (!Object.keys(slots[cid]).length) delete slots[cid]; }
+      if (i < 0) { if (forgot) writeStashNow(); return { filed: false, removed: false, forgot }; }
       q.splice(i, 1); if (!q.length) delete stash[cid];
       writeStashNow(); stashChanged(cid);
-      return { filed: false, removed: true };
+      return { filed: false, removed: true, forgot };
     }
     const handed = ((slots[cid] || {})[slot] || {}).handed;
     if (i >= 0 ? q[i].setKey === setKey : handed === setKey) return { filed: false, removed: false };

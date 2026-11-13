@@ -19,7 +19,7 @@ function senderEntry(members = []) {
   const part = (m) => {
     const count = m.n == null ? `since at least ${m.oldestText}` : m.n === 1 ? `1, sent at ${m.oldestText}` : `${m.n}, the oldest sent at ${m.oldestText}`;
     const turn = m.openedText ? `in a turn since ${m.openedText}` : 'in a turn';
-    return `to ${m.name} (${count}; ${turn}${m.card ? '; a waiting-for-you card is open in it' : ''})`;
+    return `to «${m.name}» (${count}; ${turn}${m.card ? '; a waiting-for-you card is open in it' : ''})`;   // the name is a peer's text: quoted, never bare in the hub's voice
   };
   return `(VibeSpace) Your group messages have not been handed yet: ${members.map(part).join('; ')}.`;
 }
