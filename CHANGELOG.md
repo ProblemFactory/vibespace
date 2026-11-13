@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.399 — 2026-11-13
+
+### Fixed
+- A chat shows one connection notice, updated in place, and none if you only unlocked your phone.
+
 ## 2.369.398 — 2026-11-12
 
 ### Fixed
