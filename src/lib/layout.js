@@ -1934,8 +1934,8 @@ class LayoutManager {
     const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
     const ok = await showConfirmDialog({
       title: t('Resume interrupted sessions?'),
-      message: t('<b>{n}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length })
-        + (ended ? '<br>' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
+      message: t('{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length }) // plain words: showConfirmDialog prints its message as TEXT (the tags showed, literally)
+        + (ended ? ' ' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
       confirmText: t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
     if (!ok) return;

@@ -256,7 +256,7 @@ await section('§7 THE DOORS — every surface says why, and a resume goes to th
   ok(W.stoppedWhyFor('antigravity', UUID(8), [{ ...row, backendSessionId: UUID(8), sessionId: UUID(8), status: 'live' }]) === '' && W.stoppedWhyFor('antigravity', UUID(8), []) === '',
     '§7 …and a conversation seen running again has spent it: the page forgets the boot\'s reason');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-  const keys = [SENT, 'Resume interrupted sessions?', '<b>{n}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', '{n} of them stopped because their process ended while the server was down.', 'Resume all {n}'];
+  const keys = [SENT, 'Resume interrupted sessions?', '{n} sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', '{n} of them stopped because their process ended while the server was down.', 'Resume all {n}'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), '§7 every new word has its zh and ja entry', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
   const card = read('src/lib/session-card.js'), cv = read('src/lib/chat-view.js'), lay = read('src/lib/layout.js'), lc = read('src/lib/session-lifecycle.js');
   const body = (src, head) => { const i = src.indexOf(head); return i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); };

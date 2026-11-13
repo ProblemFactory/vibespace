@@ -276,7 +276,7 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
 console.log('— reconnect wiring pins');
 {
   const cv = read('src/lib/chat-view.js'), app = read('src/lib/app.js'), rq = fs.existsSync(path.join(REPO, 'src/lib/reconnect-queue.js')) ? read('src/lib/reconnect-queue.js') : '';
-  ok('the ChatView state handler re-attaches through _reconnectAttach (not a bare _reattach(true))', /this\._renderers\.appendSystem\(t\('Reconnected'\)\);\s*\n\s*this\._reconnectAttach\(\);/.test(cv));
+  ok('the ChatView state handler re-attaches through _reconnectAttach (not a bare _reattach(true))', /this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cv));
   ok('the queued view is decided by the DERIVED flag (_suspended), never a fourth flag', /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cv));
   ok('_applySuspend(false) takes a queued view and attaches it now', /if \(!on && this\.app\?\._reconnectQueue\?\.take\(this\)\) this\._runQueuedReattach\('unhide'\);/.test(cv));
   ok('dispose cancels the view\'s slot', /this\.app\?\._reconnectQueue\?\.cancel\(this\)/.test(cv));

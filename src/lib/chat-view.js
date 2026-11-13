@@ -31,6 +31,7 @@ import { moveVerdict } from '../queue-chips.js'; // PURE (lane midturn-order): a
 import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE preview of a user turn — the server's turnMap builders read the same rule
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
+import { createConnectionNotice } from './connection-notice.js'; // a connection state is ONE live notice (lane connection-notice-once)
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
 import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-account-door: the pinned account cannot serve ⇒ the bar says so, with its two doors
@@ -1391,15 +1392,17 @@ class ChatView {
     // Connection state: freeze on disconnect, re-attach + sync on reconnect
     this._disconnected = false;
     this._hasConnected = false; // track first connect vs reconnect
+    // ONE live notice per quiet stretch, patched in place — a phone that flaps pays no row per cycle (src/lib/connection-notice.js)
+    this._connNotice = createConnectionNotice({ list: () => this._messageList, t, total: () => this._total, onPaint: () => { if (this._pinned) this._scrollToBottom(); } });
     this._stateHandler = (connected) => {
       this._disconnected = !connected;
       container.classList.toggle('chat-disconnected', !connected);
       if (this._chatInput) this._chatInput.setDisconnected(!connected);
       if (!connected) {
         this._hideTyping();
-        this._renderers.appendSystem(t('Disconnected from server'));
+        this._connNotice.down();
       } else if (this._hasConnected) {
-        this._renderers.appendSystem(t('Reconnected'));
+        this._connNotice.up();
         this._reconnectAttach(); // displayed ⇒ now; suspended ⇒ the App's reconnect queue (perf ⑤b)
       }
       this._hasConnected = true;
@@ -3481,6 +3484,7 @@ class ChatView {
       anchored = this._withViewportAnchor(() => { for (let i = 0; i < n; i++) drop(els[i]); if (leavesZero) this._dropGapSlab('trimTop', zone); });
       this._windowStart += cut();
     }
+    this._connNotice?.dropStranded(side); // outside the cards a connection notice belongs to no window (never counted above: it is no card)
     // DECISION INPUTS (inc-mubvu3a4-x8sb): the height the trim read, what it
     // left behind, the viewport and the zone — `removed` alone could not show
     // a trim eating the landing the grow loop had just made.
@@ -6519,6 +6523,12 @@ class ChatView {
       // possibly-rebuilt normalizer silently drops messages (2.219.0 audit)
       const epochChanged = msg.normEpoch && msg.normEpoch !== epochBefore;
       if (msg.normEpoch) this._normEpoch = msg.normEpoch;
+      // THE ANSWER A SLEEPING PAGE'S CYCLE WAITS FOR (src/lib/connection-notice.js ④): it asked to resume by seq and the hub could not.
+      // A view that asked for no seq (born by create, or poisoned) has no position to have fallen behind. A rebuild's sweep is about to
+      // take whatever is painted, so a row owed there comes after it (_fullViewReset).
+      const missedFrames = attachFrame.sinceSeq !== undefined && !(msg.slab === 'held' && Array.isArray(msg.replay));
+      if (missedFrames && (epochChanged || this._resetPending)) this._connNoticeOwed = true;
+      else this._connNotice?.answered(missedFrames);
       if (epochChanged || this._resetPending) {
         // STAGGERED (2.338.0): after a server restart EVERY chat window used
         // to wipe + re-render its 50-message tail in the same tick — N
@@ -6746,6 +6756,7 @@ class ChatView {
       this._seqPoisoned = false;
     } catch (e) { this._seqPoisoned = true; throw e; }
     this._drainResetQueue(held, msg);
+    if (this._connNoticeOwed) { this._connNoticeOwed = false; this._connNotice?.answered(true); }
     // A QUEUE THAT OVERFLOWED (verify r2): the ops past RESET_QUEUE_CAP were never
     // held, so this slab + the drained prefix is NOT the whole view — the heal above
     // must not clear that. Poisoned again and healed at once: an attach with no
@@ -7925,6 +7936,7 @@ class ChatView {
     try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card
     this._disposed = true;
+    this._connNotice?.dispose();
     try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)
     try { this._cvReleaseIO?.disconnect(); } catch { }
     try { this._cvSlabIO?.disconnect(); } catch { }

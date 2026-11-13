@@ -234,6 +234,7 @@
 .chat-msg-user { display: flex; justify-content: flex-end; }
 .chat-msg-assistant { display: flex; justify-content: flex-start; }
 .chat-msg-system { display: flex; justify-content: center; }
+.chat-conn-notice { max-width: 100%; min-width: 0; flex-shrink: 0; } /* a status row, no card (src/lib/connection-notice.js): the flex column never shrinks it */
 
 /* User bubble — right-aligned, subtle bg, no loud accent */
 .chat-bubble-user {

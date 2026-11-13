@@ -496,6 +496,7 @@ class ChatSearch {
     const walker = document.createTreeWalker(this._messageList, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
+      if (node.parentElement?.closest('.chat-conn-notice')) continue; // a status row is not a message (lane connection-notice-once)
       const text = node.textContent.toLowerCase();
       let idx = 0;
       while ((idx = text.indexOf(q, idx)) !== -1) {
