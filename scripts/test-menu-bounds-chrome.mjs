@@ -18,7 +18,7 @@
 import fs from 'node:fs'; import path from 'node:path'; import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE } from './scratch.mjs';   // test-architecture: every chrome suite pre-sets 'vs-onboarded' before it navigates
+import { ONBOARDED_SOURCE, scratchDir } from './scratch.mjs';   // test-architecture: every chrome suite pre-sets 'vs-onboarded' before it navigates
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(ROOT, 'package.json'));
 const CHROME = ['/opt/google/chrome/chrome', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -28,7 +28,7 @@ let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log('  ✓ ' + n); } else { failed++; console.error('  ✗ ' + n + (e ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
-const tmp = fs.mkdtempSync('/tmp/vs-menu-bounds-');
+const tmp = scratchDir('menu-bounds');   // the suite helper's scratch (test-ci-gate-tiers: no gated suite claims a fixed /tmp path)
 const entry = `import * as U from './src/lib/utils.js'; import { installExplorerOps } from './src/lib/file-explorer-ops.js';
 class FE {} installExplorerOps(FE); const fe = new FE();
 window.__menus = { showContextMenu: U.showContextMenu, followContent: U.followContent, fe };`;
