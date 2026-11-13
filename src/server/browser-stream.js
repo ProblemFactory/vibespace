@@ -1623,9 +1623,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     if (v.kind === 'ack') return;
     if (v.kind === 'ping') { send(viewer.ws, { type: 'pong', at: now() }); return; }
-    // lane ui-needs-a-button (主开发 Q2): a STOP is the PERSON's press — never a view a bearer opened (an agent's, a job's, an automation
-    // key's), and only from the page the handshake proved (write-origin pressOf); refused by name
-    if (v.kind === 'tab-act' && !v.refusal && v.act === 'stop' && (viewer.bearer || !isPress(pressOf(viewer.page, 'WS /api/browser/stream tab-act stop')))) { send(viewer.ws, { type: 'tab-ack', ok: false, rid: v.rid, act: 'stop', targetId: v.targetId, code: viewer.bearer ? 'agent_forbidden' : 'not_a_press', error: viewer.bearer ? 'stopping a page is the user\'s press — a view opened with a bearer token (an agent\'s session token, a job token or an automation key) cannot make it' : 'stopping a page is the user\'s press from this instance\'s own page' }); return; }
+    // lane ui-needs-a-button (主开发 Q2): a STOP is the PERSON's press — the message mints it from the page the handshake proved
+    if (v.kind === 'tab-act' && !v.refusal && v.act === 'stop') { const sr = stopRefusalOf(viewer, v, isPress(pressOf(viewer.page, 'WS /api/browser/stream tab-act stop'))); if (sr) { send(viewer.ws, sr); return; } }
     if (v.kind === 'tab-act') { if (v.refusal) send(viewer.ws, v.refusal); else tabActFor(relay, viewer, v); return; } // lane browser-resume C: the tab row's switch / ✕
     if (v.kind === 'watch-tab') { viewerWatch(relay, viewer, v.targetId); return; } // lane browser-windows (U3): a watching viewer's chip moves ITS view
     if (v.kind === 'input') {
@@ -1980,4 +1979,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     xSeat, xSeatWhy, xScope, askXScope, onXSeats: (fn) => { if (typeof fn === 'function') xSeatListeners.add(fn); return () => xSeatListeners.delete(fn); } }; // lane browser-x-in-window: the desktop bridge's seat for an X picture's socket, and its refresh; lane desktop-x-seat-browser r2: why it watches, the input seat's reach
 }
 
-module.exports = { create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS, INPUT_WINDOW, COPY_DEDUP_MS };
+/** lane ui-needs-a-button (主开发 Q2; reader follow-up #4 — its own function, so a suite drives it): a STOP is the PERSON's press —
+ *  never a view a bearer opened (an agent's, a job's, an automation key's), and only from the page the handshake proved (`personPress`
+ *  = the message's own write-origin press over the upgrade's headers); refused by name → the tab-ack refusal to send, or null. */
+function stopRefusalOf(viewer, v, personPress) {
+  if (v.kind === 'tab-act' && !v.refusal && v.act === 'stop' && (viewer.bearer || !personPress)) return { type: 'tab-ack', ok: false, rid: v.rid, act: 'stop', targetId: v.targetId, code: viewer.bearer ? 'agent_forbidden' : 'not_a_press', error: viewer.bearer ? 'stopping a page is the user\'s press — a view opened with a bearer token (an agent\'s session token, a job token or an automation key) cannot make it' : 'stopping a page is the user\'s press from this instance\'s own page' };
+  return null;
+}
+module.exports = { stopRefusalOf, create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS, INPUT_WINDOW, COPY_DEDUP_MS };

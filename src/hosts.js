@@ -1569,19 +1569,28 @@ class HostManager {
 
   /** lane ui-needs-a-button (主开发 Q2, machines-1): THE PUBLIC HALF of the key an EXISTING ssh machine signs in with — read, never made:
    *  its own key file's `.pub`, else derived on THIS server (`ssh-keygen -y`); a machine on the default identities shows the hub user's
-   *  ~/.ssh/*.pub. Never the private key's bytes, anywhere. → {ok, keys: [{publicKey, source}]} | {ok:false, code} */
-  async publicKeyOf(id) {
+   *  ~/.ssh/*.pub. Never the private key's bytes, anywhere. → {ok, keys: [{publicKey, source}]} | {ok:false, code}
+   *  BOUNDED (reader follow-up #3): the key path is the PERSON's (POST /api/hosts keyPath — it may sit on a hung mount), so every read
+   *  is a CHILD with a 5 s bound (`head` for a .pub, `ssh-keygen -y` for the derive) and a timer of our own past it — never a
+   *  threadpool read the hub waits on. `timeoutMs` = the bound (a suite shortens it). */
+  async publicKeyOf(id, { timeoutMs = 5000 } = {}) {
     const h = this.get(id);
     if (!h || h.transport === 'dial') return { ok: false, code: 'not_ssh' };
-    // read OFF the loop: a key path is the person's to choose (it may sit on a mount — test-sync-fs-census keeps the main thread out of it)
-    const pubOf = async (file) => { try { const s = (await fs.promises.readFile(file, 'utf-8')).trim(); return /^(ssh-|ecdsa-|sk-)/.test(s) ? s.split('\n')[0] : null; } catch { return null; } };
+    const keyLine = (out) => { const s = String(out || '').trim().split('\n')[0] || ''; return /^(ssh-|ecdsa-|sk-)/.test(s) ? s : null; };
+    // the child's answer, or null at the bound (a child stuck in a mount's read may outlive its kill: our timer answers anyway)
+    const bounded = (start) => new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (done) return; done = true; clearTimeout(tm); resolve(v); };
+      const tm = setTimeout(() => end(null), timeoutMs + 500);
+      if (tm.unref) tm.unref();
+      try { start((err, out) => end(err ? null : keyLine(out))); } catch { end(null); }
+    });
+    const pubOf = (file) => bounded((cb) => execFile('head', ['-n', '1', '--', file], { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1 << 16 }, cb));
     if (h.keyPath) {
       const direct = await pubOf(h.keyPath + '.pub');
       if (direct) return { ok: true, keys: [{ publicKey: direct, source: 'file' }] };
-      const derived = await new Promise((resolve) => {
-        execFile('ssh-keygen', ['-y', '-P', '', '-f', h.keyPath], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out || '').trim().split('\n')[0] || null));
-      });
-      return derived && /^(ssh-|ecdsa-|sk-)/.test(derived) ? { ok: true, keys: [{ publicKey: derived, source: 'derived' }] } : { ok: false, code: 'no_key' };
+      const derived = await bounded((cb) => execFile('ssh-keygen', ['-y', '-P', '', '-f', h.keyPath], { timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1 << 16 }, cb));
+      return derived ? { ok: true, keys: [{ publicKey: derived, source: 'derived' }] } : { ok: false, code: 'no_key' };
     }
     const home = require('os').homedir();
     const keys = (await Promise.all(['id_ed25519', 'id_ecdsa', 'id_rsa'].map((n) => pubOf(path.join(home, '.ssh', n + '.pub'))))).filter(Boolean).map((k) => ({ publicKey: k, source: 'default' }));

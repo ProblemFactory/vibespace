@@ -1785,10 +1785,15 @@ class WindowManager {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;cursor:move';
     // lane ui-needs-a-button (window-manager-1): the mode SAYS what it is and how it ends (it was a silent overlay — no hint, no Esc)
+    // reader follow-up #12: …and its «Cancel» is a button every input can press (a touch tablet has no Esc) — it does what Esc does
     const hint = document.createElement('div');
     hint.className = 'move-mode-hint';
     hint.setAttribute('role', 'status');
-    hint.textContent = t('Moving the window: move the mouse to place it, click to drop it, Esc cancels');
+    const hintWords = document.createElement('span');
+    hintWords.textContent = t('Moving the window: move the mouse to place it, click to drop it, Esc cancels');
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button'; cancelBtn.className = 'mounts-btn need-door move-mode-cancel'; cancelBtn.textContent = t('Cancel');
+    hint.append(hintWords, cancelBtn);
     overlay.appendChild(hint);
     document.body.appendChild(overlay);
     el.style.zIndex = '99999'; // above overlay
@@ -1801,6 +1806,7 @@ class WindowManager {
     // thrashed layout at up to 1000Hz (audit round-3). The preview rect is
     // resolved ONCE per move session, not per event.
     const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
+    const srcBefore = srcRect ? { left: srcRect.style.left, top: srcRect.style.top } : null;   // a cancel puts the preview's rect back too
     let pendingEv = null, rafId = null;
     const processMove = () => {
       rafId = null;
@@ -1823,6 +1829,7 @@ class WindowManager {
       if (!rafId) rafId = requestAnimationFrame(processMove);
     };
     const onClick = (e) => {
+      if (e && e.target && typeof e.target.closest === 'function' && e.target.closest('.move-mode-cancel')) return;   // the Cancel button's own press
       e.preventDefault();
       e.stopImmediatePropagation();
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
@@ -1837,9 +1844,8 @@ class WindowManager {
       this._captureGridBounds(win);
       this._notify();
     };
-    const onKey = (e) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault(); e.stopImmediatePropagation();
+    // Esc and «Cancel»: ONE end — the window back EXACTLY as it was, and its desktop-preview rect (processMove moved it live)
+    const cancel = () => {
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       pendingEv = null;
       overlay.remove();
@@ -1847,10 +1853,17 @@ class WindowManager {
       document.removeEventListener('mousedown', onClick, true);
       document.removeEventListener('keydown', onKey, true);
       el.style.cssText = before.css; win.isMaximized = before.isMaximized; win._isSnapped = before._isSnapped;   // back where it was
+      if (srcRect && srcBefore) { srcRect.style.left = srcBefore.left; srcRect.style.top = srcBefore.top; }
       el.style.pointerEvents = '';
       if (win.onResize) win.onResize();
       this._notify();
     };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      cancel();
+    };
+    cancelBtn.onclick = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } cancel(); };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mousedown', onClick, true);
     document.addEventListener('keydown', onKey, true);

@@ -184,6 +184,15 @@ export function registryReasonShort(row) {
  *  sources, or only as a format that does not run here). */
 export const HAND_OFF_CODES = Object.freeze(['needs_snap', 'not_found', 'conflict', 'removes']);   // never file_missing: a missing FILE is re-picked, not searched for (ui-needs-a-button)
 
+/** lane ui-needs-a-button (desktop-apps-27; reader follow-up #4 — its own function, so a suite draws it): a .deb FILE that is not
+ *  there / cannot be read — its words name the file and the machine, and «Choose another file…» on the line re-picks it (`repick`:
+ *  the path form reopened with the path kept). null for any other refusal, or with no path / no way to re-pick. */
+export function debRefusalLine(plan, { debPath = '', machine = '', repick = null } = {}) {
+  if (debPath && (plan.code === 'file_missing' || plan.code === 'file_unreadable') && typeof repick === 'function') {
+    return needLine({ words: appRefusalText(plan.code, { machine, path: debPath }), tone: 'fail', doors: [{ label: t('Choose another file…'), kind: 'primary', door: 'deb-repick', run: repick }] });
+  }
+  return null;
+}
 /** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
  *  prints it and every browser card carries it in its tooltip (a function: `t` must run after the language loads). */
 export const browserNote = () => t('This is your own browser window (an app); the Agent browser is separate');
@@ -695,10 +704,8 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
     // lane ui-needs-a-button (desktop-apps-27): a .deb file that is not there — its words name the file, and its door is on the line:
     // «Choose another file…» reopens the path form with the path kept (the form was closed to show this dialog)
     const debPath = isApp ? String((r.request || request || {}).debPath || '') : '';   // only a .deb request carries a path
-    if (debPath && (plan.code === 'file_missing' || plan.code === 'file_unreadable') && launcherApp) {
-      note.classList.remove('is-bad');
-      note.replaceChildren(needLine({ words: appRefusalText(plan.code, { machine: name, path: debPath }), tone: 'fail', doors: [{ label: t('Choose another file…'), kind: 'primary', door: 'deb-repick', run: () => { iclose(); openDebInstall(launcherApp, m, { path: debPath, onDone }); } }] }));
-    }
+    const debLine = debRefusalLine(plan, { debPath, machine: name, repick: launcherApp ? () => { iclose(); openDebInstall(launcherApp, m, { path: debPath, onDone }); } : null });
+    if (debLine) { note.classList.remove('is-bad'); note.replaceChildren(debLine); }
     return;
   }
   if (isApp) {

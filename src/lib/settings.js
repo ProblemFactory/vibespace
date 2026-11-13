@@ -32,6 +32,7 @@ class SettingsManager {
     this._saveListeners = new Set();
     this._server = {};
     this._live = null;
+    this._atLoad = null;     // lane ui-needs-a-button (reader follow-up #13): the values this PAGE loaded with (the first load)
   }
 
   /** lane owner-press-attended: a path's save state — 'pending' (committed, the debounce has not fired) | 'saving' (the
@@ -72,6 +73,7 @@ class SettingsManager {
       this._loadFromLocalStorage();
     }
     this._loaded = true;
+    if (!this._atLoad) this._atLoad = { ...this._values };   // a setting that takes effect at the next load compares against THESE
     // Notify all listeners for loaded values (they may differ from defaults)
     for (const path of Object.keys(this._values)) {
       const schema = SETTINGS_SCHEMA[path];
@@ -106,6 +108,13 @@ class SettingsManager {
       const stored = localStorage.getItem('webui-settings');
       if (stored) this._values = JSON.parse(stored);
     } catch {}
+  }
+
+  /** lane ui-needs-a-button (reader follow-up #13): the value this PAGE loaded with (the store's first load — a row that takes effect
+   *  at the next load is in force at this one); before the load, the value now. */
+  loadedValue(path) {
+    if (!this._atLoad) return this.get(path);
+    return path in this._atLoad ? this._atLoad[path] : SETTINGS_SCHEMA[path]?.default;
   }
 
   /** Get a setting value. Returns the stored override or the schema default — for a row nobody set that declares

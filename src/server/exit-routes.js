@@ -277,13 +277,11 @@ app.post('/api/hosts', async (req, res) => {
   }
 });
 // lane ui-needs-a-button (主开发 Q2, machines-1): THE PUBLIC KEY a person adds to an ssh machine that refused it — a READ (no key is made),
-// the public half only, and the PERSON's door: a bearer of any kind is refused by name (an agent's session token, a job token, an
-// automation key — the cookie gate does not run when sign-in is off)
-const BEARER_KIND = [[/^vsst_/, 'an agent\'s session token'], [/^jbt_/, 'a job token'], [/^(ak-|vsak_)/, 'an automation key']];
+// the public half only, and the PERSON's door: THE person verdict (src/routes/vault.js personVerdict — any bearer ⇒ human_only, not
+// this instance's own page ⇒ cross_site; reader follow-up #7: one verdict, never a local copy); the page words the code
 app.get('/api/hosts/:id/public-key', async (req, res) => {
-  const auth = String((req.headers && req.headers.authorization) || '');
-  const tok = /^Bearer\s+(\S+)/i.exec(auth)?.[1] || (req.query && (req.query.token || req.query.vsst)) || '';
-  if (tok) { const k = (BEARER_KIND.find(([re]) => re.test(String(tok))) || [null, 'a token'])[1]; return res.status(403).json({ error: `a machine's public key is shown to the person signed in — ${k} may not read it`, code: 'person_only' }); }
+  const who = personVerdict(req);
+  if (!who.ok) return res.status(403).json({ error: who.code === 'human_only' ? 'a machine\'s public key is shown to the person — an agent\'s token may not read it' : 'a machine\'s public key is shown only on this instance\'s own page', code: who.code });
   try { const r = await hosts.publicKeyOf(req.params.id); res.status(r.ok ? 200 : 404).json(r.ok ? { ok: true, keys: r.keys } : { ok: false, code: r.code }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });

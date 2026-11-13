@@ -64,6 +64,17 @@ const tabWord = (tab) => (tab === 'notices' ? t('Notices') : tc('inbox', 'Action
  * (`syncId`, another client's layout) builds the window from its spec and
  * never re-points an open one.
  */
+/** lane ui-needs-a-button (for-you-2; reader follow-up #4 — its own function, so a suite draws it): the pane's WHY line. A PARKED ASK's
+ *  note carries its door — «Open the conversation and answer» (model.jump, the ONE «go there»), never «click the item» in words; the
+ *  line is redrawn only when its words or its door change (a repaint never rebuilds the button under the pointer). */
+export function paintWhy(el, whyTxt, v, it, model) {
+  const parked = !v.reply.show && v.reply.code === 'card_item';
+  const whySig = whyTxt + (parked ? '\u0000door' : '');
+  if (el.dataset.need === whySig) return;
+  el.dataset.need = whySig;
+  if (parked) el.replaceChildren(needLine({ words: whyTxt, doors: [{ label: t('Open the conversation and answer'), kind: 'primary', door: 'jump', run: () => model.jump(it.sessionKey, it) }] }));
+  else el.textContent = whyTxt;
+}
 export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: wantScope = null, syncId } = {}) {
   for (const [id, w] of app.wm.windows || []) {
     if (w && w.type === 'inbox') {
@@ -430,15 +441,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const box = model.replyBox(it);
     c.ta.disabled = false;
     const whyTxt = v.reply.show && box.note ? t(box.note.key, { why: box.note.why || '' }) : v.reply.why ? t(v.reply.why) : '';
-    // lane ui-needs-a-button (for-you-2): a PARKED ASK's note carries its door — «Open the conversation and answer» (model.jump, the ONE
-    // «go there»), never «click the item» in words
-    const parked = !v.reply.show && v.reply.code === 'card_item';
-    const whySig = whyTxt + (parked ? '\u0000door' : '');
-    if (c.why.dataset.need !== whySig) {
-      c.why.dataset.need = whySig;
-      if (parked) c.why.replaceChildren(needLine({ words: whyTxt, doors: [{ label: t('Open the conversation and answer'), kind: 'primary', door: 'jump', run: () => model.jump(it.sessionKey, it) }] }));
-      else c.why.textContent = whyTxt;
-    }
+    paintWhy(c.why, whyTxt, v, it, model);
     c.why.style.display = whyTxt ? '' : 'none';
     c.why.dataset.reopen = box.reopen ? '1' : '';
     // only the option BUTTONS — the row also holds its «Reply:» label (pick 0), which is no option and takes no reply's tip

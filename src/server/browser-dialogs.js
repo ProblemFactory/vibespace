@@ -1672,7 +1672,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function rowFact(pid, w) {
     if (!w || w.state !== 'open') return null;
     const lp = loopIn(pid, null); // lane site-reset: kinds only here (the digest reaches agents — never a page's address)
-    if (lp) return { state: 'loop', since: lp.runStart || 0 };
+    if (lp) return { state: 'loop', since: lp.runStart || 0, ...(lp.targetId ? { targetId: String(lp.targetId).slice(0, 64) } : {}) }; // ui-needs-a-button (reader #2): WHICH tab loops (a CDP id, never an address)
     const v = browserVerdict(pid, heldIn(pid, null));
     if (v.state === 'unresponsive') return { state: 'unresponsive', why: v.why, count: v.count || 0, since: v.since || 0 };
     if (v.state === 'blind' || v.held) return { state: 'blind', why: 'held', since: Number(v.since || (v.held && v.held.since)) || 0 };

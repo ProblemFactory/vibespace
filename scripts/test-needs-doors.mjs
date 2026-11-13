@@ -81,11 +81,14 @@ const fc = ui && ui.rows.get('folder-create');
 const stripped = (f) => (f === 'src/lib/path-field.js' ? (sources.get(f) || '').replace(/data-act="tick"/g, 'data-act="gone"') : sources.get(f) || '');
 ok(fc && JSON.stringify(doorless(fc, stripped)) === JSON.stringify(['src/lib/path-field.js']), 'CONTROL: the folder field stating «create it?» with its create door taken out is RED by name', fc && doorless(fc, stripped));
 
-console.log('④ THE DOORS DO THEIR ACT (lane ui-needs-a-button pick 1 — the walk\'s seven majors)');
+console.log('④ THE SERVER\'S ACTS, DRIVEN IN-PROCESS (lane ui-needs-a-button picks 1–2 + the reader\'s list)');
+const os = await import('node:os');
+const http = await import('node:http');
+const { execFileSync } = await import('node:child_process');
+const { pathToFileURL } = await import('node:url');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-needs-doors-'));
+const T32 = (c) => String(c).repeat(32);
 {
-  const os = await import('node:os');
-  const { execFileSync } = await import('node:child_process');
-  const { pathToFileURL } = await import('node:url');
   // for-you-2: a parked ask is a POINTER — its one closer says what stays true; the note's words name the conversation's card
   const FA = require(path.join(REPO, 'src/foryou-actions.js'));
   const parked = (type) => ({ id: 'x', status: 'open', action: { type } });
@@ -93,19 +96,54 @@ console.log('④ THE DOORS DO THEIR ACT (lane ui-needs-a-button pick 1 — the w
     && JSON.stringify(FA.closersOf(parked('main-ask'))) === '["hide"]' && JSON.stringify(FA.closersOf(parked('helper-ask'))) === '["hide"]',
     'for-you-2: a parked ask (main-ask / helper-ask) is a pointer — its ONE closer is the hide («Stop reminding (the conversation stays paused)»), never «Mark done»', typeof FA.closersOf === 'function' ? FA.closersOf(parked('main-ask')) : null);
   const IR = require(path.join(REPO, 'src/inbox-reply.js'));
-  // the WIRE: inbox-window draws the door off the VIEW (itemView) — a view that drops the verdict's code draws no door
-  // (the pick-1 walk found exactly that: the marker was in the source, the door never on screen)
   const LAY = await import(pathToFileURL(path.join(REPO, 'src/lib/inbox-window-layout.js')).href);
   const pv = LAY.itemView({ id: 'h1', type: 'helper-ask', status: 'open', sessionKey: 'claude:x', createdAt: 1 }, { reply: { show: false, enabled: false, code: 'card_item', why: IR.REPLY_WHY.card_item } });
   ok(pv && pv.reply && !pv.reply.show && pv.reply.code === 'card_item', 'for-you-2: the window\'s VIEW of a parked ask keeps the code its door is drawn off (card_item) — the door reaches the screen', pv && pv.reply);
   ok(IR.REPLY_WHY.card_item === 'Answered on the conversation’s card — open the conversation to answer it', 'for-you-2: the note names the conversation\'s card (never «the helper\'s»); its door «Open the conversation and answer» is on its line', IR.REPLY_WHY.card_item);
+}
+{
+  // reader #1: «Stop reminding (the conversation stays paused)» HOLDS ACROSS A HUB RESTART — a filer never reopens an item the person hid
+  // for the same request (main-asks / helper-asks), while a NEW request of the same conversation is still filed
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const drive = (kind) => {
+    const dir = fs.mkdtempSync(path.join(TMP, 'parked-'));
+    const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    const at = Date.now() - 600000;
+    const asks = [{ requestId: 'req-1', toolName: 'Bash', kind: kind === 'main' ? 'permission' : 'helper', at, msgId: 'm1', label: 'Fetch the page' }];
+    const session = { _webuiId: 'w1', name: 'Session 1', _historyLoaded: true, _normalizer: { pendingAsks: () => asks.slice(), messageIndex: new Map([['m1', { permission: { requestId: 'req-1', toolName: 'Bash', input: { command: 'echo hi' } } }]]) } };
+    const file = kind === 'main' ? 'src/server/main-asks.js' : 'src/server/helper-asks.js';
+    const type = kind === 'main' ? 'main-ask' : 'helper-ask';
+    const saved = {};
+    const fresh = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(file)) delete require.cache[k]; const M = require(path.join(REPO, file)); M.install({ userTodos: todos, sessionKeyFor: () => 'claude:w1', activeSessions: new Map([['w1', session]]), log: { log() {}, warn() {} }, readAskedAt: () => saved, persistAskedAt: (_s, m) => Object.assign(saved, m) }); return M; };
+    const items = () => todos._state.items.filter((i) => i.action && i.action.type === type).map((i) => `${i.action.requestId}:${i.status}/${i.resolvedBy || '-'}`);
+    const out = [];
+    let M = fresh(); M.sync(session); out.push(items());
+    const it = todos._state.items.find((i) => i.action && i.action.type === type);
+    if (it) todos.setStatus(it.id, 'dismissed', 'user');
+    out.push(items());
+    // a second ask of the conversation, waiting since before the restart (its card's time is its clock at the first look)
+    asks.push({ requestId: 'req-2', toolName: 'Edit', kind: kind === 'main' ? 'permission' : 'helper', at, msgId: 'm2', label: 'Edit the file' });
+    M = fresh(); M.sync(session); out.push(items());   // a hub restart: a fresh module, the same store, the asks still wait
+    try { todos.stop(); } catch { /* the store's timers */ }
+    return out;
+  };
+  for (const kind of ['main', 'helper']) {
+    const r = drive(kind);
+    ok(JSON.stringify(r[0]) === '["req-1:open/-"]' && JSON.stringify(r[1]) === '["req-1:dismissed/hidden"]' && r[2].includes('req-1:dismissed/hidden') && r[2].some((x) => /^req-2:open/.test(x)) && r[2].length === 2,
+      `reader #1 (${kind}-ask): filed → «Stop reminding» (hidden) → a hub RESTART → still hidden (r.399 picks: reopened); the conversation's OTHER waiting request is still filed`, r);
+  }
+}
+{
   // desktop-apps-27: a .deb FILE that is not there is its own code, never «no such package» (and never handed to an agent)
   const DEB = require(path.join(REPO, 'src/app-kinds/deb.js'));
-  const fspm = (await import('node:fs')).promises;
-  const r27 = await DEB.planner({ p: { debPath: '/nonexistent-vs-' + process.pid + '/package.deb' }, kind: 'deb', ret: (x) => x, fsp: fspm, path, A: { fmtBytes: (n) => String(n) }, DEB_MAX: 1 << 30 }).catch((e) => ({ threw: String(e && e.message) }));
+  const r27 = await DEB.planner({ p: { debPath: '/nonexistent-vs-' + process.pid + '/package.deb' }, kind: 'deb', ret: (x) => x, fsp: fs.promises, path, A: { fmtBytes: (n) => String(n) }, DEB_MAX: 1 << 30 }).catch((e) => ({ threw: String(e && e.message) }));
   const DAL = fs.readFileSync(path.join(REPO, 'src/lib/desktop-app-launcher.js'), 'utf8');
   ok(r27 && r27.ok === false && r27.code === 'file_missing' && /package\.deb$/.test(String(r27.path || '')) && !/'file_missing'/.test((/HAND_OFF_CODES = Object\.freeze\(\[[^\]]*\]/.exec(DAL) || [''])[0]),
     'desktop-apps-27: a .deb that is not there ⇒ code file_missing with its path (r.398: not_found — «no such package» and «let an agent find another way»); it is never a hand-off code', r27);
+  const AM = require(path.join(REPO, 'src/app-manifest.js'));
+  ok(AM.PLAN_CODES.includes('file_missing') && AM.PLAN_CODES.includes('file_unreadable'), 'reader #9: the plan refusals\' closed set (app-manifest PLAN_CODES) names the two .deb FILE codes', AM.PLAN_CODES);
+}
+{
   // browser-live-1: the person's STOP — any conversation's own tab without a takeover; never another's / nobody's / a mediated one
   const TB = require(path.join(REPO, 'src/browser-tabs.js'));
   const V = (o) => TB.userTabVerdict({ act: 'stop', ...o });
@@ -113,46 +151,106 @@ console.log('④ THE DOORS DO THEIR ACT (lane ui-needs-a-button pick 1 — the w
     && TB.TAB_REFUSALS.includes('stop_failed') && /stopped .* loading/.test(TB.userActsSentence([{ kind: 'tab-stop', title: 'Shop', url: 'https://shop.example/' }])),
     'browser-live-1: a stop is the person\'s on the viewed conversation\'s own tab WITHOUT a takeover (nothing but the load stops), on the person\'s own; another\'s, nobody\'s, a mediated one refused by name; said to the agent at the handback while driving');
   const BS = require(path.join(REPO, 'src/browser-stream.js'));
-  const vv = BS.viewerMessageVerdict({ type: 'tab-act', act: 'stop', targetId: 'A'.repeat(32), rid: 3 });
-  ok(vv && vv.kind === 'tab-act' && vv.act === 'stop' && !vv.refusal, 'browser-live-1: the bridge takes a {type: tab-act, act: stop} from a viewer (then refuses a bearer\'s view by name — server/browser-stream.js)', vv);
-  const SBS = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  ok(/v\.act === 'stop' && \(viewer\.bearer \|\| !isPress\(pressOf\(viewer\.page/.test(SBS) && /code: viewer\.bearer \? 'agent_forbidden' : 'not_a_press'/.test(SBS), 'browser-live-1: a stop from a view a BEARER opened (an agent\'s session token, a job token, an automation key) is refused agent_forbidden; one with no press from this page not_a_press');
-  const LB = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-loop-banner.js')).href);
-  class Nd { constructor(tag) { this.tagName = tag; this.children = []; this._t = ''; this.className = ''; this.style = {}; } appendChild(n) { this.children.push(n); return n; } set textContent(v) { this._t = String(v); } get textContent() { return this._t; } }
-  let stops = 0;
-  const bn = LB.createLoopBanner({ createElement: (tg) => new Nd(tg) }, { stop: () => { stops++; } });
-  const loop = { urls: ['https://shop.example/a', 'https://shop.example/b'], hops: 14, sinceMs: 9000 };
-  bn.render(loop, null, { stop: true, close: false });
-  const shown1 = bn.parts.stop && bn.parts.stop.style.display === '' && bn.parts.close.style.display === 'none' && bn.parts.stop.textContent === 'Stop loading';
-  if (bn.parts.stop && typeof bn.parts.stop.onclick === 'function') bn.parts.stop.onclick({}); // the release: no door ⇒ red by name
-  bn.render(loop, null, {});
-  ok(shown1 && stops === 1 && !!bn.parts.doors && bn.parts.doors.style.display === 'none' && /may propose clearing the site’s stored login/.test(bn.parts.hint.textContent),
-    'browser-live-1: the loop banner draws its ways out as DOORS on its line — «Stop loading» (pressed ⇒ the act runs) where this view may stop, «Close this tab» only where a close is the person\'s; no door, no row');
+  const vv = BS.viewerMessageVerdict({ type: 'tab-act', act: 'stop', targetId: T32('A'), rid: 3 });
+  ok(vv && vv.kind === 'tab-act' && vv.act === 'stop' && !vv.refusal, 'browser-live-1: the bridge takes a {type: tab-act, act: stop} from a viewer', vv);
+  // the bridge's guard, DRIVEN (reader #4): a view a bearer opened is refused agent_forbidden, one with no press from this page not_a_press
+  const SBS = require(path.join(REPO, 'src/server/browser-stream.js'));
+  const WO = require(path.join(REPO, 'src/write-origin.js'));
+  const page = (h) => WO.pageOfUpgrade({ headers: { host: 'vs.test', ...h }, url: '/api/browser/stream' });
+  const sr = (viewer, msg) => { if (typeof SBS.stopRefusalOf !== 'function') return 'no stopRefusalOf'; const personPress = WO.isPress(WO.pressOf(viewer.page, 'WS /api/browser/stream tab-act stop')); return SBS.stopRefusalOf(viewer, msg, personPress); };
+  const person = { bearer: false, page: page({ 'sec-fetch-site': 'same-origin' }) }, agent = { bearer: true, page: page({ authorization: 'Bearer vsst_' + 'a'.repeat(24) }) }, script = { bearer: false, page: page({}) };
+  const r1 = sr(agent, vv), r2 = sr(script, vv), r3 = sr(person, vv), r4 = sr(agent, { ...vv, act: 'switch' });
+  ok(r1 && r1.code === 'agent_forbidden' && r1.ok === false && r1.type === 'tab-ack' && r2 && r2.code === 'not_a_press' && r3 === null && r4 === null,
+    'browser-live-1 (reader #4): the bridge\'s guard, driven — a stop from a view a BEARER opened ⇒ agent_forbidden, from a page that is no press ⇒ not_a_press; the person\'s page passes; a switch is not judged here', { r1, r2, r3, r4 });
+  // the keeper's stop over a FAKE CDP (reader #4): Page.stopLoading on THAT tab through the keeper's own CDP; a refused stop sends nothing
+  const KP = require(path.join(REPO, 'src/server/browser-keeper.js'));
+  if (typeof KP.personStop !== 'function') ok(false, 'browser-live-1 (reader #4): the keeper\'s stop is driven with a fake CDP — personStop (src/server/browser-keeper.js) is missing');
+  else {
+    const sent = [], notes = [], unnotes = [];
+    let answer = { ok: true };
+    const args = (o = {}) => ({ id: T32('B'), owner: 'agent', driving: false, counts: { agent: 2, you: 0 }, row: { title: 'Shop', url: 'https://shop.example/' }, target: { kind: 'lease' },
+      withCdpUrl: async (_t, fn) => fn('ws://cdp.test/devtools/browser/fake'), refuse: (v) => { throw Object.assign(new Error(v.error), { code: v.code }); },
+      VP: { stopLoadingOf: async (url, id) => { sent.push([url, id]); return answer; } }, note: (x) => { notes.push(x); return { rec: notes.length }; }, unnote: (rec, why) => unnotes.push([rec, why]), ...o });
+    const a = await KP.personStop(args());
+    const b = await KP.personStop(args({ driving: true }));
+    answer = { ok: false, error: 'Not attached to an active page' };
+    const c = await KP.personStop(args({ driving: true })).catch((e) => ({ code: e.code }));
+    const n0 = sent.length;
+    const d = await KP.personStop(args({ owner: 'other' })).catch((e) => ({ code: e.code }));
+    ok(a.ok && a.stopped && a.targetId === T32('B') && sent[0] && sent[0][1] === T32('B') && /^ws:/.test(sent[0][0]) && b.ok && notes.length >= 1 && notes[0].kind === 'tab-stop' && notes[0].title === 'Shop'
+      && c.code === 'stop_failed' && unnotes.length === 1 && /Not attached/.test(unnotes[0][1]) && d.code === 'not_your_tab' && sent.length === n0,
+      'browser-live-1 (reader #4): the keeper\'s stop, driven over a fake CDP — Page.stopLoading on THAT tab (its target id); recorded while driving (said at the handback); a refused stop takes its record back (stop_failed); another conversation\'s tab sends nothing', { a, b, c, d, sent, notes, unnotes });
+  }
+  // reader #2: the loop fact names WHICH tab loops — loopIn → the row fact → loopBlock → the conversation's fact → the page (its digest too)
+  const ST = require(path.join(REPO, 'src/browser-stuck.js'));
+  const lp = { urls: ['https://bank.example/a', 'https://bank.example/b'], hosts: ['bank.example'], hops: 12, sinceMs: 9000, runStart: 5, targetId: T32('B') };
+  const blk = ST.loopBlock(lp), fact = ST.stuckFact({ loop: { ...ST.loopBlock(lp), runStart: lp.runStart } });
+  const BF = require(path.join(REPO, 'src/browser-fact.js'));
+  const dg = (id) => BF.factDigest({ key: 'k', using: {}, stuck: { state: 'loop', loop: { urls: lp.urls, targetId: id } } });
+  const BD = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  ok(blk.targetId === T32('B') && fact.loop && fact.loop.targetId === T32('B') && dg(T32('A')) !== dg(T32('B')) && /if \(lp\) return \{ state: 'loop', since: lp\.runStart \|\| 0, \.\.\.\(lp\.targetId \? \{ targetId:/.test(BD),
+    'reader #2: the loop fact carries the LOOPING tab\'s target id — browser-dialogs loopIn → the row fact (read), loopBlock → the conversation\'s fact (driven), and a loop that moves to another tab is a new digest (the page redraws its doors)', { blk, fact });
+}
+{
   // machines-1: an ssh machine that refused the key — the PUBLIC half of the key it signs in with, READ (never made), the person's only
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-needs-doors-'));
-  try {
-    const key = path.join(tmp, 'k');
-    execFileSync('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'needs-doors', '-f', key, '-q']);
-    const pub = fs.readFileSync(key + '.pub', 'utf8').trim();
-    const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
-    fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
-    const H = new HostManager({ dataDir: path.join(tmp, 'data') });
-    const id = H.add({ name: 'gpu-01', user: 'ubuntu', host: '127.0.0.1', port: 22, keyPath: key });
-    const before = fs.readdirSync(tmp).sort().join(',');
-    const readPub = (x) => (typeof H.publicKeyOf === 'function' ? H.publicKeyOf(x) : { ok: false, code: 'no publicKeyOf (the release)' });
-    const a = await readPub(id);
-    fs.rmSync(key + '.pub');
-    const b = await readPub(id);
-    const after = fs.readdirSync(tmp).sort().join(',');
-    ok(a.ok && a.keys[0].publicKey === pub && a.keys[0].source === 'file' && b.ok && b.keys[0].publicKey.split(' ').slice(0, 2).join(' ') === pub.split(' ').slice(0, 2).join(' ') && b.keys[0].source === 'derived' && after === before.replace('k.pub,', '').replace(',k.pub', '')
-      && !/PRIVATE KEY/.test(JSON.stringify([a, b])) && !fs.existsSync(path.join(tmp, 'data', 'ssh', 'id_ed25519')),
-      'machines-1: publicKeyOf reads the PUBLIC half of an existing machine\'s key — its .pub, else derived on the server (ssh-keygen -y); no key is made, no private byte is answered', { a, b });
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
-  const ER = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8');
-  const route = (/app\.get\('\/api\/hosts\/:id\/public-key'[\s\S]*?\n\}\);/.exec(ER) || [''])[0];
-  ok(route && /\^vsst_/.test(ER) && /\^jbt_/.test(ER) && /ak-\|vsak_/.test(ER) && /status\(403\)[\s\S]{0,200}person_only/.test(route) && !/generateKey/.test(route),
-    'machines-1: GET /api/hosts/:id/public-key is the PERSON\'s door — an agent\'s session token, a job token and an automation key refused by name (403 person_only); a read never makes a key');
-  // plugins-integrations-19 (主开发 Q3, words only): the relay address ending /slack/ on a Lark / Google card is ONE page for every provider — said on the card's rows
+  const key = path.join(TMP, 'k');
+  execFileSync('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'needs-doors', '-f', key, '-q']);
+  const pub = fs.readFileSync(key + '.pub', 'utf8').trim();
+  const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+  fs.mkdirSync(path.join(TMP, 'data'), { recursive: true });
+  const H = new HostManager({ dataDir: path.join(TMP, 'data') });
+  const id = H.add({ name: 'gpu-01', user: 'ubuntu', host: '127.0.0.1', port: 22, keyPath: key });
+  const before = fs.readdirSync(TMP).sort().join(',');
+  const readPub = (x, o) => (typeof H.publicKeyOf === 'function' ? H.publicKeyOf(x, o) : { ok: false, code: 'no publicKeyOf (the release)' });
+  const a = await readPub(id);
+  fs.rmSync(key + '.pub');
+  const b = await readPub(id);
+  const after = fs.readdirSync(TMP).sort().join(',');
+  ok(a.ok && a.keys[0].publicKey === pub && a.keys[0].source === 'file' && b.ok && b.keys[0].publicKey.split(' ').slice(0, 2).join(' ') === pub.split(' ').slice(0, 2).join(' ') && b.keys[0].source === 'derived' && after === before.replace('k.pub,', '').replace(',k.pub', '')
+    && !/PRIVATE KEY/.test(JSON.stringify([a, b])) && !fs.existsSync(path.join(TMP, 'data', 'ssh', 'id_ed25519')),
+    'machines-1: publicKeyOf reads the PUBLIC half of an existing machine\'s key — its .pub, else derived on the server (ssh-keygen -y); no key is made, no private byte is answered', { a, b });
+  // reader #3: THE READ IS BOUNDED — a .pub that never answers (a FIFO: its open waits for a writer forever, as a hung mount's read does)
+  // is given up at the bound and the derive answers; r.399 picks: fs.promises.readFile held a threadpool thread and never answered
+  const fifo = key + '.pub';
+  execFileSync('mkfifo', [fifo]);
+  const t0 = Date.now();
+  const c = await Promise.race([Promise.resolve(readPub(id, { timeoutMs: 400 })), new Promise((r) => setTimeout(() => r({ hung: true }), 3500))]);
+  const ms = Date.now() - t0;
+  try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); } catch { /* no reader left: nothing waits on it */ }
+  const HS = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+  const pk = (/async publicKeyOf\([\s\S]*?\n  \}\n/.exec(HS) || [''])[0];
+  ok(c && c.ok && c.keys[0].source === 'derived' && ms < 2500 && pk && !/fs\.promises|readFileSync|readFile\(/.test(pk),
+    `reader #3: a .pub read that never answers (a FIFO standing in for a hung mount) is given up at the bound — the derive answers in ${ms} ms; publicKeyOf reads through a bounded child, never fs on the hub`, { c, ms });
+  // GET /api/hosts/:id/public-key — DRIVEN through an in-process app (reader #4 / #7): THE person verdict (routes/vault.js personVerdict)
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const app = express();
+  const calls = [];
+  const hosts = { publicKeyOf: async (hid) => { calls.push(hid); return hid === 'h1' ? { ok: true, keys: [{ publicKey: 'ssh-ed25519 AAAAfake needs-doors', source: 'file' }] } : { ok: false, code: 'no_key' }; }, list: () => [], get: () => null, keyInfo: () => ({ exists: false }) };
+  const ER = require(path.join(REPO, 'src/server/exit-routes.js'));
+  let made = null;
+  try { ER.create({ app, rootDir: REPO, AGENT_BIN_DIR: path.join(TMP, 'no-bin'), activeSessions: new Map(), auth: { enabled: false, requestAuthed: () => true, checkToken: () => true }, wss: null, WS_OPEN: 1, bcastAll: () => {}, integrationEnabled: () => true, unpairDialDevice: () => {}, hosts, getExitProxy: () => null, getMounts: () => null, getPortForwards: () => null }); } catch (e) { made = e.message; }
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const port = srv.address().port;
+  const get = (p, headers = {}) => new Promise((res) => { http.get({ host: '127.0.0.1', port, path: p, headers }, (r) => { let body = ''; r.on('data', (d) => { body += d; }); r.on('end', () => { let j = null; try { j = JSON.parse(body); } catch { /* not json */ } res({ status: r.statusCode, code: j && j.code, key: !!(j && j.keys) }); }); }).on('error', (e) => res({ err: e.message })); });
+  const SAME = { 'sec-fetch-site': 'same-origin' };
+  const rows = {
+    page: await get('/api/hosts/h1/public-key', SAME),
+    session: await get('/api/hosts/h1/public-key', { ...SAME, authorization: 'Bearer vsst_' + 'x'.repeat(20) }),
+    job: await get('/api/hosts/h1/public-key', { ...SAME, authorization: 'Bearer jbt_' + 'y'.repeat(20) }),
+    automation: await get('/api/hosts/h1/public-key', { ...SAME, authorization: 'Bearer vsak_' + 'z'.repeat(20) }),
+    lowercase: await get('/api/hosts/h1/public-key', { ...SAME, authorization: 'bearer abc123' }),
+    crossSite: await get('/api/hosts/h1/public-key', { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' }),
+    noBrowser: await get('/api/hosts/h1/public-key'),
+    noKey: await get('/api/hosts/h2/public-key', SAME),
+  };
+  await new Promise((r) => srv.close(r));
+  const ERS = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8');
+  const route = (/app\.get\('\/api\/hosts\/:id\/public-key'[\s\S]*?\n\}\);/.exec(ERS) || [''])[0];
+  ok(!made && rows.page.status === 200 && rows.page.key && ['session', 'job', 'automation', 'lowercase'].every((k) => rows[k].status === 403 && rows[k].code === 'human_only' && !rows[k].key)
+    && rows.crossSite.status === 403 && rows.crossSite.code === 'cross_site' && rows.noBrowser.status === 403 && rows.noBrowser.code === 'cross_site'
+    && rows.noKey.status === 404 && rows.noKey.code === 'no_key' && JSON.stringify(calls) === '["h1","h2"]' && !/generateKey/.test(route) && !/BEARER_KIND/.test(ERS),
+    'machines-1 (reader #4 / #7): GET /api/hosts/:id/public-key, DRIVEN — THE person verdict: this page reads the key; any bearer ⇒ 403 human_only, another site or a browser-less caller ⇒ 403 cross_site (never read); no key ⇒ 404 no_key; no local verdict copy, no key made', { made, rows, calls });
+  // plugins-integrations-19 (主开发 Q3, words only): the relay address ending /slack/ on a Lark / Google card is ONE page for every provider
   const OSU = fs.readFileSync(path.join(REPO, 'src/oauth-setup.js'), 'utf8');
   ok(/'row\.public': i18nKey\('[^']*one page for Lark, Slack and Google/.test(OSU) && /'row\.own\.tpl': i18nKey\('[^']*one page serves every provider/.test(OSU),
     'plugins-integrations-19: the relay rows say one page serves Lark, Slack and Google (the published path is not renamed)');
@@ -162,35 +260,374 @@ console.log('④ THE DOORS DO THEIR ACT (lane ui-needs-a-button pick 1 — the w
     'sidebar-sessions-4: «create it?» always carries its create on the line — a missing parent too (made with it at use: /api/mkdir is mkdir -p)');
 }
 
-console.log('⑤ THE SETTINGS AND INTEGRATION DOORS (lane ui-needs-a-button pick 2)');
-{
-  const { pathToFileURL } = await import('node:url');
-  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
-  const NLS = src('src/lib/need-line.js');
-  ok(/section && row\.category \? \(\) => app\._settingsUI\.open\(\{ category: String\(row\.category\) \}\)/.test(NLS) && /typeof app\.openIntegration !== 'function'\) return null;/.test(NLS) && /app\.openIntegration\(id \|\| null\)/.test(NLS),
-    'need-line: settingsDoor { section } opens the row\'s whole Settings section (the Spending limits together); integrationDoor with no id opens the window');
+console.log('⑤ THE PAGE\'S DOORS, DRAWN AND PRESSED (the client bundled by esbuild — build-version stubbed — over a minimal DOM)');
+// ── a minimal DOM: elements with children, classes, data-*, style.cssText, listeners, simple selectors ──
+const kebab = (k) => k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+const camel = (k) => k.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+function mkStyle() {
+  const st = {};
+  Object.defineProperty(st, 'cssText', { enumerable: false, get() { return Object.keys(st).filter((k) => st[k] !== '' && st[k] != null).map((k) => `${kebab(k)}: ${st[k]}`).join('; '); }, set(v) { for (const k of Object.keys(st)) delete st[k]; for (const part of String(v || '').split(';')) { const m = /^\s*([\w-]+)\s*:\s*(.*?)\s*$/.exec(part); if (m) st[camel(m[1])] = m[2]; } } });
+  Object.defineProperty(st, 'setProperty', { enumerable: false, value(k, v) { st[camel(k)] = String(v); } });
+  Object.defineProperty(st, 'removeProperty', { enumerable: false, value(k) { delete st[camel(k)]; } });
+  return st;
+}
+let DOC = null;
+function matchSel(n, sel) {
+  return String(sel).split(',').some((one) => {
+    const last = one.trim().replace(/^:scope\s*>\s*/, '').split(/\s*>\s*|\s+/).pop();
+    const m = /^([a-zA-Z][\w-]*)?((?:\.[\w-]+)*)((?:\[[^\]]+\])*)$/.exec(last);
+    if (!m || n.nodeType !== 1) return false;
+    if (m[1] && n.tagName !== m[1].toUpperCase()) return false;
+    for (const c of (m[2] || '').split('.').filter(Boolean)) if (!n.classList.contains(c)) return false;
+    for (const a of (m[3] || '').match(/\[[^\]]+\]/g) || []) { const am = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(a); if (!am) return false; const v = am[1].startsWith('data-') ? n.dataset[camel(am[1].slice(5))] : n.getAttribute(am[1]); if (am[2] === undefined ? v == null : String(v) !== am[2]) return false; }
+    return true;
+  });
+}
+class Nd {
+  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.nodeType = tag === '#text' ? 3 : 1; this.children = []; this.parentNode = null; this.style = mkStyle(); this.dataset = {}; this.attributes = {}; this._text = ''; this._ls = {}; this.className = ''; this.id = ''; this.value = ''; this.disabled = false; }
+  get classList() { const n = this; const list = () => String(n.className || '').split(/\s+/).filter(Boolean); return { add: (...c) => { n.className = [...new Set([...list(), ...c])].join(' '); }, remove: (...c) => { n.className = list().filter((x) => !c.includes(x)).join(' '); }, contains: (c) => list().includes(c), toggle: (c, f) => { const has = list().includes(c); const want = f === undefined ? !has : !!f; if (want !== has) { if (want) n.classList.add(c); else n.classList.remove(c); } return want; } }; }
+  get childNodes() { return this.children; }
+  get firstChild() { return this.children[0] || null; }
+  get parentElement() { return this.parentNode; }
+  get isConnected() { for (let n = this; n; n = n.parentNode) if (n === DOC.body) return true; return false; }
+  _drop(n) { const i = this.children.indexOf(n); if (i >= 0) this.children.splice(i, 1); n.parentNode = null; }
+  appendChild(n) { if (n.parentNode) n.parentNode._drop(n); this.children.push(n); n.parentNode = this; return n; }
+  append(...ns) { for (const n of ns) this.appendChild(typeof n === 'string' ? textNode(n) : n); }
+  prepend(...ns) { for (const n of ns.reverse()) this.insertBefore(typeof n === 'string' ? textNode(n) : n, this.children[0] || null); }
+  insertBefore(n, ref) { if (n.parentNode) n.parentNode._drop(n); const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); n.parentNode = this; return n; }
+  replaceChildren(...ns) { for (const c of this.children) c.parentNode = null; this.children = []; this._text = ''; this.append(...ns); }
+  remove() { if (this.parentNode) this.parentNode._drop(this); }
+  get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
+  set textContent(v) { for (const c of this.children) c.parentNode = null; this.children = []; this._text = String(v ?? ''); }
+  get innerHTML() { return this._html || ''; }
+  set innerHTML(v) { this.children = []; this._text = ''; this._html = String(v ?? ''); }
+  setAttribute(k, v) { this.attributes[k] = String(v); if (k === 'class') this.className = String(v); if (k === 'id') this.id = String(v); }
+  getAttribute(k) { return k in this.attributes ? this.attributes[k] : null; }
+  removeAttribute(k) { delete this.attributes[k]; }
+  hasAttribute(k) { return k in this.attributes; }
+  addEventListener(type, f) { (this._ls[type] ||= []).push(f); }
+  removeEventListener(type, f) { const l = this._ls[type]; if (l) { const i = l.indexOf(f); if (i >= 0) l.splice(i, 1); } }
+  listening(type) { return (this._ls[type] || []).length; }
+  dispatchEvent(ev) { for (const f of [...(this._ls[ev.type] || [])]) f(ev); return true; }
+  matches(sel) { return matchSel(this, sel); }
+  closest(sel) { for (let n = this; n && n.nodeType === 1; n = n.parentNode) if (matchSel(n, sel)) return n; return null; }
+  querySelectorAll(sel) { const out = []; const walk = (n) => { for (const c of n.children) { if (matchSel(c, sel)) out.push(c); walk(c); } }; walk(this); return out; }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  focus() { DOC.activeElement = this; }
+  blur() {}
+  select() { this.selected = true; }
+  click() { const ev = { type: 'click', target: this, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }; if (typeof this.onclick === 'function') this.onclick(ev); this.dispatchEvent(ev); }
+  getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
+  get offsetWidth() { return parseFloat(this.style.width) || 0; }
+  get offsetHeight() { return parseFloat(this.style.height) || 0; }
+  get offsetLeft() { return parseFloat(this.style.left) || 0; }
+  get offsetTop() { return parseFloat(this.style.top) || 0; }
+}
+const textNode = (s) => { const n = new Nd('#text'); n._text = String(s); return n; };
+DOC = new Nd('#document'); DOC.nodeType = 9;
+DOC.body = new Nd('body'); DOC.head = new Nd('head'); DOC.documentElement = new Nd('html'); DOC.documentElement.lang = 'en';
+let PREVIEW = null, EXEC_COPY = false;
+Object.assign(DOC, {
+  createElement: (tg) => new Nd(tg), createTextNode: textNode, hidden: false, visibilityState: 'visible', hasFocus: () => true,
+  getElementById: (id) => { const walk = (n) => { for (const c of n.children) { if (c.id === id) return c; const r = walk(c); if (r) return r; } return null; }; return walk(DOC.body); },
+  querySelector: (sel) => (PREVIEW && /desktop-preview-win/.test(sel) ? PREVIEW : DOC.body.querySelector(sel)), querySelectorAll: (sel) => DOC.body.querySelectorAll(sel),
+  execCommand: () => EXEC_COPY,
+});
+const PREFS = {};
+let RELOADS = 0;
+Object.assign(globalThis, {
+  window: globalThis, document: DOC, localStorage: { getItem: (k) => (k in PREFS ? PREFS[k] : null), setItem: (k, v) => { PREFS[k] = String(v); }, removeItem: (k) => { delete PREFS[k]; } },
+  sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} }, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
+  requestAnimationFrame: (f) => setTimeout(f, 0), cancelAnimationFrame: (i) => clearTimeout(i), ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
+  MutationObserver: class { observe() {} disconnect() {} }, IntersectionObserver: class { observe() {} unobserve() {} disconnect() {} }, innerWidth: 1440, innerHeight: 900, devicePixelRatio: 1,
+  location: { origin: 'http://vs.test', href: 'http://vs.test/', protocol: 'http:', host: 'vs.test', hostname: 'vs.test', pathname: '/', search: '', hash: '', reload() { RELOADS++; } },
+  getComputedStyle: () => ({ getPropertyValue: () => '' }), addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
+  CustomEvent: class { constructor(type, o) { this.type = type; this.detail = o && o.detail; } },
+});
+Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', languages: ['en'], userAgent: 'node', maxTouchPoints: 0, clipboard: null }, configurable: true, writable: true });
+const realFetch = globalThis.fetch;
+let FETCH = async () => { throw new Error('no fetch in this leg'); };
+globalThis.fetch = (...a) => FETCH(...a);
+// ── the client, bundled ONCE (one module instance: one i18n, one utils) ──
+const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+const ENTRY = [['NL', 'need-line'], ['UT', 'utils'], ['SM', 'sidebar-mounts'], ['WN', 'window'], ['LB', 'browser-loop-banner'], ['SU', 'settings-ui'], ['SET', 'settings'], ['SS', 'settings-schema'],
+  ['DAL', 'desktop-app-launcher'], ['AID', 'app-install-dialog'], ['UTR', 'user-todos-row'], ['IW', 'inbox-window'], ['LAY', 'inbox-window-layout'], ['OCR', 'oauth-connect-row'], ['BNP', 'browser-new-profile-model']]
+  .map(([k, f]) => `export * as ${k} from './${f}.js';`).join('\n');
+let CL = null;
+try {
+  const out = await esbuild.build({ stdin: { contents: ENTRY, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'needs-doors-entry.js', loader: 'js' }, bundle: true, format: 'esm', write: false, plugins: [stubBuildVersion], logLevel: 'silent', loader: { '.css': 'empty' } });
+  const f = path.join(TMP, 'client.mjs');
+  fs.writeFileSync(f, out.outputFiles[0].text);
+  CL = await import(pathToFileURL(f).href);
+} catch (e) { ok(false, 'the client bundles and imports under the minimal DOM', String(e && e.message).slice(0, 600)); }
+const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
+if (CL) {
+  const { NL, UT, SM, WN, LB, SU, SET, SS, DAL, AID, UTR, IW, OCR, BNP } = CL;
+  // need-line: the door makers DRIVEN (reader #4) — settingsDoor {section} opens the row's whole section; without, Settings searched
+  // for the row's own words; integrationDoor with no id opens the window
+  {
+    const opened = [], ints = [];
+    const app = { _settingsUI: { open: (o) => opened.push(o) }, openIntegration: (id) => ints.push(id) };
+    const sd = NL.settingsDoor(app, 'spend.unattendedPerIdentityDay', { section: true }), ss = NL.settingsDoor(app, 'browser.maxRunning'), sx = NL.settingsDoor(app, 'no.such.row'), it0 = NL.integrationDoor(app, null), it1 = NL.integrationDoor(app, 'llm');
+    for (const d of [sd, ss, it0, it1]) if (d && typeof d.run === 'function') d.run();
+    const cat = SS.SETTINGS_SCHEMA['spend.unattendedPerIdentityDay'].category, lab = SS.SETTINGS_SCHEMA['browser.maxRunning'].label;
+    ok(sd && ss && sx === null && JSON.stringify(opened) === JSON.stringify([{ category: String(cat) }, { search: String(lab) }]) && JSON.stringify(ints) === '[null,"llm"]' && sd.door === 'settings:spend.unattendedPerIdentityDay',
+      'need-line (reader #4): settingsDoor { section } opens the row\'s whole Settings section, plain it searches the row\'s own words, an unknown row draws no door; integrationDoor with no id opens the window', { opened, ints });
+    ok(!('needLineHtml' in NL) && !('bindNeedDoors' in NL) && !/needLineHtml|bindNeedDoors/.test(fs.readFileSync(path.join(REPO, 'src/lib/need-line.js'), 'utf8')), 'reader #16: need-line.js has no string twin (needLineHtml / bindNeedDoors — no surface used them; a listener bound with no signal)');
+  }
+  // reader #0: copyText SAYS whether it copied — the clipboard API, else the textarea fallback's own answer (execCommand)
+  {
+    const nav = globalThis.navigator;
+    const run = async (clip, exec) => { nav.clipboard = clip; EXEC_COPY = exec; return UT.copyText('k'); };
+    const got = [await run({ writeText: async () => {} }, false), await run({ writeText: async () => { throw new Error('denied'); } }, true), await run({ writeText: async () => { throw new Error('denied'); } }, false), await run(null, false), await run(null, true)];
+    ok(JSON.stringify(got) === '[true,true,false,false,true]', 'reader #0: copyText resolves true / false — the clipboard took it; refused but the fallback copied; refused and the fallback too; no clipboard API and the fallback refused; no API, the fallback copied (r.399: always undefined)', got);
+  }
+  // machines-1: the ssh error's cause in words (reader #4) and the public-key door's every answer (reader #0 / #8)
+  {
+    const W = typeof SM.hostErrorWords === 'function' ? SM.hostErrorWords : null;
+    const w = (raw) => (W ? W(raw, 'ubuntu@gpu-01') : null);
+    const a = w('ubuntu@gpu-01: Permission denied (publickey).'), b = w('ssh: connect to host gpu-01 port 22: Connection refused'), c = w('ssh: connect to host gpu-01 port 22: Connection timed out'), d = w('ssh: Could not resolve hostname gpu-01'), e = w('Host key verification failed.'), f = w('weird');
+    ok(a && a.refused && a.words === 'Can’t sign in to ubuntu@gpu-01: it refused the key.' && b && !b.refused && /connection was refused/.test(b.words) && /no answer/.test(c.words) && /name was not found/.test(d.words) && /host key changed/.test(e.words) && f.words === 'Can’t reach ubuntu@gpu-01.',
+      'machines-1 (reader #4): an ssh machine\'s error, CLASSIFIED — refused the key (its door: the public key to add) / connection refused / no answer / name not found / host key changed / the rest', { a, b, c, d, e, f });
+    class FakeSidebar {}
+    SM.installSidebarMounts(FakeSidebar);
+    const sb = new FakeSidebar();
+    const opened = [];
+    sb._hostsData = { key: { exists: false }, hosts: [] };
+    sb._showAddHostDialog = (hd) => opened.push(hd);
+    const nav = globalThis.navigator;
+    const press = async (answer, clip = { writeText: async (x) => { clip.got = x; } }, exec = false) => {
+      FETCH = answer instanceof Error ? async () => { throw answer; } : async () => ({ ok: answer.status === 200, status: answer.status, json: async () => answer.body });
+      nav.clipboard = clip; EXEC_COPY = exec;
+      const row = DOC.createElement('div'); DOC.body.appendChild(row);
+      const more = DOC.createElement('details'); row.appendChild(more);
+      const place = (n) => { for (const o of row.querySelectorAll('.mounts-key-shown')) o.remove(); row.insertBefore(n, more); };
+      if (typeof sb._publicKeyDoor !== 'function') return { missing: true };
+      await sb._publicKeyDoor({ id: 'h1', name: 'gpu-01', user: 'ubuntu', host: 'gpu-01' }, 'ubuntu@gpu-01', place);
+      const shown = row.querySelector('.mounts-key-shown');
+      row.remove();
+      return { shown, clip, code: shown ? shown.dataset.code : null, words: shown ? (shown.querySelector('.need-words') || shown).textContent : '', field: shown ? shown.querySelector('textarea') : null, doors: shown ? shown.querySelectorAll('button') : [] };
+    };
+    const KEY = 'ssh-ed25519 AAAAC3fake needs-doors';
+    const okKey = { status: 200, body: { ok: true, keys: [{ publicKey: KEY, source: 'file' }] } };
+    const r1 = await press(okKey);
+    const r2 = await press(okKey, { writeText: async () => { throw new Error('denied'); } }, false);
+    ok(!r1.missing && !r1.shown && r1.clip.got === KEY && r2.shown && r2.code === 'copy_refused' && r2.field && r2.field.value === KEY && r2.field.readOnly === true && /select the key in this field/.test(r2.words) && r2.shown.querySelector('textarea') === r2.field,
+      'machines-1 (reader #0): «Copy the public key to add» — copied, it says so; a clipboard that REFUSED shows the key itself in a read-only field on the row, the words pointing at THAT field (r.399: «Copied» either way)', { r1: r1.missing ? 'no _publicKeyDoor' : { shown: !!r1.shown, got: r1.clip.got }, r2: { code: r2.code, words: r2.words, value: r2.field && r2.field.value } });
+    const r3 = await press({ status: 404, body: { ok: false, code: 'no_key' } });
+    const before3 = opened.length;
+    if (r3.doors && r3.doors[0]) r3.doors[0].click();
+    const r4 = await press({ status: 404, body: { ok: false, code: 'not_ssh' } });
+    const r5 = await press({ status: 403, body: { error: 'x', code: 'human_only' } });
+    const r6 = await press(new Error('offline'));
+    ok(r3.code === 'no_key' && /^No public key to show/.test(r3.words) && r3.doors.length === 1 && r3.doors[0].dataset.door === 'key-setup' && r3.doors[0].textContent === 'Add it again with a key…' && opened.length === before3 + 1
+      && r4.code === 'not_ssh' && /dials in/.test(r4.words) && r4.doors.length === 0 && r5.code === 'human_only' && /shown only to you/.test(r5.words) && r6.code === 'network' && /Could not reach VibeSpace/.test(r6.words),
+      'machines-1 (reader #8): a key that cannot be shown says WHY by its code — no key (and «Add it again with a key…»: Add machine\'s create / paste a key) / a dial machine / refused / the hub not reached (r.399: one «no key» toast for all)', { r3: [r3.code, r3.words], r4: [r4.code, r4.words], r5: [r5.code, r5.words], r6: [r6.code, r6.words] });
+    FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // for-you-2: the For-you window's door DRAWN and PRESSED (reader #4), the tray row's closer and its door (reader #4 / #10)
+  {
+    const it = { id: 'h1', status: 'open', sessionKey: 'claude:x', text: 'A helper needs your approval to use Bash', createdAt: Date.now(), action: { type: 'helper-ask', requestId: 'r1' } };
+    const jumps = [];
+    const model = { jump: (k, x) => jumps.push([k, x.id]) };
+    const el = DOC.createElement('div');
+    const v = { reply: { show: false, enabled: false, code: 'card_item', why: 'Answered on the conversation’s card — open the conversation to answer it' } };
+    if (fn('IW', 'paintWhy')) IW.paintWhy(el, v.reply.why, v, it, model);
+    const btn = el.querySelector('.need-door');
+    if (btn) btn.click();
+    const el2 = DOC.createElement('div');
+    if (fn('IW', 'paintWhy')) IW.paintWhy(el2, 'Background Work item — answer it in the job panel', { reply: { show: false, enabled: false, code: 'job_item', why: 'x' } }, it, model);
+    ok(fn('IW', 'paintWhy') && btn && btn.dataset.door === 'jump' && btn.textContent === 'Open the conversation and answer' && /^Answered on the conversation’s card/.test(el.textContent) && JSON.stringify(jumps) === '[["claude:x","h1"]]' && !el2.querySelector('.need-door') && el2.textContent === 'Background Work item — answer it in the job panel',
+      'for-you-2 (reader #4): the For-you pane\'s note on a parked ask carries «Open the conversation and answer» — PRESSED, it jumps to the conversation; another note draws no door', { jumps, text: el.textContent });
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'Session 1', replyState: () => ({ show: false }) };
+    const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+    const pointer = (FA.POINTER_ROWS || []).find((x) => !(FA.PARKED_ASK_TYPES || []).includes(x));
+    const html = (item) => UTR.renderRow({ item, band: 2 }, ctx).innerHTML;
+    const hp = html(it), hm = html({ ...it, id: 'm1', action: { type: 'main-ask', requestId: 'r2' } }), ho = pointer ? html({ ...it, id: 'p1', text: 'A pointer', action: { type: pointer, requestId: 'r3' } }) : '';
+    const attr = (h, cls, a) => { const m = new RegExp(`<button[^>]*class="${cls}[^"]*"[^>]*\\b${a}="([^"]*)"`).exec(h); return m ? m[1] : null; };
+    ok(attr(hp, 'ut-act ut-dismiss ut-hide', 'data-label') === 'Stop reminding (the conversation stays paused)' && attr(hm, 'ut-act ut-dismiss ut-hide', 'data-label') === 'Stop reminding (the conversation stays paused)' && (!pointer || attr(ho, 'ut-act ut-dismiss ut-hide', 'data-label') === 'Hide'),
+      'for-you-2 (reader #4): the tray row of a parked ask, DRAWN — its one closer says «Stop reminding (the conversation stays paused)»; another pointer\'s says «Hide»', { parked: attr(hp, 'ut-act ut-dismiss ut-hide', 'data-label'), pointer, other: attr(ho, 'ut-act ut-dismiss ut-hide', 'data-label') });
+    ok(attr(hp, 'ut-go', 'data-label') === 'Open the conversation and answer' && attr(hp, 'ut-go', 'aria-label') === 'Open the conversation and answer' && /class="ut-go ut-go-answer"/.test(hp) && (!pointer || attr(ho, 'ut-go', 'data-label') === 'Chat'),
+      'reader #10: the tray and the phone sheet draw the parked ask\'s door — the row\'s trailing door (its press is the jump to the conversation) says «Open the conversation and answer»; another row\'s says «Chat»', { parked: attr(hp, 'ut-go', 'data-label'), other: attr(ho, 'ut-go', 'data-label') });
+    const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+    ok(/\.ut-go\.ut-go-answer::after \{ white-space: normal;/.test(CSS) && /:has\(> \.ut-go-answer\) > :is\(\.ut-text, \.ut-meta\) \{ margin-right: 104px; \}/.test(CSS), 'reader #10: the longer door wraps inside itself on the phone (never cut), and the row\'s words keep clear of it');
+  }
+  // browser-live-1: the loop banner's doors — which views draw them and WHICH TAB they act on (reader #2 / #4)
+  {
+    const rows = [{ targetId: T32('A'), active: true, title: 'Mail' }, { targetId: T32('B'), active: false, title: 'Bank' }];
+    const loop = { urls: ['https://bank.example/a', 'https://bank.example/b'], hops: 14, sinceMs: 9000, targetId: T32('B') };
+    const rowOf = fn('LB', 'loopTabRowOf') ? LB.loopTabRowOf : () => null, shown = fn('LB', 'loopDoorsShown') ? LB.loopDoorsShown : () => ({});
+    const r = rowOf(rows, loop), gone = rowOf(rows.slice(0, 1), loop), none = rowOf(rows, { ...loop, targetId: undefined });
+    ok(r === rows[1] && gone === null && none === null, 'reader #2: the banner\'s doors act on the LOOPING tab\'s row (the fact\'s target id) — never the active tab; a looping tab that is not listed (or a fact naming none) gives no row', { r, gone, none });
+    const sv = shown({ row: r }), sd = shown({ row: r, driving: true }), sh = shown({ row: r, human: true }), sn = shown({ row: null, driving: true });
+    ok(JSON.stringify([sv, sd, sh, sn]) === JSON.stringify([{ stop: true, close: false }, { stop: true, close: true }, { stop: false, close: true }, { stop: false, close: false }]),
+      'reader #2 / #4: the show flags — a conversation\'s view may stop; a close only while driving or in the person\'s own window; no looping row ⇒ no door at all', [sv, sd, sh, sn]);
+    const acts = [];
+    const bn = LB.createLoopBanner(DOC, { stop: () => acts.push(['stop', rowOf(rows, loop)]), close: () => acts.push(['close', rowOf(rows, loop)]) });
+    bn.render(loop, null, sv);
+    const s1 = bn.parts.stop && bn.parts.stop.style.display === '' && bn.parts.close.style.display === 'none' && bn.parts.stop.textContent === 'Stop loading';
+    if (bn.parts.stop) bn.parts.stop.click();
+    bn.render(loop, null, sn);
+    ok(s1 && acts.length === 1 && acts[0][0] === 'stop' && acts[0][1] === rows[1] && bn.parts.doors.style.display === 'none' && /may propose clearing the site’s stored login/.test(bn.parts.hint.textContent),
+      'browser-live-1: the loop banner draws its ways out as DOORS on its line — «Stop loading» pressed stops the LOOPING tab; with no looping row no door is drawn', acts.map((x) => [x[0], x[1] && x[1].title]));
+  }
+  // window-manager-1: move mode, DRIVEN (reader #4 / #12) — Esc and «Cancel» put the window AND its preview rect back, every listener leaves
+  {
+    const wm = Object.create(WN.WindowManager.prototype);
+    const el = DOC.createElement('div'); el.style.cssText = 'left: 100px; top: 50px; width: 400px; height: 300px; z-index: 7';
+    DOC.body.appendChild(el);
+    const win = { id: 'w1', element: el, isMaximized: false, isMinimized: false, _isSnapped: false, onResize() {} };
+    Object.assign(wm, { windows: new Map([['w1', win]]), zIndex: 50, workspace: { offsetWidth: 1600, offsetHeight: 1000, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1600, height: 1000 }) }, focusWindow() {}, witnessGeometry() {}, _captureGridBounds() {}, _notify() {}, restore() {} });
+    PREVIEW = DOC.createElement('div'); PREVIEW.style.cssText = 'left: 10%; top: 5%';
+    const fire = (type, init = {}) => DOC.dispatchEvent({ type, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}, ...init });
+    const listening = () => ['mousemove', 'mousedown', 'keydown'].map((x) => DOC.listening(x)).join(',');
+    const overlayUp = () => DOC.body.children.some((c) => c.querySelector && c.querySelector('.move-mode-hint'));
+    const run = async (end) => {
+      wm.startMoveMode('w1');
+      const hint = DOC.body.querySelector('.move-mode-hint'), cancel = hint ? hint.querySelector('.move-mode-cancel') : null;
+      fire('mousemove', { clientX: 900, clientY: 700 });
+      await tick(8);
+      const moved = { left: el.style.left, preview: PREVIEW.style.left };
+      if (end === 'esc') fire('keydown', { key: 'Escape' });
+      if (end === 'cancel') { fire('mousedown', { target: cancel || el }); if (cancel) cancel.click(); }
+      if (end === 'drop') fire('mousedown', { target: DOC.body });
+      return { moved, cancel: cancel ? cancel.textContent : null, left: el.style.left, top: el.style.top, z: el.style.zIndex, preview: PREVIEW.style.left, listening: listening(), overlay: overlayUp() };
+    };
+    const esc = await run('esc');
+    const can = await run('cancel');
+    const drop = await run('drop');
+    ok(esc.moved.left !== '100px' && esc.moved.preview !== '10%' && esc.left === '100px' && esc.top === '50px' && esc.z === '7' && esc.preview === '10%' && esc.listening === '0,0,0' && !esc.overlay,
+      'window-manager-1 (reader #4 / #12): move mode, Esc — the window back EXACTLY where it was, its desktop-preview rect too (processMove moved both live), the overlay gone, every listener removed', esc);
+    ok(can.cancel === 'Cancel' && can.left === '100px' && can.preview === '10%' && can.listening === '0,0,0' && !can.overlay,
+      'reader #12: the hint carries «Cancel» — a button every input can press (a touch tablet has no Esc); its press does what Esc does, never a drop', can);
+    ok(drop.left !== '100px' && drop.listening === '0,0,0' && !drop.overlay, 'window-manager-1 (reader #4): a click drops the window where it is and removes EVERY listener of the mode — the Esc one too', drop);
+    const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+    const hintCss = (/\.move-mode-hint \{[^}]*\}/.exec(CSS) || [''])[0];
+    ok(/box-shadow: var\(--shadow-window\)/.test(hintCss) && !/rgba\(/.test(hintCss) && /\.move-mode-hint > \.move-mode-cancel \{ pointer-events: auto; \}/.test(CSS), 'reader #12: the hint\'s shadow is the theme\'s (--shadow-window, no literal colour); its Cancel takes the pointer (the hint itself lets it through)', hintCss);
+    PREVIEW = null; el.remove();
+  }
+  // desktop-apps-27: «Choose another file…» DRAWN and PRESSED (reader #4); the words without facts are whole (reader #9)
+  {
+    let repicks = 0;
+    const mk = (code, o = {}) => (fn('DAL', 'debRefusalLine') ? DAL.debRefusalLine({ code }, { debPath: '/home/u/app.deb', machine: 'gpu-01', repick: () => { repicks++; }, ...o }) : null);
+    const l1 = mk('file_missing'), l2 = mk('file_unreadable'), l3 = mk('not_found'), l4 = mk('file_missing', { debPath: '' });
+    const b1 = l1 && l1.querySelector('.need-door');
+    if (b1) b1.click();
+    ok(l1 && b1 && b1.dataset.door === 'deb-repick' && b1.textContent === 'Choose another file…' && repicks === 1 && /^This file is not on gpu-01: \/home\/u\/app\.deb/.test(l1.textContent) && l2 && /cannot be read on gpu-01/.test(l2.textContent) && l3 === null && l4 === null,
+      'desktop-apps-27 (reader #4): a .deb file that is not there DRAWS «Choose another file…» on its line — pressed, the path form reopens; any other refusal draws none', { l1: l1 && l1.textContent, repicks });
+    const w = [AID.appRefusalText('file_missing'), AID.appRefusalText('file_unreadable'), AID.appRefusalText('file_missing', { path: '/a.deb' }), AID.appRefusalText('file_missing', { machine: 'gpu-01', path: '/a.deb' })];
+    ok(w[0] === 'The .deb file is not there any more.' && w[1] === 'The .deb file cannot be read.' && w[2] === w[0] && w[3] === 'This file is not on gpu-01: /a.deb' && w.every((x) => !/ on : |: $| on \{|\{path\}/.test(x)),
+      'reader #9: appRefusalText(file_missing | file_unreadable) with no path / machine is a WHOLE sentence (r.399 picks: «在上找不到这个文件：»)', w);
+  }
+  // settings-13: «Takes effect after a reload» against the value this PAGE LOADED with, re-judged on the store's change event (reader #4 / #13)
+  {
+    const path13 = Object.keys(SS.SETTINGS_SCHEMA).find((p) => { const r = SS.SETTINGS_SCHEMA[p]; return r && !r.liveApply && r.type === 'boolean' && !r.store; });
+    const sch = SS.SETTINGS_SCHEMA[path13];
+    const loadWith = async (vals) => { FETCH = async () => ({ ok: true, status: 200, json: async () => ({ ...vals }) }); const m = new SET.SettingsManager(); await m.load(); FETCH = async () => ({ ok: true, status: 200, json: async () => ({}) }); return m; };
+    const line = (m) => { if (!fn('SU', 'SettingsUI') || typeof SU.SettingsUI.prototype._reloadLine !== 'function') return null; const ui = Object.create(SU.SettingsUI.prototype); ui.settings = m; ui.app = {}; const l = ui._reloadLine(path13, sch); if (l) DOC.body.appendChild(l); return l; };
+    const m = await loadWith({});
+    const l = line(m);
+    const shown = () => (l ? l.style.display !== 'none' : null);
+    const s0 = shown();
+    m.set(path13, !sch.default); const s1 = shown();
+    m.set(path13, sch.default); const s2 = shown();
+    const m3 = await loadWith({});
+    const l3 = line(m3);
+    m3.applyRemote({ [path13]: !sch.default });   // another client's change, by the broadcast
+    const s3 = l3 ? l3.style.display !== 'none' : null;
+    if (l3) l3.remove();
+    const door = l && l.querySelector('.need-door');
+    if (door) door.click();
+    const m2 = await loadWith({});
+    m2.set(path13, !sch.default);   // changed EARLIER in the page's life (a quick menu, another window) — before Settings is first drawn
+    const l2 = line(m2);
+    ok(path13 && l && JSON.stringify([s0, s1, s2, s3]) === '[false,true,false,true]' && door && door.textContent === 'Reload now' && RELOADS === 1 && l2 && l2.style.display !== 'none',
+      `settings-13 (reader #4 / #13): a row that takes effect at the next load (${path13}) shows «Takes effect after a reload» + «Reload now» once its value differs from the one this PAGE LOADED with — re-judged on the store's change (this page, another client's broadcast); a value moved before Settings was first drawn shows it too`, { s: [s0, s1, s2, s3], l2: l2 && l2.style.display, reloads: RELOADS });
+    if (l) l.remove();
+    if (l2) l2.remove();
+    FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // plugins-integrations-13: the https why's door, DRAWN (reader #4 / #14) — on the default «auto» the line also says what is missing
+  {
+    const drawn = (mode) => {
+      const opened = [];
+      const app = { settings: { get: (k) => (k === 'server.https' ? mode : undefined) }, _settingsUI: { open: (o) => opened.push(o) } };
+      const box = DOC.createElement('div');
+      OCR.renderConnectRow(box, { label: 'Connect', words: {}, whys: { 'self-hosted': 'Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key' } }, { connectWhy: 'self-hosted', account: {} }, () => {}, { app });
+      const w = box.querySelector('.oauth-connect-words'), b = w && w.querySelector('.need-door');
+      if (b) b.click();
+      return { text: w ? w.textContent : '', door: b ? b.textContent : null, opened };
+    };
+    const au = drawn('auto'), of = drawn('off');
+    ok(/HTTPS Certificates for your tailnet in the Tailscale admin console/.test(au.text) && au.door === 'Use my own certificate files…' && au.opened.length === 1 && au.opened[0].search === SS.SETTINGS_SCHEMA['server.https'].label
+      && !/Tailscale admin console/.test(of.text) && of.door === 'Turn on HTTPS…' && of.opened.length === 1,
+      'plugins-integrations-13 (reader #4 / #14): «Connecting needs an https address» — on the default «auto» the line also says what is missing (the tailnet\'s HTTPS certificates, on Tailscale\'s side) and its door is the row for «My own certificate files»; with https off, «Turn on HTTPS…»', { au, of });
+    const VT = fs.readFileSync(path.join(REPO, 'src/lib/voice-teach-ui.js'), 'utf8'), IWS = fs.readFileSync(path.join(REPO, 'src/lib/integrations-window.js'), 'utf8'), PU = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
+    ok(/renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IWS) && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),
+      'plugins-integrations-13: both surfaces hand the app to the Connect block (its door is drawn on the voice sheet AND the Integrations card); no wrong menu path in the key link or the chip\'s title');
+  }
   // browser-profiles-4: the browser list's needs said ONCE, each with its door's target — the chosen cloud browser's own card
-  const BM = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-new-profile-model.js')).href);
-  const rows = [{ id: 'chromium', control: { ok: true } }, { id: 'cloud:browserbase', control: { ok: true } }, { id: 'cloud:kernel', control: { ok: true } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }];
-  const ch = typeof BM.providerChoices === 'function' ? BM.providerChoices({ providers: rows }) : [];
-  const needs = typeof BM.providerNeedsOf === 'function' ? BM.providerNeedsOf(ch, { chosen: 'cloud:kernel' }) : [];
-  const none = typeof BM.providerNeedsOf === 'function' ? BM.providerNeedsOf(BM.providerChoices({ providers: rows.slice(0, 1) })) : null;
-  ok(needs.length === 2 && needs[0].need === 'key' && needs[0].integration === 'cloud:kernel' && needs[1].setting === 'window.realDesktopTargets'
-    && ch.filter((c) => c.need === 'key').every((c) => !/⚙|→|Integrations/.test(c.note)) && Array.isArray(none) && none.length === 0,
-    'browser-profiles-4: the cloud rows no longer say «(⚙ → Integrations)» each — ONE line under the list, its door the chosen cloud browser\'s card; the desktop window\'s consent its switch; nothing when nothing needs it', { needs, notes: ch.map((c) => c.note) });
-  // settings-13: a non-live row changed in this page says «Takes effect after a reload» with «Reload now» on its row
-  const SU = src('src/lib/settings-ui.js');
-  ok(/if \(!schema\.liveApply\) \{[\s\S]{0,400}LOADED_VALUES\.set\(path, now\(\)\)[\s\S]{0,300}needLine\(\{ words: t\('Takes effect after a reload'\)[\s\S]{0,120}doors: \[reloadDoor\(\)\]/.test(SU) && /now\(\) !== LOADED_VALUES\.get\(path\)/.test(SU),
-    'settings-13: a row that takes effect at the next load, once ITS value moved in this page, carries «Reload now» on its line (the badge stays the fact)');
-  // plugins-integrations-13: the https why carries its door wherever the Connect block is drawn (the voice sheet AND the Integrations card)
-  const OC = src('src/lib/oauth-connect-row.js'), VT = src('src/lib/voice-teach-ui.js'), IW = src('src/lib/integrations-window.js'), PU = src('src/lib/plugins-ui.js');
-  ok(/'self-hosted': \(app\) => settingsDoor\(app, 'server\.https'/.test(OC) && /renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IW)
-    && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),
-    'plugins-integrations-13: «Connecting needs an https address» carries «Turn on HTTPS…» on both surfaces; the key link and the chip\'s title no longer name a wrong menu path');
-  // usage-16: on with no key ⇒ the chip is the door to the key's card (the Dropline chip's verb rule)
-  ok(/t\('Add the API key…'\)/.test(PU) && /if \(p\.enabled && !p\.configured && !stopW\) onChip = \(\) => this\.openIntegration\?\.\(p\.integration \|\| 'llm'\)/.test(PU),
-    'usage-16: the LLM plugin on with no key — its chip says «Add the API key…» and opens the key\'s card');
+  {
+    const rows = [{ id: 'chromium', control: { ok: true } }, { id: 'cloud:browserbase', control: { ok: true } }, { id: 'cloud:kernel', control: { ok: true } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }];
+    const ch = typeof BNP.providerChoices === 'function' ? BNP.providerChoices({ providers: rows }) : [];
+    const needs = typeof BNP.providerNeedsOf === 'function' ? BNP.providerNeedsOf(ch, { chosen: 'cloud:kernel' }) : [];
+    const none = typeof BNP.providerNeedsOf === 'function' ? BNP.providerNeedsOf(BNP.providerChoices({ providers: rows.slice(0, 1) })) : null;
+    ok(needs.length === 2 && needs[0].need === 'key' && needs[0].integration === 'cloud:kernel' && needs[1].setting === 'window.realDesktopTargets'
+      && ch.filter((c) => c.need === 'key').every((c) => !/⚙|→|Integrations/.test(c.note)) && Array.isArray(none) && none.length === 0,
+      'browser-profiles-4: the cloud rows no longer say «(⚙ → Integrations)» each — ONE line under the list, its door the chosen cloud browser\'s card; the desktop window\'s consent its switch; nothing when nothing needs it', { needs, notes: ch.map((c) => c.note) });
+  }
+  // usage-16: on with no key ⇒ the chip is the door to the key's card; a DOOR chip's words wrap in the narrow rail (reader #6)
+  {
+    const PU = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8'), CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+    ok(/t\('Add the API key…'\)/.test(PU) && /if \(p\.enabled && !p\.configured && !stopW\) onChip = \(\) => this\.openIntegration\?\.\(p\.integration \|\| 'llm'\)/.test(PU),
+      'usage-16: the LLM plugin on with no key — its chip says «Add the API key…» and opens the key\'s card');
+    const rule = (/\nbutton\.plugin-chip-primary \{[^}]*\}/.exec(CSS) || [''])[0];
+    ok(/white-space: normal/.test(rule) && /text-overflow: clip/.test(rule) && CSS.lastIndexOf(rule) > CSS.indexOf('.plugin-chip { max-width: 100%'),
+      'usage-16 (reader #6): a primary chip is a DOOR — its words wrap in the narrow rail, never ellipsized («填写 API ...» at 1440)', rule);
+  }
+}
+globalThis.fetch = realFetch;
+
+console.log('⑥ THE NEED-WORD NET (reader #5: a sentence that says something failed / is needed / is off / is not set / is missing)');
+{
+  const UI = TABLES.find((x) => x.scope === 'ui').T;
+  // THE FROZEN DEBT (scripts/fixtures/need-debt.json — out of src, where its sentences would read as surfaces to other censuses)
+  const DEBT_FILE = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/need-debt.json'), 'utf8'));
+  const DEBT = Array.isArray(DEBT_FILE.list) ? DEBT_FILE.list : [];
+  const SHAPES = (DEBT_FILE.shapes || []).map((x) => new RegExp(x));
+  const needDebtOf = (s) => { const p = String(s).slice(0, 64); return DEBT.includes(p) ? p : SHAPES.find((r) => r.test(String(s))) || null; };
+  const claimedBy = (s) => TABLES.some(({ T }) => T.needOf(s) || T.notNeedOf(s));
+  const needNet = (ws) => {
+    const out = { caught: 0, claimed: 0, debt: new Set(), fresh: [] };
+    if (!UI.NET.need) return { ...out, fresh: [{ s: 'the ui table has no NEED net (NET.need)' }] };
+    for (const [s, files] of ws) {
+      if (!UI.NET.need.test(s)) continue;
+      out.caught++;
+      if (claimedBy(s)) { out.claimed++; continue; }
+      const d = needDebtOf(s);
+      if (d) { out.debt.add(String(d)); continue; }
+      out.fresh.push({ s, files: [...files] });
+    }
+    return out;
+  };
+  const N = needNet(words);
+  console.log(`  · the need net catches ${N.caught} sentence(s): ${N.claimed} claimed by a row / a non-need, ${N.debt.size} by the frozen debt (${DEBT.length} entries + ${SHAPES.length} shapes)`);
+  ok(N.fresh.length === 0, `every sentence the need net catches is a row, a non-need with its reason, or an entry of the frozen NEED_DEBT — a NEW one is red by its words (${N.caught})`, N.fresh.slice(0, 12));
+  const stale = DEBT.filter((p) => !N.debt.has(p)).concat(SHAPES.filter((r) => !N.debt.has(String(r))).map(String));
+  ok(stale.length === 0, 'the NEED_DEBT is current — an entry whose sentence is gone or now claimed by a row is taken out (the list only shrinks)', stale.slice(0, 12));
+  const NEED_DEBT_CEILING = 390;   // the list when the net landed (reader follow-up of picks 1–2) — it may only go DOWN
+  ok(DEBT.length > 0 && DEBT.length <= NEED_DEBT_CEILING, `the NEED_DEBT never grows (${DEBT.length} ≤ ${NEED_DEBT_CEILING})`);
+  // CONTROL: the reader's planted sentences (logs-reader/planted.log) — three need sentences the r.399 nets let through, and a direction
+  const PLANTED = ['Sign-in failed — the token has expired.', 'This machine needs a key before it can connect.', 'Turn it on in the Advanced section of the settings window.', 'Enable it with the switch below.'];
+  const pw = new Map(words); for (const s of PLANTED) pw.set(s, new Set(['src/lib/planted-needs.js']));
+  const PN = needNet(pw), PC = census(pw).find((c) => c.scope === 'ui');
+  const redNeed = PN.fresh.map((x) => x.s), redNet = PC ? PC.unclaimed.map((x) => x.s) : [];
+  ok(PLANTED.slice(0, 3).every((s) => redNeed.includes(s)) && redNet.includes(PLANTED[3]) && PN.fresh.every((x) => PLANTED.includes(x.s)),
+    'CONTROL: the reader\'s planted sentences go RED by name — «Sign-in failed…», «This machine needs a key…», «Turn it on in the Advanced section…» (the need net), «Enable it with the switch below.» (the direction net)', { redNeed, redNet: redNet.filter((s) => PLANTED.includes(s)) });
 }
 
+try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -193,6 +193,8 @@ const NEEDS = Object.freeze([
     match: /^The agent is told — it may propose clearing the site’s stored login, which you approve$/, door: { present: { marker: /door\('stop'/, surfaces: ['src/lib/browser-loop-banner.js'] }, via: { 'src/browser-stuck.js': 'src/lib/browser-loop-banner.js' } } },
   { id: 'ssh-refused', need: 'an ssh machine that refuses — the reason in words + «Copy the public key to add» / «Try again» on the line (machines-1)',
     match: /^Can’t (sign in to|reach) \{target\}/, door: { present: { marker: /door: 'public-key'|door: 'retest'/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
+  { id: 'public-key', need: 'the public key cannot be shown — its cause by the route\'s code; no key ⇒ «Add it again with a key…» (Add machine\'s create / paste a key) on the line (machines-1, reader #8)',
+    match: /^No public key to show — VibeSpace cannot read this machine’s key/, door: { present: { marker: /door: 'key-setup'/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
   // ── the rest of the net: each sentence a door owed by a later pick of THIS lane (named, never silent) ──
   // ── pick 2: the settings and integration doors (the sentence keeps its state; the path became the door) ──
   { id: 'browser-cap', need: 'the machine\'s browser count against its limit — «Change the limit…» on the line (browser-live-8)',
@@ -210,7 +212,7 @@ const NEEDS = Object.freeze([
   { id: 'reload', need: 'a setting that takes effect at the next load, changed in this page — «Reload now» on its row (settings-13)',
     match: /^Takes effect after a reload$/, door: { present: { marker: /doors: \[reloadDoor\(\)\]/, surfaces: ['src/lib/settings-ui.js'] } } },
   { id: 'https-address', need: 'a sign-in that needs this instance\'s https address — «Turn on HTTPS…» beside the why (plugins-integrations-13)',
-    match: /^Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key$/, door: { present: { marker: /'self-hosted': \(app\) => settingsDoor\(app, 'server\.https'/, surfaces: ['src/lib/oauth-connect-row.js'] }, via: { 'src/integration-registry.js': 'src/lib/oauth-connect-row.js' } } },
+    match: /^Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key$/, door: { present: { marker: /'self-hosted': \(app\) => \(\{[\s\S]{0,400}door: settingsDoor\(app, 'server\.https'/, surfaces: ['src/lib/oauth-connect-row.js'] }, via: { 'src/integration-registry.js': 'src/lib/oauth-connect-row.js' } } },
   { id: 'browser-list-needs', need: 'the browser list\'s needs said ONCE under it — a cloud browser\'s key «Open Integrations…», the desktop window\'s consent «Turn on…» (browser-profiles-4)',
     match: /^A cloud browser needs your key from its vendor before its first start\.$|^Agents may not use windows on your desktop yet\.$/, door: { present: { marker: /integrationDoor\(app, n\.integration[\s\S]{0,160}settingsDoor\(app, n\.setting/, surfaces: ['src/lib/browser-new-profile.js'] }, via: { 'src/lib/browser-new-profile-model.js': 'src/lib/browser-new-profile.js' } } },
   { id: 'voice-teach-off', need: 'suggesting words is off — «Turn on…» opens the plugin\'s own settings section (the voice sheet, beside plugins-integrations-13)',
@@ -233,7 +235,13 @@ const NET = Object.freeze({
   path: /\b(Settings|⚙)\s*(→|›|▸)|(→|›|▸)\s*(Integrations|Plugins|Settings|Channels)\b|\bin Settings\b|\bthe ⋯ menu\b|⋯ menu\)|Services › Integrations/,
   direction: /\b(click|press|tap|pick|choose|use|paste|type|fill|enter|select|tick|open|sign in|add one|connect)\b[^.;—]{0,60}\b(below|above)\b|[“"«][^”"»]{2,40}[”"»]\s*(button\s+)?(below|above)\b|\b(button|switch|box|field|link|row|code|token|folder|address) (below|above)\b/i,
   company: /\byour company\b|\bcompany uses\b|\b(ask|contact) your admin(istrator)?\b|\bask your administrator\b/i,
+  // reader follow-up #5 — THE NEED WORDS: a sentence that says something failed / is needed / is off / is not set / is missing
+  // (or asks to turn it on) — the walk's own pattern, which the three nets above could not see. A catch is a ROW, a NOT_NEED with
+  // its reason, or an entry of the frozen NEED_DEBT (scripts/fixtures/need-debt.json) — never silent
+  need: /\b(failed|fails)\b|\bneeds?\b|\bneeded\b|\brequired\b|\b(is|are) (turned |switched )?off\b|\bnot (set|configured)\b|\bmissing\b|\bturn (it|them|this) on\b/i,
 });
+// THE NEED DEBT (reader follow-up #5) — every sentence this net caught when it landed that no row claims — is the suite's frozen
+// list, scripts/fixtures/need-debt.json (out of src: its sentences would read as surfaces to the tree's other censuses)
 const LISTED = new RegExp(NEEDS.map((r) => r.match.source).join('|'));
 const inNet = (s) => { const x = String(s); return NET.path.test(x) || NET.direction.test(x) || NET.company.test(x) || LISTED.test(x); };
 module.exports = { NEEDS, NOT_NEEDS, NET, DEFERRED, needOf, notNeedOf, inNet };

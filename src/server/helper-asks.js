@@ -70,6 +70,10 @@ function fileItem(session, ask) {
   if (!userTodos || !key) return false;
   try {
     const it = H.inboxItemFor(ask, { label: ask.label || '', sessionId: idOf(session) });
+    // lane ui-needs-a-button (reader follow-up #1): an item the PERSON hid for this request («Stop reminding (the conversation stays
+    // paused)») IS its filing — a re-file would reopen it (the store reopens a closed copy), and a restart forgets `e.filed`
+    const mine = (x) => x && x.action && it.action && x.action.type === it.action.type && String(x.action.requestId) === String(it.action.requestId);
+    if (typeof userTodos.hiddenFor === 'function' && (userTodos.hiddenFor(key) || []).some(mine)) return true;
     userTodos.add(key, { ...it, origin: 'agent', by: 'agent', kind: 'action', urgency: 'high', sessionName: session.name || session.webuiName || null });
     log?.log?.(`[helper-ask] ${idOf(session)}: ${ask.label || 'a helper'} waits for approval (${ask.toolName}) — filed in For you`);
     return true;

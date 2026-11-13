@@ -1814,21 +1814,28 @@ export function absUrl(pathOrUrl) {
   return (_instanceUrl || location.origin.replace(/\/+$/, '')) + s;
 }
 
+/** Copy `text` → a promise of true (it is on the clipboard) / false (the clipboard refused — the API and the fallback alike).
+ *  lane ui-needs-a-button (reader follow-up #0): the answer is TOLD — a caller may show the text to select by hand on false;
+ *  a caller that ignores the answer keeps working. */
 export function copyText(text) {
   if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text).catch(() => _fallbackCopy(text));
+    return navigator.clipboard.writeText(text).then(() => true, () => _fallbackCopy(text));
   }
-  _fallbackCopy(text);
-  return Promise.resolve();
+  return Promise.resolve(_fallbackCopy(text));
 }
+/** The textarea + execCommand fallback (a plain-http page has no clipboard API) → whether the browser says it copied. */
 function _fallbackCopy(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.cssText = 'position:fixed;left:-9999px';
-  document.body.appendChild(ta);
-  ta.select();
-  document.execCommand('copy');
-  ta.remove();
+  let copied = false;
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { copied = document.execCommand('copy') === true; } catch { copied = false; }
+    ta.remove();
+  } catch { copied = false; }
+  return copied;
 }
 
 // ── StateSync: unified versioned state sync with diff broadcast ──

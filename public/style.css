@@ -4642,8 +4642,12 @@ label.cfg-row {
 .desktop-launch-desk-state > .need-line { display: inline-flex; margin-left: 8px; font-weight: 400; vertical-align: middle; }
 .desktop-launch-desk-state > .need-line > .need-words { flex: 0 1 auto; }
 /* ui-needs-a-button: move mode says what it is and how it ends */
-.move-mode-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100000; pointer-events: none; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-dialog); color: var(--text); border: 1px solid var(--accent); font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
+.move-mode-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100000; pointer-events: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; max-width: calc(100vw - 24px); padding: 6px 12px; border-radius: var(--radius); background: var(--bg-dialog); color: var(--text); border: 1px solid var(--accent); font-size: 13px; box-shadow: var(--shadow-window); }
+.move-mode-hint > .move-mode-cancel { pointer-events: auto; } /* reader #12: the mode's Cancel — every input can press it (a touch tablet has no Esc) */
 .mounts-errline-details { margin: 2px 0 0; font-size: 11px; color: var(--text-dim); }
+/* reader #0: a clipboard that refused — the key itself, in a field to select, under the words that point at it */
+label.mounts-key-shown { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; font-size: 12px; }
+label.mounts-key-shown > .mounts-key-field { width: 100%; box-sizing: border-box; font-size: 11px; font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); resize: vertical; }
 .mounts-errline-details > summary { cursor: pointer; }
 .mounts-errline-details > pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0 0; }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
@@ -5578,6 +5582,10 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body:has(> .ut-go) > :is(.ut-text, .ut-meta) { margin-right: 60px; }
+  /* reader #10: a parked ask's door says «Open the conversation and answer» — its words wrap inside the door, never cut */
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go.ut-go-answer { max-width: 96px; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go.ut-go-answer::after { white-space: normal; text-align: center; overflow-wrap: anywhere; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body:has(> .ut-go-answer) > :is(.ut-text, .ut-meta) { margin-right: 104px; }
   :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body:has(> .ut-go) > .ut-deadline { margin-right: 60px; } /* r8 (the acceptance's 390 shots): a folded row's deadline line keeps clear of the Chat door too — «它下次运行» lost «次运行» under it */
   /* THE OPEN ROW (acceptance round 2): the door keeps the QUESTION LINE as its row — the question | the door, centred on the
      question's first line — and everything else runs full width BELOW the door's bottom edge (the detail box never under it) */
@@ -5797,6 +5805,9 @@ button.plugin-chip:hover { background: color-mix(in srgb, var(--text-secondary) 
 /* a chip that is a VERB (lane dropline-connect-door: the Voice row's 「Connect with Fish Audio」 door) */
 .plugin-chip-primary { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 14%, transparent); }
 button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+/* lane ui-needs-a-button (reader #6, usage-16): a PRIMARY chip is a DOOR («Add the API key…», «Connect with Fish Audio») — its words are
+   never cut in the narrow rail: they wrap inside the door (a button's corners, not a status pill's) */
+button.plugin-chip-primary { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; text-align: start; border-radius: var(--radius-sm); }
 .plugin-sw { position: relative; display: inline-flex; flex-shrink: 0; width: 36px; height: 24px; align-items: center; cursor: pointer; }
 .plugin-sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .plugin-sw-track { width: 30px; height: 16px; margin: 0 auto; border-radius: 999px; background: color-mix(in srgb, var(--text-secondary) 35%, transparent); position: relative; transition: background .15s; pointer-events: none; }

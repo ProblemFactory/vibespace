@@ -4040,15 +4040,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // (server-side CDP; the endpoint never leaves); nothing else changes. RECORDED: on the takeover's cycle while this viewer drives
     // (said to the agent at the handback) and in the journal by name; an exec that fails takes its record back
     if (act === 'stop') {
-      const vs = TBS.userTabVerdict({ act, owner, human: false, driving, mediated: false, counts });
-      if (!vs.ok) refuse(vs, `${owner}, a stop`);
-      const row0 = tabRowOf(rows, id);
-      const rec = driving ? noteUserTabAct(bk, profileId, { kind: 'tab-stop', title: row0 && row0.title, url: row0 && row0.url }) : null;
-      const VP = require('./browser-viewport.js');
-      const rs = await withCdpUrl(target, (url) => VP.stopLoadingOf(url, id));
-      if (!rs || !rs.ok) { unnoteUserTabAct(bk, profileId, rec, (rs && rs.error) || 'no answer'); throw namedError('stop_failed', TBS.tabRefusalText('stop_failed')); }
-      log.log?.(`[browser] ${eph ? `${bk} (its own browser)` : `${bk} on ${p.id}`}: viewer ${viewerId}'s stop on ${id.slice(0, 8)} (${owner}'s tab) — the page stopped loading, nothing else changed${rec ? ' (said to the agent at the handback)' : ''}`);
-      return { ok: true, act, targetId: id, stopped: true };
+      return personStop({ id, owner, driving, counts, row: tabRowOf(rows, id), target, withCdpUrl, refuse,
+        note: (told) => noteUserTabAct(bk, profileId, told), unnote: (rec, why) => unnoteUserTabAct(bk, profileId, rec, why),
+        said: (rec) => log.log?.(`[browser] ${eph ? `${bk} (its own browser)` : `${bk} on ${p.id}`}: viewer ${viewerId}'s stop on ${id.slice(0, 8)} (${owner}'s tab) — the page stopped loading, nothing else changed${rec ? ' (said to the agent at the handback)' : ''}`) });
     }
     const row = tabRowOf(rows, id);
     const active = (rows.find((x) => x.active) || {}).targetId || null;
@@ -8371,4 +8365,18 @@ function browserIdentityOfRecord(rec, url = '') {
   return uuid || proc ? `${uuid}|${proc}` : null;
 }
 
-module.exports = { create, keeper, browserIdentityOfRecord, SWEEP_PIECE_MS, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };
+/** lane ui-needs-a-button (主开发 Q2 — the loop banner's «Stop loading»; reader follow-up #4: its own function, so a suite drives it with
+ *  a fake CDP): THE PERSON'S STOP — judged (browser-tabs userTabVerdict over the facts the keeper re-read), RECORDED on the takeover's
+ *  cycle while this viewer drives (`note` — said to the agent at the handback), sent (Page.stopLoading over the keeper's own CDP:
+ *  `withCdpUrl`; the endpoint never leaves), and its record taken back when the page did not stop (`unnote`) → {ok, act, targetId,
+ *  stopped} | throws the verdict's refusal (`refuse`) / stop_failed. */
+async function personStop({ id, owner, driving, counts, row = null, target, withCdpUrl, refuse, note = () => null, unnote = () => {}, said = () => {}, VP = require('./browser-viewport.js') }) {
+  const vs = TBS.userTabVerdict({ act: 'stop', owner, human: false, driving, mediated: false, counts });
+  if (!vs.ok) refuse(vs, `${owner}, a stop`);
+  const rec = driving ? note({ kind: 'tab-stop', title: row && row.title, url: row && row.url }) : null;
+  const rs = await withCdpUrl(target, (url) => VP.stopLoadingOf(url, id));
+  if (!rs || !rs.ok) { unnote(rec, (rs && rs.error) || 'no answer'); throw namedError('stop_failed', TBS.tabRefusalText('stop_failed')); }
+  said(rec);
+  return { ok: true, act: 'stop', targetId: id, stopped: true };
+}
+module.exports = { create, keeper, browserIdentityOfRecord, SWEEP_PIECE_MS, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE, personStop };

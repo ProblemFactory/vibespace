@@ -167,7 +167,7 @@ import { restartRefusalWords } from './browser-build-model.js'; // B-53df: the R
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords, personPromptLines } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
 import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces: a browser kernel's prompt in words — its answers are the buttons (PURE)
-import { createLoopBanner } from './browser-loop-banner.js';
+import { createLoopBanner, loopTabRowOf, loopDoorsShown } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
@@ -589,7 +589,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
   // lane ui-needs-a-button (browser-live-1): the banner's ways out are DOORS — a stop of the looping tab (the person's tab act, any
   // conversation's view) and a close (only where a close is the person's: while driving, or the person's own window)
-  const loopTabRow = () => (st.tabRow && st.tabRow.rows || []).find((x) => x.active) || null;
+  // reader follow-up #2: the LOOPING tab's row (the fact names it — never the active tab: the agent may have moved on)
+  const loopTabRow = () => loopTabRowOf(st.tabRow && st.tabRow.rows, st.fact && st.fact.stuck && st.fact.stuck.state === 'loop' ? st.fact.stuck.loop : null);
   const loopBanner = createLoopBanner(document, { stop: () => { const r = loopTabRow(); if (r) tabAct('stop', r); }, close: () => { const r = loopTabRow(); if (r) tabAct('close', r); } });
   const loopBar = loopBanner.el;
   // lane site-reset step 3: ONE line when the user's Approve cleared a site's stored login in THIS profile (every holder's
@@ -1144,7 +1145,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   // ── lane browser-stuck: the dialog card + the unresponsive banner ──
   /** lane site-reset: the loop banner — the same elements, their words rewritten only where they changed. */
-  const renderLoop = (loop) => loopBanner.render(loop, t, { stop: !H && !!loopTabRow(), close: !!loopTabRow() && (!!H || (st.mode === 'takeover' && st.mine)) });
+  const renderLoop = (loop) => loopBanner.render(loop, t, loopDoorsShown({ row: loopTabRow(), human: !!H, driving: st.mode === 'takeover' && st.mine }));
   const renderDialog = () => {
     renderDeskDoor(); // lane desktop-x-seat-browser: the raw fallback's door follows the same fact
     const d = st.dialog;

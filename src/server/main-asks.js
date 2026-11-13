@@ -67,12 +67,21 @@ const openItemsOf = (key) => {
   try { return (userTodos.forSession(key) || []).filter((it) => it && it.action && it.action.type === M.MAIN_ASK_ACTION); } catch { return []; }
 };
 
+const hiddenItemsOf = (key) => {
+  const { userTodos } = deps || {};
+  if (!userTodos || !key || typeof userTodos.hiddenFor !== 'function') return [];
+  try { return (userTodos.hiddenFor(key) || []).filter((it) => it && it.action && it.action.type === M.MAIN_ASK_ACTION); } catch { return []; }
+};
+
 function fileItem(session, ask) {
   const { userTodos, log } = deps || {};
   const key = keyOf(session);
   if (!userTodos || !key) return false;
   // KEYED BY THE ASK: an open item for this request IS the filing (a restart's rebuilt card re-arms the same key)
   if (openItemsOf(key).some((it) => String(it.action.requestId) === ask.requestId)) return true;
+  // lane ui-needs-a-button (reader follow-up #1): …and so is an item the PERSON hid for this request («Stop reminding (the conversation
+  // stays paused)») — a re-file would reopen it (the store reopens a closed copy), and a restart forgets `e.filed`
+  if (hiddenItemsOf(key).some((it) => String(it.action.requestId) === ask.requestId)) return true;
   try {
     const it = M.inboxItemFor(ask, { name: nameOf(session), sessionId: idOf(session) });
     userTodos.add(key, { ...it, origin: 'agent', by: 'agent', kind: 'action', urgency: 'high', sessionName: nameOf(session) || null });

@@ -660,7 +660,10 @@ function partsOf(entry, ctx) {
   // lane foryou-honest (the phone's ONE row shape): a touch screen folds a row to its question + meta line — the whole row
   // opens it in place — and THIS trailing door keeps the conversation one tap away (a mouse never sees it: style.css); a row
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
-  const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
+  // lane ui-needs-a-button (reader follow-up #10): a PARKED ASK's door is this one — it is answered on the conversation's card, and the
+  // door says so on the tray and the phone sheet as it does in the For-you window
+  const parkedGo = isParkedAsk(i) ? t('Open the conversation and answer') : '';
+  const go = notice || entry.band ? `<button type="button" class="ut-go${parkedGo ? ' ut-go-answer' : ''}" title="${escHtml(parkedGo || t('Go to this session'))}" aria-label="${escHtml(parkedGo || t('Go to this session'))}" data-label="${escHtml(parkedGo || tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
   const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)

@@ -8,6 +8,18 @@ import { loopWords } from '../browser-stuck.js';
 /** `doc` = the document (a suite hands a minimal one); `acts` = { stop(), close() } — the banner's own DOORS (lane ui-needs-a-button:
  *  the ways out it names are buttons on its line, not words). → `{el, render(loop, t, show)}`; `render(null)` hides it;
  *  `show` = { stop, close } — which doors this view may press (a stop on a conversation's view; a close while driving / the person's own window). */
+/** lane ui-needs-a-button (reader follow-up #2): THE ROW the banner's doors act on — the LOOPING tab, named by the loop fact's
+ *  `targetId` (src/server/browser-dialogs.js loopIn → browser-stuck loopBlock), never the active tab (the agent may have moved on
+ *  to another tab of the profile); null when the fact names none or that tab is not listed — then no door is drawn. */
+export function loopTabRowOf(rows, loop) {
+  const id = loop && typeof loop.targetId === 'string' ? loop.targetId.toUpperCase() : '';
+  return id ? (Array.isArray(rows) ? rows : []).find((x) => x && String(x.targetId || '').toUpperCase() === id) || null : null;
+}
+/** Which of the banner's doors this view may press: a stop on a conversation's view (never the person's own browsing window — its
+ *  page is the person's to stop), a close while this viewer drives or in the person's own window; neither without the looping row. */
+export function loopDoorsShown({ row = null, human = false, driving = false } = {}) {
+  return { stop: !human && !!row, close: !!row && (!!human || !!driving) };
+}
 export function createLoopBanner(doc = (typeof document !== 'undefined' ? document : null), acts = {}) {
   const mk = (tag, cls) => { const n = doc.createElement(tag); n.className = cls; return n; };
   const el = mk('div', 'browser-live-dialog stuck browser-live-loop');

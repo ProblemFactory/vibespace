@@ -13754,7 +13754,6 @@ export default {
   "Can’t reach {target}: its host key changed.": "连不上 {target}：它的主机密钥变了。",
   "Can’t reach {target}.": "连不上 {target}。",
   "Copy the public key to add": "复制要添加的公钥",
-  "No key of this machine to show": "这台机器没有可显示的公钥",
   "Copied — add it to ~/.ssh/authorized_keys of {target}": "已复制——把它加到 {target} 的 ~/.ssh/authorized_keys",
   // lane ui-needs-a-button (pick 2): the settings and integration doors
   "Suggesting words is off.": "词语建议已关闭。",
@@ -13781,4 +13780,15 @@ export default {
   "Runs at the vendor, with your key.": "在服务商那里运行，用你的密钥。",
   "A cloud browser needs your key from its vendor before its first start.": "云端浏览器首次启动前需要服务商的密钥。",
   "Agents may not use windows on your desktop yet.": "agent 还不能使用你桌面上的窗口。",
+  // lane ui-needs-a-button (reader follow-up)
+  "No public key to show — VibeSpace cannot read this machine’s key: there is no .pub file, or a passphrase guards it.": "没有可显示的公钥——VibeSpace 读不到这台机器的密钥：没有 .pub 文件，或密钥设了密码。",
+  "This machine dials in — it signs in with no ssh key.": "这台机器是主动连入的——它不用 ssh 密钥登录。",
+  "The key is shown only to you, on this VibeSpace page — this request was refused.": "公钥只在这个 VibeSpace 页面上显示给你本人——这次请求被拒绝了。",
+  "Could not reach VibeSpace to read the key — press it again.": "连不上 VibeSpace，读不到公钥——请再按一次。",
+  "Could not copy — select the key in this field and copy it:": "没能复制——请在这个框里选中公钥并复制：",
+  "Add it again with a key…": "用密钥重新添加…",
+  "The .deb file is not there any more.": "这个 .deb 文件已经不在了。",
+  "The .deb file cannot be read.": "这个 .deb 文件读不了。",
+  "This instance already asks Tailscale for a certificate — turn on HTTPS Certificates for your tailnet in the Tailscale admin console.": "这个实例已经在向 Tailscale 申请证书——请在 Tailscale 管理后台为你的 tailnet 开启 HTTPS 证书。",
+  "Use my own certificate files…": "使用我自己的证书文件…",
 };

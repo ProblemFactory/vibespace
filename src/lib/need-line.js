@@ -6,7 +6,6 @@
 // ONE row shape on screen:
 //   needLine({ words, doors, tone })  → <div class="need-line" data-tone>  <span class="need-words">…</span>
 //                                                                         <span class="need-doors"><button…>…</span></div>
-//   needLineHtml({ words, doors, tone }) + bindNeedDoors(root, acts) — the same row for a surface built as an HTML string
 //   A door = { label, run, kind: 'primary' | 'secondary' | 'danger', title?, door? } (the house button, .mounts-btn); the first is
 //   the act the sentence asks for. The doors wrap under the words on a narrow screen; the words are never cut.
 // THE DOOR MAKERS — each over the opener the tree already has, never a copy:
@@ -18,7 +17,6 @@
 // THE CENSUS (scripts/test-needs-doors.mjs over src/ui-needs.js): a need sentence the net catches is a row; a row whose door is
 // present is drawn through this file on every surface that states it.
 import { t } from './i18n.js';
-import { escHtml } from './utils.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 
 export const NEED_TONES = Object.freeze(['need', 'fail', 'off', 'info']);
@@ -53,26 +51,6 @@ export function needLine({ words = '', doors = [], tone = 'need', cls = '' } = {
     line.appendChild(ds);
   }
   return line;
-}
-
-/** The same row as an HTML string (escaped): each door is `{ act, label, kind }`; `bindNeedDoors(root, { [act]: fn })` wires
- *  them once on the root (one delegated listener — a row re-drawn under it keeps working). */
-export function needLineHtml({ words = '', doors = [], tone = 'need', cls = '' } = {}) {
-  const ds = (Array.isArray(doors) ? doors : []).filter((d) => d && d.act && d.label)
-    .map((d) => `<button type="button" class="mounts-btn need-door${KINDS[d.kind] ?? ''}" data-need-act="${escHtml(String(d.act))}"${d.title ? ` title="${escHtml(String(d.title))}"` : ''}>${escHtml(String(d.label))}</button>`).join('');
-  return `<div class="need-line${cls ? ' ' + escHtml(cls) : ''}" data-tone="${NEED_TONES.includes(tone) ? tone : 'need'}"><span class="need-words">${escHtml(String(words || ''))}</span>${ds ? `<span class="need-doors">${ds}</span>` : ''}</div>`;
-}
-export function bindNeedDoors(root, acts = {}) {
-  if (!root || root._needDoorsBound) { if (root) root._needActs = acts; return; }
-  root._needDoorsBound = true; root._needActs = acts;
-  root.addEventListener('click', (ev) => {
-    const b = ev.target && ev.target.closest ? ev.target.closest('[data-need-act]') : null;
-    if (!b || !root.contains(b)) return;
-    const fn = root._needActs && root._needActs[b.dataset.needAct];
-    if (typeof fn !== 'function') return;
-    ev.preventDefault(); ev.stopPropagation();
-    try { fn(ev); } catch (e) { console.warn('[need-line] door', e); }
-  });
 }
 
 /** A door to ONE setting: Settings opened and searched for the row's own words (its label) — never a menu path in a sentence. */

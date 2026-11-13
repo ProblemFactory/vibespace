@@ -18,7 +18,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *  Returns what was drawn: 'connected' | 'key' | 'vault-locked' | 'connect'. */
 // lane ui-needs-a-button (plugins-integrations-13): a server-picked why that a person here can cure carries ITS door on the line
 // (`self-hosted` = this instance has no https address and its owner is the person: the https row); the others have none
-const WHY_DOORS = Object.freeze({ 'self-hosted': (app) => settingsDoor(app, 'server.https', { label: t('Turn on HTTPS…'), kind: 'secondary' }) });
+// reader follow-up #14: on the DEFAULT 'auto' the https row has nothing to turn on — what is missing is on Tailscale's side (the
+// tailnet's HTTPS certificates); the line says so, and the door stays the row's (for «My own certificate files»)
+const httpsAuto = (app) => { try { return !!(app && app.settings && app.settings.get('server.https') === 'auto'); } catch { return false; } };
+const WHY_DOORS = Object.freeze({ 'self-hosted': (app) => ({ also: httpsAuto(app) ? t('This instance already asks Tailscale for a certificate — turn on HTTPS Certificates for your tailnet in the Tailscale admin console.') : '',
+  door: settingsDoor(app, 'server.https', { label: httpsAuto(app) ? t('Use my own certificate files…') : t('Turn on HTTPS…'), kind: 'secondary' }) }) });
 export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
@@ -55,7 +59,8 @@ export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
     words.textContent = why();
     const k = st && whys[st.connectWhy] ? st.connectWhy : Object.keys(whys)[0];
     const d = WHY_DOORS[k] ? WHY_DOORS[k](app) : null;
-    if (d) words.append(' ', needDoorButton(d));
+    if (d && d.also) words.append(' ', d.also);
+    if (d && d.door) words.append(' ', needDoorButton(d.door));
   };
   if (!(st && st.connectVia)) { words.classList.add('plugin-cfg-warn'); sayWhy(); }
   go.onclick = async () => {

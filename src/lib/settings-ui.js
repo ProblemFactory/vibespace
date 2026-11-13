@@ -17,7 +17,6 @@ import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dicti
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
 import { holdWords } from './user-todos-row.js';   // lane setting-doors pick 2: a held row's words («1600 until 22:00, then 800») — ONE spelling with the For-you card's held line
 import { renderAutoResumeBulk } from './bulk-resume.js'; // lane auto-resume-bulk: the auto-resume row's two bulk acts + the passive cost line
-const LOADED_VALUES = new Map(); // path → the value (JSON) this page was drawn with — a non-live row's change shows «Reload now»
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
@@ -447,6 +446,22 @@ class SettingsUI {
     if (after && before !== null) content.scrollTop += after.getBoundingClientRect().top - top() - before;
   }
 
+  /** lane ui-needs-a-button (settings-13; reader follow-up #13): the «reload» badge is a fact about the row; once ITS value differs
+   *  from the value this PAGE loaded with (the settings store's first load — src/lib/settings.js loadedValue) the row's line says so
+   *  with «Reload now». Re-judged on the store's change event (this page's control, another client's broadcast, a quick menu) — the
+   *  listener leaves once its row is gone. null for a row that applies live. */
+  _reloadLine(path, schema) {
+    if (schema.liveApply) return null;
+    const json = (v) => { try { return JSON.stringify(v ?? null); } catch { return ''; } };
+    const loaded = () => json(typeof this.settings.loadedValue === 'function' ? this.settings.loadedValue(path) : this.settings.get(path));
+    const reloadLine = needLine({ words: t('Takes effect after a reload'), tone: 'info', cls: 'settings-reload-need', doors: [reloadDoor()] });
+    const sync = () => { reloadLine.style.display = json(this.settings.get(path)) !== loaded() ? '' : 'none'; };
+    const onSet = () => { if (!reloadLine.isConnected) { this.settings.off(path, onSet); return; } sync(); };
+    sync();
+    this.settings.on(path, onSet);
+    return reloadLine;
+  }
+
   _renderSetting(path, schema, chips = null) {
     const row = document.createElement('div');
     row.className = 'settings-row';
@@ -522,17 +537,8 @@ class SettingsUI {
       controlWrap.appendChild(resetBtn);
     }
 
-    // lane ui-needs-a-button (settings-13): the «reload» badge is a fact about the row; once ITS value moved in this page (against
-    // the value this page was drawn with — LOADED_VALUES, kept for the page's life) the row's line says so with «Reload now»
-    if (!schema.liveApply) {
-      const now = () => { try { return JSON.stringify(this.settings.get(path) ?? null); } catch { return ''; } };
-      if (!LOADED_VALUES.has(path)) LOADED_VALUES.set(path, now());
-      const reloadLine = needLine({ words: t('Takes effect after a reload'), tone: 'info', cls: 'settings-reload-need', doors: [reloadDoor()] });
-      const sync = () => { reloadLine.style.display = now() !== LOADED_VALUES.get(path) ? '' : 'none'; };
-      sync();
-      info.append(reloadLine);
-      for (const ev of ['change', 'click']) controlWrap.addEventListener(ev, () => setTimeout(sync, 0));
-    }
+    const reloadLine = this._reloadLine(path, schema);
+    if (reloadLine) info.append(reloadLine);
     row.append(info, controlWrap);
     return row;
   }

@@ -13753,7 +13753,6 @@ export default {
   "Can’t reach {target}: its host key changed.": "{target} に接続できません：ホスト鍵が変わりました。",
   "Can’t reach {target}.": "{target} に接続できません。",
   "Copy the public key to add": "追加する公開鍵をコピー",
-  "No key of this machine to show": "このマシンに表示できる鍵がありません",
   "Copied — add it to ~/.ssh/authorized_keys of {target}": "コピーしました — {target} の ~/.ssh/authorized_keys に追加してください",
   // lane ui-needs-a-button (pick 2): the settings and integration doors
   "Suggesting words is off.": "単語の提案はオフです。",
@@ -13780,4 +13779,15 @@ export default {
   "Runs at the vendor, with your key.": "サービス提供元で、あなたのキーを使って動きます。",
   "A cloud browser needs your key from its vendor before its first start.": "クラウドのブラウザは初回起動の前にサービス提供元のキーが必要です。",
   "Agents may not use windows on your desktop yet.": "エージェントはまだデスクトップのウィンドウを使えません。",
+  // lane ui-needs-a-button (reader follow-up)
+  "No public key to show — VibeSpace cannot read this machine’s key: there is no .pub file, or a passphrase guards it.": "表示できる公開鍵がありません——VibeSpace はこのマシンの鍵を読めません：.pub ファイルがないか、パスフレーズで保護されています。",
+  "This machine dials in — it signs in with no ssh key.": "このマシンは接続してくる側です——ssh 鍵ではサインインしません。",
+  "The key is shown only to you, on this VibeSpace page — this request was refused.": "公開鍵はこの VibeSpace のページであなたにだけ表示されます——このリクエストは拒否されました。",
+  "Could not reach VibeSpace to read the key — press it again.": "VibeSpace に接続できず、鍵を読めませんでした——もう一度押してください。",
+  "Could not copy — select the key in this field and copy it:": "コピーできませんでした——この欄の鍵を選択してコピーしてください：",
+  "Add it again with a key…": "鍵を使って追加し直す…",
+  "The .deb file is not there any more.": "この .deb ファイルはもうありません。",
+  "The .deb file cannot be read.": "この .deb ファイルを読み込めません。",
+  "This instance already asks Tailscale for a certificate — turn on HTTPS Certificates for your tailnet in the Tailscale admin console.": "このインスタンスはすでに Tailscale に証明書を求めています——Tailscale の管理コンソールで tailnet の HTTPS 証明書をオンにしてください。",
+  "Use my own certificate files…": "自分の証明書ファイルを使う…",
 };

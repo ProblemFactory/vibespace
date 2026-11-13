@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl, fetchJson } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, tc, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
@@ -181,6 +181,25 @@ function vaultMaskedNote(form, keys, reopen) {
   form.insertBefore(note, form.querySelector('.mounts-note'));
 }
 
+/** lane ui-needs-a-button (machines-1): an ssh machine's error text → its cause in the reader's words; `refused` = it refused the key
+ *  (the row's door is then the public key to add). */
+export function hostErrorWords(raw, target) {
+  const refused = /Permission denied|publickey|Authentication failed|too many authentication/i.test(raw);
+  const words = refused ? tr('Can’t sign in to {target}: it refused the key.', { target })
+    : /Connection refused/i.test(raw) ? tr('Can’t reach {target}: the connection was refused.', { target })
+      : /timed out|timeout/i.test(raw) ? tr('Can’t reach {target}: no answer.', { target })
+        : /Could not resolve|Name or service not known|nodename nor servname/i.test(raw) ? tr('Can’t reach {target}: its name was not found.', { target })
+          : /HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(raw) ? tr('Can’t reach {target}: its host key changed.', { target })
+            : tr('Can’t reach {target}.', { target });
+  return { refused, words };
+}
+/** reader follow-up #8: why the public key cannot be shown, by the route's code (src/server/exit-routes.js + hosts.js publicKeyOf). */
+export function publicKeyWhy(code) {
+  if (code === 'no_key') return tr('No public key to show — VibeSpace cannot read this machine’s key: there is no .pub file, or a passphrase guards it.');
+  if (code === 'not_ssh') return tr('This machine dials in — it signs in with no ssh key.');
+  if (code === 'human_only' || code === 'cross_site') return tr('The key is shown only to you, on this VibeSpace page — this request was refused.');
+  return tr('Could not reach VibeSpace to read the key — press it again.');
+}
 export function installSidebarMounts(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
@@ -1178,21 +1197,11 @@ export function installSidebarMounts(Sidebar) {
         // (a READ: GET /api/hosts/:id/public-key, never a new key) and a retry; the system's own text in a fold
         const raw = String(st.error || 'unreachable');
         const target = `${h.user ? h.user + '@' : ''}${h.host || h.name || ''}`;
-        const refused = /Permission denied|publickey|Authentication failed|too many authentication/i.test(raw);
-        const words = refused ? tr('Can’t sign in to {target}: it refused the key.', { target })
-          : /Connection refused/i.test(raw) ? tr('Can’t reach {target}: the connection was refused.', { target })
-            : /timed out|timeout/i.test(raw) ? tr('Can’t reach {target}: no answer.', { target })
-              : /Could not resolve|Name or service not known|nodename nor servname/i.test(raw) ? tr('Can’t reach {target}: its name was not found.', { target })
-                : /HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(raw) ? tr('Can’t reach {target}: its host key changed.', { target })
-                  : tr('Can’t reach {target}.', { target });
+        const { refused, words } = hostErrorWords(raw, target);
         const doors = [];
-        if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: async () => {
-          const r = await api(`/api/hosts/${h.id}/public-key`).catch(() => null);
-          const k = r && r.ok && r.keys && r.keys[0] && r.keys[0].publicKey;
-          if (!k) { showToast(tr('No key of this machine to show'), { type: 'error' }); return; }
-          const okc = await copyText(k);
-          showToast(okc === false ? tr('Could not copy — select the commands and copy them') : tr('Copied — add it to ~/.ssh/authorized_keys of {target}', { target }), okc === false ? { type: 'error' } : { duration: 6000 });
-        } });
+        // reader follow-up #0 / #8: the door's answer lands on THIS row — the key copied, or shown in a field to select, or the cause by code
+        const place = (n) => { for (const o of [...row.querySelectorAll('.mounts-key-shown')]) o.remove(); row.insertBefore(n, more); };
+        if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: () => this._publicKeyDoor(h, target, place) });
         doors.push({ label: tr('Try again'), kind: refused ? 'secondary' : 'primary', door: 'retest', run: async () => {
           this._hostStatus = this._hostStatus || {};
           try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch (e) { this._hostStatus[h.id] = { ok: false, error: String((e && e.message) || e) }; }
@@ -1752,6 +1761,34 @@ export function installSidebarMounts(Sidebar) {
       }, { id: 'host-add-dialog' });
     },
 
+
+    /** lane ui-needs-a-button (machines-1; reader follow-up #0 / #8): «Copy the public key to add» — the key READ from the hub (GET
+     *  /api/hosts/:id/public-key) and copied; a clipboard that refused shows the key itself in a read-only field to select (the words
+     *  point at THAT field); a key the hub cannot read says its cause by code, and «no key» offers the key door (Add machine's
+     *  «create a key for VibeSpace» / «paste my own key»). `place(node)` puts the answer on the machine's row. */
+    async _publicKeyDoor(h, target, place) {
+      const r = await fetchJson(`/api/hosts/${encodeURIComponent(h.id)}/public-key`);
+      const k = r && r.ok && Array.isArray(r.keys) && r.keys[0] && r.keys[0].publicKey;
+      if (!k) {
+        const code = (r && r.code) || 'network';
+        const doors = code === 'no_key' && this._hostsData ? [{ label: tr('Add it again with a key…'), kind: 'primary', door: 'key-setup', run: () => this._showAddHostDialog(this._hostsData) }] : [];
+        const line = needLine({ words: publicKeyWhy(code), doors, tone: 'fail', cls: 'mounts-key-shown' });
+        line.dataset.code = code;
+        place(line);
+        return;
+      }
+      if (await copyText(k)) { showToast(tr('Copied — add it to ~/.ssh/authorized_keys of {target}', { target }), { duration: 6000 }); return; }
+      const box = document.createElement('label');
+      box.className = 'mounts-key-shown';
+      box.dataset.code = 'copy_refused';
+      const words = document.createElement('span'); words.className = 'need-words'; words.textContent = tr('Could not copy — select the key in this field and copy it:');
+      const field = document.createElement('textarea');
+      field.readOnly = true; field.rows = 2; field.value = k; field.className = 'mounts-key-field'; field.spellcheck = false;
+      field.onfocus = () => field.select();
+      box.append(words, field);
+      place(box);
+      try { field.focus(); field.select(); } catch { /* not in a page */ }
+    },
 
     // Shared by "Pair a device" and the machine row's pairing sheet: fill a modal body with the per-OS installer
     // command for a mint result. lane-pairing ①: BOTH urls of every command are the address the user CHOSE

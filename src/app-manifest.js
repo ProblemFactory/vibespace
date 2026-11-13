@@ -72,7 +72,7 @@ const K = require('./app-kinds/index.js'); // PURE — an app kind is its own fi
 const { ENTRY_KINDS, HOME_KINDS } = K;
 const BY_KINDS = Object.freeze(['user', 'agent']);
 /** Every refusal a plan may carry, by name (the dialog and the CLI word them). */
-const PLAN_CODES = Object.freeze(['no_facts', 'no_apt', 'bad_name', 'not_found', 'conflict', 'removes', 'needs_snap', 'bad_source', 'disk', 'no_sudo', 'shared', 'nothing']);
+const PLAN_CODES = Object.freeze(['no_facts', 'no_apt', 'bad_name', 'not_found', 'conflict', 'removes', 'needs_snap', 'bad_source', 'disk', 'no_sudo', 'shared', 'nothing', 'file_missing', 'file_unreadable']);   // + a .deb FILE not there / unreadable (lane ui-needs-a-button, src/app-kinds/deb.js)
 /** Free space kept on a file system after an install (design §3.1 "磁盘底线"). */
 const DISK_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
 const MARKER_DIR = '/var/lib/vibespace';

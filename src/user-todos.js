@@ -728,6 +728,13 @@ class UserTodoManager {
     const set = new Set(Array.isArray(keys) ? keys : [keys]);
     return this._state.items.filter((i) => set.has(i.sessionKey) && i.status === 'open');
   }
+  /** lane ui-needs-a-button (reader follow-up #1): the items of `keys` the PERSON hid (a pointer's ✕ — status 'dismissed', resolvedBy
+   *  'hidden'), never a cleared one — a filer that must not reopen its hidden item reads them (a parked ask's «Stop reminding (the
+   *  conversation stays paused)» holds across a hub restart: main-asks / helper-asks skip a request hidden here). */
+  hiddenFor(keys) {
+    const set = new Set(Array.isArray(keys) ? keys : [keys]);
+    return this._state.items.filter((i) => set.has(i.sessionKey) && isHidden(i) && !i.clearedAt);
+  }
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 

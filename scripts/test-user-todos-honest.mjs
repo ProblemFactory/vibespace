@@ -303,7 +303,8 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
       && /for \(const o of surface\.querySelectorAll\('\.ut-item\.ut-open'\)\) if \(o !== item\) toggleOpen\(o\);/.test(P)
       && /if \(item\) rowClick\(e, item, \{ expand: isTouchDevice\(\) \}\);/.test(P)
       && /if \(e\.target\.closest\('\.ut-go'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P),
-    row: /const go = notice \|\| entry\.band \? `<button type="button" class="ut-go" title="\$\{escHtml\(t\('Go to this session'\)\)\}" aria-label="\$\{escHtml\(t\('Go to this session'\)\)\}" data-label="\$\{escHtml\(tc\('inbox', 'Chat'\)\)\}">\$\{UI_ICONS\.chat\}<\/button>`/.test(ROWS)
+    // lane ui-needs-a-button (reader #10): a parked ask's door says «Open the conversation and answer» — the same door, its own words
+    row: /const go = notice \|\| entry\.band \? `<button type="button" class="ut-go\$\{parkedGo \? ' ut-go-answer' : ''\}" title="\$\{escHtml\(parkedGo \|\| t\('Go to this session'\)\)\}" aria-label="\$\{escHtml\(parkedGo \|\| t\('Go to this session'\)\)\}" data-label="\$\{escHtml\(parkedGo \|\| tc\('inbox', 'Chat'\)\)\}">\$\{UI_ICONS\.chat\}<\/button>`/.test(ROWS)
       && /if \(wasOpen && !entry\.resolved\) el\.classList\.add\('ut-open'\);/.test(ROWS),
   };
   ok(acc.css && acc.js && acc.row, 'ONE ROW SHAPE on a phone: the sheet\'s and the page\'s rows FOLD on a touch screen (the question in ONE line + one meta line, nothing tappable inside but the trailing «Chat» door — an SVG, 44 px), the whole row opens it, ONE open at a time, a repaint keeps it open and an answer folds it', acc);
