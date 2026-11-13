@@ -646,7 +646,7 @@ try {
     if (more) {
       for (const t of ['mouseMoved', 'mousePressed', 'mouseReleased']) await p1.cdp('Input.dispatchMouseEvent', { type: t, x: more.x, y: more.y, button: 'left', clickCount: 1 });
       await sleep(250);
-      const rows = await p1.evalJs(`[...document.querySelectorAll('.context-menu > .context-menu-item')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);
+      const rows = await p1.evalJs(`[...document.querySelectorAll('.context-menu > .context-menu-item, .context-menu > .context-menu-caption')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);   // lane ui-controls-and-bugs: the About line is a caption row
       check(`the ⋯ menu carries "Share with agent…" and "Ask an agent to take control…" — and no Scale ▸ / Show window frame ▸ on a whole-display rung (${JSON.stringify(rows)})`, rows.includes('Share with agent…') && rows.includes('Ask an agent to take control…') && !rows.some((r) => /^Scale|^Show window frame/.test(r)), rows);
       // design 009 §B2: the ⋯ opens with the "About this window" fact line + a separator — address the row by its place
       // among ALL the menu's children (nth-child counts the separator too)

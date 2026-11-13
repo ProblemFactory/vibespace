@@ -1872,7 +1872,7 @@ export class DesktopManager {
     };
     return doorItems(desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops, order, tier }), { t }).map((d) => (d.separator ? d
       : d.enabled ? { door: d.id, label: d.label, action: act[d.id], ...(d.danger ? { style: 'color:var(--red, #e55)' } : {}) }
-      : { door: d.id, label: d.label, labelHtml: `<span class="door-label">${escHtml(d.label)}</span> <span class="door-why">${escHtml(d.why)}</span>`, title: d.why, disabled: true })); // a shut door says why (never greyed with no words)
+      : { door: d.id, label: d.label, off: d.why }));   // lane ui-controls-and-bugs: the menu's OFF row (the why in words, ONE grammar for every menu) // a shut door says why (never greyed with no words)
   }
 
   /** A door's words from THE table (desktopDoors) — the «+»'s ('new'), a row's / tile's switch title ('switch'): its label,

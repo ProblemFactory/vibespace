@@ -522,6 +522,14 @@
 .context-menu-item.has-submenu { display: flex; justify-content: space-between; }
 .context-menu-item.has-submenu::after { content: '▸'; content: '▸' / ""; margin-left: 12px; opacity: 0.5; }
 .context-menu-separator { height: 1px; background: var(--border); margin: 3px 0; }
+/* lane ui-controls-and-bugs — THE GREYED-OPTIONS RULE: a CAPTION is words (a heading, a fact), an OFF row says why in words and
+   may carry the door that fixes it — never a control at opacity .4 with its reason only in a tooltip */
+.context-menu-caption { padding: 5px 12px 3px; font-size: calc(11px * var(--ui-font-scale, 1)); color: var(--text-secondary); max-width: 28em; white-space: normal; line-height: 1.45; }
+.context-menu-item.context-menu-off { cursor: default; flex-direction: column; align-items: flex-start; gap: 2px; max-width: 28em; }
+.context-menu-item.context-menu-off:hover { background: transparent; }
+.context-menu-off .door-why { white-space: normal; line-height: 1.4; }
+.context-menu-off-door { align-self: flex-start; margin-top: 2px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-secondary); font: inherit; cursor: pointer; }
+.context-menu-off-door:hover { color: var(--text); border-color: var(--accent); }
 
 
 /* Context menu separator (data-driven menus in file explorer) — same spec as

@@ -4795,6 +4795,10 @@ export default {
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "这个账号的 token 是用这个客户端铸出的。换一个客户端就要重新授权 —— 保存时会直接打开「重新授权」。",
   "Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.": "与挂载的编辑对话框同一条规则：真实当前值预填，密钥在内；只保存改了的字段。",
   "Sign-in": "授权状态",
+  // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
+  "This session’s billing account": "本会话的计费账号",
+  "it connects to the vendor’s servers (measured)": "会连接厂商服务器（实测）",
+  "Change the scale for every app in Settings…": "在设置中修改所有应用的缩放…",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} 自动继续",
   "Auto-continue: off": "自动继续：关",

@@ -1075,7 +1075,7 @@ if (!CHROME) {
     // none" rule would have hidden the one rejection that explains why
     // "Permission rules…" is absent for a codex account (round-2 verifier).
     const menus = await evaljs(`(() => {
-      const row = (b) => window.app._rulesAndChecksItems(b, {}).map((i) => ({ label: i.label || (i.separator ? '—' : ''), disabled: !!i.disabled, title: i.title || '' }));
+      const row = (b) => window.app._rulesAndChecksItems(b, {}).map((i) => ({ label: i.label || (i.separator ? '—' : ''), disabled: !!i.disabled || i.off != null, title: i.title || '' }));   // an OFF row (lane ui-controls-and-bugs: the why on the row) is the not-offered one
       return { codex: row('codex'), claude: row('claude'), shell: row('shell') };
     })()`);
     const cRows = menus.codex || [];
