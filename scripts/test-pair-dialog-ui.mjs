@@ -569,9 +569,9 @@ try {
     await Z.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked') && !!document.querySelector('#device-pair-dialog .device-pair-go:not([disabled])')`, 10000);
     await Z.realClick(`#device-pair-dialog .device-pair-go`);
     const gen = await Z.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-allow') && !!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 15000);
-    ok(gen, 'Generate ⇒ the command, with the allow list\'s boxes above it', gen ? undefined : await Z.evalJs(`(document.querySelector('#device-pair-dialog')?.textContent || 'no sheet').slice(0, 400)`));
+    ok(gen, 'Generate ⇒ the command, with the allow list\'s boxes after its steps', gen ? undefined : await Z.evalJs(`(document.querySelector('#device-pair-dialog')?.textContent || 'no sheet').slice(0, 400)`));
     if (!gen) throw new Error('no command on the sheet');
-    const boxes = () => Z.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog'); return { flags: [...d.querySelectorAll('.device-pair-allow input')].map((i) => ({ f: i.dataset.flag, on: i.checked, held: i.disabled, word: i.parentElement.textContent.trim() })), cmd: d.querySelector('.device-pair-cmd').value, legend: d.querySelector('.device-pair-allow legend').textContent }; })()`);
+    const boxes = () => Z.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog'); return { flags: [...d.querySelectorAll('.device-pair-allow input')].map((i) => ({ f: i.dataset.flag, on: i.checked, held: i.disabled, word: i.parentElement.querySelector('.device-pair-allow-word').textContent.trim() })), cmd: d.querySelector('.device-pair-cmd').value, legend: d.querySelector('.device-pair-allow legend').textContent }; })()`);
     const b0 = await boxes();
     ok(b0.flags.map((x) => x.f + (x.on ? '+' : '-') + (x.held ? '!' : '')).join(' ') === 'run+! files+! sessions+ upgrade+ socks- lan- input-' && b0.flags.map((x) => x.word).join('/') === '命令/文件/会话/更新/SOCKS/局域网/键鼠' && b0.legend === '这个 VibeSpace 能在设备上做什么', 'the boxes default to the DEVICE\'s own list (run + files held by sessions), in zh', b0);
     ok(/\n  --allow run,files,sessions,upgrade$/.test(b0.cmd), 'the command ends `--allow run,files,sessions,upgrade` (a re-run keeps the device\'s list)', b0.cmd.slice(-80));

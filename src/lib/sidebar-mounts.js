@@ -1518,10 +1518,25 @@ export function installSidebarMounts(Sidebar) {
       let winNoElevate = false; // lane win-input-elevated: the Windows command registers the agent to run as administrator by DEFAULT; this appends -NoElevate for a normal-rights install
       const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}${winNoElevate ? ' `\n  -NoElevate' : ''}` : ` \\\n  --allow ${allowArgOf(allow)}`);
       let curOs = null;
-      const NOTES = {
-        mac: tr('macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.'),
-        linux: tr('Linux: needs curl (or wget) — Node is installed automatically if the machine has none.'),
-        win: tr('Windows (EXPERIMENTAL, PowerShell): Node is downloaded automatically if missing.'),
+      // lane pair-dialog-polish (for 2.369.399 — the owner's screen, 2026-11-13: «你看看这个界面是不是应该优化下»): the sheet leads with
+      // what the person DOES — three numbered steps (the system · the command, shown WHOLE, and its Copy · where to run it) — then
+      // what they MAY change (the allow list; Windows' rights), then THIS system's install facts under ONE fold. Each tab says its
+      // own system's facts and only those; no control stands greyed (a box that sessions holds on is said in words, its box hidden);
+      // every box is a house check row (label.dialog-check-row: the box beside its word, the whole row the target, a hint line under
+      // the word). The command, the allow flags and the route are as before.
+      const OS = {
+        mac: {
+          need: tr('Nothing to install first: the command brings its own Node if the Mac has none.'), run: tr('Run it in Terminal on the Mac.'),
+          starts: tr('It registers a launchd agent: it starts when you log in and restarts if it stops.'), dir: '~/.vibespace',
+        },
+        linux: {
+          need: tr('Needs curl (or wget); Node is installed automatically if the machine has none.'), run: tr('Run it in a terminal on the machine.'),
+          starts: tr('It registers a systemd user service: it starts when you log in and restarts if it stops (the installer says whether it also runs while you are logged out). Without systemd it runs until the next reboot — run the command again then.'), dir: '~/.vibespace',
+        },
+        win: {
+          need: tr('Experimental. Node is downloaded automatically if the PC has none.'), run: tr('Run it in PowerShell on the PC.'),
+          starts: tr('It registers a scheduled task: it starts, hidden, when you sign in to Windows.'), dir: '%USERPROFILE%\\.vibespace',
+        },
       };
       body.innerHTML = '';
       const done = document.createElement('p');
@@ -1536,33 +1551,88 @@ export function installSidebarMounts(Sidebar) {
               ? tr('A new command for "{id}" — the one you generated before stops working now. Run this on the device:', { id: r.deviceId })
               // verify-r5 A1: "Replace its pairing" from "Pair a device" — the command it replaced was made elsewhere
               : tr('Replaced the pairing of "{id}" — the command it held stops working now. Run this on the device:', { id: r.deviceId }))
-          : tr('Paired as "{id}". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):', { id: r.deviceId });
+          : tr('Paired as "{id}". Put it on the device in three steps:', { id: r.deviceId });
+      // ① ② ③ — what the person does, in order
+      const steps = document.createElement('ol');
+      steps.className = 'device-pair-steps';
+      const step = (key, title) => {
+        const li = document.createElement('li');
+        li.className = 'device-pair-step'; li.dataset.step = key;
+        const h = document.createElement('p');
+        h.className = 'device-pair-step-title'; h.textContent = title;
+        li.appendChild(h); steps.appendChild(li);
+        return { li, h };
+      };
+      const s1 = step('os', tr('Choose the device’s system'));
       const seg = document.createElement('div');
       seg.className = 'device-pair-os';
+      s1.li.appendChild(seg);
+      const s2 = step('copy', tr('Copy the command'));
       const ta = document.createElement('textarea');
-      ta.readOnly = true; ta.className = 'device-pair-cmd'; ta.spellcheck = false;
+      ta.readOnly = true; ta.className = 'device-pair-cmd'; ta.spellcheck = false; ta.rows = 1;
+      const copyRow = document.createElement('div');
+      copyRow.className = 'device-pair-copyrow';
+      const copy = document.createElement('button');
+      copy.className = 'btn-create device-pair-copy';
+      const copyState = document.createElement('span');
+      copyState.className = 'device-pair-copy-state'; copyState.setAttribute('aria-live', 'polite');
+      copyRow.append(copy, copyState);
+      s2.li.append(ta, copyRow);
+      const s3 = step('run', '');
       const note = document.createElement('p');
-      note.className = 'agents-note';
+      note.className = 'agents-note device-pair-need';
+      const after = document.createElement('p');
+      after.className = 'agents-note device-pair-after';
+      after.textContent = tr('Once it connects, the device shows in Machines with a green dot.');
+      s3.li.append(note, after);
+      // the command shows WHOLE — wrapped, at its own height, never a box that cuts lines off — re-measured when its text or width changes
+      const fitCmd = () => { if (!ta.isConnected) return; ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + 2}px`; };
+      if (typeof ResizeObserver === 'function') {
+        let cmdW = 0;
+        const ro = new ResizeObserver(() => { if (!ta.isConnected) { ro.disconnect(); return; } if (ta.clientWidth !== cmdW) { cmdW = ta.clientWidth; fitCmd(); } });
+        ro.observe(ta);
+      }
+      // Copy says it copied — only while what it copied is still the command (a tab or a box changes it: «copy it again»)
+      let copied = null;
+      const paintCopy = () => {
+        const same = copied !== null && copied === ta.value;
+        copy.textContent = same ? tr('Copied') : tr('Copy command');
+        copy.classList.toggle('is-copied', same);
+        copyState.textContent = copied !== null && !same ? tr('The command changed — copy it again.') : '';
+      };
+      copy.onclick = () => { copyText(ta.value); copied = ta.value; showToast(tr('Command copied')); paintCopy(); };
       // lane win-input-elevated: Windows-only — the agent runs as administrator by default (one OS consent at install); a tick to opt out
       const elevWrap = document.createElement('div');
       elevWrap.className = 'device-pair-elev';
-      const elevNote = document.createElement('p');
-      elevNote.className = 'agents-note';
-      elevNote.textContent = tr('On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).');
       const elevLab = document.createElement('label');
-      elevLab.className = 'device-pair-elev-flag';
+      elevLab.className = 'dialog-check-row device-pair-elev-flag';
       const elevCb = document.createElement('input');
       elevCb.type = 'checkbox';
       elevCb.onchange = () => { winNoElevate = elevCb.checked; if (curOs) setOs(curOs); };
-      elevLab.append(elevCb, ' ' + tr('Install with normal rights (no administrator)'));
-      elevWrap.append(elevNote, elevLab);
+      const elevWord = document.createElement('span');
+      elevWord.className = 'device-pair-allow-word'; elevWord.textContent = tr('Install with normal rights (no administrator)');
+      const elevHint = document.createElement('span');
+      elevHint.className = 'dialog-check-hint';
+      elevHint.textContent = tr('By default the agent runs as administrator (Windows asks you to confirm once), so with keyboard & mouse it can also type into windows you opened as administrator.');
+      elevLab.append(elevCb, elevWord, elevHint);
+      elevWrap.append(elevLab);
+      // the rarely needed facts — THIS system's — under one fold
+      const more = document.createElement('details');
+      more.className = 'device-pair-more';
+      const sum = document.createElement('summary');
+      sum.textContent = tr('About this install');
+      const facts = document.createElement('ul');
+      more.append(sum, facts);
       // verify-r4 F7: a paired device's command in ITS OS's form (the OS its daemon states on every dial — the receiver's
       // fact); only a device nobody has heard from yet gets the browser's OS as a guess (the tabs are the choice). The owner
       // opens VibeSpace on Windows: a paired Mac's "new command" was the PowerShell form
       const guessOs = deviceOs || (/Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux');
       const chips = {};
       const setOs = (k) => {
-        curOs = k; ta.value = cmdOf(k); note.textContent = NOTES[k]; elevWrap.style.display = k === 'win' ? '' : 'none';
+        curOs = k; ta.value = cmdOf(k); fitCmd(); paintCopy();
+        s3.h.textContent = OS[k].run; note.textContent = OS[k].need;
+        elevWrap.style.display = k === 'win' ? '' : 'none';
+        facts.replaceChildren(...[OS[k].starts, tr('Everything it installs, including a private Node if the device had none, lives under {dir}; removing that folder removes it all.', { dir: OS[k].dir }), tr('Pairing the same name again replaces its token.'), tr('One machine can pair with several VibeSpace instances — each install keeps its own state.')].map((x) => { const li = document.createElement('li'); li.textContent = x; return li; }));
         for (const [ck, el] of Object.entries(chips)) el.className = ck === k ? 'btn-create' : 'btn-cancel';
       };
       for (const [k, label] of [['mac', 'macOS'], ['linux', 'Linux'], ['win', 'Windows']]) {
@@ -1570,50 +1640,63 @@ export function installSidebarMounts(Sidebar) {
         b.textContent = label; b.onclick = () => setOs(k);
         chips[k] = b; seg.appendChild(b);
       }
-      const tail = document.createElement('p');
-      tail.className = 'agents-note';
-      tail.textContent = tr('The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token. Everything it installs — including a private Node if the machine had none — lives under ~/.vibespace on the device; removing that folder removes it all.');
       const act2 = document.createElement('div');
       act2.className = 'dialog-actions device-pair-actions';
-      const copy = document.createElement('button');
-      copy.className = 'btn-create device-pair-copy'; copy.textContent = tr('Copy command');
-      copy.onclick = () => { copyText(ta.value); showToast(tr('Command copied')); };
       const closeBtn = document.createElement('button');
       closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
-      act2.append(closeBtn, copy);
-      // the allow list's boxes (a box `sessions` brings is ticked and held: a conversation runs commands and writes its tools)
+      act2.append(closeBtn);
+      // what it may do (the allow list): a box `sessions` brings is ON and not a control — its row says so in words (a conversation
+      // runs commands and writes its tools), its box hidden; every item says in plain words what it lets this VibeSpace do there
       const box = document.createElement('fieldset');
       box.className = 'device-pair-allow';
       const lg = document.createElement('legend');
       lg.textContent = tr('What this VibeSpace may do on the device');
       box.appendChild(lg);
-      const ticks = {};
+      const HINT = {
+        run: tr('Run commands, and open apps or a browser there.'),
+        files: tr('Write, move and delete files there — reading is always allowed.'),
+        sessions: tr('Run conversations and terminals there.'),
+        upgrade: tr('Update its agent to a newer version.'),
+        socks: tr('Send this VibeSpace’s web traffic out through the device.'),
+        lan: tr('Connect to other machines on the device’s network.'),
+        input: tr('Type and click on the device’s screen.'),
+      };
+      const ticks = {}, hints = {};
       const paintTicks = () => {
         const held = new Set(allow.flatMap((f) => IMPLIES[f] || []));
-        for (const f of FLAGS) { ticks[f].checked = allow.includes(f); ticks[f].disabled = held.has(f); ticks[f].parentElement.title = held.has(f) ? tr('Sessions need commands and files — a conversation runs commands there') : ''; }
+        for (const f of SHOWN) {
+          const h = held.has(f);
+          ticks[f].checked = allow.includes(f); ticks[f].disabled = h;
+          ticks[f].parentElement.classList.toggle('is-held', h);
+          hints[f].textContent = h ? tr('On while sessions is ticked — a conversation needs it.') : HINT[f];
+        }
       };
       for (const f of SHOWN) {
         const lab = document.createElement('label');
-        lab.className = 'device-pair-allow-flag';
+        lab.className = 'dialog-check-row device-pair-allow-flag'; lab.dataset.flag = f;
         const cb = document.createElement('input');
         cb.type = 'checkbox'; cb.dataset.flag = f;
         cb.onchange = () => { allow = normalize(cb.checked ? [...allow, f] : allow.filter((x) => x !== f)); paintTicks(); if (curOs) setOs(curOs); };
-        lab.append(cb, ' ' + allowWord(f));
-        ticks[f] = cb; box.appendChild(lab);
+        const word = document.createElement('span');
+        word.className = 'device-pair-allow-word'; word.textContent = allowWord(f);
+        const hint = document.createElement('span');
+        hint.className = 'dialog-check-hint device-pair-allow-hint';
+        lab.append(cb, word, hint);
+        ticks[f] = cb; hints[f] = hint; box.appendChild(lab);
       }
       const allowNote = document.createElement('p');
       allowNote.className = 'agents-note device-pair-allow-note';
       allowNote.textContent = tr('The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.') + (r.clusterInstance ? ' ' + tr('On a cluster instance SOCKS, LAN and keyboard & mouse start off.') : '');
       box.appendChild(allowNote);
       paintTicks();
-      body.append(done, box, seg, ta, note, elevWrap, tail, act2);
+      body.append(done, steps, box, elevWrap, more, act2);
       // verify-r5 A1: THIS command can be replaced while it is on screen (another window pressed Generate / Replace, or
       // another user) — the device row's generation moves past the one minted here: said on this sheet, once
       const gen = Number(r.generation) || 0;
       if (gen && r.deviceId) {
         const gone = document.createElement('p');
         gone.className = 'agents-note device-pair-replaced'; gone.style.display = 'none';
-        body.insertBefore(gone, seg);
+        body.insertBefore(gone, steps);
         const genTick = setInterval(() => {
           if (!body.isConnected) { clearInterval(genTick); return; }
           const h2 = (this._hostsData?.hosts || []).find((x) => x && x.deviceId === r.deviceId);

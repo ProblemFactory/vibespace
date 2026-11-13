@@ -2455,7 +2455,6 @@ export default {
   "Unmount": "卸载",
   "Mount point here (optional)": "本地挂载点（可选）",
   "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.": "其拨入令牌将被吊销；重新配对会生成新令牌。它挂载到这里的文件夹会被卸载。",
-  "Paired as \"{id}\". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):": "已配对为“{id}”。选择设备的操作系统并在其上运行命令 — agent 启动并拨入后，设备会作为机器行显示在上方（绿点 = 已连接）：",
   "Remount now": "立即重挂",
   "using imported key": "使用导入的私钥",
   "using VibeSpace key": "使用 VibeSpace 密钥",
@@ -2490,7 +2489,6 @@ export default {
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "连接“{name}”的会话耗时异常——检查网络或刷新此标签页",
   "Mount a folder from \"{name}\" into this VibeSpace": "把“{name}”的文件夹挂载进本 VibeSpace",
   "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "机器离线——隧道已断; 设备重连后挂载自动恢复",
-  "The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.": "安装器会把 daemon 注册到 launchd（macOS）/ systemd（Linux）：开机自启、崩溃自动重启。一台机器可配对多个 VibeSpace 实例——每个安装以实例地址为键保留自己的状态。用同名再次配对会替换其令牌。",
   "Forward a port from \"{name}\" (open its dev servers here)": "转发“{name}”上的端口（在这里打开它的开发服务器）",
   "Forward a port from \"{name}\"": "转发“{name}”上的端口",
   "A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.": "这台机器 127.0.0.1 上监听的服务会在这里可访问（经应用代理打开）。走设备链路——不对公网暴露。",
@@ -2679,11 +2677,7 @@ export default {
   'Could not unlock the key on this server. Remove its passphrase on your own machine first: ssh-keygen -p -N "" -f <keyfile>': '无法在此服务器上解锁该密钥。请先在你自己的机器上去掉口令：ssh-keygen -p -N "" -f <keyfile>',
   'Key import cancelled': '已取消导入密钥',
   'Imported {type} key {fp}': '已导入 {type} 密钥 {fp}',
-  'macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.': 'macOS：无需预装任何东西——命令会在缺少 Node 时自带一份。不需要 ssh，不需要 FUSE。',
-  'Linux: needs curl (or wget) — Node is installed automatically if the machine has none.': 'Linux：只需 curl（或 wget）——机器上没有 Node 时会自动安装。',
-  'Windows (EXPERIMENTAL, PowerShell): Node is downloaded automatically if missing.': 'Windows（实验性，PowerShell）：缺少 Node 时会自动下载。',
   'For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.': '适用于无法 ssh 进入的机器（笔记本、家里的 Mac）：设备通过 websocket 主动拨出连到本实例，NAT 后也能用，无需暴露任何端口。无需预装任何东西——机器上没有 Node 时安装脚本会自带一份。',
-  'The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token. Everything it installs — including a private Node if the machine had none — lives under ~/.vibespace on the device; removing that folder removes it all.': '安装脚本会把守护进程注册到 launchd（macOS）/ systemd（Linux）：开机自启，崩溃自动重启。一台机器可以同时配对多个 VibeSpace 实例——每份安装按本实例地址独立保存状态。用同一名称再次配对会替换其令牌。它安装的所有内容——包括机器原本没有 Node 时自带的那份私有 Node——都在设备的 ~/.vibespace 下；删掉该目录即可完全卸载。',
   "Add pooled account…": "添加池化账号…",
   "Pooled account": "池化账号",
   "One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.": "一个内部在你已登录的订阅之间切换的账号入口。会话像选普通账号一样选它；由你（以后可自动切换）决定它当前使用哪个真实订阅。",
@@ -9638,9 +9632,36 @@ export default {
   "Allows: {on} | Off: {off}": "允许：{on} ｜ 未开：{off}", // lane device-allow-flags
   "Only re-running the pairing command on {machine} changes this list (Remote → {machine} → Pairing command → tick what it may do).": "只有在 {machine} 上重跑配对命令才能改这份清单（远程 → {machine} → 配对命令 → 勾选允许的事）。", // lane device-allow-flags
   "What this VibeSpace may do on the device": "这个 VibeSpace 能在设备上做什么", // lane device-allow-flags
-  "Sessions need commands and files — a conversation runs commands there": "会话需要命令和文件——对话会在那里跑命令", // lane device-allow-flags
   "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "清单存在设备上；只有在设备上重跑命令才能改——这个 VibeSpace 改不了。", // lane device-allow-flags
   "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "集群实例上 SOCKS、局域网和键鼠默认不开。", // lane device-allow-flags
+  // lane pair-dialog-polish (.399): the pairing command sheet — ① ② ③, the allow items' plain words, this system's install facts
+  "Paired as \"{id}\". Put it on the device in three steps:": "已配对为“{id}”。分三步装到设备上：",
+  "Choose the device’s system": "选择设备的系统",
+  "Copy the command": "复制命令",
+  "Run it in Terminal on the Mac.": "在 Mac 的“终端”里运行它。",
+  "Run it in a terminal on the machine.": "在这台机器的终端里运行它。",
+  "Run it in PowerShell on the PC.": "在这台电脑的 PowerShell 里运行它。",
+  "Nothing to install first: the command brings its own Node if the Mac has none.": "无需预先安装：Mac 上没有 Node 时，命令会自带一份。",
+  "Needs curl (or wget); Node is installed automatically if the machine has none.": "需要 curl（或 wget）；机器上没有 Node 时会自动安装。",
+  "Experimental. Node is downloaded automatically if the PC has none.": "实验性。电脑上没有 Node 时会自动下载。",
+  "Once it connects, the device shows in Machines with a green dot.": "连上之后，设备会出现在“机器”里，带一个绿点。",
+  "The command changed — copy it again.": "命令已经变了——请重新复制。",
+  "By default the agent runs as administrator (Windows asks you to confirm once), so with keyboard & mouse it can also type into windows you opened as administrator.": "默认情况下，代理以管理员身份运行（Windows 会请你确认一次），所以开了“键鼠”时，它也能向你以管理员身份打开的窗口输入。",
+  "About this install": "关于这次安装",
+  "It registers a launchd agent: it starts when you log in and restarts if it stops.": "它会注册为 launchd 代理：你登录时启动，停了会自动重启。",
+  "It registers a systemd user service: it starts when you log in and restarts if it stops (the installer says whether it also runs while you are logged out). Without systemd it runs until the next reboot — run the command again then.": "它会注册为 systemd 用户服务：你登录时启动，停了会自动重启（安装程序会说明退出登录后它是否还在运行）。没有 systemd 时，它只运行到下次重启——到时再运行一次命令。",
+  "It registers a scheduled task: it starts, hidden, when you sign in to Windows.": "它会注册为计划任务：你登录 Windows 时在后台启动。",
+  "Everything it installs, including a private Node if the device had none, lives under {dir}; removing that folder removes it all.": "它安装的所有东西（包括设备上原本没有 Node 时自带的那份）都在 {dir} 下；删掉这个文件夹就全部删干净了。",
+  "Pairing the same name again replaces its token.": "用同一个名字再配对一次，会替换它的令牌。",
+  "One machine can pair with several VibeSpace instances — each install keeps its own state.": "一台机器可以和多个 VibeSpace 实例配对——每次安装各自保存自己的状态。",
+  "Run commands, and open apps or a browser there.": "在那里运行命令，打开应用或浏览器。",
+  "Write, move and delete files there — reading is always allowed.": "在那里写入、移动和删除文件——读取始终允许。",
+  "Run conversations and terminals there.": "在那里运行对话和终端。",
+  "Update its agent to a newer version.": "把它的代理更新到新版本。",
+  "Send this VibeSpace’s web traffic out through the device.": "让这个 VibeSpace 的网络流量经这台设备出去。",
+  "Connect to other machines on the device’s network.": "连接设备所在网络里的其他机器。",
+  "Type and click on the device’s screen.": "在设备的屏幕上打字和点击。",
+  "On while sessions is ticked — a conversation needs it.": "勾选了“会话”就一直开着——对话需要它。",
   "refused: the machine’s own allow list leaves it off": "已拒绝：机器自己的允许清单没开这一项", // lane device-allow-flags
   "refused: that is the machine’s own allow list": "已拒绝：那是机器自己的允许清单", // lane device-allow-flags
   "{who} wants to run a command on {machine}": "{who} 想在 {machine} 上运行命令", // lane hub-act-ask
@@ -9914,7 +9935,6 @@ export default {
   "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "当设备代理以管理员权限运行时，代理能向你以管理员身份打开的窗口输入 — 允许哪些由你在允许清单里选。VibeSpace 从不自行提权；由 Windows 请你确认。", // lane win-input-elevated
   "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "最简单：再运行一次配对命令 — 它现在默认以管理员权限运行，并会请你确认一次。或者，在那台机器的管理员 PowerShell 里运行：", // lane win-input-elevated
   "Copied — run it in an administrator PowerShell on the machine": "已复制 — 在那台机器的管理员 PowerShell 里运行", // lane win-input-elevated
-  "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "在 Windows 上，设备代理默认以管理员权限运行 — 你运行命令时 Windows 会请你确认一次。之后代理能向你以管理员身份打开的窗口输入（允许哪些由下面的允许清单选）。", // lane win-input-elevated
   "Install with normal rights (no administrator)": "以普通权限安装（非管理员）", // lane win-input-elevated
   "administrator": "管理员", // lane win-input-elevated
   "Models — {name}": "模型 — {name}", // lane provider-record

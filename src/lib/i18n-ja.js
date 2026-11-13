@@ -2455,7 +2455,6 @@ export default {
   "Unmount": "アンマウント",
   "Mount point here (optional)": "ローカルのマウントポイント（任意）",
   "Its dial token is revoked; re-pairing mints a new one. Its mounted folders here are unmounted.": "接続トークンは失効します。再ペアリングで新トークンが発行されます。ここへのマウントは解除されます。",
-  "Paired as \"{id}\". Pick the device’s OS and run the command on it — it starts the agent and dials in; the device then appears as a machine row above (green dot = connected):": "「{id}」としてペアリングしました。デバイスの OS を選んでコマンドを実行してください。エージェントが接続すると、上のマシン一覧に行として表示されます（緑の点 = 接続中）：",
   "Remount now": "今すぐ再マウント",
   "using imported key": "インポートした鍵を使用",
   "using VibeSpace key": "VibeSpace の鍵を使用",
@@ -2490,7 +2489,6 @@ export default {
   "Attaching \"{name}\" is taking unusually long — check the connection or reload the tab": "「{name}」への接続に時間がかかっています — 接続を確認するかタブを再読み込みしてください",
   "Mount a folder from \"{name}\" into this VibeSpace": "「{name}」のフォルダをこの VibeSpace にマウント",
   "Machine is offline — the tunnel is down; the mount heals when its daemon reconnects": "マシンはオフライン — トンネルは切断中; デーモンが再接続するとマウントは自動回復します",
-  "The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token.": "インストーラはデーモンを launchd（macOS）/ systemd（Linux）に登録します: 起動時に自動開始し、クラッシュ時は自動再起動します。1 台のマシンを複数の VibeSpace インスタンスにペアリングできます。同名で再ペアリングするとトークンが置き換わります。",
   "Forward a port from \"{name}\" (open its dev servers here)": "「{name}」のポートを転送（開発サーバーをここで開く）",
   "Forward a port from \"{name}\"": "「{name}」のポートを転送",
   "A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.": "このマシンの 127.0.0.1 で待ち受けるサービスがここから利用可能になります（アプリのプロキシ経由で開きます）。デバイスリンク上で動作し、外部公開はありません。",
@@ -2679,11 +2677,7 @@ export default {
   'Could not unlock the key on this server. Remove its passphrase on your own machine first: ssh-keygen -p -N "" -f <keyfile>': 'このサーバーでキーを解錠できませんでした。先にご自身のマシンでパスフレーズを外してください: ssh-keygen -p -N "" -f <keyfile>',
   'Key import cancelled': 'キーのインポートをキャンセルしました',
   'Imported {type} key {fp}': '{type} キーをインポートしました {fp}',
-  'macOS: nothing to install first — the command brings its own Node if needed. No ssh, no FUSE.': 'macOS：事前インストールは不要——Node が無ければコマンドが自前で用意します。ssh も FUSE も不要。',
-  'Linux: needs curl (or wget) — Node is installed automatically if the machine has none.': 'Linux：curl（または wget）だけ必要——Node が無いマシンには自動でインストールされます。',
-  'Windows (EXPERIMENTAL, PowerShell): Node is downloaded automatically if missing.': 'Windows（実験的・PowerShell）：Node が無ければ自動でダウンロードします。',
   'For machines you can’t ssh into (a laptop, a Mac at home): the device dials OUT to this instance over a websocket, so it works behind NAT with nothing to expose. Nothing to install first — the installer brings its own Node when the machine has none.': 'ssh で入れないマシン（ノート PC、自宅の Mac）向け：デバイスが websocket でこのインスタンスへ発信接続するため、NAT 内でも何も公開せずに使えます。事前インストールは不要——Node が無いマシンにはインストーラーが自前で用意します。',
-  'The installer registers the daemon with launchd (macOS) / systemd (Linux): it starts on boot and auto-restarts if it crashes. One machine can pair to several VibeSpace instances — each install keeps its own state, keyed by this instance’s address. Pairing the same name again replaces its token. Everything it installs — including a private Node if the machine had none — lives under ~/.vibespace on the device; removing that folder removes it all.': 'インストーラーはデーモンを launchd（macOS）/ systemd（Linux）に登録します：起動時に自動開始し、クラッシュしても自動再起動します。1 台のマシンを複数の VibeSpace インスタンスとペアリングでき、各インストールはこのインスタンスのアドレスをキーに独立した状態を保ちます。同じ名前で再ペアリングするとトークンが置き換わります。インストールされるものは、Node が無かった場合の専用 Node も含めてすべてデバイスの ~/.vibespace 配下にあり、そのフォルダを削除すればすべて消えます。',
   "Add pooled account…": "プールアカウントを追加…",
   "Pooled account": "プールアカウント",
   "One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.": "ログイン済みサブスクリプションを内部で切り替えるひとつのアカウント枠です。セッションは普通のアカウントと同じように選択でき、実際にどのサブスクリプションを使うかはあなた（将来的には自動切替）が決めます。",
@@ -9637,9 +9631,36 @@ export default {
   "Allows: {on} | Off: {off}": "許可：{on} ｜ オフ：{off}", // lane device-allow-flags
   "Only re-running the pairing command on {machine} changes this list (Remote → {machine} → Pairing command → tick what it may do).": "このリストを変えられるのは {machine} でペアリングコマンドを再実行したときだけです（リモート → {machine} → ペアリングコマンド → 許可する項目にチェック）。", // lane device-allow-flags
   "What this VibeSpace may do on the device": "この VibeSpace がデバイスでできること", // lane device-allow-flags
-  "Sessions need commands and files — a conversation runs commands there": "セッションにはコマンドとファイルが必要です — 会話はそこでコマンドを実行します", // lane device-allow-flags
   "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "このリストはデバイスが保持します。変えられるのはデバイスでコマンドを再実行したときだけで、この VibeSpace からは変えられません。", // lane device-allow-flags
   "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "クラスタインスタンスでは SOCKS・LAN・キーボード・マウスは最初オフです。", // lane device-allow-flags
+  // lane pair-dialog-polish (.399): the pairing command sheet — ① ② ③, the allow items' plain words, this system's install facts
+  "Paired as \"{id}\". Put it on the device in three steps:": "「{id}」としてペアリングしました。次の 3 ステップでデバイスに入れます：",
+  "Choose the device’s system": "デバイスのシステムを選ぶ",
+  "Copy the command": "コマンドをコピーする",
+  "Run it in Terminal on the Mac.": "Mac の「ターミナル」で実行します。",
+  "Run it in a terminal on the machine.": "そのマシンのターミナルで実行します。",
+  "Run it in PowerShell on the PC.": "その PC の PowerShell で実行します。",
+  "Nothing to install first: the command brings its own Node if the Mac has none.": "事前のインストールは不要です。Mac に Node がなければコマンドが用意します。",
+  "Needs curl (or wget); Node is installed automatically if the machine has none.": "curl（または wget）が必要です。Node がなければ自動でインストールされます。",
+  "Experimental. Node is downloaded automatically if the PC has none.": "試験的な機能です。PC に Node がなければ自動でダウンロードされます。",
+  "Once it connects, the device shows in Machines with a green dot.": "接続すると、デバイスが「マシン」に緑の点付きで表示されます。",
+  "The command changed — copy it again.": "コマンドが変わりました。もう一度コピーしてください。",
+  "By default the agent runs as administrator (Windows asks you to confirm once), so with keyboard & mouse it can also type into windows you opened as administrator.": "既定ではエージェントは管理者として動きます（Windows が一度だけ確認します）。そのため「キーボード・マウス」がオンなら、管理者として開いたウィンドウにも入力できます。",
+  "About this install": "このインストールについて",
+  "It registers a launchd agent: it starts when you log in and restarts if it stops.": "launchd エージェントとして登録されます。ログインすると起動し、止まると再起動します。",
+  "It registers a systemd user service: it starts when you log in and restarts if it stops (the installer says whether it also runs while you are logged out). Without systemd it runs until the next reboot — run the command again then.": "systemd のユーザーサービスとして登録されます。ログインすると起動し、止まると再起動します（ログアウト中も動くかはインストーラーが表示します）。systemd がない場合は次の再起動まで動きます。そのときはもう一度コマンドを実行してください。",
+  "It registers a scheduled task: it starts, hidden, when you sign in to Windows.": "タスク スケジューラに登録されます。Windows にサインインすると非表示で起動します。",
+  "Everything it installs, including a private Node if the device had none, lives under {dir}; removing that folder removes it all.": "インストールされるもの（デバイスに Node がなかった場合の専用 Node を含む）はすべて {dir} の下にあります。このフォルダを消せばすべて消えます。",
+  "Pairing the same name again replaces its token.": "同じ名前でもう一度ペアリングすると、そのトークンが置き換わります。",
+  "One machine can pair with several VibeSpace instances — each install keeps its own state.": "1 台のマシンを複数の VibeSpace インスタンスとペアリングできます。インストールごとに状態は別々です。",
+  "Run commands, and open apps or a browser there.": "コマンドを実行し、アプリやブラウザを開きます。",
+  "Write, move and delete files there — reading is always allowed.": "ファイルの書き込み・移動・削除をします（読み取りは常に許可されます）。",
+  "Run conversations and terminals there.": "会話とターミナルを実行します。",
+  "Update its agent to a newer version.": "エージェントを新しいバージョンに更新します。",
+  "Send this VibeSpace’s web traffic out through the device.": "この VibeSpace の Web 通信をデバイス経由で外に出します。",
+  "Connect to other machines on the device’s network.": "デバイスのネットワーク上のほかのマシンに接続します。",
+  "Type and click on the device’s screen.": "デバイスの画面で入力やクリックをします。",
+  "On while sessions is ticked — a conversation needs it.": "「セッション」がオンの間は常にオンです（会話に必要です）。",
   "refused: the machine’s own allow list leaves it off": "拒否：マシン自身の許可リストでオフです", // lane device-allow-flags
   "refused: that is the machine’s own allow list": "拒否：それはマシン自身の許可リストです", // lane device-allow-flags
   "{who} wants to run a command on {machine}": "{who} が {machine} でコマンドを実行しようとしています", // lane hub-act-ask
@@ -9913,7 +9934,6 @@ export default {
   "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "デバイスエージェントが管理者として動作すると、あなたが管理者として開いたウィンドウにエージェントが入力できます — どれを許可するかは許可リストで選びます。VibeSpace が自分で昇格することはなく、Windows が確認を求めます。", // lane win-input-elevated
   "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "一番簡単なのは、ペアリングコマンドをもう一度実行することです — 既定で管理者として動作し、一度だけ確認を求めます。または、そのマシンの管理者 PowerShell で次を実行します：", // lane win-input-elevated
   "Copied — run it in an administrator PowerShell on the machine": "コピーしました — そのマシンの管理者 PowerShell で実行してください", // lane win-input-elevated
-  "On Windows the device agent runs as administrator by default — Windows asks you to confirm once when you run the command. Agents can then type into windows you opened as administrator (you choose which, in the allow list below).": "Windows ではデバイスエージェントは既定で管理者として動作します — コマンドを実行すると Windows が一度だけ確認を求めます。その後、エージェントはあなたが管理者として開いたウィンドウに入力できます（どれを許可するかは下の許可リストで選びます）。", // lane win-input-elevated
   "Install with normal rights (no administrator)": "通常の権限でインストール（管理者なし）", // lane win-input-elevated
   "administrator": "管理者", // lane win-input-elevated
   "Models — {name}": "モデル — {name}", // lane provider-record

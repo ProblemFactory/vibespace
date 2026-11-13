@@ -8503,18 +8503,35 @@ label.chan-cap-row { cursor: default; }
 .device-pair-err:empty { display: none; }
 .device-pair-os { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
 /* lane device-allow-flags: the pairing dialog's allow-list boxes (the command carries them) + the machine card's allow line */
-#device-pair-dialog .device-pair-allow { border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px 6px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 2px 12px; min-width: 0; }
-#device-pair-dialog .device-pair-allow legend { font-size: 11px; color: var(--text-dim); padding: 0 4px; }
-#device-pair-dialog .device-pair-allow-flag { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-height: 28px; }
-#device-pair-dialog .device-pair-allow-flag:has(input:disabled) { opacity: .75; }
-#device-pair-dialog .device-pair-allow-note { flex-basis: 100%; margin: 2px 0 0; }
+/* lane pair-dialog-polish (.399 — the owner's screen: «你看看这个界面是不是应该优化下»): the command sheet = ① ② ③ (what to DO) · the
+   allow list + Windows' rights (what you MAY change) · ONE fold of this system's facts. Every box is a house check row
+   (label.dialog-check-row: the box beside its word, the whole row the target, a hint line under the word); a box `sessions` holds on
+   is no control — hidden, its row says why. The pre-polish `.device-pair-allow-flag` (1,1,0) set inline-flex but kept
+   `.dialog-body label`'s COLUMN direction: every word sat UNDER its box. Gate: test-pair-dialog-polish's census + its CSS control. */
+#device-pair-dialog .device-pair-steps { margin: 0; padding: 0; list-style: none; counter-reset: dps; display: flex; flex-direction: column; gap: 12px; }
+#device-pair-dialog .device-pair-step { counter-increment: dps; display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; row-gap: 6px; align-items: start; }
+#device-pair-dialog .device-pair-step::before { content: counter(dps); grid-column: 1; grid-row: 1; width: 20px; height: 20px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+#device-pair-dialog .device-pair-step > * { grid-column: 2; margin: 0; min-width: 0; }
+#device-pair-dialog .device-pair-step-title { grid-row: 1; font-size: 13px; font-weight: 600; color: var(--text); line-height: 20px; }
+#device-pair-dialog .device-pair-copyrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#device-pair-dialog .device-pair-copy-state { font-size: 11px; color: var(--text-secondary); }
+#device-pair-dialog .device-pair-allow { border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px 8px; margin: 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#device-pair-dialog .device-pair-allow legend { font-size: 12px; font-weight: 600; color: var(--text); padding: 0 4px; }
+#device-pair-dialog label.device-pair-allow-flag, #device-pair-dialog label.device-pair-elev-flag { font-weight: 400; min-height: 32px; padding: 3px 0; }
+#device-pair-dialog .device-pair-allow-word { font-size: 12px; color: var(--text); }
+#device-pair-dialog label.device-pair-allow-flag.is-held { cursor: default; }
+#device-pair-dialog label.device-pair-allow-flag.is-held input { visibility: hidden; }
+#device-pair-dialog .device-pair-allow-note { margin: 4px 0 0; }
+#device-pair-dialog .device-pair-more summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); padding: 4px 0; }
+#device-pair-dialog .device-pair-more ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+#device-pair-dialog .device-pair-more li + li { margin-top: 4px; }
 .agents-mach-allow { flex-basis: 100%; order: 11; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-allow[data-allow-source="unreadable"] { color: var(--red); }
 .agents-mach-runtime { flex-basis: 100%; order: 12; padding-left: 16px; white-space: normal; font-size: 10px; color: var(--text-dim); }
 .agents-mach-runtime-old { color: var(--red); margin-left: 4px; }
 .agents-mach-runtime-fix { margin: 4px 0 6px 16px; font-size: 11px; color: var(--text-secondary); }
 .agents-mach-runtime-line { font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text); user-select: all; }
-#device-pair-dialog .device-pair-cmd { min-height: 110px; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-wrap: anywhere; width: 100%; box-sizing: border-box; }
+#device-pair-dialog .device-pair-cmd { min-height: 0; resize: none; overflow: hidden; white-space: pre-wrap; font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; overflow-wrap: anywhere; width: 100%; box-sizing: border-box; } /* pair-dialog-polish: WHOLE — its height set from its text (sidebar-mounts fitCmd), never cut, never resized by hand */
 .dap { display: flex; flex-direction: column; gap: 2px; }
 .dap-head { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
 .dialog-body label.dap-row, .dap-row { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; padding: 6px 6px; border-radius: var(--radius-sm); cursor: pointer; min-height: 32px; font-weight: 400; }
@@ -8719,6 +8736,8 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .dialog-body label.dap-row, .dap-row { min-height: 44px; }
   .device-pair-copy { flex: 1 1 100%; }
+  #device-pair-dialog label.device-pair-allow-flag, #device-pair-dialog label.device-pair-elev-flag, #device-pair-dialog .device-pair-os button { min-height: 44px; } /* pair-dialog-polish: a finger's target */
+  #device-pair-dialog .device-pair-more summary { padding: 12px 0; }
   .dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { min-height: 44px; }
   .exit-access-modes { flex-direction: column; gap: 0; }
   .ut-exit-answer .ut-action-exit, .ut-action-exit { min-height: 36px; min-width: 72px; }
