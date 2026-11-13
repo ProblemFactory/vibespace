@@ -70,6 +70,20 @@ This file is the engineers' record of every release: the lanes, the verification
   - src/lib/session-lifecycle.js ageTxt.
 - Pin: test-account-reset-door page-k3 reads the three unit rows from both dictionaries and asserts hours = 小时 / 時間, with no row left as the English letter. RED CONTROL: the same row over 7177b207c's dictionaries is false.
 
+### usage-walk-one-folder — the usage ledger's readers are a census: a doubled row changes no number a person sees, and stays so
+- **The page.** `/var/tmp/vibespace-lanes/usage-walk-one-folder/page-ledger-readers.md`, read and GO by 主开发 03:50Z. Two rounds tried to make the walk count a two-named transcript folder once (3a0cbda4a, db1c23005, both NOT accepted: each round's own mechanism could drop rows). The page asked first what a person sees.
+- **The answer: nothing wrong.**
+  - Every figure and decision reads the in-memory cache, which keeps the FIRST row of each request id (src/usage-history.js `_take`). That covers the Usage window and its CSV, the message popup, the anchors, the estimator, the pool and Diagnostics.
+  - Measured on the release: a conversation built CLEAN and DOUBLED (an alias made, two requests appended) gives the same 5 requests and the same cost through every one of them.
+  - The release doubles only what both names deliver in ONE walk. The local commit refuses an id the ledger holds but has no set for its own batch, which the remote ingest has.
+- **The pick is the PIN, and the walk is unchanged.** scripts/ledger-reader-census.mjs + scripts/test-ledger-readers-census.mjs (fast):
+  - the 21 readers, each with its function, its door (the cache, the shards, the hold files, the ingest index) and its rule about a repeated id (inherits, first wins, larger wins, yes-no, alike — a migration that treats every copy the same — counts copies on purpose: only the growth alarm);
+  - every scope naming the shards at its count — a new raw reader is red until it says which reader it is or why it is none (telemetry's own events-YYYY-MM files are said not to be the ledger);
+  - every file reaching into the cache's internals;
+  - the clean-vs-doubled measurement as legs;
+  - planted red controls: a new file summing raw lines, a new scope in a rowed file, a new file peeking at the cache.
+- **Next (B-6ded):** a walk stopped by the mount gate after it consumed bytes loses those rows on the release too. Its law: a walk that does not reach its commit point leaves the cursor map as it found it.
+
 ## 2.369.398 — 2026-11-12
 
 ### test-cache-bounds §30 — the fold's soft cap sits where neither verdict follows the collector (B-a77d; 主开发 21:42Z, addendum 21:45Z)
