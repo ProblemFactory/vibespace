@@ -9387,7 +9387,7 @@ export default {
   "On {machine}, run: xcode-select --install": "请在{machine}上运行：xcode-select --install",
   "On {machine}, open {pane}": "请在{machine}上打开{pane}",
   // lane machine-needs-at-pairing pick 2 (the reader's items 3 + 7): the fetch's sheet before the press; a settings door's reason by its code
-  "Get {app} for {machine}": "为{machine}取得 {app}",
+  "Get {app} for {machine}": "为 {machine} 取得 {app}",
   "Get {app}": "取得 {app}",
   "Get it": "取得",
   "What: {app}, built by {publisher} — {mb} MB to download, one program (ffmpeg.exe, {exe} MB).": "内容：{app}，由 {publisher} 构建 — 下载 {mb} MB，只取其中一个程序（ffmpeg.exe，{exe} MB）。",
@@ -9401,6 +9401,16 @@ export default {
   "{machine} tried and its system did not open the page ({why}).": "{machine} 试过了，但它的系统没有打开这个页面（{why}）。",
   "This hub refused it, so nothing reached {machine} ({why}).": "这个 hub 拒绝了这次操作，所以没有发到 {machine}（{why}）。",
   "{machine} did not open it ({why}).": "{machine} 没有打开它（{why}）。",
+  // machine-needs pick 3c: each failed build's reason by its code; the machine by the sheet title's name
+  "{build}: its folder could not be made": "{build}：无法创建它的文件夹",
+  "{build}: the download failed (no network, or its address did not answer)": "{build}：下载失败（没有网络，或下载地址没有响应）",
+  "{build}: the download is not the pinned file (its SHA-256 differs)": "{build}：下载的文件不是固定的那一个（SHA-256 不符）",
+  "{build}: the archive holds no ffmpeg.exe where it was pinned": "{build}：压缩包里固定的位置上没有 ffmpeg.exe",
+  "{build}: the unpacked ffmpeg.exe is not the pinned file (its SHA-256 differs)": "{build}：解出的 ffmpeg.exe 不是固定的那一个（SHA-256 不符）",
+  "{build}: ffmpeg.exe could not be put in place": "{build}：ffmpeg.exe 没能放到位",
+  "{build}: it stopped ({code})": "{build}：中途停止（{code}）",
+  "{app} was not fetched on {machine}, and nothing was changed there: {reasons}": "{machine} 上没有取得 {app}，那里什么都没有改动：{reasons}",
+  "What the machine printed": "那台电脑输出的原文",
   // lane machine-needs-at-pairing pick 3: the pairing sheet's step ② — what this device will be used for
   "What this device will be used for": "这台设备将用来做什么",
   "Nothing here can stop the pairing: whatever is not set up keeps its own button in the machine’s windows, and the command’s last lines say what is ready.": "这里的任何一项都不会让配对失败：没装上的会在这台电脑的窗口里保留自己的按钮，命令的最后几行会写明哪些已就绪。",

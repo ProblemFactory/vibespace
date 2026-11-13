@@ -402,7 +402,7 @@ async function streamInstall(req, res, host, run, doneOf, more = null) {
     line(await doneOf(r));
   } catch (e) {
     if (carry) line({ log: carry });
-    line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.digest ? { digest: e.digest } : {}) });
+    line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.digest ? { digest: e.digest } : {}), ...(e && Array.isArray(e.rows) ? { rows: e.rows } : {}) }); // machine-needs pick 3c: the fetch's per-build codes
   } finally { try { res.end(); } catch { /* gone */ } }
 }
 const xpraDone = (r) => {

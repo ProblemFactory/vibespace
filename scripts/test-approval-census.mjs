@@ -785,7 +785,7 @@ console.log('§3c THE INSTALL ROW HOLDS WHAT RUNS — 「取得 FFmpeg」\'s BYT
   // digest moves in that same commit.
   const FFI = REQ(path.join(REPO, 'src/ffmpeg-install.js'));
   const plan = FFI.ffmpegInstallPlan({ platform: 'win32' });
-  const FFMPEG_PLAN_ARGV_SHA256 = '90ab87be42fedff95ef4401fe084dd79e05baecf9fba3c52e94cf54e27b3cba7';
+  const FFMPEG_PLAN_ARGV_SHA256 = 'd28ca98d01916ba61137b584ce72d8949adc15d9f3fdb51d66a075ed8cc5f8bb'; // machine-needs pick 3c: the per-build codes moved the bytes
   const got = REQ('node:crypto').createHash('sha256').update(JSON.stringify(plan.argv)).digest('hex');
   ok(got === FFMPEG_PLAN_ARGV_SHA256, 'the ffmpeg plan\'s BYTES (its encoded argv — what PowerShell runs) are the ones this census holds', { got, held: FFMPEG_PLAN_ARGV_SHA256 });
   const moved = FFI.FFMPEG_BUILDS.map((b) => ({ ...b, sha256: b.sha256.replace(/^./, (c) => (c === '7' ? '8' : '7')) }));
