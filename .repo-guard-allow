@@ -106,3 +106,5 @@ bb_1234567890abcd
 kk_1234567890abcd
 # lane machine-needs-at-pairing pick 3a: xpra.org's apt PUBLIC key (scripts/fixtures/xpra/xpra.asc, fingerprint B4993B57323148E37977E5D873254CAD17978FAF) — one armored line has a cephx key's shape; a published public key, no secret
 AQ2VeOkwnYplp0[/]aPkGqQSJ\+bD5rYVMOKXkpsEDOFZs3a38F1lqFakRQlJPxv2qc
+# lane ui-controls-and-bugs: test-write-only-secrets plants invented credential URLs (example.test hosts) to prove the write-only law
+https?://(someone|ak|user):wo-u-[0-9]@

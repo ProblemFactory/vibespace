@@ -4516,7 +4516,7 @@ label.cfg-row {
 .mounts-signin-state.off { color: var(--yellow); }
 .mounts-held { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; margin-top: 2px; }
 .mounts-held-state { font-size: 12px; color: var(--text-secondary); }
-.mounts-held-replace[hidden], .mounts-form [name][hidden] { display: none; }
+.mounts-held-replace[hidden], .mounts-held-remove[hidden], .mounts-held-undo[hidden], .mounts-form [name][hidden] { display: none; }
 
 /* ── Bootstrap progress dialog ── */
 .bs-steps { display: flex; flex-direction: column; gap: 6px; }
