@@ -73,7 +73,11 @@ const UPSTREAM_OPEN_MS = 8000;
 const FETCH_MS = 4000;
 // lane chrome-157 (THE WINDOW): how long a lapsed window remembers its lease (a download its tab begins later is canceled); a hub
 // start's put-back: tries, the gap between them (× the try), and how long a grant waits for it
-const LAPSED_MS = 120000, ADOPT_TRIES = 3, ADOPT_GAP_MS = 1000, ADOPT_WAIT_MS = 10000;
+const ADOPT_TRIES = 3, ADOPT_GAP_MS = 1000;
+// the closure list S7: the first grant waits out EVERY try of the adoption (each bounded by FETCH_MS, the gaps growing) — a try never lands after a grant
+const ADOPT_WAIT_MS = ADOPT_TRIES * FETCH_MS + ADOPT_GAP_MS * (ADOPT_TRIES * (ADOPT_TRIES - 1)) / 2 + 1000;
+// a download's guid is kept a moment past its end so every copy the lease asked for (a page session's and the browser's) is delivered
+const DOWNLOAD_ENDED_KEEP_MS = 5000;
 /** lane chrome-157 r2 (主开发's MUST): what an agent's invented method names may cost — the grant's view lists at most
  *  UNCLASSIFIED_KEEP names (it rides the keeper's digest to every client), the journal says at most UNCLASSIFIED_SAY a run
  *  (one line each, then ONE line that the rest go uncounted line by line, and the count at shutdown). Only a SHAPED name
@@ -95,6 +99,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
    *  upstream, browserKey}. `adopting`: a hub start's put-back of a profile (adopt), awaited before that profile's first grant. */
   const windows = new Map();
   const adopting = new Map();
+  const toldListeners = new Set();   // (lane chrome-157, the closure list S2 / S5: the keeper's notice road)
   let unsaid = 0, sayFull = false, malformedSaid = false;
   const grants = new Map();   // token → grant
   const byKey = new Map();    // grantKey → token
@@ -197,7 +202,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     g.lastUsedAt = now();
     const closeBoth = (code, reason) => {
       const had = g.conns.delete(conn);
-      if (had && !g.conns.size && grants.get(g.token) === g) stepWindow(g.profileId, { kind: 'connGone', key: g.key });   // (lane chrome-157: W5 — a door that lives on the agent's socket is not a door)
+      if (had && grants.get(g.token) === g) { const w = windows.get(g.profileId); if (w && w.conn === conn && w.st && w.st.owner === g.key) stepWindow(g.profileId, { kind: 'connGone', key: g.key }); }   // (lane chrome-157: W5 / the closure list S1 — the window lives with the connection that SET it: its events go there alone)
       if (conn.credits) { for (const c of conn.credits.values()) settleCredit(c, { ok: false, code: 'upstream_gone', error: 'the browser connection closed before it answered' }); conn.credits.clear(); } // lane S2
       try { if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(code, reason); } catch { /* gone */ }
       try { if (up.readyState === WebSocket.OPEN || up.readyState === WebSocket.CONNECTING) up.close(); } catch { /* gone */ }
@@ -241,8 +246,11 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       }
       if (msg.method === 'Browser.setDownloadBehavior') {   // (lane chrome-157: THE WINDOW — the act, whatever its wire shape: no session, a browser-target session, a page session)
         const prm = msg.params && typeof msg.params === 'object' ? msg.params : {};
+        // the closure list S3 / S4: what THIS lease asked on THIS channel (a page session, or the connection itself) — the events the
+        // mediator forwards are exactly the ones it asked for, wherever it asked; never more because the window needed to see them
+        conn.asked = conn.asked || new Map(); conn.asked.set(msg.sessionId == null ? '' : String(msg.sessionId), prm.eventsEnabled === true);
         if (prm.browserContextId == null) {   // (a context of the lease's own was forwarded as it is by the verdict; another's was refused)
-          const r = stepWindow(g.profileId, { kind: 'set', by: g.key, behavior: prm.behavior, now: now(), paused, boundMs: windowBoundMs }, { g, conn });
+          const r = stepWindow(g.profileId, { kind: 'set', by: g.key, behavior: prm.behavior, now: now(), paused, boundMs: windowBoundMs }, { g, conn, sid: msg.sessionId == null ? null : String(msg.sessionId) });
           if (r.refuse) {
             g.refusals = (g.refusals || 0) + 1;
             const words = r.refuse.code === M.INTERRUPTED_CODE ? M.pausedWords(msg.method, M.pausedVerdict(msg.method)) : `${msg.method} ${r.refuse.words}`;
@@ -250,7 +258,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
             try { ws.send(JSON.stringify(M.refusal(msg.id, r.refuse.code, words, v.pending.sessionId))); } catch { /* gone */ }
             return;
           }
-          if (prm.behavior !== 'default') { conn.downloadEvents = prm.eventsEnabled === true; v.rewrite = { ...prm, eventsEnabled: true }; }   // (the mediator must SEE the download end; the lease is told only what it asked for, and only its own)
+          if (prm.behavior !== 'default') v.rewrite = { ...prm, eventsEnabled: true };   // (the mediator must SEE its download begin and end on the channel it set; the lease is told only what it asked for, and only its own)
         }
       }
       conn.pending.set(msg.id, v.pending);
@@ -270,16 +278,26 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         if (rec) rec.terminateAnswers.push(msg.error ? `error: ${String(msg.error.message || msg.error.code || 'refused').slice(0, 120)}` : 'ok');
         return;
       }
-      if (msg.method === 'Browser.downloadWillBegin' || msg.method === 'Browser.downloadProgress') {   // (lane chrome-157: THE WINDOW — W1 + W2)
+      if (msg.method === 'Browser.downloadWillBegin' || msg.method === 'Browser.downloadProgress') {   // (lane chrome-157: THE WINDOW — W1, W2; the closure list S3 / S4)
         const p0 = msg.params && typeof msg.params === 'object' ? msg.params : {};
         const guid = p0.guid == null ? '' : String(p0.guid);
         const w = windows.get(g.profileId);
-        const mine = !!(w && w.st && w.st.owner === g.key);
-        if (msg.method === 'Browser.downloadWillBegin') { if (mine && guid) stepWindow(g.profileId, { kind: 'begin', own: M.isLeaseFrame(g.scope, p0.frameId), guid }, { g, conn }); }
-        const deliver = !!(conn.downloadEvents && guid && g.scope.downloads.has(guid));   // only the lease's own download, only when it asked
+        const st = w && w.st;
+        const mine = !!(st && st.owner === g.key);
+        if (msg.method === 'Browser.downloadWillBegin' && guid && !g.scope.downloads.has(guid)) {
+          const own = M.isLeaseFrame(g.scope, p0.frameId);   // S4: a download its own frame began is ITS OWN, window or not (its own context's tabs are its frames)
+          if (own) g.scope.downloads.set(guid, { ended: false });
+          if (!st || mine) stepWindow(g.profileId, { kind: 'begin', own, guid, now: now() }, { g, conn });   // (another lease's window: not this lease's to count)
+        }
+        // S3: heard ONCE per channel it asked on — a copy on a channel it never asked for (the window's own) is the mediator's alone
+        const deliver = !!(guid && g.scope.downloads.has(guid) && conn.asked && conn.asked.get(msg.sessionId == null ? '' : String(msg.sessionId)) === true);
         const ended = msg.method === 'Browser.downloadProgress' && (p0.state === 'completed' || p0.state === 'canceled');
         if (deliver) { try { ws.send(String(data)); } catch { /* gone */ } } else g.dropped = (g.dropped || 0) + 1;
-        if (ended && guid) { if (mine) stepWindow(g.profileId, { kind: 'end', guid }, { g, conn }); g.scope.downloads.delete(guid); }
+        if (ended && guid) {
+          if (mine) stepWindow(g.profileId, { kind: 'end', guid }, { g, conn });
+          const rec = g.scope.downloads.get(guid);
+          if (rec && !rec.ended) { rec.ended = true; const t = setTimeout(() => { if (g.scope.downloads.get(guid) === rec) g.scope.downloads.delete(guid); }, DOWNLOAD_ENDED_KEEP_MS); if (t.unref) t.unref(); }   // every copy it asked for still reaches it
+        }
         return;
       }
       if (msg.id != null && conn.pending.has(msg.id)) {
@@ -351,8 +369,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   function interrupt({ profileId, browserKey } = {}) {
     const g = grantOf(profileId, browserKey);
     const out = { aborted: [], terminated: 0, at: now() };
-    if (g) stepWindow(g.profileId, { kind: 'takeover' });   // (lane chrome-157: THE WINDOW — a takeover puts the profile back, on either road)
-    if (g && g.windowTold && g.windowTold.unread && g.windowTold.why === 'the person took over') { g.windowTold.unread = false; out.downloadsPutBack = true; }   // …and the lease whose window it was is told (its takeover card and its handback; a sibling lease's interrupt may have closed it first)
+    if (g) { const wr = stepWindow(g.profileId, { kind: 'takeover' }); out.downloadsPutBack = !!(wr && wr.putBack); }   // (lane chrome-157: THE WINDOW — a takeover puts the profile back, on either road; the lease whose window it was is TOLD by the notice road, whoever was taken over — the closure list S5)   // …and the lease whose window it was is told (its takeover card and its handback; a sibling lease's interrupt may have closed it first)
     if (!g || g.mode === M.SCOPE_MODE) return out; // lane browser-shared-profile-freeze: the cooperative road never interrupted its calls (its pause is /resolve's)
     const rec = { at: out.at, aborted: 0, methods: [], terminated: 0, terminateAnswers: [], landed: 0, landedMethods: [] }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
     for (const conn of g.conns) {
@@ -454,59 +471,64 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     });
   }
   /** Send ONE call of the mediator's own on a lease's connection (its reply swallowed, handed to `onReply(ok)`). → sent? */
-  function sendInternal(conn, method, params, onReply) {
+  function sendInternal(conn, method, params, onReply, sessionId = null) {
     if (!conn || !conn.up || conn.up.readyState !== WebSocket.OPEN) return false;
     conn.internal = conn.internal || new Map();
     let iid = INTERNAL_ID_BASE - (conn.nextInternal = (conn.nextInternal || 0) + 1);
     while (conn.pending.has(iid) || conn.internal.has(iid)) iid -= 1;
     conn.internal.set(iid, { method, at: now(), onReply });
-    try { conn.up.send(JSON.stringify({ id: iid, method, params })); return true; } catch { conn.internal.delete(iid); return false; }
+    try { conn.up.send(JSON.stringify({ id: iid, method, params, ...(sessionId ? { sessionId } : {}) })); return true; } catch { conn.internal.delete(iid); return false; }
   }
   const ownerGrant = (key) => { const t = byKey.get(key); return t ? grants.get(t) : null; };
-  /** THE WINDOW's executor (lane chrome-157, the .401 read): M.windowStep decides; this keeps the state, runs the bound's timer,
-   *  sends the put-back (on the owner's own connection when it stands — ordered before the owner's next set — else one short
-   *  connection of its own), cancels a download the lease's tab began after its bound passed, and says each in the journal
-   *  (the profile, the lease, the door; never a path, a file name, a token or a raw url). → windowStep's answer */
-  function stepWindow(profileId, act, { g = null, conn = null } = {}) {
+  /** THE WINDOW's executor (lane chrome-157, the .401 read + the closure list): M.windowStep decides; this keeps the state, runs the
+   *  deadline's timer (the bound when nothing began, the ceiling in flight), sends the put-back — on the channel the owner SET (its
+   *  connection and its page session), with the events as the owner asked there, so its next set follows it and it hears nothing new
+   *  (S3, S6); else (that channel gone, or no ordered road) on one short connection of its own — tells the lease through the notice
+   *  road (onTold → the keeper → a free notice at its next turn; S2, S5), and says each in the journal (the profile, the lease, the
+   *  door; never a path, a file name, a token or a raw url). → windowStep's answer */
+  function stepWindow(profileId, act, { g = null, conn = null, sid = null } = {}) {
     const pid = String(profileId);
-    const w = windows.get(pid) || { st: null, timer: null, conn: null, upstream: null, browserKey: null };
+    const w = windows.get(pid) || { st: null, timer: null, conn: null, sid: null, upstream: null, browserKey: null };
     const was = w.st;
-    const owner = was ? ownerGrant(was.owner) : (act && act.kind === 'set' ? g : null);
+    const owner = was ? ownerGrant(was.owner) : (act && (act.kind === 'set' || act.kind === 'begin') ? g : null);
     const ordered = !!(w.conn && owner && owner.conns.has(w.conn) && w.conn.up && w.conn.up.readyState === WebSocket.OPEN);
     const r = M.windowStep(was, { ...act, ordered });
     w.st = r.state;
-    if (r.state && r.state.phase === 'open' && (!was || was.phase !== 'open' || was.n !== r.state.n)) {
-      w.conn = conn; w.upstream = g ? g.upstream : w.upstream; w.browserKey = g ? g.browserKey : w.browserKey;
-      log.log?.(`[cdp-mediator] ${w.browserKey} on ${pid}: the profile's download folder lent to this lease — put back when its download ends, after ${Math.round(M.WINDOW_BOUND_MS / 1000)} s with none begun, at a takeover, at the lease's end or when its connection ends`);
+    if (r.state && r.state.phase === 'open') {
+      const opened = !was || was.phase !== 'open' || was.n !== r.state.n;
+      if (act.kind === 'set' && conn) { w.conn = conn; w.sid = sid; }   // the window lives with the connection (and the channel) that set it last
+      if (opened) {
+        w.upstream = g ? g.upstream : w.upstream; w.browserKey = g ? g.browserKey : w.browserKey;
+        log.log?.(`[cdp-mediator] ${w.browserKey} on ${pid}: the profile's download folder lent to this lease — until its download needs it no more (at most ${Math.round(Number(r.state.bound) / 1000)} s with none begun, the same past its last begin), a takeover, the lease's end or its setting connection's`);
+      }
     }
-    const own = r.state ? ownerGrant(r.state.owner) : owner;
-    if (r.admit && own) own.scope.downloads.add(r.admit);
-    if (r.forget && owner) owner.scope.downloads.clear();
-    if (r.told && owner) owner.windowTold = { why: r.putBack, at: now(), unread: true };
-    if (r.cancel && own) {
-      own.scope.downloads.add(r.cancel);   // its OWN download: the lease sees it end, canceled
-      const via = [...own.conns].find((c) => c.up && c.up.readyState === WebSocket.OPEN) || null;
-      sendInternal(via, 'Browser.cancelDownload', { guid: r.cancel }, () => { });
-      log.log?.(`[cdp-mediator] ${own.browserKey} on ${pid}: a download its tab began after its folder was put back (no download within ${Math.round(M.WINDOW_BOUND_MS / 1000)} s of the set) — canceled, so it never lands in the person's own folder`);
+    if (r.admit && owner) { owner.scope.downloads.set(r.admit, owner.scope.downloads.get(r.admit) || { ended: false }); }
+    if (r.told) {
+      const to = owner || g;
+      const quiet = r.told === M.NO_WINDOW_TOLD && to && to.toldNoWindow;   // a download of its tab with no folder lent: said once until its next set
+      if (to && !quiet) {
+        if (r.told === M.NO_WINDOW_TOLD) to.toldNoWindow = true;
+        to.windowTold = { why: r.told, at: now() };
+        for (const fn of toldListeners) { try { fn({ profileId: pid, browserKey: to.browserKey, why: r.told }); } catch (e) { log.warn?.(`[cdp-mediator] a told listener threw — ${e && e.message}`); } }
+        log.log?.(`[cdp-mediator] ${to.browserKey} on ${pid}: told — ${r.told}`);
+      }
     }
+    if (act.kind === 'set' && g && act.behavior !== 'default' && r.forward) g.toldNoWindow = false;
     if (w.timer) { clearTimeout(w.timer); w.timer = null; }
-    if (r.state && r.state.phase === 'open' && !r.state.began.length) {
+    if (r.state && r.state.phase === 'open') {
       w.timer = setTimeout(() => { const x = windows.get(pid); if (x) { x.timer = null; stepWindow(pid, { kind: 'bound', now: now() }); } }, Math.max(0, Number(r.state.deadline) - now()) + 5);
-      if (w.timer.unref) w.timer.unref();
-    } else if (r.state && r.state.phase === 'lapsed') {
-      const n = r.state.n;
-      w.timer = setTimeout(() => { const x = windows.get(pid); if (x && x.st && x.st.phase === 'lapsed' && x.st.n === n) windows.delete(pid); }, LAPSED_MS);
       if (w.timer.unref) w.timer.unref();
     }
     if (r.putBack) {
       const n = r.state ? r.state.n : (was && was.n);
       const say = (ok) => log.log?.(`[cdp-mediator] ${w.browserKey || '?'} on ${pid}: the profile's download folder ${ok ? 'put back' : 'NOT put back (the browser did not answer)'} — ${r.putBack}`);
       const done = (ok) => { say(ok); if (r.state && r.state.phase === 'closing') stepWindow(pid, { kind: 'putBackDone', n }); };
-      // on the owner's own connection the events stay ON (measured on 154 + 157: {behavior:'default', eventsEnabled:true} puts the
-      // profile's place back and that connection keeps seeing downloads — so a download its tab begins after a lapse is still seen
-      // and canceled; the lease is told only its own, scope.downloads)
-      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: true }, done);
-      if (!sent) putBackDownloads(w.upstream).then(done);
+      const asked = !!(w.conn && w.conn.asked && w.conn.asked.get(w.sid || '') === true);
+      const short = () => putBackDownloads(w.upstream).then(done);
+      // measured (154 + 157): a {behavior:'default'} on the page session that set the folder puts the WHOLE profile back, and that
+      // session then hears only its own page's downloads — the ordered put-back goes there, as the lease asked its events
+      const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true); else short(); }, w.sid);
+      if (!sent) short();
     }
     if (!r.state && !w.timer) windows.delete(pid); else windows.set(pid, w);
     return r;
@@ -521,6 +543,9 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       const r = M.windowStep(windows.has(pid) ? windows.get(pid).st : null, { kind: 'adopt' });
       if (!r.putBack) return { ok: true, tries: 0 };
       for (let i = 1; i <= tries; i++) {
+        // S7: a window that opened meanwhile (a lease that held a grant before the boot came here) puts itself back by its own doors —
+        // a try now would reset that lease's fresh set
+        if (i > 1 && !M.windowStep(windows.has(pid) ? windows.get(pid).st : null, { kind: 'adopt' }).putBack) { log.log?.(`[cdp-mediator] ${pid}: adopted at the hub's start — a download window opened before the put-back landed; not tried again (that window's own doors put it back)`); return { ok: false, tries: i - 1, yielded: true }; }
         if (await putBackDownloads(upstream)) { log.log?.(`[cdp-mediator] ${pid}: adopted at the hub's start — its download folder put back to the profile's own${i > 1 ? ` (try ${i})` : ''}`); return { ok: true, tries: i }; }
         if (i < tries) await new Promise((res) => { const t = setTimeout(res, gapMs * i); if (t.unref) t.unref(); });
       }
@@ -609,7 +634,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     for (const conn of g.conns) for (const p of conn.pending.values()) if (p && p.aborted && p.interruptAt === g.lastInterrupt.at) unsettled++;
     return { ...g.lastInterrupt, methods: [...g.lastInterrupt.methods], landedMethods: [...(g.lastInterrupt.landedMethods || [])], terminateAnswers: [...g.lastInterrupt.terminateAnswers], unsettled };
   }
-  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, putBackDownloads, adopt, windowToldOf: (profileId, browserKey) => { const g = grantOf(profileId, browserKey); return g && g.windowTold ? { ...g.windowTold } : null; }, downloadWindowOf: (profileId) => { const w = windows.get(String(profileId)); return w && w.st ? { phase: w.st.phase, browserKey: w.browserKey, began: w.st.began ? w.st.began.length : 0, ordered: !!w.st.ordered, then: w.st.then || null, deadline: w.st.deadline || null } : null; }, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
+  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, putBackDownloads, adopt, onTold: (fn) => { if (typeof fn !== 'function') return () => { }; toldListeners.add(fn); return () => toldListeners.delete(fn); }, windowToldOf: (profileId, browserKey) => { const g = grantOf(profileId, browserKey); return g && g.windowTold ? { ...g.windowTold } : null; }, downloadWindowOf: (profileId) => { const w = windows.get(String(profileId)); return w && w.st ? { phase: w.st.phase, browserKey: w.browserKey, began: w.st.began ? w.st.began.length : 0, pending: !!w.st.pending, ordered: !!w.st.ordered, then: w.st.then || null, deadline: w.st.deadline || null } : null; }, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
-module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS };
+module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE, UNCLASSIFIED_KEEP, UNCLASSIFIED_SAY, VERSION_RETRY_MS, FETCH_MS, ADOPT_TRIES, ADOPT_GAP_MS, ADOPT_WAIT_MS };

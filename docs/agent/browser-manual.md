@@ -805,17 +805,22 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   only what your task needs, and `deny` it again when you are done.
 * **Downloads: the folder is lent, briefly.** `download` WORKS:
   VibeSpace lends you the profile's download folder from the moment your
-  driver sets it until that download ends — or 15 s after the set if no
-  download of your tab begins (a download your tab begins later is canceled,
-  so use `vibespace-browser download <selector> <path>`, which sets the
-  folder and clicks in one step) — and takes it back at once when the person
-  takes over, your lease ends or your connection closes (you are told when a
-  takeover took it back: set it again before your next download). While it
-  is lent, a file the person starts in that profile lands in your folder, so
-  finish and move on. One window per profile: while another conversation's
-  download is in flight there, your set is refused by name — try again in a
-  moment. `deny` (blocking every download of the profile) is refused. You
-  are told only of your own downloads, and may cancel only those.
+  driver sets it until your download no longer needs it — 30 s after the set
+  if no download of your tab begins (the driver's own timeout), and 30 s past
+  your last download's begin at most (a file's place is fixed when it begins,
+  so it still lands in your folder) — and takes it back at once when the
+  person takes over (any window of that browser), your lease ends or the
+  connection that set it closes. A download your tab begins while no folder
+  of yours is lent goes to the profile's own place (the person's Downloads):
+  use `vibespace-browser download <selector> <path>`, which sets the folder
+  and clicks in one step. You are TOLD — a note at your next turn — whenever
+  the folder was taken back early or a download of yours went to the
+  person's place. While it is lent, a file the person starts in that profile
+  lands in your folder, so finish and move on. One window per profile: while
+  another conversation's download is in flight there, your set is refused by
+  name — try again in a moment. `deny` (blocking every download of the
+  profile) is refused. You are told of your own downloads (window or not)
+  and of no one else's, and may cancel only your own.
 * A paired machine's profile, or a hub with no mediating proxy, hands your
   driver the browser directly: nothing is refused there — leave the
   person's profile as you found it (a profile shared with separate tabs is
