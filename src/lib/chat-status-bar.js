@@ -3,6 +3,7 @@ import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJ
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
 import { UI_ICONS } from './icons.js';
+import { panelPlace } from './menu-place.js'; // PURE (lane ui-controls-and-bugs): a panel keeps its natural width and slides — the width sweep's rule 4
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
@@ -1628,6 +1629,25 @@ export class ChatStatusBar {
       // into an app's picture counts too); its own rule kept: a press ON the anchor element is the toggle's, and a
       // press in another [data-popover] still closes it (it never honoured the chained-popover rule)
       onOutsidePress(dropdown, () => dropdown.remove(), { ignore: (t) => t === anchor, nested: false });
+      // A PANEL KEEPS ITS NATURAL WIDTH AND SLIDES (lane ui-controls-and-bugs — the width sweep's rule 4: the health panel,
+      // filled AFTER the clamp above ran, was squeezed to a 130 px strip at the right edge of a 320 px window). Once the caller
+      // has filled it — and again whenever its content changes — it is measured as wide as its content wants (up to the
+      // caller's max and the room), then slid left until that width fits (PURE panelPlace). LAYOUT px.
+      if (bounded) {
+        const settle = () => {
+          if (!dropdown.isConnected) return;
+          dropdown.style.left = '0px'; dropdown.style.maxWidth = Math.min(maxWidth, room) + 'px';
+          const at = panelPlace({ wantLeft, containerW, natW: dropdown.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD });
+          dropdown.style.left = at.left + 'px';
+          if (Number.isFinite(at.maxW)) dropdown.style.maxWidth = at.maxW + 'px';
+        };
+        queueMicrotask(settle);
+        if (typeof MutationObserver === 'function') {
+          let q = 0;
+          const mo = new MutationObserver(() => { if (!dropdown.isConnected) { mo.disconnect(); return; } if (!q) q = requestAnimationFrame(() => { q = 0; settle(); }); });
+          mo.observe(dropdown, { childList: true, subtree: true, characterData: true });
+        }
+      }
       return dropdown;
     };
 
