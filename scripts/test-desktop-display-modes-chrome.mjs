@@ -33,6 +33,8 @@
 //     and NOTHING by itself; the VNC picture only on that press; a display really gone ⇒ the main one; a switch = one session
 //     (`switched` in the hub's log) — RED CONTROL: the pre-lane fallback opens the VNC picture by itself      never-silent*.png
 //   ⑥ (lane stream-udp-leg-fallback R4: a relayed chip names its road — «串流 · 设备链路 · 2 个显示器 · …» here, the device link alone)
+//   ⑦ THE LOCK OVER A ROAD (lane mac-locked-capture, recovery .399): one display, then every display in one window over the device
+//     link, the Mac locked ⇒ 串流 · 锁屏中 wins over 设备链路 · …; the unlock brings the road's words back   locked-road.png, locked-many-road.png
 //   ⑥ THE STALL (lane stream-leg-flap — the owner's Mac, 2026-10-20: both displays black at «串流 · 2 个显示器 · 0 fps» while ICE
 //     stayed connected): ② over a relay-only hub whose device-link half drops the machine's RTP (a black hole — STUN, DTLS,
 //     RTCP pass) ⇒ the chip reads the owner's 0 fps; within stallMs each pane says 「串流中断：画面不再传过来——正在重新连接…」,
@@ -55,7 +57,7 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
 const NOVNC = path.join(REPO, 'public/novnc.js');
 const FIXTURE = path.join(REPO, 'scripts/fixtures/stream/fake-desk-720p.h264');
-const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
+const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.VS_UI_SHOTS_DIR ? path.join(process.env.VS_UI_SHOTS_DIR, 'display-modes-chrome') : null; })();   // lane mac-locked-capture (recovery .399): VS_UI_SHOTS_DIR too, as test-desktop-webrtc-chrome — a ci.mjs claim passes no argv
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -668,6 +670,39 @@ console.log('⑥ THE STALL (lane stream-leg-flap — the owner\'s two displays s
   ok(S.again && S.offered === 2 && S.vnc === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · [1-9]\d* fps$/.test(S.chip), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
   const C = await stallRun('/nostall');
   ok(C.both && C.black && !C.said && C.stalled === 0 && C.offered === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · 0 fps$/.test(C.chip), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
+}
+
+console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg-fallback, recovery .399 — where the two pieces meet on the chip)');
+{
+  // a relay-only hub over the device link (no hole): the chip names its road («串流 · 设备链路 · …»). The page's long poll then says
+  // paused {why: locked} (its fetch wrapped, as test-desktop-webrtc-chrome ㉑ — the agent and hub halves are test-stream-locked's):
+  // THE LOCK wins over the road — 「串流 · 锁屏中」, never the road's numbers over a black pane — one display, then all displays in one window
+  await untilN(async () => (await live()).length === 0, 5000);
+  const LOCKWRAP = `(() => { const real = window.fetch.bind(window);
+    window.fetch = async (u, o) => { const res = await real(u, o); if (!/\\/stream\\/watch\\?/.test(String(u))) return res;
+      const j = await res.json(); if (!j.ended) j.paused = window.__locked ? { why: 'locked', since: window.__locked } : null;
+      return new Response(JSON.stringify(j), { headers: { 'Content-Type': 'application/json' } }); }; return true; })()`;
+  const roadHub = DW.create({ access, direct: false, udpLeg: false, log: rec });
+  R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) }, webrtc: roadHub });
+  const CHIPQ = `(document.querySelector('${WIN} .desktop-strip-status') || {})`;
+  for (const [mode, n, file] of [[null, 1, 'locked-road.png'], ['all', 2, 'locked-many-road.png']]) {
+    const p = await page(1280, 800, DESK, { at: '/' });
+    await p.ev(LOCKWRAP);
+    await p.ev(`window.__open(${JSON.stringify(M)}${mode ? `, { mode: '${mode}' }` : ''})`);
+    const up = await playingIn(p, WIN, n);
+    const road = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 9000);
+    await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '')`, 8000);
+    await sleep(400); await p.shot(file, WIN);   // the picture BEFORE the verdict: on the release tree it shows what the release says
+    const r = await p.ev(`({ chip: ${CHIPQ}.textContent || '', title: ${CHIPQ}.title || '' })`);
+    ok(up && road && locked && !/设备链路/.test(r.chip) && (n === 1 ? /已锁屏/.test(r.title) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}`, r);
+    await p.ev('window.__locked = 0; true');
+    const back = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 8000);
+    ok(back, `⑦ …the unlock: the road's words come back by themselves (${n} display${n > 1 ? 's' : ''})`);
+    await p.close();
+  }
+  roadHub.shutdown();
+  R.setup({ access, stream: bridge, vnc: { status: async () => ({ available: true, running: false }) }, webrtc: hub });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

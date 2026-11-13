@@ -60,6 +60,7 @@
 //      Mac-shaped daemon over the fake helper's lock file) ⇒ the picture's pane says Mac 已锁屏（HH:MM 起）— 解锁后自动继续 and the
 //      chip 串流 · 锁屏中 (its title the same words); paused null (the unlock) ⇒ the words go by themselves, 串流 · N ms · N fps in
 //      the same window — RED CONTROL: the page without THE LOCK's door (/prelock) says nothing                     locked.png
+//      a phone (390 px, recovery .399): the same words in the phone's window                                        locked-phone.png
 // PNGs when `--shots <dir>`.
 //   ⑫ a Mac's strip (lane stream-mac-stall): over a STREAM the switcher lists the Mac's displays (its offer's rows, left to right,
 //      the streamed one pressed, no 全部); a pick restarts the stream ON that display; 「打开系统设置」 opens the pane ON the Mac
@@ -1545,6 +1546,19 @@ console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locke
     const b1 = await p.ev('window.__band()'); await sleep(600); const b2 = await p.ev('window.__band()');
     ok(gone && b1 !== null && b2 !== null && b2 !== b1, '㉑ the unlock (paused null): the words go BY THEMSELVES and the picture plays on in the same window — no click', { gone, b1, b2 });
     await p.close();
+  }
+  // a PHONE (390 px, recovery .399 — the picture 主开发 reads): the same window, the same words
+  {
+    const ph = await page(390, 844, PHONE.replace('width:375px', 'width:390px').replace('height:667px', 'height:844px'), { touch: true });
+    await ph.ev(LOCKWRAP);
+    await ph.ev(`window.__open(${JSON.stringify(MM)})`);
+    const upP = await playing(ph);
+    await ph.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    const saidP = await ph.until(`${WORDS}.test(${SAY})`, 8000);
+    await sleep(300); await ph.shot('locked-phone.png', WIN);
+    ok(upP && saidP, '㉑ phone 390: the locked Mac is said in the same words in the phone\'s window', { say: await ph.ev(SAY) });
+    await ph.ev('window.__locked = 0; true');
+    await ph.close();
   }
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
