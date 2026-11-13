@@ -8,6 +8,11 @@
 //    src/lib carries `disabled: true` (the walk: «— 不提供» rows greyed with the reason in a tooltip, a billing menu with two
 //    greyed accounts and no title, a zoom menu whose heading and current choice were greyed ticks); the COMPUTED ones are a
 //    frozen ledger that only shrinks
+// pick 6 —
+// ⑩ A CONTROL SAYS WHAT IT DOES: the sessions filter is a funnel (with a count while it filters), the sort button says its
+//    order and opens a menu of the others; the For-you row's buttons are at the theme's contrast and say their word on hover /
+//    focus; a phone switcher row has a visible ⋯ (the same menu as its long press); the file explorer's tools say their words
+//    and fold through the chrome-bar fold (words, then icons, then ⋯), Upload with its own mark
 // pick 5 —
 // ⑨ THE SINGLE DEFECTS of pick 5, each pinned where it lives: the process table draws every row the server sent and says
 //    «显示 350 / 共 1131 个进程» (no «show all» that showed 350); the System panel's vault / index lines in the language's
@@ -190,6 +195,22 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
     'a console\'s prerequisites: «开始前请确认：» over a list — never three run-on hint sentences'); }
 { const SM = read('src/lib/sidebar-mounts.js');
   ok(/<details class="bs-log-wrap" hidden>/.test(SM) && /const appendLog = \(line\) => \{ logWrap\.hidden = false;/.test(SM), 'the host set-up\'s Log fold appears with its first line — never a fold onto an empty box'); }
+
+// ── ⑩ a control says what it does ──
+console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons, the phone ⋯, the explorer toolbar');
+{ const SB2 = read('src/lib/sidebar.js');
+  ok(/btn\.innerHTML = UI_ICONS\.filter;/.test(SB2) && /n\.className = 'backend-filter-count'; n\.textContent = String\(this\._backendFilter\.size\);/.test(SB2) && !/backend-filter-icon-stack/.test(SB2)
+    && /btn\.textContent = words \+ ' ▾';/.test(SB2) && (SB2.match(/\[\{ caption: tr\('Sort by'\) \}, \.\.\./g) || []).length === 2 && !/this\._sortMode = this\._sortMode === 'recent' \? 'folder' : 'recent';/.test(SB2),
+    'sessions: the filter is a funnel with a count while it filters; sort says its order («最近 ▾») and opens a menu on both tabs — never a clock that silently toggles'); }
+{ const CSS = read('public/style.css');
+  ok(!/\.ut-actions \{[^}]*opacity: 0\.35/.test(CSS) && /\.ut-act\[data-label\]:is\(:hover, :focus-visible\)::after \{ content: attr\(data-label\);/.test(CSS) && /\.ut-detail-exp > summary \{ font-size: inherit;/.test(CSS),
+    'For-you: the row\'s buttons at the theme\'s contrast (no 35 % dimming), each says its word on hover / focus, «▸ 详情» at the body size'); }
+{ const MN = read('src/lib/mobile-nav.js');
+  ok(/moreBtn\.onclick = \(e\) => \{ e\.stopPropagation\(\); const r = moreBtn\.getBoundingClientRect\(\); showWindowContextMenu\(this\.app, win\.id,/.test(MN) && /item\.append\(icon, label, moreBtn, closeBtn\)/.test(MN),
+    'the phone switcher: a visible ⋯ on each row opens the window\'s own menu (the long press stays)'); }
+{ const FE = read('src/lib/file-explorer.js');
+  ok(/btnUpload\.innerHTML = UI_ICONS\.upload;/.test(FE) && !/'\\u2B06'/.test(FE) && /const fold = createBarFold\(toolbar, \{/.test(FE) && /compactClass: 'ftw-compact'/.test(FE) && /w\.className = 'ftw-word'; w\.textContent = word;/.test(FE),
+    'the file explorer: every tool says its word, Upload has its own mark (no second up-arrow), the bar folds through createBarFold (words, then icons, then ⋯)'); }
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);

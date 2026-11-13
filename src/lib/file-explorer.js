@@ -7,6 +7,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
+import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs (files-2): the toolbar folds — words, then icons, then ⋯
 import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: ‹ home, the breadcrumbs, «New session here» (phone only)
 import { t, tc } from './i18n.js';
 
@@ -85,7 +86,7 @@ class FileExplorer {
 
     const btnNewFile = this._btn('+', t('New file')); btnNewFile.onclick = () => this.createFile();
     const btnNewDir = this._btn('', t('New folder')); btnNewDir.innerHTML = FILE_ICONS.folderOpen; btnNewDir.onclick = () => this.createDir();
-    const btnUpload = this._btn('\u2B06', t('Upload')); btnUpload.onclick = () => this._triggerUpload(btnUpload);
+    const btnUpload = this._btn('', t('Upload')); btnUpload.innerHTML = UI_ICONS.upload; btnUpload.onclick = () => this._triggerUpload(btnUpload);   // its own mark (it was ⬆ beside ↑ Go up)
     btnUpload.style.position = 'relative';
     this._uploadBtn = btnUpload;
     // Ring progress indicator (Chrome-style, shown during active uploads)
@@ -109,7 +110,24 @@ class FileExplorer {
     this._ringCircumference = 2 * Math.PI * 8;
 
     toolbar.style.position = 'relative';
-    toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload);
+    // lane ui-controls-and-bugs (the walk's files-2: two up-arrows — ↑ Go up and ⬆ Upload — and no words): every tool says its
+    // WORD beside its icon; the bar folds through THE chrome-bar fold (bar-fold.js): the words go first, then the tools into ⋯
+    // (View first, Upload last); Go up, the machine and the path never fold. The phone keeps the icons (its own layout).
+    const tools = { up: [btnUp, t('Go up')], refresh: [btnRefresh, t('Refresh')], view: [btnView, t('View')], newFile: [btnNewFile, t('New file')], newDir: [btnNewDir, t('New folder')], upload: [btnUpload, t('Upload')] };
+    for (const [b, word] of Object.values(tools)) { const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
+    const btnMore = this._btn('', t('More')); btnMore.innerHTML = UI_ICONS.more; btnMore.classList.add('file-tool-more'); btnMore.setAttribute('aria-haspopup', 'menu');
+    toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, btnMore);
+    const FOLD = { up: 0, host: 0, path: 0, upload: 10, newFile: 20, newDir: 30, refresh: 40, view: 50 };   // 0 never folds; a higher one folds first
+    if (app.isMobile) btnMore.style.display = 'none';
+    else {
+      const fold = createBarFold(toolbar, {
+        more: btnMore,
+        items: () => [['up', btnUp], ['host', this._hostSelect], ['path', this._pathField.el], ['refresh', btnRefresh], ['view', btnView], ['newFile', btnNewFile], ['newDir', btnNewDir], ['upload', btnUpload]]
+          .map(([key, el]) => ({ key, el, priority: FOLD[key], ...(key === 'path' ? { flexMin: 90 } : {}), ...(tools[key] ? { compactClass: 'ftw-compact' } : {}) })),
+        signal: winInfo._listenerCtl?.signal,
+      });
+      btnMore.onclick = () => { const r = btnMore.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, fold.folded().filter((k) => tools[k]).map((k) => ({ label: tools[k][1], action: () => tools[k][0].click() }))); };
+    }
     // THE PHONE'S EXPLORER (lane phone-files-door): the window IS the screen there; ‹ returns to the phone's home, the
     // breadcrumbs scroll sideways under the path bar, «New session here» heads the listing. Built only on a phone.
     this._phone = app.isMobile ? explorerPhoneBits(this) : null;
