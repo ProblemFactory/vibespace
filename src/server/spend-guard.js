@@ -282,7 +282,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
     const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : `inbox|${key || '?'}|${v.why}`;
     const lastInbox = Number(state.notices[inboxSig]) || 0;
-    if (now - lastInbox > REFUSE_INBOX_MS) {
+    // THE SEAM WITH LAWS 2 + 3 (shape C — 主开发 2026-11-13 15:30Z): while a «messages waiting» For-you item stands for the
+    // conversation these frames wait behind (src/server/wait-watch.js, the same key `<backend>:<cid>`), IT speaks: the spending
+    // notice for that conversation is not filed — one owner item per stuck turn; filed as before once that item is gone.
+    // Its journal line keeps the notice's cadence under its OWN stamp (主开发 17:45Z): one line per REFUSE_INBOX_MS while the item
+    // stands — never one per refusal — and never the notice's stamp, so the notice is filed at once when the item goes
+    const waitItemStands = !!(wait && wait.key) && (() => { try { const ut = getUserTodos(); const sn = ut && typeof ut.snapshot === 'function' ? ut.snapshot() : null; return !!sn && (sn.open || []).some((i) => i && i.sessionKey === wait.key && String(i.itemKey || '').startsWith('messages-waiting:')); } catch { return false; } })();
+    const heldSig = 'held|' + inboxSig;
+    if (waitItemStands && now - lastInbox > REFUSE_INBOX_MS && now - (Number(state.notices[heldSig]) || 0) > REFUSE_INBOX_MS) { state.notices[heldSig] = now; persist(); log(`[spend-guard] ${v.why}: the spending notice at ${wait.key} is not filed — its «messages waiting» item stands and speaks for that turn`); }
+    if (now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
