@@ -144,11 +144,11 @@ class FakeEl {
     return el ? { text: el.textContent, title: el.title } : null;
   };
   const asked = chip('antigravity', { model: 'gemini-4-argon-high', effort: 'high' });
-  ok(asked && asked.text === 'high' && /^Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
-    'antigravity, effort asked at start: the chip says it — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
+  ok(asked && asked.text === 'High' && /^Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
+    'antigravity, effort asked at start: the chip says it (the level\'s word, lane ui-language) — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
   const none = chip('antigravity', { model: 'gemini-4-argon-high' });
-  ok(none && none.text === 'effort: ?' && /^No effort was asked at start and the CLI reports none/.test(none.title),
-    'antigravity, nothing asked: «?» stays — and its title says why (nothing asked, nothing reported, agy\'s own default)', none);
+  ok(none && none.text === 'effort: not reported' && /^No effort was asked at start and the CLI reports none/.test(none.title),
+    'antigravity, nothing asked: «effort: not reported» (was «?», lane ui-language) — and its title says why (nothing asked, nothing reported, agy\'s own default)', none);
   ok(chip('opencode', { model: 'm' }) === null, 'opencode (no effort levels): NO effort chip — not a «?» that opens claude\'s ladder');
   const cl = chip('claude', { model: 'claude-fable-5-1', effort: 'xhigh' }), cx = chip('codex', { model: 'gpt-a', effort: 'high' });
   ok(cl && /as last commanded/.test(cl.title) && cx && /as reported per turn/.test(cx.title), 'claude (commanded) and codex (per turn) keep their own titles', [cl?.title, cx?.title]);
@@ -175,14 +175,16 @@ async function permMenu(mod, backend, status) {
   chip.getBoundingClientRect = () => ({ left: 100, top: 0, right: 180, bottom: 30, width: 80, height: 30 });
   bar._onClick({ target: { closest: (sel) => (sel === '.chat-status-perm' ? chip : null) }, stopPropagation() {} });
   const dd = box.children.find((c) => c.className === 'chat-status-dropdown');
-  return { label: chip.textContent.trim(), items: dd ? dd.children.map((i) => i.textContent) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map((i) => i.textContent) : null, list: bar.permissionModes };
+  // a row = the mode's words + the protocol value as a dim hint (lane ui-language): the row's MODE is the hint's text (a mode with no words is its own text)
+  const modeOf = (i) => (i.children.find((c) => c.className === 'chat-status-perm-raw') || i.children[0] || i).textContent;
+  return { label: chip.textContent.trim(), items: dd ? dd.children.map(modeOf) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map(modeOf) : null, list: bar.permissionModes };
 }
 {
   const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
   const FOUR = am.BACKEND_META.antigravity.permissionModes;
   const cut = await permMenu(mod, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
-  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /bypassPermissions$/.test(cut.label),
-    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions and its click opens agy\'s FOUR declared modes, the current one marked', cut);
+  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /Full access$/.test(cut.label),
+    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions (its words: «Full access») and its click opens agy\'s FOUR declared modes, the current one marked', cut);
   const told = await permMenu(mod, 'antigravity', { permissionMode: 'plan', permissionModes: ['plan', 'auto'] });
   ok(!!told && J(told.items) === J(['plan', 'auto']) && J(told.list) === J(['plan', 'auto']), 'a status that NAMES modes still replaces the seed (the live list wins)', told);
 }

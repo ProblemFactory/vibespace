@@ -6,6 +6,7 @@ import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, sho
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { t } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: a job's state / access / end / start in words (the walk's jobs-2 / jobs-6)
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
@@ -121,10 +122,10 @@ export function focusJobsPanel(app, jobId) {
 
 function stateLine(j) {
   const run = j.run || {};
-  const bits = [j.state];
+  const bits = [valueWord('job-state', j.state, t)];
   if (run.startedAt && !run.endedAt) bits.push(hum(Date.now() - run.startedAt));
   else if (run.endedAt) bits.push(hum(Date.now() - run.endedAt) + ' ' + t('ago'));
-  if (run.exit !== null && run.exit !== undefined) bits.push('exit=' + run.exit);
+  if (run.exit !== null && run.exit !== undefined) bits.push(t('exit code {n}', { n: run.exit }));
   if (j.nextFireAt) bits.push(t('next') + ' ~' + hum(j.nextFireAt - Date.now()));
   const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
   if (memEnd) bits.push(memEnd);
@@ -360,7 +361,7 @@ async function expandDetail(app, el, j, refresh) {
   for (const dim of ['view', 'control']) {
     const lbl = document.createElement('span'); lbl.textContent = t(dim === 'view' ? 'view' : 'control') + ':';
     const sel = document.createElement('select'); sel.className = 'toolbar-select';
-    for (const v of ['session', 'group', 'all']) { const o = document.createElement('option'); o.value = v; o.textContent = v; if ((job.access || {})[dim] === v) o.selected = true; sel.appendChild(o); }
+    for (const v of ['session', 'group', 'all']) { const o = document.createElement('option'); o.value = v; o.textContent = valueWord('job-access', v, t); if ((job.access || {})[dim] === v) o.selected = true; sel.appendChild(o); }
     sel.onchange = async () => { const r2 = await fetchJson(`/api/jobs/${j.id}/access`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [dim]: sel.value }) }); if (r2?.error) showToast(r2.error, { error: true }); };
     acc.append(lbl, sel);
   }
@@ -454,7 +455,7 @@ async function expandDetail(app, el, j, refresh) {
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
     const left = runLeftWords(run, t); // round 5: what it left running
-    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})${left ? ' · ' + left : ''}`;
+    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }

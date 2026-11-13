@@ -771,5 +771,25 @@
   "ja: OpenAI · Responses API",
   "ja: OpenRouter",
   "ja: git worktree"
- ]
+ ],
+ "raw": {
+  "src/lib/browser-takeover-queue.js": [
+   ".state"
+  ],
+  "src/lib/user-todos-row.js": [
+   ".state"
+  ],
+  "src/lib/file-explorer.js": [
+   ".status"
+  ],
+  "src/lib/chat-renderers.js": [
+   ".outcome"
+  ],
+  "src/lib/sidebar-tasks.js": [
+   ".status"
+  ],
+  "src/lib/workflow-detail.js": [
+   ".status"
+  ]
+ }
 }

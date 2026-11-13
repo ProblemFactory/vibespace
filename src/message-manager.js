@@ -1489,7 +1489,9 @@ class MessageManager extends MessageWindow {
           // treeAlive) — a replayed record keeps its own arrival time, so a run that
           // stalled days ago is not "running" again after every restart
           { const at = this._taskRecordAt(emit); if (at) existing.taskInfo.aliveAt = at; }
-          if (raw.description) existing.taskInfo.description = raw.description;
+          // the task keeps the NAME it started with: a progress record's description is the CLI's own English activity line
+          // («Running …» — lane ui-language, the walk's chat-cards-8: the status chip showed it in a Chinese interface)
+          if (raw.description && !existing.taskInfo.description) existing.taskInfo.description = raw.description;
           if (raw.last_tool_name) existing.taskInfo.lastTool = raw.last_tool_name;
           // `summary` = the run's meta.description (a Workflow) — the NAME the
           // chips show when the launch ack carried none (2.369.136).

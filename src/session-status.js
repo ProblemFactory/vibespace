@@ -408,4 +408,4 @@ const NOTICE_RENDERERS = Object.freeze({
   'feedback-handled': (n) => require('./feedback-model').renderHandledNotice(n),
 });
 
-module.exports = { SessionStatusManager, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };
+module.exports = { SessionStatusManager, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS), STATES, URGENCIES }; // STATES / URGENCIES: the page words each one (src/lib/value-words.js — test-ui-language ⑥)

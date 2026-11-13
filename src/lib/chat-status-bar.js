@@ -6,10 +6,11 @@ import { UI_ICONS } from './icons.js';
 import { panelPlace } from './menu-place.js'; // PURE (lane ui-controls-and-bugs): a panel keeps its natural width and slides — the width sweep's rule 4
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, modelLabelFor, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
-import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js'; // lane ui-language: the lock chip and its menu in words, never the protocol value
+import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
+import { valueWord, modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
 const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
@@ -841,7 +842,7 @@ export class ChatStatusBar {
       const why = refusal ? ` \u00b7 ${escHtml(t('refusal'))}${refusal.category ? ` (${escHtml(refusal.category)})` : ''}` : '';
       const label = locked
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
-        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(this._statusModel) : t('model: ?')));
+        : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : (known ? escHtml(modelLabelFor(this._backend, this._statusModel) || this._statusModel) : t('model: ?')));
       chip('model', `chat-status-model chat-status-clickable${known || target ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
       // NO effort menu ⇒ NO effort chip (lane effort-menu-per-harness): a harness whose CLI takes no effort
       // (ui.effortLevels null — opencode) shows nothing, never a «?» that opens another harness's ladder.
@@ -885,7 +886,7 @@ export class ChatStatusBar {
         const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
           + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
           + (eOriginLine ? '\n' + eOriginLine() : '');
-        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: ?'));
+        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(valueWord('effort', this._statusEffort, t)) : t('effort: not reported'));
       }
     }
 
@@ -1772,7 +1773,7 @@ export class ChatStatusBar {
       }
       const note = document.createElement('div');
       note.className = 'chat-status-dropdown-note';
-      note.textContent = t('Reported by the harness in this session\u2019s start frame.');
+      note.textContent = t('Reported by the agent\u2019s CLI when this session started.');
       dropdown.appendChild(note);
       return;
     }
@@ -2210,7 +2211,7 @@ export class ChatStatusBar {
         for (const m of models) {
           const item = document.createElement('div');
           item.className = 'chat-status-dropdown-item' + (m.id === this._statusModel ? ' active' : '');
-          item.textContent = m.label || m.id;
+          item.textContent = modelLabelWords(m, t) || m.id;
           item.dataset.model = m.id;
           item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); via(m.id); };
           dropdown.appendChild(item);
