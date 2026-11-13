@@ -21,6 +21,7 @@ import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
+import { themeWord } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
 import { installManageAgents } from './manage-agents.js';
@@ -1501,7 +1502,7 @@ class App {
 
       const info = document.createElement('div'); info.className = 'layout-card-info';
       info.innerHTML = `<div class="layout-card-name">${isCurrent ? '● ' : ''}${escHtml(name)}</div>
-        <div class="layout-card-meta">${t('{n} windows', { n: preset.windows?.length || 0 })} · ${escHtml(preset.theme || 'dark')} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
+        <div class="layout-card-meta">${t('{n} windows', { n: preset.windows?.length || 0 })} · ${escHtml(themeWord(preset.theme || 'dark', t))} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
       info.onclick = () => {
         this.layoutManager.loadPreset(name).then(() => this.hideDialogs());
       };
@@ -2871,10 +2872,10 @@ class App {
   _populateThemeSelect(sel) {
     sel.innerHTML = '';
     const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
-    for (const name of BUILTIN_THEMES) sel.appendChild(opt(name, name.charAt(0).toUpperCase() + name.slice(1)));
+    for (const name of BUILTIN_THEMES) sel.appendChild(opt(name, themeWord(name, t)));   // the ONE theme word (value-words.js)
     const customKeys = this.themeManager.getThemeNames().filter(n => n.startsWith('custom-'));
     if (customKeys.length) {
-      const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '── Custom ──'; sel.appendChild(sep);
+      const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '── ' + t('Custom') + ' ──'; sel.appendChild(sep);
       for (const key of customKeys) sel.appendChild(opt(key, key.slice(7)));
     }
     // plugin-contributed themes (Plugin Ph4) — labelled "<label> (plugin)" by the plugin client

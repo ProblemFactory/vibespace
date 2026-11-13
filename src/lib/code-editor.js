@@ -209,7 +209,7 @@ class CodeEditor {
     const sep = () => { const s = document.createElement('span'); s.className = 'editor-toolbar-sep'; return s; };
 
     // Word wrap toggle
-    const btnWrap = this._btn('\u21A9'); btnWrap.title = 'Toggle word wrap';
+    const btnWrap = this._btn('\u21A9'); btnWrap.title = t('Toggle word wrap');
     if (this._settings.wordWrap) btnWrap.classList.add('active');
     btnWrap.onclick = () => {
       this._settings.wordWrap = !this._settings.wordWrap;
@@ -219,20 +219,20 @@ class CodeEditor {
     };
 
     // Format button
-    const btnFormat = this._btn('\u2261'); btnFormat.title = 'Format document (Shift+Alt+F)';
+    const btnFormat = this._btn('\u2261'); btnFormat.title = t('Format document (Shift+Alt+F)');
     btnFormat.onclick = () => this.format();
 
     // Font size
-    const sizeDown = this._btn('\u2212'); sizeDown.title = 'Decrease font size';
+    const sizeDown = this._btn('\u2212'); sizeDown.title = t('Decrease font size');
     this.fontSizeDisplay = document.createElement('span');
     this.fontSizeDisplay.className = 'editor-font-size-display';
     this.fontSizeDisplay.textContent = this._settings.fontSize;
-    const sizeUp = this._btn('+'); sizeUp.title = 'Increase font size';
+    const sizeUp = this._btn('+'); sizeUp.title = t('Increase font size');
     sizeDown.onclick = () => this._changeFontSize(-1);
     sizeUp.onclick = () => this._changeFontSize(1);
 
     // Save + download
-    const btnSave = this._btn(''); btnSave.innerHTML = '<svg style="width:12px;height:12px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1h8l3 3v9a2 2 0 01-2 2H3a2 2 0 01-2-2V3a2 2 0 012-2z"/><path d="M5 1v4h5V1M4 9h8"/></svg>'; btnSave.title = 'Save (Ctrl+S)';
+    const btnSave = this._btn(''); btnSave.innerHTML = '<svg style="width:12px;height:12px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1h8l3 3v9a2 2 0 01-2 2H3a2 2 0 01-2-2V3a2 2 0 012-2z"/><path d="M5 1v4h5V1M4 9h8"/></svg>'; btnSave.title = t('Save (Ctrl+S)');
     btnSave.onclick = () => this.save();
     if (this._isReadOnly) btnSave.style.display = 'none';
     // the file's machine rides along (lane raw-filename r2: without `&host=` a REMOTE file's Download asked THIS
@@ -329,7 +329,7 @@ class CodeEditor {
         }
         content = data.content || '';
       } catch (err) {
-        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">Failed to load file: ${escHtml(err.message)}</div>`;
+        this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(t('Failed to load file: {error}', { error: err.message }))}</div>`;
         this._themeObserver?.disconnect();
         return;
       }
@@ -356,8 +356,9 @@ class CodeEditor {
             { key: 'Mod-s', run: () => { self.save(); return true; } },
             { key: 'Shift-Alt-f', run: () => { self.format(); return true; } },
           ]),
+          // the dirty mark is t('Unsaved') — not t('Modified'): that row is the file list's «修改时间» column (lane ui-language)
           EditorView.updateListener.of((update) => {
-            if (update.docChanged && !self._reloading) { self.modified = true; self.saveIndicator.textContent = '● Modified'; self.saveIndicator.style.color = 'var(--yellow)'; }
+            if (update.docChanged && !self._reloading) { self.modified = true; self.saveIndicator.textContent = '● ' + t('Unsaved'); self.saveIndicator.style.color = 'var(--yellow)'; }
           }),
           ...(this._isReadOnly ? [EditorState.readOnly.of(true)] : []),
         ],
@@ -566,13 +567,13 @@ class CodeEditor {
       const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
-      this.modified = false; this.saveIndicator.textContent = '✓ Saved'; this.saveIndicator.style.color = 'var(--green)';
+      this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)';
       this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
     } catch (err) {
-      this.saveIndicator.textContent = `✕ ${err.message || 'Error'}`; this.saveIndicator.style.color = 'var(--red)';
+      this.saveIndicator.textContent = `✕ ${err.message || t('Error')}`; this.saveIndicator.style.color = 'var(--red)';
     }
   }
 
@@ -594,12 +595,12 @@ class CodeEditor {
     const serverLang = SERVER_FORMATTERS[currentLang] ?? EXT_TO_SERVER_FMT[ext] ?? null;
 
     if (!parser && !serverLang) {
-      this._formatStatus('No formatter for this language', 'var(--text-dim)', 2000);
+      this._formatStatus(t('No formatter for this language'), 'var(--text-dim)', 2000);
       return;
     }
 
     const source = this.editorView.state.doc.toString();
-    this._formatStatus('Formatting...', 'var(--text-dim)');
+    this._formatStatus(t('Formatting…'), 'var(--text-dim)');
 
     try {
       let formatted;
@@ -628,9 +629,9 @@ class CodeEditor {
           selection: EditorSelection.cursor(newCursor),
         });
       }
-      this._formatStatus('\u2713 Formatted', 'var(--green)', 2000);
+      this._formatStatus('\u2713 ' + t('Formatted'), 'var(--green)', 2000);
     } catch (err) {
-      this._formatStatus(`Format error: ${err.message?.split('\n')[0]?.substring(0, 80) || 'unknown'}`, 'var(--red)', 4000);
+      this._formatStatus(t('Format error: {error}', { error: err.message?.split('\n')[0]?.substring(0, 80) || t('unknown') }), 'var(--red)', 4000);
     }
   }
 

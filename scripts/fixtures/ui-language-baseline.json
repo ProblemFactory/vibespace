@@ -144,10 +144,6 @@
   "src/lib/browser-replay-window.js": [
    "Browser replay"
   ],
-  "src/lib/session-palette.js": [
-   "Jump to a session… (type a /path for a new one)",
-   "Jump to a session…"
-  ],
   "src/lib/subagent-card.js": [
    "data-sub-since=\"",
    "data-sub-id=\""
@@ -176,8 +172,6 @@
    "New session here on",
    "style=\"display:none\"",
    "style=\"display:none\"",
-   "Clear",
-   "Done",
    "Unarchive this project (folder + all its sessions)",
    "Archive this project (",
    "+ future sessions here)",
@@ -212,12 +206,7 @@
    "Plain Text",
    "Edit",
    "Preview",
-   "Toggle word wrap",
-   "Format document (Shift+Alt+F)",
-   "Decrease font size",
-   "Increase font size",
-   "Preview",
-   "Error"
+   "Preview"
   ],
   "src/plugin-settings.js": [
    "Voice input · Dropline",
@@ -314,12 +303,6 @@
    "unknown failure"
   ],
   "src/lib/file-viewer.js": [
-   "(no subject)",
-   "From",
-   "Date",
-   "(empty body)",
-   "Text",
-   "Text",
    "File viewer",
    "Hex viewer"
   ],
@@ -337,20 +320,9 @@
    "gemini-3.8-flash-medium"
   ],
   "src/permission-rules.js": [
-   "user settings",
-   "shared project settings",
-   "project local settings",
-   "command line arguments",
-   "enterprise managed settings",
-   "packaged defaults",
-   "system config",
    "enterprise-managed layer",
    "user config (profile “",
    "user config",
-   "project config",
-   "this session’s own -c flags",
-   "legacy managed_config.toml",
-   "legacy managed_config.toml (MDM)",
    "unknown layer “",
    "unknown layer",
    "(drop-in)",

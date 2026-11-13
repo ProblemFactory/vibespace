@@ -73,7 +73,7 @@ import { showCallersDialog, showSendToCallersDialog } from './channel-webhook.js
 // one store, two places, §9.2).
 import { renderInlineProposals, reasonLabel, attachmentOpenKind, openAttachment, openComposePick } from './channel-outbox.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
-import { routeErrorText, attachmentReasonText } from './channel-words.js';
+import { routeErrorText, attachmentReasonText, groupSysWords } from './channel-words.js';
 // R3 (§23): a picture's next step (retry / the named chip) and the text line its placeholder leaves — PURE, shared with the engine
 import * as Att from '../channel-attachments.js';
 import { track } from './telemetry-client.js';
@@ -1883,15 +1883,7 @@ function groupSysText(rec, nameOf) {
   const raw = rec.raw || {};
   const by = nameOf(raw.by || (rec.author && rec.author.id));
   const member = raw.member ? nameOf(raw.member, raw.name) : '';   // B-ff04: a member who LEFT keeps its last known name
-  switch (raw.kind) {
-    case 'create': return t('{by} created the group', { by });
-    case 'invite': return t('{by} added {member}', { by, member });
-    case 'leave': return raw.archived ? t('{member} left — the group is archived', { member }) : t('{member} left', { member });
-    case 'kick': return raw.archived ? t('{by} removed {member} — the group is archived', { by, member }) : t('{by} removed {member}', { by, member });
-    case 'rename': return raw.from ? t('{by} renamed the group (was "{from}")', { by, from: raw.from }) : t('{by} renamed the group', { by });
-    case 'archive': return t('{by} archived the group — the log is kept', { by });
-    default: return rec.text || '';
-  }
+  return groupSysWords(raw, by, member) || rec.text || '';   // the ONE table of these words (channel-words.js — the panel's preview reads it too)
 }
 
 function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {

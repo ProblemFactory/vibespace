@@ -74,7 +74,7 @@ function setup(deps) { ctx = deps; }
 const LOCAL = new Set(['', 'local']);
 const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
 const STATUS = {
-  'bad-request': 400, bad_name: 400, bad_label: 400, bad_exec: 400, bad_args: 400, too_many_variants: 400, needs_root: 400, bad_icon: 400, shadow: 400, not_witnessed: 409, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
+  'bad-request': 400, bad_search: 400, bad_name: 400, bad_label: 400, bad_exec: 400, bad_args: 400, too_many_variants: 400, needs_root: 400, bad_icon: 400, shadow: 400, not_witnessed: 409, bad_source: 400, 'unsupported-host': 400, bad_address: 400, not_an_installer: 400, too_large: 400,
   agent_forbidden: 403, 'not-yours': 403,
   'not-found': 404, not_found: 404,
   busy: 409, plan_changed: 409, proposal_state: 409, no_sudo: 409, no_apt: 409, conflict: 409, removes: 409, needs_snap: 409, disk: 409, shared: 409, nothing: 409, not_run: 409, refused: 409, not_recorded: 409, host_needs_daemon: 409, no_conversation: 409, not_filed: 409,
