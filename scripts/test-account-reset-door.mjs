@@ -1298,7 +1298,7 @@ const LEGS = {
       sealedOrdersOnTheDoor: /const ownFileReading = poolReadReading\(\{ group: false \}\);/.test(eng) && /readCache: ownFileReading,/.test(eng),
       placementWhenDecided: /claimDecided\(/.test(eng) && /moved onto \$\{nameOf\(ds\.to\)\} on your reset claim/.test(eng),
       wallsByLane: /lane && lanes\.has\(lane\) && m\.delete\(id\)/.test(eng),
-      refreshWorded: /r\.wall\) \{ const w = wallWords\(r\.wall/.test(um) && /_wallDoorAction\(w\.door\)/.test(um),
+      refreshWorded: /r\.wall\) \{ const w = wallWords\(r\.wall/.test(um) && /_wallDoorAction\(w\.door(?:, \w+)?\)/.test(um),   // + the account the toast names (lane oat-add-door: the guided door opens on its row)
       laneActs: /claimBtn\(quotaModel\.laneOfBucket\(rl, 'scoped', sc\.name\)/.test(um) && /claimBtn\('plan:5h', v5\)/.test(um) && /I reset this account on Anthropic’s site…/.test(ma),
       staleLanesOwnWindow: /quotaModel\.lanesOfReading\(rl\)/.test(um) && /quotaModel\.lanesOfReading\(u\)/.test(ma),
       refreshAllGrouped: /groupWalls\(walled/.test(ma),

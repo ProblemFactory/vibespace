@@ -11,7 +11,8 @@
 //   §6 a SIGN-IN states the type: shown, not re-chosen; the replaced choice said
 //   §7 a CLI whose values were not read: way ① alone, and why
 //   §8 phone 390 fits · no page exception
-// PNGs (zh) → $OAT_PNG_DIR or the scratch dir: guide / typeless-row / changed / from-login / not-offered / phone.
+// PNGs (zh) → $OAT_PNG_DIR or the scratch dir: guide / row-no-type / pool-members-no-type (the REAL Members dialog) / typeless-row /
+// changed / row-ultra / from-login / not-offered / phone.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,10 @@ const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const am = new AccountManager({ dataDir: path.join(dir, 'data'), platform: 'linux' });
 const acct = am.createSubscription({ name: 'Token Max' }).id;
 const acct2 = am.createSubscription({ name: 'Token Two' }).id;
+// (b) «inside a pool»: the real Members dialog — a pool needs one signed-in member (a FAKE login: no real token anywhere)
+const live = am.createSubscription({ name: 'Signed Pro' }).id;
+fs.writeFileSync(path.join(am.subDir(live), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'acc-' + 'fake', refreshToken: 'ref-' + 'fake', expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: Date.now() + 20 * 86400e3, scopes: ['user:inference', 'user:profile'], subscriptionType: 'pro' } }), { mode: 0o600 });
+const pool = am.createPool({ name: 'Work pool', members: [live, acct, acct2] }).id;
 am.noteCliVersion('2.1.321 (Claude Code)');
 const CAT = { cli: '2.1.321', anchor: true, types: ['max', 'pro', 'enterprise', 'team'], orgTypes: {}, tiers: ['default_claude_max_20x', 'default_claude_max_5x'], withheld: ['default_claude_zero'] };
 let PL = CAT;
@@ -47,10 +52,15 @@ try {
   am.setOat(acct, OAT); am.setOat(acct2, OAT.replace('DOORfake_', 'DOORfak2_')); await am.oatFileSettled();
   const stub = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
   const entry = `import { openOatShapeDialog } from './oat-shape-dialog.js';
-import { loginExpiryChipHtml } from './manage-agents.js';
+import { loginExpiryChipHtml, subIdentHtml, installManageAgents } from './manage-agents.js';
+class App {}
+installManageAgents(App, {});
+const app = new App();
+app.ws = { onGlobal() { return () => { }; } };
+window.openMembers = async (poolId) => { const r = await window.rowOf(poolId); await app._poolMembersDialog(poolId, r, () => { }); };
 window.__signins = 0; window.__refreshes = 0;
 window.rowOf = async (id) => (await (await fetch('/api/accounts')).json()).accounts.find((a) => a.id === id);
-window.chip = async (id) => { const r = await window.rowOf(id); const box = document.querySelector('#chip'); box.innerHTML = loginExpiryChipHtml(r, { local: true }); const c = box.querySelector('.acct-login-chip'); if (c) c.onclick = () => { if (c.dataset.oatShape) window.openShape(c.dataset.oatShape); }; return box.textContent; };
+window.chip = async (id) => { const r = await window.rowOf(id); const box = document.querySelector('#chip'); box.innerHTML = '<span class="acct-ident">' + subIdentHtml(r, { email: r.email || '' }) + '</span> ' + loginExpiryChipHtml(r, { local: true }); const c = box.querySelector('.acct-login-chip'); if (c) c.onclick = () => { if (c.dataset.oatShape) window.openShape(c.dataset.oatShape); }; return box.textContent; };
 window.openShape = async (id, fresh = false) => { const r = await window.rowOf(id); openOatShapeDialog({ id: r.id, name: r.name, fresh, onSignIn: () => { window.__signins++; }, refresh: () => { window.__refreshes++; } }); };
 window.ready = true;`;
   await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'door-entry.js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'www/door.js'), logLevel: 'silent', loader: { '.css': 'text' }, plugins: [stub] });
@@ -80,6 +90,10 @@ window.ready = true;`;
   const ev = async (e) => { const r = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'threw'); return r.result.value; };
   const waitFor = async (e, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(e)) return true; await sleep(60); } return false; };
   const shot = async (file) => { const s = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
+  // a ROW's picture: the row itself, clipped and drawn at 2× (a full-page shot leaves the words a speck in a corner)
+  const shotEl = async (file, sel) => { const r = await ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: Math.max(0, b.left - 8), y: Math.max(0, b.top - 8), width: Math.max(220, b.width + 16), height: b.height + 16 }; })()`); const s = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 2 } }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
+  // the choices' layout: each radio sits BESIDE its words, on their line (the picture of 375ec05ec showed it stacked above)
+  const choiceLayout = () => ev(`[...document.querySelectorAll("#oat-shape-dialog .oat-shape-choice")].map((l) => { const i = l.querySelector('input').getBoundingClientRect(), w = l.querySelector('span').getBoundingClientRect(); return { beside: i.right <= w.left + 1, sameLine: Math.abs((i.top + i.bottom) / 2 - (w.top + w.bottom) / 2) < 8 }; })`);
   await cdp('Page.enable'); await cdp('Runtime.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1100, height: 820, deviceScaleFactor: 1, mobile: false });
@@ -92,7 +106,16 @@ window.ready = true;`;
 
   console.log('§1 a pasted token with no type');
   const t1 = await ev(`chip(${J(acct)})`);
-  ok(/还差订阅类型：登录一次，或自己选/.test(t1) && await ev('!!document.querySelector("#chip [data-oat-shape]")'), 'the row: 「还差订阅类型：登录一次，或自己选」 — and its chip carries the guided door', t1);
+  ok(/还差订阅类型：登录一次，或自己选/.test(t1) && !/重新登录|已登录/.test(t1) && await ev('!!document.querySelector("#chip [data-oat-shape]")'), 'the row: 「还差订阅类型：登录一次，或自己选」 — never «重新登录» / «已登录» — and its chip carries the guided door', t1);
+  await shotEl('row-no-type.png', '#chip');
+  // (b) …and INSIDE A POOL: the real Members dialog (manage-agents _poolMembersDialog over the real /api/accounts)
+  await ev(`openMembers(${J(pool)})`);
+  ok(await waitFor('!!document.querySelector("#pool-members-dialog .pool-mem-list")', 8000), 'the pool\'s real Members dialog opens');
+  const mem = await ev('document.querySelector("#pool-members-dialog .pool-mem-list").textContent');
+  ok(/还没有订阅类型——登录一次，或自己选/.test(mem) && !/重新登录|登录已过期|未登录/.test(mem), 'inside the pool: the member reads «还没有订阅类型——登录一次，或自己选» — never «重新登录» / «登录已过期» / «未登录»', mem.slice(0, 300));
+  await shot('pool-members-no-type.png');
+  await ev('document.querySelector("#pool-members-dialog .dialog-close")?.click()');
+  await waitFor('!document.querySelector("#pool-members-dialog")', 4000);
   await ev('document.querySelector("#chip [data-oat-shape]").click()');
   ok(await waitFor(`!!document.querySelector("${dlg} #oat-shape-pick")`), 'the chip opens the guide with way ② offered');
   await ev(`document.querySelector("${dlg} .dialog-close")?.click()`); await closed();
@@ -104,7 +127,9 @@ window.ready = true;`;
   ok(g.lead === 'token 已保存。它没有说明属于哪种订阅，而 Claude Code 要先知道这一点才能用它。', 'right after the paste: the lead says why the guide came up (never «now usable»)', g.lead);
   ok(g.stake === '订阅类型决定没选模型时用哪个默认模型，以及 Claude Code 为该订阅开放的功能；选错了可以在这一行改。', 'the stake line, the owner\'s words', g.stake);
   const L = await ev(labels);
-  ok(J(L) === J(['Ultra（原 Max 20x）', 'Max（原 Max 5x）', 'Pro', 'enterprise', 'team', '不确定 — 先不选 选了类型或登录说明之前，默认用 Sonnet']), 'the choices in order: Ultra（原 Max 20x）, Max（原 Max 5x）, Pro, enterprise, team, 「不确定 — 先不选」 last with its default', L);
+  ok(J(L) === J(['Ultra（原 Max 20x）', 'Max（原 Max 5x）', 'Pro', 'enterprise（Claude Code 的原名）', 'team（Claude Code 的原名）', '不确定 — 先不选 选了类型或登录说明之前，默认用 Sonnet']), 'the choices in order: Ultra（原 Max 20x）, Max（原 Max 5x）, Pro, the CLI\'s own ids said as such (enterprise, team), 「不确定 — 先不选」 last with its default', L);
+  const lay = await choiceLayout();
+  ok(lay.length === 6 && lay.every((x) => x.beside && x.sameLine), 'each radio sits BESIDE its words, on their line (never stacked above them)', lay);
   await shot('guide.png');
 
   console.log('§3 «先不选»');
@@ -116,7 +141,7 @@ window.ready = true;`;
   ok(r3.oatShape?.source === 'person' && r3.oatShape?.typeless === true && !!c3 && c3.accessToken === OAT && !('subscriptionType' in c3) && J(c3.scopes) === '["user:inference"]', 'stored as the person\'s typeless choice; the file carries the mint\'s scope and NO type', { shape: r3.oatShape, keys: c3 && Object.keys(c3) });
   const t3 = await ev(`chip(${J(acct)})`);
   ok(/未选订阅类型 · 默认 Sonnet/.test(t3) && await ev('!!document.querySelector("#chip [data-oat-shape]")'), 'the row: 「未选订阅类型 · 默认 Sonnet」, its chip the door to choose', t3);
-  await shot('typeless-row.png');
+  await shotEl('typeless-row.png', '#chip');
 
   console.log('§4 changed at the row');
   await ev('document.querySelector("#chip [data-oat-shape]").click()'); await waitFor(`!!document.querySelector("${dlg} #oat-shape-pick")`);
@@ -126,6 +151,9 @@ window.ready = true;`;
   const c4 = cred(acct);
   ok(c4 && c4.subscriptionType === 'max' && c4.rateLimitTier === 'default_claude_max_20x' && c4.accessToken === OAT, 'Ultra ⇒ the file rewritten: max + default_claude_max_20x', c4 && { t: c4.subscriptionType, r: c4.rateLimitTier });
   await shot('changed.png');
+  const t4 = await ev(`chip(${J(acct)})`);
+  ok(/Ultra（原 Max 20x）/.test(t4) && !/· max\b|已登录/.test(t4), 'the row\'s line after the choice: «Ultra（原 Max 20x）» — never «max» (now the other plan\'s name), never «已登录» (it never signed in)', t4);
+  await shotEl('row-ultra.png', '#chip');
 
   console.log('§5 way ①');
   await ev(`openShape(${J(acct)})`); await waitFor(`!!document.querySelector("${dlg} #oat-shape-signin")`);

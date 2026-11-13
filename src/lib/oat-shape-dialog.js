@@ -8,11 +8,13 @@
 // SIGN-IN stated is shown, never re-chosen here (a sign-in again states it). Never «re-login» as the only word.
 import { t } from './i18n.js';
 import { createModalShell, escHtml, fetchJson, showToast } from './utils.js';
+import { showUnlock } from './vault-unlock.js'; // a locked vault's own door (acceptance r1 MUST 2)
 
 /** the words a choice is read by: «Ultra (formerly Max 20x)», «Pro», a type no row names by its own id, «Not sure — choose later» */
 export function choiceLabel(c) {
   if (!c || c.choice === 'unsure') return t('Not sure — choose later');
   if (c.formerly) return t('{name} (formerly {old})', { name: c.name, old: c.formerly });
+  if (c.own) return t('{id} (as Claude Code names it)', { id: String(c.name || c.type || c.tier || '') });   // a value no table row names, by its own id
   return String(c.name || c.type || '');
 }
 /** the row's shape in words: «Ultra (formerly Max 20x)», «team», or the typeless line */
@@ -25,7 +27,22 @@ export function shapeLabel(shape, choices = []) {
 const WHY = {
   'mint-unmeasured': () => t('This Claude Code version has not been checked for this yet, so only a sign-in can state the type.'),
   platform: () => t('On this machine only a sign-in can state the type.'),
+  'version-mismatch': () => t('The subscription types VibeSpace read belong to another Claude Code version than the one in use, so only a sign-in can state the type.'),
+  'no-types': () => t('This Claude Code names no subscription type VibeSpace can offer, so only a sign-in can state the type.'),
 };
+// THE SERVER'S REFUSALS IN THE PERSON'S LANGUAGE (acceptance r1): by their code, never the English sentence
+const REFUSED = {
+  from_login: () => t('A sign-in stated this account’s subscription type — sign in again to change it'),
+  not_offered: () => t('This Claude Code does not offer that type here — sign in once instead'),
+  bad_choice: () => t('That is not a subscription type choice'),
+  bad_shape: () => t('That is not a subscription type this Claude Code offers'),
+  no_token: () => t('This account holds no long-lived token'),
+  vault_locked: () => t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'),
+  key_unreadable: () => t('The long-lived token could not be opened — nothing was saved'),
+  agent_forbidden: () => t('Only a person can choose the subscription type'),
+  human_only: () => t('Only a person can choose the subscription type'),
+};
+const refusedText = (r) => (r && REFUSED[r.code] ? REFUSED[r.code]() : t('Save failed'));
 const whyText = (why) => (WHY[why] ? WHY[why]() : t('VibeSpace could not read the subscription types from this Claude Code, so only a sign-in can state the type.'));
 
 /** Open the guide for account `id`. `onSignIn()` = the row's own sign-in (way ①); `refresh()` after a save. `fresh` = right after the
@@ -33,7 +50,7 @@ const whyText = (why) => (WHY[why] ? WHY[why]() : t('VibeSpace could not read th
 export async function openOatShapeDialog({ id, name = '', onSignIn = null, refresh = null, fresh = false } = {}) {
   const enc = encodeURIComponent(id);
   const offer = await fetchJson(`/api/accounts/${enc}/oat-shape`).catch(() => null);
-  if (!offer || offer.error) { showToast(offer?.error || t('Could not read the subscription types — server unreachable'), { type: 'error' }); return; }
+  if (!offer || offer.error) { showToast(offer && offer.code ? refusedText(offer) : t('Could not read the subscription types — server unreachable'), { type: 'error' }); return; }
   const choices = Array.isArray(offer.choices) ? offer.choices : [];
   const shape = offer.shape || null;
   const fromLogin = !!shape && shape.source === 'login';
@@ -53,14 +70,14 @@ export async function openOatShapeDialog({ id, name = '', onSignIn = null, refre
   body.innerHTML = `
     <div class="usage-note">${escHtml(lead)}</div>${replaced}
     <div class="oat-shape-way">
-      <div class="oat-row"><button class="btn-create" id="oat-shape-signin">${escHtml(t('Sign in once (recommended)'))}</button></div>
-      <div class="usage-note">${escHtml(t('The sign-in states the type. It may end later — the pool keeps using the token; while it lasts, the usage can also be refreshed (⟳).'))}</div>
+      <div class="oat-row"><button class="btn-create" id="oat-shape-signin">${escHtml(fromLogin ? t('Sign in again') : t('Sign in once (recommended)'))}</button></div>
+      ${fromLogin ? '' : `<div class="usage-note">${escHtml(t('The sign-in states the type. It may end later — the pool keeps using the token; while it lasts, the usage can also be refreshed (⟳).'))}</div>`}
     </div>
     ${fromLogin ? '' : pick ? `
     <div class="oat-shape-way" id="oat-shape-pick">
       <div class="oat-shape-head">${escHtml(t('Choose it myself'))}</div>
       <div class="usage-note">${escHtml(t('The subscription type decides which model Claude Code uses when none is picked, and which features Claude Code opens for that subscription; a wrong choice can be changed on this row.'))}</div>
-      ${choices.map((c) => `<label class="oat-shape-choice"><input type="radio" name="oat-shape" value="${escHtml(c.choice)}"${c.choice === current ? ' checked' : ''}> ${escHtml(choiceLabel(c))}${c.choice === 'unsure' ? ` <span class="usage-note">${escHtml(t('Sonnet by default until a type is chosen or a sign-in states it'))}</span>` : ''}</label>`).join('')}
+      ${choices.map((c) => `<label class="dialog-check-row oat-shape-choice"><input type="radio" name="oat-shape" value="${escHtml(c.choice)}"${c.choice === current ? ' checked' : ''}> <span>${escHtml(choiceLabel(c))}</span>${c.choice === 'unsure' ? ` <span class="dialog-check-hint">${escHtml(t('Sonnet by default until a type is chosen or a sign-in states it'))}</span>` : ''}</label>`).join('')}
       <div class="oat-row"><button class="btn-create" id="oat-shape-save">${escHtml(t('Save'))}</button></div>
     </div>` : `<div class="usage-note oat-shape-none">${escHtml(whyText(offer.why))}</div>`}`;
   body.querySelector('#oat-shape-signin').onclick = () => { close(); if (typeof onSignIn === 'function') onSignIn(); };
@@ -70,7 +87,7 @@ export async function openOatShapeDialog({ id, name = '', onSignIn = null, refre
     if (!v) { showToast(t('Pick a type first'), { type: 'error' }); return false; }
     if (save) save.disabled = true;
     const r = await fetchJson(`/api/accounts/${enc}/oat-shape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choice: v }) }).catch(() => null);
-    if (!r?.success) { if (save) save.disabled = false; showToast(r?.error || t('Save failed'), { type: 'error' }); return false; }
+    if (!r?.success) { if (save) save.disabled = false; showToast(refusedText(r), { type: 'error', duration: 9000, ...(r && r.code === 'vault_locked' ? { action: { label: t('Unlock…'), run: () => { try { showUnlock(); } catch { } } } } : {}) }); return false; }
     const c = choices.find((x) => x.choice === v);
     showToast(v === 'unsure' ? t('Saved for “{name}”: no type chosen — Sonnet by default', { name }) : t('Saved: “{name}” is {type}', { name, type: choiceLabel(c) }));
     close();

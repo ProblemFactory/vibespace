@@ -164,7 +164,7 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     acc.noteCliMeasured(view);
   }
   // the mint's scopes ride the view (lane oat-add-door): a PASS of the variant for exactly these bytes, re-checked by the grammar
-  const mintOf = (r) => { const m = r && r.variants && r.variants[MINT_VARIANT]; return m && m.verdict === 'PASS' ? scopesOk(m.scopes) : null; };
+  const mintOf = (r) => { const m = r && r.state === 'pass' && r.variants && r.variants[MINT_VARIANT]; return m && m.verdict === 'PASS' ? scopesOk(m.scopes) : null; }; // only from a check that HELD (acceptance r1: an aborted or failed run's scopes are not trusted)
   const viewOfRec = (v, sha, r) => { const sc = mintOf(r); return { cli: v, sha256: sha, state: r.state, startedAt: r.startedAt || null, ...(r.reason ? { reason: r.reason } : {}), ...(sc ? { mintScopes: sc } : {}) }; };
   const checkingView = (r) => ({ cli: r.cli, sha256: r.sha, state: 'checking', startedAt: r.startedAt, lateAt: r.startedAt + B.late, killAt: r.startedAt + B.kill, typicalMs: B.typical });
 

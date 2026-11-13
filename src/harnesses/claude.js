@@ -72,7 +72,7 @@ function parseClaudeAuth(dir) {
     // (our mark's mint instant — lane oat-identity-fix: a reading judges only the generation the CLI read)
     // refreshable: a refresh token sits beside the access token — a LOGIN, never a long-lived token (the usage bearer law's
     // shape, login-expiry usageBearerOk); a boolean, the refresh token itself never leaves the file
-    return { loggedIn: true, subscriptionType: o.subscriptionType || null, email, org, accessToken: valid ? o.accessToken : null, refreshable: !!o.refreshToken, expiresAt: o.expiresAt || null, ...(oatFileOf(raw) ? { oatFile: true, oatFileGen: Number(raw.vibespaceOat && raw.vibespaceOat.mintedAt) || null } : {}) };
+    return { loggedIn: true, subscriptionType: o.subscriptionType || null, rateLimitTier: typeof o.rateLimitTier === 'string' && /^[a-z0-9_]{1,60}$/.test(o.rateLimitTier) ? o.rateLimitTier : null, email, org, accessToken: valid ? o.accessToken : null, refreshable: !!o.refreshToken, expiresAt: o.expiresAt || null, ...(oatFileOf(raw) ? { oatFile: true, oatFileGen: Number(raw.vibespaceOat && raw.vibespaceOat.mintedAt) || null } : {}) };
   } catch { return { loggedIn: false }; }
 }
 

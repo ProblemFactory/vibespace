@@ -119,6 +119,7 @@ const ROWS = {
   'src/lib/browser-build-model.js': [[K1N, 'person', 'the engine card\'s kernel line (Change build… / Settings) when the kernel\'s download was refused vault_locked']],
   'src/server/engine-distribution.js': [['the Plugin Git credential is sealed in the locked vault', 'person', 'the kernel download\'s refusal after its anonymous try was refused (round 2: the credential is optional — the engine record\'s failure, the card, a first use\'s / the fleet\'s For-you detail)']],
   'src/lib/manage-agents.js': [[K1N, 'person', 'the accounts window\'s key-unreadable reason']],
+  'src/lib/oat-shape-dialog.js': [[K1N, 'person', 'the guided door\'s answer to a locked vault (lane oat-add-door: its Unlock… door rides the toast)']],
   'src/lib/oauth-connect-row.js': [[K1N, 'person', 'an OAuth plugin row whose sign-in is sealed']],
   'src/lib/vault-reveal.js': [[K1N, 'person', 'the Vault window\'s reveal refused while locked']],
   'src/voice-model.js': [[K1N, 'person', 'voice input while the Dropline sign-in is sealed']],

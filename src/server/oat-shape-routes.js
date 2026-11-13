@@ -8,36 +8,40 @@
 // bearer is refused by name. No vendor call anywhere in it. Mounted by src/server/account-usage-routes.js; the suites mount it
 // as it is (test-oat-add-door, test-oat-add-door-chrome) with their own store and plan values.
 const planNames = require('../plan-names.js');
+const { pressBearer } = require('../write-origin.js');   // EVERY bearer (vsst_ / jbt_ / an automation key's vsak_) — acceptance r1 MUST 3
 
 /** registerOatShapeRoutes(app, { accounts, isAgentBearer, plans? }) — `plans()` = the binary in use's plan values (default: the
  *  catalog reader's) */
 function registerOatShapeRoutes(app, { accounts, isAgentBearer, plans: plansOf = null }) {
   const readPlans = () => { try { return typeof plansOf === 'function' ? plansOf() : require('./cli-model-catalog.js').plans(); } catch { return null; } };
-  const shapeOffer = () => {
-    const mint = accounts.oatMintCaps();
-    const plans = readPlans();
-    const agree = !!plans && (!plans.cli || !mint.cli || plans.cli === mint.cli);
-    const choices = mint.ok && agree ? planNames.planChoices(plans, { scopes: mint.scopes }) : [];
-    const why = choices.length ? null : !mint.scopes ? 'mint-unmeasured' : !mint.ok ? 'platform' : !plans ? 'plans-unread' : !agree ? 'version-mismatch' : 'no-types';
-    return { mint, plans: agree ? plans : null, choices, why };
+  // THE ONE OFFER (acceptance r1): the store reads it too — the walls, ⟳ and the roster say «or choose it» exactly where this door does
+  if (typeof accounts.setPlansReader === 'function') accounts.setPlansReader(readPlans);
+  const shapeOffer = () => accounts.oatShapeOffer();
+  // A PERSON'S DOOR: every bearer is refused by name — an agent's session or job token, and an automation key alike
+  const refuseBearer = (req, res) => {
+    const agent = isAgentBearer(req), other = !agent && pressBearer(req.headers || {});
+    if (!agent && !other) return false;
+    res.status(403).json({ error: 'a person’s door — no bearer token is accepted here', code: agent ? 'agent_forbidden' : 'human_only' });
+    return true;
   };
   const shapeRowOf = (id) => { try { return (accounts.list().accounts || []).find((x) => x.id === id) || null; } catch { return null; } };
   app.get('/api/accounts/:id/oat-shape', (req, res) => {
-    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    if (refuseBearer(req, res)) return;
     if (!accounts.get(req.params.id)) return res.status(404).json({ error: 'unknown account', code: 'unknown' });
     const o = shapeOffer();
     const row = shapeRowOf(req.params.id);
     res.json({ cli: o.mint.cli, choices: o.choices, ...(o.why ? { why: o.why } : {}), namesAt: planNames.PLAN_NAMES_AT, shape: (row && row.oatShape) || null, ...(row && row.oatShapeReplaced ? { replaced: row.oatShapeReplaced } : {}) });
   });
   app.post('/api/accounts/:id/oat-shape', async (req, res) => {
-    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    if (refuseBearer(req, res)) return;
     const choice = typeof req.body?.choice === 'string' ? req.body.choice : '';
     if (!planNames.choiceIdOk(choice)) return res.status(400).json({ error: 'not a subscription type choice', code: 'bad_choice' });
     const o = shapeOffer();
     const shape = o.choices.length ? planNames.choiceShape(choice, o.plans, { scopes: o.mint.scopes }) : null;
     if (!shape) return res.status(409).json({ error: o.why ? 'this Claude Code does not offer a choice here — sign in once instead' : 'this Claude Code does not offer that type', code: 'not_offered', ...(o.why ? { why: o.why } : {}) });
     try { await accounts.setOatShapeByPerson(req.params.id, shape); }
-    catch (e) { return res.status(e.code === 'unknown' ? 404 : e.code === 'from_login' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+    // a LOCKED vault answers as the vault does (MUST 2): 423, its code by name and its door — nothing was recorded
+    catch (e) { return res.status(e.code === 'vault_locked' ? 423 : e.code === 'unknown' ? 404 : e.code === 'from_login' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.door ? { door: e.door } : {}) }); }
     let f = null;
     try { f = await accounts.oatFileSettled(req.params.id); } catch { }
     const row = shapeRowOf(req.params.id);

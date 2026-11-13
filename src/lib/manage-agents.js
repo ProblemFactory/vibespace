@@ -29,7 +29,8 @@ import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-vi
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
-import { openOatShapeDialog } from './oat-shape-dialog.js'; // lane oat-add-door: the guided door — sign in once, or choose the subscription type
+import { openOatShapeDialog } from './oat-shape-dialog.js';
+import { shapeName } from '../plan-names.js'; // PURE (lane oat-add-door, acceptance r1): a plan by the table's CURRENT names on the row's line // lane oat-add-door: the guided door — sign in once, or choose the subscription type
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
 // The oracle registry + its measured PROOFS and the measured-and-REJECTED
 // candidates are PURE and shared with the server (CJS pulled into the bundle
@@ -167,9 +168,10 @@ const loginLeftText = (ms) => {
 const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }); } catch { try { return new Date(ms).toLocaleString(); } catch { return ''; } } };
 /** Why a member's long-lived token is NOT in its folder (lane pool-oat-materialize) —
  *  what to do, in words; '' when there is no refusal to name. */
-function oatFileRefusedText(reason, code = '') {
+function oatFileRefusedText(reason, code = '', { choose = true } = {}) {
   if (reason === 'cli-unmeasured') return t('this Claude Code version is not cleared on this machine yet'); // lane cli-self-measure: never «not measured»
-  if (reason === 'no-scopes') return t('the subscription type is missing — sign in once, or choose it'); // lane oat-add-door: never «re-login» — the guided door (both ways)
+  // lane oat-add-door: never «re-login» — the guided door; «or choose it» only where this hub offers way ② (acceptance r1)
+  if (reason === 'no-scopes') return choose ? t('the subscription type is missing — sign in once, or choose it') : t('the subscription type is missing — sign in once');
   if (reason === 'write-failed') return code === 'symlink' ? t('the credential file is a symlink — nothing written') : t('could not write it to the account folder');
   // pool-oat-materialize verify r1: a READ that failed (F2), a symlinked folder (F8), a token that no longer decrypts (F4)
   if (reason === 'read-failed') return t('could not read the account folder ({code})', { code: escHtml(code || '?') });
@@ -242,7 +244,7 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
       return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(ls.worstId || a.id)}" title="${titleOk}${tail}${endTail}">${ROSTER_ICONS.CLOCK}${who}${label}</span>`;
     }
     // a token NOT in the folder: the ONE word (.268), and the refusal that kept it out (pool-oat-materialize) beside it
-    const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code) : '';
+    const refused = a.oatFile && a.oatFile.state === 'refused' ? oatFileRefusedText(a.oatFile.reason, a.oatFile.code, { choose: a.oatChoose !== false }) : '';
     const label = near ? t('long-lived token only · ends in {left}', { left: escHtml(loginLeftText(ls.msLeft)) })
       : t('long-lived token only');
     const title = t('This account’s OAuth login ended {when}; sessions keep running on its long-lived token (valid until {date}); only the quota refresh (⟳) needs you to sign in again.', { when: escHtml(loginWhenText(ls.refreshExpiresAt)), date: escHtml(loginWhenText(ls.oatValidUntil)) });
@@ -266,7 +268,7 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
   // a POOL row whose dead member holds a valid long-lived token: the token runs that member's OWN
   // sessions, but a pooled session reads the login file — say why the token does not help here
   const poolOat = !!(ls.worstName && ls.worstOatValidUntil);
-  const poolRefused = poolOat ? oatFileRefusedText(ls.worstOatFileRefused) : '';
+  const poolRefused = poolOat ? oatFileRefusedText(ls.worstOatFileRefused, '', { choose: ls.oatChoose !== false }) : '';
   const poolOatNote = poolOat ? ' · ' + t('the pool can’t use its long-lived token') + (poolRefused ? ' · ' + poolRefused : '') : '';
   const title = poolOat
     ? t('{name}’s OAuth login ended. Its long-lived token (valid until {date}) keeps its own sessions running, but a pooled session reads the login file, so this pool cannot use the token — re-login to bring it back. Click to re-login.', { name: escHtml(ls.worstName), date: escHtml(loginWhenText(ls.worstOatValidUntil)) })
@@ -351,8 +353,22 @@ const probeNoteAttrs = (n) => (n && n.text ? ` data-probe-note="${escHtml(n.text
 
 /** A subscription row's ident (the tail beside the name). `email` = the best-known address,
  *  `hostTag` = the "· logged in on {host}" tag ('' when no machine holds its login). */
+/** A plan in the row's words (lane oat-add-door, acceptance r1 item 5): the table's CURRENT name («Ultra (formerly Max 20x)» —
+ *  never «max», now the other plan's name), a value no row names by the CLI's own id, '' when nothing is stated */
+export function planWordsOf(shape) {
+  const n = shapeName(shape);
+  return !n ? '' : n.formerly ? t('{name} (formerly {old})', { name: n.name, old: n.formerly }) : n.name;
+}
 export function subIdentHtml(a, { email = '', hostSub = false, hostTag = '', local = true } = {}) {
-  return a.loggedIn ? escHtml(email + (a.subscriptionType ? (email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
+  // A ROW WHOSE FILE IS ITS LONG-LIVED TOKEN never signed in (acceptance r1 item 5): never «logged in» — its address and the
+  // plan its stated shape names (a sign-in's or the person's), by the table's names
+  const tokenFile = !!(a.loggedIn && a.loginState && a.loginState.oatFile);
+  // …and a choice a sign-in REPLACED is said on the row itself for its 7 days (acceptance r1) — not only inside the guide
+  const rp = a.oatShapeReplaced ? planWordsOf(a.oatShapeReplaced) : '';
+  const replaced = a.oatShapeReplaced ? ` <span class="acct-linked-hint">${escHtml(rp ? t('a sign-in replaced your choice ({was})', { was: rp }) : t('a sign-in replaced your choice'))}</span>` : '';
+  if (tokenFile) { const p = planWordsOf(a.oatShape && !a.oatShape.typeless ? a.oatShape : null); return escHtml(email + (p ? (email ? ' · ' : '') + p : '')) + replaced; }
+  const plan = a.subscriptionType ? planWordsOf({ subscriptionType: a.subscriptionType, rateLimitTier: a.rateLimitTier || null }) : '';
+  return a.loggedIn ? (escHtml(email + (plan ? (email ? ' · ' : '') + plan : '')) || t('logged in')) + replaced
     // Host-held login + empty LOCAL dir: "not logged in" (which is
     // about the local dir) next to "logged in on {host}" read as a
     // contradiction (real report) — the host tag carries the state.

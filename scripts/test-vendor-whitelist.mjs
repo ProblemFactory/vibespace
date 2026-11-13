@@ -35,7 +35,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 
-const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.com|claude\.ai\/|anthropic-beta/;
+// + claude.com (lane oat-add-door, acceptance r1): 2.1.321's mint prints its sign-in page there — a request built to it is a vendor call
+const VENDOR = /api\.anthropic\.com|platform\.claude\.com|console\.anthropic\.com|claude\.ai\/|anthropic-beta|(?<![\w.-])claude\.com\b/;
 // The CONSTRUCTION census also counts OpenAI hosts (dc-pool-quota verify r1): the codex live quota read moved into
 // src/harnesses/codex-quota.js and rides the official client's app-server — a raw fetch to ChatGPT/OpenAI beside it
 // was invisible here. Only the census widens: whole-file VENDOR reads (permission-rules' comments name chatgpt.com) keep theirs

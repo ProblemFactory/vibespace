@@ -115,12 +115,12 @@ if (!haveStrace) {
 
   // ── the census: every error path of the measurement, named once ──
   const src = fs.readFileSync(PROBE, 'utf8'); // the error paths live in the module now (lane cli-self-measure)
-  const CENSUS = ["server.on('clientError'", "server.on('connection', (s) => s.on('error'", "server.on('error'", "req.on('error'", "res.on('error'", ".catch((e) => event('sse'", "catch (e) { event('route'", "child.stdin.on('error'", "child.stdout.on('error'", "child.stderr.on('error'", "child.on('error'", "vc.on('error'", "process.on('uncaughtException'", "process.on('unhandledRejection'", "r.on('error', (e) => { console.error(`REFUSED: sudo did not start", 'await main().catch('];
+  const CENSUS = ["server.on('clientError'", "server.on('connection', (s) => s.on('error'", "server.on('error'", "req.on('error'", "res.on('error'", ".catch((e) => event('sse'", "catch (e) { event('route'", "child.stdin.on('error'", "child.stdout.on('error'", "child.stderr.on('error'", "child.on('error'", "vc.on('error'", "mc.stdin.on('error'", "mc.stdout.on('error'", "mc.on('error'", "process.on('uncaughtException'", "process.on('unhandledRejection'", "r.on('error', (e) => { console.error(`REFUSED: sudo did not start", 'await main().catch('];
   const count = (re) => (src.match(re) || []).length;
   const SCRIPT_SRC = fs.readFileSync(SCRIPT, 'utf8'); // the sudo spawn + main's catch stay in the script (lane cli-self-measure)
   const inScript = (n) => /REFUSED: sudo did not start|await main\(\)\.catch\(/.test(n);
   const missing = CENSUS.filter((n) => (inScript(n) ? SCRIPT_SRC : src).split(n).length !== 2);
-  ok("the census: each error path named once; 11 .on('error') listeners for 1 spawn() (THE ONE LAUNCHER: every variant and the --version read, law D — the version run's own process listener is the 11th) + 1 createServer() + the canary socket (lane cli-self-measure: the sudo spawn stays in the script) (a new one moves a count)", missing.length === 0 && count(/\.on\('error', /g) === 11 && count(/\bspawn\(/g) === 1 && count(/createServer\(/g) === 1, `missing ${JSON.stringify(missing)}; .on('error') ${count(/\.on\('error', /g)}, spawn( ${count(/\bspawn\(/g)}, createServer( ${count(/createServer\(/g)}`);
+  ok("the census: each error path named once; 14 .on('error') listeners for 1 spawn() (THE ONE LAUNCHER: every variant and the --version read, law D — the version run's own process listener is the 11th; + the mint variant's three on its own launch, lane oat-add-door) + 1 createServer() + the canary socket (lane cli-self-measure: the sudo spawn stays in the script) (a new one moves a count)", missing.length === 0 && count(/\.on\('error', /g) === 14 && count(/\bspawn\(/g) === 1 && count(/createServer\(/g) === 1, `missing ${JSON.stringify(missing)}; .on('error') ${count(/\.on\('error', /g)}, spawn( ${count(/\bspawn\(/g)}, createServer( ${count(/createServer\(/g)}`);
 
   // a PATCHED MODULE beside the real script (lane cli-self-measure: the measurement lives in src/claude-oat-probe.js; the
   // script requires ../src/cli-caps.js + ../src/claude-oat-probe.js, the module ./cli-caps.js); swaps must all land
@@ -139,11 +139,11 @@ if (!haveStrace) {
   const dead = copy('ctl-dead', [...SOCKET_STUBS, ...PROCESS_STUBS]);
   const rd = measure(['--claude', wrap('connect-reset'), '--variant', 'oat-file', '--out', path.join(tmp, 'ctl-dead.json')], dead.f);
   scratchOf(rd);
-  ok("RED CONTROL: the handlers stubbed out (all 14) ⇒ connect-reset kills the run — Unhandled 'error' event, read ECONNRESET, no record", dead.n === 14 && rd.status !== 0 && /Unhandled 'error' event/.test(rd.stderr) && /read ECONNRESET/.test(rd.stderr) && !fs.existsSync(path.join(tmp, 'ctl-dead.json')), `swaps ${dead.n}, exit ${rd.status}: ${String(rd.stderr).slice(-500)}`);
+  ok("RED CONTROL: the handlers stubbed out (all 17 — + the mint's three, lane oat-add-door) ⇒ connect-reset kills the run — Unhandled 'error' event, read ECONNRESET, no record", dead.n === 17 && rd.status !== 0 && /Unhandled 'error' event/.test(rd.stderr) && /read ECONNRESET/.test(rd.stderr) && !fs.existsSync(path.join(tmp, 'ctl-dead.json')), `swaps ${dead.n}, exit ${rd.status}: ${String(rd.stderr).slice(-500)}`);
   const belt = copy('ctl-belt', SOCKET_STUBS);
   const rb = measure(['--claude', wrap('connect-reset'), '--variant', 'oat-file', '--out', path.join(tmp, 'ctl-belt.json')], belt.f);
   const B = read(path.join(tmp, 'ctl-belt.json')), bf = B?.results?.[0];
-  ok('the belt: only the process-level handlers kept ⇒ the run survives, the reset recorded as process uncaughtException ECONNRESET', belt.n === 12 && rb.status === 0 && bf?.verdict === 'PASS' && bf.events.some((x) => x.where === 'process uncaughtException' && x.code === 'ECONNRESET'), `swaps ${belt.n}, exit ${rb.status}: ${JSON.stringify(bf && { v: bf.verdict, events: bf.events }).slice(0, 400)} ${String(rb.stderr).slice(-300)}`);
+  ok('the belt: only the process-level handlers kept ⇒ the run survives, the reset recorded as process uncaughtException ECONNRESET', belt.n === 15 && rb.status === 0 && bf?.verdict === 'PASS' && bf.events.some((x) => x.where === 'process uncaughtException' && x.code === 'ECONNRESET'), `swaps ${belt.n}, exit ${rb.status}: ${JSON.stringify(bf && { v: bf.verdict, events: bf.events }).slice(0, 400)} ${String(rb.stderr).slice(-300)}`);
   // ── lane cli-self-measure: THE HUB'S ROAD — src/claude-oat-probe.js's child entry, forked exactly as src/server/cli-self-measure.js
   // forks it (a literal env, one job over IPC) — over the same fake ⇒ the same verdicts (ONE implementation), the gate reported
   // before the record; then law 3's fences, each proven to FIRE on the real strace ──

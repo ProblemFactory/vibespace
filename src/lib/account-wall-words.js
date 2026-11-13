@@ -3,7 +3,8 @@
 // PURE: every surface that says why an account cannot be used now (⟳'s refusal, «Refresh all», the pool's gather, a reset
 // claim's answer) words the POOL'S verdict here — the server sends the cause as a CODE (accounts.placeWallOf / the roster's
 // `why`), never a sentence a person must read in English. ONE sentence for many accounts with the same cause (its count),
-// and the door that ends it (`door`: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents' re-login, null = nothing
+// and the door that ends it (`door`: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents' re-login, 'oat-shape' = the
+// guided door of a token with no subscription type yet (lane oat-add-door), null = nothing
 // to press — it ends by itself, and the sentence says when). The reset claim's words live here too.
 const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
 const id = (s, p) => fill(s, p);
@@ -31,7 +32,12 @@ export function wallWords(wall, { t = id, name = null, n = 1 } = {}) {
       if (l && (l.state === 'cannot-run' || l.state === 'aborted')) return { door: 'relogin', text: many ? t('VibeSpace could not check Claude Code {cli} on this machine (For you says why) — re-login these {n} accounts to use them now', { n, cli }) : t('VibeSpace could not check Claude Code {cli} on this machine (For you says why) — re-login {name} to use it now', { name: who, cli }) };
       return { door: 'relogin', text: many ? t('Claude Code {cli} is not in this VibeSpace’s records yet — re-login these {n} accounts, or a VibeSpace update places them', { n, cli }) : t('Claude Code {cli} is not in this VibeSpace’s records yet — re-login {name}, or a VibeSpace update places it', { name: who, cli }) };
     }
-    case 'oat-not-in-folder': return w.reason === 'pending'
+    // NO TYPE YET (lane oat-add-door, acceptance r1 MUST 1): the guided door — sign in once, or choose the type where this hub
+    // offers it (`choose`) — never «re-login», never the re-login door alone
+    case 'oat-not-in-folder': if (w.reason === 'no-scopes') return { door: 'oat-shape', text: w.choose
+        ? (many ? t('{n} accounts’ long-lived tokens have no subscription type yet — sign in once, or choose the type', { n }) : t('{name}’s long-lived token has no subscription type yet — sign in once, or choose the type', { name: who }))
+        : (many ? t('{n} accounts’ long-lived tokens have no subscription type yet — sign in once', { n }) : t('{name}’s long-lived token has no subscription type yet — sign in once', { name: who })) };
+      return w.reason === 'pending'
       ? { door: null, text: many ? t('{n} accounts’ long-lived tokens are written to their folders within a minute', { n }) : t('{name}’s long-lived token is written to its folder within a minute', { name: who }) }
       : { door: 'relogin', text: many ? t('{n} accounts need a re-login', { n }) : t('{name} needs a re-login', { name: who }) };
     case 'auth-failed': return { door: null, text: many ? t('{n} accounts were refused by Anthropic — asked again after 10 minutes', { n }) : t('{name} was refused by Anthropic — asked again after 10 minutes', { name: who }) };
