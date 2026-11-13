@@ -92,6 +92,7 @@ const PRODUCERS = {
   'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: ['cli-check-again'] }, // lane cli-self-measure: a FAIL / cannot-run / stopped check's item carries «Check again»
   'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request', 'vault-words-ask'] },   // + lane vault-entry-description: an agent's proposal of an entry's words
   'src/server/feedback-forward.js': { origin: 'server', scope: 'group', types: [] },
+  'src/server/wait-watch.js': { origin: 'agent', scope: 'conversation', types: ['messages-waiting'] },   // lane queued-is-not-woke laws 2 + 3 (shape C): the «messages waiting» item, under the conversation's own key
 };
 // the add() site scanner (test-user-todos-layout ⑪'s shape: every two-argument `.add(` / `?.add(` on any receiver, its
 // top-level text — a nested `origin:` never counts; a DOM classList.add and a comment line are not sites)
