@@ -645,7 +645,6 @@ const pad2 = (n) => String(n).padStart(2, '0');
 function clockWords(ts, now = Date.now()) {
   const d = new Date(Number(ts) || 0), n = new Date(Number(now) || 0);
   const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  // page-time: a PURE shared module — the near shape page-time prints («19:27» / «11/12 19:27»), 24-hour, by hand
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 /** clockWords' spellings as ONE RegExp source (B-81c4 — a reader that does not hold the page's `now`: an hour that ends past
