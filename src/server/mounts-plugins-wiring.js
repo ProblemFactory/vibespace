@@ -913,7 +913,10 @@ app.get('/api/mounts/:id/config', (req, res) => {
   // (the Vault window's door: paced, audited `vault-reveal` field '*'); else they come back MASKED (the dialog keeps them)
   const gate = app.locals.vaultGate;
   let masked = false;
-  if (gate && gate.state() !== 'not_set_up') { const g = gate.revealRecord(req, 'mounts', req.params.id); masked = !g.ok; if (g.code === 'human_only' || g.code === 'cross_site') return res.status(403).json({ error: gate.refusalOf(g.code), code: g.code }); }
+  // lane ui-controls-and-bugs: a record whose answer carries no sealed byte (the write-only law drops every secret) asks no
+  // reveal — no `vault-reveal` audited, no pace spent for nothing
+  let needs = true; try { needs = mounts.revealNeeded(req.params.id); } catch { /* an unknown id: config() answers it below */ }
+  if (needs && gate && gate.state() !== 'not_set_up') { const g = gate.revealRecord(req, 'mounts', req.params.id); masked = !g.ok; if (g.code === 'human_only' || g.code === 'cross_site') return res.status(403).json({ error: gate.refusalOf(g.code), code: g.code }); }
   try { res.json(mounts.config(req.params.id, { masked })); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });

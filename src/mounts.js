@@ -85,12 +85,19 @@ const VAULT_MASK = '••••••••';
  *  Drive record's OAuth token in an edit box): a storage record's SECRET bytes never travel to the page — not to the owner's
  *  cookie, inside the vault's reveal window or out of it. A secret is what the record SEALS: every `<cell>Enc` (the OAuth token,
  *  a client secret, an S3 secret key / session token, a WebDAV / SFTP password, a bearer token, a Ceph secret); a raw rclone
- *  record seals EVERY parameter, so there a parameter is a secret by its NAME (SECRET_PARAM — a token / secret / password / key /
- *  credentials; an id, a file or a path is not). config() drops them and names the ones the record HOLDS in `held`; the dialog
+ *  record seals EVERY parameter, and there every parameter is a secret but the PLAIN ones (SECRET_PARAM, below). config() drops
+ *  them, names the ones the record HOLDS in `held` and every write-only parameter field in `secretParams`; the dialog
  *  says «已保存» with an empty «替换…» (the OAuth token: «已授权» beside its Re-authorize door). Everything else stays readable. */
-const SECRET_PARAM = (name) => /(^|_)(token|secret|pass(word)?\d*|key|sas_url|credentials|pem)(_|$)/i.test(String(name)) && !/(_id|_file|_path)$/i.test(String(name));
+// THE INVERSE RULE (the acceptance reader: by name, storj `passphrase` / `access_grant`, an Azure `connection_string` and `headers`
+// came back in clear, while `key_use_agent=true` and `token_url` were hidden): in a raw rclone record EVERY parameter is a secret
+// except a PLAIN one — a boolean value, a name on the short allow-list (what kind / where / who / how big), or a name ending in
+// _id / _file / _path / _url / _uri / _type / _mode (a SAS URL excepted: it carries its signature).
+const PLAIN_PARAM_NAME = /^(type|provider|env_auth|region|location|location_constraint|endpoint|host|port|user|username|account|bucket|container|scope|acl|bucket_acl|object_acl|storage_class|server_side_encryption|chunk_size|upload_cutoff|copy_cutoff|upload_concurrency|list_chunk|team_drive|drive_type|vendor|url|path|dir|root|remote|shell_type|tenant|domain|auth_version|encoding|force_path_style|v2_auth|no_check_bucket)$/i;
+const PLAIN_PARAM = (name, value) => /^(true|false)$/i.test(String(value == null ? '' : value).trim())
+  || PLAIN_PARAM_NAME.test(String(name)) || (/(_id|_file|_path|_url|_uri|_type|_mode)$/i.test(String(name)) && !/(^|_)sas_url$/i.test(String(name)));
+const SECRET_PARAM = (name, value) => !PLAIN_PARAM(name, value);
 function writeOnly(out, m) {
-  const held = [];
+  const held = [], secretParams = [];
   for (const [k, v] of Object.entries(m)) {
     if (!/Enc$/.test(k) || typeof v !== 'string') continue;   // a sealed CELL (the bags below are objects)
     const name = k.slice(0, -3);
@@ -99,9 +106,10 @@ function writeOnly(out, m) {
   }
   for (const [bag, pre] of [['params', 'param:'], ['extraParams', 'extraParams:']]) {
     const b = out[bag];
-    if (b && typeof b === 'object') for (const p of Object.keys(b)) if (SECRET_PARAM(p)) { if (b[p]) held.push(pre + p); b[p] = ''; }   // the key stays (its field), never its value
+    if (b && typeof b === 'object') for (const p of Object.keys(b)) if (SECRET_PARAM(p, b[p])) { secretParams.push(pre + p); if (b[p]) held.push(pre + p); b[p] = ''; }   // the key stays (its field), never its value
   }
   if (held.length) out.held = held;
+  if (secretParams.length) out.secretParams = secretParams;   // which parameter fields are write-only (the page draws them so)
   return out;
 }
 class MountManager {
@@ -809,6 +817,13 @@ class MountManager {
    * Served only on the cookie-authed config route. Env-provisioned records return no secrets (their connection is
    * deployment-owned and not editable anyway).
    */
+  /** Would config(id) carry any SEALED byte? (the acceptance reader: every Edit open inside the reveal window audited a
+   *  «vault-reveal» for a record that, under the write-only law, reveals nothing sealed). Only a raw rclone record's PLAIN
+   *  parameters are sealed AND shown — the route asks the vault's reveal (paced, audited) only then. */
+  revealNeeded(id) {
+    const m = this._get(id);
+    return ['paramsEnc', 'extraParamsEnc'].some((k) => { const v = m && m[k]; if (!v || typeof v !== 'object' || Array.isArray(v)) return false; const bag = this.config(id)[k.slice(0, -3)] || {}; return Object.keys(v).some((p) => !SECRET_PARAM(p, bag[p])); });
+  }
   config(id, { masked = false } = {}) {
     const m = this._get(id);
     // lane vault-contents-window r2 (verify r1): outside the page's reveal window every sealed field answers the MASK and
@@ -820,7 +835,7 @@ class MountManager {
         if (!/Enc$/.test(k) || !v) continue;
         const name = k.slice(0, -3);
         if (typeof v === 'string' && out[name] !== undefined) { out[name] = VAULT_MASK; names.push(name); }
-        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name] && !SECRET_PARAM(p)) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
+        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name] && !SECRET_PARAM(p, out[name][p])) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
       }
       return { ...out, masked: names };
     }
