@@ -88,13 +88,32 @@ const VAULT_MASK = '••••••••';
  *  record seals EVERY parameter, and there every parameter is a secret but the PLAIN ones (SECRET_PARAM, below). config() drops
  *  them, names the ones the record HOLDS in `held` and every write-only parameter field in `secretParams`; the dialog
  *  says «已保存» with an empty «替换…» (the OAuth token: «已授权» beside its Re-authorize door). Everything else stays readable. */
-// THE INVERSE RULE (the acceptance reader: by name, storj `passphrase` / `access_grant`, an Azure `connection_string` and `headers`
-// came back in clear, while `key_use_agent=true` and `token_url` were hidden): in a raw rclone record EVERY parameter is a secret
-// except a PLAIN one — a boolean value, a name on the short allow-list (what kind / where / who / how big), or a name ending in
-// _id / _file / _path / _url / _uri / _type / _mode (a SAS URL excepted: it carries its signature).
-const PLAIN_PARAM_NAME = /^(type|provider|env_auth|region|location|location_constraint|endpoint|host|port|user|username|account|bucket|container|scope|acl|bucket_acl|object_acl|storage_class|server_side_encryption|chunk_size|upload_cutoff|copy_cutoff|upload_concurrency|list_chunk|team_drive|drive_type|vendor|url|path|dir|root|remote|shell_type|tenant|domain|auth_version|encoding|force_path_style|v2_auth|no_check_bucket)$/i;
-const PLAIN_PARAM = (name, value) => /^(true|false)$/i.test(String(value == null ? '' : value).trim())
-  || PLAIN_PARAM_NAME.test(String(name)) || (/(_id|_file|_path|_url|_uri|_type|_mode)$/i.test(String(name)) && !/(^|_)sas_url$/i.test(String(name)));
+// THE rclone PARAMETER TABLE — DENY BY DEFAULT (主开发's closure 2026-11-13: «a raw parameter is secret unless its name is on an
+// explicit allow-list of plain names kept in ONE table»). Every option a provider of this tree writes has its row here, plain or
+// secret — scripts/test-write-only-secrets.mjs ② reads the options from the providers, and a new one with no row is red. A name
+// with NO row (what the owner typed into a raw record) is a SECRET, whatever its value or its ending.
+const RCLONE_PARAMS = Object.freeze({
+  // plain: what kind, where, who, how big, which switch — never a credential
+  type: 'plain', provider: 'plain', vendor: 'plain', drive_type: 'plain', env_auth: 'plain', region: 'plain', location: 'plain', location_constraint: 'plain',
+  endpoint: 'plain', url: 'plain', host: 'plain', port: 'plain', user: 'plain', username: 'plain', account: 'plain', tenant: 'plain', domain: 'plain',
+  bucket: 'plain', container: 'plain', scope: 'plain', acl: 'plain', bucket_acl: 'plain', object_acl: 'plain', storage_class: 'plain', server_side_encryption: 'plain',
+  chunk_size: 'plain', upload_cutoff: 'plain', copy_cutoff: 'plain', upload_concurrency: 'plain', list_chunk: 'plain', encoding: 'plain', auth_version: 'plain',
+  path: 'plain', dir: 'plain', root: 'plain', remote: 'plain', shell_type: 'plain',
+  team_drive: 'plain', drive_id: 'plain', root_folder_id: 'plain', shared_with_me: 'plain', client_id: 'plain', access_key_id: 'plain', key_file: 'plain',
+  token_url: 'plain', auth_url: 'plain',
+  force_path_style: 'plain', no_check_bucket: 'plain', v2_auth: 'plain', key_use_agent: 'plain', ask_password: 'plain', client_credentials: 'plain',
+  // secret: the tree's own credential options — decided here, never left to the default
+  token: 'secret', client_secret: 'secret', pass: 'secret', secret_access_key: 'secret', session_token: 'secret', bearer_token: 'secret',
+});
+// …and a VALUE that is a CREDENTIAL URL is a secret whatever its row (the closure: rclone's http backend authenticates by
+// `url = https://user:pass@host`, a webdav url / an S3 endpoint / sia's api_url the same; a signed query carries its key):
+// a URL with userinfo, or a query naming a signature, a token or a key
+const CREDENTIAL_QUERY = /^(sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token|x-goog-signature|x-goog-credential|token|access_token|auth|key|api_key|apikey|password|pass|secret)$/i;
+const CREDENTIAL_URL = (value) => {
+  let u; try { u = new URL(String(value == null ? '' : value).trim()); } catch { return false; }
+  return !!(u.username || u.password) || [...u.searchParams.keys()].some((k) => CREDENTIAL_QUERY.test(k));
+};
+const PLAIN_PARAM = (name, value) => RCLONE_PARAMS[String(name).toLowerCase()] === 'plain' && !CREDENTIAL_URL(value);
 const SECRET_PARAM = (name, value) => !PLAIN_PARAM(name, value);
 function writeOnly(out, m) {
   const held = [], secretParams = [];
@@ -306,6 +325,7 @@ class MountManager {
   // OneDrive rejects 1.65.2's download path with "unauthenticated" on EVERY
   // file read while listings/uploads/token-refresh all work — A/B against the
   // live account: 1.65.2 fails, 1.69.3 and 1.75.0 both download fine.
+  static RCLONE_PARAMS = RCLONE_PARAMS;   // THE table (the census reads every provider option against it)
   static SECRET_PARAM = SECRET_PARAM;   // the census (scripts/test-write-only-secrets.mjs) reads the law from here
   static RCLONE_PIN = 'v1.69.3';
 
@@ -822,7 +842,9 @@ class MountManager {
    *  parameters are sealed AND shown — the route asks the vault's reveal (paced, audited) only then. */
   revealNeeded(id) {
     const m = this._get(id);
-    return ['paramsEnc', 'extraParamsEnc'].some((k) => { const v = m && m[k]; if (!v || typeof v !== 'object' || Array.isArray(v)) return false; const bag = this.config(id)[k.slice(0, -3)] || {}; return Object.keys(v).some((p) => !SECRET_PARAM(p, bag[p])); });
+    // judged by the ANSWER's own `secretParams` (the rule read the value: a blanked credential URL is no longer a URL)
+    const sp = new Set(this.config(id).secretParams || []);
+    return [['paramsEnc', 'param:'], ['extraParamsEnc', 'extraParams:']].some(([k, pre]) => { const v = m && m[k]; if (!v || typeof v !== 'object' || Array.isArray(v)) return false; return Object.keys(v).some((p) => !sp.has(pre + p)); });
   }
   config(id, { masked = false } = {}) {
     const m = this._get(id);
@@ -830,12 +852,12 @@ class MountManager {
     // is named in `masked` (the dialog leaves it as it is unless a new value is typed); the rest of the record is real
     if (masked) {
       const out = this.config(id);
-      const names = [];
+      const names = [], secretOut = new Set(out.secretParams || []);   // the write-only fields stay blank — never the mask of a plain one
       for (const [k, v] of Object.entries(m)) {
         if (!/Enc$/.test(k) || !v) continue;
         const name = k.slice(0, -3);
         if (typeof v === 'string' && out[name] !== undefined) { out[name] = VAULT_MASK; names.push(name); }
-        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name] && !SECRET_PARAM(p, out[name][p])) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
+        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name] && !secretOut.has(`${name === 'params' ? 'param' : name}:${p}`)) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
       }
       return { ...out, masked: names };
     }

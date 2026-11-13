@@ -132,13 +132,13 @@ function heldFields(fields, cfg, provider, door) {
       const box = `<input type="password" name="${escHtml(k)}" value="" placeholder="${escHtml(tr('Type the new value'))}" autocomplete="new-password"${held.has(k) ? ' hidden' : ''}>`;
       // a held rclone PARAMETER can also be removed (the dialog's «clear a parameter's value to remove it» stays true): «删除»
       // marks it, the submit sends the empty value the server deletes on
-      const removeBtn = /^param:/.test(k) ? `<button type="button" class="mounts-btn mounts-held-remove">${escHtml(tr('Remove'))}</button>` : '';
+      const removeBtn = /^param:/.test(k) ? `<button type="button" class="mounts-btn mounts-held-remove">${escHtml(tr('Remove'))}</button><button type="button" class="mounts-btn mounts-held-undo" hidden>${escHtml(tr('Undo'))}</button>` : '';
       f[4] = { html: held.has(k) ? `<label>${escHtml(f[1])}<span class="mounts-held"><span class="mounts-held-state">${escHtml(tr('Saved'))}</span>${replaceBtn}${removeBtn}</span>${box}</label>` : `<label>${escHtml(f[1])}${box}</label>` };
       f[3] = '';
     }
   }
 }
-/** «替换…» opens its field's empty box; «删除» marks a held parameter for removal (one delegated listener per form). */
+/** «替换…» opens its field's empty box; «删除» marks a held parameter for removal, «撤销» takes the mark back (one delegated listener per form). */
 function wireHeld(form) {
   form.addEventListener('click', (e) => {
     const rm = e.target.closest('.mounts-held-remove');
@@ -147,6 +147,17 @@ function wireHeld(form) {
       if (box) { box.dataset.remove = '1'; box.value = ''; box.hidden = true; }
       const st = lab.querySelector('.mounts-held-state'); if (st) st.textContent = tr('Removed when you save');
       lab.querySelectorAll('.mounts-held-replace, .mounts-held-remove').forEach((x) => { x.hidden = true; });
+      const un = lab.querySelector('.mounts-held-undo'); if (un) un.hidden = false;
+      return;
+    }
+    // «撤销»: the mark is reversible before Save (the closure: closing the dialog was the only road back) — the parameter is kept
+    const un = e.target.closest('.mounts-held-undo');
+    if (un) {
+      e.preventDefault(); const lab = un.closest('label'), box = lab.querySelector('[name]');
+      if (box) delete box.dataset.remove;
+      const st = lab.querySelector('.mounts-held-state'); if (st) st.textContent = tr('Saved');
+      lab.querySelectorAll('.mounts-held-replace, .mounts-held-remove').forEach((x) => { x.hidden = false; });
+      un.hidden = true;
       return;
     }
     const b = e.target.closest('.mounts-held-replace'); if (!b) return;
