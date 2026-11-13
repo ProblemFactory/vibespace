@@ -1194,8 +1194,27 @@ for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r
 console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (lane dc-apps-rows, F-I2)');
 {
   const df = read('deploy/docker/Dockerfile');
-  const [, keyLine, srcLine, pinLine] = M.xpraRepoSteps('bookworm');
-  ok(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc`) && keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc`), 'the image fetches the key the plan fetches (XPRA_KEY_URL)');
+  const steps = M.xpraRepoSteps('bookworm'), line = (re) => steps.find((l) => re.test(l)) || '';
+  const keyLine = line(/curl -fsSL/), checkLine = line(/fpr:::::::::/), moveLine = line(/^mv -f /), srcLine = line(/Types: deb/), pinLine = line(/Pin-Priority/);
+  ok(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`) && keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`), 'the image fetches the key the plan fetches (XPRA_KEY_URL), beside the keyring until it is checked');
+  // lane machine-needs-at-pairing pick 3: THE KEY IS PINNED — the check runs before the move, the move before any apt source names it
+  ok(checkLine === M.XPRA_KEY_CHECK && steps.indexOf(keyLine) < steps.indexOf(checkLine) && steps.indexOf(checkLine) < steps.indexOf(moveLine) && steps.indexOf(moveLine) < steps.indexOf(srcLine) && df.includes(`&& ${checkLine} \\\n`) && df.includes(`&& ${moveLine} \\\n`), 'the key is checked (its pinned fingerprint) BEFORE it is moved into the keyring, and moved before the apt source names it — the image runs the same lines');
+  {
+    const cp = require('node:child_process'), os = require('node:os');
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-xpra-key-')), k = path.join(d, 'k.asc');
+    const run = (src, env) => { fs.copyFileSync(src, k); const r = cp.spawnSync('sh', ['-c', `set -e; ${M.XPRA_KEY_CHECK.split('/usr/share/keyrings/xpra.asc.new').join(k)}`], { encoding: 'utf8', ...(env ? { env } : {}) }); return { rc: r.status, kept: fs.existsSync(k), err: r.stderr }; };
+    const real = path.join(repo, 'scripts/fixtures/xpra/xpra.asc');
+    const other = ['/usr/share/keyrings/ubuntu-archive-keyring.gpg', '/usr/share/keyrings/debian-archive-keyring.gpg'].find((p) => fs.existsSync(p));
+    const nogpg = path.join(d, 'bin'); fs.mkdirSync(nogpg);
+    for (const t of ['sh', 'mktemp', 'sha256sum', 'rm', 'cat', 'echo', '[']) { const w = cp.spawnSync('sh', ['-c', `command -v ${t === '[' ? 'test' : t}`], { encoding: 'utf8' }).stdout.trim(); if (w.startsWith('/')) fs.symlinkSync(w, path.join(nogpg, t)); }
+    const a = run(real), b = other ? run(other) : null, c = run(real, { PATH: nogpg });
+    const realHasGpg = cp.spawnSync('sh', ['-c', 'command -v gpg']).status === 0;
+    ok(a.rc === 0 && a.kept && (!realHasGpg || (b && b.rc === 3 && !b.kept && /not xpra\.org's pinned key/.test(b.err))) && c.rc === 0, `the check: xpra.org's key (the fixture) passes; ${other ? 'another key' : '(no other key on this box)'} is refused (exit 3), its download removed, the reason said; with no gpg on PATH the file's pinned SHA-256 passes it`, { a, b, c });
+    const tampered = path.join(d, 'tampered.asc'); fs.writeFileSync(tampered, fs.readFileSync(real, 'utf8').replace('mQINB', 'mQINC'));
+    const e = run(tampered, { PATH: nogpg });
+    ok(e.rc === 3 && !e.kept, 'with no gpg, a changed key file fails the pinned SHA-256 and is removed (exit 3)', e);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
   ok(df.includes(`&& ${srcLine} \\\n`) && df.includes(`&& ${pinLine}\n`), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
   const pl = M.xpraInstallPlan({ platform: 'linux', apt: true, distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true });
   ok(pl.ok && M.xpraRepoSteps('bookworm').every((l) => pl.script.includes(l)), 'the machine plan runs exactly xpraRepoSteps');
