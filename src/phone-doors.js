@@ -37,18 +37,23 @@ const PHONE_TWINS = Object.freeze([
   { door: 'rail:browser', twins: [T('the «+» sheet «Agent browser»', 'src/lib/mobile-nav.js', "t('Agent browser'), () => this._openAgentBrowser")] },
   { door: 'rail:diagnostics', twins: [T('⚙ ▸ System ▸ «Diagnostics report…»', 'src/lib/gear-menu.js', "label: () => t('Diagnostics report…')")] },
   { door: 'rail:settings', twins: [T('⚙ «All Settings...»', 'src/lib/gear-menu.js', "label: () => t('All Settings...')")] },
+  // ── a window's own doors (lane phone-six) ──
+  // the desktop's side by side = a tab group's ⧉ (tab-group.js); the phone's = two windows, left and right, where they fit
+  { door: 'win:split', twins: [T('the window switcher\'s «Split» beside a window (where two panes do not fit, it says why — «Rotate to split»)', 'src/lib/mobile-nav.js', "splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');")] },
 ].map((r) => Object.freeze(r)));
 
 // a line that turns its row OFF on a phone (`when: (c) => !c.app.isMobile`, `if (!app.isMobile)`) is no phone twin
 const PHONE_OFF_RE = /!\s*(?:c\.|this\.)?app\.isMobile\b|isMobile\s*===?\s*false/;
 
-/** The desktop doors a source declares: the toolbar's `<button id="btn-…"` (inside <header id="toolbar">) and the rail's
- *  `item('<id>'` calls. → ['btn-…', 'rail:…'] in source order. */
-function desktopDoors({ indexHtml = '', railSrc = '' } = {}) {
+/** The desktop doors a source declares: the toolbar's `<button id="btn-…"` (inside <header id="toolbar">), the rail's
+ *  `item('<id>'` calls and a window's own (lane phone-six: the tab strip's split button in src/lib/tab-group.js = `win:split`).
+ *  → ['btn-…', 'rail:…', 'win:…'] in source order. */
+function desktopDoors({ indexHtml = '', railSrc = '', tabGroupSrc = '' } = {}) {
   const out = [];
   const head = /<header id="toolbar">([\s\S]*?)<\/header>/.exec(String(indexHtml));
   if (head) for (const m of head[1].matchAll(/<button id="(btn-[a-z0-9-]+)"/g)) out.push(m[1]);
   for (const m of String(railSrc).matchAll(/\bitem\('([a-z0-9-]+)',/g)) out.push('rail:' + m[1]);
+  if (/\bbtn\.className = 'tab-split-btn';/.test(String(tabGroupSrc))) out.push('win:split');
   return [...new Set(out)];
 }
 

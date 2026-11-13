@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+// THE PHONE'S SIDE BY SIDE (lane phone-six, 2026-10-26 — userW's wish, the owner's framing 「不是窗口，只能支持左右分屏」) and
+// THE TURN (the same lane's item 4 — 「每次旋转完屏幕之后都会把侧边栏默认打开」). Fast, in-process: PURE src/phone-split.js +
+// a source census of its client (src/lib/phone-split-view.js) and of the roads that use it.
+//   ① THE RULE OF WHEN — splitVerdict: two panes stand side by side only where each keeps MIN_PANE (350 px, MEASURED:
+//     a chat's 16 px composer from 290 px, a terminal's 40 columns at the phone's 14 px font from 350 px — the lane report's
+//     table) + the 8 px divider: 708 px of room. A landscape phone (844 − the 56 px bar) splits; a portrait phone says
+//     «Rotate to split» (the same screen turned clears it), a narrow one «Too narrow to split»; a portrait tablet splits
+//   ② THE PAIR — pairFor: «Split» beside a window puts it beside the window on show (fresh: shown left, it right; in a
+//     split the shown pane keeps its side, the other is replaced); a window of the shown frame (itself, a tab of its group)
+//     is no second pane
+//   ③ COLLAPSE / RESTORE — splitLayout: a room under the bound shows the pane on show alone and KEEPS the pair; the room
+//     back restores it; a window outside the pair on show ends it; a pane's window gone ends it; closePane hands the other
+//   ④ THE TURN — turnOf tells a rotation (the same screen: its area kept, swapped or not) from a fold (another screen);
+//     listOnTurn keeps the person's list on a rotation inside the phone tier, and leaves a fold / a tier change to the class
+//   ⑤ RED CONTROLS (patched copies of the module): a bound without the divider, a turn by the orientation alone (the Duo's
+//     fold reads as a rotation), a collapse that drops the pair, a carry on a fold
+//   ⑥ wiring pins — the client keeps the pair in sessionStorage only (this tab's: never localStorage, never the layout
+//     record), MobileNav installs it and applies it on every title update, the switcher row's door keeps its words when it
+//     refuses (and says them on a press), viewport-switch carries the list on a rotation, the window manager draws a split's
+//     other pane (no hidden-tab suspension), the pane's ✕ is no drag handle, the stylesheet's block is a phone's, the doors
+//     census has the split's row, i18n zh / ja
+//   ⑦ ROUND 2 (the acceptance of 6f4f858c): PURE src/phone-head.js — headName (a path-shaped name is its last segment), the
+//     8 em the name keeps, the yield ladder; RED controls (the round-1 whole-path name, the 3.5 em floor); pins: the room
+//     the panes may use is the window area now (the list column shown collapses the split), no dead pair (a minimized
+//     window restored before the pair is kept, a pane's window minimized / closed / moved drops it, said), one tap = one act
+//     on a pane's head, the head and the window's own head name with headName, the stylesheet's ladder, i18n
+// Run: node scripts/test-phone-split.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+const SRC = path.join(REPO, 'src/phone-split.js');
+const S = require(SRC);
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+const HEAD_SRC = path.join(REPO, 'src/phone-head.js');
+/** A patched copy of a module (a RED control; src/phone-split.js unless named): `from` must occur exactly once. */
+const mutant = (from, to, file = SRC) => {
+  const src = fs.readFileSync(file, 'utf8');
+  if (src.split(from).length !== 2) throw new Error('mutant anchor not unique: ' + from.slice(0, 70));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-phone-split-'));
+  const f = path.join(dir, path.basename(file));
+  fs.writeFileSync(f, src.replace(from, to));
+  try { return require(f); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+};
+
+console.log('① the rule of when — 2 × MIN_PANE + the divider');
+ok(S.MIN_PANE === 350 && S.SPLIT_DIVIDER === 8 && S.splitBound() === 708, 'MIN_PANE 350 (measured: the terminal\'s 40 columns at 14 px; a chat needs 290) + an 8 px divider = 708 px of room', { MIN_PANE: S.MIN_PANE, d: S.SPLIT_DIVIDER, bound: S.splitBound() });
+const V = (room, turnedRoom = null) => S.splitVerdict({ room, turnedRoom });
+ok(V(708).ok && !V(707).ok, 'the edge: 708 px splits, 707 does not', [V(708), V(707)]);
+ok(V(844 - 56).ok && V(951 - 56).ok, 'a landscape phone (844 − the 56 px bar = 788) and the Duo\'s inner landscape (895) split');
+ok(V(390, 844 - 56).why === 'rotate' && V(390, 844 - 56).words === 'Rotate to split' && V(669, 867 - 56).why === 'rotate', 'a portrait phone (390) and the Duo\'s inner portrait (669) say «Rotate to split» — the same screen turned clears the bound', [V(390, 788), V(669, 811)]);
+ok(V(320, 568 - 56).why === 'narrow' && V(320, 568 - 56).words === 'Too narrow to split' && V(390, null).why === 'narrow', 'a phone too small even turned (568 − 56 = 512) — and an unknown turn — say «Too narrow to split»', V(320, 512));
+ok(V(820).ok && V(768).ok, 'a portrait tablet whose width clears it (820, 768) splits — the rule reads the room, never «portrait»');
+ok(Object.values(S.SPLIT_WORDS).every((w) => typeof w === 'string' && w) && !V(390, 788).ok && !!V(390, 788).words, 'a refusal keeps its words and its reason (the door is never greyed out of its words)');
+
+console.log('② the pair — «Split» beside a window puts it beside the window on show');
+const frames = { a: 'a', b: 'b', c: 'c', g1: 'g', g2: 'g', g: 'g' };
+const frameOf = (id) => frames[id] || null;
+ok(JSON.stringify(S.pairFor({ shown: 'a', pick: 'b', frameOf })) === '["a","b"]', 'fresh: the window on show left, the picked one right');
+ok(S.pairFor({ shown: 'a', pick: 'a', frameOf }) === null && S.pairFor({ shown: 'g1', pick: 'g2', frameOf }) === null, 'the window on show itself, or a tab of its own group, is no second pane (one frame)');
+ok(JSON.stringify(S.pairFor({ shown: 'g2', pick: 'b', frameOf })) === '["g","b"]', 'a tab group pairs as its frame (the host)');
+ok(JSON.stringify(S.pairFor({ shown: 'b', pick: 'c', pair: ['a', 'b'], frameOf })) === '["c","b"]' && JSON.stringify(S.pairFor({ shown: 'a', pick: 'c', pair: ['a', 'b'], frameOf })) === '["a","c"]', 'in a split the pane on show keeps its side, the picked window replaces the other');
+ok(S.pairFor({ shown: null, pick: 'b', frameOf }) === null && S.pairFor({ shown: 'a', pick: 'zz', frameOf }) === null, 'no window on show / an unknown window ⇒ no pair');
+
+console.log('③ collapse / restore');
+const L = (o) => S.splitLayout({ pair: ['a', 'b'], shown: 'a', alive: ['a', 'b', 'c'], room: 788, ...o });
+ok(L({}).mode === 'split' && JSON.stringify(L({}).pair) === '["a","b"]' && L({}).focus === 'a' && L({ shown: 'b' }).focus === 'b', 'room, both alive, a pane on show ⇒ the split, focused on the pane on show');
+const narrow = L({ room: 390 });
+ok(narrow.mode === 'single' && narrow.keep === true && narrow.why === 'room', 'a room under the bound (turned to portrait, the list column shown) ⇒ one pane, the pair KEPT', narrow);
+ok(L({ room: 788 }).mode === 'split', '…and the room back restores it');
+ok(L({ shown: 'c' }).keep === false && L({ shown: 'c' }).why === 'other', 'a window outside the pair on show ⇒ the split is over');
+ok(L({ alive: ['a', 'c'] }).keep === false && L({ alive: ['a', 'c'] }).why === 'gone', 'a pane\'s window gone ⇒ the split is over');
+ok(S.splitLayout({ pair: null, shown: 'a', alive: ['a'], room: 900 }).why === 'none' && S.splitLayout({ pair: ['a', 'a'], shown: 'a', alive: ['a'], room: 900 }).why === 'none', 'no pair (or a degenerate one) ⇒ one window');
+ok(S.closePane(['a', 'b'], 'a') === 'b' && S.closePane(['a', 'b'], 'b') === 'a' && S.closePane(['a', 'b'], 'z') === null && S.closePane(null, 'a') === null, 'a pane\'s ✕ hands the screen to the other pane');
+
+console.log('④ the turn — a rotation keeps the list, a fold is a fresh load\'s');
+const v = (w, h, sw = w, sh = h) => ({ w, h, sw, sh });
+ok(S.turnOf(v(390, 844), v(844, 390)) === 'rotation', 'Android / Chrome: the screen swaps with the viewport (390×844 → 844×390) ⇒ a rotation');
+ok(S.turnOf(v(390, 664, 390, 844), v(844, 340, 390, 844)) === 'rotation', 'iOS: screen.width / height never swap (390×844 on both sides), Safari\'s bars change the heights ⇒ a rotation');
+ok(S.turnOf(v(382, 580), v(951, 585)) === 'fold' && S.turnOf(v(669, 867), v(951, 585)) === 'fold', 'the Duo\'s cover → its inner display, inner portrait → inner landscape as test-duo-layout emulates them (another screen) ⇒ a fold');
+ok(S.turnOf(v(390, 844), v(390, 500)) === 'none' && S.turnOf(v(844, 390), v(951, 585)) === 'none' && S.turnOf(null, v(1, 2)) === 'none', 'the orientation held (a keyboard, a fold within landscape) ⇒ none');
+ok(S.listOnTurn({ turn: 'rotation', prevPhone: true, nextPhone: true, wasShown: false }) === false && S.listOnTurn({ turn: 'rotation', prevPhone: true, nextPhone: true, wasShown: true }) === true, 'a rotation inside the phone tier keeps the list: closed stays closed, open stays open');
+ok([['fold', true, true], ['none', true, true], ['rotation', false, true], ['rotation', true, false]].every(([turn, prevPhone, nextPhone]) => S.listOnTurn({ turn, prevPhone, nextPhone, wasShown: false }) === null) && S.listOnTurn({ turn: 'rotation', prevPhone: true, nextPhone: true }) === null,
+  'a fold, no turn, a tier change (phone ↔ not), an unknown list ⇒ null: the class\'s own rule (a fresh load\'s)');
+
+console.log('⑤ RED CONTROLS (patched copies of src/phone-split.js)');
+{
+  const m = mutant('const splitBound = (minPane = MIN_PANE, divider = SPLIT_DIVIDER) => 2 * minPane + divider;', 'const splitBound = (minPane = MIN_PANE, divider = SPLIT_DIVIDER) => 2 * minPane;');
+  ok(m.splitVerdict({ room: 702 }).ok === true && S.splitVerdict({ room: 702 }).ok === false, 'RED CONTROL: a bound without the divider lets 702 px split (two 347 px panes — under MIN_PANE); the module refuses it');
+}
+{
+  const m = mutant("  if (!a || !b) return 'fold';\n  return Math.abs(a - b) <= 0.02 * Math.max(a, b) ? 'rotation' : 'fold';", "  return 'rotation';");
+  ok(m.turnOf(v(382, 580), v(951, 585)) === 'rotation' && S.turnOf(v(382, 580), v(951, 585)) === 'fold', 'RED CONTROL: a turn read from the orientation alone calls the Duo\'s fold a rotation (its list would follow the cover\'s drawer); the module calls it a fold');
+}
+{
+  const m = mutant("return { mode: 'single', keep: true, why: 'room' };", "return { mode: 'single', keep: false, why: 'room' };");
+  ok(m.splitLayout({ pair: ['a', 'b'], shown: 'a', alive: ['a', 'b'], room: 390 }).keep === false && L({ room: 390 }).keep === true, 'RED CONTROL: a collapse that drops the pair cannot restore after the turn back; the module keeps it');
+}
+{
+  const m = mutant("if (turn !== 'rotation' || !prevPhone", "if (!prevPhone");
+  ok(m.listOnTurn({ turn: 'fold', prevPhone: true, nextPhone: true, wasShown: true }) === true && S.listOnTurn({ turn: 'fold', prevPhone: true, nextPhone: true, wasShown: true }) === null, 'RED CONTROL: a carry on a fold would open the Duo\'s cover drawer over the conversation after an unfold-fold; the module leaves a fold to the class');
+}
+
+console.log('⑥ wiring pins');
+{
+  const sv = read('src/lib/phone-split-view.js'), mn = read('src/lib/mobile-nav.js'), vs = read('src/lib/viewport-switch.js'), w = read('src/lib/window.js'), css = read('public/style.css');
+  ok(/import \{ splitVerdict, splitLayout, pairFor, closePane \} from '\.\.\/phone-split\.js';/.test(sv) && /const SPLIT_KEY = 'vibespace\.phoneSplit';/.test(sv) && /sessionStorage\.setItem\(SPLIT_KEY, JSON\.stringify\(pairs\)\)/.test(sv) && !/localStorage|layoutManager|scheduleAutoSave|captureState|gridBounds/.test(sv),
+    'the client: the PURE verdicts; the pair in sessionStorage under vibespace.phoneSplit — never localStorage, never the layout record, never a geometry (a LAYOUT of two phone windows, not the window manager)');
+  ok(/import \{ installPhoneSplit \} from '\.\/phone-split-view\.js';/.test(mn) && /\n    this\.split = installPhoneSplit\(app\);/.test(mn) && /\n    this\.updateDesktopsDoor\(\);\n    this\.split\?\.apply\(\);/.test(mn), 'MobileNav installs it and applies it on every title update (every window change, a desktop change, a class switch)');
+  ok(/const sv = this\.split\?\.offer\(win\.id\);/.test(mn) && /splitBtn\.textContent = t\(sv\.words\);/.test(mn) && /if \(!sv\.ok\) \{ showToast\(t\(sv\.words\)\); return; \}/.test(mn) && /this\.split\.open\(win\.id\);/.test(mn),
+    'the switcher row\'s door: «Split», or its refusal\'s words on the button and again in a toast on a press (never greyed)');
+  ok(/if \(!v\.ok\) \{ showToast\(t\(v\.words\)\); return false; \}/.test(sv) && /new ResizeObserver\(\(\) => apply\(\)\)\.observe\(document\.getElementById\('workspace'\)\)/.test(sv), 'open() refuses by name; a resize of the window area (a turn, the list column) re-applies the rule');
+  ok(/import \{ turnOf, listOnTurn \} from '\.\.\/phone-split\.js';/.test(vs) && /const keep = listOnTurn\(\{ turn, prevPhone: isPhoneClass\(prevVc\), nextPhone: isPhoneClass\(app\._vc\), wasShown \}\);/.test(vs) && /if \(keep !== null\) setListShown\(app, keep\);\n    else if \(portrait !== null && p !== portrait\) app\.sidebar\?\.restoreListHidden\?\.\(\);/.test(vs),
+    'viewport-switch: the list read BEFORE the switch, carried on a rotation; a fold keeps the orientation\'s own start (SPEC-v3 §4 / §7)');
+  ok(/active: !!\(top\.element\?\.classList\?\.contains\('window-active'\) \|\| top\.element\?\.classList\?\.contains\('phone-pane'\)\)/.test(w) && /e\.target\.closest\('\.phone-pane-close'\)\)\);/.test(w), 'window.js: a split\'s other pane is drawn (no hidden-tab suspension of its view); its ✕ is no drag handle (the title bar would capture the press)');
+  const blk = css.slice(css.indexOf('SIDE BY SIDE ON A PHONE'));
+  ok(css.includes('SIDE BY SIDE ON A PHONE') && /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{\n  html\.vs-split \.window\.phone-pane\[data-pane\] \{ display: flex !important; position: absolute !important;/.test(blk) && /left: calc\(50% \+ 4px\) !important;/.test(blk) && /width: 44px; height: 44px;/.test(blk) && !/resize|cursor: col-resize|pointermove/.test(blk),
+    'style.css: the split is a phone block (the phone media), two absolute panes at 50 % with the 8 px divider between, a 44 px ✕ — no drag, no resize handle');
+  const D = require(path.join(REPO, 'src/phone-doors.js'));
+  const row = D.PHONE_TWINS.find((r) => r.door === 'win:split');
+  ok(!!row && row.twins?.length === 1 && row.twins[0].file === 'src/lib/mobile-nav.js' && mn.includes(row.twins[0].anchor) && D.desktopDoors({ indexHtml: '', railSrc: '', tabGroupSrc: read('src/lib/tab-group.js') }).includes('win:split'),
+    'the doors census: the desktop\'s split (a tab group\'s ⧉ in tab-group.js) has its phone twin — the switcher\'s «Split» (src/phone-doors.js)', row);
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const KEYS = ['Split', 'Rotate to split', 'Too narrow to split', 'Close the split', 'No window'];
+  const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
+  ok(miss.length === 0 && /"Rotate to split": "横屏后可分屏"/.test(zh) && /"Split": "分屏"/.test(zh) && /"No window": "无窗口"/.test(zh), `i18n: every word the split and the title say is in zh + ja (${KEYS.length}; «分屏», «横屏后可分屏», «无窗口»)`, miss);
+}
+
+console.log('⑦ round 2 — the head\'s name (PURE src/phone-head.js), the room beside the list column, one tap = one act, no dead pair');
+const H = fs.existsSync(HEAD_SRC) ? require(HEAD_SRC) : null;
+ok(!!H, 'PURE src/phone-head.js — the head\'s name');
+if (H) {
+  const cases = [['/tmp/vs-phone-six-home-1673215', 'vs-phone-six-home-1673215'], ['…ix-home/projects/deep', 'deep'], ['my-mac: /Users/x/proj', 'proj'], ['~/proj', 'proj'], ['/tmp/dir/', 'dir'], ['C:\\Users\\x\\Docs', 'Docs'],
+    ['/', '/'], ['~', '~'], ['Session 3 — /tmp/x', 'Session 3'], ['a/b test', 'a/b test'], ['https://x.y/z', 'https://x.y/z'], ['', ''], [null, '']];
+  const bad = cases.filter(([i, o]) => H.headName(i) !== o).map(([i, o]) => ({ i, want: o, got: H.headName(i) }));
+  ok(!bad.length, `headName: a PATH-shaped name (a files window's folder — «/…», «~/…», «…/…» after frontTruncate, «C:\\…», after a «machine: ») is its LAST segment; a conversation's «name — cwd» its name; anything else itself (${cases.length} cases)`, bad);
+  ok(H.NAME_FLOOR_EM === 8 && H.nameNeed(300, 14) === 112 && H.nameNeed(75, 14) === 75 && H.nameFits(111.6, 300, 14) && !H.nameFits(104, 300, 14) && H.nameFits(75, 75, 14),
+    'the name keeps 8 em (112 px at the head\'s 14 px) or its whole width when shorter; 104 px of a long name does not fit (the 669 portrait after \'win\' — measured)');
+  ok(JSON.stringify(H.YIELD_LADDER) === '["","win","badges","gear","icon"]', 'the yield ladder: every button → the window\'s extras leave (the switcher row\'s ✕ closes, ⋯ the live view) → the For-you numbers collapse to ONE (master\'s .mnav-one; the regular class keeps five while the name fits) → ⚙ folds into ⋯ (the Desktops door and ⋯ stay — the sheets the bar folds into) → the type icon + the count');
+  const m1 = mutant("  if (!PATH_RE.test(s) || !/[\\\\/]/.test(s)) return s;\n", '  return s;\n', HEAD_SRC);
+  ok(m1.headName('/tmp/vs-phone-six-home-1673215') === '/tmp/vs-phone-six-home-1673215' && H.headName('/tmp/vs-phone-six-home-1673215') === 'vs-phone-six-home-1673215',
+    'RED CONTROL: the round-1 rule (the part before « — », whole) names a files window by its path — at 669 px «/tm…», three glyphs of nothing; the module names the folder');
+  const m2 = mutant('return Math.min(Math.max(0, Number(full) || 0), floorEm * (Number(em) || 0));', 'return Math.min(Math.max(0, Number(full) || 0), 3.5 * (Number(em) || 0));', HEAD_SRC);
+  ok(H.nameFits(96, 300, 14, 96) && !H.nameFits(94, 300, 14, 96) && H.nameFits(79, 79, 14, 96) && !H.nameFits(104, 300, 14), 'the ladder\'s minimum is THE RELEASE\'S when measured (主开发 09:33Z: six CJK / twelve Latin glyphs + «…» — the 700 px tablet keeps its five): 96 px fits, 94 does not, a 79 px name whole fits; 8 em without it');
+  ok(/probe\.textContent = navTitleMinText\(name\); el\.appendChild\(probe\); const minPx = probe\.getBoundingClientRect\(\)\.width; probe\.remove\(\);/.test(read('src/lib/mobile-nav.js')) && /if \(nameFits\(el\.getBoundingClientRect\(\)\.width, el\.scrollWidth, em, minPx\)\) return;/.test(read('src/lib/mobile-nav.js')), 'the head measures that minimum in its own font and the ladder reads it');
+  ok(m2.nameFits(54, 300, 14) === true && H.nameFits(54, 300, 14) === false, 'RED CONTROL: round 1\'s 3.5 em floor calls 54 px («/tm…») enough; the module wants 8 em');
+}
+{
+  const sv = read('src/lib/phone-split-view.js'), mn = read('src/lib/mobile-nav.js'), w = read('src/lib/window.js'), css = read('public/style.css');
+  ok(/const room = \(\) => document\.getElementById\('workspace'\)\?\.offsetWidth \|\| 0;/.test(sv) && /const verdict = \(\) => splitVerdict\(\{ room: room\(\) \+ listColumn\(\), turnedRoom: turnedRoom\(\) \}\);/.test(sv) && /const v = splitLayout\(\{ pair: pairs\[d\] \|\| null, shown: frameOf\(app\.wm\.activeWindowId\), alive: alive\(\), room: room\(\) \}\);/.test(sv) && !/r \+= document\.getElementById\('sidebar'\)/.test(sv),
+    'the room the panes may use is the window area NOW (the list column shown takes its width ⇒ the split collapses, the pair kept; hidden ⇒ it returns); only «Split»\'s own verdict counts the column its press hides');
+  const iRev = sv.indexOf("if (app.wm.windows.get(frameOf(id))?.isMinimized) app.wm.revealWindow(id);"), iKeep = sv.indexOf('pairs[desk()] = pair; save();');
+  ok(iRev > 0 && iKeep > iRev && /if \(pairs\[d\] && app\._mobileNav\?\._shownBooted && deadIn\(pairs\[d\], d\)\) \{\n      delete pairs\[d\]; save\(\);\n      showToast\(t\('The split ended: one of its windows was minimized, closed or moved to another desktop'\)/.test(sv) && /if \(!w\) return seen\.has\(id\);\n    return !!w\.isMinimized \|\| /.test(sv),
+    'no dead pair: «Split» beside a minimized window restores it BEFORE the pair is kept; a pane\'s window minimized / closed after it stood / moved away drops the pair at apply() with a toast (a window not built yet is none of these)');
+  ok(/addEventListener\('pointerdown', \(e\) => \{ const w = e\.target\.closest\?\.\('\.window\.phone-pane'\); pressedAside = !!w && !w\.classList\.contains\('window-active'\); \}, true\);/.test(mn) && /if \(pressedAside\) \{ pressedAside = false; return; \}/.test(mn),
+    'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
+  ok(/import \{ headName, nameFits, YIELD_LADDER \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| t\('Window'\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
+    && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
+    && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
+    && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
+    'the head: MobileNav names with headName (the whole title in the title attribute), re-fits on every width change of the bar; the window\'s own head (landscape, a pane) names with it too; the stylesheet folds the ladder\'s steps (⚙ never with the locked vault\'s mark), and a folded ⚙ is ⋯\'s «Global settings» row');
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js'), K = 'The split ended: one of its windows was minimized, closed or moved to another desktop';
+  ok(zh.includes(`  ${JSON.stringify(K)}: "分屏已结束`) && ja.includes(`  ${JSON.stringify(K)}:`), 'i18n: the split\'s end is said in zh + ja');
+}
+
+// ⑧ THE TWO CSS LAWS OF THIS PIECE, read as RULES (the reader's list 2026-11-13: dropping either left every fast suite green)
+console.log('⑧ the finger\'s 16 px fields and the tab name\'s floor, as rules');
+{
+  const css = read('public/style.css');
+  // the block a rule lives in: the innermost @media that opens before it and has not closed
+  const blockOf = (raw, needle) => { const text = raw.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length)).replace(/'[^'\n]*'|"[^"\n]*"/g, (m) => m.replace(/[{}]/g, ' ')); const at = raw.indexOf(needle); if (at < 0) return null; let depth = 0, open = []; for (let i = 0; i < at; i++) { if (text[i] === '{') { const head = text.slice(text.lastIndexOf('}', i) + 1, i).trim(); open.push(head); depth++; } else if (text[i] === '}') { open.pop(); depth--; } } return open.filter((h) => h.startsWith('@media')).pop() || null; };
+  const FIELDS = 'textarea, select, [contenteditable]:not([contenteditable="false"]) { font-size: max(16px, 1em) !important; }';
+  const fieldsAt = (c) => blockOf(c, FIELDS);
+  ok(/^@media \(hover: none\) and \(pointer: coarse\)$/.test(fieldsAt(css) || '') && /input:not\(\[type="checkbox"\], \[type="radio"\][^)]*\),\s*\n\s*textarea, select, \[contenteditable\]/.test(css),
+    '⑧ on a FINGER every field — input (but the button-like types), textarea, select, an editable box — reads at least 16 px (iOS zooms to a smaller one and never zooms back; userW 2026-10-26)');
+  ok(!fieldsAt(css.replace(FIELDS, FIELDS.replace('max(16px, 1em) !important', 'inherit'))), '⑧ CONTROL: the reader\'s F1 (the 16 px dropped) is red');
+  const TABS = ':is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > .tab-label { flex: 0 1 auto; min-width: 4em; }';
+  ok(/^@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)$/.test(blockOf(css, TABS) || ''), '⑧ on a phone every tab keeps its name a 4 em floor (the strip scrolls before a name drops under it — the recovery reader\'s law)');
+  ok(!blockOf(css.replace(TABS, TABS.replace(' min-width: 4em;', '')), TABS), '⑧ CONTROL: the reader\'s T1 (the floor dropped) is red');
+}
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

@@ -36,8 +36,8 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 
 console.log('① the twin census — every desktop door has a phone twin');
-const indexHtml = read('public/index.html'), railSrc = read('src/lib/sidebar-rail.js');
-const doors = P.desktopDoors({ indexHtml, railSrc });
+const indexHtml = read('public/index.html'), railSrc = read('src/lib/sidebar-rail.js'), tabGroupSrc = read('src/lib/tab-group.js');
+const doors = P.desktopDoors({ indexHtml, railSrc, tabGroupSrc });
 const files = [...new Set(P.PHONE_TWINS.flatMap((r) => (r.twins || []).map((t) => t.file)))];
 const sources = Object.fromEntries(files.map((f) => [f, read(f)]));
 const v = P.twinCensus({ doors, sources });
@@ -61,7 +61,7 @@ ok(filesRow.twins.length === 3 && /mobile-nav-files/.test(filesRow.twins[0].anch
 }
 { // RED CONTROL — a new rail item nobody gave a twin
   const rail2 = railSrc.replace("item('browser', ", "item('newdoor', tr('New door'), () => {}),\n        item('browser', ");
-  const b = P.twinCensus({ doors: P.desktopDoors({ indexHtml, railSrc: rail2 }), sources });
+  const b = P.twinCensus({ doors: P.desktopDoors({ indexHtml, railSrc: rail2, tabGroupSrc }), sources });
   ok(rail2 !== railSrc && !b.ok && b.missing.join() === 'rail:newdoor', 'RED CONTROL: a NEW rail item with no phone twin is red until it has one', b.missing);
 }
 { // RED CONTROL — a twin turned off on a phone
@@ -174,6 +174,21 @@ console.log('⑥ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the D
   const KEYS = ['Desktops', 'Desktops — {name} ({k}/{n})', '1 window', '{n} windows', 'New desktop', 'Sessions'];
   const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
   ok(miss.length === 0 && /"New desktop": "新桌面"/.test(zh), `i18n: every word the door says is in zh + ja (${KEYS.length}; «新桌面»)`, miss);
+}
+
+console.log('⑦ THE SPLIT\'S DOOR (lane phone-six — userW\'s side by side; the PURE rule is test-phone-split, the chrome legs test-phone-six-chrome ⑥)');
+{
+  ok(doors.includes('win:split') && !P.desktopDoors({ indexHtml, railSrc }).includes('win:split'), 'the census reads a window\'s own door too: the tab strip\'s split button (tab-group.js) is the desktop\'s side by side — `win:split`');
+  const row = P.PHONE_TWINS.find((r) => r.door === 'win:split');
+  ok(!!row && row.twins.length === 1 && /«Split»/.test(row.twins[0].where) && v.ok, 'its phone twin: the window switcher\'s «Split» beside a window (src/lib/mobile-nav.js)', row);
+  // RED CONTROL — the base: its switcher rows had no «Split» (the anchor line removed)
+  const mn = sources['src/lib/mobile-nav.js'], baseMn = mn.replace(/\n[^\n]*splitBtn\.className = 'mobile-win-split'[^\n]*/, '');
+  const b = P.twinCensus({ doors, sources: { ...sources, 'src/lib/mobile-nav.js': baseMn } });
+  ok(baseMn !== mn && !b.ok && b.broken.length === 1 && b.broken[0].door === 'win:split', 'RED CONTROL (the base, 91bf7e18): no phone twin for the desktop\'s split — named broken', b.broken);
+  // RED CONTROL — the twin turned off on a phone
+  const offMn = mn.replace("splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');", "if (!app.isMobile) splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');");
+  const c = P.twinCensus({ doors, sources: { ...sources, 'src/lib/mobile-nav.js': offMn } });
+  ok(offMn !== mn && !c.ok && c.broken.some((x) => x.door === 'win:split' && /turned off/.test(x.why)), 'RED CONTROL: the split\'s twin turned off on a phone is red', c.broken);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

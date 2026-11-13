@@ -12881,4 +12881,10 @@ export default {
   "Resuming {i} of {n}…": "{n} 件中 {i} 件目の会話を再開しています…",
   "Resuming {i} of {n} — {f} could not be resumed": "{n} 件中 {i} 件目の会話を再開しています — {f} 件は再開できませんでした",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 件中 {f} 件の会話を再開できませんでした：{list}",
+  "No window": "ウィンドウなし",
+  "Split": "分割",
+  "Rotate to split": "横向きで分割できます",
+  "Too narrow to split": "画面が狭く分割できません",
+  "Close the split": "分割を閉じる",
+  "The split ended: one of its windows was minimized, closed or moved to another desktop": "分割を終了しました：一方のウィンドウが最小化されたか、閉じられたか、別のデスクトップに移されました",
 };

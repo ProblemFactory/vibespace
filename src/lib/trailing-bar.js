@@ -25,6 +25,7 @@ import { openJobsWindow } from './jobs-panel.js';
 import { openFilesDoor } from './phone-files.js';
 import { SESSION_STATE_META } from './sidebar-tasks.js';
 import { uiScale } from './utils.js';
+import { registerMenuItem } from './contributions.js';
 
 /** The destination each bottom button opens and how it knows it is on show. */
 const DESTS = [
@@ -134,3 +135,7 @@ export function installTrailingBar(app) {
   update();
   return { update, el: nav };
 }
+
+// ⚙ folded into ⋯ (lane phone-six r2 — the name keeps 8 em, mobile-nav.js _paintHead's 'gear' step): ⋯'s last row is it
+const gearFolded = () => { const nav = document.getElementById('mobile-nav'), g = document.getElementById('mobile-nav-gear'); return !!nav && !!g && ['gear', 'icon'].includes(nav.dataset.yield) && getComputedStyle(g).display === 'none'; };
+registerMenuItem({ menu: 'window', group: '9_bar', order: 10, id: 'window/bar-gear', when: gearFolded, label: () => t('Global settings'), run: (c) => c.app._pressGlobalSettings(document.getElementById('mobile-nav-more')) });
