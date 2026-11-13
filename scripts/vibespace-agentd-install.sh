@@ -41,6 +41,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --node) NODE_BIN_OVERRIDE="$2"; shift 2;;   # use THIS node, skip discovery
   --node-only) NODE_ONLY=1; shift;;           # resolve/provision node, print it, exit (support + tests)
   --allow) ALLOW="$2"; shift 2;;              # lane device-allow-flags: this machine's own allow list (written below)
+  --setup) SETUP="$2"; shift 2;;              # lane machine-needs-at-pairing pick 3: mac, sharing, xpra — what this machine will be used for
   --allow=*) ALLOW="${1#--allow=}"; shift;;
   *) echo "unknown arg: $1"; exit 2;;
 esac; done
@@ -594,3 +595,42 @@ SIBS_EOF
   return 0
 }
 retire_siblings
+
+# WHAT THIS MACHINE WILL BE USED FOR (lane machine-needs-at-pairing pick 3 — the owner 2026-11-13: «需要 ffmpeg 之类的事情不能在安装的时候
+# 自动解决吗？»). The pairing is DONE before any need (the agent runs); a need not met NEVER fails it — the last lines say which are met
+# and which are not. --setup mac: the screen helper and its two permissions (System Settings opens at each switch only the person can
+# turn on); sharing: Screen Sharing's pane (it listens on the local network — the pairing dialog said so before the tick); xpra: a
+# Linux machine's desktop apps (sudo asks once; xpra.org's key is pinned). The plans come from the agent bundle — never a copy here.
+SETUP_LINES=""
+if [ -n "${SETUP:-}" ]; then
+  case ",$SETUP," in *,mac,*|*,sharing,*)
+    if [ "$(uname -s)" = Darwin ]; then
+      W=""; case ",$SETUP," in *,mac,*) W="mac";; esac; case ",$SETUP," in *,sharing,*) W="${W:+$W,}sharing";; esac
+      echo "→ setting up what this Mac will be used for — System Settings opens at each switch only you can turn on"
+      OUT=$(env VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --setup "$W" 2>&1) || true # exit 4 = some need not met: said below, never the pairing's end (set -e)
+      printf '%s\n' "$OUT"
+      SETUP_LINES="$SETUP_LINES$(printf '%s\n' "$OUT" | grep -E '^(✓|✗|→)' || true)
+"
+    fi;;
+  esac
+  case ",$SETUP," in *,xpra,*)
+    if [ "$(uname -s)" = Linux ]; then
+      PRC=0; PLAN=$(env VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --setup-plan xpra 2>&1) || PRC=$? # set -e: the code is read, never fatal
+      if [ "$PRC" -eq 5 ]; then LINE="✓ xpra: already installed — nothing changed"
+      elif [ "$PRC" -ne 0 ]; then LINE="✗ xpra: $(printf '%s' "$PLAN" | head -1 | sed 's/^✗ //') — the Apps dialog says what to do"
+      else
+        echo "→ xpra 6.x for desktop apps (xpra.org's key checked against its pinned fingerprint): sudo asks for your password once"
+        if sudo sh -c "$PLAN" < /dev/tty; then LINE="✓ xpra: installed"
+        else LINE="✗ xpra: not installed (sudo was declined, or the install failed — the log above says why); the Apps dialog has «Install xpra on …»"; fi
+      fi
+      SETUP_LINES="$SETUP_LINES$LINE
+"
+    fi;;
+  esac
+  if [ -n "$(printf '%s' "$SETUP_LINES" | tr -d '\n')" ]; then
+    echo
+    echo "What this machine will be used for:"
+    printf '%s' "$SETUP_LINES" | sed '/^$/d; s/^/  /'
+    if printf '%s' "$SETUP_LINES" | grep -q '^✗'; then echo "  → the pairing is done; a need not met keeps its button in the machine's windows"; fi
+  fi
+fi
