@@ -1,4 +1,4 @@
-import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
+import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
 import { startFileDownload } from './file-download.js';
 import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
@@ -267,21 +267,10 @@ export function installExplorerOps(FileExplorer) {
       menu.appendChild(this._menuItemEl(menu, item));
     }
     document.body.appendChild(menu);
-    // Keep the menu on screen (this builder predates utils.showContextMenu and
-    // had NO clamping — real report: bottom-of-screen item menus ran off the
-    // viewport). Over-tall menus cap + scroll so the tail stays reachable.
-    let mr = menu.getBoundingClientRect();
-    const vw = window.innerWidth, vh = window.innerHeight;
-    if (mr.height > vh - 8) {
-      menu.style.maxHeight = (vh - 8) + 'px';
-      menu.style.overflowY = 'auto';
-      mr = menu.getBoundingClientRect();
-    }
-    if (mr.right > vw) menu.style.left = Math.max(0, vw - mr.width - 4) + 'px';
-    if (mr.bottom > vh) menu.style.top = Math.max(0, vh - mr.height - 4) + 'px';
-    if (mr.left < 0) menu.style.left = '4px';
-    if (mr.top < 0) menu.style.top = '4px';
-    menu.style.visibility = '';
+    // THE ONE placement (utils.js placeMenu — lane ui-controls-and-bugs, the width sweep's rule 4): bounded by the screen,
+    // placed AGAIN when §7.9 patches the office rows in after it opened (it grew past a 1024×700 screen's edge: «删除» below
+    // it, no scroll), its closing rows (Rename / Properties / Delete) in view when it scrolls
+    placeMenu(menu, x, y);
     attachPopoverClose(menu);
     return menu; // §7.9: the caller may patch rows in place (_patchMenuRows)
   },

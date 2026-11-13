@@ -8,6 +8,10 @@
 //    src/lib carries `disabled: true` (the walk: «— 不提供» rows greyed with the reason in a tooltip, a billing menu with two
 //    greyed accounts and no title, a zoom menu whose heading and current choice were greyed ticks); the COMPUTED ones are a
 //    frozen ledger that only shrinks
+// pick 4 —
+// ⑦ A MENU IS BOUNDED BY THE SCREEN (主开发's width-sweep rule 4): every context menu is placed by utils.js placeMenu — a
+//    module that makes its own `.context-menu` element calls it (the file explorer's builder had a clamp of its own and grew
+//    past the screen when its office rows arrived). The boxes themselves: scripts/test-menu-bounds-chrome.mjs (heavy)
 // pick 3 —
 // ② A BUTTON WORKS, OR IT SAYS WHY WHEN PRESSED: utils.js pressSays(btn, why) — the button stays live, a press while `why()`
 //    answers does nothing and says the reason on its own line above the buttons (never a toast, never greyed with the reason
@@ -137,6 +141,16 @@ ok(/\} else if \(v\.clusterWhyCode === 'no-preset' && v\.source !== 'cluster'\) 
   'integrations: no «用集群默认» radio pair where no cluster preset of the kind exists (the store\'s own code); a preset that went keeps its radio and its why');
 ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU) && /if \(sw\) row\.appendChild\(sw\);/.test(PU) && /if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU) && !/b\.disabled = !cat/.test(PU),
   'plugins: a switch that cannot be used is not drawn (the chip says why and is the door), a plugin with nothing to configure has no ⚙');
+
+// ── ⑦ one menu placement ──
+console.log('⑦ A MENU IS BOUNDED BY THE SCREEN — every module that makes a .context-menu places it with placeMenu');
+const ownMenus = LIB.filter((f) => f !== 'src/lib/utils.js' && /\.className = 'context-menu'[;\s]/.test(read(f)));
+const unplaced = ownMenus.filter((f) => !/\bplaceMenu\(/.test(read(f)));
+ok(ownMenus.length >= 1 && unplaced.length === 0 && /\n  placeMenu\(pop, x, y, \{ up \}\);\n  return pop;/.test(read('src/lib/utils.js')),
+  `showContextMenu and every module with its own .context-menu builder (${ownMenus.join(', ')}) are placed by placeMenu`, unplaced.join(', '));
+const PM = read('src/lib/utils.js');
+ok(/const mo = new MutationObserver\(/.test(PM) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; pinTail\(\); \}/.test(PM),
+  'placeMenu places a menu again when its rows change, and a capped menu keeps its closing rows in view');
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);
