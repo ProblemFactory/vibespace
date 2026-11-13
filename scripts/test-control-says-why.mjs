@@ -8,6 +8,13 @@
 //    src/lib carries `disabled: true` (the walk: «— 不提供» rows greyed with the reason in a tooltip, a billing menu with two
 //    greyed accounts and no title, a zoom menu whose heading and current choice were greyed ticks); the COMPUTED ones are a
 //    frozen ledger that only shrinks
+// pick 3 —
+// ② A BUTTON WORKS, OR IT SAYS WHY WHEN PRESSED: utils.js pressSays(btn, why) — the button stays live, a press while `why()`
+//    answers does nothing and says the reason on its own line above the buttons (never a toast, never greyed with the reason
+//    in a corner). A radio / switch / ⚙ that cannot be used is NOT DRAWN. A state-derived `x.disabled = <expression>` in
+//    src/lib (an in-flight `= true … = false` pair is no state) is a FROZEN LEDGER per file that only shrinks; the walk's
+//    sites moved: the group's «创建», the ask card's «提交», the new-profile rows nobody can pick, the cluster radio with no
+//    preset of its kind, the voice row's switch before it is connected, the ⚙ of a plugin with no settings
 // pick 1 —
 // ③ A MENU OPENS: every `showContextMenu(` call in src/lib passes (x, y, items) — the peer card called it (e, items), which
 //    threw after preventDefault, so a right-click showed no menu at all
@@ -72,6 +79,64 @@ ok(/items\.push\(\{ label: a\.name \+ suffix, off: block, offDoor: \{ label: t\(
 ok(/\{ caption: t\('Default scale for \{app\}', \{ app: catalogLabel\(row\) \}\) \}/.test(DL) && !/disabled: choice === cur/.test(DS)
   && /\{ label: t\('Change the scale for every app in Settings…'\), action: \(\) => app\._settingsUI\?\.open\(\{ search: t\('Desktop app scale \(xpra\)'\) \}\) \}/.test(DL) && /\.\.\.rows, setting, \.\.\.own\.tail/.test(DL),
   'desktop-app zoom: the heading is a caption; the current choice is a live ✓ row, not a greyed tick; «Auto» has its door to Settings under the choices');
+
+// ── ② a button says why when pressed ──
+/** state-derived `x.disabled = <expression>` assignments in one file (a boolean literal is an in-flight guard, no state) */
+const disabledAssigns = (src) => { let n = 0; walk(parse(src), (x) => { if (x.type === 'AssignmentExpression' && x.operator === '=' && x.left.type === 'MemberExpression' && !x.left.computed && x.left.property.name === 'disabled' && !(x.right.type === 'Literal' && typeof x.right.value === 'boolean')) n++; }); return n; };
+// THE FROZEN LEDGER (2026-11-13, pick 3: 114 sites in 47 files; 118 on 935960b7e — the four the walk named moved onto
+// pressSays / not drawn). A site that moves lowers its row; a new one is RED.
+const STATE_LEDGER = {
+  'src/lib/app-install-dialog.js': 1, 'src/lib/app.js': 1, 'src/lib/browser-build-dialog.js': 1, 'src/lib/browser-live-window.js': 9,
+  'src/lib/browser-new-profile.js': 4, 'src/lib/browser-proposal-card.js': 2, 'src/lib/browser-replay-window.js': 3, 'src/lib/browser-trace-view.js': 3,
+  'src/lib/channel-api-dialog.js': 1, 'src/lib/channel-filter-editor.js': 2, 'src/lib/channel-group-dialogs.js': 1, 'src/lib/channel-outbox.js': 1,
+  'src/lib/channel-webhook.js': 2, 'src/lib/chat-renderers.js': 2, 'src/lib/desktop-app-launcher.js': 14, 'src/lib/desktop-app-window.js': 1,
+  'src/lib/desktop-picker.js': 1, 'src/lib/doc-window-ui.js': 2, 'src/lib/docx-viewer.js': 1, 'src/lib/file-explorer.js': 1,
+  'src/lib/inbox-window.js': 3, 'src/lib/integrations-window.js': 1, 'src/lib/learn-card.js': 1, 'src/lib/machine-desktop-handover.js': 1,
+  'src/lib/machine-desktop.js': 6, 'src/lib/manage-agents.js': 2, 'src/lib/mounts-dialog.js': 4, 'src/lib/plugins-ui.js': 1,
+  'src/lib/principal-picker.js': 3, 'src/lib/refresh-live.js': 1, 'src/lib/reset-credit-dialog.js': 1, 'src/lib/session-card.js': 2,
+  'src/lib/session-props.js': 1, 'src/lib/settings-ui.js': 2, 'src/lib/sidebar-mounts.js': 5, 'src/lib/sidebar-rail.js': 1,
+  'src/lib/sidebar-workbench.js': 1, 'src/lib/stash-strip.js': 2, 'src/lib/task-detail.js': 4, 'src/lib/task-log.js': 2,
+  'src/lib/terminal.js': 2, 'src/lib/user-todos-panel.js': 3, 'src/lib/user-todos-row.js': 2, 'src/lib/utils.js': 2,
+  'src/lib/voice-teach-ui.js': 6, 'src/lib/window-share.js': 1, 'src/lib/workflow-detail.js': 1
+};
+console.log('② A BUTTON WORKS, OR IT SAYS WHY WHEN PRESSED (the state-derived `.disabled =` ledger only shrinks)');
+const statePer = {};
+for (const f of LIB) { let n = 0; try { n = disabledAssigns(read(f)); } catch {} if (n) statePer[f] = n; }
+const stateGrown = Object.entries(statePer).filter(([f, n]) => n > (STATE_LEDGER[f] || 0)).map(([f, n]) => `${f}: ${n} (ledger ${STATE_LEDGER[f] || 0})`);
+const stateShrunk = Object.entries(STATE_LEDGER).filter(([f, n]) => (statePer[f] || 0) < n).map(([f, n]) => `${f}: ${statePer[f] || 0} < ledger ${n}`);
+ok(stateGrown.length === 0, 'no NEW state-derived `.disabled =` in src/lib — a button stays live and says why (pressSays); a choice nobody can make is not drawn', stateGrown.join(' ; '));
+ok(stateShrunk.length === 0, 'the ledger is exact (a site that moved lowers its row)', stateShrunk.join(' ; '));
+// pressSays, evaluated from its own source against a fake button and line
+const UT2 = read('src/lib/utils.js');
+const psAt = UT2.indexOf('export function pressSays(');
+const psSrc = psAt < 0 ? '' : UT2.slice(psAt, UT2.indexOf('\n}\n', psAt) + 3).replace('export function', 'function');
+const pressSaysFn = psSrc ? new Function(`${psSrc}; return pressSays;`)() : () => ({ refresh() {} });   // none (the release) ⇒ every check below is RED by name
+const fakeLine = () => ({ textContent: '', offsetWidth: 0, classList: { set: new Set(), add(c) { this.set.add(c); }, remove(c) { this.set.delete(c); } } });
+const fakeBtn = () => ({ ls: [], addEventListener(type, fn, o) { this.ls.push({ type, fn, capture: !!(o && o.capture) }); }, parentElement: null });
+const press = (b) => { const e = { prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; b.ls.forEach((l) => l.type === 'click' && l.fn(e)); return e; };
+let reason = 'Pick at least two agents';
+const b1 = fakeBtn(), l1 = fakeLine(), h1 = pressSaysFn(b1, () => reason, { line: l1 });
+const e1 = press(b1);
+reason = null; const e2 = press(b1); h1.refresh();
+ok(b1.ls.length === 1 && b1.ls[0].capture && e1.prevented && e1.stopped && l1.textContent === '' && !e2.prevented && !e2.stopped,
+  'pressSays: a capture listener (before the button\'s own onclick); pressed while why() answers it stops the act and says the reason; once nothing is missing the press goes through and refresh() clears the line', JSON.stringify({ capture: b1.ls[0] && b1.ls[0].capture, e1, e2, line: l1.textContent }));
+{ const b2 = fakeBtn(), l2 = fakeLine(); pressSaysFn(b2, () => 'why', { line: l2 }); press(b2); ok(l2.textContent === 'why' && l2.classList.set.has('press-says-again'), 'pressSays: the reason is said on the line (and a second press is seen again)', l2.textContent); }
+const CG = read('src/lib/channel-group-dialogs.js'), CR = read('src/lib/chat-renderers.js'), BP = read('src/lib/browser-new-profile.js'), BM = read('src/lib/browser-new-profile-model.js'), IW = read('src/lib/integrations-window.js'), PU = read('src/lib/plugins-ui.js');
+ok(/pressSays\(go, whyNot, \{ line: status \}\);/.test(CG) && /body\.append\(status, actions\);/.test(CG) && !/go\.disabled = n < need/.test(CG) && /if \(!r\) \{ go\.disabled = false; refresh\(\); return; \}/.test(CG),
+  'the group\'s «创建» stays live: what is missing is said ABOVE the buttons, and a press says it (the in-flight guard ends with the answer)');
+ok(/const submitSays = pressSays\(submitBtn, \(\) => \{ const left = questions\.length - selections\.size;/.test(CR) && !/submitBtn\.disabled = /.test(CR) && /submitSays\.refresh\(\);/.test(CR),
+  'the ask card\'s «提交» stays live and says «先选一个答案» / how many are left when pressed early');
+{ const at = BM.indexOf('export function providerRowsShown(');
+  const fnSrc = at < 0 ? '' : BM.slice(at, BM.indexOf('\n}\n', at) + 3).replace('export function', 'function');
+  const shown = fnSrc ? new Function(`${fnSrc}; return providerRowsShown;`)() : () => ({ rows: [], windowLeftOut: false });
+  const r = shown([{ id: 'win', state: 'not-a-profile' }, { id: 'cloud:x', state: 'unavailable' }, { id: 'local-window', state: 'unavailable' }, { id: 'chromium', state: 'ready' }, { id: 'remote-only', state: 'other-machine' }],
+    [{ id: 'cloud:x', control: { ok: false, code: 'provider_unsupported' } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }]);
+  ok(JSON.stringify(r.rows.map((c) => c.id)) === '["local-window","chromium","remote-only"]' && r.windowLeftOut === true && /providerRowsShown\(providerChoices\(\{ providers: rows, host: st\.host, t \}\), rows, \{ host: st\.host \}\)/.test(BP) && /const \{ rows: choices, windowLeftOut \} = providerRowsNow\(\);/.test(BP),
+    'new profile: a row nobody can pick here (a desktop window, a backend this version cannot use) is not drawn; a row that waits for the person (the consent, This computer) stays; the list says where a desktop window goes', JSON.stringify(r)); }
+ok(/\} else if \(v\.clusterWhyCode === 'no-preset' && v\.source !== 'cluster'\) \{/.test(IW) && /if \(choice\.childNodes\.length\) card\.appendChild\(choice\);/.test(IW),
+  'integrations: no «用集群默认» radio pair where no cluster preset of the kind exists (the store\'s own code); a preset that went keeps its radio and its why');
+ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if \(disabled\) return null;/.test(PU) && /if \(sw\) row\.appendChild\(sw\);/.test(PU) && /if \(!cat\) \{ const none = document\.createElement\('span'\); none\.className = 'mounts-btn plugin-gear plugin-gear-none';/.test(PU) && !/b\.disabled = !cat/.test(PU),
+  'plugins: a switch that cannot be used is not drawn (the chip says why and is the door), a plugin with nothing to configure has no ⚙');
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);
@@ -161,6 +226,8 @@ ok(!/t\('Load more'\)/.test(HX) && /upTo >= this\.fileSize \? '' :/.test(HX) && 
 
 // ── ⑥ controls ──
 console.log('⑥ CONTROLS — the same checkers on planted code');
+ok(disabledAssigns("go.disabled = n < need; busy.disabled = true; done.disabled = false;") === 1, 'a planted state-derived `x.disabled = <expr>` is counted, an in-flight `= true` / `= false` is not');
+if (psSrc) { const b = { ls: [], addEventListener(t, fn, o) { this.ls.push({ t, fn, o }); } }; const broken = new Function(`${psSrc.replace('e.preventDefault(); e.stopImmediatePropagation();', '')}; return pressSays;`)(); broken(b, () => 'x', { line: { textContent: '', offsetWidth: 0, classList: { add() {}, remove() {} } } }); const e = { p: 0, s: 0, preventDefault() { this.p = 1; }, stopImmediatePropagation() { this.s = 1; } }; b.ls[0].fn(e); ok(!e.p && !e.s, 'a pressSays that does not stop the act is caught by the same press (the checker is a judge)'); }
 ok(disabledRows("showContextMenu(1, 2, [{ label: 'x', disabled: true }, { caption: 'fact' }, { label: 'y', disabled: busy }]);", 'planted').lit.length === 1 && disabledRows("m([{ label: 'y', disabled: busy }])", 'p').comp.length === 1 && disabledRows("pick([{ label: 'z', value: 'z', disabled: true }])", 'p').lit.length === 0, 'a planted `disabled: true` menu row is caught, a computed one is counted, a picker row (value) is not a menu row');
 ok(badMenuCalls("el.oncontextmenu = (e) => { showContextMenu(e, [{ label: 'x' }]); };", 'planted').length === 1, 'a planted (e, items) call is caught');
 ok(clearAwaitAppend('async function r(c) { c.innerHTML = \'\'; const x = await load(); c.appendChild(x); }', 'planted').length === 1, 'a planted clear-await-append render is caught');

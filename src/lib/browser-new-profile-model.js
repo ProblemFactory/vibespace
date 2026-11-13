@@ -238,3 +238,13 @@ export function cloneRefusalWords(r, t = (s) => s) {
   }
 }
 
+/** lane ui-controls-and-bugs (the walk's browser-profiles-3: three greyed rows nobody could pick): a provider row that can NEVER
+ *  be picked from this dialog is not drawn — a window on the desktop (shared from the window itself, never a profile) and a
+ *  backend this version cannot use. A row that waits for something the person can do (the desktop consent, its key, This
+ *  computer, a port) stays, with its words. `providers` = the route rows the choices were made from (their verdict codes).
+ *  → `{ rows, windowLeftOut }` — `windowLeftOut`: the list's one line says where a desktop window is handed over instead. */
+export function providerRowsShown(choices = [], providers = [], { host = null } = {}) {
+  const codeOf = new Map((Array.isArray(providers) ? providers : []).filter((r) => r && r.id).map((r) => [String(r.id), (host ? (r.onHost || r.control || {}) : (r.control || {})).code || null]));
+  const never = (c) => c.state === 'not-a-profile' || (c.state === 'unavailable' && codeOf.get(c.id) !== 'provider_needs_consent');
+  return { rows: choices.filter((c) => !never(c)), windowLeftOut: choices.some((c) => c.state === 'not-a-profile') };
+}

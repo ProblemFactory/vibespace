@@ -530,6 +530,12 @@
 .context-menu-off .door-why { white-space: normal; line-height: 1.4; }
 .context-menu-off-door { align-self: flex-start; margin-top: 2px; padding: 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text-secondary); font: inherit; cursor: pointer; }
 .context-menu-off-door:hover { color: var(--text); border-color: var(--accent); }
+/* lane ui-controls-and-bugs — a LIVE button pressed while something is missing says why on its own line above the buttons
+   (utils.js pressSays); a second press is seen too */
+.press-says { font-size: calc(11px * var(--ui-font-scale, 1)); color: var(--warn-text, #e5c07b); line-height: 1.45; margin: 4px 0 2px; }
+.press-says:empty { display: none; }
+@keyframes press-says-again { from { background: color-mix(in srgb, var(--yellow, #e5c07b) 22%, transparent); } to { background: transparent; } }
+.press-says-again { animation: press-says-again 0.7s ease-out; border-radius: var(--radius-sm); }
 
 
 /* Context menu separator (data-driven menus in file explorer) — same spec as
