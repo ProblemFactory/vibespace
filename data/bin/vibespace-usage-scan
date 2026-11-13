@@ -383,9 +383,12 @@ for (const rel of rollouts) {
 // cursor persists ONLY after stdout is fully flushed: if the ssh pipe dies
 // mid-transfer the cursor stays put and the next harvest re-emits the same
 // events — the server-side rid dedup absorbs the duplicates (lost events are
-// unrecoverable the other way round).
+// unrecoverable the other way round). B-6ded: a dead pipe calls this callback
+// FIRST, with its error (EPIPE), and only then emits 'error' — the release
+// wrote the cursor there, past every event the hub never received.
 process.stdout.on('error', () => process.exit(1));
-process.stdout.write(out.join('\n') + (out.length ? '\n' : ''), () => {
+process.stdout.write(out.join('\n') + (out.length ? '\n' : ''), (err) => {
+  if (err) { process.exitCode = 1; return; }
   try {
     fs.mkdirSync(path.dirname(CUR_FILE), { recursive: true });
     fs.writeFileSync(CUR_FILE + '.tmp', JSON.stringify(cursors));

@@ -945,6 +945,7 @@
 - (2026-11-11) A PICK SNAPPED BACK ON EVERY HARNESS WITHOUT MODEL FACTS, AND A VIEW-ONLY PAGE SAID «FALLBACK» (fable-52-cli-321 r10, the .393 candidate) — 不变量 = a bar without server facts is master's chip; «fallback» only from a live conversation's numbered facts ⇒ kb-bugfix-invariants
 - (2026-11-11) A MENU PICK WAS LOST ON ITS SECOND LIFE AND A LIFTED LOCK CAME BACK (fable-52-cli-321 r9) — 不变量 = what a resume reads lives where master keeps it; untyped scenes end where master ends, the lock's target aside ⇒ kb-bugfix-invariants
 - (2026-11-10) A TYPED /model THAT NEVER REACHED THE CLI HELD THE LOCK'S REPIN FOR EVER (fable-52-cli-321 r8) — 不变量 = an arm ends by the CLI's own answer, a removal, its process's end or a bound; a resume spawns the server's recorded ask ⇒ kb-bugfix-invariants
+- (2026-11-13) A USAGE WALK THE MOUNT GATE STOPPED LOST THE ROWS OF THE BYTES IT HAD READ, FOR GOOD; A DEAD PIPE MOVED THE SCANNER'S CURSOR (B-6ded) — 不变量 = a walk that does not reach its commit point leaves the cursor map as it found it ⇒ kb-bugfix-invariants
 
 ## THE VAULT CHIP STOOD ONE CHARACTER PER LINE IN THE TOOLBAR'S SECOND ROW (the owner, 2026-11-13, minutes after the update to 2.369.400: «这什么鬼布局»; hotfix 2.369.401)
 
@@ -965,6 +966,18 @@
 **Fix.** THE OPTIONS LAW: every rule that styles an option or an options row draws the option whole. Pills wrap inside themselves, rows wrap, and «Reply:» is said once before them. The strip's question press opens the item IN PLACE (`_dockOver`: a spacer of its closed height, the strip floats over the chat at most half the window). The item is drawn in ONE ORDER: the question, the options, then the detail. «Show it in the conversation» is a worded door of its own.
 
 **Invariant / gates.** test-foryou-fit (fast): every option rule over public/*.css — a state inside a selector counts, the base rows must wrap; the readers' mutants are planted. test-foryou-fit-chrome (heavy): five doors × the width ladder (scripts/lib/fit-ladder.mjs). Its control on the .398 source is red by name at 500.
+
+## A USAGE WALK THE MOUNT GATE STOPPED LOST THE ROWS OF THE BYTES IT HAD READ, FOR GOOD (2026-11-13; B-6ded, lane usage-walk-one-folder, 2.369.399)
+- **What happened.** The hub's ledger walk runs in-process over the hub's OWN cursor store, and the mount-health gate stops a timed walk at a budget point.
+  - The walker advanced the store's entries in place, while the stopped walk dropped its buffered rows.
+  - The next walk started past those bytes, so their requests never reached the ledger. The acceptance's drivers lost 7 of 22, and 2–5 per scene.
+- **The same shape in the shipped scanner.** Node calls a write's callback FIRST with EPIPE and emits 'error' after. The scanner wrote its cursor file in that callback, so a harvest the hub cut off (ssh's 180 s timeout, 128 MiB of output) moved the remote cursor past rows nobody received.
+- **Why the pins missed it.** test-mount-health's «a walk in flight stops at its next yield, cursors untouched» ran on an EMPTY map. There an entry is added only at a file's end, so an existing entry advancing in place was invisible.
+- **不变量 = a walk that does not reach its commit point leaves the cursor map as it found it.**
+  - The walker's cursors are its own: a map handed in is copied, and each entry is copied before it advances. The caller installs the returned map.
+  - UsageHistory installs that map AFTER every shard append, just before the cursor write. A paused walk, a thrown one, or a failed append ⇒ `_cursors` as it was. The next walk re-reads, and the ledger's id filter refuses what a shard already holds.
+  - The scanner writes its cursor only when stdout's write succeeded.
+- **Pins:** test-usage-walk-parity «B-6ded»: the module, the hub ×10 (the readers' nine pause scenes + a failed append), the scanner's dead pipe, and a planted control. All RED on the release.
 
 ## «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (the owner, 2026-11-13 01:2xZ; lane machine-needs-at-pairing pick 1, .399)
 

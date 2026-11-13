@@ -747,10 +747,11 @@ class UsageHistory {
       // before the commit point (the reload check below covers its turns too); its drops land AT the commit, as before
       const deadFacts = Date.now() - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS ? await this._deadCursorsSliced(walk.cursors) : undefined;
       if (this._cursors !== cursorsAtStart) return { added: 0, filesTouched, dropped: 'cursors-reloaded' };
-      this._cursors = walk.cursors;
 
       // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
-      // the shard appends and the cursor write
+      // the shard appends and the cursor write. B-6ded: the walk advanced its OWN copies of the cursors (src/usage-walker.js);
+      // they become this ledger's map only below, once every row is in its shard — a walk the mount gate stopped, one that
+      // threw, or an append that failed leaves `_cursors` as the walk found it, and the next walk re-reads those bytes
       let appendedNow = false, reAppended = 0;
       const knows = this._evCache && !(typeof this.ledgerLoading === 'function' && this.ledgerLoading()) ? (id) => this.ledgerKnowsId(id) : tailRids ? (id) => tailRids.has(id) : null;
       if (knows) for (const shard of Object.keys(shardBuffers)) shardBuffers[shard] = shardBuffers[shard].filter((l) => { let rid = null; try { rid = JSON.parse(l).rid; } catch { } if (rid && knows(rid)) { reAppended++; return false; } return true; });
@@ -763,10 +764,11 @@ class UsageHistory {
       // round 2 (smaller 1): THE CURSOR FOLLOWS ITS APPEND IN ORDER — after rows were appended, the cursors are the writer's
       // NEXT write (never its pace): a kill between the two re-appends at most what one cursor write's time let through
       // (the readers' rid dedup absorbs those rows), never a window per kill
+      this._cursors = walk.cursors;
       if (this._writeCursors(deadFacts) && appendedNow) { try { require('./store-writer.js').storeWriter().durable(this.cursorsFile).catch(() => { }); } catch { } }
       this._lastScan = Date.now();
     } catch (e) {
-      if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk
+      if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk (the cursors as it found them)
       console.error('[usage-history] scan failed:', e && e.message);
       return { added: 0, filesTouched, error: String((e && e.message) || e) };
     } finally { this._scanning = false; }
