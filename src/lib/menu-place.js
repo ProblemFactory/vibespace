@@ -40,3 +40,16 @@ export function menuPlace({ x = 0, y = 0, w = 0, h = 0, vw = 0, vh = 0, up = fal
   const top = side === 'above' ? y - hh : side === 'below' ? Math.max(pad, y) : Math.max(pad, vh - pad - hh);
   return { left, top, maxH, maxW, scroll: null, side };
 }
+
+/** A PANEL KEEPS ITS NATURAL WIDTH AND SLIDES (lane ui-controls-and-bugs — the width sweep's rule 4: a panel opened near a
+ *  window's right edge was squeezed to a 130 px strip, its rows wrapped six deep, half the window empty beside it). `natW` =
+ *  the width its content wants (measured with no squeeze), `minW` / `maxW` = the caller's intent, `wantLeft` = where its
+ *  anchor is. The width is natW within [minW, maxW] and the room; the panel slides left until that width fits. LAYOUT px.
+ *  → { left, maxW } */
+export function panelPlace({ wantLeft = 0, containerW = 0, natW = 0, minW = 0, maxW = Infinity, pad = 8 } = {}) {
+  const room = containerW - pad;
+  if (!(room > 0)) return { left: Math.max(0, wantLeft), maxW };
+  const w = Math.min(Math.max(natW, minW), maxW, room);
+  const left = Math.max(0, Math.min(wantLeft, containerW - w - pad));
+  return { left, maxW: Math.min(maxW, Math.max(w, containerW - left - pad)) };
+}
