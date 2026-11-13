@@ -339,6 +339,13 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
       'browser-who-model: the three dialogs word it ONLY through allAgentsSentence, keyed by the road the server sent — never a literal «own tab» promise');
     const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
     ok(zh.includes(JSON.stringify(shared) + ':') && ja.includes(JSON.stringify(shared) + ':'), 'browser-who-model: the shared-road sentence has its zh and ja');
+    // the .401 read (L2b): a MEDIATED profile on a hub with no proxy — every agent lease there is refused by name — is UNAVAILABLE, never «own tab»
+    const unavailable = "Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.";
+    const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    ok(W.allAgentsSentence('unavailable') === unavailable && zh.includes(JSON.stringify(unavailable) + ':') && ja.includes(JSON.stringify(unavailable) + ':')
+      && /const dialogRoadOf = \(p\) => \{ const v = agentRoadOf\(p\); return p && isMediated\(p\) && !\(mediator && mediationOn\(\) && typeof mediator\.grantFor === 'function'\) \? \{ mode: v\.mode, why: 'unavailable' \} : v; \};/.test(keeperSrc)
+      && /agentRoad: dialogRoadOf\(p\)\.why/.test(keeperSrc) && /agentRoadFor: \(id, \{ host = null \} = \{\}\) => \(id \? dialogRoadOf\(/.test(keeperSrc),
+      'browser-who-model: a mediated profile on a hub with NO proxy is worded UNAVAILABLE (every agent lease there is refused mediation_unavailable) — the keeper\'s dialog road says so in the profile row and /use; en / zh / ja');
   }
   const view = { use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1', title: 'Ops' }] } };
   const pr = W.pickerRows(view, { sessions: [], groups: [{ id: 'tg-1', title: 'Ops' }] });

@@ -345,7 +345,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // owner ruling A: `scope` = who may use it ('all' | 'only'), DERIVED from `owner` (one field), never stored twice; `use` =
   // the list as keys and ids only (the broadcast — the panel names them from its own rows; the agent's route strips it)
   // BROWSE YOURSELF (B-6ae8, the owner 4): `recordMine` = "Also record my own actions" — an opt-OUT, absent = on
-  const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), agentRoad: agentRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
+  const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), agentRoad: dialogRoadOf(p).why, scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by the person — no switch of theirs rides its record: verify r1 H1)
   // ── lane grants-unify: "Who can use it" = the profile's row of the ONE grants store, mirrored as `p.grantUse` ──
   /** A conversation's browser key for the panel's spelling (null while it has none). */
   // (no resolver wired — a keeper built alone: a browser key IS the conversation key it is judged by, both ways)
@@ -3333,11 +3333,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const k = inputKey(bk, profileId || null);
     const s0 = inputs.get(k) || null;
     const url0 = s0 && s0.url ? s0.url : (lease && lease.lastUrl) || '';
-    let rerun = [], userActs = [], tookOver = false;
+    let rerun = [], userActs = [], tookOver = false, folderPutBack = false;
     if (s0 && s0.input === 'user') {
       const h = handback({ browserKey: bk, profileId: profileId || null, viewerId: null, cause: 'continue', url: url0, sessionId });
       if (!h.ok) return h;
-      rerun = h.rerun || []; userActs = h.userActs || []; tookOver = true;
+      rerun = h.rerun || []; userActs = h.userActs || []; tookOver = true; folderPutBack = !!h.folderPutBack;
     }
     let tabs = [];
     if (own) {
@@ -3355,7 +3355,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (u) tabs = [{ url: u, title: '', active: true }];
     }
     log.log?.(`[browser] ${bk}${profileId ? ' on ' + profileId : ' (its own browser)'}: handed back for the next turn by the user (${tabs.length} tab(s)${tookOver ? ', the takeover ended' : ''}${rerun.length ? `, to re-run: ${rerun.join(', ')}` : ''}) — nothing delivered now`);
-    return { ok: true, own, tabs, currentIndex: KB.currentIndexOf(tabs), rerun, userActs, tookOver };
+    return { ok: true, own, tabs, currentIndex: KB.currentIndexOf(tabs), rerun, userActs, tookOver, folderPutBack };
   }
   /** lane browser-resume B: the hand-back's restore on the conversation's OWN kept entry — what its next command is told
    *  (the stash carried the note: `handedBack` ⇒ the command's note names the current tab only; a stash that could not
@@ -4336,6 +4336,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  (never a second «is there a proxy» test). Read by the profile's view (the «Who can use it» dialog says what is true on it) and by
    *  the boot's adoption (THE WINDOW's fourth door). → {mode, why} */
   const agentRoadOf = (p) => { const rec = p ? reg.browsers[p.id] : null; return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: true }); };
+  /** The road the «Who can use it» dialog words: the same verdict, except a mediated profile on a hub with no proxy — every agent lease
+   *  there is refused `mediation_unavailable`, so the dialog says unavailable (the .401 read, L2b). → {mode, why} */
+  const dialogRoadOf = (p) => { const v = agentRoadOf(p); return p && isMediated(p) && !(mediator && mediationOn() && typeof mediator.grantFor === 'function') ? { mode: v.mode, why: 'unavailable' } : v; };
   const leaseRoadOf = (p, browserKey) => {
     const bk = String(browserKey || ''), rec = p ? reg.browsers[p.id] : null;
     return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: (B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk) });
@@ -4345,11 +4348,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   async function leaseUrlFor(p, browserKey, raw) {
     if (!raw || !p || leaseRoadOf(p, browserKey).mode !== M.SCOPE_MODE) return raw;
     // a url is an authority: minted only for a lease that STANDS (attach took it after its fences — identity census)
-    if (!B.findLease(reg.leases, p.id, String(browserKey))) return raw;
+    // lane chrome-157 (the .401 read, L2b): the scope road FAILS CLOSED — no standing lease, or no grant made, is no url at all (the
+    // attach refuses `scope_unavailable` by name); it never hands the raw endpoint, where no fence and no window stands
+    if (!B.findLease(reg.leases, p.id, String(browserKey))) return null;
     try {
-      const g = await mediator.grantFor({ profileId: p.id, browserKey: String(browserKey), upstream: raw, targetIds: holderTabs(p.id, browserKey), mode: M.SCOPE_MODE });
-      return g && g.url ? g.url : raw;
-    } catch (e) { log.warn?.(`[browser] ${browserKey} on ${p.id}: no scoped url (${e && e.message}) — its driver sees every tab of the browser this time`); return raw; }
+      const g = await mediator.grantFor({ profileId: p.id, browserKey: String(browserKey), upstream: raw, targetIds: holderTabs(p.id, browserKey), mode: M.SCOPE_MODE, paused: () => inputStateFor(String(browserKey), p.id).input === 'user' });   // (the window refuses a set while the person drives — W1 on the scope road)
+      return g && g.url ? g.url : null;
+    } catch (e) { log.warn?.(`[browser] ${browserKey} on ${p.id}: no scoped url (${e && e.message}) — refused by name, never the raw endpoint`); return null; }
   }
   /** The browser's OWN endpoint for the keeper's raw reads (the whole tab set — the fence judges ownership itself), never a
    *  lease's scoped url. */
@@ -4877,6 +4882,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // (the subshell and the `--` form), `use --print` withholds it (§5.1)
     const noteOut = takeRebound(p.id, browserKey, rebound); // verify r3 (F4): this answer carries the note (its own, or one an abandoned answer left)
     const leaseUrl = await leaseUrlFor(p, browserKey, leaseCdp); // lane browser-shared-profile-freeze: the scope road's own url (else the raw one)
+    if (leaseCdp && !leaseUrl) throw namedError('scope_unavailable', `"${p.label}" is shared with your other conversations through VibeSpace, and VibeSpace could not give this conversation a connection of its own just now — it is not attached (the browser itself is never handed out); try again in a moment`);   // (lane chrome-157, the .401 read L2b)
     return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseUrl, socketDir: rec && rec.launch === 'attach' ? rec.socketDir : null }), cdpUrl: leaseUrl !== leaseCdp ? leaseUrl : rec ? rec.cdpUrl : null, pinTab, ...(added ? { added } : {}), ...(noteOut ? { rebound: noteOut } : {}) };
   }
   /** VERIFY r2 L8: the paused sentence, said about a DETACH (the refusal's own words name a command). */
@@ -5393,7 +5399,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (profileId && mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey }); } catch (e) { log.warn?.(`[browser] ${browserKey} on ${profileId}: the takeover's interrupt failed — ${e && e.message}`); } }
       let inFlight = [];
       if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId, browserKey, profileId: profileId || null, at }) || []; } catch (e) { log.warn?.(`[browser] ${browserKey}: the in-flight reader failed — ${e && e.message}`); inFlight = []; } }
-      const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] }); // a closed cycle hands on the ids it counted (told once)
+      const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [], folderPutBack: !!(ab && ab.downloadsPutBack) }); // a closed cycle hands on the ids it counted (told once); lane chrome-157: the folder put back
       cycles.set(k, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user took over (viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of the agent interrupted (${view.verbs.join(', ')})` : 'nothing of the agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted${ab.terminated ? `, ${ab.terminated} running script(s) asked to stop` : ''}` : ''}${oc.fresh ? '' : ' (the same takeover goes on: a second viewer took it before the handback)'}; agent commands are refused until the handback`);
@@ -5446,7 +5452,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey: l.browserKey }); } catch (e) { log.warn?.(`[browser] ${l.browserKey} on ${profileId}: the sibling's interrupt failed — ${e && e.message}`); } }
       let inFlight = [];
       if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId: l.sessionId || null, browserKey: l.browserKey, profileId, at }) || []; } catch { inFlight = []; } }
-      const oc = INT.openInterruption(cycles.get(sk) || lastClosed.get(sk) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] });
+      const oc = INT.openInterruption(cycles.get(sk) || lastClosed.get(sk) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [], folderPutBack: !!(ab && ab.downloadsPutBack) });
       cycles.set(sk, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${l.browserKey} on ${profileId}: taken over WITH ${browserKey} (the same browser; viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of its agent interrupted (${view.verbs.join(', ')})` : 'nothing of its agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted` : ''}; its commands are refused until the handback`);
@@ -5526,11 +5532,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     cycles.delete(k);
     if (closed) lastClosed.set(k, closed);
     const rerun = INT.interruptedVerbs(closed);
+    const folderPutBack = !!(closed && closed.folderPutBack);   // (lane chrome-157: the takeover put the download folder back — said again at the handback)
     const userActs = closed && Array.isArray(closed.userActs) ? closed.userActs.slice() : []; // lane browser-resume C: the user's tab acts while he drove
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + T.urlForLog(d.state.url) : ''}${rerun.length ? ` — to re-run: ${rerun.join(', ')}` : ''}${userActs.length ? ` — the user's tab acts while driving (said to the agent): ${userActs.map((a) => a.kind).join(', ')}` : ''}`); // lane live-input: origin + path in the journal — never the query (order ids, tokens)
     emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}), sharedWindow: sharedWindowOf(browserKey, profileId), pressed }); // verify r2 ⑦ — r2 (lane owner-press-attended): + the door's PRESS (an explicit handback is attended only with it)
     if (profileId) driveEnded(profileId); // verify r5 ②: no window of the browser driven any more ⇒ the holders refused meanwhile are told
-    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, state: inputStateFor(browserKey, profileId) };
+    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, folderPutBack, state: inputStateFor(browserKey, profileId) };
   }
   /**
    * lane P verify (finding 3): the viewer driving PASSES the controls to another view of the same browser (a
@@ -7095,8 +7102,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // names; a port another program holds ⇒ ended by identity, said by name (never left behind a dead or a foreign proxy)
       if (v.state === 'ready' && rec.egress) { const eg = await egressAdopt(rec); if (!eg.ok) { egressNotice(rec, p, eg); own = { act: 'end', why: eg.error, result: await endProcess(rec.pid, rec.starttime, { termMs: 5000 }) }; v.state = 'failed'; } }
       if (own && own.act === 'end') { v.lastError = `${own.why} — its daemon was ended at the restart (${own.result})`; rec.note = O.endedNote({ why: own.why, at: now() }); }
-      if (v.state === 'ready' && p && rec.cdpUrl && agentRoadOf(p).mode && mediator && typeof mediator.putBackDownloads === 'function') {   // (lane chrome-157: THE WINDOW's fourth door — a hub that stopped mid-download left the profile's folder an agent's)
-        mediator.putBackDownloads(rec.cdpUrl).then((ok) => log.log?.(`[browser] ${rec.profileId}: adopted — its download folder ${ok ? 'put back to the profile\'s own' : 'could not be put back (the browser did not answer)'}`), () => { });
+      if (v.state === 'ready' && p && rec.cdpUrl && agentRoadOf(p).mode && mediator && typeof mediator.adopt === 'function') {   // (lane chrome-157: THE WINDOW's fourth door, W6 — a hub that stopped mid-download left the profile's folder an agent's: put back before this profile's first grant, tried again, said by the mediator when it could not be)
+        mediator.adopt(p.id, rec.cdpUrl).catch(() => { });
       }
       if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); if (rec.closed && rec.closed.code === 'browser_unstable' && rec.closed.unstable === 'failing') bootRejudge.add(rec.profileId); // lane browser-unstable-rejudge
         log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); if (isEph(p)) keptNote('start', p); }
@@ -7551,7 +7558,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const api = {
     /** lane chrome-157: the road an agent's lease of profile `id` takes ({mode, why}) — or, with no id, the road a NEW profile on `host`
      *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
-    agentRoadFor: (id, { host = null } = {}) => (id ? agentRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
+    agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     engineFactOf, engineRowsView, defaultEngineNow, // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy

@@ -158,6 +158,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // owner ruling A: a pin is an attachment default now — P6's `pin_refused` is gone (lane browser-windows: and `browser_busy`
   // with the retired drive claim — each conversation works in a window of its own)
   mediation_unavailable: 503, mediation_no_cdp: 502, pinned: 409,
+  scope_unavailable: 503,   // lane chrome-157 (the .401 read, L2b): the scope road's own url could not be made — refused by name, never the raw endpoint
   // identity verify r2 (2026-09-28): a conversation on another machine never uses / pins / is listed on a profile
   remote_session: 409,
   // lane jobs-browser (B-dbc1): a Background Work job browses as its owner conversation — its refusals by name

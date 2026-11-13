@@ -32,6 +32,9 @@
 const INTERRUPTED_CODE = 'browser_interrupted';
 const HEAD = 'The user took over your window of this browser — your operation was interrupted'; // lane browser-windows: one window, the others run on
 const TAIL = 'Wait for the handback, then run it again.';
+/** lane chrome-157 (the .401 read): a takeover put the profile's download folder back — the lease whose download window it was is told,
+ *  in the takeover card and again at the handback. */
+const FOLDER_PUT_BACK_TEXT = 'Your download folder setting in this browser was put back to the person\'s own — set it again before your next download (`vibespace-browser download <selector> <path>` does it in one step).';
 /** THE sentence (the owner's three facts: taken over, interrupted, run it again after the handback). */
 const INTERRUPTED_TEXT = `${HEAD}. ${TAIL}`;
 /** The sentence with a detail (the CDP method, the census's words) between the head and the tail. */
@@ -102,7 +105,7 @@ const uniq = (xs) => { const s = new Set(); const out = []; for (const x of xs) 
  * `inFlight` = inFlightAt(…) at the instant; `aborted` = the mediator's answer [{method, sessionId}].
  * → { cycle, fresh }
  */
-function openInterruption(prev, { takenAt = 0, inFlight = [], aborted = [] } = {}) {
+function openInterruption(prev, { takenAt = 0, inFlight = [], aborted = [], folderPutBack = false } = {}) {
   const p = prev && typeof prev === 'object' ? prev : null;
   const open = p && !p.closedAt ? p : null;
   // a CLOSED previous cycle hands on the ids it already counted (`seen`): a command whose result the trace never got is
@@ -115,7 +118,7 @@ function openInterruption(prev, { takenAt = 0, inFlight = [], aborted = [] } = {
   const ab = base.aborted.slice();
   for (const a of Array.isArray(aborted) ? aborted : []) if (a && a.method) ab.push({ method: String(a.method).slice(0, 80), sessionId: a.sessionId ? String(a.sessionId) : null, at: num(takenAt) });
   if (ab.length > RING) ab.splice(0, ab.length - RING);
-  return { cycle: { ...base, inFlight: inF.slice(-RING), aborted: ab, takeovers: base.takeovers + 1 }, fresh: !open };
+  return { cycle: { ...base, inFlight: inF.slice(-RING), aborted: ab, takeovers: base.takeovers + 1, folderPutBack: !!(base.folderPutBack || folderPutBack) }, fresh: !open };
 }
 /** The agent tried a verb while the user drove (refused browser_paused at /resolve) — it goes on the re-run list. */
 function noteRefused(cycle, { verb = '', at = 0 } = {}) {
@@ -176,7 +179,7 @@ function interruptionView(cycle) {
   // verify r6: `terminated` = the CDP sessions a Runtime.terminateExecution went to (one per session that had an aborted
   // SCRIPT call — the mediator's plan) — the live view tells the human that a script running in the page was stopped
   const terminated = new Set(c.aborted.filter((a) => SCRIPT_METHODS.includes(a.method)).map((a) => a.sessionId || '(page)')).size;
-  return { openedAt: num(c.openedAt), takeovers: num(c.takeovers), n: ops.n, verbs: ops.verbs, aborted: c.aborted.length, terminated, refused: uniq(c.refused.map((r) => r.verb)), rerun: interruptedVerbs(c), userActs: Array.isArray(c.userActs) ? c.userActs.slice() : [], closedAt: num(c.closedAt) };
+  return { openedAt: num(c.openedAt), takeovers: num(c.takeovers), n: ops.n, verbs: ops.verbs, aborted: c.aborted.length, terminated, refused: uniq(c.refused.map((r) => r.verb)), rerun: interruptedVerbs(c), userActs: Array.isArray(c.userActs) ? c.userActs.slice() : [], closedAt: num(c.closedAt), folderPutBack: !!c.folderPutBack };
 }
 
 const listText = (verbs, max = 8) => { const v = uniq(verbs); return v.length > max ? `${v.slice(0, max).join(', ')} and ${v.length - max} more` : v.join(', '); };
@@ -230,7 +233,7 @@ function rerunSentence(verbs) {
 }
 
 module.exports = {
-  INTERRUPTED_CODE, INTERRUPTED_TEXT, interruptedText, SCRIPT_METHODS, NOT_AN_OPERATION, VERB_OF_ACTION, verbOfAction, isOperation, IN_FLIGHT_MAX_MS, SEEN_CAP,
+  INTERRUPTED_CODE, INTERRUPTED_TEXT, interruptedText, FOLDER_PUT_BACK_TEXT, SCRIPT_METHODS, NOT_AN_OPERATION, VERB_OF_ACTION, verbOfAction, isOperation, IN_FLIGHT_MAX_MS, SEEN_CAP,
   noteRecord, inFlightAt, openInterruption, noteRefused, closeInterruption, operationsOf, interruptedVerbs, interruptionView,
   USER_ACT_KINDS, USER_ACTS_CAP, noteUserAct, dropUserAct, // lane browser-resume C: the user's tab acts while he drove
   takeoverText, rerunSentence, relaunchText, // lane browser-admin 2a: Change build… restarts a browser — said like a takeover

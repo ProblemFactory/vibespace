@@ -785,22 +785,42 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
 * **The whole profile is the person's** (the owner's law): on a profile a
   person shares with agents — Separate tabs, or a profile shared through
   "Who can use it" on this machine — your lease never acts on the WHOLE
-  profile. These answer `method_refused`, each saying what to do instead:
-  `cookies clear` (it would empty the person's whole cookie jar) — clear ONE
-  site's data with `vibespace-browser site-reset --host <host>` (on a shared
-  profile it asks the person), or use your conversation's own browser for a
-  throwaway session; ignoring certificate errors for every tab, a profile-wide
-  cache or site-state wipe — open such a site in your own browser; installing,
-  removing or re-setting a web app — ask the person; site permissions
+  profile or the whole browser. These answer `method_refused`, each saying
+  what to do instead: `cookies clear` (it would empty the person's whole
+  cookie jar) — clear ONE site's data with `vibespace-browser site-reset
+  --host <host>` (on a shared profile it asks the person), or use your
+  conversation's own browser for a throwaway session; a profile-wide CACHE
+  wipe — reload the page, or use your own browser; a profile-wide SITE-STATE
+  wipe (bounce-tracking mitigations) — clear one site with `site-reset
+  --host`; ignoring certificate errors for every tab — open such a site in
+  your own browser; installing, removing or re-setting a web app or an
+  extension — ask the person; closing or crashing the browser — close only
+  your own tabs (`vibespace-browser close`). Site permissions over CDP
   (grant / set / reset) are answered only for a browser context your lease
-  created, otherwise ask the person. `download` WORKS: VibeSpace lets it set
-  the profile's download folder and puts the folder back when your download
-  ends (or the person takes over, or your lease ends) — while your download is
-  in flight, a file the person starts in that profile lands in your folder, so
-  finish it and move on. A paired machine's profile, or a hub with no
-  mediating proxy, hands your driver the browser directly: nothing is refused
-  there — leave the person's profile as you found it. Your conversation's own
-  temporary browser is yours: none of this applies to it.
+  created, otherwise ask the person. VibeSpace's own `vibespace-browser
+  permission <kind> allow|deny [origin]` is a different door: it sets that
+  ONE site's permission in this browser — on a shared profile in the
+  person's own profile too, and a geolocation position on every tab
+  VibeSpace watches — and the person sees the line in the live view; set
+  only what your task needs, and `deny` it again when you are done.
+* **Downloads: the folder is lent, briefly.** `download` WORKS:
+  VibeSpace lends you the profile's download folder from the moment your
+  driver sets it until that download ends — or 15 s after the set if no
+  download of your tab begins (a download your tab begins later is canceled,
+  so use `vibespace-browser download <selector> <path>`, which sets the
+  folder and clicks in one step) — and takes it back at once when the person
+  takes over, your lease ends or your connection closes (you are told when a
+  takeover took it back: set it again before your next download). While it
+  is lent, a file the person starts in that profile lands in your folder, so
+  finish and move on. One window per profile: while another conversation's
+  download is in flight there, your set is refused by name — try again in a
+  moment. `deny` (blocking every download of the profile) is refused. You
+  are told only of your own downloads, and may cancel only those.
+* A paired machine's profile, or a hub with no mediating proxy, hands your
+  driver the browser directly: nothing is refused there — leave the
+  person's profile as you found it (a profile shared with separate tabs is
+  not available to you at all on a hub with no proxy). Your conversation's
+  own temporary browser is yours: none of this applies to it.
 
 ### A Background Work job uses your browser as you
 

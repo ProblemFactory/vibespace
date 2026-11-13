@@ -226,7 +226,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     out.sessionId = sess.id;
     const label = labelOf(ev.profileId);
     const shared = ev.sharedWindow === true; // verify r2 ⑦ (r1 LOW 6): a mate taken WITH a legacy shared window is told so, never "your window"
-    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [], shared });
+    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [], shared }) + (iv.folderPutBack ? ' ' + require('../browser-interrupt.js').FOLDER_PUT_BACK_TEXT : '');   // (lane chrome-157: the lease's download window was put back by this takeover)
     out.text = text;
     // the card is display only — to the live session we hold (a conversation with no id yet still sees it), else by conversation id
     const card = { fromName: FROM_NAME, text, kind: 'notification' };
@@ -394,7 +394,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       }
     }
     const id = 'bres-' + require('crypto').randomBytes(4).toString('hex');
-    const text = KB.continueFrame({ note, tabs: st.tabs, currentIndex: st.currentIndex, rerun: st.rerun, rerunSentence: T.rerunSentence, userActs: st.userActs || [], actsSentence: require('../browser-tabs.js').userActsSentence, drove: !!st.tookOver }); // verify r2: the head says drove / resumed
+    const text = KB.continueFrame({ note, tabs: st.tabs, currentIndex: st.currentIndex, rerun: st.rerun, rerunSentence: T.rerunSentence, userActs: st.userActs || [], actsSentence: require('../browser-tabs.js').userActsSentence, drove: !!st.tookOver }) + (st.folderPutBack ? ' ' + require('../browser-interrupt.js').FOLDER_PUT_BACK_TEXT : ''); // verify r2: the head says drove / resumed; lane chrome-157: the takeover put its download folder back
     const cardText = KB.continueCardText({ note, tabs: st.tabs, currentIndex: st.currentIndex });
     const out = { ok: true, id, stashed: false, durable: false, carded: false, tabs: st.tabs.length, tookOver: !!st.tookOver, own: !!st.own };
     try {
