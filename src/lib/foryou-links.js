@@ -203,15 +203,38 @@ function segmentWords(src) {
  *  («https:/…» is a link only while the mark ends it). A link of the words over such a token is drawn as its words; a
  *  whole link before it (a space, a CJK mark between) stays a link. r10: so is a link ONLY THE CUT MADE — one the continued
  *  words no longer read, with no space between it and the mark: the relative grammar never takes `:line` (path-linkify —
- *  «plan.md:42» is no link), so «docs/guide/plan.md:…» read the file while «…plan.md:0» reads nothing. */
+ *  «plan.md:42» is no link), so «docs/guide/plan.md:…» read the file while «…plan.md:0» reads nothing. r11 (the .399
+ *  acceptance): the continuation also CLOSES what the cut left open in its run — a full-width pair (FW_PAIRS: a balanced
+ *  pair rides inside a URL, so «…/wiki/「…» read the parent page) and a `[vault:` mark (a whole mark rides inside a path,
+ *  so «/srv/app/[vault:s…» read «/srv/app/[vault») — and a MASKED segment over the cut's place is the token too: every
+ *  token kind the merged grammar has runs on across the cut. Still ONE re-segmentation per cut text. */
+const FW_CLOSER = new Map(FW_PAIRS.map((p) => [p[0], p[1]]));
+function continuation(src, e) {
+  let b = e; while (b > 0 && !/\s/.test(src[b - 1])) b--;
+  const open = [];
+  for (let i = b; i < e; i++) {
+    if (src.startsWith('[vault:', i)) { open.push(']'); i += 6; continue; }
+    const c = src[i];
+    if (FW_CLOSER.has(c)) open.push(FW_CLOSER.get(c));
+    else if (open.length && c === open[open.length - 1]) open.pop();
+  }
+  return '0' + open.reverse().join('');
+}
 function uncutLinks(src, segs) {
   const ends = cutRuns(src).map(([, e]) => e).filter((e) => e < src.length);
   if (!ends.length) return segs;
   const through = [], still = new Set();
+  // the continued words, and where each of their offsets sits in `src` (an inserted closer sits at its cut's mark)
+  let probe = '', from = 0; const map = [];
+  for (const e of ends) { probe += src.slice(from, e); for (let i = from; i < e; i++) map.push(i); const c = continuation(src, e); probe += c; for (let i = 0; i < c.length; i++) map.push(e); from = e + 1; }
+  probe += src.slice(from); for (let i = from; i < src.length; i++) map.push(i);
   let at = 0;
-  for (const g of segmentWords(ends.reduce((t, e) => t.slice(0, e) + '0' + t.slice(e + 1), src))) {
-    const a = at; at += g.s.length;
-    if (g.t === 'link') { still.add(a); for (const e of ends) if (a < e && e < at) through.push([a, e]); }
+  for (const g of segmentWords(probe)) {
+    const q = at; at += g.s.length;
+    if (g.t !== 'link' && g.t !== 'masked') continue;
+    const a = map[q], z = map[at - 1];
+    if (g.t === 'link') still.add(a);
+    for (const e of ends) if (a < e && z >= e) through.push([a, e]);
   }
   const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\s/.test(src.slice(z, e))); // r10: the continued words read no link here
   at = 0;

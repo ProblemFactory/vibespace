@@ -104,13 +104,28 @@ function kindOf(path, op = null) {
 const isKind = (k) => KINDS.includes(k);
 const normHost = (h) => (h && h !== 'local' ? String(h) : '');
 /** A path made absolute against the conversation's cwd when the record carried a relative one. */
+/** A ROW'S PLACE IS ITS NORMALIZED PATH (lane artifacts-by-intent, the .399 acceptance): `.` and `..` segments resolved
+ *  (`/w/proj/../other/y.md` ⇒ `/w/other/y.md` — a codex «*** Add File: ../other/y.md» from /w/proj is a file OUTSIDE the
+ *  folder, and the same file written by its absolute path is the same row). Never above the root, never above a home's
+ *  `~` (its parent is not this reducer's to know: `~/..` stays). PURE string work — the device bundle carries no `path`. */
+function normDots(p) {
+  const s = String(p || '');
+  if (!/(^|\/)\.\.?(\/|$)/.test(s)) return s;
+  const abs = s.startsWith('/'), out = [];
+  for (const seg of s.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') { if (out.length && out[out.length - 1] !== '..' && out[out.length - 1] !== '~') out.pop(); else if (!abs) out.push('..'); continue; }
+    out.push(seg);
+  }
+  return (abs ? '/' : '') + out.join('/') || (abs ? '/' : '.');
+}
 function absPath(path, cwd) {
   let p = String(path || '').trim();
   if (!p) return '';
-  if (p.startsWith('/') || p.startsWith('~')) return p.replace(/\/{2,}/g, '/');
+  if (p.startsWith('/') || p.startsWith('~')) return normDots(p.replace(/\/{2,}/g, '/'));
   if (!cwd) return p;
   p = p.replace(/^(?:\.\/)+/, '');
-  return (String(cwd).replace(/\/+$/, '') + '/' + p).replace(/\/{2,}/g, '/');
+  return normDots((String(cwd).replace(/\/+$/, '') + '/' + p).replace(/\/{2,}/g, '/'));
 }
 const keyOf = (host, path) => normHost(host) + ':' + path;
 
@@ -164,7 +179,23 @@ function evictPresented(rows, keep) {
 }
 /** Two row sets of ONE conversation (the transcript's re-derivation + the persisted rows that also carry the user's
  *  own saves) → one: per key the larger counts, the later change's `by`/`lastOp`, the earlier birth. */
-function merge(a, b) {
+/** The rows an older tree kept under a path with `.` / `..` segments, folded into the row of their normalized path (the
+ *  merge's own rule for two rows of one key) — one file written by two spellings is ONE row after the rebuild. */
+function dotsFolded(rows) {
+  let out = null;
+  for (const [k, r] of Object.entries(rows || {})) {
+    if (!r || typeof r !== 'object' || r.presented || typeof r.path !== 'string') continue;
+    const p = normDots(r.path);
+    if (p === r.path) continue;
+    if (!out) out = { ...rows };
+    delete out[k];
+    const key = keyOf(r.host, p);
+    out = mergeRows(out, { [key]: { ...r, key, path: p, name: baseName(p) } });
+  }
+  return out || rows;
+}
+function merge(a, b) { return mergeRows(dotsFolded(a), dotsFolded(b)); }
+function mergeRows(a, b) {
   const out = { ...(a || {}) };
   for (const [k, r] of Object.entries(b || {})) {
     if (!r || typeof r !== 'object') continue;
@@ -518,7 +549,7 @@ const INTENT_WORDS = Object.freeze({
 });
 const intentWord = (band, lang = 'en') => (INTENT_WORDS[band] || INTENT_WORDS.touched)[lang] || (INTENT_WORDS[band] || INTENT_WORDS.touched).en;
 
-module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
+module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, normDots, keyOf, apply, fold, merge, view,
   INTENTS, SHOWN_OPS, INTENT_WORDS, intentOf, intentWord, opAuthor, quotedOps, wasShown,
   cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows, stampsGained,

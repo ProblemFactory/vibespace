@@ -523,4 +523,22 @@ ok(cap4 && touchedShut(cap4, cap4.viewFrom({ v: cap4.VIEW_VERSION, collapsed: { 
 const OFN = cjsCopy('src/harnesses/artifacts-of.js', '(ours || !CMM().opensWithServerFrame(text))', "(ours || !CMM().opensWithServerFrame(String(text).replace(/^\\s*VibeSpace \\(this workspace, not another agent\\) reports:/, '')))", 'of-nonotice');
 ok(OFN && byOf(OFN.acp({ kind: 'update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: NOTICE } } })) === 'user', 'CONTROL the server frame without its notice-head half ⇒ VibeSpace\'s notice reads as the person\'s — RED');
 
+// .399 follow-up (the acceptance of 93c6e9132): A ROW'S PLACE IS ITS NORMALIZED PATH — a codex «*** Add File: ../other/y.md»
+// from /w/proj is a file OUTSIDE the folder: one row with the same file written by its absolute path, read as elsewhere
+// («…/other», away); an older tree's row kept under the dotted path folds into it at the rebuild's merge
+const dW = AF.fold(AF.fold({}, { op: 'write', path: '../other/y.md', cwd: '/w/proj', at: 1 }), { op: 'edit', path: '/w/other/y.md', at: 2 });
+const dRow = Object.values(dW)[0], dWhere = M.whereOf(dRow, { cwd: '/w/proj' });
+const DOTTED = { key: ':/w/proj/../other/y.md', host: '', path: '/w/proj/../other/y.md', name: 'y.md', kind: 'doc', firstAt: 1, lastAt: 1, by: 'agent', writes: 1, edits: 0, lastOp: 'write', bytes: null, lastId: null };
+const dM = AF.merge({ [DOTTED.key]: DOTTED }, dW), dMr = dM[':/w/other/y.md'];
+const dots = { keys: Object.keys(dW), writes: dRow.writes, edits: dRow.edits, where: dWhere, merged: Object.keys(dM), mergedWhere: dMr && M.whereOf(dMr, { cwd: '/w/proj' }), norm: typeof AF.normDots === 'function' ? ['~/a/../b.md', '~/../x', '/../x', '/a/./b/.'].map(AF.normDots) : null };
+ok(dots.keys.join() === ':/w/other/y.md' && dots.writes === 1 && dots.edits === 1 && dots.where.away === true && dots.where.folder === '…/other' && dots.merged.join() === ':/w/other/y.md' && !!dots.mergedWhere && dots.mergedWhere.away === true && JSON.stringify(dots.norm) === JSON.stringify(['~/b.md', '~/../x', '/x', '/a/b']),
+  '.399 follow-up: a path that climbs out of the folder (../other/y.md from /w/proj) is ONE row with the same file written by its absolute path, read as elsewhere («…/other», away); an older tree\'s row under the dotted path folds into it at the merge; never above the root or a home\'s ~', dots);
+const AFD = cjsCopy('src/artifacts.js', "return normDots((String(cwd).replace(/\\/+$/, '') + '/' + p).replace(/\\/{2,}/g, '/'));", "return (String(cwd).replace(/\\/+$/, '') + '/' + p).replace(/\\/{2,}/g, '/');", 'af-r10abs');
+ok(AFD, 'CONTROL needle present: absPath normalizes the joined path (.399 follow-up) — a tree without it has nothing to patch');
+if (AFD) {
+  const r10W = AFD.fold(AFD.fold({}, { op: 'write', path: '../other/y.md', cwd: '/w/proj', at: 1 }), { op: 'edit', path: '/w/other/y.md', at: 2 });
+  const r10Where = M.whereOf(r10W[':/w/proj/../other/y.md'] || {}, { cwd: '/w/proj' });
+  ok(Object.keys(r10W).length === 2 && r10Where.away === false && r10Where.folder === '../other', 'CONTROL r10\'s absPath (the joined path not normalized) ⇒ TWO rows for one file, the climbing one read as inside («../other») — RED', { keys: Object.keys(r10W), r10Where });
+}
+
 done();
