@@ -692,7 +692,9 @@ console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg
     const up = await playingIn(p, WIN, n);
     const road = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 9000);
     await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
-    const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '')`, 8000);
+    // every display's view hears the lock from ITS OWN long poll (the fetch wrapper adds `paused` to an answer — it wakes none; a poll
+    // holds ≤ pollMaxMs): one display ⇒ the chip; all displays ⇒ the chip AND every display's title row locked
+    const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '') && ((${CHIPQ}.title || '').match(/串流 · 锁屏中/g) || []).length >= ${n === 1 ? 0 : n}`, n === 1 ? 8000 : 30000);
     await sleep(400); await p.shot(file, WIN);   // the picture BEFORE the verdict: on the release tree it shows what the release says
     const r = await p.ev(`({ chip: ${CHIPQ}.textContent || '', title: ${CHIPQ}.title || '' })`);
     ok(up && road && locked && !/设备链路/.test(r.chip) && (n === 1 ? /已锁屏/.test(r.title) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}`, r);
