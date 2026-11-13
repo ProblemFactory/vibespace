@@ -2675,8 +2675,8 @@ async function chatReadLegs(ENGmod, name) {
         const c2 = box.querySelector('.chan-prop[data-proposal="p-cpc1"]');
         ok(asked.length === 2 && card.querySelector('.chat-chan-props') === box && box.querySelectorAll('.chan-prop').length === 1 && !!c2 && c2._cls.has('chan-prop-sent') && c2._cls.has('chan-prop-lined') && c2._cls.has('chan-prop-shut') && box.dataset.awaiting === '0' && counted === 2,
           'CPC ③ a decision broadcast naming it ⇒ the SAME box, ONE card for the id (patched in place, never re-appended), folded to its ONE line; the waiting count moved (the fold re-words)', JSON.stringify({ asked: asked.length, n: box.querySelectorAll('.chan-prop').length, counted }));
-        ok(row.querySelectorAll('.cct-prop').length === 1 && row.querySelector('.cct-prop') === chip && /^Proposal · Reply all to Lee, Sam \+2 · sent · (12:14|\d\d-\d\d 12:14)$/.test(chip.textContent) && chip.dataset.state === 'sent',
-          'CPC ③ the SAME chip says what became of it: «… · sent · 12:14»', chip.textContent);
+        ok(row.querySelectorAll('.cct-prop').length === 1 && row.querySelector('.cct-prop') === chip && /^Proposal · Reply all to Lee, Sam \+2 · sent · (12:14|\d\d-\d\d 12:14|\d{1,2}\/\d{1,2} 12:14|[A-Z][a-z]{2} \d{1,2}, 12:14 PM)$/.test(chip.textContent) && chip.dataset.state === 'sent',
+          'CPC ③ the SAME chip says what became of it: «… · sent · 12:14» (another day: its date in the page\'s one format — lane ui-language page-time)', chip.textContent);
         heard.forEach((fn) => fn({ type: 'channel-outbox-updated', changed: ['p-someone-else'] }));
         await tick();
         ok(asked.length === 2, 'CPC ③ a broadcast naming only other proposals re-reads nothing');

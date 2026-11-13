@@ -6,6 +6,7 @@
 // calls yet» or ONE line saying why it could not be read — lane channel-api-log-blank). Every row keyed; words zh/ja.
 import { fetchJson, api, createModalShell, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, principalOfRow, exceptRemoved } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
 import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: the ONE card (chat · Outbox · For you · here)
@@ -13,7 +14,7 @@ import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const button = (label, onClick, cls = 'mounts-btn') => { const b = el('button', cls, label); b.type = 'button'; b.addEventListener('click', onClick); return b; };
 const TIER_WORDS = () => [['read', t('Read')], ['write-ask', t('Read + write, ask each')], ['write-auto', t('Read + write, auto (sensitive still asks)')], ['write-all', t('Full trust — writes and deletes never ask you')]];
-const clock = (at) => new Date(Number(at) || 0).toLocaleString();
+const clock = (at) => when(Number(at) || 0);
 // the vendor's sensitive list as a person reads it (lane channel-api-chrome: the dialog printed the regex sources) —
 // `^\/api\/admin\.` ⇒ "/api/admin.…", `\.(delete|remove)$` ⇒ "….(delete|remove)"
 export const sensitiveWords = (src) => { const s = String(src || ''); return `${s.startsWith('^') ? '' : '…'}${s.replace(/^\^/, '').replace(/\$$/, '').replace(/\\(.)/g, '$1')}${s.endsWith('$') ? '' : '…'}`; };

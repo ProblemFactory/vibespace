@@ -28,6 +28,7 @@
 //   · SAVE: the serializer's output through the atomic /api/file/write of THIS window's path only, then
 //     POST /api/doc/edited {summary} — the owning chat's free next-turn note.
 import { Editor, Extension, getMarkRange } from '@tiptap/core';
+import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { Plugin, NodeSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import M from '../doc-model.js';
@@ -357,7 +358,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   if (ro) ro.observe(root);
   const setStrip = (open) => { S.stripOpen = !!open; strip.hidden = !S.stripOpen; renderStatus(); };
 
-  const hhmm = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const hhmm = () => clockOf(Date.now());
   const patch = (el, text) => { if (el.textContent !== text) el.textContent = text; };
   /** The strip from the state — each chip shown / hidden / re-worded in place, the strip itself absent when all are. */
   function renderStatus() {

@@ -5,6 +5,7 @@
 import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
@@ -388,7 +389,7 @@ export function installPluginsUI(App) {
         actions.appendChild(uninstall);
         // lane engine-distribution (D2): the cluster installed AND trusted it (only the id it names, only at the sha it pins)
         let fact = null;
-        const fleetFact = fleetPluginWords(p, r?.fleet || null, t, (ms) => new Date(ms).toLocaleString()).fact; // lane fleet-plugin-catalog: «Updated by the cluster · <old> → <new> · <when>»; r2: «waiting for your consent — its kernel is not fetched»
+        const fleetFact = fleetPluginWords(p, r?.fleet || null, t, (ms) => when(ms)).fact; // lane fleet-plugin-catalog: «Updated by the cluster · <old> → <new> · <when>»; r2: «waiting for your consent — its kernel is not fetched»
         if (fleetFact) { fact = document.createElement('div'); fact.className = p.trustedBy === 'fleet' ? 'plugin-row-fact plugin-fleet-trusted' : 'plugin-row-fact plugin-fleet-consent'; fact.textContent = fleetFact; }
         else if (!p.install || p.install.source === 'zip') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-update-how'; fact.textContent = p.install ? t('Installed from an uploaded file — upload the new .vsp through Install plugin…') : t('Placed by hand — reinstall it through Install plugin… to make it updatable'); }
         const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
@@ -478,7 +479,7 @@ export function installPluginsUI(App) {
         <div class="dialog-intro">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
         <ul class="plugin-caps-list">${items.map((it) => `<li class="plugin-cap plugin-cap-${escHtml(it.id)}">${escHtml(t(it.text, it.params || {}))}</li>`).join('')}</ul>
         ${risky && !readOnly ? `<div class="plugin-cfg-warn">${escHtml(t('Trusted code has the same power as VibeSpace itself. There is no undo beyond disabling it.'))}</div>` : ''}
-        ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: new Date(trust.trustedAt).toLocaleString() }))}</div>` : ''}
+        ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: when(trust.trustedAt) }))}</div>` : ''}
         <div class="dialog-actions plugin-consent-actions"></div>`;
       const actions = body.querySelector('.plugin-consent-actions');
       const cancel = document.createElement('button');

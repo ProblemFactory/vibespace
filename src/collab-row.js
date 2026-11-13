@@ -259,6 +259,7 @@ function collabRowTitle(row, t = T) {
   const bits = [];
   if (Number(r.ts) > 0) {
     let clock = '';
+    // page-time: a PURE shared module (it runs where src/lib/page-time.js does not) — the device's own clock face
     try { clock = new Date(Number(r.ts)).toLocaleTimeString(); } catch { clock = String(r.ts); }
     bits.push(`${t('Time')}: ${clock} (${r.tsKind === 'record' ? t('record timestamp') : t('arrival time')})`);
   }

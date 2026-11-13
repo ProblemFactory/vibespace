@@ -58,6 +58,7 @@
 // below: its composer sends as You, @name wakes.
 import { fetchJson, showToast, showContextMenu, showImageOverlay, showInputDialog, copyText } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when, dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
@@ -284,6 +285,7 @@ const stamp = (ms) => {
 /** The local calendar day of an instant — the separator's key. */
 const dayKey = (ms) => {
   const d = new Date(Number(ms) || 0);
+  // page-time: a machine day key (YYYY-MM-DD) for grouping, never shown
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 /** The separator's words: today / yesterday / the date in the DEVICE's language
@@ -295,12 +297,12 @@ function dayLabel(ms, now = Date.now()) {
   if (k === dayKey(now)) return t('Today');
   if (k === dayKey(now - 86400e3)) return t('Yesterday');
   const other = k.slice(0, 4) !== dayKey(now).slice(0, 4);
-  try { return new Date(Number(ms) || 0).toLocaleDateString(deviceLocale(), other ? { year: 'numeric', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' }); } catch { return k; }
+  return dateOf(Number(ms) || 0, { full: other }) || k;
 }
 const authorKey = (rec) => (rec.author && (rec.author.id || rec.author.name)) || '';
 /** A message's full instant in the DEVICE's language (a time's tooltip). */
 function fullStamp(ms) {
-  try { return new Date(Number(ms) || 0).toLocaleString(deviceLocale(), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return stamp(ms); }
+  return when(Number(ms) || 0, { full: true }) || stamp(ms);
 }
 
 /** A byte count in a chip's words. */

@@ -16,6 +16,7 @@
 //     the conversation's cwd) and sorts by it; a name that collides wears its distinguishing suffix — the popover's
 //     words. The rail's All or a band puts the bands' order back (one gesture after a column sort).
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 import { showContextMenu } from './utils.js';
@@ -25,7 +26,7 @@ import { artifactRowIcon, artifactRowWords, paintArtifactName, artifactRowMenu, 
 const div = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
 const span = (cls) => { const n = document.createElement('span'); n.className = cls; return n; };
 const COLS = [['name', 'Name'], ['kind', 'Kind'], ['helper', 'Helper'], ['edits', 'Edits'], ['changed', 'Last change'], ['path', 'Path']];
-const stamp = (ts) => { try { return ts ? new Date(ts).toLocaleString() : ''; } catch { return ''; } };
+const stamp = (ts) => when(ts);
 
 /** The rows the table draws: the rail's choice → the filter → the column sort — ALL through the shared model (no
  *  column clicked ⇒ 'intent': the bands, newest first, `bands` = [{band, rows}] for the table's band heads; `ctx` = the

@@ -11,6 +11,7 @@
 //    machine row, its tooltip, the Machines card and the pairing sheet's head all print.
 // Every server-provided string goes through textContent; theme vars only (public/style.css `.dap-*`).
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { dialBaseVerdict, dialUrlOf, dialDefaultChoice, dialRowState } from '../dial-facts.js';
 
 const NOTE_WORDS = {
@@ -186,7 +187,7 @@ export function dialReasonText(reason) {
 }
 // naive-user L-time: the DEVICE's locale (i18n.js deviceLocale — the one Intl tag every surface prints dates with), never
 // the browser's own: a zh page on an en-US browser read "最近一次拨号：被拒绝（令牌不匹配），04:24 PM"
-const hhmm = (ms) => { try { const d = new Date(ms); const today = new Date().toDateString() === d.toDateString(); const loc = deviceLocale(); return today ? d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString(loc, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+const hhmm = (ms) => when(ms);
 /** THE sentence of a dial row state (PURE dialRowState's structure → words; the device's own language). */
 export function dialStateText(rs) {
   const base = dialStateBase(rs);

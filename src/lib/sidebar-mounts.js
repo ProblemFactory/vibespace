@@ -5,6 +5,7 @@ import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyTe
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
 import { t as tr, tc, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
+import { dateOf, clockOf, stampAt as when } from './page-time.js';
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
@@ -77,7 +78,7 @@ const NEEDS_PASS = new Set(['key-encrypted', 'key-bad-passphrase']);
 function secondDialerLine(dh) {
   const line = document.createElement('div');
   line.className = 'mounts-path mounts-exit-line mounts-second-dialer';
-  const since = new Date(Number(dh.since) || Date.now()).toLocaleString(deviceLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const since = when(Number(dh.since) || Date.now());
   const words = document.createElement('span');
   words.textContent = [tr('Another VibeSpace agent is also dialing in from {from} with an old token (refused every {every} s since {since}) — stop the extra agent on that machine (launchd / scheduled task / a second install), or pair again', { from: dh.from || '?', every: dh.every || 30, since }),
     dh.live ? tr('The live install on that machine is {live}; stop the others — the stop command stops its launch item and the agent itself.', { live: dh.live }) : '',
@@ -329,7 +330,7 @@ export function installSidebarMounts(Sidebar) {
         for (const s of d.shares) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
-          const exp = s.expiresAt ? ` · expires ${new Date(s.expiresAt).toLocaleDateString()}` : '';
+          const exp = s.expiresAt ? ' · ' + tr('expires {date}', { date: dateOf(s.expiresAt) }) : '';
           const sub = s.kind === 'cephmount'
             ? `${escHtml(s.path || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${escHtml(tr('direct CephFS'))}`
             : `${escHtml(s.prefix || s.bucket || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${s.method === 'sts' ? tr('expires in 7 days') : tr('no expiry')}${exp}`;
@@ -526,7 +527,7 @@ export function installSidebarMounts(Sidebar) {
           // «Synced — N emails» over a failure; the worker tries again at its 120 s backoff
           sync.textContent = tr('Sync stopped: {error} — it tries again in 2 minutes', { error: m.gmailError || '?' });
         } else if (m.mounted) {
-          const when = m.lastSyncAt ? new Date(m.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const when = m.lastSyncAt ? clockOf(m.lastSyncAt) : '';
           sync.textContent = tr('Synced — {n} emails', { n: m.gmailCount ?? 0 }) + (when ? ` · ${when}` : '') + (m.email ? ` · ${m.email}` : '');
         } else {
           sync.textContent = tr('Sync paused — emails stay in the folder; connect to resume');
@@ -1831,7 +1832,7 @@ export function installSidebarMounts(Sidebar) {
           const h2 = (this._hostsData?.hosts || []).find((x) => x && x.deviceId === r.deviceId);
           const d2 = h2 && h2.dial;
           if (d2 && Number(d2.generation) > gen) {
-            gone.textContent = tr('This command no longer works — a newer one was generated for "{id}" at {time} (another window, or another user). Use the newest command.', { id: r.deviceId, time: new Date(Number(d2.tokenMintedAt) || Date.now()).toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' }) });
+            gone.textContent = tr('This command no longer works — a newer one was generated for "{id}" at {time} (another window, or another user). Use the newest command.', { id: r.deviceId, time: clockOf(Number(d2.tokenMintedAt) || Date.now()) });
             gone.style.display = ''; clearInterval(genTick);
           }
         }, 1000);

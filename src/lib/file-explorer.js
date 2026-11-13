@@ -10,6 +10,7 @@ import { FileViewer } from './file-viewer.js';
 import { createBarFold, foldedMenuItems } from './bar-fold.js'; // lane ui-controls-and-bugs (files-2): the toolbar folds — words, then icons, then ⋯
 import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: ‹ home, the breadcrumbs, «New session here» (phone only)
 import { t, tc } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
@@ -855,7 +856,7 @@ class FileExplorer {
   _formatDate(ms) {
     if (!ms) return '';
     const d = new Date(ms);
-    return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    return when(d, { full: true });   // lane ui-language: the ONE formatter (a hand-built US «11/12/2026 7:35 PM» before)
   }
 
   _renderItems() {

@@ -6,6 +6,7 @@ import {
 Chart.register(LineController, BarController, DoughnutController, LineElement, PointElement, BarElement, ArcElement, CategoryScale, LinearScale, Tooltip, Legend, Filler);
 import { escHtml, createPopover, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
+import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 
 /**
  * Configurable usage dashboard (2.96.0) — Grafana/Posthog-style panels over
@@ -160,7 +161,7 @@ export const PRESETS = () => ({
 });
 
 const fmtCost = (v) => '$' + (Number(v) || 0).toFixed(2);
-const fmtNum = (v) => (Number(v) || 0).toLocaleString();
+const fmtNum = (v) => num(Number(v) || 0);
 const fmtTok = (v) => {
   v = Number(v) || 0;
   if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';

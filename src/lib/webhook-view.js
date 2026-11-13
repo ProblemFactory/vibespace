@@ -5,6 +5,7 @@
 // - A caller row never carries a token: the register / rotate answer hands its token to showTokenOnce ALONE.
 // - Gated on the capability row (`pushTransport: 'http-inbound'`), never on an adapter's kind.
 import { t as tDevice, deviceLocale } from './i18n.js';
+import { stampAt as pageWhen } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import * as WA from '../webhook-auth.js';
 
 /** An account whose capability row declares an inbound door offers paths and callers. */
@@ -41,7 +42,7 @@ export function deliveryText(d, { t = tDevice } = {}) {
   if (m === 'poll') return t('Replies wait for it to fetch them');
   return t('Takes no replies');
 }
-const when = (at, t) => (Number(at) > 0 ? new Date(Number(at)).toLocaleString(deviceLocale()) : t('never'));
+const when = (at, t) => (Number(at) > 0 ? pageWhen(Number(at)) : t('never'));
 
 /** One caller as the panel lists it — named fields only (a `token` handed in is never read). */
 export function callerRow(c, { t = tDevice } = {}) {

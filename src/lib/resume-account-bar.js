@@ -4,12 +4,13 @@
 // PRE-FILLED with the first candidate, the pool when one can serve; its confirm resumes at once). Never a toast that
 // ends there, and never a silent switch: the conversation keeps its pin until the owner picks.
 import { t, deviceLocale } from './i18n.js';
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { UI_ICONS } from './icons.js';
 import { billingRow } from './agent-meta.js';
 import { resumeAccountWords, candidateLabel } from '../resume-account.js';
 
 const dayOf = (ms) => {
-  try { return new Date(ms).toLocaleDateString(deviceLocale(), { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return new Date(ms).toISOString().slice(0, 10); }
+  return dateOf(ms, { full: true });
 };
 const button = (cls, icon, label) => {
   const b = document.createElement('button');

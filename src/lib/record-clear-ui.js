@@ -17,6 +17,7 @@
 // cleared; `clearedText()` is the sentence in THIS device's language and
 // `isCleared(rec)` the one test every renderer asks.
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { CLEARED_TEXT, previewWords, chunked, MAX_ITEMS } from '../record-clear.js'; // PURE, shared with the server (the sentence, the preview cut, the per-request cap)
 
@@ -48,7 +49,7 @@ export function clearErrorText(code, fallback = '') {
 }
 const whenText = (at) => {
   if (!Number.isFinite(Number(at)) || !at) return '';
-  try { return new Date(Number(at)).toLocaleString(deviceLocale(), { dateStyle: 'medium', timeStyle: 'short' }); } catch { return new Date(Number(at)).toLocaleString(); }
+  return when(Number(at), { full: true });
 };
 
 /** THE confirm dialog: names every record (its time + its first words) → Promise<boolean>. */

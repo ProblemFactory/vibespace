@@ -6,6 +6,7 @@
 // 「测试」 on a row runs the roster's own Test with THAT row's id (the test verb is q-045 ④'s; this dialog hands it the id).
 // Nothing is greyed: a control that cannot act is not drawn; a press that cannot act says why.
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, escHtml, fetchJson, showToast } from './utils.js';
 import { getBackendMeta } from './agent-meta.js';
 import { CAPS, CAP_WORDS, MODEL_ERRORS, REFRESH_WORDS, kindOf, refreshable, sourceOf, validateModelRow, validateModels, formatContext } from '../model-providers.js'; // PURE: the record's rules (test-model-providers)
@@ -81,7 +82,7 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
       : p.modelsSource === 'listed' ? t('The provider lists these — new sessions on this account offer them. They are not entered here.') : '';
     const aliasNames = Object.keys(st.aliases);
     body.innerHTML = `
-      <div class="am-prov"><span class="am-kind" title="${escHtml(t('Model provider'))}">${escHtml(t(p.label))}${p.label !== k()?.label ? ` <span class="am-kind-of">${escHtml(t(k()?.label || p.kind))}</span>` : ''}</span><span class="am-source" data-source="${escHtml(p.modelsSource)}">${escHtml(words)}</span>${refreshable(p) ? `<span class="am-fetched">${escHtml(p.fetchedAt ? t('Fetched {time}', { time: new Date(p.fetchedAt).toLocaleString() }) : t('Not fetched yet'))}</span><button type="button" class="agent-btn am-refresh" title="${escHtml(t('Ask the provider for its model list now (at most once a minute)'))}">${escHtml(t('Refresh the list'))}</button>` : ''}</div>
+      <div class="am-prov"><span class="am-kind" title="${escHtml(t('Model provider'))}">${escHtml(t(p.label))}${p.label !== k()?.label ? ` <span class="am-kind-of">${escHtml(t(k()?.label || p.kind))}</span>` : ''}</span><span class="am-source" data-source="${escHtml(p.modelsSource)}">${escHtml(words)}</span>${refreshable(p) ? `<span class="am-fetched">${escHtml(p.fetchedAt ? t('Fetched {time}', { time: when(p.fetchedAt) }) : t('Not fetched yet'))}</span><button type="button" class="agent-btn am-refresh" title="${escHtml(t('Ask the provider for its model list now (at most once a minute)'))}">${escHtml(t('Refresh the list'))}</button>` : ''}</div>
       ${note ? `<div class="usage-note am-note">${escHtml(note)}</div>` : ''}
       ${st.rows.length ? `<div class="am-table${st.editable ? ' am-editable' : ''}" role="table" aria-label="${escHtml(t('Models'))}">
         <div class="am-head" role="row"><span role="columnheader">${escHtml(t('Model id'))}</span><span role="columnheader">${escHtml(t('Display name'))}</span><span role="columnheader">${escHtml(t('Context window'))}</span><span role="columnheader">${escHtml(t('Capabilities'))}</span><span></span></div>

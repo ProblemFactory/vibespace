@@ -5,6 +5,7 @@ import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, acco
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { markT } from './account-wall-words.js'; // PURE: the mark's t (m / h / d in every language)
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
@@ -1647,7 +1648,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           const roster = this._accounts?.accounts || [];
           const stateOf = (id) => { const x = roster.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: x.loggedIn !== false, loginState: x.loginState || null, usage: accountUsageStore(this, backend)?.[id] || null, nowSec: Date.now() / 1000 }); };
           const model = poolSubmenuModel({ pool: a, auth, pinId, live: isLive, applies: (a.hotSupported !== false && a.hot) ? 'now' : 'restart', stateOf });
-          const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+          const fmtTime = (ms) => when(ms);
           const memUsage = (id) => (id ? usageHint(accountUsageStore(this, backend)?.[id] || null, bill.estimates ? (this._usageEstimates?.[id] || null) : null) : '');
           const pinTo = async (memberId, name) => {
             const cfg = this.sidebar?.getSessionConfig?.(cfgKey) || {};

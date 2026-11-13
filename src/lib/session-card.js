@@ -1,5 +1,6 @@
 import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr, tc } from './i18n.js';
+import { stampAt as when, clockOf, stampAt as whenAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the board status's stored values in words (the walk's task-groups-19 / -23)
 import { registerCommand, registerMenuItem, menuItems } from './contributions.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
@@ -405,7 +406,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     gchip.style.setProperty('--chip-color', 'var(--text-dim)');
     const label = s.vcs.branch ? `${s.vcs.kind} · ${s.vcs.branch}` : s.vcs.kind;
     gchip.innerHTML = `<span class="chip-icon">${UI_ICONS.forkBranch || ''}</span><span class="chip-text">${escHtml(label)}</span>`;
-    gchip.dataset.tip = tr('Last git event the agent reported: {kind}{branch}{when}', { kind: s.vcs.kind, branch: s.vcs.branch ? ' on ' + s.vcs.branch : '', when: s.vcs.at ? ' · ' + new Date(s.vcs.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '' });
+    gchip.dataset.tip = tr('Last git event the agent reported: {kind}{branch}{when}', { kind: s.vcs.kind, branch: s.vcs.branch ? ' on ' + s.vcs.branch : '', when: s.vcs.at ? ' · ' + clockOf(s.vcs.at) : '' });
     stateChip?.after(gchip);
   }
   // WHAT WAITS (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): "N waiting" — notices held for
@@ -635,7 +636,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     { key: 'id', label: tr('ID'), display: s.sessionId, copy: s.sessionId, copiable: true, midTruncate: true },
     { key: 'backend', label: tr('Agent'), display: [backendMeta.label, showAgentKind ? agentKindMeta.label : null, agentRoleLabel, s.agentNickname || null].filter(Boolean).join(' / '), copy: [backendMeta.label, showAgentKind ? agentKindMeta.label : null, agentRoleLabel, s.agentNickname || null].filter(Boolean).join(' / ') },
     { key: 'cwd', label: tr('CWD'), display: cwdShort, copy: s.cwd || '', copiable: true, leftTruncate: true },
-    { key: 'started', label: tr('Started'), display: date.toLocaleString(), copy: date.toISOString() },
+    { key: 'started', label: tr('Started'), display: when(date, { full: true }), copy: date.toISOString() },
     { key: 'status', label: tr('Status'), display: null, badge: true, copy: `${s.status}${s.pid ? ' PID ' + s.pid : ''}` },
   ];
 
@@ -726,8 +727,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           const li = document.createElement('div');
           li.className = 'session-history-item';
           const when = new Date(h.at);
-          const t = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ')
-            + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const t = whenAt(when);   // the ONE formatter (lane ui-language) — was a hand-built «M/D hh:mm»
           const meta = h.state ? (SESSION_STATE_META[h.state] || { label: valueWord('session-state', h.state, tr), color: 'var(--text-dim)' }) : null;
           li.innerHTML = `<span class="session-history-time">${escHtml(t)}</span>`
             + `<span class="session-history-dot" style="--h-color:${meta ? meta.color : 'var(--text-dim)'}"></span>`

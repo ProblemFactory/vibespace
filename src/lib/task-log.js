@@ -1,5 +1,6 @@
 import { escHtml, showToast, showContextMenu } from './utils.js';
 import { t, tc, deviceLocale } from './i18n.js';
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { registerOpenAction } from './window-types.js';
 // the ONE backlog order every reader shares (PURE CJS, esbuild interop like
@@ -110,7 +111,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
   const fmtTime = (ts) => timeOn(app, ts);
   // the DEVICE's language, never the browser's (verify r2: 9/28/2026 · 01:25 AM on a zh page, beside a
   // confirm dialog that said 2026年9月28日) — the one Intl tag every surface prints dates with; the DAY is the owner's zone's
-  const fmtDay = (ts) => new Date(ts).toLocaleDateString(deviceLocale(), { timeZone: pageZone(app) });
+  const fmtDay = (ts) => dateOf(ts, { full: true });   // page-time prints in the page's zone (app.js hands it pageZone at boot)
   const matches = (text) => !state.search || String(text || '').toLowerCase().includes(state.search.toLowerCase());
 
   const render = () => {
