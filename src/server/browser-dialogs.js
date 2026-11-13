@@ -3513,12 +3513,23 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
   }
 
+  const LOCKED_CHECK_TAB = 'the vault is locked — VibeSpace cannot check this tab until a person unlocks it on this instance\'s page (the owner has already been told; do not ask them to)';
+
   function clearPostLiftOnTab(e, w = null) {
     if (!e) return;
     const had = Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0;
     if (e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }
     e.postLiftGuards = null;
     if (had && w && w.profileId) syncPersistedLoginFences(w.profileId);
+  }
+
+  function retirePostLiftGuardOnTab(e, guard, w = null) {
+    if (!e || !Array.isArray(e.postLiftGuards)) return;
+    const next = e.postLiftGuards.filter((x) => x !== guard);
+    const changed = next.length !== e.postLiftGuards.length;
+    e.postLiftGuards = next.length ? next : null;
+    if (!e.postLiftGuards && e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }
+    if (changed && w && w.profileId) syncPersistedLoginFences(w.profileId);
   }
 
   function tabNeedsPostLiftRecheck(e) {
@@ -3528,7 +3539,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function recheckPostLiftOnTab(w, e) {
     if (!w || w.state !== 'open' || !e || !e.sid || !tabNeedsPostLiftRecheck(e)) return { ok: true, refilled: false };
     if (e.postLiftChecking) return e.postLiftChecking;
-    const p = (async () => {
+    const p = Promise.resolve().then(async () => {
       try {
         const guards = Array.isArray(e.postLiftGuards) ? [...e.postLiftGuards] : [];
         let anyRefilled = false;
@@ -3539,9 +3550,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           if (!g || !g.lfSnap || !w || w.state !== 'open' || !e.sid) break;
           if (e.liveFill && !e.liveFill.postLiftHeld) return { ok: true, refilled: false };
           if (stripHash(tabLoginUrlOf(e)) !== stripHash(g.lfSnap.urlAtFill)) {
-            clearPostLiftOnTab(e, w);
-            if (e.liveFill && e.liveFill.postLiftHeld) clearLiveFillOnTab(w, e, 'url-changed', { audit: false, persist: true });
-            return { ok: true, refilled: false };
+            retirePostLiftGuardOnTab(e, g, w);
+            continue;
           }
           if (!g.prebuiltTargets || !Array.isArray(g.prebuiltTargets.targets) || !g.prebuiltTargets.targets.length) {
             const hyd = hydrateTabFenceSecrets(e.targetId, g.lfSnap.loginId, {
@@ -3555,11 +3565,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             });
             const svs = [...new Set([...scrubValuesForLogin(w.profileId, g.lfSnap.loginId, g.lfSnap.also), ...(hyd.values || [])])];
             const otpVals = [...new Set([...(hyd.otpValues || [])])];
-            if (hyd.locked && svs.length === 0 && otpVals.length === 0) {
-              return { ok: false, checkFailed: true, code: 'vault_locked', error: BL().LOCKED };
+            const needsOtpWhileLocked = hyd.locked && otpVals.length === 0 && (
+              g.lfSnap.typedSlot === 'otp'
+              || (Array.isArray(g.lfSnap.also) && g.lfSnap.also.some((a) => a && a.typedSlot === 'otp'))
+            );
+            if (hyd.locked && ((svs.length === 0 && otpVals.length === 0) || needsOtpWhileLocked)) {
+              return { ok: false, checkFailed: true, code: 'vault_locked', error: LOCKED_CHECK_TAB };
             }
-            if (hyd.movedOn && svs.length === 0 && otpVals.length === 0) {
-              return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };
+            if (!hyd.locked && svs.length === 0 && otpVals.length === 0) {
+              retirePostLiftGuardOnTab(e, g, w);
+              continue;
             }
             if (hyd.values && hyd.values.length) {
               if (Array.isArray(hyd.byLogin) && hyd.byLogin.length) {
@@ -3573,6 +3588,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
               g.prebuiltTargets = LF().buildFilledTargets(svs, { wholeOnlyValues: otpVals.length ? otpVals : null });
             } catch { g.prebuiltTargets = null; }
             if (!g.prebuiltTargets || !Array.isArray(g.prebuiltTargets.targets) || !g.prebuiltTargets.targets.length) {
+              if (!hyd.locked) {
+                retirePostLiftGuardOnTab(e, g, w);
+                continue;
+              }
               return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };
             }
           }
@@ -3611,9 +3630,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         }
         return { ok: true, refilled: false };
       } finally {
-        if (e) e.postLiftChecking = null;
+        if (e && e.postLiftChecking === p) e.postLiftChecking = null;
       }
-    })();
+    });
     e.postLiftChecking = p;
     return p;
   }

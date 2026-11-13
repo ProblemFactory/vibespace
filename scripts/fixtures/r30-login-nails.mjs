@@ -1053,7 +1053,13 @@ export async function runR30LoginNails({ repoDir, ok }) {
     // ──────────────────────────────────────────────────────────────────────────
     {
       const vaultBin = path.join(repoDir, 'data/bin/vibespace-vault');
-      const helpRun = spawnSync(process.execPath, [vaultBin, '--help'], { encoding: 'utf8', timeout: 5000 });
+      const helpEnv = {
+        PATH: process.env.PATH || '/usr/bin:/bin',
+        HOME: tmpRoot,
+        VIBESPACE_API: 'http://127.0.0.1:9',
+        VIBESPACE_SESSION_TOKEN: ['vsst', 'r30_help_check'].join('_'),   // a token-shaped stand-in is built at runtime from its pieces, never a literal
+      };
+      const helpRun = spawnSync(process.execPath, [vaultBin, '--help'], { encoding: 'utf8', timeout: 5000, env: helpEnv });
       const helpOut = String(helpRun.stdout || '') + String(helpRun.stderr || '');
       const kindMatch = helpOut.match(/--kind\s+login[\s\S]{0,600}/);
       const kindSection = kindMatch ? kindMatch[0] : '';
@@ -1355,6 +1361,428 @@ export async function runR30LoginNails({ repoDir, ok }) {
         keeper.shutdown();
         vault.close();
         await med.shutdown();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R31-1: Cold locked restart on lifted guard -> locked read refuses 423 vault_locked (truthful check-tab words)
+    //        -> unlock -> next read rechecks, wipes/lifts, 200; and deleted-login guard retires instead of refusing forever
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://r31-cold.example.test';
+      const VPW = 'r31-cold-vault-pw';
+      const LONG_PW = 'R31ColdLiftPw!2026_xy';
+      const DEL_PW = 'R31DeletedLiftPw!2026';
+      const dataDir = path.join(tmpRoot, 'd-r31-1');
+      const homeDir = path.join(tmpRoot, 'h-r31-1');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      let clock = 1_766_000_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/empty`, mode: { standard: true, omitFilledPassword: true } });
+      const tidEmpty = fk.targets()[0].targetId;
+      const tidRerender = fk.addTarget(`${ORIGIN}/rerender`);
+      const tidDeleted = fk.addTarget(`${ORIGIN}/deleted`);
+      fk.setDom(tidEmpty, { url: `${ORIGIN}/empty`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidRerender, { url: `${ORIGIN}/rerender`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidDeleted, { url: `${ORIGIN}/deleted`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+
+      const KEY = 'bk-0000311a';
+      const SID = 'sess-r31-1';
+      const TOKEN = 'vsst_r31_1_' + crypto.randomBytes(8).toString('hex');
+
+      const bootR31Hub = async ({ existingPid = null, coldLocked = false } = {}) => {
+        const med = CM.create({ log: quiet });
+        await med.listen();
+        const keeper = BK.create({
+          dataDir,
+          homeDir,
+          env: () => ({ HOME: homeDir }),
+          liveKeys: () => new Set([KEY]),
+          log: quiet,
+          now: () => clock,
+          install: false,
+          mediator: med,
+        });
+        const prof = existingPid
+          ? keeper.profile(existingPid)
+          : keeper.createProfile({ label: 'R31ColdProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+        const PID = prof.id;
+        const grant = await med.grantFor({
+          profileId: PID,
+          browserKey: KEY,
+          upstream: relay.wsUrl,
+          targetIds: [tidEmpty, tidRerender, tidDeleted],
+          mode: 'scope',
+        });
+        const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+        if (!existingPid) await vault.setup(VPW);
+        else if (!coldLocked) await vault.unlock(VPW);
+        const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+        const logins = Lm.create({ vault, grants: () => grants, now: () => clock, log: quiet.log });
+        if (!existingPid) {
+          logins.addOwn({ origin: ORIGIN, username: 'alice', password: LONG_PW }, { who: 'owner' });
+          logins.addOwn({ origin: ORIGIN, username: 'delu', password: DEL_PW }, { who: 'owner' });
+          grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+        }
+        const keeperWrap = {
+          ...keeper,
+          cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: relay.wsUrl } : { ok: false }),
+          leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID }],
+          statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+          setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+          resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+          attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+        };
+        const dialogs = Dm.create({
+          keeper: keeperWrap,
+          logins,
+          now: () => clock,
+          liveFillMaxMs: 250,
+          holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+          leaseCountOf: () => 1,
+          conversationOf: () => ({ cid: 'conv-r31-1', name: 'Agent R31-1' }),
+          log: quiet,
+        });
+        const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R31-1', cwd: tmpRoot, backendSessionId: 'conv-r31-1' }]]);
+        Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+        const app = express();
+        app.use(express.json());
+        app.use(Rm.router);
+        const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const post = async (u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+        return {
+          PID,
+          keeper,
+          vault,
+          logins,
+          dialogs,
+          grantUrl: grant.url,
+          post,
+          async stop() {
+            srv.close();
+            dialogs.shutdown();
+            keeper.shutdown();
+            vault.close();
+            await med.shutdown();
+          },
+        };
+      };
+
+      let hub1 = null, hubEdit = null, hub2 = null, medWs = null;
+      try {
+        hub1 = await bootR31Hub();
+        await hub1.dialogs.arm(hub1.PID);
+        for (const t of [tidEmpty, tidRerender, tidDeleted]) hub1.dialogs.bindTab?.({ profileId: hub1.PID, browserKey: KEY }, t);
+
+        hub1.dialogs.noteActiveTab?.({ profileId: hub1.PID, browserKey: KEY }, tidEmpty);
+        const fEmpty = await hub1.post('/api/agent/browser/fill-vault', { profile: hub1.PID, target: '#pw', spec: 'r31-cold.example.test#alice/password', targetId: tidEmpty });
+        hub1.dialogs.noteActiveTab?.({ profileId: hub1.PID, browserKey: KEY }, tidRerender);
+        const fRerender = await hub1.post('/api/agent/browser/fill-vault', { profile: hub1.PID, target: '#pw', spec: 'r31-cold.example.test#alice/password', targetId: tidRerender });
+        hub1.dialogs.noteActiveTab?.({ profileId: hub1.PID, browserKey: KEY }, tidDeleted);
+        const fDeleted = await hub1.post('/api/agent/browser/fill-vault', { profile: hub1.PID, target: '#pw', spec: 'r31-cold.example.test#delu/password', targetId: tidDeleted });
+
+        // Advance past ceiling so all 3 tabs wipe & lift into persisted `guards`
+        clock += 600;
+        for (const t of [tidEmpty, tidRerender, tidDeleted]) {
+          await hub1.post('/api/agent/browser/resolve', { profile: hub1.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: t });
+        }
+        await sleep(90);
+        for (const t of [tidEmpty, tidRerender, tidDeleted]) {
+          await hub1.post('/api/agent/browser/resolve', { profile: hub1.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: t });
+        }
+        const hub1Pid = hub1.PID;
+        await hub1.stop();
+        hub1 = null;
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+
+        // While Hub is down: (1) delete `delu` login in a short edit process; (2) page re-renders LONG_PW onto tidRerender
+        hubEdit = await bootR31Hub({ existingPid: hub1Pid, coldLocked: false });
+        const delEntryName = hubEdit.logins.list().entries.find((e) => e.user === 'delu')?.name;
+        const dropRes = delEntryName ? hubEdit.logins.drop(delEntryName, { who: 'owner' }) : { ok: false };
+        await hubEdit.stop();
+        hubEdit = null;
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        fk.setDom(tidRerender, { url: `${ORIGIN}/rerender`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password', value: LONG_PW }] });
+
+        // Hub #2 boots COLD (vault locked!)
+        clock += 1000;
+        hub2 = await bootR31Hub({ existingPid: hub1Pid, coldLocked: true });
+        await hub2.dialogs.arm(hub2.PID);
+        medWs = await openCdpClient(WebSocket, hub2.grantUrl);
+        const attEmpty = await medWs.call('Target.attachToTarget', { targetId: tidEmpty, flatten: true });
+        const sidEmpty = attEmpty.result?.sessionId;
+
+        const lockedReadEmpty = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidEmpty });
+        const lockedMedEmpty = await medWs.call('Runtime.evaluate', { expression: 'location.href', returnByValue: true }, sidEmpty);
+        const lockedReadRerender = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidRerender });
+        const lockedReadDeleted = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidDeleted });
+
+        const lockedWordsTruthful = /cannot check this tab/i.test(lockedReadEmpty.json?.error || '')
+          && !/nothing is filled until then/i.test(lockedReadEmpty.json?.error || '');
+
+        // Now unlock Hub #2's vault -> next read MUST recheck (not return a cached locked promise!)
+        const unlockRes = await hub2.vault.unlock(VPW);
+        const unlockedReadEmpty = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidEmpty });
+        const unlockedMedEmpty = await medWs.call('Runtime.evaluate', { expression: 'location.href', returnByValue: true }, sidEmpty);
+
+        // On tidRerender: first read after unlock catches & wipes LONG_PW (409 login_fill_live), second read verifies empty & returns 200!
+        const unlockedRerender1 = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidRerender });
+        const domRerenderAfter1 = fk.readDomValues(tidRerender).pw;
+        const unlockedRerender2 = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidRerender });
+
+        // On tidDeleted: login `delu` is gone -> guard retires instead of refusing forever, returning 200!
+        const unlockedDeleted = await hub2.post('/api/agent/browser/resolve', { profile: hub2.PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidDeleted });
+        const persistedGuardsAfter = hub2.keeper.loginFenceStateOf(hub2.PID)?.guards || [];
+
+        ok(
+          fEmpty.status === 200 && fRerender.status === 200 && fDeleted.status === 200
+            && dropRes.ok === true
+            && lockedReadEmpty.status === 423 && lockedReadEmpty.json?.code === 'vault_locked' && lockedWordsTruthful
+            && Boolean(lockedMedEmpty.error && /vault_locked/.test(lockedMedEmpty.error.message || ''))
+            && lockedReadRerender.status === 423 && lockedReadRerender.json?.code === 'vault_locked'
+            && lockedReadDeleted.status === 423 && lockedReadDeleted.json?.code === 'vault_locked'
+            && unlockRes.ok === true
+            && unlockedReadEmpty.status === 200
+            && !unlockedMedEmpty.error && unlockedMedEmpty.result?.result?.value === `${ORIGIN}/empty`
+            && unlockedRerender1.status === 409 && unlockedRerender1.json?.code === 'login_fill_live'
+            && domRerenderAfter1 === ''
+            && unlockedRerender2.status === 200
+            && unlockedDeleted.status === 200
+            && !persistedGuardsAfter.some((g) => g.targetId === tidDeleted),
+          'R31-1 (Cold locked restart + deleted-login guard retirement): locked restart refuses 423 vault_locked with truthful check-tab words, unlock rechecks/wipes/lifts to 200 (never caching locked promise), and deleted-login guard retires cleanly to 200',
+          {
+            lockedReadEmpty,
+            lockedMedEmpty,
+            lockedWordsTruthful,
+            unlockedReadEmpty,
+            unlockedMedEmpty,
+            unlockedRerender1,
+            domRerenderAfter1,
+            unlockedRerender2,
+            unlockedDeleted,
+            persistedGuardsAfter,
+          },
+        );
+      } finally {
+        if (medWs) medWs.close();
+        if (hub1) await hub1.stop();
+        if (hubEdit) await hubEdit.stop();
+        if (hub2) await hub2.stop();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R31-2: Nail verdict depends ONLY on the judged tree, never on ambient VIBESPACE_* session env
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const r30Src = fs.readFileSync(path.join(repoDir, 'scripts/fixtures/r30-login-nails.mjs'), 'utf8');
+      const mBlock = r30Src.match(/\/\/ R30-7:[\s\S]*?(?=\/\/ ──+\s*\n\s*\/\/ R30-8:)/);
+      const r30BlockCode = mBlock ? mBlock[0] : '';
+      const cleanHome = path.join(tmpRoot, 'h-r31-2-clean');
+      fs.mkdirSync(cleanHome, { recursive: true, mode: 0o700 });
+      const runnerJs = `
+        const path = require('node:path');
+        const { spawnSync } = require('node:child_process');
+        const repoDir = ${JSON.stringify(repoDir)};
+        const tmpRoot = ${JSON.stringify(cleanHome)};
+        let verdict = false, detail = null;
+        const ok = (c, _label, extra) => { verdict = Boolean(c); detail = extra || null; return verdict; };
+        ${r30BlockCode}
+        process.stdout.write(JSON.stringify({ verdict, detail, hasApi: Boolean(process.env.VIBESPACE_API), hasTok: Boolean(process.env.VIBESPACE_SESSION_TOKEN) }));
+        process.exit(verdict ? 0 : 1);
+      `;
+      const probe = spawnSync(process.execPath, ['-e', runnerJs], {
+        encoding: 'utf8',
+        timeout: 8000,
+        env: {
+          PATH: process.env.PATH || '/usr/bin:/bin',
+          HOME: cleanHome,
+          TMPDIR: os.tmpdir(),
+        },
+      });
+      let parsedProbe = null;
+      try { parsedProbe = JSON.parse(String(probe.stdout || '').trim()); } catch { parsedProbe = null; }
+      ok(
+        Boolean(r30BlockCode)
+          && probe.status === 0
+          && parsedProbe?.verdict === true
+          && parsedProbe?.hasApi === false
+          && parsedProbe?.hasTok === false,
+        'R31-2 (Clean-env nail independence): R30-7 in the judged tree passes with zero ambient VIBESPACE_* variables in process.env',
+        { status: probe.status, parsedProbe, stderr: String(probe.stderr || '').slice(0, 400) },
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R31-3: Pre-first-await return in `recheckPostLiftOnTab` (e.g. SPA pushState URL change) never caches a settled promise
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://r31-spa.example.test';
+      const SHORT_PW = 'Ab3$xy7'; // 7 bytes (< MIN_MASK_BYTES = 8)
+      const dataDir = path.join(tmpRoot, 'd-r31-3');
+      const homeDir = path.join(tmpRoot, 'h-r31-3');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      let clock = 1_766_100_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: true, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+      const rawWs = await openCdpClient(WebSocket, fk.wsUrl);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY = 'bk-0000313a';
+      const SID = 'sess-r31-3';
+      const TOKEN = 'vsst_r31_3_' + crypto.randomBytes(8).toString('hex');
+
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), liveKeys: () => new Set([KEY]), log: quiet, now: () => clock, install: false, mediator: med });
+      const prof = keeper.createProfile({ label: 'R31SpaProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl, targetIds: [tid], mode: 'scope' });
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r31-3-pw');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, now: () => clock, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: SHORT_PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: relay.wsUrl } : { ok: false }),
+        leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID, targetId: tid }],
+        statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+        setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+        resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+        attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        now: () => clock,
+        liveFillMaxMs: 250,
+        holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+        leaseCountOf: () => 1,
+        conversationOf: () => ({ cid: 'conv-r31-3', name: 'Agent R31-3' }),
+        log: quiet,
+      });
+      const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R31-3', cwd: tmpRoot, backendSessionId: 'conv-r31-3' }]]);
+      Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+      const app = express();
+      app.use(express.json());
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      let medWs = null;
+      try {
+        await dialogs.arm(PID);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY }, tid);
+        dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tid);
+
+        let watchClient = null;
+        relay.state.hook = async (msg, { sendToClient }) => {
+          if (!watchClient && msg.sessionId) watchClient = { sid: msg.sessionId, sendToClient };
+          return false;
+        };
+
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const post = async (u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+
+        // Fill #1 on /login -> lift at ceiling
+        const fill1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r31-spa.example.test#alice/password', targetId: tid });
+        clock += 600;
+        await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
+        await sleep(90);
+        const lift1Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        relay.state.hook = null;
+
+        // SPA pushState (`Page.navigatedWithinDocument`) -> `/login/done`, then read triggers pre-first-await URL-mismatch path in `recheckPostLiftOnTab`
+        fk.setDom(tid, { url: `${ORIGIN}/login/done`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+        if (watchClient) {
+          watchClient.sendToClient({
+            method: 'Page.navigatedWithinDocument',
+            params: { frameId: tid, url: `${ORIGIN}/login/done` },
+            sessionId: watchClient.sid,
+          });
+        }
+        await sleep(50);
+        const afterPushStateRead = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
+
+        // Fill #2 on `/login/done` -> lift at ceiling -> page script puts SHORT_PW back into `#pw`!
+        const fill2 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r31-spa.example.test#alice/password', targetId: tid });
+        clock += 600;
+        await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
+        await sleep(90);
+        const lift2Read = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+
+        await rawWs.evalOnTarget(tid, `(() => { document.querySelector('#pw').value = ${JSON.stringify(SHORT_PW)}; return 1; })()`);
+        const putBackRead1 = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        const domAfterPutBack1 = fk.readDomValues(tid).pw;
+
+        medWs = await openCdpClient(WebSocket, grant.url);
+        const attMed = await medWs.call('Target.attachToTarget', { targetId: tid, flatten: true });
+        await rawWs.evalOnTarget(tid, `(() => { document.querySelector('#pw').value = ${JSON.stringify(SHORT_PW)}; return 1; })()`);
+        const medPutBackEval = await medWs.call('Runtime.evaluate', { expression: 'document.querySelector("#pw").value', returnByValue: true }, attMed.result?.sessionId);
+        const leakInMed = JSON.stringify(medPutBackEval).includes(SHORT_PW);
+        const putBackRead2 = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+
+        ok(
+          Boolean(watchClient)
+            && fill1.status === 200 && lift1Read.status === 200
+            && afterPushStateRead.status === 200
+            && fill2.status === 200 && lift2Read.status === 200
+            && putBackRead1.status === 409 && putBackRead1.json?.code === 'login_fill_live'
+            && domAfterPutBack1 === ''
+            && Boolean(medPutBackEval.error && /login_fill_live/.test(medPutBackEval.error.message || ''))
+            && !leakInMed
+            && putBackRead2.status === 200,
+          'R31-3 (Pre-first-await recheckPostLiftOnTab never poisons tab): after SPA pushState triggers pre-await URL-mismatch return, a second fill+lift on the same tab still catches, wipes, and blocks put-back <8B secret (409 login_fill_live, 0 leak) and lifts on empty next read (200)',
+          {
+            hasWatchClient: Boolean(watchClient),
+            fill1: fill1.status,
+            lift1Read: lift1Read.status,
+            afterPushStateRead: afterPushStateRead.status,
+            fill2: fill2.status,
+            lift2Read: lift2Read.status,
+            putBackRead1,
+            domAfterPutBack1,
+            medPutBackEval,
+            leakInMed,
+            putBackRead2,
+          },
+        );
+      } finally {
+        if (medWs) medWs.close();
+        rawWs.close();
+        srv.close();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
         await fk.close();
       }
     }
