@@ -4,6 +4,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.398 — 2026-11-12
 
+### Fixed
+- The Agents list no longer shows a limit as read hours ago right after a refresh read it.
+- A limit you marked as reset now says when you marked it, and that the next refresh confirms or corrects it.
+- A limit's age mark now uses the interface's units, and in Chinese and Japanese a note that waits on a Claude Code check names ⚙ → Update VibeSpace….
+- If a limit you mark as reset cannot be written to disk yet, VibeSpace now says so beside the mark.
+
 ### Maintenance
 - Test and release tooling only; nothing changes for you.
 

@@ -37,6 +37,38 @@ This file is the engineers' record of every release: the lanes, the verification
   - The lanes' gate under the fast-tier lock: build ALL PASS (22), test-cache-bounds 163, test-architecture 935, test-ci-gate 96, test-changelog-style 40.
   - Direct fast: 1 of 1 (test-cache-bounds is the one suite the range changes; no suite reads its file). list-affected names 7 heavy rows (3 by docs/changelog-engineering.md, 4 always-on smokes): the train's.
 
+### account-reset-door K2 — the claims store is a store: through the store writer (主开发's read of the .397 tip, K2)
+- **The finding (minor).** src/usage-reset-claim.js saved outside the store writer: fs.promises (the threadpool) on each save, and a synchronous fsync on the main thread at the process's exit (`stopAll` → `flushSync`). Its test-store-write-census row was classed «exit», which let three main-thread syncs past the debt ratchet. As «debt» the same row goes red, 521 > 518. It also made the census's own sentence («the «exit» class is empty») untrue.
+- **The fix.** The store writes through src/store-writer.js like every store since .396: `W().dirty(file, {name: 'reset-claims.write', mode: 0o600, produce})`.
+  - Memory is authoritative, and the writer's own thread does the temp, every byte and the rename. At a stop, the writer's exit flush writes what is owed.
+  - A person's claim and dismissal are ACTS (rank 0). `persisted()` is the writer's `durable(file)`, and both routes answer after it; one that did not land answers `durable: false`.
+  - What a reading settles (a confirmation, a contradiction, a reset seen) is paced.
+  - `flushSync`, `stopAll` and the module's own exit hook are gone.
+- **The censuses.**
+  - test-store-write-census: the «exit» row and the WAITS row are gone. The «exit» class is empty again, so its sentence is true, and DEBT is unchanged.
+  - test-sync-fs-census: the «create > flushSync» row is gone.
+- **Round 2 (主开发 22:40Z) — A CLAIM THAT DID NOT REACH THE DISK IS SAID** (store-writer law F).
+  - The routes answered 200 with a `durable: false` the page never read. They now take the status route's shape (src/agent-routes/status.js): 503 `not-durable` with the store writer's own sentence, the claim's fields beside it. The claim is APPLIED (in memory, and the pool reads it).
+  - The page says both facts. The PURE `claimAnsweredWords` (src/lib/account-wall-words.js) gives the marked toast and the not-on-disk toast, the existing sentence and key. A dismissal says the same through `notOnDiskWords`.
+  - Each `then()` has a second arm, so an answer is always sent.
+  - Pinned in the route leg: the writer made to answer false for the claims file ⇒ 503 `not-durable`, the claim applied (/api/usage shows it claimed), the page's words carry both, and the dismissal answers 503 too. RED: `not-durable-unsaid` (the answer without the code ⇒ the page says only «Marked … as reset») and `page-unsaid`.
+- **The drill.** test-account-reset-door: the store leg's claim is on disk (0600) when `persisted()` answers. The wiring pins the writer, no synchronous or fs.promises write in the module, and both routes awaiting `persisted()`.
+
+### account-reset-door K3 — the page (主开发's read of the .397 tip, K3)
+- **The roster's read-at.** The Agents roster's two loaders (manage-agents.js `_renderClaudeAccounts` and the machine section) took `/api/usage`'s readings raw. Only the popup's `_applyUsage` merged the top-level `lanesReadAt`, so after any accounts broadcast a limit drew «read 14h ago» for up to a poll, the machine-login row too.
+  - Now `/api/usage` hands each account's `lanesReadAt` INSIDE its reading, and the machine login's inside `rateLimit`. Every client assignment carries it; the top-level map stays.
+- **One sentence for what confirms a claim.** The dialog, the toast, the button and the menu said «the next refresh reads it», while a claimed lane's ring said «confirms when a session uses it».
+  - `unconfirmedText` now gives a lane whose reading carries `claimedAt` its own words: «marked reset by you at {time} — the next refresh confirms or corrects it» (zh / ja). A window whose reset merely landed keeps its words.
+- **The age mark's units** go through `t()` (`staleLaneAge(…, {t})`: «{n}m» / «{n}h» / «{n}d», the keys every other short age uses).
+- **The door's CSS** stands on theme variables only: `var(--border)`, `var(--yellow)`, `var(--radius-sm)`.
+- **zh / ja name ⚙ → Update.** Since .397 no update arrives by itself, so the notes of an account waiting on a Claude Code check say «用 ⚙ →「更新 VibeSpace…」更新» / «⚙ →「VibeSpace を更新…」で更新». The changed notes: the two cli-unmeasured lines, the «turned off» line and the setting's OFF sentence.
+  - The English keys keep «a VibeSpace update places them». Their passive is true, and a key change would move six suites' pins. Named for a later change: the English «wait for a VibeSpace update» in the setting and the «turned off» line.
+- **The row's stamp** in scripts/ci.mjs says 2.369.397, the release the claim ships in.
+- **Pins** (scripts/test-account-reset-door.mjs):
+  - the route leg: the lane's read-at is inside the account's reading on `/api/usage`;
+  - leg page-k3: the claimed ring's words, and a rolled one's; zh / ja; the units through `t()`; the CSS with no literal colour or radius; zh / ja naming ⚙; the stamp.
+  - RED: the 2.369.397 release fd4acdc61 at store, route, page-k3 and wiring; patches lanes-outside, claim-session-words and units-raw.
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 
