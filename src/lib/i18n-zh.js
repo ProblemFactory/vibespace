@@ -4791,7 +4791,6 @@ export default {
   "Not signed in": "未登录",
   "scopes {list}": "权限 {list}",
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "这个账号的 token 是用这个客户端铸出的。换一个客户端就要重新授权 —— 保存时会直接打开「重新授权」。",
-  "Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.": "与挂载的编辑对话框同一条规则：真实当前值预填，密钥在内；只保存改了的字段。",
   "Sign-in": "授权状态",
   // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
   "This session’s billing account": "本会话的计费账号",
@@ -4819,6 +4818,7 @@ export default {
   "Replace…": "替换…",
   "Type the new value": "输入新的值",
   "Paste the new token JSON": "粘贴新的令牌 JSON",
+  "Secrets are never shown again after saving — only replaced.": "密钥保存后不再显示，只能替换。",
   "Sender line": "发件人说明行",
   "Instance default": "实例默认",
   "Applied on save — the account re-reads with the new settings; switching the client opens Re-authorize first.": "保存即生效 —— 账号会用新设置重新读取；换客户端会先打开重新授权。",

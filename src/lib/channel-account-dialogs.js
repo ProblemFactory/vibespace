@@ -354,7 +354,7 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   const cf = spec.clientFields || {};
   const out = [{ key: `client${sfx}`, label: tr('OAuth client'), type: 'select', options, value: v, when: when || undefined, hint: hint !== undefined ? hint : (spec.clientHint ? tr(spec.clientHint) : undefined) }];
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
-  if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: secretHint !== undefined ? secretHint : (cf.secret.help ? tr(cf.secret.help) : undefined) });
+  if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', held: !!(custom && custom.held && !custom.appSecret), when: isCustom, hint: secretHint !== undefined ? secretHint : (cf.secret.help ? tr(cf.secret.help) : undefined) });
   if (mounts.length) out.push({ key: `mnote${sfx}`, type: 'note', value: tr('The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page. The account then signs in under that client.'), when: isMount });
   // lane cluster-presets (P3): an instance with NO company client says so — the select
   // holding only "Custom" read as a broken list; the user is told who can add one
@@ -435,7 +435,7 @@ function workspaceClientSpecs(spec, { sfx = '', when = null, value, custom = nul
   const cf = spec.clientFields || {};
   const out = [{ key: `client${sfx}`, label: tr(P.fieldLabel), type: 'select', options, value: v, when: when || undefined, hint: spec.clientHint ? tr(spec.clientHint) : undefined }];
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
-  if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: cf.secret.help ? tr(cf.secret.help) : undefined });
+  if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', held: !!(custom && custom.held && !custom.appSecret), when: isCustom, hint: cf.secret.help ? tr(cf.secret.help) : undefined });
   out.push({ key: `wnote${sfx}`, type: 'note', value: tr(P.notes.custom), when: isCustom });
   // r2 (law E1): a company app with no way back here (its road `none`) is not told «press Connect, then Allow» — one truth per state
   const noWay = new Set(presets.filter((p) => (presetWay(spec.kind, p) || {}).road === 'none').map((p) => p.key));
@@ -732,7 +732,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
     // D3: the account's own client, prefilled (the owner-only config route — never the digest)
     const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}/config`);
     const c = r && r.config && r.config.client;
-    if (c) custom = { appId: c.appId || '', appSecret: c.appSecret || '' };
+    if (c) custom = { appId: c.appId || '', held: !!c.secretSet };   // THE WRITE-ONLY LAW: the secret is held, never sent — empty = the account's own
   }
   let closed = false;   // r4: the dialog closed (its onClose) — a watcher its start makes after that is taken at once
   const expired = (a.auth || {}).state === 'expired';
@@ -795,7 +795,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
   const provider = providerOf(a);
   const name = accountName(a);
   const cur = clientValueOf(a, cfg.presets || spec.presets);
-  const custom = cfg.client ? { appId: cfg.client.appId || '', appSecret: cfg.client.appSecret || '' } : null;
+  const custom = cfg.client ? { appId: cfg.client.appId || '', held: !!cfg.client.secretSet } : null;   // THE WRITE-ONLY LAW: held, never sent
   const honesty = cfg.senderHonestyLine === true ? 'on' : cfg.senderHonestyLine === false ? 'off' : 'default';
   const rxPolicy = ['propose', 'direct', 'off'].includes(a.reactionPolicy) ? a.reactionPolicy : 'propose';
   // lane channel-agent-watch W2: may agents see the LIST of this account's conversations (titles only, to ask for one)
@@ -810,7 +810,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     { key: 'name', label: tr('Name'), value: cfg.label || a.label || '' },
     ...clientFieldSpecs({ ...spec, presets: cfg.presets || spec.presets }, { value: cur, custom, secretType: 'text',
       hint: tr('This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.'),
-      secretHint: tr('Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.') }),
+      secretHint: tr('Secrets are never shown again after saving — only replaced.') }),
     { key: 'authfact', label: tr('Sign-in'), type: 'note', value: authFactText(a) },
     ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, presets: spec.presets || [] }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
@@ -837,7 +837,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     if (pol && v.policy !== undefined && (v.policy || null) !== pol.value) { patch.policy = v.policy || null; patch.base = pol.own; }
     if ((v.dirGroups === 'on') !== (dir.groups !== false) || (v.dirSingles === 'on') !== (dir.singles === true)) patch.agentDirectory = { groups: v.dirGroups === 'on', singles: v.dirSingles === 'on' };
     const switching = switchesClient({ ...a, credentialKey: cfg.credentialKey, customClient: custom ? { appId: custom.appId } : null }, v, '', cfg.presets || spec.presets);
-    if (!switching && v.client === 'custom' && v.csec !== ((custom && custom.appSecret) || '')) patch.credential = { appId: v.cid, appSecret: v.csec };
+    if (!switching && v.client === 'custom' && v.csec) patch.credential = { appId: v.cid, appSecret: v.csec };   // a held secret's box starts empty: typed = replaced
     if (Object.keys(patch).length) await capi(`/api/channels/adapters/${enc(a.id)}`, { method: 'PUT', body: JSON.stringify(patch) });
     close();
     // SWITCHING THE CLIENT IS A RE-AUTHORIZATION (the mount semantics, D2's twin): never a silent re-point
@@ -867,7 +867,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
   const presets = cfg.presets || spec.presets;
   const signin = signinOf(spec);
   const cur = clientValueOf({ ...a, credentialKey: cfg.credentialKey }, presets);
-  const custom = cfg.client ? { appId: cfg.client.appId || '', appSecret: cfg.client.appSecret || '' } : null;
+  const custom = cfg.client ? { appId: cfg.client.appId || '', held: !!cfg.client.secretSet } : null;   // THE WRITE-ONLY LAW: held, never sent (the copy's server copies it)
   const copyName = tr('{name} (copy)', { name: a.label || a.id });
   const fields = [
     { key: 'name', label: tr('Name'), value: copyName },

@@ -298,7 +298,7 @@ class MountManager {
   // OneDrive rejects 1.65.2's download path with "unauthenticated" on EVERY
   // file read while listings/uploads/token-refresh all work — A/B against the
   // live account: 1.65.2 fails, 1.69.3 and 1.75.0 both download fine.
-  static SECRET_PARAM = SECRET_PARAM;   // the census (scripts/test-mount-write-only.mjs) reads the law from here
+  static SECRET_PARAM = SECRET_PARAM;   // the census (scripts/test-write-only-secrets.mjs) reads the law from here
   static RCLONE_PIN = 'v1.69.3';
 
   rcloneBin() {

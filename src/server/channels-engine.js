@@ -3775,12 +3775,13 @@ function create(deps = {}) {
     const cf = R.clientFieldsOf(row);
     return { id: cf.id, secret: cf.secret };
   }
-  /** An account's own client for the WIRE: the id and a MASKED secret. */
+  /** An account's own client for the WIRE: the id and THAT a secret is held — never a byte of it, not even a tail (THE WRITE-ONLY
+   *  LAW, lane ui-controls-and-bugs; 主开发's ruling: only an Integrations card keeps its declared tail). */
   function customClientView(rec) {
     if (!rec || !rec.credential || typeof rec.credential !== 'object') return null;
-    let masked = null, undecryptable = false;
-    if (rec.credential.appSecretEnc) { try { masked = R.maskValue(box.dec(rec.credential.appSecretEnc)); } catch { undecryptable = true; } }
-    return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, secretMasked: masked, undecryptable };
+    let undecryptable = false;
+    if (rec.credential.appSecretEnc) { try { box.dec(rec.credential.appSecretEnc); } catch { undecryptable = true; } }   // a fact about the key, never the bytes
+    return { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, undecryptable };
   }
   function consentRouteOf(m, row) {
     const cr = consentRowOf(m.kind);

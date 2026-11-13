@@ -356,7 +356,7 @@ let idC = null;
   ok(!rawDisk(engDir).includes(CUSTOM_SECRET), 'the plaintext secret appears nowhere in adapters.json');
   ok((fs.statSync(path.join(engDir, 'channels', 'adapters.json')).mode & 0o777) === 0o600, 'adapters.json is 0600 (it holds sealed tokens and an account\'s sealed client secret)', (fs.statSync(path.join(engDir, 'channels', 'adapters.json')).mode & 0o777).toString(8));
   const row = rowOf(eng, idC);
-  ok(row.auth.state === 'connected' && row.auth.user === 'member.c@example.com' && row.credential.source === 'custom' && row.customClient.appId === CUSTOM_ID && row.customClient.secretMasked === '••••' + CUSTOM_SECRET.slice(-4), 'the row: connected, facts `custom`, customClient = the id + the MASKED secret');
+  ok(row.auth.state === 'connected' && row.auth.user === 'member.c@example.com' && row.credential.source === 'custom' && row.customClient.appId === CUSTOM_ID && row.customClient.secretSet === true && !('secretMasked' in row.customClient) && !JSON.stringify(row).includes(CUSTOM_SECRET.slice(-6)), 'the row: connected, facts `custom`, customClient = the id + that a secret is HELD (no tail — lane ui-controls-and-bugs, the write-only law)');
   ok(!JSON.stringify(eng.digest()).includes(CUSTOM_SECRET) && !frames.slice(framesAt).some((f) => JSON.stringify(f).includes(CUSTOM_SECRET)), 'the digest and every broadcast frame carry NO plaintext secret');
   ok(!logLines.some((l) => l.includes(CUSTOM_SECRET)), 'no log line carries it');
   // the refresh carries the account's own client
@@ -660,14 +660,14 @@ console.log('⑩ the routes');
   ok(cn.status === 200 && idR && cn.body.adapter.credentialKey === 'custom' && cn.body.adapter.label === 'Route mail' && cn.body.adapter.auth.tokenHeld === true, 'POST connect {flowId, name, the same custom client} creates the connected account', cn.raw.slice(0, 200));
   const cn2 = await api('POST', '/api/channels/adapters/gmail/connect', { flowId: s1.body.flowId });
   ok(cn2.status === 404 && cn2.body.code === 'no-flow', 'a taken flow is 404 no-flow');
-  // D3: the owner-only config carries the secret; nothing else does
+  // D3: the owner-only config is the Edit prefill — the secret only as HELD (lane ui-controls-and-bugs, THE WRITE-ONLY LAW); nothing carries it
   const cfg = await api('GET', `/api/channels/adapters/${encodeURIComponent(idR)}/config`);
-  ok(cfg.status === 200 && cfg.body.config.client.appId === CUSTOM_ID && cfg.body.config.client.appSecret === CUSTOM_SECRET && cfg.body.config.presets.length === 2, 'GET /adapters/:id/config (owner-only, D3) prefills the custom secret in the clear — the storage `GET /api/mounts/:id/config` rule');
+  ok(cfg.status === 200 && cfg.body.config.client.appId === CUSTOM_ID && cfg.body.config.client.secretSet === true && !('appSecret' in cfg.body.config.client) && !JSON.stringify(cfg.body).includes(CUSTOM_SECRET) && cfg.body.config.presets.length === 2, 'GET /adapters/:id/config (owner-only, D3) says the custom secret is held — never its bytes (the write-only law, as the storage config)');
   // edits in place
   const pl = await api('PUT', `/api/channels/adapters/${encodeURIComponent(idR)}`, { label: 'Renamed mail' });
   ok(pl.status === 200 && pl.body.label === 'Renamed mail' && rowOf(eng, idR).label === 'Renamed mail', 'PUT {label} renames the account');
   const ps = await api('PUT', `/api/channels/adapters/${encodeURIComponent(idR)}`, { credential: { appId: CUSTOM_ID, appSecret: CUSTOM_SECRET2 } });
-  ok(ps.status === 200 && ps.body.customClient.secretMasked === '••••' + CUSTOM_SECRET2.slice(-4) && chBox.dec(diskOf(engDir).find((x) => x.id === idR).credential.appSecretEnc) === CUSTOM_SECRET2, 'PUT {credential} with the SAME id replaces the secret in place (sealed; the answer masked)');
+  ok(ps.status === 200 && ps.body.customClient.secretSet === true && !('secretMasked' in ps.body.customClient) && !JSON.stringify(ps.body).includes(CUSTOM_SECRET2.slice(-6)) && chBox.dec(diskOf(engDir).find((x) => x.id === idR).credential.appSecretEnc) === CUSTOM_SECRET2, 'PUT {credential} with the SAME id replaces the secret in place (sealed; the answer says held — no tail, the write-only law)');
   const pi = await api('PUT', `/api/channels/adapters/${encodeURIComponent(idR)}`, { credential: { appId: 'other.apps.googleusercontent.com', appSecret: CUSTOM_SECRET2 } });
   ok(pi.status === 409 && pi.body.code === 'client-change-needs-reauth' && /Re-authorize/.test(pi.body.error), 'PUT {credential} with ANOTHER id is 409 client-change-needs-reauth (switching the client is a re-authorization)', pi.raw);
   const ra = await api('POST', `/api/channels/adapters/${encodeURIComponent(idR)}/reauthorize`, { clientPreset: 'org1' });
