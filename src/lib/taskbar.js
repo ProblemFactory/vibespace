@@ -119,7 +119,7 @@ function switchWindowItems(app, selfId) {
       action: () => app.goToWinId(wid),
     });
   }
-  if (!items.length) items.push({ label: t('(no windows)'), disabled: true });
+  if (!items.length) items.push({ caption: t('(no windows)') });
   return items;
 }
 

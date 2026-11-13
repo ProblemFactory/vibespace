@@ -1215,7 +1215,41 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
   try { ownFloat(pop, document.elementFromPoint(x, y)); } catch { /* no layout: no owner */ }   // lane dialog-yield r3: a menu opened over a form is that form's
   document.body.appendChild(pop);
   attachPopoverClose(pop); // no anchor exclusion — any outside click closes
+  // lane ui-controls-and-bugs — THE GREYED-OPTIONS RULE (kb §17: no greyed control with a hint): a row WORKS, or it is a
+  // CAPTION (words, not a control: `caption` / caller-escaped `captionHtml`), or it is OFF and says WHY in words on the row
+  // (`off`, + `offDoor: {label, action}` — the door that fixes it; a `title` may add detail on hover). ONE drawer for the
+  // top level and every submenu. A legacy `disabled` row is still drawn the old way: its title is often a description, not a
+  // reason, so it is never promoted to a why — scripts/test-control-says-why.mjs ① forbids a new one and keeps the rest in a
+  // ledger that only shrinks.
+  const wordRow = (item) => {
+    if (item.caption != null || item.captionHtml != null) {
+      const cap = document.createElement('div');
+      cap.className = className + '-caption';
+      if (item.captionHtml != null) cap.innerHTML = item.captionHtml; else cap.textContent = String(item.caption);   // captionHtml: the caller escHtml's every part
+      if (item.title) cap.title = item.title;
+      if (item.style) cap.style.cssText = item.style;
+      return cap;
+    }
+    if (item.off == null) return null;
+    const row = document.createElement('div');
+    // the desktop doors' proven markup, now every menu's: `.disabled` (the state every reader keys on) + .door-label / .door-why
+    row.className = className + '-item ' + className + '-off disabled';
+    const name = document.createElement('span'); name.className = 'door-label';
+    if (item.labelHtml != null) name.innerHTML = item.labelHtml; else name.textContent = item.label;
+    const why = document.createElement('span'); why.className = 'door-why'; why.textContent = String(item.off);
+    row.append(name, why);
+    if (item.offDoor && item.offDoor.label) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = className + '-off-door'; b.textContent = item.offDoor.label;
+      b.onclick = (e) => { e.stopPropagation(); pop.remove(); item.offDoor.action?.(); };
+      row.appendChild(b);
+    }
+    if (item.title) row.title = item.title;
+    if (item.style) row.style.cssText = item.style;
+    return row;
+  };
   for (const item of items) {
+    const words = wordRow(item);
+    if (words) { pop.appendChild(words); continue; }
     if (item.separator) { const sep = document.createElement('div'); sep.className = className + '-separator'; pop.appendChild(sep); continue; }
     const el = document.createElement('div');
     el.className = className + '-item' + (item.disabled ? ' disabled' : '');
@@ -1234,6 +1268,8 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
       sub.className = className;
       sub.style.cssText = 'position:absolute;left:100%;top:-4px;display:none;z-index:99999';
       for (const child of item.children) {
+        const words = wordRow(child);   // a caption / an off row in a submenu too (the window's Scale ▸, Stored logins ▸)
+        if (words) { sub.appendChild(words); continue; }
         const ce = document.createElement('div');
         ce.className = className + '-item' + (child.disabled ? ' disabled' : '');
         // labelHtml: see the top-level item note below — callers MUST escHtml

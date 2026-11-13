@@ -716,7 +716,7 @@ export function installManageAgents(App, ctx = {}) {
    *   · one row per registered LOCAL ORACLE for this harness — human-triggered,
    *     measured zero-network, run under the account's own config dir.
    *   · when a harness has NO oracles, the measured-and-REJECTED candidates
-   *     are shown DISABLED with the reason, because "there is nothing here"
+   *     are shown OFF with the reason on the row (the menu's off row), because "there is nothing here"
    *     and "we measured these and they phone home" are different facts and
    *     the second one is the one worth knowing.
    *   · a rejection that carries `blocks` is shown ALWAYS (round-2 verifier).
@@ -748,7 +748,9 @@ export function installManageAgents(App, ctx = {}) {
     // otherwise be empty (they answer "why is there nothing here").
     const notes = oracles.length ? blockingRejectionsFor(backend) : rejectedFor(backend);
     for (const r of notes) {
-      items.push({ label: t('{cmd} — not offered', { cmd: r.label }), disabled: true, title: r.verdict });
+      // lane ui-controls-and-bugs: the why in words ON the row (every rejected candidate was measured reaching its vendor);
+      // the measurement itself (English, a design record) stays the row's hover detail
+      items.push({ label: t('{cmd} — not offered', { cmd: r.label }), off: t('it connects to the vendor’s servers (measured)'), title: r.verdict });
     }
     return items.length ? [{ separator: true }, ...items] : [];
   },
@@ -1363,7 +1365,7 @@ export function installManageAgents(App, ctx = {}) {
       { label: t('Members & placement…'), title: placementWords(mode, t) + (top ? ' — #1 ' + top.name : ''), action: () => this._poolMembersDialog(id, a, refresh) },
     ];
     if (hotOk) items.push({ label: (a.hot ? '✓ ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) });
-    else items.push({ label: t('Hot switch unavailable — every switch restarts the session'), disabled: true, action: () => {}, title: t('The Codex app-server keeps its login in memory, so a re-pointed login never reaches a running session (verified) — switches restart the conversation via resume.') });
+    else items.push({ caption: t('Hot switch unavailable — every switch restarts the session'), title: t('The Codex app-server keeps its login in memory, so a re-pointed login never reaches a running session (verified) — switches restart the conversation via resume.') });
     return items;
   },
   // ── 'Exclude from pool “X”' (B-ad05): ONE click on the MEMBER's own ⋯ menu,
@@ -2495,7 +2497,15 @@ export function installManageAgents(App, ctx = {}) {
           if (info.installed && checks.length) {
             const chkBtn = document.createElement('button'); chkBtn.className = 'agent-btn'; chkBtn.textContent = t('Rules & checks');
             chkBtn.title = t('Read-only: permission rules, plus local checks that make no network requests');
-            chkBtn.onclick = () => { const rect = foldAnchor(chkBtn).getBoundingClientRect(); showContextMenu(rect.left, rect.bottom + 4, checks.filter((x) => !x.separator)); };
+            // lane ui-controls-and-bugs (the walk: a menu of ONE live row beside rows that only explain): one live act ⇒ the button
+            // IS that act («权限规则…»); the checks it cannot offer say why in its title (they are not doors)
+            const live = checks.filter((x) => !x.separator && typeof x.action === 'function' && x.off == null);
+            if (live.length === 1) {
+              chkBtn.textContent = live[0].label;
+              const whyNot = checks.filter((x) => x.off != null).map((x) => `${x.label}: ${x.off}`);
+              if (whyNot.length) chkBtn.title = [live[0].title, ...whyNot].filter(Boolean).join('\n');
+              chkBtn.onclick = () => live[0].action();
+            } else chkBtn.onclick = () => { const rect = foldAnchor(chkBtn).getBoundingClientRect(); showContextMenu(rect.left, rect.bottom + 4, checks.filter((x) => !x.separator)); };
             actions.appendChild(chkBtn);
           }
         }
