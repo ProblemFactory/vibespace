@@ -1033,17 +1033,18 @@ class ChatRenderers {
     // each named sender is its own link (a report of several names them all — B-9fd6)
     for (const nameEl of el.querySelectorAll('.chat-peer-name')) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(nameEl.dataset.peer || msg.peerFrom); };
     if (msg.peerFrom) {
+      // lane ui-controls-and-bugs (the walk: right-click on a peer card showed nothing): showContextMenu takes (x, y, items) — `(e, items)` threw
       el.querySelector('.chat-peer-head').oncontextmenu = (e) => {
         e.preventDefault(); e.stopPropagation();
         if (!impostor && /^Background Work · /.test(String(msg.peerFrom || ''))) { // an agent CALLING itself Background Work gets the peer menu
-          showContextMenu(e, [
+          showContextMenu(e.clientX, e.clientY, [
             { label: t('Open Background Work'), action: () => this.app.openJobs?.() },
             { label: t('Copy sender name'), action: () => copyText(msg.peerFrom) },
           ]);
           return;
         }
         const s = this._resolvePeerSession(msg.peerFrom);
-        showContextMenu(e, [
+        showContextMenu(e.clientX, e.clientY, [
           { label: t('Open session'), action: () => this._jumpToPeer(msg.peerFrom) },
           ...(s ? [{ label: t('Session properties'), action: () => this.app.openSessionProps(s.webuiId || s) }] : []),
           { label: t('Copy sender name'), action: () => copyText(msg.peerFrom) },
