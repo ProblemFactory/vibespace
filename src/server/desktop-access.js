@@ -49,6 +49,7 @@ const DA = require('../device-acts.js'); // lane device-act-audit: `by` on every
 const M = require('../desktop-apps.js');
 const SLOT = require('../install-slot.js'); // the machine's ONE package slot (its launcher, its files, its argv)
 const I = require('../installs.js'); // THE INSTALLABLES: one row each — this layer asks the row, never a name
+const FFI = require('../ffmpeg-install.js'); // machine-needs pick 3c: the fetch's per-build codes (fetchRowsOf)
 const SYS = require('../app-system.js'); // Layer 1: a sys plan's digest binds what it runs (sysDigestPart)
 const MW = require('../machine-window.js'); // lane machine-app-crop: the run's launch report (one app as its own window)
 const D = require('../desktop-display.js'); // design 014 D1: the PURE RFB greeting read of the vnc-native rung
@@ -679,7 +680,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData: (d) => { seen(d); onData(d); }, timeoutMs: installMs, by });
     const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
     if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the fetch on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
-    if (r.code !== 0) throw fail('install_failed', last ? `${hostId}: ${last.slice(0, 600)}` : `the fetch exited ${r.code} on ${hostId} and said nothing — nothing was changed there`);
+    if (r.code !== 0) { const e = fail('install_failed', last ? `${hostId}: ${last.slice(0, 600)}` : `the fetch exited ${r.code} on ${hostId} and said nothing — nothing was changed there`); const rows = FFI.fetchRowsOf(tail); if (rows.length) e.rows = rows; throw e; } // pick 3c: each failed build's code — the page says it in the interface's language
     let after = null;
     try { after = await streamFacts(hostId, { force: true }); } catch (e) { after = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
     return { ok: true, what: plan.what, hostId, plan, before: null, after, facts: null, reattached: false };

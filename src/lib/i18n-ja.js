@@ -9400,6 +9400,16 @@ export default {
   "{machine} tried and its system did not open the page ({why}).": "{machine} は試みましたが、システムがページを開きませんでした（{why}）。",
   "This hub refused it, so nothing reached {machine} ({why}).": "このハブが拒否したため、{machine} には何も届いていません（{why}）。",
   "{machine} did not open it ({why}).": "{machine} は開きませんでした（{why}）。",
+  // machine-needs pick 3c: each failed build's reason by its code; the machine by the sheet title's name
+  "{build}: its folder could not be made": "{build}：フォルダーを作れませんでした",
+  "{build}: the download failed (no network, or its address did not answer)": "{build}：ダウンロードに失敗しました（ネットワークがないか、アドレスが応答しません）",
+  "{build}: the download is not the pinned file (its SHA-256 differs)": "{build}：ダウンロードしたファイルが固定したものと違います（SHA-256 が一致しません）",
+  "{build}: the archive holds no ffmpeg.exe where it was pinned": "{build}：アーカイブの固定した場所に ffmpeg.exe がありません",
+  "{build}: the unpacked ffmpeg.exe is not the pinned file (its SHA-256 differs)": "{build}：展開した ffmpeg.exe が固定したものと違います（SHA-256 が一致しません）",
+  "{build}: ffmpeg.exe could not be put in place": "{build}：ffmpeg.exe を配置できませんでした",
+  "{build}: it stopped ({code})": "{build}：途中で止まりました（{code}）",
+  "{app} was not fetched on {machine}, and nothing was changed there: {reasons}": "{machine} で {app} を取得できず、何も変更していません：{reasons}",
+  "What the machine printed": "マシンが出力した原文",
   // lane machine-needs-at-pairing pick 3: the pairing sheet's step ② — what this device will be used for
   "What this device will be used for": "このデバイスを何に使うか",
   "Nothing here can stop the pairing: whatever is not set up keeps its own button in the machine’s windows, and the command’s last lines say what is ready.": "ここで選んだものがペアリングを止めることはありません。設定できなかったものはマシンのウィンドウにボタンが残り、コマンドの最後の行に準備できたものが表示されます。",

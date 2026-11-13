@@ -6,7 +6,7 @@
 // Shown only when NO candidate passes (主开发's Q6: a machine whose own ffmpeg passes keeps it; nothing is fetched).
 import { t } from './i18n.js';
 import { fetchJson, createModalShell } from './utils.js';
-import { FFMPEG, FFMPEG_BUILDS, FFMPEG_FOLDER } from '../ffmpeg-install.js';
+import { FFMPEG, FFMPEG_BUILDS, FFMPEG_FOLDER, FFMPEG_ROW_PREFIX } from '../ffmpeg-install.js';
 
 const MB = (n) => Math.round(n / 1e6);
 /** The button's words: the build, its publisher, its size. */
@@ -21,7 +21,23 @@ export const ffmpegNeedCode = (code) => code === 'no_ffmpeg' || code === 'no_enc
  * {what:'ffmpeg', planDigest} — NDJSON {log}… then ONE {done}|{error}). `say(text, bad)` = the line's own words as it goes.
  * → the last answer ({done, ffmpeg, label} | {error, code}) or null when nothing could start
  */
-export async function getFfmpeg(hostId, say = () => { }) {
+/** Each failed build's reason, in the interface's language (machine-needs pick 3c — the plan's codes, src/ffmpeg-install.js). */
+const FAIL_WORDS = {
+  no_folder: (build) => t('{build}: its folder could not be made', { build }),
+  download_failed: (build) => t('{build}: the download failed (no network, or its address did not answer)', { build }),
+  archive_differs: (build) => t('{build}: the download is not the pinned file (its SHA-256 differs)', { build }),
+  member_missing: (build) => t('{build}: the archive holds no ffmpeg.exe where it was pinned', { build }),
+  exe_differs: (build) => t('{build}: the unpacked ffmpeg.exe is not the pinned file (its SHA-256 differs)', { build }),
+  not_placed: (build) => t('{build}: ffmpeg.exe could not be put in place', { build }),
+};
+/** The line a person is left with when no build was fetched: the machine by ONE name (the sheet title's), each build's reason. */
+export function ffmpegFailText(rows, machine) {
+  const reasons = rows.map((r) => (Object.prototype.hasOwnProperty.call(FAIL_WORDS, r.code) ? FAIL_WORDS[r.code](r.label) : t('{build}: it stopped ({code})', { build: r.label, code: r.code })));
+  return t('{app} was not fetched on {machine}, and nothing was changed there: {reasons}', { app: FFMPEG.label, machine, reasons: reasons.join(' · ') });
+}
+/** ONE name for the machine: the hub's words name it by its id; the page says the name its title uses. */
+const named = (text, hostId, machine) => (machine && hostId && machine !== hostId ? String(text).split(hostId).join(machine) : String(text));
+export async function getFfmpeg(hostId, say = () => { }, { machine = null } = {}) {
   const shown = await fetchJson(`/api/desktop/install-plan?host=${encodeURIComponent(hostId)}&what=ffmpeg`);
   const plan = shown && shown.plan;
   if (!shown || shown.error || !plan || !plan.ok) { say(t('{app} was not fetched: {why}', { app: FFMPEG.label, why: (shown && (shown.error || (plan && plan.error))) || t('server unreachable') }), true); return shown || null; }
@@ -40,12 +56,13 @@ export async function getFfmpeg(hostId, say = () => { }) {
     for (const p of parts) {
       if (!p.trim()) continue;
       let o; try { o = JSON.parse(p); } catch { continue; }
-      if (o.log != null && String(o.log).trim()) { last = String(o.log).trim().slice(0, 200); say(last, false); }
+      if (o.log != null && String(o.log).trim() && !String(o.log).trim().startsWith(FFMPEG_ROW_PREFIX)) { last = String(o.log).trim().slice(0, 200); say(last, false); } // a code line is the page's to word
       if (o.done || o.error) end = o;
     }
   }
   if (end && end.done) say(t('Fetched {app} — both SHA-256 fingerprints checked — into {folder}', { app: end.label || FFMPEG.label, folder: FFMPEG_FOLDER }), false);
-  else say(t('{app} was not fetched: {why}', { app: FFMPEG.label, why: (end && end.error) || last || t('no answer') }), true);
+  else if (end && Array.isArray(end.rows) && end.rows.length) say(ffmpegFailText(end.rows, machine || hostId), true);
+  else say(t('{app} was not fetched: {why}', { app: FFMPEG.label, why: named((end && end.error) || last || t('no answer'), hostId, machine) }), true);
   return end;
 }
 
@@ -77,13 +94,19 @@ export function ffmpegDoor(hostId, { say = () => { }, onDone = null, cls = 'btn-
     const status = document.createElement('p'); status.className = 'ffmpeg-get-status'; status.style.display = 'none';
     const go = document.createElement('button'); go.type = 'button'; go.className = 'btn-create ffmpeg-get-go'; go.textContent = t('Get it');
     const acts = document.createElement('div'); acts.className = 'dialog-actions'; acts.appendChild(go);
-    body.append(status, acts);
+    const fold = document.createElement('details'); fold.className = 'ffmpeg-get-raw'; fold.hidden = true;
+    const foldHead = document.createElement('summary'); foldHead.textContent = t('What the machine printed');
+    const foldText = document.createElement('pre'); foldText.className = 'desktop-install-pre ffmpeg-get-raw-text'; // the install dialog's log look: wrapped, never cut at the sheet's edge
+    fold.append(foldHead, foldText);
+    body.append(status, fold, acts);
     go.onclick = async () => {
       if (go.disabled) return;
       go.disabled = true; status.style.display = '';
       const tell = (text, bad) => { status.textContent = text; status.classList.toggle('is-bad', !!bad); try { say(text, bad); } catch { /* the line is gone */ } };
       let end = null;
-      try { end = await getFfmpeg(hostId, tell); } finally { go.disabled = false; }
+      fold.hidden = true;
+      try { end = await getFfmpeg(hostId, tell, { machine: machine || hostId }); } finally { go.disabled = false; }
+      if (end && end.error && Array.isArray(end.rows) && end.rows.length) { foldText.textContent = String(end.error); fold.hidden = false; } // the raw line, kept where it can be read
       if (end && end.done) { go.style.display = 'none'; b.hidden = true; try { onDone?.(end); } catch { /* the surface is gone */ } }
     };
   };

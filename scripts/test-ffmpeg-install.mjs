@@ -20,6 +20,7 @@
 //      the slot held after a timeout while the machine says its fetch runs, the route's pane table (M12), a hub refusal said as one
 //   ⑩ THE ONE ACCESSOR on every road (screen, window, voice, sound) + the census of the agent's ffmpeg starts; an unreadable hash
 //      not remembered
+//   ⑫ (主开发 12:43Z, pick 3c) ONE name for the machine and each build's reason by its CODE, in the interface's language
 //   ⑪ WHAT A PERSON READS: the sheet before the press (ONE button), the done line, the microphone card per state (MUST 1), the
 //      settings doors' reasons by code
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { factsLine } from './fixtures/stream/screen-fakes.mjs';
 const require = createRequire(import.meta.url);
+const realFetch = globalThis.fetch; // ⑪ stands a stub in for the page's fetch; the route legs after it ask the real one
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 700) : '')); } };
@@ -363,5 +365,47 @@ console.log('⑪ WHAT A PERSON READS — the sheet BEFORE the press, the done li
   const [off, old, hub, no, none, yes] = [await toastFor({ error: 'win-a: connect ECONNREFUSED', code: 'host_unavailable' }), await toastFor({ ok: false, code: 'agent_too_old', error: 'its agent cannot open its Settings' }), await toastFor({ ok: false, code: 'hub_act_denied', error: 'the user denied it' }), await toastFor({ ok: false, code: 'open_failed', error: 'Windows did not open ms-settings:sound (blocked)' }), await toastFor(null), await toastFor({ ok: true, pane: 'sound' })];
   const byHand = 'On WIN-DESK1, open Settings › System › Sound';
   ok(/not connected/.test(off[0]) && /older than this hub/.test(old[0]) && /This hub refused it/.test(hub[0]) && /blocked/.test(no[0]) && /no answer from the server/.test(none[0]) && [off, old, hub, no, none].every((x) => x[1] === 'error' && x[0].endsWith(byHand)) && yes[1] === null, 'A SETTINGS DOOR THAT DID NOT OPEN SAYS WHY by the answer\'s code — not connected / an older agent / the hub refused / the machine\'s own failure / no answer — then where to go by hand', { off, old, hub, no, none });
+}
+
+console.log('⑫ ONE NAME, EACH BUILD\'S REASON IN THE INTERFACE\'S LANGUAGE (主开发 12:43Z, the two smalls — pick 3c)');
+{
+  const C = p.commands, ix = (re) => C.findIndex((l) => re.test(l));
+  const steps = ['no_folder', 'download_failed', 'archive_differs', 'member_missing', 'exe_differs', 'not_placed'].map((c) => ix(new RegExp(`^ {4}\\$step = '${c}'$`)));
+  const at = [/New-Item -ItemType Directory -Force -Path \$dl/, /Invoke-WebRequest/, /Get-FileHash -Algorithm SHA256 \$zip/, /ZipFile\]::OpenRead/, /Get-FileHash -Algorithm SHA256 \$part/, /Set-Content -NoNewline -LiteralPath \(\$stamp/].map(ix);
+  ok(steps.every((s, k) => s > 0 && s === at[k] - 1), 'the plan names each step\'s CODE just before it (its folder, the download, the archive\'s hash, the member, the exe\'s hash, the placement)', { steps, at });
+  const iRows = ix(/^if \(-not \$done\) \{ \$rows \| ForEach-Object \{ Write-Host \$_ \} \}$/), iLast = ix(/^if \(-not \$done\) \{ Write-Host \('ffmpeg was not fetched - '/);
+  ok(iRows > 0 && iRows === iLast - 1 && /\$rows \+= \('VS-FFMPEG-ROW ' \+ \$step \+ ' ' \+ \$b\.label\)/.test(C.join('\n')), 'each failed build\'s code line is printed just before the last line (the words stay last)');
+  const rows = typeof FF.fetchRowsOf === 'function' ? FF.fetchRowsOf('Downloading …\nVS-FFMPEG-ROW archive_differs FFmpeg 9.0.2 (gyan.dev)\nVS-FFMPEG-ROW download_failed FFmpeg 9.0.2 (BtbN FFmpeg-Builds)\nffmpeg was not fetched - … - nothing was changed') : null;
+  ok(JSON.stringify(rows) === JSON.stringify([{ code: 'archive_differs', label: 'FFmpeg 9.0.2 (gyan.dev)' }, { code: 'download_failed', label: 'FFmpeg 9.0.2 (BtbN FFmpeg-Builds)' }]), 'fetchRowsOf reads them back, in order', rows);
+  // the hub hands the codes on (desktop-access → the route's error line)
+  const express = require(REPO + '/node_modules/express');
+  const R = require(path.join(REPO, 'src/routes/desktop-apps.js'));
+  const DA = require(path.join(REPO, 'src/server/desktop-access.js'));
+  const handle = { status: () => ({ connected: true, info: { platform: 'win32', capabilities: [] } }), desktopServe: () => { }, streamFacts: async () => ({ ok: true, platform: 'win32', ffmpeg: null }),
+    runStream: async (cmd, args, o) => { o.onData(Buffer.from('NOT FETCHED from x: …\nVS-FFMPEG-ROW archive_differs FFmpeg 9.0.2 (gyan.dev)\nVS-FFMPEG-ROW download_failed FFmpeg 9.0.2 (BtbN FFmpeg-Builds)\nffmpeg was not fetched - FFmpeg 9.0.2 (gyan.dev): the download is not the pinned file (its SHA-256 differs); FFmpeg 9.0.2 (BtbN FFmpeg-Builds): the download failed (Unable to connect) - nothing was changed\n')); return { code: 1 }; } };
+  const access = DA.create({ hosts: { deviceBounded: async () => handle, get: (h) => (h === 'win-a' ? { id: h } : null), isLocal: () => false }, log: { log() { }, warn() { } }, installMs: 600, pollMs: 25 });
+  R.setup({ keeper: {}, access, vnc: {} });
+  const app = express(); app.use(express.json()); app.use(R.router);
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  let end = null;
+  try {
+    const res = await realFetch(`http://127.0.0.1:${srv.address().port}/api/desktop/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', what: 'ffmpeg' }) });
+    const ls = (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l)); end = ls[ls.length - 1];
+  } finally { srv.close(); }
+  ok(end && end.code === 'install_failed' && JSON.stringify(end.rows) === JSON.stringify(rows) && /^win-a: ffmpeg was not fetched/.test(end.error), 'the route\'s error line carries the codes beside the raw words', end);
+  // the page: the machine by the title's name, each code's sentence, the code lines never said as they stream, the raw line in a fold
+  const esbuild = require(REPO + '/node_modules/esbuild');
+  const STUB = { './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));', './utils.js': 'export const fetchJson = (u, o) => globalThis.__fj(u, o); export const createModalShell = (o) => globalThis.__sh(o);' };
+  const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/ffmpeg-door.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent', plugins: [{ name: 's', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils)\.js$/ }, (a) => ({ path: a.path, namespace: 's' })); b.onLoad({ filter: /.*/, namespace: 's' }, (a) => ({ contents: STUB[a.path], loader: 'js' })); } }] });
+  const mod = { exports: {} }; new Function('module', 'exports', 'require', out.outputFiles[0].text)(mod, mod.exports, require);
+  const D = mod.exports;
+  globalThis.__fj = async () => ({ plan: { ok: true }, digest: 'd' });
+  globalThis.fetch = async () => ({ ok: true, body: new Response([JSON.stringify({ log: 'Downloading …' }), JSON.stringify({ log: 'VS-FFMPEG-ROW archive_differs FFmpeg 9.0.2 (gyan.dev)' }), JSON.stringify(end)].join('\n') + '\n').body });
+  const said = [];
+  await D.getFfmpeg('win-a', (x, bad) => said.push([x, !!bad]), { machine: 'WIN-DESK1' });
+  const last = said.length ? said[said.length - 1] : ['', false];
+  ok(last[1] && /^FFmpeg 9\.0\.2 was not fetched on WIN-DESK1, and nothing was changed there: FFmpeg 9\.0\.2 \(gyan\.dev\): the download is not the pinned file \(its SHA-256 differs\) · FFmpeg 9\.0\.2 \(BtbN FFmpeg-Builds\): the download failed \(no network, or its address did not answer\)$/.test(last[0]) && !said.some(([x]) => /VS-FFMPEG-ROW|win-a/.test(x)), 'the line says the machine by ONE name (the title\'s), each build\'s reason as the page\'s own sentence; a code line is never said as it streams', said);
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
+  ok(zh.includes('"Get {app} for {machine}": "为 {machine} 取得 {app}"'), 'the sheet\'s zh title: a space after 为, as between the other Chinese and Latin runs');
 }
 done();
