@@ -191,7 +191,7 @@ const it = (x = {}) => ({ id: 'ut-1', sessionKey: 'claude:s1', text: 'Ship it?',
   ok(J(v.meta) === J([{ kind: 'notice', text: '«notice»' }, { kind: 'age', text: 'ago(100)' }, { kind: 'expires', text: 'exp(5000)' }, { kind: 'origin', text: '«Login expiry»' }]) && v.urgency === '', 'its meta: notice · age · expires · the producer', v.meta);
   const card = it({ action: { type: 'helper-ask', requestId: 'r1' } });
   const vc = L.itemView(card, ctx(card));
-  ok(!vc.reply.show && vc.reply.why === U.replyButtonState(card, chat).why && /helper/.test(vc.reply.why), 'a helper\'s ask (card_item) ⇒ no box, and the pane SAYS where it is answered', vc.reply);
+  ok(!vc.reply.show && vc.reply.why === U.replyButtonState(card, chat).why && /conversation’s card/.test(vc.reply.why) && vc.reply.code === 'card_item', 'a helper\'s ask (card_item) ⇒ no box, the pane SAYS where it is answered, and the view keeps the CODE (the parked ask\'s door is drawn off it — lane ui-needs-a-button)', vc.reply);
   const job = it({ jobId: 'job-1' });
   ok(/job panel/.test(L.itemView(job, ctx(job)).reply.why) && !L.itemView(job, ctx(job)).reply.show, 'a Background Work item ⇒ no box, "answer it in the job panel"');
 }

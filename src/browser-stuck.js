@@ -699,7 +699,7 @@ function loopWords(l, tIn) {
     chip: period ? t('page refreshes itself every {s} s', { s: period }) : t('page keeps reloading'),
     line: period ? t('The page refreshes itself every {s} s ({url}) — it can be read between reloads', { s: period, url: urls[0] || '' }) : urls.length === 1 && !(Number(l.more) > 0) ? t('The page keeps reloading {url} — its stored login may be stale', { url: urls[0] }) : t('The page keeps bouncing between {urls} — its stored login may be stale', { urls: urls.join(' ↔ ') + (Number(l.more) > 0 ? ` (+${Number(l.more)})` : '') }),
     title: t('Navigation loop'),
-    hint: t('The agent is told, with the ways out: stop the page, close the tab, or clear the site\'s stored login'),
+    hint: t('The agent is told — it may propose clearing the site’s stored login, which you approve'), // lane ui-needs-a-button: the banner's own doors (Stop loading / Close this tab) are on its line
     urls,
     hops: t('{n} loads in {s} s', { n: Number(l.hops) || 0, s: Math.max(1, Math.round((Number(l.sinceMs) || 0) / 1000)) }),
   };

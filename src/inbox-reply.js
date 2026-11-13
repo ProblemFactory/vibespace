@@ -36,10 +36,11 @@ const OPTION_MAX_CHARS = 40;     // chars per option label
 // answer surface is Manage Agents or the job panel, never a conversation.
 const SERVER_KEYS = ['accounts', 'jobs'];
 
+const i18nKey = (s) => s; // an English KEY the client renders with t() (lane ui-needs-a-button: the census reads it)
 const REPLY_WHY = Object.freeze({
   no_session: 'Not from an agent session — nothing to reply to',
   job_item: 'Background Work item — answer it in the job panel',
-  card_item: 'Answer it on the helper’s card — click the item to go there',
+  card_item: i18nKey('Answered on the conversation’s card — open the conversation to answer it'), // lane ui-needs-a-button: the door on its line (the For-you window)
   exit_ask: 'Answer it with Allow or Deny — a typed reply does not answer it',
   no_live_session: 'This conversation has ended — sending reopens it with this reply as its first message', // the send REOPENS it (REOPEN_CODES)
   not_chat: 'Terminal session — reply in its window',

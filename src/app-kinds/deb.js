@@ -16,7 +16,9 @@ async function planner(c) {
   } else {
     file = String(p.debPath || '');
     if (!path.isAbsolute(file) || !/\.deb$/.test(file)) return ret({ ok: false, code: 'bad_name', error: 'name a .deb file by its absolute path on this machine', kind });
-    try { st = await fsp.stat(file); } catch (e) { return ret({ ok: false, code: 'not_found', error: `${file} cannot be read on this machine (${e.code === 'ENOENT' ? 'no such file' : e.message})`, kind }); }
+    // lane ui-needs-a-button (desktop-apps-27): a FILE that is not there (or cannot be read) is its own code — `not_found` is a PACKAGE
+    // missing from the machine's sources, and its words and its hand-off to an agent told the owner the wrong story
+    try { st = await fsp.stat(file); } catch (e) { return ret({ ok: false, code: e.code === 'ENOENT' ? 'file_missing' : 'file_unreadable', error: `${file} cannot be read on this machine (${e.code === 'ENOENT' ? 'no such file' : e.message})`, path: file, kind }); }
     if (!st.isFile() || st.size > DEB_MAX) return ret({ ok: false, code: 'bad_name', error: `${file} is not a regular file under ${A.fmtBytes(DEB_MAX)}`, kind });
     staged = await stage(Buffer.alloc(0), 'deb');
     try { ({ sha256 } = await readHashed(file, staged, DEB_MAX)); } catch (e) { await fsp.rm(staged, { force: true }); return ret({ ok: false, code: 'bad_name', error: e.code === 'bad_name' ? e.message : `${file} cannot be read on this machine (${e.message})`, kind }); }

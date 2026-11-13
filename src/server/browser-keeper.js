@@ -3995,6 +3995,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (target.kind === 'human') {
       const h = humanByKey(target.key);
       if (!h) throw namedError('not_browsing', 'you are not browsing this browser any more');
+      if (act === 'stop') throw namedError('bad-request', 'a stop is a conversation view\'s door (lane ui-needs-a-button: the loop banner)');
       if (act === 'switch') { const r = await navigateHuman(h.key, { tab: id }); return { ok: true, act, targetId: id, switchedTo: id, ...(r.adopted ? { adopted: true } : {}) }; }
       return closeHumanTab(h, id);
     }
@@ -4029,11 +4030,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       owner = TBS.ownerWord(owners.get(id), { me: bk, humanKey: h ? h.key : null });
       const listed = new Set(rows.map((x) => String(x.targetId).toUpperCase()));
       counts = { agent: [...(TBS.ownSetOf(owners, bk) || [])].filter((x) => listed.has(x)).length, you: h ? [...(TBS.ownSetOf(owners, h.key) || [])].filter((x) => listed.has(x)).length : 0 };
-      if (owner === 'you' && h) {
+      if (owner === 'you' && h && act !== 'stop') {   // a stop is judged below (it never closes a tab)
         const v = TBS.userTabVerdict({ act, owner, human: false, counts });
         if (!v.ok) refuse(v, 'his own tab from a conversation\'s view');
         return closeHumanTab(h, id);
       }
+    }
+    // lane ui-needs-a-button (主开发 Q2 — the loop banner's «Stop loading»): THE PERSON'S STOP — Page.stopLoading on that one tab
+    // (server-side CDP; the endpoint never leaves); nothing else changes. RECORDED: on the takeover's cycle while this viewer drives
+    // (said to the agent at the handback) and in the journal by name; an exec that fails takes its record back
+    if (act === 'stop') {
+      const vs = TBS.userTabVerdict({ act, owner, human: false, driving, mediated: false, counts });
+      if (!vs.ok) refuse(vs, `${owner}, a stop`);
+      const row0 = tabRowOf(rows, id);
+      const rec = driving ? noteUserTabAct(bk, profileId, { kind: 'tab-stop', title: row0 && row0.title, url: row0 && row0.url }) : null;
+      const VP = require('./browser-viewport.js');
+      const rs = await withCdpUrl(target, (url) => VP.stopLoadingOf(url, id));
+      if (!rs || !rs.ok) { unnoteUserTabAct(bk, profileId, rec, (rs && rs.error) || 'no answer'); throw namedError('stop_failed', TBS.tabRefusalText('stop_failed')); }
+      log.log?.(`[browser] ${eph ? `${bk} (its own browser)` : `${bk} on ${p.id}`}: viewer ${viewerId}'s stop on ${id.slice(0, 8)} (${owner}'s tab) — the page stopped loading, nothing else changed${rec ? ' (said to the agent at the handback)' : ''}`);
+      return { ok: true, act, targetId: id, stopped: true };
     }
     const row = tabRowOf(rows, id);
     const active = (rows.find((x) => x.active) || {}).targetId || null;

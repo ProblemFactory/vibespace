@@ -276,6 +276,17 @@ app.post('/api/hosts', async (req, res) => {
     res.status(400).json({ error: e.message, code: e.code });
   }
 });
+// lane ui-needs-a-button (主开发 Q2, machines-1): THE PUBLIC KEY a person adds to an ssh machine that refused it — a READ (no key is made),
+// the public half only, and the PERSON's door: a bearer of any kind is refused by name (an agent's session token, a job token, an
+// automation key — the cookie gate does not run when sign-in is off)
+const BEARER_KIND = [[/^vsst_/, 'an agent\'s session token'], [/^jbt_/, 'a job token'], [/^(ak-|vsak_)/, 'an automation key']];
+app.get('/api/hosts/:id/public-key', async (req, res) => {
+  const auth = String((req.headers && req.headers.authorization) || '');
+  const tok = /^Bearer\s+(\S+)/i.exec(auth)?.[1] || (req.query && (req.query.token || req.query.vsst)) || '';
+  if (tok) { const k = (BEARER_KIND.find(([re]) => re.test(String(tok))) || [null, 'a token'])[1]; return res.status(403).json({ error: `a machine's public key is shown to the person signed in — ${k} may not read it`, code: 'person_only' }); }
+  try { const r = await hosts.publicKeyOf(req.params.id); res.status(r.ok ? 200 : 404).json(r.ok ? { ok: true, keys: r.keys } : { ok: false, code: r.code }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/hosts/key', async (req, res) => {
   try { res.json({ success: true, key: await hosts.generateKey() }); }
   catch (e) { res.status(400).json({ error: e.message }); }

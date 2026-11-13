@@ -513,8 +513,8 @@ shows option 1 (its relay page is its own, above).
 
 - Create a custom app in the Lark / Feishu Developer Console (Lark = open.larksuite.com, 飞书 = open.feishu.cn), with the scopes im:message and im:message.send_as_user and a published version.
 - Register the ones you use, each exactly as written, under Developer Console → your app → Security Settings → Redirect URLs (<https://open.larksuite.com/app>, <https://open.feishu.cn/app>):
-  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
-  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — one page for Lark, Slack and Google; free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
   - `https://<host>/api/channels/oauth/cb/lark` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
   - `http://127.0.0.1:17865/lark/cb` — This machine: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
 - The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
@@ -526,8 +526,8 @@ shows option 1 (its relay page is its own, above).
 - Create a **Web application** client when this VibeSpace has an https address or uses a relay page (both are https addresses, which a Desktop client can never take); a **Desktop app** client only when the browser runs on the VibeSpace machine itself and no relay page is used — it takes any 127.0.0.1 port, nothing to register.
 - Say which kind it is: a company client with `"clientType": "web"` or `"desktop"` in its gdrive-clients.json entry, a person’s own client with the account’s OAuth client type. A Web client signs in on this machine at the fixed address below; a Desktop client never rides a relay page.
 - Register the ones you use, each exactly as written, under Google Cloud console → APIs & Services → Credentials → OAuth 2.0 Client IDs → your client → Authorized redirect URIs (<https://console.cloud.google.com/apis/credentials>):
-  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
-  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — one page for Lark, Slack and Google; free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
   - `https://<host>/api/channels/oauth/cb/gmail` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
   - `http://127.0.0.1:17866/gmail/cb` — This machine, with a Web application client: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
   - `http://127.0.0.1:53682/` — A Google Drive folder (storage) signs in with the same client at this address.
@@ -539,8 +539,8 @@ shows option 1 (its relay page is its own, above).
 
 - Create a Slack app at api.slack.com/apps (a workspace app: its Client ID and Secret let every member just press Allow) — or let each person make their own app with a one-time setup token, which needs no address at all.
 - Register the ones you use, each exactly as written, under api.slack.com/apps → your app → OAuth & Permissions → Redirect URLs (<https://api.slack.com/apps>):
-  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
-  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — one page for Lark, Slack and Google; free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
   - `https://<host>/api/channels/oauth/cb/slack` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
 - The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
 - If Slack says “redirect_uri did not match any configured URIs”, the address it was sent is not on that list: add it there (for a company app, your admin does).

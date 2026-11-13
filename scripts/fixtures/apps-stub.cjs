@@ -44,7 +44,7 @@ function create({ access = null, log = console, delayMs = 400 } = {}) {
       return { ok: true, canRun: true, code: null, kind, mode: 'remove', entryId: e.id, packages: e.packages, removes: e.packages, closure: [], closureKey: e.packages.join(' '), source: 'apt', label: e.id, nonce, commands: A.appCommands({ mode: 'remove', packages: e.packages }), argv: ['true'] };
     }
     if (kind === 'refresh' || kind === 'replay') return { ok: true, canRun: true, code: null, kind, mode: kind === 'replay' ? 'replay' : 'refresh', entryId: kind, packages: [], closure: [], closureKey: kind, source: 'apt', label: kind, nonce, commands: A.appCommands({ mode: 'refresh', packages: manifest.entries.flatMap((e) => e.packages) }), argv: ['true'] };
-    if (kind === 'deb') return { ok: false, code: 'not_found', error: `${rq.debPath} cannot be read on this machine (no such file)`, kind, nonce };
+    if (kind === 'deb') return { ok: false, code: 'file_missing', error: `${rq.debPath} cannot be read on this machine (no such file)`, path: rq.debPath, kind, nonce };
     return { ok: false, code: 'bad-request', error: `the stub does not plan ${kind}`, kind, nonce };
   }
   async function call(host, op, params = {}) {

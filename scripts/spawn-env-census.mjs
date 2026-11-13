@@ -316,7 +316,7 @@ export const ROWS = Object.freeze([
   ['src/device-mount.js', "'fusermount'", 'probe', 1, PROBE + ' (unmount — the ladder\'s second rung: fusermount where fusermount3 is not on PATH)'],
   ['src/device-mount.js', "'sh'", 'probe', 1, PROBE + ' (the page-warm reads)'],
   ['src/device-mount.js', "'ls'", 'probe', 1, PROBE + ' (the mount liveness read)'],
-  ['src/hosts.js', "'ssh-keygen'", 'probe', 1, PROBE + " (the hub's own key, once)"],
+  ['src/hosts.js', "'ssh-keygen'", 'probe', 2, PROBE + " (the hub's own key, once; and a machine key's PUBLIC half derived on a person's read — ui-needs-a-button publicKeyOf)"],
   ['src/incident.js', 'cmd', 'probe', 1, PROBE + ' (the incident capture helpers, 8 s)'],
   ['src/installed-apps.js', 'argv[0]', 'default', 1, "listInstalled's default; agentd hands spawnEnv() (daemonEnv), the hub its display env"],
   ['src/machine-mounts.js', "'sh'", 'probe', 1, PROBE + ' (a mount path check, 6 s)'],

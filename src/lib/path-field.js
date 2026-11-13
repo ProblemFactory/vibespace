@@ -418,7 +418,10 @@ export function pathField(input, opts = {}) {
       if (x.file && kind === 'folder') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} is a file — this needs a folder.', { path: x.path }))}</span></div>`;
       else if (createMode === 'never') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} does not exist.', { path: x.path }))}</span></div>`;
       else h += `<div class="pf-new${st.flash ? ' appear' : ''}"><div class="pf-q"><b>${escHtml(t('Does not exist — create it?'))}</b><code>${escHtml(x.path)}</code>${fromHTML()}${x.base && x.base !== 'home' && x.base !== 'abs' ? `<span class="pf-meta">(${escHtml(t('relative to {base}', { base: x.base }))})</span>` : ''}</div>`
-        + (x.parentOk ? `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || t('Create this folder'))}</label>` : `<span class="pf-bad">${escHtml(t('The folder above, {parent}, does not exist either — pick another, or press the folder button.', { parent: x.parent || '' }))}</span>`) + '</div>';
+        // lane ui-needs-a-button (the owner's walk, sidebar-sessions-4): «create it?» ALWAYS has its door on the line — a missing
+        // parent too (the create at use is mkdir -p: /api/mkdir makes the folders above); the words say what it will make
+        + (x.parentOk ? '' : `<span class="pf-meta pf-parents">${escHtml(t('The folder above, {parent}, does not exist either.', { parent: x.parent || '' }))}</span>`)
+        + `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || (x.parentOk ? t('Create this folder') : t('Create this folder and the missing folders above it')))}</label>` + '</div>';
     } else if (!st.err && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
     } else if (!st.err && st.answered) {
@@ -545,7 +548,6 @@ export function pathField(input, opts = {}) {
     } else if (x.missing) {
       if (x.file && kind === 'folder') st.err = t('{path} is a file — this needs a folder.', { path: x.path });
       else if (createMode === 'never') st.err = t('{path} does not exist.', { path: x.path });
-      else if (!x.parentOk) st.err = t('{path} does not exist, nor the folder above — pick another.', { path: x.path });
       else if (!st.tick) { st.err = t('{path} does not exist — tick «{create}» and leave the field, or pick another.', { path: x.path, create: o.createWhen || t('Create this folder') }); st.flash = true; }
       else info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     } else {

@@ -13,7 +13,8 @@ import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf }
 import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
-import { UI_ICONS } from './icons.js'; // lane host-stale-dialer: the second-dialer line's warning glyph
+import { UI_ICONS } from './icons.js';
+import { needLine } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
@@ -1172,12 +1173,38 @@ export function installSidebarMounts(Sidebar) {
       // no visible reason — the error lived only in the dot's hover tooltip,
       // invisible on touch and undiscoverable on a 6px target). Same errline
       // pattern as storage rows; full text in title.
-      if (face && face.errline) {
-        const err = document.createElement('div');
-        err.className = 'mounts-errline';
-        err.textContent = face.errline.text;
-        err.title = face.errline.title;
+      if (!isDial && st && !st.ok) {
+        // lane ui-needs-a-button (machines-1): the reason in the reader's language and its doors ON THE LINE — the public key to add
+        // (a READ: GET /api/hosts/:id/public-key, never a new key) and a retry; the system's own text in a fold
+        const raw = String(st.error || 'unreachable');
+        const target = `${h.user ? h.user + '@' : ''}${h.host || h.name || ''}`;
+        const refused = /Permission denied|publickey|Authentication failed|too many authentication/i.test(raw);
+        const words = refused ? tr('Can’t sign in to {target}: it refused the key.', { target })
+          : /Connection refused/i.test(raw) ? tr('Can’t reach {target}: the connection was refused.', { target })
+            : /timed out|timeout/i.test(raw) ? tr('Can’t reach {target}: no answer.', { target })
+              : /Could not resolve|Name or service not known|nodename nor servname/i.test(raw) ? tr('Can’t reach {target}: its name was not found.', { target })
+                : /HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(raw) ? tr('Can’t reach {target}: its host key changed.', { target })
+                  : tr('Can’t reach {target}.', { target });
+        const doors = [];
+        if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: async () => {
+          const r = await api(`/api/hosts/${h.id}/public-key`).catch(() => null);
+          const k = r && r.ok && r.keys && r.keys[0] && r.keys[0].publicKey;
+          if (!k) { showToast(tr('No key of this machine to show'), { type: 'error' }); return; }
+          const okc = await copyText(k);
+          showToast(okc === false ? tr('Could not copy — select the commands and copy them') : tr('Copied — add it to ~/.ssh/authorized_keys of {target}', { target }), okc === false ? { type: 'error' } : { duration: 6000 });
+        } });
+        doors.push({ label: tr('Try again'), kind: refused ? 'secondary' : 'primary', door: 'retest', run: async () => {
+          this._hostStatus = this._hostStatus || {};
+          try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch (e) { this._hostStatus[h.id] = { ok: false, error: String((e && e.message) || e) }; }
+          this._renderMounts();
+        } });
+        const err = needLine({ words, doors, tone: 'fail', cls: 'mounts-errline' });
+        err.title = raw;
         row.appendChild(err);
+        const more = document.createElement('details'); more.className = 'mounts-errline-details';
+        const sm = document.createElement('summary'); sm.textContent = tr('Details');
+        const pre = document.createElement('pre'); pre.textContent = raw.slice(0, 2000);
+        more.append(sm, pre); row.appendChild(more);
       }
       return row;
     },

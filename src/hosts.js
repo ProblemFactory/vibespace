@@ -1567,6 +1567,27 @@ class HostManager {
     return { ...v };
   }
 
+  /** lane ui-needs-a-button (主开发 Q2, machines-1): THE PUBLIC HALF of the key an EXISTING ssh machine signs in with — read, never made:
+   *  its own key file's `.pub`, else derived on THIS server (`ssh-keygen -y`); a machine on the default identities shows the hub user's
+   *  ~/.ssh/*.pub. Never the private key's bytes, anywhere. → {ok, keys: [{publicKey, source}]} | {ok:false, code} */
+  async publicKeyOf(id) {
+    const h = this.get(id);
+    if (!h || h.transport === 'dial') return { ok: false, code: 'not_ssh' };
+    // read OFF the loop: a key path is the person's to choose (it may sit on a mount — test-sync-fs-census keeps the main thread out of it)
+    const pubOf = async (file) => { try { const s = (await fs.promises.readFile(file, 'utf-8')).trim(); return /^(ssh-|ecdsa-|sk-)/.test(s) ? s.split('\n')[0] : null; } catch { return null; } };
+    if (h.keyPath) {
+      const direct = await pubOf(h.keyPath + '.pub');
+      if (direct) return { ok: true, keys: [{ publicKey: direct, source: 'file' }] };
+      const derived = await new Promise((resolve) => {
+        execFile('ssh-keygen', ['-y', '-P', '', '-f', h.keyPath], { timeout: 5000 }, (err, out) => resolve(err ? null : String(out || '').trim().split('\n')[0] || null));
+      });
+      return derived && /^(ssh-|ecdsa-|sk-)/.test(derived) ? { ok: true, keys: [{ publicKey: derived, source: 'derived' }] } : { ok: false, code: 'no_key' };
+    }
+    const home = require('os').homedir();
+    const keys = (await Promise.all(['id_ed25519', 'id_ecdsa', 'id_rsa'].map((n) => pubOf(path.join(home, '.ssh', n + '.pub'))))).filter(Boolean).map((k) => ({ publicKey: k, source: 'default' }));
+    return keys.length ? { ok: true, keys } : { ok: false, code: 'no_key' };
+  }
+
   generateKey() {
     this._key = null;   // B-48a4: a fresh read before making one (a key made outside this process since: never overwritten — ssh-keygen would ask)
     if (this.keyInfo().exists) return this.keyInfo();

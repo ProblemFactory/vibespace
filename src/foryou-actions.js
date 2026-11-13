@@ -97,8 +97,8 @@ const KINDS = Object.freeze(['approval', 'question', 'secret', 'browser', 'check
 const C = (bin, verb, line) => Object.freeze({ bin, verb, line });
 const ROWS = Object.freeze([
   // ── an agent's held tool call / its own asks ──
-  { type: 'main-ask', identity: 'requestId', producer: 'src/server/main-asks.js', builtIn: 'src/main-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the conversation\'s own permission / question card (lane parked-ask-inbox) — src/lib/chat-renderers.js', on: 'the permission card in this conversation', scope: 'conversation' },
-  { type: 'helper-ask', identity: null, producer: 'src/server/helper-asks.js', builtIn: 'src/helper-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the helper\'s permission card on its Agent card (lane S1) — src/lib/chat-renderers.js', on: 'the helper\'s permission card in this conversation', scope: 'conversation' },
+  { type: 'main-ask', identity: 'requestId', producer: 'src/server/main-asks.js', builtIn: 'src/main-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the conversation\'s own permission / question card (lane parked-ask-inbox) — src/lib/chat-renderers.js', on: 'the permission card in this conversation', scope: 'conversation', closer: 'hide' },
+  { type: 'helper-ask', identity: null, producer: 'src/server/helper-asks.js', builtIn: 'src/helper-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the helper\'s permission card on its Agent card (lane S1) — src/lib/chat-renderers.js', on: 'the helper\'s permission card in this conversation', scope: 'conversation', closer: 'hide' },
   { type: 'browser-grant', identity: 'profileId', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-grant.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--grant browser:<profile>', 'filed'), scope: 'conversation' },
   // lane setting-doors pick 2: an ask that PROPOSES one change of one row — the owner's one press writes it (src/server/setting-holds.js)
   { type: 'setting-change', identity: 'key', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-setting.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--propose <row>=<value> [--until …]', 'filed'), scope: 'conversation' },
@@ -189,6 +189,11 @@ const ROWS = Object.freeze([
 ].map((r) => Object.freeze(r)));
 const ANSWERS = Object.freeze(['card', 'buttons', 'reply']);
 const CARDS = Object.freeze(['row', 'inbox-window', 'none']);
+/** lane ui-needs-a-button (主开发 Q4): a PARKED ASK — the conversation waits on its own card (main-ask / helper-ask). It is a pointer
+ *  (`closer: 'hide'`): its door opens the conversation, and its one closer says what stays true («Stop reminding (the conversation
+ *  stays paused)» — never «Mark done», which decided nothing and left the conversation paused). */
+const PARKED_ASK_TYPES = Object.freeze(['main-ask', 'helper-ask']);
+const isParkedAsk = (item) => !!(item && item.action && PARKED_ASK_TYPES.includes(item.action.type));
 const CLOSERS = Object.freeze(['hide']);   // a row's `closer` (absent = the generic ✓ / ✕ / ↺)
 const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
 // THE «CHECK AGAIN» VERBS (lane cli-self-measure): every row that declares `checkAgain` (its hover) is ONE button the For-you
@@ -1219,4 +1224,4 @@ function headWordOf(name, t) { return typeof name === 'string' && Object.prototy
 
 module.exports = {
   arrivalWords,
-  FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

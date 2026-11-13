@@ -97,6 +97,7 @@ import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; //
 import { splitWords, joinWords, commandLine } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
 import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
+import { needLine } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 import { enterSubmits } from './chat-enter-keys.js';
 import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where a refusal says the machine's agent is too old
@@ -181,7 +182,7 @@ export function registryReasonShort(row) {
 }
 /** Design 009 §B5: the plan refusals that end in a hand-off to an agent (the thing is not in this machine's package
  *  sources, or only as a format that does not run here). */
-export const HAND_OFF_CODES = Object.freeze(['needs_snap', 'not_found', 'conflict', 'removes']);
+export const HAND_OFF_CODES = Object.freeze(['needs_snap', 'not_found', 'conflict', 'removes']);   // never file_missing: a missing FILE is re-picked, not searched for (ui-needs-a-button)
 
 /** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
  *  prints it and every browser card carries it in its tooltip (a function: `t` must run after the language loads). */
@@ -691,6 +692,13 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
     note.classList.add('is-bad');
     agentDoor(plan.code);
     if (isApp) handOff(plan.code, (r.request || request || {}).packages);
+    // lane ui-needs-a-button (desktop-apps-27): a .deb file that is not there — its words name the file, and its door is on the line:
+    // «Choose another file…» reopens the path form with the path kept (the form was closed to show this dialog)
+    const debPath = isApp ? String((r.request || request || {}).debPath || '') : '';   // only a .deb request carries a path
+    if (debPath && (plan.code === 'file_missing' || plan.code === 'file_unreadable') && launcherApp) {
+      note.classList.remove('is-bad');
+      note.replaceChildren(needLine({ words: appRefusalText(plan.code, { machine: name, path: debPath }), tone: 'fail', doors: [{ label: t('Choose another file…'), kind: 'primary', door: 'deb-repick', run: () => { iclose(); openDebInstall(launcherApp, m, { path: debPath, onDone }); } }] }));
+    }
     return;
   }
   if (isApp) {

@@ -233,6 +233,7 @@
   "/api/hosts/:id/exit-access",
   "/api/hosts/:id/exit-runs",
   "/api/hosts/:id/ports",
+  "/api/hosts/:id/public-key",
   "/api/hosts/:id/recent-cwds",
   "/api/hosts/:id/sessions",
   "/api/hosts/bootstrap-steps",

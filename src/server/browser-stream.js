@@ -102,7 +102,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule every *-stream.js bridge arms
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
-const { pressBearer, pressOf, pageOfUpgrade, pageVerdict, ownOriginOf } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
+const { pressBearer, pressOf, pageOfUpgrade, pageVerdict, ownOriginOf, isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
 const FIT = require('../browser-fit.js');
 const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
 const WIN = require('../browser-windows.js'); // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
@@ -1623,6 +1623,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     if (v.kind === 'ack') return;
     if (v.kind === 'ping') { send(viewer.ws, { type: 'pong', at: now() }); return; }
+    // lane ui-needs-a-button (主开发 Q2): a STOP is the PERSON's press — never a view a bearer opened (an agent's, a job's, an automation
+    // key's), and only from the page the handshake proved (write-origin pressOf); refused by name
+    if (v.kind === 'tab-act' && !v.refusal && v.act === 'stop' && (viewer.bearer || !isPress(pressOf(viewer.page, 'WS /api/browser/stream tab-act stop')))) { send(viewer.ws, { type: 'tab-ack', ok: false, rid: v.rid, act: 'stop', targetId: v.targetId, code: viewer.bearer ? 'agent_forbidden' : 'not_a_press', error: viewer.bearer ? 'stopping a page is the user\'s press — a view opened with a bearer token (an agent\'s session token, a job token or an automation key) cannot make it' : 'stopping a page is the user\'s press from this instance\'s own page' }); return; }
     if (v.kind === 'tab-act') { if (v.refusal) send(viewer.ws, v.refusal); else tabActFor(relay, viewer, v); return; } // lane browser-resume C: the tab row's switch / ✕
     if (v.kind === 'watch-tab') { viewerWatch(relay, viewer, v.targetId); return; } // lane browser-windows (U3): a watching viewer's chip moves ITS view
     if (v.kind === 'input') {

@@ -34,7 +34,8 @@ import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store 
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW, isParkedAsk } from '../foryou-actions.js';
+import { needLine } from './need-line.js'; // lane ui-needs-a-button: a sentence that says something is needed carries its door on its line // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { replyPictures, backendOfKey } from './reply-pictures.js'; // B-51dd: a reply takes a picture (button · paste · drop) through THE picture door
@@ -345,7 +346,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     reply: () => actBtn('reply', UI_ICONS.send, t('Reply'), t('Send reply (Enter) · newline (Shift+Enter)'), 'iw-act-primary'),
     done: () => actBtn('done', UI_ICONS.check, t('Mark done'), t('Handled — mark done'), 'iw-act-done'),
     dismiss: () => actBtn('dismiss', UI_ICONS.close, tc('inbox', 'Dismiss'), t('Dismiss (not going to act on this)'), 'iw-act-dismiss'),
-    hide: () => actBtn('hide', UI_ICONS.close, t('Hide'), t('Hide — decides nothing; what it points at stays open in the conversation'), 'iw-act-dismiss'), // lane wake-approve-card r3: a pointer's one closer
+    hide: (it) => actBtn('hide', UI_ICONS.close, isParkedAsk(it) ? t('Stop reminding (the conversation stays paused)') : t('Hide'), t('Hide — decides nothing; what it points at stays open in the conversation'), 'iw-act-dismiss'), // lane wake-approve-card r3: a pointer's one closer
     reopen: () => actBtn('reopen', UI_ICONS.refresh, t('Reopen'), t('Reopen')),
     copy: () => actBtn('copy', UI_ICONS.copy, t('Copy'), t('Copy the whole item')),
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
@@ -429,7 +430,15 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const box = model.replyBox(it);
     c.ta.disabled = false;
     const whyTxt = v.reply.show && box.note ? t(box.note.key, { why: box.note.why || '' }) : v.reply.why ? t(v.reply.why) : '';
-    if (c.why.textContent !== whyTxt) c.why.textContent = whyTxt;
+    // lane ui-needs-a-button (for-you-2): a PARKED ASK's note carries its door — «Open the conversation and answer» (model.jump, the ONE
+    // «go there»), never «click the item» in words
+    const parked = !v.reply.show && v.reply.code === 'card_item';
+    const whySig = whyTxt + (parked ? '\u0000door' : '');
+    if (c.why.dataset.need !== whySig) {
+      c.why.dataset.need = whySig;
+      if (parked) c.why.replaceChildren(needLine({ words: whyTxt, doors: [{ label: t('Open the conversation and answer'), kind: 'primary', door: 'jump', run: () => model.jump(it.sessionKey, it) }] }));
+      else c.why.textContent = whyTxt;
+    }
     c.why.style.display = whyTxt ? '' : 'none';
     c.why.dataset.reopen = box.reopen ? '1' : '';
     // only the option BUTTONS — the row also holds its «Reply:» label (pick 0), which is no option and takes no reply's tip

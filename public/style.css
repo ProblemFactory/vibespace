@@ -4630,6 +4630,19 @@ label.cfg-row {
 .mounts-btn:disabled { opacity: 0.45; cursor: default; }
 .mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .mounts-btn-danger { border-color: color-mix(in srgb, var(--red, #e55) 45%, transparent); color: var(--red, #e55); }
+/* THE NEED LINE (lane ui-needs-a-button, src/lib/need-line.js): a sentence that says something is needed / failed / off and the
+   button that does it on ONE line — the buttons wrap under the words on a narrow screen, the words are never cut */
+.need-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.need-line > .need-words { flex: 1 1 14em; min-width: 0; overflow-wrap: anywhere; }
+.need-line > .need-doors { display: inline-flex; flex-wrap: wrap; gap: 6px; flex: 0 1 auto; }
+.need-line > .need-doors > .need-door { padding: 3px 10px; font-size: 12px; line-height: 1.35; border-radius: var(--radius-sm); }
+.need-line[data-tone="fail"] > .need-words { color: var(--red, #e55); }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .need-door { min-height: 36px; } } /* a finger's target (every phone target ≥ 36 px) */
+/* ui-needs-a-button: move mode says what it is and how it ends */
+.move-mode-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100000; pointer-events: none; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-dialog); color: var(--text); border: 1px solid var(--accent); font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
+.mounts-errline-details { margin: 2px 0 0; font-size: 11px; color: var(--text-dim); }
+.mounts-errline-details > summary { cursor: pointer; }
+.mounts-errline-details > pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0 0; }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
 .mounts-row-clickable { cursor: pointer; }
 .mounts-row-clickable:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }

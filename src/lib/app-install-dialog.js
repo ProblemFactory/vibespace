@@ -29,9 +29,12 @@ const btn = (label, cls = 'file-tool-btn', title = '') => { const b = el('button
 const q = (o) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
 
 /** A refusal code → the user's words (a plan the machine refused, a run that could not start). '' = none of ours. */
-export function appRefusalText(code) {
+export function appRefusalText(code, f = {}) {
   switch (code) {
     case 'bad_search': return t('Search with plain words (letters, digits, + . -) or an app’s name.'); // lane ui-language (the walk's desktop-apps-24): the server's English stood under the box
+    // lane ui-needs-a-button (desktop-apps-27): a .deb FILE that is not there / cannot be read — its own words (the path), never «no such package»
+    case 'file_missing': return t('This file is not on {machine}: {path}', { machine: f.machine || '', path: f.path || '' });
+    case 'file_unreadable': return t('This file cannot be read on {machine}: {path}', { machine: f.machine || '', path: f.path || '' });
     case 'needs_snap': return t('This package only points to a kind of app that does not run here.'); // design 009 §B5: one sentence; the way out is a button
     case 'conflict': return t('It cannot be installed together with what is already on this machine.');
     case 'removes': return t('Installing it would remove other packages — VibeSpace never removes a package to install another.');

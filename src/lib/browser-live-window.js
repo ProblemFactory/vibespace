@@ -586,7 +586,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: deskDoorStuck({ passkey: pkFactNow(), stuck: stuckNow() }), human: !!H }); } catch { ds = null; } const was = deskDoor.dataset.ds || ''; deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; if ((ds || '') !== was) queueMicrotask(() => { if (!st.closed) renderDialog(); }); };
   // lane site-reset (2026-09-30): A NAVIGATION LOOP (the browser fact's `stuck.state === 'loop'`) — the cycle's addresses,
   // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
-  const loopBanner = createLoopBanner(document);
+  // lane ui-needs-a-button (browser-live-1): the banner's ways out are DOORS — a stop of the looping tab (the person's tab act, any
+  // conversation's view) and a close (only where a close is the person's: while driving, or the person's own window)
+  const loopTabRow = () => (st.tabRow && st.tabRow.rows || []).find((x) => x.active) || null;
+  const loopBanner = createLoopBanner(document, { stop: () => { const r = loopTabRow(); if (r) tabAct('stop', r); }, close: () => { const r = loopTabRow(); if (r) tabAct('close', r); } });
   const loopBar = loopBanner.el;
   // lane site-reset step 3: ONE line when the user's Approve cleared a site's stored login in THIS profile (every holder's
   // view — the user's own browsing tab included — says it once; a click hides it)
@@ -1140,7 +1143,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   }
   // ── lane browser-stuck: the dialog card + the unresponsive banner ──
   /** lane site-reset: the loop banner — the same elements, their words rewritten only where they changed. */
-  const renderLoop = (loop) => loopBanner.render(loop, t);
+  const renderLoop = (loop) => loopBanner.render(loop, t, { stop: !H && !!loopTabRow(), close: !!loopTabRow() && (!!H || (st.mode === 'takeover' && st.mine)) });
   const renderDialog = () => {
     renderDeskDoor(); // lane desktop-x-seat-browser: the raw fallback's door follows the same fact
     const d = st.dialog;
@@ -1617,9 +1620,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (key) st.tabActs.delete(key);
     const act = (pend && pend.act) || m.act;
     if (!m.ok) {
-      const why = ['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs'].includes(m.code) ? tabRefusalText(m.code, {}, t) : String(m.error || m.code || t('server unreachable'));
+      const why = ['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs', 'stop_failed'].includes(m.code) ? tabRefusalText(m.code, {}, t) : String(m.error || m.code || t('server unreachable'));
       st.tabError = { act, code: m.code || null, why, at: Date.now() };
-      showToast(act === 'close' ? t('Could not close the tab: {why}', { why }) : t('Could not switch tabs: {why}', { why }), { type: 'error' });
+      showToast(act === 'stop' ? t('Could not stop the page: {why}', { why }) : act === 'close' ? t('Could not close the tab: {why}', { why }) : t('Could not switch tabs: {why}', { why }), { type: 'error' });
+    } else if (act === 'stop') { showToast(t('Stopped loading “{title}”', { title: (pend && pend.title) || '' }), { duration: 3000 });
     } else if (act === 'close' && pend && pend.owner === 'agent') showToast(t('Closed “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
     // lane browser-windows (U0b): a chip click that RAN is said (userW's clicks changed nothing visible and said nothing)
     else if (act === 'switch' && m.broughtForward) showToast(t('Brought “{title}” to the front of its window', { title: (pend && pend.title) || '' }), { duration: 3000 });

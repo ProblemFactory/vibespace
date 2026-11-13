@@ -212,7 +212,7 @@ export function itemView(item, ctx = {}) {
   const cardOpen = !!(card && card.state === 'done' && card.result && Array.isArray(card.result.rows) && card.result.rows.some((r) => r && r.id));
   const reply = card && !ctx.replyOpen ? { show: false, enabled: false, why: '' } : resolved ? { show: false, enabled: false, why: '' }
     : rs.show ? { show: true, enabled: !!rs.enabled, why: rs.enabled ? '' : String(rs.why || '') }
-    : { show: false, enabled: false, why: rs.code && rs.code !== 'no_session' ? String(rs.why || '') : '' };
+    : { show: false, enabled: false, why: rs.code && rs.code !== 'no_session' ? String(rs.why || '') : '', code: rs.code ? String(rs.code) : '' }; // lane ui-needs-a-button: the code rides (a parked ask's door is drawn off card_item)
   const optList = Array.isArray(ctx.options) ? ctx.options : Array.isArray(i.options) ? i.options : []; // lane foryou-honest: ctx.options = the model's (explicit, else the detail's parsed — PURE src/ask-options.js)
   const options = !resolved && reply.show ? optList.map((label, idx) => ({ idx, label: String(label) })) : [];
   const producer = !resolved && i.action && i.action.type === 'reset-credit' && i.action.accountKey

@@ -1767,6 +1767,8 @@ class WindowManager {
     this.focusWindow(id);
     const el = win.element;
 
+    // lane ui-needs-a-button (window-manager-1): Esc puts the window back EXACTLY as it was — its style and its maximized / snapped state
+    const before = { css: el.style.cssText, isMaximized: win.isMaximized, _isSnapped: win._isSnapped };
     // Restore from maximized state (same as normal drag-out-of-maximize)
     if (win.isMaximized && win.prevBounds) {
       win.isMaximized = false;
@@ -1782,6 +1784,12 @@ class WindowManager {
     // Full-screen overlay blocks all other interaction during move
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;cursor:move';
+    // lane ui-needs-a-button (window-manager-1): the mode SAYS what it is and how it ends (it was a silent overlay — no hint, no Esc)
+    const hint = document.createElement('div');
+    hint.className = 'move-mode-hint';
+    hint.setAttribute('role', 'status');
+    hint.textContent = t('Moving the window: move the mouse to place it, click to drop it, Esc cancels');
+    overlay.appendChild(hint);
     document.body.appendChild(overlay);
     el.style.zIndex = '99999'; // above overlay
     el.style.pointerEvents = 'none';
@@ -1824,12 +1832,28 @@ class WindowManager {
       el.style.zIndex = this.zIndex++;
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mousedown', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
       this.witnessGeometry(win.id); // the placement click is the user's act (verify r4 ③)
       this._captureGridBounds(win);
       this._notify();
     };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      pendingEv = null;
+      overlay.remove();
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mousedown', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      el.style.cssText = before.css; win.isMaximized = before.isMaximized; win._isSnapped = before._isSnapped;   // back where it was
+      el.style.pointerEvents = '';
+      if (win.onResize) win.onResize();
+      this._notify();
+    };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mousedown', onClick, true);
+    document.addEventListener('keydown', onKey, true);
   }
 
   toggleMaximize(id) {

@@ -44,12 +44,12 @@ const LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
 /** The agent's four acts (the binary's own operations, measured). */
 const AGENT_TAB_ACTS = Object.freeze(['list', 'new', 'switch', 'close']);
 /** The user's two acts from the tab row. */
-const USER_TAB_ACTS = Object.freeze(['switch', 'close']);
+const USER_TAB_ACTS = Object.freeze(['switch', 'close', 'stop']);   // lane ui-needs-a-button: + the person's STOP (the loop banner's door)
 /** Whose a tab is, from the VIEW's side: the viewed conversation's (`agent`), the user's own (`you`), another
  *  conversation's (`other`), nobody's (`orphan`). */
 const OWNER_WORDS = Object.freeze(['agent', 'you', 'other', 'orphan']);
 /** Every refusal a tab act can answer (the routes' STATUS rows and the census read this). */
-const TAB_REFUSALS = Object.freeze(['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs', 'not_web', 'bad-request', 'browser_unresponsive']); // lane browser-unresponsive: + the hung browser (after the verdict)
+const TAB_REFUSALS = Object.freeze(['not_your_tab', 'tabs_unreadable', 'no_such_tab', 'take_over_first', 'last_tab', 'mediated_tabs', 'not_web', 'bad-request', 'browser_unresponsive', 'stop_failed']); // lane browser-unresponsive: + the hung browser (after the verdict)
 /** A holder's roots are bounded (the lease's registry row, persisted). */
 const MAX_ROOTS = 32;
 /** The takeover cycle keeps this many of the user's tab acts. */
@@ -207,6 +207,9 @@ function agentTabVerdict({ act = 'list', ref = null, targetId = null, own = null
 function userTabVerdict({ act = 'switch', owner = 'orphan', human = false, driving = false, mediated = false, counts = {}, active = false, adoptable = false } = {}, tIn) {
   const no = (code, f = {}) => ({ ok: false, code, error: tabRefusalText(code, f, tIn) });
   if (!USER_TAB_ACTS.includes(act)) return no('bad-request');
+  // lane ui-needs-a-button (主开发 Q2): a STOP — the page stops loading, nothing else (no tab moves, no url changes) — is the person's on
+  // the viewed conversation's own tab WITHOUT a takeover, and on the person's own; never another conversation's, never nobody's, never mediated
+  if (act === 'stop') return owner === 'you' ? { ok: true, via: 'human' } : owner === 'agent' && !human ? (mediated ? no('mediated_tabs') : { ok: true, via: 'lease' }) : no('not_your_tab');
   const c = isObj(counts) ? counts : {};
   if (owner === 'you') {
     if (act === 'switch') return human ? (active ? { ok: true, via: 'human', noop: true } : { ok: true, via: 'human' }) : no('not_your_tab', { yours: true });
@@ -446,6 +449,7 @@ function tabRefusalText(code, f = {}, tIn) {
       return f && f.agent ? 'the browser\'s tabs could not be read just now — nothing ran; run the command again' : t('The tabs could not be read just now — try again');
     case 'browser_unresponsive': return f && f.agent ? unresponsiveAgentText((f && f.unresponsive) || {}) : t('The browser is not answering — Restart it from the Browser panel');
     case 'no_such_tab': return t('That tab is gone');
+    case 'stop_failed': return t('The page did not stop — it is not answering');
     case 'take_over_first': return t('Take over to switch or close the agent’s tabs');
     case 'last_tab': return f && f.yours ? t('This is your only tab — press Close to end your browsing') : t('This is the agent’s only tab — Close all tabs (quit this browser) ends it');
     case 'mediated_tabs': return t('This browser keeps each conversation’s tabs apart — its tabs are switched and closed by the agent');
@@ -459,7 +463,7 @@ function tabRefusalText(code, f = {}, tIn) {
  * to “Docs — https://docs.example/”." — '' when nothing. `acts` = [{kind:'tab-close'|'tab-switch', title, url}] in order.
  */
 function userActsSentence(acts) {
-  const list = (Array.isArray(acts) ? acts : []).filter((a) => isObj(a) && (a.kind === 'tab-close' || a.kind === 'tab-switch'));
+  const list = (Array.isArray(acts) ? acts : []).filter((a) => isObj(a) && (a.kind === 'tab-close' || a.kind === 'tab-switch' || a.kind === 'tab-stop'));
   if (!list.length) return '';
   const q = (a) => { const ti = str(a.title).trim().slice(0, 80), u = str(a.url).slice(0, 200); return `“${ti && u ? ti + ' — ' + u : (ti || u || 'a tab')}”`; };
   const closed = list.filter((a) => a.kind === 'tab-close');
@@ -467,11 +471,13 @@ function userActsSentence(acts) {
   const parts = [];
   if (closed.length) parts.push(`closed ${closed.length === 1 ? 'one of your tabs' : closed.length + ' of your tabs'} (${closed.slice(0, 6).map(q).join(', ')}${closed.length > 6 ? `, and ${closed.length - 6} more` : ''})`);
   if (sw) parts.push(`switched your current tab to ${q(sw)}`);
+  const stopped = list.filter((a) => a.kind === 'tab-stop');
+  if (stopped.length) parts.push(`stopped ${stopped.slice(0, 6).map(q).join(', ')} loading`);
   return `While driving, the user ${parts.join(' and ')}.`;
 }
 /** One user act on the cycle's list (bounded, newest kept). */
 function noteUserActIn(list, act) {
-  const a = isObj(act) && (act.kind === 'tab-close' || act.kind === 'tab-switch') ? { kind: act.kind, title: str(act.title).slice(0, 300), url: str(act.url).slice(0, 2048), at: Number(act.at) || 0 } : null;
+  const a = isObj(act) && (act.kind === 'tab-close' || act.kind === 'tab-switch' || act.kind === 'tab-stop') ? { kind: act.kind, title: str(act.title).slice(0, 300), url: str(act.url).slice(0, 2048), at: Number(act.at) || 0 } : null;
   const out = (Array.isArray(list) ? list : []).slice();
   if (a) out.push(a);
   return out.slice(-MAX_USER_ACTS);

@@ -541,4 +541,12 @@ async function openTabByActivate(cdpUrl, { anchorTargetId, windowId = null, time
   return { ok: false, code: 'window_mismatch', error: `the tab opened in window ${last == null ? '(unknown)' : last}, not the holder's window ${wantWin} — ${n} tr${n === 1 ? 'y' : 'ies'}, every stray closed at once`, leaks, tries: n };
 }
 
-module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, windowBoundsOf, setWindowBounds /* lane browser-x-in-window */, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };
+/** lane ui-needs-a-button (主开发 Q2 — the loop banner's «Stop loading»): the person's STOP of one tab — Page.stopLoading on its page
+ *  socket; nothing else is sent. → {ok} | {ok:false, error}; never throws. */
+async function stopLoadingOf(cdpUrl, targetId, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  const u = pageUrlOf(cdpUrl, targetId);
+  if (!u) return { ok: false, error: 'no such tab' };
+  const r = await pageCommand(u, 'Page.stopLoading', {}, timeoutMs, WebSocketImpl);
+  return r.ok ? { ok: true } : { ok: false, error: r.error || 'no answer' };
+}
+module.exports = { stopLoadingOf, readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, windowBoundsOf, setWindowBounds /* lane browser-x-in-window */, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };
