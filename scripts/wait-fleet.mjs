@@ -42,7 +42,8 @@ const eng = GE.create({ store: st, deliver, now, roster: () => roster, groupSett
 let utChanges = 0;
 const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(dir, 'ut-')), onChange: () => { utChanges++; }, now });
 const filings = [];
-const watchDeliver = Object.assign(Object.create(deliver), { stashSlot: (cid, slot, env, o) => { const r = deliver.stashSlot(cid, slot, env, o); if (r && r.filed) filings.push({ cid, at: clock.t }); return r; } });
+const emptied = new Set();   // senders whose set emptied (the watch forgot what it handed): a repeat after that is a new wait
+const watchDeliver = Object.assign(Object.create(deliver), { stashSlot: (cid, slot, env, o) => { const r = deliver.stashSlot(cid, slot, env, o); if (r && r.filed) filings.push({ cid, at: clock.t }); if (!env && o && o.forget) emptied.add(cid); return r; } });
 const watch = WATCH.create({ activeSessions: sessions, getDeliver: () => watchDeliver, getGroups: () => eng, getUserTodos: () => ut, sessionKeyOf: (x, id) => 'webui:' + id, now, log: { log() { } }, setTimer: () => null, clearTimer: () => { } });
 const C = cidOf(1), WK = Array.from({ length: NW }, (_, i) => cidOf(i + 2));
 const sess = (cid) => S.find((x) => x.cid === cid).s;
@@ -57,6 +58,7 @@ const startTurn = async (cid, m) => {
   stt.get(cid).inTurn = true; sess(cid)._isStreaming = true;
   await report(cid);
   const took = deliver.drainStash(cid) || [];
+  if (emptied.delete(cid)) lastHanded.delete(cid);   // {X} → {} → {X} is a leave and a join (主开发 15:30Z): not a repeat
   for (const e of took) if (e && e.slot) { if (m >= WARM) { if (cid === C) handedToC++; else handedToW++; if (lastHanded.get(cid) === e.setKey) repeats++; } lastHanded.set(cid, e.setKey); }
 };
 const endTurn = async (cid) => { stt.get(cid).inTurn = false; sess(cid)._isStreaming = false; if (cid !== C) await eng.sendToAgent({ from: cid, to: C, text: 'report from ' + cid.slice(-2), wake: false }); };

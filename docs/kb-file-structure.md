@@ -14577,18 +14577,20 @@ DEFERRED, named: a paired machine's own agy (a device op `agy-models` through th
 - **groups-engine `readWaiting(cid, {now, olderThan})` — the reading, nothing kept.**
   - For each live group, read only when the member's mark (or a held frame's start) is older than `olderThan` with records after it: `readFoldedAsync` (the fold over channel-store `readTailAsync`, a FileHandle — off the loop).
   - Then the CURRENT marks through `reachFor(g, cid)`, the next report's reach: messages only, never its own, mute nothing. Plus each held frame's records in (from, upTo].
-  - → `{groups: [{gid, name, n (null at the 2 000-record bound), oldest, atLeast, senders}], reads}`.
+  - Its OWN bound: the newest 200 records or 256 KB of a log (64 KB windows; the store's `readTailAsync` takes `maxBytes` / `windowBytes` and returns `{records, whole}`). The sweep yields to the loop between reads, so no hold is over 20 ms. A suite may widen the bound (`limit`, `maxBytes`).
+  - → `{groups: [{gid, name, n (null at the bound), oldest, atLeast, senders}], reads}`.
   - An ended conversation, an archived group or a closed pair reads nothing.
 - **conversation-deliver `stashSlot(cid, slot, envelope | null, {set})` — the keyed slot.**
   - One entry per (conversation, slot), replaced in place, never counted against STASH_CAP or evicted, rendered whole.
   - It is filed again only when its `set` differs from the entry standing there or, with none there, from the set it last HANDED. That set rides the stash file under `__slots` (the drain records it).
-  - `slotHolders(slot)` lists who holds one.
+  - `slotHolders(slot)` lists who holds an entry or a handed set. `stashSlot(cid, slot, null, {forget: true})` removes the entry and forgets the handed set: the set emptied, and the same member waiting again is a new wait.
 - **src/wait-words.js (PURE).** SENDER_MS 60 min, OWNER_MS 240 min, TICK_MS 5 min. `senderEntry` (the sender's one entry, every member named), `ownerWords` (the item's text, detail and i18n — «since at least» at the bound). No verdict word.
 - **src/server/wait-watch.js (ORCH).** Installed on one server.js line; a sweep every five minutes over the conversations in a running turn.
   - The sender's entry in the slot 'waiting' (`agentText` on every name).
-  - The owner's item, key `messages-waiting:<cid>:<turn>`. At a conversation's first sight in a process, the newest item left (open, or a person's ✕) is adopted: two turns across a restart read as one.
+  - The owner's item, key `messages-waiting:<cid>:<turn>`. At a conversation's first sight in a process, the newest OPEN item left is adopted: two turns across a restart read as one. A closed one belongs to an earlier wait.
   - Its ends are `turn-ended` (the turn is no longer running, or the conversation left) and `handed` (nothing has waited four hours). A ✕ stands for the turn. Its words are compared with the item's own, so an Undo is drawn again.
-  - A reading that throws says nothing and ends nothing.
+  - A reading that throws says nothing and ends nothing: in that sweep no slot is touched.
+  - Names: `nameOf` — one clipped line (toAgentText line, 80), quoted «» in the sender's entry.
 - **Runtime state:** nothing of its own — the slot rides msg-stash.json and the item user-todos; neither is part of the config export.
 
 ## src/server/queued-wakes.js + conversation-deliver.js + groups-engine.js + channel-groups.js deliveryOf — A QUEUED MESSAGE IS NOT A WAKE (lane queued-is-not-woke, law 1 ⇒ kb-bugfix-invariants «THREE --wake MESSAGES SAID «WOKE»…»)

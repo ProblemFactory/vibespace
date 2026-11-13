@@ -124,34 +124,54 @@ function oracleGroup(gid) {
   }
   return out;
 }
+// ── THE COMPARE (copied from the shape C reader's own adaptation, int359/acc-399/shape-c/drivers/compare.part): the async
+//    reading of EVERY member after EVERY step vs the ORACLE above (unchanged), the reading's own bound widened (the bound is
+//    its own leg in test-wait-watch);
+//    plus the GATE: with olderThan = GATE_MS, every group whose oracle-oldest is at least GATE_MS old must still be read alike.
+const GATE_MS = Number(process.env.GATE_MS || 20 * 60e3);
 async function compare(step) {
   const gr = st.groups.live();
   const errs = [];
-  const oracle = new Map(Object.keys(gr.groups).map((gid) => [gid, oracleGroup(gid)]));
   const T = (x) => (x == null ? null : x - 1.8e12);
+  const oracle = {};
+  for (const gid of Object.keys(gr.groups)) oracle[gid] = oracleGroup(gid);
+  for (const fr of Object.values(oracle)) { for (const l of Object.values(fr.m)) STAT.inst += l.length; for (const q of Object.values(fr.q)) for (const l of Object.values(q)) { STAT.frames++; STAT.finst += l.length; } }
   for (const c of CIDS) {
-    const r = await eng.readWaiting(c, { now: t, olderThan: 0 });
     const want = {};
-    for (const [gid, o] of oracle) {
-      const recs = [...(o.m[c] || []), ...Object.values(o.q[c] || {}).flat()];
+    let n = 0, since = null;
+    for (const [gid, o] of Object.entries(oracle)) {
+      const lists = [o.m[c] || [], ...Object.values(o.q[c] || {})];
+      const recs = lists.flat();
       if (!recs.length) continue;
       const senders = {};
-      for (const [at, by] of recs) { const x = senders[by] || (senders[by] = { n: 0, oldest: at }); x.n++; if (at < x.oldest) x.oldest = at; }
+      for (const [at, by] of recs) { const x = senders[by] || (senders[by] = { n: 0, oldest: at }); x.n++; x.oldest = Math.min(x.oldest, at); }
       want[gid] = { n: recs.length, oldest: Math.min(...recs.map((x) => x[0])), senders };
+      n += recs.length; since = since == null ? want[gid].oldest : Math.min(since, want[gid].oldest);
     }
-    const got = Object.fromEntries(r.groups.map((g) => [g.gid, g]));
-    for (const gid of new Set([...Object.keys(want), ...Object.keys(got)])) {
-      const w = want[gid], g = got[gid];
-      if (!w) { errs.push(`${NAME[c]} ${gid}: read ${g.n} oldest ${T(g.oldest)}, oracle nothing`); continue; }
-      if (!g) { errs.push(`${NAME[c]} ${gid}: read nothing, oracle ${w.n} oldest ${T(w.oldest)}`); continue; }
-      if (g.n == null) { errs.push(`${NAME[c]} ${gid}: no count said (oracle ${w.n}) — the walk's logs are inside the read's bound`); continue; }
-      if (g.n !== w.n) errs.push(`${NAME[c]} ${gid}: count ${g.n} oracle ${w.n}`);
-      if (g.oldest !== w.oldest) errs.push(`${NAME[c]} ${gid}: oldest ${T(g.oldest)} oracle ${T(w.oldest)}`);
-      for (const by of new Set([...Object.keys(w.senders), ...Object.keys(g.senders || {})])) {
-        const a = w.senders[by], b = (g.senders || {})[by];
-        if (!a || !b || a.n !== b.n || a.oldest !== b.oldest) errs.push(`${NAME[c]} ${gid} sender ${NAME[by] || by}: read ${J(b)} oracle ${J(a)}`);
+    const cmp = (r, label, need) => {
+      const got = {}; for (const g of r.groups) { if (got[g.gid]) errs.push(`${label} ${NAME[c]} ${g.gid}: TWICE`); got[g.gid] = g; }
+      for (const gid of new Set([...Object.keys(need), ...Object.keys(got)])) {
+        const w = need[gid], g = got[gid];
+        if (!w) { if (label === 'full' || !want[gid]) errs.push(`${label} ${NAME[c]} ${gid}: read n=${g.n} oldest ${T(g.oldest)}, oracle nothing`); continue; }
+        if (!g) { errs.push(`${label} ${NAME[c]} ${gid}: read NOTHING, oracle ${w.n} oldest ${T(w.oldest)}`); continue; }
+        if (g.n !== w.n) errs.push(`${label} ${NAME[c]} ${gid}: count ${g.n} oracle ${w.n}`);
+        if (g.oldest !== w.oldest) errs.push(`${label} ${NAME[c]} ${gid}: oldest ${T(g.oldest)} oracle ${T(w.oldest)}`);
+        for (const by of new Set([...Object.keys(w.senders), ...Object.keys(g.senders || {})])) {
+          const a = w.senders[by], b = (g.senders || {})[by];
+          if (!a || !b || a.n !== b.n || a.oldest !== b.oldest) errs.push(`${label} ${NAME[c]} ${gid} sender ${NAME[by] || by}: read ${J(b)} oracle ${J(a)}`);
+        }
       }
-    }
+      return got;
+    };
+    const r = await eng.readWaiting(c, { now: t, olderThan: 0, limit: 1e6, maxBytes: Infinity });
+    const got = cmp(r, 'full', want);
+    const tn = r.groups.reduce((a, g) => a + (g.n || 0), 0), ts = r.groups.length ? Math.min(...r.groups.map((g) => g.oldest)) : null;
+    if (tn !== n || ts !== since) errs.push(`conv ${NAME[c]}: n ${tn} since ${T(ts)} oracle n ${n} since ${T(since)}`);
+    // THE GATE never hides a wait older than GATE_MS
+    const old = Object.fromEntries(Object.entries(want).filter(([, w]) => w.oldest <= t - GATE_MS));
+    const rg = await eng.readWaiting(c, { now: t, olderThan: GATE_MS, limit: 1e6, maxBytes: Infinity });
+    STAT.gateNeed += Object.keys(old).length; STAT.gateRead += rg.reads; STAT.fullRead += r.reads;
+    cmp(rg, 'gate', old);
   }
   return errs;
 }
@@ -251,7 +271,7 @@ const log = [];
 let firstErr = null, diverged = 0;
 const counts = {};
 const KINDS = {};
-const STAT = { inst: 0, frames: 0, finst: 0, mention: 0 };
+const STAT = { inst: 0, frames: 0, finst: 0, mention: 0, gateNeed: 0, gateRead: 0, fullRead: 0 };
 for (let i = 0; i < STEPS; i++) {
   const a = (RESTART_EVERY && i && i % RESTART_EVERY === 0) ? 'restart' : nextAct();
   let said;
@@ -260,7 +280,6 @@ for (let i = 0; i < STEPS; i++) {
   log.push(`${i} ${a}: ${said}`);
   if (TRACE) console.log(log[log.length - 1]);
   const errs = await compare(i);
-  { const gr = st.groups.live(); for (const gid of Object.keys(gr.groups)) { const o = oracleGroup(gid); for (const l of Object.values(o.m)) STAT.inst += l.length; for (const fr of Object.values(o.q)) for (const l of Object.values(fr)) { STAT.frames++; STAT.finst += l.length; } } }
   if (errs.length) {
     diverged++;
     if (!firstErr) { firstErr = { step: i, act: a, said, errs }; console.log(`FIRST DIVERGENCE at step ${i} (${a}: ${said})\n  ` + errs.slice(0, 8).join('\n  ')); console.log('  the steps (last 25):\n    ' + log.slice(-25).join('\n    ')); }

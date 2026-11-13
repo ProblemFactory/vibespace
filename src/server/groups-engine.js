@@ -430,8 +430,8 @@ function create({
     const g = getGroup(gid);
     const n = Math.max(1, Number(opts.limit) || 50);
     const o = { ...opts, limit: n + clearedCountOf(g) };
-    const raw = typeof store.readTailAsync === 'function' ? await store.readTailAsync(A, gid, o) : store.readTail(A, gid, o);
-    return RC.foldClears(raw, g && g.cleared).slice(-n);
+    const raw = typeof store.readTailAsync === 'function' ? await store.readTailAsync(A, gid, o) : { records: store.readTail(A, gid, o), whole: false };
+    return { records: RC.foldClears(raw.records, g && g.cleared).slice(-n), whole: !!raw.whole };
   }
 
   async function markReported(gid, member, upTo) {
@@ -581,8 +581,9 @@ function create({
    *  when its mark — or a held frame's start — is older than `olderThan` with records after it (persisted facts: a restart
    *  changes nothing). An ended conversation, an archived group or a closed pair waits for nothing. At the read's bound (the
    *  tail does not reach back to the mark or a frame's start) no count is said and the oldest is the oldest it SAW
-   *  (`atLeast`). → {groups: [{gid, name, n (null at the bound), oldest, atLeast, senders: {cid: {n, oldest}}}], reads} */
-  async function readWaiting(cid, { now: t = now(), olderThan = 0 } = {}) {
+   *  (`atLeast`) — the reading's OWN bound: the newest WAIT_READ records or WAIT_READ_BYTES, a suite may widen it.
+   *  → {groups: [{gid, name, n (null at the bound), oldest, atLeast, senders: {cid: {n, oldest}}}], reads} */
+  async function readWaiting(cid, { now: t = now(), olderThan = 0, limit = WAIT_READ, maxBytes = WAIT_READ_BYTES } = {}) {
     const out = { groups: [], reads: 0 };
     if (!G.isCid(cid) || endedOf(cid)) return out;
     const cut = t - olderThan;
@@ -596,7 +597,8 @@ function create({
       const fl0 = floorOf(m0);
       if (!((Number(g0.lastAt) > fl0 && fl0 <= cut) || heldOf(m0).some((q) => fromOf(m0, q) <= cut))) continue;
       out.reads++; waitReads++;
-      const tail = await readFoldedAsync(g0.id, { limit: LOG_READ });
+      const { records: tail, whole: all } = await readFoldedAsync(g0.id, { limit, maxBytes, windowBytes: WAIT_READ_WINDOW });
+      await new Promise((r) => setImmediate(r));   // the sweep yields to the loop between reads (主开发 15:30Z: no hold over 20 ms)
       // after the read: the group and the marks as they are NOW (a report may have landed while it read)
       const g = getGroup(g0.id), m = live(g) ? G.memberOf(g, cid) : null;
       if (!m || m.notify === 'mute' || endedOf(cid)) continue;
@@ -604,7 +606,7 @@ function create({
       const mine = (r) => !!r && !!r.author && r.author.id !== cid && take(r);
       const fl = floorOf(m), held = heldOf(m);
       const first = tail.length ? Number(tail[0].at) : Infinity;
-      const whole = tail.length < LOG_READ || first <= Math.min(fl, ...held.map((q) => fromOf(m, q)));
+      const whole = all || first <= Math.min(fl, ...held.map((q) => fromOf(m, q)));
       const recs = tail.filter((r) => mine(r) && (Number(r.at) > fl || held.some((q) => Number(r.at) > fromOf(m, q) && Number(r.at) <= Number(q.upTo))));
       if (!recs.length) continue;
       const senders = {};
@@ -615,6 +617,10 @@ function create({
     return out;
   }
   let waitReads = 0;   // the reading's group-log reads (the suites' pin: what a sweep costs)
+  // THE READING'S OWN BOUND (主开发 15:30Z, item 5 — the loop stays clear: no single hold over 20 ms): the newest WAIT_READ records
+  // or WAIT_READ_BYTES of a log, whichever comes first, in WAIT_READ_WINDOW slices — far smaller than the report's LOG_READ.
+  // Beyond it: no count, «since at least» the oldest it saw.
+  const WAIT_READ = 200, WAIT_READ_BYTES = 256 * 1024, WAIT_READ_WINDOW = 64 * 1024;
   /** «NEVER RECEIVED», THE ONE COUNT (acceptance r8, F3, measured: the ended pair's count read «reaches» and called a
    *  muted member's 3 undelivered messages 0, while its unread count said 3): every record for a mode that hands everything
    *  (always / next-turn) or nothing (mute — none of them was received); for `mention`, what reaches it (reachFor). The

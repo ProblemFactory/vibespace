@@ -24,7 +24,7 @@ const rows = [];
 for (const seed of [1, 2, 3, 4, 5]) { const a = Date.now(); const { r, out } = walk(seed, 3000); rows.push({ seed, ms: Date.now() - a, r, first: r && r.divergedSteps ? out.split('\n').filter((l) => /FIRST DIVERGENCE|^  /.test(l)).slice(0, 6).join(' | ') : null }); }
 const steps = rows.reduce((n, x) => n + (x.r ? x.r.steps : 0), 0);
 ok(`${steps} steps over five seeds: the reading equals the oracle at every step — 0 divergences`, rows.every((x) => x.r && x.r.steps === 3000 && x.r.divergedSteps === 0), J(rows.map((x) => [x.seed, x.r && x.r.divergedSteps, x.first])));
-ok('…the await act ran (an awaited reply reaching its `mention` asker), frames were held behind turns, restarts happened', rows.every((x) => x.r && x.r.counts['post-await'] > 50 && x.r.stat.frames > 0 && x.r.counts.restart > 0), J(rows.map((x) => x.r && [x.r.counts['post-await'], x.r.stat.frames, x.r.counts.restart])));
+ok('…the await act ran (an awaited reply reaching its `mention` asker), frames were held behind turns, restarts happened, and THE GATE hid no wait older than its bound (every such group read alike)', rows.every((x) => x.r && x.r.counts['post-await'] > 50 && x.r.stat.frames > 0 && x.r.counts.restart > 0 && x.r.stat.gateNeed > 0), J(rows.map((x) => x.r && [x.r.counts['post-await'], x.r.stat.frames, x.r.counts.restart, x.r.stat.gateNeed])));
 console.log('   ' + J(rows.map((x) => ({ seed: x.seed, ms: x.ms, diverged: x.r && x.r.divergedSteps, awaits: x.r && x.r.counts['post-await'], frames: x.r && x.r.stat.frames }))));
 console.log('RED CONTROL');
 {
@@ -32,7 +32,7 @@ console.log('RED CONTROL');
   const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
   const a = '      const take = unreceivedFor(g, cid);';
   const m = src.includes(a) ? MUT.write(rel, src.split(a).join('      const take = (r) => isMessage(r) && G.reachesReport(g, cid, r);'), 'noalso') : null;
-  const { r } = m ? walk(1, 800, { WALK_GE: m }) : { r: null };
+  const { r } = m ? walk(1, 3000, { WALK_GE: m }) : { r: null };   // the walk's own length (主开发 15:30Z item 1: the reader's first divergence came at step 1 590)
   ok('CONTROL: the reading without the report\'s `also` ⇒ the walk diverges (an awaited reply to a `mention` member uncounted)', !!m && !!r && r.divergedSteps > 0, J(r && { diverged: r.divergedSteps }));
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
