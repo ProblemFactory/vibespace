@@ -1805,6 +1805,7 @@ src/server/queued-wakes.js — THE QUEUED WAKE (lane queued-is-not-woke, law 1):
   - an unreadable catch-up record: its cause and file in the journal line, ONE `sweep-record-unread` item;
   - (not asked) `userTodos.whenWritten` is answered on a flush that finds memory already on disk.
 - **The acceptance's one small thing:** `sweepLogs` refuses on an engine that is not `ready` (`init-failed` / `not-ready`) — before the pause, so the paused road's owed re-send refuses too. Its store may never have been read, so «no record lists it» means nothing there. The product arms the pass's timers only after a good init; this makes a direct call refuse as well.
+- **.399 K7 + K10:** every item that tells a person to move a held file says what moving it lets the clean-up remove (the logs of the jobs only that file lists, 14 days after their newest file); the notices' moment is an INSTANT param and their cause WORDS (src/job-model.js RECORDS_ERROR_WORDS, each a zh / ja row) — never English inside zh / ja; src/user-todos.js fillWords says a bare instant as a UTC stamp in the store's English text.
 
 **NAMED, not built (round 2).**
 - Two engines over ONE data dir on different machines each sweep by their own keep set (`jobs.lock` is a local pid check): a hub on another machine over a shared data dir would remove every run its own records do not list. Refusing a pass when the lock's host / boot id is not this machine's is the fix, not built.

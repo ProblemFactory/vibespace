@@ -1158,6 +1158,8 @@ The five removers that did exist deleted whole directories synchronously on the 
    - the failed load on the main thread makes only the release's calls; a read-only engine writes nothing;
    - a stop on the real exit keeps its batch's count; the catch-up opens with its first pass; the journal's words follow a batch's real fate; an unreadable catch-up record says its cause and files one item.
 
+9. **.399 (K7 + K10):** the words that lift a hold say what the lift lets the clean-up remove; what a notice says inside its sentence is said in the reader's language (an instant on the reader's clock, a cause in words).
+
 **Pins.** scripts/test-job-logs-sweep.mjs (fast, PURE) and scripts/test-job-logs-sweep-heavy.mjs (real processes), red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
 
 ## BATCH ARCHIVE KEPT ROLLING BACK (the owner's incident inc-mwbn2xp8-ks0b, 2026-11-11 04:49Z: «我的批量操作一直在回滚»; lane sidebar-echo-order, .397)

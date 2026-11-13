@@ -724,12 +724,12 @@ const FOR_YOU_WORDS = Object.freeze({
   fire: '{text}',
   // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
   'engine-failed': 'Background Work engine failed to start: {error}',
-  'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.',   // lane job-logs-sweep r2: ONE item for the cause carries the clean-up's hold
-  'records-unread': 'Job records in {store} could not be read ({when}: {error}). Old job logs are not cleaned up until {note} is moved or deleted. Before you move it, check that {store} reads as it should — and if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored.',   // r3 §1 / r4: a read that failed — the NOTE holds the clean-up; {when} = the failure's moment (a later load too), and what a person can SEE after the hub's own write
+  'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted. Once it is, the logs of the jobs only that file lists are removed 14 days after their newest file.',   // lane job-logs-sweep r2: ONE item for the cause carries the clean-up's hold
+  'records-unread': 'Job records in {store} could not be read ({when}: {error}). Old job logs are not cleaned up until {note} is moved or deleted; once it is, the logs of the jobs only {store} listed are removed 14 days after their newest file. Before you move it, check that {store} reads as it should — and if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored.',   // r3 §1 / r4: a read that failed — the NOTE holds the clean-up; {when} = the failure's moment (a later load too), and what a person can SEE after the hub's own write
   'records-unread-unnoted': 'Job records in {store} could not be read ({when}: {error}), and no note of it could be written yet — old job logs are not cleaned up while VibeSpace runs, and the note is tried again before each clean-up pass. If the Jobs panel lists fewer jobs than before, {store} may already have been written over: restore it before VibeSpace restarts.',   // r3 §1 / r4 §1: the note not written yet — THIS PROCESS HOLDS, the note tried again before each pass
   'sweep-record-unread': 'The clean-up of old job logs keeps its progress in {file} in the data folder, and it could not be read ({error}) — old job logs are not cleaned up until it can be read again or is moved away.',   // r4 §3: the clean-up's own record cannot be read — it waits; what to move
-  'set-aside-other': '{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.',   // round 3 §8: a file a person named so (not one this hub set aside) — true words
-  'records-held': 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.',   // lane job-logs-sweep r2: a set-aside the owner was never told of (the archive's; one from before this version)
+  'set-aside-other': '{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it; the logs no job record lists are then removed 14 days after their newest file.',   // round 3 §8: a file a person named so (not one this hub set aside) — true words
+  'records-held': 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted; once it is, the logs of the jobs only that file lists are removed 14 days after their newest file — move it once you have what you need from it.',   // lane job-logs-sweep r2: a set-aside the owner was never told of (the archive's; one from before this version)
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
   'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
@@ -752,6 +752,25 @@ const FOR_YOU_WORDS = Object.freeze({
 // `mintedFor(c)` answers that job — `undefined` for anything forYouCopy did not mint
 const MINTED = new WeakMap();
 function mintedFor(c) { return c && typeof c === 'object' ? MINTED.get(c) : undefined; }
+// lane job-logs-sweep (.399, K10): what the held-records notices put INSIDE their sentence is said in the reader's language —
+// the failure's moment an INSTANT (`{at}`: the device's clock and zone, src/lib/user-todos-layout.js saidLine), an unknown
+// moment and every cause WORDS (`{key}`, each a dictionary row) — never an English fragment («earlier», a UTC stamp, a bare
+// error code) inside zh / ja text. The code stays in its words' parentheses (what a person can search for).
+const RECORDS_ERROR_WORDS = Object.freeze({
+  EIO: 'a read or write error (EIO)', EACCES: 'no permission (EACCES)', EPERM: 'not permitted (EPERM)', ENOSPC: 'the disk is full (ENOSPC)',
+  ELOOP: 'a link that points back to itself (ELOOP)', EISDIR: 'a folder in its place (EISDIR)', ENOTDIR: 'a file in a folder\'s place (ENOTDIR)',
+  ETIMEDOUT: 'the storage did not answer in time (ETIMEDOUT)', EBUSY: 'the file is in use (EBUSY)', EROFS: 'the storage is read-only (EROFS)',
+  ENOTLIST: 'its contents are not a list of records', 'did not parse': 'its contents are not valid JSON', 'see the note': 'the reason is in the note',
+  unreadable: 'it could not be read',
+});
+const RECORDS_ERROR_OTHER = 'an error ({code})';
+const recordsErrorParam = (error) => {
+  const e = String(error == null || error === '' ? 'unreadable' : error).slice(0, 60);
+  const k = RECORDS_ERROR_WORDS[e] || (/^did not parse/.test(e) ? RECORDS_ERROR_WORDS['did not parse'] : null);
+  return k ? { key: k } : { key: RECORDS_ERROR_OTHER, params: { code: e } };
+};
+const RECORDS_WHEN_UNKNOWN = 'at an unknown earlier time';
+const recordsWhenParam = (when) => (Number.isFinite(Number(when)) && Number(when) > 0 && when !== null && when !== '' ? { at: Number(when) } : { key: RECORDS_WHEN_UNKNOWN });
 function forYouCopy(job, kind, opts = {}) {
   const c = forYouWords(job, kind, opts);
   if (!c.words) return c;
@@ -773,9 +792,9 @@ function forYouWords(job, kind, opts) {
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'], params: { file: String(file || 'the store file') } }, urgency: 'high' };
-  if (kind === 'records-unread') return { fact: 'records-unread', words: { key: FOR_YOU_WORDS['records-unread'], params: { store: String(store || 'a job record file'), note: String(note || 'its note'), error: String(error || 'unreadable').slice(0, 60), when: String(when || 'earlier').slice(0, 40) } }, urgency: 'high' };
-  if (kind === 'records-unread-unnoted') return { fact: 'records-unread-unnoted', words: { key: FOR_YOU_WORDS['records-unread-unnoted'], params: { store: String(store || 'a job record file'), error: String(error || 'unreadable').slice(0, 60), when: String(when || 'earlier').slice(0, 40) } }, urgency: 'high' };
-  if (kind === 'sweep-record-unread') return { fact: 'sweep-record-unread', words: { key: FOR_YOU_WORDS['sweep-record-unread'], params: { file: String(file || 'the clean-up\'s record'), error: String(error || 'unreadable').slice(0, 60) } }, urgency: 'normal' };
+  if (kind === 'records-unread') return { fact: 'records-unread', words: { key: FOR_YOU_WORDS['records-unread'], params: { store: String(store || 'a job record file'), note: String(note || 'its note'), error: recordsErrorParam(error), when: recordsWhenParam(when) } }, urgency: 'high' };
+  if (kind === 'records-unread-unnoted') return { fact: 'records-unread-unnoted', words: { key: FOR_YOU_WORDS['records-unread-unnoted'], params: { store: String(store || 'a job record file'), error: recordsErrorParam(error), when: recordsWhenParam(when) } }, urgency: 'high' };
+  if (kind === 'sweep-record-unread') return { fact: 'sweep-record-unread', words: { key: FOR_YOU_WORDS['sweep-record-unread'], params: { file: String(file || 'the clean-up\'s record'), error: recordsErrorParam(error) } }, urgency: 'normal' };
   if (kind === 'set-aside-other') return { fact: 'set-aside-other', words: { key: FOR_YOU_WORDS['set-aside-other'], params: { file: String(file || 'a file') } }, urgency: 'normal' };
   if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
@@ -1045,7 +1064,7 @@ function ownedJobsView(jobs, cid) {
     .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
 }
 
-module.exports = {
+module.exports = { RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,

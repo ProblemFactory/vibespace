@@ -105,6 +105,28 @@ try {
       ok(!!LS.NOTE_NAME && typeof LS.whenOf === 'function' && LS.NOTE_NAME.test('jobs.json.corrupt-unread') && LS.NOTE_NAME.test('jobs-archive.json.corrupt-unread') && !LS.NOTE_NAME.test('jobs.json.corrupt-unread-1700000000000') && !LS.NOTE_NAME.test('../jobs.json.corrupt-unread') && /^\d{4}-\d\d-\d\d \d\d:\d\d UTC$/.test(LS.whenOf(1794500000000)), 'round 4 §2: ONE note name per store (`<store>.corrupt-unread`, no moment in it, no path), and the failure\'s moment in words that need no translation');
     }
   }
+  // .399 K7 + K10 (the .398 merged-tip read): the words that lift a hold say what the lift lets the clean-up remove; the notices put
+  // no English fragment inside zh / ja text (the moment an INSTANT, every cause WORDS with dictionary rows)
+  {
+    const M = require(path.join(ROOT, 'src/job-model.js'));
+    const zhT = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), jaT = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+    const rowOf = (txt, k) => { const m = txt.match(new RegExp('^  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': (".*"),$', 'm')); return m ? JSON.parse(m[1]) : null; };
+    const lift = ['store-corrupt', 'records-held', 'records-unread', 'set-aside-other'].map((k) => [k, M.forYouCopy(null, k, { file: 'jobs.json.corrupt-1', store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: 1794500000000 })]);
+    ok(lift.every(([, c]) => c.words && /removed 14 days after their newest file/.test(c.words.key)), 'K7: every item that tells a person to move a held file says what moving it lets the clean-up remove (14 days after the newest file)', lift.filter(([, c]) => !/removed 14 days/.test(c.words.key)).map(([k]) => k));
+    const ru = M.forYouCopy(null, 'records-unread', { store: 'jobs.json', note: 'n', error: 'ETIMEDOUT', when: 1794500000000 }).words.params;
+    const ru0 = M.forYouCopy(null, 'records-unread', { store: 'jobs.json', note: 'n', error: 'see the note', when: null }).words.params;
+    const odd = M.forYouCopy(null, 'records-unread-unnoted', { store: 'jobs.json', error: 'EWHATEVER', when: 5 }).words.params;
+    const sr = M.forYouCopy(null, 'sweep-record-unread', { file: 'jobs-logs-sweep.json', error: 'did not parse; set-aside refused: EACCES' }).words.params;
+    ok(ru.when.at === 1794500000000 && ru.error.key === 'the storage did not answer in time (ETIMEDOUT)' && ru0.when.key === M.RECORDS_WHEN_UNKNOWN && ru0.error.key === 'the reason is in the note' && odd.error.key === M.RECORDS_ERROR_OTHER && odd.error.params.code === 'EWHATEVER' && sr.error.key === 'its contents are not valid JSON', 'K10: the failure\'s moment is an INSTANT ({at} — the reader\'s clock and zone), an unknown moment and every cause are WORDS — never a string the server wrote in English');
+    const keys = [...Object.values(M.RECORDS_ERROR_WORDS || {}), ...(M.RECORDS_ERROR_OTHER ? [M.RECORDS_ERROR_OTHER, M.RECORDS_WHEN_UNKNOWN] : ['(the release has no word table)']), ...['records-unread', 'records-unread-unnoted', 'sweep-record-unread', 'store-corrupt', 'records-held', 'set-aside-other'].map((k) => M.FOR_YOU_WORDS[k])];
+    const missing = keys.filter((k) => !rowOf(zhT, k) || !rowOf(jaT, k));
+    ok(!missing.length, `K10: every key those notices say (${keys.length}) has its zh and its ja row`, missing);
+    const say = (txt, w) => String(rowOf(txt, w.key) || w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params && w.params[k]; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? say(txt, v) : '11-12 14:03') : String(v); });
+    const zh = ['records-unread', 'records-unread-unnoted'].flatMap((k) => [say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: 1794500000000 }).words), say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'see the note', when: null }).words)]);
+    ok(zh.every((x) => !/\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)), 'K10: said in zh, those notices hold no English word — only the file names and the code in its words\' parentheses', zh.filter((x) => /\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)));
+    const { fillWords } = require(path.join(ROOT, 'src/user-todos.js'));
+    ok(typeof fillWords === 'function' && fillWords({ key: 'read ({when}: {error})', params: { when: { at: Date.UTC(2026, 10, 12, 14, 3) }, error: { key: 'an error ({code})', params: { code: 'EX' } } } }) === 'read (2026-11-12 14:03 UTC: an error (EX))', 'K10: the store\'s English text says an INSTANT as a UTC stamp (it said «undefined») and fills a WORDS param\'s own params');
+  }
 } catch (e) {
   fail++; console.error('  ✗ the suite threw — ' + (e && e.stack || e));
 } finally {

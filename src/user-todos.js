@@ -95,7 +95,7 @@ function maskI18nParams(x, mask) {
 /** lane job-notify-user r3: a `{key, params}` line filled the way the client's t() fills it (src/lib/i18n.js — `{name}`
  *  ⇒ the param, an unknown one kept) — the English text of an AGENT_FIELDS item is its template filled with its fields */
 function fillWords(l) {
-  return String(l.key).replace(/\{(\w+)\}/g, (m, k) => { const v = l.params ? l.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? String(v.key) : String(v); });   // a WORDS param says its English key
+  return String(l.key).replace(/\{(\w+)\}/g, (m, k) => { const v = l.params ? l.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? fillWords(v) : Number.isFinite(v.at) ? new Date(v.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : m) : String(v); });   // lane job-logs-sweep K10: a bare INSTANT in the English text is a UTC stamp (it was «undefined»), WORDS fill their own params   // a WORDS param says its English key
 }
 // A JOB ITEM'S IDENTITY IS A FACT (lane job-notify-user r3), never its words: `jobFact` names WHICH copy of WHICH job
 // (jobId) an item is — a short kebab word the producer declares ('ask': the job posted a panel, and resolveByJob closes
@@ -1208,4 +1208,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };
+module.exports = { fillWords, UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };

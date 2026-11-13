@@ -46,7 +46,8 @@ const settle = async (jm) => { if (typeof jm.logsSettled === 'function') await j
 const sweepAt = async (jm, at) => { if (typeof jm.sweepLogs === 'function') await jm.sweepLogs({ now: at }); else await jm._gc({ now: at }); await settle(jm); };
 const gcAt = async (jm, at) => { await jm._gc({ now: at }); await settle(jm); };   // THE HOURLY ROAD with its clock
 const T0 = Date.now(); const lap = (name) => console.log(`${name}  (+${Date.now() - T0} ms)`);
-const fill = (w) => String(w.key).replace(/\{(\w+)\}/g, (m, k) => (w.params && w.params[k] !== undefined ? String(w.params[k]) : m));
+// the store's English fill (src/user-todos.js fillWords): an INSTANT param a UTC stamp, a WORDS param its own key filled (K10, .399)
+const fill = (w) => String(w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params ? w.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? fill(v) : Number.isFinite(v.at) ? new Date(v.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : m) : String(v); });
 const W8w = () => require(path.join(ROOT, 'src/store-writer.js'));
 // A SLOW STORAGE (the owner's data/ is a network mount): the REAL worker, every rmSync made to cost SLOW_MS on the thread that
 // calls it — the worker's thread in the product's shape, the main thread in the control's
@@ -506,7 +507,7 @@ try {
       }
       const notes = fs.readdirSync(h3x).filter((n) => /corrupt-unread/.test(n));
       const w3 = allItems[0] ? fill(allItems[0].words) : '';
-      ok(notes.length === 1 && allItems.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: ETIMEDOUT\)/.test(w3) && !/when VibeSpace started/.test(w3) && /if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored/.test(w3) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words say WHEN it failed (a later load too, never «when VibeSpace started») and what a person can SEE after the hub's own write («fewer jobs … keep the note until it is restored»), a name not a path`);
+      ok(notes.length === 1 && allItems.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: the storage did not answer in time \(ETIMEDOUT\)\)/.test(w3) && Number.isFinite(allItems[0].words.params.when.at) && /removed 14 days after their newest file/.test(w3) && !/when VibeSpace started/.test(w3) && /if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored/.test(w3) && !/\//.test(allItems[0].words.params.note), `THREE RESTARTS THROUGH ONE TRANSIENT FAILURE: ONE note (${notes.length}), ONE item (${allItems.length}) — its words say WHEN it failed (a later load too, never «when VibeSpace started») and what a person can SEE after the hub's own write («fewer jobs … keep the note until it is restored»), a name not a path`);
     }
     // H6e «SAID» ONLY AFTER THE FOR-YOU STORE HAS WRITTEN THE ITEM: a restart before that tells again (twice at worst, never never)
     {
@@ -585,7 +586,7 @@ try {
       await sweepAt(J, Date.now()); await gcAt(J, Date.now());
       ok(has(svOld) && has(orphan) && has(owedT), '…AFTER the hub\'s own write the pass and the hourly gc still remove nothing — not the run the unread store listed, not a dir no record names');
       const un = b.items.filter((n) => n && n.fact === 'records-unread-unnoted');
-      ok(un.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: EIO\), and no note of it could be written yet/.test(fill(un[0].words)) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
+      ok(un.length === 1 && /could not be read \(\d{4}-\d\d-\d\d \d\d:\d\d UTC: a read or write error \(EIO\)\), and no note of it could be written yet/.test(fill(un[0].words)) && b.logs.filter((l) => /job-logs clean-up HELD: jobs\.json could not be read and no note of it is on disk/.test(l)).length === 1, 'its item says so ONCE (the failure\'s moment, never «when VibeSpace started»), and the journal\'s HELD line once');
       J._writeArchive([{ id: 'jb-a8c0ffb1', kind: 'task', name: 'x', state: 'done', owner, access: acc, runs: [{ startedAt: Date.now() - DAY, endedAt: Date.now() - DAY }], archivedAt: Date.now(), archivedWhy: 'done' }]);
       seedRun(n1, 'jb-a8c0ffb1', Date.now() - DAY); J.rmArchived('jb-a8c0ffb1');
       ok((await J.logsGone('jb-a8c0ffb1')).gone === true && !has(n1, 'job-logs', 'jb-a8c0ffb1'), '…while the ✕ (a removal a person asks for) still removes its logs: the hold is the pass\'s');
@@ -1021,7 +1022,7 @@ try {
     await sweepAt(C8, Date.now()); await sweepAt(C8, Date.now());
     ok(has(c8Run) && fs.statSync(path.join(c8, 'jobs-logs-sweep.json')).isDirectory() && LC8.filter((l) => /the catch-up record could not be read/.test(l)).length === 1, 'a catch-up record that cannot be READ (a directory in its place): the pass WAITS — nothing removed, nothing overwritten, said once');
     const ic8 = IC8.filter((n) => n && n.fact === 'sweep-record-unread');
-    ok(LC8.some((l) => /the catch-up record could not be read: EISDIR — nothing removed; the clean-up waits until jobs-logs-sweep\.json can be read or is moved away/.test(l)) && ic8.length === 1 && ic8[0].words.params.file === 'jobs-logs-sweep.json' && ic8[0].words.params.error === 'EISDIR', 'round 4 §3: the journal names the cause (EISDIR) and the file, and ONE For-you item says what waits and what to move (over two passes)', { items: ic8.length });
+    ok(LC8.some((l) => /the catch-up record could not be read: EISDIR — nothing removed; the clean-up waits until jobs-logs-sweep\.json can be read or is moved away/.test(l)) && ic8.length === 1 && ic8[0].words.params.file === 'jobs-logs-sweep.json' && ic8[0].words.params.error && ic8[0].words.params.error.key === 'a folder in its place (EISDIR)', 'round 4 §3: the journal names the cause (EISDIR) and the file, and ONE For-you item says what waits and what to move (over two passes)', { items: ic8.length });
     const d8 = mkDir('d8'); fs.writeFileSync(path.join(d8, 'jobs-logs-sweep.json'), '{ "catchUp": { torn');
     const d8Run = seedRun(d8, 'jb-0e1a00d8', Date.now() - 30 * DAY, { ageMs: 30 * DAY });
     const { jm: D8, logs: LD8 } = boot(d8); await sweepAt(D8, Date.now());

@@ -347,7 +347,7 @@ class JobManager {
         if (r === 'written') {
           this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) — the note ${t.file} holds the job-logs clean-up until a person moves it`);
           // «said» keyed by the note AND its moment: a note a person moved and a later failure wrote again is told again
-          this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: LS.whenOf(t.o.at) });
+          this._logsSay(`${t.file}@${t.o.at}`, 'records-unread', { store: t.base, note: t.file, error: t.o.error, when: t.o.at });
         } else this.d.log(`[jobs] ${t.side} could not be read again (${t.o.error}) — the note ${t.file} still holds the job-logs clean-up (not a new failure: nothing filed)`);
         if (this._logsUnnotedSaid.has(t.side)) this.d.log(`[jobs] job-logs: the note ${t.file} is on disk now — it holds the clean-up, also across a restart`);
         continue;
@@ -357,7 +357,7 @@ class JobManager {
       if (this._logsUnnotedSaid.has(t.side)) continue;   // said once per process; the note is asked for again before each pass
       this._logsUnnotedSaid.add(t.side);
       this.d.log(`[jobs] ${t.side} could not be read (${t.o.error}) and no note of it could be written (${why}) — the job-logs clean-up removes nothing in this process; the note is tried again before each pass`);
-      this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: t.base, error: t.o.error, when: LS.whenOf(t.o.at) }));
+      this._forYou(null, M.forYouCopy(null, 'records-unread-unnoted', { store: t.base, error: t.o.error, when: t.o.at }));
     }
   }
 
@@ -2746,7 +2746,7 @@ class JobManager {
       const key = m && Number.isFinite(nb.at) ? `${f}@${nb.at}` : f;
       if (said.has(key) || (this._logsTelling || (this._logsTelling = new Set())).has(key)) continue;
       this._logsTelling.add(key);   // filed in this process: never twice while its «said» waits for the For-you store's write
-      this._logsSay(key, m ? 'records-unread' : /^jobs(?:-archive)?\.json\.corrupt-\d+$/.test(f) ? 'records-held' : 'set-aside-other', m ? { store: m[1], note: f, error: nb.error || 'see the note', when: LS.whenOf(nb.at) } : { file: f });
+      this._logsSay(key, m ? 'records-unread' : /^jobs(?:-archive)?\.json\.corrupt-\d+$/.test(f) ? 'records-held' : 'set-aside-other', m ? { store: m[1], note: f, error: nb.error || 'see the note', when: Number.isFinite(nb.at) ? nb.at : null } : { file: f });
     }
     this._logsMergeSaid();
     if (this._logsState && this._logsState.catchUp) this._logsNext(Math.max(cfg.gapMs, LOGS_RETRY_MS));
