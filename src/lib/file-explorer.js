@@ -7,7 +7,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
-import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs (files-2): the toolbar folds — words, then icons, then ⋯
+import { createBarFold, foldedMenuItems } from './bar-fold.js'; // lane ui-controls-and-bugs (files-2): the toolbar folds — words, then icons, then ⋯
 import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: ‹ home, the breadcrumbs, «New session here» (phone only)
 import { t, tc } from './i18n.js';
 
@@ -113,8 +113,12 @@ class FileExplorer {
     // lane ui-controls-and-bugs (the walk's files-2: two up-arrows — ↑ Go up and ⬆ Upload — and no words): every tool says its
     // WORD beside its icon; the bar folds through THE chrome-bar fold (bar-fold.js): the words go first, then the tools into ⋯
     // (View first, Upload last); Go up, the machine and the path never fold. The phone keeps the icons (its own layout).
-    const tools = { up: [btnUp, t('Go up')], refresh: [btnRefresh, t('Refresh')], view: [btnView, t('View')], newFile: [btnNewFile, t('New file')], newDir: [btnNewDir, t('New folder')], upload: [btnUpload, t('Upload')] };
-    for (const [b, word] of Object.values(tools)) { const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
+    // each tool's ACT takes the place it was pressed from: its own button, or the ⋯ when it is folded (a View / Upload popover
+    // opens there — never against a hidden button at the viewport's corner)
+    const tools = { up: { el: btnUp, word: t('Go up'), act: () => this.navigateUp() }, refresh: { el: btnRefresh, word: t('Refresh'), act: () => this.refresh() },
+      view: { el: btnView, word: t('View'), act: (a) => this._showViewMenu(a) }, newFile: { el: btnNewFile, word: t('New file'), act: () => this.createFile() },
+      newDir: { el: btnNewDir, word: t('New folder'), act: () => this.createDir() }, upload: { el: btnUpload, word: t('Upload'), act: (a) => this._triggerUpload(a) } };
+    for (const { el: b, word, act } of Object.values(tools)) { b.onclick = () => act(b); const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
     const btnMore = this._btn('', t('More')); btnMore.innerHTML = UI_ICONS.more; btnMore.classList.add('file-tool-more'); btnMore.setAttribute('aria-haspopup', 'menu');
     toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, btnMore);
     const FOLD = { up: 0, host: 0, path: 0, upload: 10, newFile: 20, newDir: 30, refresh: 40, view: 50 };   // 0 never folds; a higher one folds first
@@ -126,7 +130,7 @@ class FileExplorer {
           .map(([key, el]) => ({ key, el, priority: FOLD[key], ...(key === 'path' ? { flexMin: 90 } : {}), ...(tools[key] ? { compactClass: 'ftw-compact' } : {}) })),
         signal: winInfo._listenerCtl?.signal,
       });
-      btnMore.onclick = () => { const r = btnMore.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, fold.folded().filter((k) => tools[k]).map((k) => ({ label: tools[k][1], action: () => tools[k][0].click() }))); };
+      btnMore.onclick = () => { const r = btnMore.getBoundingClientRect(); showContextMenu(r.left, r.bottom + 2, foldedMenuItems(fold.folded(), tools, btnMore)); };
     }
     // THE PHONE'S EXPLORER (lane phone-files-door): the window IS the screen there; ‹ returns to the phone's home, the
     // breadcrumbs scroll sideways under the path bar, «New session here» heads the listing. Built only on a phone.

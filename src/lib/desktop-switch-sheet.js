@@ -131,7 +131,7 @@ export function openDesktopSheet(app, anchor, { onSwitch, drawn = null } = {}) {
   };
   const regular = app.viewportClass?.() === 'regular';
   const ar = anchor?.getBoundingClientRect?.() || { left: 0, top: 0, right: 0, bottom: 0 };
-  const menu = showContextMenu(regular ? ar.left : 0, regular ? ar.top : 0, items);
+  const menu = showContextMenu(regular ? ar.left : 0, regular ? ar.top : 0, items, 'context-menu', { placesItself: true });   // a sheet: placed below (placeOverColumn / the phone's sheet rule)
   menu.classList.add('mdesk-menu');
   untilGone(menu, ctl); // every road that takes the sheet out of the page aborts its listeners (r3 ①: its dismiss left one)
   openSheet = { menu, drawn: rows }; // the sheet on screen — patchDesktopSheet keeps its waiting roll-up live (lane phone-take-photo)

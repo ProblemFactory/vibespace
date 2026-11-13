@@ -1783,7 +1783,7 @@ export class DesktopManager {
     items.push({ separator: true });
     items.push({ label: '+ ' + this._doorLabel('new'), action: () => { const id = this.createDesktop(); this.switchTo(id); } });
     const r = anchor.getBoundingClientRect();
-    const menu = showContextMenu(r.left, r.top, items, 'context-menu', { up: r.top > window.innerHeight / 2, extraClass: 'desktop-switch-menu' }); // styled BEFORE it is measured
+    const menu = showContextMenu(r.left, r.top, items, 'context-menu', { up: r.top > window.innerHeight / 2, extraClass: 'desktop-switch-menu', placesItself: true }); // styled BEFORE it is measured; it places itself (_placeList keeps its top) — never followed behind its back
     const els = menu.querySelectorAll(':scope > .context-menu-item');
     rows.forEach((row, k) => { if (row.kind === 'desktop' && els[k]) this._rowDoors(els[k], row.desk); });
     rows.forEach((row, k) => { if (els[k]) this._paintListRow(els[k], row); });

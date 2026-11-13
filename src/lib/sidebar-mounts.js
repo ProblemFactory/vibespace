@@ -1983,17 +1983,19 @@ export function installSidebarMounts(Sidebar) {
       let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
       const { overlay, body, close, raised, live } = createModalShell({ id: 'host-setup-dialog', key: h.id, undismissable: true,   // a running set-up is never closed by a neighbour's open (round 3)
-        title: `Set up ${h.name}`, minWidth: '400px',
+        title: tr('Set up {name}', { name: h.name }), minWidth: '400px',   // lane ui-controls-and-bugs (the acceptance reader: English chrome on a zh page)
         closeOnBackdrop: false, escapeToClose: false, onClose: () => off?.(), kind: 'form', // (no Escape either: the set-up runs on — its ✕ is the one door)
       });
       if (raised) return;   // raised: the same subject's form, as it was
       body.innerHTML = `<div class="bs-steps"></div>
-        <details class="bs-log-wrap" hidden><summary>Log</summary><pre class="bs-log"></pre></details>
-        <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>`;
+        <details class="bs-log-wrap" hidden><summary>${escHtml(tr('Log'))}</summary><pre class="bs-log"></pre></details>
+        <div class="dialog-actions"><button class="btn-create bs-start">${escHtml(tr('Start'))}</button></div>`;
       const stepsEl = overlay.querySelector('.bs-steps');
       const logEl = overlay.querySelector('.bs-log');
       const logWrap = overlay.querySelector('.bs-log-wrap');   // lane ui-controls-and-bugs (machines-17): drawn once it has a line — never a fold that opens onto an empty box
       const { steps } = await api('/api/hosts/bootstrap-steps');
+      // the steps in the page's words (src/hosts.js names them by key; a step it adds later shows its own label)
+      const STEP_WORDS = { connect: tr('Connect'), dtach: tr('dtach (keeps sessions running across disconnects)'), node: 'Node.js', claude: 'Claude Code CLI' };
       const state = {};
       const paint = () => {
         stepsEl.innerHTML = steps.map(s => {
@@ -2002,7 +2004,7 @@ export function installSidebarMounts(Sidebar) {
             : st === 'fail' ? '<span class="bs-ic bs-fail">✗</span>'
             : st === 'running' ? '<span class="bs-ic bs-spin"></span>'
             : '<span class="bs-ic bs-pend"></span>';
-          return `<div class="bs-step">${icon}<span>${escHtml(s.label)}</span></div>`;
+          return `<div class="bs-step">${icon}<span>${escHtml(STEP_WORDS[s.key] || s.label)}</span></div>`;
         }).join('');
       };
       paint();

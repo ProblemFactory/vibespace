@@ -157,11 +157,16 @@ ok(/function makeSwitch\(on, \{ disabled = false, label, onChange \}\) \{\n  if 
 console.log('⑦ A MENU IS BOUNDED BY THE SCREEN — every module that makes a .context-menu places it with placeMenu');
 const ownMenus = LIB.filter((f) => f !== 'src/lib/utils.js' && /\.className = 'context-menu'[;\s]/.test(read(f)));
 const unplaced = ownMenus.filter((f) => !/\bplaceMenu\(/.test(read(f)));
-ok(ownMenus.length >= 1 && unplaced.length === 0 && /\n  placeMenu\(pop, x, y, \{ up \}\);\n  return pop;/.test(read('src/lib/utils.js')),
+ok(ownMenus.length >= 1 && unplaced.length === 0 && /\n  placeMenu\(pop, x, y, \{ up, placesItself \}\);\n  return pop;/.test(read('src/lib/utils.js')),
   `showContextMenu and every module with its own .context-menu builder (${ownMenus.join(', ')}) are placed by placeMenu`, unplaced.join(', '));
 const PM = read('src/lib/utils.js');
-ok(/const mo = new MutationObserver\(/.test(PM) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; pinTail\(\); \}/.test(PM),
-  'placeMenu places a menu again when its rows change, and a capped menu keeps its closing rows in view');
+ok(/if \(follow && !placesItself\) followContent\(pop, /.test(PM) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; if \(!placesItself\) pinTail\(\); \}/.test(PM)
+  && /placeMenu\(menu, x, y, \{ follow: true \}\)/.test(read('src/lib/file-explorer-ops.js')),
+  'placeMenu follows a menu\'s rows only when its builder asks (the file explorer\'s late office rows), and a capped menu keeps its closing rows in view (the boxes: test-menu-bounds-chrome)');
+// THE MUST-FIX OF THE ACCEPTANCE READER: a menu that places itself is never placed again behind its back — every showContextMenu
+// whose caller writes the menu's place afterwards (the desktop list keeps its TOP, the sheets) declares `placesItself`
+{ const callers = LIB.map((f) => [f, read(f)]).flatMap(([f, src]) => [...src.matchAll(/(?:const|let) (\w+) = showContextMenu\(([^\n]*)/g)].filter((m) => new RegExp(`\\b(?:this\\._placeList\\(${m[1]}|placeOverColumn\\(${m[1]}|${m[1]}\\.classList\\.add\\('(?:mobile-sheet|mdesk-menu)')`).test(src)).map((m) => [f, m[1], /placesItself: true/.test(m[2])]));
+  ok(callers.length >= 3 && callers.every(([, , ok2]) => ok2), `every menu its caller places afterwards (the desktop list, the sheets) declares placesItself — never followed (${callers.map(([f, n, o]) => f.split('/').pop() + ':' + n + (o ? '' : ' ✗')).join(', ')})`); }
 
 // ── ⑦b a panel keeps its natural width and slides ──
 { const mp = read('src/lib/menu-place.js'); const at = mp.indexOf('export function panelPlace(');
@@ -170,7 +175,7 @@ ok(/const mo = new MutationObserver\(/.test(PM) && /if \(at\.maxH != null\) \{ p
   ok(!!pp && a.left === 12 && a.maxW >= 300 && b.left === 40 && c.left === 0 && c.maxW === 312,
     'panelPlace: a 300 px panel opened at x 250 of a 320 px window slides to x 12 at its width (never a 130 px strip); one that fits stays at its chip; one wider than the window takes the window', JSON.stringify({ a, b, c }));
   const CSB = read('src/lib/chat-status-bar.js'), sd = CSB.slice(CSB.indexOf('const showDropdown = (anchor,'), CSB.indexOf('\n    };', CSB.indexOf('const showDropdown = (anchor,')));
-  ok(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd) && /queueMicrotask\(settle\);/.test(sd) && /mo\.observe\(dropdown, \{ childList: true, subtree: true, characterData: true \}\);/.test(sd),
+  ok(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd) && /followContent\(dropdown, settle\);/.test(sd),
     'the status bar\'s one showDropdown places a panel AFTER the caller filled it, and again when its content changes'); }
 
 // ── ⑨ the single defects of pick 5 ──
@@ -182,12 +187,19 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
   ok(/t\('\{label\}: \{value\}', \{ label: t\('Vault'\), value: word \}\)/.test(VW) && /\['unlocked', 'locked'\]\.includes\(f\.state\) \? t\('View contents…'\) : t\('Set up the vault…'\)/.test(VW)
     && /t\('\{label\}: \{value\}', \{ label: t\('Search index'\)/.test(SW) && /'mounts-btn sys-search-rebuild'/.test(SW),
     'the System panel: «保险库：未设置» in the language\'s colon, its door «设置保险库…» (never «查看内容…» of nothing), the theme\'s secondary buttons'); }
-{ const JP = read('src/lib/jobs-panel.js'), at = JP.indexOf('export function rowVerbs(');
-  const rv = at < 0 ? null : new Function('t', `${JP.slice(at, JP.indexOf('\n}\n', at) + 3).replace('export function', 'function')}; return rowVerbs;`)((x) => x);
-  const acts = (j) => (rv ? rv(j).map((v) => v.act).join(',') : 'none');
-  ok(!!rv && acts({ state: 'up' }) === 'stop' && acts({ state: 'failed' }) === 'start,rm' && acts({ state: 'done' }) === 'rm' && acts({ state: 'up', pendingPanel: true }) === 'panel,stop'
-    && /const verbs = archived \? \[\] : rowVerbs\(j\)\.map\(\(v\) => \(\{ label: v\.label, action: \(\) => jobAction\(app, j, v\.act, refresh\) \}\)\);/.test(JP) && /return rowVerbs\(j\)\.filter\(/.test(JP),
-    'jobs: ONE verb table — the row\'s buttons and its menu (Stop / Start / Remove / Open panel, then «Clear content…»)', JSON.stringify([acts({ state: 'up' }), acts({ state: 'failed' })])); }
+{ const JP = read('src/lib/jobs-panel.js');
+  // EVALUATED (the acceptance reader's rowVerbs-1 / -3 mutants stayed green on a text pin): rowVerbs, the row's buttons and the
+  // row's menu, built from their own source; pressing every button and every menu row records the acts — the same set
+  const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
+  const made = (() => { try { return new Function('t', 'jobAction', 'document', 'clearRecords', 'isCleared', 'clearedText', `${src('rowVerbs')}\n${src('actionButtons')}\n${src('rowMenuItems')}; return { rowVerbs, actionButtons, rowMenuItems };`); } catch { return null; } })();
+  const run = (j) => { const did = []; const doc = { createElement: () => ({ className: '', textContent: '', onclick: null }) };
+    const m = made((x) => x, (app, jj, act) => { did.push(act); }, doc, () => Promise.resolve({ ok: true }), () => false, () => '');
+    const b = m.actionButtons({}, j, () => {}, { compact: false }).map((x) => { did.length = 0; x.onclick({ stopPropagation() {} }); return did[0]; });
+    const items = m.rowMenuItems({}, j, () => {}, {}); const mm = items.filter((x) => !x.separator && x.label !== 'Clear content…').map((x) => { did.length = 0; x.action(); return did[0]; });
+    return { buttons: b.join(','), menu: mm.join(','), last: items[items.length - 1].label, verbs: m.rowVerbs(j).map((v) => v.act).join(',') }; };
+  let r = null; try { r = made ? [{ state: 'up' }, { state: 'failed' }, { state: 'done' }, { state: 'up', pendingPanel: true }].map(run) : null; } catch (e) { r = String(e.message); }
+  ok(Array.isArray(r) && r.every((x) => x.buttons === x.verbs && x.menu === x.verbs && x.last === 'Clear content…') && r[0].verbs === 'stop' && r[1].verbs === 'start,rm',
+    'jobs (evaluated): the row\'s buttons and its menu draw the SAME acts — one table (rowVerbs), the menu ending in «Clear content…»', JSON.stringify(r)); }
 { const BB = read('src/lib/browser-build-dialog.js');
   ok(/const btn = el\('button', 'mounts-btn bbuild-download-btn'\);/.test(BB) && !/bwho-answer bbuild-row bbuild-download/.test(BB), '«下载其他版本…» is a button (its source line a hint under it), never a radio row\'s head'); }
 { const MD = read('src/lib/mounts-dialog.js'), CA = read('src/lib/channel-account-dialogs.js');
@@ -200,8 +212,11 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
 console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons, the phone ⋯, the explorer toolbar');
 { const SB2 = read('src/lib/sidebar.js');
   ok(/btn\.innerHTML = UI_ICONS\.filter;/.test(SB2) && /n\.className = 'backend-filter-count'; n\.textContent = String\(this\._backendFilter\.size\);/.test(SB2) && !/backend-filter-icon-stack/.test(SB2)
-    && /btn\.textContent = words \+ ' ▾';/.test(SB2) && (SB2.match(/\[\{ caption: tr\('Sort by'\) \}, \.\.\./g) || []).length === 2 && !/this\._sortMode = this\._sortMode === 'recent' \? 'folder' : 'recent';/.test(SB2),
+    && /<span class="sort-words">\$\{escHtml\(words\)\} ▾<\/span>/.test(SB2) && (SB2.match(/\[\{ caption: tr\('Sort by'\) \}, \.\.\./g) || []).length === 2 && !/this\._sortMode = this\._sortMode === 'recent' \? 'folder' : 'recent';/.test(SB2),
     'sessions: the filter is a funnel with a count while it filters; sort says its order («最近 ▾») and opens a menu on both tabs — never a clock that silently toggles'); }
+{ const SB3 = read('src/lib/sidebar.js');
+  ok(/sortBtn\.onclick = \(e, from = sortBtn\) => \{/.test(SB3) && (SB3.match(/const r = from\.getBoundingClientRect\(\);/g) || []).length === 2 && /\{ label: tr\('Sort by'\), action: \(\) => document\.getElementById\('sort-toggle'\)\?\.onclick\?\.\(null, listMenuBtn\) \}/.test(SB3) && !/getElementById\('sort-toggle'\)\?\.click\(\)/.test(SB3),
+    'the sort menu opens where it was asked from — in the regular class (the button hidden, sort a row of the list\'s ⋯) at that ⋯, never at a hidden button\'s corner'); }
 { const CSS = read('public/style.css');
   ok(!/\.ut-actions \{[^}]*opacity: 0\.35/.test(CSS) && /\.ut-act\[data-label\]:is\(:hover, :focus-visible\)::after \{ content: attr\(data-label\);/.test(CSS) && /\.ut-detail-exp > summary \{ font-size: inherit;/.test(CSS),
     'For-you: the row\'s buttons at the theme\'s contrast (no 35 % dimming), each says its word on hover / focus, «▸ 详情» at the body size'); }
@@ -211,6 +226,58 @@ console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons,
 { const FE = read('src/lib/file-explorer.js');
   ok(/btnUpload\.innerHTML = UI_ICONS\.upload;/.test(FE) && !/'\\u2B06'/.test(FE) && /const fold = createBarFold\(toolbar, \{/.test(FE) && /compactClass: 'ftw-compact'/.test(FE) && /w\.className = 'ftw-word'; w\.textContent = word;/.test(FE),
     'the file explorer: every tool says its word, Upload has its own mark (no second up-arrow), the bar folds through createBarFold (words, then icons, then ⋯)'); }
+
+// ── ⑤b the auto-continue words say what a press does (the acceptance reader's minor: «点击取消» while a press opens a panel) ──
+{ const CSB2 = read('src/lib/chat-status-bar.js'), ZH2 = read('src/lib/i18n-zh.js'), JA2 = read('src/lib/i18n-ja.js');
+  const m = CSB2.match(/export const CANCEL_TAIL = (\/.*\/);/); const TAIL = m ? new Function(`return ${m[1]};`)() : null;
+  const keys = [...CSB2.matchAll(/t\('([^']*Click to cancel\.)'/g)].map((x) => x[1]);
+  const rowOf = (dict, k) => { const q = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const r = dict.match(new RegExp(`^  ['"]${q}['"]: ['"]([^'"]*)['"]`, 'm')); return r ? r[1] : null; };
+  const miss = TAIL ? keys.flatMap((k) => [['en', k], ['zh', rowOf(ZH2, k)], ['ja', rowOf(JA2, k)]].filter(([, v]) => !v || !TAIL.test(v)).map(([l]) => `${l}: ${k.slice(0, 40)}`)) : ['no CANCEL_TAIL'];
+  ok(keys.length >= 4 && miss.length === 0 && /title = title\.replace\(CANCEL_TAIL, ''\);/.test(CSB2),
+    `the auto-continue tooltip and panel line drop the old «Click to cancel.» in every language (${keys.length} keys × en / zh / ja) — a press opens the panel, cancelling is its row`, miss.join(' ; ')); }
+
+// ── ⑩b no press goes around a pressSays button; every touched control has its words (the acceptance reader's pressSays-3 and
+//    words-1 / -2 / -3 mutants stayed green on text pins) ──
+console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — censuses over the source');
+{ const around = [];
+  for (const f of LIB) { const src = read(f); if (!/\bpressSays\(/.test(src)) continue; let ast; try { ast = parse(src); } catch { continue; }
+    const btns = new Set(); walk(ast, (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'pressSays' && n.arguments[0]) btns.add(src.slice(n.arguments[0].start, n.arguments[0].end)); });
+    walk(ast, (n) => { if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.property.name === 'onclick' && btns.has(src.slice(n.callee.object.start, n.callee.object.end))) around.push(`${f}:${n.loc.start.line}`); }); }
+  ok(around.length === 0, 'no code calls a pressSays button\'s onclick() directly — every press goes through its why (a click event, or nothing)', around.join(', ')); }
+{ const FE = read('src/lib/file-explorer.js'); const fa = parse(FE); const made = new Map(); let appended = [], toolEls = [];
+  walk(fa, (n) => {
+    if (n.type === 'VariableDeclarator' && n.init && n.init.type === 'CallExpression' && n.init.callee.type === 'MemberExpression' && n.init.callee.property.name === '_btn' && n.id.type === 'Identifier') made.set(n.id.name, n.loc.start.line);
+    if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'toolbar' && n.callee.property.name === 'append') appended = n.arguments.filter((a) => a.type === 'Identifier').map((a) => a.name);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'tools' && n.init && n.init.type === 'ObjectExpression') for (const p of n.init.properties) if (p.value && p.value.type === 'ObjectExpression') for (const q of p.value.properties) if (q.key && q.key.name === 'el' && q.value.type === 'Identifier') toolEls.push(q.value.name); });
+  const wordless = appended.filter((x) => made.has(x) && !toolEls.includes(x) && x !== 'btnMore');
+  ok(appended.length >= 7 && toolEls.length >= 6 && wordless.length === 0, `the explorer toolbar: every tool button it appends carries its word (the tools table) — none icon-only (${wordless.join(', ') || 'none'})`); }
+{ // the explorer's ⋯ (the acceptance reader's finding 4): a folded tool acts AGAINST THE ⋯ — foldedMenuItems EVALUATED from its source
+  const BF = read('src/lib/bar-fold.js'), at = BF.indexOf('export function foldedMenuItems(');
+  const fm = at < 0 ? null : new Function(`${BF.slice(at, BF.indexOf('\n}\n', at) + 3).replace('export function', 'function')}; return foldedMenuItems;`)();
+  const got = []; const hidden = { id: 'the hidden button' };
+  const items = fm ? fm(['view', 'gone', 'upload'], { view: { el: hidden, word: 'View', act: (a) => got.push(['view', a]) }, upload: { el: hidden, word: 'Upload', act: (a) => got.push(['upload', a]) } }, 'THE-MORE') : [];
+  items.forEach((x) => x.action());
+  ok(!!fm && items.map((x) => x.label).join(',') === 'View,Upload' && got.length === 2 && got.every(([, a]) => a === 'THE-MORE') && /showContextMenu\(r\.left, r\.bottom \+ 2, foldedMenuItems\(fold\.folded\(\), tools, btnMore\)\)/.test(read('src/lib/file-explorer.js')),
+    'the explorer\'s ⋯ (evaluated): a folded tool\'s row acts against the ⋯ — View\'s and Upload\'s popovers open there, never at a hidden button\'s corner', JSON.stringify(got)); }
+{ // THE SESSIONS FILTER ROW (the round's walk: the sort's words ran the row past a 200 / 260 px sidebar — ja at 260 cut the ⋯):
+  // it is a chrome bar — THE fold (bar-fold.js) with the sort's icon as its short form, manage and sort foldable, the ⋯ as `more`;
+  // a FOLDED control is a row of that ⋯ — listMenuKeys EVALUATED from its source
+  const SB4 = read('src/lib/sidebar.js'), CSS4 = read('public/style.css'), at = SB4.indexOf('export function listMenuKeys(');
+  const keys = at < 0 ? null : new Function(`${SB4.slice(at, SB4.indexOf('\n}\n', at) + 3).replace('export function', 'function')}; return listMenuKeys;`)();
+  const r = keys ? [keys({}), keys({ folded: ['sort'] }), keys({ folded: ['manage', 'sort'] }), keys({ regular: true })].map((x) => x.join('+')) : [];
+  const wired = /this\._filterFold = createBarFold\(row, \{\s*more: listMenuBtn,/.test(SB4) && /\.\.\.\(key === 'sort' \? \{ compactClass: 'sort-compact' \} : \{\}\)/.test(SB4) && /const FOLD = \{ search: 0, filter: 0, live: 0, manage: 20, sort: 10 \};/.test(SB4)
+    && /listMenuKeys\(\{ regular: this\._regularMode, folded: this\._filterFold\?\.folded\(\) \}\)\.map\(\(k\) => ROWS\[k\]\)/.test(SB4);
+  const css = /\.sfr-bar > \.bar-folded \{ display: none !important; \}/.test(CSS4) && /\.sort-btn\.sort-compact \.sort-ico \{ display: inline; \}/.test(CSS4) && !/#sort-toggle \{[^}]*(white-space: normal|max-width)/.test(CSS4);
+  ok(r.join('|') === 'refresh|refresh+sort|refresh+sort+manage|refresh+sort+manage' && wired && css,
+    'the sessions filter row never runs past the sidebar (evaluated): the sort\'s words, else its icon, else it and manage are rows of the ⋯ — the chrome-bar fold', JSON.stringify({ r, wired, css })); }
+{ const UT2 = read('src/lib/user-todos-row.js');
+  const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];
+  const glyphOnly = btns.filter((m) => !/\bt\(|\btc\(|escHtml\(/.test(m[2]) && !/data-label=/.test(m[1])).map((m) => m[1].match(/class="([^"]*)"/)[1]);
+  ok(btns.length >= 10 && glyphOnly.length === 0, `For-you: every ut-act button whose face is a glyph or an icon says its word (data-label) — ${btns.length} buttons (${glyphOnly.join(', ') || 'none without'})`); }
+{ const MN2 = read('src/lib/mobile-nav.js'); const at = MN2.indexOf('  _buildWindowItem('); const body = MN2.slice(at, MN2.indexOf('\n  }\n', at));
+  const made2 = [...body.matchAll(/const (\w+) = document\.createElement\('button'\)/g)].map((m) => m[1]);
+  const silent = made2.filter((b) => !new RegExp(`\\b${b}\\.title = |\\b${b}\\.setAttribute\\('aria-label'`).test(body));
+  ok(made2.length >= 2 && silent.length === 0, `the phone switcher's row: every button has its word (title / aria-label) — ${made2.join(', ')} (${silent.join(', ') || 'none silent'})`); }
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);

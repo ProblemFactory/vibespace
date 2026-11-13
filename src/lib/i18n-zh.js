@@ -4804,6 +4804,8 @@ export default {
   "{label}: {value}": "{label}：{value}",
   "Set up the vault…": "设置保险库…",
   "Before you start, check:": "开始前请确认：",
+  "Set up {name}": "在 {name} 上安装所需工具",
+  "dtach (keeps sessions running across disconnects)": "dtach（断线后会话继续运行）",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} 自动继续",
   "Auto-continue: off": "自动继续：关",

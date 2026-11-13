@@ -143,19 +143,19 @@ const REPLY_SNIPPET = 80; // chars of "You replied: …" on a resolved row (the 
 // A PRODUCER'S ACTION (design-reset-credits p2): an item that carries `action`
 // gets ONE button doing it — the client maps the TYPE to a verb it owns.
 const actionBtnHtml = (i, t) => (i && i.action && i.action.type === 'reset-credit' && i.action.accountKey
-  ? `<button class="ut-act ut-action-reset" title="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
+  ? `<button class="ut-act ut-action-reset" aria-label="${escHtml(t('Use a reset credit…'))}" data-label="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
 // lane channel-names-readable: a channel account's sign-in lacks a permission — ITS Re-authorize dialog (the same
 // producer-action click: the model maps the type)
 // lane channel-reauth-visible: a DEAD sign-in (`signin: 'expired'`) says its verb in WORDS on its own line instead — Reconnect
 // (the same click: the model opens the account's Re-authorize dialog)
 const signinItem = (i) => !!(i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId && i.action.signin === 'expired');
 const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId && !signinItem(i)
-  ? `<button class="ut-act ut-action-reset ut-action-reauth" title="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
+  ? `<button class="ut-act ut-action-reset ut-action-reauth" aria-label="${escHtml(t('Re-authorize'))}" data-label="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
 const reconnectHtml = (i, t) => (signinItem(i)
   ? `<div class="ut-reconnect-row"><button type="button" class="ut-action-reset ut-action-reauth ut-reconnect" title="${escHtml(t('Open the account\'s Re-authorize'))}">${escHtml(t('Reconnect'))}</button></div>` : '');
 // lane browser-takeover-queue: an assistant needs the person in its browser — its live view (the same producer-action click)
 const takeoverBtnHtml = (i, t) => (i && i.action && i.action.type === 'browser-takeover' && i.action.requestId
-  ? `<button class="ut-act ut-action-reset ut-action-takeover" title="${escHtml(t('Open its live view — take over there'))}">${UI_ICONS.browserLive || ''}</button>` : '');
+  ? `<button class="ut-act ut-action-reset ut-action-takeover" title="${escHtml(t('Open its live view — take over there'))}" data-label="${escHtml(t('Take over'))}">${UI_ICONS.browserLive || ''}</button>` : '');
 /** The command an exit ask names, in mono, then its ANSWER — Allow / Deny on their own line — and the rule (open items
  *  only). lane-pairing ⑥: answered right here (the popup, the mini inbox and the phone paint this row). naive-user
  *  N-ask: the two buttons rode the floated `.ut-actions` bar — at 35 % opacity until the row is hovered (a 60-second
@@ -525,15 +525,15 @@ function partsOf(entry, ctx) {
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}" data-label="${escHtml(t('Open'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
-  const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
+  const more = `<button type="button" class="ut-act ut-more" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
   // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS (foryou-actions closersOf) — its Approve / Deny above, no ✓ / ✕
   // beside them (a generic close was a silent Deny), and no ↺ once decided (a decision is final); r3: A POINTER HIDES — ONE
   // ✕ «Hide» (no ✓: a pointer is never «done»; hiding decides nothing) and no ↺ once hidden (it comes back by itself)
   const closers = closersOf(i, resolved);
   const actions = resolved
-    ? `<span class="ut-actions">${view}${closers.includes('reopen') ? `<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
+    ? `<span class="ut-actions">${view}${closers.includes('reopen') ? `<button class="ut-act ut-reopen" aria-label="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
-    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
+    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" aria-label="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
       + (closers.includes('done') ? `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` : '') // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
       + (closers.includes('dismiss') ? `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '')
       + (closers.includes('hide') ? `<button class="ut-act ut-dismiss ut-hide" title="${escHtml(t('Hide — decides nothing; what it points at stays open in the conversation'))}" data-label="${escHtml(t('Hide'))}">✕</button>` : '') + '</span>';
