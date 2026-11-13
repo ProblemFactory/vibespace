@@ -4,7 +4,7 @@
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { pluginProvides } from './plugins-ui.js'; // the ONE relay probe (declared capability)
-import { t as tr, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
+import { t as tr, tc, deviceLocale } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var (verify-r5 A1: + the device's locale for a time)
 import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
@@ -1353,7 +1353,7 @@ export function installSidebarMounts(Sidebar) {
      *
      * Detection here is an AFFORDANCE ONLY — it reveals the passphrase row, it
      * NEVER blocks submit (the server is authoritative, and a format we
-     * misjudge must not become a wall). The "Key has a passphrase?" toggle is
+     * misjudge must not become a wall). The «the key has a passphrase» checkbox is
      * always reachable for exactly that case.
      */
     _askPrivateKey({ text = '', error = '', showPass = false } = {}) {
@@ -1390,23 +1390,39 @@ export function installSidebarMounts(Sidebar) {
         ta.style.cssText = 'min-height:130px;font-size:10px;font-family:monospace';
         ta.value = text;
 
+        // lane ui-language (the walk's machines-16): the browser's own «Choose File / No file chosen» spoke the BROWSER's
+        // language — the input is hidden behind a themed button and a file-name line in the page's words
         const up = document.createElement('input');
         up.type = 'file';
+        up.style.display = 'none';
+        const upRow = document.createElement('div');
+        upRow.className = 'mounts-file-row';
+        const upBtn = document.createElement('button');
+        upBtn.type = 'button';
+        upBtn.className = 'mounts-btn';
+        upBtn.textContent = tr('Choose a key file…');
+        upBtn.onclick = () => up.click();
+        const upName = document.createElement('span');
+        upName.className = 'mounts-field-hint';
+        upName.textContent = tr('No file chosen');
+        upRow.append(upBtn, upName, up);
         up.onchange = () => {
           const f = up.files[0];
-          if (f) { const r = new FileReader(); r.onload = () => { ta.value = r.result; detect(); }; r.readAsText(f); }
+          if (f) { upName.textContent = f.name; const r = new FileReader(); r.onload = () => { ta.value = r.result; detect(); }; r.readAsText(f); }
         };
 
         // status line for detection verdicts (never a blocker)
         const status = document.createElement('div');
         status.className = 'mounts-field-hint';
 
-        const passToggle = document.createElement('button');
-        passToggle.type = 'button';
-        passToggle.className = 'mounts-btn';
+        // a checkbox, not a full-width bar that did not read as a control (the walk's machines-16)
+        const passToggle = document.createElement('label');
+        passToggle.className = 'mounts-check';
         passToggle.style.marginTop = '6px';
-        passToggle.textContent = tr('Key has a passphrase?');
-        passToggle.onclick = () => { revealPass(true); passIn.focus(); };
+        const passBox = document.createElement('input');
+        passBox.type = 'checkbox';
+        passToggle.append(passBox, ' ', tr('The key has a passphrase'));
+        passBox.onchange = () => { if (passBox.checked) { revealPass(true); passIn.focus(); } };
 
         const passWrap = document.createElement('div');
         // NOTE: display:none, NOT a `hidden` class — this project has no global
@@ -1454,7 +1470,7 @@ export function installSidebarMounts(Sidebar) {
         };
         ta.addEventListener('input', detect);
 
-        body.prepend(note, ta, up, status, passToggle, passWrap);
+        body.prepend(note, ta, upRow, status, passToggle, passWrap);
         if (error) {
           const errEl = ov.querySelector('.cfg-err');
           if (errEl) errEl.textContent = error;
@@ -1467,17 +1483,17 @@ export function installSidebarMounts(Sidebar) {
 
     _showAddHostDialog(hd) {
       // one subject: one machine being added
-      this._mountsDialog('Add remote machine', [
-        { key: 'name', label: 'Name', placeholder: 'gpu-01', hint: 'Any label you like — how this machine shows in your lists.' },
-        { key: 'user', label: 'Username on that machine', placeholder: 'ubuntu' },
-        { key: 'host', label: 'Address', placeholder: '10.0.0.5 or gpu01.example.com', hint: 'The machine’s IP address or hostname.' },
-        { key: 'port', label: 'Port', value: '22', hint: 'Usually 22 — leave as-is unless told otherwise.' },
-        { key: 'keyChoice', label: 'How to log in', type: 'select', options: [
-          ['default', 'The SSH keys already on this server'],
-          ['app', hd.key.exists ? 'VibeSpace’s own key (recommended)' : 'Create a key for VibeSpace (recommended)'],
-          ['paste', 'Paste or upload my own key…'],
-        ], hint: 'An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.' },
-      ], 'Add machine', async (v, { close, err }) => {
+      this._mountsDialog(tr('Add remote machine'), [
+        { key: 'name', label: tr('Name'), placeholder: 'gpu-01', hint: tr('Any label you like — how this machine shows in your lists.') },
+        { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu' },
+        { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), hint: tr('The machine’s IP address or hostname.') },
+        { key: 'port', label: tr('Port'), value: '22', hint: tr('Usually 22 — leave as-is unless told otherwise.') },
+        { key: 'keyChoice', label: tr('How to log in'), type: 'select', options: [
+          ['default', tr('The SSH keys already on this server')],
+          ['app', hd.key.exists ? tr('VibeSpace’s own key (recommended)') : tr('Create a key for VibeSpace (recommended)')],
+          ['paste', tr('Paste or upload my own key…')],
+        ], hint: tr('An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.') },
+      ], tr('Add machine'), async (v, { close, err }) => {
        // A sub-dialog (key paste / generated public key) stands BESIDE this one under its own id (lane dialog-yield r2: a form
        // is never replaced — before, it reused this id and removed this dialog); a thrown error after this dialog closed is
        // still surfaced as a toast instead of failing silently.
@@ -1496,22 +1512,25 @@ export function installSidebarMounts(Sidebar) {
             const r = await api('/api/hosts/key', { method: 'POST' });
             k = r.key;
             // surface the public key so the user can install it on the target
-            await new Promise((done) => {
+            // Done = the line is on the other machine: the add goes on; Cancel / ✕ = it is not: the add stops (the key stays
+            // for the next try). Before, the ✕ left this await hanging for ever.
+            const placed = await new Promise((done) => {
               // one subject: the public key just generated for the one machine being added
-              this._mountsDialog('Public key generated', [], 'Done', async (_, ctx) => { ctx.close(); done(); }, { id: 'mounts-key-dialog' });
+              this._mountsDialog(tr('Public key generated'), [], tc('select', 'Done'), async (_, ctx) => { done(true); ctx.close(); }, { id: 'mounts-key-dialog', onClose: () => done(false) });
               const ov = document.getElementById('mounts-key-dialog');
               const body = ov.querySelector('.dialog-body');
               const ta = document.createElement('textarea');
               ta.readOnly = true; ta.value = k.publicKey; ta.style.minHeight = '64px'; ta.style.fontSize = '11px';
               const note = document.createElement('p');
               note.className = 'agents-note';
-              note.textContent = 'This lets VibeSpace log in to that machine. Add this line to the user’s ~/.ssh/authorized_keys on the target machine (or ask whoever manages it to), then press Done.';
+              note.textContent = tr('This lets VibeSpace log in to that machine. Add this line to the user’s ~/.ssh/authorized_keys on the target machine (or ask whoever manages it to), then press Done.');
               const copy = document.createElement('button');
               copy.className = 'btn-cancel';
-              copy.textContent = 'Copy';
-              copy.onclick = () => { copyText(k.publicKey); showToast('Public key copied'); };
+              copy.textContent = tr('Copy');
+              copy.onclick = () => { copyText(k.publicKey); showToast(tr('Public key copied')); };
               body.prepend(note, ta, copy);
             });
+            if (!placed) throw new Error(tr('Cancelled — the machine was not added.'));
           }
           keyPath = k.path;
         }
@@ -1528,6 +1547,8 @@ export function installSidebarMounts(Sidebar) {
             });
             break;
           } catch (e) {
+            // the server names its refusal by code; the words are the page's (lane ui-language, the walk's machines-12)
+            if (e.code === 'host-name-taken') throw new Error(tr('A machine named “{name}” already exists — pick another name.', { name: v.name }));
             if (!privateKey || !KEY_ERR_CODES.has(e.code)) throw e;
             const again = await this._askPrivateKey({
               text: privateKey,
@@ -1544,8 +1565,8 @@ export function installSidebarMounts(Sidebar) {
         }
         // immediate connectivity test so the row shows a real status
         this._hostStatus = this._hostStatus || {};
-        try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast('Host reachable'); }
-        catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast('Added, but unreachable: ' + e.message, { type: 'error' }); }
+        try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast(tr('Machine reachable')); }
+        catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast(tr('Added, but not reachable: {error}', { error: e.message }), { type: 'error' }); }
         this._renderMounts();
        } catch (e) {
          if (!err.isConnected) { showToast(e.message || tr('Failed'), { type: 'error' }); return; }
@@ -2046,9 +2067,10 @@ export function installSidebarMounts(Sidebar) {
         closeOnBackdrop: false, escapeToClose: false, onClose: () => off?.(), kind: 'form', // (no Escape either: the set-up runs on — its ✕ is the one door)
       });
       if (raised) return;   // raised: the same subject's form, as it was
-      body.innerHTML = `<div class="bs-steps"></div>
+      body.innerHTML = `<p class="mounts-field-hint">${escHtml(tr('This installs what VibeSpace needs on that machine: dtach (keeps sessions alive), Node.js and Claude Code.'))}</p>
+        <div class="bs-steps"></div>
         <details class="bs-log-wrap" hidden><summary>${escHtml(tr('Log'))}</summary><pre class="bs-log"></pre></details>
-        <div class="dialog-actions"><button class="btn-create bs-start">${escHtml(tr('Start'))}</button></div>`;
+        <div class="dialog-actions"><button class="btn-create bs-start">${escHtml(tr('Start installing'))}</button></div>`;
       const stepsEl = overlay.querySelector('.bs-steps');
       const logEl = overlay.querySelector('.bs-log');
       const logWrap = overlay.querySelector('.bs-log-wrap');   // lane ui-controls-and-bugs (machines-17): drawn once it has a line — never a fold that opens onto an empty box
@@ -2063,7 +2085,7 @@ export function installSidebarMounts(Sidebar) {
             : st === 'fail' ? '<span class="bs-ic bs-fail">✗</span>'
             : st === 'running' ? '<span class="bs-ic bs-spin"></span>'
             : '<span class="bs-ic bs-pend"></span>';
-          return `<div class="bs-step">${icon}<span>${escHtml(STEP_WORDS[s.key] || s.label)}</span></div>`;
+          return `<div class="bs-step">${icon}<span>${escHtml(STEP_WORDS[s.key] || tr(s.label))}</span></div>`;
         }).join('');
       };
       paint();
@@ -2081,7 +2103,7 @@ export function installSidebarMounts(Sidebar) {
       off = () => this.app.ws.offGlobal(handler);
       const startBtn = overlay.querySelector('.bs-start');
       startBtn.onclick = async () => {
-        startBtn.disabled = true; startBtn.textContent = 'Running…';
+        startBtn.disabled = true; startBtn.textContent = tr('Installing…');
         overlay.querySelector('.bs-log-wrap').open = true; // show the log live
         appendLog(`$ connecting to ${h.user}@${h.host}…`);
         try {
@@ -2090,13 +2112,13 @@ export function installSidebarMounts(Sidebar) {
           // the button was disabled for the run — a terminal label on a still-
           // disabled button read as a dead "All done" (real report: clicking
           // did nothing). Completion turns it into a real close button.
-          startBtn.textContent = r.success ? 'All done' : 'Finished with failures — close';
+          startBtn.textContent = r.success ? tr('All done — close') : tr('Finished with failures — close');
           startBtn.disabled = false;
           startBtn.onclick = () => close();
           this._hostStatus = this._hostStatus || {};
           try { this._hostStatus[h.id] = await api(`/api/hosts/${h.id}/test`, { method: 'POST' }); } catch {}
           this._renderMounts();
-        } catch (e) { startBtn.textContent = 'Retry'; startBtn.disabled = false; showToast(e.message, { type: 'error' }); }
+        } catch (e) { startBtn.textContent = tr('Retry'); startBtn.disabled = false; showToast(e.message, { type: 'error' }); }
       };
     },
 
@@ -2141,7 +2163,7 @@ export function installSidebarMounts(Sidebar) {
       if (raised) return;   // raised: the same subject's form, as it was
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
-      hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
+      hint.textContent = tr('Paste the contents of your rclone.conf (from “rclone config file” — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
       const ta = document.createElement('textarea'); ta.dataset.noDictation = '1'; // an rclone.conf holds tokens: never a dictation's context (lane voice-follows-focus)
       ta.placeholder = '[gdrive]\ntype = drive\ntoken = {…}\n\n[b2]\ntype = b2\naccount = …\nkey = …';
       ta.style.minHeight = '120px'; ta.style.fontSize = '11px'; ta.style.fontFamily = 'monospace';

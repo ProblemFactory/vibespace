@@ -196,7 +196,7 @@ console.log('— ③ attributes land as raw strings; classless chips carry no cl
   // 500 of 1500 cached = 33 % → the orange tier (a color-mix of the two theme vars), never a literal colour
   ok(/^color:color-mix\(in srgb, var\(--red, #e55\) 50%, var\(--yellow, #e5c07b\)\)$/.test(els.cache.getAttribute('style')) && /^color:var\(--green, #3fb950\)$/.test(els.cost.getAttribute('style')), `③ their colour rides the style attribute, theme vars only (${els.cache.getAttribute('style')} / ${els.cost.getAttribute('style')})`);
   ok(/^<span class="chat-status-ctx-pie" style="background:conic-gradient\(.*\)"><\/span> <span style="color:.*">\d+%<\/span><span class="chat-status-dim">\[\d+k\/\d+k\]<\/span>$/.test(els.ctx.innerHTML), '③ the ctx chip keeps its pie + percent + [used/total] markup shape');
-  ok(els.perm.getAttribute('title') === 'Click to change permission mode' && els.perm.textContent.endsWith(' default'), '③ the permission chip: title + label as before');
+  ok(els.perm.getAttribute('title') === 'Ask before acting — Click to change permission mode' && els.perm.textContent.endsWith(' Ask first'), '③ the permission chip: its words in the title, the short word on the chip (lane ui-language: never the raw mode value)');
   // the "?" chips when nothing was reported
   const bare = mkBar(ChatStatusBar, { onSearch: null, onDesignRequest: null });
   bare.render();

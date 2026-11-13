@@ -4,6 +4,36 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.403 — 2026-11-15
+
+### ui-language pick 1 — every sentence a person reads goes through t(), with zh AND ja rows (the UI walk's L1 list; 主开发's GO 07:02Z)
+- **The owner (2026-11-13):** «走查一下所有界面找到可优化的布局，提示文本等». The walk found 57 language findings (9 major) in about a dozen patterns. The law: fix by rule, not by surface; pin every rule with a census derived from the tree.
+- **THE CENSUS — scripts/test-ui-language.mjs (fast, PURE).**
+  - The universe: the src files the three browser entries reach (src/client.js, src/design-viewer-entry.js, src/doc-editor-entry.js), found by a relative-import walk. Worker threads parse it with acorn (15 MB; one thread took 1.4 s). The workers' PARSED imports check the walk (491 files, equal to the bundle's metafile set).
+  - ① Visible English outside t(): a literal that reads as English in a sink a person reads (textContent / title / placeholder / innerHTML / setAttribute / toast / dialog / label-like keys / HTML template text). Held by a shrink-only baseline, scripts/fixtures/ui-language-baseline.json: a NEW hit is red, a gone row is red until `--lower`. Seeded at **667** on 935960b7e; **508** after this pick.
+  - ② Every extracted key has a zh AND a ja row (i18n-check only warned). 7 were missing.
+  - ③ Every {param} in a literal key is filled by its call. A settings `[t(key), {params}]` pair is filled where drawn; an embedded-control marker says `// ui-words:`.
+  - ④ A key carrying markup never reaches a TEXT sink, and a dict value adds no markup its key lacks: 5 backticked settings descriptions, the resume dialog's <b>/<br>, 7 translator `**`.
+  - ⑤ No zh / ja row is English for a word key: baseline 50, plus a GLOSSARY_PENDING list (agent / harness / reset credit / token) held for the owner's glossary (lane L3).
+  - ⑥ The For-you heads: every literal `sessionName` a producer files is a row of src/foryou-actions.js FORYOU_HEADS, worded at display (65 producer lines, 20 heads).
+  - Every leg's negative control runs first on a planted source or row.
+- **Measured:** ~0.75 s in-process (three runs 636–750 ms). The fast row states 0.8 s; the .398 cap (1068 s) is raised by arithmetic at the train, as 主开发 ruled.
+- **Found on the way:** scripts/i18n-extract.mjs `dictEntries` skips every row with a trailing `// lane …` comment (~500 of 11 400), so i18n-check's duplicate and parity checks never see them. The census reads the dictionary MODULES instead. Not changed here.
+- **The fixes (one mechanism each):**
+  - customize-mode.js and theme-editor.js are worded through t(). Their tables are worded at definition; theme groups stay English keys and are worded where drawn. The extra row's hint moved from a CSS `content:` string to `attr(data-cz-empty)`.
+  - The machine dialogs in sidebar-mounts.js:
+    - hosts.js's duplicate name is refused with the code `host-name-taken`, and the page words it.
+    - BOOTSTRAP_STEPS labels are `i18nKey`.
+    - The private key is picked with a themed button (the native input spoke the browser's language); the passphrase is a checkbox.
+    - The public-key step's ✕ / Cancel now stops the add (its await hung for ever before).
+  - mounts-dialog.js: every form names its Cancel, which is the shell's guarded dismiss.
+  - utils.js showConfirmDialog: `message` may be a list of sentences, one paragraph each, drawn as TEXT. layout.js's resume-all offer uses it (the key lost its <b>/<br>).
+  - The status bar's lock chip and its menu go through permission-mode-labels.js, which adds `permissionModeShort` and `permissionModeDanger`.
+  - main-ask.js files `i18n.detail`: the request line plus the way out, as keys. The command row's key lost its backticks.
+  - login-expiry-watch.js files `i18n` — every branch's words as keys, instants as `{at}`, spans as unit keys — and `source`. Its stored English `text` is unchanged, because the store is idempotent by text.
+  - FORYOU_HEADS words the ~60 producers' literal heads at display.
+- **Not here:** the glossary (agent, harness, reset credit, the quote style) waits for the owner (L3). The buttons, layout and controls halves of these items went to L2 / L4 / L5 by message.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

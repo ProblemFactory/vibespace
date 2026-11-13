@@ -73,11 +73,22 @@ const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
 const rowsOk = Object.entries(M.MAIN_ASK_KINDS).every(([, r]) => r.en && r.zh && r.ja && zh.includes(`${JSON.stringify(r.en)}: ${JSON.stringify(r.zh)}`) && ja.includes(`${JSON.stringify(r.en)}: ${JSON.stringify(r.ja)}`));
 ok('every row has en/zh/ja words and the locale files hold the same zh/ja', rowsOk && Object.keys(M.MAIN_ASK_KINDS).sort().join() === 'command,plan,question,tool,tool-bare');
 const words = (perm) => M.inboxItemFor(M.mainAskOf(perm), { name: 'docusign', sessionId: 's1' });
-ok('words: a Bash ask names the command', words({ requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf ./ds-out && ./sign.sh' } }).text === 'docusign is waiting for you: permission to run `rm -rf ./ds-out && ./sign.sh`');
-ok('words: another tool names the tool + its first words; a multi-line subject says there is more', words({ requestId: 'r', toolName: 'WebFetch', input: { url: 'https://example.com/a' } }).text === 'docusign is waiting for you: permission to use WebFetch (https://example.com/a)' && / …\`$/.test(words({ requestId: 'r', toolName: 'Bash', input: { command: 'ls\nrm x' } }).text));
+ok('words: a Bash ask names the command', words({ requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf ./ds-out && ./sign.sh' } }).text === 'docusign is waiting for your permission to run: rm -rf ./ds-out && ./sign.sh');
+ok('words: another tool names the tool + its first words; a multi-line subject says there is more', words({ requestId: 'r', toolName: 'WebFetch', input: { url: 'https://example.com/a' } }).text === 'docusign is waiting for you: permission to use WebFetch (https://example.com/a)' && / …$/.test(words({ requestId: 'r', toolName: 'Bash', input: { command: 'ls\nrm x' } }).text));
 ok('words: a question names the question; the plan names the plan', words({ requestId: 'r', toolName: 'AskUserQuestion', kind: 'user_input', questions: [{ question: 'Which database?' }] }).text === 'docusign is waiting for you: a question: Which database?' && words({ requestId: 'r', toolName: 'ExitPlanMode', input: { plan: 'x' } }).text === 'docusign is waiting for you: the plan awaits your approval');
 const w0 = words({ requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf ./ds-out' } });
 ok('the detail carries the whole request + the way out (answer, or Stop it); the action names the request + the session; i18n = the row key', /^Bash: rm -rf \.\/ds-out\n/.test(w0.detail) && /Open the conversation and answer.*or Stop it\.$/.test(w0.detail) && w0.action.type === 'main-ask' && w0.action.requestId === 'r' && w0.action.sessionId === 's1' && w0.i18n.text.key === M.MAIN_ASK_KINDS.command.en);
+// lane ui-language (the walk's for-you-1 / for-you-3): the tray words the detail in the person's language — the request line and the
+// way out are KEYS with zh / ja rows (the stored `detail` stays the store's English), and no row carries a backtick the tray would show raw
+{
+  const lines = w0.i18n.detail || [];
+  ok('the i18n detail = the request line (its tool + the whole command) + the way out, each a key with zh / ja rows; a missing name is a key, not English',
+    lines.length === 2 && lines[0].key === '{tool}: {request}' && lines[0].params.tool === 'Bash' && lines[0].params.request === 'rm -rf ./ds-out' && /^The conversation is paused until you answer\./.test(lines[1].key)
+    && [lines[0].key, lines[1].key, 'A conversation', '… cut here — {n} more characters; the card in the conversation shows the whole request'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'))
+    && typeof M.inboxItemFor(M.mainAskOf({ requestId: 'r', toolName: 'Bash', input: { command: 'ls' } }), {}).i18n.text.params.name === 'object',
+    JSON.stringify(lines));
+  ok('no row of the table carries a backtick (the tray draws text: a `…` showed raw)', Object.values(M.MAIN_ASK_KINDS).every((r) => !/`/.test(r.en + r.zh + r.ja)));
+}
 ok('a settled or stale permission is no ask', M.mainAskOf({ requestId: 'r', resolved: 'allowed' }) === null && M.mainAskOf({ requestId: 'r', stale: true }) === null);
 
 // ── the rig ──
@@ -167,7 +178,7 @@ function scenarios(mod) {
 }
 const S = scenarios(MA);
 ok('59 s: nothing; 60 s: ONE item (later syncs file nothing more)', S.filed.at59 === 0 && S.filed.open === 1 && S.filed.all === 1, S.filed);
-ok('the item: the conversation + the command, origin agent, kind action, urgency high, action = the request + the session', S.filed.text === 'docusign is waiting for you: permission to run `bash -c "rm -rf ./ds-out && ./sign.sh"`' && S.filed.origin === 'agent' && S.filed.kind === 'action' && S.filed.urgency === 'high' && S.filed.action?.type === 'main-ask' && S.filed.action?.requestId === RID && S.filed.action?.sessionId === 'sess-a', S.filed);
+ok('the item: the conversation + the command, origin agent, kind action, urgency high, action = the request + the session', S.filed.text === 'docusign is waiting for your permission to run: bash -c "rm -rf ./ds-out && ./sign.sh"' && S.filed.origin === 'agent' && S.filed.kind === 'action' && S.filed.urgency === 'high' && S.filed.action?.type === 'main-ask' && S.filed.action?.requestId === RID && S.filed.action?.sessionId === 'sess-a', S.filed);
 ok('the first-seen instant is persisted (session meta mainAskedAt)', S.filed.persisted && Number.isFinite(S.filed.persisted[RID]));
 ok('answered after filing ⇒ the item is resolved (done, by agent)', S.answeredAfter.open === 0 && S.answeredAfter.done === 1 && S.answeredAfter.by === 'agent', S.answeredAfter);
 ok('answered at 30 s ⇒ no item ever', S.answered30 === 0, S.answered30);
@@ -197,7 +208,7 @@ console.log('④ a question, the plan, a codex-shaped normalizer');
   N.feedLive(sx, { open: true }); MA.sync(sx, Date.now() + 61_000);
   const filed = R.items('sess-x', 'open').map((i) => i.text);
   N.feedLive(sx, { settle: true }); // no explicit sync: the gate's permission-op trigger must tell the engine
-  ok('a codex approval (stub normalizer, pendingAsksOf over its cards) files "permission to run `cargo test`"', filed.join() === 'codex run is waiting for you: permission to run `cargo test`', filed);
+  ok('a codex approval (stub normalizer, pendingAsksOf over its cards) files "permission to run: cargo test"', filed.join() === 'codex run is waiting for your permission to run: cargo test', filed);
   ok('…and its answer (a permission op through feedLive, no pending level) resolves it', R.items('sess-x', 'open').length === 0 && R.items('sess-x', 'done').length === 1);
 }
 

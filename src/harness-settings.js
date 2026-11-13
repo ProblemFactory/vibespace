@@ -441,7 +441,7 @@ const HARNESS_SETTINGS = {
         { value: "gemini-3.8-flash-medium", label: "gemini-3.8-flash-medium" },
       ],
       label: t("Default model"),
-      description: t("The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). `agy models` lists what your login may use; an unknown slug is refused by name."),
+      description: t("The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). “agy models” lists what your login may use; an unknown slug is refused by name."),
       apply: { kind: 'spawn', how: '--model', via: 'model' },
     },
     {

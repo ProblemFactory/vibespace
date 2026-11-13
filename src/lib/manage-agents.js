@@ -3027,7 +3027,9 @@ export function installManageAgents(App, ctx = {}) {
         for (const [key, label, tip] of [
           // t() WITHOUT params keeps the literal {n} — it marks where the
           // number input embeds into the translated sentence.
+          // ui-words: {n} marks where the number input is embedded
           ['agents.stopNudgeStaleMinutes', t('fire after {n} min without a status update'), t('The nudge only fires when the session has not updated its board status for this long, and never after a turn that already reported. 0 = always stale (with cooldown 0: fires on every stop of a turn that did not report).')],
+          // ui-words: {n} marks where the number input is embedded
           ['agents.stopNudgeCooldownMinutes', t('at most once per {n} min per session'), t('After nudging a session once, wait at least this long before nudging it again. 0 = no cooldown.')],
         ]) {
           const line = document.createElement('label');

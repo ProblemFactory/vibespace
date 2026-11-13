@@ -1,4 +1,5 @@
 import { onOutsidePress, uiScale } from './utils.js';
+import { t as tr, tc } from './i18n.js'; // lane ui-language: `t` is a local (an align target) in this file — the import is `tr`
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 // CustomizeMode — Firefox-style "Customize Toolbar" edit mode for the chrome.
 //
@@ -34,18 +35,18 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 // Adding an element = one line here (+ a show() call in applyChromeSettings
 // if it's hideable).
 export const CHROME_ELEMENTS = [
-  { id: 'layout-presets',    label: 'Layout presets',     hideKey: 'toolbar.showLayoutPresets',      defaultZone: 'toolbar-center' },
-  { id: 'btn-presets',       label: 'Presets button',     hideKey: 'toolbar.showPresetsButton',      defaultZone: 'toolbar-right' },
-  { id: 'btn-new-session',   label: 'New Session button', hideKey: null,                             defaultZone: 'toolbar-right' },
-  { id: 'btn-terminal',      label: 'Terminal button',    hideKey: 'toolbar.showTerminalButton',     defaultZone: 'toolbar-right' },
-  { id: 'btn-file-explorer', label: 'Files button',       hideKey: 'toolbar.showFileExplorerButton', defaultZone: 'toolbar-right' },
-  { id: 'btn-browser',       label: 'Web view button',    hideKey: 'toolbar.showBrowserButton',      defaultZone: 'toolbar-right' },
-  { id: 'btn-desktop-apps',  label: 'Apps button',        hideKey: 'toolbar.showDesktopAppsButton',  defaultZone: 'toolbar-right' },
-  { id: 'btn-desktop',       label: 'Desktop button',     hideKey: 'toolbar.showDesktopButton',      defaultZone: 'toolbar-right' },
-  { id: 'desktop-previews',  label: 'Desktop previews',   hideKey: 'taskbar.showDesktopPreviews',    defaultZone: 'taskbar-tray' },
-  { id: 'taskbar-user-todos', label: 'For-you inbox',     hideKey: 'taskbar.showUserTodos',          defaultZone: 'taskbar-tray' },
-  { id: 'taskbar-usage',     label: 'Usage meters',       hideKey: 'taskbar.showUsage',              defaultZone: 'taskbar-tray' },
-  { id: 'taskbar-status',    label: 'Window count',       hideKey: 'taskbar.showWindowCount',        defaultZone: 'taskbar-tray' },
+  { id: 'layout-presets',    label: tr('Layout presets'),     hideKey: 'toolbar.showLayoutPresets',      defaultZone: 'toolbar-center' },
+  { id: 'btn-presets',       label: tr('Presets button'),     hideKey: 'toolbar.showPresetsButton',      defaultZone: 'toolbar-right' },
+  { id: 'btn-new-session',   label: tr('New Session button'), hideKey: null,                             defaultZone: 'toolbar-right' },
+  { id: 'btn-terminal',      label: tr('Terminal button'),    hideKey: 'toolbar.showTerminalButton',     defaultZone: 'toolbar-right' },
+  { id: 'btn-file-explorer', label: tr('Files button'),       hideKey: 'toolbar.showFileExplorerButton', defaultZone: 'toolbar-right' },
+  { id: 'btn-browser',       label: tr('Web view button'),    hideKey: 'toolbar.showBrowserButton',      defaultZone: 'toolbar-right' },
+  { id: 'btn-desktop-apps',  label: tr('Apps button'),        hideKey: 'toolbar.showDesktopAppsButton',  defaultZone: 'toolbar-right' },
+  { id: 'btn-desktop',       label: tr('Desktop button'),     hideKey: 'toolbar.showDesktopButton',      defaultZone: 'toolbar-right' },
+  { id: 'desktop-previews',  label: tr('Desktop previews'),   hideKey: 'taskbar.showDesktopPreviews',    defaultZone: 'taskbar-tray' },
+  { id: 'taskbar-user-todos', label: tr('For-you inbox'),     hideKey: 'taskbar.showUserTodos',          defaultZone: 'taskbar-tray' },
+  { id: 'taskbar-usage',     label: tr('Usage meters'),       hideKey: 'taskbar.showUsage',              defaultZone: 'taskbar-tray' },
+  { id: 'taskbar-status',    label: tr('Window count'),       hideKey: 'taskbar.showWindowCount',        defaultZone: 'taskbar-tray' },
 ];
 
 // toolbar-row2 / taskbar-row2 are optional extra bar rows (below the toolbar /
@@ -99,14 +100,14 @@ const ALIGN_ICON = {
 };
 const ALIGN_TARGETS = [
   { key: 'taskbar-items',  el: () => document.getElementById('taskbar-items'),
-    label: 'Window items', options: ['left', 'center'], default: 'left',
-    tips: { left: 'Window items left-aligned', center: 'Window items centered (Windows-11 style)' } },
+    label: tr('Window items'), options: ['left', 'center'], default: 'left',
+    tips: { left: tr('Window items left-aligned'), center: tr('Window items centered (Windows-11 style)') } },
   { key: 'toolbar-center', el: () => document.querySelector('[data-zone="toolbar-center"]'),
-    label: 'Center area',  options: ['left', 'center', 'right'], default: 'center',
-    tips: { left: 'Align left', center: 'Align center', right: 'Align right' } },
+    label: tr('Center area'),  options: ['left', 'center', 'right'], default: 'center',
+    tips: { left: tr('Align left'), center: tr('Align center'), right: tr('Align right') } },
   { key: 'taskbar-tray',   el: () => document.getElementById('taskbar-tray'),
-    label: 'Tray',         options: ['left', 'right'], default: 'right',
-    tips: { left: 'Tray at the left end', right: 'Tray at the right end' } },
+    label: tr('Tray'),         options: ['left', 'right'], default: 'right',
+    tips: { left: tr('Tray at the left end'), right: tr('Tray at the right end') } },
 ];
 
 function zoneEl(zoneId) {
@@ -190,6 +191,8 @@ export class CustomizeMode {
 
     // Re-render chrome with hidden items forced visible (cz-off dimmed)
     this.app._applyChromeSettings?.();
+    // the empty extra row's hint (style.css draws it from this attribute — a CSS `content:` string cannot be translated)
+    for (const id of ['toolbar-row2', 'taskbar-row2']) document.getElementById(id)?.setAttribute('data-cz-empty', tr('Extra row — drag elements here'));
     // lane toolbar-fold: the toolbar's fold is SUSPENDED while editing — every element full and shown (the bar may take
     // two rows, style.css) so each one can be seen, clicked and dragged; Done re-folds
     this.app._toolbarFold?.schedule();
@@ -259,7 +262,7 @@ export class CustomizeMode {
     if (el._czWired) return;
     el._czWired = true;
     el.classList.add('cz-item', 'cz-spring-edit');
-    el.dataset.czTip = 'Spring — click to configure (strength / fixed width), drag to move';
+    el.dataset.czTip = tr('Spring — click to configure (strength / fixed width), drag to move');
     const onClick = (e) => {
       e.preventDefault(); e.stopPropagation();
       if (this._justDragged) return;
@@ -322,14 +325,14 @@ export class CustomizeMode {
     // Match: pick mode — click chrome elements to copy/sum their widths
     const matchBtn = document.createElement('button');
     matchBtn.className = 'cz-btn';
-    matchBtn.textContent = 'Match…';
-    matchBtn.title = 'Click any element (e.g. the ☰ VibeSpace section) to copy its width; keep clicking to add more widths up; click Done to finish';
+    matchBtn.textContent = tr('Match…');
+    matchBtn.title = tr('Click any element (e.g. the ☰ VibeSpace section) to copy its width; keep clicking to add more widths up; click Done to finish');
     matchBtn.onclick = (e) => {
       e.stopPropagation();
       if (this._picking) { this._stopWidthPick?.(); return; }
       save({ mode: 'fixed' });
       syncUi();
-      matchBtn.textContent = 'Done (0)';
+      matchBtn.textContent = tr('Done ({n})', { n: 0 });
       // Park the popover mid-screen while picking — anchored next to the
       // spring it can cover exactly the bar elements the user wants to click
       // (e.g. spring in the extra row → popover sits over "☰ VibeSpace").
@@ -346,10 +349,10 @@ export class CustomizeMode {
         const px = Math.round(totalPx / tbScale);
         save({ px, pct: null });
         syncUi();
-        matchBtn.textContent = `Done (${count} · ${px}px)`;
+        matchBtn.textContent = tr('Done ({n} · {px} px)', { n: count, px });
       }, () => {
         pop.classList.remove('cz-parked');
-        matchBtn.textContent = 'Match…';
+        matchBtn.textContent = tr('Match…');
       });
     };
 
@@ -363,15 +366,15 @@ export class CustomizeMode {
         b.classList.toggle('active', b.dataset.value === (cfg.pct != null ? 'pct' : 'px'));
       }
       if (fixed) {
-        valLabel.textContent = 'Width';
+        valLabel.textContent = tr('Width');
         if (cfg.pct != null) { valInput.min = 1; valInput.max = 100; valInput.step = 0.5; valInput.value = cfg.pct; }
         else { valInput.min = 4; valInput.max = 2000; valInput.step = 4; valInput.value = cfg.px; }
       } else {
-        valLabel.textContent = 'Strength';
+        valLabel.textContent = tr('Strength');
         valInput.min = 1; valInput.max = 9; valInput.step = 1; valInput.value = cfg.weight;
       }
     };
-    for (const [value, label] of [['flex', 'Flexible'], ['fixed', 'Fixed']]) {
+    for (const [value, label] of [['flex', tr('Flexible')], ['fixed', tr('Fixed')]]) {
       const b = document.createElement('button');
       b.textContent = label; b.dataset.value = value;
       b.onclick = (e) => { e.stopPropagation(); save({ mode: value }); syncUi(); };
@@ -388,7 +391,7 @@ export class CustomizeMode {
     valWrap.append(valLabel, valInput);
     const removeBtn = document.createElement('button');
     removeBtn.className = 'cz-btn';
-    removeBtn.textContent = 'Remove';
+    removeBtn.textContent = tr('Remove');
     removeBtn.onclick = (e) => { e.stopPropagation(); this._stopWidthPick?.(); pop.remove(); el.remove(); this._saveArrangement(); };
     pop.append(seg, valWrap, unitSeg, matchBtn, removeBtn);
     document.body.appendChild(pop);
@@ -442,7 +445,7 @@ export class CustomizeMode {
         setHover(el2);
         tip.style.display = el2 ? '' : 'none';
         if (el2) {
-          tip.textContent = `+${Math.round(el2.getBoundingClientRect().width)}px — click to add`;
+          tip.textContent = tr('+{px} px — click to add', { px: Math.round(el2.getBoundingClientRect().width) });
           tip.style.left = (lastMove.clientX / uiScale() + 14) + 'px';
           tip.style.top = (lastMove.clientY / uiScale() + 16) + 'px';
         }
@@ -608,11 +611,11 @@ export class CustomizeMode {
     pill.className = 'cz-pill cz-pill-taskbar';
     pill.addEventListener('contextmenu', (e) => e.stopPropagation());
     pill.append(
-      this._seg('Taskbar', 'taskbar.position', [
-        { value: 'bottom', label: 'Bottom' }, { value: 'top', label: 'Top' },
+      this._seg(tr('Taskbar'), 'taskbar.position', [
+        { value: 'bottom', label: tr('Bottom') }, { value: 'top', label: tr('Top') },
       ]),
       this._seg('', 'taskbar.visibility', [
-        { value: 'show', label: 'Show' }, { value: 'autohide', label: 'Auto-hide' }, { value: 'hidden', label: 'Hidden' },
+        { value: 'show', label: tr('Show') }, { value: 'autohide', label: tr('Auto-hide') }, { value: 'hidden', label: tr('Hidden') },
       ]),
     );
     // BODY-FIXED like the align chips (real report: switching the taskbar to
@@ -645,8 +648,8 @@ export class CustomizeMode {
     if (!sidebar) return;
     const pill = document.createElement('div');
     pill.className = 'cz-pill cz-pill-sidebar';
-    pill.appendChild(this._seg('Sidebar', 'sidebar.position', [
-      { value: 'left', label: 'Left' }, { value: 'right', label: 'Right' },
+    pill.appendChild(this._seg(tr('Sidebar'), 'sidebar.position', [
+      { value: 'left', label: tr('Left') }, { value: 'right', label: tr('Right') },
     ]));
     sidebar.appendChild(pill);
     this._cleanup.push(() => pill.remove());
@@ -719,7 +722,9 @@ export class CustomizeMode {
     panel.className = 'cz-panel';
     const hint = document.createElement('span');
     hint.className = 'cz-hint';
-    hint.innerHTML = '<b>Customize mode</b> — click an outlined element to show / hide it, drag to move it';
+    // lane ui-language: words through tr(), the bold built as an element — no markup in a key
+    const head = document.createElement('b'); head.textContent = tr('Customize mode');
+    hint.append(head, ' — ', tr('click an outlined element to show / hide it, drag to move it'));
     const btn = (label, cls, onClick) => {
       const b = document.createElement('button');
       b.className = 'cz-btn' + (cls ? ' ' + cls : '');
@@ -727,18 +732,18 @@ export class CustomizeMode {
       b.onclick = onClick;
       return b;
     };
-    const springBtn = btn('+ Spring', '', () => this._addSpring());
-    springBtn.title = 'Insert a flexible space that pushes neighboring elements apart (drag it between two elements; e.g. center previews with usage pushed right)';
+    const springBtn = btn(tr('+ Spring'), '', () => this._addSpring());
+    springBtn.title = tr('Insert a flexible space that pushes neighboring elements apart (drag it between two elements; e.g. center previews with usage pushed right)');
     panel.append(
       hint,
       springBtn,
-      btn('Reset', '', () => {
+      btn(tr('Reset to defaults'), '', () => {
         const s = this.app.settings;
         for (const k of [...CHROME_ELEMENTS.filter(e => e.hideKey).map(e => e.hideKey), ...STRUCT_KEYS]) s.reset(k);
         s.reset('chrome.arrangement');
       }),
-      btn('All settings…', '', () => { this.exit(); this.app._settingsUI?.open(); }),
-      btn('Done', 'cz-done', () => this.exit()),
+      btn(tr('All settings…'), '', () => { this.exit(); this.app._settingsUI?.open(); }),
+      btn(tc('select', 'Done'), 'cz-done', () => this.exit()),
     );
     document.body.appendChild(panel);
     this._cleanup.push(() => panel.remove());
@@ -754,8 +759,8 @@ export class CustomizeMode {
       const on = meta.hideKey ? !!s.get(meta.hideKey) : true;
       el.classList.toggle('cz-off', !on);
       el.dataset.czTip = meta.hideKey
-        ? `${meta.label} — click to ${on ? 'hide' : 'show'}, drag to move`
-        : `${meta.label} — drag to move`;
+        ? (on ? tr('{name} — click to hide, drag to move', { name: meta.label }) : tr('{name} — click to show, drag to move', { name: meta.label }))
+        : tr('{name} — drag to move', { name: meta.label });
     }
     for (const seg of document.querySelectorAll('.cz-seg')) {
       const val = s.get(seg.dataset.czKey);

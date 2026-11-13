@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.403 — 2026-11-15
+
+### Fixed
+- In Chinese and Japanese, Customize mode and the Theme Editor are now shown in your language.
+- In Chinese and Japanese, adding a machine, its key and its set-up are shown in your language, and the set-up says what it will install.
+- The permission mode in a chat's status bar shows a plain name; its menu says what each mode does and shows a mode that asks nothing in red.
+- The dialog that offers to resume interrupted sessions no longer shows raw formatting marks.
+- A conversation waiting for your permission is explained in your language in For you, and its title no longer shows backticks.
+- A Claude login warning in For you is in your language, and system items there name their source in your language.
+- The dialog for adding a machine has a Cancel button and its own button for picking a key file; a name already in use is said in your language.
+- A setting's description no longer shows a raw {n} or ** marks.
+
 ## 2.369.402 — 2026-11-14
 
 ### Added

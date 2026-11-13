@@ -767,7 +767,7 @@ function pinResolution({ variant, pinnedDir, ephemeralDir, keptDir = null }) {
 const EPHEMERAL_DENY = Object.freeze({
   profile: 'a persistent user-data-dir — its absence IS the ephemerality (D3)',
   restore: 'auto-saves and replays this session\'s cookies + localStorage across launches',
-  sessionName: 'the legacy restore key, and it turns restore ON (measured: the CLI answers with the --restore refusal)',
+  sessionName: 'the legacy restore key, and it turns restore ON (measured: the CLI answers with the --restore refusal)', // ui-words: an agent-browser flag's refusal reason, not a For-you head
   state: 'loads a saved auth state file, so the session starts from somebody else\'s logged-in origins',
   autoConnect: 'attaches to a Chrome that is ALREADY RUNNING — the interference P0 exists to stop',
   cdp: 'drives an existing browser instead of launching an isolated one',

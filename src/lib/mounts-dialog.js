@@ -274,7 +274,14 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
   const submit = document.createElement('button');
   submit.className = 'btn-create';
   submit.textContent = submitLabel;
-  actions.appendChild(submit);
+  // lane ui-language (the walk's machines-16: the key dialog had no way out but its ✕): every form names its Cancel —
+  // the ✕'s own door (asks first when something was typed), never a bare remove
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn-cancel';
+  cancel.textContent = tr('Cancel');
+  cancel.onclick = () => shell.dismiss();
+  actions.append(cancel, submit);
   body.append(err, actions);
   submit.onclick = async () => {
     err.textContent = '';
@@ -288,7 +295,7 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
       }
       const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
       await onSubmit(vals, { close, body, err });
-    } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
+    } catch (e) { err.textContent = e.message || tr('Failed'); submit.disabled = false; }
   };
   // the caller is TOLD like createModalShell's (lane dialog-yield r5): `asked` (queued behind the open one's ask), `ready` (→ the
   // shell when it opens, null when the person kept that one), `live()` — THE liveness predicate
