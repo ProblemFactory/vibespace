@@ -4813,6 +4813,12 @@ export default {
   "Turn auto-continue off": "取消自动继续",
   "Every subscription is in the pool, including ones you add later": "全部订阅都在池里（包括以后新加的）",
   "Every ChatGPT account is in the pool, including ones you add later": "全部 ChatGPT 账号都在池里（包括以后新加的）",
+  // lane ui-controls-and-bugs — THE WRITE-ONLY LAW (the storage Edit dialog: a secret is saved, never shown again, only replaced)
+  "Authorized · {provider}": "已授权 · {provider}",
+  "Not authorized · {provider}": "未授权 · {provider}",
+  "Replace…": "替换…",
+  "Type the new value": "输入新的值",
+  "Paste the new token JSON": "粘贴新的令牌 JSON",
   "Sender line": "发件人说明行",
   "Instance default": "实例默认",
   "Applied on save — the account re-reads with the new settings; switching the client opens Re-authorize first.": "保存即生效 —— 账号会用新设置重新读取；换客户端会先打开重新授权。",
