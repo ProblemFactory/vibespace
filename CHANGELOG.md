@@ -16,6 +16,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The «Set up once: install TightVNC Server» line of a Windows machine now has its Install button however you open it, and so does its virtual microphone.
 - A stream no longer stops at an old ffmpeg on the machine's PATH when a working one is in VibeSpace's ffmpeg folder.
 - Excel and Word files on a mounted drive open in the preview instead of an error, and a file VibeSpace still cannot read there says why and what to do.
+- A message to a busy Antigravity or Codex conversation is no longer shown as read while it still waits, when someone else’s message joined the queue first.
+- In a group, a member’s dropped copy now says it was dropped and to send it again, instead of saying the conversation ended.
 
 ## 2.369.398 — 2026-11-12
 
