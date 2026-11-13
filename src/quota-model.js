@@ -408,6 +408,7 @@ function laneText(lane, name = null) {
   if (lane === 'plan:5h') return 'the 5-hour window';
   if (lane === 'plan:7d') return 'the weekly limit';
   const n = name || String(lane || '').replace(/^model:/, '').replace(/-/g, ' ');
+  // ui-words: a model family's name (a brand: «Opus») in the agent-facing English
   return `the ${n ? n.charAt(0).toUpperCase() + n.slice(1) : '?'} cap`;
 }
 /** The lane of a typed limit's window: the plan's 5h / 7d, a model cap's own id (limitId 'model:…'). */
