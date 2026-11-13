@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A question's reply options are shown whole at every window size, wrapping onto more lines instead of being cut off; «Reply:» is said once before them.
 - Pressing a question in the strip above the message box opens it right there, with its details and every option; «Show it in the conversation» goes to it.
+- A slow connection no longer keeps cutting a chat that is catching up, unless it is very slow and passes through a relay on VibeSpace's own computer.
 
 ### Security
 - On a browser with Separate tabs, an agent can no longer send a browser command VibeSpace does not know yet; it is refused by name.
