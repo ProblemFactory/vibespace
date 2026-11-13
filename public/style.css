@@ -4509,6 +4509,14 @@ label.cfg-row {
 .mounts-action-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-dim); }
 .mounts-action:hover:not(:disabled) .mounts-action-icon { color: var(--accent); }
 .mounts-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; padding: 0 2px; }
+/* lane ui-controls-and-bugs — THE WRITE-ONLY LAW: a held OAuth token is ONE sign-in line with its Re-authorize door, never a box */
+.mounts-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; margin-top: 2px; }
+.mounts-signin-state { font-size: 12px; font-weight: 600; }
+.mounts-signin-state.on { color: var(--ok-text, var(--green, #3fb950)); }
+.mounts-signin-state.off { color: var(--warn-text, var(--yellow, #e5c07b)); }
+.mounts-held { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; margin-top: 2px; }
+.mounts-held-state { font-size: 12px; color: var(--text-secondary); }
+.mounts-held-replace[hidden], .mounts-form [name][hidden] { display: none; }
 
 /* ── Bootstrap progress dialog ── */
 .bs-steps { display: flex; flex-direction: column; gap: 6px; }

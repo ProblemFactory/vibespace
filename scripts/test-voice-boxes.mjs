@@ -71,6 +71,7 @@ const ROWS = [
   ['sidebar-mounts.js', '[gdrive]', 'an rclone.conf paste', 1],
   ['sidebar-mounts.js', '<textarea readonly', 'read-only links / tokens / config to copy', 5],
   ['sidebar-mounts.js', '<textarea name="${k}"', 'a mount form\'s field (configuration)', 1],
+  ['sidebar-mounts.js', '<textarea name="token"', 'a held OAuth token\'s replace box — a pasted JSON (lane ui-controls-and-bugs, the write-only law)', 1],
   ['incident-recorder.js', "What went wrong?", 'the incident snapshot\'s optional note, frozen with the diagnostics — not a conversation', 1],
   ['settings-ui.js', "const textarea = document.createElement('textarea')", 'a JSON setting field', 1],
   ['settings-ui.js', 'settings-multiline-text', 'a multi-line setting field', 1],
