@@ -482,6 +482,24 @@ else if (AB) {
   if (!o1.ok) skip(`the real agent-browser did not open through the mediated url: ${o1.err || o1.out}`);
   else {
     ok(o1.json && o1.json.success === true && o1.json.data && o1.json.data.title === 'charlie', 'session C opens a page through its mediated url (the real daemon, the real chrome)');
+    // ── THE WHOLE-PROFILE LAW with the REAL driver (lane chrome-157, the owner's law 2026-11-13): its OWN grants and sessions (never C's),
+    //    on the MEDIATED and the SCOPE road — `cookies clear` refused by name, `download` WORKS and the profile is put back when it ends
+    {
+      const dlDir = path.join(ROOT, 'wp-dl'); fs.mkdirSync(dlDir, { recursive: true });
+      for (const [road, mode, k] of [['mediated', M.MEDIATED_MODE, 'w'], ['scope', M.SCOPE_MODE, 'x']]) {
+        const gw = await med.grantFor({ profileId: 'bp-000000w' + k, browserKey: 'bk-000000w' + k, upstream: ver.webSocketDebuggerUrl, mode, paused: () => false });
+        const ow = await ab(k, gw, ['open', 'data:text/html,<title>wp</title><a id=d href="data:text/plain,whole-profile" download="wp-' + road + '.txt">d</a>']);
+        const cc = await ab(k, gw, ['cookies', 'clear']);
+        const said = cc.json && cc.json.error ? String(cc.json.error) : String(cc.err || cc.out || '');
+        ok(ow.ok && !(cc.json && cc.json.success === true) && /method_refused/.test(said) && /WHOLE/.test(said) && /site-reset --host/.test(said),
+          `the real driver (${road} road): \`cookies clear\` is REFUSED by name — it would empty the person's whole jar; the words point at site-reset / the conversation's own browser`, said.slice(0, 300));
+        const dl = await ab(k, gw, ['download', '#d', path.join(dlDir, 'wp-' + road + '.txt')]);
+        let landed = false; for (let i = 0; i < 40 && !landed; i++) { landed = fs.existsSync(path.join(dlDir, 'wp-' + road + '.txt')); if (!landed) await new Promise((r) => setTimeout(r, 150)); }
+        let back = false; for (let i = 0; i < 40 && !back; i++) { back = !med.downloadWindowOf('bp-000000w' + k); if (!back) await new Promise((r) => setTimeout(r, 150)); }
+        ok(dl.ok && landed && back, `the real driver (${road} road): \`download\` WORKS (the file landed) and the profile's download folder is put back when it ends (the window closed)`, JSON.stringify({ dl: dl.ok ? 'ok' : String(dl.err || dl.out).slice(0, 200), landed, back }));
+        med.revoke({ profileId: 'bp-000000w' + k, browserKey: 'bk-000000w' + k });
+      }
+    }
     // ③ r1 (takeover findings 1 + 2) — the REAL-binary controls the fast suite's fake binary stands on:
     // 0.32.0 reads global flags BETWEEN the verb and its noun (so `get --json cdp-url` is the raw
     // endpoint the router must refuse), and it HONOURS an env twin of a refused flag (so the shell's

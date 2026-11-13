@@ -361,7 +361,7 @@ router.get('/api/browser/profiles/:id/use', (req, res) => {
       if (!cid) { try { cid = ctx?.bindings?.conversationOf ? ctx.bindings.conversationOf(p.createdBy) || null : null; } catch { cid = null; } }
       createdBy = { key: p.createdBy, conversationId: cid, live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null };
     }
-    res.json({ profile: { id: p.id, label: p.label, legacy: !!p.legacy }, use, base: B.useStamp(p), usedBy, createdBy });
+    res.json({ profile: { id: p.id, label: p.label, legacy: !!p.legacy }, use, base: B.useStamp(p), usedBy, createdBy, road: typeof k.agentRoadFor === 'function' ? k.agentRoadFor(p.id).why : null });   // (lane chrome-157: the road an agent's lease takes — the dialog's All-agents sentence says what is true on it)
   } catch (e) { fail(res, e); }
 });
 router.patch('/api/browser/profiles/:id', async (req, res) => {

@@ -203,6 +203,26 @@ function isPausedMethod(method) { return pausedVerdict(method).refuse; }
  * that this VibeSpace does not know it yet, and what to do — there is no way round it; an update that classes it lifts it.
  * The scope road (judgeScope — an owner's cooperative lease) is untouched: it forwards every call by design.
  */
+/**
+ * THE WHOLE-PROFILE LAW (the owner's, 2026-11-13; lane chrome-157, measured with the real driver on Chrome 154 + 157): on a profile a
+ * person shares with agents, an agent's lease never performs an act on the WHOLE profile. ONE verdict, the census's own list (rows
+ * marked `law`), called by judge (the mediated road) AND judgeScope (the scope road) — never a second list:
+ *   · law 'whole-profile' (class refused): method_refused, the row's words saying what to do instead;
+ *   · law 'whole-profile-own-context': answered only when the call names a browser context THIS lease created (scope.contexts);
+ *   · law 'whole-profile-window' (Browser.setDownloadBehavior): forwarded — src/server/cdp-mediator.js puts the profile back.
+ */
+const LAW_OF = new Map(CENSUS.rows().filter((r) => r.law).map((r) => [r.domain + '.' + r.method, r]));
+function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
+  const method = msg && typeof msg.method === 'string' ? msg.method : '';
+  const row = LAW_OF.get(method);
+  if (!row || row.law === 'whole-profile-window') return null;
+  const sid = msg.sessionId == null ? null : String(msg.sessionId);
+  if (row.law === 'whole-profile') return { kind: 'refuse', why: 'whole-profile', reply: refusal(msg.id, 'method_refused', `${method} ${row.why || 'acts on the whole profile a person shares with agents'}`, sid) };
+  const params = msg.params && typeof msg.params === 'object' ? msg.params : {};
+  const c = params.browserContextId == null ? '' : String(params.browserContextId);
+  if (c && scope && scope.contexts && scope.contexts.has(c)) return null;
+  return { kind: 'refuse', why: 'whole-profile', reply: refusal(msg.id, 'method_refused', `${method} ${c ? 'names a browser context this lease did not create' : 'names no browser context'} — on a profile a person shares with agents it would change the WHOLE profile (lane chrome-157, the owner's law); it is answered for a browser context this lease made itself (Target.createBrowserContext) — for the person's own profile, ask the person`, sid) };
+}
 const UNCLASSIFIED_CODE = 'method_unclassified';
 /**
  * lane chrome-157 r2 (主开发's round 2, MUST): A METHOD NAME IS JUDGED FOR SHAPE BEFORE ANYTHING OF IT IS REMEMBERED OR SAID.
@@ -387,6 +407,7 @@ function judge(msg, scope, { paused = false, browser = null } = {}) {
   if (!method) return id == null ? { kind: 'drop', why: 'no method' } : { kind: 'refuse', reply: refusal(id, 'bad_message', 'a CDP call names a method', sid) };
   if (id == null) return { kind: 'drop', why: 'no id' };
   if (sid && !scope.sessions.has(sid)) return { kind: 'refuse', reply: refusal(id, 'session_out_of_scope', `CDP session ${sid} was not handed to this lease`, sid) };
+  { const wp = wholeProfileVerdict(msg, scope, { road: MEDIATED_MODE }); if (wp) return wp; }   // (lane chrome-157: the one whole-profile verdict)
   if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', why: 'refused', reply: refusal(id, 'method_refused', `${method} ${ALWAYS_REFUSED_WHY[method] || 'acts on the whole shared browser — not through a session url'}`, sid) };
   if (!CENSUS.hasRow(method)) {   // (lane chrome-157: both driving states; r2: one Set lookup a message, the name's SHAPE judged first)
     if (!methodShaped(method)) return { kind: 'refuse', why: 'malformed', reply: refusal(id, 'bad_message', malformedWords(method), sid) };
@@ -431,16 +452,17 @@ function judge(msg, scope, { paused = false, browser = null } = {}) {
 // conversation on the profile at once, while `/json/list`, the tab list and `session info` answered; the mediated road
 // (each lease shown only its own targets) answered the same births in 103–117 ms. A profile its conversations share
 // cooperatively (`owner`) therefore hands each AGENT lease a scoped url too — THIS judge: every call passes as written (the
-// cooperative trust — no census class, no takeover fence, no window rewrite: the keeper's own windows and /resolve's pause
+// cooperative trust — no census class but the whole-profile law (lane chrome-157), no takeover fence, no new-window rewrite: the keeper's own windows and /resolve's pause
 // stay that road's rules); what the connection DISCOVERS is the lease's own (filterEvent / admitReply, the scope above), and
 // an explicit attach by id (the keeper's bind, `tab <targetId>`) admits that target.
 const SCOPE_MODE = 'scope', MEDIATED_MODE = 'mediated';
 /** The scope road's judge (PURE): `{kind:'forward', pending}` for every CDP call, `drop` for what is not one. */
-function judgeScope(msg) {
+function judgeScope(msg, scope = null) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
   const method = typeof msg.method === 'string' ? msg.method : '';
   if (msg.id == null) return { kind: 'drop', why: method ? 'no id' : 'no method' };
   if (!method) return { kind: 'refuse', reply: refusal(msg.id, 'bad_message', 'a CDP call names a method', msg.sessionId == null ? null : String(msg.sessionId)) };
+  { const wp = wholeProfileVerdict(msg, scope, { road: SCOPE_MODE }); if (wp) return wp; }   // (lane chrome-157, 主开发 2026-11-13: the law reaches the scope road — the ONE verdict; nothing else of the census here)
   return { kind: 'forward', pending: { method, params: msg.params && typeof msg.params === 'object' ? msg.params : {}, sessionId: msg.sessionId == null ? null : String(msg.sessionId) }, explicit: true };
 }
 /**
@@ -589,7 +611,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

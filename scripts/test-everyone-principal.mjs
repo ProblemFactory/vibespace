@@ -328,6 +328,18 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
 {
   // browser-who-model: the dialog's picker ⇄ the wire
   const W = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-who-model.js')).href);
+  // lane chrome-157 (the owner's law 2026-11-13): the «All agents» sentence says what is TRUE on the profile's road — the server's own road verdict
+  {
+    const own = 'Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.';
+    const shared = 'Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.';
+    ok(W.allAgentsSentence('mediated') === own && W.allAgentsSentence('shared') === own && W.allAgentsSentence('no-proxy') === shared && W.allAgentsSentence('remote') === shared && W.allAgentsSentence(null) === shared && W.allAgentsSentence(undefined) === shared,
+      'browser-who-model: «each conversation in its own tab» is said only on the mediated and the scope road (the server\'s verdict); on the raw endpoint (no proxy, a paired machine, unknown) it says they all share every tab');
+    const dialog = fs.readFileSync(path.join(REPO, 'src/lib/browser-who-dialog.js'), 'utf8'), fresh = fs.readFileSync(path.join(REPO, 'src/lib/browser-new-profile.js'), 'utf8'), trace = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
+    ok([dialog, fresh, trace].every((x) => !x.includes(`t('${own}')`)) && /allAgentsSentence\(view\.road, t\)/.test(dialog) && /allAgentsSentence\(st\.host \? st\.hostRoad : st\.road, t\)/.test(fresh) && /allAgentsSentence\(r && r\.agentRoad, t\)/.test(trace),
+      'browser-who-model: the three dialogs word it ONLY through allAgentsSentence, keyed by the road the server sent — never a literal «own tab» promise');
+    const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    ok(zh.includes(JSON.stringify(shared) + ':') && ja.includes(JSON.stringify(shared) + ':'), 'browser-who-model: the shared-road sentence has its zh and ja');
+  }
   const view = { use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1', title: 'Ops' }] } };
   const pr = W.pickerRows(view, { sessions: [], groups: [{ id: 'tg-1', title: 'Ops' }] });
   ok(J(pr.selected) === J([W.EVERYONE_KEY, 'task:tg-1']), 'browser-who-model: a profile under All opens with ALL AGENTS picked and the kept rows picked beside it', pr.selected);

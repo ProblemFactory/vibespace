@@ -5268,6 +5268,7 @@ export default {
   "Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.": "每个会话通过中介 CDP 端点只能看到并操作自己的标签页；你接管期间，它的输入和导航会被拒绝。",
   "Who can use it": "谁能使用",
   "Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.": "你的任何会话都能使用这个浏览器和其中的登录 — 同一个浏览器，每个会话在自己的标签页里。",
+  "Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.": "你的任何会话都能使用这个浏览器和其中的登录 — 它们共用这个浏览器：每个会话都能看到并操作其中的每个标签页。",
   "Could not change who can use it": "无法更改谁能使用",
   "{n} other conversation(s) no longer use {label}": "另有 {n} 个会话不再使用 {label}",
   "Rename {label}": "重命名 {label}",

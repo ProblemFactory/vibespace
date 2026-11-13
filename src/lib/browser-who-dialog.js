@@ -20,7 +20,7 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail, exceptRemoved } from './principal-picker-model.js';
-import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY, draftExcept } from './browser-who-model.js';
+import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY, draftExcept, allAgentsSentence } from './browser-who-model.js';
 
 const DIALOG_ID = 'browser-who-dialog';
 
@@ -148,7 +148,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     unexcept.style.display = d.removed.length ? '' : 'none';
     remoteLine.style.display = mode() === 'only' && model.remote ? '' : 'none';
     const sentence = mode() === 'all'
-      ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
+      ? allAgentsSentence(view.road, t)   // (lane chrome-157: what is true on this profile's road)
       : t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.');
     if (meaning.textContent !== sentence) meaning.textContent = sentence;
     const kept = mode() === 'all' && d.who.length ? t('The others you picked are kept for when you take All agents away.') : '';

@@ -2327,6 +2327,33 @@ version's Chrome for Testing build, run `scripts/cdp-protocol-fetch.mjs
 --chrome <it>` and the suite with `--chrome <it>`. Gates: test-cdp-census
 (fast), test-browser-mediation ⑥, test-browser-mediation-chrome ⑥ (heavy).
 
+**THE WHOLE-PROFILE LAW (the owner's, 2026-11-13; lane chrome-157 — measured with the real agent-browser 0.38.2 on Chrome
+154.0.8037.57 and Chrome for Testing 157.0.8103.50).** On a profile a person shares with agents, an agent's lease never performs
+an act on the WHOLE profile. One verdict (src/browser-mediation.js `wholeProfileVerdict`, the census rows marked `law`), called
+by `judge` (mediated) AND `judgeScope` (scope); nothing else of the census moves onto the scope road.
+
+| Method | Rule | The real driver's verb (measured) |
+|---|---|---|
+| Security.setIgnoreCertificateErrors | refused | `--ignore-https-errors`: sends nothing through a lease (it applies only to a browser the driver launches) |
+| Network.clearBrowserCookies | refused | `cookies clear`: refused on both roads — the words point at `site-reset --host` / the conversation's own browser |
+| Network.clearBrowserCache, Storage.runBounceTrackingMitigations, PWA.install / uninstall / changeAppUserSettings | refused | the driver sends none of them |
+| Page.setDownloadBehavior | refused | measured NOT scoped to its page (tab A's call sent tab B's download into A's folder, on 154 and 157) |
+| Browser.setDownloadBehavior | THE WINDOW: forwarded; the profile put back (`behavior: 'default'`, measured to restore the profile's own place) when the lease's download ends, at a takeover, at the lease's end, and when a hub start adopts the profile | `download` works; the driver never names a context, so (c) would have broken it |
+| Browser.grantPermissions / setPermission / resetPermissions, Storage.clearCookies | answered only for a browser context the lease created (`scope.contexts`), else refused | NOT measured with the real driver — no local verb sends them (`set geo` is emulation only) |
+
+The one thing that stays true: while an agent's download is in flight, a file the person starts in that profile lands in the
+agent's folder (narrower than before, where the changed folder lasted for the lease's whole life and beyond). Kept as they are:
+the origin-scoped cookie writes (Network.setCookies / deleteCookies, Storage.setCookies) and Storage.clearDataForOrigin — that
+they take ANY origin is a grant question (backlog B-771e), not this law. Nothing about connecting changes: the driver sends no
+whole-profile call when it connects (measured on both roads).
+
+ENFORCED ON: mediated (Separate tabs) — yes · scope (a profile shared through «Who can use it» on this machine) — yes · a paired
+machine's profile, or a hub with no mediating proxy — NO: the raw endpoint, nothing in between (no fence is built there and none
+is promised — the «Who can use it» sentence says so, keyed by the same road verdict). A conversation's OWN temporary browser: the
+raw endpoint by design — untouched by all of this. Gates: test-browser-mediation ⑥c (both roads, the window over a fake browser,
+two mutant controls), test-cdp-census (the class snapshot), test-everyone-principal (the dialog's sentence by road),
+test-browser-mediation-chrome (the real driver, heavy).
+
 ### Agent browser v2 — P7: window binding — one group, two panes side by side (2026-09-21; design §4.6 / §3.7, D19 / D24, the §10 P7 row)
 
 **What it is.** A browser window an agent is driving LOSES ITS OWNER the

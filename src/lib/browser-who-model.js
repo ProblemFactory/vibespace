@@ -25,6 +25,15 @@ import { capsOf } from '../backend-caps.js'; // PURE → PURE (lane dc-harness-t
 
 /** The picker key of ALL AGENTS — the dialog's first row (it maps to `use.mode:'all'`). */
 export const EVERYONE_KEY = 'everyone:*';
+/** lane chrome-157 (the owner's law 2026-11-13): the «All agents» sentence says what is TRUE on the road an agent's lease of this
+ *  profile takes — the server's own road verdict (`road`: 'mediated' | 'shared' = the scope road ⇒ each conversation in its own
+ *  tab; 'no-proxy' | 'remote' | anything else ⇒ the raw endpoint, every conversation sees and drives every tab). Never a second
+ *  «is there a proxy» test here. */
+export function allAgentsSentence(road, t = (s) => s) {
+  return road === 'mediated' || road === 'shared'
+    ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
+    : t('Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.');
+}
 
 /** How many chips the panel row shows before "+N more" (the phone: 2). */
 export const CHIPS_WIDE = 4;
