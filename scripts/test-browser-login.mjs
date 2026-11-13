@@ -49,10 +49,15 @@ const stubLoginChannel = ({ mediated = false, proxy = true, ephemeral = false, r
   );
 
 function spawnNailChild(scriptRel) {
+  const cleanChildEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('VIBESPACE_') && !k.startsWith('AGENT_BROWSER_')),
+  );
+  cleanChildEnv.VIBESPACE_SKIP_AGENT_HOOKS = '1';
+  cleanChildEnv.VS_NO_REAL_CLI = '1';
   return new Promise((resolve) => {
     const ch = spawn(process.execPath, [path.join(REPO, scriptRel), `--repo=${REPO}`], {
       cwd: REPO,
-      env: process.env,
+      env: cleanChildEnv,
     });
     let out = '';
     ch.stdout.on('data', (d) => { out += d; });
