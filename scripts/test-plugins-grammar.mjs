@@ -62,11 +62,15 @@ const c = controls(helpersSrc(now) + listSrc(now));
 ok(c.inputs === 1 && c.checkbox === 1 && !c.password && !c.integrationCard, `② ONE input in the list's code — the switch's checkbox (role=switch): ${JSON.stringify(c)}`);
 ok(/cb\.setAttribute\('role', 'switch'\)/.test(now), '② the toggle is a role=switch');
 const rowFn = now.slice(now.indexOf('function pluginRow('), now.indexOf('\n}\n', now.indexOf('function pluginRow(')));
-ok(/row\.append\(dot, main, c\);\s*\n\s*if \(sw\) row\.appendChild\(sw\);[^\n]*\n\s*if \(install\) row\.appendChild\(install\);\s*\n\s*row\.appendChild\(gear\);/.test(rowFn), '② a row appends exactly dot · name+description · chip · [switch — none when it cannot be used, lane ui-controls-and-bugs] · [install] · ⚙');
+// lane ui-phone-and-fit pick 1: the row is the RAIL ROW (src/lib/rail-row.js) — railRow draws lead · the name block · the controls in
+// the order given (a fourth control folds into «⋯», its order kept); the law read through it: dot · name+description · chip · switch · [install] · ⚙
+const RAIL = read('src/lib/rail-row.js');
+ok(/railRow\(\{ className: 'plugin-row', lead: dot, name: label,[^}]*desc: description \|\| '',[^}]*main: \[fact\], controls: \[c, sw, install, gear\] \}\)/.test(rowFn)
+  && /r\.replaceChildren\(\.\.\.\[lead, m, ctl\]\.filter\(Boolean\)\);/.test(RAIL) && /const list = \(controls \|\| \[\]\)\.filter\(Boolean\);/.test(RAIL), '② a row appends exactly dot · name+description · chip · [switch — none when it cannot be used, lane ui-controls-and-bugs: railRow drops it] · [install] · ⚙');
 ok((listSrc(now).match(/pluginRow\(\{/g) || []).length === 2, '② built-in AND manifest plugins draw through the same row');
 // lane decision-spend-readout: the ONE extra line a row may carry is a READOUT under the description (the LLM plugin's
 // money today) — a div inside the name+description block, painted from the PURE line, never a control
-const factIsReadout = (src, fn) => /if \(fact\) main\.appendChild\(fact\);/.test(fn)
+const factIsReadout = (src, fn) => /main: \[fact\]/.test(fn) && /for \(const x of \(main \|\| \[\]\)\) if \(x\) m\.appendChild\(x\);/.test(RAIL)
   && (src.match(/\bfact = Object\.assign\(document\.createElement\('(\w+)'\)/g) || []).every((m) => /'div'/.test(m))
   && /\bfact = Object\.assign\(document\.createElement\('div'\), \{ className: 'plugin-row-fact' \}\)/.test(src)
   && !/\bfact\.(onclick|addEventListener|tabIndex|contentEditable)\b/.test(src) && /paintDecisionLine\(fact, x, 'short'\)/.test(src);
@@ -214,6 +218,10 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     get classList() { const el = this; const has = () => el.className.split(/\s+/).filter(Boolean); return { add: (...c) => { el.className = [...new Set([...has(), ...c])].join(' '); }, contains: (c) => has().includes(c) }; }
     append(...ns) { for (const n of ns) this.appendChild(typeof n === 'string' ? Object.assign(new El('#text'), { _text: n }) : n); }
     appendChild(n) { n.parentNode = this; this.children.push(n); return n; }
+    // the rail row (lane ui-phone-and-fit pick 1) fills a row with replaceChildren and finds its parts by a class or a tag
+    replaceChildren(...ns) { for (const c of this.children) c.parentNode = null; this.children = []; this._text = ''; this.append(...ns); }
+    querySelectorAll(sel) { return this.all().slice(1).filter((e) => (sel.startsWith('.') ? e.className.split(/\s+/).includes(sel.slice(1)) : e.tagName === sel.toUpperCase())); }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
     get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }
     set textContent(v) { this._text = String(v); this.children = []; }
     get innerHTML() { return this._html || ''; }
@@ -259,7 +267,7 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     installPluginsUI(App);
     const app = new App(); const root = new El('div');
     await app.openPluginsDialog({ container: root });
-    const rowOf = (id) => root.all().find((e) => e.className === 'plugin-row' && e.dataset.plugin === id) || null;
+    const rowOf = (id) => root.all().find((e) => e.className.split(/\s+/).includes('plugin-row') && e.dataset.plugin === id) || null;   // the rail row: 'rail-row plugin-row'
     const buttons = (row) => (row ? row.all().filter((e) => e.tagName === 'BUTTON') : []);
     const named = (row, label) => buttons(row).find((e) => e.textContent === label) || null;
     const rows = {};

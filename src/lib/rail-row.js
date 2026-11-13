@@ -15,8 +15,9 @@ import { showContextMenu, showToast } from './utils.js';
 import { t } from './i18n.js';
 
 const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
-/** a control's words for the «⋯» menu: its label, else its title / aria-label */
-const wordsOf = (c) => (c.dataset?.railLabel || c.getAttribute?.('aria-label') || c.title || c.textContent || '').trim();
+/** a control's LABEL for the «⋯» menu — its own words (data-rail-label, aria-label, title, text): chrome, never a record's text
+ *  (its own name: test-record-clear-census reads the For-you model's record-words accessor by its name) */
+const labelOf = (c) => (c.dataset?.railLabel || c.getAttribute?.('aria-label') || c.title || c.textContent || '').trim();
 
 /**
  * railRow({ row?, className?, lead?, name?, nameClass?, desc?, descClass?, main?, mainClass?, controls?, max? }) → the row element.
@@ -43,7 +44,7 @@ export function railRow({ row = null, className = '', lead = null, name = null, 
     // the reader's minor: a folded GROUP (a <div> of buttons — the manifest plugin's Update · Uninstall) is its BUTTONS, one row
     // each; a disabled control's row is drawn off and its press SAYS why (its own tip), never a silent nothing
     const rows = rest.flatMap((c) => (c.tagName === 'BUTTON' ? [c] : [...c.querySelectorAll('button')]));
-    more.onclick = (e) => { e.stopPropagation(); const b = more.getBoundingClientRect(); showContextMenu(b.left, b.bottom + 2, rows.map((c) => ({ label: wordsOf(c), title: c.title || '', disabled: false, action: () => { if (c.disabled) showToast(c.title || (wordsOf(c) + ' — ' + t('not available'))); else c.click(); } }))); };
+    more.onclick = (e) => { e.stopPropagation(); const b = more.getBoundingClientRect(); showContextMenu(b.left, b.bottom + 2, rows.map((c) => ({ label: labelOf(c), title: c.title || '', disabled: false, action: () => { if (c.disabled) showToast(c.title || (labelOf(c) + ' — ' + t('not available'))); else c.click(); } }))); };
     ctl.appendChild(more);
   }
   r.replaceChildren(...[lead, m, ctl].filter(Boolean));

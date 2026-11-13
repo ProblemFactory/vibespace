@@ -131,6 +131,52 @@ check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the s
 check('③b …the For-you window\'s pane: the options before the detail', /el\.append\(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions\);/.test(IW));
 check('③b …the opened strip: the options (order 6) before the detail (order 7), which scrolls below them',
   /\.chat-attn-dock\.cad-open \.cad-rows \.ut-item > \.ut-body > \.ut-detail-exp \{ display: block !important; order: 7;/.test(CC) && /\.cad-rows \.ut-body > \.ut-opts \{ order: 6;/.test(CC));
+// ③e ONE ORDER BY RULE, AT EVERY DOOR (the closure verifier's R1 / R2: a later rule that put the detail first stayed green —
+// ③b reads only the drawing order). For each door where an item opens, every rule of public/*.css that can reach that door's
+// options row or its detail is read: the detail's least `order` is never below the options' greatest, no rule reverses the
+// item's direction, and neither part is placed on a grid (order alone places them). A rule reaches a door unless it names
+// another door's own container (or excludes this one by :not); an :is() list reaches a door when one of its names does.
+const OWN = ['chat-attn-dock', 'cad-rows', 'cad-open', 'cad-over', '#user-todos-popup', '#phone-home', 'ut-mini-popover', 'cn-card'];
+const DOORS = [
+  { name: 'the opened strip', has: ['chat-attn-dock', 'cad-rows', 'cad-open', 'cad-over'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the tray', has: ['#user-todos-popup'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the phone page', has: ['#phone-home'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the mini inbox', has: ['ut-mini-popover'], opts: /^\.ut-opts$/, det: /^\.ut-detail-exp$/, body: /^\.ut-body$/ },
+  { name: 'the For-you window', has: [], opts: /^\.iw-opts$/, det: /^\.iw-detail$/, body: /^\.iw-item$/ },
+];
+// the selector's context (all but its styled compound) split into plain names, :is()/:where() choices and :not() exclusions
+const context = (sel) => {
+  const last = lastCompound(sel); let s = sel.slice(0, sel.length - last.length) + last.replace(/^[^:]*/, (h) => h.replace(/^[.#][\w-]+/, ''));
+  const groups = []; let m;
+  while ((m = /:(is|where|not|has)\(/.exec(s))) {
+    let d = 1, j = m.index + m[0].length; while (j < s.length && d) { if (s[j] === '(') d++; else if (s[j] === ')') d--; j++; }
+    groups.push({ kind: m[1], inner: s.slice(m.index + m[0].length, j - 1) }); s = s.slice(0, m.index) + ' ' + s.slice(j);
+  }
+  const names = (x) => (x.match(/[.#][\w-]+/g) || []).map((n) => (n[0] === '.' ? n.slice(1) : n)).filter((n) => OWN.includes(n));
+  return { plain: names(s), choices: groups.filter((g) => g.kind === 'is' || g.kind === 'where').map((g) => selectorList(g.inner).map(names)), nots: groups.filter((g) => g.kind === 'not').flatMap((g) => names(g.inner)) };
+};
+const reaches = (sel, door) => { const c = context(sel); const ok = (ns) => ns.every((n) => door.has.includes(n)); return ok(c.plain) && c.choices.every((alts) => alts.some(ok)) && !c.nots.some((n) => door.has.includes(n)); };
+const orderOf = (body) => { const all = [...body.matchAll(/(?:^|;)\s*order:\s*(-?\d+)/g)]; return all.length ? Number(all[all.length - 1][1]) : null; };
+const PARTS = /\.(ut-opts|ut-detail-exp|ut-body|iw-opts|iw-detail|iw-item)(?![\w-])/;   // read only the rules that name a part (the census stays O(parts))
+const orderFaults = (all) => { const rules = all.filter((r) => PARTS.test(r.sel)); return DOORS.flatMap((door) => {
+  const on = (re) => rules.flatMap((r) => selectorList(r.sel).filter((x) => re.test(lastCompound(x).replace(/:[\w-]+(\([^)]*\))?|\[[^\]]*\]/g, '')) && reaches(x, door)).map((x) => ({ r, x })));
+  const opts = on(door.opts), det = on(door.det), body = on(door.body);
+  const oMax = Math.max(0, ...opts.map(({ r }) => orderOf(r.body)).filter((n) => n !== null));
+  const dSet = det.map(({ r, x }) => ({ x, n: orderOf(r.body) })).filter((d) => d.n !== null);
+  const out = dSet.filter((d) => d.n < oMax).map((d) => `${door.name}: «${d.x}» orders the detail ${d.n}, before the options (${oMax})`);
+  if (!dSet.length && oMax > 0) out.push(`${door.name}: the options are ordered ${oMax} and the detail keeps 0 — the detail first`);
+  for (const { r, x } of body) if (/flex-direction:\s*(row|column)-reverse/.test(r.body)) out.push(`${door.name}: «${x}» reverses the item's direction`);
+  for (const { r, x } of [...opts, ...det]) if (/grid-(row|area|column)\s*:/.test(r.body)) out.push(`${door.name}: «${x}» places a part on a grid`);
+  return out;
+}); };
+const oNow = orderFaults(RULES);
+check(`③e ONE ORDER BY RULE at every door (${DOORS.map((d) => d.name).join(' · ')}): no rule orders a detail before its options, reverses an item or places either part on a grid`, oNow.length === 0, oNow);
+const R1 = '.chat-attn-dock.cad-open .cad-rows .ut-body > .ut-detail-exp { order: 5 !important; }';
+const R2 = ':is(#user-todos-popup, #phone-home) .ut-item > .ut-body { display: flex; flex-direction: column; } :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-detail-exp { order: -1; }';
+const R3 = '.iw-item { display: flex; flex-direction: column-reverse; }';
+const oRed = { R1: orderFaults([...RULES, ...cssRules(R1, 'planted')]), R2: orderFaults([...RULES, ...cssRules(R2, 'planted')]), R3: orderFaults([...RULES, ...cssRules(R3, 'planted')]) };
+check(`③e CONTROL (the closure verifier's R1 / R2 + a reversed window item): each planted rule is caught at its door — ${Object.entries(oRed).map(([k, v]) => `${k} ${v.length}`).join(' · ')}`,
+  oRed.R1.length >= 1 && oRed.R1.every((f) => f.startsWith('the opened strip')) && oRed.R2.length === 2 && oRed.R2.some((f) => f.startsWith('the tray')) && oRed.R2.some((f) => f.startsWith('the phone page')) && oRed.R3.length === 1 && oRed.R3[0].startsWith('the For-you window'), oRed);
 
 // ④ the ladder
 const L = await import(pathToFileURL(path.join(repo, 'scripts/lib/fit-ladder.mjs')).href);
