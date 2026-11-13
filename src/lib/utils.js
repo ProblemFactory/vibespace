@@ -1360,15 +1360,59 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
     }
     pop.appendChild(el);
   }
-  // Keep menu on screen — THE ONE placement (PURE menuPlace, lane desktop-small P2-3): below the point, or above it when
-  // `up` and there is room, else clamped to the edge; a menu TALLER than the viewport is capped + scrollable (clamping
-  // alone left its tail unreachable). Viewport px measured, layout px written.
-  const mr = pop.getBoundingClientRect();
-  const at = menuPlace({ x, y, w: mr.width, h: mr.height, vw: window.innerWidth, vh: window.innerHeight, up });
-  if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; }
-  pop.style.left = (at.left / Z) + 'px';
-  pop.style.top = (at.top / Z) + 'px';
+  placeMenu(pop, x, y, { up });
+  return pop;
+}
+
+/** A MENU IS BOUNDED BY THE SCREEN (lane ui-controls-and-bugs, 主开发's width-sweep rule 4, 2026-11-13) — THE ONE placement of
+ *  every context menu (showContextMenu and the file explorer's own builder): PURE menuPlace (below the point, above it when
+ *  `up` and there is room, else clamped; a menu TALLER than the viewport is capped and scrolls inside). Two things on top:
+ *  - a menu whose rows change after it opened (the file explorer's office rows arrive late) is PLACED AGAIN — it never
+ *    grows past the screen's edge (the sweep: «删除» below a 1024×700 screen, no scroll);
+ *  - a capped menu keeps its CLOSING rows in view — the last group after a separator when it is short (≤ 4 rows: Rename /
+ *    Properties / Delete), else that group's last two (the session card's 属性… / 终止): they stick to its bottom edge while
+ *    the rest scrolls under them. The rows stay the menu's own children (no wrapper).
+ *  Viewport px measured, layout px written (uiScale). */
+export function placeMenu(pop, x, y, { up = false } = {}) {
+  const Z = uiScale();
+  const isSep = (k) => [...k.classList].some((c) => /-(separator|sep)$/.test(c));
+  const unpin = () => { for (const k of pop.children) if (k.dataset && k.dataset.menuTail) { delete k.dataset.menuTail; k.style.position = ''; k.style.bottom = ''; k.style.zIndex = ''; k.style.background = ''; k.style.boxShadow = ''; } };
+  const pinTail = () => {
+    const kids = [...pop.children].filter((k) => !k.classList.contains('context-submenu'));
+    let i = kids.length - 1;
+    while (i >= 0 && !isSep(kids[i])) i--;
+    const group = kids.slice(i + 1), tail = group.length <= 4 ? group : group.slice(-2);
+    if (i < 0 || !tail.length) return;
+    let below = 0;
+    for (let k = tail.length - 1; k >= 0; k--) {
+      const row = tail[k];
+      row.dataset.menuTail = '1';
+      Object.assign(row.style, { position: 'sticky', bottom: below + 'px', zIndex: '1', background: 'var(--bg-dialog)' });
+      // the first pinned row draws the group's rule above it; the last covers the menu's bottom padding (a scrolled row
+      // showed through the 4 px under «终止»)
+      row.style.boxShadow = [k === 0 ? '0 -1px 0 var(--border)' : '', k === tail.length - 1 ? '0 6px 0 var(--bg-dialog)' : ''].filter(Boolean).join(', ');
+      below += row.offsetHeight;
+    }
+  };
+  const place = () => {
+    unpin(); pop.style.maxHeight = ''; pop.style.overflowY = '';   // its natural size first
+    const mr = pop.getBoundingClientRect();
+    const at = menuPlace({ x, y, w: mr.width, h: mr.height, vw: window.innerWidth, vh: window.innerHeight, up });
+    if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; pinTail(); }
+    pop.style.left = (at.left / Z) + 'px';
+    pop.style.top = (at.top / Z) + 'px';
+  };
+  place();
   pop.style.visibility = '';
+  if (typeof MutationObserver === 'function') {
+    // rows added or removed after it opened ⇒ placed again; a submenu the builder hangs INSIDE the menu is not a row
+    const mo = new MutationObserver((recs) => {
+      if (!pop.isConnected) { mo.disconnect(); return; }
+      const rows = recs.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n.nodeType === 1 && !n.classList.contains('context-submenu')));
+      if (rows) { const keep = pop.scrollTop; place(); pop.scrollTop = keep; }
+    });
+    mo.observe(pop, { childList: true });
+  }
   return pop;
 }
 
