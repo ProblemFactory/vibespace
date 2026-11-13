@@ -242,12 +242,13 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     './picture-shell.js': 'export const pageIsSecure = () => false;', // lane desktop-v2-latency: the strip's keyboard-lock gate (the real one imports utils.js)
     './stream-view.js': 'export const createStreamView = () => ({ connect() {}, dispose() {} });', // lane stream-p1a-transport: the window's WebRTC <video> (node has no RTCPeerConnection: the window takes the VNC view)
     './machine-desktop-handover.js': 'export const createHandover = () => ({ facts() {}, ownerInput() {}, playing() {}, redraw() {}, dispose() {}, state: null });', // lane desktop-handover: the strip's hand-over (its picker imports the real utils.js)
+    './desktop-app-launcher.js': 'export const showInstallDialog = (m, o) => { (globalThis.__installs = globalThis.__installs || []).push({ host: m && m.hostId, what: o && o.what }); };', // lane machine-needs-at-pairing: THE install door the dialog loads when pressed — a press records what it asked
   };
   // (and for src/lib/desktop-picker.js — lane desktop-v2-entry: the strip's machine ▾ opens the Desktop picker)
   // the same four stubs for src/lib/machine-app.js (machine-app-crop's "Run as its own window…" module the dialog imports — the real
   // utils.js wires document-level tooltips at load)
   const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/machine-desktop.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
-    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view|machine-desktop-handover)\.js$/ }, (a) => (/(machine-(desktop|app|displays)|desktop-picker|remoteapp-card|stream-stats|stream-pill|corner-float|stream-mic-strip)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view|machine-desktop-handover|desktop-app-launcher)\.js$/ }, (a) => (/(machine-(desktop|app|displays)|desktop-picker|remoteapp-card|stream-stats|stream-pill|corner-float|stream-mic-strip)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
   class N {
     constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.style = { cssText: '' }; this.attrs = {}; this.className = ''; this._text = ''; this.hidden = false; this.disabled = false; this.value = ''; this.title = '';
       this.classList = { toggle: (c, on) => { const s = new Set(this.className.split(/\s+/).filter(Boolean)); if (on === undefined ? !s.has(c) : on) s.add(c); else s.delete(c); this.className = [...s].join(' '); }, contains: (c) => this.className.split(/\s+/).includes(c) }; }
@@ -279,7 +280,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   answer = { hostId: 'win-a', platform: 'win32', rows: [ZR, JR], total: 2, truncated: false, listedAt: 1 };
   const m = { hostId: 'win-a', label: 'WIN-DESK1', code: 'no_vnc', setup: 'win32', desktop: 'vnc-native', selectable: true };
   let rechecks = 0;
-  showMachineDesktopDialog({}, m, { install: () => { }, recheck: async () => { rechecks++; return m; } });
+  showMachineDesktopDialog({}, m, { recheck: async () => { rechecks++; return m; } });
   const body = ROOT.children[ROOT.children.length - 1];
   ok(body.find('machine-apps-note')[0].textContent === 'Listing the apps on WIN-DESK1…', 'the dialog opens saying it is listing the machine');
   await tick(); await tick();
@@ -323,6 +324,30 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   answer = { hostId: 'win-a', platform: 'win32', rows: [{ name: 'TightVNC Server 2.8.85', launch: null, source: 'install', pending: true, seenAt: 4 }], total: 1, truncated: false, listedAt: 4 };
   await checkBtn.onclick(); await tick();
   ok(rowsNow().length === 1 && rowsNow()[0].disabled && rowsNow()[0].lastChild.textContent === 'just installed — being listed', 'a just-installed (pending) row shows, greyed, until the machine lists it');
+
+  // lane machine-needs-at-pairing (the owner 2026-11-13: «设置一次：在 dev-… 上安装 TightVNC Server», and no button — the Desktop
+  // picker opened this dialog without the `install` callback the Apps dialog handed it). THE OPENERS, derived from the tree: every
+  // showMachineDesktopDialog( call in src/lib (a DOM dialog: only a client module can open it), each opened here with exactly the
+  // options it passes
+  const sig = /export function showMachineDesktopDialog\(app, m0, \{([^}]*)\} = \{\}\)/.exec(fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'));
+  const optNames = sig ? [...sig[1].matchAll(/(\w+) =/g)].map((x) => x[1]) : [];
+  const openers = [];
+  const walkSrc = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walkSrc(p); else if (/\.js$/.test(e.name)) for (const line of fs.readFileSync(path.join(REPO, p), 'utf8').split('\n')) { const mm = /showMachineDesktopDialog\(\w+, \w+, \{(.*)$/.exec(line); if (mm && !/^\s*export function/.test(line)) openers.push({ file: p, text: mm[1], keys: optNames.filter((k) => new RegExp(`\\b${k}:`).test(mm[1])) }); } } };
+  walkSrc('src/lib');
+  ok(J(openers.map((o) => o.file).sort()) === J(['src/lib/desktop-app-launcher.js', 'src/lib/desktop-picker.js']) && optNames.length && !optNames.includes('install'), `THE OPENERS (derived): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — the dialog takes no install door (its options: ${optNames.join(', ')})`, { openers, optNames });
+  ok(openers.every((o) => !/\binstall:/.test(o.text)), 'no opener hands the dialog an install door — the door is the dialog\'s own');
+  for (const o of openers) {
+    const opts = Object.fromEntries(o.keys.map((k) => [k, k === 'recheck' ? async () => m : () => { }]));
+    globalThis.__installs = [];
+    answer = (u) => (/\/machine-desktop\/mic\?/.test(u) ? { state: { state: 'absent' } } : { hostId: 'win-a', platform: 'win32', rows: [ZR], total: 1, truncated: false, listedAt: 5 });
+    showMachineDesktopDialog({}, { ...m }, opts);
+    const b = ROOT.children[ROOT.children.length - 1];
+    await tick(); await tick();
+    const row = b.find('desktop-install-actions')[0];
+    const tv = row && row.children.find((x) => x.textContent === 'Install TightVNC Server…'), mi = b.find('machine-mic-install')[0];
+    if (tv) await tv.onclick(); if (mi) await mi.onclick(); await tick(); await tick();
+    ok(tv && mi && J(globalThis.__installs) === J([{ host: 'win-a', what: 'tightvnc' }, { host: 'win-a', what: 'virtual-mic' }]), `opened as ${o.file} opens it: the TightVNC line has «Install TightVNC Server…» and the microphone card «Install a virtual microphone…», each opening the launcher's install dialog`, { tv: !!tv, mi: !!mi, installs: globalThis.__installs, row: row && row.children.map((x) => x.textContent) });
+  }
 
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   const rule = (src) => { const row = /\.desktop-install-actions \{([^}]*)\}/.exec(src); const btn = /\.desktop-install-actions > button \{([^}]*)\}/.exec(src); const icon = /\.desktop-install-actions > \.file-tool-btn \{([^}]*)\}/.exec(src); return !!(row && /flex-wrap:\s*wrap/.test(row[1]) && btn && /flex:\s*none/.test(btn[1]) && /white-space:\s*nowrap/.test(btn[1]) && icon && /width:\s*auto/.test(icon[1])); };

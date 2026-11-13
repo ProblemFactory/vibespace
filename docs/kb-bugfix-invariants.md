@@ -931,6 +931,20 @@
 - (2026-11-12) A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (job-logs-sweep) — 不变量 = what no record lists leaves job-logs 14 days after its NEWEST file; never a live / listed run; ≤ 500 a pass, said twice; no removal on the main thread (kb-bugfix-invariants)
 - (2026-11-12) THREE --wake MESSAGES SAID «WOKE» AND «READ» AND WERE CHARGED WHILE AN ANTIGRAVITY WRAPPER HELD THEM SIX HOURS BEHIND A TURN THAT NEVER ENDED (queued-is-not-woke) — 不变量 = the sender is told what the addressee did; a queued frame waits, owed (kb-bugfix-invariants)
 - (2026-11-06) THE CHAT'S TAIL WAS NOTHING BUT «断开 / 重连» (owner, phone; connection-notice-once) — 不变量 = one live notice patched in place, a status row is no message, a cycle nobody could have noticed is no notice ⇒ kb-bugfix-invariants
+- (2026-11-13) «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (owner; the Desktop picker opened the dialog without the opener's `install`) — 不变量 = a need's door is the surface's own, never an opener's callback; the first ffmpeg that PASSES is used, in the same order (kb-bugfix-invariants)
+
+## «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (the owner, 2026-11-13 01:2xZ; lane machine-needs-at-pairing pick 1, .399)
+
+**Symptom.** A paired Windows machine's window «dev-… — 它的桌面» said «设置一次：在 dev-… 上安装 TightVNC Server — 它只在那台机器本机监听» and offered 串流一个窗口… / 再检查一次 / RemoteApp 设置… — no button that installs anything. The owner's words: «这种需要 vnc 啊，需要 ffmpeg 之类的事情不能在安装的时候自动解决吗？»
+
+**Cause (read on fd4acdc61).** `showMachineDesktopDialog` drew «Install TightVNC Server…» and the microphone card's «Install a virtual microphone…» only when its OPENER handed an `install` callback. The Apps dialog did; the Desktop picker's «Set up first» row did not — the owner came through the Desktop button. Beside it: the agent's `findFfmpeg` took the first ffmpeg that EXISTS (PATH first), so an old one on PATH shadowed a good one in VibeSpace's folder; and the no_ffmpeg words said «and NVENC» where the ladder takes four encoders.
+
+**Fix.** The dialog's own door (`installDoor`: the launcher's install dialog, loaded when pressed); no opener hands one. `SP.firstPassingFfmpeg`: the first candidate that PASSES, in the same order. The words name every rung of the ladder.
+
+**不变量.**
+1. A NEED'S DOOR IS THE SURFACE'S OWN: a line that states a need draws its door whoever opened the surface — never a callback an opener may leave out. Pinned by opening the dialog with each opener's own options, the openers derived from the tree.
+2. THE FIRST THAT PASSES, IN THE SAME ORDER: a machine's ffmpeg is the first candidate (PATH, the folder, the probe folder) that passes the verdict and has a rung of the ladder; a machine whose own ffmpeg passes keeps it; none passes ⇒ the first found is named.
+3. THE WORDS SAY WHAT THE CODE TAKES: a need names every rung the ladder accepts, derived from the ladder.
 
 ## THE CHAT'S TAIL WAS NOTHING BUT «断开 / 重连» (the owner 2026-11-06, on a phone: «以后别拿这个刷屏了吧»; lane connection-notice-once, the notice pick)
 

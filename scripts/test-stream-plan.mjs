@@ -8,6 +8,9 @@
 //      every patch within ±1; the table equals the function on all 65 536 bit patterns; odd sizes stay inside
 //   §3 THE ENCODER LADDER: the table's order decides (RED CONTROL: a reversed ladder takes x264 over NVENC); software = said
 //   §4 FFMPEG FACTS: version / filters / encoders texts → the verdict; no_ffmpeg names where it looked
+//   §4b THE LOOKUP (lane machine-needs-at-pairing): the FIRST ffmpeg that PASSES, in the same order (PATH, the folder, the probe
+//      folder) — an old one on PATH no longer shadows a good one; none passes ⇒ the first found, named as before; the words
+//      name every rung of the ladder (never «and NVENC» alone)
 //   §5 THE FACTS SCRIPT + PARSER: the three DisplayConfig types + the DXGI walk; the line → displays (PS 5's lone row too)
 //   §6 THE PLAN: the road by HDR state, the refusals by name, the argvs — the capture never converts a float format
 //   §11 GONE MEANS GONE (lane stream-fallback-never-silent): displaySeen / judgeGone (two successful reads 1 s apart) / captureRestart
@@ -114,6 +117,57 @@ console.log('§4 ffmpeg facts');
     const r = SP.parseFfmpegFacts(real.stdout, spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8' }).stdout, spawnSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' }).stdout);
     ok(r.major >= 4 && r.ddagrab === false && Array.isArray(r.encoders), `this box's real ffmpeg parses (${r.version}, major ${r.major}; no ddagrab off Windows — refused there by name)`, r);
   } else console.log('  · no ffmpeg on this box: the real-text leg is skipped');
+}
+
+console.log('§4b THE LOOKUP (lane machine-needs-at-pairing — the owner 2026-11-13): the first ffmpeg that PASSES, in the same order');
+{
+  const FILT = ' ... ddagrab           |->V       Grab Windows Desktop images using Desktop Duplication API.\n';
+  const enc = (ids) => ids.map((e) => ` V....D ${e}           ${e} encoder (codec h264)\n`).join('');
+  const OLD = { version: '6.1.1-essentials_build-www.gyan.dev' }, GOOD = { version: '9.0.2-essentials_build-www.gyan.dev' };
+  const NO_RUNG = { version: '9.0.2', encoders: ['libx265'] }, NO_DDA = { version: '9.0.2', ddagrab: false };
+  const texts = (x) => ({ v: `ffmpeg version ${x.version} Copyright (c) 2000-2026\n`, f: x.ddagrab === false ? '' : FILT, e: enc(x.encoders || ['h264_nvenc']) });
+  // ── the DAEMON's own lookup (src/agentd/stream-screen.js facts → findFfmpeg) on a Windows-shaped machine: its files and its
+  //    programs' answers stood in (fs.statSync, execFile) — what runs on the owner's machine, not a model of it
+  const { createScreen } = require(path.join(REPO, 'src/agentd/stream-screen.js'));
+  const DIRS = { old: '/m/old', tools: '/m/tools', folder: '/m/lad/vibespace/ffmpeg/bin', probe: '/m/home/vs-probe/ffmpeg/ffmpeg-master-latest-win64-gpl/bin' };
+  const exe = (k) => `${DIRS[k]}/ffmpeg.exe`;
+  const daemonPick = async (have) => {
+    const files = new Map(Object.entries(have).map(([k, x]) => [exe(k), texts(x)]));
+    const asked = [];
+    const execFile = (file, args, opts, cb) => {
+      if (file === 'powershell.exe') return cb(null, factsLine([{ id: 'D1', x: 0, y: 0, w: 1920, h: 1080, primary: true, hdr: null, white: null, adapter: null }]) + '\n', '');
+      const t = files.get(file); asked.push(file);
+      if (!t) return cb(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }), '', '');
+      cb(null, args.includes('-version') ? t.v : args.includes('-filters') ? t.f : t.e, '');
+    };
+    const fsFake = { statSync: (p) => { if (!files.has(p)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return { isFile: () => true }; } };
+    const S = createScreen({ platform: 'win32', execFile, spawn: () => { throw new Error('no spawn in the facts read'); }, env: {}, lookupEnv: { PATH: `${DIRS.old}${path.delimiter}${DIRS.tools}`, LOCALAPPDATA: '/m/lad', USERPROFILE: '/m/home' }, fs: fsFake });
+    const f = await S.facts({ force: true });
+    return { path: f && f.ffmpeg ? f.ffmpeg.path : null, verdict: SP.ffmpegVerdict(f && f.ffmpeg), asked: [...new Set(asked)] };
+  };
+  const d1 = await daemonPick({ old: OLD, folder: GOOD });
+  ok(d1.path === exe('folder') && d1.verdict.ok, 'THE DAEMON, the owner\'s shape: an OLD ffmpeg (6.1) on PATH no longer shadows a good one in %LOCALAPPDATA%\\vibespace\\ffmpeg\\bin — the folder\'s is taken', d1);
+  const d2 = await daemonPick({ old: NO_RUNG, tools: NO_DDA, folder: GOOD });
+  ok(d2.path === exe('folder'), 'THE DAEMON: one with no H.264 rung of the ladder and one with no ddagrab are passed over the same way', d2);
+  const d3 = await daemonPick({ tools: GOOD, folder: GOOD });
+  ok(d3.path === exe('tools') && !d3.asked.includes(exe('folder')), 'THE DAEMON, THE ORDER STAYS: two that pass ⇒ PATH\'s, the machine\'s own (主开发 Q6); nothing after the first that passes is asked', d3);
+  const d4 = await daemonPick({ old: OLD, probe: NO_DDA });
+  ok(d4.path === exe('old') && d4.verdict.code === 'no_ffmpeg' && d4.verdict.error.includes(`${exe('old')} is 6.1.1`), 'THE DAEMON: none passes ⇒ the FIRST one found, and the refusal names its version as before', d4);
+  // ── the PURE rule it asks (src/stream-plan.js firstPassingFfmpeg), with the candidates as ffmpegCandidates gives them
+  if (typeof SP.firstPassingFfmpeg !== 'function') ok(false, 'THE LOOKUP is ONE PURE rule (SP.firstPassingFfmpeg)');
+  else {
+    const C = SP.ffmpegCandidates({ platform: 'win32', env: { PATH: 'C:\\old;C:\\tools', LOCALAPPDATA: 'C:\\Users\\o\\AppData\\Local', USERPROFILE: 'C:\\Users\\o' } });
+    const asked = [];
+    const r = await SP.firstPassingFfmpeg([...C, C[0]], async (c) => { asked.push(c.path); return null; });
+    ok(r.ffmpeg === null && same(r.looked, ['PATH', '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin', 'the probe folder']) && asked.length === 4, 'THE RULE: none found ⇒ null, every place looked; a path listed twice is asked once', { r, asked });
+    const scr = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8');
+    ok(/return SP\.firstPassingFfmpeg\(candidates, async \(c\) =>/.test(scr), 'the screen source\'s findFfmpeg IS this rule — no first-found return of its own');
+  }
+  ok(/ffmpeg: async \(\) => \{[^}]*streamScreenOf\(\)\.facts\(\)/.test(fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8')), 'the microphone and the sound take the screen facts\' ffmpeg — one pick for all three roads');
+  const rungs = SP.ENCODER_LADDER.map((e) => e.label), need = SP.ffmpegVerdict(null).error;
+  ok(rungs.length === 4 && rungs.every((l) => need.includes(l)) && !/and NVENC/.test(need), `the agent's refusal names every rung the ladder takes (${rungs.join(', ')}), never «and NVENC» alone`, need);
+  const client = /no_ffmpeg: \(\) => t\('([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'));
+  ok(client && rungs.every((l) => client[1].includes(l)) && !/and NVENC/.test(client[1]), 'the desktop window\'s no_ffmpeg words name every rung too', client && client[1]);
 }
 
 console.log('§5 the facts script and its parser');

@@ -9321,7 +9321,7 @@ export default {
   "the machine’s agent cannot capture its screen yet": "机器的 agent 还不能采集它的屏幕",
   "the machine already streams to two windows": "机器已经在给两个窗口串流",
   "the machine could not start it": "机器没能开始串流",
-  "the machine needs ffmpeg 7 or newer (with ddagrab and NVENC) — on its PATH or in {dir}": "需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）——放在机器的 PATH 或 {dir}",
+  "the machine needs ffmpeg 7 or newer with ddagrab and an H.264 encoder (NVENC, AMF, Quick Sync or x264) — on its PATH or in {dir}": "需要 ffmpeg 7 或更新版本，含 ddagrab 和一个 H.264 编码器（NVENC、AMF、Quick Sync 或 x264）——放在机器的 PATH 或 {dir}",
   "the machine’s ffmpeg has no H.264 encoder": "机器的 ffmpeg 没有 H.264 编码器",
   "the machine’s HDR white level could not be read": "读不到机器 HDR 显示器的 SDR 白点",
   "the display it showed is gone": "要串流的显示器不在了",

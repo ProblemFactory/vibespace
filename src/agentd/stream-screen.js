@@ -122,21 +122,19 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     qosScript([process.pid], true);
   }
   async function findFfmpeg() {
-    const looked = [], tried = new Set();
     // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
     // ~/.local/bin); the folders from this process's environment
     const PATH = [lookupEnv.PATH, env.PATH].filter(Boolean).join(path.delimiter);
-    for (const c of SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: path.delimiter, sep: path.sep })) {
-      if (!looked.includes(c.where)) looked.push(c.where);
-      if (tried.has(c.path)) continue;
-      tried.add(c.path);
-      let st = null; try { st = fs.statSync(c.path); } catch { continue; }
-      if (!st.isFile()) continue;
+    const candidates = SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: path.delimiter, sep: path.sep });
+    // lane machine-needs-at-pairing: the FIRST that PASSES (SP.firstPassingFfmpeg), in the same order — an old ffmpeg on PATH no
+    // longer shadows a good one in %LOCALAPPDATA%\vibespace\ffmpeg\bin; the microphone and the sound ride this same pick
+    return SP.firstPassingFfmpeg(candidates, async (c) => {
+      let st = null; try { st = fs.statSync(c.path); } catch { return null; }
+      if (!st.isFile()) return null;
       const [v, fl, en] = [await run(c.path, ['-hide_banner', '-version']), await run(c.path, ['-hide_banner', '-filters']), await run(c.path, ['-hide_banner', '-encoders'])];
-      if (v.err && !v.stdout) continue;
-      return { looked, ffmpeg: { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout) } };
-    }
-    return { looked, ffmpeg: null };
+      if (v.err && !v.stdout) return null;
+      return { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout) };
+    });
   }
   async function readFacts() {
     if (platform !== 'win32') return { ok: false, code: 'not_windows', platform, error: `the screen source captures a Windows desktop (this machine runs ${platform})` };

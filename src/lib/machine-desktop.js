@@ -45,6 +45,10 @@ import { createMicToggle, createMicCard, createSoundToggle, createSoundCard } fr
 import { micDefaultDoors, micRoadWords } from '../mic-model.js'; // lane stream-mic-road: the Machines card's microphone row
 import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
 
+/** THE INSTALL DOOR of the machine's one-time setups (lane machine-needs-at-pairing — the owner 2026-11-13: «设置一次：在 dev-… 上安装
+ *  TightVNC Server» and no button): the launcher's install dialog, loaded when pressed (the strip's microphone door's way, below) —
+ *  this module's OWN door, never a callback an opener hands in (the Desktop picker opened the dialog without one). */
+const installDoor = (m, opts) => import('./desktop-app-launcher.js').then(({ showInstallDialog }) => showInstallDialog(m, opts));
 const RUNS_KEY = 'vibespace.machineDesktopRuns'; // { [hostId]: [line…] } — the owner's latest lines per machine (≤ 3)
 function readRuns() { try { const o = JSON.parse(localStorage.getItem(RUNS_KEY) || '{}'); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; } }
 function saveRun(hostId, line) { const o = readRuns(); o[hostId] = rememberRun(o[hostId], line); try { localStorage.setItem(RUNS_KEY, JSON.stringify(o)); } catch { /* storage refused: nothing remembered */ } }
@@ -535,7 +539,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     too_many_streams: (i) => (i && Number.isInteger(i.cap) ? t('the machine already streams {live} pictures — at most {cap} for its {n} displays (one per display + one)', { live: i.live, cap: i.cap, n: i.displays }) : t('the machine already streams to two windows')), // lane desktop-display-modes: THE PER-MACHINE CAP names its count (an older agent: two)
     offer_failed: () => t('the machine could not start it'),
     // lane stream-p1b-screen: the screen source's own names (src/agentd/stream-screen.js — refused before it starts, or ended)
-    no_ffmpeg: () => t('the machine needs ffmpeg 7 or newer (with ddagrab and NVENC) — on its PATH or in {dir}', { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }),
+    no_ffmpeg: () => t('the machine needs ffmpeg 7 or newer with ddagrab and an H.264 encoder (NVENC, AMF, Quick Sync or x264) — on its PATH or in {dir}', { dir: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin' }), // lane machine-needs-at-pairing: what the ladder takes (was «and NVENC»)
     no_encoder: () => t('the machine’s ffmpeg has no H.264 encoder'), no_white_level: () => t('the machine’s HDR white level could not be read'),
     display_gone: () => t('the display it showed is gone'), display_other_gpu: () => t('that display is on another graphics card'),
     capture_failed: () => t('the machine’s screen capture could not start'), capture_exited: () => t('the machine’s screen capture stopped'), encoder_exited: () => t('the machine’s video encoder stopped'),
@@ -884,13 +888,15 @@ function installedList(m, { onPick }) {
 }
 
 /**
- * THE MACHINE'S DIALOG (the launcher opens it for a Windows / macOS row): its state, "Open its desktop", the one-time
- * setup (the Mac's words; Windows' Install… through the launcher's install dialog, `install`), and "Run on its
- * desktop…" — the machine's installed apps, then the Examples / Recent lines, then the command box. `recheck(hostId)`
- * re-reads the machine rows (the probe runs again — an explicit act, never a timer); Check again also lists the
- * machine's apps again (on the machine, now).
+ * THE MACHINE'S DIALOG (the Apps dialog and the Desktop picker open it for a Windows / macOS row): its state, "Open its
+ * desktop", the one-time setup (the Mac's words; Windows' Install TightVNC Server… and the virtual microphone's Install… =
+ * the launcher's install dialog, through this module's installDoor), and "Run on its desktop…" — the machine's installed apps, then the
+ * Examples / Recent lines, then the command box. `recheck(hostId)` re-reads the machine rows (the probe runs again — an
+ * explicit act, never a timer); Check again also lists the machine's apps again (on the machine, now).
+ * Lane machine-needs-at-pairing (the owner 2026-11-13): the install door is THIS dialog's own — the Desktop picker opened it
+ * with no `install` callback and its TightVNC line had no button; no opener hands a door any more, so none can leave it out.
  */
-export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
+export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
   const { body, close: closeDialog, raised, live, ready } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
@@ -921,7 +927,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   input.addEventListener('input', pickDefault);
   runRow.append(input, winBtn, ...(raBtn ? [raBtn] : []), runBtn);
   // lane stream-mic-road: the machine's virtual microphone — its state and its doors (install, the default pair, remove)
-  const mic = m.setup === 'win32' || m.setup === 'darwin' ? createMicCard({ hostId: m.hostId, machine, install: install ? (what) => install(m, { what, onDone: () => mic.refresh({ force: true }) }) : null }) : null;
+  const mic = m.setup === 'win32' || m.setup === 'darwin' ? createMicCard({ hostId: m.hostId, machine, install: (what) => installDoor(m, { what, onDone: () => mic.refresh({ force: true }) }) }) : null;
   const sound = m.setup === 'win32' || m.setup === 'darwin' ? createSoundCard({ platform: m.setup }) : null; // lane speaker-passthrough-v1: the sound's consent, said
   body.append(state, acts, ...(mic ? [mic.el] : []), ...(sound ? [sound.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
@@ -953,7 +959,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (m.code === 'desktop_ready') acts.append(btn('desktop-open-link', t('Open its desktop → Desktop'), () => { toWindow(); openMachineDesktop(app, m); }));
     // lane stream-p2w-build: ONE application window of a Windows machine as its own window (its agent captures that window only) — beside the desktop: the two ways to look at the machine; a Mac's too (lane stream-p3m-build's window source — int304's one door)
     if ((m.setup === 'win32' || m.setup === 'darwin') && m.code !== 'offline') { const ws = btn('file-tool-btn machine-window-stream-open', t('Stream one window…'), () => openWindowPicker(app, m, { openDesktop: () => openMachineDesktop(app, m), onOpen: toWindow })); ws.title = t('Show one application window of {machine} as its own window — only that window is sent', { machine }); acts.append(ws); }
-    if (m.code === 'no_vnc' && m.setup === 'win32' && install) acts.append(btn('btn-create', t('Install TightVNC Server…'), () => install(m, { what: 'tightvnc', onDone: () => check() })));
+    if (m.code === 'no_vnc' && m.setup === 'win32') acts.append(btn('btn-create', t('Install TightVNC Server…'), () => installDoor(m, { what: 'tightvnc', onDone: () => check() })));
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     if (m.setup === 'win32') { const rs = btn('file-tool-btn machine-remoteapp-settings', t('RemoteApp settings…'), () => openRemoteappSettings(app, m)); rs.title = t('Set up RemoteApp once for this Windows machine: its sign-in and its certificate'); acts.append(rs); } // lane remoteapp-r1b: never greyed — offline, the card says so
     // lane desktop-vnc-remember: 「忘掉登录」 — only while a sign-in is remembered (the next desktop asks again)

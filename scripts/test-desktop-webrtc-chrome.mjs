@@ -546,7 +546,7 @@ console.log('⑦ relay-only ⑧ no source');
   await q.until(`!!document.querySelector('${WIN} canvas')`, 15000);
   await sleep(500);
   const s = await stripText(q);
-  ok(asked && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && /没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）/.test(s.title), '⑧ a hub with no fake source, a machine with no ffmpeg (its screen source refused, no_ffmpeg): the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）……)', s);
+  ok(asked && vnc.seen.sessions === before + 1 && !s.note && !(await q.ev(`!!document.querySelector('${WIN} .stream-video')`)) && /没有串流：需要 ffmpeg 7 或更新版本，含 ddagrab 和一个 H\.264 编码器（NVENC、AMF、Quick Sync 或 x264）/.test(s.title), '⑧ a hub with no fake source, a machine with no ffmpeg (its screen source refused, no_ffmpeg): the rung is not taken ⇒ the VNC picture at once with NO note (the chip\'s title says why, in the page\'s words: 没有串流：需要 ffmpeg ≥ 7（含 ddagrab 与 NVENC）……)', s);
   await q.close();
   noSource.shutdown();
   R.setup({ ...BASE });

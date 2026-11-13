@@ -1101,7 +1101,7 @@ export async function showLaunchDialog(app, opts = {}) {
       b.title = (!b.disabled ? machineName(m) : `${machineName(m)} — ${why}`) + (probe && m.code !== 'checking' ? `\n${probe}` : '');
       b.onclick = () => {
         // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
-        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const ms = await recheckMachines(id); if (!ms) return null; if (live()) { machines = ms; renderMachines(); } return ms.find((x) => x.hostId === id) || null; } }); return; }
+        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { closeOpener: close, recheck: async (id) => { const ms = await recheckMachines(id); if (!ms) return null; if (live()) { machines = ms; renderMachines(); } return ms.find((x) => x.hostId === id) || null; } }); return; }
         if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); holdApps(refresh()); mountApps(); };
       if (at === b) at = b.nextElementSibling; else machinesEl.insertBefore(b, at); // in order: a row already in place is never moved
     }

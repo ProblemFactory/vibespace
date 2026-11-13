@@ -9320,7 +9320,7 @@ export default {
   "the machine’s agent cannot capture its screen yet": "マシンのエージェントはまだ画面をキャプチャできません",
   "the machine already streams to two windows": "マシンはすでに 2 つのウィンドウにストリームしています",
   "the machine could not start it": "マシンがストリームを開始できませんでした",
-  "the machine needs ffmpeg 7 or newer (with ddagrab and NVENC) — on its PATH or in {dir}": "ffmpeg 7 以上（ddagrab と NVENC 付き）が必要です — マシンの PATH か {dir} に置いてください",
+  "the machine needs ffmpeg 7 or newer with ddagrab and an H.264 encoder (NVENC, AMF, Quick Sync or x264) — on its PATH or in {dir}": "ddagrab と H.264 エンコーダー（NVENC・AMF・Quick Sync・x264 のいずれか）付きの ffmpeg 7 以上が必要です — マシンの PATH か {dir} に置いてください",
   "the machine’s ffmpeg has no H.264 encoder": "マシンの ffmpeg に H.264 エンコーダーがありません",
   "the machine’s HDR white level could not be read": "マシンの HDR ディスプレイの SDR 白レベルを読めませんでした",
   "the display it showed is gone": "表示していたディスプレイがなくなりました",

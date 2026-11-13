@@ -10,7 +10,10 @@
 //   ② the list shows JASP (listed ON the device by the real op); a press fills the command; the filter narrows
 //   ③ Check again re-lists (a new app on the device appears)   ④ the Mac machine lists its bundles (`open -a "JASP"`)
 //   ⑤ an old agent ⇒ the update words, answered at once (never a hang)
-// PNGs (when `--shots <dir>`): desk.png, phone.png, old-daemon.png.
+//   ⑥ lane machine-needs-at-pairing (the owner 2026-11-13: «设置一次：…安装 TightVNC Server», and no button): the dialog opened
+//     as EACH opener in the tree opens it (every showMachineDesktopDialog( call in src/lib, with exactly its options) shows
+//     «安装 TightVNC Server…» on its action row, drawn on screen
+// PNGs (when `--shots <dir>`, or MDA_SHOTS): desk.png, phone.png, old-daemon.png, opener-<file>.png.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -21,7 +24,7 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const BUNDLE = path.join(REPO, 'data/bin/vibespace-agentd.js');
-const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : null; })();
+const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ? process.argv[i + 1] : process.env.MDA_SHOTS || null; })(); // MDA_SHOTS: a ci.mjs claim passes no argv
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -98,7 +101,8 @@ const R = require(path.join(REPO, 'src/routes/desktop-apps.js'));
 R.setup({ keeper, access, vnc: {} });
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const entry = `import { showMachineDesktopDialog } from ${JSON.stringify(path.join(REPO, 'src/lib/machine-desktop.js'))};
-window.__open = (m) => { document.getElementById('machine-desktop-dialog')?.remove(); showMachineDesktopDialog({ wm: { windows: new Map() } }, m, { install: () => {}, recheck: async () => m }); };`;
+window.__open = (m) => { document.getElementById('machine-desktop-dialog')?.remove(); showMachineDesktopDialog({ wm: { windows: new Map() } }, m, { recheck: async () => m }); };
+window.__openAs = (m, keys) => { document.getElementById('machine-desktop-dialog')?.remove(); const o = {}; for (const k of keys) o[k] = k === 'recheck' ? async () => m : () => {}; showMachineDesktopDialog({ wm: { windows: new Map() } }, m, o); };`;
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page.js'), loader: { '.css': 'empty' }, logLevel: 'error' });
 const app = express(); app.use(express.json()); app.use(R.router);
 const CSS = ['xterm', 'style', 'viewers', 'chat', 'theme-editor', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
@@ -209,6 +213,27 @@ console.log('⑤ an old agent: the update words, answered at once');
   ok(note === '这份列表需要更新OLD-PC上的 VibeSpace 代理（它会自动更新；一分钟后再检查一次）', 'the words, verbatim', note);
   await p.shot('old-daemon.png');
   p.close();
+}
+
+console.log('⑥ the dialog as EACH opener opens it (lane machine-needs-at-pairing): the TightVNC line has its button, on screen');
+{
+  const sig = /export function showMachineDesktopDialog\(app, m0, \{([^}]*)\} = \{\}\)/.exec(fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'));
+  const optNames = sig ? [...sig[1].matchAll(/(\w+) =/g)].map((x) => x[1]) : [];
+  const openers = [];
+  for (const f of fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js'))) for (const line of fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8').split('\n')) {
+    const mm = /showMachineDesktopDialog\(\w+, \w+, \{(.*)$/.exec(line);
+    if (mm && !/^\s*export function/.test(line)) openers.push({ file: f, keys: optNames.filter((k) => new RegExp(`\\b${k}:`).test(mm[1])), hands: /\binstall:/.test(mm[1]) });
+  }
+  ok(openers.length >= 2 && openers.every((o) => !o.hands), `the openers (derived from src/lib): ${openers.map((o) => `${o.file} {${o.keys.join(', ')}}`).join(' · ')} — none hands an install door`, openers);
+  for (const o of openers) {
+    const p = await page(900, 760);
+    await p.ev(`window.__openAs(${ROW('win-a', 'WIN-DESK1')}, ${JSON.stringify(o.keys)})`);
+    ok(await p.until(`!!document.querySelector('#machine-desktop-dialog .desktop-install-actions')`), `${o.file}: the dialog opens`);
+    const tv = await p.ev(`(() => { const b = [...document.querySelectorAll('#machine-desktop-dialog .desktop-install-actions > button')].find((x) => x.textContent === '安装 TightVNC Server…'); if (!b) return null; const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), shown: !!b.offsetParent, state: document.querySelector('.machine-desktop-state').textContent }; })()`);
+    ok(tv && tv.shown && tv.w > 40 && tv.h > 10 && /TightVNC/.test(tv.state), `${o.file}: the line «${tv && tv.state}» has «安装 TightVNC Server…» beside it, drawn on screen (${tv && `${tv.w}×${tv.h}`})`, tv);
+    await p.shot(`opener-${o.file.replace(/\.js$/, '')}.png`);
+    p.close();
+  }
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed${fail ? ', ' + fail + ' failed' : ''})`);

@@ -272,11 +272,35 @@ function parseFfmpegFacts(versionText, filtersText, encodersText) {
 }
 /** May this ffmpeg capture? → { ok } | { ok: false, code: 'no_ffmpeg', error } */
 function ffmpegVerdict(ff) {
-  const need = `this machine needs ffmpeg ${FFMPEG_MIN_MAJOR} or newer with ddagrab and NVENC (looked in ${LOOKED})`;
+  // lane machine-needs-at-pairing: the need as the ladder takes it (any rung — NVENC is only the first; was «and NVENC»)
+  const need = `this machine needs ffmpeg ${FFMPEG_MIN_MAJOR} or newer with ddagrab and an H.264 encoder — NVENC, AMF, Quick Sync or x264 (looked in ${LOOKED})`;
   if (!ff || !ff.path) return { ok: false, code: 'no_ffmpeg', error: need };
   if (!(ff.major >= FFMPEG_MIN_MAJOR)) return { ok: false, code: 'no_ffmpeg', error: `${need}; ${ff.path} is ${ff.version || 'an unknown version'}` };
   if (!ff.ddagrab) return { ok: false, code: 'no_ffmpeg', error: `${need}; ${ff.path} has no ddagrab` };
   return { ok: true };
+}
+/** Does this ffmpeg PASS — the verdict, and a rung of the encoder ladder? (lane machine-needs-at-pairing) */
+const ffmpegPasses = (ff) => ffmpegVerdict(ff).ok && pickEncoder(ff && ff.encoders).ok;
+/**
+ * THE LOOKUP (lane machine-needs-at-pairing, pick 1 — the owner 2026-11-13: an old ffmpeg on PATH shadowed a good one).
+ * `candidates` IN ffmpegCandidates' ORDER (PATH, then the folder, then the probe folder — the order stays); `probe(c)` → that
+ * file's facts ({ path, where, version, major, ddagrab, encoders }) or null (no file there, or it did not answer). The FIRST
+ * candidate that PASSES (ffmpegPasses) is taken; none passes ⇒ the FIRST one found, so the refusal names it (its version, no
+ * ddagrab, no encoder) exactly as before; none found ⇒ null. A candidate path is probed once. → { looked, ffmpeg }
+ */
+async function firstPassingFfmpeg(candidates, probe) {
+  const looked = [], tried = new Set();
+  let first = null;
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    if (!looked.includes(c.where)) looked.push(c.where);
+    if (tried.has(c.path)) continue;
+    tried.add(c.path);
+    const ff = await probe(c);
+    if (!ff) continue;
+    if (ffmpegPasses(ff)) return { looked, ffmpeg: ff };
+    if (!first) first = ff;
+  }
+  return { looked, ffmpeg: first };
 }
 
 // ── THE MACHINE'S SCREEN FACTS (Windows PowerShell 5.1) ──────────────────────────────────────────────────────────────
@@ -1030,7 +1054,7 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   PQ, SCRGB_NITS, BT709_TO_BT2020, BT2020, HDR_VUI, pqOetf, pqCodeOfNits, buildPqTables, pqOfHalf, p010FromHalf, p010Bytes, HDR_LADDER, hdrFactsOf, hdrEncodeArgv, KBPS_FLOOR_HDR,
-  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
+  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, ffmpegPasses, firstPassingFfmpeg, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
   MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
