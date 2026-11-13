@@ -109,15 +109,16 @@ function pickerInDialog(body, extra, { profileId = null, onDownloaded = null } =
   return p;
 }
 
-/** The "Download another build…" row (Change build… and New profile…'s build section): an act that opens the picker. */
+/** The "Download another build…" row (Change build… and New profile…'s build section): an act that opens the picker — a
+ *  real BUTTON (lane ui-controls-and-bugs, the walk's browser-profiles-7: drawn as a radio row's head it read as a heading)
+ *  with the source line as its hint under it. */
 export function downloadRow(r, open) {
-  const row = el('div', 'bwho-answer bbuild-row bbuild-download'); row.dataset.key = r.key; row.setAttribute('role', 'button'); row.tabIndex = 0;
-  const text = el('span', 'bwho-answer-text');
-  text.appendChild(el('span', 'bwho-answer-head', r.label));
-  if (r.note) text.appendChild(el('span', 'bwho-answer-sub', r.note));
-  row.appendChild(text);
-  row.onclick = () => open();
-  row.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+  const row = el('div', 'bbuild-row bbuild-download'); row.dataset.key = r.key;
+  const btn = el('button', 'mounts-btn bbuild-download-btn'); btn.type = 'button';
+  btn.appendChild(el('span', 'bwho-answer-head', r.label));
+  row.appendChild(btn);
+  if (r.note) row.appendChild(el('span', 'bwho-answer-sub bbuild-download-hint', r.note));
+  row.onclick = () => open();   // the button, or its hint line
   return row;
 }
 /**

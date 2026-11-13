@@ -385,6 +385,19 @@ export function renderFields(body, fields) {
       rowRec.hintEl = h;
       dest.appendChild(h);
     }
+    const prereqs = Array.isArray(f.prereqs) ? f.prereqs.filter(Boolean) : [];
+    if (prereqs.length) {
+      // lane ui-controls-and-bugs (the walk's channels-accounts-8: three console prerequisites as run-on sentences): a CHECKLIST
+      // under one line — the Integrations window's own list (ul.integ-prereq); shown and hidden with its row
+      const head = document.createElement('div');
+      head.className = 'mounts-field-hint mounts-prereq-head';
+      head.textContent = tr('Before you start, check:');
+      const ul = document.createElement('ul');
+      ul.className = 'integ-prereq';
+      for (const p of prereqs) { const li = document.createElement('li'); li.textContent = p; ul.appendChild(li); }
+      dest.append(head, ul);
+      rowRec.hintEls = [...(rowRec.hintEls || []), head, ul];
+    }
   }
   if (advBody) {
     const det = document.createElement('details');

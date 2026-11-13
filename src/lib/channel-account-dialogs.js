@@ -373,11 +373,14 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   // the app registers ONCE — the fleet's and the public page — in place of an address per instance; the type's own
   // callback only where no relay page serves it
   const relays = ridesRelay(spec) ? spec.relayPages.filter((r) => r && r.url) : [];
-  const setupHint = spec.setup ? [spec.setup.callbackNote ? tr(spec.setup.callbackNote) : null, ...(spec.setup.prerequisites || []).map((p) => tr(p))] : [];
+  // the callback note is a hint line; the console's prerequisites are a checklist under one line (lane ui-controls-and-bugs:
+  // channels-accounts-8 — mounts-dialog.js draws `prereqs`)
+  const setupHint = spec.setup && spec.setup.callbackNote ? [tr(spec.setup.callbackNote)] : [];
+  const prereqs = spec.setup ? (spec.setup.prerequisites || []).map((p) => tr(p)) : [];
   if (relays.length) {
-    relays.forEach((r, i) => out.push({ key: `rp${i}${sfx}`, label: relayLabel(r, relays.length), type: 'copy', value: r.url, when: isCustom, ...(i === relays.length - 1 && setupHint.length ? { hint: setupHint } : {}) }));
+    relays.forEach((r, i) => out.push({ key: `rp${i}${sfx}`, label: relayLabel(r, relays.length), type: 'copy', value: r.url, when: isCustom, ...(i === relays.length - 1 && setupHint.length ? { hint: setupHint } : {}), ...(i === relays.length - 1 && prereqs.length ? { prereqs } : {}) }));
   } else if (spec.setup && spec.setup.callbackUrl) {
-    out.push({ key: `cb${sfx}`, label: tr('Callback URL (register it on your app first)'), type: 'copy', value: callbackOf(spec), when: isCustom, hint: setupHint });
+    out.push({ key: `cb${sfx}`, label: tr('Callback URL (register it on your app first)'), type: 'copy', value: callbackOf(spec), when: isCustom, hint: setupHint, prereqs });
   }
   out.push(...setupFolds(spec, { sfx, on, isOwn: (vals) => isCustom(vals) || isMount(vals) }));
   return out;

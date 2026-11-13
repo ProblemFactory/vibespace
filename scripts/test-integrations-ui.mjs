@@ -552,14 +552,17 @@ const p2 = await newPage();
     const copy = [...d.querySelectorAll(':scope > .mounts-oauth-link')].find(vis);
     const hints = [];
     for (let n = copy && copy.nextElementSibling; n && n.className === 'mounts-field-hint'; n = n.nextElementSibling) hints.push(n.textContent);
+    // lane ui-controls-and-bugs (channels-accounts-8): the prerequisites are a checklist under one line, after the note
+    const pq = copy && [...copy.parentElement.querySelectorAll('.mounts-prereq-head + ul.integ-prereq')].find((u) => u.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_PRECEDING);
+    const prereqHead = pq ? pq.previousElementSibling.textContent : null; if (pq) hints.push(...[...pq.querySelectorAll('li')].map((li) => li.textContent));
     const pw = [...d.querySelectorAll(':scope > input[type="password"]')].find(vis);
-    return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], cb: copy ? copy.querySelector('input').value : null, cbReadOnly: copy ? copy.querySelector('input').readOnly : null, copyBtn: copy ? copy.querySelector('button').textContent : null, hints, secretIsPassword: !!pw, block: ([...d.querySelectorAll('.mounts-drive-connect')].find(vis) || { querySelector: () => ({}) }).querySelector('button').textContent };
+    return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], cb: copy ? copy.querySelector('input').value : null, cbReadOnly: copy ? copy.querySelector('input').readOnly : null, copyBtn: copy ? copy.querySelector('button').textContent : null, hints, secretIsPassword: !!pw, prereqHead, block: ([...d.querySelectorAll('.mounts-drive-connect')].find(vis) || { querySelector: () => ({}) }).querySelector('button').textContent };
   })()`);
   ok(lk.clientValue === 'custom' && JSON.stringify(lk.options) === JSON.stringify(['Custom (own client id/secret)']), `Lark with no preset preselects Custom — the only entry (${JSON.stringify(lk.options)})`);
   ok(JSON.stringify(lk.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Custom App ID', 'Custom App Secret', 'Callback URL (register it on your app first)', 'Lark authorization', 'Brand']), `Custom unfolds IN PLACE: Custom App ID / Custom App Secret (the registry's labels), the callback row, the authorization block, the type's own field (${JSON.stringify(lk.labels)})`);
   ok(lk.cb === LARK_CB && lk.cbReadOnly === true && lk.copyBtn === 'Copy' && lk.secretIsPassword, `the callback URL is the oauthLinkRow-shaped READ-ONLY row + Copy with EXACTLY ${LARK_CB}; the secret input is a password field`);
   const larkRow = R.rowById('lark');
-  ok(lk.hints.length === 4 && lk.hints[0] === larkRow.setup.callbackNote && larkRow.setup.prerequisites.every((p, i) => lk.hints[i + 1] === p), `the console note + the three prerequisites as hint lines (${JSON.stringify(lk.hints)})`);
+  ok(lk.hints.length === 4 && lk.hints[0] === larkRow.setup.callbackNote && larkRow.setup.prerequisites.every((p, i) => lk.hints[i + 1] === p) && lk.prereqHead === 'Before you start, check:', `the console note, then «Before you start, check:» over the three prerequisites as a LIST (${JSON.stringify(lk.hints)})`);
   ok(lk.block === 'Connect Lark', 'the Lark authorization block');
   const copied = await p1.evaljs(`(async () => {
     window.__copied = null;
@@ -1188,6 +1191,7 @@ const p2 = await newPage();
     const labelOf = (row) => { let l = row.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return l ? l.textContent : null; };
     const last = rows[rows.length - 1]; const hints = [];
     for (let n = last && last.nextElementSibling; n && n.className === 'mounts-field-hint'; n = n.nextElementSibling) hints.push(n.textContent);
+    { let n = last; while (n && !(n.matches && n.matches('ul.integ-prereq'))) n = n.nextElementSibling; if (n) hints.push(...[...n.querySelectorAll('li')].map((li) => li.textContent)); }   // the checklist (lane ui-controls-and-bugs)
     return { rows: rows.map((r) => ({ label: labelOf(r), value: r.querySelector('input').value, field: r.dataset.field })), hints };
   })()`);
   ok(JSON.stringify(lk.rows.map((r) => r.value)) === JSON.stringify([ADMIN, PUBLIC]) && /^Redirect URL for this fleet’s VibeSpaces/.test(lk.rows[0].label || '') && lk.rows[1].label === 'A public relay page you may register if this VibeSpace has no https address' && !lk.rows.some((r) => /127\.0\.0\.1/.test(r.value)),
