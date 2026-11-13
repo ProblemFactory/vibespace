@@ -584,12 +584,12 @@ class FileViewer {
     const h = mail.headers;
     wrap.innerHTML = `
       <div class="eml-head">
-        <div class="eml-subject">${esc(h.subject) || '(no subject)'}</div>
+        <div class="eml-subject">${esc(h.subject) || esc(t('(no subject)'))}</div>
         <div class="eml-meta">
-          ${h.from ? `<div><span class="eml-k">From</span>${esc(h.from)}</div>` : ''}
-          ${h.to ? `<div><span class="eml-k">To</span>${esc(h.to)}</div>` : ''}
-          ${h.cc ? `<div><span class="eml-k">Cc</span>${esc(h.cc)}</div>` : ''}
-          ${h.date ? `<div><span class="eml-k">Date</span>${esc(h.date)}</div>` : ''}
+          ${h.from ? `<div><span class="eml-k">${esc(t('From'))}</span>${esc(h.from)}</div>` : ''}
+          ${h.to ? `<div><span class="eml-k">${esc(t('To'))}</span>${esc(h.to)}</div>` : ''}
+          ${h.cc ? `<div><span class="eml-k">${esc(t('Cc'))}</span>${esc(h.cc)}</div>` : ''}
+          ${h.date ? `<div><span class="eml-k">${esc(t('Date'))}</span>${esc(h.date)}</div>` : ''}
         </div>
       </div>
       <div class="eml-tools"></div>
@@ -610,17 +610,17 @@ class FileViewer {
       body.innerHTML = '';
       const pre = document.createElement('pre');
       pre.className = 'eml-text';
-      pre.textContent = mail.textBody || '(empty body)';
+      pre.textContent = mail.textBody || t('(empty body)');
       body.appendChild(pre);
     };
     if (mail.htmlBody && mail.textBody) {
       const btn = document.createElement('button');
       btn.className = 'tv-tool-btn';
       let mode = 'html';
-      btn.textContent = 'Text';
+      btn.textContent = t('Text');
       btn.onclick = () => {
         mode = mode === 'html' ? 'text' : 'html';
-        btn.textContent = mode === 'html' ? 'Text' : 'HTML';
+        btn.textContent = mode === 'html' ? t('Text') : 'HTML';
         (mode === 'html' ? showHtml : showText)();
       };
       tools.appendChild(btn);
@@ -639,7 +639,7 @@ class FileViewer {
     for (const a of mail.attachments || []) {
       const row = document.createElement('a');
       row.className = 'eml-att';
-      row.textContent = `📎 ${a.filename || 'attachment'} (${(a.size / 1024).toFixed(1)} KB)`;
+      row.textContent = `📎 ${a.filename || t('attachment')} (${(a.size / 1024).toFixed(1)} KB)`;
       row.href = '#';
       row.onclick = (e) => {
         e.preventDefault();

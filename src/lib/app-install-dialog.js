@@ -30,6 +30,7 @@ const q = (o) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(
 /** A refusal code → the user's words (a plan the machine refused, a run that could not start). '' = none of ours. */
 export function appRefusalText(code) {
   switch (code) {
+    case 'bad_search': return t('Search with plain words (letters, digits, + . -) or an app’s name.'); // lane ui-language (the walk's desktop-apps-24): the server's English stood under the box
     case 'needs_snap': return t('This package only points to a kind of app that does not run here.'); // design 009 §B5: one sentence; the way out is a button
     case 'conflict': return t('It cannot be installed together with what is already on this machine.');
     case 'removes': return t('Installing it would remove other packages — VibeSpace never removes a package to install another.');

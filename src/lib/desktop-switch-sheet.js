@@ -14,6 +14,7 @@
 // close it (showContextMenu's own popover rules); the rows' long-press listeners hang on the sheet's own AbortController,
 // aborted on EVERY road that takes the sheet out of the page (round 3: untilGone — a dismissed sheet kept its listener).
 import { t } from './i18n.js';
+import { storedNameWords } from './value-words.js'; // lane ui-language: «Desktop 1» in the reader's words
 import { escHtml, showContextMenu, uiScale } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { desktopRows, switchVerdict, sheetItems, followDesktops, windowWaits, waitingElsewhere } from '../desktop-switch.js';
@@ -117,7 +118,7 @@ export function openDesktopSheet(app, anchor, { onSwitch, drawn = null } = {}) {
   const items = sheetItems(rows, { t }).map((s) => (s.door === 'new'
     ? { labelHtml: `${mark(UI_ICONS.plus)}<span class="mdesk-text"><span class="mdesk-name">${escHtml(s.label)}</span></span>`, action: () => { ctl.abort(); onSwitch(dm.createDesktop()); } }
     : {
-      labelHtml: `${mark(s.active ? UI_ICONS.check : '')}<span class="mdesk-text"><span class="mdesk-line"><span class="mdesk-name">${escHtml(s.name)}</span>${s.waiting ? waitHtml(s.waiting) : ''}<span class="mdesk-count">${escHtml(s.count)}</span></span>${s.sub ? `<span class="mdesk-titles">${escHtml(s.sub)}</span>` : ''}</span>`,
+      labelHtml: `${mark(s.active ? UI_ICONS.check : '')}<span class="mdesk-text"><span class="mdesk-line"><span class="mdesk-name">${escHtml(storedNameWords('desktop', s.name, t))}</span>${s.waiting ? waitHtml(s.waiting) : ''}<span class="mdesk-count">${escHtml(s.count)}</span></span>${s.sub ? `<span class="mdesk-titles">${escHtml(s.sub)}</span>` : ''}</span>`,
       title: s.title,
       action: () => { ctl.abort(); go(rows.find((x) => x.id === s.id)); },
     }));

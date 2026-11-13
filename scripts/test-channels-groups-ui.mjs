@@ -444,7 +444,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   const planted = read('src/lib/channels-panel.js').replace('title.textContent = r.title;', 'title.innerHTML = r.title;');
   ok(planted !== read('src/lib/channels-panel.js') && judge(planted).length === 1, 'NEGATIVE CONTROL: a planted `title.innerHTML = r.title` (a hostile group name) is FLAGGED by the same judge');
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), D = read('src/lib/channel-group-dialogs.js');
-  ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = r\.lastText \|\| '';/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line and source chip through textContent');
+  ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = \(r\.lastRaw && groupSysWords\(r\.lastRaw, r\.lastRaw\.by, r\.lastRaw\.member\)\) \|\| r\.lastText \|\| '';/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line (a system line in the reader\'s words — lane ui-language) and source chip through textContent');
   ok(/el\('div', 'chanmsg-ctx', raw\.context\)/.test(W) && /body\.appendChild\(document\.createTextNode\(r\.text\)\)/.test(W) && /el\('span', 'chanblk-at chan-at', '@' \+ nameOf\(r\.id, r\.text\.slice\(1\)\)\)/.test(W) && /titleRow\.appendChild\(el\('b', '', group\.name \|\| groupId\)\)/.test(W), 'the group window: invite context, message body and the group name through el() (textContent)');
   // channel-polish (2026-09-27): the member picker is the ONE principal picker — its names through el() (textContent)
   const PP = read('src/lib/principal-picker.js');

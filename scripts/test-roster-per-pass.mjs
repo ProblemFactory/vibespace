@@ -61,11 +61,14 @@ function ok(cond, name, detail) {
 const tick = () => new Promise((r) => setImmediate(r));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clone = (v) => JSON.parse(JSON.stringify(v));
-const canon = (v) => (v === undefined ? 'undefined' : JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((kk) => [kk, x[kk]])) : x)));
+// a field this tree's group view carries that the reference predates — never part of the roster's equality (lane ui-language
+// pick 3: lastRaw = a group system line's structure beside lastText, so the Channels list words it in the reader's language)
+const NEWER = new Set(['lastRaw']);
+const canon = (v) => (v === undefined ? 'undefined' : JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).filter((kk) => !NEWER.has(kk)).sort().map((kk) => [kk, x[kk]])) : x)));
 function firstDiff(a, b, at = '') {
   if (canon(a) === canon(b)) return null;
   if (a && b && typeof a === 'object' && typeof b === 'object') {
-    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { const d = firstDiff(a[k], b[k], `${at}.${k}`); if (d) return d; }
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { if (NEWER.has(k)) continue; const d = firstDiff(a[k], b[k], `${at}.${k}`); if (d) return d; }
   }
   return `${at || '.'}: ${canon(a).slice(0, 300)} ≠ ${canon(b).slice(0, 300)}`;
 }

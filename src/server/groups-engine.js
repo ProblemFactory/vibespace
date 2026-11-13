@@ -292,7 +292,7 @@ function create({
       // verify r1 F3 (lane peer-census): the name leaves the store through the belt — a group named before the line
       // rule (or by any writer that skipped cleanName) is judged on its way out, like every member name (displayName)
       id: g.id, name: agentText(g.name, { kind: 'line', max: G.NAME_MAX * 4 }), pair: g.pair ? g.pair.slice() : null, createdBy: g.createdBy, createdAt: g.createdAt,
-      archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '', lastCleared: !!g.lastCleared, // lastCleared: the last line IS the cleared sentence (a client words it)
+      archivedAt: g.archivedAt || null, lastAt: g.lastAt || g.createdAt, lastText: g.lastText || '', lastRaw: g.lastRaw || null, lastCleared: !!g.lastCleared, // lastCleared: the last line IS the cleared sentence (a client words it)
       // lane group-pending (2026-10-01): the member's report MARKER rides the view — the window's line under every
       // message ("waiting for beta's next turn" / "read by beta") and the CLI's trailing clause are judged off it
       // (PURE G.deliveryOf); it was a private fact before, so a message handed over looked exactly like one waiting
@@ -409,6 +409,9 @@ function create({
     g.lastAt = at;
     bumpUnread(g, prevLastAt, at, author, rec);
     g.lastText = String(rec.text).replace(/\s+/g, ' ').slice(0, LAST_TEXT_MAX);
+    // a SYSTEM line's structure beside its agent-facing English — the page words it in the reader's language (lane ui-language,
+    // the walk's channels-groups-outbox-3: the list's preview read «User added Sessio…» in a Chinese interface)
+    g.lastRaw = raw && raw.kind && raw.kind !== 'message' ? { kind: raw.kind, by: displayName(g, raw.by || author), member: raw.member ? (displayName(g, raw.member) || raw.name || '') : '', from: raw.from || '', archived: !!raw.archived } : null;
     delete g.lastCleared;
     return rec;
   }
@@ -1501,7 +1504,7 @@ function create({
       }));
       store.appendRecords(A, gid, repl);                       // the log FIRST…
       for (const r of fresh) g.cleared[r.vendorId] = { at: stamp, by: byWho };   // …the index SECOND
-      if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; }
+      if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; g.lastRaw = null; }
       for (const r of fresh) { out.cleared.push(r.vendorId); out.records.push(RC.clearedRecord(r, { kind: 'group-message', by: byWho, at: stamp })); }
     });
     if (out.cleared.length) {

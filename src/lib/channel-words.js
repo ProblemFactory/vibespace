@@ -586,3 +586,19 @@ export function attachmentReasonText(code, { t = tDevice } = {}) {
     default: return chanCaps.errorCodeText(code || 'vendor-error', { t });
   }
 }
+
+/** A group's SYSTEM record in the reader's words (create / invite / leave / kick / rename / archive) — `by` / `member` are the
+ *  names the caller resolved; null for a kind this table does not word (the caller shows the record's own text). The group
+ *  window and the Channels panel's preview both read it (lane ui-language). */
+export function groupSysWords(raw, by, member) {
+  raw = raw || {};
+  switch (raw.kind) {
+    case 'create': return t('{by} created the group', { by });
+    case 'invite': return t('{by} added {member}', { by, member });
+    case 'leave': return raw.archived ? t('{member} left — the group is archived', { member }) : t('{member} left', { member });
+    case 'kick': return raw.archived ? t('{by} removed {member} — the group is archived', { by, member }) : t('{by} removed {member}', { by, member });
+    case 'rename': return raw.from ? t('{by} renamed the group (was "{from}")', { by, from: raw.from }) : t('{by} renamed the group', { by });
+    case 'archive': return t('{by} archived the group — the log is kept', { by });
+    default: return null;
+  }
+}

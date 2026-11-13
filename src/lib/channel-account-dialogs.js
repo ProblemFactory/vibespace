@@ -45,6 +45,7 @@
 // the component (textContent) or `el()` here; nothing below writes innerHTML.
 import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
 import { t as tr, deviceLocale } from './i18n.js';
+import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
@@ -531,11 +532,7 @@ function changedOptions(vals, schema, current = {}, only = null) {
 }
 /** The push exclusivity DECLARATION (the Push… dialog's three words). */
 function pushClaimSpec(value) {
-  return { key: 'push', label: tr('Exclusivity declaration'), type: 'select', value: value || 'unknown', options: [
-    ['unknown', tr('unknown — declare nothing: push only kicks the cursor (default)')],
-    ['shared', tr('shared — other clients use this app: push only kicks the cursor')],
-    ['exclusive', tr('exclusive — this instance is the only client: push carries messages, the poll reconciles every 15 min')],
-  ] };
+  return { key: 'push', label: tr('Exclusivity declaration'), type: 'select', value: value || 'unknown', options: pushClaimOptions(tr) };   // the ONE list (src/lib/value-words.js)
 }
 /** A consent flow's refusal as the block's status sentence (a busy fixed port). */
 /** THE NARROWING RETRIES (owner ruling 2026-09-28; lane lark-search-poll, owner decision 5 — "one scope dropped per

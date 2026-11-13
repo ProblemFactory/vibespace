@@ -1,6 +1,7 @@
 import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
+import { storedNameWords } from './value-words.js'; // lane ui-language: a default desktop name («Desktop 1») is worded at display, never in storage
 import { switcherForm, TILE_MIN_PX, STRIP_MIN_TILES, OVERFLOW_CHIP_PX, OVERFLOW_CHIP_WARM_PX } from './taskbar-fit.js'; // PURE (lane desktop-small): the switcher folds to ONE button when the desktops crowd the tiles out
 import { sheetRows } from './desktop-switch-sheet.js'; // int358 seam: the compact list's rows = the phone sheet's (PURE desktopRows over ONE input)
 import { desktopDoors, doorItems } from '../desktop-switch.js'; // lane desktop-doors-table: THE desktop doors — one PURE table for every surface
@@ -1634,7 +1635,7 @@ export class DesktopManager {
       wrapper.className = 'desktop-preview-wrapper';
       const label = document.createElement('div');
       label.className = 'desktop-preview-label';
-      label.textContent = desk.name;
+      label.textContent = storedNameWords('desktop', desk.name, t);
       wrapper.append(preview, label);
       wrapper.title = this._doorLabel('switch', desk.id); // the tile IS the switch door (lane desktop-doors-table: its words are the table's)
 
@@ -1734,7 +1735,7 @@ export class DesktopManager {
     // the desktop on show by its NAME (r2 ①: a rename shows on the button) and its place k/N
     const word = document.createElement('span'), pos = document.createElement('span');
     word.className = 'dsc-btn-name'; pos.className = 'dsc-btn-pos';
-    word.textContent = stage?.isActive ? t('Stage') : (desk?.name || '');
+    word.textContent = stage?.isActive ? t('Stage') : (desk?.name ? storedNameWords('desktop', desk.name, t) : '');
     if (!stage?.isActive) pos.textContent = i + 1 + '/' + this._desktops.length;
     btn.append(word, pos);
     btn.setAttribute('aria-label', stage?.isActive ? t('Stage') : (desk?.name || '') + ' — ' + t('Desktop {k}/{n}', { k: i + 1, n: this._desktops.length }));
@@ -1839,7 +1840,7 @@ export class DesktopManager {
   _paintListRow(el, r) {
     const part = (k) => el.querySelector(':scope > .dsc-' + k), why = part('why'), n = part('count');
     part('mark').textContent = r.on ? '\u2713' : '';
-    part('name').textContent = r.name;
+    part('name').textContent = storedNameWords('desktop', r.name, t);
     why.textContent = r.why || ''; why.hidden = !r.why;
     n.textContent = r.count == null ? '' : String(r.count); n.hidden = r.count == null; n.title = r.count == null ? '' : t('{n} windows', { n: r.count });
     el.classList.toggle('dsc-gone', !!r.gone);
@@ -1963,7 +1964,9 @@ export class DesktopManager {
   async _startRename(desk) {
     const w = desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops }).find((d) => d.id === 'rename').dialog; // the Rename door's own dialog — its words are the table's (r2 ④)
     const now = this._desktops.find((d) => d.id === desk.id) || desk; // its name as it is now (renamed elsewhere since the menu opened)
-    const name = await showInputDialog({ title: t(w.title), label: t(w.label), value: now.name, confirmText: t(w.confirm) });
+    const shown = storedNameWords('desktop', now.name, t);   // a default name is shown in the reader's words…
+    const name = await showInputDialog({ title: t(w.title), label: t(w.label), value: shown, confirmText: t(w.confirm) });
+    if (name && name.trim() === shown && shown !== now.name) return false;   // …and coming back unchanged it stays STORED as it was (kb §16)
     if (!(name && name.trim())) return false; // cancelled — false: nothing comes back (r3 ④)
     if (this._doorRefused(desk, 'rename')) return false; // deleted on another screen while the dialog was open: SAID, the typed name never dropped in silence (r2 ②)
     const typed = name.trim(), live = this._desktops.find((d) => d.id === desk.id);
@@ -2000,7 +2003,7 @@ export class DesktopManager {
     return this._desktops
       .filter(d => d.id !== win._desktopId)
       .map(d => ({
-        label: d.name,
+        label: storedNameWords('desktop', d.name, t),
         action: () => this.moveWindowToDesktop(winId, d.id, { speak: true }),
       }));
   }

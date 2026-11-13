@@ -1826,7 +1826,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       b.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); stripMenu(r, e.clientX, e.clientY); };
       stripTabs.appendChild(b);
     }
-    capBtn.textContent = chip.text;
+    // lane ui-language (the walk's browser-live-7): the ratio says what it counts — «1/1» alone was a red mystery
+    capBtn.textContent = chip.full ? t('{own}/{cap} browsers (at the limit)', { own: chip.own, cap: chip.cap }) : t('{own}/{cap} browsers', { own: chip.own, cap: chip.cap });
     capBtn.classList.toggle('full', chip.full);
     capBtn.classList.toggle('machine-full', chip.machineFull);
     capBtn.title = t('{own} of this conversation’s {cap} browsers are running — click to see them or change the limit', { own: chip.own, cap: chip.cap }) + (chip.machineFull ? '\n' + t('Machine ceiling reached') : '');
