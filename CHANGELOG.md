@@ -19,6 +19,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A message to a busy Antigravity or Codex conversation is no longer shown as read while it still waits, when someone else’s message joined the queue first.
 - In a group, a member’s dropped copy now says it was dropped and to send it again, instead of saying the conversation ended.
 - In Chinese and Japanese, an age in hours is now written in the interface's language, like minutes and days.
+- The For-you item about unreadable job records now says what moving the kept file lets the clean-up remove.
+- In Chinese and Japanese those items no longer carry English words or a UTC time: the moment is said on your own clock and the cause in your language.
 
 ## 2.369.398 — 2026-11-12
 
