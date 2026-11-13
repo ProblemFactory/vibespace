@@ -4799,6 +4799,9 @@ export default {
   "This session’s billing account": "本会话的计费账号",
   "it connects to the vendor’s servers (measured)": "会连接厂商服务器（实测）",
   "Change the scale for every app in Settings…": "在设置中修改所有应用的缩放…",
+  "Pick an answer first": "先选一个答案",
+  "{n} question(s) still unanswered": "还有 {n} 个问题没回答",
+  "To hand a window on your desktop to an agent, choose «Share with agent…» in that window’s menu.": "要把桌面上的窗口交给 agent，请在那个窗口的菜单里选「共享给 agent…」。",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} 自动继续",
   "Auto-continue: off": "自动继续：关",
@@ -9124,7 +9127,6 @@ export default {
   "The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.": "LLM 插件已停：模型拒绝了这种请求格式（HTTP 400）。请在 设置 › 插件 › LLM 中更换判断模型，或在 ⚙ → 系统 → 集成与密钥 中更换钥匙。",
   "Turn {name} on or off": "打开或关闭 {name}",
   "Open settings": "打开设置",
-  "{name} has nothing to configure": "{name} 没有可设置的项",
   "Show in Integrations": "在集成里查看",
   "Open the Plugins list": "打开插件列表",
   "Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.": "建议词语已关闭 —— 在「全部设置 › 插件 › Voice input · Dropline」里打开。",

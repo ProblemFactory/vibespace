@@ -8,7 +8,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js'; // THE one sanitizer for agent / peer / file HTML (no CSS, no product classes, no forms)
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: THE one door that draws a ```mermaid fence (self-hosted, sanitized)
 import { diagramFences, mayHoldDiagram, isMermaidLang } from './mermaid-model.js';
-import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress, fetchJson } from './utils.js';
+import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress, fetchJson, pressSays } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
@@ -2282,7 +2282,6 @@ class ChatRenderers {
       const submitBtn = document.createElement('button');
       submitBtn.className = 'chat-perm-btn chat-perm-allow chat-ask-submit';
       submitBtn.textContent = t('Submit');
-      submitBtn.disabled = true;
       submitBtn.onclick = () => {
         const answers = {};
         for (const [qText, val] of selections) answers[qText] = val;
@@ -2317,6 +2316,9 @@ class ChatRenderers {
       if (questions.length > 1) nav.append(prevBtn, pageIndicator, nextBtn);
       nav.append(submitBtn, cancelBtn);
       prompt.appendChild(nav);
+      // lane ui-controls-and-bugs (the walk's chat-cards-9: «提交» greyed until an answer was picked): Submit stays live; pressed
+      // before every question has its answer, it sends nothing and says what is missing above the buttons
+      const submitSays = pressSays(submitBtn, () => { const left = questions.length - selections.size; return left <= 0 ? null : questions.length === 1 ? t('Pick an answer first') : t('{n} question(s) still unanswered', { n: left }); });
 
       const showPage = () => {
         pages.forEach((p, i) => p.style.display = i === currentPage ? '' : 'none');
@@ -2328,7 +2330,7 @@ class ChatRenderers {
         pageIndicator.title = dots.join(' ');
       };
       const updateSubmitState = () => {
-        submitBtn.disabled = selections.size < questions.length;
+        submitSays.refresh();
         showPage();
       };
       showPage();

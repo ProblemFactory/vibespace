@@ -363,7 +363,7 @@ const CARD = '.integ-card[data-integ="dropline"]';
 async function rowDoor(pg) {
   await pg.ev('window.__plugins()');
   await pg.until(`!!document.querySelector('${ROW} .plugin-chip')`, 6000);
-  return pg.ev(`(() => { const r = document.querySelector('${ROW}'); const c = r && r.querySelector('.plugin-chip'); const sw = r && r.querySelector('.plugin-sw input'); return c ? { tag: c.tagName, text: c.textContent, cls: c.className, title: c.title, swOff: !!sw && sw.disabled && !sw.checked } : null; })()`);
+  return pg.ev(`(() => { const r = document.querySelector('${ROW}'); const c = r && r.querySelector('.plugin-chip'); const sw = r && r.querySelector('.plugin-sw input'); return c ? { tag: c.tagName, text: c.textContent, cls: c.className, title: c.title, noSwitch: !sw } : null; })()`);   // lane ui-controls-and-bugs: a switch that cannot be used is not drawn
 }
 const isRowDoor = (c) => !!c && c.tag === 'BUTTON' && c.text === '用 Fish Audio 连接' && /plugin-chip-primary/.test(c.cls);
 async function cardDoor(pg) {
@@ -379,7 +379,7 @@ try {
   const p = await page(1280, 860);
   ok('the page is a secure, non-loopback origin (https://hub.test); the plugin is OFF and nothing is connected', await p.ev('window.isSecureContext && location.hostname === "hub.test"') && rec.enabled === false && !client.connected());
   const chip0 = await rowDoor(p);
-  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; the switch waits (off, disabled)', isRowDoor(chip0) && chip0.title.includes('或在「服务 › 集成」里粘贴 Dropline key') && chip0.swOff, chip0);
+  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; no switch until it is connected (lane ui-controls-and-bugs: never a greyed one)', isRowDoor(chip0) && chip0.title.includes('或在「服务 › 集成」里粘贴 Dropline key') && chip0.noSwitch, chip0);
   await p.shot('door-row.png', '#plugins');
   await p.clickSel(`${ROW} .plugin-chip`);
   const sheet = await p.until('!!document.querySelector("#voice-sheet .oauth-connect-btn") && !!document.querySelector("#voice-sheet .oauth-connect-key")', 6000);

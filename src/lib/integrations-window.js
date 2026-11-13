@@ -223,6 +223,10 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
     };
     choice.append(lbl, sel);
     if (v.delegate.prefer && (v.clusterOptions || []).length > 1) choice.appendChild(el('span', 'plugin-cfg-hint', t('Preferred preset: {key}', { key: v.delegate.prefer })));
+  } else if (v.clusterWhyCode === 'no-preset' && v.source !== 'cluster') {
+    // lane ui-controls-and-bugs (the walk's plugins-integrations-16: «用集群默认» greyed beside «用我自己的 key» on a personal
+    // install): no cluster preset of THIS kind exists (the store's own code — the company-words fact) ⇒ nothing to choose
+    // between: no radio pair, the fields alone. A preset that was there and went ('preset-gone') keeps its radio and its why.
   } else {
     const mk = (value, label, checked, disabled, why) => {
       const wrap = el('label', 'integ-radio' + (disabled ? ' integ-radio-off' : ''));
@@ -241,7 +245,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
     own.r.onchange = () => { if (own.r.checked) { card.dataset.ownMode = '1'; drawFields(); } };
     choice.append(cluster.wrap, own.wrap);
   }
-  card.appendChild(choice);
+  if (choice.childNodes.length) card.appendChild(choice);
 
   // ── 4. the declared fields (own mode only — a cluster row has nothing to type) ──
   const fields = el('div', 'plugin-config integ-fields');

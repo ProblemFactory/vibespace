@@ -89,12 +89,15 @@ function relaySheet(p, api, rerender) {
     if (!r.retired && r.knock === 'off') door(t('Send the shared token again'), () => go('knock', t('The shared relay token is sent again')));
   }
 }
-/** the on/off switch (role=switch over a checkbox): the row's one toggle */
+/** the on/off switch (role=switch over a checkbox): the row's one toggle. A switch that cannot be used is NOT drawn (lane
+ *  ui-controls-and-bugs, the walk's plugins-integrations-2: a greyed switch beside «用 Fish Audio 连接»): the row's chip says
+ *  why and is the door → null. */
 function makeSwitch(on, { disabled = false, label, onChange }) {
+  if (disabled) return null;
   const l = document.createElement('label');
   l.className = 'plugin-sw';
   const cb = document.createElement('input');
-  cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on; cb.disabled = !!disabled;
+  cb.type = 'checkbox'; cb.setAttribute('role', 'switch'); cb.checked = !!on;
   cb.setAttribute('aria-label', label);
   cb.onchange = () => onChange(cb.checked, cb);
   l.append(cb, Object.assign(document.createElement('span'), { className: 'plugin-sw-track' }));
@@ -114,7 +117,8 @@ function pluginRow({ id, label, description, tone, chip, chipTitle, onChip, sw, 
   c.className = 'plugin-chip' + (tone ? ' plugin-chip-' + tone : ''); c.textContent = chip; c.title = chipTitle ? `${chip} · ${chipTitle}` : chip; // the narrow rail clips the chip — its whole word on hover
   if (onChip) c.onclick = onChip;
   const dot = Object.assign(document.createElement('span'), { className: 'plugin-dot' + (tone === 'ok' ? ' ok' : tone === 'warn' ? ' warn' : tone === 'err' ? ' err' : '') });
-  row.append(dot, main, c, sw);
+  row.append(dot, main, c);
+  if (sw) row.appendChild(sw);   // none when it cannot be used (makeSwitch)
   if (install) row.appendChild(install);
   row.appendChild(gear);
   return row;
@@ -397,13 +401,14 @@ export function installPluginsUI(App) {
   },
 
   /** the row's ⚙: All Settings at the plugin's section (tree node selected; the phone shows that section alone).
-   *  A plugin with no configuration says so instead of opening an empty place. */
+   *  A plugin with no configuration has NO ⚙ (lane ui-controls-and-bugs, the walk's plugins-integrations-5 / usage-18: a
+   *  greyed ⚙ on three rows) — an empty, unseen place keeps the row's columns where the others have theirs. */
   _pluginGear(id, label) {
+    const cat = pluginCategoryOf(id);
+    if (!cat) { const none = document.createElement('span'); none.className = 'mounts-btn plugin-gear plugin-gear-none'; none.textContent = '⚙'; none.setAttribute('aria-hidden', 'true'); return none; }
     const b = document.createElement('button');
     b.className = 'mounts-btn plugin-gear'; b.textContent = '⚙';
-    const cat = pluginCategoryOf(id);
-    b.disabled = !cat;
-    b.title = cat ? t('Open settings') : t('{name} has nothing to configure', { name: label });
+    b.title = t('Open settings');
     b.setAttribute('aria-label', b.title);
     b.onclick = () => this._openPluginSettings(id);
     return b;

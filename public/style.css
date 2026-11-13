@@ -5615,6 +5615,11 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 .plugin-sw input:focus-visible + .plugin-sw-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-gear { min-width: 28px; padding: 2px 6px; }
 @media (pointer: coarse) { .plugin-sw { width: 44px; height: 36px; } .plugin-gear { min-width: 36px; min-height: 36px; } }
+/* lane ui-controls-and-bugs: a plugin with nothing to configure has no ⚙ — an unseen place keeps the row's columns; a DOOR chip
+   (a chip that acts, in the primary tone — «Connect with Fish Audio», «Add the API key…») is drawn as a button, not a status tag */
+.plugin-gear-none { visibility: hidden; pointer-events: none; }
+button.plugin-chip.plugin-chip-primary { border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; }
+.plugin-row:not(:has(> .plugin-install)) > button.plugin-chip.plugin-chip-primary { grid-column: 2 / -1; }   /* the door reads whole in the narrow rail */
 .settings-link-row .settings-row-control { display: flex; gap: 6px; align-items: center; }
 
 /* ── Plugin config rows (2.141.2: tailscale mode + up-flags) ── */
