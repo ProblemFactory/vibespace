@@ -83,6 +83,15 @@ const cxRecords = [
 ];
 fs.writeFileSync(path.join(cxDir, `rollout-2026-08-10T12-00-00-${TID}.jsonl`), cxRecords.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
+// lane chat-attachments-persist (the cut): a conversation whose tool results carry pictures — the main file and a
+// sub-agent's (<session>/subagents/agent-<id>.jsonl), as the real 2.1.322 writes them
+const PSID = '9a9a9a9a-1111-2222-3333-444444444444', PAG = 'a0b1c2d3e4f50617';   // an id no other leg of this suite writes
+const pic = (n, k) => Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(k, n)]);
+const picRec = (uuid, pics, extra = {}) => JSON.stringify({ parentUuid: null, isSidechain: false, cwd: CWD, sessionId: PSID, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-' + uuid, content: pics.map((p) => ({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: p.toString('base64') } })) }] }, uuid, timestamp: ts(9), ...extra });
+fs.writeFileSync(path.join(PROJ, PSID + '.jsonl'), [picRec('pu-1', [pic(1, 900), pic(2, 300000)])].join('\n') + '\n');   // the second past the mux window
+fs.mkdirSync(path.join(PROJ, PSID, 'subagents'), { recursive: true });
+fs.writeFileSync(path.join(PROJ, PSID, 'subagents', `agent-${PAG}.jsonl`), picRec('pu-2', [pic(3, 700)], { isSidechain: true, agentId: PAG }) + '\n');
+
 // ── in-process service, the DAEMON's exact shape (no live sessions, no
 // buffer overlay, no hosts — the overlay stays a server concern by design) ──
 const { createTranscriptService } = require(REPO + '/src/transcript-service.js');
@@ -203,6 +212,24 @@ await parity('codex gapInfo', Promise.resolve({ gap: cg.gap, hasFile: !!cg.fp })
 
 // searchFull op (2.293.0 — the last read the seek family needed to switch)
 await parity('searchFull', (async () => { const g2 = await svc.gapInfo(href); return svc.searchFull(href, g2.fp, '问题'); })(), ['searchFull', href, { q: '问题' }]);
+
+// lane chat-attachments-persist (the cut): A PICTURE FROM ITS RECORD — the hub's reader (its own transcript worker, the
+// byte range of the file) and the agent's (transcript-op `picture`: the SAME src/transcript-picture.js in its bundle) give
+// the SAME bytes; the agent names the capability the hub asks for; a gone place is gone on both
+{
+  const caps = (await dm.connect())?.info?.capabilities || [];
+  ok(caps.includes('transcript-picture'), 'the agent\'s hello-ack names `transcript-picture` (the hub asks no agent without it)');
+  const pref = { backend: 'claude', sessionId: PSID, cwd: CWD };
+  for (const [name, params] of [['main file, a picture past the mux window', { key: 'pu-1', n: 1 }], ['main file, the first picture', { key: 'pu-1', n: 0 }], ['a sub-agent\'s file', { key: 'pu-2', n: 0, agent: PAG }]]) {
+    const hub = await svc.picture(pref, params);
+    const hubBytes = hub && hub.ok ? Buffer.from(fs.readFileSync(hub.fp).toString('latin1', hub.start, hub.end), 'base64') : null;
+    const dev = await dm.transcriptOp('picture', pref, params);
+    ok(!!hubBytes && dev && dev.ok && dev.mediaType === hub.mediaType && Buffer.from(dev.b64, 'base64').equals(hubBytes), `picture (${name}): the agent's answer = the hub's, byte for byte (${hubBytes ? hubBytes.length : 0} bytes)`);
+  }
+  const [hg2, dg2] = [await svc.picture(pref, { key: 'pu-1', n: 5 }), await dm.transcriptOp('picture', pref, { key: 'pu-1', n: 5 })];
+  const [hu, du] = [await svc.picture(pref, { key: 'pu-2', n: 0, agent: 'ffffffffffffffff' }), await dm.transcriptOp('picture', pref, { key: 'pu-2', n: 0, agent: 'ffffffffffffffff' })];
+  ok(hg2.gone === 'shortened' && dg2.gone === 'shortened' && hu.unknown === true && du.unknown === true, 'a gone place is gone on both (shortened), a sub-agent file that is not the conversation\'s own is unknown on both');
+}
 
 // contract hygiene
 let unknownErr = null;

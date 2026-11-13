@@ -40,7 +40,11 @@ fs.mkdirSync(stubDir, { recursive: true });
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(path.join(CWD, 'docs'), { recursive: true });
 const BRIEF = path.join(CWD, 'docs/BRIEF.md'), NOTES = path.join(CWD, 'docs/NOTES.md'), PHONE = path.join(CWD, 'docs/PHONE.md');
-const SITE = path.join(CWD, 'site.html'), LANDING = path.join(CWD, 'designs/landing'), ATT = path.join(CWD, 'attach.pdf'); // lane artifacts-registries
+const SITE = path.join(CWD, 'site.html'), LANDING = path.join(CWD, 'designs/landing'); // lane artifacts-registries
+// the upload's path (lane chat-attachments-persist): the cwd's — or, the cwd being TEMPORARY (this suite's scratch home is under
+// /tmp), the conversation's kept folder data/chat-attachments/<sid>/files/ — set once the chat's id is known
+let ATT = path.join(CWD, 'attach.pdf');
+const TEMP_ROOTS = [...new Set([require('os').tmpdir(), '/tmp', '/var/tmp'].map((d) => path.resolve(d)))];
 const LIVE_SID = '5c3a0000-0000-4000-8000-0000000af001';
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -180,6 +184,7 @@ try {
   for (let i = 0; i < 80 && !sid; i++) { sid = await evalJs(`([...app.sessions.values()].find((v) => v && v._messageList)?.sessionId) || null`); if (!sid) await sleep(250); }
   check('a live claude chat session is created through the page\'s own createSession (the creator path, never attached; stub CLI behind the real wrapper)', !!sid);
   await evalJs(`window.__sid = ${JSON.stringify(sid)}; true`);
+  if (sid && TEMP_ROOTS.some((r) => path.resolve(CWD).startsWith(r + path.sep))) ATT = path.join(wt, 'data', 'chat-attachments', sid, 'files', 'attach.pdf');   // lane chat-attachments-persist
   check('the live chat window attaches', await waitFor(`!!document.querySelector('.chat-view .chat-input')`, 20000));
   await sleep(600);
 

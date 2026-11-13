@@ -182,6 +182,27 @@ module.exports = {
     discover: store.discoverClaudeSessions,        // async ({activeSessions, webuiPids, devSnap}) → session entries
     locate: (id, cwd) => store.findSessionJsonlPath(id, cwd), // (sessionId, cwd) → path|null
     locateIsProof: true, // a null from locate PROVES no transcript is here (a conversation IS its .jsonl) — the transcript worker's `locate` op
+    // lane chat-attachments-persist (the cut): WHERE A PICTURE SITS IN THIS HARNESS'S RECORD — src/transcript-picture.js reads
+    // a picture back from the line it came in through these: the bytes a line holding one carries (a tool result's image
+    // block; the owner's rescue stub, so a place there says «rescued»), the record's key (its uuid — the live stream's is the
+    // same, measured on 2.1.322), its pictures in document order (the message's own image blocks and each tool result's, as
+    // message-manager.js pictureOrdinalsOf counts them), and a sub-agent's records in <session>/subagents/agent-<id>.jsonl
+    pictures: {
+      marks: ['"type":"image"', '"text":"[rescued '],
+      subagents: true,
+      keyOf: (r) => r.str(r.get(r.root, 'uuid')),
+      picturesOf: (r) => {
+        const out = [];
+        const push = (src) => { const d = r.get(src, 'data'); out.push(r.str(r.get(src, 'type')) === 'base64' && r.isStr(d) ? { mediaType: r.str(r.get(src, 'media_type')), span: d } : null); };
+        for (const blk of r.items(r.get(r.get(r.root, 'message'), 'content'))) {
+          const ty = r.str(r.get(blk, 'type'));
+          if (ty === 'image') push(r.get(blk, 'source'));
+          else if (ty === 'tool_result') for (const sub of r.items(r.get(blk, 'content'))) if (r.str(r.get(sub, 'type')) === 'image') push(r.get(sub, 'source'));
+        }
+        return out;
+      },
+      rescued: (r) => r.items(r.get(r.get(r.root, 'message'), 'content')).some((it) => r.str(r.get(it, 'type')) === 'text' && /^\[rescued /.test(String(r.str(r.get(it, 'text')) || ''))),
+    },
     // THE RESUMABLE ID (lane dead-socket-keeps-chat-meta): the conversation a session meta can be RESUMED by — boot-restore's
     // retireDeadSocket keeps a dead local session STOPPED when this answers, deletes it when it answers null (PURE, no fs)
     resumeIdOf: (meta) => idOf(meta && meta.claudeSessionId) || idOf(meta && meta.backendSessionId), // the CLI's session uuid (spawn.conversationIdField), else the generic twin

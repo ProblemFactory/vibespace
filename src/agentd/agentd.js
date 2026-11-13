@@ -1874,7 +1874,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2249,6 +2249,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
               const g = await svc.gapInfo(ref);
               result = { turns: g.fp ? await svc.fullTurnmap(ref, g.fp) : [], ...(g.gap || {}) };
             }
+            // lane chat-attachments-persist (the cut): a picture read from the record it came in, by the SAME reader the hub
+            // runs (src/transcript-picture.js); the hub asks only an agent whose hello-ack names 'transcript-picture'
+            else if (m === 'picture') result = await svc.pictureHere(ref, { agent: msg.params?.agent || null, key: String(msg.params?.key || ''), n: Number(msg.params?.n) });
             else throw new Error('unknown transcript method: ' + m);
             const buf = Buffer.from(JSON.stringify(result), 'utf-8');
             mux.control({ op: 'fs-result', id: rid, size: buf.length, sending: buf.length });

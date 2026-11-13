@@ -100,6 +100,19 @@ function runOp(op, payload = {}) {
       if (!(h && h.store && typeof h.store.locate === 'function')) return { result: null };
       return { result: h.store.locate(payload.id, payload.cwd || '') ? true : h.store.locateIsProof === true ? false : null };
     }
+    case 'picture': { // lane chat-attachments-persist (the cut): a picture read from the record it came in — its span in the file
+      // (src/transcript-picture.js; this thread's index of the file is kept and EXTENDED, never rebuilt, while it only grows).
+      // ASYNC (fs.promises): the inline fallback (SafeFs awaits it) never holds the hub's loop
+      // the place's file through the harness's own locate (a walk may take its time HERE, never on the hub's loop)
+      if (isMainThread) return { result: { unavailable: true } };
+      const TP = require('./transcript-picture.js'), q = payload || {};
+      const h = require('./harnesses').list().find((x) => x && x.id === q.backend);   // transcript-service named it (its norm)
+      const locate = h && h.store && typeof h.store.locate === 'function' ? (id, cwd) => h.store.locate(id, cwd) : null;
+      return TP.placeFile({ backend: q.backend, tx: q.tx, cwd: q.cwd, agent: q.agent }, { locate })
+        .then((fp) => (fp ? TP.reader().find({ fp, backend: q.backend, key: q.key, n: q.n }).then((r) => ({ ...r, fp })) : { unknown: true }))
+        .then((result) => ({ result }));
+    }
+    case 'pictureHeld': return { result: require('./transcript-picture.js').reader().held() };
     case '__sleep': { // test hook (deadline/restart path)
       const until = Date.now() + (payload.ms || 1000);
       while (Date.now() < until) { /* burn */ }
@@ -115,12 +128,12 @@ if (!isMainThread && parentPort) {
   parentPort.on('message', (msg) => {
     if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
     const { id, op, payload } = msg || {};
+    const fail = (e) => parentPort.postMessage({ id, ok: false, error: { message: e.message, code: e.code } });
     try {
-      const { result } = runOp(op, payload);
-      parentPort.postMessage({ id, ok: true, result });
-    } catch (e) {
-      parentPort.postMessage({ id, ok: false, error: { message: e.message, code: e.code } });
-    }
+      const out = runOp(op, payload);
+      if (out && typeof out.then === 'function') out.then(({ result }) => parentPort.postMessage({ id, ok: true, result }), fail);   // an async op (picture)
+      else parentPort.postMessage({ id, ok: true, result: out.result });
+    } catch (e) { fail(e); }
   });
 }
 

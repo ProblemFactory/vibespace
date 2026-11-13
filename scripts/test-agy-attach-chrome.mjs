@@ -8,7 +8,9 @@
 // ANTIGRAVITY_CMD: it ends its stream on agy's measured commands only) behind the REAL data/bin/agy-wrapper.js, and every
 // stdin line it reads is logged:
 //   ① the page's own createSession makes an Antigravity chat; the composer's REAL upload (ChatInput.uploadFiles →
-//     /api/upload → _insertUploadedPaths) writes `<cwd>/brief.zip ` into the box, the owner's words are typed after it and
+//     /api/upload → _insertUploadedPaths) writes the file's absolute path into the box — `<cwd>/brief.zip`, or, the cwd being
+//     TEMPORARY (this suite's scratch home is under /tmp), the conversation's kept folder `data/chat-attachments/<sid>/files/`
+//     (lane chat-attachments-persist) — the owner's words are typed after it and
 //     Enter sends ⇒ agy reads that line with the path FIRST, its reply is drawn, and the chat shows NO error card;
 //   ② /model typed and sent in the same chat ⇒ the error card names /model (a real command is still held back), agy never
 //     reads it, and the next line is answered (the conversation lives on).
@@ -135,9 +137,13 @@ try {
   const sid = await openChat('agy-attach');
   check('an Antigravity chat is created through the page\'s own createSession and the fake agy started behind the real wrapper', !!sid && agyStarted(sid), { sid, log: sid && stubLog(sid).slice(0, 2) });
   const WORDS = '这里是标书，请看看';
-  const MSG = `${CWD}/brief.zip ${WORDS}`;
+  // where the upload lands (lane chat-attachments-persist): the cwd, or — a TEMPORARY cwd — the conversation's kept folder
+  const TEMP = [...new Set([require('os').tmpdir(), '/tmp', '/var/tmp'].map((d) => path.resolve(d)))];
+  const upPath = (s) => (TEMP.some((r) => path.resolve(CWD).startsWith(r + path.sep)) ? path.join(wt, 'data', 'chat-attachments', s, 'files', 'brief.zip') : path.join(CWD, 'brief.zip'));
+  const UP = upPath(sid);
+  const MSG = `${UP} ${WORDS}`;
   const a = await attachAndSend(sid, WORDS);
-  check('the composer\'s REAL upload wrote the file\'s absolute path FIRST in the box (`<cwd>/brief.zip `), the file is in the working dir', a.box === `${CWD}/brief.zip ` && fs.existsSync(path.join(CWD, 'brief.zip')), a);
+  check('the composer\'s REAL upload wrote the file\'s absolute path FIRST in the box (where it landed: the cwd, or the conversation\'s kept folder for a temporary cwd), the file is there', a.box === `${UP} ` && fs.existsSync(UP), { a, UP });
   check('…the owner\'s words typed after it, Enter sent it (the box emptied, no slash dropdown in the way)', a.typed === MSG && a.cleared && !a.dropdown, a);
   const read = await until(() => agyRead(sid).includes(MSG), 15000);
   check('agy READ the message with the attachment\'s path first — exactly the line the box held', !!read, { want: MSG, read: agyRead(sid) });
@@ -166,11 +172,11 @@ try {
   fs.writeFileSync(WRAP, W_SRC.replace(GUARD, BASE_GUARD));
   const sid2 = await openChat('agy-attach-base', sid);
   const b = await attachAndSend(sid2, WORDS);
-  const first = '/' + CWD.split('/')[1];
+  const first = '/' + upPath(sid2).split('/')[1];
   const refused = await waitFor(`((${V(sid2)})?._messageList?.textContent || '').includes(${JSON.stringify(first + ' ' + SENT_NOT)})`, 15000);
   await sleep(1200);
   check(`RED CONTROL: the base guard refuses the attachment's message as the command «${first}» (the owner's «/home was not sent»), and agy never reads it`,
-    W_SRC.includes(GUARD) && !!sid2 && sid2 !== sid && b.box === `${CWD}/brief.zip ` && refused && !agyRead(sid2).includes(MSG), { b, read: agyRead(sid2), tail: (await chatText(sid2)).slice(-300) });
+    W_SRC.includes(GUARD) && !!sid2 && sid2 !== sid && b.box === `${upPath(sid2)} ` && refused && !agyRead(sid2).includes(`${upPath(sid2)} ${WORDS}`), { b, read: agyRead(sid2), tail: (await chatText(sid2)).slice(-300) });
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

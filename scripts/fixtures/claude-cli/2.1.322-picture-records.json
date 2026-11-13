@@ -1,0 +1,197 @@
+{
+ "cli": "2.1.322",
+ "measured": "2026-11-13",
+ "how": "the real CLI behind the real chat-wrapper against a loopback mock (no vendor traffic): a Read of a PNG in the main conversation and in a sub-agent",
+ "live": [
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_main_read",
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "image",
+        "source": {
+         "type": "base64",
+         "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+         "media_type": "image/png"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "parent_tool_use_id": null,
+   "session_id": "fade1407-7845-4f1d-b067-1359e750bba4",
+   "uuid": "7e4ab5a4-2e6a-43a0-a6e8-e5b656d275fb",
+   "timestamp": "2026-11-13T11:57:11.949Z",
+   "tool_use_result": {
+    "type": "image",
+    "file": {
+     "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+     "type": "image/png",
+     "originalSize": 69,
+     "dimensions": {
+      "originalWidth": 1,
+      "originalHeight": 1,
+      "displayWidth": 1,
+      "displayHeight": 1
+     }
+    }
+   },
+   "tool_result_meta": [
+    {
+     "id": "toolu_main_read",
+     "permission_decision": {
+      "decision": "accept",
+      "source": "config",
+      "reason_type": "mode"
+     }
+    }
+   ]
+  },
+  {
+   "type": "user",
+   "message": {
+    "role": "user",
+    "content": [
+     {
+      "tool_use_id": "toolu_sub_read",
+      "type": "tool_result",
+      "content": [
+       {
+        "type": "image",
+        "source": {
+         "type": "base64",
+         "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+         "media_type": "image/png"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "parent_tool_use_id": "toolu_main_agent",
+   "agent_id": "ac01899df3ec0bbd0",
+   "session_id": "fade1407-7845-4f1d-b067-1359e750bba4",
+   "uuid": "15a59692-c1be-45de-9920-ed615b2b7bee",
+   "timestamp": "2026-11-13T11:57:12.005Z",
+   "tool_result_meta": [
+    {
+     "id": "toolu_sub_read",
+     "permission_decision": {
+      "decision": "accept",
+      "source": "config",
+      "reason_type": "mode"
+     }
+    }
+   ],
+   "subagent_type": "general-purpose",
+   "task_description": "read a picture"
+  }
+ ],
+ "disk": [
+  {
+   "file": "<project>/fade1407-7845-4f1d-b067-1359e750bba4/subagents/agent-ac01899df3ec0bbd0.jsonl",
+   "record": {
+    "parentUuid": "da78fa6e-a2d0-4c63-a416-db0fed853675",
+    "isSidechain": true,
+    "promptId": "7633c73c-6eb1-483a-9f35-a89b60ea3712",
+    "agentId": "ac01899df3ec0bbd0",
+    "type": "user",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "tool_use_id": "toolu_sub_read",
+       "type": "tool_result",
+       "content": [
+        {
+         "type": "image",
+         "source": {
+          "type": "base64",
+          "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+          "media_type": "image/png"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "uuid": "15a59692-c1be-45de-9920-ed615b2b7bee",
+    "timestamp": "2026-11-13T11:57:12.005Z",
+    "sourceToolAssistantUUID": "da78fa6e-a2d0-4c63-a416-db0fed853675",
+    "permissionDecision": {
+     "decision": "accept",
+     "source": "config",
+     "reasonType": "mode"
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/tmp/vs-fixture/work",
+    "sessionId": "fade1407-7845-4f1d-b067-1359e750bba4",
+    "version": "2.1.322",
+    "gitBranch": "HEAD"
+   }
+  },
+  {
+   "file": "<project>/fade1407-7845-4f1d-b067-1359e750bba4.jsonl",
+   "record": {
+    "parentUuid": "e7354e04-8d33-4230-9170-e4d6742b135f",
+    "isSidechain": false,
+    "promptId": "7633c73c-6eb1-483a-9f35-a89b60ea3712",
+    "type": "user",
+    "message": {
+     "role": "user",
+     "content": [
+      {
+       "tool_use_id": "toolu_main_read",
+       "type": "tool_result",
+       "content": [
+        {
+         "type": "image",
+         "source": {
+          "type": "base64",
+          "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+          "media_type": "image/png"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    "uuid": "7e4ab5a4-2e6a-43a0-a6e8-e5b656d275fb",
+    "timestamp": "2026-11-13T11:57:11.949Z",
+    "toolUseResult": {
+     "type": "image",
+     "file": {
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4//8/AAX+Av6n1qTBAAAAAElFTkSuQmCC",
+      "type": "image/png",
+      "originalSize": 69,
+      "dimensions": {
+       "originalWidth": 1,
+       "originalHeight": 1,
+       "displayWidth": 1,
+       "displayHeight": 1
+      }
+     }
+    },
+    "sourceToolAssistantUUID": "e7354e04-8d33-4230-9170-e4d6742b135f",
+    "permissionDecision": {
+     "decision": "accept",
+     "source": "config",
+     "reasonType": "mode"
+    },
+    "userType": "external",
+    "entrypoint": "sdk-cli",
+    "cwd": "/tmp/vs-fixture/work",
+    "sessionId": "fade1407-7845-4f1d-b067-1359e750bba4",
+    "version": "2.1.322",
+    "gitBranch": "HEAD"
+   }
+  }
+ ]
+}

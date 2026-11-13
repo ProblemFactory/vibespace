@@ -158,7 +158,7 @@ const ROWS = [
   ["src/routes/channels.js", "route:GET /api/channels/avatar", 1, "local-only", "r.file = channel-store avatarGet: <dataDir>/channels/<account>/avatars/<sha1(author)> (channels-engine.js:519)."],
   ["src/routes/editor.js", "registerEditorRoutes > route:POST /api/editor/signal", 2, "guarded", "filePath / signalPath come straight from the POST body (normally the CLI's Ctrl+G temp file, but unchecked — any path)"],
   ["src/routes/files.js", "remoteToLocalTmp", 3, "local-only", "hit.tmp / v0.tmp sit in a mkdtemp dir under os.tmpdir() ('webui-remote-') this function made for a remote preview pull"],
-  ["src/routes/files.js", "route:POST /api/upload", 5, "local-only", "file.path / f.path are multer temp files under /tmp/claude-webui-uploads/ (multer dest); the dest-side ops already go through SafeFs"],
+  ["src/routes/files.js", "route:POST /api/upload", 3, "local-only", "lane chat-attachments-persist: 5 → 3 — the remote branch reads and unlinks its multer temp asynchronously now; file.path / f.path are multer temp files under /tmp/claude-webui-uploads/ (multer dest); the dest-side ops already go through SafeFs"],
   ["src/routes/files.js", "route:POST /api/paste-image", 1, "local-only", "tmpPath = os.tmpdir()/claude-paste-<ts>.<ext>, a scratch file this route makes"],
   ["src/routes/files.js", "route:POST /api/archive/extract-entry", 3, "local-only", "rTmp / tmpDir are mkdtemp dirs under os.tmpdir() ('webui-archive-') made by this route"],
   ["src/routes/files.js", "writeExtractJournal", 2, "local-only", "EXTRACT_JOURNAL = <checkout>/data/extract-journal.json (+ .tmp)"],

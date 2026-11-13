@@ -435,6 +435,7 @@ class SettingsUI {
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
     if (schema.fact === 'browser-engine') this._renderEngineFact(info, row, path); // lane engine-plugin: where the default engine comes from + the engines here
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
+    if (schema.fact === 'kept-files') this._renderKeptFiles(info);   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
@@ -524,6 +525,42 @@ class SettingsUI {
 
   /** lane attention-policy: the judge's readout under its switch — "Today: judged N · M needed you" (GET
    *  /api/channels/attention, asked when the row draws, never on a timer). */
+  /** lane chat-attachments-persist (the cut): what the files a person dropped into a temporary folder take now (GET
+   *  /api/chat-attachments/usage) — and, apart, what belongs to conversations that no longer exist, with a Remove door that
+   *  names the count and the size BEFORE it acts (the POST carries exactly those; the hub refuses if they moved). A read that
+   *  fails is said, never «0». */
+  _renderKeptFiles(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.dataset.keptFiles = '1';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    const gone = document.createElement('div');
+    gone.className = 'settings-row-fact';
+    gone.dataset.keptOrphans = '1';
+    info.appendChild(gone);
+    const mb = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(b >= 10485760 ? 0 : 1)} MB` : `${Math.max(0, Math.round(b / 1024))} KB`);
+    const unread = () => { line.textContent = t('Could not read what is kept now'); };
+    fetchJson('/api/chat-attachments/usage').then((u) => { if (!u || !Number.isFinite(Number(u.files)) || !Number.isFinite(Number(u.bytes))) return unread(); line.textContent = t('Files you dropped into a temporary folder, kept with their conversations: {n} files, {size}', { n: Number(u.files), size: mb(Number(u.bytes)) }); }).catch(unread);
+    fetchJson('/api/chat-attachments/orphans').then((o) => {
+      if (!o || !(Number(o.files) > 0)) return;
+      const files = Number(o.files), bytes = Number(o.bytes);   // captured BEFORE the dialog: the door acts on exactly these
+      gone.textContent = t('Files of conversations that no longer exist: {n} files, {size}', { n: files, size: mb(bytes) }) + ' ';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'settings-fact-btn';
+      btn.textContent = t('Remove…');
+      btn.addEventListener('click', async () => {
+        const yes = await showConfirmDialog({ title: t('Remove files'), message: t('Remove {n} files ({size}) of conversations that no longer exist? This cannot be undone.', { n: files, size: mb(bytes) }), confirmText: t('Remove'), danger: true });
+        if (!yes) return;
+        const r = await fetchJson('/api/chat-attachments/orphans/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files, bytes }) });
+        if (!r || r.error) { showToast(r && r.code === 'changed' ? t('What would be removed changed — look again') : t('Not removed: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }
+        showToast(t('Removed {n} files ({size})', { n: Number(r.files) || 0, size: mb(Number(r.bytes) || 0) }));
+        gone.textContent = '';
+      });
+      gone.appendChild(btn);
+    });
+  }
   _renderAttentionToday(info) {
     const line = document.createElement('div');
     line.className = 'settings-row-fact';

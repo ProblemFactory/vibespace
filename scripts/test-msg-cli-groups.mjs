@@ -809,9 +809,10 @@ console.log('§2c the addressing-read census (r7): every raw "which session carr
     { file: 'src/server/conversation-ops.js', needle: 'data.backendSessionId && (session.backendSessionId', verdict: 'harmless', why: 'rename-session fallback, reached only when the client\'s own webui id is stale (missing from activeSessions); user-explicit, renames a display name, self-heals at adoption' },
     { file: 'src/ws-handler.js', needle: 'data.sessionId = eid; break', verdict: 'harmless', why: 'kill fallback on a stale webui id; user-explicit, no bill/grant/record; a fork/parent id ambiguity here is the same transient class as any two sessions momentarily sharing an id' },
     { file: 'src/server/usage-attribution.js', needle: '=== sid && s2._accountId === acct', verdict: 'harmless', why: 'recordUsageAttribution — the REAL inference odometer (reading-attribution campaign, slot-transitions/reading-repair), NOT the addressing lane; the pool MEMBER is chosen by poolMemberOfSession keyed on the found session\'s webuiId, and requests share the parent\'s transcript rid pre-adoption' },
+    { file: 'src/server/mounts-plugins-wiring.js', needle: "(s.backendSessionId || s.claudeSessionId) === tx) return s.cwd || ''", verdict: 'harmless', why: 'lane chat-attachments-persist (the cut): the picture route reads the cwd of a LOCAL live session whose transcript is `tx` — only to aim the harness\'s own locate (a pending fork shares its parent\'s file, so either cwd finds the same transcript); it names, bills, grants and records nothing' },
   ];
   const hits = censusOf(REPO);
-  ok(hits.length === 9, `the tree holds exactly the 9 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);
+  ok(hits.length === 10, `the tree holds exactly the 10 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);
   let classified = 0, unlisted = [];
   for (const h of hits) {
     const row = TABLE.find((r) => r.file === h.file && h.text.includes(r.needle));

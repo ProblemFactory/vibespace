@@ -163,6 +163,22 @@ const browserLogins = require('./browser-logins.js').create({ vault, grants: () 
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
 const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, useGrants: vaultUseGrants, logins: browserLogins, totp: vaultTotp, runOf: totpRunOf, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
+// lane chat-attachments-persist (the cut, 主开发 2026-11-13: «the record is the store»): a picture a message showed is READ
+// from the record it came in (the route, through the transcript service: this hub's transcript worker, or a paired
+// machine's agent); the files a person dropped into a temporary folder live with the conversation — the store, its stray
+// temp files swept now. The hub's conversations = its session records, live or kept (an archived one, one on a machine
+// that is offline: still theirs)
+const CAM = require('./chat-attachments.js');
+const chatAttachments = CAM.create({ root: path.join(rootDir, 'data', 'chat-attachments'), knownIds: async () => {
+  const ids = new Set(activeSessions.keys());
+  try { for (const f of await require('fs').promises.readdir(path.join(rootDir, 'data', 'session-meta'))) { const m = /^(.+)\.json(?:\.orphan)?$/.exec(f); if (m) ids.add(m[1]); } } catch { }
+  return ids;
+} });
+chatAttachments.sweepTemps().catch(() => { });
+require('../routes/chat-attachments.js').registerChatAttachmentRoutes(app, { store: chatAttachments,
+  transcripts: require('../transcript-service').createTranscriptService({ activeSessions, createSessionMessages: null, hosts }),
+  hostKnown: (h) => { try { return !!(hosts && hosts.get(h)); } catch { return false; } },
+  cwdOf: (tx, b) => { for (const s of activeSessions.values()) if (s && !s.host && (s.backend || 'claude') === b && (s.backendSessionId || s.claudeSessionId) === tx) return s.cwd || ''; return ''; } });
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)

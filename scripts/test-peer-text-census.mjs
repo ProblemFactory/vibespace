@@ -1060,6 +1060,9 @@ const PRINTS = {
     'info.mime': 'judged:agentAttachmentAnswer — the vendor\'s type', 'info.from': 'judged:agentAttachmentAnswer — the sender\'s name',
     'info.conversation': 'judged:agentAttachmentAnswer — the conversation head (key / id / title)', 'info.conversation.title': 'judged:agentAttachmentAnswer — the title (agentTitle)',
     'conversation': 'judged:agentAttachmentAnswer — the title, else the conv key the caller named',
+    // lane chat-attachments-persist: the attachment cache's bound line — our constant, our count; trimAttachmentCache's own fs reads
+    'ATTACH_CACHE_MAX': `${V}:the cache's bound (our constant, MB)`, 'trimmed': `${V}:a count of the cache's copies removed`,
+    'd.name': `${V}:a cache folder's name (the adapter id we sanitized)`, 'st.mtimeMs': `${V}:a cached copy's mtime (a number)`, 'r.size': `${V}:a cached copy's size (a number)`,
   }),
   ...rows('data/bin/vibespace-job', {
     // verify r4 F4: the REACH of a chain's root and of printJob(j) (chains on its parameter) — the caller's flags behind the request bodies, the run record
