@@ -80,10 +80,13 @@ export function offLine({ t, rel, path }) {
   return { tone: 'dim', text: `${t("Leaving the CLI's own value alone")} (${rel ? '~/' + rel : ''}${path ? ' → ' + path : ''})` };
 }
 /** The chip head for a row by its apply kind (what the value is FOR). */
-export function applyHead(apply, { t } = {}) {
+// lane ui-language (the walk's settings-8 / -9): `apply.how` is the engineer's line — CLI flags, an engine's rung in English
+// («pool engine — the codex reset-credit rung …»). The head a person reads says only WHEN the value applies; `how` rides the
+// head's tooltip, and joins the head in advanced mode.
+export function applyHead(apply, { t, advanced = false } = {}) {
   if (!apply) return null;
-  if (apply.kind === 'spawn') return `${t('Applies to new sessions')}${apply.mode === 'terminal' ? ` (${t('terminal mode')})` : ''} · ${apply.how}${apply.live ? ` · ${t('running chat sessions follow from their next turn')}` : ''}`;
-  if (apply.kind === 'server') return `${t('Read by VibeSpace')} · ${apply.how}`;
+  if (apply.kind === 'spawn') return `${t('Applies to new sessions')}${apply.mode === 'terminal' ? ` (${t('terminal mode')})` : ''}${advanced && apply.how ? ` · ${apply.how}` : ''}${apply.live ? ` · ${t('running chat sessions follow from their next turn')}` : ''}`;
+  if (apply.kind === 'server') return `${t('Read by VibeSpace')}${advanced && apply.how ? ` · ${apply.how}` : ''}`;
   if (apply.kind === 'cli-config') return t('Written into the CLI config');
   return null;
 }

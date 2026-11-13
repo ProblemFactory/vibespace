@@ -494,7 +494,9 @@ console.log('§8 receipt wording');
   ok('unknown → dim "not checked — reinstall"', line('unknown').tone === 'dim' && /not checked — reinstall the agent tools/.test(line('unknown').text));
   ok('no-node marker → bad', line('unknown', { reason: 'no-node' }).tone === 'bad');
   ok('offLine says the CLI value is left alone', /Leaving the CLI's own value alone \(~\/.codex\/config.toml → history.persistence\)/.test(chips.offLine({ t, rel: '.codex/config.toml', path: 'history.persistence' }).text));
-  ok('applyHead per kind', /Applies to new sessions · --brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t })) && /terminal mode/.test(chips.applyHead({ kind: 'spawn', how: 'x', mode: 'terminal' }, { t })) && /running chat sessions follow/.test(chips.applyHead({ kind: 'spawn', how: 'x', live: 'v' }, { t })) && /Read by VibeSpace · pool/.test(chips.applyHead({ kind: 'server', how: 'pool' }, { t })) && /Written into the CLI config/.test(chips.applyHead({ kind: 'cli-config' }, { t })) && chips.applyHead(null, { t }) === null);
+  // lane ui-language: the person's head says WHEN; `how` (flags, an engine's rung) joins it in advanced mode only
+  ok('applyHead: the plain head carries no `how`', chips.applyHead({ kind: 'server', how: 'pool engine — the codex reset-credit rung' }, { t }) === 'Read by VibeSpace' && !/--brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t })));
+  ok('applyHead per kind', /Applies to new sessions · --brief/.test(chips.applyHead({ kind: 'spawn', how: '--brief' }, { t, advanced: true })) && /terminal mode/.test(chips.applyHead({ kind: 'spawn', how: 'x', mode: 'terminal' }, { t, advanced: true })) && /running chat sessions follow/.test(chips.applyHead({ kind: 'spawn', how: 'x', live: 'v' }, { t, advanced: true })) && /Read by VibeSpace · pool/.test(chips.applyHead({ kind: 'server', how: 'pool' }, { t, advanced: true })) && /Written into the CLI config/.test(chips.applyHead({ kind: 'cli-config' }, { t, advanced: true })) && chips.applyHead(null, { t }) === null);
 }
 
 // ── §9 onSettingsWrite: cli-config diff ⇒ sync; live verb ⇒ every running chat session of THAT harness whose adapter has it ──

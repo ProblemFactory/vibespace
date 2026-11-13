@@ -135,13 +135,13 @@ ok(J(L.scopeRows(null, {})) === '[]' && J(ids(L.scopeRows([null, { item: null },
   ok(bad2.length === 2, 'control: a copy without the session scope lists every session\'s rows under "this session"', bad2);
 }
 
-console.log('④b rowPreview — the list row\'s one-line cut of a detail, VERBATIM (lane foryou-honest P1-2: the pane has the whole text, both drawn as written)');
+console.log('④b rowPreview — the list row\'s one-line cut of a detail (lane foryou-honest P1-2: never a strip that eats `__tests__/`; lane ui-language: a leading heading / quote mark and backtick pairs dropped)');
 const PREV = [
   ['the first non-blank line, its marks kept', '\n\nMARK — **please review before Friday.**\nsecond line', 160, 'MARK — **please review before Friday.**'],
   ['THE STRESS ROW: an agent\'s `__tests__/` stays (the strip read «B tests__/» — the option the agent did not write)', 'A test/（现有）；B __tests__/', 160, 'A test/（现有）；B __tests__/'],
-  ['a heading / list / numbered / quote mark stays as written', '## The plan', 160, '## The plan'],
+  ['a heading mark at the line\'s start is dropped (lane ui-language, 主开发 2026-11-13: the LIST subtitle drops leading marks; the pane stays as written)', '## The plan', 160, 'The plan'],
   ['…a list mark', '- first, the dry run', 160, '- first, the dry run'],
-  ['…a quote mark and backticks', '> run `npm test` first', 160, '> run `npm test` first'],
+  ['…a quote mark and a backtick pair are dropped too', '> run `npm test` first', 160, 'run npm test first'],
   ['snake_case stays words', 'rename user_id to owner_id', 160, 'rename user_id to owner_id'],
   ['__emphasis__ marks stay (the pane is no markdown either)', 'this is __really__ urgent', 160, 'this is __really__ urgent'],
   ['a dunder INSIDE an identifier stays (the r0 preview printed window.xss)', '</div><img src=y onerror=window.__xss=3>', 160, '</div><img src=y onerror=window.__xss=3>'],
@@ -151,10 +151,11 @@ const PREV = [
 for (const [label, d, max, want] of PREV) ok(L.rowPreview(d, max) === want, `${label} → ${J(want)}`, L.rowPreview(d, max));
 {
   // RED CONTROL = the base's rule put back (it dropped the markdown marks a one-liner "should not show")
-  const base = await mutant('preview-base-strip', "const plain = (String(detail || '').split('\\n').find((l) => l.trim()) || '').trim();",
+  const base = await mutant('preview-base-strip', "const plain = (String(detail || '').split('\\n').find((l) => l.trim()) || '').trim().replace(/^(?:#{1,6}|>)\\s+/, '').replace(/`([^`\\n]+)`/g, '$1');",   // lane ui-language: the line now also drops a leading mark
     "const line = String(detail || '').split('\\n').find((l) => l.trim()) || ''; const plain = line.replace(/\\*\\*|`/g, '').replace(/(^|[\\s(])__(?=\\S)|(?<=\\S)__(?=[\\s).,;:!?]|$)/g, '$1').replace(/^\\s*(?:#{1,6}|>|[-*+]|\\d+[.)])\\s+/, '').trim();");
   const red = base ? PREV.filter(([, d, max, want]) => base.rowPreview(d, max) !== want).map(([l]) => l) : [];
-  ok(red.length >= 5 && red.some((l) => /THE STRESS ROW/.test(l)) && base.rowPreview('A test/（现有）；B __tests__/', 160) === 'A test/（现有）；B tests__/', `RED CONTROL: the base's strip turns the agent's \`B __tests__/\` into «B tests__/» (${red.length} rows red)`, red);
+  // lane ui-language: the list row now drops a leading heading / quote mark too — the base agrees on those two rows, so ≥ 4 red
+  ok(red.length >= 4 && red.some((l) => /THE STRESS ROW/.test(l)) && base.rowPreview('A test/（现有）；B __tests__/', 160) === 'A test/（现有）；B tests__/', `RED CONTROL: the base's strip turns the agent's \`B __tests__/\` into «B tests__/» (${red.length} rows red)`, red);
 }
 
 console.log('⑤ itemView — the pane as STRUCTURE (fed the REAL replyButtonState)');

@@ -666,7 +666,7 @@ export function installSetupFlows(App) {
       const names = Object.keys(m).sort();
       if (!names.length) return `<p class="dim">${esc(t('No metrics yet — they accumulate as the app runs.'))}</p>`;
       const row = (n) => `<tr><td>${esc(n)}</td><td class="n">${m[n].count}</td><td class="n">${m[n].p50}</td><td class="n">${m[n].p95}</td><td class="n">${m[n].max}</td><td class="n"><b>${m[n].last}</b></td></tr>`;
-      return `<table><tr><td class="dim">${esc(t('metric'))}</td><td class="n dim">n</td><td class="n dim">p50</td><td class="n dim">p95</td><td class="n dim">max</td><td class="n dim">${esc(t('latest'))}</td></tr>${names.map(row).join('')}</table>`;
+      return `<table><tr><td class="dim">${esc(t('metric'))}</td><td class="n dim">${esc(t('count'))}</td><td class="n dim">${esc(t('median'))}</td><td class="n dim">p95</td><td class="n dim">${esc(t('max'))}</td><td class="n dim">${esc(t('latest'))}</td></tr>${names.map(row).join('')}</table>`;
     })()}
     ${(() => {
       // THE BOOT HOLDS (B-1319): this server's start — the longest times its main loop was held (pages, paired

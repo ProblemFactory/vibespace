@@ -381,7 +381,7 @@ export default {
   "Change #{id}": "变更 #{id}",
   "Code change": "代码变更",
   "Harness drift": "Harness 漂移",
-  "Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.": "harness 发出而 VibeSpace 不认识的记录，以及带着未声明字段的已知记录。每行一条痕迹；引入它的 CLI 版本写在 detail 里。",
+  "Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.": "harness 发出而 VibeSpace 不认识的记录，以及带着未声明字段的已知记录。每行一条痕迹；引入它的 CLI 版本写在 详情里。",
   "breadcrumb": "痕迹",
   "first seen": "首见",
   "New fields on a known record": "已知记录上的新字段",
@@ -837,7 +837,7 @@ export default {
   "System & other sources ×{n} · Hide": "其他来源 ×{n} · 隐藏",
   "Nothing you typed here — the button above lists the rest": "这里没有你自己说的话——点上面的按钮查看其余的",
   "Filter...": "筛选…",
-  "Find": "Find",
+  "Find": "查找",
   "Find window": "查找窗口",
   "Folder": "文件夹",
   "Folders": "文件夹",
@@ -850,7 +850,7 @@ export default {
   "Generate a random password": "生成随机密码",
   "Get started": "开始使用",
   "Go to window": "前往窗口",
-  "GoTo": "GoTo",
+  "GoTo": "跳转",
   "Goal check: not met": "目标检查：未达成",
   "Goal met: {condition}": "目标已达成：{condition}",
   "Goal set: {condition}": "已设定目标：{condition}",
@@ -2244,7 +2244,7 @@ export default {
   "a self-contained markdown file (frontmatter + objective + activity) — commit it into a git repo so the task travels with the code, or move it between machines": "一个自包含的 markdown 文件（frontmatter + 目标 + 活动）——提交进 git 仓库让任务随代码走，或在机器间迁移",
   "+ Park an item (Enter)": "+ 搁置一项（回车）",
   "Attach full context to the new item": "为新条目附上完整上下文",
-  "Backlog": "Backlog（搁置区）",
+  "Backlog": "搁置区",
   "Backlog & activity…": "Backlog 与活动日志…",
   "Delete item": "删除条目",
   "Detail — context, options discussed, why it was deferred (optional)": "详情——背景、讨论过的选项、为何被搁置（可选）",
@@ -3726,11 +3726,11 @@ export default {
   "{check}…": "{check}…",
   "{cmd} — not offered": "{cmd} —— 不提供",
   "Spending": "花费",
-  "Unattended turns per account per hour": "每账号每小时的无人值守 turn 上限",
-  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace 在一个滚动小时内、在同一个账号上自行开启的 turn 上限——撞限后的自动续跑、Stop 记账提醒、Background Work 通知、别的会话发来的消息全都计入。你自己打字发起的 turn 永不计入，你按下的标着「会开始一轮」的按钮（现在交给它、立即唤醒、交还控制）也不计入。0 = 任何账号都不允许自动 turn。预算花完时拒绝会进日志并投进“For you”收件箱; 什么都不会丢——投不成的通知会改由该对话的下一个 turn 注入。",
-  "Unattended turns per account per day": "每账号每天的无人值守 turn 上限",
+  "Unattended turns per account per hour": "每账号每小时的无人值守轮次上限",
+  "The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says “starts a turn” (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the “For you” inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation’s next turn instead.": "VibeSpace 在一个滚动小时内、在同一个账号上自行开启的轮次上限——撞限后的自动续跑、Stop 记账提醒、后台工作通知、别的会话发来的消息全都计入。你自己打字发起的轮次永不计入，你按下的标着「会开始一轮」的按钮（现在交给它、立即唤醒、交还控制）也不计入。0 = 任何账号都不允许自动轮次。预算花完时拒绝会进日志并投进「待你处理」; 什么都不会丢——投不成的通知会改由该对话的下一轮注入。",
+  "Unattended turns per account per day": "每账号每天的无人值守轮次上限",
   "The same ceiling over a rolling 24 hours. An account can be busy for an hour without spending its whole day.": "同一个上限, 按滚动 24 小时计。一个账号可以忙一个小时, 而不至于把一整天都花光。",
-  "Unattended turns for this instance per day": "本实例每天的无人值守 turn 上限",
+  "Unattended turns for this instance per day": "本实例每天的无人值守轮次上限",
   "The ceiling across every account together, over a rolling 24 hours — the bound that still holds when a new subscription is added mid-incident.": "所有账号合计的上限, 按滚动 24 小时计——事故当中临时加进来一个新订阅时, 仍然成立的那道界。",
   "Warn when a spending budget reaches (%)": "花费预算达到多少时提醒(%)",
   "File one “For you” item when an account (or this instance) has used this share of its unattended-turn budget, so the ceiling is never a surprise. 0 = never warn.": "当某个账号(或本实例)用掉了这个比例的无人值守 turn 预算时, 投一条“For you”条目, 让上限不会突然砸下来。0 = 从不提醒。",
@@ -10929,7 +10929,7 @@ export default {
   "Description / standing instructions": "说明 / 常驻指令", // lane task-group-context
   "told word for word to every member conversation — the one home of this group's rules": "逐字注入每个成员对话，是规则唯一的家", // lane task-group-context
   "What this group is for, and the rules every conversation in it follows…": "这个任务组做什么，以及组里每个对话都要遵守的规则……", // lane task-group-context
-  "Context table": "Context 表", // lane task-group-context
+  "Context table": "上下文表", // lane task-group-context
   "every row tells the agent its path and note; 「Tell the agent」 sets only how deep. A relative path resolves against the row above's folder, then the group's first folder, then home.": "每一行都会告诉 agent：路径 + 说明；「告诉 agent」只决定说多深。相对路径按上一行的文件夹解析（再按任务组的第一个文件夹、家目录）", // lane task-group-context
   "Note (for people and the agent)": "说明（给人也给 agent 看）", // lane task-group-context
   "Tell the agent": "告诉 agent", // lane task-group-context
@@ -12808,4 +12808,8 @@ export default {
   "in {span}": "还有 {span}",
   "expires {date}": "{date} 到期",
   "layout::Restore": "恢复",
+  "Lists, opens, resumes and forks STOPPED OpenCode conversations. OpenCode keeps its sessions in its own database rather than in files, so VibeSpace runs `opencode serve` on 127.0.0.1 to read them. Off by default; it stops when you disable it.": "列出、打开、继续和分叉已停止的 OpenCode 对话。OpenCode 把会话存在自己的数据库里而不是文件里，所以 VibeSpace 在 127.0.0.1 上运行「opencode serve」来读取它们。默认关闭；关闭后它就停止。",
+  "count": "次数",
+  "median": "中位数",
+  "max": "最大",
 };

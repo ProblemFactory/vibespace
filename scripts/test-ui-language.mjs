@@ -44,6 +44,9 @@
 //      modules shared with agent-facing text keep theirs until each moves). A machine format (an explicit `en-…` locale, a zone read
 //      `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says
 //      `// page-time: <why>` on its line or the line above.
+//   ⑧ THE SIGN-IN PAGE (served before sign-in: no bundle, no dictionary — src/login-words.js holds its words): every row
+//      whole in en / zh / ja (zh / ja in their own script), and the page src/auth.js draws shows no English literal of
+//      its own (the ① scan over auth.js).
 //
 // Every leg runs its NEGATIVE CONTROL first on a planted source / dictionary: it must go red; the same plant worded through
 // t() must stay green. Run: node scripts/test-ui-language.mjs [--lower] [--print]
@@ -127,6 +130,7 @@ async function scanAll(files, repo) {
 
 // ── ① the sink scan ──
 const T_FNS = new Set(['t', 'tc', 'tr', 'i18nKey']);
+const CODE = '\u0000code';   // a sink that is code (inside a <style> / <script> block): no words there
 const CODE_FIELDS = new Set(['state', 'status', 'role', 'urgency', 'stopReason', 'stop_reason', 'verb', 'trigger', 'cause', 'service_tier', 'tier', 'theme', 'permissionMode', 'effort', 'severity', 'outcome']);
 const QUIET_OBJ = new Set(['console']);
 const NOT_SINK_CALLS = new Set(['Error', 'querySelector', 'querySelectorAll', 'closest', 'fetch', 'matches', 'getItem', 'setItem', 'removeItem', 'addEventListener', 'removeEventListener', 'getElementById', 'test', 'replace', 'replaceAll', 'startsWith', 'includes', 'endsWith', 'split', 'indexOf', 'postMessage', 'send', 'dispatchEvent', 'match', 'matchAll', 'exec']);
@@ -240,21 +244,30 @@ export function scanFile(file, src, ast = parse(src)) {
         return walk(node.value, SINK_KEYS.has(k) ? 'key:' + k : (sink && sink.startsWith('call:') ? sink : null));
       }
       case 'Literal':
-        if (sink && typeof node.value === 'string') { const e = englishOf(node.value); if (e) hit(node, sink, e); }
+        if (sink && sink !== CODE && typeof node.value === 'string') { const e = englishOf(node.value); if (e) hit(node, sink, e); }
         return;
       case 'TemplateLiteral': {
-        const html = node.quasis.some((q) => /<[a-z][\w-]*[\s>/]|<\/[a-z]/.test(q.value.cooked || ''));
+        const html = sink !== CODE && node.quasis.some((q) => /<[a-z][\w-]*[\s>/]|<\/[a-z]/.test(q.value.cooked || ''));
+        const codeAfter = [];   // per quasi: is a <style> / <script> block open after it (its expression is code, not words)
         node.quasis.forEach((q, qi) => { if (qi > 0 && /^(m|h|d|s)( ago)?(?![A-Za-z0-9])/.test(q.value.cooked || '')) timeHit(q, '${…}' + (q.value.cooked || '').slice(0, 6), 'unit'); });
+        let inCode = false;   // inside a <style> / <script> block (CSS / code, never words) — it may span quasis
         for (const q of node.quasis) {
-          const s = q.value.cooked || '';
+          codeAfter.push(inCode);
+          let s = q.value.cooked || '';
           if (html) {
+            // drop what a <style> / <script> holds; a block left open at the quasi's end goes on into the next one
+            if (inCode) { const end = s.search(/<\/(style|script)>/i); if (end < 0) continue; s = s.slice(end); inCode = false; }
+            s = s.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, '<x></x>');
+            const open = s.search(/<(style|script)\b/i);   // its tag may be cut by a \${…} (\`<script nonce="\${nonce}">\`)
+            if (open >= 0) { s = s.slice(0, open) + '<x>'; inCode = true; }
             const segs = [];
             s.replace(/>([^<>]+)</g, (m, g) => { segs.push(g); return m; });
             s.replace(/(?:title|placeholder|aria-label|alt)="([^"$]+)"/g, (m, g) => { segs.push(g); return m; });
             for (const g of segs) { const e = englishOf(g); if (e) hit(q, 'html', e); }
-          } else if (sink) { const e = englishOf(s); if (e) hit(q, sink, e); }
+          } else if (sink && sink !== CODE) { const e = englishOf(s); if (e) hit(q, sink, e); }
+          codeAfter[codeAfter.length - 1] = inCode;
         }
-        for (const x of node.expressions) walk(x, html ? 'html' : sink);
+        node.expressions.forEach((x, i) => walk(x, html && codeAfter[i] ? CODE : html ? 'html' : sink));
         return;
       }
       default: break;
@@ -346,6 +359,15 @@ async function setsOf(repo) {
   const vw = await import(pathToFileURL(path.join(repo, 'src', 'lib', 'value-words.js')).href);
   return { lists, sets: vw.VALUE_SETS, delegated: { 'job-state': jm.STATE_WORDS || {} } };
 }
+/** ⑧: the sign-in page's words table → its rows that are not whole in en / zh / ja. PURE. */
+export function loginFindings(table) {
+  const out = [];
+  for (const [k, v] of Object.entries(table || {})) {
+    for (const l of ['en', 'zh', 'ja']) if (!v || typeof v[l] !== 'string' || !v[l].trim()) out.push(`${k}: no ${l}`);
+    for (const l of ['zh', 'ja']) if (v && typeof v[l] === 'string' && v[l].trim() && !/[\u3040-\u30ff\u3400-\u9fff]/.test(v[l])) out.push(`${k}: the ${l} row is not ${l === 'zh' ? 'Chinese' : 'Japanese'} («${v[l]}»)`);
+  }
+  return out;
+}
 export function headFindings(lines, table) {
   const out = [];
   for (const ln of lines) {
@@ -400,7 +422,11 @@ export async function census(repo = REPO) {
   }
   const rowsOf = (d) => new Set(d.map((x) => x.key));
   const sets = { findings: setFindings(vsets.lists, vsets.sets, vsets.delegated, { zh: rowsOf(zh), ja: rowsOf(ja) }), lists: Object.values(vsets.lists).reduce((a, l) => a + l.length, 0) };
-  return { files: files.length, visible, raw, time, units, sets, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  const lw = createRequire(path.join(repo, 'package.json'))(path.join(repo, 'src', 'login-words.js'));
+  const loginRows = loginFindings(lw.LOGIN_WORDS);
+  const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
+  const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
+  return { files: files.length, visible, raw, time, units, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -437,6 +463,8 @@ if (isMain) {
     ok(scanFile('src/lib/page-time.js', 'x = new Date(1).toLocaleString();').time.length === 0, '⑦ …and page-time.js itself is the one place a time is formatted');
     const sh = scanFile('src/lib/sh.js', "import { stampAt as when } from './page-time.js';\nfunction f(d) { let when; when = d ? when(d) : ''; return when; }\nfunction g(d) { return when(d); }");
     ok(sh.time.length === 1 && /shadows/.test(sh.time[0].text), '⑦ a page-time import shadowed by a local where it is called is named (the usage meter\'s and the job detail\'s bug); a plain call is not', JSON.stringify(sh.time));
+    const lf = loginFindings({ a: { en: 'Sign in', zh: '登录', ja: 'サインイン' }, b: { en: 'Password', zh: 'Password', ja: '' } });
+    ok(lf.length === 2 && /b: no ja/.test(lf.join()) && /b: the zh row is not Chinese/.test(lf.join()), '⑧ a sign-in row with no ja and an English zh row are named; a whole row is not', JSON.stringify(lf));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
     ok(h.length === 1 && /Brand new head/.test(h[0]), '⑥ a literal For-you head the table does not hold is named; a held one and a `// ui-words:` line are not', JSON.stringify(h));
   }
@@ -479,6 +507,8 @@ if (isMain) {
   ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);
   ok(rw.fresh.length === 0, `⑥ no NEW code-named field drawn raw in a visible sink (${count(now.raw)} today = the baseline's ${count(base.raw || {})}) — word it through src/lib/value-words.js`, rw.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}`));
   ok(rw.stale.length === 0, `⑥ no raw-field baseline row the tree no longer holds (lower it)`, rw.stale.map((h) => `${h.file}: ${h.text}`));
+  ok(now.login.findings.length === 0 && now.login.rows >= 10, `⑧ every row of the sign-in page's words (${now.login.rows}) is whole in en / zh / ja`, now.login.findings);
+  ok(now.login.page.length === 0, `⑧ the sign-in page src/auth.js draws shows no English literal outside src/login-words.js`, now.login.page);
   ok(now.heads.missing.length === 0 && now.heads.lines > 20, `⑥ every literal For-you head (${now.heads.lines} producer lines) is a row of FORYOU_HEADS (${now.heads.table}) — worded at display, never in the store`, now.heads.missing);
   ok(now.dict.missing.length === 0, `② every extracted key has a zh AND a ja row`, now.dict.missing);
   ok(now.params.length === 0, `③ every {param} in a literal key is filled by its call`, now.params);

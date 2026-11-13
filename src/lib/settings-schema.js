@@ -1882,7 +1882,7 @@ function derivePluginRow(pluginId, category, r) {
   return entry;
 }
 function derivePluginTable(pluginId, label, rows) {
-  const category = t('Plugin: {name}', { name: label || pluginId });
+  const category = t('Plugin: {name}', { name: label ? t(label) : pluginId });   // a built-in plugin's label in the reader's words
   const paths = [];
   for (const r of rows) { const path = pluginRowPath(pluginId, r); SETTINGS_SCHEMA[path] = derivePluginRow(pluginId, category, r); paths.push(path); }
   if (paths.length && !SETTINGS_CATEGORIES.includes(category)) SETTINGS_CATEGORIES.push(category);

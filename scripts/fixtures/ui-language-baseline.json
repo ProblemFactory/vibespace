@@ -124,9 +124,6 @@
    "Ports",
    "style=\"padding-left:"
   ],
-  "src/lib/setup-flows.js": [
-   "body{font:13px/1.5 system-ui;max-width:880px;margin:24px auto;padding:0 16px;color:#24292f}\n      h2{margin:18px 0 6px} table{border-collapse:collapse;min-width"
-  ],
   "src/browser-passkey.js": [
    "A page in the agent's browser is waiting for a passkey ( )",
    "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is re",
@@ -135,7 +132,6 @@
    "VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time it is still on that tab, so that tab may still sig"
   ],
   "src/consent-road.js": [
-   "body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}",
    "data-chain=\""
   ],
   "src/lib/form-window.js": [
@@ -694,7 +690,6 @@
  },
  "english": [
   "zh: Yolo",
-  "zh: Find",
   "zh: Tmux",
   "zh: API key — {name}",
   "zh: {n} tokens",

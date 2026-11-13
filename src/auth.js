@@ -18,6 +18,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { LOGIN_WORDS, loginWords } = require('./login-words.js'); // lane ui-language: the sign-in page's words, whole in en / zh / ja
+const { landingLang } = require('./consent-road.js'); // the browser's asked language (the landing pages' one rule)
 const appCsp = require('./app-csp.js'); // PURE: the sign-in page's report-only policy (lane app-page-csp)
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
 const { replaceShredding } = require('./secret-file.js');
@@ -380,7 +382,7 @@ class Auth {
       // lane app-page-csp: the sign-in page reports too — its one inline script carries this response's nonce
       const nonce = crypto.randomBytes(16).toString('base64');
       res.set(appCsp.HEADER, appCsp.loginPolicy({ nonce, clerkHost: this._clerk?.enabled ? this._clerk.frontendApi : '' }));
-      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled, nonce }));
+      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled, nonce, lang: landingLang(req.headers['accept-language']) }));
     });
 
     // Clerk SSO exchange: the login page verified the user on Clerk's hosted
@@ -390,7 +392,7 @@ class Auth {
     app.post('/api/clerk-login', express_json_lite, async (req, res) => {
       if (!this._clerk?.enabled) return res.status(404).json({ error: 'SSO not configured' });
       const ip = req.socket.remoteAddress || '?';
-      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
+      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute', code: 'too-many' });
       try {
         const { email } = await this._clerk.verifyToken(String(req.body?.token || ''));
         if (!email) {
@@ -412,11 +414,11 @@ class Auth {
     app.post('/api/login', express_json_lite, (req, res) => {
       if (!this.enabled) return res.json({ success: true });
       const ip = req.socket.remoteAddress || '?';
-      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
+      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute', code: 'too-many' });
       const pw = String(req.body?.password ?? '');
       if (!this.verifyPassword(pw)) {
         this._rateFail(ip);
-        return res.status(401).json({ error: 'Wrong password' });
+        return res.status(401).json({ error: 'Wrong password', code: 'wrong-password' });
       }
       this._rateOk(ip);
       this._grantSession(req, res);
@@ -445,7 +447,7 @@ class Auth {
       //   neither ⇒ open — that is how a local instance opts INTO auth (first-run onboarding)
       if (this.enabled && !this.passwordEnabled && !this.requestAuthed(req)) return res.status(401).json({ error: 'unauthorized' });
       const ip = req.socket.remoteAddress || '?';
-      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute' });
+      if (!this._rateCheck(ip)) return res.status(429).json({ error: 'Too many attempts — wait a minute', code: 'too-many' });
       const { current, newPassword, remove } = req.body || {};
       // Gate on the PASSWORD being set (not this.enabled): a Clerk-only
       // instance has no current password — its cookie-authed user may set one.
@@ -494,14 +496,16 @@ function express_json_lite(req, res, next) {
  * our cookie. A 403 (email not allowed / missing claim) offers an SSO
  * sign-out link so the user can retry with a different account.
  */
-function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
+function loginHtml({ clerk = null, passwordEnabled = true, nonce = '', lang = 'en' } = {}) {
   const clerkOn = !!clerk?.enabled;
-  const sub = passwordEnabled
-    ? 'Enter the workspace password'
-    : 'Sign in with your organization account';
+  // lane ui-language (the walk's first-run-3): the page's words in the browser's language (src/login-words.js); its script
+  // re-applies this device's own choice below — the app's per-device rule (localStorage `vibespace.lang`)
+  const W = loginWords(lang);
+  const e = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const sub = passwordEnabled ? W.subPassword : W.subSso;
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VibeSpace — Login</title>
+<html lang="${e(lang === 'zh' ? 'zh-CN' : lang === 'ja' ? 'ja' : 'en')}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${e(W.title)}</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
@@ -525,15 +529,26 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
 </style></head>
 <body><form class="card" id="f">
   <h1>VibeSpace</h1>
-  <p>${sub}</p>
+  <p data-w="${passwordEnabled ? 'subPassword' : 'subSso'}">${e(sub)}</p>
   ${passwordEnabled ? `
-  <input type="password" id="pw" placeholder="Password" autofocus autocomplete="current-password">
-  <button type="submit">Sign in</button>` : ''}
-  ${clerkOn ? `${passwordEnabled ? `<div class="or">or</div>` : ''}
-  <button type="button" class="sso" id="sso" disabled>Loading SSO…</button>` : ''}
+  <input type="password" id="pw" placeholder="${e(W.password)}" data-w-ph="password" autofocus autocomplete="current-password">
+  <button type="submit" data-w="signIn">${e(W.signIn)}</button>` : ''}
+  ${clerkOn ? `${passwordEnabled ? `<div class="or" data-w="or">${e(W.or)}</div>` : ''}
+  <button type="button" class="sso" id="sso" disabled>${e(W.ssoLoading)}</button>` : ''}
   <div class="err" id="err"></div>
 </form>
 <script nonce="${nonce}">
+  // the device's own language wins over the browser's ask (the app's rule); the words are the page's own table
+  const ALL = ${JSON.stringify(LOGIN_WORDS).replace(/</g, '\\u003c')};
+  const LANG = (() => { let p = null; try { p = localStorage.getItem('vibespace.lang'); } catch {} const n = (navigator.language || '').toLowerCase();
+    return p && p !== 'auto' && ['en', 'zh', 'ja'].includes(p) ? p : n.startsWith('zh') ? 'zh' : n.startsWith('ja') ? 'ja' : 'en'; })();
+  const w = (k) => (ALL[k] && (ALL[k][LANG] || ALL[k].en)) || k;
+  if (LANG !== ${JSON.stringify(lang)}) {
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : LANG; document.title = w('title');
+    for (const el of document.querySelectorAll('[data-w]')) el.textContent = w(el.dataset.w);
+    for (const el of document.querySelectorAll('[data-w-ph]')) el.placeholder = w(el.dataset.wPh);
+    const sb = document.getElementById('sso'); if (sb) sb.textContent = w('ssoLoading');
+  }
   const err = document.getElementById('err');
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -545,8 +560,8 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
         body: JSON.stringify({ password: pwEl.value }) });
       const d = await r.json().catch(() => ({}));
       if (r.ok) location.href = '/';
-      else err.textContent = d.error || 'Login failed';
-    } catch { err.textContent = 'Network error'; }
+      else err.textContent = d.code && ALL[d.code] ? w(d.code) : (d.error || w('loginFailed'));
+    } catch { err.textContent = w('network'); }
   });
   ${clerkOn ? `
   (() => {
@@ -559,7 +574,7 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
     // clerk-js v5 from the CDN self-bootstraps window.Clerk as an INSTANCE
     // using this attribute ("window.Clerk is not a constructor" without it).
     s.setAttribute('data-clerk-publishable-key', PK);
-    s.onerror = () => { ssoBtn.textContent = 'SSO unavailable'; };
+    s.onerror = () => { ssoBtn.textContent = w('ssoUnavailable'); };
     s.onload = async () => {
       try {
         // Instance (v5 CDN) or constructor (older builds) — accept both.
@@ -567,7 +582,7 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
         await clerk.load({ standardBrowser: true });
         const exchange = async () => {
           ssoBtn.disabled = true;
-          ssoBtn.textContent = 'Signing in…';
+          ssoBtn.textContent = w('signingIn');
           let token = null;
           // Prefer a "vibespace" JWT template (guaranteed email claim); fall
           // back to the plain session token (works when the dashboard adds
@@ -579,21 +594,21 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '' } = {}) {
           const d = await r.json().catch(() => ({}));
           if (r.ok) { location.href = '/'; return; }
           ssoBtn.disabled = false;
-          ssoBtn.textContent = 'Sign in with SSO';
+          ssoBtn.textContent = w('ssoSignIn');
           err.innerHTML = '';
-          err.appendChild(document.createTextNode(d.error || 'SSO failed'));
+          err.appendChild(document.createTextNode(d.code && ALL[d.code] ? w(d.code) : (d.error || w('ssoFailed'))));
           const out = document.createElement('a');
-          out.href = '#'; out.textContent = ' Switch account';
+          out.href = '#'; out.textContent = ' ' + w('switchAccount');
           out.onclick = (e) => { e.preventDefault(); clerk.signOut({ redirectUrl: location.href }); };
           err.appendChild(out);
         };
         if (clerk.user) { exchange(); }
         else {
           ssoBtn.disabled = false;
-          ssoBtn.textContent = 'Sign in with SSO';
+          ssoBtn.textContent = w('ssoSignIn');
           ssoBtn.onclick = () => clerk.redirectToSignIn({ redirectUrl: location.href });
         }
-      } catch (e) { ssoBtn.textContent = 'SSO unavailable'; err.textContent = String(e.message || e); }
+      } catch (e) { ssoBtn.textContent = w('ssoUnavailable'); err.textContent = String(e.message || e); }
     };
     document.head.appendChild(s);
   })();` : ''}
