@@ -261,9 +261,11 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
 { const FE = read('src/lib/file-explorer.js'); const fa = parse(FE); const made = new Map(); let appended = [], toolEls = [];
   walk(fa, (n) => {
     if (n.type === 'VariableDeclarator' && n.init && n.init.type === 'CallExpression' && n.init.callee.type === 'MemberExpression' && n.init.callee.property.name === '_btn' && n.id.type === 'Identifier') made.set(n.id.name, n.loc.start.line);
-    if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'toolbar' && n.callee.property.name === 'append') appended = n.arguments.filter((a) => a.type === 'Identifier').map((a) => a.name);
+    if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'toolbar' && n.callee.property.name === 'append') appended.push(...n.arguments.filter((a) => a.type === 'Identifier').map((a) => a.name));
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'tools' && n.init && n.init.type === 'ObjectExpression') for (const p of n.init.properties) if (p.value && p.value.type === 'ObjectExpression') for (const q of p.value.properties) if (q.key && q.key.name === 'el' && q.value.type === 'Identifier') toolEls.push(q.value.name); });
   const wordless = appended.filter((x) => made.has(x) && !toolEls.includes(x) && x !== 'btnMore');
+  ok(/\n    if \(!app\.isMobile\) toolbar\.append\(btnMore\);/.test(FE) && !/btnMore\.style\.display = 'none'/.test(FE),
+    'the explorer\'s ⋯ is in the toolbar only where it folds (the desk): the phone has none — never a hidden 0×0 button among its touch targets (test-mobile-gaps #8)');
   ok(appended.length >= 7 && toolEls.length >= 6 && wordless.length === 0, `the explorer toolbar: every tool button it appends carries its word (the tools table) — none icon-only (${wordless.join(', ') || 'none'})`); }
 { // the explorer's ⋯ (the acceptance reader's finding 4): a folded tool acts AGAINST THE ⋯ — foldedMenuItems EVALUATED from its source
   const BF = read('src/lib/bar-fold.js'), at = BF.indexOf('export function foldedMenuItems(');
