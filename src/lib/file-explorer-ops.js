@@ -270,7 +270,7 @@ export function installExplorerOps(FileExplorer) {
     // THE ONE placement (utils.js placeMenu — lane ui-controls-and-bugs, the width sweep's rule 4): bounded by the screen,
     // placed AGAIN when §7.9 patches the office rows in after it opened (it grew past a 1024×700 screen's edge: «删除» below
     // it, no scroll), its closing rows (Rename / Properties / Delete) in view when it scrolls
-    placeMenu(menu, x, y);
+    placeMenu(menu, x, y, { follow: true });   // its office rows arrive after it opened: placed again then
     attachPopoverClose(menu);
     return menu; // §7.9: the caller may patch rows in place (_patchMenuRows)
   },

@@ -4612,7 +4612,7 @@ label.cfg-row {
 /* Sidebar manage mode: mark-then-apply batch management */
 #manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 /* lane refresh-live-sessions: the session list's ⋯ (its list-wide actions) + the confirm of 「刷新所有活着的会话」 */
-#session-list-menu { width: auto; padding: 0 5px; font-size: 14px; }
+#session-list-menu, .sfr-more { width: auto; padding: 0 5px; font-size: 14px; }   /* .sfr-more: the fold measures a clone (no id) */
 .refresh-live-dialog { width: min(480px, calc(100vw - 24px)); }
 .refresh-live-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; }
 .refresh-live-dialog .refresh-live-count { font-size: 12px; color: var(--text); }
@@ -5624,7 +5624,13 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 /* lane ui-controls-and-bugs (sidebar-sessions-18): the filter is a funnel with a count while it filters; sort says its order */
 .backend-filter-btn svg { width: 13px; height: 13px; }
 .backend-filter-count { position: absolute; top: -2px; right: -3px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px; background: var(--accent); color: var(--accent-fg); font-size: 9px; line-height: 13px; text-align: center; }
-#sort-toggle { max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the sessions filter row = a chrome bar (src/lib/bar-fold.js, wired in sidebar.js): it never wraps and never runs past the
+   sidebar — the sort's words on one line, else its icon (.sort-compact), else it and manage are rows of the ⋯ (lane ui-controls-and-bugs) */
+.sfr-bar > .bar-folded { display: none !important; }
+.sfr-bar > .sort-btn, .sfr-bar > .sfr-more { white-space: nowrap; flex: 0 0 auto; }
+.sort-btn .sort-ico, .sort-btn.sort-compact .sort-words { display: none; }
+.sort-btn.sort-compact .sort-ico { display: inline; }
+#session-filter { min-width: 64px; }
 /* lane ui-controls-and-bugs (browser-profiles-7): «Download another build…» is a button, its source line a hint under it */
 .bbuild-download { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0 2px; }
 .bbuild-download-btn .bwho-answer-head { font-weight: normal; color: inherit; }
