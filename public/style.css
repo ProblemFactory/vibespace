@@ -1421,7 +1421,12 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .usage-outcome-x { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0 2px; margin-left: auto; font-size: 12px; line-height: 1; }
 .usage-stat-stale { color: var(--yellow); }
 .usage-pie-aged { position: relative; display: inline-block; }
-.usage-age-badge, .acct-donut-age { position: absolute; top: -5px; right: -7px; font-size: 8px; line-height: 10px; padding: 0 2px; border-radius: var(--radius-sm); background: var(--bg-input); color: var(--yellow); border: 1px solid currentColor; pointer-events: none; }
+.usage-age-badge, .acct-donut-age { position: absolute; right: -7px; font-size: 8px; line-height: 10px; padding: 0 2px; border-radius: var(--radius-sm); background: var(--bg-input); color: var(--yellow); border: 1px solid currentColor; pointer-events: none; white-space: nowrap; }
+/* K3 badge cure (.401, 主开发's law): a badge is ONE line and never over its ring's label — zh/ja «47小时» wrapped to two or three
+   lines over «Fa». Each badge sits high enough to clear the label of the ring it marks (measured in this box's face and the runner's
+   DejaVu: test-age-badge-chrome); the 14 px taskbar ring's badge carries the compact mark («47h», like its «5h» / «7d» labels) */
+.acct-donut-age { top: -7px; }
+.usage-age-badge { top: -9px; }
 .acct-donut-aged { position: relative; }
 .usage-stat-unconfirmed { color: var(--text-secondary); font-style: italic; }
 .bsw-usage .bsw-seg.bsw-unconfirmed .bsw-pct { color: var(--text-secondary) !important; text-decoration: underline dashed 1px; text-underline-offset: 2px; }

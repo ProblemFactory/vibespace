@@ -493,7 +493,8 @@ export function installUsageMeter(App, ctx = {}) {
     const capPie = (c) => {
       if (c.state === 'read' && c.staleAge) {   // L3 (lane account-reset-door): its reading is hours older than its siblings'
         const pie = renderPie(escHtml(c.label), c.pct, false, c.pair, c.view, c.tipName, ' · ' + t('read {age} ago', { age: c.staleAge }));
-        return `<div class="usage-pie-aged">${pie}<span class="usage-age-badge" title="${escHtml(t('read {age} ago', { age: c.staleAge }))}">${escHtml(c.staleAge)}</span></div>`;
+        // the BADGE is a mark (K3 badge cure, .401): the compact «47h» on a 14 px ring — the full words in its tooltip and the popup's line
+        return `<div class="usage-pie-aged">${pie}<span class="usage-age-badge" title="${escHtml(t('read {age} ago', { age: c.staleAge }))}">${escHtml(c.staleMark || c.staleAge)}</span></div>`;
       }
       if (c.state !== 'read') return `<div class="usage-pie usage-donut" title="${escHtml(c.tip)}" style="background:var(--bg-input)"><span class="usage-donut-label">${escHtml(c.label)}</span></div>`;
       const dur = bucketMayNameDeadline(c.view.reading) ? fullEta(bucketResetMs(c.view.reading), Date.now()) : null;
@@ -580,7 +581,12 @@ export function installUsageMeter(App, ctx = {}) {
       const laneAt = new Map((noData || !rl ? [] : quotaModel.lanesOfReading(rl)).map((x) => [x.lane, Math.max(Number(x.at) || 0, Number(statedAt[x.lane]) || 0) || null]));
       const atOf = (lane) => (lane && laneAt.get(lane)) || null;
       const freshest = Math.max(0, ...[...laneAt.values()].map((v) => Number(v) || 0));
-      if (cap && cap.state === 'read') cap.staleAge = staleLaneAge(atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt, freshest, Date.now(), { t });
+      if (cap && cap.state === 'read') {
+        const capAt = atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt;
+        cap.staleAge = staleLaneAge(capAt, freshest, Date.now(), { t });   // the words: the tooltip and the popup's «read … ago»
+        // …and the MARK the 14 px ring carries: the compact unit, untranslated like the ring's own «5h» / «7d» labels (K3 badge cure)
+        cap.staleMark = staleLaneAge(capAt, freshest, Date.now(), { t: (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m)) });
+      }
       const laneAge = (at) => { const a = staleLaneAge(at, freshest, Date.now(), { t }); return a ? `<span class="usage-stat usage-stat-stale">${escHtml(t('read {age} ago', { age: a }))}</span>` : ''; };
       const claimBtn = (lane, view, capName = null) => (noData || !lane || !view || view.unconfirmed || claimed[lane] || !(Number(view.reading?.utilization) >= quotaModel.RESET_SEEN_MIN_DROP / 100) ? ''
         : `<button class="usage-claim-btn" data-claim-key="${escHtml(claimKey)}" data-claim-lane="${escHtml(lane)}"${capName ? ` data-cap-name="${escHtml(capName)}"` : ''} title="${escHtml(t('Mark it as reset — unconfirmed until the next refresh reads it'))}">${escHtml(t('I reset this on Anthropic’s site'))}</button>`);
