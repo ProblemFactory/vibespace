@@ -22,6 +22,9 @@ const { psEncoded, PS_ARGV } = require('./machine-desktop-model.js');
 const FFMPEG_FOLDER = '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin';
 /** The stamp the plan writes beside the copy it fetched: `{ sha256, label, url }` — the agent checks that copy against it. */
 const FFMPEG_STAMP = 'ffmpeg.exe.vibespace.json';
+/** The marker a running fetch writes beside the folder (its PowerShell's pid): the agent's facts say `fetching` while that run lives —
+ *  the hub keeps its install slot held after a timeout or a lost link until the machine says the run ended (the reader's item 6). */
+const FFMPEG_FETCHING = 'ffmpeg.fetching';
 const FFMPEG_BUILDS = Object.freeze([
   Object.freeze({
     id: 'gyan-9.0.2-essentials', label: 'FFmpeg 9.0.2', version: '9.0.2', publisher: 'gyan.dev',
@@ -70,36 +73,46 @@ function ffmpegInstallPlan(f) {
     "$ProgressPreference = 'SilentlyContinue'",
     '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
     'Add-Type -AssemblyName System.IO.Compression.FileSystem',
-    "$bin = Join-Path $env:LOCALAPPDATA 'vibespace\\ffmpeg\\bin'",
+    "$bin = Join-Path $env:LOCALAPPDATA 'vibespace\\ffmpeg\\bin'; $home0 = Split-Path $bin",
     '$null = New-Item -ItemType Directory -Force -Path $bin',
+    "$dest = Join-Path $bin 'ffmpeg.exe'; $prev = Join-Path $bin 'ffmpeg.exe.old'; $stamp = Join-Path $bin '" + FFMPEG_STAMP + "'",
+    // the edges a killed run leaves (the reader's item 6): a stray .old with no ffmpeg.exe is PUT BACK (never deleted); a stray
+    // download folder (up to ~360 MB) is removed; THIS run says it is running (the agent's facts read it: the hub holds its slot)
+    'if (-not (Test-Path -LiteralPath $dest) -and (Test-Path -LiteralPath $prev)) { Move-Item -LiteralPath $prev -Destination $dest -Force; Write-Host \'Put back the ffmpeg.exe a stopped run had set aside\' }',
+    "Get-ChildItem -LiteralPath $home0 -Directory -Filter '.dl-*' -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue",
+    "$fetching = Join-Path $home0 '" + FFMPEG_FETCHING + "'; Set-Content -NoNewline -LiteralPath $fetching -Value $PID",
     '$builds = @(',
     FFMPEG_BUILDS.map(row).join(",\n"),
     ')',
-    '$done = $null',
+    '$done = $null; $why = @()',
+    'try {',
     'foreach ($b in $builds) {',
-    "  $dl = Join-Path (Split-Path $bin) ('.dl-' + [guid]::NewGuid().ToString('N'))",
+    "  $dl = Join-Path $home0 ('.dl-' + [guid]::NewGuid().ToString('N'))",
     '  try {',
     '    $null = New-Item -ItemType Directory -Force -Path $dl',
     "    $zip = Join-Path $dl 'ffmpeg.zip'; $part = Join-Path $dl 'ffmpeg.exe'",
     "    Write-Host ('Downloading ' + $b.label + ' (' + $b.mb + ' MB) from ' + $b.url)",
-    '    Invoke-WebRequest -UseBasicParsing -Uri $b.url -OutFile $zip',
-    "    if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $b.sha) { throw ('the download is not ' + $b.label + ' (its SHA-256 differs) - nothing was changed') }",
+    "    try { Invoke-WebRequest -UseBasicParsing -Uri $b.url -OutFile $zip } catch { throw ('the download failed (' + $_.Exception.Message + ')') }",
+    "    if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $b.sha) { throw 'the download is not the pinned file (its SHA-256 differs)' }",
     '    $z = [IO.Compression.ZipFile]::OpenRead($zip)',
     "    try { $e = $z.GetEntry($b.member); if (-not $e) { throw ('the archive holds no ' + $b.member) }; [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $part, $true) } finally { $z.Dispose() }",
-    "    if ((Get-FileHash -Algorithm SHA256 $part).Hash -ne $b.exe) { throw ('the unpacked ffmpeg.exe is not ' + $b.label + ' (its SHA-256 differs) - nothing was changed') }",
-    "    $dest = Join-Path $bin 'ffmpeg.exe'; $prev = Join-Path $bin 'ffmpeg.exe.old'",
+    "    if ((Get-FileHash -Algorithm SHA256 $part).Hash -ne $b.exe) { throw 'the unpacked ffmpeg.exe is not the pinned file (its SHA-256 differs)' }",
+    // the stamp is written BESIDE first, then the exe replaced in ONE step (ReplaceFile keeps the old copy at .old until the new
+    // one is in place — a kill never leaves no ffmpeg.exe), then the stamp renamed; the old copy goes only after that
+    "    Set-Content -NoNewline -LiteralPath ($stamp + '.new') -Value ('{\"sha256\":\"' + $b.exe.ToLower() + '\",\"label\":\"' + $b.label + '\"}')",
+    '    if (Test-Path -LiteralPath $dest) { [IO.File]::Replace($part, $dest, $prev) } else { Move-Item -LiteralPath $part -Destination $dest }',
+    '    $done = $b; Remove-Item -LiteralPath $stamp -Force -ErrorAction SilentlyContinue',
+    "    try { Move-Item -LiteralPath ($stamp + '.new') -Destination $stamp -Force } catch { Write-Host ('ffmpeg.exe is in place, but its stamp was not written (' + $_.Exception.Message + ') - the agent judges it as a copy a person put there') }",
     '    Remove-Item -LiteralPath $prev -Force -ErrorAction SilentlyContinue',
-    '    if (Test-Path -LiteralPath $dest) { Move-Item -LiteralPath $dest -Destination $prev -Force }',
-    '    try { Move-Item -LiteralPath $part -Destination $dest -Force } catch { if (Test-Path -LiteralPath $prev) { Move-Item -LiteralPath $prev -Destination $dest -Force }; throw }',
-    '    Remove-Item -LiteralPath $prev -Force -ErrorAction SilentlyContinue',
-    `    Set-Content -NoNewline -LiteralPath (Join-Path $bin '${FFMPEG_STAMP}') -Value ('{"sha256":"' + $b.exe.ToLower() + '","label":"' + $b.label + '"}')`,
     "    Write-Host ('Fetched ' + $b.label + ' - both SHA-256 fingerprints checked - into ' + $bin)",
-    '    $done = $b; break',
-    "  } catch { Write-Host ('NOT FETCHED from ' + $b.url + ': ' + $_.Exception.Message) }",
-    '  finally { Remove-Item -LiteralPath $dl -Recurse -Force -ErrorAction SilentlyContinue }',
+    '    break',
+    "  } catch { $why += ($b.label + ': ' + $_.Exception.Message); Write-Host ('NOT FETCHED from ' + $b.url + ': ' + $_.Exception.Message) }",
+    "  finally { Remove-Item -LiteralPath $dl -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath ($stamp + '.new') -Force -ErrorAction SilentlyContinue }",
     '}',
-    "if (-not $done) { Write-Host 'ffmpeg was not fetched - nothing was changed'; exit 1 }",
-    "try { $v = & (Join-Path $bin 'ffmpeg.exe') -hide_banner -version 2>&1 | Select-Object -First 1; Write-Host $v } catch { Write-Host ('Windows did not start ffmpeg.exe: ' + $_.Exception.Message) }",
+    '} finally { Remove-Item -LiteralPath $fetching -Force -ErrorAction SilentlyContinue }',
+    // the LAST line names each build's own reason (the reader's item 4): «not the pinned file» is told apart from «no network»
+    "if (-not $done) { Write-Host ('ffmpeg was not fetched - ' + ($why -join '; ') + ' - nothing was changed'); exit 1 }",
+    "try { $v = & $dest -hide_banner -version 2>&1 | Select-Object -First 1; Write-Host $v } catch { Write-Host ('Windows did not start ffmpeg.exe: ' + $_.Exception.Message) }",
     'exit 0',
   ];
   return {
@@ -113,4 +126,4 @@ function ffmpegInstallPlan(f) {
  *  at the route), refused by name on this machine, done once the machine's stream facts name an ffmpeg that PASSES. */
 const FFMPEG_INSTALL = Object.freeze({ id: 'ffmpeg', from: 'hello', humanOnly: true, local: Object.freeze({ code: 'not_windows', error: 'ffmpeg is fetched by a paired Windows machine' }), plan: ffmpegInstallPlan, done: 'ffmpeg' });
 
-module.exports = { FFMPEG, FFMPEG_BUILDS, FFMPEG_FOLDER, FFMPEG_STAMP, FFMPEG_EXE_PINS, stampOf, stampedCopyOk, ffmpegInstallPlan, FFMPEG_INSTALL };
+module.exports = { FFMPEG, FFMPEG_BUILDS, FFMPEG_FOLDER, FFMPEG_STAMP, FFMPEG_FETCHING, FFMPEG_EXE_PINS, stampOf, stampedCopyOk, ffmpegInstallPlan, FFMPEG_INSTALL };

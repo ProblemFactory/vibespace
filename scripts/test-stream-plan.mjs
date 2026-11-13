@@ -163,7 +163,7 @@ console.log('§4b THE LOOKUP (lane machine-needs-at-pairing — the owner 2026-1
     const scr = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8');
     ok(/return SP\.firstPassingFfmpeg\(candidates, async \(c\) =>/.test(scr), 'the screen source\'s findFfmpeg IS this rule — no first-found return of its own');
   }
-  ok(/ffmpeg: async \(\) => \{[^}]*streamScreenOf\(\)\.facts\(\)/.test(fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8')), 'the microphone and the sound take the screen facts\' ffmpeg — one pick for all three roads');
+  { const ad = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8'); ok(/ffmpeg: process\.platform === 'win32' \? \(\) => streamScreenOf\(\)\.runnable\(\{ road: 'voice' \}\) : null/.test(ad) && /ffmpegPath: \(\) => \(process\.platform === 'win32' \? streamScreenOf\(\)\.runnable\(\{ road: 'sound' \}\)/.test(ad), 'the microphone and the sound take the screen source\'s ONE accessor on Windows (SP.runnableFfmpeg over its facts — machine-needs pick 2\'s reader\'s list) — one pick for all three roads'); }
   const rungs = SP.ENCODER_LADDER.map((e) => e.label), need = SP.ffmpegVerdict(null).error;
   ok(rungs.length === 4 && rungs.every((l) => need.includes(l)) && !/and NVENC/.test(need), `the agent's refusal names every rung the ladder takes (${rungs.join(', ')}), never «and NVENC» alone`, need);
   const client = /no_ffmpeg: \(\) => t\('([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8'));

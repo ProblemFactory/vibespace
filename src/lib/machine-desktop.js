@@ -511,7 +511,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     if (m.setup !== 'win32' || !ffmpegNeedCode(code) || ffShown === code) return;
     ffShown = code;
     const ffText = el('span', null, streamWords(code, info));
-    ffEl.replaceChildren(ffText, ffmpegDoor(m.hostId, { cls: 'file-tool-btn desktop-strip-tcc-open', say: (text) => { ffText.textContent = text; } }));
+    ffEl.replaceChildren(ffText, ffmpegDoor(m.hostId, { machine: nameOf(m), cls: 'file-tool-btn desktop-strip-tcc-open', say: (text) => { ffText.textContent = text; } }));
     ffEl.hidden = false;
   };
   const MAC_PANES = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
@@ -959,7 +959,7 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
     if (!f || f.ok === false || f.ffmpegPasses !== false) { ffLine.style.display = 'none'; return; }
     const words = el('span', 'color:var(--warning, #d9822b)', t('Streaming needs ffmpeg 7 or newer with ddagrab and an H.264 encoder — {machine} has none that does', { machine }));
     words.title = f.ffmpegWhy || '';
-    ffLine.replaceChildren(words, ffmpegDoor(m.hostId, { say: (text) => { words.textContent = text; }, onDone: () => readFfmpeg() }));
+    ffLine.replaceChildren(words, ffmpegDoor(m.hostId, { machine: nameOf(m), say: (text) => { words.textContent = text; }, onDone: () => readFfmpeg() }));
     ffLine.style.display = 'flex';
   };
   body.append(state, acts, ffLine, ...(mic ? [mic.el] : []), ...(sound ? [sound.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));

@@ -46,6 +46,7 @@ const SP = require('../stream-plan.js');
 const FF = require('../ffmpeg-install.js'); // lane machine-needs-at-pairing pick 2: the fetched copy's stamp + the pinned fingerprints (PURE)
 const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's IVF → temporal units
 
+const FETCH_MARK_MS = 2 * 60 * 60 * 1000; // a fetch's marker older than this names no running fetch (a run is bounded far below it)
 const FACTS_MS = 30000;      // a facts answer is reused this long (a refused offer re-reads them: `force`)
 // lane desktop-display-modes (measured on the owner's box): with one 4K HDR display streaming, the SECOND display's capture died
 // at once — ddagrab «Failed to create Direct3D device (8007000e)» — in every leg, never when the same capture was asked again by
@@ -123,17 +124,32 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     qosScript([process.pid], true);
   }
   const hashed = new Map(); // path → { size, mtimeMs, sha256 } — a stamped copy is hashed once per agent life while it stays the same file
-  /** null = no stamp beside it (or the copy matches its stamp); else the words of why the fetched copy is not run. */
-  async function fetchedCopyChanged(file, st) {
+  /** The stamp's verdict on one copy → { changed: null | the words of why it is not run, label: the build a matching stamp names }.
+   *  No stamp ⇒ a person's copy, judged as before. Bytes that could NOT BE READ refuse this time and are never remembered (the
+   *  reader's item 6 — a passing read error is not «changed» for ever). */
+  async function fetchedCopyState(file, st) {
     let stamp = null;
-    try { stamp = FF.stampOf(fs.readFileSync(path.join(path.dirname(file), FF.FFMPEG_STAMP), 'utf8')); } catch { return null; }
-    if (!stamp) return null;
+    try { stamp = FF.stampOf(fs.readFileSync(path.join(path.dirname(file), FF.FFMPEG_STAMP), 'utf8')); } catch { return { changed: null, label: null }; }
+    if (!stamp) return { changed: null, label: null };
     let h = hashed.get(file);
     if (!h || h.size !== st.size || h.mtimeMs !== st.mtimeMs) {
-      const sha256 = await new Promise((resolve) => { const hash = require('crypto').createHash('sha256'); const rs = fs.createReadStream(file); rs.on('data', (d) => hash.update(d)); rs.on('error', () => resolve(null)); rs.on('end', () => resolve(hash.digest('hex'))); });
+      const sha256 = await new Promise((resolve) => { try { const hash = require('crypto').createHash('sha256'); const rs = fs.createReadStream(file); rs.on('data', (d) => hash.update(d)); rs.on('error', () => resolve(null)); rs.on('end', () => resolve(hash.digest('hex'))); } catch { resolve(null); } });
+      if (sha256 == null) return { changed: 'its bytes could not be read to check them against its stamp', label: null };
       h = { size: st.size, mtimeMs: st.mtimeMs, sha256 }; hashed.set(file, h);
     }
-    return FF.stampedCopyOk(stamp, h.sha256) ? null : `it is not the copy VibeSpace fetched (${stamp.label || 'ffmpeg'}): its SHA-256 changed since`;
+    return FF.stampedCopyOk(stamp, h.sha256) ? { changed: null, label: stamp.label } : { changed: `it is not the copy VibeSpace fetched (${stamp.label || 'ffmpeg'}): its SHA-256 changed since`, label: null };
+  }
+  /** Is a fetch running here now? (the plan's marker: its PowerShell's pid, alive, written within FETCH_MARK_MS) — the hub holds its
+   *  install slot while it is. A PROBE only: its answer never feeds a signal. A recycled pid reads alive (fail closed: the slot stays
+   *  held — the hub's own bound frees it) until the marker is older than any fetch runs. */
+  function fetchRunning() {
+    try {
+      const file = path.join(String(lookupEnv.LOCALAPPDATA || ''), 'vibespace', 'ffmpeg', FF.FFMPEG_FETCHING);
+      if (now() - fs.statSync(file).mtimeMs > FETCH_MARK_MS) return false;
+      const pid = Number(String(fs.readFileSync(file, 'utf8')).trim());
+      if (!(pid > 0)) return false;
+      try { process.kill(pid, 0); return true; } catch (e) { return !!(e && e.code === 'EPERM'); }
+    } catch { return false; }
   }
   async function findFfmpeg() {
     // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
@@ -147,11 +163,11 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       if (!st.isFile()) return null;
       // lane machine-needs-at-pairing pick 2 (主开发 Q5): a copy VibeSpace FETCHED (its stamp beside it) is checked against the stamp
       // before it runs — bytes that changed since are never run, and the refusal names it; an unstamped copy is judged as before
-      const changed = await fetchedCopyChanged(c.path, st);
-      if (changed) return { path: c.path, where: c.where, version: null, major: null, ddagrab: false, encoders: [], changed };
+      const stamped = await fetchedCopyState(c.path, st);
+      if (stamped.changed) return { path: c.path, where: c.where, version: null, major: null, ddagrab: false, encoders: [], changed: stamped.changed };
       const [v, fl, en] = [await run(c.path, ['-hide_banner', '-version']), await run(c.path, ['-hide_banner', '-filters']), await run(c.path, ['-hide_banner', '-encoders'])];
       if (v.err && !v.stdout) return null;
-      return { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout) };
+      return { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout), ...(stamped.label ? { fetched: stamped.label } : {}) }; // the build a fetch put there (its stamp) — the done line names it
     });
   }
   async function readFacts() {
@@ -159,7 +175,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     const ps = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(SP.STREAM_FACTS_PS, 'utf16le').toString('base64')], 256 * 1024);
     const d = SP.parseStreamFacts(ps.stdout);
     const ff = await findFfmpeg();
-    const facts = { ok: true, platform, at: now(), ffmpeg: ff.ffmpeg, looked: ff.looked, displays: d.ok ? d.displays : [], dxgi: d.ok ? d.dxgi : 0 };
+    const facts = { ok: true, platform, at: now(), ffmpeg: ff.ffmpeg, looked: ff.looked, displays: d.ok ? d.displays : [], dxgi: d.ok ? d.dxgi : 0, fetching: fetchRunning() };
     if (!d.ok) facts.displaysError = (ps.stderr.trim().split('\n')[0] || (ps.err && ps.err.message) || d.error).slice(0, 200);
     const p = SP.planScreen(facts);
     facts.primary = p.ok ? { mode: p.mode, encoder: p.encoder.label, note: p.note, display: p.display.id, w: p.w, h: p.h, white: p.white } : { code: p.code, error: p.error };
@@ -468,7 +484,10 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     const r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `Start-Process '${uri}'`]);
     return r.err ? named('open_failed', `Windows did not open ${uri} (${String(r.stderr || r.err.message || r.err.code).trim().slice(0, 120)})`) : { ok: true, pane };
   }
-  return { facts, source, openSettings };
+  /** THE FFMPEG THIS AGENT MAY RUN on `road` (lane machine-needs-at-pairing pick 2, reader 2): SP.runnableFfmpeg over the facts —
+   *  the receiver and the sound ask THIS, never a path of their own. → a path | null */
+  async function runnable({ road = 'screen' } = {}) { const f = await facts(); return f && f.ok ? SP.runnableFfmpeg(f.ffmpeg, road) : null; }
+  return { facts, source, openSettings, runnable };
 }
 
 /** THE MAPPER WORKER's body (agentd.js runs it in its `stream-map` worker branch): the table once, then frames. */
