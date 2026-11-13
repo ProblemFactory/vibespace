@@ -1,5 +1,6 @@
 import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
-import { t as tr } from './i18n.js';
+import { t as tr, tc } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: the board status's stored values in words (the walk's task-groups-19 / -23)
 import { registerCommand, registerMenuItem, menuItems } from './contributions.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { UI_ICONS } from './icons.js';
@@ -369,7 +370,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       stateChip.classList.toggle('sess-state-derived', derived || staleResult);
       stateChip.dataset.tip = derived
         ? tr('{state} — {activity} (observed by VibeSpace; the agent can set its own state with vibespace-status). Click to set manually.', { state: meta.label, activity: waiting ? tr('finished, waiting for you') : tr('active') })
-        : `${tr('state: {state}', { state: meta.label })}${st.urgency ? tr(' · urgency: {urgency}', { urgency: st.urgency }) : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''}${staleResult ? tr(' (set before the session stopped)') : ''}${tr(' (set by {who}; click to change)', { who: st.setBy === 'agent' ? tr('the agent') : tr('you') })}`;
+        : `${tr('state: {state}', { state: meta.label })}${st.urgency ? tr(' · urgency: {urgency}', { urgency: valueWord('urgency', st.urgency, tr) }) : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''}${staleResult ? tr(' (set before the session stopped)') : ''}${tr(' (set by {who}; click to change)', { who: st.setBy === 'agent' ? tr('the agent') : tr('you') })}`;
       stateChip.classList.toggle('sess-state-urgent', st?.urgency === 'urgent');
       stateChip.onclick = (e) => { e.stopPropagation(); state._showSessionStatusPopover?.(stateChip, s); };
     }
@@ -679,12 +680,13 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
   {
     const row = document.createElement('div');
     row.className = 'session-detail-row';
-    const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = tr('Status');
+    // the BOARD mark (vibespace-status), not the run badge above it — two rows were both «状态» (the walk's sidebar-sessions-1)
+    const lbl = document.createElement('span'); lbl.className = 'session-detail-label'; lbl.textContent = tc('session-card', 'Mark');
     const val = document.createElement('span'); val.className = 'session-detail-value';
     val.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     const st = state.getSessionStatus?.(s);
     val.textContent = st && (st.state || st.urgency)
-      ? `${st.state || ''}${st.urgency ? (st.state ? ' / ' : '') + st.urgency : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''} (${st.setBy === 'agent' ? tr('agent') : tr('you')})`
+      ? `${st.state ? valueWord('session-state', st.state, tr) : ''}${st.urgency ? (st.state ? ' · ' : '') + valueWord('urgency', st.urgency, tr) : ''}${st.reason ? ' — ' + shownText(st, st.reason) : ''} (${st.setBy === 'agent' ? tr('agent') : tr('you')})`
       : tr('None');
     if (st?.reason) val.title = shownText(st, st.reason);
     const btn = document.createElement('button');
@@ -726,7 +728,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           const when = new Date(h.at);
           const t = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ')
             + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          const meta = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
+          const meta = h.state ? (SESSION_STATE_META[h.state] || { label: valueWord('session-state', h.state, tr), color: 'var(--text-dim)' }) : null;
           li.innerHTML = `<span class="session-history-time">${escHtml(t)}</span>`
             + `<span class="session-history-dot" style="--h-color:${meta ? meta.color : 'var(--text-dim)'}"></span>`
             + `<span class="session-history-state">${escHtml(h.cleared ? tr('cleared') : (meta?.label || ''))}${h.urgency && h.urgency !== 'normal' ? ' !' + (h.urgency === 'urgent' ? '!' : '') : ''}</span>`
@@ -889,7 +891,8 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         for (const opt of options) {
           const o = document.createElement('option');
           o.value = opt.value || opt.id || '';
-          o.textContent = opt.label || opt.value || tr('Default');
+          // the default row (no value) is the page's own «Default» — never the server's English label (the walk's sidebar-sessions-2)
+          o.textContent = !(opt.value || opt.id) ? tr('Default') : (opt.label || opt.value);
           if (String(o.value) === String(isDefault ? defaultVal : curVal)) o.selected = true;
           sel.appendChild(o);
         }

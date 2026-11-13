@@ -29,9 +29,14 @@
 //   ⑤ NO zh / ja ROW IS ENGLISH FOR A WORD KEY — a value with no CJK whose key holds an English word that is not a brand or
 //      a unit: RED unless printed in the baseline (shrink-only) or in GLOSSARY_PENDING (the words the owner's glossary still
 //      holds: agent, harness, reset credit, token — changed by lane L3 when the word comes).
-//   ⑥ A STORED VALUE IS WORDED WHERE IT IS DRAWN — never translated in storage, never printed raw. The For-you heads: every
-//      literal `sessionName: '…'` a producer in src/ files is a row of src/foryou-actions.js FORYOU_HEADS (the card's head
-//      is worded there, at display — the walk's chat-cards-3: «Manage Agents» stood English on a Chinese card).
+//   ⑥ A STORED VALUE IS WORDED WHERE IT IS DRAWN — never translated in storage, never printed raw. (a) The For-you heads: every
+//      literal sessionName head a producer in src/ files is a row of src/foryou-actions.js FORYOU_HEADS (the walk's
+//      chat-cards-3: «Manage Agents» stood English on a Chinese card). (b) THE DOOR, src/lib/value-words.js: every value the
+//      tree LISTS for a set it words is in its table (session-status STATES / URGENCIES, backend-caps response styles,
+//      automation-engine's key.* acts, jobs.js's run causes and triggers) and every delegated word (job-model STATE_WORDS)
+//      has zh + ja rows — a new enum value without words is RED. (c) A code-named field (.state .status .role .urgency
+//      .stopReason .verb .trigger .cause .tier .theme .permissionMode .effort …) put straight into a visible sink, never
+//      through a words function, is RED unless held by its own shrink-only baseline (`raw`).
 //
 // Every leg runs its NEGATIVE CONTROL first on a planted source / dictionary: it must go red; the same plant worded through
 // t() must stay green. Run: node scripts/test-ui-language.mjs [--lower] [--print]
@@ -115,6 +120,7 @@ async function scanAll(files, repo) {
 
 // ── ① the sink scan ──
 const T_FNS = new Set(['t', 'tc', 'tr', 'i18nKey']);
+const CODE_FIELDS = new Set(['state', 'status', 'role', 'urgency', 'stopReason', 'stop_reason', 'verb', 'trigger', 'cause', 'service_tier', 'tier', 'theme', 'permissionMode', 'effort', 'severity', 'outcome']);
 const QUIET_OBJ = new Set(['console']);
 const NOT_SINK_CALLS = new Set(['Error', 'querySelector', 'querySelectorAll', 'closest', 'fetch', 'matches', 'getItem', 'setItem', 'removeItem', 'addEventListener', 'removeEventListener', 'getElementById', 'test', 'replace', 'replaceAll', 'startsWith', 'includes', 'endsWith', 'split', 'indexOf', 'postMessage', 'send', 'dispatchEvent', 'match', 'matchAll', 'exec']);
 const SINK_PROPS = new Set(['textContent', 'innerText', 'title', 'placeholder', 'innerHTML', 'outerHTML', 'ariaLabel', 'alt', 'label']);
@@ -145,7 +151,7 @@ const MARKUP = /<\/?(?:b|br|i|em|strong|code)\b[^>]*>|\*\*[^*]+\*\*|`[^`]+`/;
 const TEXT_SINK = (sink) => !!sink && !HTML_PROPS.has(sink.replace(/^prop:/, '')) && sink !== 'html' && sink !== 'call:insertAdjacentHTML';
 /** One file → { visible: [{line, sink, text}], markup: [{line, sink, key}], params: [{line, key, missing}] } */
 export function scanFile(file, src, ast = parse(src)) {
-  const visible = [], markup = [], params = [];
+  const visible = [], markup = [], params = [], raw = [];
   const ex = exemptLines(src);
   const at = (node) => lineAt(src, node.start);
   const hit = (node, sink, text) => { const line = at(node); if (!ex.has(line)) visible.push({ line, sink, text }); };
@@ -189,6 +195,13 @@ export function scanFile(file, src, ast = parse(src)) {
       case 'ThrowStatement': case 'ImportDeclaration': case 'ExportAllDeclaration': return;
       case 'BinaryExpression': if (/^[!=]==?$|^in$|^instanceof$/.test(node.operator)) return; break;
       case 'SwitchCase': for (const s of node.consequent) walk(s, sink); return;
+      // a condition's TEST and the left of `&&` decide what is drawn — they are not drawn themselves
+      case 'ConditionalExpression': walk(node.test, null); walk(node.consequent, sink); walk(node.alternate, sink); return;
+      case 'LogicalExpression': walk(node.left, node.operator === '&&' ? null : sink); walk(node.right, sink); return;
+      case 'MemberExpression':
+        if (sink && !node.computed && node.property.type === 'Identifier' && CODE_FIELDS.has(node.property.name)) { const line = at(node); if (!ex.has(line)) raw.push({ line, sink, text: '.' + node.property.name }); return; }
+        walk(node.object, null); if (node.computed) walk(node.property, null);
+        return;
       case 'ArrayExpression': {
         const [a0, a1] = node.elements;
         if (a0 && a0.type === 'CallExpression' && a0.callee.type === 'Identifier' && T_FNS.has(a0.callee.name) && a1 && a1.type === 'ObjectExpression') {
@@ -233,7 +246,7 @@ export function scanFile(file, src, ast = parse(src)) {
     }
   };
   walk(ast, null);
-  return { visible, markup, params };
+  return { visible, markup, params, raw };
 }
 
 // ── ②④⑤ the dictionaries ──
@@ -263,6 +276,25 @@ export function dictFindings(keys, dicts) {
 
 // ── ⑥ stored values: the For-you heads ──
 /** `git grep` lines (`file:line:text`) → the literal heads a producer files that the table does not hold. */
+/** ⑥(b): the tree's own lists of each set's values → the values the door's table does not word. PURE over (lists, sets). */
+export function setFindings(lists, sets, delegated = {}, rows = {}) {
+  const out = [];
+  for (const [set, values] of Object.entries(lists)) for (const v of values) if (!(sets[set] && Object.prototype.hasOwnProperty.call(sets[set], v))) out.push(`${set}: «${v}» has no words in src/lib/value-words.js VALUE_SETS`);
+  for (const [set, words] of Object.entries(delegated)) for (const [v, w] of Object.entries(words)) for (const [lang, have] of Object.entries(rows)) if (!have.has(w)) out.push(`${set}: «${v}» → «${w}» has no ${lang} row`);
+  return out;
+}
+async function setsOf(repo) {
+  const req = createRequire(path.join(repo, 'package.json'));
+  const ss = req(path.join(repo, 'src', 'session-status.js')), bc = req(path.join(repo, 'src', 'backend-caps.js')), jm = req(path.join(repo, 'src', 'job-model.js'));
+  const styles = new Set(); for (const c of Object.values(bc.BACKEND_CAPS || {})) for (const v of (c && c.responseStyle && c.responseStyle.values) || []) styles.add(v);
+  const ae = fs.readFileSync(path.join(repo, 'src', 'server', 'automation-engine.js'), 'utf8');
+  const jobs = fs.readFileSync(path.join(repo, 'src', 'jobs.js'), 'utf8');
+  const causes = new Set([...jobs.matchAll(/'(ok\(until-output\)|interrupted|ok|timeout|error|update_window|wrapper-mismatch)'/g)].map((m) => m[1]).concat(jm.MEMORY_CAUSES || []));
+  const triggers = new Set([...jobs.matchAll(/_(?:spawn|startAfter)\(job, '([a-z-]+)'/g)].map((m) => m[1]).concat([...jobs.matchAll(/'(vault-approved|vault-unlocked)'/g)].map((m) => m[1])));
+  const lists = { 'session-state': ss.STATES || [], urgency: ss.URGENCIES || [], 'response-style': [...styles], 'vault-act': [...new Set([...ae.matchAll(/verb: '(key\.[a-z]+)'/g)].map((m) => m[1]))], 'job-cause': [...causes], 'job-trigger': [...triggers] };
+  const vw = await import(pathToFileURL(path.join(repo, 'src', 'lib', 'value-words.js')).href);
+  return { lists, sets: vw.VALUE_SETS, delegated: { 'job-state': jm.STATE_WORDS || {} } };
+}
 export function headFindings(lines, table) {
   const out = [];
   for (const ln of lines) {
@@ -300,20 +332,23 @@ async function dictOf(repo, rel) {
 export async function census(repo = REPO) {
   const files = universe(repo);
   const heads = headsOf(repo);
-  const [scanned, keys, zh, ja] = await Promise.all([
+  const [scanned, keys, zh, ja, vsets] = await Promise.all([
     scanAll(files, repo),
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
-    dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja),
+    dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [];
+  const visible = {}, markup = [], params = [], missed = [], raw = {};
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
+    if (r.raw.length) raw[r.file] = r.raw;
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
     for (const x of r.reached) if (!inUni.has(x) && !Object.values(DICTS).includes(x)) missed.push(`${r.file} → ${x}`);
   }
-  return { files: files.length, visible, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  const rowsOf = (d) => new Set(d.map((x) => x.key));
+  const sets = { findings: setFindings(vsets.lists, vsets.sets, vsets.delegated, { zh: rowsOf(zh), ja: rowsOf(ja) }), lists: Object.values(vsets.lists).reduce((a, l) => a + l.length, 0) };
+  return { files: files.length, visible, raw, sets, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -341,6 +376,10 @@ if (isMain) {
     ok(d.missing.join() === 'zh: Fine words', '② a key with no zh row is named', JSON.stringify(d.missing));
     ok(d.english.join() === 'zh: Find' && d.glossary.join() === 'zh: the agent', '⑤ a zh row left in English is named; a glossary-pending word and a brand are not', JSON.stringify(d));
     ok(d.addedMarkup.length === 1, '④ a dict value that adds ** its key lacks is named', JSON.stringify(d.addedMarkup));
+    const rf = scanFile('rf.js', `a.textContent = j.state; b.textContent = valueWord('job-state', j.state, t); c.title = \`\${st.urgency} ok\`; if (j.state === 'up') d.textContent = 'x'; e.textContent = st.state ? w(st.state) : ''; f.textContent = st.role && w(st.role);`);
+    ok(rf.raw.length === 2 && rf.raw.map((x) => x.text).join() === '.state,.urgency', '⑥(c) a code-named field drawn raw is named (a textContent, a template title); the same field through a words function, or compared, is not', JSON.stringify(rf.raw));
+    const sf = setFindings({ urgency: ['low', 'brand-new'] }, { urgency: { low: 'low' } }, { 'job-state': { up: 'running', zz: 'never translated' } }, { zh: new Set(['running']) });
+    ok(sf.length === 2 && /brand-new/.test(sf[0]) && /never translated/.test(sf[1]), '⑥(b) a listed value with no words, and a delegated word with no row, are named', JSON.stringify(sf));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
     ok(h.length === 1 && /Brand new head/.test(h[0]), '⑥ a literal For-you head the table does not hold is named; a held one and a `// ui-words:` line are not', JSON.stringify(h));
   }
@@ -349,6 +388,7 @@ if (isMain) {
   const base = fs.existsSync(BASELINE) ? JSON.parse(fs.readFileSync(BASELINE, 'utf8')) : { visible: {}, english: [] };
   const v = multisetDiff(Object.fromEntries(Object.entries(now.visible).map(([f, hs]) => [f, hs])), base.visible || {});
   const e = multisetDiff({ dict: now.dict.english }, { dict: base.english || [] });
+  const rw = multisetDiff(now.raw, base.raw || {});
   if (process.argv.includes('--lower')) {
     // min(baseline, now): stale rows leave, a NEW hit is never written in
     const keep = (nowMap, baseMap) => Object.fromEntries(Object.entries(baseMap).map(([f, list]) => {
@@ -358,11 +398,13 @@ if (isMain) {
     }).filter(([, l]) => l.length));
     const seed = !fs.existsSync(BASELINE) || process.argv.includes('--seed');
     const next = seed
-      ? { note: 'lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}) and ⑤ zh/ja rows left in English. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.', visible: Object.fromEntries(Object.entries(now.visible).map(([f, hs]) => [f, hs.map((h) => h.text)])), english: now.dict.english }
-      : { note: base.note, visible: keep(now.visible, base.visible || {}), english: (keep({ dict: now.dict.english }, { dict: base.english || [] }).dict) || [] };
+      ? { note: 'lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}), ⑤ zh/ja rows left in English, ⑥(c) code-named fields drawn raw. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.', visible: Object.fromEntries(Object.entries(now.visible).map(([f, hs]) => [f, hs.map((h) => h.text)])), english: now.dict.english, raw: Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])) }
+      : { note: base.note, visible: keep(now.visible, base.visible || {}), english: (keep({ dict: now.dict.english }, { dict: base.english || [] }).dict) || [],
+          // a leg's section is SEEDED once, by the lane that adds the leg; after that it only shrinks
+          raw: base.raw ? keep(now.raw, base.raw) : Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])) };
     fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
     fs.writeFileSync(BASELINE, JSON.stringify(next, null, 1) + '\n');
-    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length}`);
+    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length} · ⑥(c) ${count(next.raw || {})}`);
     process.exit(0);
   }
   if (process.argv.includes('--print')) { for (const [f, hs] of Object.entries(now.visible)) for (const h of hs) console.log(`${f}:${h.line} [${h.sink}] ${h.text}`); }
@@ -372,6 +414,9 @@ if (isMain) {
   ok(v.fresh.length === 0, `① no NEW visible English literal outside t() (${count(now.visible)} today = the baseline's ${count(base.visible || {})} rows)`, v.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}  — word it through t() (+ zh / ja rows), or mark \`// ui-words: <why>\``));
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
   console.log('§2 the dictionaries');
+  ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);
+  ok(rw.fresh.length === 0, `⑥ no NEW code-named field drawn raw in a visible sink (${count(now.raw)} today = the baseline's ${count(base.raw || {})}) — word it through src/lib/value-words.js`, rw.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}`));
+  ok(rw.stale.length === 0, `⑥ no raw-field baseline row the tree no longer holds (lower it)`, rw.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.heads.missing.length === 0 && now.heads.lines > 20, `⑥ every literal For-you head (${now.heads.lines} producer lines) is a row of FORYOU_HEADS (${now.heads.table}) — worded at display, never in the store`, now.heads.missing);
   ok(now.dict.missing.length === 0, `② every extracted key has a zh AND a ja row`, now.dict.missing);
   ok(now.params.length === 0, `③ every {param} in a literal key is filled by its call`, now.params);

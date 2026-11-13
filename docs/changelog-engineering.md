@@ -34,6 +34,26 @@ This file is the engineers' record of every release: the lanes, the verification
   - FORYOU_HEADS words the ~60 producers' literal heads at display.
 - **Not here:** the glossary (agent, harness, reset credit, the quote style) waits for the owner (L3). The buttons, layout and controls halves of these items went to L2 / L4 / L5 by message.
 
+### ui-language pick 2 — ONE door from a stored value to a word (src/lib/value-words.js)
+- **The rule:** a protocol or stored value stays EXACTLY what it is on the wire and in storage; the page words it at DISPLAY through `valueWord(set, value, t)`. A value the table does not know is shown as itself, never hidden.
+- **The sets:** msg-role · stop-reason · service-tier · effort · response-style · mcp-state / load-error · session-state / urgency · job-access / job-cause / job-trigger · vault-act · browser-claim · model-note.
+- **Delegated, never twinned:** `job-state` reads src/job-model.js STATE_WORDS; `perm-mode` reads permission-mode-labels.js. sidebar-tasks.js SESSION_STATE_META / SESSION_URGENCY_META now take their labels FROM the door.
+- **browser-switcher-model.js stays import-free:** its DOM halves inject `claimWord`.
+- **Census ⑥ grows:**
+  - (b) Every value the tree LISTS is worded: session-status STATES / URGENCIES (now exported), backend-caps response styles (codex none / friendly / pragmatic were missing), automation-engine `key.*` acts, jobs.js causes / triggers. Every delegated word has zh + ja rows. 40 listed values.
+  - (c) A code-named field (.state .status .role .urgency .stopReason .verb .trigger .cause .tier .theme …) put straight into a visible sink is red. Its own shrink-only baseline was seeded at **6**: none of them on this lane's list.
+  - A ternary's test and the left of `&&` count as not-drawn.
+- **The fixes:**
+  - The status bar's effort chip and menu, the style names, the model chip (agent-meta MODEL_CATALOG keeps each model's `label`; `modelLabelFor`), the model menu's alias notes and its default row, and the health rows («connection failed», «needs sign-in»).
+  - The message details: role, stop reason, service tier.
+  - The board mark's own label (`tc('session-card','Mark')`) and its words.
+  - The resume-settings default row, worded by the page.
+  - jobs-panel: state, access options, run cause / trigger, «exit code {n}».
+  - The vault audit's `key.*` acts.
+  - The browser claim codes.
+  - A task keeps its started name: message-manager no longer overwrites it with the CLI's `task_progress` activity line («Running …»).
+- **Left for pick 4:** the dates and durations of these surfaces (message details, jobs, the session card, the vault audit).
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

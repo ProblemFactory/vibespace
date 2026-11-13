@@ -13,6 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
 import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor, billingRow, viewIdFor, legacyIdFor, BACKEND_META } from './agent-meta.js';
@@ -2231,7 +2232,7 @@ class ChatView {
     const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : null);
     const rows = [];
     const add = (label, val, copyable) => { if (val != null && val !== '') rows.push({ label, val: String(val), copyable }); };
-    add(t('Role'), msg.role === 'assistant' ? 'assistant' : msg.role === 'user' ? 'user' : msg.role === 'tool' ? `tool (${msg.toolName || '?'})` : msg.role);
+    add(t('Role'), msg.role === 'tool' ? `${valueWord('msg-role', 'tool', t)} (${msg.toolName || '?'})` : valueWord('msg-role', msg.role, t));
     add(t('Time'), msg.ts ? new Date(msg.ts).toLocaleString() : null);
     add(t('Model'), meta.model);
     if (u.input_tokens != null || u.output_tokens != null) {
@@ -2244,7 +2245,7 @@ class ChatView {
       add(t('Cache write'), cw ? fmt(cw) : null);
       add(t('Output tokens'), fmt(u.output_tokens));
       if (u.reasoning_output_tokens != null) add(t('Reasoning tokens'), fmt(u.reasoning_output_tokens)); // codex: the reasoning share of output_tokens
-      if (u.service_tier) add(t('Service tier'), u.service_tier);
+      if (u.service_tier) add(t('Service tier'), valueWord('service-tier', u.service_tier, t));
     }
     // THE TURN'S reasoning effort (turn_context / the wrapper's live twin).
     // 'ultra' is a delegation MODE, not a level — effortDisplay names the
@@ -2252,7 +2253,7 @@ class ChatView {
     // multi_agent_reasoning_effort), so a user who picked ultra does not read
     // a bare 'xhigh' here and conclude their pick was dropped (2.369.62).
     if (meta.effort) add(t('Effort'), effortDisplay(this._backendId(), meta.effort, { model: meta.model }));
-    add(t('Stop reason'), meta.stopReason);
+    add(t('Stop reason'), meta.stopReason ? valueWord('stop-reason', meta.stopReason, t) : null);
     // THE TURN this message closed (claude turn_duration, design-unknown-records
     // 2026-09-21): "Turn: 3m18s · 66 messages [· budget n/limit]".
     if (meta.turn && (meta.turn.durationMs != null || meta.turn.messageCount != null)) {

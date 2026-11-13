@@ -13,6 +13,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Claude login warning in For you is in your language, and system items there name their source in your language.
 - The dialog for adding a machine has a Cancel button and its own button for picking a key file; a name already in use is said in your language.
 - A setting's description no longer shows a raw {n} or ** marks.
+- The effort and style menus in a chat's status bar name their values in your language, and the model chip names the model as its menu does.
+- A chat's list of what is not working says what is wrong in your language.
+- A message's details show its author, why it stopped and its service tier in your language.
+- A helper's status in a chat keeps its task's name instead of the command line tool's English activity line.
+- Background Work shows a job's state, who may see it, how a run ended and what started it in your language.
+- A conversation's card shows its board mark apart from its run status, in your language, and its resume settings say Default in your language.
+- The vault's automation key history says in words what you did with a key.
+- When a site blocks the agent's browser for a known reason, the reason is shown in your language.
 
 ## 2.369.402 — 2026-11-14
 

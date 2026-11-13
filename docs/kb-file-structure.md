@@ -29,6 +29,9 @@ scripts/test-oat-add-door.mjs (NEW, fast — lane oat-add-door) — the plan val
 src/claude-oat-probe.js — + the MINT variant (lane oat-add-door): `setup-token` in a pty (util-linux script) through the one launcher, its printed authorize URL's scope=; ends by the tracer's kill by design; never in the gate; BROWSER pinned /bin/false ⇒ kb-file-structure.md
 src/cli-caps.js — + MINT_VARIANT, mintScopesIn (the printed URL), mintScopesOf (per exact version, scripts/fixtures/oat-mint-scopes.json), scopesOk (the one scope grammar) ⇒ kb-file-structure.md
 src/accounts.js — + the shape's PROVENANCE (oatShapeSource login|person, oatShapeAt, oatShapeReplaced), oatMintCaps, setOatShapeByPerson; a sign-in's shape replaces a person's, said once ⇒ kb-file-structure.md
+src/lib/value-words.js (NEW, PURE — lane ui-language pick 2) — THE ONE DOOR from a stored value to a word: valueWord(set, value, t) at display, the value itself when unknown; job-state / perm-mode read their own tables ⇒ kb-file-structure.md
+scripts/test-ui-language.mjs (NEW, fast PURE — lane ui-language) — every sentence through t() with zh + ja rows: ① visible English (shrink-only baseline) ② rows ③ params ④ markup ⑤ rows left English ⑥ stored values worded ⇒ kb-file-structure.md
+src/foryou-actions.js FORYOU_HEADS / headWordOf (lane ui-language) — a system producer's filed For-you head («Manage Agents», «Vault» …) worded at display, never in the store ⇒ kb-file-structure.md
 src/user-state-ops.js (NEW, PURE — lane sidebar-echo-order) — user state by item in the server's order: diffOps / applyOps, stateRev + stateEpoch, a FACT per slot (factStore / judgeRequest / moveFacts: the later act wins by each act's age), createSync (each request carries all unconfirmed) ⇒
 src/lib/sidebar-state.js _userSync / _applyServerState / _pushUserState (lane sidebar-echo-order) — the person's ops at the act to the ops door, each batch with its age; an echo at or below the page's stateRev changes nothing ⇒ the essay is src/user-state-ops.js's (below)
 src/job-logs-sweep.js + src/job-logs-sweep-worker.js — NEW (lane job-logs-sweep) THE JOB-LOGS REMOVER: runVerdict (age = NEWEST file; never listed / held / skeleton / alive), keepSetOf, createRemover (one queue, one child process, timeouts, HELD); the child does every removal under data/job-logs ⇒
@@ -13171,6 +13174,36 @@ PURE (imports nothing; CJS — required by the claude adapter, bundled into the 
 - **`CODEX_NOTE`** — why codex gets nothing: its only per-command allow is an execpolicy `.rules` file under CODEX_HOME (no per-spawn flag in 0.154.0 — a write into the user's own config), and its default workspace-write sandbox with network on already runs these tools without asking.
 
 Consumers: src/adapters/claude-code.js (the spawn's `--settings permissions.allow` + — in a mode that asks anyway, r3 — `permissions.ask`, row `claude.allowAgentTools`), src/lib/chat-renderers.js (plain words, the browser face, the widened / narrowed / withheld Always Allow). Gates: scripts/test-agent-tool-rules.mjs (fast, 134) + scripts/test-new-session-dialog.mjs (heavy, 58); the upload refusal: test-browser-verbs.
+
+### src/lib/value-words.js — THE ONE DOOR FROM A STORED VALUE TO A WORD (PURE, lane ui-language pick 2)
+
+`valueWord(set, value, t, { backend })` / `hasWord(set, value)` / `modelLabelWords(m, t)` / `VALUE_SETS`. A protocol or stored value (a message's role, a stop reason, an effort level, a job's state, a vault act …) stays EXACTLY what it is on the wire and in storage. The page words it HERE, at display (kb-design-lessons §16). A value the table does not know is shown as itself: a newer CLI's value is never hidden or mis-worded.
+
+The words are `i18nKey` literals, so their zh + ja rows are held by test-ui-language ②. Sets that already had a table are READ, never twinned: `job-state` → src/job-model.js STATE_WORDS, `perm-mode` → permission-mode-labels.js. sidebar-tasks.js SESSION_STATE_META / SESSION_URGENCY_META take their labels from here. A PURE model that imports nothing (browser-switcher-model.js) gets the worder injected by its DOM half.
+
+Census: test-ui-language ⑥.
+- (b) Every value the tree lists has words: session-status STATES / URGENCIES, backend-caps responseStyle values, automation-engine `key.*`, jobs.js causes and triggers. Every delegated word has rows.
+- (c) A code-named field drawn raw into a visible sink is red, past a shrink-only baseline.
+
+### scripts/test-ui-language.mjs — THE UI-LANGUAGE CENSUS (fast, PURE, lane ui-language)
+
+**The universe:** the src files the three browser entries reach (src/client.js, src/design-viewer-entry.js, src/doc-editor-entry.js), walked through their relative imports. Worker threads parse it with acorn and hand back each file's PARSED imports; one the walk missed is red. ~0.75 s.
+
+**The legs:**
+- ① A literal that reads as English in a sink a person reads, outside t() / tc() / tr() / i18nKey(). Held by the shrink-only multiset baseline in scripts/fixtures/ui-language-baseline.json: a NEW hit is red; a gone row is red until `--lower`. A non-word literal carries `// ui-words: <why>`.
+- ② Every extracted key has a zh AND a ja row.
+- ③ Every {param} of a literal key is filled by its call, or by a settings `[t(key), {params}]` pair.
+- ④ Markup:
+  - A key carrying `<b>` / `<br>` / `**` / a backtick pair never reaches a text sink.
+  - A dict value adds no markup its key lacks.
+- ⑤ No zh / ja row is English for a word key. Shrink-only baseline, plus GLOSSARY_PENDING (agent / harness / reset credit / token) — the owner's glossary is lane L3's.
+- ⑥ Stored values:
+  - The For-you heads (src/foryou-actions.js FORYOU_HEADS).
+  - The value door's sets, and the raw-field baseline (see src/lib/value-words.js).
+
+Every leg runs its planted control first.
+
+**Found on the way:** scripts/i18n-extract.mjs `dictEntries` misses rows with a trailing `// …` comment (~500), so this census reads the dictionary MODULES.
 
 ### src/lib/permission-mode-labels.js — PERMISSION MODES IN PLAIN WORDS (PURE, lane L)
 

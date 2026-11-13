@@ -5,6 +5,7 @@ import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
@@ -80,7 +81,7 @@ const maskNoteHtml = (words) => { const n = maskedNoteOf(words, t); return n ? `
 /** THE «Now» VALUE of a session's status record (the current state, its reason — a cleared one in this device's words — and its detail),
  *  as HTML (every string escaped). r4: module-level so the masked-note render leg draws the real markup. */
 export function statusNowHtml(st) {
-  const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: st.state, color: 'var(--text-dim)' }) : null;
+  const meta = st?.state ? (SESSION_STATE_META[st.state] || { label: valueWord('session-state', st.state, t), color: 'var(--text-dim)' }) : null;
   const urgMark = st?.urgency ? (SESSION_URGENCY_META[st.urgency]?.mark || '') : '';
   return meta
     ? `<span style="color:${meta.color};font-weight:600">${escHtml(meta.label)}${urgMark ? ' ' + urgMark : ''}</span>${st.reason ? ` <span style="color:var(--text-dim)"${isCleared(st) ? ' class="rc-cleared"' : ''}>— ${escHtml(isCleared(st) ? clearedText() : st.reason)}</span>` : ''} <span class="sp-dim-note">(${st.setBy === 'agent' ? escHtml(t('agent')) : escHtml(t('you'))})</span>${st.reason && !isCleared(st) ? maskNoteHtml(st.reason) : ''}${st.detail ? `<details class="sp-status-detail"><summary>${escHtml(t('detail'))}</summary><div>${escHtml(st.detail)}${maskNoteHtml(st.detail)}</div></details>` : ''}`
@@ -171,7 +172,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
           histList.appendChild(li);
           continue;
         }
-        const m = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
+        const m = h.state ? (SESSION_STATE_META[h.state] || { label: valueWord('session-state', h.state, t), color: 'var(--text-dim)' }) : null;
         li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
           + `<span class="session-history-dot" style="--h-color:${m ? m.color : 'var(--text-dim)'}"></span>`
           + `<span class="session-history-state">${escHtml(h.cleared ? t('cleared') : (m?.label || ''))}</span>`

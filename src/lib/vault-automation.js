@@ -29,6 +29,7 @@
 // filter past eight, ended conversations dim with ONE 清理已结束的授权 — remembered per key for this page); the limits are ONE
 // line of words where an unrestricted set says 任何 and more than three picks say 「N 种」 (the names in its title).
 import { t } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: an owner's act (key.mint …) in words (the walk's vault-grants-1)
 import { fetchJson, showToast, showConfirmDialog, createModalShell, createPopover } from './utils.js';
 import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder, EVERYONE_SUBJECT } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
 import { BACKEND_META } from './agent-meta.js';
@@ -295,7 +296,7 @@ export async function showAuditDialog(key, data) {
     // a use: who called · the verb · allowed or the refusal's code; an owner's act (key.mint / .grant / .limits / …): you · the act → whom
     const own = /^key\./.test(String(l.verb || ''));
     row.append(el('span', 'vw-ak-when', whenText(Date.parse(l.at))), el('span', 'vw-ak-who', own || l.subject === 'owner' ? t('You') : subjectName(l.subject, data)),
-      el('span', 'vw-ak-verb', SCOPES.some((x) => x.verb === l.verb) ? verbWord(l.verb) : l.verb));
+      el('span', 'vw-ak-verb', SCOPES.some((x) => x.verb === l.verb) ? verbWord(l.verb) : own ? valueWord('vault-act', l.verb, t) : l.verb));
     if (own) { if (l.subject && l.subject !== 'owner') row.append(el('span', 'vw-ak-arg', '→ ' + subjectName(l.subject, data))); }
     else row.append(el('span', 'vw-ak-outcome', l.ok ? t('Allowed') : l.code));
     if (l.args && l.args.cwd) row.append(el('span', 'vw-ak-arg', l.args.cwd));
