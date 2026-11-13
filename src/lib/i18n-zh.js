@@ -9745,7 +9745,7 @@ export default {
   "The device keeps this list; only running the command again on the device changes it — this VibeSpace cannot.": "清单存在设备上；只有在设备上重跑命令才能改——这个 VibeSpace 改不了。", // lane device-allow-flags
   "On a cluster instance SOCKS, LAN and keyboard & mouse start off.": "集群实例上 SOCKS、局域网和键鼠默认不开。", // lane device-allow-flags
   // lane pair-dialog-polish (.399): the pairing command sheet — ① ② ③, the allow items' plain words, this system's install facts
-  "Paired as \"{id}\". Put it on the device in three steps:": "已配对为“{id}”。分三步装到设备上：",
+  "Paired as \"{id}\". Put it on the device in four steps:": "已配对为“{id}”。分四步装到设备上：",
   "Choose the device’s system": "选择设备的系统",
   "Copy the command": "复制命令",
   "Run it in Terminal on the Mac.": "在 Mac 的“终端”里运行它。",
