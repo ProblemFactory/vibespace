@@ -275,7 +275,7 @@ export function installSetupFlows(App) {
       } else if (step === 1) {
         content.innerHTML = `
           <h1>${t('Connect your agents')}</h1>
-          <p class="ob-sub">${t('Sign in with your own Claude account — your company uses a Claude subscription. Nothing works until you do.')}</p>
+          <p class="ob-sub">${t('Sign in to your Claude account to start a conversation.')}</p>
           <div id="ob-signin"></div>
           <div class="ob-warn" id="ob-signin-warn" hidden>${t('You are not signed in yet — you won’t be able to start a chat. Continue anyway?')}</div>
           <details class="ob-advanced"><summary>${t('Advanced: sign in from a terminal, or add Codex')}</summary>

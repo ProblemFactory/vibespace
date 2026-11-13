@@ -183,11 +183,11 @@ module.exports = {
       { key: 'rootFolderId', label: i18nKey('Folder ID (advanced)'), placeholder: '1AbC…' },
     ],
     connect: [
-      { key: 'token', label: i18nKey('Google Drive access'), type: 'textarea', placeholder: i18nKey('click "Connect Google Drive" below — no terminal needed'), hint: i18nKey('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
+      { key: 'token', label: i18nKey('Google Drive access'), type: 'textarea', placeholder: i18nKey('press “Connect Google Drive” — no terminal needed'), hint: i18nKey('Advanced: you can also paste the JSON from `rclone authorize "drive"` run elsewhere.') },
       { key: 'driveFolder', label: i18nKey('Folder (optional, blank = whole Drive)'), placeholder: 'Projects/Data' },
       { key: 'clientChoice', label: i18nKey('OAuth client'), type: 'select', clients: { builtin: i18nKey('Built-in client (rclone shared — being retired by Google)') }, value: { preset: '' },
         // lane cluster-presets (P3): no company client is SAID, never just an absent option
-        hint: { presets: i18nKey('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.'), none: i18nKey("No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.") } },
+        hint: { presets: i18nKey('Pick the preset matching your Google account\'s organization; external accounts may see a one-time "unverified app" warning.'), none: i18nKey('The built-in client connects right away; its quota is shared with everyone, so for heavy use bring your own client.') } },
       { key: 'clientId', label: i18nKey('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: { clientChoice: 'custom' } },
       { key: 'clientSecret', label: i18nKey('Custom OAuth client secret'), type: 'password', when: { clientChoice: 'custom' } },
       { key: 'driveMode', label: i18nKey('Cloud-side scope'), type: 'select',

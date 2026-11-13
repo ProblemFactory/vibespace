@@ -14,6 +14,7 @@ import { marked } from 'marked';
 import { escHtml, showConfirmDialog } from './utils.js';
 import { lineDelta } from '../artifacts.js'; // lane artifacts-model: the save's "+a −b lines"
 import { t, tc } from './i18n.js';
+import { needLine } from './need-line.js'; // lane ui-needs-a-button (desktop-apps-30): a state + both ways on one line
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: the preview's diagrams
 import * as prettier from 'prettier/standalone';
@@ -179,13 +180,13 @@ class CodeEditor {
     // Disk-change notice: shown when the on-disk file is newer than the loaded
     // copy AND the editor holds unsaved edits (clean editors auto-reload).
     // Click = reload, which confirms the discard — edits are never silently lost.
-    this._diskChip = document.createElement('button');
-    this._diskChip.className = 'file-tool-btn media-btn';
-    this._diskChip.textContent = '⚠ ' + t('File changed on disk');
-    this._diskChip.title = t('Reload from disk');
-    this._diskChip.style.cssText = 'display:none;color:var(--yellow)';
-    this._diskChip.onclick = () => this.reloadFromDisk();
-    toolbarLeft.append(this.saveIndicator, this._diskChip);
+    // lane ui-needs-a-button (desktop-apps-30): the state AND both ways on its line — «Reload from disk» (confirms the discard)
+    // or «Keep my changes» (the notice goes until the file changes on disk again; the next save writes these edits)
+    this._diskChip = needLine({ words: '⚠ ' + t('Another program changed this file on disk'), tone: 'need', cls: 'code-editor-disk-need', doors: [
+      { label: t('Reload from disk'), kind: 'primary', door: 'disk-reload', run: () => this.reloadFromDisk() },
+      { label: t('Keep my changes'), kind: 'secondary', door: 'disk-keep', run: () => { this._diskKept = this._diskSeen || Date.now(); this._diskChip.style.display = 'none'; } }] });
+    this._diskChip.style.display = 'none';
+    toolbarLeft.append(this.saveIndicator);   // the disk notice is its OWN row under the toolbar (the 500 px picture: one toolbar row crushed its doors)
 
     const toolbarRight = document.createElement('div'); toolbarRight.className = 'editor-toolbar-right';
 
@@ -253,7 +254,7 @@ class CodeEditor {
 
     this.editorBody = document.createElement('div'); this.editorBody.className = 'editor-body';
     this._previewBody = document.createElement('div'); this._previewBody.className = 'markdown-preview editor-body'; this._previewBody.style.display = 'none'; this._previewBody.style.overflow = 'auto';
-    container.append(toolbar, this.editorBody, this._previewBody);
+    container.append(toolbar, this._diskChip, this.editorBody, this._previewBody);
     winInfo.content.appendChild(container);
 
     this._langCompartment = new Compartment();
@@ -423,8 +424,8 @@ class CodeEditor {
         const res = await fetch(`/api/file/info?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
         const info = await res.json();
         const m = info && !info.error && info.modified ? new Date(info.modified).getTime() : 0;
-        if (!m || m <= this._diskMtime) return;
-        if (this.modified) { this._diskChip.style.display = ''; this._toolbarEl?.classList.add('ce-disk-changed'); } // the notice takes its own line (lane ui-phone-and-fit #3)
+        if (!m || m <= this._diskMtime || m <= (this._diskKept || 0)) return;
+        if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; }
         else await this.reloadFromDisk({ auto: true });
       } catch {}
     };

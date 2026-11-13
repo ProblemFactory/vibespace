@@ -394,7 +394,8 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
 }
 
 /** "Install an app…" — search this machine's package sources, pick one, see THE plan. */
-export function openAppSearch(app, m, { onDone = null } = {}) {
+export function openAppSearch(app, m, { onDone = null, query = '' } = {}) {
+  // not the subject: query — a card's program name, filled into THE one search form of that machine (asked again it is raised, what was typed kept)
   const { body, close, raised, ready } = createModalShell({ id: 'app-search-dialog', key: m.hostId, title: t('Install an app on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-search', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const intro = el('p', 'app-search-intro', t('Search the package sources of {machine}. Nothing is installed until you read its plan and press Install.', { machine: machineInSentence(m) }));
@@ -427,7 +428,8 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
     if (exact && !r.results.some((x) => x.package === words)) { const b = el('button', 'app-search-result app-search-exact'); b.type = 'button'; b.append(el('span', 'app-search-pkg', words), el('span', 'app-search-sum', t('Plan this exact package name'))); b.onclick = () => pick(words); results.appendChild(b); }
     for (const x of r.results) { const b = el('button', 'app-search-result'); b.type = 'button'; b.dataset.pkg = x.package; b.append(el('span', 'app-search-pkg', x.package), el('span', 'app-search-sum', x.summary)); b.onclick = () => pick(x.package); results.appendChild(b); }
   };
-  ready.then((s) => { if (s) setTimeout(() => input.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
+  if (query) input.value = String(query);   // lane ui-needs-a-button (desktop-apps-3): a card's «Install…» names its program
+  ready.then((s) => { if (s) setTimeout(() => { input.focus({ preventScroll: true }); if (query && typeof form.requestSubmit === 'function') form.requestSubmit(); }, 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 

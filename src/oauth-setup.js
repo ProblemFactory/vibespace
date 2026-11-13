@@ -98,7 +98,8 @@ const WORDS = Object.freeze({
   'where.custom': i18nKey('Then: Connect an account → OAuth client → Custom — enter the client ID and secret there.'),
   'where.preset': i18nKey('The client ID and secret are set by your admin in the cluster presets.'),
   'where.self': i18nKey('The client id is filled in by Connect.'),
-  refusal: i18nKey('If {provider} says “{error}”, the address it was sent is not on that list: add it there (for a company app, your admin does).'),
+  refusal: i18nKey('If {provider} says “{error}”, the address it was sent is not on that list: add it there.'),
+  'refusal.admin': i18nKey('This is a company app: its admin adds the address.'),   // lane ui-needs-a-button (M3): said only beside a company preset
   'refusal.desktop': i18nKey('An https address and {provider} still says “{error}”? The client is a Desktop app client, which cannot take one — create a Web application client, or sign in the other way.'),
   console: i18nKey('Open the console'),
 });
@@ -185,7 +186,7 @@ function setupCard({ kind, redirect = null, base = '', relayPages = [], preset =
  *  kinds of client (`clientTypes`), an https address asked (`https`), a company preset (`preset`). The «it is a Desktop app
  *  client» CLAIM (`refusal.desktop`) is drawn only for a person's OWN client: a company app's kind is its admin's fact. */
 function refusalKeys({ clientTypes = false, https = false, preset = false } = {}) {
-  return ['refusal', 'register', ...(clientTypes && https && !preset ? ['refusal.desktop'] : [])];
+  return ['refusal', ...(preset ? ['refusal.admin'] : []), 'register', ...(clientTypes && https && !preset ? ['refusal.desktop'] : [])];
 }
 /** lane gmail-connect-wall (law 5, the admin's door NAMED, not built): the lines that say what a company preset does not
  *  say (`lacks` ⊆ LACK_KEYS) and WHERE its admin says it (`source`: the presets directory — watched, no restart — or the

@@ -125,7 +125,7 @@ console.log('§1 PURE preset-layers');
   const t = (s, p) => String(s).replace(/\{(\w+)\}/g, (m0, k) => (p && p[k] !== undefined ? String(p[k]) : m0));
   const ago = (ms) => `${Math.round(ms / 60000)} min ago`;
   const none = PL.presetsLine(PL.summarize({}), { t, ago });
-  ok(none.none && none.text === 'Company presets: none — ask your admin.', `no presets ⇒ "${none.text}"`);
+  ok(none.none && none.text === 'Company presets: none.', `no presets ⇒ "${none.text}"`);
   const sum = PL.summarize({ dir: '/etc/vibespace/presets', updatedAt: 1000, items: [{ kind: 'gdrive', source: 'cluster', n: 3 }, { kind: 'lark', source: 'cluster', n: 1 }, { kind: 'gdrive', source: 'release', n: 1 }, { kind: 'cloud:browserbase', source: 'env', n: 1 }, { kind: 'lark', source: 'release', n: 0 }] });
   const line = PL.presetsLine(sum, { t, ago, now: 1000 + 120000 });
   ok(line.text === 'Company presets: 3 Google clients, 1 Lark app — from the cluster, updated 2 min ago; 1 Google client — from this release’s own values, updated 2 min ago; Browserbase (cloud browser) key — from the environment (a restart is needed to change them)', `the brief's sentence, per source: "${line.text}"`);
@@ -357,7 +357,7 @@ for (const c of STATES) for (const r of STATES) {
     `${name}: ${expErrs.length} typed error row(s) (kept:false) + ${expErrs.length} line(s) naming file + code${expErrs.length ? '' : ' — none'}`);
   // the words
   const wantCluster = P3.KINDS.some((k) => expectKind(k, c, r).from === 'cluster'), wantRelease = P3.KINDS.some((k) => expectKind(k, c, r).from === 'release');
-  const okWords = anyEntry ? (!line.none && /from the cluster/.test(line.text) === wantCluster && /from this release/.test(line.text) === wantRelease && !/from the environment/.test(line.text)) : (line.none && /none — ask your admin/.test(line.text));
+  const okWords = anyEntry ? (!line.none && /from the cluster/.test(line.text) === wantCluster && /from this release/.test(line.text) === wantRelease && !/from the environment/.test(line.text)) : (line.none && /^Company presets: none\.$/.test(line.text));
   ok(okWords && line.errors.length === expErrs.length && line.errors.every((s) => /offers no presets until it is fixed/.test(s)), `${name}: the line says it — "${line.text}"${line.errors.length ? ' + ' + line.errors.length + ' error sentence(s)' : ''}`);
   // never a value
   const leaked = leaks([cap.lines, st, sum, line]);
@@ -388,7 +388,7 @@ ok(cells === STATES.length * STATES.length, `${cells} file cells (${STATES.lengt
   const p = envCell('present');
   ok(p.d.length === 1 && p.d[0].clientSecret === SENT.env.gdrive && p.res.source === 'cluster' && p.res.values.apiKey === SENT.env.integrations, 'env=present, directory silent: Google clients from VIBESPACE_GDRIVE_CLIENTS, the cloak row from VIBESPACE_INTEGRATIONS (source cluster)');
   const a = envCell('absent');
-  ok(a.d.length === 0 && a.res.source === 'none' && a.res.whyCode === 'no-preset', 'env=absent, directory silent: no Google client, the row says no-preset (the dialogs: ask your admin)');
+  ok(a.d.length === 0 && a.res.source === 'none' && a.res.whyCode === 'no-preset', 'env=absent, directory silent: no Google client, the row says no-preset (the dialogs: your own client)');
   const m = envCell('malformed');
   console.error = prevErr;                      // the captures are over — ok()'s own ✗ goes to stderr again
   ok(m.d.length === 0 && m.res.source === 'none' && m.errs.length === 1 && m.lines.some((l) => /unparseable|not valid JSON/.test(l)) && !leaks([m.errs, m.lines]).length, 'env=malformed: [] / none, ONE line each, no bytes of the secret');

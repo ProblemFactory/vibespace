@@ -336,9 +336,9 @@ export function installOfferFor(av, m) {
 }
 /** lane C2: the install dialog's words for a plan the machine cannot run, by code. §7.9: `what` = the install (xpra by
  *  default — its words unchanged; a LibreOffice install says its own words where they differ). */
-export function installRefusalText(code, what = 'xpra') {
+export function installRefusalText(code, what = 'xpra', m = null) {
   if (what === 'tightvnc') { // design 014 D1: the Windows one-time setup
-    if (code === 'no_admin') return t('Windows on that machine granted no administrator rights — nobody clicked Yes there. Click Install again with someone at that machine, or paste the commands above into an administrator PowerShell there.');
+    if (code === 'no_admin') return t('Windows on that machine granted no administrator rights — nobody clicked Yes there. Click Install again with someone at that machine, or paste these commands into an administrator PowerShell there.');
     if (code === 'install_failed') return t('The install failed — the administrator window on that machine said why.');
     if (code === 'still-absent') return t('The install finished, but nothing answers as a VNC server on port 5900 yet — check again.');
     if (code === 'not_windows') return t('TightVNC is for Windows machines — a Mac turns on Screen Sharing instead.');
@@ -348,9 +348,10 @@ export function installRefusalText(code, what = 'xpra') {
     if (code === 'still-absent') return t('The install finished, but LibreOffice is still not found on this machine — check again.');
   }
   if (code === 'no_x11') return t('This machine runs macOS or Windows — it has no X11 server, so desktop apps cannot run there.');
-  if (code === 'no_apt') return t('This Linux has no apt-get — install xpra 6.x by hand from xpra.org.');
+  if (code === 'no_apt') return t('{machine} cannot install the display component by itself — it has no apt-get.', { machine: machineName(m) });
   if (code === 'no_repo') return t('Its package sources offer only an old xpra and xpra.org publishes nothing for this release — install xpra 6.x by hand.');
-  if (code === 'no_sudo') return t('This machine has no passwordless sudo — run these commands yourself in a terminal there, then check again.');
+  if (code === 'no_sudo') return !m || !m.hostId || m.hostId === 'local' ? t('This machine has no passwordless sudo — run these commands yourself in a terminal, then press Check again.')
+    : t('{machine} has no passwordless sudo — run these commands yourself in a terminal on it, then press Check again.', { machine: machineName(m) });
   if (code === 'no_facts') return t('The agent on this machine did not report what it runs — reconnect it to upgrade the agent.');
   if (code === 'busy') return t('An install is already running on this machine — wait for it to finish, then check again.');
   if (code === 'install_timeout') return t('The install did not finish in time and is still running on this machine — VibeSpace never stops apt halfway. Check again once it ends.');
@@ -560,13 +561,19 @@ export async function removeRegistered(row, { forget = false, onDone = null } = 
   if (!ok) return null;
   const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(row.id)}/${forget ? 'forget' : 'remove'}`, POST_JSON({}));
   if (!r || r.ok === false || r.error) {
-    const { body, raised } = createModalShell({ id: 'desktop-remove-failed', key: `${row && row.id}:${forget ? 'forget' : 'remove'}`, title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+    const { body, close: rclose, raised } = createModalShell({ id: 'desktop-remove-failed', key: `${row && row.id}:${forget ? 'forget' : 'remove'}`, title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     const said = r && r.code === 'no_recipe' ? t('{app} has no remove recipe — use Forget', { app }) : r && r.code === 'needs_root' ? t('Its remove recipe needs administrator rights — VibeSpace runs recipes as you only') : t('The remove recipe failed');
-    const p = document.createElement('p'); p.className = 'desktop-adopt-witness is-bad'; p.textContent = [said, r && r.error].filter(Boolean).join(' — ');
-    body.appendChild(p);
+    // lane ui-needs-a-button (desktop-apps-18): the sentence ONCE with its ways out on its line — «Forget it» (the entry leaves Apps,
+    // the program is not touched), «Copy the command», «Close»; what the recipe printed is said once, under «Details»
+    const doors = [forget ? null : { label: t('Forget it'), kind: 'primary', door: 'remove-forget', run: () => { rclose(); removeRegistered(row, { forget: true, onDone }); } },
+      rec ? { label: t('Copy the command'), kind: 'secondary', door: 'remove-copy', run: async () => { const ok2 = await copyText(rec); showToast(ok2 === false ? t('Could not copy — select the commands and copy them') : t('Commands copied'), ok2 === false ? { type: 'error' } : undefined); } } : null,
+      { label: t('Close'), kind: 'secondary', door: 'remove-close', run: () => rclose() }];
+    body.appendChild(needLine({ words: said, tone: 'fail', cls: 'desktop-adopt-witness', doors }));
     const out = String((r && r.output) || '').trimEnd().split('\n').slice(-12).join('\n');
-    if (out) { const pre = document.createElement('pre'); pre.className = 'desktop-install-pre desktop-remove-output'; pre.textContent = out; body.appendChild(pre); }
+    const err = String((r && r.error) || '').trim();
+    const raw = [err && !out.includes(err) ? err : '', out].filter(Boolean).join('\n');
+    if (raw) { const det = document.createElement('details'); det.className = 'desktop-remove-details'; const sm = document.createElement('summary'); sm.textContent = t('Details'); const pre = document.createElement('pre'); pre.className = 'desktop-install-pre desktop-remove-output'; pre.textContent = raw; det.append(sm, pre); body.appendChild(det); }
     return null;
   }
   const fresh = onDone ? await onDone() : null;
@@ -680,6 +687,14 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const more = document.createElement('details'); more.className = 'app-install-details';
   if (isApp) { const s = document.createElement('summary'); s.textContent = t('Details'); more.append(s); ib.insertBefore(summary, note); }
   // design 009 §B5: a refusal that is a dead end offers its way out — an agent looks for another way (the request carried)
+  // lane ui-needs-a-button (desktop-apps-20 / -21, M5): an install that cannot run here says why with its ways out ON its line —
+  // no passwordless sudo: «Open a terminal» + «Check again»; no apt-get: «Open the xpra download page» (xpra) + «Check again» +
+  // «Close». THE MARKER the machine table (lane machine-needs-at-pairing, src/machine-needs.js) reads: door: 'install-recheck'
+  const recheck = { label: t('Check again'), kind: 'primary', door: 'install-recheck', run: () => { iclose(); showInstallDialog(m, { what, onDone, request, proposalId }); } };
+  const deadEndDoors = (code) => code === 'no_sudo'
+    ? [launcherApp && typeof launcherApp.openShellTerminal === 'function' ? { label: t('Open a terminal'), kind: 'secondary', door: 'install-terminal', run: () => launcherApp.openShellTerminal(undefined, m.hostId && m.hostId !== 'local' ? { hostId: m.hostId } : {}) } : null, recheck]
+    : [xp ? { label: t('Open the xpra download page'), kind: 'secondary', door: 'install-xpra-page', run: () => window.open('https://xpra.org/', '_blank', 'noopener') } : null, recheck, { label: t('Close'), kind: 'secondary', door: 'install-close', run: () => iclose() }];
+  const sayDeadEnd = (code, words) => { note.classList.remove('is-bad'); note.replaceChildren(needLine({ words, tone: 'fail', doors: deadEndDoors(code) })); };
   const handOff = (code, pkgs) => {
     if (!HAND_OFF_CODES.includes(code) || !launcherApp) return;
     const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-create desktop-install-handoff'; b.textContent = t('Let an agent find another way');
@@ -697,9 +712,10 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   let shownDigest = r.digest || null; // verify-r6 I1: the press names the plan these commands are
   if (isApp && r.request) { const h = ib.closest('.dialog')?.querySelector('.dialog-title, h3, .modal-title'); if (h) h.textContent = appDialogTitle(r.request, name); }
   if (!plan.ok) {
-    note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : vm ? (micInstallRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what) || plan.error || ''); // design 009 §B5: ONE sentence, ours
+    note.textContent = isApp ? (appRefusalText(plan.code) || plan.error || '') : vm ? (micInstallRefusalText(plan.code) || plan.error || '') : (installRefusalText(plan.code, what, m) || plan.error || ''); // design 009 §B5: ONE sentence, ours
     note.classList.add('is-bad');
     agentDoor(plan.code);
+    if (!isApp && !vm && plan.code === 'no_apt') sayDeadEnd('no_apt', installRefusalText('no_apt', what, m));
     if (isApp) handOff(plan.code, (r.request || request || {}).packages);
     // lane ui-needs-a-button (desktop-apps-27): a .deb file that is not there — its words name the file, and its door is on the line:
     // «Choose another file…» reopens the path form with the path kept (the form was closed to show this dialog)
@@ -724,7 +740,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const src = plan.source === 'xpra.org' ? t('from xpra.org (xpra {major}.x, pinned) — the package sources on {machine} offer only {apt}', { major: '6', machine: name, apt: plan.aptXpra || t('no xpra') }) : t('from the package sources on {machine}', { machine: name });
   // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
   const running = !!((isApp ? r.install : r.facts) && (isApp ? r.install : r.facts).installing);
-  if (!plan.canRun && !running) { note.textContent = isApp ? appRefusalText('no_sudo') : installRefusalText('no_sudo', what); note.classList.add('is-bad'); return; }
+  if (!plan.canRun && !running) { sayDeadEnd('no_sudo', isApp ? appRefusalText('no_sudo') : installRefusalText('no_sudo', what, m)); return; }
   note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : vm ? (plan.adminDialog ? t('This asks for the Mac’s administrator password on {machine}’s own screen — someone there types it. Then, as administrator, it runs:', { machine: name }) : t('This asks Windows on {machine} for administrator rights on its own screen — someone there clicks Yes. The administrator window runs:', { machine: name })) : tv ? t('Install asks Windows on {machine} for administrator rights: someone at that machine clicks Yes, then types the VNC password into the window that opens there (VibeSpace never sees it). It runs these commands:', { machine: name }) : isApp ? (r.card ? '' : appPlanNote(plan, name)) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
   if (isApp) goBtn.textContent = appGoLabel(plan);
   if (running) goBtn.textContent = t('Follow the install');
@@ -1306,6 +1322,16 @@ export async function showLaunchDialog(app, opts = {}) {
         ab.textContent = t('Add…'); ab.title = t('Add to VibeSpace…'); ab.setAttribute('aria-label', t('Add {app} to VibeSpace…', { app: catalogLabel(row) }));
         ab.onclick = (e) => { e.stopPropagation(); cardMenuAct(row, { kind: 'adopt' }); };
         wrap.appendChild(ab);
+      }
+      // lane ui-needs-a-button (desktop-apps-3): a built-in app that is not installed carries «Install…» — the package search
+      // with its program's name filled in (the plan first, never a silent apt); a card that cannot start for another reason keeps its words
+      if (registryReasonShort(row) && !dead && !doc) {
+        const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'desktop-launch-card-install'; ib.dataset.door = 'registry-install';
+        ib.textContent = t('Install…'); ib.title = t('Find {app} in the package sources of {machine}', { app: catalogLabel(row), machine: machineInSentence(machineOf(host)) });
+        ib.setAttribute('aria-label', ib.title);
+        const query = String(row.exec || '').trim().split(/\s+/)[0].split('/').pop() || catalogLabel(row);
+        ib.onclick = (e) => { e.stopPropagation(); openAppSearch(app, machineOf(host), { query, onDone: () => { if (live()) { refresh(); appsSec?.refresh(); } } }); };
+        wrap.appendChild(ib);
       }
       // §7.9: a LibreOffice row that is not installed carries its install beside it (the plan first, never a silent apt)
       if (row.office && !row.available && !dead) {

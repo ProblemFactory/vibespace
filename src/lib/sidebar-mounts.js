@@ -14,7 +14,7 @@ import { dialAddressPicker, dialStateText, dialStateShort, generateConsequenceTe
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { UI_ICONS } from './icons.js';
-import { needLine, needDoorButton, pairDoor } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
+import { needLine, needDoorButton, pairDoor, settingsDoor } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
@@ -724,13 +724,15 @@ export function installSidebarMounts(Sidebar) {
       if (m.cache && m.cache.why) {
         const cl = document.createElement('div');
         cl.className = 'mounts-syncline mounts-cacheline';
+        const cacheDoor = () => [settingsDoor(this.app, 'mounts.vfsCacheRoot', { label: tr('Choose a cache folder…'), kind: 'secondary' })];   // lane ui-needs-a-button
         cl.textContent = m.cache.why === 'dirty' ? tr('Cache kept on a network filesystem: {n} items still uploading — it moves to local disk at the next reconnect once they are done', { n: m.cache.items })
           : m.cache.why === 'unread' ? tr('Cache kept where it is: its state could not be read ({code}) — not moved until it reads clean', { code: m.cache.code || '?' })
           : m.cache.why === 'override-refused' ? tr('Cache folder setting refused: {dir} is not a writable folder ({code}) — every cache stays where it is until it is fixed or cleared', { dir: m.cache.override || '', code: m.cache.code || '?' })
-          : m.cache.why === 'ephemeral-home' ? tr('Cache on a network filesystem: the home folder is not a persistent disk — set Settings › Storage mount cache folder to a persistent local folder')
+          : m.cache.why === 'ephemeral-home' ? tr('Cache on a network filesystem: the home folder is not a persistent disk — the cache needs a persistent local folder')
           : m.cache.why === 'at-remount' ? tr('Cache on a network filesystem — it moves to local disk at the next reconnect if nothing is waiting to upload')
-          : tr('Cache on a network filesystem with no local disk to move it to — set Settings › Storage mount cache folder (or VIBESPACE_VFS_CACHE_DIR) to a local folder');
+          : tr('Cache on a network filesystem with no local disk to move it to — the cache needs a local folder');
         cl.title = m.cache.dir;
+        if (!['dirty', 'unread', 'override-refused', 'at-remount'].includes(m.cache.why)) { const w = cl.textContent; cl.textContent = ''; cl.appendChild(needLine({ words: w, tone: 'need', doors: cacheDoor() })); }
         row.appendChild(cl);
       }
       if (m.keyFile && keyFileWords(m.keyFile.code, m.keyFile.file)) { // THE KEY-FILE LAW: the store's key is why, never the credential

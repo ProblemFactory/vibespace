@@ -80,10 +80,10 @@ module.exports = {
     ],
     connect: [
       { key: 'gmailClientChoice', label: i18nKey('OAuth client'), type: 'select', clients: {}, value: { preset: 'custom' },
-        hint: { presets: i18nKey('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.'), none: i18nKey('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).') } },
+        hint: { presets: i18nKey('Gmail has no built-in fallback client — pick a preset or provide your own. The client needs the gmail.readonly scope.'), none: i18nKey('Gmail needs your own OAuth client here (with the gmail.readonly scope).') } },
       { key: 'gmailClientId', label: i18nKey('Custom OAuth client ID'), placeholder: '….apps.googleusercontent.com', when: { gmailClientChoice: 'custom' } },
       { key: 'gmailClientSecret', label: i18nKey('Custom OAuth client secret'), type: 'password', when: { gmailClientChoice: 'custom' } },
-      { key: 'gmailToken', label: i18nKey('Gmail access'), type: 'textarea', placeholder: i18nKey('click "Connect Gmail" below — no terminal needed'),
+      { key: 'gmailToken', label: i18nKey('Gmail access'), type: 'textarea', placeholder: i18nKey('press “Connect Gmail” — no terminal needed'),
         hint: i18nKey('This is a SYNC, not a live mount: emails download into the folder as .eml files (read-only archive) and keep syncing while connected.') },
       { key: 'syncCount', label: i18nKey('Messages to sync (newest N; 0 = everything)'), placeholder: '200',
         hint: i18nKey('0 syncs the ENTIRE mailbox — archived and spam/trash included when no label filter is set. Large mailboxes take a while (quota-paced); the card shows live progress.') },

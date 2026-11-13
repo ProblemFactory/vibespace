@@ -1,7 +1,7 @@
 // THE HUMANE CLAUDE SIGN-IN CARD (lane door-signin-card) — ONE card for every
 // wall a person meets the sign-in wall at: the chat's «Not logged in» card, the
 // tour's «Connect your agents» step, and Manage agents. It says, in plain words,
-// «Sign in with Claude — your company uses a Claude subscription» + a button
+// «Sign in with Claude» + a button (lane ui-needs-a-button: personal words — no company preset kind exists for Claude sign-in)
 // that opens the OAuth link in a NEW TAB; the product drives the CLI's login
 // flow itself (POST /api/accounts/:id/signin → the hub-owned PTY of
 // src/server/claude-signin.js), shows a paste-the-code box, feeds the code back,
@@ -187,13 +187,13 @@ export class SignInCard {
         (v.submitting ? `<div class="usage-note signin-spinner">${escHtml(t('Signing you in…'))}</div>` : codeRow(true)) + toggle;
     } else if (v.state === 'no-login') {
       bodyHtml =
-        `<div class="signin-sub">${escHtml(t('Your company uses a Claude subscription — sign in with your own account.'))}</div>` +
+        `<div class="signin-sub">${escHtml(t('Sign in with your Claude account — the browser comes back here when it is done.'))}</div>` +
         `<div class="signin-actions"><button class="mounts-btn mounts-btn-primary" data-act="begin">${escHtml(t('Sign in with Claude'))}</button></div>` +
-        `<div class="usage-note">${escHtml(t('No account yet? Ask your administrator.'))}</div>`;
+        `<div class="usage-note signin-signup">${escHtml(t('No Claude account yet?'))} <a class="signin-signup-link" data-door="claude-signup" href="https://claude.ai/" target="_blank" rel="noopener">${escHtml(t('Sign up at claude.ai'))}</a></div>`;   // lane ui-needs-a-button (M3): a personal install's words + the door
     } else if (v.state === 'starting') {
       // a live run: the button stays — DISABLED, saying what it waits for (never a second press, never a blank card)
       bodyHtml =
-        `<div class="signin-sub">${escHtml(t('Your company uses a Claude subscription — sign in with your own account.'))}</div>` +
+        `<div class="signin-sub">${escHtml(t('Sign in with your Claude account — the browser comes back here when it is done.'))}</div>` +
         `<div class="signin-actions"><button class="mounts-btn mounts-btn-primary" data-act="begin" disabled>${escHtml(t('Starting the sign-in…'))}</button></div>` + toggle;
     } else if (v.state === 'url-shown' || v.state === 'waiting-code') {
       title = t('Sign in with Claude');

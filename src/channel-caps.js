@@ -155,7 +155,7 @@ function pushLaneText(push, lane, { t = defaultT, now = null, coldSeconds = COLD
     const text = pushUnavailableText(p.lastStateCode, { t, words: p.unavailableWords });
     return text || t('push unavailable: {why}', { why: p.lastStateWhy || t('unknown') });
   }
-  if (!p.state) return t('push not started');
+  if (!p.state) return t('push not started — it starts while the account is connected and turned on');
   if (l.via === 'push' && l.live && l.carryContent) return t('push live — carrying messages (declared exclusive); polling reconciles every {age} as a safety net', { age: humanAge(coldSeconds) });
   if (l.via === 'push' && l.live) return p.claimedExclusive === 'shared' ? t('push live — cursor kicks only (declared shared)') : t('push live — cursor kicks only (exclusivity not declared)');
   // Connected but silent past the heartbeat window: the resolver reads it as

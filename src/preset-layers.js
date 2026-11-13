@@ -240,7 +240,7 @@ function presetsLine(summary, { t = (s, p) => fill(s, p), ago = null, now = Date
     const p = { file: e.layer === 'release' ? `override/${e.file}` : e.file, code: e.code };
     return e.kept ? t('The company presets file {file} could not be read ({code}) — the previous presets are kept.', p) : t('The company presets file {file} could not be read ({code}) — it offers no presets until it is fixed.', p);
   });
-  if (!groups.length) return { text: t('Company presets: none — ask your admin.'), none: true, errors };
+  if (!groups.length) return { text: t('Company presets: none.'), none: true, errors };   // lane ui-needs-a-button (M3): the fact, no admin assumed
   const age = s.updatedAt && typeof ago === 'function' ? ago(now - s.updatedAt) : null;
   const parts = groups.map((g) => {
     const list = g.items.map((it) => itemWords(it, { t })).join(', ');

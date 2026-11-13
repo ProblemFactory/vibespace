@@ -889,8 +889,12 @@ function showPushDialog(app, a) {
   const current = chanCaps.PUSH_CLAIMS.includes(p.claimedExclusive) ? p.claimedExclusive : 'unknown';
   sel.value = current;
   wrap.appendChild(sel);
-  wrap.appendChild(chanLine('chan-opt-help chan-push-exclusive-help', t('Exclusive = only this VibeSpace consumes that subscription; shared = another instance also reads it, so push here only advances the cursor and polling stays fast.')));
-  wrap.appendChild(chanLine('chan-opt-help', t('The platform does not say how many clients share the app, so exclusivity is asserted here and MEASURED by the product: records the reconciliation poll sees before push do not happen on an exclusive lane. Past 2% over 20 records the lane demotes itself to cursor kicks and says so.')));
+  wrap.appendChild(chanLine('chan-opt-help chan-push-advice', t('Choose exclusive only when this VibeSpace is the only one using this app; otherwise keep the default.')));   // lane ui-needs-a-button (channels-accounts-17)
+  const pushMore = document.createElement('details'); pushMore.className = 'chan-opt-more';
+  const pushSum = document.createElement('summary'); pushSum.textContent = t('Details'); pushMore.appendChild(pushSum);
+  pushMore.appendChild(chanLine('chan-opt-help chan-push-exclusive-help', t('Exclusive = only this VibeSpace consumes that subscription; shared = another instance also reads it, so push here only advances the cursor and polling stays fast.')));
+  pushMore.appendChild(chanLine('chan-opt-help', t('The platform does not say how many clients share the app, so exclusivity is asserted here and MEASURED by the product: records the reconciliation poll sees before push do not happen on an exclusive lane. Past 2% over 20 records the lane demotes itself to cursor kicks and says so.')));
+  wrap.appendChild(pushMore);
   body.appendChild(wrap);
   const drawn = () => JSON.stringify([enabledBox ? enabledBox.checked : null, sel.value]);
   let base = drawn();

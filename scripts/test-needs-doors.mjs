@@ -829,6 +829,36 @@ console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 
     'browser-live-13: a page waiting for a passkey has «Passkey settings…» beside Cancel — the Agent browser panel at that profile, its Passkeys open', pw);
 }
 
+console.log('⑦ ACTS, DEAD ENDS AND COMPANY WORDS (lane ui-needs-a-button pick 4)');
+{
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const LA = src('src/lib/desktop-app-launcher.js');
+  ok(/door: 'install-recheck'/.test(LA) && /sayDeadEnd\('no_sudo'/.test(LA) && /sayDeadEnd\('no_apt'/.test(LA) && /door: 'install-terminal'/.test(LA) && /door: 'install-xpra-page'/.test(LA) && !/in a terminal there, then check again/.test(LA),
+    'desktop-apps-20 / -21 (M5): no passwordless sudo ⇒ «Open a terminal» + «Check again»; no apt-get ⇒ «Open the xpra download page» + «Check again» + «Close» — on the refusal\'s line; «there» never said of this machine (the machine table\'s marker: door: \'install-recheck\')');
+  ok(/dataset\.door = 'registry-install'/.test(LA) && /openAppSearch\(app, machineOf\(host\), \{ query,/.test(LA) && /\{ onDone = null, query = '' \}/.test(src('src/lib/app-install-dialog.js')),
+    'desktop-apps-3: a built-in app that is not installed carries «Install…» — the package search with its program\'s name filled in');
+  ok(/door: 'remove-forget'/.test(LA) && /door: 'remove-copy'/.test(LA) && /desktop-remove-details/.test(LA) && !/p\.textContent = \[said, r && r\.error\]/.test(LA),
+    'desktop-apps-18: a failed removal says it ONCE with «Forget it» / «Copy the command» / «Close»; the error and output once, under «Details»');
+  const CE = src('src/lib/code-editor.js');
+  ok(/'● ' \+ t\('Unsaved'\)/.test(CE) && /'✓ ' \+ t\('Saved'\)/.test(CE) && /door: 'disk-keep'/.test(CE) && /m <= \(this\._diskKept \|\| 0\)/.test(CE),
+    'desktop-apps-30: the editor\'s marks are words of the page\'s language; a file changed on disk says so with «Reload from disk» / «Keep my changes» (kept = quiet until it changes again)');
+  const OS = require(path.join(REPO, 'src/oauth-setup.js'));
+  const kOwn = typeof OS.refusalKeys === 'function' ? OS.refusalKeys({ preset: false }) : [], kPre = typeof OS.refusalKeys === 'function' ? OS.refusalKeys({ preset: true }) : [];
+  ok(!kOwn.includes('refusal.admin') && kPre.includes('refusal.admin') && !/admin/.test(OS.WORDS.refusal) && /company app/.test(OS.WORDS['refusal.admin'] || ''),
+    'M3 (plugins-integrations-20): a company app\'s admin is named only beside a company preset — the refusal line itself assumes none', { kOwn, kPre });
+  const SC = src('src/lib/signin-card.js');
+  ok(!/Ask your administrator|Your company uses/.test(SC) && /data-door="claude-signup" href="https:\/\/claude\.ai\/"/.test(SC) && !/your company uses/i.test(src('src/lib/setup-flows.js')),
+    'agents-accounts-15 / first-run-6 (M3): no Claude preset kind exists ⇒ the sign-in words are personal; «No Claude account yet?» carries «Sign up at claude.ai»');
+  const MP = ['cloud', 'drive', 'gmail', 'onedrive'].map((n) => src(`src/mount-providers/${n}.js`)).join('\n');
+  ok(!/below — no terminal needed/.test(MP) && (MP.match(/— no terminal needed/g) || []).length >= 4,
+    'storage-1: no access box points BELOW at its Connect button (drawn above it) — the button is named, no direction');
+  const UI = TABLES.find((x) => x.scope === 'ui').T;
+  const deferredRows = UI.NEEDS.filter((r) => r.door.deferred).map((r) => r.id);
+  const remainder = [...words.keys()].filter((w) => UI.inNet(w) && (UI.needOf(w) || {}).id === 'settings-paths').length;
+  ok(deferredRows.length === 1 && deferredRows[0] === 'settings-paths' && remainder <= 49,
+    `the ui table's deferred remainder is ONE row, shrink-only (${remainder} ≤ 49 path sentences, each named in pick 4's report)`, { deferredRows, remainder });
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

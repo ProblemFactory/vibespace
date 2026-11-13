@@ -105,6 +105,7 @@ export function renderSetupCard(model, { provider = '' } = {}) {
   if (model.refusal) {
     const ref = el('div', 'mounts-field-hint oauth-setup-refusal', t(OS.WORDS.refusal, p));
     card.appendChild(ref);
+    if (model.who === 'preset') card.appendChild(el('div', 'mounts-field-hint oauth-setup-refusal-admin', t(OS.WORDS['refusal.admin'], p)));   // lane ui-needs-a-button (M3)
     if (model.clientTypes && model.who !== 'preset') card.appendChild(el('div', 'mounts-field-hint oauth-setup-refusal-desktop', t(OS.WORDS['refusal.desktop'], p)));   // lane gmail-connect-wall (law 3): never a claim about a company app's kind
   }
   if (model.who !== 'self') card.appendChild(el('div', 'mounts-field-hint oauth-setup-last', t(OS.WORDS.last)));

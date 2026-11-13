@@ -101,6 +101,7 @@ export const CENSUS = [
   ['channels-panel.js', 'select', 'choice', 'account fields'],
   ['channels-panel.js', 'canvas', 'none', 'int214: the freshness pill fit\'s text measure (fitRowPills — never in the document)'],
   ['channels-panel.js', 'tabindex', 'control', 'a paged list\'s END (0): focus there reads the next page (design 008 + owner 2026-10-03, seamless lists) — no keys of its own'],
+  ['channels-panel.js', 'details', 'control', 'the push setup\'s Details fold under «push not started» (lane ui-needs-a-button pick 4, channels-accounts-17)'],
   ['chat-input.js', 'input', 'control', 'the attach / file / folder pickers (type=file)'],
   ['chat-input.js', 'textarea', 'text', 'THE CHAT COMPOSER'],
   ['chat-input.js', 'tabindex', 'widget', 'the queue strip\'s items'],

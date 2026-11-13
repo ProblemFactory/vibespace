@@ -4641,6 +4641,9 @@ label.cfg-row {
 /* lane ui-needs-a-button pick 2: a need line INSIDE a heading's state slot (the Apps dialog's real-desktop switch) stays on the heading's line */
 .desktop-launch-desk-state > .need-line { display: inline-flex; margin-left: 8px; font-weight: 400; vertical-align: middle; }
 .desktop-launch-desk-state > .need-line > .need-words { flex: 0 1 auto; }
+/* pick 4: the editor's disk notice is its own row under the toolbar (its doors wrap under the words on a narrow window); a failed removal's output folds under «Details» */
+.code-editor-disk-need { flex: 0 0 auto; padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--yellow); font-size: 12px; }
+.desktop-remove-details > summary { cursor: pointer; color: var(--text-secondary); }
 /* ui-needs-a-button: move mode says what it is and how it ends */
 .move-mode-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100000; pointer-events: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; max-width: calc(100vw - 24px); padding: 6px 12px; border-radius: var(--radius); background: var(--bg-dialog); color: var(--text); border: 1px solid var(--accent); font-size: 13px; box-shadow: var(--shadow-window); }
 .move-mode-hint > .move-mode-cancel { pointer-events: auto; } /* reader #12: the mode's Cancel — every input can press it (a touch tablet has no Esc) */

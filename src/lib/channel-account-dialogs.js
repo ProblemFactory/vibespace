@@ -362,7 +362,7 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   if (mounts.length) out.push({ key: `mnote${sfx}`, type: 'note', value: tr('The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page. The account then signs in under that client.'), when: isMount });
   // lane cluster-presets (P3): an instance with NO company client says so — the select
   // holding only "Custom" read as a broken list; the user is told who can add one
-  if (!presets.length) out.push({ key: `npnote${sfx}`, type: 'note', value: tr('No company {name} client on this instance — ask your admin, or use your own client.', { name: signinOf(spec) }), when: when || undefined });
+  if (!presets.length) out.push({ key: `npnote${sfx}`, type: 'note', value: tr('No {name} app is set up on this instance yet — use your own app’s ID and secret.', { name: signinOf(spec) }), when: when || undefined });
   // addendum 1 (the owner 2026-10-22: «github 那个 url 不能加到我们公司的 lark 和 slack app 默认配置里»): a COMPANY preset's setup
   // names only ITS relay page (its own relayUrl › the fleet's — the digest's `relayPage`) or says it has none yet;
   // the public page is never offered for it

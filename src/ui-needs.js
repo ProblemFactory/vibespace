@@ -15,47 +15,31 @@
  * THE ROW SHAPE IS lane machine-needs-at-pairing's (src/machine-needs.js); ONE suite reads both tables (scripts/test-needs-doors.mjs).
  * A sentence the MACHINE table claims (a machine's need) is its; this table claims the rest. PURE (no imports).
  */
-const DEFERRED = 'ui-needs-a-button · pick 4';
+const DEFERRED = 'ui-needs-a-button · after pick 4 — the remainder named in its report (B-row by 主开发)';
 // ── THE REST OF THE NET on 935960b7e (derived: work/dump-net.mjs), each claimed by name — the first 64 characters of the sentence ──
 const oneOf = (list) => new RegExp('^(?:' + list.map((s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|') + ')');
+// THE REMAINDER after pick 4 — real needs whose doors are not built in this lane yet, each named in the pick-4 report (the next pick or its owner lane)
 const PATHS_LEFT = Object.freeze([
     "A message with no quote and no thread that arrives after this ag",
     "Action trace is off — Settings → Agent browser",
     "Approve or deny from the conversation's Reach dialog (rail → Cha",
-    "Auto (Settings → Desktop app scale)",
     "Automatic turns are refused on this account while it bills paid ",
     "Background jobs owned by this conversation message it when they ",
-    "Cache on a network filesystem with no local disk to move it to —",
-    "Cache on a network filesystem: the home folder is not a persiste",
     "Checking a new Claude Code is turned off in Settings (Accounts) ",
-    "Default scale for {app}: Auto (Settings → Desktop app scale). Cl",
-    "Developer Console → Security Settings → Redirect URLs. It must m",
-    "Developer Console → your app → Security Settings → Redirect URLs",
     "Disabled — master switch is off (Settings → Integration)",
-    "Frame shown (Settings → Seamless desktop app windows is off)",
-    "Guards on top (also in Settings → Channels): {list} always needs",
     "How to turn it on: ⚙ → Integrations, the account type’s setup ca",
     "Model-scoped weekly limits (e.g. Fable) aren’t in the passive fe",
-    "Nextcloud: Settings → Files shows this address. Use an app passw",
-    "No guard is on (also in Settings → Channels) — the policy alone ",
     "Not set here: enter it in Settings → Channels → relay page to us",
-    "Not set — the default in Settings applies (Integration → Hub aut",
     "On-demand quota refresh is disabled in Settings",
-    "Open Settings → Spending",
-    "Open in Settings",
-    "Open in Settings…",
     "Open the Outbox (rail → Channels → Outbox) or the conversation w",
     "Open the Outbox (rail → Channels → Outbox) to approve, edit or r",
     "Running sessions do not need it. You will only be asked once — ⚙",
     "Runs on this machine only. For {host}, log in on the host — or e",
     "Runs on this machine only. For {host}: use “Log in on {host} as ",
     "Sampling is off in Settings — the holds are still measured.",
-    "Scale {scale}× from Settings → Desktop app scale — widgets {gdk}",
     "Sessions run the pristine CLI: no hooks, no injected context, no",
-    "Settings → Spending",
     "Slack opens its Allow page; press Allow and you are connected. T",
     "Stops as soon as you disable it in ⚙ → Plugins, and VibeSpace st",
-    "Stored rate-limit reset credits — one can be consumed when a lim",
     "That browser engine plugin is not running on this computer — ena",
     "That engine's plugin did not answer — restart it in ⚙ → Plugins.",
     "The LLM plugin stopped: the model refused the request shape (HTT",
@@ -65,9 +49,7 @@ const PATHS_LEFT = Object.freeze([
     "The cluster names {plugin} at «{ref}» — not a full commit sha, s",
     "The cluster's plugin {plugin}: waiting for your consent — its ke",
     "The code points at a plain http address — pairing needs https (o",
-    "The key lives in Services › Integrations — this section never ho",
     "The profile did not start: “Name the code that holds the server”",
-    "The scale this app was started at (Settings → Desktop app scale)",
     "The telemetry forward target in Settings (Forward diagnostics to",
     "The {name} background service has not answered yet — check ⚙ → P",
     "This conversation is NOT notified when its background jobs finis",
@@ -75,7 +57,6 @@ const PATHS_LEFT = Object.freeze([
     "Turn on what you want in Settings › Plugins › LLM — each feature",
     "Usage refresh is Off in Settings — turn it on to check it, or ru",
     "VibeSpace asks Anthropic once how much of this account’s usage l",
-    "VibeSpace's earlier download at {path} is now the program named ",
     "action trace is off (Settings → Agent browser)",
     "keeping is off (Settings → Agent browser)",
     "the drafter is switched off in Settings › Plugins › LLM",
@@ -85,18 +66,46 @@ const PATHS_LEFT = Object.freeze([
     "“{name}” runs on this machine only. For {host}, use “Log in on h",
     "② Or host your own copy (one page serves every provider): the tw",
     "② Your own copy of the relay page (Settings → Channels → relay p",
-  ]);
-// the plugin migration's own notices (src/server/migrations.js words) matched by SHAPE: test-architecture §106 keeps that
-// backend's name out of every src file but its rows
-const PATHS_LEFT_SHAPES = Object.freeze([/^\S+ now installs as a plugin — ⚙ → Plugins → /, /^Your \S+ (?:program path|site list) was carried into ⚙ → Plugins → /]);
-const DIRECTIONS_LEFT = Object.freeze([
-    "+ Add a path… (a folder or a file; relative = against the row ab",
+]);
+// a door's own LABEL naming where it opens
+const PATHS_LABEL = Object.freeze([
+    "Open Settings → Spending",
+    "Open in Settings",
+    "Open in Settings…",
+]);
+// a path in the VENDOR's own console (Lark developer console, Nextcloud) — VibeSpace draws nothing there
+const PATHS_VENDOR = Object.freeze([
+    "Developer Console → Security Settings → Redirect URLs. It must m",
+    "Developer Console → your app → Security Settings → Redirect URLs",
+    "Nextcloud: Settings → Files shows this address. Use an app passw",
+]);
+// PROVENANCE: the setting a value comes from, on the control or the info line that shows that value
+const PATHS_PROVENANCE = Object.freeze([
+    "Auto (Settings → Desktop app scale)",
+    "Default scale for {app}: Auto (Settings → Desktop app scale). Cl",
+    "Frame shown (Settings → Seamless desktop app windows is off)",
+    "Not set — the default in Settings applies (Integration → Hub aut",
+    "Scale {scale}× from Settings → Desktop app scale — widgets {gdk}",
+    "Settings → Spending",
+    "Stored rate-limit reset credits — one can be consumed when a lim",
+    "The scale this app was started at (Settings → Desktop app scale)",
+]);
+// «also in …»: the second place the same switch is drawn (the switch is on this line's surface)
+const PATHS_ALSO = Object.freeze([
+    "Guards on top (also in Settings → Channels): {list} always needs",
+    "No guard is on (also in Settings → Channels) — the policy alone ",
+]);
+// the plugin migration's one-shot notices (src/server/migrations.js words): where a moved row now lives, read once
+const PATHS_MIGRATION = Object.freeze([
+    "VibeSpace's earlier download at {path} is now the program named ",
+]);
+// a DIRECTION that is true on its surface: the control it names is drawn on that side in the same dialog / list (pick 4 judged each from its file's draw order; the walk found storage-1 and the TightVNC note wrong — both fixed)
+const DIRECTIONS_TRUE = Object.freeze([
     "3. Copy the User OAuth Token (it starts xoxp-) from “OAuth & Per",
     "A Web application client works here too: register the 127.0.0.1 ",
     "A note for the agent (optional). Nothing is sent now. To have th",
     "A sign-in from this page comes back to 127.0.0.1 on any free por",
     "Approve access on the sign-in page (or paste the address back be",
-    "At the bottom of that page, under “Your App Configuration Tokens",
     "Click for automatic placement; pick a member below to pin this c",
     "Either sign in above, or paste a key: create one at dropline.fis",
     "Finder: Cmd+K → enter the server address; any username, password",
@@ -105,8 +114,6 @@ const DIRECTIONS_LEFT = Object.freeze([
     "If Slack’s last page shows a code instead of coming back here, p",
     "Inherits the account: {mode} — pick one above to change it for t",
     "Inherits the vendor's default: {mode} — pick one above to change",
-    "Insert row above",
-    "Insert row below",
     "It will be listed in these {n} groups and get their context; the",
     "It will be listed in this group and get its context; the folder ",
     "No groups yet. \"New group\" starts one with live agent sessions; ",
@@ -126,7 +133,6 @@ const DIRECTIONS_LEFT = Object.freeze([
     "Starts at {size} — the picture size it last launched with; chang",
     "Stop it, take it away from every conversation that uses it, and ",
     "Stored securely on the server. If the key is passphrase-protecte",
-    "That is the refresh token (xoxe-) — copy the token above it on t",
     "The directory is moved beside itself (…forgotten-<time>) and lis",
     "The sign-in screen itself. Open the link, sign in, then paste th",
     "The sign-in screen says something VibeSpace does not know yet — ",
@@ -135,33 +141,36 @@ const DIRECTIONS_LEFT = Object.freeze([
     "Type a folder, or pick one below",
     "Type its user name and password below — they go straight into th",
     "VibeSpace could not read the sign-in link — here is the sign-in ",
-    "Windows on that machine granted no administrator rights — nobody",
-    "click \"Connect Gmail\" below — no terminal needed",
-    "click \"Connect Google Drive\" below — no terminal needed",
-    "click \"Connect OneDrive\" below — no terminal needed",
-    "click \"Connect\" below — no terminal needed",
     "click “List shared drives” (needs access above) or paste an id",
-    "every row tells the agent its path and note; 「Tell the agent」 se",
-    "resolved against the group's first folder (the row above's folde",
-    "resolved against the row above",
     "the model has no zero-data-retention endpoint — pick the other m",
-    "the row above",
-    "{path} does not exist, nor the folder above ({parent})",
     "✓ Connected as {user} — finish with the “Connect” button below.",
     "✓ Connected as {user} — finish with the “Create & connect” butto",
     "✓ Connected — finish with the “Connect” button below.",
     "✓ Connected — finish with the “Create & connect” button below.",
-  ]);
-const COMPANY_LEFT = Object.freeze([
-    "Company presets: none — ask your admin.",
-    "No account yet? Ask your administrator.",
-    "No company OAuth client on this instance — ask your admin, or pr",
-    "No company OAuth client on this instance — ask your admin. Meanw",
-    "No company {name} client on this instance — ask your admin, or u",
-    "Sign in with your own Claude account — your company uses a Claud",
-    "Your company uses a Claude subscription — sign in with your own ",
+]);
+// names a table ROW or a parent FOLDER («the row above», «Insert row below», «the folder above») — not a control
+const DIRECTIONS_ROWS = Object.freeze([
+    "+ Add a path… (a folder or a file; relative = against the row ab",
+    "Insert row above",
+    "Insert row below",
+    "every row tells the agent its path and note; 「Tell the agent」 se",
+    "resolved against the group's first folder (the row above's folde",
+    "resolved against the row above",
+    "the row above",
+    "{path} does not exist, nor the folder above ({parent})",
+]);
+// a step on the vendor's own page (api.slack.com) — VibeSpace draws no control there
+const DIRECTIONS_VENDOR = Object.freeze([
+    "At the bottom of that page, under “Your App Configuration Tokens",
+    "That is the refresh token (xoxe-) — copy the token above it on t",
+]);
+// the vendor's own WORKSPACE admin (Slack approves an app per workspace) — a fact of Slack, not an assumption about this install
+const COMPANY_VENDOR = Object.freeze([
     "Your workspace admin may have to approve the app; your company’s",
-  ]);
+]);
+// the plugin migration's own notices (src/server/migrations.js words) matched by SHAPE: test-architecture §106 keeps that
+// backend's name out of every src file but its rows
+const PATHS_LEFT_SHAPES = Object.freeze([/^\S+ now installs as a plugin — ⚙ → Plugins → /, /^Your \S+ (?:program path|site list) was carried into ⚙ → Plugins → /]);
 const INSIDE_SETTINGS = Object.freeze([
     "Every feature above counts toward it: once a day's calls have co",
     "Lets sessions YOU designate as \"Group manager\" (Session Properti",
@@ -244,14 +253,37 @@ const NEEDS = Object.freeze([
     match: /^No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet/, door: { present: { marker: /'browser-plugin': app && typeof app\._pluginInstallDialog/, surfaces: ['src/lib/browser-proposal-card.js'] }, via: { 'src/browser-switch.js': 'src/lib/browser-proposal-card.js' } } },
   { id: 'passkey-wait', need: 'a page waits for a passkey — «Passkey settings…» beside «Cancel passkey request» (browser-live-13)',
     match: /^Cancel the request to use the page’s other way in, or sign in on your own device/, door: { present: { marker: /open: 'passkeys'/, surfaces: ['src/lib/browser-live-window.js'] }, via: { 'src/browser-passkey.js': 'src/lib/browser-live-window.js' } } },
-  { id: 'settings-paths', need: 'a sentence that routes a person by a menu / settings path — its door (src/lib/need-line.js settingsDoor / integrationDoor / a window\'s opener) replaces the path (picks 2–3)', match: new RegExp([oneOf(PATHS_LEFT).source, ...PATHS_LEFT_SHAPES.map((r) => r.source)].join('|')), door: { deferred: DEFERRED } },
-  { id: 'directions', need: 'a hint that points at a control by a direction — checked on its surface: the door on the line, or the direction kept where it is true (pick 4)', match: oneOf(DIRECTIONS_LEFT), door: { deferred: DEFERRED } },
-  { id: 'company-words', need: 'a sentence that assumes a company / an administrator — said only where a company preset of that kind exists (pick 4)', match: oneOf(COMPANY_LEFT), door: { deferred: DEFERRED } },
+  // ── pick 4: acts, the install / editor / folder outliers, the sign-in's personal words ──
+  { id: 'remove-failed', need: 'a failed app removal — the sentence once with «Forget it» / «Copy the command» / «Close» on its line; the output once, folded (desktop-apps-18)',
+    match: /^The remove recipe failed$/, door: { present: { marker: /door: 'remove-forget'/, surfaces: ['src/lib/desktop-app-launcher.js'] } } },
+  { id: 'disk-changed', need: 'a file another program changed while it has unsaved edits — «Reload from disk» / «Keep my changes» on the line (desktop-apps-30)',
+    match: /^Another program changed this file on disk$/, door: { present: { marker: /door: 'disk-keep'/, surfaces: ['src/lib/code-editor.js'] } } },
+  { id: 'hidden-only', need: 'a folder whose every entry is hidden — said, with «Show hidden files» on the line (phone-23)',
+    match: /^This folder is empty — \{n\} hidden files$/, door: { present: { marker: /door: 'show-hidden'/, surfaces: ['src/lib/file-explorer.js'] } } },
+  { id: 'mount-cache', need: 'a mount cache on a network filesystem — «Choose a cache folder…» (the setting) on the line',
+    match: /^Cache on a network filesystem(: the home folder is not a persistent disk — the cache needs a persistent local folder| with no local disk to move it to — the cache needs a local folder)$/, door: { present: { marker: /settingsDoor\(this\.app, 'mounts\.vfsCacheRoot'/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
+  { id: 'claude-signup', need: 'no Claude account yet — «Sign up at claude.ai» on the line, never «ask your administrator» (agents-accounts-15 / first-run-6, M3)',
+    match: /^No Claude account yet\?$/, door: { present: { marker: /data-door="claude-signup"/, surfaces: ['src/lib/signin-card.js'] } } },
+  { id: 'company-admin', need: 'a company app\'s admin named ONLY beside a company preset of that kind (M3; plugins-integrations-20\'s clause)',
+    match: /^This is a company app: its admin adds the address\.$/, door: { present: { marker: /if \(model\.who === 'preset'\) card\.appendChild\(el\('div', 'mounts-field-hint oauth-setup-refusal-admin'/, surfaces: ['src/lib/oauth-setup-card.js'] }, via: { 'src/oauth-setup.js': 'src/lib/oauth-setup-card.js' } } },
+  { id: 'composer-upload', need: 'chat-core-10 (no upload button in the desktop composer) — TAKEN OUT by 主开发 2026-11-13: not this lane\'s',
+    match: /^Type a message\.\.\.$/, door: { none: 'taken out by 主开发 (2026-11-13): the desktop composer is not changed by this lane; files go in by drag, paste or the phone «+»' } },
+  { id: 'settings-paths', need: 'a sentence that routes a person by a menu / settings path — its door (src/lib/need-line.js settingsDoor / integrationDoor / a window\'s opener) replaces the path — THE REMAINDER after pick 4 (each sentence named in its report; shrink-only)', match: oneOf(PATHS_LEFT), door: { deferred: DEFERRED } },
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([
+  { why: 'says what is NOT needed («no terminal needed») — the Connect button it names is on the same form, above the box (pick 4, storage-1)', match: /^press “Connect[^”]*” — no terminal needed$/ },
+  { why: 'the need\'s own fields are under it on the same form (the client id and secret boxes) — the form is its door', match: /^Gmail needs your own OAuth client here \(with the gmail\.readonly scope\)\.$/ },
   { why: 'inside Settings: a row\'s own description naming another row of the same window (no door is owed — it is on that page)', match: oneOf(INSIDE_SETTINGS) },
-  { why: 'a MACHINE\'s own operating-system settings path (Windows / macOS) — lane machine-needs-at-pairing\'s table claims it (src/machine-needs.js, its doors)', match: oneOf(MACHINE_OS) },
+  { why: 'a MACHINE\'s own operating-system settings path (Windows / macOS) — lane machine-needs-at-pairing\'s table claims it (src/machine-needs.js, its doors)', match: oneOf(MACHINE_OS) },  { why: "a door's own label naming where it opens", match: oneOf(PATHS_LABEL) },
+  { why: "a path in the vendor's own console — VibeSpace draws nothing there", match: oneOf(PATHS_VENDOR) },
+  { why: 'provenance: the setting a value comes from, said on the control or info line that shows the value (a fact, not a need)', match: oneOf(PATHS_PROVENANCE) },
+  { why: '«also in …»: the second place the same switch is drawn', match: oneOf(PATHS_ALSO) },
+  { why: "the plugin migration's one-shot notices: where a moved row now lives (matched by shape: test-architecture §106 keeps that backend's name out of src)", match: new RegExp([oneOf(PATHS_MIGRATION).source, ...PATHS_LEFT_SHAPES.map((r) => r.source)].join('|')) },
+  { why: 'a direction that is true on its surface: the control it names is drawn on that side in the same dialog / list', match: oneOf(DIRECTIONS_TRUE) },
+  { why: 'names a table row or a parent folder, not a control — no door is owed', match: oneOf(DIRECTIONS_ROWS) },
+  { why: "a step on the vendor's own page — VibeSpace draws no control there", match: oneOf(DIRECTIONS_VENDOR) },
+  { why: "the vendor's own workspace admin (Slack approves an app per workspace) — not an assumption about this install", match: oneOf(COMPANY_VENDOR) },
 ]);
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
 const notNeedOf = (sentence) => NOT_NEEDS.find((r) => r.match.test(String(sentence))) || null;

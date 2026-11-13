@@ -97,7 +97,7 @@ module.exports = {
     connect: [
       { key: 'cloudBackend', label: i18nKey('Provider'), type: 'select', options: [
         ['dropbox', 'Dropbox'], ['box', 'Box'], ['pcloud', 'pCloud'], ['yandex', 'Yandex Disk'], ['jottacloud', 'Jottacloud'], ['hidrive', 'HiDrive']] },
-      { key: 'cloudToken', label: i18nKey('Access'), type: 'textarea', placeholder: i18nKey('click "Connect" below — no terminal needed'),
+      { key: 'cloudToken', label: i18nKey('Access'), type: 'textarea', placeholder: i18nKey('press “Connect” — no terminal needed'),
         hint: i18nKey('Advanced: you can also paste the JSON from `rclone authorize "<provider>"` run elsewhere.') },
       { key: 'cloudPath', label: i18nKey('Folder (optional, blank = whole drive)'), placeholder: 'Projects/Data' },
       { key: 'cloudClientId', label: i18nKey('Custom OAuth client ID (optional — your own app)'), advanced: true,

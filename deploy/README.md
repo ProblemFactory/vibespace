@@ -518,7 +518,7 @@ shows option 1 (its relay page is its own, above).
   - `https://<host>/api/channels/oauth/cb/lark` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
   - `http://127.0.0.1:17865/lark/cb` — This machine: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
 - The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
-- If Lark says “20029”, the address it was sent is not on that list: add it there (for a company app, your admin does).
+- If Lark says “20029”, the address it was sent is not on that list: add it there.
 - If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
 
 #### Gmail — Google
@@ -532,7 +532,7 @@ shows option 1 (its relay page is its own, above).
   - `http://127.0.0.1:17866/gmail/cb` — This machine, with a Web application client: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
   - `http://127.0.0.1:53682/` — A Google Drive folder (storage) signs in with the same client at this address.
 - The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
-- If Google says “Error 400: redirect_uri_mismatch”, the address it was sent is not on that list: add it there (for a company app, your admin does). An https address and Google still says “Error 400: redirect_uri_mismatch”? The client is a Desktop app client, which cannot take one — create a Web application client, or sign in the other way.
+- If Google says “Error 400: redirect_uri_mismatch”, the address it was sent is not on that list: add it there. An https address and Google still says “Error 400: redirect_uri_mismatch”? The client is a Desktop app client, which cannot take one — create a Web application client, or sign in the other way.
 - If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
 
 #### Slack
@@ -543,7 +543,7 @@ shows option 1 (its relay page is its own, above).
   - ② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
   - `https://<host>/api/channels/oauth/cb/slack` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
 - The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
-- If Slack says “redirect_uri did not match any configured URIs”, the address it was sent is not on that list: add it there (for a company app, your admin does).
+- If Slack says “redirect_uri did not match any configured URIs”, the address it was sent is not on that list: add it there.
 - If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
 
 #### Dropline (voice input) — Fish Audio

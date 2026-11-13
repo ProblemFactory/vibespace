@@ -129,7 +129,7 @@ module.exports = {
     ],
     editChild: [{ key: 'remotePath', label: i18nKey('Folder path'), placeholder: 'Documents/sub' }],
     connect: [
-      { key: 'onedriveToken', label: i18nKey('OneDrive access'), type: 'textarea', placeholder: i18nKey('click "Connect OneDrive" below — no terminal needed') },
+      { key: 'onedriveToken', label: i18nKey('OneDrive access'), type: 'textarea', placeholder: i18nKey('press “Connect OneDrive” — no terminal needed') },
       { key: 'driveType', label: i18nKey('Account type'), type: 'select',
         options: [['personal', i18nKey('Personal')], ['business', i18nKey('Work / School (OneDrive for Business)')], ['documentLibrary', i18nKey('SharePoint document library')]] },
       { key: 'remotePath', label: i18nKey('Folder (optional, blank = whole drive)'), placeholder: 'Documents/Projects' },

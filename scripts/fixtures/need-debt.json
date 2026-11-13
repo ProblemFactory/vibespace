@@ -248,7 +248,6 @@
     "The list needs {machine}’s VibeSpace agent updated (it updates i",
     "The machine VibeSpace itself runs on — sessions and files here n",
     "The proposal failed: {error}",
-    "The remove recipe failed",
     "The send failed",
     "The server refuses any synchronous file call on a storage mount ",
     "The sign-in failed — sign in again",

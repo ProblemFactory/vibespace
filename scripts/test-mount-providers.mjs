@@ -273,6 +273,13 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
   // provider — the Connect dialog's fields (+ each `when` over the types), the submit body, the Edit fields (top +
   // child), the re-authorize names, the D2 client-switch rule: identical. SKIP by name on a shallow clone (§75).
   let baseSm = null; try { baseSm = execFileSync('git', ['-C', REPO, 'show', 'f02c9dfa9:src/lib/sidebar-mounts.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch {}
+  // lane ui-needs-a-button pick 4 (storage-1): the four token placeholders' WORDS changed on purpose — the Connect button sits ABOVE
+  // the box, never «below» — so the base client is given the new words and the differential still compares every field's behaviour
+  if (baseSm) { const n0 = (baseSm.match(/tr\('click "Connect[^"]*" below — no terminal needed'\)/g) || []).length; baseSm = baseSm.replace(/tr\('click "Connect([^"]*)" below — no terminal needed'\)/g, "tr('press “Connect$1” — no terminal needed')"); ok(n0 === 4, '⑤ the base client’s four «… below — no terminal needed» placeholders are given the new words (4)', n0); // …and the two company sentences (M3: «ask your admin» only beside a company preset) — the same rule, the new words
+    const CO = [["tr(\"No company OAuth client on this instance — ask your admin. Meanwhile the built-in client works, and your own avoids rclone's shared quota.\")", "tr('The built-in client connects right away; its quota is shared with everyone, so for heavy use bring your own client.')"],
+      ["tr('No company OAuth client on this instance — ask your admin, or provide your own (it needs the gmail.readonly scope).')", "tr('Gmail needs your own OAuth client here (with the gmail.readonly scope).')"]];
+    const co = CO.filter(([a]) => baseSm.includes(a)).length; for (const [a, b] of CO) baseSm = baseSm.split(a).join(b);
+    ok(co === 2, '⑤ the base client’s two «ask your admin» hints are given the new words (2)', co); }
   if (!baseSm) console.log('  SKIP ⑤ differential base-vs-tree client — f02c9dfa9 not in this clone (shallow)');
   else {
     const TYPES = PROV.rows.map((r) => r.id);

@@ -211,7 +211,7 @@ function linksOf(id) {
   const tbl = PLUGIN_SETTINGS[id];
   if (!tbl) return [];
   const out = [{ to: { kind: 'plugins-panel', id }, label: t('On / off and status'), description: t('Turn the plugin on or off in the Plugins list (sidebar). Its status and anything waiting for you are there too.') }];
-  if (tbl.integration) out.push({ to: { kind: 'integration', id: tbl.integration }, label: t('Key and provider'), description: t('The key lives in Services › Integrations — this section never holds it.') });
+  if (tbl.integration) out.push({ to: { kind: 'integration', id: tbl.integration }, label: t('Key and provider'), description: t('The key lives on its Integrations card — this section never holds it.') });
   for (const s of tbl.secrets || []) out.push({ to: { kind: 'plugin-secret', id, key: s.key }, label: s.label, description: s.description });
   return out;
 }

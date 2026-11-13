@@ -12,6 +12,7 @@ import { createBarFold, foldedMenuItems } from './bar-fold.js'; // lane ui-contr
 import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: ‹ home, the breadcrumbs, «New session here» (phone only)
 import { t, tc } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { needLine } from './need-line.js'; // lane ui-needs-a-button (phone-23)
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
@@ -866,6 +867,12 @@ class FileExplorer {
     this._renderOrder = sorted.map(i => i.name);
     this.listEl.innerHTML = '';
     this.listEl.className = 'file-list' + (this._viewMode === 'icon' ? ' icon-view' : '');
+    // lane ui-needs-a-button (phone-23): every entry here is hidden — the empty list says so, its door on the line
+    if (!sorted.length && Array.isArray(this.items) && this.items.length && !this._showHidden) {
+      this.listEl.appendChild(needLine({ words: t('This folder is empty — {n} hidden files', { n: this.items.length }), tone: 'info', cls: 'empty-hint', doors: [
+        { label: t('Show hidden files'), kind: 'secondary', door: 'show-hidden', run: () => { this._showHidden = true; this._persistSettings(); this._renderItems(); } }] }));
+      return;
+    }
 
     const groups = this._groupItems(sorted);
     if (groups) {
