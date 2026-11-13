@@ -162,7 +162,10 @@ function makeProjectCwdReader() {
  *  `yield`s mark budget points, driven straight through (sync) or across an
  *  `await onBudget()` per yield (hooked). A yield happens only AFTER a whole
  *  line was consumed and its bytes added to the cursor, so a suspended walk's
- *  cursors are always valid ones. scripts/test-usage-walk-parity.mjs pins the
+ *  cursors are always valid ones. B-6ded: they are the WALK'S OWN copies — a
+ *  `cursors` map handed in is never written (nor any entry of it); the caller
+ *  installs the returned map at its commit point, so a walk that never gets
+ *  there leaves the caller's map as it found it. scripts/test-usage-walk-parity.mjs pins the
  *  yielding form against the sync form AND the shipped scanner (events,
  *  cursors, filesTouched). */
 function runUsageWalk(opts = {}) {
@@ -192,7 +195,12 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   // daemon/scan-op call shape byte-identical.
   projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}, meter) {
   const PROJECTS = projectsDir || path.join(home, '.claude', 'projects');
-  let cursors = injectedCursors;
+  // B-6ded: THE WALK'S CURSORS ARE ITS OWN until its caller commits them. A map handed in (the hub's live store) is never
+  // written, nor any entry of it — the walk advances copies and RETURNS them — so a walk stopped at a budget point (the
+  // mount gate) or one that throws leaves the caller's map exactly as it found it, and the next walk re-reads from there
+  // (the ledger's id filter refuses what it already holds). The release advanced the hub's own entries in place: the
+  // rows of the bytes a stopped walk had consumed were never appended, and never read again.
+  let cursors = injectedCursors ? Object.assign({}, injectedCursors) : null;
   if (!cursors) { try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf-8')) || {}; } catch { cursors = {}; } }
   const out = [];
   let filesTouched = 0;
@@ -302,7 +310,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
       let st; try { st = fs.statSync(fp); } catch { continue; }
       if (!st.isFile()) continue;
-      const cur = cursors[fp] || { offset: 0, lastRid: null };
+      const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)
       if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } // rotated/truncated
       cur.sid = sid;
       // NOTE: the unchanged-file path keeps cur.sid in the cursor entry —
@@ -339,7 +347,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     if (!st.isFile()) continue;
     const zst = !!m[2];
     if (zst && !ZSTD_OK) continue; // this runtime cannot read compressed rollouts
-    const cur = cursors[fp] || { offset: 0, lastRid: null };
+    const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)
     if (zst) { if (cur.zsize === st.size) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
     else { if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } if (st.size === cur.offset) { cursors[fp] = cur; continue; } }
     const sid = m[1].toLowerCase();

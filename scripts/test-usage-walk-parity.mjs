@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -731,6 +731,146 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   }
   fs.rmSync(bHome, { recursive: true, force: true });
   fs.rmSync(bData, { recursive: true, force: true });
+}
+
+// ── B-6ded: A WALK THAT DOES NOT REACH ITS COMMIT POINT LEAVES THE CURSOR MAP AS IT FOUND IT ──────────────────────
+// The hub walks IN-PROCESS over its own cursor store, and the mount gate (UsageHistory's `paused` hook) stops a timed
+// walk at a budget point. The release advanced that store's entries IN PLACE: the rows of the bytes a stopped walk had
+// consumed were never appended and never read again (the acceptance's driver: 7 of 22 requests gone for good). Per
+// spelling — the MODULE never writes a map handed to it, nor any entry of it (a stopped walk, a whole one); the HUB
+// installs the walk's map only once every row is in its shard (paused, thrown, or an append that failed ⇒ `_cursors`
+// exactly as it was, every request in the ledger after the next walk); the SHIPPED SCANNER's commit point is a flushed
+// stdout (a dead pipe leaves its cursor file byte for byte). The hub's scenes are the acceptance's three pause drivers.
+{
+  const b6Root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-b6ded-'));
+  const S1 = '11111111-2222-4333-8444-555555555555', S2 = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  const line6 = (k, month = 10) => JSON.stringify({ type: 'assistant', requestId: `req_${k}`, timestamp: new Date(Date.UTC(2026, month, 12, 10, 0, 0) + k * 1000).toISOString(), cwd: '/srv/proj/a',
+    message: { id: `msg_${k}`, model: 'claude-fable-5', usage: { input_tokens: 100 + k, output_tokens: 20 } } }) + '\n';
+  const { runUsageWalk: walk6 } = require(path.join(REPO, 'src/usage-walker.js'));
+  const noCx = path.join(b6Root, 'no-codex');
+
+  // (a) THE MODULE: a map handed in is the caller's — a stopped walk and a whole walk leave it as they found it
+  const modLegs = async (walkFn, tag) => {
+    const mh = path.join(b6Root, 'mod-' + tag), mA = path.join(mh, '.claude', 'projects', '-srv-proj-a');
+    fs.mkdirSync(mA, { recursive: true });
+    let k = 0; const addM = (sid, c) => { for (let i = 0; i < c; i++) fs.appendFileSync(path.join(mA, sid + '.jsonl'), line6(++k)); };
+    addM(S1, 2);
+    const handed = walkFn({ home: mh, codexSessionsDir: noCx, cursors: {} }).cursors;   // the committed map of a first walk
+    const entry = handed[path.join(mA, S1 + '.jsonl')], before = JSON.stringify(handed);
+    addM(S1, 20); addM(S2, 15);
+    let calls = 0, threw = null;
+    try { await walkFn({ home: mh, codexSessionsDir: noCx, cursors: handed, budgetBytes: 300, onBudget: () => (++calls === 2 ? Promise.reject(Object.assign(new Error('paused'), { paused: true })) : new Promise(setImmediate)) }); } catch (e) { threw = e; }
+    const stopped = !!(threw && threw.paused) && calls === 2 && JSON.stringify(handed) === before && handed[path.join(mA, S1 + '.jsonl')] === entry;
+    const whole = walkFn({ home: mh, codexSessionsDir: noCx, cursors: handed });
+    const wholeOk = JSON.stringify(handed) === before && whole.cursors !== handed && whole.events.length === 35 && whole.cursors[path.join(mA, S1 + '.jsonl')].offset === fs.statSync(path.join(mA, S1 + '.jsonl')).size;
+    return { stopped, wholeOk, calls, after: JSON.stringify(handed) === before ? 'as found' : 'ADVANCED' };
+  };
+  const m = await modLegs(walk6, 'real');
+  ok(m.stopped, `B-6ded MODULE: a walk stopped at its 2nd budget point leaves the map handed to it exactly as it found it — every key, every entry the same object, the same offset (${m.after})`);
+  ok(m.wholeOk, 'B-6ded MODULE: a whole walk RETURNS its advanced cursors as a map of its own — the one handed in is unchanged (the caller commits)');
+
+  // (b) THE HUB, through UsageHistory: the readers' scenes, the mount gate tripping at a chosen yield of ONE walk
+  let sceneNo = 0;
+  const hubScene = (budget) => {
+    const root = path.join(b6Root, 'hub-' + (++sceneNo)), hh = path.join(root, 'home'), hd = path.join(root, 'data');
+    const PJ = path.join(hh, '.claude', 'projects'), A = path.join(PJ, '-srv-proj-a');
+    fs.mkdirSync(A, { recursive: true }); fs.mkdirSync(hd, { recursive: true });
+    let k = 0, yields = 0, pauseAt = 0;
+    const prevCx = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(hh, '.codex');
+    const h = new UsageHistory({ dataDir: hd, homeDir: hh, scanBudgetBytes: budget, scanYield: () => { yields++; return new Promise(setImmediate); }, paused: () => pauseAt > 0 && yields >= pauseAt });
+    if (prevCx === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCx;
+    const sc = {
+      h, PJ, A,
+      add(dir, sid, c, month = 10) { for (let i = 0; i < c; i++) fs.appendFileSync(path.join(dir, sid + '.jsonl'), line6(++k, month)); },
+      // one timed walk; `at` = the yield at which the mount gate trips (0 = open); `kept` = `_cursors` as the walk found it
+      async walk(at = 0) { h._lastScanAt = 0; yields = 0; pauseAt = at; const before = JSON.stringify(h._cursors); const r = await h.scan(false); pauseAt = 0; return { r, yields, kept: JSON.stringify(h._cursors) === before }; },
+      rows() { const ids = []; for (const f of fs.readdirSync(h.dir)) if (/^events-\d{4}-\d{2}\.ndjson$/.test(f) && fs.statSync(path.join(h.dir, f)).isFile()) for (const l of fs.readFileSync(path.join(h.dir, f), 'utf8').split('\n')) if (l) ids.push(JSON.parse(l).rid); return ids; },
+      missing() { const have = new Set(sc.rows()); return Array.from({ length: k }, (_, i) => `req_${i + 1}`).filter((r) => !have.has(r)); },
+      get k() { return k; },
+    };
+    return sc;
+  };
+  const verdict = (sc, cut, once) => {
+    const rows = sc.rows(), miss = sc.missing();
+    return { good: cut.r && cut.r.paused === true && cut.kept && miss.length === 0 && (!once || rows.length === new Set(rows).size), why: `paused ${!!(cut.r && cut.r.paused)} at yield ${cut.yields}, map ${cut.kept ? 'as found' : 'ADVANCED'}, ${sc.k} requests, ${rows.length} rows, missing ${JSON.stringify(miss)}` };
+  };
+  const SCENES = [
+    // uw1 parity/drivers/pause.js: one name, then the same with an alias — the 2nd yield of the 2nd walk, then two clean walks
+    ['pause.js «one name»: a prior cursor, the file grows by 20, cut at yield 2', 600, true, async (sc) => { sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 20); const c = await sc.walk(2); await sc.walk(); await sc.walk(); return c; }],
+    ['pause.js «two names» (an alias beside the folder)', 600, false, async (sc) => { fs.symlinkSync('-srv-proj-a', path.join(sc.PJ, '-w-alias')); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 20); const c = await sc.walk(2); await sc.walk(); await sc.walk(); return c; }],
+    // uw1 refute-parity-1/drv/pause.mjs: four scenes at a 300-byte budget
+    ['pause.mjs «prior»: a file with a cursor already in the map, cut mid-file', 300, true, async (sc) => { sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 20); const c = await sc.walk(2); await sc.walk(); return c; }],
+    ['pause.mjs «alias-prior»: two names, prior cursors, cut mid-file', 300, false, async (sc) => { fs.symlinkSync(sc.A, path.join(sc.PJ, '-srv-proj-b')); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 20); const c = await sc.walk(2); await sc.walk(); return c; }],
+    ['pause.mjs «alias-finished»: the two-named file FINISHES, a later one-named file is cut', 300, false, async (sc) => { fs.symlinkSync(sc.A, path.join(sc.PJ, '-srv-proj-b')); const C = path.join(sc.PJ, '-srv-proj-c'); fs.mkdirSync(C); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 5); sc.add(C, S2, 15); const c = await sc.walk(8); await sc.walk(); return c; }],
+    ['pause.mjs «two files»: no prior cursor, the first file finishes, the second is cut', 300, true, async (sc) => { sc.add(sc.A, S1, 5); sc.add(sc.A, S2, 15); const c = await sc.walk(8); await sc.walk(); return c; }],
+    // uw2 redrive/drv/pause2.mjs: a link beside the folder, the gate at the walk's FIRST yield (at its 1 MiB default a
+    // 7-request walk has no budget point at all — the release cannot be cut there; at 300 bytes it can)
+    ['pause2.mjs «link-after» (a relinkLegacy-style link that sorts after the folder), gate at the first yield', 300, false, async (sc) => { fs.symlinkSync('-srv-proj-a', path.join(sc.PJ, '-srv-proj-z')); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 5); const c = await sc.walk(1); await sc.walk(); return c; }],
+    ['pause2.mjs «link-before» (the link sorts before the folder)', 300, false, async (sc) => { fs.symlinkSync('-srv-proj-a', path.join(sc.PJ, '-srv-proj-0')); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 5); const c = await sc.walk(1); await sc.walk(); return c; }],
+    ['pause2.mjs «other-link-after» (the link names ANOTHER folder)', 300, true, async (sc) => { const B = path.join(sc.PJ, '-srv-proj-b'); fs.mkdirSync(B); fs.writeFileSync(path.join(B, S2 + '.jsonl'), ''); fs.symlinkSync('-srv-proj-b', path.join(sc.PJ, '-srv-proj-z')); sc.add(sc.A, S1, 2); await sc.walk(); sc.add(sc.A, S1, 5); const c = await sc.walk(1); await sc.walk(); return c; }],
+  ];
+  for (const [label, budget, once, run] of SCENES) {
+    const sc = hubScene(budget);
+    const v = verdict(sc, await run(sc), once);
+    ok(v.good, `B-6ded HUB ${label}: the stopped walk leaves \`_cursors\` as it found it; after the next walk every request is in the ledger${once ? ', once' : ''}`, v.why);
+  }
+  // the commit's own failure: an append that throws (December's shard path is a directory) after November's rows landed —
+  // the map as the walk found it; the fault cleared, the next walk appends December and refuses November's re-read
+  {
+    const sc = hubScene(300);
+    sc.add(sc.A, S1, 2); await sc.walk();
+    sc.add(sc.A, S1, 3, 10); sc.add(sc.A, S1, 3, 11);
+    const dec = path.join(sc.h.dir, 'events-2026-12.ndjson');
+    fs.mkdirSync(dec);
+    const failed = await sc.walk();
+    const midRows = sc.rows().length;
+    fs.rmdirSync(dec);
+    const after = await sc.walk();
+    const rows = sc.rows(), miss = sc.missing();
+    ok(failed.r && failed.r.error && failed.kept && midRows === 5 && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
+      'B-6ded HUB an append that fails AT the commit (one shard written, the next refused): `_cursors` as the walk found it; once the fault clears every request is in the ledger once — the re-read rows refused by the ledger\'s id filter',
+      `error ${failed.r && failed.r.error}, map ${failed.kept ? 'as found' : 'ADVANCED'}, ${midRows} rows mid-way, then added ${after.r.added} reWalked ${after.r.reWalked}, missing ${JSON.stringify(miss)}, ${rows.length} rows / ${new Set(rows).size}`);
+  }
+
+  // (c) THE SHIPPED SCANNER: its commit point is a flushed stdout — a dead pipe (the ssh link gone) leaves its cursor file
+  // byte for byte, and the next live run emits every event of those bytes. Node calls the write's callback FIRST, with
+  // EPIPE, and emits 'error' after it: the release wrote the cursor in that callback.
+  {
+    const sh = path.join(b6Root, 'scan-home'), sA = path.join(sh, '.claude', 'projects', '-srv-proj-a'), scCur = path.join(b6Root, 'scan-cursor.json');
+    fs.mkdirSync(sA, { recursive: true });
+    const SCANNER = path.join(REPO, 'data/bin/vibespace-usage-scan');
+    const scEnv = { ...process.env, HOME: sh, CODEX_HOME: path.join(sh, '.codex'), VIBESPACE_USAGE_CURSOR: scCur };
+    const live = () => execFileSync(process.execPath, [SCANNER], { encoding: 'utf8', env: scEnv, timeout: 30000, maxBuffer: 64 << 20 }).split('\n').filter(Boolean);
+    let k = 0; const addS = (c) => { for (let i = 0; i < c; i++) fs.appendFileSync(path.join(sA, S1 + '.jsonl'), line6(++k)); };
+    addS(2);
+    const first = live();
+    const before = fs.readFileSync(scCur);
+    addS(400);   // > a pipe's 64 KiB of NDJSON: the write meets the dead pipe whatever the timing
+    const dead = await new Promise((resolve) => {
+      const c = spawn(process.execPath, [SCANNER], { env: scEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+      c.stdout.destroy();   // the reader is gone before the scanner writes
+      const t = setTimeout(() => c.kill('SIGKILL'), 30000);
+      c.on('exit', (code, sig) => { clearTimeout(t); resolve({ code, sig }); });
+    });
+    const kept = Buffer.compare(before, fs.readFileSync(scCur)) === 0;
+    const next = live();
+    ok(first.length === 2 && dead.code === 1 && kept && next.length === 400 && JSON.parse(next[0]).rid === 'req_3',
+      'B-6ded SCANNER a dead stdout pipe (EPIPE) leaves the scanner\'s cursor file byte for byte; the next live run emits all 400 events of those bytes',
+      `first ${first.length}, dead run exit ${dead.code}/${dead.sig}, cursor ${kept ? 'as found' : 'WRITTEN'}, next run ${next.length} events`);
+  }
+
+  // NEGATIVE CONTROL (a scratch-dir patched copy): the walker that hands the CALLER'S entry to the walk again (the copy
+  // removed at the transcript road) — the module leg must see it
+  {
+    const M = mutantCopies('walkpar-b6ded', REPO);
+    const src0 = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
+    const mutated = src0.replace("      const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n", "      const cur = cursors[fp] || { offset: 0, lastRid: null };\n");
+    ok(mutated !== src0, 'the control mutation applies to the shipped source (the entry copy is where this suite expects it)');
+    const { runUsageWalk: walkCtl } = M.load('src/usage-walker.js', mutated, 'b6ded-in-place');
+    const mc = await modLegs(walkCtl, 'ctl');
+    ok(!mc.stopped, `NEGATIVE CONTROL: the walker advancing the caller's own entry FAILS the module leg (the handed map ${mc.after})`);
+  }
+  fs.rmSync(b6Root, { recursive: true, force: true });
 }
 
 fs.rmSync(home, { recursive: true, force: true });
