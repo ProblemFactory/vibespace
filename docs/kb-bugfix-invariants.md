@@ -933,6 +933,17 @@
 - (2026-11-06) THE CHAT'S TAIL WAS NOTHING BUT «断开 / 重连» (owner, phone; connection-notice-once) — 不变量 = one live notice patched in place, a status row is no message, a cycle nobody could have noticed is no notice ⇒ kb-bugfix-invariants
 - (2026-11-13) «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (owner; the Desktop picker opened the dialog without the opener's `install`) — 不变量 = a need's door is the surface's own, never an opener's callback; the first ffmpeg that PASSES is used, in the same order (kb-bugfix-invariants)
 - (2026-10-26) AN EXCEL FILE ON A STORAGE MOUNT OPENED FROM CHAT SAID «refused: a synchronous fs call…» RAW (userW, .358): the xlsx lib read by PATH on the loop. 不变量 = a preview hands a library bytes SafeFs read, parses off the loop; a refusal is said in words ⇒ kb-bugfix-invariants
+- (2026-11-13) THE STRIP CUT THE OWNER'S REPLY OPTIONS TO «回复：保留 ag» IN A ~500 PX WINDOW, AND ITS QUESTION ONLY JUMPED TO THE CONVERSATION (lane ui-phone-and-fit pick 0) — 不变量 = every option is drawn whole at every width of its door; the strip's item opens in place (kb-bugfix-invariants)
+
+## THE STRIP CUT THE OWNER'S REPLY OPTIONS, AND ITS QUESTION ONLY JUMPED AWAY (the owner, 2026-11-13; lane ui-phone-and-fit pick 0, .400)
+
+**Symptom.** In a ~500 px chat window the strip «等你操作 · 9 个问题» drew the question cut, then «回复：保留 ag», cut by the window. The other options were out of sight. A press on the question only landed the card in the conversation; the detail could not be read in the strip.
+
+**Cause (on 935960b7e).** The base `.ut-opt` / `.iw-opt` were nowrap + ellipsis. The strip's options were ONE sideways-scrolling line, its pills capped at 24 em with an ellipsis. The phone's pills were clamped to two lines. The strip's question press only landed in the conversation.
+
+**Fix.** THE OPTIONS LAW: every rule that styles an option or an options row draws the option whole. Pills wrap inside themselves, rows wrap, and «Reply:» is said once before them. The strip's question press opens the item IN PLACE (`_dockOver`: a spacer of its closed height, the strip floats over the chat at most half the window). The item is drawn in ONE ORDER: the question, the options, then the detail. «Show it in the conversation» is a worded door of its own.
+
+**Invariant / gates.** test-foryou-fit (fast): every option rule over public/*.css — a state inside a selector counts, the base rows must wrap; the readers' mutants are planted. test-foryou-fit-chrome (heavy): five doors × the width ladder (scripts/lib/fit-ladder.mjs). Its control on the .398 source is red by name at 500.
 
 ## «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (the owner, 2026-11-13 01:2xZ; lane machine-needs-at-pairing pick 1, .399)
 

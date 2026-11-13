@@ -30,7 +30,9 @@ const CUT = /text-overflow:\s*ellipsis|white-space:\s*nowrap|line-clamp:\s*\d|ov
 const ONE_LINE = /flex-wrap:\s*nowrap|overflow-x:\s*(auto|scroll)/;
 // a selector REACHES an option when its styled compound is an option, or a button / any element inside an options row
 // (the reader's W2 planted `.cad-rows .ut-opts > button { nowrap; ellipsis }` past a last-compound-only census)
-const reachesOpt = (x) => { const last = lastCompound(x); if (/::?(before|after)|:hover|:focus|:disabled/.test(last)) return false; return OPT.test(last) || (ROWS.test(x.slice(0, x.length - last.length)) && /^(button|\*|\[|:|\.ut-opt|\.iw-opt)/.test(last)); };
+// a STATE or a pseudo-element is exempt only when the selector ENDS in it («.ut-opt:hover», «.ut-opt::before») — never a state
+// inside it: «.ut-opt:not(:disabled)» is every live option (the .400 merged-tip read's hole a)
+const reachesOpt = (x) => { const last = lastCompound(x); if (/(::?(before|after)|:hover|:focus(-visible|-within)?|:active|:disabled)$/.test(last)) return false; return OPT.test(last) || (ROWS.test(x.slice(0, x.length - last.length)) && /^(button|\*|\[|:|\.ut-opt|\.iw-opt)/.test(last)); };
 const faults = (rules) => rules.flatMap((r) => {
   const sels = selectorList(r.sel).map(lastCompound);
   const out = [];
@@ -53,6 +55,15 @@ check(`① CONTROL (the reader's W2): an option cut through a descendant selecto
 const pillRules = RULES.filter((r) => ['.ut-opt', '.iw-opt', '.cad-rows .ut-opt'].includes(r.sel));
 check(`① every base pill rule (${pillRules.map((r) => r.sel).join(' · ')}) breaks a long unbroken word inside the pill (overflow-wrap) — the reader's W1`, pillRules.length === 3 && pillRules.every((r) => /overflow-wrap:\s*(break-word|anywhere)/.test(r.body)));
 check(`① CONTROL: the release's five rules (the owner's case), planted, are caught — ${red.length} faults`, red.length === 5, red);
+const notDis = faults(cssRules('.ut-opt:not(:disabled) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }', 'planted'));
+check(`① CONTROL (the .400 merged-tip read's hole a): a cut through a state INSIDE the selector («.ut-opt:not(:disabled)» — every live option) is caught — ${notDis.length}`, notDis.length === 1, notDis);
+// the base options rows WRAP (the .400 merged-tip read's hole b: dropping the wrap from the base rule passed every fast suite) —
+// the tray / mini inbox / phone sheet / card draw their options in .ut-opts, the For-you window in .iw-opts
+const baseRow = (sel) => RULES.find((r) => r.file === 'style.css' && r.sel === sel);
+const wraps = (r) => !!r && /display:\s*flex/.test(r.body) && /flex-wrap:\s*wrap/.test(r.body);
+check('① the base options rows (.ut-opts — the tray, the mini inbox, the phone sheet, the card; .iw-opts — the For-you window) are flex rows that WRAP', wraps(baseRow('.ut-opts')) && wraps(baseRow('.iw-opts')), [baseRow('.ut-opts')?.body, baseRow('.iw-opts')?.body]);
+const unwrapped = { file: 'style.css', sel: '.ut-opts', body: (baseRow('.ut-opts')?.body || '').replace(/flex-wrap:\s*wrap;?\s*/, '') };
+check('① CONTROL: the base .ut-opts with its wrap dropped is refused by that leg', !wraps(unwrapped) && unwrapped.body !== baseRow('.ut-opts')?.body);
 const CC = read('public/chat.css');
 check('① the strip\'s options: a line of their own (flex 1 1 100%) that WRAPS, its pills wrapping inside themselves; the question two lines before its cut when options stand',
   /\.cad-rows \.ut-body > \.ut-opts \{ order: 6; flex: 1 1 100%;[^}]*flex-wrap: wrap;[^}]*overflow: visible; \}/.test(CC) && /\.cad-rows \.ut-opt \{[^}]*white-space: normal;[^}]*overflow-wrap: break-word;/.test(CC)

@@ -58,6 +58,7 @@ scripts/test-claude-update-needs-nothing-hub.mjs — heavy: a scratch hub with t
 scripts/claude-catalog-stand-in.mjs — the stand-in claude for both: a /bin/sh stub whose bytes carry a catalog literal in the CLI's own minified shape (never run); neverSeen(base) adds Fable 6 + the family Quill
 src/server/cli-env.js — + CLAUDE_KNOWN_MODELS = the picker's full-id rows: Fable 5.1, 5.2 and 5.2 [1m] (lane fable-52-cli-321; a typed …[1m] id no row names is refused by the provider, and a bare row strips it) ⇒ kb-file-structure.md
 scripts/lib/fit-ladder.mjs — THE WIDTH LADDER (lane ui-phone-and-fit pick 0): LADDER 280…1440 / PHONE_LADDER, fitVerdictSource (controls inside container + row, no cut words, no sideways scroll), runLadder, ladderFaults — every UI fit pin measures with it ⇒
+scripts/test-foryou-fit.mjs (fast) + test-foryou-fit-chrome.mjs (heavy) (lane ui-phone-and-fit pick 0) — the owner's case: every option whole at every width of its door, the strip opens in place in ONE ORDER; the census over every option rule, the doors on the width ladder ⇒
 scripts/lib/css-rules.mjs — cssRules / selectorList / lastCompound: every innermost rule of a sheet, read for the fit censuses ⇒
 src/lib/row-fold-model.js — PURE (lane phone-roster-fold) rowActionsFold: a phone status row keeps ≤ ROW_INLINE_MAX (3) buttons inline; the rest, and what the width cannot hold, fold into ONE «…» — the count in barLayout's order, then barLayout (a primary never folds) ⇒
 src/lib/manage-agents.js — + foldRowByTier (lane phone-roster-fold): each strip at the CURRENT tier (RO + vs-viewport-class, bound to the render's signal) — the phone folds by count + width into ONE «…» (row-more, context-menu, FOLDED); the desktop = the base's bar, byte for byte ⇒
@@ -14607,4 +14608,12 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **fits(v)**, **runLadder({ widths, setWidth, read })** and **ladderFaults(rows)** give a check's message by width.
 - **css-rules.mjs:** `cssRules(text, file)`, `selectorList`, `lastCompound` — the fast censuses read public/*.css with it.
 - **Users:** test-foryou-fit / test-foryou-fit-chrome (pick 0). The other UI lanes and the walk's next wave call the same helper.
+
+### scripts/test-foryou-fit.mjs + scripts/test-foryou-fit-chrome.mjs (lane ui-phone-and-fit pick 0 — the owner's case)
+- **test-foryou-fit (fast, in-process, 29):**
+  - ① THE OPTIONS LAW over every rule of public/*.css that reaches an option (an option or any element in an options row; a state or pseudo-element is exempt only when the selector ENDS in it). None cuts an option's words; none makes the options one sideways line. The base `.ut-opts` / `.iw-opts` rows are flex rows that wrap. Controls: the release's five rules, `.cad-rows .ut-opts > button`, `.ut-opt:not(:disabled)`, a base row without its wrap.
+  - ② «Reply:» once.
+  - ③ the strip's row opens in place (`_dockFold` / `_dockOver` / `_dockDetail`, law 7, Esc, the z order, the half-window cap). ③b ONE ORDER; ③d the order of the measure and the open state, with the readers' five behaviour mutants planted.
+  - ④ the ladder is one helper.
+- **test-foryou-fit-chrome (heavy):** five doors (the chat strip, the tray, the For-you window, the phone sheet, the mini inbox) × the ladder × 1 / 3 / 5 / 6 options × zh / en, with a 120-character parsed option. The strip opened in place: the options in view at its top, the detail below, the chat's scroll unmoved. Legs: history ↓, Esc, a short 360 × 500 tile, six long options at 360. `--tree <built .398 copy>` = the control, red by name at 500. `--shots <dir>` keeps the pictures.
 
