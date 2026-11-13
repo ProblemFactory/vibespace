@@ -131,6 +131,23 @@ module.exports = {
     discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
     locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant)
     locateIsProof: true, // a null PROVES no rollout is here (the walk + the remote cache) — the transcript worker's `locate` op
+    // lane chat-attachments-persist (the cut): WHERE A PICTURE SITS IN A ROLLOUT LINE — a function output's input_image data
+    // URL (a view_image); the key = the output's call_id; no sub-agent files (a Codex sub-agent is a thread of its own)
+    pictures: {
+      marks: ['"input_image"'],
+      subagents: false,
+      keyOf: (r) => r.str(r.get(r.get(r.root, 'payload'), 'call_id')),
+      picturesOf: (r) => {
+        const out = [];
+        for (const it of r.items(r.get(r.get(r.root, 'payload'), 'output'))) {
+          if (r.str(r.get(it, 'type')) !== 'input_image') continue;
+          const u = r.get(it, 'image_url');
+          const m = r.isStr(u) ? /^data:([^;,]+);base64,/.exec(r.head(u, 128)) : null;
+          if (m) out.push({ mediaType: m[1], span: r.from(u, m[0].length) });
+        }
+        return out;
+      },
+    },
     resumeIdOf: (meta) => (meta && typeof meta.backendSessionId === 'string' && meta.backendSessionId) || null, // THE RESUMABLE ID (boot-restore): the thread id
     createReader: (session, sessionId, opts) => new codexStore.CodexSessionMessages(session, sessionId, opts || {}),
     forkChain: (id) => { const p = findCodexSessionJsonlPath(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },

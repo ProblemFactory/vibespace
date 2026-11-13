@@ -31,6 +31,16 @@ const {
 const { get: harnessOf } = require('./harnesses'); // S3: store.locate per harness
 
 const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
+// lane chat-attachments-persist (the cut): pictures are read in ONE transcript worker of their own (its indexes are kept
+// and extended there — one copy, never one per pool thread); inline (the pool down) the op answers «unavailable»
+let _picturePool = null;
+function picturePool() {
+  if (_picturePool) return _picturePool;
+  const { SafeFs } = require('./safe-fs');
+  const { runOp } = require('./transcript-worker');
+  _picturePool = new SafeFs({ workerPath: require('path').join(__dirname, 'transcript-worker.js'), name: 'transcript-picture', poolSize: 1, inlineRun: runOp, timeouts: { default: 120000 } });
+  return _picturePool;
+}
 const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);
 
 function createTranscriptService({ activeSessions, createSessionMessages, hosts }) {
@@ -341,7 +351,37 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return { replaced, skipped, lines, sizeBefore, sizeAfter: fs.statSync(fp).size, backup };
   }
 
-  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue };
+  /** lane chat-attachments-persist (the cut): A PICTURE FROM THE RECORD IT CAME IN — `params` = {agent, key, n} (a place,
+   *  src/transcript-picture.js). On this machine: the transcript worker finds the file through the harness's own locate and
+   *  answers the picture's byte span {ok, mediaType, fp, start, end, dev, ino}; on a paired machine: its agent answers with
+   *  the SAME reader {ok, mediaType, b64} — asked ONLY when its hello-ack names `transcript-picture` (an agent without it is
+   *  never asked: an unknown op would hang), else {oldAgent: true}. {gone: why} | {unknown: true} | {unavailable: true}. */
+  async function picture(ref, params = {}) {
+    const r = norm(ref);
+    const q = { backend: r.backend, tx: r.sessionId, cwd: r.cwd, agent: params.agent || null, key: params.key, n: params.n };
+    if (r.host) {
+      if (!hosts?.deviceBounded) return { unavailable: true };
+      try {
+        const dm = await hosts.deviceBounded(r.host, 6000);
+        const caps = (await dm?.connect?.())?.info?.capabilities;
+        if (!dm?.transcriptOp || !Array.isArray(caps) || !caps.includes('transcript-picture')) return { oldAgent: true };
+        return await dm.transcriptOp('picture', { backend: r.backend, sessionId: r.sessionId, cwd: r.cwd }, { agent: q.agent, key: q.key, n: q.n });
+      } catch (e) { return { unavailable: true, why: String((e && e.message) || e).slice(0, 120) }; }
+    }
+    return picturePool().call('picture', q);
+  }
+  /** THE DEVICE'S ANSWER (its agent's transcript-op `picture`): the same reader over this machine's own transcript, the
+   *  picture's base64 text included (the hub decodes it). */
+  async function pictureHere(ref, params = {}) {
+    const r = norm(ref);
+    const TP = require('./transcript-picture.js');
+    const fp = await TP.placeFile({ backend: r.backend, tx: r.sessionId, cwd: r.cwd, agent: params.agent || null }, { locate: async (id, cwd) => localTranscriptPath({ ...r, sessionId: id, cwd }) });
+    if (!fp) return { unknown: true };
+    const out = await TP.reader().find({ fp, backend: r.backend, key: params.key, n: Number(params.n), withText: true });
+    return out.ok ? { ok: true, mediaType: out.mediaType, b64: out.b64 } : out;
+  }
+
+  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue, picture, pictureHere };
 }
 
 module.exports = { createTranscriptService };

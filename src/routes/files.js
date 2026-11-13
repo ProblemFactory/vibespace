@@ -521,6 +521,28 @@ router.delete('/api/file', async (req, res) => {
 
 // File upload
 const upload = multer({ dest: '/tmp/claude-webui-uploads/' });
+// lane chat-attachments-persist (road a): a file the person gives a conversation whose cwd is TEMPORARY — chat.uploadDir
+// unset, the cwd under os.tmpdir() / /tmp / /var/tmp — is kept with the conversation instead (data/chat-attachments/<conv>/
+// files/, a remote host's ~/.vibespace/chat-attachments/<conv>/), and the answer says where; a cwd that is not temporary
+// keeps today's road (the agent wants the file beside its work). A same-named file is never overwritten: «name (1).ext».
+const CA = require('../server/chat-attachments.js');
+const ATTACH_ROOT = path.join(__dirname, '..', '..', 'data', 'chat-attachments');
+const TEMP_ROOTS = () => [...new Set([os.tmpdir(), '/tmp', '/var/tmp'].map((p) => path.resolve(p)))];
+const underTempRoot = (p, roots = TEMP_ROOTS()) => roots.some((r) => p === r || p.startsWith(r + path.sep));
+const REMOTE_TEMP_RE = /^\/(?:tmp|var\/tmp)(?:\/|$)/;
+/** «a.png» → «a (1).png», «a (2).png»… — the first name `taken(name)` answers false for (bounded). */
+async function freeName(name, taken) {
+  if (!(await taken(name))) return name;
+  const dot = name.lastIndexOf('.'), base = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : '';
+  for (let n = 1; n < 1000; n++) { const c = `${base} (${n})${ext}`; if (!(await taken(c))) return c; }
+  throw new Error(`Too many files named ${name}`);
+}
+/** The top-level component of every upload name renamed once when it is taken (a file, or a folder's root). */
+async function freeTops(names, taken) {
+  const map = new Map();
+  for (const n of names) { const top = String(n).split('/')[0]; if (top && !map.has(top)) map.set(top, await freeName(top, taken)); }
+  return (n) => { const parts = String(n).split('/'); parts[0] = map.get(parts[0]) || parts[0]; return parts.join('/'); };
+}
 // lane artifacts-registries: the composer names its chat (`sessionId`) ⇒ each landed file is that conversation's `upload`
 // row (src/server/artifact-registry.js); a file-explorer upload names none and feeds nothing
 function noteChatUploads(req, files) {
@@ -529,7 +551,10 @@ function noteChatUploads(req, files) {
   try { require('../server/artifact-registry.js').noteUploads({ sessionId, host: req.query.host ? String(req.query.host) : '', files }); } catch (e) { console.warn('[upload] artifacts rows not fed:', e.message); }
 }
 router.post('/api/upload', upload.array('files'), async (req, res) => {
-  const destDir = req.body.destDir || os.homedir();
+  let destDir = req.body.destDir || os.homedir();
+  const conv = req.body && req.body.sessionId ? String(req.body.sessionId) : '';
+  const keepWithConv = req.body.uploadDirSet !== '1' && CA.convOk(conv);   // chat.uploadDir unset (today's default = the cwd) and a conversation named
+  let keptFrom = null;   // the temporary folder the files were kept away from (said in the answer)
   const preservePaths = req.body.preservePaths === '1'; // folder upload: keep relative paths
   // Client sends correct UTF-8 filenames as JSON to avoid multer encoding issues
   let clientNames = [];
@@ -539,17 +564,24 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   if (R) {
     try {
       const results = [];
+      if (keepWithConv && REMOTE_TEMP_RE.test(String(destDir))) {   // road a, a remote host: its own persistent folder, absolute
+        const home = String(await R.fs.home(R.host) || '').replace(/\/+$/, '');
+        if (home) { keptFrom = destDir; destDir = `${home}/.vibespace/chat-attachments/${conv}`; await R.fs.mkdir(R.host, destDir); }
+      }
+      const dir = destDir.endsWith('/') ? destDir : destDir + '/';
+      const names = req.files.map((f, i) => clientNames[i] || f.originalname);
+      for (const n of names) if (n.includes('..')) throw new Error('Invalid file name: ' + n);
+      const rename = await freeTops(names, async (top) => { try { return !!(await R.fs.stat(R.host, dir + top)); } catch { return false; } });
       for (let i = 0; i < req.files.length; i++) {
         const file = req.files[i];
-        const name = clientNames[i] || file.originalname;
-        if (name.includes('..')) throw new Error('Invalid file name: ' + name);
-        const dest = (destDir.endsWith('/') ? destDir : destDir + '/') + name;
-        await R.fs.write(R.host, dest, fs.readFileSync(file.path));
-        fs.unlinkSync(file.path);
+        const name = rename(names[i]);
+        const dest = dir + name;
+        await R.fs.write(R.host, dest, await fs.promises.readFile(file.path));
+        await fs.promises.unlink(file.path).catch(() => {});
         results.push({ name, path: dest, size: file.size });
       }
       noteChatUploads(req, results);
-      return res.json({ success: true, files: results });
+      return res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destDir } : {}) });
     } catch (e) {
       for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }
       return res.status(400).json({ error: e.message });
@@ -557,13 +589,17 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
   }
   try {
     const results = [];
-    const destRoot = path.resolve(expandTilde(destDir)); // chat.uploadDir may be ~/Downloads
+    let destRoot = path.resolve(expandTilde(destDir)); // chat.uploadDir may be ~/Downloads
+    if (keepWithConv && underTempRoot(destRoot, req.app.locals.chatTempRoots || TEMP_ROOTS())) { keptFrom = destRoot; destRoot = path.join(req.app.locals.chatAttachmentsRoot || ATTACH_ROOT, conv, 'files'); }   // road a: kept with the conversation (a gate's root: app.locals.chatAttachmentsRoot)
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
     await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)
+    // lane chat-attachments-persist: a same-named file (or folder) is never silently overwritten — «name (1).ext»
+    const names = req.files.map((f, i) => clientNames[i] || f.originalname);
+    const rename = await freeTops(names, async (top) => { const p = path.resolve(destRoot, top); if (p !== destRoot && !p.startsWith(destRoot + path.sep)) return false; try { return !!(await sfs(req).call('exists', { path: p })).exists; } catch { return false; } });
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
-      const name = clientNames[i] || file.originalname;
+      const name = rename(names[i]);
       const dest = path.resolve(destRoot, name);
       // Confine to the chosen folder: a name containing ../ would otherwise
       // silently write outside the upload destination
@@ -574,12 +610,18 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
       if (preservePaths && name.includes('/')) {
         await sfs(req).call('mkdir', { path: path.dirname(dest) });
       }
+      if (keptFrom) {   // road a: into the conversation's own folder as a temp file LINKED to a free name — never overwriting
+        const got = await CA.placeFile(file.path, destRoot, name);
+        await fs.promises.unlink(file.path).catch(() => { });
+        results.push({ name: got, path: path.join(destRoot, got), size: file.size });
+        continue;
+      }
       await sfs(req).call('copy', { src: file.path, dest, overwrite: true });
       fs.unlinkSync(file.path);
       results.push({ name, path: dest, size: file.size });
     }
     noteChatUploads(req, results);
-    res.json({ success: true, files: results });
+    res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destRoot } : {}) });
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)
     for (const f of req.files || []) { try { fs.unlinkSync(f.path); } catch {} }

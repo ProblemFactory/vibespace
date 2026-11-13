@@ -250,20 +250,52 @@ function classifyResultError(text) {
   return PROMPT_TOO_LONG_RE.test(String(text || '')) ? 'prompt-too-long' : null;
 }
 
+/** lane chat-attachments-persist (the cut, 主开发 2026-11-13: «the record is the store»): A PICTURE'S PLACE IN ITS RECORD —
+ *  `{b, tx, agent?, key}` of the record + the picture's ordinal `n` among the record's image blocks in DOCUMENT ORDER (a
+ *  message's own image blocks and each tool_result's, as they come) — the order src/transcript-picture.js reads them in.
+ *  tx = the record's own transcript id (sessionId; the live stream's session_id), else the reader's (threadId); key = the
+ *  record's uuid (measured on 2.1.322: the live record's uuid IS its transcript line's); agent = a sub-agent's file
+ *  (agentId; live agent_id). No tx or no key ⇒ no place. PURE. */
+const PLACE_RE = /^[A-Za-z0-9_-]{1,128}$/;
+function pictureBaseOf(raw, fallbackTx = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const tx = (typeof raw.sessionId === 'string' && raw.sessionId) || (typeof raw.session_id === 'string' && raw.session_id) || fallbackTx;
+  const key = typeof raw.uuid === 'string' ? raw.uuid : null;
+  const agent = (typeof raw.agentId === 'string' && raw.agentId) || (typeof raw.agent_id === 'string' && raw.agent_id) || null;
+  if (!tx || !key || !PLACE_RE.test(tx) || !PLACE_RE.test(key) || (agent && !PLACE_RE.test(agent))) return null;
+  return { b: 'claude', tx, ...(agent ? { agent } : {}), key };
+}
+/** each tool_result block of the record → the ordinal of its first picture (document order, every image block counted) */
+function pictureOrdinalsOf(raw) {
+  const out = new Map();
+  const content = raw && raw.message && Array.isArray(raw.message.content) ? raw.message.content : [];
+  let n = 0;
+  for (const b of content) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'image') n++;
+    else if (b.type === 'tool_result') { out.set(b, n); if (Array.isArray(b.content)) for (const c of b.content) if (c && c.type === 'image') n++; }
+  }
+  return out;
+}
+
 /** tool_result content → { text, images }. Text/other blocks keep the exact
  *  previous shape (string passthrough; arrays JSON-stringified so the
  *  renderer's `[{` Agent-result parse still works); image blocks are LIFTED
- *  OUT as {mediaType, bytes} and replaced by a one-line marker. */
-function splitToolResultContent(content) {
+ *  OUT as {mediaType, bytes} and replaced by a one-line marker. lane chat-attachments-persist: `place` (a record's
+ *  {b, tx, agent?, key, n0}) — each lifted picture carries its place {…, n} so the view can draw it FROM THE RECORD. */
+function splitToolResultContent(content, place = null) {
   if (typeof content === 'string') return { text: content, images: [] };
   if (!Array.isArray(content)) return { text: JSON.stringify(content || ''), images: [] };
   const images = [];
   const rest = [];
+  let i = 0;
   for (const b of content) {
     if (b && typeof b === 'object' && b.type === 'image') {
       const data = b.source?.data || '';
       const bytes = Math.round(data.length * 3 / 4);
-      images.push({ mediaType: b.source?.media_type || 'image/png', bytes });
+      const n = i++;
+      const where = place && data ? { b: place.b, tx: place.tx, ...(place.agent ? { agent: place.agent } : {}), key: place.key, n: (place.n0 || 0) + n } : null;
+      images.push({ mediaType: b.source?.media_type || 'image/png', bytes, ...(where ? { place: where } : {}) });
       rest.push({ type: 'text', text: `[image ${b.source?.media_type || 'image/png'} · ${Math.max(1, Math.round(bytes / 1024))} KB]` });
     } else rest.push(b);
   }
@@ -381,8 +413,11 @@ class MessageManager extends MessageWindow {
   // can't reach server state directly). null in tests → defaults apply.
   static getSetting = null;
 
-  constructor(sessionId) {
+  constructor(sessionId, opts = null) {
     super(sessionId);
+    // lane chat-attachments-persist: the transcript this reader renders (createMessageManager's opts.threadId — a view, the
+    // transcript API, a gap slab): a picture's place when its record names none
+    this._placeTx = opts && typeof opts.threadId === 'string' && opts.threadId ? opts.threadId : null;
     this.pendingToolCalls = new Map();   // toolUseId → { msgId, block }
     // Task lifecycle needs its OWN index (2.368.15, owner: "基本每个对话都有
     // 已结束的后台任务显示为正在进行"): pendingToolCalls is the permission/
@@ -1954,6 +1989,8 @@ class MessageManager extends MessageWindow {
     const textBlocks = blocks.filter(b => b.type !== 'tool_result');
 
     if (toolResults.length) this._noteRide(); // lane midturn-order: a handed message rides the request built after this result
+    const pictureBase = toolResults.length ? pictureBaseOf(raw, this._placeTx) : null;   // lane chat-attachments-persist: the record's place
+    const pictureOrdinals = pictureBase ? pictureOrdinalsOf(raw) : null;
     // Merge tool results into pending tool messages
     for (const tr of toolResults) {
       const toolUseId = tr.tool_use_id;
@@ -1968,7 +2005,7 @@ class MessageManager extends MessageWindow {
       // the renderer (escHtml/linkify over base64) froze the whole page. Images
       // leave as {mediaType, bytes} metadata; the renderer shows the FILE (the
       // Read path is on disk) instead of the bytes.
-      const split = splitToolResultContent(tr.content);
+      const split = splitToolResultContent(tr.content, pictureBase ? { ...pictureBase, n0: pictureOrdinals.get(tr) || 0 } : null);   // lane chat-attachments-persist: each picture's place in its record
       const resultText = split.text;
       const ackText = toolResultText(tr.content); // B-63f1: the launch ack is a TEXT-BLOCK LIST in every real record — its words, never the card's JSON
       existing.status = tr.is_error ? 'error' : 'complete';
@@ -2732,4 +2769,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
-module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };
+module.exports = { splitToolResultContent, pictureBaseOf, pictureOrdinalsOf, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, applyPeerOrigin, userRecordOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

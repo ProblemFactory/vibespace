@@ -310,7 +310,10 @@
   "/api/voice/status",
   "/api/voice/teach",
   "/api/window/desktop",
-  "/api/workflow"
+  "/api/workflow",
+  "/api/chat-picture/:tx/:key/:n",
+  "/api/chat-attachments/usage",
+  "/api/chat-attachments/orphans"
  ],
  "windows": {
   "skip": {

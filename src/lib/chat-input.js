@@ -596,9 +596,12 @@ export class ChatInput {
         destDir,
         host: this._getHost(), // remote sessions: upload lands on the host, not locally
         sessionId: this._sessionId, // lane artifacts-registries: the attachments are this conversation's `upload` rows
+        uploadDirSet: !!(this._getUploadDir() || '').trim(), // lane chat-attachments-persist: a chosen folder is never moved
         onProgress: (d, total) => this._uploadToast(t('Uploading {d}/{total}…', { d, total })),
       });
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
+      const kept = uploaded.find((f) => f && f.keptDir);   // lane chat-attachments-persist: said, never silent
+      if (kept) showToast(t('Kept with this conversation in {dir} — {from} is a temporary folder', { dir: kept.keptDir, from: kept.keptFrom }), { duration: 8000 });
       if (failed.length) {
         this._uploadToast(t("Uploaded {n}, {failed} couldn't be read (e.g. {name})", { n: uploaded.length, failed: failed.length, name: failed[0].name }), true);
       } else if (!uploaded.length) {
@@ -626,11 +629,18 @@ export class ChatInput {
     const base = cwd.replace(/\/+$/, '');
     // One entry per top-level item: a file → its own path; a folder → the folder
     // root (deduped across all its uploaded files).
+    // lane chat-attachments-persist: the SERVER's absolute path (never «~», never the client's guess — the server may have
+    // numbered a same-named file or kept it with the conversation); the client's join is only for an older hub's answer
     const tops = new Set();
-    for (const f of uploaded) { const first = (f.name || '').split('/')[0]; if (first) tops.add(first); }
+    for (const f of uploaded) {
+      const name = String(f.name || ''), first = name.split('/')[0];
+      if (!first) continue;
+      const p = typeof f.path === 'string' && f.path.endsWith(name) ? f.path.slice(0, f.path.length - (name.length - first.length)) : base + '/' + first;
+      tops.add(p);
+    }
     if (!tops.size) return;
     const quote = (p) => /[\s'"$`\\()]/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p;
-    const text = [...tops].map((t) => quote(base + '/' + t)).join(' ');
+    const text = [...tops].map((p) => quote(p)).join(' ');
     // THE EDITOR OWNS THE BOX, AND THIS WRITER LANDS LATE (round-6 verifier).
     // Every other programmatic writer runs on the click that caused it; an
     // upload writes the box only after a network round-trip, so an editor

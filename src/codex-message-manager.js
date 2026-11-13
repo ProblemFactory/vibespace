@@ -1610,6 +1610,12 @@ class CodexMessageManager extends MessageWindow {
     // claude normalizer's splitToolResultContent; the renderer draws the file.
     const raw = item.output;
     const images = [];
+    // lane chat-attachments-persist (the cut): each picture's PLACE in its record — the rollout (tx), the output's call_id
+    // (key), its ordinal among the output's pictures — so the view draws it FROM THE RECORD (src/transcript-picture.js)
+    const placeTx = this._recordThreadId || this._threadId, placeKey = typeof item.call_id === 'string' ? item.call_id : null;
+    const PLACE_RE = /^[A-Za-z0-9_-]{1,128}$/;
+    const placeOk = !!(placeTx && placeKey && PLACE_RE.test(placeTx) && PLACE_RE.test(placeKey));
+    let pictureN = 0;
     const output = typeof raw === 'string' ? raw
       : Array.isArray(raw) ? raw.map((b) => {
         if (b && typeof b === 'object' && b.type === 'input_image' && typeof b.image_url === 'string') {
@@ -1617,7 +1623,8 @@ class CodexMessageManager extends MessageWindow {
           const mediaType = m ? m[1] : 'image/png';
           const b64 = b.image_url.slice(b.image_url.indexOf(',') + 1);
           const bytes = Math.round(b64.length * 3 / 4);
-          images.push({ mediaType, bytes });
+          const n = pictureN++;
+          images.push({ mediaType, bytes, ...(placeOk && b64 ? { place: { b: 'codex', tx: placeTx, key: placeKey, n } } : {}) });
           return `[image ${mediaType} · ${Math.max(1, Math.round(bytes / 1024))} KB]`;
         }
         return b && typeof b === 'object' ? (b.text ?? '') : String(b ?? '');

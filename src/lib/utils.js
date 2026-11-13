@@ -877,7 +877,7 @@ export async function collectDroppedFiles(dt) {
   return out;
 }
 
-export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress, host, sessionId = '' } = {}) {
+export async function uploadFilesBatched(files, { destDir, preservePaths, onProgress, host, sessionId = '' , uploadDirSet = false} = {}) {
   const list = (files || []).filter(Boolean);
   const CHUNK_FILES = 40, CHUNK_BYTES = 64 * 1024 * 1024;
   const chunks = [];
@@ -895,6 +895,7 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     fd.append('destDir', destDir);
     fd.append('fileNames', JSON.stringify(names));
     if (sessionId) fd.append('sessionId', sessionId); // lane artifacts-registries: the composer's chat ⇒ the files are its `upload` rows
+    if (uploadDirSet) fd.append('uploadDirSet', '1'); // lane chat-attachments-persist: chat.uploadDir is set ⇒ the server never moves the files
     if (preservePaths || names.some((n) => n.includes('/'))) fd.append('preservePaths', '1');
     // Remote sessions: route the upload to the host so destDir resolves on the
     // remote (and its ~ is the remote home) — without ?host= a remote-session
@@ -903,7 +904,8 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     const res = await fetch(url, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
-    return data.files || [];
+    // lane chat-attachments-persist: the server kept them with the conversation (a temporary cwd) — each file says where from
+    return (data.files || []).map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '', keptDir: data.dir || '' } : f));
   };
 
   const uploaded = [], failed = [];

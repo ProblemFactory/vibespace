@@ -397,6 +397,19 @@ export function ctxFullCardsToResolve(cards, { upToTs = null } = {}) {
   });
   return out;
 }
+/** lane chat-attachments-persist: a path under a temporary root — what the system cleans (the «gone» words name it). */
+const TEMP_PATH_RE = /^\/(?:tmp|var\/tmp|private\/tmp|private\/var\/folders)\//;
+/** lane chat-attachments-persist (the cut): a picture's PLACE in its record {b, tx, agent?, key, n} → the URL that reads it
+ *  from that record (src/routes/chat-attachments.js), or '' — never a path. `host` = the machine the conversation lives on. */
+const PLACE_RE = /^[A-Za-z0-9_-]{1,128}$/;
+export function placePictureUrl(p, host = null) {
+  if (!p || typeof p !== 'object') return '';
+  const b = p.b == null ? '' : String(p.b);   // the harness whose record it is (the route judges it against the descriptors)
+  const tx = String(p.tx || ''), key = String(p.key || ''), n = Number(p.n), agent = p.agent ? String(p.agent) : '';
+  if ((b && !/^[a-z][a-z0-9-]{0,31}$/.test(b)) || !PLACE_RE.test(tx) || !PLACE_RE.test(key) || !Number.isInteger(n) || n < 0 || n > 1000 || (agent && !PLACE_RE.test(agent))) return '';
+  const q = [b ? `b=${encodeURIComponent(b)}` : '', agent ? `agent=${encodeURIComponent(agent)}` : '', host ? `host=${encodeURIComponent(host)}` : ''].filter(Boolean).join('&');
+  return `/api/chat-picture/${encodeURIComponent(tx)}/${encodeURIComponent(key)}/${n}${q ? '?' + q : ''}`;
+}
 export function imageRawUrl(fp, host) {
   return `/api/file/raw?path=${encodeURIComponent(fp)}${host ? `&host=${encodeURIComponent(host)}` : ''}`;
 }
@@ -414,17 +427,21 @@ const imageFormatWord = (mediaType) => { const m = /^image\/([\w.+-]+)$/i.exec(S
  * @param {string} [o.dataUrl]   inline data: URL (harness-supplied small image)
  * @param {string} [o.name]      summary label (default: basename of path)
  * @param {boolean} [o.open]     expanded by default (true)
+ * @param {object} [o.place]     lane chat-attachments-persist: the picture's place in its RECORD {b, tx, agent?, key, n} — drawn
+ *                               from the record when the path no longer answers (ChatView's error delegate swaps
+ *                               `data-record-src` in), or at once when there is no path
  * @returns {string} HTML — a <details class="chat-media"> block, or a size chip when there is nothing drawable
  */
-export function imageMediaHtml({ path = '', host = null, mediaType = '', bytes = 0, dataUrl = null, name = '', open = true } = {}) {
+export function imageMediaHtml({ path = '', host = null, mediaType = '', bytes = 0, dataUrl = null, name = '', open = true, place = null } = {}) {
   const label = name || (path ? String(path).split('/').pop() : '') || t('Image');
   const meta = [imageFormatWord(mediaType), bytes > 0 ? fmtBytes(bytes) : ''].filter(Boolean).join(' · ');
-  const src = dataUrl || (path ? imageRawUrl(path, host) : '');
+  const recordSrc = placePictureUrl(place, host);
+  const src = dataUrl || (path ? imageRawUrl(path, host) : '') || recordSrc;
   if (!src) return `<span class="chat-tool-image-chip" data-chip="size">${escHtml(meta || t('Image'))}</span>`;
   const metaHtml = meta ? ` <span class="chat-media-meta" data-chip="size">${escHtml(meta)}</span>` : '';
   // the "missing" line is display:none until the <img> fires error (ChatView's
   // capture-phase listener flags .chat-media-broken — no inline handlers)
-  return `<details class="chat-diff chat-media"${open ? ' open' : ''}><summary class="chat-diff-summary">${UI_ICONS.image} ${escHtml(label)}${metaHtml}</summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="${escHtml(src)}" alt="${escHtml(label)}"><span class="chat-media-missing">${escHtml(t('Image not available on this machine'))}</span></div></details>`;
+  return `<details class="chat-diff chat-media"${open ? ' open' : ''}><summary class="chat-diff-summary">${UI_ICONS.image} ${escHtml(label)}${metaHtml}</summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="${escHtml(src)}"${recordSrc && recordSrc !== src ? ` data-record-src="${escHtml(recordSrc)}"` : ''} alt="${escHtml(label)}"><span class="chat-media-missing">${escHtml(TEMP_PATH_RE.test(String(path || '')) || (recordSrc && !path) ? t('This picture was stored in a temporary folder and is gone') : t('Image not available on this machine'))}</span></div></details>`;
 }
 
 // Seconds left on a held message's settle chip (lane claude-steer-inject r5) — «12 s»; ChatView's ticker rewrites it.
@@ -1323,6 +1340,14 @@ class ChatRenderers {
     const stdoutMatch = rawText.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
     const hookMatch = rawText.match(/^A session-scoped Stop hook is now active with condition: "([\s\S]*?)"/);
     const hookFeedback = rawText.match(/^Stop hook feedback:\s*\[[\s\S]*?\]:\s*([\s\S]*)/);
+    // lane chat-attachments-persist (road 1): the CLI's «[Image source: /tmp/claude-…/images/N.png]» beside a pasted picture
+    // names ITS OWN temporary copy — the picture itself is kept in this conversation's history (the transcript holds its
+    // bytes; the view draws them from there). Said so, never as if the temp path were where it lives.
+    if (/^\s*\[Image source: [^\]\n]+\]\s*$/.test(rawText)) {
+      el.innerHTML = `<span class="chat-system-text">${UI_ICONS.image || ''} ${escHtml(t("The picture is kept in this conversation's history"))}</span>`;
+      el.title = t("Claude Code also made its own temporary copy; this conversation keeps the picture itself");
+      return el;
+    }
 
     // Background-task wakeup (2.229.2): the harness re-invokes the agent with
     // a <task-notification> block when a background task/workflow completes —
@@ -1697,7 +1722,7 @@ class ChatRenderers {
     const images = Array.isArray(block.images) ? block.images : [];
     const mediaHost = this._sessionCtx().host || null;
     const mediaHtml = images.length
-      ? `<div class="chat-tool-images">${images.map((im) => imageMediaHtml({ path: isImagePath(fp) ? fp : '', host: mediaHost, mediaType: im.mediaType, bytes: im.bytes })).join('')}</div>`
+      ? `<div class="chat-tool-images">${images.map((im) => imageMediaHtml({ path: isImagePath(fp) ? fp : '', host: mediaHost, mediaType: im.mediaType, bytes: im.bytes, place: im.place || null })).join('')}</div>`
       : '';
     // Parse JSON content arrays (e.g. Agent tool returns [{"type":"text","text":"..."}])
     if (resultText.startsWith('[{')) {
@@ -1782,7 +1807,7 @@ class ChatRenderers {
       const promptHtml = prompt ? `<details class="chat-diff"><summary class="chat-diff-summary">${t('Prompt')}</summary><pre>${this.linkifyText(stripAnsi(prompt))}</pre></details>` : '';
       // a format the browser cannot decode (tiff/heic) gets the type/size chip,
       // never an <img> that can only break
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.image} ${escHtml(verb)} ${this.clickablePath(imgPath)}</span>${imageMediaHtml({ path: isImagePath(imgPath) ? imgPath : '', host: mediaHost, mediaType: im.mediaType || '', bytes: im.bytes || 0 })}${promptHtml}</div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.image} ${escHtml(verb)} ${this.clickablePath(imgPath)}</span>${imageMediaHtml({ path: isImagePath(imgPath) ? imgPath : '', host: mediaHost, mediaType: im.mediaType || '', bytes: im.bytes || 0, place: im.place || null })}${promptHtml}</div>`;
     }
     if (block.toolName === 'Read') {
       // lane agy-card-details gap 1: agy's read result is a ONE-LINE summary («113 lines, 24215 bytes»), never the

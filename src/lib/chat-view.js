@@ -461,9 +461,13 @@ class ChatView {
     // from a machine that does not have it) swap to the honest "not available"
     // line — `error` does not bubble, so this is a CAPTURE-phase delegate on
     // the list (no inline handlers in rendered HTML; 2.369.48)
+    // lane chat-attachments-persist (the cut): a picture whose path no longer answers is drawn FROM THE RECORD it came in,
+    // once (through .src); a record read that does not answer either says why (_recordPictureFailed)
     this._messageList.addEventListener('error', (e) => {
       const img = e.target;
-      if (img?.tagName === 'IMG' && img.classList?.contains('chat-tool-img')) img.closest('.chat-media')?.classList.add('chat-media-broken');
+      if (img?.tagName !== 'IMG' || !img.classList?.contains('chat-tool-img')) return;
+      if (this._recordPictureNext(img)) return;
+      img.closest('.chat-media')?.classList.add('chat-media-broken');
     }, true);
     // Consecutive thinking/Bash run collapse (chat.collapseRuns, default ON —
     // TUI-style): a MutationObserver keeps the decoration current across live
@@ -6852,6 +6856,41 @@ class ChatView {
   }
 
   // Convert to read-only mode (after session terminate/exit)
+  /** lane chat-attachments-persist: the kept copy does not answer either — the «gone» line says WHY: removed by the
+   *  conversation's picture limit (the route's 410 names it — Settings › Chat), else the temporary-folder words it holds */
+  /** lane chat-attachments-persist (the cut): the next step for a picture that did not load — the record's copy swapped in
+   *  once (through .src), else the record's answer read and said (_recordPictureFailed). false = no record to ask. */
+  _recordPictureNext(img) {
+    const src = img.getAttribute('src') || '';
+    const rec = img.dataset?.recordSrc || (src.startsWith('/api/chat-picture/') ? src : '');
+    if (!rec) return false;
+    if (src !== rec && !img.dataset.recordTried) { img.dataset.recordTried = '1'; img.src = rec; return true; }
+    this._recordPictureFailed(img, rec);
+    return true;
+  }
+  /** The record's answer, in words the card shows: gone (why), still being found (asked again, a few times), an older agent
+   *  on that machine, no such conversation here — never a broken image without a reason. */
+  _recordPictureFailed(img, rec) {
+    const box = img.closest('.chat-media');
+    const say = (words) => { const miss = box?.querySelector('.chat-media-missing'); if (miss && words) miss.textContent = words; box?.classList.add('chat-media-broken'); };
+    const base = rec.replace(/[?&]try=\d+$/, '');
+    const tries = Number(img.dataset.recordTries || 0);
+    fetch(rec, { cache: 'no-store' }).then(async (r) => {
+      const j = r.ok ? {} : await r.json().catch(() => ({}));
+      if (r.ok) { img.dataset.recordTries = String(tries + 1); img.src = base + (base.includes('?') ? '&' : '?') + 'try=' + (tries + 1); return; }   // it answers now: draw it
+      if (r.status === 503 && tries < 8) {
+        say(t('Still finding this picture in the conversation…'));
+        setTimeout(() => { img.dataset.recordTries = String(tries + 1); box?.classList.remove('chat-media-broken'); img.src = base + (base.includes('?') ? '&' : '?') + 'try=' + (tries + 1); }, Math.min(10000, Number(j.retryMs) || 2000));
+        return;
+      }
+      if (r.status === 410) return say(j.why === 'rescued' ? t('This picture was removed from the conversation\'s record when the record was rescued') : j.why === 'compressed' ? t('This conversation\'s record is compressed, so its pictures cannot be shown') : t('This picture is no longer in the conversation\'s record'));
+      if (r.status === 409) return say(t('That machine\'s agent is older — update it to see pictures from the conversation\'s record'));
+      if (r.status === 404) return say(t('This conversation\'s record is not on this machine'));
+      if (r.status === 503) return say(t('This picture could not be found in time'));
+      say('');
+    }).catch(() => say(''));
+  }
+
   _setReadOnly() {
     this._readOnly = true;
     if (this._chatInput) this._chatInput.setReadOnly();

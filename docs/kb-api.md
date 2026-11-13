@@ -38,7 +38,14 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - `GET /api/file/csv?path=&offset=&limit=&sep=` — streaming CSV/TSV row range (virtual scroll)
 - `POST /api/format` — server-side code formatting (Python/Go/Rust/Shell via ruff/black/shfmt/gofmt/rustfmt)
 - `GET /api/download?path=[&host=]` — download file: `attachment` (local: `res.download`, both forms; remote: RemoteFs.downloadTo, both forms via contentDisposition — r2: the raw name used to make setHeader throw on a CJK name and the request was never answered). Any synchronous throw from a remote stream helper answers 502 (files.js `remoteStream`). `GET /api/download-zip?host=` likewise (`<dir>.zip`, both forms)
-- `POST /api/upload` — multipart upload (fileNames JSON field for Unicode filenames, preservePaths=1 for folder uploads with recursive mkdir)
+- `POST /api/upload` — multipart upload (fileNames JSON field for Unicode filenames, preservePaths=1 for folder uploads with recursive mkdir).
+  - Lane chat-attachments-persist: `sessionId` + no `uploadDirSet=1` + a temporary destDir ⇒ the files are kept in data/chat-attachments/<conv>/files/, and the answer adds `keptWithConversation`, `keptFrom`, `dir`.
+  - A taken name gets «name (n).ext».
+  - Every `files[].path` is absolute.
+- `GET /api/chat-picture/:tx/:key/:n[?agent=][&b=claude|codex][&host=]` (lane chat-attachments-persist, the cut) — the n-th picture of the record `key` (Claude: its uuid; Codex: the function output's call_id) in the transcript `tx`, READ FROM THAT RECORD: found only through the hub's own knowledge (the harness's locate, in the transcript worker; a sub-agent file only among the conversation's own; `host` a paired machine, whose agent is asked only when its hello-ack names `transcript-picture`). Owner's cookie only; a bearer ⇒ 403 `bearer_refused`; the type from an own entry of the closed table (else 415 `type`); nosniff; `private, max-age=31536000, immutable` + ETag (304 on If-None-Match). 400 `bad_place` · 404 `unknown` · 410 `{code:'gone', why: missing|shortened|rescued|no-bytes|compressed}` · 409 `old-agent` · 503 `{code:'finding', retryMs}` past the 10 s deadline (Retry-After 2). At most 3 readings at once; a closed page's waiting requests leave.
+- `GET /api/chat-attachments/usage` — `{files, bytes, conversations}`: the files a person dropped into a temporary folder, kept with their conversations (Settings › Chat beside «Upload files to»; the owner's cookie; read off the loop).
+- `GET /api/chat-attachments/orphans` — `{conversations, files, bytes}` of the folders of conversations the hub lists nowhere (no session record, live or kept).
+- `POST /api/chat-attachments/orphans/remove` `{files, bytes}` — removes exactly what /orphans named; other numbers ⇒ 409 `changed` (+ `now`), nothing removed.
 - `GET /api/file/serve/*` — path-based raw file serving (was the HTML preview's `<base href>`; no client caller since lane frame-host-preview — the preview's folder is `/frame-host/f/<token>/`)
 - `POST /api/file/write` — write file
 - `POST /api/mkdir` — create directory

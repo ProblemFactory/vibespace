@@ -839,22 +839,33 @@ let pendingRestart = null;
 // path — so a picture alone is a message too. Only a picture that could not be written is said as not sent. The
 // picture's bytes never reach the journal, the log or argv.
 const UPLOAD_DIR = '.vibespace-uploads';
+// lane chat-attachments-persist (road b): a conversation whose cwd is TEMPORARY (os.tmpdir() / /tmp / /var/tmp) keeps its
+// pictures with the conversation instead — <data>/chat-attachments/<conversation>/files/ (this wrapper runs on the hub:
+// data/bin/ → data/), the same folder the upload road uses; any other cwd keeps today's <cwd>/.vibespace-uploads/.
+const CONV_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(process.env.CLAUDE_WEBUI_SESSION_ID || '') && !String(process.env.CLAUDE_WEBUI_SESSION_ID).includes('..') ? process.env.CLAUDE_WEBUI_SESSION_ID : '';
+const TEMP_ROOTS = [...new Set([require('os').tmpdir(), '/tmp', '/var/tmp'].map((p) => path.resolve(p)))];
+const underTempRoot = (p) => { const r = path.resolve(p); return TEMP_ROOTS.some((t) => r === t || r.startsWith(t + path.sep)); };
+const pictureDir = () => (CONV_ID && underTempRoot(baseCwd) ? path.join(__dirname, '..', 'chat-attachments', CONV_ID, 'files') : path.join(baseCwd, UPLOAD_DIR));
 const PICTURE_MAX = 20 * 1024 * 1024;
 const PICTURE_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/tiff': 'tiff' };
 const quotePath = (p) => (/[\s'"$`\\()]/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p); // the composer's _insertUploadedPaths quoting
 function savePicture(b) {
   const src = b && b.source;
   if (!src || (src.type && src.type !== 'base64') || typeof src.data !== 'string') throw new Error('not a base64 picture');
-  const mt = String(src.media_type || '').toLowerCase(), ext = PICTURE_EXT[mt];
+  const mt = String(src.media_type || '').toLowerCase(), ext = Object.prototype.hasOwnProperty.call(PICTURE_EXT, mt) ? PICTURE_EXT[mt] : null;   // an OWN entry only («constructor» names no type)
   if (!ext) throw new Error(`a ${mt || 'typeless'} picture`);
   const bytes = Buffer.from(src.data, 'base64');
   if (!bytes.length) throw new Error('an empty picture');
   if (bytes.length > PICTURE_MAX) throw new Error(`a picture over ${PICTURE_MAX / 1048576} MB`);
-  const dir = path.join(baseCwd, UPLOAD_DIR);
+  const dir = pictureDir();   // lane chat-attachments-persist: a temporary cwd ⇒ kept with the conversation
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { }
   const fp = path.join(dir, `pasted-${require('crypto').createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.${ext}`);
-  if (!fs.existsSync(fp)) fs.writeFileSync(fp, bytes, { mode: 0o600 });
+  if (!fs.existsSync(fp)) {   // lane chat-attachments-persist: a temp file LINKED to its name (never a half-written picture; EEXIST = the same bytes)
+    const tmp = path.join(dir, `.${path.basename(fp)}.${process.pid}-${require('crypto').randomBytes(4).toString('hex')}.vs-tmp`);
+    fs.writeFileSync(tmp, bytes, { mode: 0o600 });
+    try { fs.linkSync(tmp, fp); } catch (e) { if (!e || e.code !== 'EEXIST') throw e; } finally { try { fs.unlinkSync(tmp); } catch { } }
+  }
   return fp;
 }
 /** A chat-input → {text, images, failed}: `text` = the pictures' paths first, then the typed text (the last text block,
