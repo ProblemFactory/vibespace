@@ -303,6 +303,20 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
 // `mountsDialog` and `reauthDialog` both render through it; nothing else in
 // src/lib may (scripts/test-oauth-field-parity.mjs §3). `note` / `copy`
 // fields carry no value (they are never in `inputs`).
+/** A held secret's row: «已保存» + «替换…» that opens `input` (empty, hidden until then). */
+function heldSecretRow(input) {
+  const row = document.createElement('span');
+  row.className = 'mounts-held';
+  const state = document.createElement('span');
+  state.className = 'mounts-held-state';
+  state.textContent = tr('Saved');
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'mounts-btn mounts-held-replace'; btn.textContent = tr('Replace…');
+  input.value = ''; input.hidden = true; input.placeholder = tr('Type the new value');
+  btn.onclick = (e) => { e.preventDefault(); input.hidden = false; btn.hidden = true; input.focus(); };
+  row.append(state, btn, input);
+  return row;
+}
 export function renderFields(body, fields) {
   const inputs = {};
   const rows = []; // {field, label, el} for conditional visibility
@@ -344,7 +358,10 @@ export function renderFields(body, fields) {
     }
     if (f.readonly && !valueless) el.readOnly = true;
     if (!valueless) inputs[f.key] = el;
-    const rowRec = { field: f, label, el };
+    // lane ui-controls-and-bugs (THE WRITE-ONLY LAW): a secret the record HOLDS — «已保存» + «替换…»; its box starts empty and
+    // hidden, and is sent only when a new value is typed (a record's secret never reaches the page)
+    const heldRow = f.held && el.tagName === 'INPUT' ? heldSecretRow(el) : null;
+    const rowRec = { field: f, label, el: heldRow || el };
     rows.push(rowRec);
     // THE PATH FIELD (lane path-field — it replaced the Tab / type-ahead completion): 'local' = this server's folders; a
     // function returns the per-keystroke endpoint of a machine (`/api/hosts/<id>/dir-complete`) — the field asks THAT

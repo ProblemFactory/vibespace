@@ -2188,7 +2188,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   ok(sealedOk(edir, rec) && rec.credential.appSecretEnc !== mountCipher && !opensWithMounts, 'Connect {flowId, fromMount} creates the account: `custom` + {appId: the mount\'s id, appSecretEnc} RE-SEALED under .channels-key (a new blob — the mounts ciphertext is NOT copied and does not open with .mounts-key)');
   const plainOnDisk = (dir) => disk(dir).includes(CSEC);
   ok(!plainOnDisk(edir) && !disk(edir).includes(mountCipher), 'the plaintext secret (and the mounts ciphertext) appear nowhere in adapters.json');
-  ok(c1.adapter.auth.tokenHeld && c1.adapter.credentialKey === 'custom' && c1.adapter.customClient.appId === CID && c1.adapter.customClient.secretMasked === '••••' + CSEC.slice(-4), 'the account is connected — an ordinary Custom client (the card masks the secret)');
+  ok(c1.adapter.auth.tokenHeld && c1.adapter.credentialKey === 'custom' && c1.adapter.customClient.appId === CID && c1.adapter.customClient.secretSet === true && !JSON.stringify(c1.adapter).includes(CSEC.slice(-6)), 'the account is connected — an ordinary Custom client (the card says its secret is held; no tail — the write-only law)');
   const au = eng.store.auditTail().filter((l) => l.kind === 'auth' && l.op === 'client-from-mount');
   ok(au.length === 1 && au[0].mountId === P && au[0].by === 'user' && au[0].adapterKind === 'gmail' && au[0].clientIdPrefix === CID.slice(0, 12) && !JSON.stringify(au).includes(CSEC), `ONE audit line {kind:'auth', op:'client-from-mount', mountId, by:'user'} for the copy (Connect's re-check of the same mount is not a second copy) (${JSON.stringify(au)})`);
   // (d) re-authorize under ANOTHER mount's client = a rebind (the mount semantics)
@@ -2368,7 +2368,7 @@ console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail acco
   const cfgA = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`, undefined, AG);
   ok(cfgA.status === 403 && cfgA.body.code === 'agent-forbidden' && !cfgA.raw.includes(CSEC), 'verify r2: the owner-only config refuses a self-identifying agent bearer 403 agent-forbidden (the plaintext prefill is the owner\'s)');
   const cfgO = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`);
-  ok(cfgO.status === 200 && cfgO.body.config.client && cfgO.body.config.client.appSecret === CSEC, '…and the owner (no bearer) still reads the Edit prefill (D3)');
+  ok(cfgO.status === 200 && cfgO.body.config.client && cfgO.body.config.client.secretSet === true && !cfgO.raw.includes(CSEC), '…and the owner (no bearer) still reads the Edit prefill (D3) — the secret only as HELD (lane ui-controls-and-bugs, THE WRITE-ONLY LAW)');
   R4.bodies.pop();   // the owner's config read is the D3 door — excluded from the leak census by design
   const gl2 = await R4.call('GET', '/api/channels/oauth/mount-clients?kind=gmail');
   const rowL = gl2.body.clients.find((x) => x.mountId === LONG), rowH = gl2.body.clients.find((x) => x.mountId === HN);
