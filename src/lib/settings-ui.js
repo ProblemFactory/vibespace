@@ -793,7 +793,8 @@ class SettingsUI {
     box.className = 'settings-row-apply';
     const head = document.createElement('div');
     head.className = 'settings-row-apply-head';
-    head.textContent = applyHead(schema.apply, { t }) || '';
+    head.textContent = applyHead(schema.apply, { t, advanced: !!this._showAdvanced }) || '';
+    if (schema.apply.how) head.title = schema.apply.how;   // the engineer's line, on hover (lane ui-language)
     box.appendChild(head);
     if (schema.apply.kind === 'cli-config') {
       const key = path.slice(schema.harness.length + 1);

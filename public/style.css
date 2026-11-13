@@ -666,8 +666,10 @@ html, body {
 .session-detail-row {
   display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; font-size: 10px;
 }
+/* lane ui-language: no text-transform on a label that carries translated words — it shouted the English left in them
+   («HARNESS», «CONTEXT 表», «AGENT») and changed brand names («CLAUDE»); zh / ja have no case at all */
 .session-detail-label {
-  color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 9px;
+  color: var(--text-dim); font-weight: 600; font-size: 9px;
   min-width: 42px; flex-shrink: 0;
 }
 .session-detail-value {
@@ -1941,7 +1943,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .settings-foot { flex-shrink: 0; padding: 6px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
 .settings-section { margin-top: 16px; }
 .settings-section-title {
-  font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
   letter-spacing: 0.5px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
 }
@@ -1965,7 +1967,7 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
 .vnc-paste-actions { display: flex; gap: 6px; justify-content: flex-end; }
 /* The settings nav is a TREE (2.369.132): group heads fold their categories on desktop; the phone strip shows everything. */
 .settings-nav-group { display: flex; flex-direction: column; }
-.settings-nav-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }
+.settings-nav-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }
 .settings-nav-group-head:hover { color: var(--text); background: var(--bg-hover); }
 .settings-nav-group-head svg { width: 12px; height: 12px; flex: none; transition: transform 120ms; }
 .settings-nav-group.is-folded .settings-nav-group-head svg { transform: rotate(-90deg); }
@@ -4860,7 +4862,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .task-detail-btn:hover { border-color: var(--border-active); color: var(--text); }
 .task-detail-btn:disabled { opacity: 0.4; cursor: default; }
 .task-detail-section { display: flex; flex-direction: column; gap: 4px; }
-.task-detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); display: flex; gap: 6px; align-items: baseline; }
+.task-detail-label { font-size: 10px; letter-spacing: 0.5px; color: var(--text-dim); display: flex; gap: 6px; align-items: baseline; }
 .task-detail-hint { font-size: 10px; color: var(--text-dim); text-transform: none; letter-spacing: 0; opacity: 0.8; }
 .task-detail-objective {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
