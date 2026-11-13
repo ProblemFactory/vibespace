@@ -150,7 +150,10 @@ export function rowVerbs(j) {
   const out = [];
   if (j.pendingPanel) out.push({ act: 'panel', label: t('Open panel'), glyph: '⚑', cls: 'jobs-btn-warn' });
   if (['up', 'starting', 'awaiting-user', 'waiting'].includes(j.state) || (j.kind === 'cron' && j.desiredUp && j.state === 'scheduled')) out.push({ act: 'stop', label: t('Stop'), glyph: '■', cls: '' });
-  if (['down', 'failed', 'missed'].includes(j.state) || (j.kind === 'cron' && !j.desiredUp)) out.push({ act: 'start', label: t('Start'), glyph: '▸', cls: 'jobs-btn-ok' });
+  // the start verb's WORD says what it does to THIS row (the UI walk's jobs-5: a failed export task and a stopped server both
+  // said «启动»): a task that ran is run again, a cron that is off resumes, a service starts — the same act
+  const startWord = j.kind === 'cron' && !j.desiredUp ? t('Resume') : j.kind === 'task' && ['failed', 'missed'].includes(j.state) ? t('Run again') : t('Start');
+  if (['down', 'failed', 'missed'].includes(j.state) || (j.kind === 'cron' && !j.desiredUp)) out.push({ act: 'start', label: startWord, glyph: '▸', cls: 'jobs-btn-ok' });
   if (['done', 'interrupted', 'failed', 'missed'].includes(j.state)) out.push({ act: 'rm', label: t('Remove'), glyph: '✕', cls: '' });
   return out;
 }
@@ -161,15 +164,17 @@ export function rowMenuItems(app, j, refresh, { archived = false } = {}) {
   return [...verbs, ...(verbs.length ? [{ separator: true }] : []), { label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }];
 }
 function actionButtons(app, j, refresh, { compact } = {}) {
-  const mk = (label, act, cls = '') => {
+  const mk = (face, act, cls = '', word = '') => {
     const b = document.createElement('button');
     b.className = 'jobs-btn ' + cls;
-    b.textContent = label;
+    b.textContent = face;
+    // a glyph face (the rail's compact row, the window's ✕) says its verb's word — the same word the window draws
+    if (word && word !== face) { b.title = word; b.setAttribute('aria-label', word); }
     b.onclick = (ev) => { ev.stopPropagation(); jobAction(app, j, act, refresh); };
     return b;
   };
   // the compact rail row keeps no ✕ (its menu has Remove); the window's ✕ stays a glyph
-  return rowVerbs(j).filter((v) => !(compact && v.act === 'rm')).map((v) => mk(compact || v.act === 'rm' ? v.glyph : v.label, v.act, v.cls));
+  return rowVerbs(j).filter((v) => !(compact && v.act === 'rm')).map((v) => mk(compact || v.act === 'rm' ? v.glyph : v.label, v.act, v.cls, v.label));
 }
 
 /** shared list renderer — the window (rich) and the rail panel (compact).
