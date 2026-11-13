@@ -286,7 +286,7 @@ ok(/Could not open \/home\/userW\/x\/out\/report\.md on this machine: EACCES: pe
 reset(); FS = { [ABS]: { error: 'the hub’s English for agents', code: 'storage_sync_refused', params: { mount: 'NAS', release: '2.369.360' } } };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 T = toastOf(toasts()[0]);
-ok((T?.body || '').startsWith('Could not open /home/userW/x/out/report.md on this machine: this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder')
+ok((T?.body || '').startsWith('Could not open /home/userW/x/out/report.md on this machine: this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there')
   && !(T?.body || '').includes('the hub’s English') && /global-toast-error/.test(T?.cls), `a storage_sync_refused answer ⇒ the toast in the reader's words, never the raw text (${T?.body})`);
 
 reset(); FS = {}; CTX = { cwd: '/w/proj', host: 'h1' };

@@ -335,7 +335,10 @@ const OPS = {
   // extent past the shown one rides as `declared {rows, cols}` — information, never a cut.
   // The lib loads on this worker's first workbook (lazy), never in a worker that previews none.
   xlsxSheets({ path: p, capBytes, maxRows = 5000, maxSheets = 50, maxCols = 256, maxCell = 2000 }) {
-    const XLSX = require('xlsx');
+    // THE LIBRARY IS THE HUB'S (主开发's merged .399 read: inlined, it grew the device bundle 31 %): build:agentd keeps it EXTERNAL,
+    // so a paired machine never carries it — a workbook is parsed on the hub; asked on a device, this op refuses by name
+    let XLSX;
+    try { XLSX = require('xlsx'); } catch { throw Object.assign(new Error('a workbook is parsed on the hub, never on a paired machine (this machine carries no spreadsheet library)'), { code: 'xlsx_hub_only' }); }
     const wb = XLSX.read(readCapped(p, capBytes), { type: 'buffer', sheetRows: maxRows + 1, sheets: Array.from({ length: maxSheets }, (_, i) => i) });
     const truncated = { rows: 0, sheets: Math.max(0, wb.SheetNames.length - maxSheets), cols: 0, cells: 0 };
     const sheets = wb.SheetNames.slice(0, maxSheets).map((name) => {

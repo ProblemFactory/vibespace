@@ -165,10 +165,10 @@ try {
   console.log('④ R2 a refusal still met is SAID — the storage by name, why, the way on');
   const B = await serve({});   // no pool: SafeFs's in-main fallback runs the op on the main thread — the guard refuses it
   try {
-    const want = `this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (${RELEASE}); open the file from the Files window or copy it to a local folder`;
+    const want = `this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there`;
     for (const route of [`/api/file/excel?path=${q(BOOK)}`, `/api/file/info?path=${q(BOOK)}`, `/api/file/content?path=${q(path.join(STORE, 'notes.txt'))}`]) {
       const r = await get(B.base, route);
-      ok(r.body?.code === 'storage_sync_refused' && r.body.error === want && r.body.params?.mount === 'NAS' && r.body.params.release === RELEASE && !String(r.body.error).includes(SW.REFUSAL),
+      ok(r.body?.code === 'storage_sync_refused' && r.body.error === want && r.body.params?.mount === 'NAS' && !('release' in r.body.params) && !/\d+\.\d+\.\d+/.test(r.body.error) && !String(r.body.error).includes(SW.REFUSAL),
         `${route.split('?')[0]} ⇒ code storage_sync_refused, «NAS», the release — never the raw words (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
     }
     ok(journal.some((l) => /^\[mount-guard\] openSync\(.*季度报表\.xlsx\) from src\/safe-fs-worker\.js:\d+ readCapped refused — use SafeFs\/async; the mount «.*NAS»$/.test(l)),
@@ -186,7 +186,7 @@ try {
     const body = { error: 'the server’s English', code: 'storage_sync_refused', params: { mount: 'NAS', release: '9.9.9' } };
     const said = {};
     const src = fs.readFileSync(path.join(REPO, 'src/lib/file-explorer-ops.js'), 'utf8');
-    const keys = [...src.matchAll(/t\('(this file is on (?:the|a) storage mount[^']*)'/g)].map((m) => m[1]);
+    const keys = [...src.matchAll(/t\('(this file is on (?:the|a) storage[^']*)'/g)].map((m) => m[1]);   // the person's words name «the storage» (主开发's merged read)
     for (const lang of ['zh', 'ja', 'en']) {
       globalThis.localStorage = { getItem: () => lang, setItem() {}, removeItem() {} };
       const { fsErrorText } = await import(pathToFileURL(out).href + '?lang=' + lang);
@@ -194,11 +194,11 @@ try {
     }
     delete globalThis.localStorage;
     ok(keys.length === 2, `fsErrorText words the code in two sentences (a named storage / an unnamed one) (${keys.length})`);
-    ok(said.en[0] === 'this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (9.9.9); open the file from the Files window or copy it to a local folder' && said.en[1].startsWith('this file is on a storage mount;'),
-      `en: the sentence with the storage's name and the release (${said.en[0]})`);
+    ok(said.en[0] === 'this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there' && said.en[1].startsWith('this file is on a storage, and'),
+      `en: the sentence with the storage's name, no version (主开发's merged read: a version promised a fix the hub already holds) (${said.en[0]})`);
     for (const l of ['zh', 'ja']) {
-      ok(said[l][0] !== said.en[0] && said[l][0].includes('NAS') && said[l][0].includes('9.9.9') && !said[l][0].includes('the server’s English') && said[l][1] !== said.en[1],
-        `${l}: its own sentence through t(), the name + the release in it (${said[l][0]})`);
+      ok(said[l][0] !== said.en[0] && said[l][0].includes('NAS') && !/\d+\.\d+\.\d+/.test(said[l][0]) && !said[l][0].includes('the server’s English') && said[l][1] !== said.en[1],
+        `${l}: its own sentence through t(), the name in it, no version (${said[l][0]})`);
     }
     ok(said.en[2] === 'another document is being parsed — try again in a moment' && said.zh[2] !== said.en[2] && said.ja[2] !== said.en[2] && ![said.zh[2], said.ja[2]].some((x) => x.includes('English')),
       `parse_busy (⑨) in zh / ja / en through t() (${said.zh[2]} | ${said.ja[2]} | ${said.en[2]})`);

@@ -298,9 +298,10 @@ try {
   console.log('── ⑧ the editor\'s Markdown preview ──');
   await ev(`(app.openEditor(${JSON.stringify(path.join(CWD, 'flow.md'))}, 'flow.md'), true)`);
   const EW = `[...app.wm.windows.values()].find((w) => w.type === 'editor' && w._filePath === ${JSON.stringify(path.join(CWD, 'flow.md'))})`;
-  const prevBtn = await until(() => ev(`(() => { const w = ${EW}; const b = w && [...w.element.querySelectorAll('button')].find((x) => x.textContent === 'Preview' && x.style.display !== 'none'); return !!b; })()`), 20000);
-  check('the editor opened the .md with its Preview button', !!prevBtn);
-  await press(`[...(${EW}).element.querySelectorAll('button')].find((x) => x.textContent === 'Preview')`);
+  const prevBtn = await until(() => ev(`(() => { const w = ${EW}; const b = w && [...w.element.querySelectorAll('button')].find((x) => x.textContent === '预览' && x.style.display !== 'none'); return !!b; })()`), 20000);
+  // lane file-preview-mount: the toggle is worded in the page's language now (the release drew the English «Preview» on a zh page)
+  check('the editor opened the .md with its Preview button — «预览» on this zh page', !!prevBtn);
+  await press(`[...(${EW}).element.querySelectorAll('button')].find((x) => x.textContent === '预览')`);
   const EC = `(() => { const w = ${EW}; return w ? w.element.querySelector('.markdown-preview .chat-diagram') : null; })()`;
   const f8 = await until(async () => { const f = await facts(EC); return f && f.state === 'ok' ? f : null; }, 30000);
   check('the preview draws the same flowchart (≥ 6 nodes, every label) through the one door — no CDN script', !!f8 && f8.nodes >= 6 && LABELS.every((l) => f8.labels.includes(l)) && !f8.onAttrs.length && f8.fo === 0, f8 || await facts(EC));

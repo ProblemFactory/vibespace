@@ -23,7 +23,7 @@ export function fsErrorText(d) {
   if (d && d.code === 'windows_unsupported' && WIN_UNSUPPORTED[p.op]) return WIN_UNSUPPORTED[p.op]();
   // lane file-preview-mount (userW inc-mvq4hn9x): the mount guard's refusal, said by the files router (src/routes/files.js
   // syncRefusedBody) — the storage by name, why, the way on; never the guard's raw «refused: a synchronous fs call…»
-  if (d && d.code === 'storage_sync_refused') return p.mount ? t('this file is on the storage mount «{mount}»; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder', { mount: p.mount, release: p.release || '' }) : t('this file is on a storage mount; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder', { release: p.release || '' });
+  if (d && d.code === 'storage_sync_refused') return p.mount ? t('this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there', { mount: p.mount }) : t('this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there');
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
   return String((d && d.error) || '');

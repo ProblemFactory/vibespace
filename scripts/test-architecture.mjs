@@ -7180,5 +7180,47 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(planted106.length === 3 && scan106('src/lib/i18n-zh.js', `  ${JSON.stringify([...W106][0] || '')}: "x",`).length === 0, `§106 CONTROL: a planted provider id, a planted dictionary entry and a planted dictionary comment are each named (${planted106.length}); a notice key is not`, planted106);
 }
 
+
+// ── §107 lane file-preview-mount (主开发 09:05Z, the merged .399 read: the SafeFs worker's xlsxSheets op said require('xlsx'),
+// and the worker rides the DEVICE bundle — build:agentd inlined node_modules/xlsx, 6 037 978 ⇒ 7 939 685 bytes, +31 %, inside
+// the one fixed 30-second upgrade window of every paired machine; no device op ever parses a workbook). THE LAW: a file the
+// device bundle carries pulls no hub-only library into it. The leg runs the agent build's OWN esbuild call (its flags read
+// from package.json build:agentd) for its INPUT LIST: every node_modules package in it is a row of DEVICE_LIBS — the .398
+// release's list, with why the device carries it; a new one is red until it is rowed with its reason. The output stays within
+// DEVICE_BUNDLE_MARGIN of the release's size. And the refusal a storage mount gets says no version (a «being fixed (x.y.z)»
+// was false on the hub that already ran x.y.z).
+{
+  const req107 = (await import('node:module')).createRequire(import.meta.url);
+  const esbuild107 = req107('esbuild');
+  const script107 = (JSON.parse(read('package.json')).scripts || {})['build:agentd'] || '';
+  const m107 = /esbuild src\/agentd\/agentd\.js ([^&]*?)--outfile=/.exec(script107);
+  const flags107 = m107 ? m107[1] : '';
+  const ext107 = [...flags107.matchAll(/--external:(\S+)/g)].map((x) => x[1]);
+  const build107 = async (external) => esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent' });
+  const libs107 = (r) => [...new Set(Object.keys(r.metafile.inputs).map((k) => (k.match(/node_modules\/((?:@[^/]+\/)?[^/]+)/) || [])[1]).filter(Boolean))].sort();
+  const WERIFT_TREE = 'the screen stream (WebRTC): werift and its own dependency tree';
+  const DEVICE_LIBS = Object.freeze({
+    werift: WERIFT_TREE, '@fidm/x509': WERIFT_TREE, '@fidm/asn1': WERIFT_TREE, 'reflect-metadata': WERIFT_TREE, tslib: WERIFT_TREE, pvtsutils: WERIFT_TREE, pvutils: WERIFT_TREE, asn1js: WERIFT_TREE,
+    '@peculiar/utils': WERIFT_TREE, '@peculiar/asn1-schema': WERIFT_TREE, '@peculiar/asn1-x509': WERIFT_TREE, '@peculiar/asn1-cms': WERIFT_TREE, '@peculiar/asn1-x509-attr': WERIFT_TREE, '@peculiar/asn1-ecc': WERIFT_TREE,
+    '@peculiar/asn1-rsa': WERIFT_TREE, tsyringe: WERIFT_TREE, '@peculiar/asn1-pfx': WERIFT_TREE, '@peculiar/asn1-pkcs8': WERIFT_TREE, '@peculiar/asn1-pkcs9': WERIFT_TREE, '@peculiar/asn1-csr': WERIFT_TREE, '@peculiar/x509': WERIFT_TREE,
+    'is-property': WERIFT_TREE, 'generate-function': WERIFT_TREE, '@shinyoshiaki/binary-data': WERIFT_TREE, isobject: WERIFT_TREE, 'is-plain-object': WERIFT_TREE, '@noble/hashes': WERIFT_TREE, '@noble/curves': WERIFT_TREE,
+    'dns-packet': 'the stream\'s mDNS candidates (multicast-dns)', '@leichtgewicht/ip-codec': 'the stream\'s mDNS candidates (multicast-dns)', thunky: 'the stream\'s mDNS candidates (multicast-dns)', 'multicast-dns': 'the stream\'s mDNS candidates',
+    tweetnacl: 'the device verifies the signed release before it re-execs (src/agentd-signature.js)',
+  });
+  const RELEASE_BUNDLE_BYTES = 6037978, DEVICE_BUNDLE_MARGIN = 0.02;   // the .398 release's data/bin/vibespace-agentd.js (主开发's merged read), + 2 % for this tree's own code
+  const r107 = await build107(ext107);
+  const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
+  const size107 = r107.outputFiles[0].contents.length;
+  ok(/--external:xlsx\b/.test(flags107) && !got107.includes('xlsx') && extra107.length === 0, `§107 the device bundle's input list (build:agentd's own esbuild flags: ${ext107.join(', ')}) names no hub-only library — every node_modules package is a DEVICE_LIBS row (${got107.length} packages)`, extra107.length ? extra107 : got107.includes('xlsx') ? 'node_modules/xlsx' : flags107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of the .398 release's ${RELEASE_BUNDLE_BYTES} bytes (${size107})`, size107);
+  const rc107 = await build107(ext107.filter((x) => x !== 'xlsx'));
+  ok(libs107(rc107).includes('xlsx') && rc107.outputFiles[0].contents.length > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with xlsx NOT external inlines node_modules/xlsx (${rc107.outputFiles[0].contents.length} bytes) — both legs above go red on it`);
+  ok(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js')), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
+  const code107 = (s) => s.replace(/\/\/[^\n]*/g, '');   // the CODE, never a comment that names the old words
+  const files107 = read('src/routes/files.js'), sent107 = code107((files107.match(/function syncRefusedBody[\s\S]*?\n\}/) || [''])[0]);
+  const fe107 = read('src/lib/file-explorer-ops.js'), said107 = code107((fe107.match(/storage_sync_refused'\) return [^\n]*/) || [''])[0]);
+  ok(!!sent107 && !/RELEASE|version|\{release\}|being fixed|\d+\.\d+\.\d+/.test(sent107) && !!said107 && !/\{release\}|being fixed|\d+\.\d+\.\d+/.test(said107), '§107 the storage-mount refusal says no version and no «being fixed» — the server\'s sentence and the client\'s words', { sent: sent107.slice(0, 200), said: said107.slice(0, 200) });
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -460,7 +460,7 @@ try {
   const x2 = await openBook();
   await evalJs('(() => { window.fetch = window.__fetch0; return true; })()');
   check('a refusal the hub SAID (storage_sync_refused) reaches the viewer in the reader\'s words — «NAS», the release, the way on — never the `error` kept for agents',
-    x2?.hint === 'Error: this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder', x2);
+    x2?.hint === 'Error: this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there', x2);
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(BOOK)}) app.wm.closeWindow(w.id); return true; })()`);
   const BOOK60 = path.join(CWD, 'report', '六十张.xlsx');
   const wb60 = XLSX.utils.book_new();
@@ -533,7 +533,7 @@ try {
   const e1 = await evalJs(`(() => { const w = ${TWIN}; const R = w && (w.content || w.element); return R ? { hint: R.querySelector('.empty-hint')?.textContent || null, cm: !!R.querySelector('.cm-content') } : null; })()`);
   await unstub();
   check('a load the hub refused (storage_sync_refused) says fsErrorText\'s sentence — «NAS», the release, the way on — never the `error` kept for agents',
-    e1?.hint === 'this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder' && !e1.cm, e1);
+    e1?.hint === 'this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there' && !e1.cm, e1);
   await closeTxt(); await sleep(300);
   await evalJs(`(() => { app.openEditor(${JSON.stringify(TXT)}, 'notes.txt'); return true; })()`);
   await waitFor(`(() => { const w = ${TWIN}; const R = w && (w.content || w.element); if (R) R.dataset.fpm11 = '1'; return !!(R && R.querySelector('.cm-content')); })()`, 15000);

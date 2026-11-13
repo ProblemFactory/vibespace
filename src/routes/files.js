@@ -78,7 +78,6 @@ function sfs(req) {
 // storage_sync_refused (the client's fsErrorText words it in the reader's language; `error` = the English for agents).
 const GUARD_REFUSAL = require('../server/sync-fs-witness').REFUSAL;
 const SP = require('../storage-path');
-const RELEASE = (() => { try { return require('../../package.json').version; } catch { return ''; } })();
 function syncRefusedBody(req) {
   let row = null;
   for (const raw of [req.query.path, req.query.dir, req.body?.path, req.body?.src, req.body?.dest, req.body?.destDir]) {
@@ -86,9 +85,12 @@ function syncRefusedBody(req) {
     try { row = SP.storageRootOf(safePath(raw)); } catch { }
   }
   const mount = row ? (row.name || path.basename(row.root)) : '';
-  const on = mount ? `this file is on the storage mount «${mount}»` : 'this file is on a storage mount';
-  return { error: `${on}; VibeSpace does not read mounts from its main thread — the preview road is being fixed (${RELEASE}); open the file from the Files window or copy it to a local folder`,
-    code: 'storage_sync_refused', params: { mount, release: RELEASE } };
+  const on = mount ? `this file is on the storage «${mount}»` : 'this file is on a storage';
+  // 主开发's merged .399 read: the person's words — what it is, what cannot be done here, the way on; no version (a «being fixed
+  // (x.y.z)» was false on the hub that ran x.y.z) and none of the hub's inside (why: the guard keeps every storage read off the
+  // main thread, and this view reads there — docs/kb-file-structure.md, src/routes/files.js)
+  return { error: `${on}, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there`,
+    code: 'storage_sync_refused', params: { mount } };
 }
 const PREVIEW_READS = new Set(['/api/file/info', '/api/file/content', '/api/file/binary', '/api/file/csv', '/api/file/excel', '/api/file/docx']);
 router.use((req, res, next) => {
