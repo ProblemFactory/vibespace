@@ -2355,7 +2355,7 @@ proposal on a shared profile (as site-reset is) is 主开发's to rule. Kept as 
 question (backlog B-771e). Nothing about connecting changes: the driver sends no whole-profile call when it connects.
 
 THE WINDOW (W1–W6 + the closure list S1–S8): ONE state per PROFILE, a PURE transition (src/browser-mediation.js `windowStep`),
-executed by the mediator; pinned by a GENERATED table (scripts/download-window-cells.mjs — 9 states × 21 acts, 189 cells, no cull:
+executed by the mediator; pinned by a GENERATED table (scripts/download-window-cells.mjs — 10 states × 23 acts, 230 cells, no cull:
 every combination is reachable). MEASURED with the real driver (agent-browser 0.38.2, Chrome 154 + 157): it clicks 1–3 ms after its
 set; its download begins when the page's first byte comes (1.0 s / 10.0 s after the set for a 1 s / 10 s page); it gives up at 30 s
 (its own timeout) — so the bound is 30 s; a download's folder is FIXED when it begins (a put-back right after the begin left it
@@ -2372,7 +2372,14 @@ passed, the ceiling passed, a takeover took it back, or the connection that set 
 set (its connection and its page session, the events as it asked — measured: that puts the whole profile back and that session then
 hears only its own page's downloads), so its next set follows it and nothing is heard twice; else on one connection of its own. A
 browser restart drops the window (its setting died with it); a hub stop puts it back best-effort; a HUB START's adoption puts it
-back before the profile's first grant (the grant waits out all 3 tries) and stops trying once a window has opened.
+back before the profile's first grant (the grant waits out all 3 tries) and a SET on that profile is held until it ends (its
+connection's later calls behind it). The re-run's last list: CLOSING ALWAYS ENDS — an ordered put-back not answered within 4 s, or
+whose connection closes, or whose lease ends, is followed by the hub's own put-back on a connection of its own; the folder notice
+describes ONE present state — a conversation holds at most one pending (the newest words) and it never evicts another kind's notice
+(src/session-status.js ONE_STATE_KINDS); ANOTHER conversation's own download is told to THAT conversation (while a window of another
+stands, its file went to that folder; with no window, to the person's Downloads); a sentence about where a file went is said only
+where the hub knows it (a put-back on its way: «cannot tell you where it went»; a tab in a browser context of its own: «where your own
+context saves downloads»); the words never echo an unknown reason.
 
 ENFORCED ON: mediated (Separate tabs) — yes · scope (a profile shared through «Who can use it» on this machine) — yes, and it fails
 CLOSED: a url of its own that cannot be made refuses the attach `scope_unavailable` by name, never the raw endpoint · a paired

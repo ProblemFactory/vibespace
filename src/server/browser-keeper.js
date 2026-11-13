@@ -4348,7 +4348,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!t || !t.browserKey) return;
     const p = t.profileId ? profile(t.profileId) : null;
     const l = t.profileId ? B.findLease(reg.leases, t.profileId, String(t.browserKey)) : null;
-    const ev = { profileId: t.profileId || null, browserKey: String(t.browserKey), sessionId: (l && l.sessionId) || null, why: t.why, text: M.windowToldText(t.why, { label: p ? p.label : null }) };
+    const ev = { profileId: t.profileId || null, browserKey: String(t.browserKey), sessionId: (l && l.sessionId) || null, why: t.why, text: M.windowToldText(t.why, { label: p ? B.cleanLabel(p.label) : null }) };   // (the store's own cut — never a split pair)
     for (const fn of folderListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] a download-folder listener threw — ${e && e.message}`); } }
   });
   const leaseRoadOf = (p, browserKey) => {

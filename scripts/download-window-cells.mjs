@@ -24,13 +24,14 @@ import { createRequire } from 'node:module';
 
 const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const PROFILE = 'bp-0000000p', L = 'bk-000000l1', MM = 'bk-000000m1';
-export const STATES = ['none', 'armed', 'flight', 'flight2', 'flightSet', 'closingOrdered', 'closingShort', 'closingLapse', 'lapsed'];
-export const ACTS = ['setL', 'setLdef', 'setM', 'setMdef', 'setLpaused', 'beginOwn', 'beginOther', 'endAdmitted', 'endOther', 'bound', 'takeover', 'takeoverM', 'leaseEndL', 'leaseEndM', 'connGoneL', 'connGoneLother', 'connGoneM', 'repoint', 'hubStop', 'adopt', 'putBackDone'];
+export const STATES = ['none', 'armed', 'flight', 'flight2', 'flightSet', 'closingOrdered', 'closingShort', 'closingLapse', 'closingShortLapse', 'lapsed'];
+export const ACTS = ['setL', 'setLdef', 'setM', 'setMdef', 'setLpaused', 'beginOwn', 'beginOther', 'beginM', 'endAdmitted', 'endOther', 'bound', 'takeover', 'takeoverM', 'leaseEndL', 'leaseEndM', 'connGoneL', 'connGoneLother', 'connGoneM', 'repoint', 'hubStop', 'adopt', 'putBackDone', 'putBackLost'];
 
 // ── THE LAWS (主开发's list 18:08Z + the closure list 19:58Z) — the first line that speaks decides the cell; no combination is culled ─
-const OPEN = ['armed', 'flight', 'flight2', 'flightSet'], CLOSING = ['closingOrdered', 'closingShort', 'closingLapse'];
+const OPEN = ['armed', 'flight', 'flight2', 'flightSet'], CLOSING = ['closingOrdered', 'closingShort', 'closingLapse', 'closingShortLapse'];
+const SHORTER = { closingOrdered: 'closingShort', closingLapse: 'closingShortLapse' };   // F1: an ordered put-back whose answer cannot come — the hub's own, on a connection of its own
 const folderOf = (after) => (/^(armed|flight)/.test(after) ? 'agent' : 'person');   // once every put-back has landed
-const c = (after, e = {}) => ({ after, reply: e.reply || null, putBack: !!e.putBack, delivered: !!e.delivered, told: !!e.told, folder: folderOf(after) });
+const c = (after, e = {}) => ({ after, reply: e.reply || null, putBack: !!e.putBack, delivered: !!e.delivered, told: !!e.told, toldM: !!e.toldM, folder: folderOf(after) });
 export const LAWS = [
   ['W6: a hub start puts the profile back — a window already standing (a lease that set before the boot reached it) puts itself back by its own doors', (s, a) => a === 'adopt' && c(s, { putBack: s === 'none' })],
   ['a repoint (the browser restarted / stopped): its setting died with it — no record, nothing put back', (s, a) => a === 'repoint' && c('none')],
@@ -39,18 +40,20 @@ export const LAWS = [
   ['W3: one window per profile — another lease\'s set is refused while one stands', (s, a) => (a === 'setM' || a === 'setMdef') && (OPEN.includes(s) || CLOSING.includes(s)) && c(s, { reply: 'method_refused' })],
   ['W1: another lease\'s set opens its own window when none stands', (s, a) => a === 'setM' && c('armed@M', { reply: 'forward' })],
   ['W4: «default» is forwarded and closes the setter\'s window (no put-back: it is one)', (s, a) => (a === 'setLdef' || a === 'setMdef') && c('none', { reply: 'forward' })],
-  ['W1: a put-back on a connection of its own cannot be ordered before a new set — refused, a moment', (s, a) => a === 'setL' && s === 'closingShort' && c(s, { reply: 'method_refused' })],
+  ['W1: a put-back on a connection of its own cannot be ordered before a new set — refused, a moment', (s, a) => a === 'setL' && (s === 'closingShort' || s === 'closingShortLapse') && c(s, { reply: 'method_refused' })],
   ['S2 (c): a re-set never moves the deadline; in flight it is ONE more expectation, once', (s, a) => a === 'setL' && c({ flight: 'flightSet', flight2: 'flight2Set', armed: 'armed', flightSet: 'flightSet' }[s] || 'armed', { reply: 'forward' })],
   ['W1: a download its own tab begins in an open window is its own — counted, told to it', (s, a) => a === 'beginOwn' && OPEN.includes(s) && c({ armed: 'flight', flight: 'flight2', flight2: 'flight3', flightSet: 'flight2' }[s], { delivered: true })],
   ['S2 (b) + S4: a download its own tab begins with no folder of its lent goes to the profile\'s own place — ONE rule: told, and told of it as its own', (s, a) => a === 'beginOwn' && c(s, { delivered: true, told: true })],
   ['W2: another\'s download is never the lease\'s and changes nothing', (s, a) => (a === 'beginOther' || a === 'endOther') && c(s)],
+  ['F4: ANOTHER conversation\'s own download changes nothing of the window — and THAT conversation is told the true thing', (s, a) => a === 'beginM' && c(s, { toldM: true })],
   ['W1: the last end puts the profile back; a second keeps it open; a set after the begin waits for its own; S4: an own download ending outside the window is still told', (s, a) => a === 'endAdmitted' && (s === 'flight' ? c('closingOrdered', { putBack: true, delivered: true }) : s === 'flight2' ? c('flight', { delivered: true }) : s === 'flightSet' ? c('armed', { delivered: true }) : c(s, { delivered: true }))],
   ['S1 / S2: the deadline — none begun: put back, lapsed, told; in flight: the ceiling (the file is fixed at its begin), put back, told', (s, a) => a === 'bound' && (s === 'armed' ? c('closingLapse', { putBack: true, told: true }) : ['flight', 'flight2', 'flightSet'].includes(s) ? c('closingOrdered', { putBack: true, told: true }) : c(s))],
   ['S5: a takeover — of this conversation or another\'s — puts an open window back, and the lease is told', (s, a) => (a === 'takeover' || a === 'takeoverM') && (OPEN.includes(s) ? c('closingOrdered', { putBack: true, told: true }) : c(s === 'lapsed' ? 'none' : s))],
-  ['the lease\'s end puts its window back', (s, a) => a === 'leaseEndL' && (OPEN.includes(s) ? c('closingShort', { putBack: true }) : c(s === 'lapsed' ? 'none' : s))],
-  ['S1: the window lives with the connection that set it — its close puts it back, and the lease is told', (s, a) => a === 'connGoneL' && (OPEN.includes(s) ? c('closingShort', { putBack: true, told: true }) : c(s))],
+  ['the lease\'s end puts its window back; F1: a closing whose ordered put-back can no longer be answered is put back by the hub', (s, a) => a === 'leaseEndL' && (OPEN.includes(s) ? c('closingShort', { putBack: true }) : SHORTER[s] ? c(SHORTER[s], { putBack: true }) : c(s === 'lapsed' ? 'none' : s))],
+  ['S1: the window lives with the connection that set it — its close puts it back, and the lease is told; F1: closing on it, the hub puts it back itself', (s, a) => a === 'connGoneL' && (OPEN.includes(s) ? c('closingShort', { putBack: true, told: true }) : SHORTER[s] ? c(SHORTER[s], { putBack: true }) : c(s))],
+  ['F1: CLOSING ALWAYS ENDS — an ordered put-back not answered in its bound is followed by the hub\'s own', (s, a) => a === 'putBackLost' && (SHORTER[s] ? c(SHORTER[s], { putBack: true }) : c(s))],
   ['another connection of the lease, another lease: nothing', (s, a) => ['connGoneLother', 'leaseEndM', 'connGoneM'].includes(a) && c(s)],
-  ['the put-back answered: the window is gone (after the bound: lapsed); a stale answer changes nothing', (s, a) => a === 'putBackDone' && c(s === 'closingLapse' ? 'lapsed' : CLOSING.includes(s) ? 'none' : s)],
+  ['the put-back answered: the window is gone (after the bound: lapsed); a stale answer changes nothing', (s, a) => a === 'putBackDone' && c(['closingLapse', 'closingShortLapse'].includes(s) ? 'lapsed' : CLOSING.includes(s) ? 'none' : s)],
 ];
 /** The table: [{state, act, law, cell}] — every state × act. */
 export function table() {
@@ -75,6 +78,7 @@ export function pureState(s) {
   if (s === 'closingOrdered') return { phase: 'closing', ...base, ordered: true, then: null };
   if (s === 'closingShort') return { phase: 'closing', ...base, ordered: false, then: null };
   if (s === 'closingLapse') return { phase: 'closing', ...base, ordered: true, then: 'lapsed' };
+  if (s === 'closingShortLapse') return { phase: 'closing', ...base, ordered: false, then: 'lapsed' };
   if (s === 'lapsed') return { phase: 'lapsed', ...base };
   throw new Error('no state ' + s);
 }
@@ -82,9 +86,9 @@ export function pureAct(a) {
   const set = (by, behavior, paused = false) => ({ kind: 'set', by, behavior, now: 2000, paused });
   return ({
     setL: set('K-L', 'allowAndName'), setLdef: set('K-L', 'default'), setM: set('K-M', 'allowAndName'), setMdef: set('K-M', 'default'), setLpaused: set('K-L', 'allowAndName', true),
-    beginOwn: { kind: 'begin', own: true, guid: 'g3', now: 2000 }, beginOther: { kind: 'begin', own: false, guid: 'gP', now: 2000 }, endAdmitted: { kind: 'end', guid: 'g1', ordered: true }, endOther: { kind: 'end', guid: 'gP', ordered: true },
+    beginOwn: { kind: 'begin', own: true, guid: 'g3', now: 2000, by: 'K-L' }, beginOther: { kind: 'begin', own: false, guid: 'gP', now: 2000 }, beginM: { kind: 'begin', own: true, guid: 'gM', now: 2000, by: 'K-M' }, endAdmitted: { kind: 'end', guid: 'g1', ordered: true }, endOther: { kind: 'end', guid: 'gP', ordered: true },
     bound: { kind: 'bound', now: 1e12, ordered: true }, takeover: { kind: 'takeover', ordered: true }, takeoverM: { kind: 'takeover', ordered: true }, leaseEndL: { kind: 'leaseEnd', key: 'K-L' }, leaseEndM: { kind: 'leaseEnd', key: 'K-M' },
-    connGoneL: { kind: 'connGone', key: 'K-L' }, connGoneLother: { kind: 'noop' }, connGoneM: { kind: 'connGone', key: 'K-M' }, repoint: { kind: 'repoint' }, hubStop: { kind: 'hubStop' }, adopt: { kind: 'adopt' }, putBackDone: { kind: 'putBackDone', n: 1 },
+    connGoneL: { kind: 'connGone', key: 'K-L' }, connGoneLother: { kind: 'noop' }, connGoneM: { kind: 'connGone', key: 'K-M' }, repoint: { kind: 'repoint' }, hubStop: { kind: 'hubStop' }, adopt: { kind: 'adopt' }, putBackDone: { kind: 'putBackDone', n: 1 }, putBackLost: { kind: 'putBackLost', n: 1 },
   })[a];
 }
 /** windowStep's state as a canonical name (the owner named when it is not the lease L). */
@@ -95,13 +99,14 @@ export function canonPure(st) {
   if (st.phase === 'closing') return (st.then === 'lapsed' ? (st.ordered ? 'closingLapse' : 'closingShortLapse') : (st.ordered ? 'closingOrdered' : 'closingShort')) + who;
   return st.phase + who;
 }
-const KEYS = ['after', 'reply', 'putBack', 'delivered', 'told', 'folder'];
+const KEYS = ['after', 'reply', 'putBack', 'delivered', 'told', 'toldM', 'folder'];
 /** Compare windowStep with every cell: → [{state, act, law, want, got, pass}] (`delivered` and `folder` are the mediator's — derived here). */
 export function pureCells(windowStep) {
   return table().filter((r) => r.cell).map((r) => {
     const x = windowStep(pureState(r.state), pureAct(r.act));
     const after = canonPure(x.state);
-    const got = { after, reply: x.refuse ? x.refuse.code : (x.forward ? 'forward' : null), putBack: !!x.putBack, delivered: r.act === 'beginOwn' || r.act === 'endAdmitted', told: !!x.told, folder: folderOf(after) };
+    const a = pureAct(r.act), actorM = a.by === 'K-M';
+    const got = { after, reply: x.refuse ? x.refuse.code : (x.forward ? 'forward' : null), putBack: !!x.putBack, delivered: r.act === 'beginOwn' || r.act === 'endAdmitted', told: !!x.told && !(x.toldTo === 'actor' && actorM), toldM: !!x.told && x.toldTo === 'actor' && actorM, folder: folderOf(after) };
     const want = r.cell;
     return { state: r.state, act: r.act, law: r.law, want, got, pass: KEYS.every((k) => got[k] === want[k]) };
   });
@@ -153,7 +158,7 @@ export function fakeChrome(WS) {
     resolve({
       url: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID`, st,
       /** a download BEGINS in tab `frameId`: its folder fixed NOW (measured — a put-back after the begin moves it nowhere) */
-      begin(guid, frameId) { const to = recipients(frameId); const where = st.behavior === 'default' ? 'PERSON' : st.path; st.downloads.set(guid, { guid, to, where, done: false }); for (const [s, sid] of to) { try { s.send(JSON.stringify({ method: 'Browser.downloadWillBegin', ...(sid ? { sessionId: sid } : {}), params: { frameId, guid, url: 'http://site.example/' + guid, suggestedFilename: guid + '.txt' } })); } catch { /* gone */ } } return where; },
+      begin(guid, frameId, name = null) { const to = recipients(frameId); const where = st.behavior === 'default' ? 'PERSON' : st.path; st.downloads.set(guid, { guid, to, where, done: false }); for (const [s, sid] of to) { try { s.send(JSON.stringify({ method: 'Browser.downloadWillBegin', ...(sid ? { sessionId: sid } : {}), params: { frameId, guid, url: 'http://site.example/' + guid, suggestedFilename: name || guid + '.txt' } })); } catch { /* gone */ } } return where; },
       end(guid, state = 'completed') { const dl = st.downloads.get(guid); if (dl && !dl.done) { dl.done = true; emit(dl, state); } },
       release() { st.holdDefault = false; const h = st.held.splice(0); for (const s of new Set(h)) s.release(); return h.length; },
       putBacks: () => st.seen.filter((x) => x.method === 'Browser.setDownloadBehavior' && x.mediator && x.params && x.params.behavior === 'default').length,
@@ -172,7 +177,7 @@ function client(WS, url) {
   return { ws, call, events, open: new Promise((r, j) => { ws.once('open', r); ws.once('error', j); }) };
 }
 const codeOf = (m) => (m && m.error ? String(m.error.message || '').split(':')[0] : (m && m.noReply ? 'no-reply' : 'forward'));
-const BOUND_MS = 800;
+const BOUND_MS = 800, ANSWER_MS = 1500;
 /** Drive one cell on `road` over the checkout at `root` (or `mods` — a mutant copy): → {state, act, road, want, got, pass, note} */
 export async function driveCell(root, road, state, act, want, { mods = null } = {}) {
   const require = createRequire(path.join(root, 'scripts', 'x.mjs'));
@@ -180,17 +185,17 @@ export async function driveCell(root, road, state, act, want, { mods = null } = 
   const MED = mods && mods.MED ? mods.MED : require(path.join(root, 'src/server/cdp-mediator.js')); const M = mods && mods.M ? mods.M : require(path.join(root, 'src/browser-mediation.js'));   // (a suite's mutant copy may stand in)
   const f = await fakeChrome(WS);
   const logs = [], told = [];
-  const med = MED.create({ log: { log: (l) => logs.push(String(l)), warn: (l) => logs.push('W ' + String(l)) }, windowBoundMs: BOUND_MS });
+  const med = MED.create({ log: { log: (l) => logs.push(String(l)), warn: (l) => logs.push('W ' + String(l)) }, windowBoundMs: BOUND_MS, windowAnswerMs: ANSWER_MS });
   if (typeof med.onTold === 'function') med.onTold((t) => told.push(t));
   const paused = { v: false };
   const mode = road === 'scope' ? M.SCOPE_MODE : M.MEDIATED_MODE;
   const form = process.env.VS_WINDOW_FORM === 'browser' ? 'browser' : 'session';
   const conn = async (bk, tab) => { const g = await med.grantFor({ profileId: PROFILE, browserKey: bk, upstream: f.url, targetIds: [tab], paused: () => paused.v, mode }); const cl = client(WS, g.url); await cl.open; const a = await cl.call('Target.attachToTarget', { targetId: tab, flatten: true }); return { cl, sid: a.result && a.result.sessionId }; };
   let note = '';
-  const got = { after: null, reply: null, putBack: false, delivered: false, told: false, folder: null };
+  const got = { after: null, reply: null, putBack: false, delivered: false, told: false, toldM: false, folder: null };
   try {
     const L1 = await conn(L, 'T-L'), L2 = await conn(L, 'T-L'), m = await conn(MM, 'T-M');   // L's setting connection and another of its own; M
-    for (const c2 of [L1, L2]) await c2.cl.call('Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: true }, c2.sid);   // L hears its own downloads on both its connections (as the real driver does after its first `download`)
+    for (const c2 of [L1, L2, m]) await c2.cl.call('Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: true }, c2.sid);   // L (both its connections) and M hear their own downloads (as the real driver does after its first `download`)
     const lc = () => (L1.cl.ws.readyState === 1 ? L1 : L2);
     const set = (who, behavior) => who.cl.call('Browser.setDownloadBehavior', behavior === 'default' ? { behavior, eventsEnabled: true } : { behavior, downloadPath: '/agent/' + (who === m ? 'M' : 'L'), eventsEnabled: true }, form === 'session' ? who.sid : undefined);   // the real driver's shape: on its page session (VS_WINDOW_FORM=browser: none)
     const settle = (ms = 60) => sleep(ms);
@@ -205,10 +210,11 @@ export async function driveCell(root, road, state, act, want, { mods = null } = 
       closingOrdered: async () => { await set(L1, 'allowAndName'); f.begin('g1', 'T-L'); await settle(); f.st.holdDefault = true; med.interrupt({ profileId: PROFILE, browserKey: L }); await settle(); },
       closingShort: async () => { await set(L1, 'allowAndName'); f.st.holdDefault = true; L1.cl.ws.close(); await settle(120); },
       closingLapse: async () => { await set(L1, 'allowAndName'); f.st.holdDefault = true; await sleep(BOUND_MS + 250); },
+      closingShortLapse: async () => { await set(L1, 'allowAndName'); f.st.holdDefault = true; await sleep(BOUND_MS + 250); L1.cl.ws.close(); await settle(120); },
       lapsed: async () => { await set(L1, 'allowAndName'); await sleep(BOUND_MS + 250); },
     };
     await setup[state]();
-    const pb0 = f.putBacks(), told0 = told.filter((t) => t.browserKey === L).length;
+    const pb0 = f.putBacks(), told0 = told.filter((t) => t.browserKey === L).length, toldM0 = told.filter((t) => t.browserKey === MM).length;
     if (act !== 'putBackDone' && act !== 'adopt') f.st.holdDefault = true;   // a put-back the act sends stays on its way while the window is looked at
     const evOf = (guid, method = null) => [...L1.cl.events, ...L2.cl.events].some((e) => e.params && e.params.guid === guid && (!method || e.method === method));
     // a set sent on a connection whose held put-back is still on its way waits behind it (one connection, in order — as Chrome does):
@@ -222,6 +228,7 @@ export async function driveCell(root, road, state, act, want, { mods = null } = 
       setLpaused: async () => { paused.v = true; got.reply = codeOf(await answer(set(lc(), 'allowAndName'))); paused.v = false; },
       beginOwn: async () => { f.begin('g3', 'T-L'); await settle(80); got.delivered = evOf('g3'); },
       beginOther: async () => { f.begin('gP', 'T-P'); await settle(80); got.delivered = evOf('gP'); },
+      beginM: async () => { f.begin('gM', 'T-M'); await settle(80); got.delivered = evOf('gM'); },
       endAdmitted: async () => { f.end('g1'); await settle(80); got.delivered = evOf('g1', 'Browser.downloadProgress'); },
       endOther: async () => { f.begin('gP', 'T-P'); await settle(30); f.end('gP'); await settle(80); got.delivered = evOf('gP'); },
       bound: async () => { await sleep(BOUND_MS + 150); },
@@ -236,11 +243,13 @@ export async function driveCell(root, road, state, act, want, { mods = null } = 
       hubStop: async () => { med.shutdown(); },
       adopt: async () => { if (typeof med.adopt !== 'function') { note = 'no adoption door on this checkout'; return; } await med.adopt(PROFILE, f.url); },
       putBackDone: async () => { f.release(); },
+      putBackLost: async () => { const v0 = typeof med.downloadWindowOf === 'function' ? med.downloadWindowOf(PROFILE) : null; if (v0 && v0.phase === 'closing' && v0.ordered) await sleep(ANSWER_MS + 250); },   // the ordered put-back held past its answer's bound (with none on its way the event cannot happen)
     };
     await acts[act]();
     await sleep(act === 'bound' ? 60 : 120);
     got.putBack = f.putBacks() > pb0;
     got.told = typeof med.onTold === 'function' ? told.filter((t) => t.browserKey === L).length > told0 : false;
+    got.toldM = typeof med.onTold === 'function' ? told.filter((t) => t.browserKey === MM).length > toldM0 : false;
     const v = typeof med.downloadWindowOf === 'function' ? med.downloadWindowOf(PROFILE) : null;
     got.after = canonView(v);
     if (act === 'hubStop' || act === 'repoint') got.after = v && v.phase ? got.after : 'none';
@@ -248,7 +257,7 @@ export async function driveCell(root, road, state, act, want, { mods = null } = 
     got.folder = f.folder();
   } catch (e) { note = 'threw: ' + (e && e.message); }
   finally { try { med.shutdown(); } catch { /* gone */ } f.close(); }
-  const keys = ['after', 'putBack', 'folder', ...(act.startsWith('set') ? ['reply'] : []), ...(/^(begin|end)/.test(act) ? ['delivered'] : []), 'told'];
+  const keys = ['after', 'putBack', 'folder', ...(act.startsWith('set') ? ['reply'] : []), ...(/^(begin|end)/.test(act) ? ['delivered'] : []), 'told', 'toldM'];
   const pass = !note && keys.every((k) => got[k] === want[k]);
   return { state, act, road, want, got, pass, note };
 }

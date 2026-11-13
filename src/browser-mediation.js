@@ -266,9 +266,11 @@ function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
  *          · {phase:'lapsed', owner, n} — the bound passed with no download begun; ends at the owner's next set, its end, a repoint
  *   act:   {kind:'set', by, behavior, now, paused, boundMs} · {kind:'begin', own, guid, now} (own = a frame of the window's lease) ·
  *          {kind:'end', guid} · {kind:'bound', now} · {kind:'takeover'} · {kind:'leaseEnd', key} · {kind:'connGone', key} (the
- *          SETTING connection — the window lives with it) · {kind:'putBackDone', n} · {kind:'repoint'} · {kind:'hubStop'} ·
+ *          SETTING connection — the window lives with it) · {kind:'putBackDone', n} · {kind:'putBackLost', n} (the ordered put-back's
+ *          answer did not come in its bound — F1: closing always ends) · {kind:'repoint'} · {kind:'hubStop'} ·
  *          {kind:'adopt'} (a hub start)
- *   →      {state, forward, refuse:{code, words}|null, putBack: why|null, admit: guid|null, told: why|null}
+ *   →      {state, forward, refuse:{code, words}|null, putBack: why|null, admit: guid|null, told: why|null, toldTo}
+ *          (`toldTo: 'actor'` = told to the lease whose tab began the download — another's window's lease is not the one told)
  *          (`told`: the lease is TOLD — a free notice at its next turn: the bound passed, the ceiling, a takeover, its setting
  *          connection closed, or a download of its tab began while no folder of its was lent — it went to the profile's own place)
  */
@@ -276,6 +278,11 @@ const WINDOW_BOUND_MS = 30000;   // the real driver's own download timeout (meas
 const WINDOW_BUSY_TEXT = "another conversation's download is in progress in this profile — try again in a moment (lane chrome-157: one download window per profile)";
 const WINDOW_CLOSING_TEXT = "this profile's download folder is being put back — try again in a moment";
 const NO_WINDOW_TOLD = 'a download your tab began while no download folder of yours was lent';
+// the re-run's F4 / F5: a sentence about where a file went is said only where the hub KNOWS it — another conversation's lent folder
+// (its window is open), a place it cannot name (a put-back still on its way), a browser context of the lease's own
+const OTHER_WINDOW_TOLD = "a download your tab began while another conversation's download folder was lent";
+const PLACE_UNKNOWN_TOLD = 'a download your tab began while this profile\'s download folder was being put back';
+const OWN_CONTEXT_TOLD = 'a download your tab began in a browser context of your own';
 function windowStep(state, act) {
   const st = state || null;
   const out = { state: st, forward: false, refuse: null, putBack: null, admit: null, told: null };
@@ -303,8 +310,10 @@ function windowStep(state, act) {
     }
     case 'begin': {
       if (!a.own || !a.guid) return out;
+      if (a.ownContext) return { ...out, told: OWN_CONTEXT_TOLD, toldTo: 'actor' };   // F5: its own context's folder, never the person's profile's — the window is not about it
+      if (st && a.by && st.owner !== a.by) return { ...out, told: st.phase === 'open' ? OTHER_WINDOW_TOLD : st.phase === 'closing' ? PLACE_UNKNOWN_TOLD : NO_WINDOW_TOLD, toldTo: 'actor' };   // F4: ANOTHER conversation's own download — told the true thing
       if (OPEN) return st.began.includes(a.guid) ? out : { ...out, state: { ...st, began: [...st.began, a.guid], deadline: (Number(a.now) || 0) + (Number(st.bound) || WINDOW_BOUND_MS), pending: false }, admit: a.guid };
-      return { ...out, told: NO_WINDOW_TOLD };   // S2 (b) + S4: ONE rule — it went to the profile's own place, the lease is told (and told of it, as its own)
+      return { ...out, told: st && st.phase === 'closing' ? PLACE_UNKNOWN_TOLD : NO_WINDOW_TOLD, toldTo: 'actor' };   // S2 (b) + S4: ONE rule — never canceled; F5: the place said only where it is known
     }
     case 'end': {
       if (!OPEN || !st.began.includes(a.guid)) return out;
@@ -321,11 +330,16 @@ function windowStep(state, act) {
       if (OPEN) return close('the person took over', { ordered: !!a.ordered, told: 'the person took over' });
       if (st && st.phase === 'lapsed') return { ...out, state: null };
       return out;
+    case 'putBackLost':   // F1: the ordered put-back's answer did not come within its bound — the hub puts it back on a connection of its own
+      if (st && st.phase === 'closing' && st.ordered && st.n === a.n) return { ...out, state: { ...st, ordered: false }, putBack: 'its put-back was not answered' };
+      return out;
     case 'leaseEnd':
+      if (st && st.phase === 'closing' && st.ordered && st.owner === a.key) return { ...out, state: { ...st, ordered: false }, putBack: 'the lease ended before its put-back was answered' };   // F1
       if (OPEN && st.owner === a.key) return close('the lease ended');
       if (st && st.owner === a.key && st.phase === 'lapsed') return { ...out, state: null };
       return out;
     case 'connGone':
+      if (st && st.phase === 'closing' && st.ordered && st.owner === a.key) return { ...out, state: { ...st, ordered: false }, putBack: 'its connection ended before the put-back was answered' };   // F1: the answer can no longer come on it
       if (OPEN && st.owner === a.key) return close('its connection ended', { told: 'its connection ended' });   // S1: the window lives with the connection that set it
       return out;
     case 'putBackDone':
@@ -343,14 +357,18 @@ function windowStep(state, act) {
 }
 /** The words the lease is told (a free notice at its next turn) — one sentence per reason. */
 function windowToldText(why, { label = null } = {}) {
-  const where = label ? `the "${String(label).slice(0, 60)}" browser` : 'this browser';
+  const lab = label ? Array.from(String(label)).slice(0, 80).join('') : '';   // (the keeper hands the store's cleanLabel; never a split pair here)
+  const where = lab ? `the "${lab}" browser` : 'this browser';
   // (never the download's own file name: a site chose it — this sentence reaches the agent as a system note)
   if (why === NO_WINDOW_TOLD) return `A download your tab began in ${where} went to the profile's own download place — the person's Downloads folder — because no download folder of yours was lent at that moment. Set the folder and click in one step: \`vibespace-browser download <selector> <path>\`.`;
   if (/no download of its tab began/.test(String(why))) return `Your download folder in ${where} was put back to the person's own: ${String(why).replace('its tab', 'your tab').replace('its set', 'your set')}. A download your tab begins now goes to the person's Downloads folder — run \`vibespace-browser download <selector> <path>\` again.`;
   if (/ran past/.test(String(why))) return `Your download folder in ${where} was put back to the person's own while your download was still running (it ${String(why).replace(/^its download /, '').replace('its own folder', 'your folder')}). Set it again before your next download.`;
   if (why === 'the person took over') return `The person took over ${where}, and your download folder there was put back to the person's own — set it again before your next download (\`vibespace-browser download <selector> <path>\` does it in one step).`;
   if (why === 'its connection ended') return `Your browser connection to ${where} ended, so your download folder there was put back to the person's own — set it again before your next download.`;
-  return `Your download folder in ${where} was put back to the person's own (${String(why).slice(0, 120)}).`;
+  if (why === OTHER_WINDOW_TOLD) return `A download your tab began in ${where} went to ANOTHER conversation's download folder — its download was in progress, so the profile's folder was lent to it. Run your download again in a moment (\`vibespace-browser download <selector> <path>\`).`;
+  if (why === PLACE_UNKNOWN_TOLD) return `A download your tab began in ${where} started while the profile's download folder was being put back — VibeSpace cannot tell you where it went. Run \`vibespace-browser download <selector> <path>\` again.`;
+  if (why === OWN_CONTEXT_TOLD) return `A download your tab began in ${where} went where your own browser context saves downloads — VibeSpace lends folders only in the person's profile.`;
+  return `Your download folder in ${where} was put back to the person's own.`;   // F7: an unknown reason is never echoed (a later reason could carry a site's string)
 }
 const FRAMES_MAX = 4096;
 /** Is `frameId` one of this lease's own (a tab it holds, or a frame seen under one of its sessions)? */
@@ -632,6 +650,7 @@ function admitReply(reply, pending, scope, { explicit = false } = {}) {
     case 'Target.createTarget':
       if (r && r.targetId) {
         admitTarget(scope, r.targetId);
+        if (p.browserContextId != null && scope.contexts.has(String(p.browserContextId))) { scope.ctxTargets = scope.ctxTargets || new Set(); scope.ctxTargets.add(String(r.targetId)); }   // (lane chrome-157, F5: a tab in a context of its own saves where THAT context says)
         const seen = scope.recent && scope.recent.get(String(r.targetId));
         if (seen) { scope.recent.delete(String(r.targetId)); emit.push({ method: 'Target.targetCreated', params: { targetInfo: seen } }); }
       }
@@ -692,8 +711,8 @@ function filterEvent(ev, scope) {
     case 'Browser.downloadProgress':
       // lane chrome-157 (the .401 read, W2 — MEASURED on 154 + 157: with the browser form of Browser.setDownloadBehavior +
       // eventsEnabled, the PERSON's download in another tab reached the agent's connection, its url and its file name): a
-      // download event reaches a lease ONLY for a download its own tab began while its folder was lent (scope.downloads —
-      // admitted by the mediator, src/server/cdp-mediator.js), whatever session it came on; everything else is dropped
+      // download event reaches a lease ONLY for a download its own tab began — window or not (scope.downloads, recorded at the
+      // begin by the mediator, src/server/cdp-mediator.js, which also keeps it to the channel the lease asked on); all else dropped
       return p.guid != null && scope.downloads && scope.downloads.has(String(p.guid)) ? ev : null;
     case 'Page.frameAttached':
     case 'Page.frameNavigated': {
@@ -758,7 +777,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

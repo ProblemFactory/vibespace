@@ -813,12 +813,19 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   connection that set it closes. A download your tab begins while no folder
   of yours is lent goes to the profile's own place (the person's Downloads):
   use `vibespace-browser download <selector> <path>`, which sets the folder
-  and clicks in one step. You are TOLD — a note at your next turn — whenever
-  the folder was taken back early or a download of yours went to the
-  person's place. While it is lent, a file the person starts in that profile
-  lands in your folder, so finish and move on. One window per profile: while
-  another conversation's download is in flight there, your set is refused by
-  name — try again in a moment. `deny` (blocking every download of the
+  and clicks in one step. You are TOLD — ONE note at your next turn, the
+  newest words (a later one replaces it) — when the folder was taken back
+  early (the bound, the ceiling, a takeover, the connection that set it
+  closing) and, once until your next set, when a download of your tab began
+  with no folder of yours lent: where it went if VibeSpace knows (the
+  person's Downloads; another conversation's lent folder), or that it cannot
+  say (the folder was being put back). VibeSpace cannot see a download whose
+  events are off on your connection. While it is lent, a file the person —
+  or another conversation — starts in that profile lands in your folder, so
+  finish and move on. One window per profile: while another conversation's
+  download is in flight there, your set is refused by name and a download
+  your own tab begins goes to ITS folder (you are told) — try again in a
+  moment. `deny` (blocking every download of the
   profile) is refused. You are told of your own downloads (window or not)
   and of no one else's, and may cancel only your own.
 * A paired machine's profile, or a hub with no mediating proxy, hands your
