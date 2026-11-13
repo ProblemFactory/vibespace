@@ -543,6 +543,13 @@ class SettingsUI {
     const unread = () => { line.textContent = t('Could not read what is kept now'); };
     fetchJson('/api/chat-attachments/usage').then((u) => { if (!u || !Number.isFinite(Number(u.files)) || !Number.isFinite(Number(u.bytes))) return unread(); line.textContent = t('Files you dropped into a temporary folder, kept with their conversations: {n} files, {size}', { n: Number(u.files), size: mb(Number(u.bytes)) }); }).catch(unread);
     fetchJson('/api/chat-attachments/orphans').then((o) => {
+      if (o && Number(o.unchecked) > 0) {   // a read failed: those folders are kept, and the person is told why nothing is offered for them
+        const un = document.createElement('div');
+        un.className = 'settings-row-fact';
+        un.dataset.keptUnchecked = '1';
+        un.textContent = t('Could not check whether {n} conversations still exist — their files are kept', { n: Number(o.unchecked) });
+        info.appendChild(un);
+      }
       if (!o || !(Number(o.files) > 0)) return;
       const files = Number(o.files), bytes = Number(o.bytes);   // captured BEFORE the dialog: the door acts on exactly these
       gone.textContent = t('Files of conversations that no longer exist: {n} files, {size}', { n: files, size: mb(bytes) }) + ' ';

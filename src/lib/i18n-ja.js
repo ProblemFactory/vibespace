@@ -3468,6 +3468,7 @@ export default {
   "Remove {n} files ({size}) of conversations that no longer exist? This cannot be undone.": "もう存在しない会話のファイル {n} 個（{size}）を削除しますか？元に戻せません。",
   "What would be removed changed — look again": "削除対象が変わりました。もう一度確認してください",
   "Removed {n} files ({size})": "{n} 個のファイル（{size}）を削除しました",
+  "Could not check whether {n} conversations still exist — their files are kept": "{n} 件の会話がまだ存在するか確認できませんでした。それらのファイルは残します",
   "Still finding this picture in the conversation…": "会話の記録でこの画像を探しています…",
   "This picture was removed from the conversation's record when the record was rescued": "会話の記録を修復したときに、この画像は記録から取り除かれました",
   "This picture is no longer in the conversation's record": "この画像はもう会話の記録にありません",
