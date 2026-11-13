@@ -13,6 +13,7 @@ import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1:
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
 import { UI_ICONS } from './icons.js';
+import { createBarFold } from './bar-fold.js'; // lane ui-controls-and-bugs: the filter row folds through THE chrome-bar fold
 import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
 import { noteWarmthAnswer } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the poll tick's ONE warmth pass
 
@@ -166,6 +167,19 @@ const liveFactsDigestPart = (s) => {
 
 /** The regular class's landscape list column, hidden or not — this tab's choice (lane desktop-switch-phone). */
 const LIST_HIDDEN_KEY = 'vibespace.listHidden';
+/** THE LIST ⋯'s ROWS (lane ui-controls-and-bugs — the round's walk: the sort's words ran the filter row past a 200 / 260 px
+ *  sidebar). The row folds through THE chrome-bar fold (bar-fold.js): the sort gives up its words first (its icon), then manage
+ *  and sort fold into this ⋯ — and a FOLDED control is a row here (in the regular class the pair is always here: SPEC-v3 §2.3).
+ *  PURE. → the row keys in order */
+const SORT_ICONS = Object.freeze({
+  arrows: '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M5 13l-2.5-2.5M5 13l2.5-2.5M11 13V3M11 3L8.5 5.5M11 3l2.5 2.5"/></svg>',
+  clock: '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 1.5"/></svg>',
+  folder: '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>',
+});
+export function listMenuKeys({ regular = false, folded = [] } = {}) {
+  const f = new Set(folded || []);
+  return ['refresh', ...['sort', 'manage'].filter((k) => regular || f.has(k))];
+}
 const landscapeNow = () => { try { return window.matchMedia('(orientation: landscape)').matches; } catch { return false; } };
 
 class Sidebar {
@@ -271,11 +285,13 @@ class Sidebar {
     // Sort toggle
     const sortBtn = document.getElementById('sort-toggle');
     this._updateSortBtn(sortBtn);
-    sortBtn.onclick = () => {
+    // the sort menu opens where it was asked from: the button, or — in the regular class, where the button is hidden and sort
+    // is a row of the list's ⋯ — that ⋯ (lane ui-controls-and-bugs: never against a hidden button at the screen's corner)
+    sortBtn.onclick = (e, from = sortBtn) => {
       if (this._activeTab === 'tasks') {
         // Task View sort menu (urgency/status/recent/name) — same control
         // position as the Folders sort, per-context contents.
-        const r = sortBtn.getBoundingClientRect();
+        const r = from.getBoundingClientRect();
         const SORTS = { urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') };
         showContextMenu(r.left, r.bottom + 2, [{ caption: tr('Sort by') }, ...Object.entries(SORTS).map(([k, label]) => ({
           label: (this._taskViewSortMode === k ? '✓ ' : '  ') + label,
@@ -289,7 +305,7 @@ class Sidebar {
         return;
       }
       // Folders: a menu of its two orders (it toggled on each press, saying nothing — lane ui-controls-and-bugs)
-      const r = sortBtn.getBoundingClientRect();
+      const r = from.getBoundingClientRect();
       showContextMenu(r.left, r.bottom + 2, [{ caption: tr('Sort by') }, ...[['recent', tr('Recent')], ['folder', tr('Folder')]].map(([k, label]) => ({
         label: (this._sortMode === k ? '✓ ' : '  ') + label,
         action: () => {
@@ -339,16 +355,30 @@ class Sidebar {
       listMenuBtn.onclick = (e) => {
         e.stopPropagation();
         const r = listMenuBtn.getBoundingClientRect();
-        const rows = [
-          { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
-        ];
-        // the regular class's head has no room for sort / manage: they are rows of this ⋯ there (SPEC-v3 §2.3)
-        if (this._regularMode) rows.push(
-          { label: tr('Sort by'), action: () => document.getElementById('sort-toggle')?.click() },
-          { label: tr('Manage mode — show quick terminate buttons'), action: () => document.getElementById('manage-toggle')?.click() },
-        );
-        showContextMenu(r.left, r.bottom + 2, rows);
+        const ROWS = {
+          refresh: { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
+          sort: { label: tr('Sort by'), action: () => document.getElementById('sort-toggle')?.onclick?.(null, listMenuBtn) },   // its menu at this ⋯
+          manage: { label: tr('Manage mode — show quick terminate buttons'), action: () => document.getElementById('manage-toggle')?.click() },
+        };
+        // the regular class's head has no room for sort / manage, and a narrow row folds them: they are rows of this ⋯ then
+        showContextMenu(r.left, r.bottom + 2, listMenuKeys({ regular: this._regularMode, folded: this._filterFold?.folded() }).map((k) => ROWS[k]));
       };
+      // THE FILTER ROW never runs past the sidebar: search · filter · manage · sort · ⋯ through THE chrome-bar fold — the sort's
+      // words go first (its icon, the order in its title), then manage, then sort fold into the ⋯ (above); the search and the
+      // filter never fold. The regular class moves the filter and the ⋯ into the head: the fold stands aside there.
+      const row = document.getElementById('session-filter-row');
+      if (row) {
+        row.classList.add('sfr-bar'); sortBtn.classList.add('sort-btn'); listMenuBtn.classList.add('sfr-more');
+        const FOLD = { search: 0, filter: 0, live: 0, manage: 20, sort: 10 };   // 0 never folds; a higher one folds first
+        this._filterFold = createBarFold(row, {
+          more: listMenuBtn,
+          moreAlways: () => listMenuBtn.style.display !== 'none',
+          suspended: () => !!this._regularMode,
+          items: () => [['search', 'session-filter'], ['filter', 'backend-filter'], ['live', 'live-filter'], ['manage', 'manage-toggle'], ['sort', 'sort-toggle']]
+            .map(([key, id]) => ({ key, el: document.getElementById(id), priority: FOLD[key], ...(key === 'search' ? { flexMin: 64 } : {}), ...(key === 'sort' ? { compactClass: 'sort-compact' } : {}) }))
+            .filter((it) => it.el && it.el.parentElement === row),
+        });
+      }
     }
     // Apply defaultStatusFilter once after async settings load (setting may differ from schema default)
     const _applyDefaultFilter = (val) => {
@@ -519,7 +549,9 @@ class Sidebar {
     const words = this._activeTab === 'tasks'
       ? ({ urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') })[this._taskViewSortMode] || tr('Urgency + status')
       : (this._sortMode === 'recent' ? tr('Recent') : tr('Folder'));
-    btn.textContent = words + ' ▾';
+    // its ICON is the fold's short form (a narrow row): the release's own drawings, the order still in the title
+    const icon = this._activeTab === 'tasks' ? SORT_ICONS.arrows : this._sortMode === 'recent' ? SORT_ICONS.clock : SORT_ICONS.folder;
+    btn.innerHTML = `<span class="sort-ico" aria-hidden="true">${icon}</span><span class="sort-words">${escHtml(words)} ▾</span>`;
     btn.setAttribute('aria-haspopup', 'menu');
     btn.title = tr('Sort by: {mode}', { mode: words });
   }

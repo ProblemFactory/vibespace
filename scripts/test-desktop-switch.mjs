@@ -451,7 +451,7 @@ console.log('⑪ ROUND 3 — a list\'s listeners live while it is in the page; t
   };
   const swBad = lifeCensus(sw, item);
   ok(!!sw && !!item && swBad.length === 0, 'r3 ①: the window switcher has ONE close — its title toggle, an outside tap and both row taps call it; its vs-desktops listener and outside-press watch hang on its signal; a road that only removes it aborts them too', swBad);
-  ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items\);\n  menu\.classList\.add\('mdesk-menu'\);\n  untilGone\(menu, ctl\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  \}\);/.test(sh),
+  ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items, 'context-menu', \{ placesItself: true \}\);[^\n]*\n  menu\.classList\.add\('mdesk-menu'\);\n  untilGone\(menu, ctl\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  return menu;/.test(sh) && /\}, \{ signal: ctl\.signal \}\);\n  \}\);/.test(sh),
     'r3 ①: the sheet\'s listeners (its rows\' long press, its vs-desktops) hang on its controller, aborted on EVERY road that takes it out (an outside press, Esc, a row\'s tap, the doors\' menu, the next open — 25151f0b: only the next open)');
   { // RED CONTROL — 25151f0b's switcher: a self-removing listener with no controller, three bare removes
     const I2 = item.replace('item.onclick = () => { close(); wm.revealWindow(win.id); };', 'item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };');

@@ -154,6 +154,12 @@ export function rowVerbs(j) {
   if (['done', 'interrupted', 'failed', 'missed'].includes(j.state)) out.push({ act: 'rm', label: t('Remove'), glyph: '✕', cls: '' });
   return out;
 }
+/** THE ROW'S MENU (right-click / long-press): the row's own verbs first (rowVerbs — the same table its buttons draw), then
+ *  «Clear content…» (live AND archived rows: the registry and the archive both hold the record). */
+export function rowMenuItems(app, j, refresh, { archived = false } = {}) {
+  const verbs = archived ? [] : rowVerbs(j).map((v) => ({ label: v.label, action: () => jobAction(app, j, v.act, refresh) }));
+  return [...verbs, ...(verbs.length ? [{ separator: true }] : []), { label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }];
+}
 function actionButtons(app, j, refresh, { compact } = {}) {
   const mk = (label, act, cls = '') => {
     const b = document.createElement('button');
@@ -311,8 +317,7 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   el.oncontextmenu = (ev) => {
     // offered on a cleared job too: a job that ran again after a clear has new words (its runs' last lines)
     ev.preventDefault(); ev.stopPropagation();
-    const verbs = archived ? [] : rowVerbs(j).map((v) => ({ label: v.label, action: () => jobAction(app, j, v.act, refresh) }));   // the row's own acts first
-    showContextMenu(ev.clientX, ev.clientY, [...verbs, ...(verbs.length ? [{ separator: true }] : []), { label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }]);
+    showContextMenu(ev.clientX, ev.clientY, rowMenuItems(app, j, refresh, { archived }));
   };
   el.onclick = () => {
     if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }

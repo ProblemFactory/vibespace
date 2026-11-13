@@ -30,6 +30,13 @@
 import { barLadder } from './live-bar-layout.js';
 
 export const FOLDED = 'bar-folded';
+
+/** THE ⋯'s ROWS for the folded tools (lane ui-controls-and-bugs — the acceptance reader: a folded View / Upload, pressed from
+ *  the ⋯, opened its popover against its HIDDEN button — at the viewport's corner). `tools[key] = { word, act(anchor) }`; a
+ *  row acts AGAINST THE ⋯ (`anchor`), the place the person pressed. PURE. → [{ label, action }] */
+export function foldedMenuItems(keys, tools, anchor) {
+  return (keys || []).filter((k) => tools && tools[k]).map((k) => ({ label: tools[k].word, action: () => tools[k].act(anchor) }));
+}
 const CACHE_MAX = 400;
 
 /**

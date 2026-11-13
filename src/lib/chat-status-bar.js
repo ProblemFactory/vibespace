@@ -1,5 +1,5 @@
 import { pillMode, billingPillForms, billingPillHtml, phoneBarFold } from './title-chips.js'; // lane phone-chip: the billing pill folds, never cuts
-import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
+import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
 import { UI_ICONS } from './icons.js';
@@ -42,6 +42,10 @@ const CHANNEL_GLYPH = { mail: UI_ICONS.mail, chat: UI_ICONS.chat, robot: UI_ICON
  *  (layout px). The panel is positioned OUT of the ≤768px bar's horizontal
  *  scroller, so whatever lands past the edge is unreachable, not merely ugly. */
 const DROPDOWN_EDGE_PAD = 8;
+/** The auto-continue words' old last sentence — «Click to cancel.» and its zh / ja forms (the dictionaries' own; test-control-says-why
+ *  ⑤ reads every such key's rows against it): a press OPENS the chip's panel now and cancelling is the panel's row, so neither
+ *  the tooltip nor the panel's line says it (lane ui-controls-and-bugs, the acceptance reader). */
+export const CANCEL_TAIL = /\s*(?:Click to cancel\.|点击取消。|クリックで(?:取消|キャンセル|取り消し)。)\s*$/;
 /** P2-17 PURE: how tall a status-bar panel may grow (LAYOUT px) — it opens UPWARD from its chip (bottom edge 4 px above
  *  the chip's top), so its room is the chip's top less the highest edge it must stay under: its container's top (a chat
  *  window clips what rises past it), the phone's top bar, the viewport — less the edge pad. Viewport px in, ÷ `scale`;
@@ -1030,6 +1034,7 @@ export class ChatStatusBar {
       // lane ui-controls-and-bugs (the walk's MAJOR: a bare «09:22 PM», one press turned it off): the chip SAYS what it means —
       // «21:22 自动继续» / «自动继续：关» — and a press opens it (below), never acts at once
       const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: when }))) : (a.enabled ? ' ' + escHtml(t('auto')) : ' ' + escHtml(t('Auto-continue: off')));
+      title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
       chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
     }
@@ -1641,12 +1646,7 @@ export class ChatStatusBar {
           dropdown.style.left = at.left + 'px';
           if (Number.isFinite(at.maxW)) dropdown.style.maxWidth = at.maxW + 'px';
         };
-        queueMicrotask(settle);
-        if (typeof MutationObserver === 'function') {
-          let q = 0;
-          const mo = new MutationObserver(() => { if (!dropdown.isConnected) { mo.disconnect(); return; } if (!q) q = requestAnimationFrame(() => { q = 0; settle(); }); });
-          mo.observe(dropdown, { childList: true, subtree: true, characterData: true });
-        }
+        followContent(dropdown, settle);   // once filled, and again whenever its content changes (utils.js — one helper)
       }
       return dropdown;
     };

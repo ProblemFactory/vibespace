@@ -10,6 +10,10 @@
 //   ③ the file explorer's builder, then its office rows patched in after it opened (the sweep's 1024 defect): «Delete»
 //      still inside the viewport
 //   ④ a submenu opened at the bottom-right: inside the viewport
+//   ⑤ a menu that places itself (the desktop list: rows patched, then its own top) is never re-placed behind its back; a
+//      plain menu its caller patches is not moved either (following is the file explorer builder's opt-in)
+//   ⑥ followContent (one helper for every follower): runs once filled, again on growth, never after its box left
+//   ⑦ an OFF row is drawn at full strength (its why's effective opacity 1)
 //   CONTROL: ③ with the re-placement switched off (no MutationObserver) — «Delete» falls below the screen: the judge bites
 import fs from 'node:fs'; import path from 'node:path'; import net from 'node:net';
 import { spawn } from 'node:child_process';
@@ -25,9 +29,9 @@ const check = (n, c, e) => { if (c) { passed++; console.log('  ✓ ' + n); } els
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const tmp = fs.mkdtempSync('/tmp/vs-menu-bounds-');
-const entry = `import { showContextMenu } from './src/lib/utils.js'; import { installExplorerOps } from './src/lib/file-explorer-ops.js';
+const entry = `import * as U from './src/lib/utils.js'; import { installExplorerOps } from './src/lib/file-explorer-ops.js';
 class FE {} installExplorerOps(FE); const fe = new FE();
-window.__menus = { showContextMenu, fe };`;
+window.__menus = { showContextMenu: U.showContextMenu, followContent: U.followContent, fe };`;
 const js = (await esb.build({ stdin: { contents: entry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'iife', write: false, logLevel: 'silent' })).outputFiles[0].text;
 fs.writeFileSync(path.join(tmp, 'menus.html'), `<!doctype html><html data-theme="dark"><head><link rel="stylesheet" href="file://${ROOT}/public/style.css"><link rel="stylesheet" href="file://${ROOT}/public/viewers.css"></head><body style="background:#1e1e1e;margin:0"><script>${js.replace(/<\/script/g, '<\\/script')}</script></body></html>`);
 const CDP = await freePort();
@@ -90,9 +94,41 @@ try {
     await sleep(200);
     const s4 = await ev(`(() => { const sub = [...document.querySelectorAll('.context-menu .context-menu')].find((e) => e.style.display !== 'none'); if (!sub) return null; const r = sub.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; })()`);
     check(`${at} ④ a submenu opened at the bottom-right is inside the viewport`, !!s4 && inside(s4, vw, vh), s4);
+    // ⑤ A MENU THAT PLACES ITSELF IS NEVER MOVED BEHIND ITS BACK (the acceptance reader's must-fix: the desktop list keeps its
+    // TOP after a remote change patches its rows — lane desktop-doors-table r4/r5; an observer on every menu re-placed it from
+    // its anchor, so its rows moved under the pointer). The desktop list's protocol: opened with `up` from the taskbar, rows
+    // patched in, then its own placement writes its top. A plain menu a caller patches is not moved either (the release's).
+    const own = await ev(`(async () => { document.querySelectorAll('.context-menu').forEach((m) => m.remove());
+      const m = __menus.showContextMenu(${X}, ${Y}, Array.from({ length: 6 }, (_, i) => ({ label: 'Desk ' + i, action() {} })), 'context-menu', { up: true, placesItself: true });
+      const kept = Math.round(m.getBoundingClientRect().top) - 40; m.style.top = kept + 'px';   // its own placement (keep-its-top)
+      for (let i = 0; i < 3; i++) { const r = document.createElement('div'); r.className = 'context-menu-item'; r.textContent = 'Added ' + i; m.insertBefore(r, m.children[1]); }
+      m.style.top = kept + 'px';   // _placeList after the patch: the top it stood at
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const top = Math.round(m.getBoundingClientRect().top), pinned = [...m.children].filter((k) => k.dataset && k.dataset.menuTail).length;   // read before the next menu (one per class) takes its place
+      const plain = __menus.showContextMenu(${X} - 300, 40, Array.from({ length: 3 }, (_, i) => ({ label: 'Plain ' + i, action() {} })));
+      const pTop = plain.getBoundingClientRect().top; plain.appendChild(Object.assign(document.createElement('div'), { className: 'context-menu-item', textContent: 'Late' }));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return { kept, top, pinned, plainMoved: Math.round(plain.getBoundingClientRect().top - pTop) }; })()`);
+    check(`${at} ⑤ a menu that places itself (the desktop list's protocol: rows patched, then its own top written) is never re-placed behind its back — its top stays where its owner put it, no row pinned`, !!own && own.top === own.kept && own.pinned === 0, own);
+    check(`${at} ⑤ …and a plain menu its caller patches is not moved either (following is the builder's opt-in — the release's behaviour)`, !!own && own.plainMoved === 0, own);
   }
+  // ⑥ FOLLOWING AN OPEN BOX (utils.js followContent — placeMenu's opt-in follow and the status bar's panel settle; the reader's
+  // panel-1 mutant — the re-settle on growth dropped — had no red suite): it runs once filled, again when its content grows,
+  // and ends with the box
+  const fol = await ev(`(async () => { const box = document.createElement('div'); document.body.appendChild(box); let n = 0;
+    if (typeof __menus.followContent !== 'function') return null;
+    __menus.followContent(box, () => { n++; });
+    box.textContent = 'filled'; await new Promise((r) => setTimeout(r, 60)); const afterFill = n;
+    box.appendChild(document.createElement('div')).textContent = 'grew'; await new Promise((r) => setTimeout(r, 80)); const afterGrow = n;
+    box.remove(); box.textContent = 'gone'; await new Promise((r) => setTimeout(r, 80)); return { afterFill, afterGrow, afterGone: n }; })()`);
+  check('⑥ followContent: it runs once the box is filled, again when its content grows (one frame), and never after the box left the page', !!fol && fol.afterFill >= 1 && fol.afterGrow > fol.afterFill && fol.afterGone === fol.afterGrow, fol);
+  // ⑦ THE OFF ROW IS WORDS AT FULL STRENGTH (the reader's grammar-1 mutant — an off row at opacity .4 again — had no red suite)
+  const offr = await ev(`(() => { document.querySelectorAll('.context-menu').forEach((m) => m.remove()); const m = __menus.showContextMenu(40, 40, [{ label: 'Live', action() {} }, { label: 'Blocked', off: 'it needs a sign-in' }]);
+    const row = m.querySelector('.context-menu-off'); if (!row) return null; let o = 1; for (let e = row.querySelector('.door-why'); e && e !== document.body; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
+    const why = row.querySelector('.door-why'); return { o, why: why && why.textContent, whyColor: why && getComputedStyle(why).color }; })()`);
+  check('⑦ an OFF row draws at full strength — its why\'s effective opacity 1 (never a greyed row with a tooltip)', !!offr && offr.o >= 0.99 && offr.why === 'it needs a sign-in', offr);
   const src = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8'), ops = fs.readFileSync(path.join(ROOT, 'src/lib/file-explorer-ops.js'), 'utf8');
-  check('ONE placement: showContextMenu and the file explorer\'s builder both end in placeMenu (no clamp of their own)', /\n  placeMenu\(pop, x, y, \{ up \}\);\n  return pop;\n\}/.test(src) && /\n    placeMenu\(menu, x, y\);\n/.test(ops) && !/if \(mr\.bottom > vh\) menu\.style\.top/.test(ops));
+  check('ONE placement: showContextMenu and the file explorer\'s builder both end in placeMenu (no clamp of their own); only the explorer\'s builder follows its rows', /\n  placeMenu\(pop, x, y, \{ up, placesItself \}\);\n  return pop;\n\}/.test(src) && /\n    placeMenu\(menu, x, y, \{ follow: true \}\);/.test(ops) && !/if \(mr\.bottom > vh\) menu\.style\.top/.test(ops));
 } finally { cleanup(); }
 console.log(failed ? `${failed} FAILED (${passed} passed)` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

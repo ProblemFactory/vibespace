@@ -4803,6 +4803,8 @@ export default {
   "{label}: {value}": "{label}：{value}",
   "Set up the vault…": "保管庫を設定…",
   "Before you start, check:": "始める前に確認してください：",
+  "Set up {name}": "{name} に必要なツールをインストール",
+  "dtach (keeps sessions running across disconnects)": "dtach（切断後もセッションを継続）",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} に自動で続行",
   "Auto-continue: off": "自動続行：オフ",

@@ -484,7 +484,7 @@ export class MobileNav {
     // ONE class name to showContextMenu (it derives the row class from it —
     // a two-word name would strip every row of .context-menu-item); the
     // sheet modifier is added afterwards.
-    const menu = showContextMenu(0, 0, items);
+    const menu = showContextMenu(0, 0, items, 'context-menu', { placesItself: true });   // a sheet: its CSS places it
     menu.classList.add('mobile-sheet'); // under the bar as it stands: style.css --phone-sheet-top (_publishUnder, r4)
     return menu;
   }
@@ -793,6 +793,7 @@ export class MobileNav {
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
+    closeBtn.title = t('Close'); closeBtn.setAttribute('aria-label', t('Close'));   // its word (the ✕ is a glyph — lane ui-controls-and-bugs)
     // a window that asks first (requestClose answered false — a «Session unavailable» tile's confirm, a desktop app's own ask)
     // closes LATER: the list redraws when it does (r4: its row stayed, and a tap revealed a window that was gone)
     closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };

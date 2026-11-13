@@ -1233,7 +1233,7 @@ export function createPopover(anchor, className, opts = {}) {
  *   added after the placement restyled a menu already placed (lane desktop-small r2: the desktop list landed 85 px above
  *   its button, measured unstyled)
  */
-export function showContextMenu(x, y, items, className = 'context-menu', { up = false, extraClass = '' } = {}) {
+export function showContextMenu(x, y, items, className = 'context-menu', { up = false, extraClass = '', placesItself = false } = {}) {
   // Remove existing menus of same class
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
@@ -1360,20 +1360,23 @@ export function showContextMenu(x, y, items, className = 'context-menu', { up = 
     }
     pop.appendChild(el);
   }
-  placeMenu(pop, x, y, { up });
+  placeMenu(pop, x, y, { up, placesItself });
   return pop;
 }
 
 /** A MENU IS BOUNDED BY THE SCREEN (lane ui-controls-and-bugs, 主开发's width-sweep rule 4, 2026-11-13) — THE ONE placement of
  *  every context menu (showContextMenu and the file explorer's own builder): PURE menuPlace (below the point, above it when
  *  `up` and there is room, else clamped; a menu TALLER than the viewport is capped and scrolls inside). Two things on top:
- *  - a menu whose rows change after it opened (the file explorer's office rows arrive late) is PLACED AGAIN — it never
- *    grows past the screen's edge (the sweep: «删除» below a 1024×700 screen, no scroll);
+ *  - a menu whose rows change after it opened is PLACED AGAIN when its builder asks (`follow` — the file explorer's office
+ *    rows arrive late: «删除» grew below a 1024×700 screen, no scroll). OPT-IN: a menu that places itself after a patch (the
+ *    desktop list keeps its TOP, lane desktop-doors-table r4/r5; the sheets) must never be moved under the pointer behind
+ *    its back (the acceptance reader's must-fix: an observer on every menu did exactly that);
  *  - a capped menu keeps its CLOSING rows in view — the last group after a separator when it is short (≤ 4 rows: Rename /
  *    Properties / Delete), else that group's last two (the session card's 属性… / 终止): they stick to its bottom edge while
  *    the rest scrolls under them. The rows stay the menu's own children (no wrapper).
- *  Viewport px measured, layout px written (uiScale). */
-export function placeMenu(pop, x, y, { up = false } = {}) {
+ *  `placesItself` — the caller places it from here on (the desktop list, a sheet): the release's plain placement only, no
+ *  pinned rows, no following. Viewport px measured, layout px written (uiScale). */
+export function placeMenu(pop, x, y, { up = false, follow = false, placesItself = false } = {}) {
   const Z = uiScale();
   const isSep = (k) => [...k.classList].some((c) => /-(separator|sep)$/.test(c));
   const unpin = () => { for (const k of pop.children) if (k.dataset && k.dataset.menuTail) { delete k.dataset.menuTail; k.style.position = ''; k.style.bottom = ''; k.style.zIndex = ''; k.style.background = ''; k.style.boxShadow = ''; } };
@@ -1398,22 +1401,34 @@ export function placeMenu(pop, x, y, { up = false } = {}) {
     unpin(); pop.style.maxHeight = ''; pop.style.overflowY = '';   // its natural size first
     const mr = pop.getBoundingClientRect();
     const at = menuPlace({ x, y, w: mr.width, h: mr.height, vw: window.innerWidth, vh: window.innerHeight, up });
-    if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; pinTail(); }
+    if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; if (!placesItself) pinTail(); }
     pop.style.left = (at.left / Z) + 'px';
     pop.style.top = (at.top / Z) + 'px';
   };
   place();
   pop.style.visibility = '';
-  if (typeof MutationObserver === 'function') {
-    // rows added or removed after it opened ⇒ placed again; a submenu the builder hangs INSIDE the menu is not a row
-    const mo = new MutationObserver((recs) => {
-      if (!pop.isConnected) { mo.disconnect(); return; }
-      const rows = recs.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n.nodeType === 1 && !n.classList.contains('context-submenu')));
-      if (rows) { const keep = pop.scrollTop; place(); pop.scrollTop = keep; }
-    });
-    mo.observe(pop, { childList: true });
-  }
+  // rows added or removed after it opened ⇒ placed again (a submenu the builder hangs INSIDE the menu is not a row)
+  if (follow && !placesItself) followContent(pop, () => { const keep = pop.scrollTop; place(); pop.scrollTop = keep; }, { rows: true });
   return pop;
+}
+
+/** FOLLOW AN OPEN BOX'S CONTENT (lane ui-controls-and-bugs — ONE helper: placeMenu's opt-in `follow` and the status bar's panel
+ *  settle): `fn` runs once the caller has filled `el` (a microtask) and again — once per frame — whenever its content changes;
+ *  it ends with the box (disconnected the first time it is out of the page). `rows`: only a child added or removed counts
+ *  (never a submenu the builder hangs inside it); else any child / text change. `fn` must only write styles (it cannot feed
+ *  itself: the observer watches children and text). → `stop()` */
+export function followContent(el, fn, { rows = false } = {}) {
+  let q = 0, mo = null;
+  const run = () => { q = 0; if (el.isConnected) fn(); };
+  if (!rows) queueMicrotask(run);
+  if (typeof MutationObserver !== 'function') return () => {};
+  mo = new MutationObserver((recs) => {
+    if (!el.isConnected) { mo.disconnect(); return; }
+    if (rows && !recs.some((r) => [...r.addedNodes, ...r.removedNodes].some((n) => n.nodeType === 1 && !(n.classList && n.classList.contains('context-submenu'))))) return;
+    if (!q) q = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : setTimeout(run, 16);
+  });
+  mo.observe(el, rows ? { childList: true } : { childList: true, subtree: true, characterData: true });
+  return () => mo.disconnect();
 }
 
 /** What the DOM says about a press at (x, y) on `target` — the facts PURE pressTargetClass (press-select.js) reads:
