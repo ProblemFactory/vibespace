@@ -4,6 +4,42 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.398 — 2026-11-12
+
+### test-cache-bounds §30 — the fold's soft cap sits where neither verdict follows the collector (B-a77d; 主开发 21:42Z, addendum 21:45Z)
+- **The red:** «this range needs more memory than the usage fold's 30 MB cap (30 MB at 94000–114000 rows)». It was the one red of every whole fast tier on 11-12, and red ALONE on the release b19f0ecdb (4 of 7) and on the .397 cut (3 of 5).
+- **The cause, measured** with the leg's own month and fold: a recording copy of the worker kept the largest `used_heap_size` seen at a 2 000-row check and never refused; 30 folds each way.
+  - The 5 000-row chunks HOLD ≤ 9.5 MB. The reading at a check (what the collector has not taken yet included) is:
+    - 27.9–30.4 MiB plain;
+    - 28.3–30.3 on one core;
+    - 29.0–32.7 on one core under `--single-threaded-gc` (32.9 the largest of all runs).
+  - That sits ON the 30 MiB cap. So the verdict was the collector's timing: the tip alone was red 2 of 12, and one core + the single-threaded collector 8 of 10.
+  - The reading does not follow the worker's old-space limit: 28.0–30.8 MiB under 96 MB instead of 64. An earlier «half the hard limit» explanation was measured false and withdrawn.
+  - It is not B-a77d's «built inside §15's window»: a fresh process folding only this month is refused at the same rates.
+- **The box did not change** (主开发's question 2, read 22:20Z):
+  - no CPU cap on any scope: cpu.max «max» from the session's cgroup up to user.slice and on every vibespace-job scope, nr_throttled 0 since boot;
+  - boost off / 3.0 GHz / EPP balance_power since 11-08; Tctl 47 °C;
+  - node v24.22.1 (binary 10-20); 85 GB of memory available.
+- **The trees did move it.** Each release's own worker folded the same month, cap 30, order-balanced: .363 3 of 60 against the .397 cut 18 of 60. .363 and .374 run the same fold code; the step is b26459c09 (cli-update-needs-nothing, 11-10: usage-history.js requires catalog-pricing.js, which the fold worker loads too): ef4044cb5 6 of 40, b26459c09 16 of 40, d3fa8b553 14 of 40. The worker's heap after its requires rose 6.36 → 6.47 MiB from .363 to the cut; a reading that sits on its cap moves with a tenth of a MB (test-ledger-dedup-law ⑧ records the same: +0.32 MB took §30 to red 13 of 34).
+- **The change (test-only):** SOFT30 = 46.
+  - It is 13 MB over the chunks' largest reading, and 12 MB under the 58 MB the whole group holds after a full collection (refused at «59–65 MB at 2000 rows»): each more than a quarter of the cap.
+  - The month (50 MB) is still larger than the cap, now asserted (`mb > cap`).
+  - 64 or more is not a choice: the worker's old space is max(64, cap), and the whole-group read then dies of the worker's own limit instead of FOLD_TOO_BIG.
+  - The const lives inside prep30, because prep30 runs inside §15's block, before a module-level line would be reached.
+- **The product's words at production's numbers** (cap 1536 = the worker's old-space limit; the hub runs plain `node server.js`, no NODE_OPTIONS):
+  - Measured with a worker under the fold's own limits that holds a real live set and parses fold-like rows: between collections the reading peaks about halfway between the live set and the limit. Live 760 MB reads 1168, 1200 reads 1371, 1400 reads 1472, 1460 reads 1504, 1490 reads 1517. A live set of 50 MB reads 151 (10 %).
+  - The reading also counts the young generation, which sits outside the old-space limit. So a fold is refused while it still fits only when it holds about 1500 of the 1536 MB, a hair from the worker's own limit. There «narrow the range or raise the cap» is the right advice.
+  - A production chunk (100 000 rows) holds about 50 MB. Without a parent heap flag the words are true at production's numbers. With one above the cap — the case the soft check exists for — they are not: under `--max-old-space-size=4096` the worker's old space follows the flag (heap_size_limit 4144 MiB despite resourceLimits 1536), and a fold holding 800 MB (52 % of the cap) reads 1551 MiB ⇒ refused «retrying will not help» while a collection would fit it (1100 reads 1852; a 50 MB chunk 297). Filed B-f35e (a product row; not fixed here).
+- **Gates** (on the commit's tree, each alone, niced):
+  - §30 red 0 of 50 plain, 0 of 50 on one core, 0 of 50 on one core + `--single-threaded-gc`. The other legs had 0 failures, and the control was refused in every run.
+  - The suite alone ×2: ALL PASS 163, 13.0 s. The 50 plain runs averaged 13.06 s against the tip's ≈ 13 s: not slower.
+  - The big row budget at 46: refused 10 of 10 («60 MB at 2000 rows»).
+  - The lanes' gate under the fast-tier lock: build ALL PASS (22), test-cache-bounds 163, test-architecture 935, test-ci-gate 96, test-changelog-style 40.
+  - Direct fast: 1 of 1 (test-cache-bounds is the one suite the range changes; no suite reads its file). list-affected names 7 heavy rows (3 by docs/changelog-engineering.md, 4 always-on smokes): the train's.
+
+### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
+- **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
+
 ## 2.369.397 — 2026-11-12
 
 ### passkey-lend-walk — every other way a lent sign-in ends takes the passkey back, or says it could not (B-97ae's second commit; the acceptance's walk a–d)
