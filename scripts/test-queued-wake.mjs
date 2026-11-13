@@ -680,6 +680,20 @@ console.log('㉑ AN ENTRY BINDS ITS OWN FRAME (follow-up 2026-11-13: a person\'s
     w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'qa', kind: 'peer', from: 'alpha' }], PID, { fresh: true });   // beta's ran first
     const carried = w.ev.filter((x) => x[0] === 'carried').map((x) => x[1]);
     ok('㉑ D: two senders, beta\'s frame listed (and run) first — B1 is carried, A1 still waits: each entry is bound by its sender, never by «newest»', S(carried) === S([eb.id]) && S(w.q.entriesFor(CID).map((x) => [x.id, x.state])) === S([[ea.id, 'queued']]), JSON.stringify({ carried, st: state(w) })); }
+  // E — THE SCENE THE KIND DECIDES (the readers' person-first scene, 2026-11-13): the person's line reaches the wrapper
+  //     just BEFORE the hub's peer frame, in one chunk — both unseen at the frame's write, the person's listed FIRST (agy
+  //     lists a person's line with no `from`); the person's ⚡ runs it, the frame still waits. «Earliest» alone would bind
+  //     the person's line; only the listing's kind keeps it off.
+  { const w = start(); const e = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P', fromName: 'alpha', holder: PID });
+    w.q.noteQueue(CID, [{ id: 'h', kind: 'user', from: null }, { id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
+    w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true });   // h ran (⚡), p waits
+    const stash = []; w.q.handBackGone(CID, (pe, x) => stash.push(x.text), 'the conversation was terminated');
+    ok('㉑ E: the person\'s line h listed BEFORE the peer frame p (both unseen at the write), h run first (⚡): the entry is NOT carried while p waits, and the kill hands P back (its unit returned, never lost while marked read)', !w.ev.some((x) => x[0] === 'carried') && S(stash) === S(['P']), JSON.stringify({ ev: w.ev, stash })); }
+  // E′ — the same with a wrapper's own nudge / retry (kind 'system', agy and acp list it) listed first: not a peer frame either
+  { const w = start(); const e = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P', fromName: 'alpha', holder: PID });
+    w.q.noteQueue(CID, [{ id: 's', kind: 'system', from: null }, { id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
+    w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true });   // the nudge ran, p waits
+    ok('㉑ E′: a wrapper nudge s (kind \'system\') listed BEFORE the peer frame p, s run first: the entry is NOT carried while p waits', !w.ev.some((x) => x[0] === 'carried') && S(state(w)) === S(['queued']), JSON.stringify({ ev: w.ev, st: state(w) })); }
   ok('㉑ the module binds by what the listing says an item IS, and takes the earliest (never `fresh[fresh.length - 1]`)', /e\.bind = \[fresh\[0\]\];/.test(read('src/server/queued-wakes.js')) && !/fresh\[fresh\.length - 1\]/.test(read('src/server/queued-wakes.js')) && /it\.kind && it\.kind !== 'peer'/.test(read('src/server/queued-wakes.js')));
 }
 
