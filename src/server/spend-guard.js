@@ -272,13 +272,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // stops keeping, so the user is told once per (identity, why) per 6h. The
     // inbox is the surface, because the conversation it would have spent on is
     // by definition one nobody is watching.
-    // B-0a33 round 1: when WAITING frames hold the cap, the notice is keyed by the WAIT (its oldest frame names it) and filed
+    // B-0a33 round 1: when WAITING frames hold the cap, the notice is keyed by the PLACE they wait (account, cap, conversation) and filed
     // under the conversation they wait behind so it opens it. Follow-up (主开发 08:35Z): while the wait still refuses, exactly
     // ONE notice of it is open — filed again at the first refusal after the previous one expired (its expiry IS
     // REFUSE_INBOX_MS), never two at once; a person's dismissal stands until that mark. Else as before, per 6 h
     const promisedHere = v.counts ? Number(v.why === 'hour-cap' ? v.counts.promisedHour : v.why === 'day-cap' ? v.counts.promisedDay : v.why === 'instance-cap' ? v.counts.promisedInstanceDay : 0) || 0 : 0;
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
-    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|wait|${wait.rid}` : `inbox|${key || '?'}|${v.why}`;
+    // THE KEY IS THE PLACE (follow-up 2): the account, the cap, the conversation the frames wait behind — never the oldest frame
+    // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : `inbox|${key || '?'}|${v.why}`;
     const lastInbox = Number(state.notices[inboxSig]) || 0;
     if (now - lastInbox > REFUSE_INBOX_MS) {
       const filed = fileInbox(text,

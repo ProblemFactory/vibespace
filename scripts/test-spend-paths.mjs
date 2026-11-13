@@ -2427,7 +2427,28 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       for (let i = 0; i < 5; i++) W4.g.note({ reason: 'peer-message', identity: ID, reservation: 'bad-' + i, now: W4.t() });
       W4.q = W4.mkQ(() => '{ "v": 2, "entries": [');   // torn on disk: unparsable
       const torn = W4.counts().promisedHour;
-      ok('§5f an UNREADABLE msg-queued.json is not an empty one: a read error (EIO) or a torn file at load ⇒ the reconcile holds off (at load and at the sweep) — the five waiting stamps stand, counted, never freed by a read that failed', eio === 5 && torn === 5, J({ eio, torn }));
+      // THE KEY IS THE PLACE (主开发 08:53Z): eight frames behind one conversation, one carried each hour, a refusal every ten
+    // minutes ⇒ notices only at 0 h and after 6 h — never one per carried frame, never two open; a second conversation's wait
+    // then gets its own at once
+    {
+      const notes = [];
+      let Wt = () => 0;
+      const W5 = world(2, 200, { ut: { add: (key, it) => { if (it && it.i18n) notes.push({ key, at: Wt(), exp: it.expiresAt }); return { id: 'p' + notes.length }; } } }); Wt = W5.t;
+      const t0 = W5.t(), A2 = { key: 'antigravity:cid-a', name: 'a-chat' }, B2 = { key: 'codex:cid-b', name: 'b-chat' };
+      for (let i = 0; i < 8; i++) W5.g.note({ reason: 'peer-message', identity: ID, reservation: 'pa' + i, behind: A2, now: t0 });
+      for (let m = 0; m < 480; m += 10) {
+        if (m > 0 && m % 60 === 0) W5.g.note({ reason: 'peer-message', identity: ID, reservation: 'pa' + (m / 60 - 1), carried: true, now: W5.t() });   // one frame carried each hour
+        W5.g.authorize({ reason: 'job-notification', identity: ID, now: W5.t() }); W5.adv(10 * MIN);
+      }
+      W5.g.note({ reason: 'peer-message', identity: ID, reservation: 'pa7', carried: true, now: W5.t() });
+      for (let i = 0; i < 2; i++) W5.g.note({ reason: 'peer-message', identity: ID, reservation: 'pb' + i, behind: B2, now: W5.t() });
+      W5.g.authorize({ reason: 'job-notification', identity: ID, now: W5.t() });
+      const row = notes.map((x) => [x.key, Math.round((x.at - t0) / MIN)]);
+      const twoOpen = notes.some((x, k) => notes.some((y, j) => j < k && y.key === x.key && x.at < y.exp));
+      ok('§5f THE KEY IS THE PLACE: eight frames behind one conversation, one carried each hour, a refusal every ten minutes ⇒ its notices at 0 h and 6 h 10 only — never one per carried frame, never two open for it; a second conversation\'s wait gets its own at once',
+        J(row) === J([['antigravity:cid-a', 0], ['antigravity:cid-a', 370], ['codex:cid-b', 480]]) && !twoOpen, J({ row, twoOpen }));
+    }
+    ok('§5f an UNREADABLE msg-queued.json is not an empty one: a read error (EIO) or a torn file at load ⇒ the reconcile holds off (at load and at the sweep) — the five waiting stamps stand, counted, never freed by a read that failed', eio === 5 && torn === 5, J({ eio, torn }));
     }
     ok('§5f at each SWEEP: a stamp its live entry holds stays waiting (1 after a restart); one no entry holds (a crash between a carry and the guard\'s write) is given up at the sweep', held === 1 && W2.counts().promisedHour === 1 && W2.g.reservationState(k.id) === 'reserved', J({ held, after: W2.counts() }));
   }
