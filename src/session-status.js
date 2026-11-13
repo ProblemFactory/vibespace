@@ -302,7 +302,7 @@ class SessionStatusManager {
     if (!n || !NOTICE_RENDERERS[n.kind]) throw new Error(`pushNotice: unknown notice kind ${JSON.stringify(n && n.kind)} (one of ${Object.keys(NOTICE_RENDERERS).join('/')})`);
     const rec = this._state.statuses[key] || (this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: null, at: Date.now(), pendingNotices: [] });
     if (!Array.isArray(rec.pendingNotices)) rec.pendingNotices = [];
-    if (replaceKind) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));
+    if (replaceKind || ONE_STATE_KINDS.has(n.kind)) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));
     // BOUNDED: a producer that fires faster than the user types must not grow
     // the record without limit; the newest notices are the ones that describe
     // the present, so the oldest go first.
@@ -357,6 +357,9 @@ class SessionStatusManager {
 }
 
 const MAX_NOTICES = 8;
+// lane chrome-157 (the re-run's F2): kinds whose notice describes ONE present state — a conversation holds at most one of each pending
+// (the newest words), whoever pushes it, so a run of them never evicts what another kind owes the agent (a takeover's notice)
+const ONE_STATE_KINDS = new Set(['browser-download-folder']);
 function renderStatusOverride(notice) {
   const fmt = (s) => s ? `state=${s.state || 'unset'}, urgency=${s.urgency || 'unset'}${s.reason ? `, reason="${s.reason}"` : ''}` : null;
   const agent = fmt(notice.agent);

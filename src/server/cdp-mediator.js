@@ -78,6 +78,8 @@ const ADOPT_TRIES = 3, ADOPT_GAP_MS = 1000;
 const ADOPT_WAIT_MS = ADOPT_TRIES * FETCH_MS + ADOPT_GAP_MS * (ADOPT_TRIES * (ADOPT_TRIES - 1)) / 2 + 1000;
 // a download's guid is kept a moment past its end so every copy the lease asked for (a page session's and the browser's) is delivered
 const DOWNLOAD_ENDED_KEEP_MS = 5000;
+// the reasons a lease is told about a download its own tab began (said once until its next set)
+const BEGIN_TOLD = new Set([M.NO_WINDOW_TOLD, M.OTHER_WINDOW_TOLD, M.PLACE_UNKNOWN_TOLD, M.OWN_CONTEXT_TOLD]);
 /** lane chrome-157 r2 (主开发's MUST): what an agent's invented method names may cost — the grant's view lists at most
  *  UNCLASSIFIED_KEEP names (it rides the keeper's digest to every client), the journal says at most UNCLASSIFIED_SAY a run
  *  (one line each, then ONE line that the rest go uncounted line by line, and the count at shutdown). Only a SHAPED name
@@ -90,7 +92,7 @@ const VERSION_RETRY_MS = 5000;
  *  the close reason the grant's live connections get (verify r3 M3). */
 const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
-function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
+function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_MS, windowBoundMs = M.WINDOW_BOUND_MS, windowAnswerMs = FETCH_MS } = {}) {   // (lane chrome-157: a suite's world shortens THE WINDOW's bound)
   /** lane chrome-157: the methods an unclassified refusal was said for in the journal, this RUN of this mediator (the hub makes
    *  ONE a run) — once a method, never per call; r2: at most UNCLASSIFIED_SAY of them, the rest counted (`unsaid`) */
   const unclassifiedSaid = new Set();
@@ -207,7 +209,22 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       try { if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(code, reason); } catch { /* gone */ }
       try { if (up.readyState === WebSocket.OPEN || up.readyState === WebSocket.CONNECTING) up.close(); } catch { /* gone */ }
     };
+    // the re-run's F6 (W6): no set is forwarded on a profile whose adoption has not finished — it waits for it (inside the bound the first
+    // grant waits), and this connection's later calls wait behind it, in order (the driver clicks 1–3 ms after its set)
+    const held = [];
+    let holding = false;
+    const release = () => { holding = false; while (held.length && !holding) onClient(held.shift()); };
     ws.on('message', (data) => {
+      if (holding) { held.push(data); return; }
+      const pend = adopting.get(g.profileId);
+      if (pend && /"Browser\.setDownloadBehavior"/.test(String(data))) {
+        holding = true; held.push(data);
+        Promise.race([pend, new Promise((res) => { const t = setTimeout(res, ADOPT_WAIT_MS); if (t.unref) t.unref(); })]).then(release, release);
+        return;
+      }
+      onClient(data);
+    });
+    function onClient(data) {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
       if (!msg) { try { ws.send(JSON.stringify(M.refusal(null, 'bad_message', 'not JSON'))); } catch { /* gone */ } return; }
@@ -265,7 +282,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
       if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
       try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
-    });
+    }
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
@@ -287,7 +304,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         if (msg.method === 'Browser.downloadWillBegin' && guid && !g.scope.downloads.has(guid)) {
           const own = M.isLeaseFrame(g.scope, p0.frameId);   // S4: a download its own frame began is ITS OWN, window or not (its own context's tabs are its frames)
           if (own) g.scope.downloads.set(guid, { ended: false });
-          if (!st || mine) stepWindow(g.profileId, { kind: 'begin', own, guid, now: now() }, { g, conn });   // (another lease's window: not this lease's to count)
+          if (own) stepWindow(g.profileId, { kind: 'begin', own, guid, now: now(), by: g.key, ownContext: !!(g.scope.ctxTargets && g.scope.ctxTargets.has(String(p0.frameId))) }, { g, conn });   // (F4: another lease's window — this lease is TOLD, the window untouched)
         }
         // S3: heard ONCE per channel it asked on — a copy on a channel it never asked for (the window's own) is the mediator's alone
         const deliver = !!(guid && g.scope.downloads.has(guid) && conn.asked && conn.asked.get(msg.sessionId == null ? '' : String(msg.sessionId)) === true);
@@ -369,7 +386,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
   function interrupt({ profileId, browserKey } = {}) {
     const g = grantOf(profileId, browserKey);
     const out = { aborted: [], terminated: 0, at: now() };
-    if (g) { const wr = stepWindow(g.profileId, { kind: 'takeover' }); out.downloadsPutBack = !!(wr && wr.putBack); }   // (lane chrome-157: THE WINDOW — a takeover puts the profile back, on either road; the lease whose window it was is TOLD by the notice road, whoever was taken over — the closure list S5)   // …and the lease whose window it was is told (its takeover card and its handback; a sibling lease's interrupt may have closed it first)
+    if (g) stepWindow(g.profileId, { kind: 'takeover' });   // (lane chrome-157: THE WINDOW — a takeover puts the profile back, on either road; the lease whose window it was is TOLD by the notice road, whoever was taken over — the closure list S5)   // …and the lease whose window it was is told (its takeover card and its handback; a sibling lease's interrupt may have closed it first)
     if (!g || g.mode === M.SCOPE_MODE) return out; // lane browser-shared-profile-freeze: the cooperative road never interrupted its calls (its pause is /resolve's)
     const rec = { at: out.at, aborted: 0, methods: [], terminated: 0, terminateAnswers: [], landed: 0, landedMethods: [] }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
     for (const conn of g.conns) {
@@ -504,16 +521,17 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     }
     if (r.admit && owner) { owner.scope.downloads.set(r.admit, owner.scope.downloads.get(r.admit) || { ended: false }); }
     if (r.told) {
-      const to = owner || g;
-      const quiet = r.told === M.NO_WINDOW_TOLD && to && to.toldNoWindow;   // a download of its tab with no folder lent: said once until its next set
+      const to = r.toldTo === 'actor' ? (g || owner) : (owner || g);
+      const begun = BEGIN_TOLD.has(r.told);
+      const quiet = begun && to && to.toldBegin;   // a download of its tab with no folder of its own lent: said ONCE until its next set
       if (to && !quiet) {
-        if (r.told === M.NO_WINDOW_TOLD) to.toldNoWindow = true;
+        if (begun) to.toldBegin = true;
         to.windowTold = { why: r.told, at: now() };
         for (const fn of toldListeners) { try { fn({ profileId: pid, browserKey: to.browserKey, why: r.told }); } catch (e) { log.warn?.(`[cdp-mediator] a told listener threw — ${e && e.message}`); } }
         log.log?.(`[cdp-mediator] ${to.browserKey} on ${pid}: told — ${r.told}`);
       }
     }
-    if (act.kind === 'set' && g && act.behavior !== 'default' && r.forward) g.toldNoWindow = false;
+    if (act.kind === 'set' && g && act.behavior !== 'default' && r.forward) g.toldBegin = false;
     if (w.timer) { clearTimeout(w.timer); w.timer = null; }
     if (r.state && r.state.phase === 'open') {
       w.timer = setTimeout(() => { const x = windows.get(pid); if (x) { x.timer = null; stepWindow(pid, { kind: 'bound', now: now() }); } }, Math.max(0, Number(r.state.deadline) - now()) + 5);
@@ -529,6 +547,10 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       // session then hears only its own page's downloads — the ordered put-back goes there, as the lease asked its events
       const sent = r.state && r.state.phase === 'closing' && r.state.ordered && sendInternal(w.conn, 'Browser.setDownloadBehavior', { behavior: 'default', eventsEnabled: asked }, (ok) => { if (ok) done(true); else short(); }, w.sid);
       if (!sent) short();
+      else {   // F1: closing always ends — an answer that does not come in its bound is followed by the hub's own put-back
+        const t = setTimeout(() => { const x = windows.get(pid); if (x && x.st && x.st.phase === 'closing' && x.st.ordered && x.st.n === n) stepWindow(pid, { kind: 'putBackLost', n }); }, windowAnswerMs);
+        if (t.unref) t.unref();
+      }
     }
     if (!r.state && !w.timer) windows.delete(pid); else windows.set(pid, w);
     return r;
@@ -543,9 +565,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       const r = M.windowStep(windows.has(pid) ? windows.get(pid).st : null, { kind: 'adopt' });
       if (!r.putBack) return { ok: true, tries: 0 };
       for (let i = 1; i <= tries; i++) {
-        // S7: a window that opened meanwhile (a lease that held a grant before the boot came here) puts itself back by its own doors —
-        // a try now would reset that lease's fresh set
-        if (i > 1 && !M.windowStep(windows.has(pid) ? windows.get(pid).st : null, { kind: 'adopt' }).putBack) { log.log?.(`[cdp-mediator] ${pid}: adopted at the hub's start — a download window opened before the put-back landed; not tried again (that window's own doors put it back)`); return { ok: false, tries: i - 1, yielded: true }; }
+        // (S7 / F6: a set on this profile is HELD until this adoption ends — no window can open between two tries)
         if (await putBackDownloads(upstream)) { log.log?.(`[cdp-mediator] ${pid}: adopted at the hub's start — its download folder put back to the profile's own${i > 1 ? ` (try ${i})` : ''}`); return { ok: true, tries: i }; }
         if (i < tries) await new Promise((res) => { const t = setTimeout(res, gapMs * i); if (t.unref) t.unref(); });
       }
