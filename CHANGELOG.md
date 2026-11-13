@@ -15,6 +15,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Settings › Background Work › Clean up old job logs turns that clean-up off; if job records could not be read, it waits and For you says why.
 - A message sent with --wake to a busy conversation now says it waits for that turn; it shows as read only once a turn reads it.
 - Such a message counts against your spend limit from the send and is given back if it never runs; a dropped copy says «not delivered».
+- A reply sent from For you now reaches a running agent the way a typed message does, instead of waiting behind the turn while later messages went first.
 
 ### Maintenance
 - Test and release tooling only; nothing changes for you.

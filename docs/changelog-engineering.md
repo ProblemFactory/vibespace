@@ -275,6 +275,23 @@ This file is the engineers' record of every release: the lanes, the verification
   - Pins: test-queued-wake 105 (⑯ the predicate through the three exits, the record census knowing `fresh`, U3 / U3c / U3k, the person's turn; ⑰ U10; ⑱ U12 / M7f / a reservation never recorded; ⑲ evict 30 + 10, U14, the age; ⑳ the four states); test-spend-paths 457 (§5d the census; §5e d3b ×2, the burst, M7f / M7g, the smalls).
 - **Laws 2 and 3 are not in this commit:** the wait bound, the owner's item, the life witness and agy's store-proven close.
 
+### reply-door-follows-enter — a person's words reach a running turn the same way whatever door they came through (the owner's screen, 2026-11-13 00:2xZ)
+- **The scene.** A For-you reply to a running conversation's own question sat «queued — runs after this turn», while a message typed in the composer AFTER it carried «Steered» and was already inside the turn. The owner: «这条消息状态异常了，这个似乎是已经处理过的消息却还浮动在下面».
+- **The cause.** The composer's send carries the person's door: the page asks the harness row's `enterDoor` intersected with the running wrapper's verbs, and passes `steer: true`. The For-you reply route (both sends: the live one and the reopen), the design comments and the doc comments called the same typing path with no door, so the wrapper held them until the turn ended.
+- **The fix.** ONE door decision, PURE, in src/backend-caps.js: `sendDoors` + `doorCapsOf` + the moved `SEND_DOOR_TABLE`.
+  - The page's composer reads it (agent-meta `composerSendModes`, chat-view `_queueCaps`), and so does the server's typing path. src/server/user-input.js `door: 'enter'` is a person's words through a door with no keys of its own: it follows the conversation's own Enter door (its harness row ∩ the running wrapper's sidecar verbs; a wrapper with no queue ⇒ a plain send).
+  - The reply route, design-engine and doc-engine name that door. The composer keeps passing its own `steer`, the hold door included, and the dispatch's compact stays the machine's.
+  - A harness row with no steer door on Enter (codex), or an older wrapper, keeps today's behaviour, and the reply's bubble says «queued». The bubble's state is the wrapper's own `queueState` for that message, so «Steered» / «queued» is true for the reply as for a typed message.
+- **Money.** None moves: the reply is the person's own typed send (the route's existing row in test-spend-paths).
+- **Pins (scripts/test-reply-door.mjs, fast, through the REAL typing path and the REAL reply route over a fake session and its wrapper sidecar):**
+  - the owner's scene: a reply mid-turn, then a composer Enter ⇒ both handed to the running turn, the reply first;
+  - the hold door: a held message stays held, and a later Enter passes it;
+  - an older wrapper and a wrapper with no queue: the reply is not steered;
+  - the door decision PURE and the composer's equal to it;
+  - the typing path's caller census: every caller names `door: 'enter'`, its own `steer`, or `origin: 'dispatch'` — a planted caller without one is RED.
+  - RED: the release fd4acdc61 (a COUNTED skip without it) and this tree with the reply's door removed — the reply HELD.
+- **test-queue-steer's pin** on chat-view's intersection now reads the one derivation in src/backend-caps.js `doorCapsOf`.
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 
