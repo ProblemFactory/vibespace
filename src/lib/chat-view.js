@@ -6883,12 +6883,19 @@ class ChatView {
         setTimeout(() => { img.dataset.recordTries = String(tries + 1); box?.classList.remove('chat-media-broken'); img.src = base + (base.includes('?') ? '&' : '?') + 'try=' + (tries + 1); }, Math.min(10000, Number(j.retryMs) || 2000));
         return;
       }
+      if (r.status === 410 && j.why === 'missing' && !img.dataset.recordAgain) {   // a live line may not be in the file yet: ONE more ask
+        img.dataset.recordAgain = '1';
+        say(t('Still finding this picture in the conversation…'));
+        setTimeout(() => { box?.classList.remove('chat-media-broken'); img.src = base + (base.includes('?') ? '&' : '?') + 'try=' + (tries + 1); }, 3000);
+        return;
+      }
       if (r.status === 410) return say(j.why === 'rescued' ? t('This picture was removed from the conversation\'s record when the record was rescued') : j.why === 'compressed' ? t('This conversation\'s record is compressed, so its pictures cannot be shown') : t('This picture is no longer in the conversation\'s record'));
       if (r.status === 409) return say(t('That machine\'s agent is older — update it to see pictures from the conversation\'s record'));
       if (r.status === 404) return say(t('This conversation\'s record is not on this machine'));
       if (r.status === 503) return say(t('This picture could not be found in time'));
-      say('');
-    }).catch(() => say(''));
+      if (r.status === 415) return say(t('This picture\'s type is not one this page shows'));
+      say(t('This picture could not be read from the conversation\'s record'));   // a 500, or any answer not named above
+    }).catch(() => say(t('This picture could not be reached — the hub did not answer')));
   }
 
   _setReadOnly() {

@@ -859,6 +859,10 @@ function savePicture(b) {
   if (bytes.length > PICTURE_MAX) throw new Error(`a picture over ${PICTURE_MAX / 1048576} MB`);
   const dir = pictureDir();   // lane chat-attachments-persist: a temporary cwd ⇒ kept with the conversation
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (CONV_ID && dir.endsWith(path.join(CONV_ID, 'files'))) {   // the link beside the files: whose they are (the hub fills the transcript id while it lists the conversation)
+    const link = path.join(path.dirname(dir), 'conversation.json');
+    if (!fs.existsSync(link)) { const t = path.join(path.dirname(link), `.conversation.json.${process.pid}-${require('crypto').randomBytes(4).toString('hex')}.vs-tmp`); try { fs.writeFileSync(t, JSON.stringify({ v: 1, conv: CONV_ID, backend: 'antigravity', tx: null }), { mode: 0o600 }); fs.renameSync(t, link); } catch { try { fs.unlinkSync(t); } catch { } } }
+  }
   try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { }
   const fp = path.join(dir, `pasted-${require('crypto').createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.${ext}`);
   if (!fs.existsSync(fp)) {   // lane chat-attachments-persist: a temp file LINKED to its name (never a half-written picture; EEXIST = the same bytes)

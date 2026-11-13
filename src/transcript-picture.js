@@ -265,9 +265,17 @@ async function placeFile({ backend, tx, cwd = '', agent = null }, { locate, fs =
   if (!fp || typeof fp !== 'string') return null;
   if (!agent) return fp;
   const dir = path.join(path.dirname(fp), tx, 'subagents');
-  let names = []; try { names = await fs.readdir(dir); } catch { return null; }
   const want = `agent-${agent}.jsonl`;
-  return names.includes(want) ? path.join(dir, want) : null;
+  let names = []; try { names = await fs.readdir(dir); } catch { return null; }
+  if (names.includes(want)) return path.join(dir, want);
+  // a WORKFLOW's agent: <session>/subagents/workflows/wf_<run>/agent-<id>.jsonl (the layout /api/subagent-messages reads) —
+  // still only among this conversation's own files
+  let runs = []; try { runs = (await fs.readdir(path.join(dir, 'workflows'))).filter((r) => /^wf_[A-Za-z0-9_-]{1,128}$/.test(r)); } catch { return null; }
+  for (const r of runs) {
+    let inRun = []; try { inRun = await fs.readdir(path.join(dir, 'workflows', r)); } catch { continue; }
+    if (inRun.includes(want)) return path.join(dir, 'workflows', r, want);
+  }
+  return null;
 }
 
 let shared = null;

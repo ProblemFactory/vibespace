@@ -605,7 +605,7 @@ const SETTINGS_SCHEMA = {
   'chat.uploadDir': {
     type: 'string', default: '',
     label: t('Upload files to'),
-    description: t('Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine. Empty and the working directory temporary (/tmp, /var/tmp): the files are kept with the conversation instead, in VibeSpace\'s data folder, and the chat says where. A same-named file is never overwritten (a number is added).'),
+    description: t('Where files dropped or attached in chat are saved. Empty = the session’s working directory (default). Set an absolute path (e.g. ~/Downloads or /data/uploads) to collect every upload in one place, or a name (e.g. uploads) for a folder under the working directory. For remote sessions the path is on the remote machine. Empty and the working directory temporary (/tmp, /var/tmp): the files are kept with the conversation instead, in VibeSpace\'s data folder, and the chat says where. There a same-named file is never overwritten (a number is added); anywhere else an upload replaces it.'),
     category: t('Chat'), liveApply: true, fact: 'kept-files',   // lane chat-attachments-persist: what the files dropped into a temporary folder take, beside where they go
   },
   // lane bypass-no-prompts (owner 2026-10-10): read SERVER-side at every ask (src/server/bypass-auto-allow.js)
