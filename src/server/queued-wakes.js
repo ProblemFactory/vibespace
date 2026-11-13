@@ -55,7 +55,7 @@ const digestOf = (text) => crypto.createHash('sha256').update(String(text || '')
 const idsOf = (items) => (Array.isArray(items) ? items.map((it) => (it && typeof it === 'object' ? it.id : it)).filter((x) => typeof x === 'string' && x) : []);
 const live = (e) => e.state === 'pending' || e.state === 'queued';
 
-function create({ dataDir, noteSpend = null, releaseSpend = null, reservationState = null, stashHas = null, log = () => { }, now = () => Date.now(), writer = null, readFile = null, rand = () => crypto.randomBytes(4).toString('hex') } = {}) {
+function create({ dataDir, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, stashHas = null, log = () => { }, now = () => Date.now(), writer = null, readFile = null, rand = () => crypto.randomBytes(4).toString('hex') } = {}) {
   const file = path.join(dataDir, FILE);
   const storeWriter = () => writer || require('../store-writer.js').storeWriter();
   const boot = rand();   // ids never repeat across processes: a reservation is idempotent by its id
@@ -96,6 +96,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
    *  (the ladder's timer). Its unit aged out of every window days ago; the row says «not delivered» (the 'dropped' event). */
   function ageOut() {
     const t = now();
+    reconcile();   // B-0a33 round 1: every sweep, the guard's waiting reservations against the live entries
     const old = entries.filter((e) => isOld(e, t));
     if (!old.length) return 0;
     for (const e of old) remove(e);
@@ -111,6 +112,24 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   function endUnit(e) {
     if (!e.reserved || !noteSpend) return;
     try { noteSpend({ reason: e.reason || 'peer-message', identity: e.identity || null, hold: null, reservation: e.id, ended: true }); } catch (err) { log('[queued] settling the reservation failed:', err.message); }
+  }
+  /** B-0a33 round 1: A WAITING STAMP NOBODY HOLDS IS LET GO, AND SAID TRULY. The guard's waiting reservations are this ladder's
+   *  frames; one that no live entry holds (the release's unknown hand-backs read at the update, a crash between a carry and
+   *  the guard's write, msg-queued.json lost) can no longer run through this hub's books: it ends as «given up» NOW, once —
+   *  counted where the hub stopped waiting, never returned, and no longer said to wait. At load and at each sweep. */
+  function reconcile() {
+    if (typeof waitingReservations !== 'function' || !noteSpend) return 0;
+    let rids = [];
+    try { rids = waitingReservations() || []; } catch { return 0; }
+    if (!rids.length) return 0;
+    const held = new Set(entries.filter((e) => live(e) && e.reserved).map((e) => String(e.id)));
+    let n = 0;
+    for (const rid of rids) {
+      if (held.has(String(rid))) continue;
+      try { noteSpend({ reason: 'peer-message', identity: null, hold: null, reservation: String(rid), ended: true }); n++; } catch (err) { log('[queued] settling an unheld reservation failed:', err.message); }
+    }
+    if (n) log(`[queued] ${n} waiting reservation(s) held by no queued entry — given up now (counted here, never returned)`);
+    return n;
   }
   function returnUnit(e) {
     if (!e.reserved) return;
@@ -170,7 +189,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   /** A peer frame was just written to a wrapper whose conversation is in a turn. `charged` = the ladder's authorization
    *  ({reason, identity, hold, session}) — it becomes the RESERVATION here (its hold converted into a stamp named by this
    *  entry's id). `mark` = what a group wake must move when it is carried ({gid, upTo}) or null. */
-  function noteWritten(cid, { charged = null, text = '', kind = 'peer', fromName = null, mark = null, since = null, peerName = null, holder = null } = {}) {
+  function noteWritten(cid, { charged = null, text = '', kind = 'peer', fromName = null, mark = null, since = null, peerName = null, holder = null, waitKey = null } = {}) {
     const m = mirrorOf(cid);
     const e = {
       id: `qw-${boot}-${++seq}`, cid, at: now(), kind, text: String(text || ''), fromName: fromName || null, digest: digestOf(text), state: 'pending', reserved: false,
@@ -179,7 +198,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
       idsAtWrite: m.ids ? [...m.ids] : null, bind: [], startsAt: m.starts, endsAt: m.ends,
     };
     if (charged && noteSpend) {
-      try { noteSpend({ reason: charged.reason || 'peer-message', identity: charged.identity || null, hold: charged.hold || null, session: charged.session || null, reservation: e.id }); e.reserved = true; }
+      try { noteSpend({ reason: charged.reason || 'peer-message', identity: charged.identity || null, hold: charged.hold || null, session: charged.session || null, reservation: e.id, behind: waitKey ? { key: waitKey, name: peerName || '' } : null }); e.reserved = true; }
       catch (err) { log('[queued] the reservation was not recorded (its authorization hold stands until it expires):', err.message); }
     }
     entries.push(e);
@@ -337,6 +356,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     return out;
   }
 
+  reconcile();   // B-0a33 round 1: at load — a ledger's waiting stamps no entry on disk holds end now
   return {
     noteWritten, answer, unanswered, noteQueue, noteTurnStarted, noteTurnEnded, noteHandedBack, handBackGone, noteStashDrained, noteHolder, bootSettle, noteStashEvicted, dropConversation, full,
     onDropped: (fn) => { listeners.dropped.add(fn); for (const e of droppedAtLoad.splice(0)) { try { fn(e.cid, publicOf(e), { why: 'aged out' }); } catch (err) { log('[queued] listener failed:', err.message); } } return () => listeners.dropped.delete(fn); },
@@ -345,7 +365,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     onHandedBack: (fn) => { listeners.back.add(fn); return () => listeners.back.delete(fn); },
     entriesFor: (cid) => { ageOut(); return entries.filter((e) => !cid || e.cid === cid).map(publicOf); },
     heldCids: () => { ageOut(); return [...new Set(entries.filter(live).map((e) => e.cid))]; },
-    ageOut,
+    ageOut, reconcile,
     count: () => entries.length,
   };
 }

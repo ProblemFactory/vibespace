@@ -107,7 +107,7 @@ const RETRY_CAP = STASH_CAP;   // the hand-over's sender (src/notification-sende
 // cannot name. It is charged to a NAMED bucket (`host:<id>` / `unattributed`)
 // rather than guessed at or waved through — the instance/day ceiling still
 // applies to it, and the name says what we do not know.
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, reservationState = null, waitingReservations = null, onStashChange = () => { }, log = () => { }, retryClock = null, renderBatch = null }) {   // renderBatch (verify r1 N1d): the hand-over's renderer (agent-routes renderMsgStash), injected — a batch of parked entries goes out as ONE frame in its shape
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
@@ -1320,7 +1320,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // THE QUEUED WAKE (lane queued-is-not-woke, law 1): a frame written to a wrapper whose conversation is IN A TURN waits in
   // that wrapper's queue — it is not «woke», not «read», not charged until a turn carries it (src/server/queued-wakes.js)
   // reservationState: the guard's word before any marked copy; stashHas: a handed-back frame's words still wait (round 4)
-  const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
+  const queued = require('./queued-wakes.js').create({ dataDir, noteSpend, releaseSpend, reservationState, waitingReservations, stashHas: (cid, ref) => (stash[cid] || []).some((e) => e && e.ref === ref), log });
   /** Give a withheld frame's authorization hold back to the guard (r5). A
    *  stranded frame gets it too: the wrapper died holding our money open, and
    *  the guard's own TTL would give it back anyway — this just does it the
@@ -1695,7 +1695,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
             // waiting, the group's mark held, the charge OWED until a turn carries it (or released when it is handed back)
             machineTurn(); lastPostAt.set(cid, clock.now()); money.settled = true;
             const since = Number.isFinite(rpc.s._turnOpenedAt) ? rpc.s._turnOpenedAt : null;   // the turn it waits behind (acp-events / codex-events stamp it)
-            const qe = queued.noteWritten(cid, { charged, text, kind, fromName: opts.fromName || null, mark: opts.wakeMark || null, since, peerName: rpc.s.name || null, holder: rpc.wc && rpc.wc.pid ? String(rpc.wc.pid) : null });   // the hold becomes the RESERVATION; the holder = the wrapper process that took it (round 2)
+            const qe = queued.noteWritten(cid, { charged, text, kind, fromName: opts.fromName || null, mark: opts.wakeMark || null, since, peerName: rpc.s.name || null, holder: rpc.wc && rpc.wc.pid ? String(rpc.wc.pid) : null, waitKey: `${rpc.s.backend || 'claude'}:${cid}` });   // the hold becomes the RESERVATION; the holder = the wrapper process that took it (round 2)
             noteFrameWritten(cid, null, qe.id);
             return { ok: true, lane: 'rpc-queue', kind, steered: false, queued: true, since, peerName: rpc.s.name || null };
           }

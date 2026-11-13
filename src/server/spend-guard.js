@@ -44,7 +44,8 @@ function writeJsonAtomic(file, obj) {
 
 const REFUSE_LOG_MS = 5 * 60 * 1000;      // one journal line per (reason, identity, why)
 const REFUSE_INBOX_MS = 6 * 60 * 60 * 1000; // one "For you" item per (identity, why)
-const INBOX_KEY = 'accounts';             // the same inbox row login-expiry-watch files under
+const INBOX_KEY = 'accounts';
+const WAIT_CAPS = Object.freeze({ 'hour-cap': 1, 'day-cap': 1, 'instance-cap': 1 });   // B-0a33 round 1: the caps waiting frames can hold             // the same inbox row login-expiry-watch files under
 // WHAT A NOTICE IS ABOUT DECIDES WHEN IT DIES (2.369.152, "SPEND NOTICES LIVED
 // FOREVER AS ACTIONS"): every inbox item this module files carries the end of
 // the window it talks about as `expiresAt`, and the store resolves it
@@ -198,7 +199,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency, expiresAt, i18n = null) {
+  function fileInbox(text, detail, urgency, expiresAt, i18n = null, about = null) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
@@ -207,7 +208,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
     // `i18n` (lane owner-press-attended): the refusal as STRUCTURE — the client says the next free slot in the viewer's
     // zone from its epoch (A.refusalI18n), never a time string this hub rendered
-    try { userTodos.add(INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
+    // B-0a33 round 1: `about` = the conversation waiting frames wait behind — the notice is filed under ITS key, so it opens it
+    try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt, ...(about && about.key ? { sessionName: about.name || 'Spending' } : {}) }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
@@ -248,7 +250,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // r2: THE NOTICE NAMES THE CONVERSATION — the delivery ladder passes the session, not its name (its refusals said
     // «in» nothing); the name the session carries is the conversation the owner reads
     const convName = sessionName || (session && typeof session.name === 'string' && session.name) || null;
-    const text = A.refusalText(v, { sessionName: convName });
+    // B-0a33 round 1: what the waiting reservations wait behind (the refusal names them; the notice opens the first)
+    const behind = v.why in WAIT_CAPS ? A.waitingBehind(state, key, now) : [];
+    const text = A.refusalText(v, { sessionName: convName, behind });
     // THE LINE NAMES THE CONVERSATION and SAYS WHAT IT COLLAPSED (lane owner-press-attended: userW's five refused presses
     // showed as three lines «for a session» — the ladder passes the cid, the 5-min dedupe hid two with no word)
     if (now - last.at > REFUSE_LOG_MS) {
@@ -268,16 +272,21 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // stops keeping, so the user is told once per (identity, why) per 6h. The
     // inbox is the surface, because the conversation it would have spent on is
     // by definition one nobody is watching.
-    const inboxSig = `inbox|${key || '?'}|${v.why}`;
+    // B-0a33 round 1: when WAITING frames hold the cap, ONE notice per WAIT (its oldest frame names it — never again every 6 h
+    // while the same wait goes on), filed under the conversation they wait behind so it opens it; else as before, per 6 h
+    const promisedHere = v.counts ? Number(v.why === 'hour-cap' ? v.counts.promisedHour : v.why === 'day-cap' ? v.counts.promisedDay : v.why === 'instance-cap' ? v.counts.promisedInstanceDay : 0) || 0 : 0;
+    const wait = promisedHere > 0 && behind.length ? behind[0] : null;
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|wait|${wait.rid}` : `inbox|${key || '?'}|${v.why}`;
     const lastInbox = Number(state.notices[inboxSig]) || 0;
-    if (now - lastInbox > REFUSE_INBOX_MS) {
+    if (wait ? !lastInbox : now - lastInbox > REFUSE_INBOX_MS) {
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
+        + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName }));
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key, name: wait.name } : null);
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -286,7 +295,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   /** Charge a spend that actually happened. The identity is the one
    *  `authorize()` resolved and put on its verdict — see identityFor; `hold` is
    *  the reservation that verdict opened, converted here into the stamp. */
-  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
+  function note({ reason = null, identity: identityHint = null, session = null, hold = null, reservation = null, carried = false, drain = false, ended = false, behind = null, now = Date.now() } = {}) {   // carried: a queued frame's reservation CONVERTED (round 3) — marked; durable like any spend (the guard's debounce, round 4)   // drain: a stash drain never stamps   // reservation: a queued frame's id (lane queued-is-not-woke) — its unit taken once, returnable by release
     sweepHolds(now);
     // convert, never double-count: the stamp below IS this hold's outcome
     if (hold) pending = A.releasePending(pending, hold);
@@ -305,7 +314,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const identity = identityFor(session, identityHint);
     // the stamp carries its producer (5b ②) so a later reader can say who spent the slot
     // ended (B-0a33): queued-wakes stopped waiting for the frame and cannot tell whether it ran — the unit stays, placed in this hour
-    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended });
+    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended, behind });
     state = r.state;
     persist();   // round 4: a reservation and a conversion are as durable as any spent turn — the guard's own debounce, never a write inside the send call or the carry callback
     if (r.warn) {
@@ -361,6 +370,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   return {
     authorize, note, release, overageFor, spendControlFor, nudgeRec, noteNudge, flush,
     reservationState: (rid) => A.reservationState(state, rid),   // lane queued-is-not-woke round 3: 'converted' | 'reserved' | null
+    waitingReservations: () => A.waitingRids(state),   // B-0a33 round 1: queued-wakes ends the ones no live entry holds
     limits, overagePolicy,
     snapshot: () => ({
       budget: A.pruneBudget(state, Date.now(), A.LOAD_RETENTION), nudge: { ...nudge },   // round 4: every prune keeps what the largest caps could count
