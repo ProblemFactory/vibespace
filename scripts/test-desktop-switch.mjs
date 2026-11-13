@@ -344,7 +344,9 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
         if (k > 0 && /\/\/\s*ui-words:\s*\S.{6,}/.test(lines[k - 1])) return;   // a line that says why it is already worded
         // a drawn sink: a textContent / title / innerHTML written with the name, or a t() whose params carry it (row DATA and the
         // table's verdict inputs keep the stored name — the table compares it)
-        const drawn = (/(?:textContent|title|innerHTML)\s*=[^;]*\b(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln) || /\bt\([^;]*\b(?:name|was|now):\s*(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln));
+        const drawn = (/(?:textContent|title|innerHTML)\s*=[^;]*\b(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln) || /\bt\([^;]*\b(?:name|was|now):\s*(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln)
+          // what a screen reader says / a hover written through setAttribute (the closure's finding: the desktop button's aria-label)
+          || /setAttribute\(\s*['"](?:aria-label|title|alt|placeholder)['"][^;]*\b(?:desk|d|r|s|now|live|row)\??\.name\b/.test(ln));
         if (drawn && !/nameOf\(|storedNameWords\(|_doorLabel\(|_doorRefused\(/.test(ln)) raw.push(`${f}:${k + 1} ${ln.trim().slice(0, 110)}`);
       });
     }

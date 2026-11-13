@@ -7,7 +7,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 // All CSS custom properties that themes define
 const CSS_VAR_DEFS = [
   // Backgrounds
-  { key: '--bg-root', label: t('Root'), group: 'Backgrounds' },
+  { key: '--bg-root', label: tc('theme-color', 'Root'), group: 'Backgrounds' },
   { key: '--bg-workspace', label: t('Workspace'), group: 'Backgrounds' },
   { key: '--bg-window', label: t('Window'), group: 'Backgrounds' },
   { key: '--bg-titlebar', label: t('Title Bar'), group: 'Backgrounds' },
@@ -18,7 +18,7 @@ const CSS_VAR_DEFS = [
   { key: '--bg-dialog', label: t('Dialog'), group: 'Backgrounds' },
   { key: '--bg-sidebar', label: t('Sidebar'), group: 'Backgrounds' },
   // Text
-  { key: '--text', label: t('Primary'), group: 'Text' },
+  { key: '--text', label: tc('theme-color', 'Primary'), group: 'Text' },
   { key: '--text-secondary', label: t('Secondary'), group: 'Text' },
   { key: '--text-dim', label: t('Dim'), group: 'Text' },
   // Accent

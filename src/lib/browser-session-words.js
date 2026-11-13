@@ -4,7 +4,7 @@
 // dividers and Sessions list, Session properties' row and the replay window all read these functions, so a card and
 // a list row can never say the same session two ways. Plain words only: no ids, no reasons in code form.
 import { t, deviceLocale } from './i18n.js';
-import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { durationParts } from '../browser-sessions.js';
 
 /** "42 s" / "3 min" / "1 h 5 min" in the device's words. */
@@ -16,10 +16,9 @@ export function durationText(ms) {
 }
 /** An instant as a surface prints it: the time today, the date and time before today. */
 export function whenText(at, now = Date.now()) {
-  const d = new Date(Number(at) || 0);
-  const n = new Date(Number(now) || Date.now());
-  const sameDay = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
-  return sameDay ? clockOf(d) : when(d, { now: n.getTime() });   // the ONE formatter (lane ui-language)
+  // the ONE formatter decides «today» in the zone it prints in (the page's — the closure round: this said «today» by the
+  // device's calendar and printed in the page's zone)
+  return when(Number(at) || 0, { now: Number(now) || Date.now() });
 }
 /** Which browser a session ran: its profile's name, or the conversation's own temporary one. */
 export function browserNameText(s) { return s && s.label ? String(s.label) : t('a browser of its own'); }

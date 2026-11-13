@@ -863,28 +863,38 @@
   ]
  },
  "clocks": {
-  "src/lib/usage-ledger-note.js": [
-   "hh:mm built by hand (getHours / getMinutes)"
-  ],
   "src/browser-passkey.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
-  "src/lib/channel-words.js": [
+  "src/browser-tabs.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
-  "src/lib/browser-replay-window.js": [
+  "src/channel-caps.js": [
+   "hh:mm built by hand (getHours / getMinutes)",
    "hh:mm built by hand (getHours / getMinutes)"
   ],
   "src/channel-policy.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
-  "src/lib/browser-trace-view.js": [
+  "src/foryou-actions.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/hub-act-policy.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
   "src/job-model.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
-  "src/browser-tabs.js": [
+  "src/lib/browser-replay-window.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/lib/browser-takeover-queue.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/lib/browser-trace-view.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/lib/channel-outbox.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
   "src/lib/channel-touch-view.js": [
@@ -893,23 +903,16 @@
   "src/lib/channel-window.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
-  "src/lib/desktop-app-window.js": [
-   "hh:mm built by hand (getHours / getMinutes)"
-  ],
-  "src/lib/browser-takeover-queue.js": [
-   "hh:mm built by hand (getHours / getMinutes)"
-  ],
-  "src/hub-act-policy.js": [
-   "hh:mm built by hand (getHours / getMinutes)"
-  ],
-  "src/channel-caps.js": [
-   "hh:mm built by hand (getHours / getMinutes)",
-   "hh:mm built by hand (getHours / getMinutes)"
-  ],
-  "src/lib/channel-outbox.js": [
+  "src/lib/channel-words.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ],
   "src/lib/cli-config-chips.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/lib/desktop-app-window.js": [
+   "hh:mm built by hand (getHours / getMinutes)"
+  ],
+  "src/lib/usage-ledger-note.js": [
    "hh:mm built by hand (getHours / getMinutes)"
   ]
  }

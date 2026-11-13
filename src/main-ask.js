@@ -40,11 +40,11 @@ const MAIN_ASK_KINDS = Object.freeze({
   question: Object.freeze({ en: i18nKey('{name} is waiting for you: a question: {line}'), zh: '{name} 在等你：一个问题：{line}', ja: '{name} があなたを待っています：質問：{line}' }),
   plan: Object.freeze({ en: i18nKey('{name} is waiting for you: the plan awaits your approval'), zh: '{name} 在等你：计划等你批准', ja: '{name} があなたを待っています：プランの承認待ち' }),
 });
-/** Every `permission.kind` a normalizer writes → its row family ('' = no kind: a claude tool permission). */
 /** Keys an item filed by an OLDER release still carries in its stored `i18n.text` — main-ask items are keyed by requestId and
  *  never re-filed, so an ask that waits across the update keeps its key. Kept with zh / ja rows for one release (the reader's
  *  round: dropping the row turned such an item English); the rows say the current words. */
 const LEGACY_KEYS = Object.freeze([i18nKey('{name} is waiting for you: permission to run `{line}`')]);
+/** Every `permission.kind` a normalizer writes → its row family ('' = no kind: a claude tool permission). */
 const RECORD_KINDS = Object.freeze({ '': 'permission', approval: 'permission', user_input: 'question' });
 /** The tools whose permission ask IS the plan approval. */
 const PLAN_TOOLS = Object.freeze(['ExitPlanMode']);

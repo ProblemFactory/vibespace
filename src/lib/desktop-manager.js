@@ -1738,7 +1738,7 @@ export class DesktopManager {
     word.textContent = stage?.isActive ? t('Stage') : (desk?.name ? storedNameWords('desktop', desk.name, t) : '');
     if (!stage?.isActive) pos.textContent = i + 1 + '/' + this._desktops.length;
     btn.append(word, pos);
-    btn.setAttribute('aria-label', stage?.isActive ? t('Stage') : (desk?.name || '') + ' — ' + t('Desktop {k}/{n}', { k: i + 1, n: this._desktops.length }));
+    btn.setAttribute('aria-label', stage?.isActive ? t('Stage') : (desk ? this.nameOf(desk) : '') + ' — ' + t('Desktop {k}/{n}', { k: i + 1, n: this._desktops.length }));   // what a screen reader says goes through the door too
     btn.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>');
     btn.title = stage?.isActive ? t('Stage — sessions materialize here with their workspace') : this._doorLabel('switch', desk?.id); // the desktop on show's switch door — the table's words (r2 ④: the fence found it hand-written); the Stage: its tile's words
     if ([...this.app.wm.windows.values()].some((w) => w._desktopId && w._desktopId !== this._activeId && w.element?.classList.contains('window-waiting'))) btn.classList.add('desktop-switch-waiting');
