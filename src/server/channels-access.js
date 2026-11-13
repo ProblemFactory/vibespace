@@ -851,14 +851,14 @@ function create(engineCtx) {
           text: `${ctx.name || ctx.id} requests access to ${title}`,
           action: { type: 'open-channel', adapterId: en.adapterId, convId: en.id, key: en.key },   // B-c127: a click opens the conversation (its Reach dialog is there)
           about: ctx.sessionKey || null,   // lane chat-needs-you-card: the ASKING conversation — its chat draws the card
-          detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${title}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
+          detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${title}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog — this item opens the conversation. Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels',
           i18n: {
             text: { key: i18nKey('{agent} requests access to {title}'), params: { agent: ctx.name || ctx.id, title } },
             detail: [
               { key: i18nKey('Agent session {name} ({id}) asks to see {adapter} · {title}.'), params: { name: ctx.name || '', id: ctx.id, adapter: rec.label || rec.id, title } },
               { key: i18nKey('Reason: {reason}'), params: { reason: String(reason) } },
-              { key: i18nKey('Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.') },
+              { key: i18nKey('Approve or deny from the conversation\'s Reach dialog — this item opens the conversation. Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.') },
             ],
             source: INBOX_SOURCE,
           },

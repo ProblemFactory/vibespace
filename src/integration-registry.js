@@ -418,7 +418,7 @@ const ROWS = Object.freeze([
       prerequisites: [
         i18nKey('Pick a key: use the one the cluster set up, or paste your own (OpenAI or OpenRouter)'),
         i18nKey('Click “Test connection”'),
-        i18nKey('Turn on what you want in Settings › Plugins › LLM — each feature has its own switch'),
+        i18nKey('Turn on what you want in the LLM plugin’s settings — each feature has its own switch'),
       ],
     },
     choiceWords: { cluster: i18nKey('Use the key the cluster set up'), own: i18nKey('Use a key of my own') },

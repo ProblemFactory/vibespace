@@ -65,7 +65,9 @@ for (const c of C) {
   ok(c.unclaimed.length === 0, `[${c.scope}] every sentence its net catches is claimed — by a row or a non-need with its reason (${caught})`, c.unclaimed.slice(0, 12));
   ok([...c.rows.values()].every((e) => e.sentences.length > 0), `[${c.scope}] every row claims at least one sentence of the tree (no dead row)`, [...c.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
   ok(c.T.NEEDS.every((r) => (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1), `[${c.scope}] every row has exactly one door verdict (present / none / deferred)`);
-  ok(c.T.NEEDS.filter((r) => r.door.deferred).every((r) => r.door.deferred === c.T.DEFERRED), `[${c.scope}] every deferred door names its owner («${c.T.DEFERRED}»)`);
+  // lane ui-needs-a-button pick 5: THE UI TABLE ENDS WITH NO DEFERRED ROW — every caught sentence a door, a none with its reason, or a non-need
+  if (c.scope === 'ui') ok(c.T.NEEDS.every((r) => !r.door.deferred) && !('DEFERRED' in c.T), '[ui] no deferred row is left in the ui table (every caught sentence: a door, a none with its reason, or a non-need)', c.T.NEEDS.filter((r) => r.door.deferred).map((r) => r.id));
+  else ok(c.T.NEEDS.filter((r) => r.door.deferred).every((r) => r.door.deferred === c.T.DEFERRED), `[${c.scope}] every deferred door names its owner («${c.T.DEFERRED}»)`);
   if (c.scope === 'machine') ok(c.T.NEEDS.every((r) => ['a', 'b', 'c', '-'].includes(r.kind) && Array.isArray(r.platforms) && r.platforms.length), '[machine] every row has a kind and its platforms');
 }
 
@@ -855,8 +857,45 @@ console.log('⑦ ACTS, DEAD ENDS AND COMPANY WORDS (lane ui-needs-a-button pick 
   const UI = TABLES.find((x) => x.scope === 'ui').T;
   const deferredRows = UI.NEEDS.filter((r) => r.door.deferred).map((r) => r.id);
   const remainder = [...words.keys()].filter((w) => UI.inNet(w) && (UI.needOf(w) || {}).id === 'settings-paths').length;
-  ok(deferredRows.length === 1 && deferredRows[0] === 'settings-paths' && remainder <= 49,
-    `the ui table's deferred remainder is ONE row, shrink-only (${remainder} ≤ 49 path sentences, each named in pick 4's report)`, { deferredRows, remainder });
+  ok(deferredRows.length <= 1 && deferredRows.every((id) => id === 'settings-paths') && remainder <= 49,
+    `the ui table's deferred remainder is at most ONE row, shrink-only (${remainder} ≤ 49 path sentences, each named in pick 4's report; pick 5 takes it to none)`, { deferredRows, remainder });
+}
+
+console.log('⑧ THE LAST SETTINGS PATHS, THE OUTBOX DRAFTER, THE PULL DIALOG (lane ui-needs-a-button pick 5)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const NL = src('src/lib/need-line.js');
+  ok(/export function pluginDoor\(app, id/.test(NL) && /app\.openPluginDoor\(\{ plugin: String\(id\) \}\)/.test(NL) && /export function pluginsDoor\(app/.test(NL) && /app\.openPluginsDialog\(\)/.test(NL),
+    'need-line: pluginDoor (a plugin\'s own settings — its sheet / rows / the list) and pluginsDoor (the Plugins list) over the openers the app has');
+  // the engine fact line: what it says is missing, as a door's target (PURE)
+  const BB = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-build-model.js')).href);
+  const fd = typeof BB.engineFactDoor === 'function' ? BB.engineFactDoor : () => 'none';
+  const gone = fd({ defaultEngine: { value: 'plugin:ghost', source: 'user' }, engines: [] });
+  const bare = fd({ defaultEngine: { value: 'default' }, engines: [{ id: 'kern', source: 'user', binary: { code: 'browser_engine_kernel_missing' } }] });
+  const fine = fd({ defaultEngine: { value: 'default' }, engines: [{ id: 'kern', source: 'user', measuredVersion: '1' }] });
+  ok(gone && gone.plugins === true && bare && bare.plugin === 'kern' && fine === null && /engineFactDoor\(r\)[\s\S]{0,200}pluginDoor\(this\.app, fd\.plugin/.test(src('src/lib/settings-ui.js')),
+    'engine fact: the named engine not running ⇒ the Plugins list; an owner\'s engine with no program ⇒ that plugin\'s settings; nothing missing ⇒ no door', { gone, bare, fine });
+  // For you: the lapsed-subscription notice lands where it is answered (the «accounts» bucket's door = Manage Agents)
+  ok(/todos\.add\('accounts', mode === 'off' \?/.test(src('src/server/usage-pool-engine.js')) && /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog/.test(src('src/lib/user-todos-actions.js')),
+    'pool-serve: the lapsed notice is filed under For you\'s «accounts» bucket — its door opens Manage Agents (never «Session not found»)');
+  const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  const cc = (FA.ROWS || []).find((r) => r.type === 'cli-check-again') || {};
+  ok(cc.checkOffSetting === 'accounts.cliSelfMeasure' && !/in Settings/.test(String((cc.checkSaid || {}).off || '')) && /r\.state === 'off' && checkRow\.checkOffSetting \? \{ action: settingsDoor\(app, checkRow\.checkOffSetting/.test(src('src/lib/user-todos-actions.js')),
+    'cli-check-again: a check that is turned off says so and its toast opens the switch the row declares (checkOffSetting)', cc.checkOffSetting);
+  // the billing menu: a greyed row named the setting — now the menu's last row opens it
+  ok(/shipBlocked = true;/.test(src('src/lib/session-lifecycle.js')) && /if \(shipBlocked\) \{ const d = settingsDoor\(this, 'accounts\.shipSubscriptionToRemote'/.test(src('src/lib/session-lifecycle.js')),
+    'billing menu: a login that cannot ship adds ONE row that opens «Ship subscription logins to remote hosts»');
+  // channels-groups-outbox-4: the drafter on EVERY Outbox row; an agent's name filters the list
+  const OB = src('src/lib/channel-outbox.js');
+  const rowFn = OB.slice(OB.indexOf('export function renderProposalRow('), OB.indexOf('export function renderProposalRow(') + 4000);
+  ok(/drafterFilterOf\(app, p\)[\s\S]{0,200}'chan-orow-drafter', drafterLabel\(p\)/.test(rowFn) && /app\.openChannelOutbox\(\{ filter: f \}\)/.test(rowFn),
+    'channels-groups-outbox-4: every Outbox row says who drafted it; an agent\'s name filters the list to its drafts (no longer only in the right-click menu)');
+  // storage-5, the PULL direction: the same offline line + pairing door as the push dialog
+  const SM = src('src/lib/sidebar-mounts.js');
+  const pull = SM.slice(SM.indexOf('    _showMachinePullDialog(h) {'), SM.indexOf('    _showMachinePullDialog(h) {') + 3000);
+  ok(/this\._offlineMountNeed\(h\); \/\/ lane ui-needs-a-button pick 5 \(storage-5, the PULL direction\)/.test(pull),
+    'storage-5 (pull): «Mount a folder from …» on an offline machine says so first, with its pairing door (as the push dialog)');
 }
 
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }

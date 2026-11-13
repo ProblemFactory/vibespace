@@ -48,7 +48,7 @@ const REFUSALS = () => ({
   busy: t('a draft is already being made — wait for it'),
   'not-openrouter': t('the drafter needs an OpenRouter key on the Language model card'), 'no-key': t('the drafter needs an OpenRouter key on the Language model card'),
   'plugin-off': t('the LLM plugin is off'),
-  'learn-off': t('the drafter is switched off in Settings › Plugins › LLM'),
+  'learn-off': t('the drafter is switched off'),   // its door: the toast's «Turn on…» (mountLearnDraft openRow)
 });
 /** A refusal's words (the POST's `why`) — null for a why the card has no words for (a server error). */
 export function learnRefusal(why) {
@@ -206,7 +206,7 @@ export function renderLearnCard(r, { onSave = () => { }, onDiscard = () => { } }
 
 /** Wire the 「我关心什么」 row: the catalogue button `catalogue` gives way to the drafter's when the drafter exists.
  *  `ta` = the row's box, `apply(text)` = the row's own write door (→ {ok} | {ok: false, why: 'too-long', chars, max}). */
-export function mountLearnDraft(wrap, { catalogue, ta, apply } = {}) {
+export function mountLearnDraft(wrap, { catalogue, ta, apply, openRow = null } = {}) {
   return Promise.resolve(fetchJson('/api/channels/decision/learn')).then((a) => {
     if (!a || a.ok !== true || !a.exists || !catalogue || !catalogue.isConnected) return false;   // 404 / unreachable ⇒ the catalogue draft stays
     const b = el('button', 'settings-link-btn', t('Draft from my verdicts'));
@@ -219,7 +219,7 @@ export function mountLearnDraft(wrap, { catalogue, ta, apply } = {}) {
       for (const old of wrap.querySelectorAll('[data-learn-refused]')) old.remove();
       if (!r || r.ok !== true || !r.table) {
         const said = r ? learnRefusal(r.why) : t('server unreachable');
-        if (said) showToast(t('No draft — {why}', { why: said }), { type: 'error' });
+        if (said) showToast(t('No draft — {why}', { why: said }), { type: 'error', ...(r && r.why === 'learn-off' && typeof openRow === 'function' ? { action: { label: t('Turn on…'), run: () => openRow('plugin.llm.learn') } } : {}) });
         else wrap.appendChild(refusedCard(r));   // a server error: never raw in a toast
         return;
       }

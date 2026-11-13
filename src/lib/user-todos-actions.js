@@ -19,6 +19,7 @@
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang } from './i18n.js';
 import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's interface words in the reader's language
+import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
 import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
@@ -457,7 +458,8 @@ export function inboxModel(app) {
       const said = checkRow.checkSaid || {};
       // what the press did, said as it is (small 1): a check already running is NOT restarted — it says how long is left
       if (r && r.ok && r.already) { showToast(t(said.already, { n: String(Number(r.leftMin) || 1) })); return true; }
-      if (r && r.ok) { showToast(t(r.state === 'pass' || r.state === 'fixture' ? said.done : r.state === 'checking' ? said.started : r.state === 'off' ? said.off : said.none)); return true; }
+      // lane ui-needs-a-button pick 5: a check that is turned off — its toast opens the switch the row declares (checkOffSetting)
+      if (r && r.ok) { showToast(t(r.state === 'pass' || r.state === 'fixture' ? said.done : r.state === 'checking' ? said.started : r.state === 'off' ? said.off : said.none), r.state === 'off' && checkRow.checkOffSetting ? { action: settingsDoor(app, checkRow.checkOffSetting, { label: t('Turn on…') }) || undefined } : {}); return true; }
       showToast((r && r.error) || t(said.failed), { type: 'error' });
       return false;
     }

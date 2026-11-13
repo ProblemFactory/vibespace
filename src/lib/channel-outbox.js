@@ -1045,6 +1045,10 @@ export function renderProposalRow(app, p, { badge = null, open = false, onToggle
   title.title = [who, where].filter(Boolean).join(' · ');
   line.appendChild(title);
   if (badge && badge.multi) { const ac = el('span', 'chan-orow-acct', badge.label); ac.title = t('From your {label} account', { label: badge.label }); line.appendChild(ac); }
+  // lane ui-needs-a-button pick 5 (channels-groups-outbox-4): WHO drafted it, on every row — an agent's name is the filter's door
+  { const f = drafterFilterOf(app, p); const dw = el(f ? 'button' : 'span', 'chan-orow-drafter', drafterLabel(p));
+    if (f) { dw.type = 'button'; dw.dataset.drafterFilter = '1'; dw.title = t('Only drafts by {name}', { name: f.name }); dw.onclick = (ev) => { ev.stopPropagation(); app.openChannelOutbox({ filter: f }); }; }
+    line.appendChild(dw); }
   line.appendChild(el('span', 'chan-orow-at', stamp(p.updatedAt || p.at)));
   line.appendChild(icon('chevronRight', 10, 'chan-orow-chev'));
   row.appendChild(line);

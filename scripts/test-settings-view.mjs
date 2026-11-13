@@ -589,7 +589,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
 {
   const de = S.SETTINGS_SCHEMA['browser.defaultEngine'], ui = read('src/lib/settings-ui.js');
   ok(de && de.type === 'enum' && de.options.length === 1 && de.options[0].value === 'default' && !/plugin:|custom-browser/.test(JSON.stringify(de)) && de.fact === 'browser-engine' && de.tier === 'advanced'
-    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /import \{ engineFactText, fillEngineSelect \} from '\.\/browser-build-model\.js'/.test(ui),
+    && /this\._renderEngineFact\(info, row, path\)/.test(ui) && /import \{ engineFactText, engineFactDoor, fillEngineSelect \} from '\.\/browser-build-model\.js'/.test(ui),
     'lane engine-spi-egress: the default-engine row names no engine id (Chrome alone in the schema); its options are DRAWN from the engine table the fact line reads (engineOptions), the same answer', de && de.options);
 }
 
@@ -620,7 +620,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   const zhU = (await import('../src/lib/i18n-zh.js')).default, jaU = (await import('../src/lib/i18n-ja.js')).default;
   const tr = (dict) => (s, p) => String(dict && dict[s] != null ? dict[s] : s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
   const base = { id: 'vibespace.user-engine', label: 'CloakBrowser', installed: true, executable: true, source: 'user', kernel: { state: 'absent' } };
-  const cases = [[{ ...base, measuredVersion: '146.0.7680.177' }, /CloakBrowser · measured 146\.0\.7680\.177/], [{ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' } }, /CloakBrowser · no program set — open ⚙ → Plugins → CloakBrowser → Program file/],
+  const cases = [[{ ...base, measuredVersion: '146.0.7680.177' }, /CloakBrowser · measured 146\.0\.7680\.177/], [{ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' } }, /CloakBrowser · no program set \(its Program file setting\)/],
     [{ ...base, executable: false, binary: { code: 'browser_engine_not_executable', why: 'script' } }, /CloakBrowser · the program you named can't be run \(it is a script\)/], [{ ...base, installed: false, executable: false, binary: { code: 'browser_engine_not_executable', why: 'missing' } }, /can't be run \(it is not there\)/], [{ ...base, measureFailed: true }, /CloakBrowser · the program did not say its version/],
     // L1b r2: a program not measured yet (new, replaced — the record's version was another file's) says so; an execute-only file is said as unreadable
     [base, /CloakBrowser · not measured yet — VibeSpace measures the program at its next launch/], [{ ...base, executable: false, binary: { code: 'browser_engine_not_executable', why: 'unreadable' } }, /can't be run \(VibeSpace can't read the file to check it — give it read permission\)/]];
@@ -628,7 +628,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   const z = cases.map(([e]) => BMu.engineNote(e, tr(zhU))), j = cases.map(([e]) => BMu.engineNote(e, tr(jaU)));
   const downloadingUser = BMu.engineNote({ ...base, installed: false, executable: false, binary: { code: 'browser_engine_kernel_missing', why: 'unset' }, kernel: { state: 'downloading', bytes: 1, total: 2 } }, tr(null));
   ok(en.every(([s, re]) => re.test(s)) && !/download/i.test(downloadingUser) && z.every((s) => /[\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && j.every((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s) && !/the program/.test(s)) && /没有设置程序/.test(z[1]) && /プログラムが設定されていません/.test(j[1]),
-    'L1b: the engine card for the OWNER\'s program — «measured x» / «no program set — open ⚙ → Plugins → <plugin> → Program file» / «the program you named can\'t be run (why)» / «did not say its version» / r2: «not measured yet» (never an older file\'s version) and an execute-only file «can\'t read the file to check it»; never a download word (a stale kernel state ignored), in zh / ja too', { en: en.map(([s]) => s), z, j });
+    'L1b: the engine card for the OWNER\'s program — «measured x» / «no program set (its Program file setting)» + its door on the line (lane ui-needs-a-button pick 5) / «the program you named can\'t be run (why)» / «did not say its version» / r2: «not measured yet» (never an older file\'s version) and an execute-only file «can\'t read the file to check it»; never a download word (a stale kernel state ignored), in zh / ja too', { en: en.map(([s]) => s), z, j });
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

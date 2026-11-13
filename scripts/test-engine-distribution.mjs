@@ -327,8 +327,8 @@ const j5s = P.journal.slice(j5);
 ok(k2hits() === h5 && P.receiptSha() === KSHA.k1 && P.ED.kernelFact(EID).sha256 === KSHA.k1 && JSON.stringify(P.ED._record().engines[EID].measured) === m5 && !j5s.some((l) => /kernel says|— downloading|is installed \(sha256/.test(l))
   && j5s.some((l) => l.includes(`fleet plugin: ${EID} is waiting for your consent — its kernel is not fetched`)) && P.ED.fleetView().kernel?.state === 'untrusted',
   'preinstall on + the untrusted package\'s kernel.json naming K2 ⇒ fetched nothing (/k2 not asked), K1 stays in its place and in the record, no binary run (the measure untouched) — journaled «… is waiting for your consent — its kernel is not fetched»', { fetched: k2hits() - h5, receipt: P.receiptSha() === KSHA.k1 ? 'K1' : P.receiptSha(), lines: j5s.filter((l) => /kernel|consent/.test(l)) });
-ok(tagLine === 'The cluster names vibespace.custom-browser at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → vibespace.custom-browser · waiting for your consent — its kernel is not fetched', `the panel line reads «${tagLine}» (r3: the door by name)`);
-ok(tagFact === 'waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → vibespace.custom-browser', `the row reads «${tagFact}» (r3: the door by name)`);
+ok(tagLine === 'The cluster names vibespace.custom-browser at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it, then turn vibespace.custom-browser on in this list · waiting for your consent — its kernel is not fetched', `the panel line reads «${tagLine}» (r3: the door by name)`);
+ok(tagFact === 'waiting for your consent — its kernel is not fetched; turning it on fetches it', `the row reads «${tagFact}» (r3: the door — lane ui-needs-a-button pick 5: the row's own switch, no menu path)`);
 const due5 = await P.ED.kernelDue?.(EID);
 let refused5 = null; try { await P.ED.installKernel(EID, { by: 'user' }); } catch (e) { refused5 = e; }
 ok(due5?.due === false && due5?.untrusted === true && refused5 && refused5.code === 'engine_untrusted' && /waiting for your consent/.test(refused5.message) && k2hits() === h5 && P.receiptSha() === KSHA.k1,
@@ -759,10 +759,10 @@ async function tagScene(BMx = BM) {
 }
 await leg('⑯ the tag line follows trust', async () => {
   const x = await tagScene();
-  ok(x.outcome === 'unpinned' && x.before === `The cluster names ${EID} at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → ${EID} · waiting for your consent — its kernel is not fetched`
-    && x.factBefore === `waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → ${EID}`
+  ok(x.outcome === 'unpinned' && x.before === `The cluster names ${EID} at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it, then turn ${EID} on in this list · waiting for your consent — its kernel is not fetched`
+    && x.factBefore === 'waiting for your consent — its kernel is not fetched; turning it on fetches it'
     && x.after === `The cluster names ${EID} at «v0.1.2» (not a full sha, so the cluster does not vouch for it); you enabled it yourself — its kernel follows your consent` && !x.factAfter,
-    'a tag pin: before the owner\'s consent the line names the door («… enable it in ⚙ → Plugins → <id>»); once the owner enabled it the line says so («you enabled it yourself — its kernel follows your consent»), the row\'s consent words gone', x);
+    'a tag pin: before the owner\'s consent the line names the door («… turn <id> on in this list» — lane ui-needs-a-button pick 5: the list it is drawn in, no menu path); once the owner enabled it the line says so («you enabled it yourself — its kernel follows your consent»), the row\'s consent words gone', x);
 });
 
 console.log('— ⑰ (r4 N3) a plan that cannot be read at the landing is a TRANSIENT on the install road too');
@@ -1430,7 +1430,7 @@ await leg('M13', async () => { // M13 — the r2 other-id: the kernel step's con
 await leg('M14', async () => { // M14 — the r2 tag line: blind to trust
   const b = swap(BMsrc, "    else if (f.outcome === 'unpinned' && f.trusted === true) line =", "    else if (false) line =", 'tag line');
   const bad = await tagScene(await bmMutant(b, 'tag-blind'));
-  ok(bad.after === `The cluster names ${EID} at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → ${EID}`,
+  ok(bad.after === `The cluster names ${EID} at «v0.1.2» — not a full commit sha, so the cluster does not trust it; review it, then turn ${EID} on in this list`,
     'control M14: a tag line blind to trust still tells the owner to enable what they just enabled — ⑯ RED', bad);
 });
 await leg('M15', async () => { // M15 — the r3 order: the judge asked before the in-use scan only (none inside the section)

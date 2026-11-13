@@ -75,6 +75,16 @@ export function pairDoor(app, host = null, { label = '', kind = 'primary' } = {}
   if (!sb || typeof sb._showDevicePairDialog !== 'function') return null;
   return { label: label || (host ? t('Show the pairing command…') : t('Pair a device…')), kind, door: 'pair' + (host ? ':' + String(host.id || '') : ''), run: () => sb._showDevicePairDialog(host || null) };
 }
+/** A door to ONE plugin's own settings (its rows in Settings; a plugin without rows ⇒ the Plugins list — app.openPluginDoor). */
+export function pluginDoor(app, id, { label = '', kind = 'primary' } = {}) {
+  if (!app || !id || (typeof app.openPluginDoor !== 'function' && typeof app._openPluginSettings !== 'function')) return null;
+  return { label: label || t('Plugin settings…'), kind, door: 'plugin:' + id, run: () => (typeof app.openPluginDoor === 'function' ? app.openPluginDoor({ plugin: String(id) }) : app._openPluginSettings(String(id))) };
+}
+/** A door to the Plugins list (a plugin to turn on, restart or answer). */
+export function pluginsDoor(app, { label = '', kind = 'primary' } = {}) {
+  if (!app || typeof app.openPluginsDialog !== 'function') return null;
+  return { label: label || t('Plugins…'), kind, door: 'plugins', run: () => app.openPluginsDialog() };
+}
 /** The page reloaded — a setting that takes effect on the next load. */
 export function reloadDoor({ label = '', kind = 'primary' } = {}) {
   return { label: label || t('Reload now'), kind, door: 'reload', run: () => { try { location.reload(); } catch { /* not in a page */ } } };

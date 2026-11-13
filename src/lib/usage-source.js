@@ -139,7 +139,7 @@ export function overageChip(state, { t = tIdent } = {}) {
       tip: [
         t('Using paid overage credits — this account’s subscription quota is spent and its requests are billed pay-per-use.'),
         money ? t('Spent this period: {money}.', { money }) : '',
-        t('Automatic turns are refused on this account while it bills paid overage (Settings → Spending).'),
+        t('Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).'),
       ].filter(Boolean).join(' '),
     };
   }
@@ -324,7 +324,7 @@ export function capRing(model, reading, estSel, nowMs, { pair, t = fillParams, r
   const what = known ? t('{name} weekly limit', { name: String(known) }) : t('model-scoped weekly cap (e.g. Fable)');
   const lastReadAt = Number(reading?.scopedFetchedAt) > 0 ? Number(reading.scopedFetchedAt) : null; // a ⟳ read that named no cap: a FACT, never a verdict
   return { state: 'unread', label: known ? String(known).slice(0, 2) : t('cap'), name: known || null, readAt, lastReadAt, rest: [], all: [],
-    tip: refreshOff ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings')
+    tip: refreshOff ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is off')
       : `${what}: ${lastReadAt ? t('the last ⟳ ({when}) returned no cap figure — press ⟳ to read again', { when: resetInstantText(lastReadAt, nowMs) }) : t('no data yet — press ⟳')}` };
 }
 

@@ -253,7 +253,7 @@ export function installUsageMeter(App, ctx = {}) {
       if (!acked) {
         const ok = await showConfirmDialog({
           title: t('Check this account’s usage limits now?'),
-          message: t('VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “Claude usage refresh”. You see this note once.'),
+          message: t('VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You can turn it off later with the setting “On-demand quota refresh”. You see this note once.'),
           confirmText: t('Check now'),
         });
         if (!ok) return;
@@ -680,7 +680,7 @@ export function installUsageMeter(App, ctx = {}) {
         // ring's own sentence — «… the last ⟳ (<when>) returned no cap figure — press ⟳ to read again», a fact, never «no cap
         // on this account» (an empty read proves nothing — B-9f4b); no ⟳ read yet keeps the passive-feed sentence
         scopedSections.push(`<div class="usage-note">${acctCap.lastReadAt ? escHtml(acctCap.tip) : odOff
-          ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings')
+          ? t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is off')
           : t('Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand')}</div>`);
       }
       // The signed-out warning concerns the GLOBAL login's data — only shown

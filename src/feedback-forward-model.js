@@ -140,7 +140,7 @@ function pauseHolds(pause, { door, version } = {}, now) {
 
 const i18nKey = (s) => s;   // the extraction marker (scripts/i18n-extract.mjs) — the client words the notice through t()
 const PAUSE_TEXT = i18nKey('Agent feedback stays on this instance: {target} has no feedback door');
-const PAUSE_DETAIL = i18nKey('The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.');
+const PAUSE_DETAIL = i18nKey('The telemetry forward target («Forward diagnostics to a central collector») answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay on this instance — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.');
 /** the pause in words → { log (the instance's line, once per pause), text / detail / i18n (the owner's For-you notice —
  *  `text` stays the same for one target: the store's dedupe key) } */
 function pauseWords({ target, status, waiting } = {}) {

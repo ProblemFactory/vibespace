@@ -107,7 +107,7 @@ const W = {
   unread: 'model-scoped weekly cap (e.g. Fable): no data yet — press ⟳', known: 'Fable weekly limit: no data yet — press ⟳',
   fetched: `model-scoped weekly cap (e.g. Fable): ${LAST(READ_AT)}`, knownFetched: `Fable weekly limit: ${LAST(READ_AT)}`,
   absent: 'no model-scoped cap on this account', // r3's «none» — WITHDRAWN: never said on a read that proves nothing
-  off: 'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is disabled in Settings',
+  off: 'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — on-demand refresh is off',
   passive: 'Model-scoped weekly limits (e.g. Fable) aren’t in the passive feed — ⟳ fetches them on demand',
 };
 const note = (s) => `<div class="usage-note">${s}</div>`;

@@ -76,7 +76,7 @@ export function retentionText(limitBytes) { return t('Frames are kept until this
 /** A replay pane's empty state by NAME (src/browser-sessions.js replayEmpty). */
 export function emptyText(kind, { limit = 0 } = {}) {
   if (kind === 'no-sessions') return t('No browser sessions recorded for this conversation');
-  if (kind === 'trace-off') return t('Action trace is off — Settings → Agent browser');
+  if (kind === 'trace-off') return t('Action trace is off');   // its door: the replay pane's «Turn on…» (browser-replay-window setEmpty)
   if (kind === 'frames-removed') return framesGoneText(limit);
   if (kind === 'no-actions') return t('The agent did not act in this browser session');
   if (kind === 'yours-not-recorded') return t('Only when you started and stopped is kept.'); // BROWSE YOURSELF (B-6ae8): "Also record my own actions" was off

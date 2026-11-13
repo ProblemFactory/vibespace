@@ -207,7 +207,7 @@ console.log('⑦ a plugin that can update has a labelled «Update…» on its ro
     './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));',
     './agent-meta.js': 'export const BACKEND_META = {};',
     './voice-plugin-card.js': 'export const renderVoiceSheet = () => {};',
-    './settings-schema.js': 'export const pluginCategoryOf = () => null;',
+    './settings-schema.js': 'export const pluginCategoryOf = () => null; export const SETTINGS_SCHEMA = {};',
     './decision-readout.js': 'export const decisionLineOf = () => null, paintDecisionLine = () => {}, liveDecisionLine = () => null;',
     '../plugin-cred-state.js': 'export const pluginGitCredOf = () => null;',
   };

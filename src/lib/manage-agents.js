@@ -22,7 +22,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 }
 import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
-import { needLine, pairDoor } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
+import { needLine, pairDoor, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
@@ -307,11 +307,12 @@ export function serveLapsedChipHtml(a, { mode = 'manual', pooled = true } = {}) 
   const head = pooled
     ? t('This account’s subscription no longer serves ({why}). The pool skips it and keeps its membership, note and readings.', { why })
     : t('This account’s subscription no longer serves ({why}); its conversations fail until it answers again.', { why });
-  const tail = mode === 'off' ? t('Usage refresh is Off in Settings — turn it on to check it, or run a turn on it directly.')
+  const tail = mode === 'off' ? t('Usage refresh is off — click to turn it on, or run a turn on it directly.')
     : mode === 'auto-cli' ? t('It rejoins by itself once it answers again (checked about hourly). Click to check now.')
     : t('Nothing asks it by itself under the current usage-refresh setting — after renewing, click to check it now.');
   const label = `${ROSTER_ICONS.CLOCK}${t('subscription inactive since {when}', { when: escHtml(when) })}`;
-  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" style="color:var(--red,#e55)" title="${head} ${tail}">${label}</span>`;
+  // lane ui-needs-a-button pick 5: under 'off' the chip is the SETTING's door (the ⟳ route refuses — no Re-check verb)
+  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" role="button" tabindex="0" data-serve-setting="accounts.onDemandQuotaRefresh" style="color:var(--red,#e55)" title="${head} ${tail}">${label}</span>`;
   return ` <span class="acct-blocked-hint acct-serve-chip" role="button" tabindex="0" data-serve-recheck="${escHtml(a.id)}" style="color:var(--red,#e55)"`
     + ` title="${head} ${tail}">${label} · ${t('Re-check')}</span>`;
 }
@@ -1847,7 +1848,7 @@ export function installManageAgents(App, ctx = {}) {
   // render inline on their row (静默失败零容忍 — never silent).
   async _refreshAllQuota(btn, bodyEl) {
     if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') {
-      showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });
+      showToast(t('On-demand quota refresh is off'), { type: 'error', action: settingsDoor(this, 'accounts.onDemandQuotaRefresh', { label: t('Turn on…') }) || undefined });
       return;
     }
     // Same one-time explainer + ack key as the usage popup's ⟳.
@@ -2049,7 +2050,7 @@ export function installManageAgents(App, ctx = {}) {
         : `<span class="ob-warn">${t('not logged in')}</span>`;
       const hint = linked
         ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
-        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+        : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or turn on “Ship subscription logins to remote hosts” (pressing the row offers it).', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your ChatGPT accounts') : t('ChatGPT account — runs on this machine (or a host you log into)');
       const usageCell = isPool
         ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current], null, 'codex') : '')
@@ -2143,7 +2144,7 @@ export function installManageAgents(App, ctx = {}) {
       const doTest = (model = '') => { // model: a 模型… row's id (the dialog's 「测试」); the menu's Test passes none
         if (!a?.loggedIn) { showToast(t('This account isn’t signed in yet — use “Add ChatGPT account…” to finish the login first.'), { type: 'error' }); return; }
         if (keyRow.dataset.blocked) {
-          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
+          showToast(t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.', { name: a?.name, host: escHtml(hostLabel) }) + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000, action: settingsDoor(this, 'accounts.shipSubscriptionToRemote', { label: t('Turn on…') }) || undefined });
           return;
         }
         done();
@@ -2643,8 +2644,9 @@ export function installManageAgents(App, ctx = {}) {
           if (hs.integrationOff) {
             // Master switch (Settings → Integration) outranks this row — the
             // install route refuses and boot strips, so offer no buttons.
-            left.innerHTML = `<b>${t('VibeSpace integration')}</b><div><span class="ob-warn">${t('Disabled — master switch is off (Settings → Integration)')}</span></div>`
-              + `<div class="agents-note">${t('Sessions run the pristine CLI: no hooks, no injected context, no agent tools. Re-enable it in Settings to restore Task Group context.')}</div>`;
+            left.innerHTML = `<b>${t('VibeSpace integration')}</b><div><span class="ob-warn">${t('Disabled — its master switch is off')}</span></div>`
+              + `<div class="agents-note">${t('Sessions run the pristine CLI: no hooks, no injected context, no agent tools. Turning it on restores Task Group context.')}</div>`;
+            { const d = settingsDoor(this, 'agents.vibespaceIntegration', { label: t('Turn on…') }); if (d) left.appendChild(needDoorButton(d)); } // lane ui-needs-a-button pick 5: the switch's door
             row.append(left);
             body.appendChild(row);
           } else if (hs.refused) {
@@ -2751,13 +2753,14 @@ export function installManageAgents(App, ctx = {}) {
           // withheld (the route refuses anyway); Remove stays as the cleanup.
           const masterOff = this.settings?.get?.('agents.vibespaceIntegration') === false;
           const noteHtml = masterOff
-            ? `<div><span class="ob-warn">${t('Disabled — master switch is off (Settings → Integration)')}</span></div>`
+            ? `<div><span class="ob-warn">${t('Disabled — its master switch is off')}</span></div>`
               + `<div class="agents-note">${t('New remote sessions ship no tools and register no hook. Anything shown above is residue from earlier sessions — inert without the session env; Remove deletes it from the host.')}</div>`
             : `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
           left.innerHTML = `<b>${t('VibeSpace integration on {host}', { host: escHtml(hostName) })}</b>`
             + `<div title="${escHtml(perTool)}">${toolsHtml} &nbsp; ${hookHtml}${extras.length ? ' &nbsp; ' + extras.join(' &nbsp; ') : ''}</div>`
             + cliConfigChipsHtml({ receipts: rs.cliConfig || [], refused: rs.refused || null }, { where: hostName, remote: true })
             + noteHtml;
+          if (masterOff) { const d = settingsDoor(this, 'agents.vibespaceIntegration', { label: t('Turn on…') }); if (d) left.appendChild(needDoorButton(d)); } // lane ui-needs-a-button pick 5: the switch's door
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const allGood = presentN === names.length && !outdatedN;
           // Dial devices: install/uninstall ride the SESSION SPAWN channel
@@ -3362,7 +3365,7 @@ export function installManageAgents(App, ctx = {}) {
         ? ` <span class="acct-linked-hint" title="${t('Runs on {host} through its long-lived token (nothing rotates, no login is shipped).', { host: escHtml(hostLabel) })}">${t('· via long-lived token')}</span>`
         : blocked ? ` <span class="acct-blocked-hint" title="${a.localOnly
           ? t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: escHtml(hostLabel) })
-          : t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the ⋯ menu (a per-account login held on the host), or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+          : t('Runs on this machine only. For {host}: use “Log in on {host} as this account…” in the row’s menu (a per-account login held on the host), or turn on “Ship subscription logins to remote hosts”.', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
       // Provenance + user note tags (2.201.0, real report: a key imported
       // from a host read as live-shared FROM it — say where it came from and
       // that it's an independent copy)
@@ -3645,8 +3648,8 @@ export function installManageAgents(App, ctx = {}) {
         if (keyRow.dataset.blocked) {
           showToast((a?.localOnly
             ? t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: escHtml(hostLabel) })
-            : t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on Settings → “Ship subscription logins to remote hosts.”', { name: a?.name, host: escHtml(hostLabel) }))
-            + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000 });
+            : t('“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.', { name: a?.name, host: escHtml(hostLabel) }))
+            + ' ' + t('Already logged in as this account ON {host}? Then pick “CLI login @ {host}” when switching the session’s billing — that uses the host’s own login.', { host: escHtml(hostLabel) }), { type: 'error', duration: 8000, ...(a?.localOnly ? {} : { action: settingsDoor(this, 'accounts.shipSubscriptionToRemote', { label: t('Turn on…') }) || undefined }) });
           return;
         }
         done();
@@ -3728,6 +3731,8 @@ export function installManageAgents(App, ctx = {}) {
       // the ⋯ menu's "Re-login on this machine…" runs). A pool's chip carries
       // the MEMBER id, so it re-logs in the account that is actually dying.
       // A LAPSED SUBSCRIPTION's Re-check: the SAME human-gated ⟳ for this one account (no new vendor surface)
+      const offChip = e.target.closest?.('[data-serve-setting]');   // lane ui-needs-a-button pick 5: usage refresh is off ⇒ its setting
+      if (offChip) { e.stopPropagation(); const d = settingsDoor(this, offChip.dataset.serveSetting, { label: t('Turn on…') }); if (d) d.run(); return; }
       const serveChip = e.target.closest?.('.acct-serve-chip');
       if (serveChip) {
         const target = serveChip.dataset.serveRecheck || id;

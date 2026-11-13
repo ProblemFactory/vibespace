@@ -5,9 +5,9 @@ import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLande
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
-import { engineFactText, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
+import { engineFactText, engineFactDoor, fillEngineSelect } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here); lane engine-spi-egress: its options
 import { t } from './i18n.js';
-import { needLine, reloadDoor } from './need-line.js'; // lane ui-needs-a-button (settings-13): the reload a changed row waits for, on its line
+import { needLine, needDoorButton, reloadDoor, pluginDoor, pluginsDoor } from './need-line.js'; // lane ui-needs-a-button (settings-13): the reload a changed row waits for, on its line
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -869,7 +869,13 @@ class SettingsUI {
   _loadEngines(row, path, line) {
     const paint = (r) => {
       if (r && !r.error) this._engines = r;
-      if (line && (line.isConnected || line.parentNode)) { line.textContent = engineFactText(r, t); this._paintKernelDoors(line, r, () => this._loadEngines(row, path, line)); }
+      if (line && (line.isConnected || line.parentNode)) {
+        line.textContent = engineFactText(r, t);
+        // lane ui-needs-a-button pick 5: what the line says is missing has its door on the line
+        const fd = engineFactDoor(r), d = fd ? (fd.plugin ? pluginDoor(this.app, fd.plugin, { label: t('Its settings…'), kind: 'secondary' }) : pluginsDoor(this.app, { label: t('Plugins…'), kind: 'secondary' })) : null;
+        if (d) line.append(' ', needDoorButton(d));
+        this._paintKernelDoors(line, r, () => this._loadEngines(row, path, line));
+      }
       const sel = row ? row.querySelector('select.settings-select') : null;
       if (sel) fillEngineSelect(sel, r && !r.error ? r : null, this.settings.get(path), t, document);
     };
@@ -1296,7 +1302,7 @@ class SettingsUI {
         wrap.appendChild(d);
         // lane rule-learning (design q-037 P0): with an OpenRouter key on the Language model row this button gives way to
         // 「从我的判定起草」 (a proposal card under the box, saved through this row's own save); a 404 keeps it as it is
-        mountLearnDraft(wrap, { catalogue: d, ta, apply: (text) => save(text) });
+        mountLearnDraft(wrap, { catalogue: d, ta, apply: (text) => save(text), openRow: (p) => this.open({ search: String((SETTINGS_SCHEMA[p] || {}).label || p) }) });
       }
       wrap.appendChild(saveBtn);
       return wrap;

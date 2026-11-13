@@ -229,8 +229,8 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // lane decision-vendor-hygiene: a row stop the owner must act on (the plan, the request shape) says ONE server notice — the
   // client words it from the i18n key, `text` stays the English; a notice no client received is said again at the next refusal
   const STOP_NOTICE = Object.freeze({
-    plan: 'The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.',
-    shape: 'The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.',
+    plan: 'The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in the plugin’s settings, or the key on its Integrations card.',
+    shape: 'The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in the plugin’s settings, or the key on its Integrations card.',
   });
   function stopNotice(why) {
     if (!stop || !STOP_NOTICE[why]) return;

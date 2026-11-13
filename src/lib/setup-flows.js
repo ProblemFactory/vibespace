@@ -3,6 +3,7 @@ import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: t
 import { TerminalSession } from './terminal.js';
 import { t, tc } from './i18n.js';
 import { stampAt as when, clockOf, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a refusal toast's door
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
@@ -597,12 +598,12 @@ export function installSetupFlows(App) {
     const r = await fetchJson('/api/loop-holds/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     // lane hub-loop-stalls: a refusal is answered AT THE PRESS, by name (never a success toast and «did not run» ten minutes later)
     const why = { heap_near_limit: t('The profile did not start: the server’s memory is near its limit, and sampling it now could run it out of memory.'),
-      sampling_off: t('The profile did not start: “Name the code that holds the server” is off in Settings.'),
+      sampling_off: t('The profile did not start: “Name the code that holds the server” is off.'),
       debugger_attached: t('The profile did not start: a debugger is attached to the server.'),
       setting_unknown: t('The profile did not start: the server has not read its settings yet — try again in a moment.'),
       no_watchdog: t('The profile did not start: the server’s watchdog thread is not running.'),
       no_inspector: t('The profile did not start: this server’s Node has no inspector.') }[r && r.error];
-    if (why) { showToast(why, { type: 'error' }); return; }
+    if (why) { showToast(why, { type: 'error', ...(r.error === 'sampling_off' ? { action: settingsDoor(this, 'telemetry.loopHoldSampling', { label: t('Turn on…') }) || undefined } : {}) }); return; }
     if (!r || r.error || !r.ok) { showToast(t('Could not start the profile: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }
     showToast(t('Profiling the server until {time} — then open ⚙ System → Diagnostics report…', { time: clockOf(r.until) }));
   },

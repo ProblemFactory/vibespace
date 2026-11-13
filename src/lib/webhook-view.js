@@ -118,7 +118,7 @@ export function joinWhyText(r, { from = '', t = tDevice } = {}) {
     case 'bad-code': return t('That is not a VibeSpace pairing code — copy the whole code again (it starts vswp_)');
     case 'caller-token': return t('That is a caller token, not a pairing code — ask the other side for a pairing code (it starts vswp_)');
     case 'expired': return t('This code has expired — a code lives 10 minutes; ask for a new one');
-    case 'https-required': return t('The code points at a plain http address — pairing needs https (or allow private reply URLs in Settings)');
+    case 'https-required': return t('The code points at a plain http address — pairing needs https, or private reply URLs allowed');   // its door: channel-webhook's join dialog
     case 'bad-url': return t('The code carries an address VibeSpace cannot use — ask for a new code');
     case 'no-instance-url': return t('This VibeSpace has no public address yet — the other side needs one to call back; set the instance URL first');
     case 'code-used': return t('{from} says this code was already used — ask {from} for a new one', { from: who });
@@ -129,6 +129,8 @@ export function joinWhyText(r, { from = '', t = tDevice } = {}) {
   }
 }
 /** the mint door's refusal (no instance URL, an http one…): a named code worded, else the server's own words */
+/** lane ui-needs-a-button pick 5: does this join refusal's door open «Allow private reply URLs» (a plain http reply address)? */
+export function joinNeedsPrivateUrls(r) { return !!(r && r.code === 'https-required'); }
 export function mintWhyText(r, { t = tDevice } = {}) { return PAIR_REFUSALS.includes(r && r.code) ? joinWhyText(r, { t }) : String((r && r.error) || t('no answer')); }
 /** what a finished join did — the path, who calls it, where replies go */
 export function joinDoneText(r, { from = '', t = tDevice } = {}) {

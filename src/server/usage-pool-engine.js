@@ -6635,18 +6635,18 @@ function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backen
         // all — "the pool skips it" would be false; its conversations show the CLI's own error and its roster row says it.
         const mode = (() => { try { return serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { return 'manual'; } })();
         const auto = mode === 'auto-cli';
-        const item = !pooled ? null : todos && typeof todos.add === 'function' ? todos.add('webui:pool-serve', mode === 'off' ? {
-          origin: 'pool', kind: 'notice', urgency: 'normal',
-          text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly`,
+        const item = !pooled ? null : todos && typeof todos.add === 'function' ? todos.add('accounts', mode === 'off' ? {   // lane ui-needs-a-button pick 5: the «accounts» bucket's door is Manage Agents (user-todos-actions jump)
+          origin: 'pool', kind: 'notice', urgency: 'normal', sessionName: 'Manage Agents',
+          text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly`,
           detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. Claude usage refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
-          i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly'), params: { account: name, since: sinceText } } },
+          i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly'), params: { account: name, since: sinceText } } },
         } : auto ? {
-          origin: 'pool', kind: 'notice', urgency: 'normal',
+          origin: 'pool', kind: 'notice', urgency: 'normal', sessionName: 'Manage Agents',
           text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents`,
           detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. The background usage check asks it every 30–60 min, so a renewal is noticed within the hour; Re-check on its row asks now.`,
           i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents'), params: { account: name, since: sinceText } } },
         } : {
-          origin: 'pool', kind: 'notice', urgency: 'normal',
+          origin: 'pool', kind: 'notice', urgency: 'normal', sessionName: 'Manage Agents',
           text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents`,
           detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. Nothing asks it by itself under the current usage-refresh setting — after renewing, Re-check on its row asks the CLI once and brings it back.`,
           i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents'), params: { account: name, since: sinceText } } },

@@ -7,6 +7,7 @@
 // a word on when it is used, the one a sign-in from this page uses NOW marked —, the console path with its link, where
 // the client ID and secret go, and the vendor's own refusal words. Every string through textContent (XSS law).
 import { t } from './i18n.js';
+import { needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: the relay page setting's door
 import { copyText, showToast } from './utils.js';
 import { icon } from './channel-chrome.js';
 import * as R from '../integration-registry.js';
@@ -52,7 +53,9 @@ function copyRow(uri) {
 }
 
 /** THE CARD — `model` = setupCard's answer, `provider` = the sign-in brand. */
-export function renderSetupCard(model, { provider = '' } = {}) {
+export function renderSetupCard(model, { provider = '', app = null } = {}) {
+  // lane ui-needs-a-button pick 5: the rows that name the relay page carry its setting's door (`channels.<kind>RelayUrl`, when that kind has one)
+  const relayDoor = () => settingsDoor(app || (typeof window !== 'undefined' ? window.app : null), `channels.${model.kind}RelayUrl`, { label: t('Relay page setting…'), kind: 'secondary' });
   const card = el('div', 'integ-setup oauth-setup');
   card.dataset.kind = model.kind; card.dataset.who = model.who;
   const p = { provider, kind: model.kind, host: model.host || '<host>', path: model.console ? t(model.console.path) : '', error: model.refusal || '' };
@@ -86,8 +89,9 @@ export function renderSetupCard(model, { provider = '' } = {}) {
       const words = el('div', 'mounts-field-hint oauth-setup-row-words', t(OS.rowWords(x), p));
       if (x.now) words.append(' ', el('span', 'integ-chip integ-chip-user oauth-setup-now', t(OS.WORDS.now)));
       li.appendChild(words);
+      if (x.key === 'own') { const d = relayDoor(); if (d) words.append(' ', needDoorButton(d)); }
       if (x.uri) li.appendChild(copyRow(x.uri));
-      if (x.key === 'public' && !x.active && model.who === 'custom') li.appendChild(el('div', 'mounts-field-hint oauth-setup-inactive', t(OS.WORDS.inactive)));
+      if (x.key === 'public' && !x.active && model.who === 'custom') { const n = el('div', 'mounts-field-hint oauth-setup-inactive', t(OS.WORDS.inactive)); const d = relayDoor(); if (d) n.append(' ', needDoorButton(d)); li.appendChild(n); }
       list.appendChild(li);
     }
     card.appendChild(list);

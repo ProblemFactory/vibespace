@@ -197,7 +197,7 @@ function pushLaneNotice(push, lane, { t = defaultT, now = null, steps = false } 
   // the lane's own CAUSE words (short, no command), else its declared remedy, else its log sentence verbatim
   const cause = pushUnavailableText(code, { t, words: p.unavailableCauses }) || pushUnavailableText(code, { t, words: p.unavailableWords }) || (p.lastStateWhy ? t('push unavailable: {why}', { why: p.lastStateWhy }) : '');
   const details = [cause, t('Nothing is lost: every message still arrives by polling.')].filter(Boolean);
-  if (steps) details.push(t('How to turn it on: ⚙ → Integrations, the account type’s setup card under «Real-time push — optional» — and the Diagnostics report.'));
+  if (steps) details.push(t('How to turn it on: the account type’s setup card, under «Real-time push — optional» — and the Diagnostics report.'));   // its door: channels-panel pushNoticeParts
   return { sig: `unavailable:${code || 'unknown'}`, line: t('Real-time push is off — messages are polled (every 30 s – 15 min)'), details, verb: null };
 }
 /** THE CASES a re-authorization line is drawn for — each with the reasons (codes) its words know (reauthWhyText's table). */

@@ -11,7 +11,7 @@
 //
 // The arithmetic is PURE (src/lib/browser-new-profile-model.js); the words are the device's t().
 import { t } from './i18n.js';
-import { needLine, integrationDoor, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (browser-profiles-4): the list's needs, once, with doors
+import { needLine, needDoorButton, integrationDoor, settingsDoor, pluginsDoor } from './need-line.js'; // lane ui-needs-a-button (browser-profiles-4): the list's needs, once, with doors
 import { fetchJson, showToast, createModalShell, copyText } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
@@ -20,7 +20,7 @@ import { pickerRows, draftWho, EVERYONE_KEY, allAgentsSentence } from './browser
 import { nameHelpers } from './browser-who-dialog.js';
 import { providerNeedsOf, providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn
-import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
+import { buildRows, choiceOfRow, installHint, buildRefusalWords, buildRefusalDoorOf } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
 import { mountProxyField } from './browser-proxy-field.js'; // B-8b87: the proxy and its login (kept in the vault)
@@ -401,6 +401,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       }
       const pw = r && PROXY_REFUSALS.includes(r.code) ? proxyWords(r.code, t, '', { act: 'save', word: r.word }) : '';
       say(pw || createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))), pw ? proxyDoor(r.code, r.word) : null);
+      if (buildRefusalDoorOf(r) === 'plugins') { const d = pluginsDoor(app, { kind: 'secondary' }); if (d) refusal.append(' ', needDoorButton(d)); }
       if (r && (r.code === 'label_required' || r.code === 'label_taken')) nameInput.focus();
       return;
     }

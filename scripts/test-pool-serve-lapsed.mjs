@@ -137,8 +137,8 @@ am2.setServeState(U, null);
 const EO = build(SLICE, { setting: 'off' });
 EO.noteMemberServeFailure(U, { message: PROD });
 ck('r2 ② under accounts.onDemandQuotaRefresh = off the item NAMES the setting — by its title in Settings, «Claude usage refresh» — and never says Re-check asks the CLI',
-  EO.todos.length === 1 && /usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text) && /Claude usage refresh is Off in Settings/.test(EO.todos[0].detail) && !/asks the CLI once/.test(EO.todos[0].detail));
-const OFFMUT = SLICE.replace("todos.add('webui:pool-serve', mode === 'off' ? {", "todos.add('webui:pool-serve', false ? {");
+  EO.todos.length === 1 && /usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly$/.test(EO.todos[0].text) && /Claude usage refresh is Off in Settings/.test(EO.todos[0].detail) && !/asks the CLI once/.test(EO.todos[0].detail));
+const OFFMUT = SLICE.replace("todos.add('accounts', mode === 'off' ? {", "todos.add('accounts', false ? {");
 am2.setServeState(U, null);
 const EOM = build(OFFMUT, { setting: 'off' }); EOM.noteMemberServeFailure(U, { message: PROD });
 ck('CONTROL (patched copy without the off branch): under Off the item tells the owner to press Re-check — the press the route refuses', OFFMUT !== SLICE && /press Re-check on its row in Manage Agents$/.test((EOM.todos[0] || {}).text || ''));
@@ -219,7 +219,7 @@ const chip = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1
 const chipAuto = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'auto-cli' });
 const chipOff = chipFn({ id: 'sub-080ce98c7dca', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'off' });
 const chipSolo = chipFn({ id: 'sub-solo', serve: { state: 'lapsed', since: 1, why: 'x' } }, { pooled: false });
-ck('r2 ② roster chip under Off: NO Re-check verb, not a button, and its title names the setting', !/Re-check/.test(chipOff) && !/role="button"/.test(chipOff) && !/data-serve-recheck/.test(chipOff) && /Usage refresh is Off in Settings/.test(chipOff));
+ck('r2 ② roster chip under Off: NO Re-check verb — the chip is the usage-refresh setting\'s door (lane ui-needs-a-button pick 5)', !/Re-check/.test(chipOff) && !/data-serve-recheck/.test(chipOff) && /data-serve-setting="accounts\.onDemandQuotaRefresh"/.test(chipOff) && /Usage refresh is off — click to turn it on/.test(chipOff));
 ck('r2 ③ roster chip for an account NO pool lists: no pool words (its conversations fail until it answers again)', !/pool/i.test(chipSolo) && /its conversations fail until it answers again/.test(chipSolo) && /· Re-check<\/span>$/.test(chipSolo));
 ck('roster chip title says what is true per setting (manual: nothing asks it by itself; auto-cli: it rejoins by itself)', /Nothing asks it by itself under the current usage-refresh setting/.test(chip) && !/rejoins by itself/.test(chip) && /rejoins by itself once it answers again/.test(chipAuto));
 ck('roster chip: "subscription inactive since {when} · Re-check", a Re-check button for THIS account, the why escaped', /subscription inactive since 10\/8\/26, 1:30 PM · Re-check<\/span>$/.test(chip) && /data-serve-recheck="sub-080ce98c7dca"/.test(chip) && /has &lt;disabled&gt; access/.test(chip) && chipFn({ id: 'x' }) === '' && chipFn({ id: 'x', serve: { state: 'other' } }) === '');
@@ -234,9 +234,9 @@ const thenMut = thenBody.replace(/\n\s*else if \(r && r\.error && !r\.lapsed\) s
 ck('CONTROL (patched copy without the r.error branch): the 403 is reported as "still does not answer"', thenMut !== thenBody && /still does not answer/.test(runThen(thenMut, off403)[0][0]));
 const KEYS = ['skipped — subscription inactive', 'subscription inactive', 'subscription inactive since {when}', 'Re-check', '{name} answered — it is back in its pools', '{name} still does not answer — the pool keeps skipping it',
   'This account’s subscription no longer serves ({why}). The pool skips it and keeps its membership, note and readings.', 'This account’s subscription no longer serves ({why}); its conversations fail until it answers again.',
-  'Usage refresh is Off in Settings — turn it on to check it, or run a turn on it directly.', 'It rejoins by itself once it answers again (checked about hourly). Click to check now.',
+  'Usage refresh is off — click to turn it on, or run a turn on it directly.', 'It rejoins by itself once it answers again (checked about hourly). Click to check now.',
   '{name} answered — its subscription is active again', '{name} answered, but the reading was refused as another account’s window — it stays inactive', '{name} still does not answer — its subscription stays inactive',
-  "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly",
+  "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is off: its chip in Manage Agents turns it on to Re-check, or run a turn on it directly",
   "{account}'s subscription is no longer active (since {since}): the pool skips it; it rejoins by itself once it answers again (checked about hourly) — Re-check it in Manage Agents",
   "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — after renewing, press Re-check on its row in Manage Agents",
   'Nothing asks it by itself under the current usage-refresh setting — after renewing, click to check it now.',

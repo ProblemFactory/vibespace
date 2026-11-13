@@ -1032,13 +1032,13 @@ function create(engineCtx) {
         const item = userTodos.add(INBOX_KEY, {
           origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels',
           text: `New messages awaiting approval on ${label}`,
-          detail: `${awaiting.length} new message(s) awaiting your approval on ${label}.\nLatest${who ? ` (${who})` : ''}: to ${to} — "${subject}"\n\nOpen the Outbox (rail → Channels → Outbox) to approve, edit or reject.`,
+          detail: `${awaiting.length} new message(s) awaiting your approval on ${label}.\nLatest${who ? ` (${who})` : ''}: to ${to} — "${subject}"\n\nOpen the Outbox to approve, edit or reject.`,
           i18n: {
             text: { key: i18nKey('New messages awaiting approval on {account}'), params: { account: label } },
             detail: [
               { key: i18nKey('{n} new message(s) awaiting your approval on {account}.'), params: { n: awaiting.length, account: label } },
               { key: i18nKey('Latest: to {to} — "{subject}"'), params: { to, subject } },
-              { key: i18nKey('Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.') },
+              { key: i18nKey('Open the Outbox to approve, edit or reject.') },
             ],
             source: INBOX_SOURCE,
           },
@@ -2325,14 +2325,14 @@ function create(engineCtx) {
       const who = agentName || 'you';
       const adapterLabel = rec ? (rec.label || rec.id) : en.adapterId;
       const latestText = String(latest.text).slice(0, 300);
-      const detail = `${awaiting.length} proposal${awaiting.length === 1 ? '' : 's'} awaiting your approval in ${adapterLabel} · ${title}.\nLatest (${who}): "${latestText}"\n\nOpen the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.`;
+      const detail = `${awaiting.length} proposal${awaiting.length === 1 ? '' : 's'} awaiting your approval in ${adapterLabel} · ${title}.\nLatest (${who}): "${latestText}"\n\nApprove, edit or reject in the conversation window (this item opens it) or in the Outbox. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.`;
       // the same sentences as STRUCTURE — the client words them (a3 i18n)
       const i18n = {
         text: { key: i18nKey('Proposals awaiting approval in {title}'), params: { title } },
         detail: [
           { key: i18nKey('{n} proposal(s) awaiting your approval in {adapter} · {title}.'), params: { n: awaiting.length, adapter: adapterLabel, title } },
           agentName ? { key: i18nKey('Latest ({who}): "{text}"'), params: { who: agentName, text: latestText } } : { key: i18nKey('Latest (your own draft): "{text}"'), params: { text: latestText } },
-          { key: i18nKey('Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.') },
+          { key: i18nKey('Approve, edit or reject in the conversation window (this item opens it) or in the Outbox. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.') },
         ],
         source: INBOX_SOURCE,
       };

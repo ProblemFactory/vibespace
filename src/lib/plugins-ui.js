@@ -7,6 +7,7 @@ import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, sh
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { pluginsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a service toast's door
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
@@ -18,8 +19,8 @@ const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON 
 // model changes): the chip says which, its title says what to do. `s` = the engine's status().stop {why, status, at}.
 const DECISION_STOP_WORDS = Object.freeze({
   reconnect: (s) => [t('stopped — key refused'), t('Reconnect: the provider refused this key (HTTP {status}).', { status: s.status })],
-  plan: () => [t('stopped — plan refused'), t('The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.')],
-  shape: () => [t('stopped — model refused'), t('The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.')],
+  plan: () => [t('stopped — plan refused'), t('The LLM plugin stopped: the provider says the plan does not allow this model (HTTP 402). Change the judging model in the plugin’s settings, or the key on its Integrations card.')],
+  shape: () => [t('stopped — model refused'), t('The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in the plugin’s settings, or the key on its Integrations card.')],
 });
 
 // lane plugin-settings-p0 (owner 2026-10-13, the VS Code plugin model — docs/design-plugin-settings.zh.md): the
@@ -207,6 +208,8 @@ export function installPluginsUI(App) {
           chipTitle = (p.enabled && !p.configured && !stopW ? t('On — no API key yet') + ' · ' : '') + L.text + (stopW ? ' · ' + stopW[1] : '');
           // lane ui-needs-a-button (usage-16): on with no key ⇒ the chip opens the key's card (door: 'decision-key')
           if (p.enabled && !p.configured && !stopW) onChip = () => this.openIntegration?.(p.integration || 'llm'); // door: 'decision-key'
+          // lane ui-needs-a-button pick 5: a plan / model refusal stopped it ⇒ the chip opens the plugin's settings (the judging model)
+          if (p.enabled && stopW && d.stop && (d.stop.why === 'plan' || d.stop.why === 'shape')) onChip = () => this._openPluginSettings(p.id); // door: 'decision-model'
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
           fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' }); fact.dataset.decisionToday = '1';
           liveDecisionLine(fact, (x) => paintDecisionLine(fact, x, 'short'), { first: p });   // patched in place every 60 s while drawn
@@ -639,7 +642,7 @@ export function installPluginsUI(App) {
     // service off with VIBESPACE_OPENCODE_SERVE=0 — both are honest dead ends,
     // and a failed user action must still hear WHY (no silent failure).
     if (!st.installed || st.envForced === false || st.enabled || st.prompted) {
-      if (needsService && !st.enabled) showToast(st.reason || t('The background service for {name} is off — turn it on in ⚙ → Plugins.', { name: meta.label || backend }), { type: 'error' });
+      if (needsService && !st.enabled) showToast(st.reason || t('The background service for {name} is off.', { name: meta.label || backend }), { type: 'error', action: pluginsDoor(this, { label: t('Turn on…') }) || undefined });
       return !!st.enabled;
     }
     const accepted = await this._harnessServiceDialog(meta, st);
@@ -678,7 +681,7 @@ export function installPluginsUI(App) {
     if (st?.running) { showToast(t('{name} background service is running', { name: meta.label || backend })); retry?.(); return true; }
     // Not a spinner forever: say what the state actually is and leave the
     // panel as the place to look.
-    showToast(st?.reason || t('The {name} background service has not answered yet — check ⚙ → Plugins.', { name: meta.label || backend }), { type: 'warn' });
+    showToast(st?.reason || t('The {name} background service has not answered yet.', { name: meta.label || backend }), { type: 'warn', action: pluginsDoor(this, { label: t('Plugins…') }) || undefined });
     return false;
   },
 

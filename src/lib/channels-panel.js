@@ -46,6 +46,7 @@ import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDia
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, clockOf, dateOf } from './page-time.js';
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
+import { needDoorButton, integrationDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: the push steps' door
 import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
@@ -325,6 +326,8 @@ function pushNoticeParts(a, kinds) {
   const pn = a.push ? chanCaps.pushLaneNotice(a.push, a.lane, { t, now: Date.now(), steps: !!(k && k.pushSetup) }) : null;
   if (!pn) return null;
   const details = pn.details.map((s) => { const n = noteLine('chan-sec-note', s); n.dataset.chanPushDetail = a.id; return n; });
+  // lane ui-needs-a-button pick 5: the «how to turn it on» line (the last detail of an unavailable lane drawn with steps) opens that card
+  if (k && k.pushSetup && /^unavailable:/.test(String(pn.sig || '')) && details.length) { const d = integrationDoor(typeof window !== 'undefined' ? window.app : null, a.kind, { label: t('Open its setup card…'), kind: 'secondary' }); if (d) details[details.length - 1].append(' ', needDoorButton(d)); }
   if ((SEEN || {})[a.id] === pn.sig) return { line: null, details, verb: pn.verb };
   const n = noteLine('chan-sec-note', pn.line);
   n.dataset.chanPush = a.id;

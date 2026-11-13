@@ -16,6 +16,7 @@
 // through `img.src` from `/api/browser/actions/:id/frame/:which` (never markup). A session start / end or a new action
 // of this conversation re-reads the list (debounced); rows are keyed by id and patched in place.
 import { t, tc } from './i18n.js';
+import { needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: the trace switch's door
 import { fetchJson, showToast } from './utils.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
@@ -230,6 +231,7 @@ export function openBrowserReplayWindow(app, opts = {}) {
   function setEmpty(kind) {
     const on = !!kind;
     empty.textContent = on ? emptyText(kind, { limit: st.limit }) : '';
+    if (kind === 'trace-off') { const d = settingsDoor(app, 'browser.actionTrace', { label: t('Turn on…'), kind: 'secondary' }); if (d) empty.append(' ', needDoorButton(d)); }
     empty.dataset.kind = kind || '';
     empty.style.display = on ? '' : 'none';
     pic.style.display = on ? 'none' : '';

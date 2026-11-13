@@ -99,7 +99,7 @@ function integrationRow({ V, okV, bad }) {
         i18nKey('Your workspace admin may have to approve the app; your company’s data policy comes first. The token stays on this server, sealed.'),
       ],
       notes: {
-        custom: i18nKey('Slack opens its Allow page; press Allow and you are connected. The app must list the relay page (Settings → Channels → Slack relay page) under OAuth & Permissions → Redirect URLs.'),
+        custom: i18nKey('Slack opens its Allow page; press Allow and you are connected. The app must list this instance’s Slack relay page under OAuth & Permissions → Redirect URLs.'),
         preset: i18nKey('Your workspace’s app: press Connect, then Allow on Slack’s page — nothing to copy.'),
         landed: i18nKey('Slack’s last page says “Done here” and this dialog finishes by itself — even when you approved in another browser. If that page shows a code instead, or does not load, paste the code or its address here:'),
         switchBack: i18nKey('Switching to the workspace app keeps this account; the app you made yourself stays in Slack — remove it at api.slack.com/apps if you no longer need it.'),

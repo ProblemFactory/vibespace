@@ -694,7 +694,9 @@ function inferBlock(rule, { changed }) {
   const lab = el('label', 'dialog-check-row chan-af-infer-on');   // the dialog's checkbox row (out-ranks `.dialog-body label`'s column)
   const tick = el('input'); tick.type = 'checkbox'; tick.checked = rule.infer === true; tick.className = 'chan-af-infer-tick';
   lab.append(tick, el('span', '', t('Also judge plain replies (LLM plugin)')));
-  const note = noteEl(t('A message with no quote and no thread that arrives after this agent\'s own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin\'s daily budget. How long after the agent\'s message: Settings › Channels.'));
+  // lane ui-needs-a-button pick 5: «how long after» is ONE row of Settings — its door on the line (the editor holds no app: the page's)
+  const note = needLine({ words: t('A message with no quote and no thread that arrives after this agent\'s own message is judged once: is it an answer to it? A yes notifies like a quote does; each judgment is one call within the plugin\'s daily budget.'), tone: 'info', cls: 'chan-flow-note',
+    doors: [settingsDoor(typeof window !== 'undefined' ? window.app : null, 'channels.replyInferHours', { label: t('How long after…'), kind: 'secondary' })] });
   note.classList.add('chan-af-infer-note');
   const off = el('div', 'chan-dec-plugin');
   const chip = el('span', 'chan-chip chan-road-chip'); chip.hidden = true;   // lane judged-watch-state: the road's state while ticked

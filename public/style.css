@@ -4641,6 +4641,10 @@ label.cfg-row {
 /* lane ui-needs-a-button pick 2: a need line INSIDE a heading's state slot (the Apps dialog's real-desktop switch) stays on the heading's line */
 .desktop-launch-desk-state > .need-line { display: inline-flex; margin-left: 8px; font-weight: 400; vertical-align: middle; }
 .desktop-launch-desk-state > .need-line > .need-words { flex: 0 1 auto; }
+/* lane ui-needs-a-button pick 5 (channels-groups-outbox-4): the drafter on an Outbox row — a small name; an agent's name filters the list */
+.chan-orow-drafter { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); margin-left: 6px; padding: 0; border: 0; background: none; font: inherit; font-size: 11px; }
+button.chan-orow-drafter { cursor: pointer; }
+button.chan-orow-drafter:hover { color: var(--text); text-decoration: underline; }
 /* pick 4: the editor's disk notice is its own row under the toolbar (its doors wrap under the words on a narrow window); a failed removal's output folds under «Details» */
 .code-editor-disk-need { flex: 0 0 auto; padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--yellow); font-size: 12px; }
 .desktop-remove-details > summary { cursor: pointer; color: var(--text-secondary); }

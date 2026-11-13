@@ -1051,7 +1051,7 @@ if (tracked.length) {
   // lane llm-plugin-rename (owner 2026-10-14): the key card is named by its PROVIDER, holds provider + key only (the model is
   // the LLM plugin's judgeModel row), says every feature of the plugin uses it, and its third step names where the switches are
   const llm = R.rowById('llm');
-  ok(llm.label === 'Language model (OpenAI / OpenRouter)' && llm.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.usedBy === 'Every feature of the LLM plugin uses this key' && /Settings › Plugins › LLM/.test(dv.setup.prerequisites[2]),
+  ok(llm.label === 'Language model (OpenAI / OpenRouter)' && llm.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.fields.map((f) => f.key).join() === 'provider,apiKey' && dv.usedBy === 'Every feature of the LLM plugin uses this key' && /the LLM plugin’s settings/.test(dv.setup.prerequisites[2]) && !/Settings ›/.test(dv.setup.prerequisites[2]),
     `llm: named by its provider, provider + key ONLY, used by every feature of the LLM plugin, step 3 names the plugin's switches (${llm.label} · ${llm.fields.map((f) => f.key)} · ${dv.setup.prerequisites[2]})`);
   const zhD = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default || {}, jaD = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
   ok(zhD[llm.label] === '语言模型（OpenAI / OpenRouter）' && jaD[llm.label] === '言語モデル（OpenAI / OpenRouter）' && zhD[dv.usedBy] === 'LLM 插件的各项功能用这把钥匙' && !!jaD[dv.usedBy] && !!zhD[dv.setup.prerequisites[2]] && !!jaD[dv.setup.prerequisites[2]],

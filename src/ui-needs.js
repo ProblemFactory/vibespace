@@ -11,62 +11,13 @@
  *                    company preset of that kind exists (cluster-presets)
  *         listed     the walk's own «needed / failed / off with no button» sentences, each its row
  *   door  { present: { marker, surfaces } } — every file that states the sentence carries the door's marker (a PURE model's words
- *         count for the surface that draws them: `via`) · { none: why } · { deferred: DEFERRED } (a later pick of this lane, said)
+ *         count for the surface that draws them: `via`) · { none: why } (pick 5: no row is deferred — every sentence the net catches is a door, a none with its reason, or a non-need)
  * THE ROW SHAPE IS lane machine-needs-at-pairing's (src/machine-needs.js); ONE suite reads both tables (scripts/test-needs-doors.mjs).
  * A sentence the MACHINE table claims (a machine's need) is its; this table claims the rest. PURE (no imports).
  */
-const DEFERRED = 'ui-needs-a-button · after pick 4 — the remainder named in its report (B-row by 主开发)';
 // ── THE REST OF THE NET on 935960b7e (derived: work/dump-net.mjs), each claimed by name — the first 64 characters of the sentence ──
 const oneOf = (list) => new RegExp('^(?:' + list.map((s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|') + ')');
 // THE REMAINDER after pick 4 — real needs whose doors are not built in this lane yet, each named in the pick-4 report (the next pick or its owner lane)
-const PATHS_LEFT = Object.freeze([
-    "A message with no quote and no thread that arrives after this ag",
-    "Action trace is off — Settings → Agent browser",
-    "Approve or deny from the conversation's Reach dialog (rail → Cha",
-    "Automatic turns are refused on this account while it bills paid ",
-    "Background jobs owned by this conversation message it when they ",
-    "Checking a new Claude Code is turned off in Settings (Accounts) ",
-    "Disabled — master switch is off (Settings → Integration)",
-    "How to turn it on: ⚙ → Integrations, the account type’s setup ca",
-    "Model-scoped weekly limits (e.g. Fable) aren’t in the passive fe",
-    "Not set here: enter it in Settings → Channels → relay page to us",
-    "On-demand quota refresh is disabled in Settings",
-    "Open the Outbox (rail → Channels → Outbox) or the conversation w",
-    "Open the Outbox (rail → Channels → Outbox) to approve, edit or r",
-    "Running sessions do not need it. You will only be asked once — ⚙",
-    "Runs on this machine only. For {host}, log in on the host — or e",
-    "Runs on this machine only. For {host}: use “Log in on {host} as ",
-    "Sampling is off in Settings — the holds are still measured.",
-    "Sessions run the pristine CLI: no hooks, no injected context, no",
-    "Slack opens its Allow page; press Allow and you are connected. T",
-    "Stops as soon as you disable it in ⚙ → Plugins, and VibeSpace st",
-    "That browser engine plugin is not running on this computer — ena",
-    "That engine's plugin did not answer — restart it in ⚙ → Plugins.",
-    "The LLM plugin stopped: the model refused the request shape (HTT",
-    "The LLM plugin stopped: the provider says the plan does not allo",
-    "The action trace is OFF (Settings → Agent browser → Action trace",
-    "The background service for {name} is off — turn it on in ⚙ → Plu",
-    "The cluster names {plugin} at «{ref}» — not a full commit sha, s",
-    "The cluster's plugin {plugin}: waiting for your consent — its ke",
-    "The code points at a plain http address — pairing needs https (o",
-    "The profile did not start: “Name the code that holds the server”",
-    "The telemetry forward target in Settings (Forward diagnostics to",
-    "The {name} background service has not answered yet — check ⚙ → P",
-    "This conversation is NOT notified when its background jobs finis",
-    "This stored login can’t ship to {host}. If you’ve logged this ac",
-    "Turn on what you want in Settings › Plugins › LLM — each feature",
-    "Usage refresh is Off in Settings — turn it on to check it, or ru",
-    "VibeSpace asks Anthropic once how much of this account’s usage l",
-    "action trace is off (Settings → Agent browser)",
-    "keeping is off (Settings → Agent browser)",
-    "the drafter is switched off in Settings › Plugins › LLM",
-    "waiting for your consent — its kernel is not fetched; enable it ",
-    "{account}'s subscription is no longer active (since {since}): th",
-    "{plugin} · no program set — open ⚙ → Plugins → {plugin} → Progra",
-    "“{name}” runs on this machine only. For {host}, use “Log in on h",
-    "② Or host your own copy (one page serves every provider): the tw",
-    "② Your own copy of the relay page (Settings → Channels → relay p",
-]);
 // a door's own LABEL naming where it opens
 const PATHS_LABEL = Object.freeze([
     "Open Settings → Spending",
@@ -224,6 +175,10 @@ const NEEDS = Object.freeze([
     match: /^A cloud browser needs your key from its vendor before its first start\.$|^Agents may not use windows on your desktop yet\.$/, door: { present: { marker: /integrationDoor\(app, n\.integration[\s\S]{0,160}settingsDoor\(app, n\.setting/, surfaces: ['src/lib/browser-new-profile.js'] }, via: { 'src/lib/browser-new-profile-model.js': 'src/lib/browser-new-profile.js' } } },
   { id: 'voice-teach-off', need: 'suggesting words is off — «Turn on…» opens the plugin\'s own settings section (the voice sheet, beside plugins-integrations-13)',
     match: /^Suggesting words is off\.$/, door: { present: { marker: /door: 'plugin-settings', run: \(\) => app\._openPluginSettings\('voice-input'\)/, surfaces: ['src/lib/voice-teach-ui.js'] } } },
+  { id: 'engine-plugin-off', need: 'a browser engine plugin that is not running — «Plugins…» on the refusal\'s line (the build and new-profile dialogs)',
+    match: /^That browser engine plugin is not running on this computer — turn it on in the Plugins list, then try again\.$/, door: { present: { marker: /buildRefusalDoorOf\(r\) === 'plugins'\) \{ const d = pluginsDoor\(app/, surfaces: ['src/lib/browser-build-dialog.js'] }, via: { 'src/lib/browser-build-model.js': 'src/lib/browser-build-dialog.js' } } },
+  { id: 'model-limits-refresh-off', need: 'a meter tooltip: model-scoped limits wait for on-demand refresh, which is off',
+    match: /^Model-scoped weekly limits \(e\.g\. Fable\) aren’t in the passive feed — on-demand refresh is off$/, door: { none: 'a tooltip of the usage meter — pressing the row opens the account\'s card, whose usage-refresh chip is the door (pick 5)' } },
   { id: 'llm-key', need: 'the LLM plugin is on with no key — its chip is the door to the key\'s card (usage-16)',
     match: /^On — no API key yet$/, door: { present: { marker: /onChip = \(\) => this\.openIntegration\?\.\(p\.integration \|\| 'llm'\)/, surfaces: ['src/lib/plugins-ui.js'] } } },
   // ── pick 3: windows, dialogs and machine rows (the way a sentence named became the door on its line) ──
@@ -268,7 +223,41 @@ const NEEDS = Object.freeze([
     match: /^This is a company app: its admin adds the address\.$/, door: { present: { marker: /if \(model\.who === 'preset'\) card\.appendChild\(el\('div', 'mounts-field-hint oauth-setup-refusal-admin'/, surfaces: ['src/lib/oauth-setup-card.js'] }, via: { 'src/oauth-setup.js': 'src/lib/oauth-setup-card.js' } } },
   { id: 'composer-upload', need: 'chat-core-10 (no upload button in the desktop composer) — TAKEN OUT by 主开发 2026-11-13: not this lane\'s',
     match: /^Type a message\.\.\.$/, door: { none: 'taken out by 主开发 (2026-11-13): the desktop composer is not changed by this lane; files go in by drag, paste or the phone «+»' } },
-  { id: 'settings-paths', need: 'a sentence that routes a person by a menu / settings path — its door (src/lib/need-line.js settingsDoor / integrationDoor / a window\'s opener) replaces the path — THE REMAINDER after pick 4 (each sentence named in its report; shrink-only)', match: oneOf(PATHS_LEFT), door: { deferred: DEFERRED } },
+  // ── pick 5: the last settings paths — each door on its line (the sentence keeps its state) ──
+  { id: 'trace-switches', need: 'the action trace / keeping is off — «Turn on…» beside the words (the replay pane, the chat card, the profiles window)',
+    match: /^Action trace is off$|^action trace is off$|^The action trace is off\.$|^Keeping is off$/, door: { present: { marker: { 'src/lib/browser-replay-window.js': /settingsDoor\(app, 'browser\.actionTrace'/, 'src/lib/browser-trace-view.js': /settingsDoor\((?:view && view\.app|app), 'browser\.(?:actionTrace|keepConversationBrowser)'/ }, surfaces: ['src/lib/browser-replay-window.js', 'src/lib/browser-trace-view.js'] }, via: { 'src/lib/browser-session-words.js': 'src/lib/browser-replay-window.js' } } },
+  { id: 'reply-window', need: 'how long after the agent\'s message a plain reply is judged — its row\'s door on the note',
+    match: /^A message with no quote and no thread that arrives after this agent's own message is judged once/, door: { present: { marker: /settingsDoor\([^;]{0,80}'channels\.replyInferHours'/, surfaces: ['src/lib/channel-filter-editor.js'] } } },
+  { id: 'drafter-off', need: 'the rule drafter is switched off — the refusal toast\'s «Turn on…» (its row searched)',
+    match: /^the drafter is switched off$/, door: { present: { marker: /openRow\('plugin\.llm\.learn'\)/, surfaces: ['src/lib/learn-card.js'] } } },
+  { id: 'usage-refresh-off', need: 'usage refresh is off — the lapsed chip and the ⟳ toast open its setting',
+    match: /^Usage refresh is off — click to turn it on|^On-demand quota refresh is off$/, door: { present: { marker: /data-serve-setting="accounts\.onDemandQuotaRefresh"[\s\S]*settingsDoor\(this, 'accounts\.onDemandQuotaRefresh'/, surfaces: ['src/lib/manage-agents.js'] } } },
+  { id: 'ship-logins', need: 'a stored login that cannot ship to a host — the toast\'s / the billing menu\'s «Ship subscription logins…» door',
+    match: /runs on this machine only\. For \{host\}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”\.$|^This stored login can’t ship to \{host\}\./, door: { present: { marker: /settingsDoor\(this, 'accounts\.shipSubscriptionToRemote'/, surfaces: ['src/lib/manage-agents.js', 'src/lib/session-lifecycle.js'] } } },
+  { id: 'master-switch', need: 'the VibeSpace integration\'s master switch is off — «Turn on…» on its card',
+    match: /^Disabled — its master switch is off$/, door: { present: { marker: /settingsDoor\(this, 'agents\.vibespaceIntegration'/, surfaces: ['src/lib/manage-agents.js'] } } },
+  { id: 'llm-stopped-model', need: 'the LLM plugin stopped on a plan / model refusal — its chip opens the plugin\'s settings (the judging model)',
+    match: /^The LLM plugin stopped: .* Change the judging model in the plugin’s settings, or the key on its Integrations card\.$/, door: { present: { marker: /d\.stop\.why === 'plan' \|\| d\.stop\.why === 'shape'\)\) onChip = \(\) => this\._openPluginSettings\(p\.id\)/, surfaces: ['src/lib/plugins-ui.js'] } } },
+  { id: 'plugin-service', need: 'a backend\'s background service is off / silent — the toast\'s «Turn on…» / «Plugins…» (the Plugins list)',
+    match: /^The background service for \{name\} is off\.$|^The \{name\} background service has not answered yet\.$/, door: { present: { marker: /action: pluginsDoor\(this, \{ label: t\('Turn on…'\) \}\)[\s\S]*action: pluginsDoor\(this, \{ label: t\('Plugins…'\) \}\)/, surfaces: ['src/lib/plugins-ui.js'] } } },
+  { id: 'job-notify', need: 'job auto-notify for this conversation — its setting\'s «Change…» on the hint',
+    match: /Each Task Group can also set its own\.$/, door: { present: { marker: /settingsDoor\(app, 'agents\.jobNotify'/, surfaces: ['src/lib/session-props.js'] } } },
+  { id: 'sampling-off', need: 'a server profile refused: the sampler is off — the toast\'s «Turn on…»',
+    match: /^The profile did not start: “Name the code that holds the server” is off\.$/, door: { present: { marker: /settingsDoor\(this, 'telemetry\.loopHoldSampling'/, surfaces: ['src/lib/setup-flows.js'] } } },
+  { id: 'private-reply-urls', need: 'a pairing code that points at plain http — «Allow private reply URLs…» beside the refusal',
+    match: /^The code points at a plain http address — pairing needs https, or private reply URLs allowed$/, door: { present: { marker: /settingsDoor\(app, 'webhook\.allowPrivateReplyUrl'/, surfaces: ['src/lib/channel-webhook.js'] }, via: { 'src/lib/webhook-view.js': 'src/lib/channel-webhook.js' } } },
+  { id: 'relay-page', need: 'the relay page is a setting of the account type — «Relay page setting…» on the setup card\'s rows that name it',
+    match: /its address is this account type’s relay page setting\)\.$|register its address and set it as the relay page\.$|^Not set here: set it as the relay page to use it\.$/, door: { present: { marker: /settingsDoor\([^;]{0,90}`channels\.\$\{model\.kind\}RelayUrl`/, surfaces: ['src/lib/oauth-setup-card.js'] }, via: { 'src/oauth-setup.js': 'src/lib/oauth-setup-card.js' } } },
+  { id: 'push-steps', need: 'how to turn real-time push on — «Open its setup card…» on the steps line',
+    match: /^How to turn it on: the account type’s setup card, under «Real-time push — optional»/, door: { present: { marker: /integrationDoor\([^;]{0,80}a\.kind, \{ label: t\('Open its setup card…'\)/, surfaces: ['src/lib/channels-panel.js'] }, via: { 'src/channel-caps.js': 'src/lib/channels-panel.js' } } },
+  { id: 'cli-check-off', need: 'the Claude Code check is turned off — the press\'s toast opens the switch the row declares',
+    match: /^Checking a new Claude Code is turned off — those accounts wait for a VibeSpace update$/, door: { present: { marker: /settingsDoor\(app, checkRow\.checkOffSetting/, surfaces: ['src/lib/user-todos-actions.js'] }, via: { 'src/foryou-actions.js': 'src/lib/user-todos-actions.js' } } },
+  { id: 'engine-fact', need: 'the default browser engine\'s plugin is missing / has no program — its door on the fact line',
+    match: /^\{plugin\} · no program set \(its Program file setting\)$|^That browser engine plugin is not running on this computer\.$/, door: { present: { marker: /engineFactDoor\(r\)[\s\S]{0,200}pluginDoor\(this\.app, fd\.plugin/, surfaces: ['src/lib/settings-ui.js'] }, via: { 'src/lib/browser-build-model.js': 'src/lib/settings-ui.js' } } },
+  { id: 'pool-serve-lapsed', need: 'a pooled subscription that stopped serving — filed under For you\'s «accounts» bucket, whose door is Manage Agents (its row\'s Re-check / setting chip)',
+    match: /'s subscription is no longer active \(since \{since\}\): the pool skips it/, door: { present: { marker: /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog/, surfaces: ['src/lib/user-todos-actions.js'] }, via: { 'src/server/usage-pool-engine.js': 'src/lib/user-todos-actions.js' } } },
+  { id: 'outbox-pointer', need: 'new messages awaiting approval on an account — the For-you pointer names the Outbox',
+    match: /^Open the Outbox to approve, edit or reject\.$/, door: { none: 'its For-you item carries no action yet: a door to the Outbox needs a new For-you action type with its registry row (src/foryou-actions.js + test-foryou-actions-census) — named in pick 5\'s report for 主开发; the Outbox badge on the rail still shows it' } },
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([
@@ -283,6 +272,8 @@ const NOT_NEEDS = Object.freeze([
   { why: 'a direction that is true on its surface: the control it names is drawn on that side in the same dialog / list', match: oneOf(DIRECTIONS_TRUE) },
   { why: 'names a table row or a parent folder, not a control — no door is owed', match: oneOf(DIRECTIONS_ROWS) },
   { why: "a step on the vendor's own page — VibeSpace draws no control there", match: oneOf(DIRECTIONS_VENDOR) },
+  { why: 'a consent prompt saying where its switch lives LATER — nothing is needed now; the prompt\'s own buttons are the act', match: /^Stops as soon as you disable it in ⚙ → Plugins, and VibeSpace stops it by itself|^Running sessions do not need it\. You will only be asked once — ⚙ → Plugins can turn it on later\.$/ },
+  { why: 'inside the static Diagnostics report page (a blob page holds no door to the app; the same switch has its door in Settings)', match: /^Sampling is off in Settings — the holds are still measured\.$/ },
   { why: "the vendor's own workspace admin (Slack approves an app per workspace) — not an assumption about this install", match: oneOf(COMPANY_VENDOR) },
 ]);
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
@@ -301,4 +292,4 @@ const NET = Object.freeze({
 // list, scripts/fixtures/need-debt.json (out of src: its sentences would read as surfaces to the tree's other censuses)
 const LISTED = new RegExp(NEEDS.map((r) => r.match.source).join('|'));
 const inNet = (s) => { const x = String(s); return NET.path.test(x) || NET.direction.test(x) || NET.company.test(x) || LISTED.test(x); };
-module.exports = { NEEDS, NOT_NEEDS, NET, DEFERRED, needOf, notNeedOf, inNet };
+module.exports = { NEEDS, NOT_NEEDS, NET, needOf, notNeedOf, inNet };

@@ -6,6 +6,7 @@ import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { unknownRowOf } from './resume-pacer.js'; // B-f64b cure: a row still being checked is never started unasked
 import { stampAt as when, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: the billing menu's setting row
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
@@ -1646,6 +1647,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Per-account login held ON the host (2.199.0) — cached from the last
     // Manage-Agents visit to that machine; the server re-verifies at spawn.
     const hostSubHeld = (a) => { const v = vOf(a); if (v) return v.usable && v.how === 'host-held'; return bill.hostLogin && rHostId && (this._hostSubsKnown?.[rHostId] || []).includes(a.id); };
+    let shipBlocked = false;
     const subBlock = (a) => {
       // a THIRD-PARTY provider runs on this machine only — never offered to a session on another one (the switch would
       // end the session first and the create refuse it — lane lg-providers U5 r1)
@@ -1674,7 +1676,8 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (v.reason === 'local-only-mac') return t('This macOS Keychain-backed login stays on this machine. Log in as this account on {host} instead; copying it can invalidate rotating OAuth credentials.', { host: rHostName });
         if (v.reason === 'pool-local-only') return t('Pooled accounts run on this machine only');
         if (v.reason === 'pool-no-target') return t('This pooled account has no target — pick a subscription in Manage agents');
-        return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or enable Settings → “Ship subscription logins to remote hosts”.)', { host: rHostName });
+        shipBlocked = true;   // lane ui-needs-a-button pick 5: the menu's last row opens that setting
+        return t('This stored login can’t ship to {host}. If you’ve logged this account in ON {host}, pick “CLI login @ {host}” above — that uses the host’s own login. (Or turn on “Ship subscription logins to remote hosts” — the menu’s last row.)', { host: rHostName });
       }
       // ── legacy fallback (probe in flight / old server) ──
       // NEVER-SIGNED-IN sub (2.240.0, userN's inc-msfx2fdt-3rbn): an
@@ -1888,6 +1891,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         : (this._usageEstimates?.[a.id] || (this._usageGlobal?.accountId === a.id ? this._usageEstimates?.__global__ : null));
       items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, suffix, usageHint(usageFor(a), estA)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
+    if (shipBlocked) { const d = settingsDoor(this, 'accounts.shipSubscriptionToRemote', { label: t('Ship subscription logins to remote hosts…') }); if (d) items.push({ label: d.label, action: () => d.run() }); } // door: 'ship-setting'
     let menuEl;
     items.unshift({ caption: t('This session’s billing account') });   // lane ui-controls-and-bugs: the menu says what it is (the walk: a bare list)
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {

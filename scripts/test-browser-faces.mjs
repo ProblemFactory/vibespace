@@ -57,7 +57,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   ok(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
   ok(!/Settings → Browser'/.test(dl) && dl.split("t('Agents on your real desktop: off')").length - 1 === 1 && /settingsDoor\(app, \(d && d\.setting\) \|\| 'window\.realDesktopTargets'/.test(dl), "Apps dialog's desktop-consent line says the switch's state with ITS door («Turn on…» = the Desktop apps row) — one sentence, drawn on the footer line (said ONCE since design 009 §B3) and as the read-error fallback (lane ui-needs-a-button: never a menu path)");
   const tv = read('src/lib/browser-trace-view.js');
-  ok(tv.split("t('action trace is off (Settings → Agent browser)')").length - 1 === 2 && /Settings → Agent browser → Action trace/.test(tv) && /\(Agent browser\)'\)/.test(tv), "the trace pointers name Settings → Agent browser / the Agent browser window");
+  ok(tv.split("t('action trace is off')").length - 1 === 2 && (tv.match(/settingsDoor\((?:view && view\.app|app), 'browser\.actionTrace'/g) || []).length === 3 && /\(Agent browser\)'\)/.test(tv), "the trace pointers carry the action trace switch's door (lane ui-needs-a-button pick 5: never a menu path) / name the Agent browser window");
   const lw = read('src/lib/browser-live-window.js');
   const btr = read('src/browser-trace.js'); // lane live-input: the recording chip's words moved to PURE recordingChipWords
   ok(/title: t\('Agent browser \(live\)'\), type: 'browser-live'/.test(lw) && /in Agent browser\.'\)/.test(btr) && /Click to open Agent browser/.test(btr) && /t\('Agent browser is not available'\)/.test(lw), "the live view: window title 'Agent browser (live)', its pointers name the Agent browser window");
@@ -86,8 +86,8 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
     'Agent browser — live view': null,
     'Hand the agent browser back': null,
     'Open a web view': null,
-    'action trace is off (Settings → Agent browser)': null,
-    'The action trace is OFF (Settings → Agent browser → Action trace).': null,
+    'action trace is off': null,
+    'The action trace is off.': null,
     'Agent browser is not available': null,
     'not traced — this browser was not started through VibeSpace (Agent browser)': null,
   };

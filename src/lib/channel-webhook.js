@@ -9,7 +9,7 @@
 // showPairCodeOnce alone; a pasted code lives in the join box alone (no module state; closing empties it).
 import { fetchJson, showToast, createModalShell, freshKey, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
-import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (channels-groups-outbox-10)
+import { needLine, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (channels-groups-outbox-10)
 import { icon, el, btn } from './channel-chrome.js';
 import { routeErrorText } from './channel-words.js';
 import * as V from './webhook-view.js';
@@ -369,6 +369,8 @@ export function showJoinDialog(app) {
   done.dataset.whJoinDone = '1'; show(done, false);
   m.body.appendChild(done);
   const say = (text, kind) => { show(said, !!text); said.textContent = text || ''; said.classList.toggle('chan-warn', kind === 'refused'); said.dataset.whJoinSaid = kind || ''; };
+  // lane ui-needs-a-button pick 5: a refusal a person here can cure carries its door (https-required ⇒ the private-reply-URL row)
+  const sayDoor = (r) => { if (V.joinNeedsPrivateUrls(r)) { const d = settingsDoor(app, 'webhook.allowPrivateReplyUrl', { label: t('Allow private reply URLs…'), kind: 'secondary' }); if (d) said.append(' ', needDoorButton(d)); } };
   const pasted = () => box.value.trim();
   async function read() {
     const mine = ++seq;
@@ -379,7 +381,7 @@ export function showJoinDialog(app) {
     say(t('Reading the code…'), 'reading');
     const r = await post('/api/channels/webhook/join', { code: pasted(), check: true, ...(sv ? { slug: sv } : {}) });
     if (mine !== seq) return;
-    if (!r || !r.ok) { say(V.joinWhyText(r, { t }), 'refused'); if (!slugTouched) show(slugField, false); return; }
+    if (!r || !r.ok) { say(V.joinWhyText(r, { t }), 'refused'); sayDoor(r); if (!slugTouched) show(slugField, false); return; }
     ck = r;
     say(V.joinPreviewText(r, { t }), 'read');
     if (!slugTouched) slug.value = r.slug;
@@ -400,7 +402,7 @@ export function showJoinDialog(app) {
     const from = ck.from;
     go.disabled = true;
     const r = await post('/api/channels/webhook/join', { code: pasted(), slug: slug.value.trim() || ck.slug });
-    if (!r || !r.ok) { say(V.joinWhyText(r, { from, t }), 'refused'); show(slugField, false); return; }
+    if (!r || !r.ok) { say(V.joinWhyText(r, { from, t }), 'refused'); sayDoor(r); show(slugField, false); return; }
     seq++; box.value = '';
     show(intro, false); show(codeField, false); show(slugField, false); say('', '');
     done.append(whNote(V.joinDoneText(r, { from, t })));

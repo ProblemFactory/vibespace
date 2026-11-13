@@ -7,7 +7,7 @@ import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
-import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (task-groups-15): a need + its door on one line
+import { needLine, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (task-groups-15): a need + its door on one line
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
@@ -782,8 +782,9 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
       hint.textContent = eff
-        ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Toggle globally in Settings → Integration, per group in the group window.')
-        : t('This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.');
+        ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Each Task Group can also set its own.')
+        : t('This conversation is NOT notified when its background jobs finish — agents must poll. Each Task Group can also set its own.');
+      { const d = settingsDoor(app, 'agents.jobNotify', { label: t('Change…'), kind: 'secondary' }); if (d) hint.append(' ', needDoorButton(d)); } // lane ui-needs-a-button pick 5
       bwSec.appendChild(hint);
       // B-70f9 ② (design §9): the jobs this conversation OWNS — glyph · name · state; a click opens the Background Work
       // panel at that job. Read-only here; when a person ENDS or archives the conversation, one notice names those still running with «Stop these too» (B-70f9 ②).

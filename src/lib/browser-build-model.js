@@ -65,7 +65,7 @@ function engineNoteOf(e, t, { door = false } = {}) { // B-0bc7: `door` — the S
   // lane engine-spi-egress L1b: the OWNER's program (source 'user') — judged by VibeSpace, never downloaded: no download word, ever
   if (e.source === 'user') {
     const b = e.binary && typeof e.binary === 'object' ? e.binary : null;
-    if (b && b.code === 'browser_engine_kernel_missing') return t(i18nKey('{plugin} · no program set — open ⚙ → Plugins → {plugin} → Program file'), { plugin });
+    if (b && b.code === 'browser_engine_kernel_missing') return t(i18nKey('{plugin} · no program set (its Program file setting)'), { plugin });
     if (b) return t(i18nKey("{plugin} · the program you named can't be run ({why})"), { plugin, why: userWhyWords(b.why, t) });
     if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) });
     // L1b r2: a version is THIS file's measurement only — a program not measured yet (new, replaced) says so, never an older one's
@@ -135,14 +135,14 @@ export function fleetPluginWords(p, fleet, t, when = (ms) => new Date(ms).toISOS
     fact = inst && inst.prevSha && inst.sha && inst.updatedAt ? `${t(i18nKey('Updated by the cluster'))} · ${short(inst.prevSha)} → ${short(inst.sha)} · ${when(inst.updatedAt)}`
       : t(i18nKey('Installed and trusted by the cluster')) + (inst && inst.sha ? ` · ${short(inst.sha)}` : '');
   } else if (p && other && (p.id === f.plugin || p.id === f.got)) fact = other;
-  else if (p && consent && f.plugin === p.id) fact = t(i18nKey('waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → {plugin}'), { plugin: p.id }); // r3: the door, by name
+  else if (p && consent && f.plugin === p.id) fact = t(i18nKey('waiting for your consent — its kernel is not fetched; turning it on fetches it'), { plugin: p.id }); // r3: the door, by name
   let line = null;
   if (f && f.plugin) {
     if (f.outcome === 'failed') line = t(i18nKey("The cluster's plugin {plugin} could not be installed: {error}"), { plugin: f.plugin, error: `${f.error || ''}${f.code ? ` [${f.code}]` : ''}` });
     else if (other) line = other;
     else if (f.outcome === 'unpinned' && f.trusted === true) line = t(i18nKey('The cluster names {plugin} at «{ref}» (not a full sha, so the cluster does not vouch for it); you enabled it yourself — its kernel follows your consent'), { plugin: f.plugin, ref: String(f.ref || '') }); // r3 (N5)
-    else if (f.outcome === 'unpinned') line = t(i18nKey('The cluster names {plugin} at «{ref}» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → {plugin}'), { plugin: f.plugin, ref: String(f.ref || '') }) + (consent ? ` · ${t(i18nKey('waiting for your consent — its kernel is not fetched'))}` : '');
-    else if (consent) line = t(i18nKey("The cluster's plugin {plugin}: waiting for your consent — its kernel is not fetched; enable it in ⚙ → Plugins → {plugin}"), { plugin: f.plugin });
+    else if (f.outcome === 'unpinned') line = t(i18nKey('The cluster names {plugin} at «{ref}» — not a full commit sha, so the cluster does not trust it; review it, then turn {plugin} on in this list'), { plugin: f.plugin, ref: String(f.ref || '') }) + (consent ? ` · ${t(i18nKey('waiting for your consent — its kernel is not fetched'))}` : '');
+    else if (consent) line = t(i18nKey("The cluster's plugin {plugin}: waiting for your consent — its kernel is not fetched; turn {plugin} on in this list"), { plugin: f.plugin });
     else if (f.kernel && f.kernel.state === 'staged' && f.kernel.unread) line = t(i18nKey("The cluster's plugin {plugin}: its waiting kernel {version} could not be read ({code}) — it is kept beside its place and asked again at the next start"), { plugin: f.plugin, version: String(f.kernel.version || ''), code: String(f.kernel.unread) }); // r8 (s3)
     else if (f.kernel && f.kernel.state === 'staged') line = t(i18nKey("The cluster's plugin {plugin}: new kernel {version} downloaded — a browser running the current kernel keeps it; the next browser start uses the new one"), { plugin: f.plugin, version: String(f.kernel.version || '') });
     else if (f.kernel && f.kernel.state === 'due') line = t(i18nKey("The cluster's plugin {plugin}: new kernel {version} — downloaded at the next browser start, which still runs the current one"), { plugin: f.plugin, version: String(f.kernel.version || '') });
@@ -248,9 +248,20 @@ export function engineFactText(r, t) {
   const value = pid ? (row && row.label ? String(row.label) : choiceWords({ kind: 'plugin', id: pid }, t)) : t(i18nKey("the browser CLI's default build"));
   const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
   // lane engine-spi-egress: an engine the value names that is not in the table is a FACT said here — never a refusal of the value
-  if (pid && !row) parts.push(t(i18nKey('That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.')));
+  if (pid && !row) parts.push(t(i18nKey('That browser engine plugin is not running on this computer.')));
   parts.push(engines.length ? engines.map((e) => engineNote(e, t, { door: true })).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.'))); // B-0bc7: the row where «Download kernel» stands
   return parts.join(' ');
+}
+/** lane ui-needs-a-button pick 5: THE FACT LINE'S DOOR — what engineFactText says is missing, as a door's target (PURE):
+ *  the named engine not running ⇒ the Plugins list; an owner's engine with no program ⇒ that plugin's own settings. null = none. */
+export function engineFactDoor(r) {
+  if (!r || r.error || !r.defaultEngine) return null;
+  const engines = Array.isArray(r.engines) ? r.engines : [];
+  const v = String(r.defaultEngine.value || 'default');
+  const pid = v.startsWith('plugin:') ? v.slice(7) : null;
+  if (pid && !engines.find((e) => e && e.id === pid)) return { plugins: true };
+  const bare = engines.find((e) => e && e.source === 'user' && e.binary && e.binary.code === 'browser_engine_kernel_missing');
+  return bare ? { plugin: String(bare.id) } : null;
 }
 /** lane engine-spi-egress r2: THE ROW'S <select>, drawn from engineOptions at EVERY draw — the first, a Reset's redraw, the engines'
  *  answer, their failure (`r` null / an error ⇒ no engine row): the stored value always shows AS ITSELF (an engine that is not here
@@ -390,6 +401,8 @@ export function changedWords({ label = '', to = null, restarted = false, told = 
 }
 
 /** A refused change / create, in the device's words by the server's CODE. null = the caller adds the server's sentence. */
+/** lane ui-needs-a-button: a refusal whose cure is a plugin turned on has a door — the Plugins list (the caller draws pluginsDoor) */
+export function buildRefusalDoorOf(r) { return r && r.code === 'browser_engine_missing' ? 'plugins' : null; }
 export function buildRefusalWords(r, t) {
   if (r && r.failed) { const fw = engineFailedWords(r.failed, String(r.failed.label || ''), t); if (fw) return fw; } // B-a470: an engine plugin's OWN error, quoted at every door
   switch (String((r && r.code) || '')) {
@@ -409,11 +422,11 @@ export function buildRefusalWords(r, t) {
     case 'browser_driven': return t(i18nKey('Somebody is driving this browser by hand right now — hand it back first.'));
     case 'browser_restarting': return t(i18nKey('The browser is restarting — try again in a moment.'));
     // lane engine-plugin: a browser ENGINE's refusals (src/browser-engines.js ENGINE_CODES)
-    case 'browser_engine_missing': return t(i18nKey('That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.'));
+    case 'browser_engine_missing': return t(i18nKey('That browser engine plugin is not running on this computer — turn it on in the Plugins list, then try again.'));
     case 'browser_engine_kernel_missing': return t(i18nKey("That engine's kernel is not installed on this computer."));
     case 'browser_engine_not_executable': return t(i18nKey("That engine's kernel can't be run."));
     case 'browser_engine_protocol': return t(i18nKey('That engine speaks another version of the engine protocol — update the plugin or VibeSpace.'));
-    case 'browser_engine_unanswered': return t(i18nKey("That engine's plugin did not answer — restart it in ⚙ → Plugins."));
+    case 'browser_engine_unanswered': return t(i18nKey("That engine's plugin did not answer — restart the plugin, then try again."));
     case 'browser_engine_env': return t(i18nKey('That engine asked to set environment variables VibeSpace does not allow.'));
     case 'engine_kernel_landing': return t(i18nKey('The browser kernel is being replaced — try again in a moment.')); // lane fleet-plugin-catalog r5: a start refused beside a half-landed kernel
     default: return null;

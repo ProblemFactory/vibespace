@@ -1415,6 +1415,7 @@ export function installSidebarMounts(Sidebar) {
         showToast(tr('Mounted at {mp} (read-only, over the device link)', { mp: r.mountpoint }));
         this._renderMounts();
       }, { id: 'mount-from-dialog', key: h.id });
+      this._offlineMountNeed(h); // lane ui-needs-a-button pick 5 (storage-5, the PULL direction): the same line + pairing door
     },
 
     // Port forwarding (B-0b60 tunnel path): expose a machine's loopback dev

@@ -6,10 +6,11 @@
 // nobody can judge against the profile's last Chrome asks one tick ("use it anyway"); a refusal is said by its CODE.
 // How to ADD a build is said as the command the user runs (installing a Chrome build is held for a later lane).
 import { t } from './i18n.js';
+import { needDoorButton, pluginsDoor } from './need-line.js'; // lane ui-needs-a-button: a refusal's door on its line
 import { fetchJson, showToast, createModalShell, showConfirmDialog } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { UI_ICONS } from './icons.js'; // lane engine-plugin: the «自研内核» card's glyph
-import { buildRows, choiceOfRow, choiceWords, cardBuildLine, changeSentences, installHint, changedWords, buildRefusalWords,
+import { buildRefusalDoorOf, buildRows, choiceOfRow, choiceWords, cardBuildLine, changeSentences, installHint, changedWords, buildRefusalWords,
   pickerIntro, channelLabel, majorLabel, verdictLines, downloadConfirmWords, downloadRefusalWords, downloadProgressWords, installedWords, freeWords, removeConfirmWords, removedWords } from './browser-build-model.js';
 
 const DIALOG_ID = 'browser-build-dialog';
@@ -88,6 +89,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
       if (r && r.code === 'downgrade_unknown') confirmRow.style.display = '';
       const w = buildRefusalWords(r, t);
       say((w || (t('Could not change the build') + ' — ' + ((r && r.error) || t('server unreachable')))) + (r && r.restored === false ? ' ' + t('The browser did not start again — its next command starts it.') : ''));
+      if (buildRefusalDoorOf(r) === 'plugins') { const d = pluginsDoor(app, { kind: 'secondary' }); if (d) refusal.append(' ', needDoorButton(d)); }
       return;
     }
     showToast(changedWords({ label: name, to: r.to || choice, restarted: !!r.restarted, told: Array.isArray(r.told) ? r.told.length : 0 }, t), { duration: 7000 });
