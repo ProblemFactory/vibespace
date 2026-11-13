@@ -4,7 +4,7 @@
 // agentd.js hands `--setup-plan` / `--setup` here and RETURNS before the daemon's body: these modes never start the daemon, take
 // no lock and open no socket (the daemon is the installer's own next step, or already running).
 //   `--setup-plan <install>`  the install row's PURE plan for THIS machine (TightVNC's from the hello, xpra's from the facts —
-//                             src/desktop-apps.js): its root script, else its commands; exit 5 = it is there already (the
+//                             src/desktop-apps.js): its root script, else its commands; exit 5 = there is nothing left to do (the
 //                             installer runs TightVNC's in its ONE administrator window, xpra's under sudo)
 //   `--setup ffmpeg`          the agent's own lookup; none passes ⇒ the pinned row fetched now (unelevated); then looked at again
 //   `--setup mac[,sharing]`   the screen helper read (its Screen Recording row added), the Settings panes opened for the person's
@@ -12,6 +12,14 @@
 // One line per need, met (✓) or not (✗ + where its door is). Exit 0 = all met, 4 = some not — the installer says it and the
 // pairing STAYS done (law 3: a «no» never fails the pairing), 2 = a word it does not know, 3 = no plan for this machine.
 const fs = require('fs');
+
+/** What `--setup-plan` answers for a plan (PURE — machine-needs pick 3d, the reader): exit 5 «there already» ONLY when the plan has
+ *  nothing left to do (xpra present still installs the rung's companions — xterm, xdotool, xauth, xvfb — and the pairing runs
+ *  them); else its root script, or its commands. → { rc: 5 } | { rc: 0, text } (the process exit code it means) */
+function planAnswer(plan) {
+  if (plan.already && !(Array.isArray(plan.packages) && plan.packages.length)) return { rc: 5 };
+  return { rc: 0, text: typeof plan.script === 'string' ? plan.script : plan.commands.join('\n') };
+}
 
 /** `--setup-plan <install>`: the row's own plan — the two install rows the pairing runs (src/desktop-apps.js: TightVNC's, xpra's),
  *  found by the row's own id (never a branch on an install's name; never the whole registry, whose other rows the agent must not carry). */
@@ -25,8 +33,9 @@ function setupPlan(argv) {
     const facts = row.from === 'facts' ? await require('../desktop-display.js').installFacts({}) : { platform: process.platform };
     const plan = row.plan(facts);
     if (!plan || !plan.ok) { fs.writeSync(2, `✗ ${(plan && plan.error) || what}\n`); process.exit(3); }
-    if (plan.already) process.exit(5);
-    fs.writeSync(1, (typeof plan.script === 'string' ? plan.script : plan.commands.join('\n')) + '\n');
+    const a = planAnswer(plan);
+    if (a.rc === 5) process.exit(5);
+    fs.writeSync(1, a.text + '\n');
     process.exit(0);
   })().catch((e) => { fs.writeSync(2, `✗ ${e.message}\n`); process.exit(3); });
 }
@@ -83,4 +92,4 @@ function main(argv = process.argv) {
   return false;
 }
 
-module.exports = { main };
+module.exports = { main, planAnswer };

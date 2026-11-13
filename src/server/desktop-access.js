@@ -669,9 +669,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  machine's stream facts are read again (forced) — the route judges them (src/routes/desktop-apps.js DONE.ffmpeg). */
   async function runStreamInstall(hostId, plan, { onData = () => { }, expectDigest = null, by = 'system:desktop-access' } = {}) {
     if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
-    if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran`); e.plan = plan; throw e; }
+    // pick 3d (the reader): the fetch's words never carry the hub's id for the machine — the page names it ONE way (the sheet
+    // title's name); the machine's own lines go through as they came
+    if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', 'what would run there changed after it was shown — nothing ran'); e.plan = plan; throw e; }
     const dm = await deviceOf(hostId);
-    if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
+    if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', 'its agent cannot stream a command — it updates itself');
     log.log?.(`[desktop] fetching ${plan.label} on ${hostId} from ${plan.source} (unelevated, into ${plan.folder || 'its folder'})`);
     // reader 4: the run's LAST line is its reason (the plan names each build's — «not the pinned file» apart from «no network»):
     // a surface with one line says it, never «the log above»
@@ -679,8 +681,8 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const seen = (d) => { tail = (tail + (Buffer.isBuffer(d) ? d.toString('utf8') : String(d))).slice(-4000); const ls = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean); if (ls.length) last = ls[ls.length - 1]; };
     const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData: (d) => { seen(d); onData(d); }, timeoutMs: installMs, by });
     const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
-    if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the fetch on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
-    if (r.code !== 0) { const e = fail('install_failed', last ? `${hostId}: ${last.slice(0, 600)}` : `the fetch exited ${r.code} on ${hostId} and said nothing — nothing was changed there`); const rows = FFI.fetchRowsOf(tail); if (rows.length) e.rows = rows; throw e; } // pick 3c: each failed build's code — the page says it in the interface's language
+    if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the fetch reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
+    if (r.code !== 0) { const e = fail('install_failed', last ? last.slice(0, 600) : `the fetch exited ${r.code} and said nothing — nothing was changed there`); const rows = FFI.fetchRowsOf(tail); if (rows.length) e.rows = rows; throw e; } // pick 3c: each failed build's code — the page says it in the interface's language
     let after = null;
     try { after = await streamFacts(hostId, { force: true }); } catch (e) { after = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
     return { ok: true, what: plan.what, hostId, plan, before: null, after, facts: null, reattached: false };

@@ -1587,14 +1587,14 @@ export function installSidebarMounts(Sidebar) {
       const MB = (n) => Math.max(1, Math.round(n / 1e6 * 10) / 10);
       const NEEDS_OF = {
         win: [{ key: 'desktop', word: tr('Its desktop and streaming (recommended)'), hints: [
-          tr('{app} ({publisher}, {mb} MB, {licence}): no administrator rights, and it listens on nothing. No publisher signs ffmpeg, so its bytes are checked against two fixed SHA-256 fingerprints.', { app: FFI.FFMPEG.label, publisher: FFI.FFMPEG.publisher, mb: Math.round(MB(FFI.FFMPEG.bytes)), licence: FFI.FFMPEG.licence }),
+          tr('{app} ({publisher}, {mb} MB, {licence}) from its release on GitHub ({where}) into {folder}. VibeSpace did not build it; no publisher signs ffmpeg, so its bytes are checked against two fixed SHA-256 fingerprints. It needs no administrator rights (run this command as administrator and it is fetched as administrator), and it listens on nothing.', { app: FFI.FFMPEG.label, publisher: FFI.FFMPEG.publisher, mb: Math.round(MB(FFI.FFMPEG.bytes)), licence: FFI.FFMPEG.licence, where: FFI.FFMPEG.url.replace(/^https:\/\//, ''), folder: FFI.FFMPEG_FOLDER }), // pick 3d: what, from where, where it lands, not built by VibeSpace, who runs it
           tr('{app} (tightvnc.com, {mb} MB): Windows asks for administrator rights once and you type its VNC password there; it listens on this PC only (127.0.0.1 and ::1, port 5900).', { app: MDM.TIGHTVNC.label, mb: MB(MDM.TIGHTVNC.bytes) }),
         ] }],
         mac: [
           { key: 'mac', word: tr('Its screen, sound, keys and clicks (recommended)'), hints: [tr('System Settings opens at Screen & System Audio Recording and at Accessibility: switch vibespace-screen on in each. Its screen helper comes from this VibeSpace, or the Command Line Tools installer opens. Nothing listens on the network.')] },
           { key: 'sharing', word: tr('Its whole desktop through macOS Screen Sharing'), hints: [tr('Opens General › Sharing for you to turn Screen Sharing on. macOS’s Screen Sharing listens on the local network (port 5900, your Mac’s sign-in), not only on this Mac.')] },
         ],
-        linux: [{ key: 'xpra', word: tr('Desktop apps (xpra 6.x)'), hints: [tr('From the distribution or xpra.org (its key checked against a pinned fingerprint); sudo asks for your password once. Each app listens on this machine only.')] }],
+        linux: [{ key: 'xpra', word: tr('Desktop apps (xpra 6.x)'), hints: [tr('From the distribution, or from xpra.org: then xpra.org stays an apt source on this machine (its key file checked against a pinned SHA-256) and xpra is held at 6.x. It installs xpra, xterm, xdotool, xauth and xvfb, all under one sudo — it asks for your password once. Each app listens on this machine only.')] }], // pick 3d: what persists (the apt source, the 6.x hold), what is installed, what runs as root
       };
       const drawNeeds = (k) => {
         needsRows.replaceChildren(...NEEDS_OF[k].map((n) => {

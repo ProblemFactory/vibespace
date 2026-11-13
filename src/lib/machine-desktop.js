@@ -606,7 +606,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   winInfo._handover = handover;
   // lane stream-mic-road (src/lib/stream-mic-strip.js): 「麦克风」 — every stream asks for the microphone's m-line, the first that carries
   // it carries the voice; nothing about it is remembered (a restored window starts it OFF — micStep's `restore`); its door installs
-  const micToggle = createMicToggle({ hostId: m.hostId, strip, before: chip, install: () => import('./desktop-app-launcher.js').then(({ showInstallDialog }) => showInstallDialog(m, { what: 'virtual-mic' })) });
+  const micToggle = createMicToggle({ hostId: m.hostId, machine: nameOf(m), strip, before: chip, install: () => import('./desktop-app-launcher.js').then(({ showInstallDialog }) => showInstallDialog(m, { what: 'virtual-mic' })) });
   winInfo._micToggle = micToggle;
   // lane speaker-passthrough-v1 (src/lib/stream-mic-strip.js): 「声音」 — every stream asks for the machine's sound track, the first that
   // carries it plays it here; ON is remembered per machine, a RESTORED window (a reload, a layout replay: syncId) says 「点一下开声音」

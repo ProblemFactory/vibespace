@@ -232,6 +232,10 @@ $setupLines = @(); $vncCmds = $null
 if ($Setup -match '(^|,)desktop(,|$)') {
   $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
   Write-Host '-> setting up what this machine will be used for: its desktop and streaming'
+  # pick 3d (the reader): an OPTIONAL need never ends the pairing — a native command's stderr under 'Stop' can be a terminating
+  # error in Windows PowerShell 5.1, so here it is 'Continue', each call judged by its stdout lines, and anything thrown is SAID
+  $eapWas = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try {
   $ffOut = @(); & $nodeExe "$current\vibespace-device.js" --setup ffmpeg 2>&1 | Tee-Object -Variable ffOut | Out-Host
   $setupLines += @($ffOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^(OK|x|->|!) ' })
   $vncUp = @(Get-NetTCPConnection -LocalPort 5900 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.LocalAddress })
@@ -242,6 +246,8 @@ if ($Setup -match '(^|,)desktop(,|$)') {
     if (-not $vncCmds) { $setupLines += 'x TightVNC: its plan could not be read - the desktop window has "Install TightVNC Server..."'; $vncCmds = $null }
     else { Write-Host '-> TightVNC Server 2.8.85 (tightvnc.com, 2.5 MB, listens on this machine only): Windows asks for administrator rights ONCE - click Yes, then type the VNC password in that window' }
   }
+  } catch { $setupLines += ('x the setup stopped: ' + $_.Exception.Message + ' - the pairing is done; each need keeps its door in the machine''s windows'); $vncCmds = $null }
+  finally { $ErrorActionPreference = $eapWas }
 }
 $persist = 'none (re-run this command after a reboot)'
 try {

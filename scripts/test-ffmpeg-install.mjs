@@ -392,7 +392,7 @@ console.log('⑫ ONE NAME, EACH BUILD\'S REASON IN THE INTERFACE\'S LANGUAGE (�
     const res = await realFetch(`http://127.0.0.1:${srv.address().port}/api/desktop/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'win-a', what: 'ffmpeg' }) });
     const ls = (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l)); end = ls[ls.length - 1];
   } finally { srv.close(); }
-  ok(end && end.code === 'install_failed' && JSON.stringify(end.rows) === JSON.stringify(rows) && /^win-a: ffmpeg was not fetched/.test(end.error), 'the route\'s error line carries the codes beside the raw words', end);
+  ok(end && end.code === 'install_failed' && JSON.stringify(end.rows) === JSON.stringify(rows) && /^ffmpeg was not fetched/.test(end.error) && !/win-a/.test(end.error), 'the route\'s error line carries the codes beside the machine\'s own words — never the hub\'s id for the machine (pick 3d)', end);
   // the page: the machine by the title's name, each code's sentence, the code lines never said as they stream, the raw line in a fold
   const esbuild = require(REPO + '/node_modules/esbuild');
   const STUB = { './i18n.js': 'export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && k in p ? String(p[k]) : m));', './utils.js': 'export const fetchJson = (u, o) => globalThis.__fj(u, o); export const createModalShell = (o) => globalThis.__sh(o);' };
@@ -405,6 +405,23 @@ console.log('⑫ ONE NAME, EACH BUILD\'S REASON IN THE INTERFACE\'S LANGUAGE (�
   await D.getFfmpeg('win-a', (x, bad) => said.push([x, !!bad]), { machine: 'WIN-DESK1' });
   const last = said.length ? said[said.length - 1] : ['', false];
   ok(last[1] && /^FFmpeg 9\.0\.2 was not fetched on WIN-DESK1, and nothing was changed there: FFmpeg 9\.0\.2 \(gyan\.dev\): the download is not the pinned file \(its SHA-256 differs\) · FFmpeg 9\.0\.2 \(BtbN FFmpeg-Builds\): the download failed \(no network, or its address did not answer\)$/.test(last[0]) && !said.some(([x]) => /VS-FFMPEG-ROW|win-a/.test(x)), 'the line says the machine by ONE name (the title\'s), each build\'s reason as the page\'s own sentence; a code line is never said as it streams', said);
+  // pick 3d (the reader): ONE name — a road with no codes names the machine by the title's name and NEVER rewrites free text
+  // (a host id «mac» used to turn «machine» into «WIN-DESK1hine»); the microphone strip's sheet names its machine too
+  globalThis.fetch = async () => ({ ok: true, body: new Response(JSON.stringify({ error: 'the fetch reported no exit (the link dropped) — check again; this machine may still be fetching', code: 'install_link_lost' }) + '\n').body });
+  const said2 = []; await D.getFfmpeg('mac', (x, bad) => said2.push([x, !!bad]), { machine: 'WIN-DESK1' });
+  const last2 = said2.length ? said2[said2.length - 1][0] : '';
+  ok(/^FFmpeg 9\.0\.2 was not fetched on WIN-DESK1: the fetch reported no exit \(the link dropped\) — check again; this machine may still be fetching$/.test(last2), 'a failure with no codes: the machine by the title\'s name, the words as they came — never a substring rewrite', last2);
+  const strip = fs.readFileSync(path.join(REPO, 'src/lib/stream-mic-strip.js'), 'utf8'), md = fs.readFileSync(path.join(REPO, 'src/lib/machine-desktop.js'), 'utf8');
+  ok(/export function createMicToggle\(\{ hostId, machine = null,/.test(strip) && /ffmpegDoor\(hostId, \{ machine, cls: 'desktop-strip-mic-install'/.test(strip) && /createMicToggle\(\{ hostId: m\.hostId, machine: nameOf\(m\),/.test(md), 'the microphone strip\'s 「取得 FFmpeg」 sheet names its machine as the window does');
+  // every code the plan can print has the page's own sentence, in en / zh / ja
+  const keys = []; const T2 = (k) => { keys.push(k); return k; };
+  const codes = Array.isArray(FF.FFMPEG_FAIL_CODES) ? FF.FFMPEG_FAIL_CODES : [];
+  const texts = codes.map((c) => D.ffmpegFailText([{ code: c, label: 'B' }], 'M'));
+  const zhD = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaD = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const doorSrc = fs.readFileSync(path.join(REPO, 'src/lib/ffmpeg-door.js'), 'utf8');
+  const wordKeys = codes.map((c) => { const m = new RegExp(`\\b${c}: \\(build\\) => t\\('([^']+)'`).exec(doorSrc); return m ? m[1] : null; });
+  ok(codes.length === 6 && texts.every((x) => !/it stopped/.test(x)) && wordKeys.every((k) => k && zhD.includes(JSON.stringify(k) + ':') && jaD.includes(JSON.stringify(k) + ':')), 'EVERY code the plan can print (FFMPEG_FAIL_CODES) has the page\'s own sentence — and its zh / ja row', { codes, missing: codes.filter((c, i) => !wordKeys[i] || !zhD.includes(JSON.stringify(wordKeys[i]) + ':')) });
+  void T2;
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
   ok(zh.includes('"Get {app} for {machine}": "为 {machine} 取得 {app}"'), 'the sheet\'s zh title: a space after 为, as between the other Chinese and Latin runs');
 }
