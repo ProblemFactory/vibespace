@@ -730,6 +730,7 @@
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-text { white-space: normal; display: block; -webkit-line-clamp: none; line-clamp: none; overflow: visible; text-overflow: clip; flex: 1 1 100%; line-height: 20px; padding-block: 3px; }
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp { display: block !important; order: 7; flex: 1 1 100%; min-width: 0; margin: 4px 0 4px; } /* ONE ORDER (主开发 13:34Z): the question, the options (order 6), then the detail — the detail scrolls below them */
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp > summary { display: none; }
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-arts { display: flex !important; order: 7; flex: 1 1 100%; min-width: 0; margin: 4px 0 0; } /* the .400 merged-tip read's third minor: what the ask ATTACHED (--artifact chips) is drawn in the opened item — after its options, with the detail (order 7), never pushing the options out; the closed strip keeps hiding it (the row's one line) */
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp > .ut-detail { white-space: pre-wrap; overflow-wrap: break-word; color: var(--text); font-size: 12px; line-height: 18px; max-height: none; }
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-opts { flex-direction: column; align-items: stretch; }
 .chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-opts > .ut-opts-label { align-self: flex-start; }

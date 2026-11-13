@@ -209,6 +209,9 @@ try {
         const IW = `(document.querySelector('.iw'))`, IROW = `((document.querySelector('.iw .iw-opts') || {}).parentElement || null)`;
         const iw = await runLadder({ setWidth: async (w) => { await winW(IWIN, w, 700); await sleep(250); }, read: async () => evalJs(fitVerdictSource(IW, { row: IROW, controls: '.iw-opt', words: '.iw-opt' })) });
         check(`① ${lang} · ${n} option(s) · the For-you window at the ladder: every option whole inside its pane`, !!IWIN && ladderFaults(iw).length === 0, ladderFaults(iw));
+        // the .400 merged-tip read's minor (i): the reply's tip is an option BUTTON's — the row's «Reply:» label carries none
+        const tips = await evalJs(`(() => { const l = document.querySelector('.iw .iw-opts-label'), o = [...document.querySelectorAll('.iw .iw-opt')]; return { label: !!l, labelTip: l ? l.getAttribute('title') : 'none', optTips: o.filter((b) => !!b.title).length, opts: o.length }; })()`);
+        check(`① ${lang} · ${n} option(s) · the For-you window: every option has its reply's tip (${tips && tips.optTips} / ${tips && tips.opts}), the «Reply:» label none`, !!tips && tips.label && tips.labelTip === null && tips.opts > 0 && tips.optTips === tips.opts, tips);
         await evalJs(`(() => { const w = app.wm.windows.get(${J(IWIN)}); if (w) app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
       }
       // the PARSED road: a 120-character URL option with no space breaks INSIDE its pill — the strip at the ladder
@@ -310,6 +313,33 @@ try {
     await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(400);
     const esc = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock:not([hidden])'); return d && { open: d.classList.contains('cad-open'), spacer: !!document.querySelector('.cad-spacer') }; })()`);
     check('② Esc on the opened strip closes it (no overlay, no spacer left)', !!esc && !esc.open && !esc.spacer, esc);
+    // the .400 merged-tip read's minor (ii): a bar inserted BELOW the opened strip after the open (as the resume bar, the sign-in
+    // card or a sub-agent note arrive) moves the spacer up — the strip follows: its bottom stays on the spacer's bottom edge
+    await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700);
+    const EDGE = `(() => { const w = app.wm.windows.get(${J(SID)}).element, d = w.querySelector('.chat-attn-dock.cad-open'), sp = w.querySelector('.cad-spacer'); if (!d || !sp) return null; return { dock: Math.round(d.getBoundingClientRect().bottom), spacer: Math.round(sp.getBoundingClientRect().bottom) }; })()`;
+    const e0 = await evalJs(EDGE);
+    await evalJs(`(() => { const w = app.wm.windows.get(${J(SID)}).element, d = w.querySelector('.chat-attn-dock.cad-open'); if (!d) return false; const b = document.createElement('div'); b.className = 'planted-bar-below'; b.style.cssText = 'height: 64px; flex: none; background: var(--bg-titlebar);'; d.after(b); return true; })()`); await sleep(500);
+    const e1 = await evalJs(EDGE);
+    await shot('open-500-bar-below.png');
+    check(`② a bar arrives below the OPENED strip (64 px, as the resume bar or the sign-in card): the strip moves with its spacer — bottom ${e1 && e1.dock} on the spacer's ${e1 && e1.spacer} (it was ${e0 && e0.dock} / ${e0 && e0.spacer})`, !!e0 && !!e1 && Math.abs(e0.dock - e0.spacer) <= 1 && Math.abs(e1.dock - e1.spacer) <= 1 && e1.spacer < e0.spacer - 30, { e0, e1 });
+    await evalJs(`document.querySelectorAll('.planted-bar-below').forEach((b) => b.remove()); true`); await sleep(300);
+    await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
+    // the .400 merged-tip read's THIRD minor: an ask's attached files (--artifact) are drawn in the OPENED strip — after its
+    // options, with its detail, the first option still in view at the strip's top (two real files in the conversation's folder)
+    const artP = ['季度报告-final-v3.docx', 'notes-for-review.md'].map((n) => path.join(CWD, n));
+    for (const f of artP) fs.writeFileSync(f, 'attached for the strip leg\n');
+    await resolveAll();
+    const artR = await post({ add: { text: ITEMS.zh.text + ' #arts', options: optsOf('zh', 3), detail: detail.slice(0, 300), urgency: 'high', artifacts: artP } });
+    const artId = artR && artR.item ? artR.item.id : null;
+    await winW(SID, 500, 820); await waitFor(`!!document.querySelector('.chat-attn-dock .cad-rows > .ut-item[data-id="${artId}"]')`, 8000); await sleep(500);
+    await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700);
+    const ar = await evalJs(`(() => { const d = document.querySelector('.chat-attn-dock.cad-open'); if (!d) return null; const R = (e) => e.getBoundingClientRect(), dr = R(d);
+      const opts = [...d.querySelectorAll('.ut-opt')].filter((e) => e.getClientRects().length), chips = [...d.querySelectorAll('.ut-arts .ut-art')].filter((e) => e.getClientRects().length), box = d.querySelector('.ut-arts');
+      const last = opts[opts.length - 1], first = opts[0];
+      return { chips: chips.length, names: chips.map((c) => c.textContent.trim()).slice(0, 2), after: !!box && !!last && R(box).top >= R(last).bottom - 1, firstIn: !!first && R(first).top >= dr.top - 1 && R(first).bottom <= dr.bottom + 1, scroll: Math.round(d.scrollTop) }; })()`);
+    await shot('open-500-arts.png');
+    check(`② an ask with two attached files, OPENED: both chips drawn (${ar && ar.chips}: ${ar && ar.names.join(' · ')}) AFTER its last option, the first option in view at the strip's top`, !!artId && !!ar && ar.chips === 2 && ar.after && ar.firstIn && ar.scroll === 0, { artId, err: artR && artR.error, ar });
+    await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(400);
     const five = await fileAsk('zh', 5, detail.slice(0, 200));
     await winW(SID, 500, 820); await waitFor(`!!document.querySelector('.chat-attn-dock .cad-rows > .ut-item[data-id="${five}"]')`, 8000); await sleep(500); await shot('five-500-closed.png');
     await press(`(document.querySelector('.chat-attn-dock .cad-rows > .ut-item > .ut-body > .ut-text'))`); await sleep(700); await shot('five-500-opened.png');

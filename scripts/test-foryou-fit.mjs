@@ -85,7 +85,7 @@ check('③ the landing is a door of its own, in words («Show it in the conversa
 check('③ the open strip floats over the chat on a spacer of its closed height (the transcript\'s size and scroll unchanged), at most half the view — its place read again when the view or the message box resizes',
   /_dockOver\(dock, on\) \{[\s\S]{0,900}?sp\.style\.height = h \+ 'px';[\s\S]{0,200}?dock\.before\(sp\);[\s\S]{0,900}?'--cad-max', Math\.max\(120, Math\.floor\(host\.clientHeight \* 0\.5\)\)/.test(NC)
   && /dock\.classList\.add\('cad-over'\);\s*place\(\);/.test(NC) /* out of the flow first, then measured (the claim's ㉓ r2) */
-  && /const ro = dock\._cadRO = new ResizeObserver\(place\);\s*ro\.observe\(host\);\s*for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\);/.test(NC) && /dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null;/.test(NC)
+  && /const ro = dock\._cadRO = new ResizeObserver\(place\);\s*const watch = \(\) => \{ ro\.disconnect\(\); ro\.observe\(host\); for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\); \};\s*watch\(\);/.test(NC) && /dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null;/.test(NC)
   && /\.chat-attn-dock\.cad-over \{ position: absolute;[^}]*bottom: var\(--cad-bottom, 0px\); max-height: var\(--cad-max, 50%\); overflow-y: auto;/.test(CC));
 check('③ law 7: the open item stays the strip\'s item while it waits (a newer arrival redraws around it); its detail is open',
   /const openKeep = dock\.classList\?\.contains\('cad-open'\) && this\._dockOpenId \? list\.find\(\(e\) => e\.item\.id === this\._dockOpenId\) : null;\s*if \(openKeep && entry && entry\.item\.id !== openKeep\.item\.id\) entry = \{ item: openKeep\.item \};/.test(NC) && /_dockDetail\(dock\) \{[^}]*if \(ex && !ex\.open\) ex\.open = true;/.test(NC)
@@ -110,7 +110,7 @@ const measured = (b, f) => { const h = b.indexOf('const host = dock.parentElemen
 check('③d the closed height is read before the strip leaves the flow, the place after it left and never inside it (the lost tap; the reader\'s M1 / M2)', measured(overBody, foldBody));
 const keeps = (p) => /if \(openKeep && entry && entry\.item\.id !== openKeep\.item\.id\) entry = \{ item: openKeep\.item \};\n/.test(p) && !/entry = d \? \{ item: d\.newest \} : entry/.test(p);
 check('③d the open item is never replaced by the newest after law 7 kept it (the reader\'s S1)', keeps(passBody));
-check('③d a close always runs the whole _dockOver(off) — the spacer and the observer gone (the reader\'s S2)', foldBody.includes('if (!open && was) this._dockOver(dock, false);') && /if \(!on\) \{ dock\.classList\.remove\('cad-over'\); dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null; dock\._cadSpacer\?\.remove\(\);/.test(overBody));
+check('③d a close always runs the whole _dockOver(off) — the spacer and the observer gone (the reader\'s S2)', foldBody.includes('if (!open && was) this._dockOver(dock, false);') && /if \(!on\) \{ (dock\._cadMO\?\.disconnect\(\); dock\._cadMO = null; )?dock\.classList\.remove\('cad-over'\); dock\._cadRO\?\.disconnect\(\); dock\._cadRO = null; dock\._cadSpacer\?\.remove\(\);/.test(overBody));
 check('③d the detail is opened at the open AND at every pass while open (the reader\'s S3)', foldBody.includes('if (open) this._dockDetail(dock);') && passBody.includes("if (row && dock.classList?.contains('cad-open')) this._dockDetail(dock);"));
 // RED CONTROLS: the reader's mutants, planted in a copy of the source, each turn its leg red
 const M = {
@@ -124,6 +124,25 @@ const bodyOf = (x, head) => { const i = x.indexOf(head), j = x.indexOf('\n  }\n'
 const judge = { M1: (x) => measured(bodyOf(x, '  _dockOver(dock, on) {'), bodyOf(x, '  _dockFold(dock, open) {')), M2: (x) => measured(bodyOf(x, '  _dockOver(dock, on) {'), bodyOf(x, '  _dockFold(dock, open) {')), S1: (x) => keeps(bodyOf(x, '  _dockPass(waiting) {')), S2: (x) => bodyOf(x, '  _dockFold(dock, open) {').includes('if (!open && was) this._dockOver(dock, false);'), S3: (x) => bodyOf(x, '  _dockFold(dock, open) {').includes('if (open) this._dockDetail(dock);') };
 const caught = Object.entries(M).filter(([k, f]) => { const m = f(NC); return m !== NC && !judge[k](m); }).map(([k]) => k);
 check(`③d CONTROL: the reader's five behaviour mutants, planted in a copy, each turn its leg red (${caught.join(' ')})`, caught.length === 5, caught);
+// ③f THE .400 MERGED-TIP READ'S TWO CODE MINORS (B-d23d):
+//   (i) the For-you window's tip loop walks only the option BUTTONS — the row's «Reply:» label is no option
+const tipLoop = (x) => /for \(const o of c\.opts\.querySelectorAll\('\.iw-opt'\)\) \{ o\.disabled = sending; o\.title =/.test(x) && !/for \(const o of c\.opts\.children\)/.test(x);
+check('③f the For-you window gives a reply\'s tip (and the sending lock) to its option BUTTONS only — never to the row\'s «Reply:» label', tipLoop(IW));
+check('③f CONTROL: the loop over every child of the options row (cdfed28ee\'s) is refused', !tipLoop(IW.replace("for (const o of c.opts.querySelectorAll('.iw-opt'))", 'for (const o of c.opts.children)')));
+//   (ii) the open strip watches its COLUMN: a bar inserted below after the open (the resume bar, the sign-in card, a sub-agent
+//   note) re-observes what follows the strip and re-reads its place; the close disconnects that watch before the spacer goes
+const watchesColumn = (body) => /dock\._cadMO = new MutationObserver\(\(\) => \{ watch\(\); place\(\); \}\);/.test(body) && /dock\._cadMO\.observe\(host, \{ childList: true \}\);/.test(body)
+  && /const watch = \(\) => \{ ro\.disconnect\(\); ro\.observe\(host\); for \(let n = dock\.nextElementSibling; n; n = n\.nextElementSibling\) ro\.observe\(n\); \};/.test(body)
+  && /if \(!on\) \{ dock\._cadMO\?\.disconnect\(\); dock\._cadMO = null;[^\n]*dock\._cadSpacer\?\.remove\(\);/.test(body);
+check('③f the open strip re-reads its place when a bar arrives below it after the open (its column\'s children watched; the watch ends at the close)', watchesColumn(overBody));
+const noMO = overBody.replace(/\n      if \(typeof MutationObserver === 'function'\) \{[\s\S]*?\n      \}/, '');
+check('③f CONTROL: the strip that watches only what stood below it at the open (cdfed28ee\'s) is refused', noMO !== overBody && !watchesColumn(noMO));
+//   (iii) the opened item draws what the ask ATTACHED (its --artifact chips): the strip's hide rule keeps a list of parts, and the
+//   chips were never on it — opened, they are shown after the options (an order ≥ the options'), never before them
+const artsShown = (rules) => rules.some((r) => selectorList(r.sel).some((x) => /\.cad-open\b/.test(x) && /\.cad-rows\b/.test(x) && /^\.ut-arts$/.test(lastCompound(x)))
+  && /display:\s*flex\s*!important/.test(r.body) && /(?:^|;)\s*order:\s*(\d+)/.test(r.body) && Number(/(?:^|;)\s*order:\s*(\d+)/.exec(r.body)[1]) >= 6);
+check('③f the opened strip draws the ask\'s attached chips (.ut-arts) after its options — display flex !important at an order ≥ the options\' 6', artsShown(RULES));
+check('③f CONTROL: without that rule (e0c3fcba2\'s sheet) the chips stay hidden in the opened item — refused', !artsShown(RULES.filter((r) => !/\.ut-arts\b/.test(r.sel) || !/\.cad-open\b/.test(r.sel))));
 
 // ③b ONE ORDER wherever an item opens (主开发 13:34Z — the owner: «这样我都看不到推荐回复选项»): the question, its OPTIONS, then the detail
 check('③b ONE ORDER: the row (the tray, the mini inbox, the phone sheet, the strip, the card) draws its options BEFORE its detail fold',
