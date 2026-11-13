@@ -26,8 +26,8 @@ export function installSetupFlows(App) {
      * fixed flows must not dump people into a detached terminal window that
      * never comes back). The ephemeral shell session runs INSIDE the dialog;
      * `checkDone` is polled every 3s and on success the modal shows ✓ and
-     * closes itself — the caller resumes (onboarding stays on screen the
-     * whole time; the modal z-index sits above the wizard overlay).
+     * closes itself — the caller resumes (the tour steps aside while it
+     * is up — a form is a window under the tour's overlay — and returns).
      * Returns true when checkDone passed, false on cancel.
      */
     runGuidedCli({ title, cmd, hint, checkDone }) {
@@ -92,6 +92,15 @@ export function installSetupFlows(App) {
         this.ws.send({ type: 'create', backend: 'shell', mode: 'terminal', name: cmd.split(' ')[0], reqId, ephemeral: true, purpose: SIGN_IN });
       });
       if (own) own._guided = outcome;   // what a re-open of this flow answers with
+      // THE GUIDE YIELDS WHILE ITS WINDOW IS UP (lane ui-phone-and-fit #4 — the walk: after «安装» the tour's card stayed on
+      // top and the install window opened BEHIND it, as if nothing happened). Since lane dialog-yield a form is a window of
+      // the window manager, which the tour's #welcome overlay covers — so while a guided window opened from the tour is
+      // up, the tour steps aside (hidden, its step kept), and comes back when that window closes, whatever ended it
+      const welcome = own && document.getElementById('welcome');
+      if (welcome && welcome.classList.contains('onboarding')) {
+        welcome.classList.add('ob-yield');
+        outcome.finally(() => welcome.classList.remove('ob-yield'));
+      }
       return outcome;
     },
 

@@ -104,9 +104,10 @@ scripts/chip-matrix.mjs — THE MODEL CHIP MATRIX driver (fable-52-cli-321 r10):
 scripts/fixtures/chip-matrix-master.json — master e74fabc6b's chip per row × door (the oracle for every row without server model facts); regenerate only by `node scripts/chip-matrix.mjs <masterRoot> --write` ⇒ kb-file-structure.md
 scripts/test-mobile-gaps.mjs — + THE 5-1 SCENE (lane fable-52-cli-321 r4, law A): a fable[1m] lock, 40 turns at 5-1 then 40 at 5-2, the older history loaded after the tail at 390×844 ⇒ the chip names what the server says ⇒ kb-file-structure.md
 src/server/cli-env.js — + CLAUDE_KNOWN_MODELS = the picker's full-id rows: Fable 5.1, 5.2 and 5.2 [1m] (lane fable-52-cli-321; a typed …[1m] id no row names is refused by the provider, and a bare row strips it) ⇒ kb-file-structure.md
-scripts/lib/fit-ladder.mjs — THE WIDTH LADDER (lane ui-phone-and-fit pick 0): LADDER 280…1440 / PHONE_LADDER, fitVerdictSource (controls inside container + row, no cut words, no sideways scroll), runLadder, ladderFaults — every UI fit pin measures with it ⇒
+scripts/lib/fit-ladder.mjs — THE WIDTH LADDER (lane ui-phone-and-fit pick 0): LADDER 280…1440 / PHONE_LADDER / SIDEBAR_LADDER, fitVerdictSource + columnFactsSource (pick 1's narrow column), runLadder, ladderFaults — every UI fit pin measures with it ⇒
 scripts/test-foryou-fit.mjs (fast) + test-foryou-fit-chrome.mjs (heavy) (lane ui-phone-and-fit pick 0) — the owner's case: every option whole at every width of its door, the strip opens in place in ONE ORDER; the census over every option rule, the doors on the width ladder ⇒
 scripts/lib/css-rules.mjs — cssRules / selectorList / lastCompound: every innermost rule of a sheet, read for the fit censuses ⇒
+src/lib/rail-row.js — railRow (lane ui-phone-and-fit M2): ONE row shape for a narrow column — name block beside its controls, else the controls on the next line; > 3 controls fold into «⋯» (rowActionsFold); with the .btn-bar rule, gated by test-ui-fit + test-ui-fit-chrome ⇒
 src/lib/row-fold-model.js — PURE (lane phone-roster-fold) rowActionsFold: a phone status row keeps ≤ ROW_INLINE_MAX (3) buttons inline; the rest, and what the width cannot hold, fold into ONE «…» — the count in barLayout's order, then barLayout (a primary never folds) ⇒
 src/lib/manage-agents.js — + foldRowByTier (lane phone-roster-fold): each strip at the CURRENT tier (RO + vs-viewport-class, bound to the render's signal) — the phone folds by count + width into ONE «…» (row-more, context-menu, FOLDED); the desktop = the base's bar, byte for byte ⇒
 scripts/test-roster-row-fold.mjs — fast: rowActionsFold tables + sweep + 4 RED mutants; the wiring (tier read every pass); ③ THE CLI-PRESENCE CENSUS from the product's DOORS (every renderer call named); a hub suite reaching one injects the CLI shape or says why not (checked; r1's predicate RED) ⇒
@@ -14987,6 +14988,13 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **fits(v)**, **runLadder({ widths, setWidth, read })** and **ladderFaults(rows)** give a check's message by width.
 - **css-rules.mjs:** `cssRules(text, file)`, `selectorList`, `lastCompound` — the fast censuses read public/*.css with it.
 - **Users:** test-foryou-fit / test-foryou-fit-chrome (pick 0). The other UI lanes and the walk's next wave call the same helper.
+### src/lib/rail-row.js (lane ui-phone-and-fit M2 — a narrow column reads by rule)
+- **railRow({ row?, className, lead, name, nameClass, desc, descClass, main, mainClass, controls, max })** builds `.rail-row > [lead] .rail-row-main(name, desc, main…) .rail-row-ctl(controls)`. CSS: the name block is `flex: 1 1 9em`, so it keeps ~9 em beside the controls; when the controls cannot fit beside it they wrap to the next line and the name has the whole width. A name breaks between words only. A control keeps its whole width (`text-overflow: clip`) and wraps inside itself only when it alone is wider than the line.
+- More than `max` (ROW_INLINE_MAX, 3) controls: the PURE rowActionsFold (row-fold-model.js) keeps a `data-rail-primary` one inline and folds the rest into ONE `.rail-row-more` «⋯» whose context menu lists each by its own words.
+- **The button bar** beside it (style.css «THE BUTTON BAR»): `.btn-bar` words (`.btn-bar-text`, 12 em) + whole buttons that wrap. `.rail-panel .agent-actions` wears it by selector, because test-roster-row-fold counts `actions.className = 'agent-actions'`.
+- **Users:** plugins-ui.js pluginRow; jobs-panel.js renderCard + the rail bar + the window toolbar; manage-agents.js heads and tabs.
+- **No floor:** the sidebar's 200 px minimum stays (主开发 07:02Z), so a panel gets ~128 px. Pictures of every rail door at 260 / 200 are in the lane's pick-1 folder.
+- **Gate:** test-ui-fit ①② (the ledger over PANEL_TABS, the rules, the rail-control cut census) + test-ui-fit-chrome ① (FIT_FACTS from scripts/ui-fit-census.mjs at both widths, with the undone-wrap CONTROL).
 
 ### scripts/test-foryou-fit.mjs + scripts/test-foryou-fit-chrome.mjs (lane ui-phone-and-fit pick 0 — the owner's case)
 - **test-foryou-fit (fast, in-process, 29):**

@@ -1025,6 +1025,7 @@ body.customize-mode #toolbar > .toolbar-center { flex-wrap: wrap; row-gap: 4px; 
 /* ── Welcome ── */
 #welcome { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1; }
 #welcome.hidden { display: none; }
+#welcome.onboarding.ob-yield { visibility: hidden; } /* lane ui-phone-and-fit #4: the tour steps aside while a guided window it opened is up (setup-flows.js runGuidedCli) */
 .welcome-content { text-align: center; max-width: 480px; }
 .welcome-content h1 {
   font-size: 26px; font-weight: 700; margin-bottom: 6px;
@@ -1845,6 +1846,17 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
   display: flex; flex-direction: column; gap: 3px; font-size: 11px;
   color: var(--text-secondary); font-weight: 500;
 }
+/* THE CHECK ROW (lane ui-phone-and-fit M6 — the walk: a box ALONE and centred, its words on the next line, in the vault's
+   paste dialog, the design and the files publish dialogs): a label whose own child is a checkbox or a radio is a ROW — the
+   box, then its words — never the field column above. :where() keeps this rule at `.dialog-body label`'s weight and it comes
+   after it, so it wins over that column and loses to any label with its own row class (.dialog-check-row, .settings-radio,
+   .pool-mem-row …); flex-direction: row also straightens a label laid out inline as a flex box. Gate: test-ui-fit ⑥. */
+.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); flex-direction: row; align-items: center; justify-items: start;
+  column-gap: 8px; row-gap: 2px; text-align: left;
+}
+.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) > input { margin: 0; width: auto; }
+.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"]))) > :not(input):nth-child(n+3) { grid-column: 2; }
 .dialog-body input, .dialog-body select, .dialog-body textarea {
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
   padding: 6px 8px; border-radius: var(--radius-sm); font-size: 12px; font-family: inherit;
@@ -4191,7 +4203,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .agents-note { font-size: 11px; color: var(--text-dim); line-height: 1.5; margin: 4px 0 0; }
 /* Machine-sectioned overview (2.245.0): "This machine" + one section per host */
 .agents-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-.agents-overview-head .agents-note { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-overview-head .agents-note { margin: 0; } /* a btn-bar-text: the words wrap whole above the button, never cut */
 .agents-refresh-all { display: inline-flex; align-items: center; gap: 5px; flex: none; }
 .agents-refresh-all svg { width: 12px; height: 12px; }
 .agents-refresh-all.usage-refresh-spin svg { animation: usage-refresh-spin 0.8s linear infinite; }
@@ -5638,14 +5650,34 @@ html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .ca
 .plugin-auth-url > .mounts-btn { flex: none; }   /* lane relay-token-per-instance: a long registration line never squeezes its Copy button */
 .plugin-relay-doors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
+/* ── THE RAIL ROW (lane ui-phone-and-fit M2 — src/lib/rail-row.js railRow): ONE shape for a list a narrow column shows. It reads at
+   the sidebar's own widths (260 px and its 200 px floor — the owner's sidebar is never widened for it) and stands on one line
+   where there is room: the name block keeps ~9 em beside the controls, else the controls drop to the next line and the name has
+   the whole width; a name breaks between words only; a control keeps its whole width (a status chip that is a button is never
+   cut — it wraps inside itself only when it alone is wider than the line). Gate: test-ui-fit ② + test-ui-fit-chrome. ── */
+.rail-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 4px; min-width: 0; }
+.rail-row > .rail-row-main { flex: 1 1 9em; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.5em; }
+.rail-row > .rail-row-main > div { flex: 1 1 100%; min-width: 0; } /* a row made by rule still reads as its PARTS (the reader's must-fix: «dev-serverdown»): inline parts — a job's name and its state — keep a gap and wrap whole; a block part (a plugin's name, its words) has its own line */
+.rail-row-name { overflow-wrap: break-word; word-break: normal; min-width: 0; }
+.rail-row > .rail-row-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-left: auto; max-width: 100%; min-width: 0; }
+.rail-row > .rail-row-ctl > * { flex: 0 0 auto; max-width: 100%; white-space: normal; overflow-wrap: break-word; text-overflow: clip; }
+.rail-row-more { min-width: 24px; min-height: 24px; padding: 0 6px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; }
+/* THE BUTTON BAR (the same lane): a bar of a panel or a window — its words take the room they need (basis 12 em) and the
+   buttons wrap to the next line as WHOLE buttons, never one character per line. The Agents panel's status rows wear it by
+   selector (.rail-panel .agent-actions): that class name is the phone fold's census (test-roster-row-fold), and in the modal the
+   phone fold — not a wrap — keeps a row on its line (test-roster-reset-eta's CONTROL) */
+.btn-bar, .rail-panel .agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.btn-bar > .btn-bar-text { flex: 1 1 12em; min-width: 0; overflow-wrap: break-word; }
+.btn-bar > :is(button, .btn-bar-group), .rail-panel .agent-actions > button { flex: 0 0 auto; white-space: nowrap; }
+
 /* ── The Plugins LIST (lane plugin-settings-p0, the VS Code plugin model): one row per plugin — dot · name +
    description · status chip · switch · [install] · ⚙; configuration lives in All Settings ── */
 .plugin-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
-.plugin-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; grid-template-areas: "dot main sw gear" ". chip inst inst"; align-items: center; column-gap: 8px; row-gap: 4px; padding: 8px; border-radius: var(--radius); border: 1px solid transparent; }
+.plugin-row { padding: 8px; border-radius: var(--radius); border: 1px solid transparent; }  /* lane ui-phone-and-fit M2: the plugin row IS a rail row (rail-row.js) — the grid areas that left the name ~75 px are gone */
 .plugin-row:hover { background: var(--bg-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
 .plugin-row > .plugin-dot { grid-area: dot; }
 .plugin-row-main { grid-area: main; min-width: 0; }
-.plugin-row-name { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.plugin-row-name { font-size: 12px; font-weight: 600; }
 .plugin-row-desc { font-size: 10px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-row-fact { margin-top: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; } /* lane decision-spend-readout: the LLM plugin's money today — a readout, not a control; it WRAPS (the desk rail is ~75 px wide: an ellipsis would hide the money) */
 .plugin-row-fact.is-near-cap, .settings-row-fact.is-near-cap { color: var(--red, #e55); } /* ≥ 90 % of the day's cap */
@@ -5944,10 +5976,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    children pinned at 221px inside a 188px panel) */
 .rail-panel .ob-backend:not(.acct-roster) { flex-wrap: wrap; }
 .acct-roster > * { min-width: 0; max-width: 100%; }
-.acct-roster-head .acct-add { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-list > .acct-key-row { min-width: 0; }
 .rail-panel .ob-backend:first-child { border-top: none; }
-.rail-panel .acct-roster-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-panel .acct-roster-head b { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
 .rail-panel .acct-roster-head .acct-add { padding: 1px 7px; font-size: 10px; }
 .rail-panel .agents-note { font-size: 10px; }
 .rail-panel .agent-actions { margin-left: auto; }
@@ -5997,6 +6028,13 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-reset-slot { grid-area: reset; justify-self: end; max-width: 100%; margin-left: 0; }
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra { grid-area: extra; }
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra > .acct-blocked-hint { overflow-wrap: normal; word-break: normal; }
+}
+/* THE NAME'S OWN LINE (lane ui-phone-and-fit M2 — the sidebar's 200 px floor leaves the roster ~128 px: line 1 of the rung
+   above kept icon · name · ★ ⋯ and the name drew two letters, «CL…», «Pe…»). Under 172 px (icon 22 + the readable 96 + ★ ⋯ 54)
+   the star and ⋯ move to line 2 beside the tail and the name has line 1 to itself. test-login-expiry §9 measures 180 / 215:
+   untouched. Gate: test-ui-fit-chrome ①. */
+@container (max-width: 172px) {
+  .acct-list > .acct-key-row { grid-template-areas: "icon name name name name" "tail tail tail tail act" "cred cred pill pill pill" "reset reset reset reset reset" "extra extra extra extra extra"; }
 }
 
 /* intrinsic-width breakers (2.179.1 screenshot audit): nowrap name/email and
@@ -6392,13 +6430,13 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 }
 
 /* ── Background Work TRIAGE (design §13, 2026-09-14): session heads, fold groups, the failed row's last line, the archive row ── */
-.jobs-sess-head { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; text-align: left; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-dim); margin: 10px 0 4px; padding: 3px 4px; border: none; background: transparent; cursor: pointer; border-radius: var(--radius-sm); } /* 2.369.121: a fold button (chevron · name · ×n · chips · Mark all seen · age) */
+.jobs-sess-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 2px; width: 100%; box-sizing: border-box; text-align: left; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-dim); margin: 10px 0 4px; padding: 3px 4px; border: none; background: transparent; cursor: pointer; border-radius: var(--radius-sm); } /* 2.369.121: a fold button (chevron · name · ×n · chips · Mark all seen · age) */
 .jobs-sess-head:hover { background: var(--bg-hover, var(--bg-panel)); }
 .jobs-sess-head.jobs-sess-attn .jobs-sess-name { color: var(--text); }
 .jobs-sess-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .jobs-seen-all { font-weight: 500; white-space: nowrap; }
 .jobs-seen-slot:empty { display: none; }
-.jobs-group { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; text-align: left; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.jobs-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; row-gap: 2px; width: 100%; box-sizing: border-box; text-align: left; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .jobs-group:hover { background: var(--bg-hover); }
 .jobs-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .jobs-group-attn { border-left-color: var(--red); }
@@ -6696,9 +6734,12 @@ button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .chan-wh-delivery .chan-opt-input { flex: 1 1 160px; min-width: 0; }
 .chan-wh-register { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 .chan-wh-register > .mounts-btn { align-self: flex-start; }
-.chan-wh-pick { align-items: baseline; flex-wrap: wrap; }
+.chan-wh-pick { align-items: baseline; }
 .chan-wh-pick-off { color: var(--text-dim); }
-.chan-wh-why { flex-basis: 100%; padding-left: 22px; font-size: 11px; color: var(--warn-text); }
+/* lane ui-phone-and-fit #1 (the walk: a caller's name broken one character per line): the pick row is the house check row, a
+   GRID (box · words) — the «why» was written for flex (flex-basis / padding), so it fell into the box's column, widened it and
+   squeezed the name; it is the row's hint now, under the words */
+.chan-wh-why { grid-column: 2; font-size: 11px; color: var(--warn-text); line-height: 1.4; }
 /* lane webhook-pair-join: the join box (a pasted pairing code wraps anywhere) + what a finished join did */
 .chan-wh-paste { width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); font-size: 12px; word-break: break-all; resize: vertical; min-height: 64px; }
 .chan-wh-join-done { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
