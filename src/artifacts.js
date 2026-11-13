@@ -2,7 +2,8 @@
 // A CONVERSATION'S DELIVERABLES, DERIVED (lane artifacts-model, owner 2026-10-05; docs/design-artifacts.zh.md).
 // The product never asks the agent to DECLARE what it made (teaching a tool forks the deliverables): it reads what it
 // already WITNESSED — the harness's write record (claude Write / Edit, codex apply_patch, an ACP diff) and the user's
-// own saves — and folds it into ONE row per file. PURE (CJS, imports nothing but the ONE extension table): the server's
+// own saves — and folds it into ONE row per file. PURE (CJS, imports nothing but the ONE extension table and the For-you
+// reply's grammar — its cut mark, r6): the server's
 // stdout consumer, the rebuild's replay, the normalizer's card and the client's chip all read THIS file.
 //
 // THE ROW: {key: host+':'+path, host, path, name, kind, firstAt, lastAt, by: agent|user, writes, edits, lastOp, bytes,
@@ -13,8 +14,22 @@
 //           row. Rows are a plain object keyed by `key` (session-meta `artifacts` persists it as is).
 // BOUNDS:   ≤ MAX_ROWS per conversation; past it the oldest CODE rows go first, then the oldest of the rest — every
 //           eviction is returned (the consumer logs it) and `view()` says the list is `full`.
-// THE VIEW: `view(rows)` = the chip's order: doc › service › page › design › media › upload › other, newest-changed first in each,
-//           code folded behind a count.
+// THE VIEW: `view(rows)` = the chip's order: the INTENT bands first (`intentOf` — for you › made here › touched, lane
+//           artifacts-by-intent), newest-changed first in each; code folded behind a count. The kinds (VIEW_ORDER) stay
+//           the list's SECONDARY grouping (src/lib/artifacts-list-model.js).
+// THE INTENT (lane artifacts-by-intent, owner 2026-11-06 「分一下哪些可能是用户最需要看的，比如 publish 这种行为显然就是 agent
+//           想要让用户看的，自动检测修改过的文件这种优先级就更低」): `intentOf(row)` → 'foryou' | 'made' | 'touched', PURE over
+//           the row's own facts — ① FOR YOU: what an agent put in front of the person (a published page, a presented
+//           page, a hand-over, a running service with its link, a row a publish / present / hand-over / Design-window
+//           open named — `shown`, sticky FORWARD: a later op by the person never clears it, and a row kept before the
+//           field reads its showing only from a fact that tells the person from the agent, `wasShown` (r5: never its
+//           `by` — the old reducer wrote every op the agent's); a page link the PERSON pasted into their own message
+//           is theirs, never «for you» — `opAuthor`: a present op carries its message's author, and the author is the
+//           message's PROVENANCE, never the record's type — a peer's send, a notice, a helper's records are an agent's,
+//           src/harnesses/artifacts-of.js); ② MADE HERE: what the agent WROTE (a write born it — `writes`), the person's
+//           own uploads (theirs, never «for you»), a page unpublished (it says so), a stopped service; ③ TOUCHED: code
+//           and the rows born by an edit (a file that existed before — the auto-detected changes, lowest). The server
+//           sends the verdict on every block (`cardBlock` `intent`) — the chip, the popover and the window group by it.
 //
 // THE CONTRACT TOWARD doc-window (the Doc window lane — it calls both; spelled here and in kb-file-structure):
 //   ownerOf({host, path}) → {sessionId, row} | null   — the newest conversation whose registry holds the path
@@ -32,8 +47,11 @@
 // Their ops (REG_OPS) never count as a write or an edit; their kind outranks an extension's (KIND_RANK: a published
 // design stays a design, an uploaded .md the agent then edits stays an upload). `pageOp` / `designOp` / `uploadOp` turn
 // a store's record into the op; `storeRows` folds a conversation's pages + designs at every rebuild (the uploads live in
-// the persisted rows — the composer's record IS this registry).
+// the persisted rows — the composer's record IS this registry) and (lane artifacts-by-intent r6) every ask it filed that
+// the For-you store keeps: `askOps` is THE ONE READER OF AN ASK — live (presentAsk) and at the rebuild — so a row an ask
+// put in front of the person reads «for you» whatever op came after, the tree before this field included.
 const { FILE_TYPES } = require('./file-type-table.js');
+const { uncut } = require('./inbox-reply-text.js'); // PURE: the cut mark's reader (r6) — a token a cap cut through is no link
 
 const KINDS = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'code', 'other']);
 const VIEW_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other']); // lane artifacts-services: what a conversation RUNS reads first after its docs
@@ -42,6 +60,8 @@ const REG_OPS = Object.freeze(['publish', 'unpublish', 'open', 'upload', 'handov
 const KIND_RANK = Object.freeze({ design: 3, page: 2, upload: 1 }); // a registry's kind over an extension's (and design › page › upload)
 const outranks = (a, b) => (KIND_RANK[a] || 0) > (KIND_RANK[b] || 0);
 const BY = Object.freeze(['agent', 'user']);
+const INTENTS = Object.freeze(['foryou', 'made', 'touched']); // lane artifacts-by-intent: the list's first axis, in its order
+const SHOWN_OPS = Object.freeze(['publish', 'present', 'handover', 'open']); // a store's fact that put the row in front of the person
 const MAX_ROWS = 500;
 // a category of the extension table → the deliverable kind
 const CATEGORY_KIND = Object.freeze({
@@ -110,7 +130,8 @@ function apply(rows, op) {
   if (prev && o.id && prev.lastId === o.id) return { rows: cur, row: prev, born: false, evicted: [], skipped: 'seen' };
   const row = prev ? { ...prev } : { key, host, path, name: baseName(path), kind: isKind(o.kind) ? o.kind : kindOf(path, o.op), firstAt: at, lastAt: at, by, writes: 0, edits: 0, lastOp: o.op, bytes: null, lastId: null };
   if (prev && isKind(o.kind) && o.kind !== 'code' && row.kind !== o.kind && !outranks(row.kind, o.kind)) row.kind = o.kind; // a registry's kind (page / design / upload) names it better than an extension
-  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); if (o.op === 'present' && !prev && o.page) { row.presented = true; row.page = String(o.page || ''); row.origin = String(o.origin || ''); } }
+  if (prev && wasShown(prev)) row.shown = true; // sticky FORWARD: a showing (a row kept before the field: its own facts) survives any later op — the person's quote too
+  if (REG_OPS.includes(o.op)) { if (o.url !== undefined) row.url = o.url ? String(o.url) : null; if (o.state) row.state = String(o.state); if (o.name) row.name = String(o.name).slice(0, 200); if (o.op === 'present' && !prev && o.page) { row.presented = true; row.page = String(o.page || ''); row.origin = String(o.origin || ''); } if (SHOWN_OPS.includes(o.op) && !(o.op === 'present' && by === 'user')) row.shown = true; } // the person's own paste shows nothing to them
   else if (o.op === 'write' && by === 'agent') row.writes += 1; else row.edits += 1;
   const via = viaOf(o.via);
   if (via && (!prev || !row.via)) row.via = via; // lane artifacts-handover: WHO made it for this conversation (a subagent / a helper conversation) — the birth's
@@ -153,6 +174,7 @@ function merge(a, b) {
     const reg = {}; // the registries' facts: the later side's, else whichever side has them; the higher-ranked kind
     for (const f of ['url', 'state']) { const v = later[f] !== undefined ? later[f] : (p[f] !== undefined ? p[f] : r[f]); if (v !== undefined) reg[f] = v; }
     if (!p.via && r.via) reg.via = r.via; // lane artifacts-handover: the birth's helper; the hand-overs of both sides
+    if (wasShown(p) || wasShown(r)) reg.shown = true; // lane artifacts-by-intent: once put in front of the person, on either side (`by` = the later writer — never the showing)
     if (r.handedTo || p.handedTo) reg.handedTo = handedUnion(p.handedTo, r.handedTo);
     if (outranks(r.kind, p.kind)) reg.kind = r.kind;
     if (r.name && (outranks(r.kind, p.kind) || (r.kind === p.kind && later === r))) reg.name = r.name; // a design's newer title
@@ -164,11 +186,48 @@ function merge(a, b) {
   evictPresented(out, null);
   return out;
 }
-/** THE CHIP'S ORDER: deliverables by kind (VIEW_ORDER), newest change first in each; code behind a count. */
+/** WAS THE ROW PUT IN FRONT OF THE PERSON (lane artifacts-by-intent — sticky forward): its `shown` — the reducer writes
+ *  it at every showing. A row WITHOUT it (kept by a tree before the field) is read only from a fact that tells the
+ *  person from the agent (r5): that tree wrote every op `by: 'agent'`, the person's paste included, so its `by` and
+ *  `presented` witness nothing — a page link counts only when its last op was an ASK (an `ask:` id: presentAsk alone
+ *  writes it), any other row when its last op is a showing (publish · present · hand-over · open: a person's message
+ *  never named anything but a page link). On every row this reducer writes it agrees with `shown`; a link kept so with
+ *  no such fact is «made» until the rebuild's own derivation finds an agent's showing in the transcript (merge). */
+const wasShown = (r) => !!(r && (r.shown || (r.presented ? String(r.lastId || '').startsWith('ask:') : SHOWN_OPS.includes(r.lastOp))));
+/** THE ONE VERDICT (lane artifacts-by-intent; the header's THE INTENT): the band a row reads in — 'foryou' | 'made' |
+ *  'touched' — over its own facts only (a row or its card block; junk ⇒ 'touched'). */
+function intentOf(r) {
+  if (!r || typeof r !== 'object') return 'touched';
+  if (r.kind === 'service') return r.state === 'stopped' || !r.url ? 'made' : 'foryou'; // running, with the link the person clicks
+  if (r.state === 'unpublished' || r.gone) return 'made'; // a page taken down leaves the band (its row says so)
+  if (r.presented) return wasShown(r) ? 'foryou' : 'made'; // a page link an agent put in front of the person (the person's own paste is theirs)
+  if (r.kind === 'page' && r.state === 'published') return 'foryou';
+  if (r.via && r.via.kind === 'handover') return 'foryou';
+  if (r.kind === 'upload') return 'made'; // the person's own file: shown, never «for you»
+  if (wasShown(r)) return 'foryou'; // an ask's --artifact, a Design window opened on it — even a code file
+  if (r.kind === 'design') return 'made'; // a design no Design window opened yet
+  if (r.kind === 'code') return 'touched';
+  return (Number(r.writes) || 0) > 0 ? 'made' : 'touched'; // born by an edit (a file that was there before) ⇒ touched
+}
+/** WHO an observed op is by (the live consumer and the rebuild's derivation — one rule): the agent's, except a page link
+ *  in a message the PERSON typed (`artifactsOf` tags its present op `by: 'user'` by the message's provenance — a peer's
+ *  send, a notice, a helper's records never) — never «for you». */
+const opAuthor = (o) => (o && o.op === 'present' && o.by === 'user' ? 'user' : 'agent');
+/** A TRAY ANSWER'S QUOTE (r10 — a quote carries the ORIGIN of what it quotes): the quote above the person's answer is the
+ *  words of the ITEM it quotes, and the tray answers a producer's item too (the browser's lapsed takeover names the page
+ *  it left open). artifacts-of names that item on each quote op (`quote` = its id); the op is the agent's showing only
+ *  when `isAsk(id)` — the item is one of this conversation's ASKS (the registry asks the ask route's own answer, asksOf:
+ *  src/inbox-origin.js isAsk under the route's key) —, else nobody's: dropped, no row (a producer's record is never a
+ *  witness; nor is an item the store no longer keeps). Every other op passes untouched. One rule, live and at the rebuild. */
+function quotedOps(ops, isAsk = () => false) {
+  const ours = (id) => { try { return !!isAsk(String(id)); } catch { return false; } };
+  return (Array.isArray(ops) ? ops : []).filter((o) => !(o && o.quote) || ours(o.quote));
+}
+/** THE CHIP'S ORDER: the intent bands (INTENTS), newest change first in each; code behind a count. */
 function view(rows) {
   const all = Object.values(rows || {}).filter((r) => r && r.key);
   const byNew = (a, b) => (b.lastAt || 0) - (a.lastAt || 0) || String(a.key).localeCompare(String(b.key));
-  const items = all.filter((r) => r.kind !== 'code').sort((a, b) => (VIEW_ORDER.indexOf(a.kind) - VIEW_ORDER.indexOf(b.kind)) || byNew(a, b));
+  const items = all.filter((r) => r.kind !== 'code').sort((a, b) => (INTENTS.indexOf(intentOf(a)) - INTENTS.indexOf(intentOf(b))) || byNew(a, b));
   const code = all.filter((r) => r.kind === 'code').sort(byNew);
   return { items, code, count: items.length, codeCount: code.length, total: all.length, full: all.length >= MAX_ROWS };
 }
@@ -179,6 +238,7 @@ function cardBlock(row) {
   if (!row || !row.key) return null;
   return { type: 'artifact', key: row.key, host: row.host || '', path: row.path, name: row.name, kind: row.kind,
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
+    intent: intentOf(row), ...(row.shown ? { shown: true } : {}), // lane artifacts-by-intent: the band the list reads it in
     ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
     ...(row.via ? { via: row.via } : {}), ...(row.handedTo && row.handedTo.length ? { handedTo: row.handedTo } : {}),
     ...(row.presented ? { presented: true, page: row.page, public: !!row.public, publisher: row.publisher || '', ...(row.gone ? { gone: true } : {}) } : {}),
@@ -260,12 +320,18 @@ function uploadOp(f, { host = '', at = 0 } = {}) {
   if (!f || typeof f.path !== 'string' || !f.path) return null;
   return { op: 'upload', kind: 'upload', by: 'user', host, path: f.path, bytes: Number.isFinite(f.size) ? f.size : undefined, at };
 }
-/** A conversation's rows from the STORES (not the transcript) — the rebuild's third merge input. */
-function storeRows({ pages = [], designs = [] } = {}) {
+/** A conversation's rows from the STORES (not the transcript) — the rebuild's third merge input: its pages + designs, and
+ *  (r6) the asks it filed (`asks` = the For-you store's items, open or answered — the store keeps their words and
+ *  attachments): the ops each one folded live (askOps), so the merge stamps every row an ask named `shown`. */
+function storeRows({ pages = [], designs = [], asks = [] } = {}) {
   let rows = {};
   for (const op of [...(pages || []).map((p) => pageOp(p)), ...(designs || []).map(designOp)]) if (op) rows = fold(rows, op);
+  for (const it of asks || []) if (it && it.id) for (const op of askOps({ artifacts: it.artifacts, id: it.id, at: Number(it.createdAt) || 0, said: [it.text, it.detail] })) rows = fold(rows, op);
   return rows;
 }
+/** THE REBUILD'S STAMP (r6): a row the merge put in front of the person that the rows before it did not stamp — the
+ *  rebuild persists then (normalizers' persist seam → the registry's persistSoon), so a restart before the next op keeps it. */
+const stampsGained = (before, after) => Object.values(after || {}).some((r) => r && r.shown && !((before || {})[r.key] || {}).shown);
 // ── THE PRESENTED PAGES (lane pages-chip-groups, owner 2026-10-08 "可以，不过要分组"; B-aa28) — a page ANOTHER conversation
 // published whose /p/<id> link appears in THIS conversation's text (an assistant reply, the user's message, a peer's):
 // OBSERVED, never declared — the link in the text is the witness (the harness hook reads text blocks only, never a tool
@@ -305,6 +371,16 @@ function askOp(a, { at = Date.now(), id = '' } = {}) {
   if (a.kind === 'page') { const op = presentOp({ id: a.page, origin: '' }); return op && { ...op, ...tag }; }
   if (!a.path || (a.kind !== 'file' && a.kind !== 'design')) return null;
   return { op: 'present', ...(a.kind === 'design' ? { kind: 'design' } : {}), host: a.host || '', path: a.path, name: a.name || '', ...tag };
+}
+/** AN ASK'S OPS — THE ONE READER OF AN ASK (lane artifacts-by-intent r6), live (the registry's presentAsk, at the filing)
+ *  and at every rebuild (storeRows over the For-you store's asks): each attachment (askOp) and every /p/ link in its KEPT
+ *  words (`said` = the store's text + detail; a token the store's cut went through is no link — the grammar's `uncut`),
+ *  each the agent's, tagged `ask:<id>:<k>` (the id wasShown reads on a row kept before `shown`). */
+function askOps({ artifacts = null, id = '', at = 0, said = [] } = {}) {
+  const tag = (k) => (id ? `ask:${id}:${k}` : '');
+  const ops = (Array.isArray(artifacts) ? artifacts : []).map((a, k) => askOp(a, { at, id: tag(k) }));
+  for (const l of pageLinksIn((Array.isArray(said) ? said : []).filter((x) => typeof x === 'string').map((x) => uncut(x)).join('\n'))) { const o = presentOp(l); if (o) ops.push({ ...o, at, ...(id ? { id: tag('p:' + l.id) } : {}) }); }
+  return ops.filter(Boolean).map((o) => ({ ...o, by: 'agent' }));
 }
 /** THE READ (the registry's list, every time): each presented row against the pages store. `pageOf(id)` → {page} (live) |
  *  {gone: true} (unpublished — B-f694's 410) | null (never published here); `own(page)` = this conversation published it;
@@ -434,10 +510,18 @@ function rowFor(rows, arg, host = '') {
   return (rows || {})[keyOf(host, a.replace(/\/+$/, '') || a)] || null;
 }
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
+// the bands' words (lane artifacts-by-intent — the closed set's words, like KIND_WORDS; «For you» alone is the tray's 待你处理 in t())
+const INTENT_WORDS = Object.freeze({
+  foryou: { en: 'For you', zh: '给你看的', ja: 'あなたに見せるもの' },
+  made: { en: 'Made here', zh: '做出来的', ja: 'ここで作ったもの' },
+  touched: { en: 'Touched', zh: '顺带改的', ja: 'ついでに変えたもの' },
+});
+const intentWord = (band, lang = 'en') => (INTENT_WORDS[band] || INTENT_WORDS.touched)[lang] || (INTENT_WORDS[band] || INTENT_WORDS.touched).en;
 
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, keyOf, apply, fold, merge, view,
+  INTENTS, SHOWN_OPS, INTENT_WORDS, intentOf, intentWord, opAuthor, quotedOps, wasShown,
   cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
-  pageOp, designOp, uploadOp, storeRows,
-  MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, askOp, resolvePresented,
+  pageOp, designOp, uploadOp, storeRows, stampsGained,
+  MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, askOp, askOps, resolvePresented,
   SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,
   VIA_KINDS, MAX_HANDOVER, viaOf, handoverOp, markHanded, rowFor };

@@ -2074,10 +2074,11 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .af-expand { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); }
 .af-expand:hover, .af-expand:focus-visible { color: var(--accent); background: var(--bg-hover); }
 .af-expand svg { width: 14px; height: 14px; }
-.af-ctl { display: flex; align-items: center; gap: 6px; }
-.af-pick { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.af-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; } /* by measure (r3): one line when it fits, else the count — then a picker — takes the next line; nothing is cut mid-word */
+.af-pick { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; flex: none; max-width: 100%; } /* one line («给你看的优先» at 1280 wrapped) */
+.af-pick-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; } /* the last resort: a picker wider than the whole row */
 .af-pick:hover, .af-pick:focus-visible { border-color: var(--accent); }
-.af-count { margin-left: auto; font-size: 10px; white-space: nowrap; }
+.af-count { margin-left: auto; font-size: 10px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; } /* whole on its own line after the wrap; an ellipsis only past that */
 .af-auto { display: flex; align-items: center; gap: 6px; font-size: 11px; cursor: pointer; user-select: none; } /* lane artifacts-auto-open-quiet: the auto-open switch */
 .af-auto-cb { margin: 0; }
 .chat-artifacts-panel .af-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
@@ -2097,11 +2098,35 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-artifact-row:hover .chat-artifact-more, .chat-artifact-row:focus .chat-artifact-more, .chat-artifact-row:focus-within .chat-artifact-more, .af-trow:hover .chat-artifact-more, .af-trow:focus .chat-artifact-more, .af-trow:focus-within .chat-artifact-more { visibility: visible; }
 @media (hover: none) { .chat-artifacts-panel .chat-artifact-more, .af-window .chat-artifact-more { visibility: visible; } }
 .chat-artifacts-panel .chat-status-dropdown-note { max-width: none; }
-@media (max-width: 480px) {
-  .chat-status-dropdown.chat-artifacts-panel { position: fixed !important; left: 0 !important; right: 0; bottom: 0 !important; width: auto; min-width: 0 !important; max-width: none !important; max-height: 82vh; border-radius: var(--radius) var(--radius) 0 0; }
-  .chat-artifacts-panel .chat-artifact-row { min-height: 44px; }
-  .chat-artifacts-panel .af-search { height: 36px; }
-  .chat-artifacts-panel .chat-artifact-more { visibility: visible; }
+/* lane artifacts-by-intent (owner 2026-11-06, 「根本找不到想找的东西」): the BANDS (给你看的 · 做出来的 · 顺带改的) read as
+   sections, «for you» in the accent; a section over 8 rows sub-groups by FOLDER (an indented head with its count) */
+.chat-artifacts-panel .chat-artifact-head.af-head-band { font-size: 11px; font-weight: 600; color: var(--text); }
+.chat-artifacts-panel .chat-artifact-head.af-head-band[data-band="foryou"] { color: var(--accent); }
+.chat-artifacts-panel .chat-artifact-head.af-head-folder { text-transform: none; letter-spacing: 0; padding-left: 18px; }
+.chat-artifacts-panel .chat-artifact-row.af-in-folder { padding-left: 26px; }
+.chat-artifact-name.af-name-path { direction: rtl; text-align: left; } /* a told-apart name («traces/v3-or1/README.md») ellipsizes from its start — the file's name stays */
+.af-menu, .af-close { display: none; align-items: center; justify-content: center; flex: none; padding: 0; border: 0; background: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); }
+.af-menu svg, .af-close svg { width: 16px; height: 16px; }
+.af-menu:hover, .af-menu:focus-visible, .af-close:hover, .af-close:focus-visible { color: var(--accent); background: var(--bg-hover); }
+/* a FINGER device below 1024 px (and any width ≤ 480): a full-height sheet — the search pinned at its top beside ✕, the
+   auto-open switch in the ⋯ menu (out of the header), every target 44 px, the names and the field 16 px (the house
+   touch scale: the meta 14 px) */
+@media (max-width: 480px), (pointer: coarse) and (max-width: 1023px) {
+  .chat-status-dropdown.chat-artifacts-panel { position: fixed !important; left: 0 !important; right: 0; top: 0 !important; bottom: 0 !important; width: auto; min-width: 0 !important; max-width: none !important; max-height: none; border-radius: 0; border: 0; padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); box-sizing: border-box; z-index: 1000; }
+  .chat-artifacts-panel .af-top { padding: 8px 8px 6px 12px; }
+  .chat-artifacts-panel .af-search { height: 44px; padding-right: 0; }
+  .chat-artifacts-panel .af-filter { font-size: 16px; }
+  .chat-artifacts-panel .af-expand, .chat-artifacts-panel .af-menu, .chat-artifacts-panel .af-close { display: inline-flex; width: 44px; height: 44px; }
+  .chat-artifacts-panel .af-auto { display: none; }
+  .chat-artifacts-panel .af-ctl { flex-wrap: wrap; row-gap: 4px; }
+  .chat-artifacts-panel .af-pick { height: 44px; font-size: 14px; padding: 0 12px; }
+  .chat-artifacts-panel .af-count { font-size: 14px; }
+  .chat-artifacts-panel .chat-artifact-head { min-height: 44px; font-size: 14px; box-sizing: border-box; padding-top: 4px; padding-bottom: 4px; }
+  .chat-artifacts-panel .chat-artifact-head.af-head-band { font-size: 14px; }
+  .chat-artifacts-panel .chat-artifact-row { min-height: 56px; padding-right: 0; }
+  .chat-artifacts-panel .chat-artifact-name { font-size: 16px; }
+  .chat-artifacts-panel .chat-artifact-meta, .chat-artifacts-panel .af-ago { font-size: 14px; }
+  .chat-artifacts-panel .chat-artifact-more { visibility: visible; width: 44px; height: 44px; }
   .chat-artifacts-panel .af-key { display: none; }
 }
 .af-window { display: flex; height: 100%; min-height: 0; font-size: 12px; color: var(--text); background: var(--bg-dialog); }
@@ -2130,6 +2155,8 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .af-c-edits, .af-c-changed { font-variant-numeric: tabular-nums; }
 .af-td.af-c-path { direction: rtl; text-align: left; }
 .af-trow[data-state="stopped"] { opacity: 0.55; }
+.af-tband { padding: 8px 8px 3px; font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--border); } /* lane artifacts-by-intent: a band's head row in the table — where «for you» ends */
+.af-tband[data-band="foryou"] { color: var(--accent); }
 .af-window .chat-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-window .chat-artifact-name mark { background: var(--accent-dim); color: inherit; border-radius: 2px; }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {

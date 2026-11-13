@@ -27,9 +27,10 @@ const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
-const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ASK_VIA, ASK_FILER, legacyAsk } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
 const { legacyCopyFact } = require('./job-model.js'); // PURE: THE ONE LEGACY RUNG reads a ≤ .360 job copy's fact off its own template (lane job-notify-user r4)
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
+const { clip, sameWords } = require('./inbox-reply-text.js'); // PURE: THE cut mark (r6) — every cap of an item's words cuts through it (r7: the facts' strings too — one surrogate-safe cut)
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
 /** lane lark-refresh-stall: the params a WORDS param may carry (each a string or a finite number) — more is refused by name. */
@@ -222,12 +223,6 @@ function normalizeCard(x, name = 'card') {
  *  part nested past 4 is cut — each cut NAMED in the facts' `cut` (≤ 16 paths, the fold says it) and on the returned record
  *  (`factsCut`). Idempotent: facts inside the bound (the door's own) are kept EXACTLY. A whole past 24 KB, or no object at
  *  all, is dropped (the card draws the prose `detail`, as before r7) — still filed. → {facts | null, cut: [paths]}. */
-const clipText = (v, max) => {
-  if (v.length <= max) return v;
-  let n = max - 1;
-  if (/[\ud800-\udbff]/.test(v[n - 1])) n--;   // never half a surrogate pair
-  return v.slice(0, n) + '…';
-};
 /** The first `max` units (no marker — the door's own clip) / the whole in ≤ `max` chunks; both surrogate-safe. */
 const headOf = (v, max) => { let n = Math.min(max, v.length); if (n < v.length && /[\ud800-\udbff]/.test(v[n - 1])) n--; return v.slice(0, n); };
 const chunksOf = (v, max) => { const out = []; for (let i = 0; i < v.length;) { const c = headOf(v.slice(i), max); out.push(c); i += c.length || max; } return out.length ? out : ['']; };
@@ -245,7 +240,7 @@ function normalizeCardFacts(x) {
   const walk = (v, depth, at) => {
     if (v === null || typeof v === 'boolean') return v;
     if (typeof v === 'number') { if (Number.isFinite(v)) return v; said(at); return null; }
-    if (typeof v === 'string') { if (v.length > RUN_CMD_BODY_MAX) said(at); return clipText(v, RUN_CMD_BODY_MAX); }
+    if (typeof v === 'string') { if (v.length > RUN_CMD_BODY_MAX) said(at); return clip(v, RUN_CMD_BODY_MAX); }
     if (depth >= 5 || typeof v !== 'object') { said(at); return null; }   // r13 (lane wake-approve-card): 5 — a reason reference's fold (reason.away[k].refFull) sits at 4; depth 4 cut it, so the card always said it was cut
     if (Array.isArray(v)) { if (v.length > 64) said(at); return v.slice(0, 64).map((y, k) => walk(y, depth + 1, `${at}[${k}]`)); }
     const out = {};
@@ -329,6 +324,7 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
+const { ROW_OF } = require('./foryou-actions.js'); // the registry's declared rows: the load's ask rung reads which file files an action (lane artifacts-by-intent r7)
 const { isDecisionRow, endsOf, OUTCOME_ENDS, RUN_CMD_BODY_MAX, RUN_CMD_MAX } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows (r3: each row's own ends; r8: a producer's outcome-in-the-fact settle, the run card's ONE bound)
 const { isPointer, isHidden, HIDDEN_BY } = require('./foryou-actions.js');   // lane wake-approve-card r3: THE registry's pointers
 /** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — the registry's DECISION_ROWS: a `decide:
@@ -372,7 +368,9 @@ const STATUSES = ['open', 'done', 'dismissed'];
 // THE SIZE OF AN ITEM (2026-09-27, the For-you window's verify round — the owner's
 // complaint IS long agent messages, and the window reads them whole): a question up
 // to TEXT_MAX chars, its detail up to DETAIL_MAX. add() cuts past them and SAYS SO
-// on the record it RETURNS (`textCut` / `detailCut` = the cap it hit — never stored)
+// on the record it RETURNS (`textCut` / `detailCut` = the cap it hit — never stored);
+// the kept words END in the cut mark (src/inbox-reply-text.js `clip` — lane
+// artifacts-by-intent r6: a token the cut went through is no link to any reader)
 // so `vibespace-ask` can name the cut instead of dropping 3 000 characters silently
 // (measured: a 5 000-char --detail printed "added" and kept 2 000). The snapshot every
 // client receives (the broadcast and GET /api/user-todos) carries an OPEN item whole
@@ -480,6 +478,10 @@ class UserTodoManager {
         const f = legacyCopyFact(it.text, it.jobId);
         if (f) it.jobFact = f;
       }
+      // …and THE ASK'S MARK (lane artifacts-by-intent r7): an item the ask route filed before `via` existed takes it here —
+      // the route's shape on every older tree (legacyAsk: the agent's own words, no action but one the action registry says
+      // the route files); a producer's record carries its own action or its words as structure (i18n), never the route's
+      if (legacyAsk(it, (type) => (ROW_OF[type] || {}).producer)) it.via = ASK_VIA;
     }
     // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
     // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
@@ -599,11 +601,11 @@ class UserTodoManager {
     const notObject = fx.fresh.includes('facts') && (typeof facts !== 'object' || Array.isArray(facts));   // the WHY of a drop, from the producer's own value (never the item's words in a log)
     if (fx.fresh.length) console.warn(`[user-todos] ${String(it.sessionKey).slice(0, 80)}: the card drawn again — ${fx.fresh.includes('facts') ? `its facts were ${notObject ? 'not an object' : 'larger than 24 KB'} — dropped, the card shows its text only` : `its facts were cut — named in its fold: ${fx.fresh.join(', ')}`}`);
     const raw = typeof detail === 'string' ? detail.trim() : '';
-    it.detail = raw ? raw.slice(0, DETAIL_MAX) : null;
+    it.detail = raw ? clip(raw, DETAIL_MAX) : null;
     if (fx.facts) it.facts = fx.facts; else delete it.facts;
     if (words !== undefined) { if (words) it.i18n = words; else delete it.i18n; }
     delete it.judged;   // the card's words moved: its place in the list is judged again
-    if (typeof text === 'string' && text.trim()) it.text = clipText(text.trim(), TEXT_MAX);   // a producer whose ONE item counts what it says (lane paced-wake-retry): this file's own surrogate-safe cut
+    if (typeof text === 'string' && text.trim()) it.text = clip(text.trim(), TEXT_MAX);   // a producer whose ONE item counts what it says (lane paced-wake-retry): this file's own surrogate-safe cut
     this._save(); this._notify();
     return { ok: true, facts: fx.facts, detail: it.detail };
   }
@@ -742,7 +744,7 @@ class UserTodoManager {
     if (!minted.has(origin)) minted.set(origin, Object.freeze({ origin, of: 'the For-you store' }));
     return minted.get(origin);
   }
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null, filerKey = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null, filerKey = null, via = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
     // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
@@ -774,7 +776,7 @@ class UserTodoManager {
       if (typeof jobName === 'string' && jobName.trim()) sessionName = [typeof sessionName === 'string' && sessionName ? sessionName : null, beltOf(jobName.trim().slice(0, 200))].filter(Boolean).join(' · ');
     } else if (jobName != null) throw new Error("jobName: only a Background Work item names one (origin 'jobs')");
     const rawText = typeof text === 'string' ? (agentWords ? beltOf(text.trim()) : text.trim()) : '';
-    text = rawText.slice(0, TEXT_MAX);
+    text = clip(rawText, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
     expiresAt = validExpiry(expiresAt, this._now());
@@ -811,6 +813,16 @@ class UserTodoManager {
     // `agent`, each server producer its own, every fixture explicitly
     // (test-user-todos-layout ⑪ is the census beside this throw).
     origin = normalizeOrigin(origin);
+    // WHOSE ASK IS THIS (lane artifacts-by-intent r7): `via: 'ask'` is the ASK ROUTE's mark (src/inbox-origin.js isAsk — what
+    // the agent asked the person to look at), from ASK_FILER alone: a producer's record of a tool call filed under the same
+    // conversation key never carries it — a product file that tries is refused by name. A caller the store cannot name (a
+    // suite's patched copy of the route, outside the tree) is not judged: the mark tells a reader whose item it is, it
+    // grants nothing
+    if (via != null) {
+      if (via !== ASK_VIA || origin !== 'agent') throw new Error(`via: only an agent's ask carries one ('${ASK_VIA}', origin 'agent')`);
+      const filer = srcCallerOf(UserTodoManager.prototype.add);
+      if (typeof filer === 'string' && filer !== ASK_FILER) throw new Error(`via '${ASK_VIA}' is the ask route's mark — filed only by ${ASK_FILER}, not ${filer}`);
+    }
     // A PLUGIN'S REMINDER (lane foryou-plugin-notices): origin 'plugin' names WHICH plugin (`plugin`, its id) and files under
     // that id — one tray section per plugin, pinned under urgent unless filed low (src/lib/user-todos-layout.js trayBand); the plugin must
     // DECLARE 'reminders' (the gate); `plugin` on any other origin is refused, and so is a door on an item that is no plugin's
@@ -828,7 +840,7 @@ class UserTodoManager {
     // never in the red badge. A PRODUCER declares it; nothing infers it.
     if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
     const rawDetail = typeof detail === 'string' ? (agentWords ? beltOf(detail.trim()) : detail.trim()) : '';   // agent-output-sinks: an agent's words only (AGENT_WORDS_ORIGINS; a fields item's detail was composed from belted fields)
-    detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
+    detail = rawDetail ? clip(rawDetail, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
     const named = (o) => (arts.cut || fx.cut.length ? { ...o, ...(arts.cut ? { artifactsCut: arts.cut } : {}), ...(fx.cut.length ? { factsCut: fx.cut } : {}) } : o); // lane foryou-attachments: the attachments' cap, named the same way (r8: the facts' cuts too)
@@ -881,7 +893,7 @@ class UserTodoManager {
       // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open
       // is a RE-ASK — counted (the tray's judge reads "re-asked N times"; the 48 h decay restarts at the last one); new
       // words are an edit (F2 below), and a server producer's periodic re-file is not an ask
-      const reask = existing.status === 'open' && origin === 'agent' && (!detail || detail === existing.detail);
+      const reask = existing.status === 'open' && origin === 'agent' && (!detail || sameWords(detail, existing.detail, DETAIL_MAX)); // r7: the same words an older tree kept as a plain slice
       if (existing.status !== 'open') {
         if (openCount >= maxOpen) throw Object.assign(new Error(`this session already has ${openCount} open items — resolve some before adding more`), { code: 'full', open: openCount });
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
@@ -899,7 +911,8 @@ class UserTodoManager {
         existing.expiresAt = expiresAt; changed = true;
       }
       if (reask) { existing.reasks = (Number(existing.reasks) || 0) + 1; existing.reaskedAt = this._now(); changed = true; }
-      if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
+      if (detail && detail !== existing.detail && sameWords(detail, existing.detail, DETAIL_MAX)) { existing.detail = detail; changed = true; } // r7: the same words an older tree kept as a plain slice — the copy takes the mark, the verdict stays
+      else if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
@@ -916,6 +929,7 @@ class UserTodoManager {
       // a DECLARED origin is kept (the item's producer does not change on a re-file);
       // an item filed before the field existed takes the re-filer's declaration
       if (!existing.origin) { existing.origin = origin; changed = true; }
+      if (via && existing.via !== via) { existing.via = via; changed = true; } // r7: the ask route re-filing the words is its ask
       if (changed) { this._save(); this._notify(); }
       return cut({ ...existing, existing: true });
     }
@@ -942,6 +956,7 @@ class UserTodoManager {
       ...(origin === 'plugin' ? { plugin } : {}), ...(open ? { open } : {}), // lane foryou-plugin-notices: WHICH plugin, and where a click on the item opens
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
       origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
+      ...(via ? { via } : {}), // lane artifacts-by-intent r7: the ask route's own item (src/inbox-origin.js isAsk)
       createdAt: this._now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);

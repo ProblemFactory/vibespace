@@ -39,6 +39,7 @@ export const FILE_ICONS = {
 export const UI_ICONS = {
   image:     FILE_ICONS.image, // image media cards (chat-renderers) share the file-type glyph
   camera:    _s('<path d="M2 5.5a1 1 0 011-1h2l1.2-1.8h3.6L11 4.5h2a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1z"/><circle cx="8" cy="8.5" r="2.5"/>'), // lane phone-take-photo: the composer's 拍照 row
+  folder:    FILE_ICONS.folder, // lane artifacts-by-intent: the Artifacts list's folder heads share the file-type glyph
   alert: `<svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.8v3.6" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/></svg>`,
   // Tool cards
   // Classic open-end wrench (Lucide 'wrench' scaled to 16) — the old path

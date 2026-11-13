@@ -1,5 +1,5 @@
 // THE FOR-YOU LINKS (lane foryou-attachments, owner 2026-10-09 "经常 agent 会让我 review 一个产物/文件/网页，我却没法轻易从
-// inbox 里打开") — PURE (imports only ../path-linkify.js): what an item's words point at, and what an ask's attachment
+// inbox 里打开") — PURE (imports ../path-linkify.js + the cut rule): what an item's words point at, and what an ask's attachment
 // opens. The words stay EXACTLY as written; a link is a span AROUND the words, every segment escaped (linkedHtml) — the
 // item is agent-written and syncs to every client, so raw text is never markup. ONE grammar with the chat: where a path
 // ends = pathRe / cleanPath, a relative reference = looksRelPath (the chat's code-span rule), where it may live =
@@ -13,6 +13,7 @@
 import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';
 import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
 import { maskedLink } from '../secret-shapes.js'; // PURE: THE belt's marks — «redacted» / [vault:<entry>], raw or in an href
+import { cutRuns } from '../inbox-reply-text.js'; // PURE: the tokens a cut went through (lane artifacts-by-intent r7)
 
 export const ASK_ARTIFACT_KINDS = Object.freeze(['file', 'design', 'page']);
 // r5 (M1): THE full-width pairs a URL token may hold BALANCED (a CJK page title: `…/wiki/東京（都）`, `…/「東京」`) — as cleanPath's ASCII
@@ -168,6 +169,9 @@ function proseSegments(s, segs) {
  *  filename. A `masked` segment is a URL a belt masked inside (mask = secret-shapes maskedLink's {shape, vault}). */
 export function segmentText(text) {
   const src = typeof text === 'string' ? text : '';
+  return uncutLinks(src, segmentWords(src));
+}
+function segmentWords(src) {
   const segs = [];
   let at = 0;
   for (const m of src.matchAll(CODE_RE)) {
@@ -190,6 +194,28 @@ export function segmentText(text) {
   }
   if (at < src.length) proseSegments(src.slice(at), segs);
   return segs;
+}
+/** A CUT TOKEN IS NO LINK (lane artifacts-by-intent r7 → r8 — every reader of a cut text drops the WHOLE token the cut went
+ *  through): where the store cut the words is cutRuns' (its «…» at a cap); WHICH token it went through is THIS grammar's —
+ *  the words segmented again with each cut's mark continued by a digit — every link runs on across one, and a path's
+ *  `:line:col` suffix ONLY across one (r9: r8's letter stopped there) — and a link of that text over a cut's place is the token (a URL or a path runs on across '.', '/', '?', '=', ':' — r7 read the page id's word run
+ *  and kept «https://docs.example.…» a link to another host); so is a link of the words that runs right up to the mark
+ *  («https:/…» is a link only while the mark ends it). A link of the words over such a token is drawn as its words; a
+ *  whole link before it (a space, a CJK mark between) stays a link. r10: so is a link ONLY THE CUT MADE — one the continued
+ *  words no longer read, with no space between it and the mark: the relative grammar never takes `:line` (path-linkify —
+ *  «plan.md:42» is no link), so «docs/guide/plan.md:…» read the file while «…plan.md:0» reads nothing. */
+function uncutLinks(src, segs) {
+  const ends = cutRuns(src).map(([, e]) => e).filter((e) => e < src.length);
+  if (!ends.length) return segs;
+  const through = [], still = new Set();
+  let at = 0;
+  for (const g of segmentWords(ends.reduce((t, e) => t.slice(0, e) + '0' + t.slice(e + 1), src))) {
+    const a = at; at += g.s.length;
+    if (g.t === 'link') { still.add(a); for (const e of ends) if (a < e && e < at) through.push([a, e]); }
+  }
+  const cutMade = (a, z) => !still.has(a) && ends.some((e) => e >= z && !/\s/.test(src.slice(z, e))); // r10: the continued words read no link here
+  at = 0;
+  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && (ends.includes(at) || through.some(([b, e]) => b < at && e > a) || cutMade(a, at)) ? { t: 'text', s: g.s } : g; });
 }
 /** The words as HTML: every segment ESCAPED; a link = a span around its own words carrying its kind + ref (escaped); a
  *  masked link = its words + the note (`note(g)` — the caller's translated words, maskedLinkNote) — no ref, no role. */

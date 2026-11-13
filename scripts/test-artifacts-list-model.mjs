@@ -34,7 +34,7 @@ function fixture() {
 }
 const ROWS = fixture();
 const items = ROWS.filter((r) => r.kind !== 'code'), code = ROWS.filter((r) => r.kind === 'code');
-const V = { ok: true, items, code, count: items.length, codeCount: code.length, total: ROWS.length, full: false };
+const V = { ok: true, items, code, count: items.length, codeCount: code.length, total: ROWS.length, full: false, cwd: '/home/u/house3d' }; // the server names the conversation's cwd (lane artifacts-by-intent)
 console.log(`fixture: ${items.length} deliverables + ${code.length} code = ${ROWS.length}`);
 ok(items.length === 43 && code.length === 174, 'the 217-row fixture is the owner\'s 43 + 174');
 
@@ -48,8 +48,8 @@ const f3 = M.filterRows(ROWS, 'pt2:FIX');
 ok(f3.rows.length > 0 && f3.rows.every((r) => M.helperOf(r) === 'pt2:fix'), `a helper label ("pt2:FIX") matches that helper's rows (${f3.rows.length})`);
 const f4 = M.filterRows(ROWS, '设计');
 ok(f4.rows.length === 1 && f4.rows[0].name === '设计说明.md', 'CJK as typed: "设计" finds 设计说明.md');
-const f5 = M.filterRows(ROWS, 'house3d');
-ok(f5.rows.length === 1 && f5.rows[0].kind === 'service', `the path tail is the LAST TWO segments: "house3d" (a deeper ancestor) is not a path match — only the service named so (${f5.rows.length})`);
+const f5 = M.filterRows(ROWS, 'house3d', { cwd: V.cwd });
+ok(f5.rows.length === 1 && f5.rows[0].kind === 'service', `the path is read FROM THE CONVERSATION'S CWD (lane artifacts-by-intent): "house3d" (the cwd every row shares) is not a path match — only the service named so (${f5.rows.length})`);
 ok(M.filterRows(ROWS, '   ').rows.length === ROWS.length && M.filterRows(ROWS, '').q === '', 'an empty / blank query keeps every row (q "")');
 const long = 'x'.repeat(200);
 ok(M.queryOf(long).length === M.FILTER_MAX && M.FILTER_MAX === 80, 'the query is bounded to 80 chars');
@@ -79,7 +79,7 @@ ok(sorted(docs('name'), (a, b) => a.name.localeCompare(b.name, undefined, { nume
 ok(sorted(docs('edits'), (a, b) => ((b.edits + b.writes) - (a.edits + a.writes))), 'edits: most touches (edits + writes) first');
 const tie = [{ key: 'b', name: 'same', lastAt: 5, edits: 1, writes: 1, kind: 'doc' }, { key: 'a', name: 'same', lastAt: 5, edits: 1, writes: 1, kind: 'doc' }];
 ok(M.SORTS.every((s) => keys(M.orderRows(tie, { group: 'kind', sort: s })[0].rows).join() === 'a,b'), 'full ties fall to the key — the same order every time');
-ok(M.orderRows(ROWS, { group: 'nope', sort: 'nope' })[0].head.key === 'k:doc', 'an unknown group / sort reads as kind / changed');
+ok(M.orderRows(ROWS, { group: 'nope', sort: 'nope' })[0].head.key === 'i:made' && M.orderRows(ROWS, { group: 'nope', sort: 'nope' }).at(-1).head.key === 'i:touched', 'an unknown group / sort reads as the intent default / changed (a block without the server\'s verdict: code ⇒ touched, the rest ⇒ made here)');
 
 console.log('③ recentOf + the band rule');
 const rec = M.recentOf(ROWS);
@@ -115,14 +115,14 @@ ok(R.helpers.length && R.helpers.every((h) => h.label) && M.railRows(ROWS, R.hel
 ok(M.railRows(ROWS, 'k:code').length === 174 && M.railRows(ROWS, 'recent').length === 5 && M.railRows(ROWS, 'all').length === 217, 'railRows: a kind · recent · all');
 
 console.log('⑥ listPlan (the popover) + viewFrom (the device-kept view)');
-const p0 = M.listPlan(V, { collapsed: M.DEFAULT_VIEW.collapsed.kind });
-ok(p0.sections[0].key === 'recent' && p0.sections.find((s) => s.key === 'k:code').open === false && p0.sections.find((s) => s.key === 'k:doc').open === true, 'default: the 最近 band first; 代码 collapsed; documents open');
-const p1 = M.listPlan(V, { q: 'pkg3/', collapsed: ['k:code'] });
+const p0 = M.listPlan(V, { group: 'kind', collapsed: M.DEFAULT_VIEW.collapsed.kind });
+ok(p0.sections[0].key === 'recent' && p0.sections[0].rows.every((r) => r.kind === 'code') && p0.sections.find((s) => s.key === 'k:code').open === false && p0.sections.find((s) => s.key === 'k:doc').open === true, 'by kind: the 最近 band first — only what no open group shows (the folded code); 代码 collapsed; documents open');
+const p1 = M.listPlan(V, { q: 'pkg3/', group: 'kind', collapsed: ['k:code'] });
 ok(!p1.sections.some((s) => s.key === 'recent') && p1.sections.find((s) => s.key === 'k:code').open === true, 'filtering: the band hides; a collapsed group with matches opens');
 ok(M.listPlan(V, { q: 'zzzz' }).empty === true, 'zero matches ⇒ the empty note');
 const v1 = M.viewFrom({ group: 'helper', sort: 'edits', collapsed: { helper: ['h:pt2:fix'] } });
 ok(v1.group === 'helper' && v1.sort === 'edits' && v1.collapsed.helper[0] === 'h:pt2:fix' && v1.collapsed.kind.join() === 'k:code', 'viewFrom keeps a stored choice; an absent kind fold set = 代码 collapsed');
-ok(JSON.stringify(M.viewFrom('junk')) === JSON.stringify(M.viewFrom(null)) && M.viewFrom({ group: 'x' }).group === 'kind', 'junk ⇒ the defaults');
+ok(JSON.stringify(M.viewFrom('junk')) === JSON.stringify(M.viewFrom(null)) && M.viewFrom({ group: 'x' }).group === 'intent', 'junk ⇒ the defaults (intent)');
 
 console.log('⑦ the work per keystroke (filterRows → orderRows): LINEAR in WORK at 250 → 500 → 1 000 rows; the clock printed, never judged');
 const big = []; for (let i = 0; i < 500; i++) big.push({ ...ROWS[i % ROWS.length], key: 'k' + i, name: (i % 3 ? 'mod_' : 'Sec') + i + '.py' });

@@ -33,7 +33,7 @@ const ra = rows0['job:a'];
 ok(ra && ra.kind === 'service' && ra.url === 'https://inst.example.test/proxy/http://127.0.0.1:8100/' && ra.via === 'proxy' && ra.state === 'running' && ra.since === 900 && ra.firstAt === 1000, 'a running job that listens = ONE service row: its url = this instance\'s proxy of its port (no forward), since = the job\'s start, firstAt = its first listen', ra);
 const mixed = { ...AF.fold({}, { op: 'write', path: '/p/notes.md', at: 5 }), ...AF.fold({}, AF.pageOp({ id: 'pg', srcKey: 'local:/p/site/index.html', srcPath: '/p/site/index.html', path: '/p/pg', updatedAt: 9 })), ...AF.fold({}, { op: 'write', path: '/p/run.py', at: 7 }), ...rows0 };
 const v = AF.view(mixed);
-ok(v.items.map((b) => b.kind).join(',') === 'doc,service,page' && v.code.length === 1 && v.count === 3, 'placement: Services under their own head AFTER Docs and before the rest; code stays folded; the chip counts it', v.items.map((b) => b.kind));
+ok(v.items.map((b) => b.kind).join(',') === 'service,page,doc' && v.items.map((b) => AF.intentOf(b)).join(',') === 'foryou,foryou,made' && v.code.length === 1 && v.count === 3, 'placement (lane artifacts-by-intent): the running service and the published page read «for you» (newest first), the doc the agent wrote «made here»; code stays folded; the chip counts it', v.items.map((b) => b.kind));
 const stopped = job('b', 'c-A', { state: 'down', runs: [{ startedAt: 900, endedAt: 5000 }] });
 const rb = AF.serviceRow(stopped, { now: 5000 + 23 * H });
 ok(rb && rb.state === 'stopped' && rb.stoppedAt === 5000 && AF.cardFacts(AF.cardBlock(rb)).stoppedAt === 5000, 'a stopped job\'s row stays (greyed) with its stop instant', rb);
@@ -101,6 +101,8 @@ const portOf = (tag) => { try { return Number(fs.readFileSync(path.join(D, tag +
 const list = () => REG.listFor('s1');
 const svc = () => list().items.filter((b) => b.kind === 'service');
 const born = await until(() => svc().length === 1 && portOf('mine') > 0 && JX && JX.listen);
+session.host = 'gpu1'; const remoteList = list(); session.host = '';
+ok(list().cwd === D && list().host === '' && remoteList.host === 'gpu1' && remoteList.cwd === D, 'listFor names the conversation\'s cwd and its machine (local = \'\') — the folder every row reads is read against them (lane artifacts-by-intent)', { cwd: list().cwd, host: remoteList.host });
 const P = portOf('mine');
 const b1 = svc()[0];
 ok(born && b1.jobId === J.id && b1.port === P && b1.url === `https://inst.example.test/proxy/http://127.0.0.1:${P}/` && b1.via === 'proxy' && b1.state === 'running' && b1.name === 'house-web', 'the job\'s row appears within one read: its ephemeral port, the link = this instance\'s proxy of it (no forward yet)', b1);

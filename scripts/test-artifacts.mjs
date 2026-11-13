@@ -77,13 +77,19 @@ ok(orphan.born && orphan.row.edits === 1 && orphan.row.writes === 0 && orphan.ro
 ok(AF.apply({}, { op: 'write' }).skipped === 'no-path' && AF.apply({}, { path: '/a', op: 'delete' }).skipped === 'bad-op', 'an unreadable op is skipped with a reason, never a throw');
 
 console.log('④ bounds + the view');
+// the first MAX_ROWS rows set up in one object, each exactly as the reducer births it (below the cap no row meets
+// another); every row PAST the cap folds through the reducer — the eviction the assert judges (lane artifacts-by-intent
+// r5: 510 folds each copying the whole object were 22 ms of this suite; r10: two folds past the cap, not ten — each sorts all
+// 500 rows to pick its victim, and the third op's victim m2 says the first two took m0, m1: oldest code first, in order)
 let big = {};
-for (let i = 0; i < 30; i++) big = AF.fold(big, { path: `/c/m${i}.py`, op: 'write', at: 1000 + i });
-for (let i = 0; i < 480; i++) big = AF.fold(big, { path: `/d/d${i}.md`, op: 'write', at: 5000 + i });
+const born = (o) => { const r = AF.apply({}, o).row; big[r.key] = r; };
+for (let i = 0; i < 30; i++) born({ path: `/c/m${i}.py`, op: 'write', at: 1000 + i });
+for (let i = 0; i < 470; i++) born({ path: `/d/d${i}.md`, op: 'write', at: 5000 + i });
+for (let i = 470; i < 472; i++) big = AF.fold(big, { path: `/d/d${i}.md`, op: 'write', at: 5000 + i });
 const over = AF.apply(big, { path: '/d/last.md', op: 'write', at: 9999 });
-ok(Object.keys(over.rows).length === AF.MAX_ROWS && over.evicted.length === 1 && over.evicted[0] === ':/c/m10.py' && Object.keys(big).length === AF.MAX_ROWS, `≤ ${AF.MAX_ROWS} rows: the oldest CODE row goes first and is returned`, over.evicted);
+ok(Object.keys(over.rows).length === AF.MAX_ROWS && over.evicted.length === 1 && over.evicted[0] === ':/c/m2.py' && !big[':/c/m0.py'] && !big[':/c/m1.py'] && !!big[':/c/m2.py'] && Object.keys(big).length === AF.MAX_ROWS, `≤ ${AF.MAX_ROWS} rows: the oldest CODE row goes first and is returned`, over.evicted);
 const v = AF.view(rows);
-ok(v.items.map((r) => r.name).join(',') === 'part1.md,BRIEF.md,cover.png' && v.codeCount === 2 && v.count === 3, 'view: docs first (newest change first), then media; code folded behind a count', v.items.map((r) => r.name));
+ok(v.items.map((r) => r.name).join(',') === 'cover.png,part1.md,BRIEF.md' && v.items.every((r) => AF.intentOf(r) === 'made') && v.codeCount === 2 && v.count === 3, 'view (lane artifacts-by-intent): the three the agent wrote read in ONE band (made here), newest change first — the kind no longer splits them; code folded behind a count', v.items.map((r) => r.name));
 ok(AF.view(over.rows).full === true, 'a full list says so');
 
 console.log('⑤ the replay — a transcript with 3 deliverable writes ⇒ the rows + one card each after a rebuild');
@@ -162,7 +168,7 @@ const uk = ':' + CWD + '/notes.md';
 ur = AF.fold(ur, { op: 'edit', path: CWD + '/notes.md', at: Date.parse(T(61)), id: 'e-notes' });
 ok(ur[uk].kind === 'upload' && ur[uk].bytes === 12 && ur[uk].edits === 1 && AF.cardFacts(AF.cardBlock(ur[uk])).byUser === false, 'an upload is an `upload` row by: user; the agent\'s later edit keeps its kind (an upload outranks the extension)', ur[uk]);
 const mixed = AF.merge(AF.merge({ ...rr, ...ur }, dr), {});
-ok(AF.view(mixed).items.map((b) => b.kind).join(',') === 'page,design,upload', 'the chip\'s order holds the three: page › design › upload', AF.view(mixed).items.map((b) => b.kind));
+ok(AF.view(mixed).items.map((b) => b.kind + ':' + AF.intentOf(b)).join(',') === 'design:foryou,upload:made,page:made', 'the chip\'s order (lane artifacts-by-intent): the design a Design window opened reads «for you»; the upload (the person\'s own) and the page taken down read «made here», newest first', AF.view(mixed).items.map((b) => b.kind + ':' + AF.intentOf(b)));
 const stale = AF.merge({ [pk]: { ...rr[pk], lastAt: Date.parse(T(70)) } }, AF.storeRows({ pages: [PG] }));
 const back = AF.merge({ [pk]: { ...rr[pk] } }, AF.storeRows({ pages: [{ ...PG, updatedAt: Date.parse(T(80)) }] }));
 ok(stale[pk].state === 'unpublished' && back[pk].state === 'published', 'the merge: the LATER fact wins (a persisted unpublish over an older store record; a re-publish after it)', [stale[pk].state, back[pk].state]);
@@ -324,7 +330,8 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   const sA = { backend: 'claude', sockName: 'sA', claudeSessionId: 'c-pa', cwd: CWD, host: '', name: 'Writer', _artifacts: {} };
   const sB = { backend: 'claude', sockName: 'sB', claudeSessionId: 'c-pb', cwd: CWD, host: '', name: 'Publisher', _artifacts: {} };
   const told = [];
-  REG.configure({ activeSessions: () => new Map([['sA', sA], ['sB', sB]]), pages: () => pagesStore, designs: () => null, sessionMeta: null, instanceUrl: { url: () => 'https://vs.example.com:3456' }, toSession: (s, sid, m) => told.push({ sid, ...m }), log: { log() {}, warn() {} } });
+  const regCfg = (more = []) => ({ activeSessions: () => new Map([['sA', sA], ['sB', sB], ...more]), pages: () => pagesStore, designs: () => null, sessionMeta: null, instanceUrl: { url: () => 'https://vs.example.com:3456' }, toSession: (s, sid, m) => told.push({ sid, ...m }), log: { log() {}, warn() {} } });
+  REG.configure(regCfg());
   const recs = [
     sayAt(`Here is the tour: /p/${OTHER.id}`, 20),
     userAt([{ type: 'tool_result', tool_use_id: 'x', content: `Published /p/${PID('t')}` }], 21), // a tool result is not a text record
@@ -359,6 +366,320 @@ console.log('⑪ a page ANOTHER conversation published, shown here by its /p/<id
   const sR = { backend: 'claude', sockName: 'sR', claudeSessionId: 'c-pr', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
   await N.rebuildHistory(sR, 'sR', [sayAt(`replayed /p/${PID('r')}`, 40)]);
   ok(sR._artifacts[AF.keyOf('', '/p/' + PID('r'))]?.presented === true, 'rebuild: the transcript\'s link re-derives the presented row (the registry\'s second path)');
+  // lane artifacts-by-intent r3 (z1): WHO wrote a link is the message's PROVENANCE, through BOTH doors — the live consumer
+  // (registry observe) and the rebuild (normalizers artifactDeriver); the r2 acceptance reverted either door to r1's forced
+  // «agent» and no suite went red
+  const PEERP = { id: PID('e'), name: 'Referee report', path: '/p/' + PID('e'), public: true, updatedAt: 8, sessionId: 'sB', conversationId: 'c-pb' };
+  const PASTEP = { id: PID('f'), name: 'A page they pasted', path: '/p/' + PID('f'), public: true, updatedAt: 9, sessionId: 'sB', conversationId: 'c-pb' };
+  PSTORE.pages.push(PEERP, PASTEP);
+  const peerAt = (text, s) => ({ ...userAt(`Another Claude session sent a message:\n${text}`, s), isMeta: true, origin: { kind: 'peer', from: 'unknown' }, promptSource: 'system' }); // the CLI's measured peer record (scripts/fixtures/message-origin)
+  const DOOR = [peerAt(`Message from session "referee" (via vibespace-msg; reply: vibespace-msg send "referee" "..."):\nreport published: /p/${PEERP.id}`, 60), userAt(`can you fix the table on /p/${PASTEP.id} ?`, 61)];
+  const bandsOf = (rows) => Object.fromEntries(Object.values(rows || {}).filter((r) => r.presented).map((r) => [r.page, AF.intentOf(r)]));
+  const doorsRight = (b) => b[PEERP.id] === 'foryou' && b[PASTEP.id] === 'made';
+  const sD = { backend: 'claude', sockName: 'sD', claudeSessionId: 'c-pd', cwd: CWD, host: '', name: 'Lead', _artifacts: {} };
+  REG.configure(regCfg([['sD', sD]]));
+  for (const r of DOOR) REG.observe(sD, r);
+  const liveD = Object.fromEntries(REG.listFor('sD').items.filter((b) => b.presented).map((b) => [b.page, b.intent]));
+  ok(doorsRight(liveD), 'LIVE door (observe → listFor): a peer\'s vibespace-msg send with a /p/ link ⇒ «for you»; the person\'s own paste ⇒ «made here»', liveD);
+  const sDr = { backend: 'claude', sockName: 'sDr', claudeSessionId: 'c-pdr', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
+  await N.rebuildHistory(sDr, 'sDr', DOOR);
+  ok(doorsRight(bandsOf(sDr._artifacts)), 'REBUILD door (the transcript\'s derivation): the same two verdicts', bandsOf(sDr._artifacts));
+  {
+    const fsD = await import('node:fs'), rsrc = fsD.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), nsrcD = fsD.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+    const liveDoor = 'noteOp(session, { ...o, by: AF.opAuthor(o) })', rbDoor = "by: AF.opAuthor(o) }); // the person's own page link";
+    const M4e = rsrc.includes(liveDoor) ? M.load('src/server/artifact-registry.js', rsrc.replace(liveDoor, "noteOp(session, { ...o, by: 'agent' })"), 'liveagent') : null;
+    const sE = { backend: 'claude', sockName: 'sE', claudeSessionId: 'c-pe', cwd: CWD, host: '', _artifacts: {} };
+    if (M4e) { M4e.configure(regCfg([['sE', sE]])); for (const r of DOOR) M4e.observe(sE, r); REG.configure(regCfg()); } // the copy's configure pointed the rebuild's helper seam at itself — the real one again
+    ok(M4e && bandsOf(sE._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the live door forcing «agent» (r1 — the acceptor\'s M4e) ⇒ the person\'s paste reads «for you» — RED', M4e && bandsOf(sE._artifacts));
+    const M4f = nsrcD.includes(rbDoor) ? M.load('src/normalizers.js', nsrcD.replace(rbDoor, "by: 'agent' }); // control"), 'rebuildagent') : null;
+    const sF = { backend: 'claude', sockName: 'sF', claudeSessionId: 'c-pf', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
+    if (M4f) await M4f.rebuildHistory(sF, 'sF', DOOR);
+    ok(M4f && bandsOf(sF._artifacts)[PASTEP.id] === 'foryou', 'CONTROL the rebuild forcing «agent» (r1 — the acceptor\'s M4f) ⇒ RED', M4f && bandsOf(sF._artifacts));
+  }
+  // r4 (W1): a For-you TRAY ANSWER is ONE message with TWO authors — composeReply quotes the ask (its text + up to
+  // DETAIL_QUOTE_CAP chars of its detail: the AGENT's words) above the person's answer. The r3 acceptance's three measured
+  // records (claude JSONL promptSource sdk · the live _fromWebui record · codex input_text): the ask's pages «for you» at
+  // BOTH doors; a link the person typed in the ANSWER lines «made»; a link the cap cut mid-id is no row from the reply.
+  {
+    const IR = require(path.join(REPO, 'src/inbox-reply.js'));
+    const ASKP = { id: PID('h'), name: 'Referee report', path: '/p/' + PID('h'), public: true, updatedAt: 10, sessionId: 'sB', conversationId: 'c-pb' };
+    const DIFFP = { ...ASKP, id: PID('i'), name: 'The diff', path: '/p/' + PID('i') }, MINEP = { ...ASKP, id: PID('j'), name: 'My notes', path: '/p/' + PID('j') }, CUTP = { ...ASKP, id: PID('k'), name: 'Cut', path: '/p/' + PID('k') };
+    PSTORE.pages.push(ASKP, DIFFP, MINEP, CUTP);
+    const ASK = { id: 'ut-0123456789', text: `Please review the referee report /p/${ASKP.id} before I merge`, detail: `Also see /p/${DIFFP.id} for the diff\n${'x'.repeat(IR.DETAIL_QUOTE_CAP - 46)} /p/${CUTP.id}`, createdAt: Date.parse(T(70)), urgency: 'normal' };
+    const reply = IR.composeReply(ASK, `Looks fine, merge it — my own notes: /p/${MINEP.id}`, { now: Date.parse(T(80)) });
+    const cutAt = reply.indexOf('/p/' + CUTP.id.slice(0, 4));
+    ok(IR.parseReply(reply) && cutAt > 0 && !reply.includes('/p/' + CUTP.id), 'the fixture: composeReply\'s own reply (the parser reads it back); the detail\'s last link cut at the cap MID-ID (' + JSON.stringify(reply.slice(cutAt, cutAt + 12)) + ')');
+    const RECS3 = {
+      'claude JSONL (sdk)': { type: 'user', uuid: 'tr1', timestamp: T(80), cwd: CWD, sessionId: 'c-pt', promptSource: 'sdk', message: { role: 'user', content: reply } },
+      'claude live (_fromWebui)': { type: 'user', _fromWebui: true, msgId: 'm-tray', uuid: 'tr2', timestamp: T(80), cwd: CWD, sessionId: 'c-pt', message: { role: 'user', content: [{ type: 'text', text: reply }] } },
+      'codex input_text': { type: 'response_item', timestamp: T(80), payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: reply }] } },
+    };
+    const trayRight = (b) => b[ASKP.id] === 'foryou' && b[DIFFP.id] === 'foryou' && b[MINEP.id] === 'made' && !(CUTP.id in b);
+    const sess = (id, backend = 'claude') => ({ backend, sockName: id, claudeSessionId: 'c-' + id, cwd: CWD, host: '', name: id, _artifacts: {}, _normalizer: null });
+    const live = {}, rebuilt = {};
+    for (const [k, rec] of Object.entries(RECS3)) {
+      const backend = k.startsWith('codex') ? 'codex' : 'claude', sL = sess('sTL' + backend + k.length, backend), sR3 = sess('sTR' + backend + k.length, backend);
+      REG.configure({ ...regCfg([[sL.sockName, sL]]), asks: () => [ASK] }); // r10: the item the person answers is this conversation's ask (the store keeps it)
+      REG.observe(sL, rec); live[k] = Object.fromEntries(REG.listFor(sL.sockName).items.filter((b) => b.presented).map((b) => [b.page, b.intent]));
+      await N.rebuildHistory(sR3, sR3.sockName, [rec]); rebuilt[k] = bandsOf(sR3._normalizer && sR3._normalizer.derivedArtifacts); // the transcript's derivation (the store's own copy of the ask is storeRows' — below)
+    }
+    REG.configure({ ...regCfg(), asks: () => [] });
+    ok(['claude JSONL (sdk)', 'claude live (_fromWebui)'].every((k) => trayRight(live[k])), 'LIVE door (observe → listFor), a tray answer: the ask\'s pages (its text, its detail) «for you»; the person\'s own link in the answer «made»; nothing from the cut link', live);
+    ok(Object.keys(RECS3).every((k) => trayRight(rebuilt[k])), 'REBUILD door (the transcript\'s derivation): the same verdicts for claude JSONL, the live record and codex input_text', rebuilt);
+    // door (a): THE ASK — presentAsk folds every /p/ link in the ask's text and WHOLE detail (the cut one too) as the agent's
+    const sQ = sess('sQ');
+    REG.configure(regCfg([['sQ', sQ]]));
+    const nQ = REG.presentAsk(sQ, null, { id: ASK.id, said: [ASK.text, ASK.detail] });
+    const askB = Object.fromEntries(REG.listFor('sQ').items.filter((b) => b.presented).map((b) => [b.page, b.intent]));
+    REG.observe(sQ, RECS3['claude JSONL (sdk)']);
+    const afterB = Object.fromEntries(REG.listFor('sQ').items.filter((b) => b.presented).map((b) => [b.page, b.intent]));
+    ok(nQ === 3 && askB[ASKP.id] === 'foryou' && askB[DIFFP.id] === 'foryou' && askB[CUTP.id] === 'foryou' && afterB[ASKP.id] === 'foryou' && afterB[MINEP.id] === 'made', 'AT THE ASK (presentAsk, no --artifact): the links in its text and its whole detail are «for you» from the ask on — the cut one too; the answer later changes none of them', { askB, afterB });
+    // controls: r3's whole-message rule at the reader; r3's presentAsk (attachments only)
+    const fsT = await import('node:fs'), osrc = fsT.readFileSync(path.join(REPO, 'src/harnesses/artifacts-of.js'), 'utf8'), rsrcT = fsT.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
+    const splitLine = (/^ {2}for \(const s of texts\) \{ const rp = parseReply\(s\); if \(rp\) out\.push\(.*$/m.exec(osrc) || [''])[0]; // the reader's split line (r4's or r5's words)
+    const WM = splitLine ? M.load('src/harnesses/artifacts-of.js', osrc.replace(splitLine, '  out.push(...presentOps(texts, by));'), 'wholemsg') : null;
+    if (ok(WM, 'CONTROL needle present: the reader\'s split of a tray answer (r4) — a tree without it has nothing to patch')) {
+      const wmB = bandsOf(AF.resolvePresented(WM.claude(RECS3['claude JSONL (sdk)']).reduce((rows, o) => AF.apply(rows, { cwd: CWD, at: 1, ...o, by: AF.opAuthor(o) }).rows, {}), { pageOf: (id) => ({ page: { ...ASKP, id } }) }));
+      ok(wmB[ASKP.id] === 'made', 'CONTROL r3\'s whole-message rule (a tray answer\'s every line the person\'s) ⇒ the ask\'s page reads «made here» — RED', wmB);
+    }
+    const askLine = 'for (const op of AF.askOps({ artifacts, id, at, said }))'; // r6: the ONE reader of an ask (AF.askOps)
+    const PA = rsrcT.includes(askLine) ? M.load('src/server/artifact-registry.js', rsrcT.replace(askLine, 'for (const op of AF.askOps({ artifacts, id, at }))'), 'askattachonly') : null;
+    if (ok(PA, 'CONTROL needle present: presentAsk\'s fold of the ask\'s words (r4) — a tree without it has nothing to patch')) {
+      const sQ2 = sess('sQ2');
+      PA.configure(regCfg([['sQ2', sQ2]])); PA.presentAsk(sQ2, null, { id: ASK.id, said: [ASK.text, ASK.detail] }); REG.configure(regCfg());
+      ok(!Object.keys(sQ2._artifacts).length, 'CONTROL r3\'s presentAsk (the attachments only) ⇒ an ask naming a page in its words shows none — RED', Object.keys(sQ2._artifacts));
+    }
+    // r5 (V5): A TOKEN THE CAP CUT IS NO LINK — a link that ENDS at the cap is read only when the detail was whole (≤ the
+    // cap); at the cap with more detail beyond it, it is a token cut through: no row from the reply (whatever the ask
+    // carried whole was folded at the ask — presentAsk). Through the reader, the cap landing exactly at the token's end
+    const C = IR.DETAIL_QUOTE_CAP, PH = PID('q'), AT = PID('r'), pad = 'x'.repeat(C - 16) + ' /p/'; // a 12-char id's last char lands at index C - 1
+    const fromReply = (detail) => { const rep = IR.composeReply({ ...ASK, detail }, 'ok', { now: Date.parse(T(80)) }); return HOOK.claude({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: rep } }).map((o) => o.page + ':' + (o.by || 'agent')).filter((x) => !x.startsWith(ASKP.id)); };
+    const atCap = { phantom: fromReply(pad + PH + 'z and more'), cutLink: fromReply(pad + AT + ' and more'), whole: fromReply(pad + AT), before: fromReply(pad.slice(1) + AT + ' and more') };
+    const askPh = AF.pageLinksIn(pad + PH + 'z and more').length;
+    ok((pad + AT).length === C && askPh === 0 && !atCap.phantom.length && !atCap.cutLink.length, 'a token of pg + 11 (no link) cut by the cap to pg + 10 ⇒ no row from the reply (the ask saw no link either); a link ending AT the cap with more detail beyond ⇒ no row from the reply — a token cut through', atCap);
+    ok(atCap.whole.join() === AT + ':agent' && atCap.before.join() === AT + ':agent', 'a link ending at the cap in a detail of exactly the cap (whole) ⇒ read, the agent\'s; a link ending one before the cap (a space at the cut) ⇒ read', atCap);
+    const uncutLine = 'presentOps([uncut(rp)])'; // the quote's reading (r5's words; r10 names the quoted item after it)
+    const UC = osrc.includes(uncutLine) ? M.load('src/harnesses/artifacts-of.js', osrc.replace(uncutLine, 'presentOps([rp.quote])'), 'quotewhole') : null;
+    if (ok(UC, 'CONTROL needle present: the reader\'s drop of the token the cap cut (r5) — a tree without it has nothing to patch')) {
+      const ucPh = UC.claude({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: IR.composeReply({ ...ASK, detail: pad + PH + 'z and more' }, 'ok', { now: Date.parse(T(80)) }) } }).map((o) => o.page);
+      ok(ucPh.includes(PH), 'CONTROL r4\'s reader (the quote read whole) ⇒ the cut token births a phantom row «' + PH + '» — RED', ucPh);
+    }
+    // r6 (U1): A TOKEN CUT AT ANY CAP IS NO LINK — ONE rule for every cap. The store keeps an ask's words to TEXT_MAX /
+    // DETAIL_MAX through the grammar's ONE cut (`clip`: the kept words end in the cut mark — test-user-todos-layout ⑫ pins
+    // the store's own record) and both readers of the kept words drop the token the cut went through: presentAsk at the
+    // ask (AF.askOps), the reader of the tray answer's quote. The acceptance's fixture (a pg + 11 token over char 500) and
+    // the one only the mark stops (the kept chars end in pg + 10, the mark after them) — in the text and the detail
+    const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
+    const utSrc = fsT.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
+    const TM = +(/^const TEXT_MAX = (\d+);$/m.exec(utSrc) || [])[1], DM = +(/^const DETAIL_MAX = (\d+);$/m.exec(utSrc) || [])[1];
+    ok(TM === 500 && DM === 8000 && /\btext = clip\(rawText, TEXT_MAX\);/.test(utSrc) && /\bdetail = rawDetail \? clip\(rawDetail, DETAIL_MAX\) : null;/.test(utSrc) && typeof RT.clip === 'function',
+      'census: the store keeps an ask\'s text to TEXT_MAX 500 and its detail to DETAIL_MAX 8 000 through the grammar\'s ONE cut (`clip` — the cut mark where the cut is made)');
+    const clipT = typeof RT.clip === 'function' ? RT.clip : (s, cap) => s.slice(0, cap), sliceT = (s, cap) => s.slice(0, cap); // sliceT: r5's store
+    const P11 = PID('7') + '7', W10 = PID('8'); // a 13-char token (pg + 11: no page id) · a page id
+    const CUTS = {
+      acceptance: { text: 'x'.repeat(484) + ' /p/' + P11 + ' tail words after the token', detail: null }, // the token over char 500
+      atMark: { text: 'x'.repeat(483) + ' /p/' + P11 + ' more', detail: 'y'.repeat(DM - 17) + ' /p/' + P11 + ' more' }, // kept: pg + 10, then the mark
+      whole: { text: 'x'.repeat(TM - 16) + ' /p/' + W10, detail: 'y'.repeat(DM - 16) + ' /p/' + W10 }, // a link ending AT the cap, nothing beyond
+    };
+    const kept = (k, cut = clipT) => ({ id: 'ut-00000000c' + Object.keys(CUTS).indexOf(k), urgency: 'normal', createdAt: Date.parse(T(70)), text: cut(CUTS[k].text, TM), detail: CUTS[k].detail == null ? null : cut(CUTS[k].detail, DM) });
+    let nU = 0;
+    const atAsk = (it) => { const s = sess('sU' + (++nU)); REG.presentAsk(s, null, { id: it.id, said: [it.text, it.detail] }); return Object.values(s._artifacts).map((r) => r.page); };
+    const fromQuote = (it, R = HOOK) => R.claude({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: IR.composeReply(it, 'ok', { now: Date.parse(T(80)) }) } }).map((o) => o.page);
+    const k6 = Object.fromEntries(Object.keys(CUTS).map((k) => { const it = kept(k); return [k, { tail: it.text.slice(-3) + '|' + String(it.detail).slice(-3), ask: atAsk(it), reply: fromQuote(it) }]; }));
+    ok(!k6.acceptance.ask.length && !k6.acceptance.reply.length && !k6.atMark.ask.length && !k6.atMark.reply.length && k6.atMark.tail === '77…|77…',
+      'a pg + 11 token the store\'s cut went through — char 500 of the text, 8 000 of the detail (the acceptance\'s fixture; and the kept chars ending in pg + 10, the mark after them) ⇒ no row at the ask (presentAsk), no row from the tray answer\'s quote of the same kept text', k6);
+    ok(k6.whole.ask.join() === W10 && k6.whole.reply.join() === W10 && !k6.whole.tail.includes('…'), 'a whole link ending exactly AT the cap, nothing beyond (no cut, no mark) ⇒ a row at the ask and from the reply', k6.whole);
+    const r5store = { ask: atAsk(kept('acceptance', sliceT)), reply: fromQuote(kept('acceptance', sliceT)) };
+    ok(r5store.ask.join() === PID('7') && r5store.reply.join() === PID('7'), 'CONTROL r5\'s store (a plain slice — the cut unmarked) ⇒ the acceptance\'s phantom «' + PID('7') + '» at the ask and from the reply — RED', r5store);
+    const mk6 = kept('atMark'), r5read = { ask: AF.pageLinksIn([mk6.text, mk6.detail].join('\n')).map((l) => l.id), reply: UC ? fromQuote(mk6, UC) : null };
+    ok(r5read.ask.join() === PID('7') && (r5read.reply || []).join() === PID('7'), 'CONTROL r5\'s readers (the mark unread: presentAsk over the kept words whole; the reply\'s `cutAt` only — a text cut sets none) ⇒ the phantom at both doors — RED', r5read);
+  }
+  // r5 (V2): THE ONE RULE — a row BORN or MOVED BETWEEN BANDS tells the conversation's clients (artifacts-changed → they
+  // re-read GET /api/artifacts: listFor is what the client draws), code rows included; an op that moves nothing tells nothing
+  {
+    const PGV = { id: PID('v'), name: 'Their spec', path: '/p/' + PID('v'), public: true, updatedAt: 10, sessionId: 'sB', conversationId: 'c-pb' };
+    PSTORE.pages.push(PGV);
+    const sV = { backend: 'claude', sockName: 'sV', claudeSessionId: 'c-sv', cwd: CWD, host: '', name: 'Asker', _artifacts: {}, _normalizer: null };
+    const toldV = () => told.filter((m) => m.type === 'artifacts-changed' && m.sid === 'sV').length;
+    const bandV = (R, pred) => { const v = R.listFor('sV'); return (v.items.concat(v.code).find(pred) || {}).intent; };
+    const APP = CWD + '/src/app.py', attach = [{ kind: 'file', host: '', path: APP, name: 'app.py' }];
+    const editRec = (n) => ({ type: 'assistant', uuid: 've' + n, timestamp: T(90 + n), cwd: CWD, sessionId: 'c-sv', message: { id: 'msg_ve' + n, role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'tu-ve' + n, name: 'Edit', input: { file_path: APP, old_string: 'a', new_string: 'b' } }] } });
+    const run = (R) => {
+      R.configure(regCfg([['sV', sV]])); sV._artifacts = {};
+      const tl = [], bd = [];
+      const step = (f, pred) => { const t0 = toldV(); f(); tl.push(toldV() - t0); bd.push(pred ? bandV(R, pred) : ''); };
+      const isPg = (b) => b.page === PGV.id, isApp = (b) => b.path === APP;
+      step(() => R.observe(sV, { type: 'user', promptSource: 'sdk', uuid: 'vp', timestamp: T(89), cwd: CWD, sessionId: 'c-sv', message: { role: 'user', content: [{ type: 'text', text: 'my notes: /p/' + PGV.id }] } }), isPg); // 0 the person pastes it
+      step(() => R.presentAsk(sV, null, { id: 'ut-00000000a1', said: ['Please review /p/' + PGV.id] }), isPg); // 1 an ask names it
+      step(() => R.presentAsk(sV, null, { id: 'ut-00000000a2', said: ['Again: /p/' + PGV.id] }), isPg); // 2 a second ask: nothing moves
+      step(() => R.observe(sV, editRec(1)), isApp); // 3 an Edit births a code row
+      step(() => R.observe(sV, editRec(2)), isApp); // 4 a second Edit: nothing moves
+      step(() => R.presentAsk(sV, attach, { id: 'ut-00000000a3' }), isApp); // 5 an ask attaches it
+      step(() => R.presentAsk(sV, attach, { id: 'ut-00000000a3' }), isApp); // 6 the SAME op again (seen)
+      step(() => R.observe(sV, editRec(3)), isApp); // 7 an Edit after: still «for you», nothing moves
+      REG.configure(regCfg());
+      return { tl, bd };
+    };
+    const g = run(REG);
+    ok(g.bd[0] === 'made' && g.bd[1] === 'foryou' && g.tl[1] === 1, 'presentAsk naming a page the person pasted ⇒ told +1, and listFor (what the client re-reads on it) moves it «made» → «for you»', g);
+    ok(g.bd[3] === 'touched' && g.bd[5] === 'foryou' && g.tl[3] === 1 && g.tl[5] === 1, 'a code row: born by an Edit ⇒ told +1; an ask attaching it ⇒ told +1, «touched» → «for you»', g);
+    ok(g.tl[2] === 0 && g.tl[4] === 0 && g.tl[6] === 0 && g.tl[7] === 0, 'an op that moves nothing tells nothing — a second ask on a row already «for you», a second Edit, the same op twice, an Edit after the ask (no storm)', g.tl);
+    const csrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+    ok(/msg\.type === 'artifacts-changed' && msg\.sessionId === sessionId\) \{\s*this\._refreshArtifacts\(\);/.test(csrc) && /_refreshArtifacts\(\) \{[\s\S]{0,400}fetch\(`\/api\/artifacts\?sessionId=[\s\S]{0,200}setArtifacts\(v\); publishArtifacts\(this\.sessionId, v\)/.test(csrc),
+      'census: the client hears it — chat-view re-reads GET /api/artifacts on artifacts-changed; the chip and an open Artifacts window (publishArtifacts) draw the answer');
+    const rsrcV = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
+    const oneRule = "  if (r.born || AF.intentOf(before[r.row.key]) !== AF.intentOf(r.row)) tellChanged(session);";
+    const B4 = rsrcV.includes(oneRule) ? M.load('src/server/artifact-registry.js', rsrcV.replace(oneRule, '  if (r.row.presented && r.born) tellChanged(session);'), 'tellborn') : null;
+    if (ok(B4, 'CONTROL needle present: noteOp\'s one tell rule (r5) — a tree without it has nothing to patch')) {
+      const g4 = run(B4);
+      REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
+      ok(g4.bd[1] === 'foryou' && g4.tl[1] === 0 && g4.tl[5] === 0, 'CONTROL r4\'s rule (told only at a presented birth) ⇒ the pasted page moves to «for you» and the code file too with nothing told — the open list keeps the old band — RED', g4.tl);
+    }
+  }
+  // r4: the machines a view names, AS THE PERSON READS THEM (deps.hostName = the hosts registry's record name — the host
+  // pickers' word): the list model's host rule says «gpu1:», never «host-1a2b3c4d:»
+  {
+    const HID = 'host-1a2b3c4d', sH = { backend: 'claude', sockName: 'sH', claudeSessionId: 'c-ph', cwd: CWD, host: HID, name: 'Remote', _artifacts: {} };
+    const names = { [HID]: 'gpu1', 'host-2b3c4d5e': 'gpu2' };
+    const HOSTS = { get: (id) => { if (!names[id]) throw new Error('host not found'); return { id, name: names[id] }; } }; // HostManager.get's shape: the record, a throw for an id it lost
+    const cfgH = { ...regCfg([['sH', sH]]), hosts: () => HOSTS };
+    REG.configure(cfgH);
+    sH._artifacts = [[HID, CWD + '/a.md'], ['', '/srv/hub/b.md'], ['host-2b3c4d5e', '/srv/c.md'], ['host-dead1234', '/srv/d.md']].reduce((rows, [h, p], i) => AF.apply(rows, { op: 'write', host: h, path: p, cwd: CWD, at: 100 + i }).rows, {});
+    const lv = REG.listFor('sH');
+    REG.configure(regCfg());
+    ok(lv.host === HID && JSON.stringify(lv.hostNames) === JSON.stringify({ [HID]: 'gpu1', 'host-2b3c4d5e': 'gpu2' }), 'listFor names the machines its view mentions by the hosts registry\'s name (the conversation\'s own included; the hub\'s own and a machine gone from the list: none — the model says «Local» / the id)', lv.hostNames);
+    const hsrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), hdoor = ', hostNames: hostNamesOf([host, ...v.items.map((r) => r.host), ...v.code.map((r) => r.host)]) }';
+    const MH = hsrc.includes(hdoor) ? M.load('src/server/artifact-registry.js', hsrc.replace(hdoor, ' }'), 'nohostnames') : null;
+    if (ok(MH, 'CONTROL needle present: listFor\'s machine names (r4) — a tree without it has nothing to patch')) {
+      const mhv = (MH.configure(cfgH), MH.listFor('sH'));
+      REG.configure(regCfg()); // the copy's configure re-pointed the normalizers' seams — the real one again
+      ok(!mhv.hostNames, 'CONTROL r3\'s listFor (no names) ⇒ the list reads the internal id — RED');
+    }
+    // r5 (V4): THE WIRING — server.js hands the registry the hosts registry the host pickers read (`hosts: () => hosts`,
+    // the HostManager); its own words, evaluated over a stub registry, carry «gpu1» to listFor (the list model's hostTag
+    // reads it as «gpu1:» — test-artifacts-intent's machine-name leg)
+    const srvSrc = (await import('node:fs')).readFileSync(path.join(REPO, 'server.js'), 'utf8');
+    const wireOf = (src) => { const line = src.split('\n').find((l) => l.startsWith("require('./src/server/artifact-registry.js').configure(")) || ''; const m = /[{,] hosts: (\(\) => [A-Za-z_$][\w$]*)[,}]/.exec(line); return m && /^const hosts = new HostManager\(/m.test(src) ? m[1] : null; };
+    const wordVia = (src) => { const w = wireOf(src); let thunk = () => null; try { thunk = w ? new Function('hosts', `return (${w});`)(HOSTS) : thunk; } catch { /* no wiring */ } REG.configure({ ...regCfg([['sH', sH]]), hosts: thunk }); const v = REG.listFor('sH'); REG.configure(regCfg()); return (v.hostNames || {})[HID] || null; };
+    ok(wireOf(srvSrc) === '() => hosts', 'census: server.js configures the registry with `hosts: () => hosts` — `hosts` the HostManager the host pickers read');
+    ok(wordVia(srvSrc) === 'gpu1', 'through server.js\'s own wiring (its words over a stub hosts registry) ⇒ listFor names the machine «gpu1»', wordVia(srvSrc));
+    const noDep = srvSrc.replace(' hosts: () => hosts,', '');
+    ok(noDep !== srvSrc && wireOf(noDep) === null && wordVia(noDep) === null, 'CONTROL the dep removed from server.js ⇒ the census reds and listFor names no machine (the list reads «' + HID + ':») — RED', wordVia(noDep));
+    // r6 (U2 + U3) → r7 (T1 · T2 · T5): THE ASK STORE AT THE REBUILD, read by the ask route's own answer to «whose ask is
+    // this?» (src/agent-routes/status.js asksOf: the route's key — a pending fork's placeholder —, the route's own items,
+    // `via: 'ask'`), wired by server.js's own words over the records a For-you store holds: an older tree's (its asks carry
+    // no mark — the store's load marks them by the route's shape, IO.legacyAsk; test-user-todos-layout pins that load on the
+    // real store) and this tree's filings. The merge stamps the row; a stamp the merge gained is PERSISTED at the rebuild
+    // (normalizers' persist seam → persistSoon) and a rebuild that gains none writes nothing.
+    const fsX = await import('node:fs');
+    const IO = require(path.join(REPO, 'src/inbox-origin.js')), STR = require(path.join(REPO, 'src/agent-routes/status.js'));
+    const MA = require(path.join(REPO, 'src/main-ask.js')), HA = require(path.join(REPO, 'src/helper-ask.js')), UX = require(path.join(REPO, 'src/server/unexpected-exit.js')), AG = require(path.join(REPO, 'src/ask-grant.js'));
+    const RPT = CWD + '/out/report.md', PO = CWD + '/out/parent-only.md', FO = CWD + '/out/fork-own.md', EO = CWD + '/out/early.md';
+    const BASE_S3H = { key: AF.keyOf('', RPT), host: '', path: RPT, name: 'report.md', kind: 'doc', firstAt: Date.parse(T(55)), lastAt: Date.parse(T(65)), by: 'agent', writes: 1, edits: 1, lastOp: 'edit', bytes: null, lastId: 'toolu_e65' }; // b48937610's row: write → ask → the agent's edit
+    const PGQ = ['1', '2', '3', '4'].map(PID), PGA = PID('5'), PGG = PID('6'), PGO = PID('9'), PGH = PID('0'), PGT = PID('s'); // pages only a producer's record of a tool call names · one this tree's ask names · one an older tree's --grant ask names
+    for (const id of [...PGQ, PGA, PGG, PGO, PGH, PGT]) PSTORE.pages.push({ id, name: 'their page ' + id.slice(-1), path: '/p/' + id, public: true, updatedAt: 11, sessionId: 'sB', conversationId: 'c-pb' });
+    const URL0 = 'https://vs.example.com:3456/p/', att = (p) => [{ kind: 'file', host: '', path: p, name: path.basename(p) }], KP = 'claude:c-pr';
+    let nI = 0;
+    const rec = (sessionKey, o) => ({ id: 'ut-00000000' + (++nI).toString(16).padStart(2, '0'), sessionKey, detail: null, status: 'open', by: 'agent', i18n: null, action: null, createdAt: Date.parse(T(60 + nI)), ...o }); // the store's record shape
+    const producers = ([qm, qh, qx]) => [ // the three producers' OWN filings under the conversation's key (main-asks.js:78, helper-asks.js:73, unexpected-exit.js:82), each naming a page
+      qm && rec(KP, { ...MA.inboxItemFor(MA.mainAskOf({ requestId: 'rq-' + qm, toolName: 'WebFetch', input: { url: URL0 + qm, prompt: 'read it' } }, {}), { name: 'Reporter', sessionId: 'sP7' }), origin: 'agent', kind: 'action', urgency: 'high', sessionName: 'Reporter' }),
+      qh && rec(KP, { ...HA.inboxItemFor({ requestId: 'rq-' + qh, toolName: 'Bash', input: { command: 'curl -s ' + URL0 + qh } }, { label: 'Fetcher', sessionId: 'sP7' }), origin: 'agent', kind: 'action', urgency: 'high', sessionName: 'Reporter' }),
+      qx && rec(KP, { origin: 'agent', urgency: 'high', sessionName: 'Reporter', text: UX.TEXTS.failed.replace('{name}', 'Reporter').replace('{time}', '08:01'), detail: 'Exit record: it was showing /p/' + qx + '\nNothing was sent into it.', i18n: { text: { key: UX.TEXTS.failed, params: { name: 'Reporter', time: '08:01' } } } }),
+    ].filter(Boolean);
+    const OLD = [rec(KP, { text: 'Please review the report', origin: 'agent', status: 'done', artifacts: att(RPT) }), rec('claude:c-other', { text: 'another conversation\'s ask', origin: 'agent', artifacts: att(CWD + '/out/theirs.md') }),
+      rec(KP, { text: 'May this conversation use the Work browser? It opens /p/' + PGG, origin: 'agent', ...AG.grantItemFields({ id: 'bp-1', label: 'Work' }) }), ...producers(PGQ.slice(0, 3)),
+      (({ origin, ...r }) => r)(rec(KP, { text: 'Please review the page /p/' + PGO, sessionName: 'Reporter' })), // r8 (X2): an ask filed before the origin field (≤ 2.369.168) — no origin
+      // r9 (Y3): the browser's .168 records under the same key — a lapsed takeover naming the page it left, a backend switch proposal (no origin, no i18n, no action)
+      (({ origin, ...r }) => r)(rec(KP, { text: "Your takeover of the agent's browser (Reporter) lapsed after 2 min without input — the agent is driving again", detail: 'Page you left it on: ' + URL0 + PGH + '. Nothing was sent to the agent (browser.announceIdleHandback is off).', urgency: 'low', sessionName: 'Reporter' })),
+      (({ origin, ...r }) => r)(rec(KP, { text: 'Browser backend: switch to CloakBrowser', detail: 'The agent proposes to switch to CloakBrowser. /p/' + PGH + ' stays open.', sessionName: 'Reporter' }))]; // an older tree's: answered, another conversation's, a --grant ask (the grant IS its action), the producers'
+    const TKq = require(path.join(REPO, 'src/browser-takeover.js')), IRq = require(path.join(REPO, 'src/inbox-reply.js'));
+    const NEW = [rec(KP, { text: 'And this page: /p/' + PGA, origin: 'agent', via: 'ask' }), ...producers([PGQ[3]]), ...[['claude:c-par', PO, 'Parent'], ['claude:c-fk', FO, 'Fork'], ['webui:sE', EO, 'Early']].map(([k, p, t]) => rec(k, { text: t + ': please check', origin: 'agent', via: 'ask', artifacts: att(p) })),
+      rec(KP, { ...TKq.idleInboxItem({ label: 'Work', url: URL0 + PGT, sessionName: 'Reporter' }), by: 'agent', origin: 'browser', sessionName: 'Reporter' })]; // r10 (F1): this tree's lapsed takeover — the builder's words, browser-handback fileInbox's fields — naming the page it left open
+    const ROW_OF = require(path.join(REPO, 'src/foryou-actions.js')).ROW_OF, producerOf = (type) => (ROW_OF[type] || {}).producer; // the store's own lookup
+    const held = (rung, legacy = IO.legacyAsk) => { const items = OLD.map((i) => (rung && typeof legacy === 'function' && legacy(i, producerOf) ? { ...i, via: IO.ASK_VIA } : i)).concat(NEW); return { idsWhere: (p) => items.filter(p).map((i) => i.id), get: (id) => items.find((i) => i.id === id) || null }; }; // UserTodoManager's own read
+    const B = held(true), BR = held(false), B7 = held(true, (i, p) => i.origin === 'agent' && typeof IO.legacyAsk === 'function' && IO.legacyAsk(i, p)), B8 = held(true, (i, p) => !!i && (i.origin === 'agent' || (i.origin == null && !['Spending', 'Channels'].includes(i.sessionName) && i.jobId == null)) && i.via == null && i.i18n == null && (i.action == null || p(i.action.type) === IO.ASK_FILER)); // … · r8's rung, its expression as it was (no browser census) // what this tree's load holds · a load without the rung · r7's rung (origin `agent` only)
+    const fixture = { marked: OLD.map((i) => (B.get(i.id).via || '-')).join(), named: [...OLD.slice(3, 6), NEW[1]].every((i, k) => i.detail.includes(PGQ[k])) };
+    ok(fixture.marked === 'ask,ask,ask,-,-,-,ask,-,-' && fixture.named, 'fixture: the store\'s load rung (IO.legacyAsk) marks the older tree\'s asks — answered, another conversation\'s, a --grant ask, one filed before the origin field — and none of the producers\' records (the browser\'s .168 ones too), each of which names its page', fixture);
+    const metas = {}, writes = {}, META = { readSessionMeta: (k) => metas[k] || null, writeSessionMeta: (k, v) => { writes[k] = (writes[k] || 0) + 1; metas[k] = JSON.parse(JSON.stringify(v)); } };
+    const recsP = [tool('Write', { file_path: RPT, content: 'r' }, 55).rec, tool('Edit', { file_path: RPT, old_string: 'r', new_string: 's' }, 65).rec];
+    const keyFn = /^function sessionStatusKey\(session, id\) \{\n[^\n]*\n[^\n]*\n\}$/m.exec(srvSrc), statusKey = keyFn ? new Function(`return (${keyFn[0]});`)() : null;
+    const ASKS = "(s, id) => require('./src/agent-routes/status.js').asksOf(userTodos, s, id, sessionStatusKey)";
+    const wireAsk = (src) => { const line = src.split('\n').find((l) => l.startsWith("require('./src/server/artifact-registry.js').configure(")) || ''; const m = /[{,] asks: (\(s, id\) => require\('\.\/src\/agent-routes\/status\.js'\)\.asksOf\(userTodos, s, id, sessionStatusKey\))[,}]/.exec(line); return m ? m[1] : null; };
+    const srvRequire = createRequire(path.join(REPO, 'server.js'));
+    const asksVia = (src, store) => { const w = wireAsk(src); try { return w ? new Function('userTodos', 'sessionStatusKey', 'require', `return (${w});`)(store, statusKey, srvRequire) : () => []; } catch { return () => []; } };
+    const BASE_PGH = { key: AF.keyOf('', '/p/' + PGH), host: '', path: '/p/' + PGH, name: PGH, kind: 'page', firstAt: Date.parse(T(51)), lastAt: Date.parse(T(51)), by: 'agent', writes: 0, edits: 0, lastOp: 'present', bytes: null, lastId: null, url: '/p/' + PGH, presented: true, page: PGH, origin: '' }; // the row an older tree kept for the page the takeover left open
+    const BASE_PGO = { key: AF.keyOf('', '/p/' + PGO), host: '', path: '/p/' + PGO, name: PGO, kind: 'page', firstAt: Date.parse(T(50)), lastAt: Date.parse(T(50)), by: 'agent', writes: 0, edits: 0, lastOp: 'present', bytes: null, lastId: null, url: '/p/' + PGO, presented: true, page: PGO, origin: '' }; // the page row an older tree kept: no `shown`, no `ask:` id
+    const rebuild = async (sid, asks, { cid = 'c-pr', more = {}, rows = { [BASE_S3H.key]: { ...BASE_S3H }, [BASE_PGO.key]: { ...BASE_PGO }, [BASE_PGH.key]: { ...BASE_PGH } }, recs = recsP, sink = true } = {}) => { // one conversation per variant; the meta read after ONE shared tick (below)
+      const sP = { backend: 'claude', sockName: sid, claudeSessionId: cid, cwd: CWD, host: '', name: 'Reporter', _artifacts: rows, _normalizer: null, ...more };
+      REG.configure({ ...regCfg([[sid, sP]]), sessionMeta: () => META, asks });
+      if (!sink && typeof N.setArtifactPersistSink === 'function') N.setArtifactPersistSink(null); // r5's normalizers: no persist seam
+      await N.rebuildHistory(sP, sid, recs);
+      const v = REG.listFor(sid), all = v.items.concat(v.code), band = (pred) => (all.find(pred) || {}).intent || null;
+      REG.configure({ ...regCfg(), asks: () => [] });
+      return { sid, rows: sP._artifacts, derived: bandsOf(sP._normalizer && sP._normalizer.derivedArtifacts), pgt: band((b) => b.page === PGT), rpt: band((b) => b.path === RPT), theirs: all.some((b) => b.name === 'theirs.md'), pga: band((b) => b.page === PGA), pgg: band((b) => b.page === PGG), pgo: band((b) => b.page === PGO), pgh: band((b) => b.page === PGH), pgq: PGQ.filter((id) => Object.values(sP._artifacts).some((r) => r.page === id)).length, po: band((b) => b.path === PO), fo: band((b) => b.path === FO), eo: band((b) => b.path === EO) };
+    };
+    const persisted = (g) => { const m = ((metas[g.sid] || {}).artifacts || {})[BASE_S3H.key]; const { rows, ...rest } = g; return { ...rest, persisted: !!(m && m.shown), writes: writes[g.sid] || 0 }; };
+    const W7 = asksVia(srvSrc, B), FORK = { _forkRequested: true, _forkSourceId: 'c-par' }, bare = { rows: {}, recs: [] };
+    ok(wireAsk(srvSrc) === ASKS && !!statusKey && statusKey({ backend: 'claude', claudeSessionId: 'c-pr' }, 'sP') === 'claude:c-pr',
+      'census: server.js configures the registry with `asks: ' + ASKS + '` — the ask route\'s own answer to «whose ask is this?» over the For-you store');
+    // the controls: patched copies of the ask route's ONE answer — r6's reader (origin `agent`), the filter dropped, r6's key (no fork guard), no placeholder
+    const stSrc = fsX.readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
+    const ISASK = 'store.idsWhere((i) => IO.isAsk(i) && keys.has(i.sessionKey))', FORKKEY = '  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);', PLACE = 'const keys = new Set([askKey(s, id, sessionStatusKey), `webui:${id}`]);';
+    const stMut = (a, b, tag) => (stSrc.includes(a) ? M.load('src/agent-routes/status.js', stSrc.replace(a, b), tag) : null);
+    const S6 = stMut(ISASK, "store.idsWhere((i) => i.origin === 'agent' && keys.has(i.sessionKey))", 'r6origin'), S0 = stMut(ISASK, 'store.idsWhere((i) => keys.has(i.sessionKey))', 'nofilter');
+    const SK = stMut(FORKKEY, '  const key = sessionStatusKey(s, id);', 'r6key'), SP = stMut(PLACE, 'const keys = new Set([askKey(s, id, sessionStatusKey)]);', 'noplaceholder');
+    ok(S6 && S0 && SK && SP, 'CONTROL needles present: asksOf\'s filter, askKey\'s fork guard, the placeholder key (r7) — a tree without them has nothing to patch');
+    const viaCopy = (S, store = B) => (s, id) => (S && typeof S.asksOf === 'function' ? S.asksOf(store, s, id, statusKey) : []);
+    const g7 = await rebuild('sP7', W7), g5 = await rebuild('sP5', asksVia(srvSrc.replace(' asks: ' + ASKS + ',', ''), B)), gS = await rebuild('sPS', W7, { sink: false });
+    const again = await rebuild('sP7', W7, { rows: JSON.parse(JSON.stringify(g7.rows)) }); // r7 (T5 · M3): the same conversation rebuilt from what it holds (a restart's persisted rows)
+    const fkP = await rebuild('sF', W7, { cid: 'c-par', more: FORK, ...bare }), fkL = await rebuild('sF', W7, { cid: 'c-fk', more: FORK, ...bare }), gE = await rebuild('sE', W7, { cid: 'c-e', ...bare }), gN = await rebuild('sN', W7, { cid: 'c-none' });
+    // r10 (F1): the person answers «ok» from the tray — to the browser's lapsed takeover, and to the conversation's own ask
+    const TKI = NEW[NEW.length - 1], answer = (it, s) => ({ type: 'user', _fromWebui: true, msgId: 'm-' + it.id, uuid: 'uq' + s, timestamp: T(s), cwd: CWD, sessionId: 'c-pr', message: { role: 'user', content: [{ type: 'text', text: IRq.composeReply(it, 'ok', { now: Date.parse(T(s)) }) }] } });
+    const TREC = answer(TKI, 90), AREC = answer(NEW[0], 91), gQ = await rebuild('sPQ', W7, { rows: {}, recs: [TREC, AREC] });
+    const c6 = await rebuild('sC6', viaCopy(S6)), c0 = await rebuild('sC0', viaCopy(S0)), cK = await rebuild('sF', viaCopy(SK), { cid: 'c-par', more: FORK, ...bare }), cP = await rebuild('sE', viaCopy(SP), { cid: 'c-e', ...bare }), cR = await rebuild('sCR', viaCopy(STR, BR)), c7 = await rebuild('sC7', viaCopy(STR, B7)), c8 = await rebuild('sC8', viaCopy(STR, B8));
+    // the persist seam asked at a rebuild that gains nothing: this tree's normalizers vs a copy that persists at every rebuild (a spy for persistSoon)
+    const nsrc = fsX.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8'), GAIN = 'if (artifactPersistSink && AF.stampsGained(was, session._artifacts)) artifactPersistSink(session);';
+    const NM = nsrc.includes(GAIN) ? M.load('src/normalizers.js', nsrc.replace(GAIN, 'if (artifactPersistSink) artifactPersistSink(session);'), 'persistall') : null;
+    const spyOn = async (Nmod) => { let n = 0; const sR = { backend: 'claude', sockName: 'sR', claudeSessionId: 'c-pr', cwd: CWD, host: '', name: 'Reporter', _artifacts: JSON.parse(JSON.stringify(g7.rows)), _normalizer: null }; Nmod.setArtifactPersistSink(() => n++); await Nmod.rebuildHistory(sR, 'sR', recsP); return n; };
+    const spy = { tree: await spyOn(N), everyRebuild: NM ? await spyOn(NM) : null };
+    REG.configure({ ...regCfg(), asks: () => [] }); // the registry's own sink back on the real normalizers
+    await new Promise((r) => setTimeout(r, 1)); // persistSoon(…, 0) is an earlier timer of the same 1 ms list
+    const [p7, p5, pS, pN] = [g7, g5, gS, gN].map(persisted);
+    ok(p7.rpt === 'foryou' && p7.pgg === 'foryou' && p7.pga === 'foryou' && !p7.theirs && p7.persisted, 'r6 (U2 + U3) through server.js\'s own wiring: the older tree\'s row of a file its ask attached (answered since) that the agent then edited + the transcript intact ⇒ «for you» after the rebuild (its --grant ask\'s page too, this tree\'s ask\'s page too); another conversation\'s ask adds nothing; the stamp is in the session meta at the next tick — no op needed', p7);
+    ok(p7.pgq === 0, 'r7 (T1) a parked WebFetch permission, a helper\'s Bash approval, an unexpected exit — an older tree\'s and this tree\'s, each naming a /p/ page, filed under the conversation\'s key with origin `agent` ⇒ no row (the witness is what the agent ASKED the person to look at, never a producer\'s record of a tool call)', p7);
+    ok(c6 && c6.pgq === 4 && c6.rpt === 'foryou', 'CONTROL r6\'s reader (origin `agent`) ⇒ the four pages only the producers\' records name are rows, stamped «for you» — RED', c6);
+    ok(c0 && c0.pgq === 4 && !c0.theirs, 'CONTROL the reader with no filter but the key ⇒ the same four phantom rows — RED', c0);
+    ok(p7.pgo === 'foryou', 'r8 (X2) an ask filed before the origin field (≤ 2.369.168: no origin — the tray reads it as the agent\'s) still in the store, naming a page whose row an older tree kept (no `shown`, no `ask:` id) ⇒ «for you» at the rebuild', p7);
+    ok(p7.pgh === 'made', 'r9 (Y3) the browser\'s .168 records under the same key (a lapsed takeover naming the page it left open, a backend switch proposal naming it too) ⇒ no ask: the page an older tree kept reads «made» — a producer\'s record is never a witness', p7);
+    ok(c8.pgh === 'foryou' && c8.pgo === 'foryou', 'CONTROL r8\'s rung (every origin-less item the tray files under Agents) ⇒ the takeover\'s page a phantom «for you» — RED', c8);
+    ok(c7.pgo === 'made' && c7.rpt === 'foryou', 'CONTROL r7\'s rung (origin `agent` only) ⇒ that page «made» while its ask is in the store — RED', c7);
+    // r10 (F1): A QUOTE CARRIES THE ORIGIN OF WHAT IT QUOTES — the tray answers a PRODUCER's item too (replyVerdict ok for
+    // origin 'browser'); its quote is nobody's showing: no row live or at the rebuild, nothing persisted. The same «ok» to the
+    // conversation's own ask (via 'ask') keeps its page «for you» from the quote (the live door folds no ask's words)
+    let nQL = 0;
+    const liveQ = (asks, recs = [TREC, AREC]) => { const s = { backend: 'claude', sockName: 'sQL' + (++nQL), claudeSessionId: 'c-pr', cwd: CWD, host: '', name: 'Reporter', _artifacts: {}, _normalizer: null }; REG.configure({ ...regCfg([[s.sockName, s]]), asks }); for (const r of recs) REG.observe(s, r); const v = REG.listFor(s.sockName); REG.configure({ ...regCfg(), asks: () => [] }); return Object.fromEntries(v.items.filter((b) => b.presented).map((b) => [b.page, b.intent])); };
+    const qShape = { item: TKI.origin + ' · ' + TKI.text.slice(0, 22) + '… · ' + TKI.detail.slice(0, 22) + '…', quoted: IRq.composeReply(TKI, 'ok').includes('/p/' + PGT), verdict: IRq.replyVerdict({ item: TKI, session: { live: true, mode: 'chat' } }).ok, ask: IO.isAsk(TKI) };
+    const qLive = liveQ(W7), qMeta = Object.values((metas.sPQ || {}).artifacts || {});
+    ok(qShape.quoted && qShape.verdict === true && qShape.ask === false, 'fixture: the browser\'s lapsed takeover (origin `browser`, its own builder\'s words) names the page it left open, the tray lets the person answer it, and it is no ask', qShape);
+    ok(!(PGT in qLive) && gQ.pgt === null && !(PGT in gQ.derived) && !qMeta.some((r) => r.page === PGT), 'r10 (F1) the person answers «ok» from the tray to the browser\'s lapsed takeover ⇒ the page its quote names is NO row — live (observe), at the rebuild (the transcript\'s derivation and the merge), nothing persisted: a producer\'s quoted words are nobody\'s showing', { live: qLive, rebuilt: gQ.pgt, derived: gQ.derived, persisted: qMeta.map((r) => r.page) });
+    ok(qLive[PGA] === 'foryou' && gQ.derived[PGA] === 'foryou' && gQ.pga === 'foryou' && liveQ(() => [], [AREC])[PGA] === undefined, 'r10 (F1) the same «ok» to the conversation\'s OWN ask (the route\'s, via `ask`) ⇒ its page «for you» from the quote — live and in the derivation; the ask unknown to this conversation (asksOf: none) ⇒ no row from the quote', { live: qLive, derived: gQ.derived });
+    { // CONTROL r9's reader: the same ops, the quoted item unnamed (its said() pushed presentOps([uncut(rp)]) as they are)
+      const isA = (id) => STR.asksOf(B, { backend: 'claude', claudeSessionId: 'c-pr' }, 'sPQ', statusKey).some((i) => i.id === id), r9ops = HOOK.claude(TREC).map(({ quote, ...o }) => o);
+      const r9b = bandsOf(AF.resolvePresented(AF.quotedOps(r9ops, isA).reduce((rows, o) => AF.apply(rows, { cwd: CWD, at: 1, ...o, by: AF.opAuthor(o) }).rows, {}), { pageOf: (id) => ({ page: { id, name: id, path: '/p/' + id } }) }));
+      ok(HOOK.claude(TREC).some((o) => o.page === PGT && o.quote === TKI.id) && r9b[PGT] === 'foryou', 'CONTROL r9\'s reader (the quote\'s ops name no item: every quoted link the agent\'s) ⇒ the takeover\'s page a phantom «for you» — RED', r9b);
+    }
+    ok(cR.rpt === 'made' && cR.pgg === null, 'CONTROL a load without the rung (an older tree\'s asks unmarked) ⇒ its ask is no witness: «made», its --grant page no row — RED', cR);
+    const keyOf = typeof STR.askKey === 'function' ? STR.askKey : () => null, route = { pending: keyOf({ backend: 'claude', claudeSessionId: 'c-par', ...FORK }, 'sF', statusKey), landed: keyOf({ backend: 'claude', claudeSessionId: 'c-fk', ...FORK }, 'sF', statusKey) };
+    ok(JSON.stringify(route) === JSON.stringify({ pending: 'webui:sF', landed: 'claude:c-fk' }) && fkP.po === null && fkP.fo === null && fkL.fo === 'foryou' && fkL.po === null,
+      'r7 (T2) a pending fork (its claudeSessionId still the parent\'s) ⇒ the parent\'s ask rows are absent at its rebuild — the route\'s ONE key rule (askKey: the placeholder `webui:<id>` while pending, the route files and lists under it too); after the fork lands ⇒ its own asks only', { route, pending: fkP.po, landed: [fkL.fo, fkL.po] });
+    ok(cK && cK.po === 'foryou', 'CONTROL r6\'s key (the status key, no fork guard) ⇒ the pending fork folds the PARENT\'s ask «for you» — RED', cK);
+    ok(gE.eo === 'foryou', 'r7 (T5 · M2) an early ask filed under the placeholder `webui:<id>` (before the conversation had its id; the route re-keys it at the next ask) ⇒ «for you» at the rebuild', gE);
+    ok(cP && cP.eo === null, 'CONTROL the reader without the placeholder key ⇒ the early ask is no witness — RED', cP);
+    ok(p5.rpt === 'made' && !p5.persisted, 'CONTROL the ask store unwired (r5: the `ask:` id read on page rows only) ⇒ «made», nothing persisted — RED', p5);
+    ok(pS.rpt === 'foryou' && !pS.persisted, 'CONTROL r5\'s rebuild (no persist at the rebuild) ⇒ «for you» in memory, the meta still without the stamp at the next tick — a restart before the next op loses it — RED', pS);
+    ok(again.rpt === 'foryou' && p7.writes === 1 && pN.writes === 0 && spy.tree === 0, 'r7 (T5 · M3) a rebuild that gains no stamp writes nothing — the same conversation rebuilt from what it holds (a restart\'s persisted rows): still «for you», ONE write in all (the first rebuild\'s); a conversation with no ask: none; the persist seam (persistSoon) never asked', { again: again.rpt, writes, spy });
+    ok(spy.everyRebuild === 1, 'CONTROL a persist at every rebuild (the stampsGained clause dropped) ⇒ the restart\'s rebuild asks for a write — RED', spy);
+  }
   // controls
   const asrc = (await import('node:fs')).readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8');
   const cw = " && !row.presented); // lane pages-chip-groups";
@@ -389,7 +710,7 @@ console.log('ASK ATTACHMENTS (lane foryou-attachments) — vibespace-ask --artif
   ok(own.writes === 2 && !own.presented, 'a file the conversation wrote keeps its counts when an ask attaches it');
   ok(AF.askOp({ kind: 'exe', path: '/x' }) === null && AF.askOp({ kind: 'file' }) === null, 'a malformed attachment is no op');
   const rs = require('node:fs').readFileSync(path.join(REPO, 'src/agent-routes/status.js'), 'utf8');
-  ok(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id \}\)/.test(rs) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments to the registry (presentAsk → noteOp), never the rows itself');
+  ok(/require\('\.\.\/server\/artifact-registry\.js'\)\.presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(rs) && !/_artifacts/.test(rs), 'THE ONE WRITER: the ask route hands its attachments AND its words to the registry (presentAsk → noteOp), never the rows itself');
 }
 
 console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit calls are rows (the owner\'s shapes, names replaced)');

@@ -27,7 +27,7 @@
  * the codes and the sentences agree (the sentences are t() keys client-side).
  */
 
-const { REPLY_MARKER_RE, lf, parseReply } = require('./inbox-reply-text.js'); // THE marker + parser (PURE, imports nothing — the daemon-bundled turn preview reads it)
+const { REPLY_MARKER_RE, lf, parseReply, cutLine } = require('./inbox-reply-text.js'); // THE marker + parser (PURE, imports nothing — the daemon-bundled turn preview reads it)
 const DETAIL_QUOTE_CAP = 1500;   // chars of the item's detail quoted into the reply
 const REPLY_MAX = 4000;          // chars of the user's own reply
 const OPTIONS_MAX = 6;           // option chips per item
@@ -140,7 +140,7 @@ function composeReply(item, replyText, { now = Date.now() } = {}) {
     const d = lf(it.detail);
     lines.push('> detail:');
     lines.push(...quote(d.length > DETAIL_QUOTE_CAP ? d.slice(0, DETAIL_QUOTE_CAP) : d));
-    if (d.length > DETAIL_QUOTE_CAP) lines.push(`> … (detail cut at ${DETAIL_QUOTE_CAP} of ${d.length} chars — \`vibespace-ask show ${it.id}\` prints the whole item)`);
+    if (d.length > DETAIL_QUOTE_CAP) lines.push('> ' + cutLine(DETAIL_QUOTE_CAP, d.length, it.id));
   }
   if (Array.isArray(it.options) && it.options.length) lines.push('> options: ' + it.options.map(chip).join(' | '));
   const body = typeof replyText === 'string' ? lf(replyText).trim() : '';
@@ -189,5 +189,5 @@ function replyBoxView(rs, failure = null) {
 module.exports = {
   REPLY_MARKER_RE, DETAIL_QUOTE_CAP, REPLY_MAX, OPTIONS_MAX, OPTION_MAX_CHARS, SERVER_KEYS,
   REPLY_WHY, REPLY_HIDDEN_CODES, REOPEN_CODES, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES,
-  checkReplyText, normalizeOptions, composeReply, parseReply, replyVerdict, replyBoxView,
+  checkReplyText, normalizeOptions, composeReply, parseReply, cutLine, replyVerdict, replyBoxView,
 };
