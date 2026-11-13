@@ -739,7 +739,6 @@ export function installSidebarRail(Sidebar) {
       let query = '';
       let data = null; // last /api/sysinfo/procs response
       let dataHost = ''; // verify-r6 S1: the machine THAT listing came from — a row's signal goes there, never to the panel's machine at click time
-      let showAll = false;
       root.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'usage-section-title prc-head';
@@ -828,9 +827,10 @@ export function installSidebarRail(Sidebar) {
         const q = query.trim().toLowerCase();
         if (q) list = list.filter((p) => String(p.pid) === q || (p.cmd || '').toLowerCase().includes(q) || (p.user || '').toLowerCase().includes(q));
         const total = data.total || list.length;
-        head.querySelector('.prc-count').textContent = q ? `${list.length}` : (total > list.length ? tr('{shown} of {total}', { shown: list.length, total }) : `${total}`);
+        head.querySelector('.prc-count').textContent = q ? `${list.length}` : (total > list.length ? tr('Showing {shown} of {total} processes', { shown: list.length, total }) : `${total}`);   // lane ui-controls-and-bugs: what is on screen, of how many
         const parts = [];
-        const CAP = showAll || q ? Infinity : 120;
+        // lane ui-controls-and-bugs (the walk's system-ports-10: «+ 显示全部 350 个» beside «350 / 1131»): every row the server
+        // sent is drawn — the server's own cap (sysinfo.js) is the one cap, and the head says it; no «show all» that showed 350
         if (this._prcSort === 'tree') {
           // partial-forest tree: missing parents (capped table) become roots
           const byPid = new Map(list.map((p) => [p.pid, p]));
@@ -844,10 +844,7 @@ export function installSidebarRail(Sidebar) {
           }
           const byCpu = (a, b) => cpuOf(b) - cpuOf(a) || b.rss - a.rss;
           roots.sort(byCpu);
-          let n = 0;
           const walk = (p, depth) => {
-            if (n >= CAP) return;
-            n++;
             parts.push(rowHtml(p, depth, data.serverPid));
             for (const k of (kids.get(p.pid) || []).sort(byCpu)) walk(k, depth + 1);
           };
@@ -860,17 +857,15 @@ export function installSidebarRail(Sidebar) {
             name: (a, b) => nameOf(a).localeCompare(nameOf(b)) || a.pid - b.pid,
           };
           list = [...list].sort(sorters[this._prcSort] || sorters.cpu);
-          for (const p of list.slice(0, CAP === Infinity ? list.length : CAP)) parts.push(rowHtml(p, 0, data.serverPid));
+          for (const p of list) parts.push(rowHtml(p, 0, data.serverPid));
         }
         // a truncated table cannot prove absence — say so instead of a
         // definitive "no match" (review-confirmed false negative)
         const truncated = (data.total || 0) > (data.procs || []).length;
         if (!parts.length) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(q ? (truncated ? tr('No match among the {n} transported rows (of {total} on the machine)', { n: (data.procs || []).length, total: data.total }) : tr('No process matches the filter')) : tr('No processes'))}</div>`);
         else if (q && truncated) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Searched the {n} transported rows (of {total} on the machine)', { n: (data.procs || []).length, total: data.total }))}</div>`);
-        else if (CAP !== Infinity && (data.procs || []).length > CAP && !q) parts.push(`<button class="ports-sys-expander prc-more">${escHtml(tr('+ show all {n}', { n: list.length }))}</button>`);
         if (data.sampled === false && (data.procs || []).length) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('CPU% is a lifetime average on this machine (no live sampling)'))}</div>`);
         table.innerHTML = parts.join('');
-        table.querySelector('.prc-more')?.addEventListener('click', () => { showAll = true; drawTable(); });
         table.querySelectorAll('.prc-row').forEach((row) => row.addEventListener('click', () => {
           const k = expKey(row.dataset.pid);
           if (this._prcExpanded.has(k)) this._prcExpanded.delete(k); else this._prcExpanded.add(k);

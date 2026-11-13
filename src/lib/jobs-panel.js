@@ -143,8 +143,18 @@ async function jobAction(app, j, act, refresh) {
   if (r?.error) showToast(r.error, { error: true });
   refresh?.();
 }
-function actionButtons(app, j, refresh, { compact } = {}) {
+/** THE ROW'S VERBS — one table: the row's buttons and its menu (right-click / long-press) draw the same acts (lane
+ *  ui-controls-and-bugs, the walk's jobs-14: the menu offered only «Clear content…» beside a row with Stop / Start / ✕).
+ *  → [{ act, label (the words), glyph (the compact button), cls }] */
+export function rowVerbs(j) {
   const out = [];
+  if (j.pendingPanel) out.push({ act: 'panel', label: t('Open panel'), glyph: '⚑', cls: 'jobs-btn-warn' });
+  if (['up', 'starting', 'awaiting-user', 'waiting'].includes(j.state) || (j.kind === 'cron' && j.desiredUp && j.state === 'scheduled')) out.push({ act: 'stop', label: t('Stop'), glyph: '■', cls: '' });
+  if (['down', 'failed', 'missed'].includes(j.state) || (j.kind === 'cron' && !j.desiredUp)) out.push({ act: 'start', label: t('Start'), glyph: '▸', cls: 'jobs-btn-ok' });
+  if (['done', 'interrupted', 'failed', 'missed'].includes(j.state)) out.push({ act: 'rm', label: t('Remove'), glyph: '✕', cls: '' });
+  return out;
+}
+function actionButtons(app, j, refresh, { compact } = {}) {
   const mk = (label, act, cls = '') => {
     const b = document.createElement('button');
     b.className = 'jobs-btn ' + cls;
@@ -152,11 +162,8 @@ function actionButtons(app, j, refresh, { compact } = {}) {
     b.onclick = (ev) => { ev.stopPropagation(); jobAction(app, j, act, refresh); };
     return b;
   };
-  if (j.pendingPanel) out.push(mk(compact ? '⚑' : t('Open panel'), 'panel', 'jobs-btn-warn'));
-  if (['up', 'starting', 'awaiting-user', 'waiting'].includes(j.state) || (j.kind === 'cron' && j.desiredUp && j.state === 'scheduled')) out.push(mk(compact ? '■' : t('Stop'), 'stop'));
-  if (['down', 'failed', 'missed'].includes(j.state) || (j.kind === 'cron' && !j.desiredUp)) out.push(mk(compact ? '▸' : t('Start'), 'start', 'jobs-btn-ok'));
-  if (['done', 'interrupted', 'failed', 'missed'].includes(j.state) && !compact) out.push(mk('✕', 'rm'));
-  return out;
+  // the compact rail row keeps no ✕ (its menu has Remove); the window's ✕ stays a glyph
+  return rowVerbs(j).filter((v) => !(compact && v.act === 'rm')).map((v) => mk(compact || v.act === 'rm' ? v.glyph : v.label, v.act, v.cls));
 }
 
 /** shared list renderer — the window (rich) and the rail panel (compact).
@@ -304,7 +311,8 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   el.oncontextmenu = (ev) => {
     // offered on a cleared job too: a job that ran again after a clear has new words (its runs' last lines)
     ev.preventDefault(); ev.stopPropagation();
-    showContextMenu(ev.clientX, ev.clientY, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }]);
+    const verbs = archived ? [] : rowVerbs(j).map((v) => ({ label: v.label, action: () => jobAction(app, j, v.act, refresh) }));   // the row's own acts first
+    showContextMenu(ev.clientX, ev.clientY, [...verbs, ...(verbs.length ? [{ separator: true }] : []), { label: t('Clear content…'), action: () => { clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); } }]);
   };
   el.onclick = () => {
     if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }
