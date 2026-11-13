@@ -120,10 +120,12 @@ class FileExplorer {
       newDir: { el: btnNewDir, word: t('New folder'), act: () => this.createDir() }, upload: { el: btnUpload, word: t('Upload'), act: (a) => this._triggerUpload(a) } };
     for (const { el: b, word, act } of Object.values(tools)) { b.onclick = () => act(b); const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
     const btnMore = this._btn('', t('More')); btnMore.innerHTML = UI_ICONS.more; btnMore.classList.add('file-tool-more'); btnMore.setAttribute('aria-haspopup', 'menu');
-    toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, btnMore);
+    toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload);
+    // the phone keeps its icons and has no fold: no ⋯ in its toolbar at all (a hidden one measured 0×0 among its touch targets —
+    // test-mobile-gaps #8, the lane's heavy claim on fd8da831d)
+    if (!app.isMobile) toolbar.append(btnMore);
     const FOLD = { up: 0, host: 0, path: 0, upload: 10, newFile: 20, newDir: 30, refresh: 40, view: 50 };   // 0 never folds; a higher one folds first
-    if (app.isMobile) btnMore.style.display = 'none';
-    else {
+    if (!app.isMobile) {
       const fold = createBarFold(toolbar, {
         more: btnMore,
         items: () => [['up', btnUp], ['host', this._hostSelect], ['path', this._pathField.el], ['refresh', btnRefresh], ['view', btnView], ['newFile', btnNewFile], ['newDir', btnNewDir], ['upload', btnUpload]]
