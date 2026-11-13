@@ -272,13 +272,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // stops keeping, so the user is told once per (identity, why) per 6h. The
     // inbox is the surface, because the conversation it would have spent on is
     // by definition one nobody is watching.
-    // B-0a33 round 1: when WAITING frames hold the cap, ONE notice per WAIT (its oldest frame names it — never again every 6 h
-    // while the same wait goes on), filed under the conversation they wait behind so it opens it; else as before, per 6 h
+    // B-0a33 round 1: when WAITING frames hold the cap, the notice is keyed by the WAIT (its oldest frame names it) and filed
+    // under the conversation they wait behind so it opens it. Follow-up (主开发 08:35Z): while the wait still refuses, exactly
+    // ONE notice of it is open — filed again at the first refusal after the previous one expired (its expiry IS
+    // REFUSE_INBOX_MS), never two at once; a person's dismissal stands until that mark. Else as before, per 6 h
     const promisedHere = v.counts ? Number(v.why === 'hour-cap' ? v.counts.promisedHour : v.why === 'day-cap' ? v.counts.promisedDay : v.why === 'instance-cap' ? v.counts.promisedInstanceDay : 0) || 0 : 0;
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
     const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|wait|${wait.rid}` : `inbox|${key || '?'}|${v.why}`;
     const lastInbox = Number(state.notices[inboxSig]) || 0;
-    if (wait ? !lastInbox : now - lastInbox > REFUSE_INBOX_MS) {
+    if (now - lastInbox > REFUSE_INBOX_MS) {
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
