@@ -46,6 +46,7 @@ const STORES = Object.freeze({
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
+  'chat-attachments-link.write': row('write', 'chat-attachments/<conversation>/conversation', 'src/server/chat-attachments.js', ['writeLink']),   // through the store writer (lane chat-attachments-persist: which conversation a dropped file's folder belongs to)
   'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-hold-road.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor (r11: the hold road's file)
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)

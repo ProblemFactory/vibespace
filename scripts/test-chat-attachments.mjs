@@ -64,7 +64,10 @@ const LINES = [
 ];
 fs.writeFileSync(MAIN, LINES.join('\n') + '\n');
 const SUB = path.join(PROJ, TX, 'subagents', `agent-${AG}.jsonl`);
+const WAG = 'b2c3d4e5f6a70819';   // a WORKFLOW's agent: <session>/subagents/workflows/wf_<run>/agent-<id>.jsonl (the layout /api/subagent-messages reads)
+fs.mkdirSync(path.join(PROJ, TX, 'subagents', 'workflows', 'wf_run1'), { recursive: true });
 fs.writeFileSync(SUB, userRec(U(6), [tr('tu6', [img(PNG(8))])], { isSidechain: true, agentId: AG }) + '\n');
+fs.writeFileSync(path.join(PROJ, TX, 'subagents', 'workflows', 'wf_run1', `agent-${WAG}.jsonl`), userRec(U(10), [tr('tu10', [img(PNG(13))])], { isSidechain: true, agentId: WAG }) + '\n');
 const CODEX_DIR = path.join(HOME, '.codex', 'sessions', '2026', '11', '13'); fs.mkdirSync(CODEX_DIR, { recursive: true });
 fs.writeFileSync(path.join(CODEX_DIR, `rollout-2026-11-13T00-00-00-${CTX}.jsonl`), [
   JSON.stringify({ timestamp: '2026-11-13T00:00:00Z', type: 'session_meta', payload: { id: CTX, cwd: '/w/proj' } }),
@@ -135,6 +138,18 @@ console.log('② the reader — from the record, by its place');
   fs.truncateSync(fp, 10);
   const g3 = await G.find({ fp, backend: 'claude', key: U(1), n: 0 });
   ok(g3.gone === 'missing' && G.held().rebuilt === 2, 'a file that SHRANK is indexed again');
+  {   // the INDEX FAILS CLOSED: a line at a kept offset that now parses as ANOTHER record (an equal-length swap in place — the
+      // same inode, the same size) is never served for this place
+    const sw = path.join(d, 'swap.jsonl');
+    const A = userRec('aaaaaaaa-0000-4000-8000-0000000000a1', [tr('ta', [img(PNG(50))])]), B = userRec('aaaaaaaa-0000-4000-8000-0000000000b2', [tr('tb', [img(PNG(51))])]);
+    fs.writeFileSync(sw, A + '\n' + B + '\n');
+    const SW = TP.create();
+    const a1 = await SW.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
+    const fd = fs.openSync(sw, 'r+'); fs.writeSync(fd, Buffer.from(B + '\n' + A + '\n'), 0, undefined, 0); fs.closeSync(fd);   // the two lines swapped in place
+    const a2 = await SW.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
+    const bytesAt = (r) => (r && r.ok ? Buffer.from(fs.readFileSync(sw).toString('latin1', r.start, r.end), 'base64') : null);
+    ok(a1.ok && a2.ok && bytesAt(a2).equals(PNG(50)) && a2.start !== a1.start, 'the index FAILS CLOSED: an equal-length swap in place (same inode, same size) is caught by the record\'s key — the place is found again, never another record\'s picture', { a1: a1.start, a2: a2.start });
+  }
   const L = TP.create({ indexMax: 2 });
   const fps = [0, 1, 2].map((i) => { const f = path.join(d, `l${i}.jsonl`); fs.writeFileSync(f, LINES[1] + '\n'); return f; });
   for (const f of fps) await L.find({ fp: f, backend: 'claude', key: U(1), n: 0 });
@@ -169,6 +184,8 @@ const get = async (u, h = {}) => { const r = await fetch(S1.base + u, { headers:
   ok(nm.s === 304 && nm.b.length === 0, 'the validator answers 304 (a record\'s bytes never change)');
   const sub = await get(`/api/chat-picture/${TX}/${U(6)}/0?agent=${AG}`), notAmong = await get(`/api/chat-picture/${TX}/${U(6)}/0?agent=ffffffffffffffff`), noAgent = await get(`/api/chat-picture/${TX}/${U(6)}/0`);
   ok(sub.s === 200 && sub.b.equals(PNG(8)) && notAmong.s === 404 && notAmong.j?.code === 'unknown' && noAgent.s === 410, 'a sub-agent\'s picture: its file only when it is AMONG the conversation\'s own sub-agent files — another id answers 404 unknown', [sub.s, notAmong.s, noAgent.s]);
+  const wf = await get(`/api/chat-picture/${TX}/${U(10)}/0?agent=${WAG}`);
+  ok(wf.s === 200 && wf.b.equals(PNG(13)), 'a WORKFLOW agent\'s picture: its file under <session>/subagents/workflows/wf_<run>/ is among the conversation\'s own (the reader\'s minor: it answered 404 «not on this machine»)', { s: wf.s, j: wf.j });
   const cx = await get(`/api/chat-picture/${CTX}/call_pic1/0?b=codex`);
   ok(cx.s === 200 && cx.b.equals(PNG(9)), 'a Codex picture from its rollout (the codex harness\'s own locate, the output\'s call_id)', { s: cx.s, j: cx.j });
   const unk = await get(`/api/chat-picture/bbbbbbbb-0000-4000-8000-000000000000/${U(1)}/0`);
@@ -215,6 +232,12 @@ console.log('⑤ the index\'s cost — measured');
   const r = await fetch(`${slow.base}/api/chat-picture/${TX}/${U(1)}/0`), j = await r.json();
   slow.close();
   ok(r.status === 503 && j.code === 'finding' && j.retryMs === ROUTES.RETRY_MS && r.headers.get('retry-after') === '2', 'past the DEADLINE the route answers 503 `finding` + retryMs — the page is never held; the reading goes on', j);
+  let ran = 0;
+  const dl = await serve({ store, transcripts: { picture: () => { ran++; return sleep(60).then(() => ({ gone: 'missing' })); } }, deadlineMs: 25 });
+  const st12 = await Promise.all([...Array(12)].map((_, i) => fetch(`${dl.base}/api/chat-picture/${TX}/${U(1)}/${i}`).then((x) => x.status)));
+  for (let i = 0; i < 50 && dl.api.stats().running; i++) await sleep(5);
+  const dls = dl.api.stats(); dl.close();
+  ok(st12.every((x) => x === 503) && ran === ROUTES.MAX_AT_ONCE && dls.ran === ROUTES.MAX_AT_ONCE && dls.left === 12 - ROUTES.MAX_AT_ONCE, 'a request answered at its DEADLINE withdraws its job if it has not started — twelve asks past a 25 ms deadline run only the 3 readings already started (the reader\'s minor: all 12 ran, 9 for nobody)', { st12, ran, dls });
   const cv = read('src/lib/chat-view.js');
   ok(/r\.status === 503 && tries < 8\) \{\s*say\(t\('Still finding this picture in the conversation…'\)\);\s*setTimeout\(/.test(cv), 'the view says it is still being found and asks again (a few times, then «could not be found in time»)');
 }
@@ -226,7 +249,8 @@ console.log('⑥ many at once');
   const go = (i, signal) => fetch(`${many.base}/api/chat-picture/${TX}/${U(1)}/${i}`, { signal }).then((r) => r.status, () => 'aborted');
   const kept = [...Array(9)].map((_, i) => go(i));
   const ac = new AbortController(); const left = [...Array(6)].map((_, i) => go(20 + i, ac.signal));
-  await sleep(60); ac.abort(); await sleep(60);
+  for (let i = 0; i < 200 && many.api.stats().asked < 15; i++) await sleep(5);   // every ask has reached the hub
+  ac.abort(); for (let i = 0; i < 100 && many.api.stats().left < 6; i++) await sleep(5);
   const before = calls; open();
   const st = await Promise.all(kept), lt = await Promise.all(left);
   await sleep(10);
@@ -250,55 +274,94 @@ console.log('⑦ files a person dropped');
   for (const x of [root, notTmp, tmpCwd]) fs.mkdirSync(x, { recursive: true });
   app.locals.chatAttachmentsRoot = root;
   app.locals.chatTempRoots = [path.resolve(tmpCwd)];
+  app.locals.activeSessions = new Map([['cw-cap-up', { backend: 'claude', backendSessionId: TX }]]);
   app.use(require(path.join(REPO, 'src/routes/files.js')));
   const srv = app.listen(0, '127.0.0.1'); await new Promise((r) => srv.once('listening', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
-  const up = async (destDir, name, bytes, extra = {}) => { const fd = new FormData(); fd.append('files', new Blob([bytes]), name); fd.append('destDir', destDir); fd.append('fileNames', JSON.stringify([name])); fd.append('sessionId', 'cw-cap-up'); for (const [k, v] of Object.entries(extra)) fd.append(k, v); const r = await fetch(base + '/api/upload', { method: 'POST', body: fd }); return { s: r.status, j: await r.json().catch(() => ({})) }; };
+  const up = async (destDir, name, bytes, extra = {}, sid = 'cw-cap-up') => { const fd = new FormData(); fd.append('files', new Blob([bytes]), name); fd.append('destDir', destDir); fd.append('fileNames', JSON.stringify([name])); if (sid) fd.append('sessionId', sid); for (const [k, v] of Object.entries(extra)) fd.append(k, v); const r = await fetch(base + '/api/upload', { method: 'POST', body: fd }); return { s: r.status, j: await r.json().catch(() => ({})) }; };
   const a = await up(tmpCwd, 'a.png', PNG(21));
   const keptAt = path.join(root, 'cw-cap-up', 'files', 'a.png');
   ok(a.s === 200 && a.j.keptWithConversation === true && a.j.files[0].path === keptAt && fs.readFileSync(keptAt).equals(PNG(21)) && !fs.existsSync(path.join(tmpCwd, 'a.png')) && (fs.statSync(keptAt).mode & 0o777) === 0o600,
     'chat.uploadDir unset + a TEMPORARY cwd ⇒ kept in data/chat-attachments/<the hub\'s conversation id>/files/ (0600), the answer says where', a.j);
   const b = await up(tmpCwd, 'a.png', PNG(22));
-  ok(b.j.files && b.j.files[0].path === path.join(root, 'cw-cap-up', 'files', 'a (1).png') && fs.readFileSync(keptAt).equals(PNG(21)), 'a same-named file is NEVER overwritten: «a (1).png», the first one untouched', b.j);
+  ok(b.j.files && b.j.files[0].path === path.join(root, 'cw-cap-up', 'files', 'a (1).png') && fs.readFileSync(keptAt).equals(PNG(21)), 'on the KEPT road a same-named file is never overwritten: «a (1).png», the first one untouched', b.j);
+  await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(path.join(root, 'cw-cap-up', CA.LINK_FILE));
+  let link = null; try { link = JSON.parse(fs.readFileSync(path.join(root, 'cw-cap-up', CA.LINK_FILE), 'utf8')); } catch { }
+  ok(link && link.conv === 'cw-cap-up' && link.backend === 'claude' && link.tx === TX && (fs.statSync(path.join(root, 'cw-cap-up', CA.LINK_FILE)).mode & 0o777) === 0o600, 'THE LINK beside the files names their conversation\'s transcript (written at the upload, through the store writer) — it outlives the hub\'s session record', link);
   const c = await up(notTmp, 'w.png', PNG(23)), dd = await up(tmpCwd, 'chosen.png', PNG(24), { uploadDirSet: '1' });
   ok(!c.j.keptWithConversation && c.j.files[0].path === path.join(notTmp, 'w.png') && !dd.j.keptWithConversation && dd.j.files[0].path === path.join(tmpCwd, 'chosen.png'), 'a cwd that is not temporary, and a chosen chat.uploadDir, keep today\'s road');
+  // THE MODERATE (reader 13:41Z): every OTHER upload replaces a same-named file, as the release did — the explorer (no
+  // conversation) and a chat in an ordinary folder
+  fs.writeFileSync(path.join(notTmp, 'report.txt'), 'version 1');
+  const ex = await up(notTmp, 'report.txt', Buffer.from('version 2'), {}, null), ch = await up(notTmp, 'w.png', PNG(28));
+  ok(ex.j.files && ex.j.files[0].name === 'report.txt' && fs.readFileSync(path.join(notTmp, 'report.txt'), 'utf8') === 'version 2' && !fs.existsSync(path.join(notTmp, 'report (1).txt')) && ch.j.files[0].name === 'w.png' && fs.readFileSync(path.join(notTmp, 'w.png')).equals(PNG(28)) && !fs.existsSync(path.join(notTmp, 'w (1).png')),
+    'anywhere but the kept road an upload REPLACES a same-named file, as the release did (the explorer\'s report.txt, a chat in an ordinary folder) — the numbering is only the hub\'s own folder\'s', { ex: ex.j, ch: ch.j });
   srv.close();
   const pd = scratch('cap-place'); fs.mkdirSync(pd, { recursive: true });
-  const src = path.join(pd, 'src.bin'); fs.writeFileSync(src, PNG(25));
+  const given = path.join(pd, 'given.bin'); fs.writeFileSync(given, PNG(25));
   fs.writeFileSync(path.join(pd, 'x.png'), 'held');
-  const both = await Promise.all([CA.placeFile(src, pd, 'x.png'), CA.placeFile(src, pd, 'x.png'), CA.placeFile(src, pd, 'x.png')]);
-  ok(new Set(both).size === 3 && !both.includes('x.png') && fs.readFileSync(path.join(pd, 'x.png'), 'utf8') === 'held' && both.every((n) => fs.readFileSync(path.join(pd, n)).equals(PNG(25))) && !fs.readdirSync(pd).some((n) => n.endsWith(CA.TMP_SUFFIX)),
+  const both = await Promise.all([CA.placeFile(given, pd, 'x.png'), CA.placeFile(given, pd, 'x.png'), CA.placeFile(given, pd, 'x.png')]);
+  ok(new Set(both).size === 3 && !both.includes('x.png') && fs.readFileSync(path.join(pd, 'x.png'), 'utf8') === 'held' && both.every((n) => fs.readFileSync(path.join(pd, n)).equals(PNG(25))) && !fs.readdirSync(pd).some((n) => CA.isTemp(n)),
     'placeFile: a temp file LINKED to a free name — three at once for a held name get three new names, the held file untouched, no temp left', both);
-  let threw = null; try { await CA.placeFile(src, pd, '../out.png'); } catch (e) { threw = e.message; }
+  let threw = null; try { await CA.placeFile(given, pd, '../out.png'); } catch (e) { threw = e.message; }
   ok(/Invalid file name/.test(threw || ''), 'a name that leaves its folder is refused');
+  // the start's sweep: ONLY the writer's own temp shape; a person's own «draft.vs-tmp» is theirs
   const sr = scratch('cap-sweep'); fs.mkdirSync(path.join(sr, 'cw-s1', 'files'), { recursive: true });
-  const oldT = path.join(sr, 'cw-s1', 'files', `.a.png.1-ab${CA.TMP_SUFFIX}`), youngT = path.join(sr, 'cw-s1', 'files', `.b.png.1-cd${CA.TMP_SUFFIX}`);
-  fs.writeFileSync(oldT, 'x'); fs.writeFileSync(youngT, 'y'); fs.writeFileSync(path.join(sr, 'cw-s1', 'files', 'kept.png'), PNG(26));
-  const past = (Date.now() - 5 * 60000) / 1000; fs.utimesSync(oldT, past, past);
+  const F = (n) => path.join(sr, 'cw-s1', 'files', n);
+  const oldT = F(`.a.png.123-abcdef12${CA.TMP_SUFFIX}`), youngT = F(`.b.png.123-0123abcd${CA.TMP_SUFFIX}`), theirs = F('draft.vs-tmp');
+  fs.writeFileSync(oldT, 'x'); fs.writeFileSync(youngT, 'y'); fs.writeFileSync(theirs, 'a person\'s own file'); fs.writeFileSync(F('kept.png'), PNG(26));
+  const past = (Date.now() - 60 * 60000) / 1000; fs.utimesSync(oldT, past, past); fs.utimesSync(theirs, past, past);
   const ss = CA.create({ root: sr, knownIds: async () => new Set(['cw-s1']), log: quiet });
   const swept = await ss.sweepTemps();
-  ok(swept === 1 && !fs.existsSync(oldT) && fs.existsSync(youngT) && fs.existsSync(path.join(sr, 'cw-s1', 'files', 'kept.png')), 'AT START: a temp file a crash left (older than a minute) is removed; a write still running (younger) and every kept file stay', { swept });
+  ok(swept === 1 && !fs.existsSync(oldT) && fs.existsSync(youngT) && fs.existsSync(theirs) && fs.existsSync(F('kept.png')), 'AT START: only the WRITER\'S OWN temp shape a crash left (older than a minute) is removed — a write still running stays, and a person\'s own «draft.vs-tmp» (an hour old) is never touched', { swept });
   const u = await ss.usage();
-  ok(u.files === 1 && u.bytes === PNG(26).length && u.conversations === 1, 'the usage counts what a person dropped (temps never counted)', u);
-  fs.mkdirSync(path.join(sr, 'cw-gone-1', 'files'), { recursive: true }); fs.writeFileSync(path.join(sr, 'cw-gone-1', 'files', 'g.png'), PNG(27));
-  const o = await ss.orphans();
-  ok(o.conversations === 1 && o.files === 1 && o.bytes === PNG(27).length && o.ids.join() === 'cw-gone-1', 'a conversation the hub lists NOWHERE is named with its count and size; one it lists (live, kept, archived, on an offline machine) is not', o);
-  const wrong = await ss.removeOrphans({ files: 2, bytes: o.bytes }), right = await ss.removeOrphans({ files: o.files, bytes: o.bytes });
-  ok(wrong.changed === true && right.removed === 1 && !fs.existsSync(path.join(sr, 'cw-gone-1')) && fs.existsSync(path.join(sr, 'cw-s1', 'files', 'kept.png')), 'the Remove door acts ONLY on the count and size it named (anything else ⇒ «changed», nothing removed)', { wrong, right });
-  const S2 = await serve({ store: CA.create({ root: sr, knownIds: async () => new Set(), log: quiet }), transcripts: svc });
+  ok(u.files === 2 && u.bytes === PNG(26).length + Buffer.byteLength('a person\'s own file') && u.conversations === 1, 'the usage counts what a person dropped — their «draft.vs-tmp» included; the writer\'s temps never', u);
+  // THE MUST (reader 13:41Z): «no longer exists» is PROVEN — the four rows, with the REAL hub knowledge over a scratch meta
+  // dir and the REAL transcript worker's locate (the scratch HOME's transcripts)
+  const meta = scratch('cap-meta'); fs.mkdirSync(meta, { recursive: true });
+  const live = new Map([['cw-live', { backend: 'claude', backendSessionId: TX }]]);
+  const rec = (id, ext, body = {}) => fs.writeFileSync(path.join(meta, id + ext), JSON.stringify({ backend: 'claude', backendSessionId: TX, ...body }));
+  rec('cw-kept', '.json'); rec('cw-archived', '.json', { archived: true }); rec('cw-stopped', '.json.stopped', { stoppedAt: 1 }); rec('cw-orphan', '.json.orphan');
+  const GONE_TX = 'deadbeef-0000-4000-8000-000000000000';
+  const or = scratch('cap-orphans');
+  const seed = (id, linkTo) => { fs.mkdirSync(path.join(or, id, 'files'), { recursive: true }); fs.writeFileSync(path.join(or, id, 'files', `${id}.png`), PNG(40)); if (linkTo) fs.writeFileSync(path.join(or, id, CA.LINK_FILE), JSON.stringify({ v: 1, conv: id, ...linkTo })); };
+  for (const id of ['cw-live', 'cw-kept', 'cw-archived', 'cw-stopped', 'cw-orphan']) seed(id);
+  seed('cw-terminated', { backend: 'claude', tx: TX });              // terminated: its record deleted, its transcript kept
+  seed('cw-deleted', { backend: 'claude', tx: GONE_TX });           // deleted: no record, its transcript gone
+  seed('cw-nolink');                                                 // nobody names it
+  seed('cw-notx', { backend: 'claude', tx: null });                  // a link that names no transcript: unknown
+  seed('cw-noproof', { backend: 'antigravity', tx: 'agy-conv-1' });  // a harness whose locate is no proof: unknown
+  const locate = (backend, id) => require(path.join(REPO, 'src/adapters/codex.js')).transcriptWorkerCall('locate', { backend, id, cwd: '' }, () => null);
+  const HK = CA.hubKnowledge({ activeSessions: live, metaDir: meta, locate });
+  const os2 = CA.create({ root: or, ...HK, log: quiet });
+  const ob = await os2.orphans();
+  ok(ob.ids.sort().join() === 'cw-deleted,cw-nolink' && ob.files === 2, 'LAW 5 (the MUST): a TERMINATED conversation (no record, its transcript here), one a RESTART kept as stopped (.json.stopped), an ARCHIVED one, a live one, a kept one, a keeper\'s .orphan, a link naming no transcript and a harness whose locate is no proof all KEEP their files — only a DELETED conversation (its transcript proven gone) and a folder nobody names are offered', ob);
+  const terminate = scratch('cap-term'); fs.mkdirSync(path.join(terminate, 'cw-t2', 'files'), { recursive: true }); fs.writeFileSync(path.join(terminate, 'cw-t2', 'files', 't.png'), PNG(41));
+  const lv = new Map([['cw-t2', { backend: 'claude', backendSessionId: TX }]]);
+  const ts2 = CA.create({ root: terminate, ...CA.hubKnowledge({ activeSessions: lv, metaDir: meta, locate }), log: quiet });
+  await ts2.usage(); await ts2.orphans();   // the hub sees the folder while it lists the conversation: its link is written
+  await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(path.join(terminate, 'cw-t2', CA.LINK_FILE));
+  lv.delete('cw-t2');                       // terminated: the live session and its record go
+  const after = await ts2.orphans();
+  ok(after.conversations === 0 && JSON.parse(fs.readFileSync(path.join(terminate, 'cw-t2', CA.LINK_FILE), 'utf8')).tx === TX, 'the flow: a folder seen while its conversation is listed gets its link; TERMINATED afterwards, it is still known by its transcript — nothing offered', after);
+  const wrong = await os2.removeOrphans({ files: 3, bytes: ob.bytes }), right = await os2.removeOrphans({ files: ob.files, bytes: ob.bytes });
+  ok(wrong.changed === true && right.removed === 2 && !fs.existsSync(path.join(or, 'cw-deleted')) && ['cw-live', 'cw-kept', 'cw-archived', 'cw-stopped', 'cw-orphan', 'cw-terminated', 'cw-notx', 'cw-noproof'].every((id) => fs.existsSync(path.join(or, id, 'files', `${id}.png`))), 'the Remove door acts ONLY on the count and size it named (anything else ⇒ «changed», nothing removed) — and only on the proven-gone', { wrong, right });
+  const S2 = await serve({ store: CA.create({ root: or, knownIds: async () => new Set(), log: quiet }), transcripts: svc });
+  fs.mkdirSync(path.join(or, 'cw-x', 'files'), { recursive: true }); fs.writeFileSync(path.join(or, 'cw-x', 'files', 'x.png'), PNG(42));
   const oo = await (await fetch(`${S2.base}/api/chat-attachments/orphans`)).json();
-  const rm409 = await fetch(`${S2.base}/api/chat-attachments/orphans/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ files: 9, bytes: 9 }) });
+  const rm409 = await fetch(`${S2.base}/api/chat-attachments/orphans/remove`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ files: 99, bytes: 9 }) });
   S2.close();
-  ok(oo.conversations === 1 && oo.files === 1 && !('ids' in oo) && rm409.status === 409, 'the routes: the orphans\' count and size (never their ids); a removal naming other numbers ⇒ 409 changed');
+  ok(oo.files >= 1 && !('ids' in oo) && rm409.status === 409, 'the routes: the orphans\' count and size (never their ids); a removal naming other numbers ⇒ 409 changed');
   const wiring = read('src/server/mounts-plugins-wiring.js');
-  ok(/const ids = new Set\(activeSessions\.keys\(\)\);[\s\S]{0,200}session-meta[\s\S]{0,120}\/\^\(\.\+\)\\\.json\(\?:\\\.orphan\)\?\$\//.test(wiring) && /chatAttachments\.sweepTemps\(\)/.test(wiring), 'the hub\'s conversations = its live sessions + every session record it keeps (an .orphan one: a machine that is offline); the sweep runs at start');
+  ok(/\.\.\.CAM\.hubKnowledge\(\{ activeSessions, metaDir: path\.join\(rootDir, 'data', 'session-meta'\),/.test(wiring) && /transcriptWorkerCall\('locate', \{ backend, id: tx, cwd: '' \}, \(\) => null\)/.test(wiring) && /chatAttachments\.sweepTemps\(\)/.test(wiring) && String(CA.RECORD_RE) === String(/^(.+)\.json(?:\.orphan|\.stopped)?$/),
+    'the hub wires THAT knowledge (live sessions, the session records in every form, the transcript worker\'s locate); the sweep runs at start');
   const agy = read('data/bin/agy-wrapper.js');
-  ok(/Object\.prototype\.hasOwnProperty\.call\(PICTURE_EXT, mt\) \? PICTURE_EXT\[mt\] : null/.test(agy) && /fs\.linkSync\(tmp, fp\)/.test(agy) && /\.vs-tmp`/.test(agy), 'the Antigravity wrapper: an extension only from an OWN entry; a pasted picture written as a temp file linked to its name');
+  ok(/Object\.prototype\.hasOwnProperty\.call\(PICTURE_EXT, mt\) \? PICTURE_EXT\[mt\] : null/.test(agy) && /fs\.linkSync\(tmp, fp\)/.test(agy) && /backend: 'antigravity', tx: null/.test(agy), 'the Antigravity wrapper: an extension only from an OWN entry; a pasted picture written as a temp file linked to its name; its folder\'s link written (the hub fills the transcript)');
 }
 
 console.log('⑧ the words + the deletion list');
 {
-  const en = read('CHANGELOG.md'), head = en.slice(en.indexOf('## 2.369.401'), en.indexOf('## 2.369.398'));
+  const en = read('CHANGELOG.md'), at = en.indexOf('## 2.369.401'), head = en.slice(at, en.indexOf('\n## ', at + 5));   // this release's block only
   ok(/A picture Claude Code or Codex showed/.test(head) && /A file you dropped/.test(head) && !/MB|bound|limit|trim/i.test(head), 'the words say what is covered — «a picture Claude Code or Codex showed», «a file you dropped» — and nothing about a bound', head.slice(0, 400));
   const GONE = ['keepPicture', 'usePictureKeeper', 'PICTURE_KEEPER', 'keptPicturesMB', 'kept-pictures', 'kept.json', 'LEDGER_FILE', 'trimNow', 'wasTrimmed', 'whenKept', 'PENDING_MAX_CHARS', 'conversationBytes', 'CONVERSATION_MB_', 'chat-attachments-ledger', 'keptPictureUrl', 'data-kept-src', '_keptPictureGone', 'Pictures kept per conversation', 'Removed to stay within', '.trimmed.json'];
   const files = ['src/server/chat-attachments.js', 'src/routes/chat-attachments.js', 'src/message-manager.js', 'src/codex-message-manager.js', 'src/server/mounts-plugins-wiring.js', 'src/timed-sync.js', 'src/lib/chat-renderers.js', 'src/lib/chat-view.js', 'src/lib/settings-ui.js', 'src/lib/settings-schema.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js', 'src/server/stdout/claude-stream-json.js', 'src/ws-handler.js', 'docs/settings.md', 'docs/kb-api.md', 'docs/kb-features.md', 'docs/kb-file-structure.md', 'CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'];
@@ -329,6 +392,8 @@ console.log('⑨ the view — the real renderer');
   ok(h2.includes(`src="${url}"`) && !h2.includes('data-record-src'), 'no path (an inline screenshot) ⇒ drawn from the record at once');
   const cv = read('src/lib/chat-view.js');
   ok(/if \(this\._recordPictureNext\(img\)\) return;/.test(cv) && /if \(src !== rec && !img\.dataset\.recordTried\) \{ img\.dataset\.recordTried = '1'; img\.src = rec; return true; \}/.test(cv), 'the error delegate swaps the record\'s copy in ONCE, through .src (never innerHTML), then reads the record\'s answer');
+  ok(/if \(r\.status === 410 && j\.why === 'missing' && !img\.dataset\.recordAgain\) \{/.test(cv) && /if \(r\.status === 415\) return say\(t\('This picture\\'s type is not one this page shows'\)\);/.test(cv) && /say\(t\('This picture could not be read from the conversation\\'s record'\)\);/.test(cv) && /\}\)\.catch\(\(\) => say\(t\('This picture could not be reached — the hub did not answer'\)\)\);/.test(cv),
+    'true words for every answer: a 415, a 500 and a network failure each say what happened; a 410 «missing» on a live line is asked ONCE more before it is called gone (the reader\'s minor)');
   ok(/r\.status === 410\) return say\(j\.why === 'rescued'/.test(cv) && /r\.status === 409\) return say\(t\('That machine\\'s agent is older/.test(cv) && /r\.status === 404\) return say\(t\('This conversation\\'s record is not on this machine'\)\)/.test(cv), 'the record\'s answer is said in words: gone (the rescue named), an older agent, not on this machine');
   const r = new R.ChatRenderers({ ws: null, sessionId: 'cw-1', app: null, messageList: { addEventListener() {} }, getSessionCtx: () => ({ cwd: '/w', host: null }) });
   const note = r._renderNotificationMsg('[Image source: /tmp/claude-1000/-p/conv/images/16.png]');
@@ -344,19 +409,35 @@ console.log('⑩ the sync-fs guard + RED controls');
   const ts = read('src/transcript-service.js');
   ok(/return picturePool\(\)\.call\('picture', q\);/.test(ts) && /poolSize: 1/.test(ts) && /case 'picture':/.test(read('src/transcript-worker.js')), 'on the hub every reading runs in ONE transcript worker of its own (one copy of each index)');
   // RED CONTROL 1: a reader that reads every file again from the start — the LAW 3 leg's count must see it
-  const src = read('src/transcript-picture.js'), anchor = 'let pos = ix.to, lineAt = ix.to, skipping = false;';
+  // a mutant copy lives in a scratch dir: its harness registry is the tree's own (absolute), or it would find no shape at all
+  const src = read('src/transcript-picture.js').split("require('./harnesses')").join(`require(${JSON.stringify(path.join(REPO, 'src/harnesses'))})`), anchor = 'let pos = ix.to, lineAt = ix.to, skipping = false;';
   const mdir = scratch('cap-mutant'); fs.mkdirSync(mdir, { recursive: true });
   ok(src.includes(anchor), 'the mutant\'s anchor is in the reader (where a pass starts)');
   fs.writeFileSync(path.join(mdir, 'tp.js'), src.replace(anchor, 'let pos = 0, lineAt = 0, skipping = false;'));
   const M = require(path.join(mdir, 'tp.js')).create({ chunk: 4096 });
   const fp = path.join(mdir, 't.jsonl'); fs.writeFileSync(fp, LINES.slice(0, 2).join('\n') + '\n');
   await M.find({ fp, backend: 'claude', key: U(1), n: 0 }); const b1 = M.held().bytesScanned; const more = userRec(U(8), [tr('t8', [img(PNG(30))])]) + '\n'; fs.appendFileSync(fp, more); await M.find({ fp, backend: 'claude', key: U(8), n: 0 });
-  ok(M.held().bytesScanned - b1 !== Buffer.byteLength(more), 'RED CONTROL: a reader that starts every pass from the beginning reads more than what was appended — what the LAW 3 leg catches');
+  ok(b1 > 0 && M.held().bytesScanned - b1 > Buffer.byteLength(more), 'RED CONTROL: a reader that starts every pass from the beginning reads more than what was appended — what the LAW 3 leg catches', { b1, after: M.held().bytesScanned });
+  // RED CONTROL 3: a reader with no key check — the swap leg must see it (the reader's M3)
+  {
+    const KEYCHK = "if (keyOf(shape, buf, root) !== key) { ix.ino = null; continue; }";
+    ok(src.includes(KEYCHK), 'the key check is in the reader (the third mutant\'s anchor)');
+    fs.writeFileSync(path.join(mdir, 'tp3.js'), src.replace(KEYCHK, ''));
+    const M3 = require(path.join(mdir, 'tp3.js')).create();
+    const sw = path.join(mdir, 'swap.jsonl');
+    const A = userRec('aaaaaaaa-0000-4000-8000-0000000000a1', [tr('ta', [img(PNG(50))])]), B = userRec('aaaaaaaa-0000-4000-8000-0000000000b2', [tr('tb', [img(PNG(51))])]);
+    fs.writeFileSync(sw, A + '\n' + B + '\n');
+    await M3.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
+    const fd = fs.openSync(sw, 'r+'); fs.writeSync(fd, Buffer.from(B + '\n' + A + '\n'), 0, undefined, 0); fs.closeSync(fd);
+    const r = await M3.find({ fp: sw, backend: 'claude', key: 'aaaaaaaa-0000-4000-8000-0000000000a1', n: 0 });
+    ok(r.ok && Buffer.from(fs.readFileSync(sw).toString('latin1', r.start, r.end), 'base64').equals(PNG(51)), 'RED CONTROL: a reader without the key check serves ANOTHER record\'s picture after the swap — what the swap leg catches');
+  }
   // RED CONTROL 2: a route with no limit — the LAW 4 leg's count must see it
   let cur = 0, max = 0, open; const gate = new Promise((r) => { open = r; });
   const nolimit = await serve({ store, transcripts: { picture: async () => { cur++; max = Math.max(max, cur); await gate; cur--; return { gone: 'missing' }; } }, maxAtOnce: 1000 });
   const all = [...Array(8)].map((_, i) => fetch(`${nolimit.base}/api/chat-picture/${TX}/${U(1)}/${i}`).then((x) => x.status));
-  await sleep(60); open(); await Promise.all(all); nolimit.close();
+  for (let i = 0; i < 200 && nolimit.api.stats().asked < 8; i++) await sleep(5);
+  await sleep(5); open(); await Promise.all(all); nolimit.close();
   ok(max > ROUTES.MAX_AT_ONCE, 'RED CONTROL: a route with no limit runs every reading at once — what the LAW 4 leg catches', { max });
 }
 S1.close();

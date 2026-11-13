@@ -571,7 +571,9 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
       const dir = destDir.endsWith('/') ? destDir : destDir + '/';
       const names = req.files.map((f, i) => clientNames[i] || f.originalname);
       for (const n of names) if (n.includes('..')) throw new Error('Invalid file name: ' + n);
-      const rename = await freeTops(names, async (top) => { try { return !!(await R.fs.stat(R.host, dir + top)); } catch { return false; } });
+      // a same-named file is numbered ONLY on the kept-with-conversation road (the hub's own folder); elsewhere an upload
+      // replaces it, as it always did (the explorer, a chat in an ordinary folder)
+      const rename = keptFrom ? await freeTops(names, async (top) => { try { return !!(await R.fs.stat(R.host, dir + top)); } catch { return false; } }) : (n) => n;
       for (let i = 0; i < req.files.length; i++) {
         const file = req.files[i];
         const name = rename(names[i]);
@@ -594,9 +596,10 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
     // dest side may be a mount → all dest-touching fs ops go through SafeFs.
     // The multer temp files live in /tmp (fast, local) — their unlink stays fs.
     await sfs(req).call('mkdir', { path: destRoot }); // ensure target exists (plain-file uploads to a fresh dir)
-    // lane chat-attachments-persist: a same-named file (or folder) is never silently overwritten — «name (1).ext»
+    // lane chat-attachments-persist: on the KEPT road a same-named file (or folder) is never overwritten — «name (1).ext»;
+    // anywhere else an upload replaces a same-named file, as it always did
     const names = req.files.map((f, i) => clientNames[i] || f.originalname);
-    const rename = await freeTops(names, async (top) => { const p = path.resolve(destRoot, top); if (p !== destRoot && !p.startsWith(destRoot + path.sep)) return false; try { return !!(await sfs(req).call('exists', { path: p })).exists; } catch { return false; } });
+    const rename = !keptFrom ? (n) => n : await freeTops(names, async (top) => { const p = path.resolve(destRoot, top); if (p !== destRoot && !p.startsWith(destRoot + path.sep)) return false; try { return !!(await sfs(req).call('exists', { path: p })).exists; } catch { return false; } });
     for (let i = 0; i < req.files.length; i++) {
       const file = req.files[i];
       const name = rename(names[i]);
@@ -621,6 +624,10 @@ router.post('/api/upload', upload.array('files'), async (req, res) => {
       results.push({ name, path: dest, size: file.size });
     }
     noteChatUploads(req, results);
+    if (keptFrom) {   // THE LINK beside the files: which conversation they belong to — it outlives the hub's session record
+      const live = req.app.locals.activeSessions && req.app.locals.activeSessions.get(conv);
+      try { CA.writeLink(path.dirname(path.dirname(destRoot)), conv, live ? { backend: live.backend || 'claude', tx: live.backendSessionId || live.claudeSessionId || null } : {}); } catch { }
+    }
     res.json({ success: true, files: results, ...(keptFrom ? { keptWithConversation: true, keptFrom, dir: destRoot } : {}) });
   } catch (err) {
     // Clean up remaining multer temp files on failure (they leaked in /tmp)

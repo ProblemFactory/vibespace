@@ -548,10 +548,10 @@ class SettingsUI {
       gone.textContent = t('Files of conversations that no longer exist: {n} files, {size}', { n: files, size: mb(bytes) }) + ' ';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'settings-fact-btn';
+      btn.className = 'settings-link-btn';   // the settings page's own themed link button
       btn.textContent = t('Remove…');
       btn.addEventListener('click', async () => {
-        const yes = await showConfirmDialog({ title: t('Remove files'), message: t('Remove {n} files ({size}) of conversations that no longer exist? This cannot be undone.', { n: files, size: mb(bytes) }), confirmText: t('Remove'), danger: true });
+        const yes = await showConfirmDialog({ title: t('Remove files'), message: t('Remove {n} files ({size}) of conversations that no longer exist? This cannot be undone.', { n: files, size: mb(bytes) }), confirmText: t('Delete'), danger: true });
         if (!yes) return;
         const r = await fetchJson('/api/chat-attachments/orphans/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files, bytes }) });
         if (!r || r.error) { showToast(r && r.code === 'changed' ? t('What would be removed changed — look again') : t('Not removed: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }

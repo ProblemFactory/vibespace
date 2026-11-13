@@ -46,14 +46,21 @@ function registerChatAttachmentRoutes(app, { store, transcripts, hostKnown = () 
   // ── many at once: a few readings run, the rest wait in order; a closed page's requests leave ──
   const queue = []; let running = 0;
   const pump = () => { while (running < maxAtOnce && queue.length) { const j = queue.shift(); if (j.left) continue; running++; j.go(); } };
-  // the RESPONSE's close before it finished = the page went away (a GET's request stream closes as soon as it is read)
-  const inTurn = (res, fn) => new Promise((resolve, reject) => {
+  // the RESPONSE's close before it finished = the page went away (a GET's request stream closes as soon as it is read);
+  // `withdraw()` = nobody waits any more (the deadline answered): a job not started yet leaves the queue — one running goes
+  // on and warms the index
+  const inTurn = (res, fn) => {
     const j = { left: false, started: false };
-    j.go = () => { j.started = true; Promise.resolve().then(fn).then(resolve, reject).finally(() => { running--; pump(); }); };
-    res.once('close', () => { if (!j.started && !res.writableEnded) { j.left = true; reject(Object.assign(new Error('the page closed'), { code: 'left' })); } });
-    queue.push(j); pump();
-  });
-  const stats = { asked: 0, left: 0, finding: 0, served: 0 };
+    const promise = new Promise((resolve, reject) => {
+      j.go = () => { j.started = true; Promise.resolve().then(fn).then(resolve, reject).finally(() => { running--; pump(); }); };
+      j.leave = (why) => { if (!j.started && !j.left) { j.left = true; stats.left++; reject(Object.assign(new Error(why), { code: 'left' })); } };
+      res.once('close', () => { if (!res.writableEnded) j.leave('the page closed'); });
+      queue.push(j); pump();
+    });
+    promise.catch(() => { });
+    return { promise, withdraw: () => j.leave('answered at its deadline') };
+  };
+  const stats = { asked: 0, left: 0, finding: 0, served: 0, ran: 0 };
 
   app.get('/api/chat-picture/:tx/:key/:n', async (req, res) => {
     stats.asked++;
@@ -66,14 +73,16 @@ function registerChatAttachmentRoutes(app, { store, transcripts, hostKnown = () 
     let timer = null;
     const deadline = new Promise((r) => { timer = setTimeout(() => r({ finding: true }), deadlineMs); timer.unref?.(); });
     let p;
+    const turn = inTurn(res, () => { stats.ran++; return transcripts.picture({ backend: b, sessionId: tx, cwd: host ? '' : cwdOf(tx, b), host }, { agent, key, n }); });
     try {
-      p = await Promise.race([inTurn(res, () => transcripts.picture({ backend: b, sessionId: tx, cwd: host ? '' : cwdOf(tx, b), host }, { agent, key, n })), deadline]);
+      p = await Promise.race([turn.promise, deadline]);
     } catch (e) {
       clearTimeout(timer);
-      if (e && e.code === 'left') { stats.left++; return; }
+      if (e && e.code === 'left') return;
       return res.status(500).json({ error: 'the picture could not be read', code: 'unreadable' });
     }
     clearTimeout(timer);
+    if (p && p.finding) turn.withdraw();   // answered at the deadline: a job that has not started leaves the queue
     if (res.writableEnded || res.destroyed) return;
     if (!p || p.finding || p.unavailable) { stats.finding++; return res.status(503).set('Retry-After', '2').json({ error: 'still finding this picture in the conversation', code: 'finding', retryMs: RETRY_MS }); }
     if (p.oldAgent) return res.status(409).json({ error: 'that machine\'s agent is older than this reader', code: 'old-agent' });

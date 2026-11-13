@@ -169,11 +169,12 @@ const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations
 // temp files swept now. The hub's conversations = its session records, live or kept (an archived one, one on a machine
 // that is offline: still theirs)
 const CAM = require('./chat-attachments.js');
-const chatAttachments = CAM.create({ root: path.join(rootDir, 'data', 'chat-attachments'), knownIds: async () => {
-  const ids = new Set(activeSessions.keys());
-  try { for (const f of await require('fs').promises.readdir(path.join(rootDir, 'data', 'session-meta'))) { const m = /^(.+)\.json(?:\.orphan)?$/.exec(f); if (m) ids.add(m[1]); } } catch { }
-  return ids;
-} });
+const chatAttachments = CAM.create({ root: path.join(rootDir, 'data', 'chat-attachments'),
+  // what the hub knows (src/server/chat-attachments.js hubKnowledge): its live sessions, its session records in every form,
+  // and — through the transcript worker's `locate`, the harness's own — whether a conversation's transcript is still here
+  ...CAM.hubKnowledge({ activeSessions, metaDir: path.join(rootDir, 'data', 'session-meta'),
+    locate: (backend, tx) => require('../adapters/codex.js').transcriptWorkerCall('locate', { backend, id: tx, cwd: '' }, () => null) }),
+});
 chatAttachments.sweepTemps().catch(() => { });
 require('../routes/chat-attachments.js').registerChatAttachmentRoutes(app, { store: chatAttachments,
   transcripts: require('../transcript-service').createTranscriptService({ activeSessions, createSessionMessages: null, hosts }),
