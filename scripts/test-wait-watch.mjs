@@ -356,7 +356,8 @@ console.log('THE BOUND — NO COUNT, «SINCE AT LEAST»');
 {
   const W = world('antigravity');
   const gid = await pair(W);
-  for (let i = 0; i < 2010; i++) W.st.appendRecords(G.GROUP_ADAPTER_ID, gid, [{ ...W.st.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1 })[0], vendorId: 'gm-bulk-' + i, at: Date.now() + i + 10, text: 'bulk ' + i }]);
+  const bulk0 = W.st.readTail(G.GROUP_ADAPTER_ID, gid, { limit: 1 })[0];   // read ONCE: re-reading the growing log at each of the 2 010 appends was 2.6 s of this suite's 3.9 (主开发 17:45Z item 4)
+  for (let i = 0; i < 2010; i++) W.st.appendRecords(G.GROUP_ADAPTER_ID, gid, [{ ...bulk0, vendorId: 'gm-bulk-' + i, at: Date.now() + i + 10, text: 'bulk ' + i }]);
   await W.st.groups.update((gr) => { gr.groups[gid].lastAt = Date.now() + 2020; });
   W.skip = 241 * MIN;
   const r = await W.r();
@@ -403,9 +404,11 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
   ok('THE WORDS say what the hub did (handed or not) — no verdict word in en / zh / ja; every key translated; zh says «hub» as the product does, never «中枢»', said.every((x) => x && !BANNED.test(x)) && zh.every(Boolean) && ja.every(Boolean) && !zh.some((x) => /中枢/.test(x)), J({ hits: said.filter((x) => x && BANNED.test(x)), missing: keys.filter((k, i) => !zh[i] || !ja[i]) }));
   const name = 'a {since} $& name';
   ok('…a name holding «{since}» or a «$» pattern cannot corrupt the stored English text', WW.ownerWords({ name, n: 2, since: 1_800_000_000_000 }).text.startsWith(`2 group messages have not been handed to ${name} yet`));
-  const files = String(require('node:child_process').execFileSync('git', ['ls-files', '-z', 'src', 'server.js', 'data/bin'], { cwd: REPO })).split('\0').filter((f) => f && (/\.(js|mjs|cjs)$/.test(f) || f.startsWith('data/bin/')));
-  const GONE = /group-waits|waitsAt|loadWaits|keptFrom|nothingBehind|setWaitRecord|waitRecord\(|noteStillWaiting|waitTold|waitsOf\(|refillWaits|migrateWaits|waitingFor\(|WAIT_READS_PER_MIN|readSeen|handedAtOnce|adoptOf|_turnQuietSince|_turnLifeBack|lifeWitness|quiet-turn|\/api\/turn-quiet|2026-11-waits-kept/;
-  const left = files.filter((f) => { try { return GONE.test(read(f)); } catch { return false; } });
+  // every tracked file under src, server.js, data/bin, searched by git grep for the gone names as FIXED strings (one process; a JS
+  // alternation over the whole tree was 0.3 s of this suite — 主开发 17:45Z item 4); no match = exit 1
+  const GONE = ['group-waits', 'waitsAt', 'loadWaits', 'keptFrom', 'nothingBehind', 'setWaitRecord', 'waitRecord(', 'noteStillWaiting', 'waitTold', 'waitsOf(', 'refillWaits', 'migrateWaits', 'waitingFor(', 'WAIT_READS_PER_MIN', 'readSeen', 'handedAtOnce', 'adoptOf', '_turnQuietSince', '_turnLifeBack', 'lifeWitness', 'quiet-turn', '/api/turn-quiet', '2026-11-waits-kept'];
+  const grepped = (() => { try { return String(require('node:child_process').execFileSync('git', ['grep', '-lzF', ...GONE.flatMap((w) => ['-e', w]), '--', 'src', 'server.js', 'data/bin'], { cwd: REPO })); } catch (e) { if (e && e.status === 1) return ''; throw e; } })();
+  const left = grepped.split('\0').filter((f) => f && (/\.(js|mjs|cjs)$/.test(f) || f.startsWith('data/bin/')));
   if (/applyMarks|stampWaits|function keep\(/.test(read('src/server/groups-engine.js'))) left.push('src/server/groups-engine.js (the cut\'s keep / applyMarks / stampWaits)');
   if (/test-group-waits|group-waits/.test(read('scripts/ci.mjs'))) left.push('scripts/ci.mjs (a test-group-waits row)');
   ok('THE REMOVAL (the deletion list of the page, against the cut 9a9b3a65a and shape B): no ledger store, seq, load, kept instants, wait record, told mark, waitsOf, migration — none of shape B\'s definitions either; the cut\'s and shape B\'s end words gone',
