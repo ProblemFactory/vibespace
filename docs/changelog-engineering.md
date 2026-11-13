@@ -27,6 +27,22 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The device agent's bundle changes** (src/agentd/stream-screen.js + src/stream-plan.js are in it): a machine gets the new lookup when its agent updates (the release's signed manifest). An older agent still takes the first ffmpeg that exists; its refusal names that file's version, as today.
 - **Pins.** test-installed-apps §8: THE OPENERS derived from the tree (every `showMachineDesktopDialog(` call in src/), each opened with exactly the options it passes ⇒ both lines have their button and a press opens the launcher's install dialog (stubbed: it records what was asked). test-stream-plan §4b: THE DAEMON's own lookup (createScreen facts with the machine's files and programs stood in) — the owner's shape, a no-rung and a no-ddagrab ffmpeg passed over, the order kept, none passing ⇒ the first named; the words name every rung. RED on fd4acdc61: test-installed-apps 5 (the Desktop picker's opener among them), test-stream-plan 5.
 
+### pair-dialog-polish — the device pairing COMMAND sheet, from the owner's screen (2026-11-13 01:2xZ: «你看看这个界面是不是应该优化下»)
+- **What the owner's picture showed — each one a census row of test-pair-dialog-polish, whose BEFORE pass (PAIR_PICS_BEFORE=fd4acdc61, the pre-polish sheet drawn from that revision's files) must be RED on it:**
+  - ① each allow word sat UNDER its box. `#device-pair-dialog .device-pair-allow-flag` (1,1,0) set `display: inline-flex` but never the direction, so `.dialog-body label`'s COLUMN stood — the 8th instance of that class of bug.
+  - ② 命令 / 文件 ticked and greyed with no word why (`sessions` IMPLIES them).
+  - ③ the Windows rights box centred on its own line, its words bold below it — no rule at all, so the column flex again — and its sentence said «…in the allow list below» while the list stood ABOVE.
+  - ④ one tail for every system: with Windows chosen it explained launchd and systemd and nothing of the scheduled task.
+  - ⑤ a 110 px resizable textarea that showed five of the command's lines, with no sign that it held more.
+- **The sheet now** (`_fillPairCommandBody`, the command / the allow flags / the route unchanged):
+  - ① ② ③ numbered steps — choose the system (the tabs), copy the command (shown WHOLE: `fitCmd` sizes it from its text, re-measured on a width change; `resize: none`), run it (that system's own place: Terminal / a terminal / PowerShell, its one prerequisite, where the device shows up).
+  - Then the options: the allow list as house check rows (`label.dialog-check-row`: the box beside its word, the whole row the target, a hint line saying what the item lets this VibeSpace do there). A row `sessions` holds is ON and said in words, its box hidden (`.is-held`); unticking sessions gives the boxes back. Then the Windows-only rights box as a check row.
+  - Last, ONE fold «About this install» with THIS system's facts: what it registers (launchd agent / systemd user service / scheduled task), where it lives (~/.vibespace or %USERPROFILE%\.vibespace), re-pairing replaces the token, several instances.
+  - Copy says «Copied» while what it copied is still the command; a tab or box that changes it turns it back and says «The command changed — copy it again.»
+  - 44 px rows / tabs on the phone tier. 27 new en / zh / ja rows; the 8 dead ones (the old head, the three per-OS notes, the elevation note, both spellings of the old tail, the held-box tooltip) removed.
+- **i18n trap found on the way:** `scripts/i18n-extract.mjs`'s ENTRY_RE ends at the value — a dictionary row with a trailing `// comment` is INVISIBLE to the duplicate check and the dead-key census. The new rows carry no trailing comment (one comment line above the block).
+- **Pinned** — test-pair-dialog-polish (heavy, new): ①–⑥ for 3 systems × zh / en × 1280 / 390 px, Copy, the held rows, the long command, the re-pair sheet. CONTROLS: a patched style.css (the pre-polish row rule ⇒ ① RED; the held box shown ⇒ ② RED), and a patched bundle (the facts left at macOS's ⇒ ③ RED; the box never measured ⇒ ④ RED). PAIR_PICS_OUT + PAIR_PICS_BEFORE=<rev> draw the BEFORE / AFTER pictures. test-pair-dialog-ui reads a row's word from `.device-pair-allow-word`.
+
 ## 2.369.398 — 2026-11-12
 
 ### test-cache-bounds §30 — the fold's soft cap sits where neither verdict follows the collector (B-a77d; 主开发 21:42Z, addendum 21:45Z)

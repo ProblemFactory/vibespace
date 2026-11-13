@@ -4,6 +4,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.399 — 2026-11-13
 
+### Changed
+- The pairing command for a device is now three numbered steps: choose the system, copy the command, run it.
+- In the pairing command, each thing a device may allow says in plain words what it lets VibeSpace do there.
+- The pairing command is shown whole, its Copy button says when it copied, and each system's tab says only that system's facts.
+
 ### Fixed
 - A chat shows one connection notice, updated in place, and none if you only unlocked your phone.
 - The «Set up once: install TightVNC Server» line of a Windows machine now has its Install button however you open it, and so does its virtual microphone.
