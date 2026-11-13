@@ -669,6 +669,9 @@ if (process.argv.includes('--write-policy')) {
   fs.writeSync(1, `→ allow list: ${DP.allowArg(r.allow)} (${POLICY_FILE})\n`);
   process.exit(0);
 }
+// ── THE PAIRING'S SETUP (lane machine-needs-at-pairing pick 3): `--setup-plan <install>` / `--setup <needs>` — the INSTALLER's
+// questions, answered by src/agentd/setup-mode.js from the PURE plans this bundle carries; never the daemon (this module returns)
+if (process.argv.includes('--setup-plan') || process.argv.includes('--setup')) { require('./setup-mode.js').main(process.argv); return; }
 // ── DIAL CHECK (lane-pairing ⑤): `vibespace-device.js --dial-check <url> --dial-token <t> [--timeout-ms 15000]`
 // — the installer runs the daemon's OWN dial once, BEFORE it writes dial.json / state/token / the service: ONE
 // attempt carrying `x-vibespace-dial-probe: 1` (the server answers 200 after the same token check and registers

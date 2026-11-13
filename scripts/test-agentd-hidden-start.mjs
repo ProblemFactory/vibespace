@@ -216,7 +216,7 @@ const PS1_STARTS = (ps1) => {
     if (/New-ScheduledTaskAction\b/.test(l)) { const m = /-Execute '([^']*)'/.exec(l); rows.push({ line: n, kind: 'logon task', hidden: !!m && m[1] === 'powershell.exe' && taskUnit(ps1).length === 0 }); }
     // int316: device-allow-flags' `--write-policy` (the allow-list writer) is a one-shot like the dial check — it exits
     // before the daemon body (src/agentd/agentd.js), so it is never a daemon in the installer's console
-    if (/&\s*\$nodeExe\b[^\n]*vibespace-device\.js/.test(l) && !/--dial-check|--write-policy/.test(l)) rows.push({ line: n, kind: 'foreground daemon', hidden: false });
+    if (/&\s*\$nodeExe\b[^\n]*vibespace-device\.js/.test(l) && !/--dial-check|--write-policy|--setup(-plan)? /.test(l)) rows.push({ line: n, kind: 'foreground daemon', hidden: false }); // lane machine-needs-at-pairing pick 3: the pairing's setup modes are one-shots too (src/agentd/setup-mode.js — agentd.js returns before its daemon body)
   }
   return rows;
 };
@@ -236,7 +236,7 @@ console.log(`    ${C.js.length} daemon starts in agentd.js, ${C.ps.length} in th
 ok(C.red.length === 0 && C.dead.length === 0, 'every daemon start is hidden (agentd: detached + stdio ignore + windowsHide: true; ps1: -WindowStyle Hidden / the hidden task); no dead hub row', { red: C.red, dead: C.dead });
 ok(C.js.length === 2 && C.js.some((s) => /cpB\.spawn\(process\.execPath, \[__filename\]/.test(s.text)) && C.js.some((s) => /spawn\(process\.execPath, argv, \{/.test(s.text)), 'agentd.js starts the daemon at exactly TWO sites: the --stdio bridge and startSuccessor (THE re-exec)', C.js);
 ok((AD.match(/startSuccessor\(/g) || []).length === 3 && /startSuccessor\(reExecArgv\(path\.join\(dir, path\.basename\(process\.argv\[1\] \|\| 'agentd\.js'\)\)\), \{ VIBESPACE_AGENTD_VERSION: version \}\)/.test(AD) && /startSuccessor\(reExecArgv\(process\.argv\[1\] \|\| __filename\), \{ \[HS\.HIDDEN_MARK\]: '1' \}\)/.test(AD), 'startSuccessor: one definition, two callers — the self-upgrade (its version) and the console self-heal (the mark)');
-eq(C.ps.map((s) => s.kind), ['first launch', 'logon task'], 'the ps1 starts the daemon at TWO sites: the first launch and the logon task (the dial check and the allow-list writer are one-shots, not daemons)');
+eq(C.ps.map((s) => s.kind), ['first launch', 'logon task'], 'the ps1 starts the daemon at TWO sites: the first launch and the logon task (the dial check, the allow-list writer and the pairing\'s setup modes are one-shots, not daemons)');
 const pj = census({ ad: AD + "\nfunction plantedStart() { require('child_process').spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore' }).unref(); }\n" });
 ok(pj.red.length === 1 && /plantedStart|spawn\(process\.execPath, \[__filename\]/.test(pj.red[0]), 'CONTROL: a planted daemon start without windowsHide ⇒ RED', pj.red);
 const pp = census({ ps1: PS1.replace('$p = Start-Process -PassThru -WindowStyle Hidden $nodeExe', '$p = Start-Process -PassThru $nodeExe') });

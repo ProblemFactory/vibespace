@@ -18,7 +18,8 @@ param(
   [string]$NodeExe,
   [string]$Allow,
   [switch]$NoCheck,
-  [switch]$NoElevate
+  [switch]$NoElevate,
+  [string]$Setup   # lane machine-needs-at-pairing pick 3: «desktop» = what this machine will be used for (the pairing dialog's tick)
 )
 $ErrorActionPreference = 'Stop'
 # PS 5.1 defaults to TLS 1.0 — nodejs.org (and most CDNs) refuse it
@@ -222,6 +223,26 @@ if ($p.HasExited) {
 function Quote-Ps([string]$s) { return "'" + ($s -replace '[''\u2018\u2019\u201A\u201B]', '$0$0') + "'" }
 # lane win-input-elevated: am I (the installer) already elevated? A function so a test can stub it (IsInRole is a .NET call).
 function Test-VsAdmin { return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+# WHAT THIS MACHINE WILL BE USED FOR (lane machine-needs-at-pairing pick 3 — the owner 2026-11-13: «需要 ffmpeg 之类的事情不能在安装的时候
+# 自动解决吗？»). The pairing is DONE before any need (the agent runs); a need not met NEVER fails it — the last lines say which are met
+# and which are not, each one's door in the machine's desktop window. -Setup desktop: ffmpeg (no rights: the agent's own lookup, the
+# pinned build when none passes) and TightVNC (ONE administrator moment — the agent's own below; its password typed there).
+function VsEnc([string]$t) { return [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($t)) }
+$setupLines = @(); $vncCmds = $null
+if ($Setup -match '(^|,)desktop(,|$)') {
+  $env:VIBESPACE_DEVICE_ROOT = $root; $env:VIBESPACE_AGENTD_ROOT = $root
+  Write-Host '-> setting up what this machine will be used for: its desktop and streaming'
+  $ffOut = @(); & $nodeExe "$current\vibespace-device.js" --setup ffmpeg 2>&1 | Tee-Object -Variable ffOut | Out-Host
+  $setupLines += @($ffOut | ForEach-Object { "$_" } | Where-Object { $_ -match '^(OK|x|->|!) ' })
+  $vncUp = @(Get-NetTCPConnection -LocalPort 5900 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.LocalAddress })
+  if ($vncUp.Count -and @($vncUp | Where-Object { $_ -ne '127.0.0.1' -and $_ -ne '::1' }).Count) { $setupLines += ('! TightVNC: something already listens on ' + ($vncUp -join ', ') + ' port 5900 - beyond this machine; VibeSpace leaves it as it is (its desktop window says what to change)') }
+  elseif ($vncUp.Count) { $setupLines += 'OK TightVNC: already running on this machine only (port 5900) - nothing installed' }
+  else {
+    $vncCmds = (& $nodeExe "$current\vibespace-device.js" --setup-plan tightvnc 2>$null) -join "`n"
+    if (-not $vncCmds) { $setupLines += 'x TightVNC: its plan could not be read - the desktop window has "Install TightVNC Server..."'; $vncCmds = $null }
+    else { Write-Host '-> TightVNC Server 2.8.85 (tightvnc.com, 2.5 MB, listens on this machine only): Windows asks for administrator rights ONCE - click Yes, then type the VNC password in that window' }
+  }
+}
 $persist = 'none (re-run this command after a reboot)'
 try {
   $task = "VibeSpaceDevice-$dialHost"
@@ -241,20 +262,34 @@ try {
   $me = "$env:USERDOMAIN\$env:USERNAME"
   $highest = $false
   if (-not $NoElevate -and (Test-VsAdmin)) {
+    if ($vncCmds) { powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand (VsEnc $vncCmds) } # lane machine-needs-at-pairing pick 3: already administrator — TightVNC here, its password in this console
     try { $p = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest; Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Principal $p -Force | Out-Null; $highest = $true } catch { $highest = $false }
   } elseif (-not $NoElevate) {
     try {
       $reg = '$ErrorActionPreference=''Stop''; $a = New-ScheduledTaskAction -Execute ''powershell.exe'' -Argument ' + (Quote-Ps $taskArgs) + '; $s = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; $p = New-ScheduledTaskPrincipal -UserId ' + (Quote-Ps $me) + ' -LogonType Interactive -RunLevel Highest; Register-ScheduledTask -TaskName ' + (Quote-Ps $task) + ' -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Principal $p -Force | Out-Null'
+      # lane machine-needs-at-pairing pick 3: TightVNC rides the SAME administrator window — VISIBLE then (its password is typed
+      # there); it runs as a child of that window, so the window's exit is still the task's alone
+      if ($vncCmds) { $reg = $reg + "`n" + 'powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ' + (VsEnc $vncCmds) + "`n" + 'exit 0' }
       $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reg))
-      $proc = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$enc
+      if ($vncCmds) { $proc = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$enc }
+      else { $proc = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList '-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',$enc }
       $highest = ($proc.ExitCode -eq 0) -and (((Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).Principal.RunLevel) -eq 'Highest')
     } catch { $highest = $false }
+  }
+  if ($NoElevate -and $vncCmds) { # 主开发's Q2: a normal-rights agent, and TightVNC alone asks ONE prompt (named above the command)
+    try { $null = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',(VsEnc $vncCmds) } catch { }
   }
   if (-not $highest) { Register-ScheduledTask -TaskName $task -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $s -Force | Out-Null }
   if ($highest) { $persist = "scheduled task '$task' (starts at logon, hidden, RUNS AS ADMINISTRATOR)" }
   elseif ($NoElevate) { $persist = "scheduled task '$task' (starts at logon, hidden; normal rights — you chose a normal install)" }
   else { $persist = "scheduled task '$task' (starts at logon, hidden; normal rights — UAC was declined; use 'Run as administrator...' on the machine card to raise it)" }
 } catch { Write-Host "   (no scheduled task: $_)" }
+if ($vncCmds) { # TightVNC's result is what listens now — never the window's exit (a declined prompt, a refused password, a failed download)
+  Start-Sleep -Seconds 2
+  $vncNow = @(Get-NetTCPConnection -LocalPort 5900 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $_.LocalAddress })
+  if ($vncNow.Count -and -not @($vncNow | Where-Object { $_ -ne '127.0.0.1' -and $_ -ne '::1' }).Count) { $setupLines += 'OK TightVNC Server 2.8.85: installed, listening on this machine only (port 5900)' }
+  else { $setupLines += 'x TightVNC: not installed (no administrator rights given, or the window said why) - the desktop window has "Install TightVNC Server..."' }
+}
 
 Write-Host "OK vibespace device agent running (pid $($p.Id)). Restart after reboot: $persist"
 Write-Host "  Log:  $root\state\agentd.out"
@@ -320,4 +355,12 @@ if (-not $NoCheck) {
       if ($other.Count -gt 0) { Write-Host "-> kept: $($other -join ', ') (another VibeSpace's install on this machine)" }
     }
   }
+}
+
+# lane machine-needs-at-pairing pick 3: THE LAST LINES — which needs are met and which are not (the pairing is done either way)
+if ($setupLines.Count) {
+  Write-Host ''
+  Write-Host 'What this machine will be used for:'
+  $setupLines | ForEach-Object { Write-Host "  $_" }
+  if (@($setupLines | Where-Object { $_ -match '^(x|!) ' }).Count) { Write-Host '  -> the pairing is done; a need not met keeps its button in the machine''s desktop window (VibeSpace -> Desktop -> this machine)' }
 }

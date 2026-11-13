@@ -33,6 +33,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/agentd/agentd.js', 'computeDiscoverySnapshot > walk', 'walk', 1, OFF, 'the device agent — its OWN process'],
     ['src/agentd/agentd.js', 'open', 'child:spawnSync', 1, OFF, 'the device agent — its OWN process'],
     ['src/agentd/agentd.js', 'psOnceSync', 'child:execFileSync', 1, OFF, 'the device agent — its OWN process'],
+    ['src/agentd/setup-mode.js', 'setupNeeds', 'child:spawnSync', 1, OFF, 'lane machine-needs-at-pairing pick 3: the installer\'s one-shot `--setup ffmpeg` (the agent bundle run by the pairing command, its own process) — never the hub\'s loop'],
     ['src/agentd/attach-cli.js', 'main', 'child:execFileSync', 1, OFF, 'the person\'s `vibespace attach` CLI — its own process'],
     ['src/claude-oat-probe.js', 'measure', 'child:execFileSync', 2, OFF, 'the measurement runs only in the FORKED child (the hub requires the module for its constants alone)'],
     ['src/claude-oat-probe.js', 'preflight', 'child:execFileSync', 3, OFF, 'the forked measurement child (preflight runs inside measure)'],
