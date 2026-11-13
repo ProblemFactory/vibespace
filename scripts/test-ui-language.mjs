@@ -115,7 +115,9 @@ export function scanFiles(files, repo = REPO) {
     const ast = parse(src);
     const r = scanFile(f, src, ast);
     const reached = specsOf(ast).map((s) => resolveSpec(f, s, repo)).filter(Boolean);
-    return { file: f, ...r, reached };
+    // the names this file imports from the one formatter (§1b: every export of page-time has a reader)
+    const ptNames = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][./]*(?:lib\/)?page-time\.js['"]/g)].flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean));
+    return { file: f, ...r, reached, ptNames };
   });
 }
 async function scanAll(files, repo) {
@@ -472,7 +474,8 @@ export async function census(repo = REPO) {
   const loginRows = loginFindings(lw.LOGIN_WORDS);
   const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
-  return { files: files.length, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  const ptUsed = [...new Set(scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : r.ptNames || [])))];
+  return { files: files.length, ptUsed, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -570,6 +573,37 @@ if (isMain) {
   // tree holds today are a shrink-only list (`clocks`), each to be moved to page-time (a machine clock says `// page-time: <why>`)
   ok(ck.fresh.length === 0, `⑦ no NEW hh:mm built by hand (${count(now.clocks)} today = the baseline's ${count(base.clocks || {})}) — print it with page-time's stampAt / clockOf`, ck.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
   ok(ck.stale.length === 0, `⑦ no hand-clock baseline row the tree no longer holds (lower it)`, ck.stale.map((h) => `${h.file}: ${h.text}`));
+  console.log('§1b the one formatter, driven (the closure round, 主开发 15:15Z)');
+  {
+    const PT = await import(pathToFileURL(path.join(REPO, 'src/lib/page-time.js')).href);
+    // the two US-DST 01:30 instants (2026-11-01, PDT then PST) printed the same — a wall clock the zone lives twice says its offset
+    PT.setPageZone('America/Los_Angeles');
+    const pdt = Date.parse('2026-11-01T08:30:00Z'), pst = Date.parse('2026-11-01T09:30:00Z'), at = Date.parse('2026-11-13T12:00:00Z');
+    const a = PT.stampAt(pdt, { now: at }), b = PT.stampAt(pst, { now: at }), ca = PT.clockOf(pdt), cb = PT.clockOf(pst);
+    ok(a !== b && ca !== cb && PT.stampAt(Date.parse('2026-11-01T20:30:00Z'), { now: at }) === PT.stampAt(Date.parse('2026-11-01T20:30:00Z'), { now: at }),
+      'a wall clock the zone lives twice (the US fall-back 01:30) says which: the two instants never print the same', [a, b, ca, cb]);
+    // «today» is decided in the zone the stamp is printed in: browser-session-words decided it by the DEVICE's calendar
+    PT.setPageZone('Asia/Shanghai');
+    const BSW = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-session-words.js')).href);
+    const w = BSW.whenText(Date.parse('2026-11-13T16:10:00Z'), Date.parse('2026-11-13T15:30:00Z'));   // Shanghai: 11/14 00:10 against 11/13 23:30
+    ok(/14/.test(w), 'a session instant past midnight in the PAGE\'s zone carries its date (whenText reads «today» in the zone it prints in)', w);
+    PT.setPageZone(null);
+    // every export of the one formatter has a reader in the browser bundle (the closure: until() had none)
+    const ptSrc = fs.readFileSync(path.join(REPO, 'src/lib/page-time.js'), 'utf8');
+    const exportsOf = [...ptSrc.matchAll(/^export function (\w+)/gm)].map((m) => m[1]);
+    const used = new Set(now.ptUsed || []);
+    const dead = exportsOf.filter((n) => !used.has(n));
+    ok(dead.length === 0 && exportsOf.length >= 6, `every export of src/lib/page-time.js has a reader in the bundle (${exportsOf.join(', ')})`, dead);
+  }
+  // the closure round (F12): one-word keys another surface may spell with another meaning live under a context (tc / a set's
+  // `set::word`) — never as plain keys
+  {
+    const GENERIC = ['Light', 'Dark', 'Standard', 'Batch', 'Flex', 'Assistant', 'Tool', 'max', 'count', 'median', 'Root', 'Primary', 'Date', 'Base'];
+    const plain = GENERIC.filter((k) => now.dict && (now.dict.zhKeys ? now.dict.zhKeys.has(k) : false));
+    const zhSrc = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
+    const rows = GENERIC.filter((k) => new RegExp('^\\s*' + JSON.stringify(k) + ':', 'm').test(zhSrc));
+    ok(rows.length === 0 && plain.length === 0, 'the generic one-word keys this lane added live under a context (theme::Light, service-tier::Standard, msg-role::Assistant, diagnostics::count, theme-color::Root, eml::Date) — no plain row another surface would inherit', rows);
+  }
   console.log('§2 the dictionaries');
   // a caption SENTENCE drawn inside an upper-cased head inherits text-transform — «运行 AGENT 会话» (主开发's look, the Machines
   // section): each known (head, sentence) pair says text-transform: none on the sentence
