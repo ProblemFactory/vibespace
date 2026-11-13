@@ -595,6 +595,13 @@ if (isMain) {
     const dead = exportsOf.filter((n) => !used.has(n));
     ok(dead.length === 0 && exportsOf.length >= 6, `every export of src/lib/page-time.js has a reader in the bundle (${exportsOf.join(', ')})`, dead);
   }
+  // the mutant battery (M4c, the reader's): a value the door has no word for shows as ITSELF — never blank — and a known one is worded
+  {
+    const VW = await import(pathToFileURL(path.join(REPO, 'src/lib/value-words.js')).href);
+    const mk = (k) => '‹' + k + '›';
+    const unknown = VW.valueWord('theme', 'my-own-theme', mk), known = VW.valueWord('theme', 'dark', (k) => (k === 'theme::Dark' ? '深色' : k)), bare = VW.valueWord('theme', 'light', (k) => k);
+    ok(unknown === 'my-own-theme' && known === '深色' && bare === 'Light', 'value-words: an unknown value shows as itself (never blank), a known one is worded, a contexted key with no row is the word without its context', { unknown, known, bare });
+  }
   // the closure round (F12): one-word keys another surface may spell with another meaning live under a context (tc / a set's
   // `set::word`) — never as plain keys
   {
