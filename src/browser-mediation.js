@@ -132,8 +132,8 @@ function newScope({ targets = [], contexts = [] } = {}) {
   // never learns its own tab and `open` hangs forever)
   // lane chrome-157 (the .401 read, W2): `frames` = the frame ids seen under this lease's own sessions (Page.frameAttached /
   // frameNavigated — a download's frameId names where it began); `downloads` = the guids this lease's own tabs began while its
-  // download folder was lent (admitted by the mediator) — the only downloads it is told of and may cancel
-  return { targets: new Set((targets || []).filter(Boolean).map(String)), sessions: new Map(), contexts: new Set((contexts || []).filter(Boolean).map(String)), recent: new Map(), frames: new Set(), downloads: new Set() };
+  // own frames began (the mediator records them at the begin, window or not) — the only downloads it is told of and may cancel
+  return { targets: new Set((targets || []).filter(Boolean).map(String)), sessions: new Map(), contexts: new Set((contexts || []).filter(Boolean).map(String)), recent: new Map(), frames: new Set(), downloads: new Map() };
 }
 function remember(scope, info) {
   if (!scope || !scope.recent || !info || !info.targetId) return;
@@ -242,93 +242,119 @@ function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
     return refuse(`${guid ? 'names a download no tab of this lease began' : 'names no download'} — ${LAW_HEAD}; the person's downloads and another conversation's are theirs: cancel only a download your own tab began`);
   }
   if (own) return null;
-  return refuse(`${c ? 'names a browser context this lease did not create' : 'names no browser context'} — on a profile a person shares with agents it would change the WHOLE profile (lane chrome-157, the owner's law); it is answered for a browser context this lease made itself (Target.createBrowserContext) — for the person's own profile, ask the person`);
+  // the closure list S8 (d): the recipe names the door that exists — the `permission` verb for a site's permission, site-reset for one site's cookies
+  const door = method === 'Storage.clearCookies' ? 'clear ONE site with `vibespace-browser site-reset --host <host>` (on a shared profile it asks the person), or ask the person' : 'set ONE site\'s permission with `vibespace-browser permission <kind> allow|deny [origin]` (the agent manual says what it does), or ask the person';
+  return refuse(`${c ? 'names a browser context this lease did not create' : 'names no browser context'} — on a profile a person shares with agents it would change the WHOLE profile (lane chrome-157, the owner's law); it is answered for a browser context this lease made itself (Target.createBrowserContext) — for the person's own profile, ${door}`);
 }
 
 /**
- * THE WINDOW (the .401 read, 主开发 2026-11-13 — W1–W6; measured on Chrome 154 + 157: Browser.setDownloadBehavior, sent with no
- * session OR on a page session — the real driver's `download` sends {behavior:'allowAndName', downloadPath, eventsEnabled:true} on
- * its page session — moves the WHOLE profile's download folder; a {behavior:'default'} from any connection puts it back). The
- * profile's folder is an agent's only while THAT agent's download is in flight. ONE small state per PROFILE and this PURE
- * transition function; src/server/cdp-mediator.js only executes its effects. Pinned by a GENERATED table (test-browser-mediation
- * ⑥d: every state × act, the expected cell from the laws, the culls named).
- *   state: null — no window · {phase:'open', owner, n, began:[guid…], deadline} — lent to `owner` (began empty = armed: its bound runs)
- *          · {phase:'closing', owner, n, ordered, then} — the put-back is on its way (`ordered`: on the owner's own connection, so
- *          the owner's next set follows it) · {phase:'lapsed', owner, n} — the bound passed: a download its tab begins now is cancelled
- *   act:   {kind:'set', by, behavior, now, paused, boundMs} · {kind:'begin', own, guid} (own = a frame of the window's lease) · {kind:'end', guid}
- *          · {kind:'bound', now} · {kind:'takeover'} · {kind:'leaseEnd', key} · {kind:'connGone', key} (the lease's LAST connection)
- *          · {kind:'putBackDone', n} · {kind:'repoint'} · {kind:'hubStop'} · {kind:'adopt'} (a hub start; a new hub holds no window)
- *   →      {state, forward, refuse:{code, words}|null, putBack: why|null, admit: guid|null, cancel: guid|null, forget, told}
- *          (`forget` = the lease learns nothing more of its downloads; `told` = the lease is told its folder was put back)
+ * THE WINDOW (the .401 read, 主开发 2026-11-13 — W1–W6; the closure list S1–S8; measured on Chrome 154 + 157 with the real driver
+ * agent-browser 0.38.2). Browser.setDownloadBehavior, sent with no session OR on a page session (the real driver's `download` sends
+ * {behavior:'allowAndName', downloadPath, eventsEnabled:true} on its page session and clicks 1–3 ms later), moves the WHOLE
+ * profile's download folder; a {behavior:'default'} from any connection or on that session puts it back; a download's folder is
+ * FIXED when it begins (a put-back right after the begin left that download completing in the agent's folder); the driver gives up
+ * at 30 s (its own timeout — measured: a first byte at 1 s / 10 s begins 1.0 s / 10.0 s after the set, at 30 s it never does).
+ * The profile's folder is an agent's only while ITS download needs it. ONE small state per PROFILE and this PURE transition; the
+ * mediator only executes its effects. Pinned by a GENERATED table (scripts/download-window-cells.mjs; test-cdp-census ⑫,
+ * test-browser-mediation ⑥e).
+ *   state: null — no window
+ *          · {phase:'open', owner, n, began:[guid…], bound, deadline, pending} — lent to `owner`; began empty = armed: the deadline is
+ *            fixed at the opening set (a re-set never moves it); in flight: the deadline is the last begin + the bound (the ceiling —
+ *            the folder is fixed at the begin, so the put-back then harms no download); `pending` = a set came after the last begin
+ *            (one more expectation, once)
+ *          · {phase:'closing', owner, n, ordered, then} — the put-back on its way (`ordered`: on the owner's own setting channel)
+ *          · {phase:'lapsed', owner, n} — the bound passed with no download begun; ends at the owner's next set, its end, a repoint
+ *   act:   {kind:'set', by, behavior, now, paused, boundMs} · {kind:'begin', own, guid, now} (own = a frame of the window's lease) ·
+ *          {kind:'end', guid} · {kind:'bound', now} · {kind:'takeover'} · {kind:'leaseEnd', key} · {kind:'connGone', key} (the
+ *          SETTING connection — the window lives with it) · {kind:'putBackDone', n} · {kind:'repoint'} · {kind:'hubStop'} ·
+ *          {kind:'adopt'} (a hub start)
+ *   →      {state, forward, refuse:{code, words}|null, putBack: why|null, admit: guid|null, told: why|null}
+ *          (`told`: the lease is TOLD — a free notice at its next turn: the bound passed, the ceiling, a takeover, its setting
+ *          connection closed, or a download of its tab began while no folder of its was lent — it went to the profile's own place)
  */
-const WINDOW_BOUND_MS = 15000;
-const FRAMES_MAX = 4096;
-/** Is `frameId` one of this lease's own (a tab it holds, or a frame seen under one of its sessions)? */
-function isLeaseFrame(scope, frameId) { const f = frameId == null ? '' : String(frameId); return !!(f && scope && ((scope.targets && scope.targets.has(f)) || (scope.frames && scope.frames.has(f)))); }
+const WINDOW_BOUND_MS = 30000;   // the real driver's own download timeout (measured 30.0 s on 154 and 157)
 const WINDOW_BUSY_TEXT = "another conversation's download is in progress in this profile — try again in a moment (lane chrome-157: one download window per profile)";
 const WINDOW_CLOSING_TEXT = "this profile's download folder is being put back — try again in a moment";
+const NO_WINDOW_TOLD = 'a download your tab began while no download folder of yours was lent';
 function windowStep(state, act) {
   const st = state || null;
-  const out = { state: st, forward: false, refuse: null, putBack: null, admit: null, cancel: null, forget: false, told: false };
+  const out = { state: st, forward: false, refuse: null, putBack: null, admit: null, told: null };
   const a = act || {};
-  const close = (why, { ordered = false, then = null, told = false } = {}) => ({ ...out, state: { phase: 'closing', owner: st.owner, n: st.n, ordered: !!ordered, then }, putBack: why, forget: true, told });
+  const OPEN = !!(st && st.phase === 'open');
+  const secs = (ms) => `${Math.round((Number(ms) || WINDOW_BOUND_MS) / 100) / 10} s`;
+  const close = (why, { ordered = false, then = null, told = null } = {}) => ({ ...out, state: { phase: 'closing', owner: st.owner, n: st.n, ordered: !!ordered, then }, putBack: why, told });
   switch (a.kind) {
     case 'set': {
       if (a.behavior === 'default') {
         if (!st || st.phase === 'lapsed') return { ...out, state: null, forward: true };
-        if (st.owner === a.by) return { ...out, state: null, forward: true, forget: true };
+        if (st.owner === a.by) return { ...out, state: null, forward: true };
         return { ...out, refuse: { code: 'method_refused', words: WINDOW_BUSY_TEXT } };
       }
       if (a.paused) return { ...out, refuse: { code: 'browser_interrupted', words: 'interrupted' } };
-      const n = (st && st.n || 0) + 1;
       const bound = Number(a.boundMs) > 0 ? Number(a.boundMs) : WINDOW_BOUND_MS;
-      const open = () => ({ ...out, state: { phase: 'open', owner: a.by, n, began: [], bound, deadline: (Number(a.now) || 0) + bound }, forward: true });
+      const now = Number(a.now) || 0;
+      const n = (st && st.n || 0) + 1;
+      const open = () => ({ ...out, state: { phase: 'open', owner: a.by, n, began: [], bound, deadline: now + bound, pending: false }, forward: true });
       if (!st || st.phase === 'lapsed') return open();
       if (st.owner !== a.by) return { ...out, refuse: { code: 'method_refused', words: WINDOW_BUSY_TEXT } };
       if (st.phase === 'closing') return st.ordered ? open() : { ...out, refuse: { code: 'method_refused', words: WINDOW_CLOSING_TEXT } };
-      if (!st.began.length) return { ...out, state: { ...st, deadline: (Number(a.now) || 0) + (Number(st.bound) || WINDOW_BOUND_MS) }, forward: true };
-      return { ...out, forward: true };
+      if (!st.began.length || st.pending) return { ...out, forward: true };   // S2 (c): a re-set never moves the deadline
+      return { ...out, state: { ...st, pending: true, deadline: Math.max(Number(st.deadline) || 0, now + (Number(st.bound) || bound)) }, forward: true };   // one more expectation, once
     }
     case 'begin': {
-      if (!st || !a.own || !a.guid) return out;
-      if (st.phase === 'open') return st.began.includes(a.guid) ? out : { ...out, state: { ...st, began: [...st.began, a.guid] }, admit: a.guid };
-      if (st.phase === 'lapsed') return { ...out, cancel: a.guid };
-      return out;
+      if (!a.own || !a.guid) return out;
+      if (OPEN) return st.began.includes(a.guid) ? out : { ...out, state: { ...st, began: [...st.began, a.guid], deadline: (Number(a.now) || 0) + (Number(st.bound) || WINDOW_BOUND_MS), pending: false }, admit: a.guid };
+      return { ...out, told: NO_WINDOW_TOLD };   // S2 (b) + S4: ONE rule — it went to the profile's own place, the lease is told (and told of it, as its own)
     }
     case 'end': {
-      if (!st || st.phase !== 'open' || !st.began.includes(a.guid)) return out;
+      if (!OPEN || !st.began.includes(a.guid)) return out;
       const left = st.began.filter((g) => g !== a.guid);
       if (left.length) return { ...out, state: { ...st, began: left } };
+      if (st.pending) return { ...out, state: { ...st, began: [], pending: false } };   // the set after its begin waits for its own download (to the deadline)
       return close('its download ended', { ordered: !!a.ordered });
     }
     case 'bound':
-      if (st && st.phase === 'open' && !st.began.length && Number(a.now) >= Number(st.deadline)) return close(`no download began within ${Math.round((Number(st.bound) || WINDOW_BOUND_MS) / 100) / 10} s of the set`, { ordered: !!a.ordered, then: 'lapsed', told: true });
-      return out;
+      if (!OPEN || Number(a.now) < Number(st.deadline)) return out;
+      if (!st.began.length) { const why = `no download of its tab began within ${secs(st.bound)} of its set`; return close(why, { ordered: !!a.ordered, then: 'lapsed', told: why }); }
+      { const why = `its download ran past ${secs(st.bound)} — the file still lands in its own folder (fixed when it began)`; return close(why, { ordered: !!a.ordered, told: why }); }   // S1: the ceiling
     case 'takeover':
-      if (st && st.phase === 'open') return close('the person took over', { ordered: !!a.ordered, told: true });
+      if (OPEN) return close('the person took over', { ordered: !!a.ordered, told: 'the person took over' });
       if (st && st.phase === 'lapsed') return { ...out, state: null };
       return out;
     case 'leaseEnd':
-      if (st && st.owner === a.key && st.phase === 'open') return close('the lease ended');
+      if (OPEN && st.owner === a.key) return close('the lease ended');
       if (st && st.owner === a.key && st.phase === 'lapsed') return { ...out, state: null };
       return out;
     case 'connGone':
-      if (st && st.owner === a.key && st.phase === 'open') return close('its connection ended');
+      if (OPEN && st.owner === a.key) return close('its connection ended', { told: 'its connection ended' });   // S1: the window lives with the connection that set it
       return out;
     case 'putBackDone':
       if (st && st.phase === 'closing' && st.n === a.n) return { ...out, state: st.then === 'lapsed' ? { phase: 'lapsed', owner: st.owner, n: st.n } : null };
       return out;
     case 'repoint':
-      return { ...out, state: null, forget: !!st };
-    case 'hubStop':
-      if (st && st.phase === 'open') return { ...out, state: null, putBack: 'the hub stopped', forget: true };
       return { ...out, state: null };
+    case 'hubStop':
+      return { ...out, state: null, putBack: OPEN ? 'the hub stopped' : null };
     case 'adopt':
-      return st ? out : { ...out, putBack: 'a hub start adopted the profile' };
+      return st ? out : { ...out, putBack: 'a hub start adopted the profile' };   // a window standing at boot puts itself back by its own doors
     default:
       return out;
   }
 }
+/** The words the lease is told (a free notice at its next turn) — one sentence per reason. */
+function windowToldText(why, { label = null } = {}) {
+  const where = label ? `the "${String(label).slice(0, 60)}" browser` : 'this browser';
+  // (never the download's own file name: a site chose it — this sentence reaches the agent as a system note)
+  if (why === NO_WINDOW_TOLD) return `A download your tab began in ${where} went to the profile's own download place — the person's Downloads folder — because no download folder of yours was lent at that moment. Set the folder and click in one step: \`vibespace-browser download <selector> <path>\`.`;
+  if (/no download of its tab began/.test(String(why))) return `Your download folder in ${where} was put back to the person's own: ${String(why).replace('its tab', 'your tab').replace('its set', 'your set')}. A download your tab begins now goes to the person's Downloads folder — run \`vibespace-browser download <selector> <path>\` again.`;
+  if (/ran past/.test(String(why))) return `Your download folder in ${where} was put back to the person's own while your download was still running (it ${String(why).replace(/^its download /, '').replace('its own folder', 'your folder')}). Set it again before your next download.`;
+  if (why === 'the person took over') return `The person took over ${where}, and your download folder there was put back to the person's own — set it again before your next download (\`vibespace-browser download <selector> <path>\` does it in one step).`;
+  if (why === 'its connection ended') return `Your browser connection to ${where} ended, so your download folder there was put back to the person's own — set it again before your next download.`;
+  return `Your download folder in ${where} was put back to the person's own (${String(why).slice(0, 120)}).`;
+}
+const FRAMES_MAX = 4096;
+/** Is `frameId` one of this lease's own (a tab it holds, or a frame seen under one of its sessions)? */
+function isLeaseFrame(scope, frameId) { const f = frameId == null ? '' : String(frameId); return !!(f && scope && ((scope.targets && scope.targets.has(f)) || (scope.frames && scope.frames.has(f)))); }
 const UNCLASSIFIED_CODE = 'method_unclassified';
 /**
  * lane chrome-157 r2 (主开发's round 2, MUST): A METHOD NAME IS JUDGED FOR SHAPE BEFORE ANYTHING OF IT IS REMEMBERED OR SAID.
@@ -732,7 +758,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

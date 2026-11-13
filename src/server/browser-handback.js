@@ -226,7 +226,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     out.sessionId = sess.id;
     const label = labelOf(ev.profileId);
     const shared = ev.sharedWindow === true; // verify r2 ⑦ (r1 LOW 6): a mate taken WITH a legacy shared window is told so, never "your window"
-    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [], shared }) + (iv.folderPutBack ? ' ' + require('../browser-interrupt.js').FOLDER_PUT_BACK_TEXT : '');   // (lane chrome-157: the lease's download window was put back by this takeover)
+    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [], shared });
     out.text = text;
     // the card is display only — to the live session we hold (a conversation with no id yet still sees it), else by conversation id
     const card = { fromName: FROM_NAME, text, kind: 'notification' };
@@ -246,6 +246,18 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
    * the zero-spend `browser-window-free` notice (src/browser-windows.js's words) at its next turn — no card, no delivery, no
    * turn: nobody typed it; a holder with no live session is skipped (its lease is gone with it). → {told, skipped}.
    */
+  /** lane chrome-157 (the closure list S2 / S5): THE WINDOW's words to the lease whose download folder it was — ONE free notice
+   *  (`browser-download-folder`, rendered by session-status) to that conversation, at its next turn. → {sessionId, noticed, why} */
+  function announceDownloadFolder(ev) {
+    const out = { sessionId: null, noticed: false, why: null };
+    if (!ev || !ev.browserKey || !ev.text) { out.why = 'no words'; return out; }
+    const sess = sessionFor(ev.sessionId || null, ev.browserKey);
+    if (!sess) { out.why = 'no live session carries this browser key'; return out; }
+    out.sessionId = sess.id;
+    out.noticed = queueNotice(sess, { kind: 'browser-download-folder', text: String(ev.text).slice(0, 600), at: Date.now() });
+    log.log?.(`[browser] ${ev.browserKey}${ev.profileId ? ' on ' + ev.profileId : ''}: its download folder — told by a free notice (${ev.why || 'the window'})`);
+    return out;
+  }
   function announceDriveEnded(ev) {
     const out = { told: [], skipped: [], why: null };
     if (!ev || ev.kind !== 'drive-ended' || !Array.isArray(ev.refused)) { out.why = 'not a drive-ended event'; return out; }
@@ -394,7 +406,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       }
     }
     const id = 'bres-' + require('crypto').randomBytes(4).toString('hex');
-    const text = KB.continueFrame({ note, tabs: st.tabs, currentIndex: st.currentIndex, rerun: st.rerun, rerunSentence: T.rerunSentence, userActs: st.userActs || [], actsSentence: require('../browser-tabs.js').userActsSentence, drove: !!st.tookOver }) + (st.folderPutBack ? ' ' + require('../browser-interrupt.js').FOLDER_PUT_BACK_TEXT : ''); // verify r2: the head says drove / resumed; lane chrome-157: the takeover put its download folder back
+    const text = KB.continueFrame({ note, tabs: st.tabs, currentIndex: st.currentIndex, rerun: st.rerun, rerunSentence: T.rerunSentence, userActs: st.userActs || [], actsSentence: require('../browser-tabs.js').userActsSentence, drove: !!st.tookOver }); // verify r2: the head says drove / resumed
     const cardText = KB.continueCardText({ note, tabs: st.tabs, currentIndex: st.currentIndex });
     const out = { ok: true, id, stashed: false, durable: false, carded: false, tabs: st.tabs.length, tookOver: !!st.tookOver, own: !!st.own };
     try {
@@ -415,7 +427,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     return out;
   }
 
-  let unsubInput = null, unsubConfirm = null, unsubWindow = null, unsubRelaunch = null;
+  let unsubInput = null, unsubConfirm = null, unsubWindow = null, unsubRelaunch = null, unsubFolder = null;
   /** P9b: hang on the window-targets engine's input seam — the same announce, target 'window'. Idempotent. */
   function installWindow(engine) {
     if (!engine || typeof engine.onInput !== 'function' || unsubWindow) return false;
@@ -495,6 +507,10 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   function install() {
     if (!keeper) return false;
     installRequests(); // lane browser-takeover-queue
+    // lane chrome-157 (the closure list S2 / S5): THE WINDOW's words to the lease whose download folder it was — the bound passed, the
+    // ceiling, a takeover (of ANY conversation's window), its setting connection ended, a download of its tab with no folder lent —
+    // ONE free notice at its next turn (never a wake, never a card): the notice road every one of them takes
+    if (!unsubFolder && typeof keeper.onDownloadFolder === 'function') unsubFolder = keeper.onDownloadFolder((ev) => { try { announceDownloadFolder(ev); } catch (e) { log.warn?.(`[browser] download-folder notice failed — ${e && e.message}`); } });
     if (!unsubInput && typeof keeper.onInput === 'function') unsubInput = keeper.onInput((ev) => {
       // BROWSE YOURSELF (B-6ae8, the owner 2026-09-28): the user's OWN browsing window taking / letting go of HIS tab is
       // nobody's takeover — no card, no notice, no delivery, no stale sweep, no inbox item (it is no conversation's)
@@ -517,9 +533,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!unsubConfirm && typeof keeper.onConfirmation === 'function') unsubConfirm = keeper.onConfirmation((ev) => { try { noteConfirmation(ev); } catch (e) { log.warn?.(`[browser] confirmation inbox failed — ${e && e.message}`); } });
     return true;
   }
-  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); unsubRequests?.(); unsubStatus?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; unsubRequests = null; unsubStatus = null; }
+  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); unsubRequests?.(); unsubStatus?.(); unsubFolder?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; unsubRequests = null; unsubStatus = null; unsubFolder = null; }
 
-  return { announce, announceTakeover, announceDriveEnded, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME,
+  return { announce, announceTakeover, announceDriveEnded, announceDownloadFolder, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME,
     installRequests, fileRequestItem, tellDone }; // lane browser-takeover-queue
 }
 

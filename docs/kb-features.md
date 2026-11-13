@@ -2341,7 +2341,7 @@ shape (no session, a browser-target session, the lease's own page session); no C
 | Browser.close / crash / crashGpuProcess / executeBrowserCommand / addMockCamera / setGlobalPrivacyControl, Cast.startDesktopMirroring, Extensions.loadUnpacked / uninstall, Target.setRemoteLocations, Tethering.bind / unbind | refused — the whole BROWSER's acts the census itself measured or named (the .401 read: on the scope road they were forwarded) | `close --all` sends Browser.close — refused, and the driver answers ok (measured on the mediated road: another lease's page survives) |
 | Target.sendMessageToTarget, Target.exposeDevToolsProtocol | refused — each carries a call past this verdict (an old non-flattened session; a raw binding in the page) | the driver sends neither |
 | Page.setDownloadBehavior | refused | measured NOT scoped to its page (tab A's call sent tab B's download into A's folder, on 154 and 157) |
-| Browser.setDownloadBehavior | THE WINDOW (below): forwarded; `deny` refused; a browser context of the lease's own forwarded as it is, another's refused | `download` sends it ON ITS PAGE SESSION, `{behavior:'allowAndName', downloadPath, eventsEnabled:true}` — measured: that moves the WHOLE profile's folder too |
+| Browser.setDownloadBehavior | THE WINDOW (below): forwarded; `deny` refused; a browser context of the lease's own forwarded as it is, another's refused | `download` sends it ON ITS PAGE SESSION, `{behavior:'allowAndName', downloadPath, eventsEnabled:true}`, and clicks 1–3 ms later — measured: that moves the WHOLE profile's folder too |
 | Browser.cancelDownload | answered only for a download a tab of the lease began (measured: a cancel by guid DID cancel the person's download) | the driver sends none |
 | Browser.grantPermissions / setPermission / resetPermissions, Storage.clearCookies | answered only for a browser context the lease created | NOT measured with the real driver (it never sends them) |
 
@@ -2354,18 +2354,25 @@ proposal on a shared profile (as site-reset is) is 主开发's to rule. Kept as 
 (Network.setCookies / deleteCookies, Storage.setCookies) and Storage.clearDataForOrigin — that they take ANY origin is a grant
 question (backlog B-771e). Nothing about connecting changes: the driver sends no whole-profile call when it connects.
 
-THE WINDOW (W1–W6): ONE state per PROFILE, a PURE transition (src/browser-mediation.js `windowStep`), executed by the mediator;
-pinned by a GENERATED table (scripts/download-window-cells.mjs — 7 states × 19 acts, 122 cells, 11 culls). The one true sentence:
-**an agent's download set lends it the profile's download folder until that download ends — at most 15 s if no download of its
-tab begins — and a takeover, the lease's end or its last connection closing takes it back at once; while it is lent, a file the
-person starts in that profile lands in the agent's folder.** Only one window per profile (another lease's set is refused by name
-while one stands); only the lease's OWN downloads count (by the frame they began in — measured) and only those are told to it, and
-only if it asked (`eventsEnabled`); nothing more once its window has closed; a download its tab begins after the bound is canceled
-(it would land in the person's own folder); the put-back goes on the lease's own connection when it stands (ordered before its
-next set — `{behavior:'default', eventsEnabled:true}`, measured to put the place back and keep the mediator seeing) else on one of
-its own; a takeover tells the lease (its card and its handback); a browser restart drops the window (its setting died with it); a
-hub stop puts it back best-effort; a HUB START's adoption puts it back before the profile's first grant, tried again (3 tries) and
-said when it could not be.
+THE WINDOW (W1–W6 + the closure list S1–S8): ONE state per PROFILE, a PURE transition (src/browser-mediation.js `windowStep`),
+executed by the mediator; pinned by a GENERATED table (scripts/download-window-cells.mjs — 9 states × 21 acts, 189 cells, no cull:
+every combination is reachable). MEASURED with the real driver (agent-browser 0.38.2, Chrome 154 + 157): it clicks 1–3 ms after its
+set; its download begins when the page's first byte comes (1.0 s / 10.0 s after the set for a 1 s / 10 s page); it gives up at 30 s
+(its own timeout) — so the bound is 30 s; a download's folder is FIXED when it begins (a put-back right after the begin left it
+completing in the agent's folder). The one true sentence: **an agent's download set lends it the profile's download folder until
+its download no longer needs it — 30 s with none of its tab begun, 30 s past its last begin at most — and a takeover of any window
+of that browser, the lease's end or the connection that set it closing takes it back at once; while it is lent, a file the person
+starts in that profile lands in the agent's folder.** A re-set never moves the deadline (in flight it is one more expectation,
+once); only one window per profile (another lease's set is refused by name while one stands); the window counts only the lease's
+OWN downloads (by the frame they began in), and a lease is told of its own downloads — window or not — and of no one else's, only
+on the channel where it asked (`eventsEnabled`), once; a download its tab begins while no folder of its is lent goes to the
+profile's own place — ONE rule, never canceled — and the lease is TOLD; the lease is told (a free notice at its next turn,
+`browser-download-folder`: src/server/browser-keeper.js `onDownloadFolder` → src/server/browser-handback.js) whenever the bound
+passed, the ceiling passed, a takeover took it back, or the connection that set it closed. The put-back goes on the channel the lease
+set (its connection and its page session, the events as it asked — measured: that puts the whole profile back and that session then
+hears only its own page's downloads), so its next set follows it and nothing is heard twice; else on one connection of its own. A
+browser restart drops the window (its setting died with it); a hub stop puts it back best-effort; a HUB START's adoption puts it
+back before the profile's first grant (the grant waits out all 3 tries) and stops trying once a window has opened.
 
 ENFORCED ON: mediated (Separate tabs) — yes · scope (a profile shared through «Who can use it» on this machine) — yes, and it fails
 CLOSED: a url of its own that cannot be made refuses the attach `scope_unavailable` by name, never the raw endpoint · a paired
@@ -2373,9 +2380,9 @@ machine's profile, or a hub with no mediating proxy — NO: the raw endpoint, no
 promised — the «Who can use it» sentence says so, keyed by the same road verdict; a Separate-tabs profile on a hub with no proxy is
 worded UNAVAILABLE — every agent lease there is refused `mediation_unavailable`). A conversation's OWN temporary browser: the raw
 endpoint by design — untouched by all of this. Gates: test-cdp-census ⑫ (FAST: the exact law lists, every refusal's recipe on
-both roads, the own-context / own-download / window verdicts, the window table against windowStep), test-browser-mediation ⑥c/⑥e
-(every window cell over the real proxy, both roads, both set forms; two leases; two downloads; the person's download; the
-adoption door; behavioural mutant controls) and ④ (a hub start's adoption and the no-proxy / fail-closed words, through real
+both roads, the own-context / own-download / window verdicts, the window table against windowStep, the window's words), test-browser-mediation ⑥c/⑥e
+(every window cell over the real proxy, both roads, both set forms; two leases; two downloads; the person's download; heard once;
+the notice road; the adoption door and its wait; behavioural mutant controls for every law) and ④ (a hub start's adoption and the no-proxy / fail-closed words, through real
 keepers), test-everyone-principal (the dialog's sentence by road), test-browser-mediation-chrome (the real driver, heavy).
 
 ### Agent browser v2 — P7: window binding — one group, two panes side by side (2026-09-21; design §4.6 / §3.7, D19 / D24, the §10 P7 row)

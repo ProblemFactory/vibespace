@@ -388,6 +388,9 @@ const NOTICE_RENDERERS = Object.freeze({
   // lane browser-propose (2026-09-30): an approved switch told for FREE — only when the ladder's stash could not take the
   // words (the proposal runner's one carrier otherwise); the words are browser-switch.approvedText's
   'browser-proposal': (n) => '<system-reminder>\n' + String((n && n.text) || '').slice(0, 1200) + '\n</system-reminder>',
+  // lane chrome-157 (the closure list S2 / S5): THE WINDOW's words — the agent's download folder in a shared browser was put back (the
+  // bound, the ceiling, a takeover, its connection ended) or a download of its tab went to the person's own place; free, at its next turn
+  'browser-download-folder': (n) => '<system-reminder>\n' + String((n && n.text) || '').slice(0, 600) + '\n</system-reminder>',
   // lane hooks-create (2026-10-01): the registration that CREATED the hook file reached a session that started without
   // it — ONE free next-turn note (src/hooks-late.js); agent-routes drops it unread in any OTHER process (a resume)
   'hooks-late': (n) => require('./hooks-late').renderHooksLateNotice(n),

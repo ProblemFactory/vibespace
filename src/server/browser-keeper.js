@@ -3333,11 +3333,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const k = inputKey(bk, profileId || null);
     const s0 = inputs.get(k) || null;
     const url0 = s0 && s0.url ? s0.url : (lease && lease.lastUrl) || '';
-    let rerun = [], userActs = [], tookOver = false, folderPutBack = false;
+    let rerun = [], userActs = [], tookOver = false;
     if (s0 && s0.input === 'user') {
       const h = handback({ browserKey: bk, profileId: profileId || null, viewerId: null, cause: 'continue', url: url0, sessionId });
       if (!h.ok) return h;
-      rerun = h.rerun || []; userActs = h.userActs || []; tookOver = true; folderPutBack = !!h.folderPutBack;
+      rerun = h.rerun || []; userActs = h.userActs || []; tookOver = true;
     }
     let tabs = [];
     if (own) {
@@ -3355,7 +3355,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (u) tabs = [{ url: u, title: '', active: true }];
     }
     log.log?.(`[browser] ${bk}${profileId ? ' on ' + profileId : ' (its own browser)'}: handed back for the next turn by the user (${tabs.length} tab(s)${tookOver ? ', the takeover ended' : ''}${rerun.length ? `, to re-run: ${rerun.join(', ')}` : ''}) — nothing delivered now`);
-    return { ok: true, own, tabs, currentIndex: KB.currentIndexOf(tabs), rerun, userActs, tookOver, folderPutBack };
+    return { ok: true, own, tabs, currentIndex: KB.currentIndexOf(tabs), rerun, userActs, tookOver };
   }
   /** lane browser-resume B: the hand-back's restore on the conversation's OWN kept entry — what its next command is told
    *  (the stash carried the note: `handedBack` ⇒ the command's note names the current tab only; a stash that could not
@@ -4339,6 +4339,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   /** The road the «Who can use it» dialog words: the same verdict, except a mediated profile on a hub with no proxy — every agent lease
    *  there is refused `mediation_unavailable`, so the dialog says unavailable (the .401 read, L2b). → {mode, why} */
   const dialogRoadOf = (p) => { const v = agentRoadOf(p); return p && isMediated(p) && !(mediator && mediationOn() && typeof mediator.grantFor === 'function') ? { mode: v.mode, why: 'unavailable' } : v; };
+  // lane chrome-157 (the closure list S2 / S5): THE WINDOW's words reach the lease whose download folder it was — the mediator says
+  // WHY (onTold), the keeper words it with the profile's label and hands it to its listeners (browser-handback.js: ONE free notice at
+  // that conversation's next turn) — the one road for the bound, the ceiling, a takeover, its connection ending, a download with no
+  // folder of its lent
+  const folderListeners = new Set();
+  if (mediator && typeof mediator.onTold === 'function') mediator.onTold((t) => {
+    if (!t || !t.browserKey) return;
+    const p = t.profileId ? profile(t.profileId) : null;
+    const l = t.profileId ? B.findLease(reg.leases, t.profileId, String(t.browserKey)) : null;
+    const ev = { profileId: t.profileId || null, browserKey: String(t.browserKey), sessionId: (l && l.sessionId) || null, why: t.why, text: M.windowToldText(t.why, { label: p ? p.label : null }) };
+    for (const fn of folderListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] a download-folder listener threw — ${e && e.message}`); } }
+  });
   const leaseRoadOf = (p, browserKey) => {
     const bk = String(browserKey || ''), rec = p ? reg.browsers[p.id] : null;
     return M.leaseRoadVerdict({ mediated: isMediated(p), proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: !p || isEph(p), remote: !!(p && p.host) || !(rec && isLocalRec(rec)), agent: (B.isBrowserKey(bk) || B.isChildKey(bk)) && !HM.isHumanKey(bk) });
@@ -5399,7 +5411,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (profileId && mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey }); } catch (e) { log.warn?.(`[browser] ${browserKey} on ${profileId}: the takeover's interrupt failed — ${e && e.message}`); } }
       let inFlight = [];
       if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId, browserKey, profileId: profileId || null, at }) || []; } catch (e) { log.warn?.(`[browser] ${browserKey}: the in-flight reader failed — ${e && e.message}`); inFlight = []; } }
-      const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [], folderPutBack: !!(ab && ab.downloadsPutBack) }); // a closed cycle hands on the ids it counted (told once); lane chrome-157: the folder put back
+      const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] }); // a closed cycle hands on the ids it counted (told once)
       cycles.set(k, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user took over (viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of the agent interrupted (${view.verbs.join(', ')})` : 'nothing of the agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted${ab.terminated ? `, ${ab.terminated} running script(s) asked to stop` : ''}` : ''}${oc.fresh ? '' : ' (the same takeover goes on: a second viewer took it before the handback)'}; agent commands are refused until the handback`);
@@ -5452,7 +5464,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey: l.browserKey }); } catch (e) { log.warn?.(`[browser] ${l.browserKey} on ${profileId}: the sibling's interrupt failed — ${e && e.message}`); } }
       let inFlight = [];
       if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId: l.sessionId || null, browserKey: l.browserKey, profileId, at }) || []; } catch { inFlight = []; } }
-      const oc = INT.openInterruption(cycles.get(sk) || lastClosed.get(sk) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [], folderPutBack: !!(ab && ab.downloadsPutBack) });
+      const oc = INT.openInterruption(cycles.get(sk) || lastClosed.get(sk) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] });
       cycles.set(sk, oc.cycle);
       const view = INT.interruptionView(oc.cycle);
       log.log?.(`[browser] ${l.browserKey} on ${profileId}: taken over WITH ${browserKey} (the same browser; viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of its agent interrupted (${view.verbs.join(', ')})` : 'nothing of its agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted` : ''}; its commands are refused until the handback`);
@@ -5532,12 +5544,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     cycles.delete(k);
     if (closed) lastClosed.set(k, closed);
     const rerun = INT.interruptedVerbs(closed);
-    const folderPutBack = !!(closed && closed.folderPutBack);   // (lane chrome-157: the takeover put the download folder back — said again at the handback)
     const userActs = closed && Array.isArray(closed.userActs) ? closed.userActs.slice() : []; // lane browser-resume C: the user's tab acts while he drove
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + T.urlForLog(d.state.url) : ''}${rerun.length ? ` — to re-run: ${rerun.join(', ')}` : ''}${userActs.length ? ` — the user's tab acts while driving (said to the agent): ${userActs.map((a) => a.kind).join(', ')}` : ''}`); // lane live-input: origin + path in the journal — never the query (order ids, tokens)
     emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}), sharedWindow: sharedWindowOf(browserKey, profileId), pressed }); // verify r2 ⑦ — r2 (lane owner-press-attended): + the door's PRESS (an explicit handback is attended only with it)
     if (profileId) driveEnded(profileId); // verify r5 ②: no window of the browser driven any more ⇒ the holders refused meanwhile are told
-    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, folderPutBack, state: inputStateFor(browserKey, profileId) };
+    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, state: inputStateFor(browserKey, profileId) };
   }
   /**
    * lane P verify (finding 3): the viewer driving PASSES the controls to another view of the same browser (a
@@ -7558,6 +7569,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const api = {
     /** lane chrome-157: the road an agent's lease of profile `id` takes ({mode, why}) — or, with no id, the road a NEW profile on `host`
      *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
+    onDownloadFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); },   // (lane chrome-157: THE WINDOW's notice road)
     agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
