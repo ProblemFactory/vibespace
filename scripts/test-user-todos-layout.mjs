@@ -31,6 +31,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import { execFileSync } from 'node:child_process';
+// the viewer's zone (page-time prints the For-you instants in the page's zone = this process's when none is set — lane
+// ui-language): pinned, so a UTC runner reads the same clock as this box
+process.env.TZ = 'America/Los_Angeles';
 const { openLayout, nextLayout, entriesFor } = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + JSON.stringify(e) : '')); } };
@@ -487,12 +491,31 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
         const tt = (k, p0) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p0 && p0[x] !== undefined ? String(p0[x]) : m));
         const ahead = LY.saidLine(sp.i18n.text, tt, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
         const gone = LY.saidLine(sp.i18n.text, tt, { now: at + 7.5 * 60e3, locale: 'en-US', timeZone: 'America/Los_Angeles' });
-        ok(/The next frees at 01:21 AM\.$/.test(ahead) && /The next is free now\.$/.test(gone) && !/01:21/.test(gone),
-          'R2 the clause is said at RENDER: «The next frees at 01:21 AM.» while ahead, «The next is free now.» once 7.5 min past (the stored epoch unchanged)', JSON.stringify({ ahead, gone }));
-        ok(/const said = \(l\) => saidLine\(l, t, \{ locale: deviceLocale\(\) \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'))
-          && /if \(Number\.isFinite\(v\.at\)\) return clockAt\(v\.at, \{ now, locale, timeZone \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8')),
-          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through clockAt in the device\'s locale and zone');
+        ok(/The next frees at 1:21 AM\.$/.test(ahead) && /The next is free now\.$/.test(gone) && !/1:21/.test(gone),
+          'R2 the clause is said at RENDER: «The next frees at 1:21 AM.» while ahead, «The next is free now.» once 7.5 min past (the stored epoch unchanged)', JSON.stringify({ ahead, gone }));
+        ok(/const said = \(l\) => saidLine\(l, t\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'))
+          && /const at = \(ms\) => stampAt\(ms, \{ now \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8'))
+          && /if \(Number\.isFinite\(v\.at\)\) return at\(v\.at\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8')),
+          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through page-time stampAt (the date beyond today, the page\'s zone — lane ui-language)');
         const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+        // the reader's round (13:41Z, MUST): a For-you instant beyond today carries its DATE — «已于 周六 05:00 过期» named a weekday
+        // for an expiry 20 days back. Driven in a child on a zh PAGE (the page's language is read once, when i18n loads):
+        // login-expiry-watch's own words → saidLine → the page's one formatter.
+        {
+          const drive = `globalThis.localStorage = { getItem: (k) => (k === 'vibespace.lang' ? 'zh' : null), setItem() {}, removeItem() {} };
+            Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, configurable: true });
+            const { createRequire } = await import('node:module'); const require = createRequire(${JSON.stringify(ROOT + '/x.js')});
+            const LE = require(${JSON.stringify(ROOT + '/src/server/login-expiry-watch.js')});
+            const I = await import(${JSON.stringify(ROOT + '/src/lib/i18n.js')}); const LY = await import(${JSON.stringify(ROOT + '/src/lib/user-todos-layout.js')});
+            const now = Date.parse('2026-11-13T12:00:00Z'), say = (stage, info) => LY.saidLine(LE.itemWordsFor(stage, 'Work', info, {}), I.t, { now });
+            console.log(JSON.stringify([say('expired', { state: 'expired', msLeft: -20 * 86400e3, refreshExpiresAt: now - 20 * 86400e3 }),
+              say('expiring', { state: 'expiring', msLeft: 9 * 86400e3, refreshExpiresAt: now + 9 * 86400e3 }),
+              say('expiring', { state: 'expiring', msLeft: 3 * 3600e3, refreshExpiresAt: now + 3 * 3600e3 })]));`;
+          let got = null; try { got = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', drive], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } }).trim().split('\n').pop()); } catch (e) { got = String(e.stderr || e.message).slice(0, 400); }
+          const [past, ahead, today] = Array.isArray(got) ? got : [];
+          ok(Array.isArray(got) && /已于 10\/24 05:00 过期/.test(past) && /11\/22 04:00/.test(ahead) && /（07:00）/.test(today) && !/周[一二三四五六日]/.test(got.join(' ')),
+            'THE READER\'S MUST (F2): a For-you login-expiry instant beyond today says its DATE on a zh page («已于 10/24 05:00 过期», «11/22 04:00»), today its clock («07:00») — never a weekday', got);
+        }
         const keys = new Set([...Object.values(SA.REFUSAL_WORDS).flat(), ...Object.values(SA.NEXT_WORDS).flatMap((x) => [x.key, x.gone]), ...Object.values(SA.LINE_WORDS), ...Object.values(SA.DOOR_WORDS), ...Object.values(SA.SPEND_REASONS).map((r) => r.what)]);
         for (const why of ['hour-cap', 'day-cap', 'instance-cap', 'overage-in-use', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'unknown-reason', 'weird']) for (const ra of [at, 0]) for (const sn of ['build-bot', null]) { const w = SA.refusalI18n({ ...v, why, retryAfter: ra, producers: { 'job-notification': 2, unknown: 1 } }, { sessionName: sn }); keys.add(w.text.key); for (const d of w.detail || []) keys.add(d.key); }
         const missing = [...keys].filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
@@ -520,10 +543,10 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
           const PT = { locale: 'en-US', timeZone: 'America/Los_Angeles' };
           const kAhead = [ki.i18n.text, ...ki.i18n.detail].map((l) => LY.saidLine(l, tt, { now, ...PT }));
           const kPast = [ki.i18n.text, ...ki.i18n.detail].map((l) => LY.saidLine(l, tt, { now: at + 60e3, ...PT }));
-          ok(JSON.stringify(kAhead) === JSON.stringify(['VibeSpace held it. The next frees at 01:21 AM.', 'held. The next frees at 01:21 AM.', 'Its window: Its overage resets at 01:21 AM.', 'Reported at 01:21 AM.'])
-            && JSON.stringify(kPast) === JSON.stringify(['VibeSpace held it. The next is free now.', 'held. The next is free now.', 'Its window: Its overage window has reset since.', 'Reported at 01:21 AM.'])
+          ok(JSON.stringify(kAhead) === JSON.stringify(['VibeSpace held it. The next frees at 1:21 AM.', 'held. The next frees at 1:21 AM.', 'Its window: Its overage resets at 1:21 AM.', 'Reported at 1:21 AM.'])
+            && JSON.stringify(kPast) === JSON.stringify(['VibeSpace held it. The next is free now.', 'held. The next is free now.', 'Its window: Its overage window has reset since.', 'Reported at 1:21 AM.'])
             && ki.i18n.text.params.next.gone === 'The next is free now.' && LY.CLAUSE_DEFAULTS[0] === SA.NEXT_WORDS.cap && LY.CLAUSE_DEFAULTS[1] === SA.NEXT_WORDS.overage,
-            'r3 A KEYLESS CLAUSE says the DEFAULT words (spend-authorizer NEXT_WORDS — the same table): «The next frees at 01:21 AM.» ahead, «The next is free now.» once past — never a bare clock; an INSTANT in any other slot stays its clock', JSON.stringify({ kAhead, kPast }));
+            'r3 A KEYLESS CLAUSE says the DEFAULT words (spend-authorizer NEXT_WORDS — the same table): «The next frees at 1:21 AM.» ahead, «The next is free now.» once past — never a bare clock; an INSTANT in any other slot stays its clock', JSON.stringify({ kAhead, kPast }));
           // r3: THE FOLD IS FOR THE EYE, NOT THE RECORD — a line's `more` rows survive the store; the eye reads the line, a Copy the rows
           const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-fold-'));
           const m7 = new UserTodoManager({ dataDir: fdir, expirySweepMs: 0 });
@@ -1068,7 +1091,8 @@ console.log('lane browser-takeover-queue: a takeover request\'s ONE item — its
       const plain = R.resolvedByText(m.get(pk.id).resolvedBy, ctx.t, m.get(pk.id));
       const at10 = new Date(2026, 9, 31, 8, 51).getTime(), noted = m.noteFact(pk.id, { endedAt: at10, endedBy: 'later-answer' });
       const said10 = R.resolvedByText(m.get(pk.id).resolvedBy, ctx.t, m.get(pk.id)), row10 = R.renderRow({ item: m.get(pk.id), resolved: true }, ctx).innerHTML;
-      ok(noted && said10 === 'allowed once · withdrawn by your later answer at 08:51' && row10.includes('allowed once · withdrawn by your later answer at 08:51') && !/withdrawn/.test(plain),
+      const at10Said = (await import(path.join(ROOT, 'src/lib/page-time.js'))).stampAt(at10);   // lane ui-language: page-time — beyond today, with its date
+      ok(noted && /\d/.test(at10Said) && at10Said !== '08:51' && said10 === `allowed once · withdrawn by your later answer at ${at10Said}` && row10.includes(`allowed once · withdrawn by your later answer at ${at10Said}`) && !/withdrawn/.test(plain),
         'lane passkey-browse-yourself r10: a passkey registration card\'s «Allow once» taken back by a later answer — its resolved For-you record carries the end (the real store\'s noteFact) and the row says «allowed once · withdrawn by your later answer at HH:MM»; without the end it says nothing of the kind', { plain, said10 });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }

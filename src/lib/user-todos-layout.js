@@ -74,7 +74,7 @@
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { rowOf, needsMe, placeOf, badgeRows, bandInfo, policyOf } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds; `policy` = the owner's (src/attention-model.js settingsPolicy, lane attention-predicate-shared)
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
-import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (lane owner-press-attended)
+import { stampAt } from './page-time.js'; // the ONE formatter of a time a person reads: today «19:27», beyond today with its date, in the page's zone (lane ui-language — the reader's round: stash-summary clockAt printed «周六 05:00» for an expiry 20 days back)
 import { NEXT_WORDS } from '../spend-authorizer.js'; // PURE: the instant clause's words (r3: a clause that lost its key says these)
 
 /** PURE. THE WORDS OF ONE i18n LINE (`{key, params}`) — the ONE renderer every For-you surface uses (user-todos-actions'
@@ -94,13 +94,14 @@ function clauseOf(name, v) {
   if (typeof v.gone === 'string' && v.gone) return { ...(CLAUSE_DEFAULTS.find((d) => d.gone === v.gone) || CLAUSE_DEFAULTS[0]), at: v.at, gone: v.gone };
   return name === 'next' ? { ...CLAUSE_DEFAULTS[0], at: v.at } : null;
 }
-export function saidLine(l, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
+export function saidLine(l, t, { now = Date.now() } = {}) {
+  const at = (ms) => stampAt(ms, { now });
   const word = (name, v) => {
     if (!v || typeof v !== 'object') return v;
     const c = clauseOf(name, v);
-    if (c) return t(c.at > now || !(typeof c.gone === 'string' && c.gone) ? c.key : c.gone, { time: clockAt(c.at, { now, locale, timeZone }) });
+    if (c) return t(c.at > now || !(typeof c.gone === 'string' && c.gone) ? c.key : c.gone, { time: at(c.at) });
     if (typeof v.key === 'string') return t(v.key, v.params || undefined);   // lane lark-refresh-stall: words carry their own params
-    if (Number.isFinite(v.at)) return clockAt(v.at, { now, locale, timeZone });
+    if (Number.isFinite(v.at)) return at(v.at);
     return v;
   };
   return String(t(l.key, Object.fromEntries(Object.entries((l && l.params) || {}).map(([k, v]) => [k, word(k, v)])))).trim();

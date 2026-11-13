@@ -54,6 +54,10 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { gitEnvFrom } from './git-env.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { pathToFileURL } from 'node:url';
+// the viewer's zone the For-you lines are read in (page-time prints in the page's zone = this process's when none is set —
+// lane ui-language): pinned, so a UTC runner reads the same clock as this box
+process.env.TZ = 'America/Los_Angeles';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -3776,7 +3780,7 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
   console.log('    zh: ' + out.zh.text + ' / ' + out.zh.lines.join(' / '));
   console.log('    ja: ' + out.ja.text + ' / ' + out.ja.lines.join(' / '));
   const has = (o, re) => re.test(o.text + '\n' + o.lines.join('\n'));
-  ok('§10r hour-cap, en: the PRODUCER (the continue after a usage limit), the CONVERSATION («build-bot»), the account, the cap, the next free slot in the viewer\'s zone', has(out.en, /the continue after a usage limit/) && has(out.en, /«build-bot»/) && has(out.en, /acct-1 has used its 30 turns/) && has(out.en, /The next frees at 01:21 AM\./), out.en.text);
+  ok('§10r hour-cap, en: the PRODUCER (the continue after a usage limit), the CONVERSATION («build-bot»), the account, the cap, the next free slot in the viewer\'s zone', has(out.en, /the continue after a usage limit/) && has(out.en, /«build-bot»/) && has(out.en, /acct-1 has used its 30 turns/) && has(out.en, /The next frees at 1:21 AM\./), out.en.text);
   ok('§10r …the COUNTS per window and ONE «Spent by» row per producer, most first (job-notification ×20, peer-message ×10) — and the Spending door', has(out.en, /30 of 30 this hour, 30 of 200 in 24 hours; this instance 30 of 800/) && out.en.lines.filter((l) => /^Spent by /.test(l)).join('|') === 'Spent by a Background Work notification: 20|Spent by a message from another session: 10' && has(out.en, /Held: the continue after a usage limit \(auto-resume\)/) && has(out.en, /Settings → Spending/), out.en.lines.join(' | '));
   ok('§10r …in zh: the producer, the conversation, the counts and each «Spent by» row, in Chinese', has(out.zh, /用量限制后的自动继续/) && has(out.zh, /「build-bot」/) && has(out.zh, /本小时 30\/30/) && has(out.zh, /由一条后台任务通知花掉：20/) && has(out.zh, /由一条来自其他会话的消息花掉：10/) && !has(out.zh, /MISSING/), out.zh.text + ' / ' + out.zh.lines.join(' / '));
   ok('§10r …in ja: the same facts in Japanese', has(out.ja, /使用制限後の自動続行/) && has(out.ja, /「build-bot」/) && has(out.ja, /この 1 時間 30\/30/) && has(out.ja, /バックグラウンド作業の通知による消費：20/) && !has(out.ja, /MISSING/), out.ja.text);
@@ -3817,7 +3821,8 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
     ovg.authorize({ reason: 'job-notification', identity: id, sessionName: 'nightly', hold: false, now: nowR });
     const ov = (ovStore.snapshot().open || []).find((x) => x.origin === 'spend' && x.i18n); ovStore.stop();
     const oo = render('en', ov, nowR), ooj = render('ja', ov, nowR);
-    const seenClock = require(path.join(REPO, 'src/stash-summary.js')).clockAt(nowR - 7 * 60e3, { now: nowR, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    // the tray prints an instant through page-time (lane ui-language, the reader's round: the date beyond today, the page's zone)
+    const seenClock = (await import(pathToFileURL(path.join(REPO, 'src/lib/page-time.js')).href)).stampAt(nowR - 7 * 60e3, { now: nowR });
     ok('§10r r3 THE OVERAGE EVIDENCE: «last reported 7 min ago» is rendered as the instant — «Paid overage was last reported at ' + seenClock + '.» (the viewer\'s zone; ja too)',
       !!ov && /last reported 7 min ago/.test(ov.text) && oo.lines.includes(`Paid overage was last reported at ${seenClock}.`) && has(ooj, /有料の超過利用が最後に報告されたのは/), ov && oo.lines.join(' | '));
     // (c) identity-unknown: the English said «(instance 7/800)» — the instance's count is rendered with no account

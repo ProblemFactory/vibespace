@@ -444,7 +444,21 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   const planted = read('src/lib/channels-panel.js').replace('title.textContent = r.title;', 'title.innerHTML = r.title;');
   ok(planted !== read('src/lib/channels-panel.js') && judge(planted).length === 1, 'NEGATIVE CONTROL: a planted `title.innerHTML = r.title` (a hostile group name) is FLAGGED by the same judge');
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), D = read('src/lib/channel-group-dialogs.js');
-  ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = \(r\.lastRaw && groupSysWords\(r\.lastRaw, r\.lastRaw\.by, r\.lastRaw\.member\)\) \|\| r\.lastText \|\| '';/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line (a system line in the reader\'s words — lane ui-language) and source chip through textContent');
+  ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = groupLastLine\(r\);/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line (a system line in the reader\'s words — lane ui-language) and source chip through textContent');
+  // the reader's round (13:41Z, F4): the list's preview of a group's SYSTEM line, DRAWN — the row groupListRows builds from the
+  // group view goes through the one line function on a zh page (the row never carried lastRaw, so the stored English stood)
+  {
+    const { execFileSync } = await import('node:child_process');
+    const drive = `globalThis.localStorage = { getItem: (k) => (k === 'vibespace.lang' ? 'zh' : null), setItem() {}, removeItem() {} };
+      Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, configurable: true });
+      const V = await import(${JSON.stringify(REPO + '/src/lib/channel-groups-view.js')}); const W = await import(${JSON.stringify(REPO + '/src/lib/channel-words.js')});
+      const g = (id, lastText, lastRaw) => ({ id, name: id, members: [], lastAt: 1, lastText, lastRaw });
+      const { rows } = V.groupListRows({ groups: [g('g1', 'Alice added Bob', { kind: 'invite', by: 'Alice', member: 'Bob', from: '', archived: false }), g('g2', 'hello there', null)] });
+      console.log(JSON.stringify(rows.map((r) => W.groupLastLine(r))));`;
+    let got = null; try { got = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', drive], { encoding: 'utf8' }).trim().split('\n').pop()); } catch (e) { got = String(e.stderr || e.message).slice(0, 300); }
+    ok(Array.isArray(got) && got[0] === 'Alice 拉入了 Bob' && got[1] === 'hello there',
+      'the Channels list DRAWS a group\'s system line in the reader\'s words (zh «Alice 拉入了 Bob» from the row groupListRows builds) and a message as written (the reader\'s F4)', got);
+  }
   ok(/el\('div', 'chanmsg-ctx', raw\.context\)/.test(W) && /body\.appendChild\(document\.createTextNode\(r\.text\)\)/.test(W) && /el\('span', 'chanblk-at chan-at', '@' \+ nameOf\(r\.id, r\.text\.slice\(1\)\)\)/.test(W) && /titleRow\.appendChild\(el\('b', '', group\.name \|\| groupId\)\)/.test(W), 'the group window: invite context, message body and the group name through el() (textContent)');
   // channel-polish (2026-09-27): the member picker is the ONE principal picker — its names through el() (textContent)
   const PP = read('src/lib/principal-picker.js');

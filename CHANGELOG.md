@@ -42,6 +42,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Spending settings, the task group window and the diagnostics report use your language's words where English had stayed.
 - The For you list's one-line preview drops a leading heading or quote mark and backticks; the detail still shows the text exactly as written.
 - The theme's name in the ⚙ menu's Appearance row, the Theme Editor's base list and a terminal's theme list is shown in your language.
+- A default desktop's name is shown in your language on the phone's desktop tabs, in the desktop switch's words and in the rename notice.
+- The default model choice in Settings says Default in your language, and the OpenCode background service plugin has its name in your language.
+- The Machines section's caption is no longer shown in capital letters.
 
 ## 2.369.402 — 2026-11-14
 

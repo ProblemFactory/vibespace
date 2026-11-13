@@ -97,6 +97,12 @@ export function modelLabelWords(m, t) {
   return x && hasWord('model-note', x[2]) ? `${x[1]} (${valueWord('model-note', x[2], t)})` : label;
 }
 
+/** A served model list as a settings select's options: every row through modelLabelWords — the default row (id '') is the
+ *  page's «Default», never the server's English label (the reader's round: the ⚙ default-model select read «Default»). */
+export function modelOptions(models, t) {
+  return (Array.isArray(models) ? models : []).filter(Boolean).map((m) => ({ value: m.id, label: modelLabelWords(m, t) || m.id }));
+}
+
 /** The push declaration's options, in the order a person reads them: [[value, words]…] (both the account dialog and the
  *  channel options read THIS — they kept two copies of the English before). */
 export function pushClaimOptions(t) { return ['unknown', 'shared', 'exclusive'].map((v) => [v, valueWord('push-claim', v, t)]); }

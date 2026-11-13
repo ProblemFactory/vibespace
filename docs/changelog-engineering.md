@@ -104,6 +104,31 @@ This file is the engineers' record of every release: the lanes, the verification
 - **`themeWord(key, t, label)`:** a plugin theme (`plugin-<x>`) reads the label it was registered with (ThemeManager.getPluginThemes), never its key capitalised.
 - **test-ui-language ⑥(d), zero tolerance:** a value capitalised by hand (`x.charAt(0).toUpperCase()`, `x[0].toUpperCase()`) anywhere in the browser bundle is RED. The six first letters that are not a value's carry `// ui-words: <why>` on the line above: a worded sentence's, the agent's own sentence, a model family, a vendor slug, and a level the door has no word for. A planted control holds both spellings.
 
+### ui-language — the reader's round (主开发 13:41Z: 2 must-fix + 6 moderate, one commit at the tip)
+- **MUST (pick 4):** chat-status-bar render() declared a local string `when` and the pool lines called `when(ms)` inside a closure, which threw a TypeError whenever a pool auto-continue wait with a cause was drawn. The local is now `resetAt`, printed through stampAt, so a reset tomorrow carries its date.
+  - Census ⑦'s shadow leg resolves a call through EVERY enclosing function (params, any pattern, function / class declarations, catch params). The reader's M3c is a planted control.
+  - test-chat-status-bar-effort ④a draws the pool chip.
+- **MUST (pick 1):** a For-you instant (`{at}` and a clause's time) printed through stash-summary clockAt, a weekday with no date and in the device zone («已于 周六 05:00 过期» for an expiry 20 days back). user-todos-layout saidLine now prints through page-time stampAt: today the clock, beyond today with its date, in the page's zone.
+  - test-user-todos-layout drives login-expiry's real words on a zh page in a child process.
+  - Suites that pin a For-you clock set `process.env.TZ`.
+  - page-time's formatter cache keys on the device zone too.
+- **The phone permission menu:** the row wraps; the words take a min-width; the raw hint shrinks, then drops under the words.
+- **The Channels list's group system line:** groupListRows copies `lastRaw` onto the row. channel-words `groupLastLine(row)` is the one drawing; the pin draws a zh row.
+- **«Desktop N»:** DesktopManager `nameOf(desk)` is THE door. The door words (`_doorLabel` / `_doorRefused` params), the rename «meanwhile» line, the phone tabs and the Desktops button all go through it. test-desktop-switch reds a stored name drawn past it.
+- **Built-in plugin words:** census ⑥(e) reads src/plugins/index.js and reds a label / description with no zh / ja row («OpenCode background service» had none). The built-in rows' `{name}` params are worded.
+- **The ⚙ default-model select:** value-words `modelOptions(models, t)` (the server's default row is the page's «Default»); app.js reads it.
+- **Legacy key:** main-ask `LEGACY_KEYS` keeps the .398 command row's key with zh / ja rows (the current words) for one release. Items are keyed by requestId and never re-filed.
+- **Census holes planted as controls (the reader's M1c, M2c, M3b, M3c), each detector widened:**
+  - ① a `{param}` sentence filled by `.replace` outside t();
+  - ⑥(d) a regex capitalisation;
+  - ⑦ an hh:mm read off getHours / getMinutes. The 17 the tree holds today are a shrink-only `clocks` list; the ones this round touched were moved to page-time.
+- **Smaller fixes:**
+  - The explorer's Modified / Created columns use the near shape.
+  - page-time: «1 day»; units chosen after rounding (59:40 is «1 h»); until() of a past instant says when it was.
+  - hostStateChip's default words go through t().
+  - Three zh / ja rows.
+  - The Machines caption (`.mounts-sec-sub { text-transform: none }`, pinned in the census).
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

@@ -143,8 +143,11 @@
 .chat-status-dropdown-item:hover { background: var(--bg-hover); }
 .chat-status-dropdown-item.active { color: var(--accent); font-weight: 600; }
 /* lane ui-language: the permission menu — words first, the protocol value as a dim hint; a mode that asks nothing in the warning colour */
-.chat-status-perm-item { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
-.chat-status-perm-raw { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono, monospace); flex: 0 0 auto; }
+.chat-status-perm-item { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; justify-content: space-between; }
+/* the words take the row and wrap at word width; the hint shrinks, then drops under the words when the menu is narrow (the
+   reader's round: on a 390 px phone a hint that never shrank left the words one character per line) */
+.chat-status-perm-words { flex: 1 1 auto; min-width: min(9em, 100%); overflow-wrap: normal; word-break: normal; }
+.chat-status-perm-raw { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono, monospace); flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; margin-left: auto; }
 .chat-status-dropdown-item.danger, .chat-status-perm.danger { color: var(--red, #e55); }
 .chat-status-perm {
   font-size: 10px; color: var(--text-dim); padding: 0 4px;

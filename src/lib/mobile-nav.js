@@ -393,11 +393,13 @@ export class MobileNav {
   updateDesktopsDoor() {
     const b = this.desktopsBtn, dm = this.app.desktopManager;
     if (!b) return;
-    const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: d.name, active: d.id === dm.activeDesktopId })));
+    // a desktop's name through THE door (dm.nameOf — «Desktop 1» in the reader's words), read once where the list is read
+    const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: dm.nameOf ? dm.nameOf(d) : d.name, active: d.id === dm.activeDesktopId })));
     // THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 17:10Z: «我并不能看出来现在有消息在等我»): something waits for
     // the person somewhere they are not looking ⇒ the closed door says it — a yellow dot and its words — so they need not open
     // the sheet to find out; the conversation ON SHOW is never counted (it says it itself). THE waiting fact (windowWaits).
     const waiting = doorWaiting(this.app); // r2 (主开发 ⑤): THE door's count — its exclusion of the one on show pinned on its own
+    // ui-words: s.name is the desktop's name through dm.nameOf (the list above is read once, through the door)
     const label = (s.k ? t('Desktops — {name} ({k}/{n})', { name: s.name, k: s.k, n: s.n }) : t('Desktops')) + (waiting ? ' · ' + t('{n} waiting for input', { n: waiting }) : '');
     b._door = { k: s.k, n: s.n, name: s.name, waiting, waitingWords: waiting ? t('{n} waiting for input', { n: waiting }) : '' }; // the ⋯ row's words (r3): the PLACE of the total and the name, as the label says them
     this._waitDot(b, waiting > 0);
@@ -665,7 +667,8 @@ export class MobileNav {
           tab.dataset.desktopId = desk.id;
           const isActive = !desk.gone && desk.id === dm.activeDesktopId;
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
-          tab.textContent = desk.gone ? desk.name : `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
+          const shown = dm.nameOf ? dm.nameOf(desk) : desk.name;   // THE door for a desktop's name (lane ui-language)
+          tab.textContent = desk.gone ? shown : `${shown} (${deskWindows.length + savedCount(desk.id)})`;
           if (!desk.gone && [...wm.windows.values()].some((w) => w._desktopId === desk.id && w.id !== wm.activeWindowId && windowWaits(w))) { tab.classList.add('waiting'); this._waitDot(tab, true); } // the roll-up (lane phone-take-photo) — r2: a standing dot too, drawn AFTER the words (textContent wipes children)
           tab.title = dm._doorLabel('switch', desk.id, desk.name); // the tab IS the switch door: the table's words (a gone one's: its why, by the name it showed)
           tab.style.cssText = tabCss(isActive) + (desk.gone ? ';opacity:0.5' : '');

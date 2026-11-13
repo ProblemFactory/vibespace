@@ -553,8 +553,9 @@ export function installExplorerOps(FileExplorer) {
       if (!d || d.error) { cells.Type.textContent = t('Could not read properties') + (d?.code ? ` — ${fsErrorText(d)}` : ''); return; }
       cells.Type.textContent = d.isDirectory ? t('Folder ({n} items)', { n: d.entryCount ?? '?' }) : t('File');
       cells.Size.textContent = d.isDirectory ? t('calculating…') : formatSize(d.size);
-      cells.Modified.textContent = d.modified ? when(d.modified, { seconds: true, full: true }) : '-';
-      cells.Created.textContent = d.created ? when(d.created, { seconds: true, full: true }) : '-';
+      // the near shape 主开发 ruled (today its clock, this year without the year — the reader's round: today's files read «2026/11/13 01:19»)
+      cells.Modified.textContent = d.modified ? when(d.modified, { seconds: true }) : '-';
+      cells.Created.textContent = d.created ? when(d.created, { seconds: true }) : '-';
       cells.Permissions.textContent = d.mode || '-';
       // …then the slow recursive size streams in for folders when it's done
       if (d.isDirectory) {

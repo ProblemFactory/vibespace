@@ -13,7 +13,7 @@ const LOGIN_WORDS = Object.freeze({
   signIn: Object.freeze({ en: 'Sign in', zh: '登录', ja: 'サインイン' }),
   or: Object.freeze({ en: 'or', zh: '或', ja: 'または' }),
   ssoLoading: Object.freeze({ en: 'Loading SSO…', zh: '正在加载单点登录…', ja: 'SSO を読み込み中…' }),
-  ssoSignIn: Object.freeze({ en: 'Sign in with SSO', zh: '用单点登录', ja: 'SSO でサインイン' }),
+  ssoSignIn: Object.freeze({ en: 'Sign in with SSO', zh: '使用单点登录（SSO）登录', ja: 'SSO でサインイン' }),
   signingIn: Object.freeze({ en: 'Signing in…', zh: '正在登录…', ja: 'サインイン中…' }),
   ssoUnavailable: Object.freeze({ en: 'SSO unavailable', zh: '单点登录不可用', ja: 'SSO を利用できません' }),
   ssoFailed: Object.freeze({ en: 'SSO failed', zh: '单点登录失败', ja: 'SSO に失敗しました' }),

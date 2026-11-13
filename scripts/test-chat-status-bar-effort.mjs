@@ -158,6 +158,43 @@ class FakeEl {
     'the bar\'s menu asks /api/session-options WITH its backend; a failed ask falls back to THIS harness\'s seed (never claude\'s five + ultracode)');
 }
 
+console.log('— ④c THE ⚙ DEFAULT-MODEL SELECT (the reader\'s F7): the served model list\'s default row is the page\'s «Default»');
+{
+  const VW = await import(pathToFileURL(path.join(REPO, 'src/lib/value-words.js')).href);
+  const mk = (x, p) => '‹' + String(x).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? p[k] : m)) + '›';
+  const opts = typeof VW.modelOptions === 'function' ? VW.modelOptions([{ id: '', label: 'Default' }, { id: 'opus', label: 'opus (latest, 200k)' }, { id: 'gpt-x' }], mk) : null;
+  const appSrc = read('src/lib/app.js');
+  ok(!!opts && opts[0].value === '' && opts[0].label === '‹Default›' && opts[1].label.startsWith('opus') && opts[2].label === 'gpt-x' && /const toSchemaOptions = \(models\) => modelOptions\(models, t\);/.test(appSrc),
+    'the settings select\'s served model rows go through value-words modelOptions: the default row is worded (‹Default›), a model keeps its name; app.js reads it', opts);
+}
+console.log('— ④d THE PHONE PERMISSION MENU (the reader\'s F3): its decision words are never squeezed to one character per line');
+{
+  // a row = the words + the protocol value as a dim hint: on a 390 px phone a hint that never shrank (flex 0 0 auto) left the
+  // words a column one character wide. The law in the rule text: the row wraps, the words keep a min-width, the hint shrinks.
+  const css = read('public/chat.css');
+  const rule = (sel) => { const m = new RegExp('(?:^|\\n)' + sel.replace(/[.]/g, '\\.') + '\\s*\\{([^}]*)\\}').exec(css); return m ? m[1] : ''; };
+  const item = rule('.chat-status-perm-item'), words = rule('.chat-status-perm-words'), hint = rule('.chat-status-perm-raw');
+  const bar = read('src/lib/chat-status-bar.js');
+  ok(/flex-wrap:\s*wrap/.test(item) && /min-width:\s*min\(\d+(\.\d+)?em,\s*100%\)/.test(words) && /flex:\s*1 1 auto/.test(words) && /flex:\s*0 1 auto/.test(hint) && /min-width:\s*0/.test(hint) && !/flex:\s*0 0 auto/.test(hint)
+    && /words\.className = 'chat-status-perm-words';/.test(bar),
+    'the permission menu row WRAPS: the words take the row with a min-width, the raw hint shrinks and drops under them (no one-character column on a phone)', { item, words, hint });
+}
+console.log('— ④a THE READER\'S MUST (pick 4): a POOL auto-continue wait with a cause is DRAWN — its lines name the reset in the page\'s one format');
+{
+  // chat-status-bar render(): a local string named like the page-time import (`const when = …`) was called inside the pool
+  // lines' closure — a TypeError the moment a pool wait with a cause was drawn (the reader's F1; census ⑦ now sees closures)
+  const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
+  const bar = new mod.ChatStatusBar({ send() {} }, 'sid-pool', { backend: 'claude', getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
+  const T = Date.now() + 2 * 3600e3, T2 = Date.now() + 3600e3;
+  let threw = null, title = '';
+  try {
+    bar.setAutoResume({ enabled: true, armed: true, watch: false, resetsAt: T, cause: { scope: 'pool', soonest: { id: 'b', name: 'B-Stack Max', bucket: { label: '7d', resetsAt: T } }, rejector: { id: 'p', name: 'userP', ownWall: { label: '5h', resetsAt: T2 } } } });
+    const el = bar.element.children.find((c) => c.getAttribute('data-chip') === 'autoresume');
+    title = el ? el.title : '(no chip)';
+  } catch (e) { threw = String(e && e.message); }
+  ok(!threw && /Earliest usable account: B-Stack Max \(7d resets at [^)]*\d[^)]*\)/.test(title) && /userP: 5h resets at [^.]*\d/.test(title),
+    'a pool auto-continue wait with a cause draws its chip: the rejector\'s reset and the soonest account\'s reset, each a time (no TypeError — the reader\'s F1)', threw || title);
+}
 console.log('— ④b THE PERMISSION CHIP OPENS THE HARNESS\'S MODES: a status naming no modes (`[]`) keeps the declared list');
 // the chip's menu, opened through the bar's OWN delegated click (_onClick) under the fake DOM: a container that measures,
 // the dropdown it fills — returns the chip's label, the menu's rows, the bar's list

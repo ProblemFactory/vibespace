@@ -735,6 +735,7 @@ function browserAnswerVerdict(prev, { answered = false, at = 0, pidAlive = true 
 /** The record's fact (`rec.unresponsive`) from a verdict's `next` — `{since, lastAnswerAt, asks}`. */
 function unresponsiveFact(next) { return next && Number.isFinite(next.since) ? { since: next.since, lastAnswerAt: Number.isFinite(next.lastAnswerAt) ? next.lastAnswerAt : null, asks: Number(next.asks) || 0 } : null; }
 /** "16:34" (UTC — the journal's and the agent's clock; the UI formats `since` in the viewer's own zone). */
+// page-time: the agent's own journal clock (UTC) inside the agent's sentence — never a time drawn on the page
 function utcClock(ms) { const d = new Date(Number(ms) || 0); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
 function minutesSince(since, now) { return Math.max(1, Math.round(((Number(now) || 0) - (Number(since) || 0)) / 60000)); }
 // ── lane browser-daemon-survives-update (B-1574 — userW, profile jarvis-work, FOUR freezes 10-05..10-18, each a working day's
