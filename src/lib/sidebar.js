@@ -277,7 +277,7 @@ class Sidebar {
         // position as the Folders sort, per-context contents.
         const r = sortBtn.getBoundingClientRect();
         const SORTS = { urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') };
-        showContextMenu(r.left, r.bottom + 2, Object.entries(SORTS).map(([k, label]) => ({
+        showContextMenu(r.left, r.bottom + 2, [{ caption: tr('Sort by') }, ...Object.entries(SORTS).map(([k, label]) => ({
           label: (this._taskViewSortMode === k ? '✓ ' : '  ') + label,
           action: () => {
             this._taskViewSortMode = k;
@@ -285,13 +285,20 @@ class Sidebar {
             this._updateSortBtn(sortBtn);
             this._render();
           },
-        })));
+        }))]);
         return;
       }
-      this._sortMode = this._sortMode === 'recent' ? 'folder' : 'recent';
-      localStorage.setItem('sessionSort', this._sortMode);
-      this._updateSortBtn(sortBtn);
-      this._render();
+      // Folders: a menu of its two orders (it toggled on each press, saying nothing — lane ui-controls-and-bugs)
+      const r = sortBtn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 2, [{ caption: tr('Sort by') }, ...[['recent', tr('Recent')], ['folder', tr('Folder')]].map(([k, label]) => ({
+        label: (this._sortMode === k ? '✓ ' : '  ') + label,
+        action: () => {
+          this._sortMode = k;
+          localStorage.setItem('sessionSort', this._sortMode);
+          this._updateSortBtn(sortBtn);
+          this._render();
+        },
+      }))]);
     };
 
     // Status filter dropdown (multi-select: live, running, stopped, archived)
@@ -506,14 +513,15 @@ class Sidebar {
   _updateSortBtn(btn) {
     if (!btn) return;
     // Context-aware: on the Task Groups tab (Tasks view) the button owns the
-    // Task View sort menu; on Folders it cycles recent/folder grouping.
-    if (this._activeTab === 'tasks') {
-      btn.innerHTML = '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v10M5 13l-2.5-2.5M5 13l2.5-2.5M11 13V3M11 3L8.5 5.5M11 3l2.5 2.5"/></svg>';
-      btn.title = tr('Sort by: {mode}', { mode: ({ urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') })[this._taskViewSortMode] || tr('Urgency + status') });
-      return;
-    }
-    btn.innerHTML = this._sortMode === 'recent' ? '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 1.5"/></svg>' : '<svg style="width:11px;height:11px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/></svg>';
-    btn.title = tr('Sort by: {mode}', { mode: this._sortMode === 'recent' ? tr('Recent') : tr('Folder') });
+    // Task View sort menu; on Folders the recent / folder menu.
+    // lane ui-controls-and-bugs (the walk's sidebar-sessions-18: sort was a clock): the button SAYS the current order (its menu
+    // offers the others) — on the Task Groups tab its own orders, on Folders recent / folder
+    const words = this._activeTab === 'tasks'
+      ? ({ urgency: tr('Urgency + status'), status: tr('Status'), recent: tr('Recent'), name: tr('Name') })[this._taskViewSortMode] || tr('Urgency + status')
+      : (this._sortMode === 'recent' ? tr('Recent') : tr('Folder'));
+    btn.textContent = words + ' ▾';
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.title = tr('Sort by: {mode}', { mode: words });
   }
 
   _showStatusFilterMenu(anchor) {
@@ -683,16 +691,10 @@ class Sidebar {
     const isDefault = this._backendFilter.size === 0;
     btn.style.color = isDefault ? '' : 'var(--accent-hover)';
     btn.title = isDefault ? tr('Filter by agent backend') : tr('Agents: {list}', { list: [...this._backendFilter].join(', ') });
-    const iconIds = isDefault ? this._getAvailableBackends().slice(0, 2) : [...this._backendFilter].slice(0, 2);
-    btn.replaceChildren();
-    const stack = document.createElement('span');
-    stack.className = 'backend-filter-icon-stack';
-    if (!iconIds.length) {
-      stack.textContent = '◎';
-    } else {
-      for (const id of iconIds) stack.appendChild(createBackendIcon(id, { className: 'backend-filter-btn-icon' }));
-    }
-    btn.appendChild(stack);
+    // lane ui-controls-and-bugs (the walk's sidebar-sessions-18: the filter read as two agent logos): a FUNNEL — what the button
+    // does — with a count while it filters (how many agents it keeps)
+    btn.innerHTML = UI_ICONS.filter;   // the library's own static SVG
+    if (!isDefault) { const n = document.createElement('span'); n.className = 'backend-filter-count'; n.textContent = String(this._backendFilter.size); btn.appendChild(n); }
   }
 
   _renderQuickTabs() {

@@ -797,8 +797,18 @@ export class MobileNav {
     // closes LATER: the list redraws when it does (r4: its row stayed, and a tap revealed a window that was gone)
     closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };
 
-    if (billChip) item.append(icon, label, billChip, closeBtn);
-    else item.append(icon, label, closeBtn);
+    // lane ui-controls-and-bugs (the walk's window-manager-3: the window's menu hid behind a long press nobody guesses): a
+    // visible ⋯ opens THE SAME menu (the For-you row's ⋯ is the precedent); the long press stays
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'mobile-win-more';
+    moreBtn.style.cssText = 'background:none;border:none;color:var(--text-secondary);padding:4px 6px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
+    moreBtn.innerHTML = UI_ICONS.more;   // the library's own static SVG
+    moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More')); moreBtn.setAttribute('aria-haspopup', 'menu');
+    moreBtn.onclick = (e) => { e.stopPropagation(); const r = moreBtn.getBoundingClientRect(); showWindowContextMenu(this.app, win.id, r.left, r.bottom + 2, { onAction: () => setTimeout(() => rerender?.(), 50) }); };
+
+    if (billChip) item.append(icon, label, billChip, moreBtn, closeBtn);
+    else item.append(icon, label, moreBtn, closeBtn);
     paintSwitcherRow(this.app, item, win); // lane cache-warmth-band: the row's warmth band + «N min left» (one row per tab)
     if (billChip) requestAnimationFrame(() => fitRowPill(label, billChip));
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
