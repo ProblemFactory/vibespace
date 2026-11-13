@@ -39,6 +39,13 @@
  *   livenessVerdict({pong, inbound, wroteBefore, wroteNow, queuedBefore}) → 'alive' | 'draining' | 'silent'   (PURE)
  * A round heard as alive / draining is a round with a pong; a drop after a round heard silent says so in its reason
  * (`… and nothing acknowledged`). keepaliveStep without `heard` (no evidence) keeps the classic words.
+ *
+ * ONE RULE, ONE MEASUREMENT (lane connection-notice-once, measured 2026-11-07): the hub's heartbeat (src/server/ws-heartbeat.js) needs the same
+ * proof, so it reads livenessVerdict + drainMark from here. The measurement was bytesWritten − writableLength + bufferedAmount, which hold a frame
+ * whole: real sockets, one 12 MiB frame at 400 KB/s, 2 s rounds ⇒ cut at round 2 and the frame never landed, plain and TLS. It carried no ghost
+ * (200-byte frames to a peer that stopped reading ⇒ cut at round 2, plain and TLS, also written in the tick's own timer phase), so the rule was
+ * right and only blind inside a frame. WHAT STAYS PER CALLER, on purpose: the cadence (20 s here, 30 s there), and what follows the last proof
+ * (the heartbeat gives one grace round for what the kernel still holds).
  * Gate: scripts/test-ws-keepalive.mjs (the step table + a mutant control + the census: every src/server/*-stream.js arms
  * it and pings nowhere else; ⑤ the stall table + the gauge; ⑥ the REAL bridge through a stall storm).
  */
@@ -60,14 +67,48 @@ const SILENT_ROUNDS_TO_CUT = 2;
  * THE LIVENESS RULE (lane desktop-keepalive): a pong, or bytes FROM the peer (an RFB client asks for the next update
  * after every one it draws; an xpra client acks every frame; a live view sends its input / fits) ⇒ alive; while bytes
  * wait in the user-space queue (`queuedBefore` > 0) the kernel's send buffer is full, so every byte it accepted since
- * (`wroteNow` > `wroteBefore`, accepted = bytesWritten − writableLength) is room the peer's acknowledgements made ⇒
- * draining (alive, reading); with no backlog a small write lands in a non-full kernel buffer whether or not anybody is
- * there — never evidence ⇒ silent.
+ * (`wroteNow` > `wroteBefore`, read off drainMark) is room the peer's acknowledgements made ⇒ draining (alive, reading);
+ * with no backlog a small write lands in a non-full kernel buffer whether or not anybody is there — never evidence ⇒ silent.
  */
 function livenessVerdict({ pong = false, inbound = 0, wroteBefore = 0, wroteNow = 0, queuedBefore = 0 } = {}) {
   if (pong || Number(inbound) > 0) return 'alive';
   if (Number(queuedBefore) > 0 && Number(wroteNow) > Number(wroteBefore)) return 'draining';
   return 'silent';
+}
+/**
+ * DRAINING IS NOT KEEPING UP (lane connection-notice-once r4, measured: a reader at 1 MB/s under a producer at 3.2 MB/s moved its bytes every round, so every round
+ * read as draining, and the hub's queue passed 73 MiB where the old cut held it at 6). For a caller whose producer nothing stops, the drain proof is capped in BYTES.
+ * The hub's heartbeat reads this; the stream bridges read livenessVerdict alone: their high-water / frameGate already stop their producer.
+ * THE CEILING (r6, after two heuristics that proved no bound: growth judged against the round before (r4) and against the last round of the same kind (r5) both left
+ * rounds unjudged, and a random search found 179.9 MiB on one socket; a reader stalling one round after each ping was never cut). An EPISODE starts at the first
+ * round, pong or not, whose backlog is past the allowance, and ends at the first round back under it; a pong does not end it. Its ceiling is the backlog at its
+ * start + the allowance, fixed for the episode. A pong-less round above the ceiling is `losing`, whatever drained; every round under it is judged by the plain proof.
+ * THE BOUND it proves (the heartbeat's comment, and scripts/test-connection-notice-bound.mjs searches it): at a round the socket survives, its backlog is at most
+ * the larger of the allowance and the ceiling + one round of production; the round that cuts it can add one more.
+ * memo = {ceiling} for the episode, null outside one.
+ *   drainVerdict(memo, {pong, inbound, queuedBefore, wroteBefore, wroteNow, backlogNow, backlogAllowance}) → {verdict: 'alive' | 'draining' | 'silent' | 'losing', memo}   (PURE)
+ */
+function drainVerdict(memo, { backlogNow = 0, backlogAllowance = Infinity, ...round } = {}) {
+  const heard = livenessVerdict(round);
+  const b = Number(backlogNow), allow = Number(backlogAllowance);
+  if (!(b > allow)) return { verdict: heard, memo: null }; // under the allowance: no episode
+  const m = memo && Number.isFinite(memo.ceiling) ? memo : { ceiling: b + allow }; // an episode's first round sets its ceiling; a pong does not end the episode
+  return { verdict: heard !== 'alive' && b > m.ceiling ? 'losing' : heard, memo: m };
+}
+
+/**
+ * THE MEASUREMENT: where this socket's bytes are. `queued` still waiting at the TCP handle (a TLS socket's own handle counts a write whole until its
+ * last byte; the TCP one under it moves), `taken` handed to the kernel so far, `backlog` everything still in user space: that queue + the frames behind it. Node's internals (its own socket timeout reads `writeQueueSize` the
+ * same way; nothing public moves mid-write: `bufferedAmount` and `writableLength` hold a frame whole). Anything else (a fake client, a future Node)
+ * is null, which proves nothing, so the plain rule judges.
+ */
+function drainMark(client) {
+  const socket = client && client._socket, handle = socket && socket._handle;
+  if (!handle) return null;
+  const queued = (handle._parent || handle).writeQueueSize, handedDown = socket._bytesDispatched;
+  if (!Number.isFinite(queued) || !Number.isFinite(handedDown)) return null;
+  const taken = handedDown - queued, written = socket.bytesWritten; // bytesWritten = dispatched + the frames waiting behind the one in flight
+  return { queued, taken, backlog: Number.isFinite(written) ? Math.max(queued, written - taken) : queued };
 }
 
 function keepaliveInit(now = 0, { pingMs = PING_MS, stallGraceMs = null } = {}) {
@@ -139,20 +180,19 @@ function createLoopGauge({ clock = () => (globalThis.performance && typeof globa
 }
 /** The process's gauge — every armed keepalive (both bridges) reads it. */
 const LOOP_GAUGE = createLoopGauge();
+const NO_MARK = Object.freeze({ queued: 0, taken: 0 });
 function armKeepalive(ws, { pingMs = PING_MS, now = Date.now, onDrop = () => {}, setIntervalFn = setInterval, clearIntervalFn = clearInterval, gauge = LOOP_GAUGE } = {}) {
   let state = keepaliveInit(now(), { pingMs });
   let timer = null;
   let since = null;
   if (gauge) { gauge.retain(); since = gauge.now(); }
   const onPong = () => { state = keepaliveStep(state, 'pong', now()).state; };
-  // the round's evidence (livenessVerdict): messages from the peer, and the kernel's progress through a backlog — bytes
-  // the KERNEL accepted = bytesWritten − writableLength (Node's bytesWritten also counts what still waits in the socket's
-  // own buffer: a queued 2-byte ping moved it on a dead path — lane desktop-keepalive, measured)
+  // the round's evidence (livenessVerdict): messages from the peer, and the kernel's progress through a backlog (drainMark:
+  // Node's bytesWritten also counts what still waits in the socket's own buffer: a queued 2-byte ping moved it on a dead path — lane desktop-keepalive, measured)
   let inbound = 0;
   const onMessage = () => { inbound++; }; // a listener of its own — the bridge's relay listener is untouched
-  const wrote = () => { try { const so = ws._socket; return so ? Math.max(0, (Number(so.bytesWritten) || 0) - (Number(so.writableLength) || 0)) : 0; } catch { return 0; } };
-  const queued = () => { try { return Number(ws.bufferedAmount) || 0; } catch { return 0; } };
-  let wBefore = wrote(), qBefore = queued();
+  const markNow = () => { try { return drainMark(ws) || NO_MARK; } catch { return NO_MARK; } };
+  let before = markNow();
   const stop = () => {
     if (timer !== null) { clearIntervalFn(timer); timer = null; if (gauge) gauge.release(); }
     try { if (typeof ws.off === 'function') { ws.off('pong', onPong); ws.off('message', onMessage); } } catch { /* gone */ }
@@ -163,9 +203,9 @@ function armKeepalive(ws, { pingMs = PING_MS, now = Date.now, onDrop = () => {},
     if (ws.readyState !== 1) { stop(); return; }
     let loopGapMs = 0;
     if (gauge) { const g = gauge.read(since); loopGapMs = g.gapMs; since = g.at; }
-    const wNow = wrote(), qNow = queued();
-    const heard = livenessVerdict({ pong: false, inbound, wroteBefore: wBefore, wroteNow: wNow, queuedBefore: qBefore });
-    inbound = 0; wBefore = wNow; qBefore = qNow;
+    const mark = markNow();
+    const heard = livenessVerdict({ pong: false, inbound, wroteBefore: before.taken, wroteNow: mark.taken, queuedBefore: before.queued });
+    inbound = 0; before = mark;
     const r = keepaliveStep(state, 'tick', now(), { loopGapMs, heard });
     state = r.state;
     if (r.drop) { stop(); try { onDrop(r.drop); } catch { /* the bridge's words */ } try { ws.terminate(); } catch { /* gone */ } return; }
@@ -175,4 +215,4 @@ function armKeepalive(ws, { pingMs = PING_MS, now = Date.now, onDrop = () => {},
   return { stop };
 }
 
-module.exports = { PING_MS, STALL_GRACE_MS, MAX_STALLED_MISSES, PULSE_MS, KEEPALIVE_DROP_CODE, NOTHING_ACKED, SILENT_ROUNDS_TO_CUT, dropReason, livenessVerdict, keepaliveInit, keepaliveStep, createLoopGauge, LOOP_GAUGE, armKeepalive };
+module.exports = { PING_MS, STALL_GRACE_MS, MAX_STALLED_MISSES, PULSE_MS, KEEPALIVE_DROP_CODE, NOTHING_ACKED, SILENT_ROUNDS_TO_CUT, dropReason, livenessVerdict, drainVerdict, drainMark, keepaliveInit, keepaliveStep, createLoopGauge, LOOP_GAUGE, armKeepalive };

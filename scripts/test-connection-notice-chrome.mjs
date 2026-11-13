@@ -7,8 +7,8 @@
 //   ④ A CYCLE NOBODY COULD HAVE NOTICED (round 2): a CDP freeze of 10 / 40 / 70 s ⇒ no row, no count; a freeze the hub cut with nothing lost ⇒ the same;
 //     a hidden tab's cycle ⇒ the same; a freeze that lost frames off the ring ⇒ one row at the resume; an awake drop ⇒ one row; a hub's cut while awake ⇒ counted.
 //   ⑤ THE OWNER'S PICTURES: a phone 390 px wide, in Chinese — 10 real flaps ⇒ one row that counts them, its time 24-hour; a hide / show cycle ⇒ none.
-// ② (the bytes-taken mark on real sockets) and ③ (the loop, law 5: a client on a slow link) are the SLOW-LINK pick's, on top of this
-// one: this pick is the page's half. The proxy stays: ④'s hub cuts need a path that can go silent.
+// ② (the bytes-taken mark on real sockets) and ③ (the loop, law 5: a client on a slow link) are scripts/test-connection-notice-slowlink-chrome.mjs:
+// together with this suite's legs they need more than one 10-minute claim. The proxy stays: ④'s hub cuts need a path that can go silent.
 // WHY NOT Network.emulateNetworkConditions: it does not throttle a websocket's reads (test-reconnect-storm's (j) measured the queue
 // at 0 under it), so the slow link is a proxy in front of the hub: one token bucket for hub → browser, and a WAN-sized TCP window
 // on its upstream socket (TCP_MAXSEG 1300, SO_RCVBUF 8 KB) so backpressure reaches the hub's own queue. Measured: at SO_RCVBUF 64 KB

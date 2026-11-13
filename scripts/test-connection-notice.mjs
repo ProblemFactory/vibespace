@@ -7,13 +7,14 @@
 //   ② the reconnect patches the drop's row, in place   ③ it keeps its age   ④ a message starts a new stretch (drawn or only counted)
 //   ⑤ a swept row comes back with its count   ⑥ the words never claim a reconnect that has not happened
 //   ⑦ a trim leaves no row outside the cards   ⑧ no card to any reader: class, search; no toast road
-//   ⑨ the reconnect road is untouched   ⑪ the words exist in zh + ja   ⑫ the Resume dialog prints words, not tags
+//   ⑨ the reconnect road is untouched   ⑩ a slow client is not a dead one (src/server/ws-heartbeat.js)   ⑪ the words exist in zh + ja   ⑫ the Resume dialog prints words, not tags
 //   ⑬ a cycle nobody could have noticed is not a notice (round 2): the page's lifecycle, the re-attach's answer, the retry window; a row's length is the outage it measured (round 3)
+//   ⑭ one rule, one measurement: the keepalive and the heartbeat read the same verdict over the same mark (round 3)
+//   ⑩ also: a reader the producer outruns is cut within a named bound, one that keeps up is not (rounds 4–6; the bound searched: test-connection-notice-bound)
 //   ⑪ also: the row's time is the owner's clock (chat-view hands the notice `timeOn`, 24-hour in the page's zone; 主开发's merged-tip read, 2026-11-13)
-// ⑩ and ⑭ (law 5: a slow client is not a dead one; the keepalive and the heartbeat read one verdict over one mark) are the SLOW-LINK pick's,
-// on top of this one: this pick is the page's half and reads no line of src/server/ws-heartbeat.js or src/ws-keepalive.js.
-// RED: `REPO=<a git archive of the release (fd4acdc61, 2.369.397) + node_modules> node scripts/test-connection-notice.mjs` — ①–⑧, ⑫ and ⑬ red by name and by behaviour
-// (726 rows for 363 cycles). The same on 8b3fdb6ab, where the lane began. CONTROL for ⑬: `REPO=<a git archive of round 1, 08aebf78e>` — every cycle counted, ⑬ alone red.
+// RED: `REPO=<a git archive of the release (935960b7e, 2.369.398) + node_modules> node scripts/test-connection-notice.mjs` — ①–⑧, ⑩, ⑫ and ⑬ red by name and by
+// behaviour (726 rows for 363 cycles). RED for the slow-link pick: `REPO=<the notice pick's tree with its clock, a5644f599>` — ⑩ (the slow client cut, the flood
+// never bounded) and ⑭. CONTROL for ⑬: `REPO=<a git archive of round 1, 08aebf78e>` — every cycle counted, ⑬ alone red.
 // RED for round 3's two durations: `REPO=<round 2, cde2d80b8>` — «down 5 h», «down 2 h».
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +42,8 @@ class El {
 globalThis.document = { createElement: (t) => new El(t) };
 const t = (s, v) => (v ? s.replace(/\{(\w+)\}/g, (_, k) => v[k]) : s);
 const CN = fs.existsSync(path.join(REPO, 'src/lib/connection-notice.js')) ? require(path.join(REPO, 'src/lib/connection-notice.js')) : null;
+const HB = require(path.join(REPO, 'src/server/ws-heartbeat.js'));
+const HB_VERDICT_FN = () => require(path.join(REPO, 'src/ws-keepalive.js')).drainVerdict;
 
 // the tree's own handler + its own appendSystem over a view of stubs
 const cvSrc = read('src/lib/chat-view.js'), crSrc = read('src/lib/chat-renderers.js');
@@ -199,6 +202,180 @@ console.log('⑨ the reconnect road is untouched');
   ok('one state call per real transition', /if \(wasConnected\) \{ this\._outageStart = Date\.now\(\); this\._notifyState\(false\); \}/.test(ws));
   ok('_reconnectAttach on every reconnect, the queue for a suspended view', /this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cvSrc) && /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cvSrc));
   ok('the lagged re-attach by seq', /if \(this\._readOnly \|\| this\._disconnected \|\| this\._disposed\) return;\s*\n\s*this\._reattach\(false\);/.test(cvSrc) && /attachFrame\.sinceSeq = this\._lastSeq;/.test(cvSrc));
+}
+
+console.log('⑩ a slow client is not a dead one');
+{
+  const logs = [], silent = { warn: (l) => logs.push(l) };
+  // the ws shape the heartbeat reads: `_socket` = net.Socket (a TLSSocket's _handle wraps the TCP handle as _parent)
+  const fakeClient = ({ tls = false } = {}) => { const tcp = { writeQueueSize: 0 }; const c = { pings: 0, terminated: 0, _isAlive: true, ping() { c.pings++; }, terminate() { c.terminated++; }, _socket: { _bytesDispatched: 0, _handle: tls ? { writeQueueSize: 123456, _parent: tcp } : tcp }, tcp,
+    queue(n) { c._socket._bytesDispatched += n; tcp.writeQueueSize += n; }, take(n) { tcp.writeQueueSize -= n; }, pong() { c._isAlive = true; } }; return c; };
+  let at = 0; const now = () => at;
+  const beat = (clients) => { const hb = HB.createWsHeartbeat({ clients }, { now, log: silent, metric() {} }); return () => { for (let i = 0; i < 30; i++) { at += 1000; hb.pulse(); } return hb.tick(); }; }; // a healthy loop: the 1 s pulse beat all round (a long gap would taint it)
+
+  ok('drainMark is exported', typeof HB.drainMark === 'function');
+  for (const tls of [false, true]) {
+    const label = tls ? 'TLS' : 'plain';
+    const c = fakeClient({ tls }); const tick = beat(new Set([c]));
+    c.queue(2097152); // a 2 MiB slab on a slow link: the kernel full, the rest queued here
+    tick(); const pingsAfterFirst = c.pings;
+    c.take(750000); const r = tick();
+    ok(`${label}: a client without a pong whose queue is draining is not cut`, c.terminated === 0, c.terminated);
+    ok(`${label}: …the round says so`, r.draining === 1, r);
+    ok(`${label}: …and sends no second ping (the first is still on its way)`, c.pings === pingsAfterFirst, c.pings);
+    c.take(750000); tick();
+    ok(`${label}: …for as long as the bytes move`, c.terminated === 0, c.terminated);
+    c.take(597152); c.pong(); tick();
+    ok(`${label}: its pong lands, it is pinged like any client`, c.terminated === 0 && c.pings === pingsAfterFirst + 1, { t: c.terminated, p: c.pings });
+    const tail = fakeClient({ tls }); const tickT = beat(new Set([tail]));
+    tail.queue(1000000); tickT(); tail.take(1000000); tickT(); // the last byte left the queue: the kernel still holds the tail, the ping behind it
+    tickT();
+    ok(`${label}: the round after the last proof still waits (the ping is crossing what the kernel held)`, tail.terminated === 0, tail.terminated);
+    tickT();
+    ok(`${label}: …and the round after that judges`, tail.terminated === 1, tail.terminated);
+    const dead = fakeClient({ tls }); const tickD = beat(new Set([dead]));
+    dead.queue(2097152); tickD(); tickD();
+    ok(`${label}: a queue that does not move is judged on time`, dead.terminated === 1, dead.terminated);
+    const grow = fakeClient({ tls }); const tickG = beat(new Set([grow]));
+    grow.queue(1000); tickG(); grow.queue(500000); tickG();
+    ok(`${label}: live frames piling up on a dead socket are no progress`, grow.terminated === 1, grow.terminated);
+    const ghost = fakeClient({ tls }); const tickH = beat(new Set([ghost]));
+    for (let i = 0; i < 2; i++) { ghost._socket._bytesDispatched += 800; tickH(); } // a half-dead path: its kernel's buffer has room, so a chatty hub's frames vanish into it and nothing queues
+    ok(`${label}: a trickle swallowed by the kernel with no ACK is NOT a drain: a ghost is cut on time`, ghost.terminated === 1, ghost.terminated);
+  }
+  // the waiver's failure mode, as the kb states it: a box on the path that ACKs for a dead peer (no pong ever). It is renewed by every proof, so
+  // what bounds it is the queue running dry at that box's rate; the grace round is only what follows.
+  const box = fakeClient(); const tickX = beat(new Set([box]));
+  box.queue(600000); tickX(); let spared = 0;
+  for (let i = 0; i < 5; i++) { box.take(120000); tickX(); if (!box.terminated) spared++; }
+  ok('a middlebox that ACKs for a dead peer: spared while the queue lasts', box.terminated === 0 && spared === 5, { spared, t: box.terminated });
+  tickX();
+  ok('…the queue dry, one round of grace', box.terminated === 0, box.terminated);
+  tickX();
+  ok('…then cut: the bound is the queue ÷ the peer\'s ACK rate + 1 round, and `lagged` caps what a session can queue', box.terminated === 1, box.terminated);
+  // G1 → B2 (rounds 4–6): draining is not keeping up. `output` frames carry no seq, so `lagged` never stops them. The waiver is capped in BYTES: an episode starts at
+  // the first round past the allowance, its ceiling is that round's backlog + the allowance, a pong does not end it, and a pong-less round above it is cut.
+  const ALLOW = HB.DRAIN_BACKLOG_ALLOWANCE ?? 4194304, MiB = 1048576;
+  { const c = fakeClient(); const tickF = beat(new Set([c])); let round = 0, maxQ = 0, E = null; const MAKE = 3000000; // 25 KB/s under 100 KB/s, per 30 s round
+    c.queue(100); tickF(); round++;
+    while (!c.terminated && round < 200) { c.queue(MAKE); c.take(750000); const q = c._socket._handle.writeQueueSize; maxQ = Math.max(maxQ, q); tickF(); if (E == null && q > ALLOW) E = q; round++; }
+    ok('a reader the producer outruns is cut, every round a proof or not', c.terminated === 1, { round, maxQ });
+    ok('…once it has fallen the allowance behind where its episode began', E != null && maxQ > E + ALLOW - MAKE && round <= 6, { round, E, maxQ });
+    ok('…within the bound: the episode\'s ceiling + a round of production (+ one more at the round that cuts it)', maxQ <= E + ALLOW + 2 * MAKE, { maxQ, bound: E + ALLOW + 2 * MAKE }); }
+  { const c = fakeClient(); const tickF = beat(new Set([c])); let round = 0, maxQ = 0; const READ = 30000000, MAKE = 48000000; // 1 MB/s under 1.6 MB/s: its pong comes back on time until the backlog passes a round of its reading
+    c.queue(100); c.take(100); tickF();
+    while (!c.terminated && round < 40) { const late = c._socket._handle.writeQueueSize > READ; c.queue(MAKE); c.take(READ); if (!late) c.pong(); maxQ = Math.max(maxQ, c._socket._handle.writeQueueSize); tickF(); round++; }
+    ok('a reader fast enough to answer on time: cut once its pongs are late and its backlog passes the ceiling, within the loose bound (2 × allowance + 3 rounds of production)', c.terminated === 1 && round <= 5 && maxQ <= 2 * ALLOW + 3 * MAKE, { round, maxQ, t: c.terminated }); }
+  { const c = fakeClient(); const tickF = beat(new Set([c])); // a slow surplus: the same law, later — kept far longer than the old code, never past the bound
+    c.queue(100); tickF(); let round = 0, maxQ = 0;
+    while (!c.terminated && round < 400) { c.queue(800000); c.take(750000); maxQ = Math.max(maxQ, c._socket._handle.writeQueueSize); tickF(); round++; }
+    ok('a small surplus: cut once the allowance behind its episode\'s start (about twice the allowance in all), not kept for hours', c.terminated === 1 && round >= 150 && round <= 180 && maxQ <= 2 * ALLOW + 2 * 800000, { round, maxQ }); }
+  { const c = fakeClient(); const tickK = beat(new Set([c])); let spared = 0;
+    c.queue(12582912); tickK();
+    for (let i = 0; i < 25; i++) { c.queue(10000); c.take(400000); tickK(); if (!c.terminated) spared++; }
+    ok('a slow reader that keeps up survives ≥ 10 rounds, far past the allowance, small live frames on top', c.terminated === 0 && spared === 25, { spared, t: c.terminated }); }
+  { const c = fakeClient(); const tickB = beat(new Set([c]));
+    c.queue(100000); tickB();
+    for (let i = 0; i < 5; i++) { c.queue(700000); c.take(100000); tickB(); }
+    ok('below the allowance growth is waived: a burst, or `lagged` about to stop it', c.terminated === 0 && c._socket._handle.writeQueueSize < ALLOW, { t: c.terminated, q: c._socket._handle.writeQueueSize }); }
+  { const c = fakeClient(); const tickH = beat(new Set([c]));
+    c.queue(6 * MiB); tickH();
+    for (let i = 0; i < 20; i++) { c.queue(500000); c.take(500000); tickH(); }
+    ok('a backlog that holds past the allowance is waived, round after round', c.terminated === 0, c.terminated); }
+  // B4: a pong does not end the episode — at the HEARTBEAT, not only in the PURE rule
+  { const c = fakeClient(); const tickP = beat(new Set([c]));
+    c.queue(6 * MiB); tickP(); c.take(100000); tickP(); const ceil0 = c._hbEpisode?.ceiling;
+    c.take(100000); c.pong(); tickP(); const ceil1 = c._hbEpisode?.ceiling;
+    ok('a pong round past the allowance keeps the episode and its ceiling (the heartbeat\'s own memo)', Number.isFinite(ceil0) && ceil1 === ceil0, { ceil0, ceil1 });
+    c.take(6 * MiB); c.pong(); tickP();
+    ok('…a round back under the allowance ends it', c._hbEpisode == null, c._hbEpisode); }
+  // the backlog is every byte still in user space: the write in flight AND the frames waiting behind it. `socket.bytesWritten` counts both, the handle's
+  // writeQueueSize only the first (the acceptance of 3b4f37610 on a real loopback ws, 2 000-byte frames, the peer paused: the handle plateaued at
+  // 1 783 980 B while 7 795 980 B waited). A mark that read the handle alone (mutant M9, `backlog: queued`) never opened an episode, so an outrun reader
+  // was waived for good — and every fake above has bytesWritten == dispatched, so none of them could see it.
+  { const c = fakeClient(), D = 6000 * 2000, q = 1783980;
+    c._socket._bytesDispatched = D; c.tcp.writeQueueSize = q; c._socket.bytesWritten = D + 6012000;
+    const m = HB.drainMark?.(c); // ?. : an older tree has no mark — its RED is by name, never a crash
+    ok('the backlog counts the frames behind the write in flight (bytesWritten − taken), not the handle\'s queue alone', !!m && m.queued === q && m.backlog === 7795980, m);
+    const tickW = beat(new Set([c])); tickW();
+    ok('…so a backlog the handle does not show opens the episode at the heartbeat', c._hbEpisode?.ceiling === 7795980 + ALLOW, c._hbEpisode); }
+  // the rule, PURE: (memo, round) → {verdict, memo}
+  const DV = (memo, r) => { try { const v = HB_VERDICT_FN()(memo, r); return v && typeof v === 'object' ? v : { verdict: undefined, memo: null }; } catch { return { verdict: undefined, memo: null }; } };
+  const drained = { queuedBefore: 1, wroteBefore: 0, wroteNow: 1 }, still = { queuedBefore: 1, wroteBefore: 1, wroteNow: 1 };
+  { const u = DV(null, { ...drained, backlogNow: 3 * MiB, backlogAllowance: 4 * MiB }), a = DV(null, { ...drained, backlogNow: 5 * MiB, backlogAllowance: 4 * MiB });
+    ok('the rule says it: under the allowance no episode', u.verdict === 'draining' && u.memo === null, u);
+    ok('…the first round past it opens one, its ceiling that backlog + the allowance', a.verdict === 'draining' && a.memo?.ceiling === 9 * MiB, a);
+    const g = DV(a.memo, { ...drained, backlogNow: 8.9 * MiB, backlogAllowance: 4 * MiB }), x = DV(a.memo, { ...drained, backlogNow: 9.1 * MiB, backlogAllowance: 4 * MiB }), xs = DV(a.memo, { ...still, backlogNow: 9.1 * MiB, backlogAllowance: 4 * MiB });
+    ok('…growing under the ceiling is still a drain', g.verdict === 'draining', g.verdict);
+    ok('…above it ⇒ losing, whether it drained or not', x.verdict === 'losing' && xs.verdict === 'losing', [x.verdict, xs.verdict]);
+    const p = DV(a.memo, { pong: true, backlogNow: 12 * MiB, backlogAllowance: 4 * MiB });
+    ok('…a pong keeps the episode, its ceiling unmoved', p.verdict === 'alive' && p.memo?.ceiling === 9 * MiB, p);
+    ok('…back under the allowance ends it', DV(a.memo, { ...drained, backlogNow: 3 * MiB, backlogAllowance: 4 * MiB }).memo === null); }
+  ok('…no allowance never reads losing', DV({ ceiling: 5 * MiB }, { ...drained, backlogNow: 6 * MiB }).verdict === 'draining');
+  // THE BOUND on the acceptance's byte-faithful model (a send buffer S that wakes the writer when a third is free; pongs once the reader has read past the ping),
+  // on the tree's own heartbeat. At every round it survives: backlog ≤ max(allowance, ceiling) + Pr; at the round that cuts it: + Pr more. (The full search:
+  // scripts/test-connection-notice-bound.mjs.)
+  const burstModel = ({ R, P, S, T, seed, maxS }) => {
+    let t = 0, produced = S + seed, taken = S, readPos = 0, kernelQ = S, maxQ = 0, worst = 0, ceil = null, lastPing = 0, round = 0; const pings = [];
+    const c = { readyState: 1, _isAlive: true, _socket: { _handle: {}, get _bytesDispatched() { return produced; }, get bytesWritten() { return produced; } }, ping() { produced += 2; pings.push(produced); lastPing = round; }, terminate() { this.terminated = t; } };
+    Object.defineProperty(c._socket._handle, 'writeQueueSize', { get() { return produced - taken; } });
+    const hb = HB.createWsHeartbeat({ clients: new Set([c]) }, { intervalMs: T * 1000, now: () => t, log: silent, metric() { } });
+    hb.pulse(); hb.tick(); c._isAlive = true; pings.length = 0; produced -= 2;
+    const Rf = typeof R === 'function' ? R : () => R, Pr = P * T;
+    let next = T, belowAt = null;
+    while (t < maxS * 1000 && c.terminated == null) {
+      t += 50; produced += P * 0.05;
+      const rd = Math.min(kernelQ, Rf({ round, pending: pings.length > 0, lastPing }) * 0.05); readPos += rd; kernelQ -= rd;
+      const free = S - kernelQ; if (free >= S / 3) { const mv = Math.min(free, produced - taken); taken += mv; kernelQ += mv; }
+      while (pings.length && readPos >= pings[0]) { pings.shift(); c._isAlive = true; }
+      if (t % 1000 === 0) hb.pulse();
+      if (t / 1000 >= next - 1e-9) {
+        next += T; hb.tick(); round++;
+        const b = produced - taken, seen = ceil; if (b > ALLOW) { if (ceil == null) ceil = b + ALLOW; } else ceil = null;
+        worst = Math.max(worst, b / (Math.max(ALLOW, seen ?? 0) + (c.terminated != null ? 2 : 1) * Pr));
+      }
+      maxQ = Math.max(maxQ, produced - taken);
+      if (belowAt == null && produced - taken < ALLOW && t > T * 1000) belowAt = t;
+    }
+    return { cutS: c.terminated == null ? null : c.terminated / 1000, maxMiB: +(maxQ / MiB).toFixed(1), rounds: round, belowS: belowAt == null ? null : belowAt / 1000, worst: +worst.toFixed(3) };
+  };
+  const within = (r) => r.worst <= 1.0001;
+  { const r = burstModel({ R: 46.6e3, P: 48.7e3, S: 4.4e6, T: 30, seed: 0, maxS: 9000 });
+    ok('B1: a burst period just above one round (46.6 KB/s under 48.7 KB/s, 30 s rounds): within the bound (7.8 MiB, cut at 3 210 s)', within(r) && r.cutS != null, r); }
+  { const r = burstModel({ R: 47.9e3, P: 48.5e3, S: 4.4e6, T: 30, seed: 3e6, maxS: 9000 });
+    ok('B1: …47.9 under 48.5 KB/s, 3 MB owed: within the bound (8.9 MiB, cut at 8 520 s)', within(r) && r.cutS != null, r); }
+  { const r = burstModel({ R: 74e3, P: 85e3, S: 8e6, T: 30, seed: 0, maxS: 3600 });
+    ok('B1: …an 8 MB send buffer, 74 under 85 KB/s: within the bound (13 MiB)', within(r) && r.cutS != null, r); }
+  { const R0 = 30e3; const r = burstModel({ R: ({ round }) => (round % 2 === 0 ? 0 : 2 * R0), P: R0 * 1.1, S: 4.4e6, T: 30, seed: 0, maxS: 3600 });
+    ok('B2: a link that stalls a whole round and catches up at twice its rate, under a producer 10 % faster: within the bound (94–137 MiB, kept 12–22 min)', within(r) && r.cutS != null, r); }
+  { const P = 400e3; const r = burstModel({ R: ({ round, pending, lastPing }) => (round > 2 && pending && round === lastPing + 1 ? 0 : P * 1.002), P, S: 65536, T: 2, seed: 1e6, maxS: 1800 });
+    ok('B2: the ratchet (stall the round after each ping, else read 0.2 % faster than the producer): cut, within the bound (never cut, 30.9 MiB)', within(r) && r.cutS != null, r); }
+  { const r = burstModel({ R: 400e3, P: 520e3, S: 4.4e6, T: 2, seed: 1e6, maxS: 240 });
+    ok('H1: bursts a round or two apart, the surplus smaller than a burst: cut, within the bound', within(r) && r.cutS != null, r); }
+  { const r = burstModel({ R: 30e3, P: 45e3, S: 4.4e6, T: 30, seed: 1e6, maxS: 1800 });
+    ok('H1: …at the real 30 s round, 30 KB/s under a 45 KB/s terminal: cut, within the bound', within(r) && r.cutS != null, r); }
+  { const r = burstModel({ R: 400e3, P: 900e3, S: 4.4e6, T: 2, seed: 1e6, maxS: 60 });
+    ok('the control, a surplus larger than a burst: cut within seconds, within the bound', within(r) && r.cutS != null && r.cutS <= 20, r); }
+  { const r = burstModel({ R: 400e3, P: 250e3, S: 4.4e6, T: 2, seed: 8e6, maxS: 120 });
+    ok('a reader that drains in bursts and SHRINKS the backlog across them is kept: no cut while it is past the allowance, ≥ 10 rounds', r.belowS != null && (r.cutS == null || r.cutS > r.belowS) && r.belowS / 2 >= 10, r); }
+  { const r = burstModel({ R: 30e3, P: 20e3, S: 4.4e6, T: 30, seed: 8e6, maxS: 1800 });
+    ok('…the same at the real 30 s round', r.belowS != null && (r.cutS == null || r.cutS > r.belowS) && r.belowS / 30 >= 10, r); }
+  { const r = burstModel({ R: 400e3, P: 380e3, S: 4.4e6, T: 2, seed: 8e6, maxS: 240 });
+    ok('B3: no price for keeping up by a thin margin (5 %, round 5 cut it at 8 s): kept through its drain', r.belowS != null && (r.cutS == null || r.cutS > r.belowS), r); }
+  { const r = burstModel({ R: 30e3, P: 30e3, S: 4.4e6, T: 30, seed: 8e6, maxS: 1800 });
+    ok('B3: …nor for a backlog that holds exactly (round 5 cut it at 120 s): kept 30 min', r.cutS == null, r); }
+  { const r = burstModel({ R: 37.6e3, P: 26.3e3, S: 4.4e6, T: 30, seed: 8e6, maxS: 1800 });
+    ok('B3: …nor for 30 % at 300 kbit/s (round 5 cut it at 180 s): kept through its drain', r.belowS != null && (r.cutS == null || r.cutS > r.belowS), r); }
+  { const r = burstModel({ R: 20e3, P: 10e3, S: 4.4e6, T: 30, seed: 8e6, maxS: 600 });
+    ok('the stated limit: 160 kbit/s behind a 4.4 MB send buffer is still cut on its second round (its bursts are further apart than the grace), as on 8b3fdb6ab', r.cutS === 60, r); }
+  ok('the allowance is `lagged`\'s own number', HB.DRAIN_BACKLOG_ALLOWANCE === require(path.join(REPO, 'src/op-seq.js')).LAGGED_LIMIT_BYTES, HB.DRAIN_BACKLOG_ALLOWANCE);
+  const idle = fakeClient(); const tickI = beat(new Set([idle]));
+  tickI(); tickI();
+  ok('an idle socket with no pong is cut in the same round it always was', idle.terminated === 1, idle.terminated);
+  const bare = { pings: 0, terminated: 0, _isAlive: true, ping() { this.pings++; }, terminate() { this.terminated++; } }; const tickB = beat(new Set([bare]));
+  tickB(); tickB();
+  ok('a client with no socket internals falls to the plain rule', bare.terminated === 1, bare.terminated);
+  ok('…drainMark reads null there', HB.drainMark?.(bare) === null);
 }
 
 console.log('⑪ the words exist in zh + ja');
@@ -424,6 +601,31 @@ console.log('⑬ a cycle nobody could have noticed is not a notice');
   ok('the rebuild pays AFTER its slab and drain', /this\._drainResetQueue\(held, msg\);\s*\n\s*if \(this\._connNoticeOwed\)/.test(cvSrc));
   ok('the view stands its window down when it dies', /this\._disposed = true;\s*\n\s*this\._connNotice\?\.dispose\(\);/.test(cvSrc));
   ok('the notice reads no socket: the re-attach road tells it, the road itself sends the same frame', !!CN && !/\.send\(|sinceSeq/.test(read('src/lib/connection-notice.js'))); // !!CN: an older tree has no such file, and a RED run reads to its last row
+}
+
+console.log('⑭ one rule, one measurement');
+{
+  const KA = require(path.join(REPO, 'src/ws-keepalive.js'));
+  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+  const hb = code(read('src/server/ws-heartbeat.js')), ka = code(read('src/ws-keepalive.js'));
+  ok('the keepalive owns the measurement', typeof KA.drainMark === 'function');
+  ok('the heartbeat reads the keepalive\'s verdict over it', /require\('\.\.\/ws-keepalive'\)/.test(hb) && /drainVerdict\(client\._hbEpisode/.test(hb) && /const heard = livenessVerdict\(round\)/.test(ka));
+  ok('the stream bridges read the rule alone: their own high-water stops their producer, so they never read `losing`', /const heard = livenessVerdict\(\{ pong: false, inbound,/.test(ka));
+  ok('…and keeps no rule or measurement of its own', !/function drainMark/.test(hb) && !/\.queued > 0/.test(hb) && !/writeQueueSize/.test(hb));
+  const kaOutsideMark = ka.replace(/function drainMark[\s\S]*?\n\}\n/, '');
+  ok('the keepalive reads no second measurement', !/bytesWritten|writableLength|bufferedAmount/.test(kaOutsideMark), (kaOutsideMark.match(/bytesWritten|writableLength|bufferedAmount/g) || []).length);
+  // armKeepalive over the one socket shape it reads, on fake rounds
+  const armed = () => { let tick = null, at = 0; const s = { pings: 0, terminated: 0, drops: [] };
+    const ws = { readyState: 1, on() {}, off() {}, ping() { s.pings++; }, terminate() { s.terminated++; }, _socket: { _bytesDispatched: 0, _handle: { writeQueueSize: 0 } } };
+    KA.armKeepalive(ws, { pingMs: 20000, now: () => at, onDrop: (d) => s.drops.push(d.reason), gauge: null, setIntervalFn: (f) => { tick = f; return 1; }, clearIntervalFn: () => {} });
+    return { ws, s, round() { at += 20000; tick(); }, queue(n) { ws._socket._bytesDispatched += n; ws._socket._handle.writeQueueSize += n; }, take(n) { ws._socket._handle.writeQueueSize -= n; } }; };
+  { const a = armed(); a.queue(12582912); a.round();
+    for (let i = 0; i < 8; i++) { a.take(800000); a.round(); }
+    ok('inside ONE frame the keepalive now sees the bytes move: spared for as long as they do', a.s.terminated === 0, a.s.drops); }
+  { const a = armed(); a.queue(12582912); a.round(); a.round();
+    ok('a frame that does not move is cut on time', a.s.terminated === 1 && /nothing acknowledged/.test(a.s.drops[0] || ''), a.s.drops); }
+  { const a = armed(); a.round(); a.ws._socket._bytesDispatched += 200; a.round();
+    ok('a trickle swallowed by a kernel with room is no drain: a ghost is cut on time', a.s.terminated === 1, a.s.drops); }
 }
 
 console.log(fail ? `\nFAILED: ${fail} failed, ${pass} passed` : `\nALL PASS (${pass})`);
