@@ -37,7 +37,7 @@ export const ROWS = [
   ['src/browser-serve.js', 'own-tree', 7, null, DATA],
   ['src/browser-verbs.js', 'own-tree', 2, null, DATA],
   ['src/channel-outbox-files.js', 'own-tree', 5, null, DATA],
-  ['src/channel-store.js', 'own-tree', 33, null, DATA],   // lane webhook-l1-server: + rewriteRecords (record-clear's channel-webhook door); lane lark-search-miss: + feedMissRead (<account>/feed-misses.json); lane hub-loop-stalls commit 2: + the acts journal (index-acts.ndjson) read once at the store's start
+  ['src/channel-store.js', 'own-tree', 34, null, DATA],   // lane queued-is-not-woke laws 2 + 3: + readTailAsync (the log's async twin, its FileHandle open — the wait reading); lane webhook-l1-server: + rewriteRecords (record-clear's channel-webhook door); lane lark-search-miss: + feedMissRead (<account>/feed-misses.json); lane hub-loop-stalls commit 2: + the acts journal (index-acts.ndjson) read once at the store's start
   ['src/claude-lock-capture.js', 'own-tree', 3, null, CLI],
   ['src/cli-identity.js', 'own-tree', 18, null, PROC],
   ['src/codex-fork-ledger-purge.js', 'own-tree', 6, null, CLI],

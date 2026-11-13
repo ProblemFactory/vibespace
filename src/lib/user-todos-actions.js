@@ -18,7 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang, deviceLocale } from './i18n.js';
-import { ROW_OF as FORYOU_ROW_OF } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
+import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -399,6 +399,10 @@ export function inboxModel(app) {
       showToast((r && r.error) || t('Still no answer: {why}', { why: String((r && r.lastProbe && r.lastProbe.why) || t('no answer')) }), { type: 'error' });
       return false;
     }
+    // A ROW'S DECLARED BUTTON (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting): 'jump' = the item's
+    // conversation, its only door
+    { const btn = rec && rec.action ? (buttonsOf(rec.action.type) || []).find((b) => b.answer === answer) : null;
+      if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; } }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
       // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
       // refused human_only). The server resolves the item; a failure is said, never swallowed.

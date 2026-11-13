@@ -9,7 +9,8 @@
  *   identity  how two filings of it MERGE in the store (`action[identity]` must match; null = by its text) — was
  *             ACTION_IDENTITY in src/user-todos.js
  *   producer  the file whose add() files it (+ `builtIn`: the module that spells the type when another builds the action)
- *   waits     an agent's tool call held on the owner's answer (the attention list's band 2) — was WAIT_ACTIONS in
+ *   waits     someone held on the owner (the attention list's band 2 «Someone is waiting», its arrival toast): an agent's
+ *             tool call held on the owner's answer; messages-waiting — messages that have waited an hour behind a running turn — was WAIT_ACTIONS in
  *             src/attention-model.js
  *   answer    'card' = answered on a card in the chat, never by a typed reply (was CARD_ACTION_TYPES, src/inbox-reply.js) ·
  *             'buttons' = its own buttons on the item, never a typed reply (was ANSWER_ACTION_TYPES) · 'reply' = a reply may
@@ -98,6 +99,19 @@ const ROWS = Object.freeze([
   { type: 'helper-ask', identity: null, producer: 'src/server/helper-asks.js', builtIn: 'src/helper-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the helper\'s permission card on its Agent card (lane S1) — src/lib/chat-renderers.js', on: 'the helper\'s permission card in this conversation', scope: 'conversation' },
   { type: 'browser-grant', identity: 'profileId', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-grant.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--grant browser:<profile>', 'filed'), scope: 'conversation' },
   // ── machines ──
+  // lane queued-is-not-woke laws 2 + 3, SHAPE C (主开发 2026-11-13 13:35Z / 13:42Z): ONE item per conversation and TURN — filed
+  // when a group message has not been handed to a conversation in a RUNNING turn for FOUR HOURS (read from the hub's own record
+  // at that moment; nothing kept). It says how many (no count at the read's bound: «since at least»), since when, the turn's
+  // opening where a record states it, a «waiting for you» card open. Its ONLY door opens the conversation. Its two ends: the
+  // turn ended, or they were handed.
+  // BAND 2 «Someone is waiting»: its senders are waiting (its arrival toasts once; a redraw keeps its id).
+  { type: 'messages-waiting', identity: 'sessionId', producer: 'src/server/wait-watch.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: false, owner: 'src/lib/chat-view.js — the conversation itself: the item only opens it (no window line, no Stop from the hub)', kind: 'check', scope: 'conversation',
+    // THE ROW'S OWN BUTTONS (buttonsOf — drawn and run by every surface from these fields): `door` 'jump' = the item's conversation
+    buttons: Object.freeze([
+      Object.freeze({ answer: 'open', label: i18nKey('Open the conversation'), title: i18nKey('Open the conversation'), door: 'jump' }),
+    ]),
+    // THE ITEM'S ENDS, SAID: each end its producer writes, a sentence in the owner's language (never a raw code)
+    endWords: Object.freeze({ handed: i18nKey('they were handed to it'), 'turn-ended': i18nKey('the turn ended') }) },
   { type: 'exit-run-ask', identity: 'askId', producer: 'src/exit-proxy.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-exit', 'run / push / pull', 'wait'), scope: 'conversation' },
   { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'about', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over'], stamp: 'allow' },   // r3: `about` = the asking conversation (an agent's act) — its chat draws the card
   // lane ledger-dedup-law F3 / r9: a background subject's ONE standing item — a NOTICE: no answer drawn (`answer: 'reply'`,
@@ -517,6 +531,8 @@ const PERSON_DECIDES = typesWhere((r) => r.decide === 'person');
  *  `offersClosers` — one answer, three surfaces. */
 const DECISION_ENDS = Object.freeze(['allowed', 'denied', 'expired']);
 /** A decision row's own ends (its row's `ends`, else DECISION_ENDS) — what src/user-todos.js lets close its item. */
+/** A row's DECLARED end words (`endWords` — code → i18n key), or null: what a resolved row says for an end its producer wrote. */
+function endWordsOf(type) { const r = ROW_OF[type]; return r && r.endWords && typeof r.endWords === 'object' ? r.endWords : null; }
 function endsOf(item) { const r = item && item.action && ROW_OF[item.action.type]; return r && Array.isArray(r.ends) ? r.ends : DECISION_ENDS; }
 /** The `decide: 'person'` rows whose item DRAWS its two verbs (`card: 'row'`) — the wake request. open-channel is not one: its
  *  item is a door to the Reach dialog (where its Approve / Deny are), and the Outbox's pointer item shares its type (its
@@ -1098,4 +1114,10 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+/** A row's OWN buttons (lane queued-is-not-woke): [{answer, label, title, door: 'jump'}] | null — and the one line drawn under
+ *  them. Every surface draws and runs them from these fields (no branch on a type). */
+function buttonsOf(type) { const r = ROW_OF[type]; return r && Array.isArray(r.buttons) && r.buttons.length ? r.buttons : null; }
+function buttonsNoteOf(type) { const r = ROW_OF[type]; return r && typeof r.note === 'string' ? r.note : ''; }
+
+module.exports = {
+  buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

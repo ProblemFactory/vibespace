@@ -358,6 +358,13 @@ function helperLabelOf(card) {
  *  `messages` = a normalizer's list (harness-neutral: every normalizer keeps the
  *  same `permission` shape). `msgIndex` is the index the chat window pages by
  *  (`indexOf(m, k)` when `messages` is a candidate subset of the full list). */
+/** THE CHIP'S FACT, per harness (lane queued-is-not-woke, Shape B): every ask waiting in this session — its normalizer's own
+ *  pending list where it keeps one (claude's MessageManager), else pendingAsksOf over its cards (codex / ACP keep none). The
+ *  «waiting for you» chip (ws-handler's chatStatus) and the wait watch's «a waiting-for-you card is open» read THIS — one
+ *  function, never a second reading of the asks. [] when there is no normalizer or it cannot be read. */
+function chipAsksOf(session) {
+  try { const mm = session && session._normalizer; return mm ? (typeof mm.pendingAsks === 'function' ? mm.pendingAsks() : pendingAsksOf(mm.messages)) : []; } catch { return []; }
+}
 function pendingAsksOf(messages, { indexOf = null } = {}) {
   const out = [];
   if (!Array.isArray(messages)) return out;
@@ -533,7 +540,7 @@ module.exports = {
   // verify r6: the WHOLE subject (F3), the hidden-character screen + the second press (F7)
   askSubject, INBOX_SUBJECT_MAX, hiddenCharsOf, revealParts, revealHidden, SECOND_PRESS_MS, secondPressVerdict,
   HELPER_ASK_INBOX_MS, helperAskOf, askRecordOf, helperParentOf, askTarget, askState, hasPendingHelperAsk, helperLabelOf,
-  pendingAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
+  pendingAsksOf, chipAsksOf, asksSignature, waitingChip, helperAskHead, helperAskSettledWords, mainAskSettledWords, inboxItemFor, inboxDueAt,
   isStopRejection, isSubTerminated, SUB_TERMINATED_NOTE, agentStatusWords, answerSessionFor, answerRefusalWords,
   // verify r3: THE TABLE
   ASK_STATES, ASK_EVENTS, ASK_EFFECTS, ASK_INITIAL, ASK_RECORD_EVENTS, ASK_TABLE, askTransition, isWaiting, answerVerdict,

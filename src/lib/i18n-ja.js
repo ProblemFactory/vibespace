@@ -12381,4 +12381,13 @@ export default {
   "This account holds no long-lived token": "このアカウントには長期トークンがありません",
   "The long-lived token could not be opened — nothing was saved": "長期トークンを開けませんでした——何も保存されていません",
   "Only a person can choose the subscription type": "サブスクリプションの種類を選べるのは本人だけです",
+  // lane queued-is-not-woke laws 2 + 3 (shape C): the owner's item when group messages have not been handed for four hours (src/wait-words.js, src/foryou-actions.js)
+  "1 group message has not been handed to {name} yet — sent at {since}": "1 件のグループメッセージがまだ {name} に渡されていません — {since} に送信",
+  "{n} group messages have not been handed to {name} yet — the oldest sent at {since}": "{n} 件のグループメッセージがまだ {name} に渡されていません — 最も古いものは {since} に送信",
+  "the turn ended": "そのターンは終わりました",
+  "Group messages have not been handed to {name} yet — since at least {since}": "グループメッセージがまだ {name} に渡されていません — 少なくとも {since} から",
+  "they were handed to it": "それらは渡されました",
+  "Its turn opened at {opened}.": "そのターンは {opened} に始まりました。",
+  "It is in a turn.": "ターンの途中です。",
+  "A waiting-for-you card is open in it.": "「あなた待ち」のカードが開いています。",
 };
