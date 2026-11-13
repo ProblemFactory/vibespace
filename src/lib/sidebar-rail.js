@@ -16,7 +16,7 @@ import { renderChannelsPanel } from './channels-panel.js';
 import { channelsBadge, attentionPolicy, signinAccounts } from '../channel-focus.js';
 import { needsMe, settingsPolicy } from '../attention-model.js';
 import { takeoverBadge } from '../browser-takeover-request.js'; // lane browser-takeover-queue: the Browser badge = the waiting takeover requests in bands 1–4 (PURE)
-import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl, latestRender } from './utils.js';
 import { registerMenuItem } from './contributions.js';
 import { pluginProvides, pluginState } from './plugins-ui.js';
 import { registerWindowType } from './window-types.js';
@@ -1040,12 +1040,12 @@ export function installSidebarRail(Sidebar) {
       const machines = [{ id: '__local__', name: tr('This machine'), online: true }, ...hosts.map((h) => ({ id: h.id, name: h.name || h.id, online: h.transport === 'dial' ? !!h.online : true }))];
       const nameOf = (hid) => (machines.find((m) => m.id === hid) || {}).name || hid;
 
-      const render = async () => {
-        if (!c.isConnected) return;
+      // lane ui-controls-and-bugs (the walk's major: the forwards and the input box drawn TWICE): render() is ONE latest
+      // render — built off-DOM, a newer call drops an older build, one replaceChildren lands it (utils.js latestRender)
+      const render = latestRender(c, async (out) => {
         let fwds = [];
         try { fwds = ((await api('/api/port-forwards')) || {}).forwards || []; } catch { }
-        c.innerHTML = '';
-        await this._renderInstanceUrlRow(c, api, render);
+        await this._renderInstanceUrlRow(out, api, render);
         // active forwards
         const sec = document.createElement('div');
         sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active forwards'))}</div>`;
@@ -1169,7 +1169,7 @@ export function installSidebarRail(Sidebar) {
             sec.appendChild(ur);
           }
         }
-        c.appendChild(sec);
+        out.appendChild(sec);
         // per-machine scan sections
         for (const m of machines) {
           const ms = document.createElement('div');
@@ -1270,14 +1270,14 @@ export function installSidebarRail(Sidebar) {
           mi.onkeydown = (e) => { if (enterSubmits(e)) doManual(); };
           man.append(mi, mb);
           ms.append(head, list, man);
-          c.appendChild(ms);
+          out.appendChild(ms);
         }
-      };
+      });
       render();
       // live refresh: forwards changes + new-port announcements re-render;
       // handler self-disarms once the panel leaves the DOM
-      this.app.ws.onGlobal((msg) => {
-        if (!c.isConnected) return;
+      const offPorts = this.app.ws.onGlobal((msg) => {
+        if (!c.isConnected) { offPorts(); return; }   // the panel is gone: its listener goes with it (one per open was kept forever)
         if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && this._portScanCache.has(msg.hostId)) {
           // merge the announced ports into the cached scan so the replayed
           // list actually SHOWS what the toast talked about

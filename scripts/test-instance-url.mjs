@@ -173,7 +173,8 @@ const mk = (opts = {}) => {
   ok('and it resolves its base URL through the same resolver', w.includes('instanceUrl?.url()') && !/serverSetting\('agentd\.publicUrl'\)/.test(w));
   const rail = read('src/lib/sidebar-rail.js');
   ok('the Ports panel has the "This VibeSpace" row', rail.includes('_renderInstanceUrlRow') && rail.includes("tr('This VibeSpace')"));
-  ok('the row is rendered by the panel', rail.includes('await this._renderInstanceUrlRow(c, api, render)'));
+  // lane ui-controls-and-bugs pick 1: the panel builds off-DOM through latestRender (the Ports panel was drawn twice) — the row goes into `out`
+  ok('the row is rendered by the panel', rail.includes('await this._renderInstanceUrlRow(out, api, render)'));
   ok('the row hits the instance-url API both ways', rail.includes("'/api/instance-url/publish', { method: 'DELETE' }") && rail.includes("'/api/instance-url/publish', { method: 'POST'"));
   ok('the row SAYS what happens to the configured address', rail.includes('is kept and restored when you unmap'));
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(`${path.basename(f)} carries the new keys`, read(f).includes("'This VibeSpace'") && read(f).includes("'Mapped: {url}'"));

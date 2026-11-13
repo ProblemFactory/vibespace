@@ -27,10 +27,8 @@ class HexViewer {
     jumpInput.className = 'toolbar-select'; jumpInput.placeholder = t('Jump to offset (hex)');
     jumpInput.style.cssText = 'width:140px;font-family:monospace';
     jumpInput.onkeydown = (e) => { if (enterSubmits(e)) this._jumpTo(jumpInput.value); };
-    const loadMoreBtn = document.createElement('button'); loadMoreBtn.className = 'file-tool-btn media-btn';
-    loadMoreBtn.textContent = t('Load more');
-    loadMoreBtn.onclick = () => this._loadChunk();
-    toolbar.append(jumpInput, loadMoreBtn, wireFileDownload(winInfo, { path: filePath, host: this._host })); // lane viewer-download
+    // lane ui-controls-and-bugs (the walk: «加载更多» beside «已加载 4.0 KB / 4.0 KB»): no button — the scroll loads the next chunk (below)
+    toolbar.append(jumpInput, wireFileDownload(winInfo, { path: filePath, host: this._host })); // lane viewer-download
 
     // Content
     this.contentEl = document.createElement('div'); this.contentEl.className = 'hex-content';
@@ -56,7 +54,7 @@ class HexViewer {
     this._loading = true;
     try {
       const fileOffset = this.baseOffset + this.data.length;
-      if (fileOffset >= this.fileSize) { this.statusEl.textContent = t('End of file'); return; }
+      if (fileOffset >= this.fileSize) { this.statusEl.textContent = this.baseOffset > 0 ? t('End of file') : ''; return; }   // a whole file says nothing more
       const res = await fetch(`/api/file/binary?path=${encodeURIComponent(this.filePath)}&offset=${fileOffset}&length=${CHUNK_SIZE}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
       if (!res.ok) throw new Error(t('Failed to load'));
       const buf = await res.arrayBuffer();
@@ -73,7 +71,7 @@ class HexViewer {
       const upTo = this.baseOffset + this.data.length;
       this.statusEl.textContent = this.baseOffset > 0
         ? t('Showing {from}–{to} / {size}', { from: '0x' + this.baseOffset.toString(16), to: '0x' + upTo.toString(16), size: formatSize(this.fileSize) })
-        : t('Loaded {loaded} / {total}', { loaded: formatSize(upTo), total: formatSize(this.fileSize) });
+        : upTo >= this.fileSize ? '' : t('Loaded {loaded} / {total}', { loaded: formatSize(upTo), total: formatSize(this.fileSize) });   // the whole file: nothing to say
     } catch (err) {
       this.statusEl.textContent = t('Error: {msg}', { msg: err.message });
     } finally {

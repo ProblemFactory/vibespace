@@ -1026,7 +1026,10 @@ export class ChatStatusBar {
       const ck = a.armed && a.cause && a.cause.checking ? a.cause.checking : null;
       if (ck) title = t('Claude Code {v} is being checked on this machine (about {n} min) — this session continues by itself when it passes, if those accounts can take it. Click to cancel.', { v: String(ck.cli || '?'), n: String(ck.typicalMin || 5) });
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
-      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(when)) : (a.enabled ? ' ' + escHtml(t('auto')) : '');
+      // lane ui-controls-and-bugs (the walk's MAJOR: a bare «09:22 PM», one press turned it off): the chip SAYS what it means —
+      // «21:22 自动继续» / «自动继续：关» — and a press opens it (below), never acts at once
+      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: when }))) : (a.enabled ? ' ' + escHtml(t('auto')) : ' ' + escHtml(t('Auto-continue: off')));
+      this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
       chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
     }
 
@@ -1965,11 +1968,24 @@ export class ChatStatusBar {
     const arEl = e.target.closest('.chat-status-autoresume');
     if (arEl) {
       e.stopPropagation();
+      // lane ui-controls-and-bugs: a press OPENS the chip — what it means (the reset, whose account) and ONE door — never turns it off unasked
+      const dropdown = showDropdown(arEl, { minWidth: 240, maxWidth: 380 });
+      if (!dropdown) return;
       const on = !(this._autoResume && (this._autoResume.armed || this._autoResume.enabled));
-      this._ws.send({ type: 'auto-resume', sessionId: this._sessionId, enabled: on });
-      this._onConfigChange?.({ autoResume: on });   // survives the next resume
-      showToast(on ? t('Auto-continue on: this session will resume itself when the limit resets')
-        : t('Auto-continue off'));
+      const note = document.createElement('div');
+      note.className = 'chat-status-dropdown-note chat-status-autoresume-note';
+      note.textContent = this._autoResumeTitle || '';
+      const act = document.createElement('div');
+      act.className = 'chat-status-dropdown-item chat-status-autoresume-act';
+      act.textContent = on ? t('Turn auto-continue on') : t('Turn auto-continue off');
+      act.onclick = (ev) => {
+        ev.stopPropagation(); dropdown.remove();
+        this._ws.send({ type: 'auto-resume', sessionId: this._sessionId, enabled: on });
+        this._onConfigChange?.({ autoResume: on });   // survives the next resume
+        showToast(on ? t('Auto-continue on: this session will resume itself when the limit resets')
+          : t('Auto-continue off'));
+      };
+      dropdown.append(note, act);
       return;
     }
 

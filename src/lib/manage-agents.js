@@ -1468,6 +1468,7 @@ export function installManageAgents(App, ctx = {}) {
     const st = {
       all: !explicit,
       checked: explicit ? explicit.slice() : subs.map((x) => x.id),
+      picked: explicit ? explicit.slice() : null,   // lane ui-controls-and-bugs (the walk's MAJOR): the person's own list, kept apart while «All» is on
       mode: Array.isArray(fresh.priority) && fresh.priority.length ? 'priority' : 'automatic',
       order: Array.isArray(fresh.priority) ? fresh.priority.slice() : [],
     };
@@ -1485,10 +1486,11 @@ export function installManageAgents(App, ctx = {}) {
       </div>
       <label class="pool-mem-row pool-mem-all"><input type="checkbox" id="pool-mem-all" ${st.all ? 'checked' : ''}>
         <span><b>${escHtml(codex ? t('All ChatGPT accounts') : t('All subscriptions'))}</b><br><span class="pool-mem-sub">${escHtml(t('including accounts you add in the future'))}</span></span></label>
+      ${st.all && subs.length ? `<div class="usage-note pool-mem-all-note">${escHtml(codex ? t('Every ChatGPT account is in the pool, including ones you add later') : t('Every subscription is in the pool, including ones you add later'))}</div>` : ''}
       <div class="pool-mem-list">${rows.map((r) => { const w = rowWords(r, t, { fmtTime }); return `
         <div class="pool-mem-row pool-prio-row${r.place ? ' ranked' : ''}" data-id="${escHtml(r.id)}"${r.place ? ' draggable="true"' : ''}>
           ${r.place ? `<span class="pool-prio-grip" title="${escHtml(t('Drag to reorder'))}" aria-hidden="true">⋮⋮</span>` : ''}
-          <input type="checkbox" class="pool-mem-cb" data-id="${escHtml(r.id)}" ${r.checked ? 'checked' : ''} ${st.all ? 'disabled' : ''} aria-label="${escHtml(r.name)}">
+          ${st.all ? '' : `<input type="checkbox" class="pool-mem-cb" data-id="${escHtml(r.id)}" ${r.checked ? 'checked' : ''} aria-label="${escHtml(r.name)}">`}
           <span class="pool-prio-place">${escHtml(w.place)}</span>
           <span class="pool-prio-name">${escHtml(w.name)}${r.sub ? ` <span class="pool-mem-sub">${escHtml(r.sub)}</span>` : ''}<br><span class="pool-mem-sub pool-prio-state" data-state="${escHtml(r.state?.code || '')}">${escHtml(w.state)}${w.note ? ' · ' + escHtml(w.note) : ''}</span></span>
           ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('Order'))}" aria-label="${escHtml(t('Order'))}">⋯</button>` : ''}
@@ -1506,7 +1508,8 @@ export function installManageAgents(App, ctx = {}) {
         draw();
       };
       const allCb = body.querySelector('#pool-mem-all');
-      allCb.onchange = () => { st.all = allCb.checked; if (st.all) st.checked = subs.map((x) => x.id); draw(); };
+      // ticking ALL keeps the person's own list aside; unticking brings THAT list back — never every subscription silently ticked
+      allCb.onchange = () => { st.all = allCb.checked; if (st.all) { st.picked = st.checked.slice(); st.checked = subs.map((x) => x.id); } else if (st.picked) st.checked = st.picked.slice(); draw(); };
       for (const cb of body.querySelectorAll('.pool-mem-cb')) cb.onchange = () => {
         const id = cb.dataset.id;
         st.checked = cb.checked ? [...new Set([...st.checked, id])] : st.checked.filter((x) => x !== id);
