@@ -660,8 +660,29 @@ try {
     return Math.abs(o.end) <= 1 ? `held ${o.end} px, ${v}` : o.end > 0 ? `DROPPED ${o.end} px, ${v}` : `rose ${-o.end} px, ${v}`; };
 
   console.log('⑥b THE TAP HOLDS ITS ROW ON A PINNED VIEW (acceptance round 3, #2; round 4, #1: the TEXT LINE held, the answers inside)');
-  {
-    await A.load(); await openChat(A); await sixUp(A); await sleep(1500);
+  // THE FONT PASS (the .400 hosted red — 主开发 18:47Z): the runner's default sans is DejaVu Sans, WIDER than this box's Noto Sans;
+  // pick 0 draws a card's options whole, so there an opened card is a line taller. The same presses run again with the chat
+  // drawn in DejaVu Sans (installed here — the runner note: injecting the face on the measured element gives the runner's
+  // positions), so this box sees the runner's wrap. The face is read back first (a canvas width against monospace).
+  const pinnedHold = async (face) => {
+    await A.device(1280, 800, { mouse: true }); await A.load(); await openChat(A);
+    if (face) {
+      const has = await A.evalJs(`(() => { const c = document.createElement('canvas').getContext('2d'), w = (f) => { c.font = f; return c.measureText('Reply options wrap whole 回复').width; }; return w('16px "${face}", monospace') !== w('16px monospace'); })()`);
+      check(`⑥b font pass: «${face}» is installed and drawn (a canvas width that is not the fallback's)`, has);
+      await A.evalJs(`(() => { const st = document.createElement('style'); st.id = 'vs-font-pass'; st.textContent = '.chat-view, .chat-view * { font-family: "${face}", "Noto Sans CJK SC", sans-serif !important; }'; document.head.appendChild(st); return true; })()`);
+    }
+    await sixUp(A); await sleep(1500);
+    // THE ROW IT PRESSES IS WHOLLY IN VIEW, BY ITS OWN GEOMETRY (the .400 font repro, 主开发 19:10Z: in the runner's wider face the
+    // newest card — its options whole — stood a line taller and pushed the folded row above it until its text line began above
+    // the list's top; the press still landed, but a row a person cannot see proves nothing, so «seen» stays a precondition).
+    // At the live tail no row above the newest is seen if that one is not, so the WINDOW grows by what is missing (it keeps its
+    // share of the workspace; the pinned view follows its tail) — never a scroll, never a count; on this box's face it grows 0
+    let grown = 0;
+    for (let k = 0; k < 4; k++) {
+      const miss = await A.evalJs(`(() => { const v = ${VIEW}, tx = ${LINE(q(5))}; if (!v || !tx) return null; return Math.ceil(v._messageList.getBoundingClientRect().top - tx.getBoundingClientRect().top); })()`);
+      if (miss == null || miss <= 0) break;
+      grown += miss + 24; await A.device(1280, 800 + grown, { mouse: true }); await sleep(900);
+    }
     const pinned0 = await A.evalJs(`${VIEW}?._pinned === true`);
     const s5 = await spot(A, q(5));
     if (s5) { await track(A, q(5)); await A.clickAt(s5.x, s5.y); }
@@ -672,8 +693,12 @@ try {
     const after = await A.evalJs(ACC), pinned1 = await A.evalJs(`${VIEW}?._pinned`), tail1 = await A.evalJs(`(() => { const l = ${VIEW}._messageList; return l.scrollHeight - l.scrollTop - l.clientHeight < 50; })()`);
     // the pin follows the landing (the chat's own law, PINNED ⇔ AT THE LIVE TAIL < 50 px — round 4: a line held at the very
     // end leaves the view AT the tail, pinned; an open that grew the card past the edge leaves it a reader's position)
-    check(`RED-able: on a PINNED view (the live tail, never scrolled) a click on the folded row above the newest holds its TEXT LINE under the pointer (${how(o5)}, every frame for 0.9 s; its card fits) — then the one below it: ${how(o6)} — never dropped, the answers inside; the pin follows the landing (${pinned1 ? 'pinned' : 'unpinned'}, ${tail1 ? 'at' : 'off'} the live tail)`, pinned0 && !!s5 && s5.seen && s5.onRow && s5.fold && held(o5) && Math.abs(o5.end) <= 1 && !!s6 && s6.seen && s6.onRow && s6.fold && held(o6) && pinned1 === tail1 && openOnes(after).length === 1 && openOnes(after)[0].id === q(6), { pinned0, s5, o5, s6, o6, pinned1, tail1, open: openOnes(after).map((c) => c.id) });
-  }
+    check(`RED-able${face ? ' (' + face + ' — the hosted runner\'s face)' : ''}: on a PINNED view (the live tail, never scrolled) a click on the folded row above the newest holds its TEXT LINE under the pointer (${how(o5)}, every frame for 0.9 s; its card fits) — then the one below it: ${how(o6)} — never dropped, the answers inside; the pin follows the landing (${pinned1 ? 'pinned' : 'unpinned'}, ${tail1 ? 'at' : 'off'} the live tail) [every conjunct, so a hosted red names its own (.400 mirror 2): worst frame ${o5 && o5.drop} / ${o6 && o6.drop} px · the window grown ${grown} px for the row to be wholly seen · rows seen-on-folded ${!!s5 && s5.seen && s5.onRow && s5.fold} / ${!!s6 && s6.seen && s6.onRow && s6.fold} · heads ${o5 && o5.head} / ${o6 && o6.head} · opened ${o5 && o5.open} / ${o6 && o6.open} · pinned before ${pinned0} · open now ${openOnes(after).map((c) => c.id).join(',') || 'none'}]`, pinned0 && !!s5 && s5.seen && s5.onRow && s5.fold && held(o5) && Math.abs(o5.end) <= 1 && !!s6 && s6.seen && s6.onRow && s6.fold && held(o6) && pinned1 === tail1 && openOnes(after).length === 1 && openOnes(after)[0].id === q(6), { pinned0, s5, o5, s6, o6, pinned1, tail1, open: openOnes(after).map((c) => c.id) });
+  };
+  await pinnedHold('DejaVu Sans');   // first: the box's own pass reloads the page after it, so ⑥c and every leg after
+  await pinnedHold(null);            // it start from the box's face, exactly as before
+  await A.device(1280, 800, { mouse: true }); await sleep(300); // (the box's pass grows nothing — 1280 × 800 for ⑥c, as before)
+
   lap('⑥b done');
 
   console.log('⑥c THE BOTTOM EDGE (acceptance round 4, #1): a folded row ON the list\'s bottom edge — the line never drops, the answers come inside');
