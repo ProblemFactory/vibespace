@@ -4794,6 +4794,10 @@ export default {
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "このアカウントのトークンはこのクライアントで発行されました。クライアントを切り替えるとサインインし直しになります — 保存すると「再認可」が開きます。",
   "Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.": "ストレージの編集ダイアログと同じルール：現在の実際の値（シークレットを含む）を入力済み。変更した項目だけが保存されます。",
   "Sign-in": "サインイン",
+  // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
+  "This session’s billing account": "このセッションの課金アカウント",
+  "it connects to the vendor’s servers (measured)": "ベンダーのサーバーに接続します（実測）",
+  "Change the scale for every app in Settings…": "すべてのアプリのスケールを設定で変更…",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} に自動で続行",
   "Auto-continue: off": "自動続行：オフ",

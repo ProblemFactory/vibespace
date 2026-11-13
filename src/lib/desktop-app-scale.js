@@ -44,10 +44,10 @@ export function launchScaleChoice(map, payload) {
 }
 
 /** A catalog card's default-scale menu: every SCALE_CHOICES row ('auto' = follow the instance default), the stored one
- *  current (checked, not offered again). */
+ *  current (checked — a live row like the others, never greyed: lane ui-controls-and-bugs). */
 export function scaleDefaultMenuModel(map, key) {
   const cur = scaleChoiceOf(map, key);
-  return SCALE_CHOICES.map((choice) => ({ choice, current: choice === cur, disabled: choice === cur }));
+  return SCALE_CHOICES.map((choice) => ({ choice, current: choice === cur }));
 }
 
 /**

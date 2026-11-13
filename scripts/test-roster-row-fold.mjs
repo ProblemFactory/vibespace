@@ -170,6 +170,8 @@ const DOORS = {
   relogin: { door: 'the resume bar\'s 「重新登录」 (openResumeAccountDoor)', at: ['src/lib/session-lifecycle.js'],
     names: { 'src/lib/session-lifecycle.js': ['openResumeAccountDoor(door)'], 'src/lib/resume-account-bar.js': ["button('chat-account-relogin'"] },
     reach: [/chat-account-relogin|openResumeAccountDoor/] },
+  billing: { door: 'the billing switcher\'s OFF row «Manage agents…» (an account this session cannot switch to — lane ui-controls-and-bugs: the why and its door on the row)', at: ['src/lib/session-lifecycle.js'],
+    names: { 'src/lib/session-lifecycle.js': ["offDoor: { label: t('Manage agents…')", "opener: 'billing'"] }, reach: [/opener: ['"`]billing|context-menu-off-door/] },
   gear: { door: 'the gear menu\'s «Manage agents…»', at: ['src/lib/gear-menu.js'],
     names: { 'src/lib/gear-menu.js': ["t('Manage agents…')", 'gs-menu-item'] },
     reach: [[/Manage agents/, /gs-menu|btn-global-settings|_pressGlobalSettings/]] },

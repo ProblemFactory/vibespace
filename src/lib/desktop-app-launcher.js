@@ -920,12 +920,14 @@ export async function showLaunchDialog(app, opts = {}) {
     c.onclick = (e, at = null) => {
       e.stopPropagation();
       const r = at || c.getBoundingClientRect();
-      const rows = scaleDefaultMenuModel(appPrefs(SCALE_PREF_KEY), key).map((m) => ({ label: cardScaleRowLabel(m), disabled: m.disabled, action: () => {
+      const rows = scaleDefaultMenuModel(appPrefs(SCALE_PREF_KEY), key).map((m) => ({ label: cardScaleRowLabel(m), action: () => {   // lane ui-controls-and-bugs: the current choice is a live ✓ row, never a greyed tick
         refocusScale = row.id;
         saveAppPrefs(SCALE_PREF_KEY, (map) => setScaleChoice(map, key, m.choice), t('Could not save the app’s default scale'));
       } }));
       const own = cardMenuItems(row); // lane app-register-ui: the card's variants above, Add / Remove / Show command below
-      const pop = showContextMenu(r.left, r.bottom + 2, tidyMenu([...own.head, { label: t('Default scale for {app}', { app: catalogLabel(row) }), disabled: true }, ...rows, ...own.tail]));
+      // lane ui-controls-and-bugs (the walk's desktop-apps-16): «Auto» follows Settings — the door to it sits under the choices
+      const setting = { label: t('Change the scale for every app in Settings…'), action: () => app._settingsUI?.open({ search: t('Desktop app scale (xpra)') }) };
+      const pop = showContextMenu(r.left, r.bottom + 2, tidyMenu([...own.head, { caption: t('Default scale for {app}', { app: catalogLabel(row) }) }, ...rows, setting, ...own.tail]));
       // Esc closes THIS menu only: the dialog's own Esc (createModalShell's overlay listener) would close the whole dialog
       const onEsc = (ev) => {
         if (!pop.isConnected) { document.removeEventListener('keydown', onEsc, true); return; }

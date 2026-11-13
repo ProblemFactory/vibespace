@@ -2024,21 +2024,21 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const rows = [];
     const check = (pane, btn) => (st.sidePane === pane ? '✓ ' : '') + btn.textContent;
     for (const key of out) {
-      if (key === 'badge') rows.push({ label: modeBadge.title || modeBadge.textContent, title: modeBadge.title, disabled: true }); // who drives, in full (an info row — the toggle is the act)
-      else if (key === 'kbd') rows.push({ label: kbdChip.textContent, title: kbdChip.title, disabled: true }); // lane J r2's chip, folded: an info row
+      if (key === 'badge') rows.push({ caption: modeBadge.title || modeBadge.textContent, title: modeBadge.title }); // who drives, in full (an info row — the toggle is the act)
+      else if (key === 'kbd') rows.push({ caption: kbdChip.textContent, title: kbdChip.title }); // lane J r2's chip, folded: an info row
       else if (key === 'kbdBtn') rows.push({ label: t('Keyboard'), title: kbdBtn.title, action: () => kbdBtn.onclick() }); // BROWSE YOURSELF: the touch keyboard, folded
       else if (key === 'continue') rows.push({ label: contBtn.textContent, title: contBtn.title, action: () => contBtn.onclick() }); // lane browser-resume B: the between-turns hand-back, folded
       else if (key === 'quit') rows.push({ label: quitBtn.textContent, title: quitBtn.title, action: () => quitBtn.onclick() }); // BROWSE YOURSELF: "Quit the whole browser", folded on a narrow bar (Close never folds)
       else if (key === 'bind') rows.push({ label: bindLabel(), title: bindTitle(), action: () => toggleBind() });
       else if (key === 'url') rows.push({ label: st.url ? (st.url.length > 90 ? st.url.slice(0, 89) + '…' : st.url) : t('Open this URL in a web view'), title: t('Open this URL in a web view'), disabled: !st.url, action: () => openBtn.onclick() });
       else if (key === 'open') { if (!out.includes('url')) rows.push({ label: t('Open this URL in a web view'), disabled: !st.url, action: () => openBtn.onclick() }); }
-      else if (key === 'viewers') rows.push({ label: viewersEl.textContent, title: viewersEl.title, disabled: true });
+      else if (key === 'viewers') rows.push({ caption: viewersEl.textContent, title: viewersEl.title });
       else if (key === 'rec') rows.push({ label: recEl.textContent, title: recEl.title, action: () => recEl.onclick() });
-      else if (key === 'fit') { const c = fitChipNow(); rows.push(c.act ? { label: fitChip.textContent, title: fitChip.title, action: () => fitChip.onclick() } : { label: fitChip.textContent, title: fitChip.title, disabled: true }); } // lane S4; builder r2: folded, the row keeps the chip's own words (WHY the page looks small AND what a click does — "Fit the page to this window" alone lost the why at 360 px)
+      else if (key === 'fit') { const c = fitChipNow(); rows.push(c.act ? { label: fitChip.textContent, title: fitChip.title, action: () => fitChip.onclick() } : { caption: fitChip.textContent, title: fitChip.title }); } // lane S4; builder r2: folded, the row keeps the chip's own words (WHY the page looks small AND what a click does — "Fit the page to this window" alone lost the why at 360 px)
       else if (key === 'copy') rows.push({ label: copyChip.textContent, title: copyChip.title, action: () => copyChip.onclick() }); // lane live-input
       // the browser's name, folded, says WHAT it is (the naive-user verifier, 2026-09-28: a bare "Chromium" row read as nothing)
       else if (key === 'backend') rows.push({ label: t('Switch browser (now {name})…', { name: backendBtn.textContent }), title: backendBtn.title, action: () => backendBtn.onclick() });
-      else if (key === 'backendLabel') rows.push({ label: t("Your agent's browser: {name}", { name: backendLabelEl.textContent }), disabled: true }); // an info row (no other browser to switch to)
+      else if (key === 'backendLabel') rows.push({ caption: t("Your agent's browser: {name}", { name: backendLabelEl.textContent }) }); // an info row (no other browser to switch to)
       else if (key === 'tabs') rows.push({ label: check('tabs', tabsBtn), action: () => tabsBtn.onclick() });
       else if (key === 'console') rows.push({ label: check('console', consBtn), action: () => consBtn.onclick() });
       else if (key === 'trace') rows.push({ label: check('trace', traceBtn), title: traceBtn.title, action: () => traceBtn.onclick() });

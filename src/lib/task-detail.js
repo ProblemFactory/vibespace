@@ -495,7 +495,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       const taken = new Set(rows.filter((r) => r.ref).map((r) => r.ref));
       const others = (sidebar._tasks || []).filter((g) => g.id !== task.id && !taken.has(g.id));
       const items = others.length ? others.map((g) => ({ label: `${g.title} — ${t('{n} shared rows', { n: (g.ctx || []).filter((o) => !o.ref && o.share).length })}`, action: () => { const next = rowsOf(); next.push({ ref: g.id, note: '' }); writeRows(next); } }))
-        : [{ label: t('No other Task Group to reference yet'), disabled: true, action: () => {} }];
+        : [{ caption: t('No other Task Group to reference yet') }];
       const rect = refBtn.getBoundingClientRect();
       showContextMenu(e.clientX || rect.left, e.clientY || rect.bottom, items);
     };

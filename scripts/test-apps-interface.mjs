@@ -47,7 +47,7 @@ console.log('§1 the window bar: status · Stop · ⋯ · Paste');
   const pinBar = (s) => [
     /backendChip\.className = 'desktop-app-chip desktop-app-chip-backend'; backendChip\.style\.display = 'none';/.test(s) || 'backend chip shown',
     /liveChip\.textContent = liveChipText\(rec\); liveChip\.style\.display = 'none';/.test(s) || 'memory chip shown',
-    /const about = aboutWindowText\(rec\);[^\n]*\n\s*if \(about\) items\.push\(\{ label: about,[^\n]*disabled: true \}\);/.test(s) || 'no about line in ⋯',
+    /const about = aboutWindowText\(rec\);[^\n]*\n\s*if \(about\) items\.push\(\{ caption: about,[^\n]*\}\);/.test(s) || 'no about line in ⋯',   // lane ui-controls-and-bugs: a fact is a caption, not a greyed row
     /moreAlways: \(\) => !!rec && \(cap\(rec, 'seamless'\) \|\| cap\(rec, 'scales'\) \|\| shareable\(\) \|\| !!aboutWindowText\(rec\)\)/.test(s) || '⋯ not always there',
   ].filter((v) => v !== true);
   ok(same(pinBar(win), []), 'WIRING: both chips stay in the DOM never shown (display none = absent for the fold), the about line opens the ⋯, the ⋯ is there whenever it has a line', pinBar(win));

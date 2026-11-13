@@ -250,14 +250,14 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
     return { self, calls };
   };
   // ONE drawn menu against the table: exactly its 'item' doors, in its order, with its label; an open one acts, a shut one
-  // is greyed WITH its why (the words on the row and its title) and acts on nothing
+  // is the menu's OFF row WITH its why (`off`: the words on the row — utils.js showContextMenu) and acts on nothing
   const census = (items, doors) => {
     const want = M.doorItems(doors, { t: tr }).filter((x) => !x.separator), got = (items || []).filter((x) => x && !x.separator), bad = [];
     for (const w of want) {
       const g = got.find((x) => x.label === w.label);
       if (!g) { bad.push(`${w.id}: not drawn (want «${w.label}»)`); continue; }
       if (w.enabled && (g.disabled || typeof g.action !== 'function')) bad.push(`${w.id}: open in the table, not a live item`);
-      if (!w.enabled && !(g.disabled && !g.action && String(g.labelHtml || '').includes(esc(w.why)) && g.title === w.why)) bad.push(`${w.id}: shut — not greyed with its why «${w.why}»`);
+      if (!w.enabled && !(g.off === w.why && !g.action && !g.disabled)) bad.push(`${w.id}: shut — not an OFF row with its why «${w.why}»`);   // lane ui-controls-and-bugs: showContextMenu's OFF row (the why in words on the row — .door-label / .door-why)
     }
     for (const g of got) if (!want.some((w) => w.label === g.label)) bad.push(`«${g.label}»: drawn — the table has no such door here`);
     if (got.map((x) => x.label).join(' · ') !== want.map((x) => x.label).join(' · ')) bad.push(`the order: ${got.map((x) => x.label).join(' · ')} ≠ ${want.map((x) => x.label).join(' · ')}`);

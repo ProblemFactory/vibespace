@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // A CONTROL WORKS, OR IT IS NOT THERE, OR IT SAYS WHY (lane ui-controls-and-bugs, the UI walk of 2026-11-13 — 主开发's GO for
 // the page: «fix by rule, not by surface»). Fast tier, PURE (acorn over src/lib; no DOM, no server). Legs land pick by pick:
+// pick 2 —
+// ① A MENU ROW WORKS, OR IT IS A CAPTION, OR IT SAYS WHY: showContextMenu draws `caption` (words, not a control) and `off`
+//    (the why in words on the row, + `offDoor`); a legacy `disabled` row is NOT promoted (its title is often a description,
+//    never a reason). No menu-row literal in
+//    src/lib carries `disabled: true` (the walk: «— 不提供» rows greyed with the reason in a tooltip, a billing menu with two
+//    greyed accounts and no title, a zoom menu whose heading and current choice were greyed ticks); the COMPUTED ones are a
+//    frozen ledger that only shrinks
 // pick 1 —
 // ③ A MENU OPENS: every `showContextMenu(` call in src/lib passes (x, y, items) — the peer card called it (e, items), which
 //    threw after preventDefault, so a right-click showed no menu at all
@@ -25,6 +32,46 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const LIB = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f);
 const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
 function walk(n, fn) { if (!n || typeof n.type !== 'string') return; fn(n); for (const k of Object.keys(n)) { if (k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) v.forEach((c) => walk(c, fn)); else if (v && typeof v.type === 'string') walk(v, fn); } }
+
+// ── ① menu rows: caption / off / live ──
+/** object literals that look like a MENU ROW (a label / caption) and carry `disabled` — a picker row (`value`) is not a menu row */
+function disabledRows(src, file) {
+  const lit = [], comp = [];
+  walk(parse(src), (n) => {
+    if (n.type !== 'ObjectExpression') return;
+    const props = n.properties.filter((p) => p.type === 'Property' && !p.computed);
+    const keys = props.map((p) => p.key.name || p.key.value);
+    if (!keys.includes('disabled') || keys.includes('value') || !['label', 'labelHtml', 'caption', 'captionHtml'].some((k) => keys.includes(k))) return;
+    const d = props.find((p) => (p.key.name || p.key.value) === 'disabled');
+    (d.value.type === 'Literal' && d.value.value === true ? lit : comp).push(`${file}:${n.loc.start.line}`);
+  });
+  return { lit, comp };
+}
+// THE FROZEN LEDGER of computed `disabled:` menu rows (2026-11-13, pick 2): still drawn the old way (greyed, a tooltip) — each
+// moves onto caption / off with ITS OWN why and lowers its row (the ledger only shrinks)
+const MENU_LEDGER = { 'src/lib/browser-live-window.js': 3, 'src/lib/contributions.js': 1, 'src/lib/desktop-app-launcher.js': 1, 'src/lib/desktop-app-window.js': 3, 'src/lib/file-explorer.js': 1,
+  'src/lib/machine-desktop.js': 1, 'src/lib/manage-agents.js': 1, 'src/lib/plugins-ui.js': 3, 'src/lib/session-card.js': 1, 'src/lib/sidebar-render.js': 1, 'src/lib/taskbar.js': 1 };
+console.log('① A MENU ROW WORKS, OR IT IS A CAPTION, OR IT SAYS WHY');
+const litRows = [], compPer = {};
+for (const f of LIB) { let r = { lit: [], comp: [] }; try { r = disabledRows(read(f), f); } catch {} litRows.push(...r.lit); if (r.comp.length) compPer[f] = r.comp.length; }
+ok(litRows.length === 0, 'no menu-row literal carries `disabled: true` — a fact is a `caption`, a choice that cannot be taken is `off` with its why', litRows.join(', '));
+const compGrown = Object.entries(compPer).filter(([f, n]) => n > (MENU_LEDGER[f] || 0)).map(([f, n]) => `${f}: ${n} (ledger ${MENU_LEDGER[f] || 0})`);
+const compShrunk = Object.entries(MENU_LEDGER).filter(([f, n]) => (compPer[f] || 0) < n).map(([f, n]) => `${f}: ${compPer[f] || 0} < ledger ${n}`);
+ok(compGrown.length === 0, 'no NEW computed `disabled:` menu row (a new one is `off` with its why, or not drawn)', compGrown.join(' ; '));
+ok(compShrunk.length === 0, 'the computed ledger is exact (a site that moved onto caption / off lowers its row)', compShrunk.join(' ; '));
+const UT = read('src/lib/utils.js');
+const scm = UT.slice(UT.indexOf('export function showContextMenu('), UT.indexOf('/** What the DOM says about a press'));
+ok(!/off: item\.title/.test(scm)
+  && /cap\.className = className \+ '-caption';/.test(scm) && /const words = wordRow\(item\);/.test(scm) && /const words = wordRow\(child\);/.test(scm) && /row\.className = className \+ '-item ' \+ className \+ '-off disabled';/.test(scm) && /why\.className = 'door-why'; why\.textContent = String\(item\.off\);/.test(scm) && /item\.offDoor\.action\?\.\(\)/.test(scm),
+  'showContextMenu draws a CAPTION and an OFF row with its why in words (+ its door) — ONE drawer, at the top level AND in a submenu; a legacy title is never promoted to a why (it is often a description: «Open this URL in a web view»)');
+ok(/\.context-menu-caption \{/.test(read('public/viewers.css')) && /\.context-menu-off \.door-why \{/.test(read('public/viewers.css')), 'the caption and the off row have their styles (words at full contrast, never opacity .4)');
+const MA2 = read('src/lib/manage-agents.js'), SL = read('src/lib/session-lifecycle.js'), DL = read('src/lib/desktop-app-launcher.js'), DS = read('src/lib/desktop-app-scale.js');
+ok(/label: t\('\{cmd\} — not offered', \{ cmd: r\.label \}\), off: t\('it connects to the vendor’s servers \(measured\)'\), title: r\.verdict \}/.test(MA2) && /if \(live\.length === 1\) \{\s*chkBtn\.textContent = live\[0\]\.label;/.test(MA2), 'rules & checks: a check it cannot offer says why on its row IN THE PAGE\'S LANGUAGE (the English measurement is its hover detail); one live act ⇒ the button IS that act');
+ok(/items\.push\(\{ label: a\.name \+ suffix, off: block, offDoor: \{ label: t\('Manage agents…'\)/.test(SL) && (SL.match(/items\.unshift\(\{ caption: t\('This session’s billing account'\) \}\);/g) || []).length === 1,
+  'billing: the menu says what it is (a caption), a blocked account says why ON its row with the door where sign-in lives');
+ok(/\{ caption: t\('Default scale for \{app\}', \{ app: catalogLabel\(row\) \}\) \}/.test(DL) && !/disabled: choice === cur/.test(DS)
+  && /\{ label: t\('Change the scale for every app in Settings…'\), action: \(\) => app\._settingsUI\?\.open\(\{ search: t\('Desktop app scale \(xpra\)'\) \}\) \}/.test(DL) && /\.\.\.rows, setting, \.\.\.own\.tail/.test(DL),
+  'desktop-app zoom: the heading is a caption; the current choice is a live ✓ row, not a greyed tick; «Auto» has its door to Settings under the choices');
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);
@@ -114,6 +161,7 @@ ok(!/t\('Load more'\)/.test(HX) && /upTo >= this\.fileSize \? '' :/.test(HX) && 
 
 // ── ⑥ controls ──
 console.log('⑥ CONTROLS — the same checkers on planted code');
+ok(disabledRows("showContextMenu(1, 2, [{ label: 'x', disabled: true }, { caption: 'fact' }, { label: 'y', disabled: busy }]);", 'planted').lit.length === 1 && disabledRows("m([{ label: 'y', disabled: busy }])", 'p').comp.length === 1 && disabledRows("pick([{ label: 'z', value: 'z', disabled: true }])", 'p').lit.length === 0, 'a planted `disabled: true` menu row is caught, a computed one is counted, a picker row (value) is not a menu row');
 ok(badMenuCalls("el.oncontextmenu = (e) => { showContextMenu(e, [{ label: 'x' }]); };", 'planted').length === 1, 'a planted (e, items) call is caught');
 ok(clearAwaitAppend('async function r(c) { c.innerHTML = \'\'; const x = await load(); c.appendChild(x); }', 'planted').length === 1, 'a planted clear-await-append render is caught');
 ok(clearAwaitAppend('async function r(c) { const x = await load(); c.replaceChildren(); c.appendChild(x); }', 'planted').length === 0, '…and a render that awaits FIRST, then clears and fills, is not');

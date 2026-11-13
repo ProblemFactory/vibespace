@@ -1532,7 +1532,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       const chip = probeErr
         ? hostStateChip('error', { text: t('couldn’t reach {host} — account availability unknown', { host: rHostName }), title: probeErr })
         : hostStateChip('pending', { text: t('checking accounts on {host}…', { host: rHostName }) });
-      items.push({ labelHtml: chip.outerHTML, disabled: true,
+      items.push({ captionHtml: chip.outerHTML,
         title: probeErr ? t('The reasons below are guesses from cached data until the machine answers. Retrying shortly.') : t('Availability below is unconfirmed until the machine answers.') });
     }
     // 'subscription' = accounts.resolveForSpawn's force-the-CLI's-own-login
@@ -1620,7 +1620,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
-      items.push({ label: t('Why API billing? apiKeyHelper is set on the machine'), disabled: true,
+      items.push({ caption: t('Why API billing? apiKeyHelper is set on the machine'),
         title: t('The CLI prefers a configured apiKeyHelper over the machine\u2019s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.') });
     }
     for (const a of accts) {
@@ -1631,7 +1631,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // (local symlink mechanics — the server refuses the spawn too).
       if (a.pooled) {
         const sfx = a.currentName ? ` → ${a.currentName}` : ' ' + t('· pool');
-        if (rHostId) { items.push({ label: a.name + sfx, disabled: true, title: t('Pooled accounts are local-only (the pool switches a credentials directory on THIS machine)') }); continue; }
+        if (rHostId) { items.push({ label: a.name + sfx, off: t('Pooled accounts are local-only (the pool switches a credentials directory on THIS machine)') }); continue; }
         const estP = a.current ? (this._usageEstimates?.[a.current] || (this._usageGlobal?.accountId === a.current ? this._usageEstimates?.__global__ : null)) : null;
         // THE CONVERSATION'S POOL PIN (2026-09-28, owner: "变成池的子菜单，直接选池本身就是自动切换，如果在
         // 子菜单里选"自动"也是自动切换，但如果选择某个具体账号，那在这个账号耗尽之前就pin在这个账号下"): the pool
@@ -1689,7 +1689,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       // yet) is a guess — say so in the tooltip rather than let a cold cache
       // speak with the server's authority.
       if (block && verdictsCold) block += ' ' + t('(unconfirmed — {host} hasn’t answered the availability check yet)', { host: rHostName });
-      if (block && !cur) { items.push({ label: a.name + suffix, disabled: true, title: block }); continue; }
+      // lane ui-controls-and-bugs (the walk: two accounts greyed, no reason): the why ON the row, and the door where sign-in lives
+      if (block && !cur) { items.push({ label: a.name + suffix, off: block, offDoor: { label: t('Manage agents…'), action: () => this._showAgentsDialog?.({ opener: 'billing' }) } }); continue; }
       // LINKED pick sends the REAL account id (2.241.0): the server's
       // email-linked rescue (ws-handler create, 2.240.2) maps it onto the
       // host's own login — zero creds ship — while session._accountId keeps
@@ -1704,6 +1705,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       items.push({ labelHtml: rowHtml((cur ? '✓ ' : '') + a.name, suffix, usageHint(usageFor(a), estA)), action: () => { if (!cur) doSwitch(a.id, a.name); } });
     }
     let menuEl;
+    items.unshift({ caption: t('This session’s billing account') });   // lane ui-controls-and-bugs: the menu says what it is (the walk: a bare list)
     if (anchor && typeof anchor.getBoundingClientRect === 'function') {
       const r = anchor.getBoundingClientRect();
       menuEl = showContextMenu(r.left, r.bottom + 4, items);

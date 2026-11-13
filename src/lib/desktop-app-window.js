@@ -289,7 +289,7 @@ export function appDefaultItems(model, save) {
   if (!model) return [];
   const sep = 'border-top: 1px solid var(--border); margin-top: 2px; padding-top: 6px;';
   const out = [];
-  if (model.isDefault) out.push({ label: t('{scale}× is this app’s default', { scale: model.def }), disabled: true });
+  if (model.isDefault) out.push({ caption: t('{scale}× is this app’s default', { scale: model.def }) });
   if (model.make != null) out.push({ label: t('Make {scale}× the default for this app', { scale: model.make }), action: () => save(model.make) });
   if (model.clear) out.push({ label: t('Forget this app’s default ({scale}×)', { scale: model.def }), action: () => save('auto') });
   if (out.length) out[0] = { ...out[0], style: sep };
@@ -963,7 +963,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     const rows = m.rows.map((r) => ({ label: scaleRowLabel(r), disabled: r.disabled, action: () => { relaunchAt(r.choice, r.scale); } }));
     // lane D: the app's default scale — stored under the same per-app key as the frame choice, heard by every client
     const tail = appDefaultItems(appDefaultModel(rec, appPrefs(SCALE_PREF_KEY)), (choice) => saveScaleDefault(frameKey(), choice));
-    return why ? [{ label: why, disabled: true }, ...rows, ...tail] : [...rows, ...tail];
+    return why ? [{ caption: why }, ...rows, ...tail] : [...rows, ...tail];
   };
   winInfo._desktopAppScaleItems = scaleItems;
   winInfo._desktopScaleMenu = scaleModel; // the raw handle the heavy suite reads
@@ -1011,7 +1011,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     showToast(t('Forgot {n} stored logins', { n: r.forgot || 0 }), { duration: 3500 });
   };
   const secretsItems = () => [
-    { label: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), disabled: true, style: 'min-width:18em;max-width:22em;white-space:normal' },
+    { caption: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), style: 'min-width:18em;max-width:22em;white-space:normal' },
     { label: t('Forget all'), action: () => forgetSecrets(), disabled: !secretsCount },
   ];
   moreBtn.addEventListener('pointerenter', () => { refetchSecrets(); }, { signal: lsig });
@@ -1023,14 +1023,14 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     const folded = barFold ? barFold.folded() : [];
     const items = [];
     const about = aboutWindowText(rec); // design 009 §B2: what the backend + memory chips said, one line
-    if (about) items.push({ label: about, title: [backendChip.title, liveChip.title].filter(Boolean).join(' — '), disabled: true });
-    for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ label: el.textContent, title: el.title || '', disabled: true });
+    if (about) items.push({ caption: about, title: [backendChip.title, liveChip.title].filter(Boolean).join(' — ') });
+    for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ caption: el.textContent, title: el.title || '' });
     if (items.length) items.push({ separator: true });
     if (cap(rec, 'seamless')) items.push({ label: t('Show window frame'), children: frameItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Scale'), children: scaleItems() });
     if (cap(rec, 'scales')) items.push({ label: t('Pin size…'), children: pinItems() }); // lane e2b: the xpra per-window rung (the client fits the pin)
     if (rec && rec.secrets === 'on') items.push({ label: t('Stored logins ({n})', { n: secretsCount == null ? '…' : secretsCount }), children: secretsItems() }); // lane app-display-secrets
-    if (rec && appSecretsKeyWords(rec.secrets)) items.push({ label: t('Stored logins: {why}', { why: appSecretsKeyWords(rec.secrets) }), disabled: true }); // lane key-file-law-stores: kept sealed, never re-keyed
+    if (rec && appSecretsKeyWords(rec.secrets)) items.push({ caption: t('Stored logins: {why}', { why: appSecretsKeyWords(rec.secrets) }) }); // lane key-file-law-stores: kept sealed, never re-keyed
     items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
@@ -1159,7 +1159,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   let appNotes = [], noteWaiting = false;
   const refetchNotes = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/notifications`); if (!closed && r && Array.isArray(r.notes)) appNotes = r.notes.slice(-NOTE_RING_MAX); };
   const noteSeen = () => { if (!noteWaiting) return; noteWaiting = false; fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/notifications/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); };
-  const notesItems = () => (appNotes.length ? appNotes.slice().reverse().map((n) => ({ label: noteLine(n), title: n.body || '', disabled: true })) : [{ label: t('No notifications yet'), disabled: true }]);
+  const notesItems = () => (appNotes.length ? appNotes.slice().reverse().map((n) => ({ caption: noteLine(n), title: n.body || '' })) : [{ caption: t('No notifications yet') }]);
   const showAppNote = (m) => {
     const n = m.note || {};
     appNotes.push(n); if (appNotes.length > NOTE_RING_MAX) appNotes.splice(0, appNotes.length - NOTE_RING_MAX);
@@ -1229,7 +1229,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     const m = frameMenuModel(frameChoice());
     const head = frameStatusText(seamless);
     const rows = m.map((r) => ({ label: frameRowLabel(r), disabled: r.disabled, action: () => { saveFrameChoice(frameKey(), r.choice); } }));
-    return head ? [{ label: head, disabled: true }, ...rows] : rows;
+    return head ? [{ caption: head }, ...rows] : rows;
   };
   const canKeep = () => !!rec && rec.state === 'ready' && rec.idleTimeoutMs > 0;
   const canStop = () => !!rec && (rec.state === 'ready' || rec.state === 'launching');
