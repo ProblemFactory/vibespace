@@ -9,6 +9,7 @@
 //   ⑦ a trim leaves no row outside the cards   ⑧ no card to any reader: class, search; no toast road
 //   ⑨ the reconnect road is untouched   ⑪ the words exist in zh + ja   ⑫ the Resume dialog prints words, not tags
 //   ⑬ a cycle nobody could have noticed is not a notice (round 2): the page's lifecycle, the re-attach's answer, the retry window; a row's length is the outage it measured (round 3)
+//   ⑪ also: the row's time is the owner's clock (chat-view hands the notice `timeOn`, 24-hour in the page's zone; 主开发's merged-tip read, 2026-11-13)
 // ⑩ and ⑭ (law 5: a slow client is not a dead one; the keepalive and the heartbeat read one verdict over one mark) are the SLOW-LINK pick's,
 // on top of this one: this pick is the page's half and reads no line of src/server/ws-heartbeat.js or src/ws-keepalive.js.
 // RED: `REPO=<a git archive of the release (fd4acdc61, 2.369.397) + node_modules> node scripts/test-connection-notice.mjs` — ①–⑧, ⑫ and ⑬ red by name and by behaviour
@@ -203,6 +204,12 @@ console.log('⑨ the reconnect road is untouched');
 console.log('⑪ the words exist in zh + ja');
 {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  { // the row's time (主开发's PICK A read: «07:38 PM» inside a Chinese sentence): the product's own clock for the owner, never the browser's locale
+    ok('the view hands the notice the owner\'s clock (timeOn: the page\'s zone, 24-hour)', /import \{ timeOn \} from '\.\/owner-facts\.js';/.test(cvSrc) && /createConnectionNotice\(\{[^\n]*clock: \(at\) => timeOn\(this\.app, at\)/.test(cvSrc));
+    const WW = fs.existsSync(path.join(REPO, 'src/when-words.js')) ? require(path.join(REPO, 'src/when-words.js')) : null;
+    const at = Date.UTC(2026, 10, 13, 3, 38), words = WW?.timeOf?.(at, 'Asia/Shanghai');
+    ok('…which reads 24-hour words with its zone, never AM / PM', words === '11:38 GMT+8' || /^11:38 \S+$/.test(words || ''), words);
+  }
   for (const k of ['Disconnected from server', 'Reconnected · down {duration}', 'Connection unstable: dropped {n} times, last reconnected {time}', 'Connection unstable: dropped {n} times, disconnected since {time}', 'First dropped at {time}']) {
     ok(`«${k}»`, zh.includes(`"${k}":`) && ja.includes(`"${k}":`));
   }

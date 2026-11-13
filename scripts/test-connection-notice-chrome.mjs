@@ -6,7 +6,7 @@
 //     (addendum 1) The Resume dialog, rendered for real: no literal tag in what the person reads.
 //   ④ A CYCLE NOBODY COULD HAVE NOTICED (round 2): a CDP freeze of 10 / 40 / 70 s ⇒ no row, no count; a freeze the hub cut with nothing lost ⇒ the same;
 //     a hidden tab's cycle ⇒ the same; a freeze that lost frames off the ring ⇒ one row at the resume; an awake drop ⇒ one row; a hub's cut while awake ⇒ counted.
-//   ⑤ THE OWNER'S PICTURES: a phone 390 px wide, in Chinese — 10 real flaps ⇒ one row that counts them; a hide / show cycle ⇒ none.
+//   ⑤ THE OWNER'S PICTURES: a phone 390 px wide, in Chinese — 10 real flaps ⇒ one row that counts them, its time 24-hour; a hide / show cycle ⇒ none.
 // ② (the bytes-taken mark on real sockets) and ③ (the loop, law 5: a client on a slow link) are the SLOW-LINK pick's, on top of this
 // one: this pick is the page's half. The proxy stays: ④'s hub cuts need a path that can go silent.
 // WHY NOT Network.emulateNetworkConditions: it does not throttle a websocket's reads (test-reconnect-storm's (j) measured the queue
@@ -394,6 +394,7 @@ console.log('⑤ the owner\'s pictures: 390 px wide, zh');
   console.log(`    ${done} flaps; rows ${JSON.stringify(z1.rows.slice(-3))} (${z1.rows.length} in all)`);
   ok(`zh, ${FLAPS} real flaps: the socket cycled ${FLAPS} times and the re-attach ran each time`, done === FLAPS && z1.attached - z0.attached === FLAPS, { done, attached: z1.attached - z0.attached });
   ok(`zh, ${FLAPS} real flaps: ONE notice, in Chinese, that counts them`, z1.rows.length === 1 && zh(z1.rows) && new RegExp(`断开 ${FLAPS} 次`).test(z1.rows[0] || ''), z1.rows);
+  ok('zh: its time is the owner\'s clock, 24-hour (no AM / PM)', /最近 \d{2}:\d{2}( \S+)? 已重连/.test(z1.rows[0] || '') && !/AM|PM|上午|下午/.test(z1.rows[0] || ''), z1.rows[0]);
   await shot('zh-390-flap-10.png');
   await reopen(); await sleep(1500);
   const h0 = await ev('window.__facts()');

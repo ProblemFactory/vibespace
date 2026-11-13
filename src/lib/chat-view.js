@@ -32,6 +32,7 @@ import { turnPreviewOf } from '../assistant-note.js'; // PURE (B-40f8): THE prev
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
 import { createConnectionNotice } from './connection-notice.js'; // a connection state is ONE live notice (lane connection-notice-once)
+import { timeOn } from './owner-facts.js'; // the notice's time is the owner's clock: 24-hour, the page's zone (src/when-words.js)
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
 import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-account-door: the pinned account cannot serve ⇒ the bar says so, with its two doors
@@ -1393,7 +1394,7 @@ class ChatView {
     this._disconnected = false;
     this._hasConnected = false; // track first connect vs reconnect
     // ONE live notice per quiet stretch, patched in place — a phone that flaps pays no row per cycle (src/lib/connection-notice.js)
-    this._connNotice = createConnectionNotice({ list: () => this._messageList, t, total: () => this._total, onPaint: () => { if (this._pinned) this._scrollToBottom(); } });
+    this._connNotice = createConnectionNotice({ list: () => this._messageList, t, total: () => this._total, clock: (at) => timeOn(this.app, at), onPaint: () => { if (this._pinned) this._scrollToBottom(); } });
     this._stateHandler = (connected) => {
       this._disconnected = !connected;
       container.classList.toggle('chat-disconnected', !connected);
