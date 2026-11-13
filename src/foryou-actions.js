@@ -192,12 +192,15 @@ const DEFAULT_NEED = Object.freeze({ kind: 'check', card: true });
  *  `fn` = the function that picks the conversation's items, in `file`; `about: true` = it also counts the items that
  *  ADDRESS the conversation (a watch request under 'channels'); 'deferred' = the conversation's own key only — named here
  *  so test-conversation-needs ⑨ keeps it honest (a deferred row whose function starts reading `about` goes red until its
- *  row says true; a new function matching a conversation's items by sessionKey goes red until it is a row). */
+ *  row says true; a new function matching a conversation's items by sessionKey goes red until it is a row). `about: false`
+ *  (lane artifacts-by-intent, .401) = the conversation's own key BY LAW, never a deferral: a reader no `about` item can
+ *  reach — the census reds it the day it starts reading `about`. */
 const SURFACES = Object.freeze({
   'chat-card': { file: 'src/foryou-actions.js', fn: 'cardsWhere', about: true, what: 'the cards and the quiet records in the chat (needsOf / recordsOf → src/lib/chat-needs-card.js) + the window\'s attention dock above the message box (dockOf — «waiting for you · N», the newest, its verbs)' },
   'title-badge': { file: 'src/lib/user-todos-layout.js', fn: 'inboxBadgeFor', about: 'deferred', what: 'the window title bar\'s mini inbox badge (2.369.169)' },
   'mini-inbox': { file: 'src/lib/user-todos-layout.js', fn: 'miniInboxEntries', about: 'deferred', what: 'the title-bar mini inbox popover' },
   'session-marker': { file: 'src/lib/user-todos-layout.js', fn: 'sessionMark', about: 'deferred', what: 'a session row\'s «needs you · N» (lane foryou-honest)' },
+  'ask-artifacts': { file: 'src/agent-routes/status.js', fn: 'asksOf', about: false, what: 'the Artifacts list\'s «给你看的» rows an ask named (lane artifacts-by-intent: the registry\'s rebuild folds the asks THIS conversation filed, open or answered, under its key or the webui: placeholder) — no For-you item is drawn; an ask is filed ONLY under the conversation\'s own key (askKey) by the ask route, never with `about` (the store refuses `via: \'ask\'` from any other filer), so no `about` item can be one' },
 });
 
 /** The identity ids an item's producer names in its words (a tool's result says `wr-…` / `sr-…` / `ut-…`). */

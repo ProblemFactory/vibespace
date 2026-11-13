@@ -463,6 +463,7 @@ console.log('⑨ every surface that shows a conversation its own items is a SURF
       const readsAbout = /\babout\b/.test(body) || (/\bisTheirs\(/.test(body) && /\.about\b/.test(isTheirsDef(fl[r.file])));
       if (r.about === true && !readsAbout) problems.push(`SURFACES.${k}: ${r.fn} claims \`about\` but never reads it`);
       if (r.about === 'deferred' && readsAbout) problems.push(`SURFACES.${k}: ${r.fn} reads \`about\` now — its row must say true`);
+      if (r.about === false && readsAbout) problems.push(`SURFACES.${k}: ${r.fn} reads \`about\` — its row says the conversation's own key BY LAW (false): say true and why`); // lane artifacts-by-intent (.401)
     }
     // every function under src/ that picks items by a conversation's key set is a row
     for (const [rel, src] of Object.entries(fl)) {
@@ -474,8 +475,13 @@ console.log('⑨ every surface that shows a conversation its own items is a SURF
     return problems;
   };
   const S0 = surfaceCensus(CN.SURFACES);
-  ok(S0.length === 0, `every surface is a row and says the truth about \`about\` (${Object.keys(CN.SURFACES).length} rows: ${Object.entries(CN.SURFACES).map(([k, r]) => k + (r.about === true ? '' : ' (deferred)')).join(', ')})`, S0);
+  ok(S0.length === 0, `every surface is a row and says the truth about \`about\` (${Object.keys(CN.SURFACES).length} rows: ${Object.entries(CN.SURFACES).map(([k, r]) => k + (r.about === true ? '' : r.about === false ? ' (own key by law)' : ' (deferred)')).join(', ')})`, S0);
   ok(Object.values(CN.SURFACES).filter((r) => r.about === 'deferred').length === 3, 'the deferred surfaces are named — the title-bar badge, the mini inbox, the session row\'s marker count the conversation\'s own key only (a watch request counts on the chip, not on the badge)');
+  // lane artifacts-by-intent (.401): the ask route's own read for the Artifacts list is a row — the conversation's own key BY LAW (an ask is
+  // filed only under askKey, never with `about`); dropped from the registry it is named; the day it reads `about` it is red until its row says so
+  ok(!!CN.SURFACES['ask-artifacts'] && CN.SURFACES['ask-artifacts'].file === 'src/agent-routes/status.js' && CN.SURFACES['ask-artifacts'].fn === 'asksOf' && CN.SURFACES['ask-artifacts'].about === false, 'the ask route\'s read for the Artifacts list (asksOf) is a row: the conversation\'s own key by law (about: false)', CN.SURFACES['ask-artifacts']);
+  { const r = { ...CN.SURFACES }; delete r['ask-artifacts']; ok(surfaceCensus(r).some((p) => /src\/agent-routes\/status\.js asksOf\(\) picks a conversation's items by sessionKey — a surface missing/.test(p)), 'RED: asksOf dropped from the registry is named'); }
+  { const st = files['src/agent-routes/status.js'] || ''; const fl = { ...files, 'src/agent-routes/status.js': st.replace('return store.idsWhere((i) => IO.isAsk(i) && keys.has(i.sessionKey))', 'return store.idsWhere((i) => IO.isAsk(i) && (keys.has(i.sessionKey) || keys.has(i.about)))') }; ok(fl['src/agent-routes/status.js'] !== st && surfaceCensus(CN.SURFACES, fl).some((p) => /SURFACES\.ask-artifacts: asksOf reads `about` — its row says the conversation's own key BY LAW/.test(p)), 'RED: asksOf reading `about` while its row says own key by law (false) is named'); }
   { const r = { ...CN.SURFACES }; delete r['mini-inbox']; ok(surfaceCensus(r).some((p) => /miniInboxEntries\(\) picks a conversation's items by sessionKey — a surface missing/.test(p)), 'RED: a surface dropped from the registry is named'); }
   { const r = { ...CN.SURFACES, 'title-badge': { ...CN.SURFACES['title-badge'], about: true } }; ok(surfaceCensus(r).some((p) => /SURFACES\.title-badge: inboxBadgeFor claims `about` but never reads it/.test(p)), 'RED: a deferred surface claimed as done is named'); }
   { const fl = { ...files, 'src/lib/user-todos-layout.js': files['src/lib/user-todos-layout.js'].replace('export function sessionMark(open, keys) {', 'export function sessionMark(open, keys) { if (keys && keys.about) return null;') }; ok(surfaceCensus(CN.SURFACES, fl).some((p) => /SURFACES\.session-marker: sessionMark reads `about` now — its row must say true/.test(p)), 'RED: a deferred surface that starts reading `about` is named until its row says so'); }
