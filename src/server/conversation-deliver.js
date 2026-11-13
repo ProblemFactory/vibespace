@@ -111,6 +111,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
+  // lane queued-is-not-woke laws 2 + 3 (shape C): THE KEYED SLOTS' MEMORY — per (conversation, slot), the set its entry carried
+  // when it was last HANDED — rides the stash file beside the queues under one reserved key (a release that reads this
+  // file drops it: it keeps queues only)
+  let slots = stash && stash.__slots && typeof stash.__slots === 'object' && !Array.isArray(stash.__slots) ? stash.__slots : {};
+  if (stash) delete stash.__slots;
+  const stashBody = () => JSON.stringify(Object.keys(slots).length ? { ...stash, __slots: slots } : stash);
   // A CLAIM THE PREVIOUS PROCESS DID NOT SETTLE (channel-jump verify r2, 2026-09-27): an entry stamped `ho:<id>` was
   // being handed over when the server stopped. The shutdown path WAITS for a hand-over in flight (server.js
   // `stashView.settle`), so a stamp here means the process died mid-post (SIGKILL / OOM) inside the socket
@@ -123,7 +129,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const e of q) if (e && e.ho) { ids.add(e.ho); delete e.ho; }
     if (ids.size) releasedAtBoot.push({ cid, ids: [...ids], n: q.length });
   }
-  if (releasedAtBoot.length) { try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
+  if (releasedAtBoot.length) { try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
   // lane report-mark-on-ack: a `carry` claim is an UNCONFIRMED ANSWER's (src/turn-carry.js) — it posts no frame, so its line
   // names no hand-over to look for; a hand-over's keeps its words; both on one conversation are named apart
   const claimedWords = (ids) => {
@@ -141,7 +147,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   let lastWriteError = null, retryTimer = null;
   const STASH_RETRY_MS = 30 * 1000;
   const writeStashNow = () => {
-    try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
+    try { fs.writeFileSync(stashFile + '.tmp', stashBody()); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
     catch (e) {
       lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
       log('[deliver] stash persist failed:', e.message);
@@ -197,11 +203,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // may already have reached the agent (`held.maybeDelivered`) fall before any other, oldest first; then the oldest
     // unclaimed as before. The same rule in the jobs engine's store (src/jobs.js capUnclaimedNotifs)
     let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;
+    over -= q.filter((e) => e && e.slot && !e.ho).length;   // a KEYED SLOT entry (lane queued-is-not-woke, shape C: the sender's one waiting entry) is never counted and never dropped
     const dropped = [];
     if (over <= 0) return dropped;
     for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {
       for (let i = 0; i < q.length && over > 0;) {
-        if (!q[i] || q[i].ho || !pass(q[i])) { i++; continue; }
+        if (!q[i] || q[i].ho || q[i].slot || !pass(q[i])) { i++; continue; }
         dropped.push(...q.splice(i, 1)); over--;
       }
     }
@@ -338,12 +345,44 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       const keep = q.filter((e) => !mine(e));
       if (keep.length) stash[cid] = keep; else delete stash[cid];
       for (const e of took) if (e && e.ho) delete e.ho;   // what went out carries no claim into a restore
+      noteSlotsHanded(cid, took);
       if (took.length) { writeStashNow(); stashChanged(cid); emitStash('drained', cid, took); }   // `drained` names what was TAKEN, never the whole queue (withdraw r4 + the .195 merge)
       return took;
     }
+    noteSlotsHanded(cid, q);
     delete stash[cid]; writeStashNow(); stashChanged(cid);
     emitStash('drained', cid, q);
     return q;
+  }
+  /** the conversations holding an entry in `slot` (the watch asks them when their set empties) */
+  const slotHolders = (slot) => Object.keys(stash).filter((cid) => Array.isArray(stash[cid]) && stash[cid].some((e) => e && e.slot === slot));
+  /** a keyed slot's entry that went out: its set is the one it HANDED (written with the drain's own stash write) */
+  function noteSlotsHanded(cid, took) {
+    for (const e of took || []) if (e && e.slot) (slots[cid] || (slots[cid] = {}))[e.slot] = { handed: e.setKey || '[]', at: Date.now() };
+  }
+  /** ONE ENTRY PER (conversation, slot), REPLACED IN PLACE (lane queued-is-not-woke laws 2 + 3, shape C — the sender's one
+   *  waiting entry, 主开发 13:35Z / 13:42Z a). Never counted against STASH_CAP, never evicted, so it never evicts; rendered
+   *  whole (`whole`). It is filed again ONLY when its `set` differs from the entry standing there, or — with none there —
+   *  from the set it last HANDED (never the same set twice). `envelope` null: the slot's entry leaves (nothing left to say).
+   *  A slot entry claimed by a hand-over in flight is left alone (the next call decides). → {filed, removed} */
+  function stashSlot(cid, slot, envelope, { set = [] } = {}) {
+    if (!cid || !slot) return { filed: false, removed: false };
+    const setKey = JSON.stringify([...new Set((set || []).map(String))].sort());
+    const q = stash[cid] || [];
+    if (q.some((e) => e && e.slot === slot && e.ho)) return { filed: false, removed: false };
+    const i = q.findIndex((e) => e && e.slot === slot);
+    if (!envelope) {
+      if (i < 0) return { filed: false, removed: false };
+      q.splice(i, 1); if (!q.length) delete stash[cid];
+      writeStashNow(); stashChanged(cid);
+      return { filed: false, removed: true };
+    }
+    const handed = ((slots[cid] || {})[slot] || {}).handed;
+    if (i >= 0 ? q[i].setKey === setKey : handed === setKey) return { filed: false, removed: false };
+    const entry = { source: envelope.source || 'agent', kind: 'notification', fromName: 'VibeSpace', text: String(envelope.text == null ? '' : envelope.text), ts: Date.now(), whole: true, slot: String(slot), setKey };
+    if (i >= 0) q[i] = entry; else (stash[cid] = q).push(entry);
+    writeStashNow(); stashChanged(cid);
+    return { filed: true, removed: false };
   }
   /** Put drained entries BACK, each as itself (the hand-over's frame came back undelivered — verify r2: the codex
    *  wrapper's `peer_message_result ok:false` used to re-stash the ONE combined text as ONE notice; 5 became 1 and the
@@ -352,7 +391,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const mine = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object');
     if (!cid || !mine.length) return 0;
     const q = stash[cid] || (stash[cid] = []);
-    for (const e of mine) { delete e.ho; judgeEntry(e); if (!q.includes(e)) q.push(e); }   // judged at the write like every entry (verify r4)
+    for (const e of mine) {
+      delete e.ho; judgeEntry(e);
+      if (e.slot) { const mem = (slots[cid] || {})[e.slot]; if (mem && mem.handed === e.setKey) delete slots[cid][e.slot]; if (q.some((x) => x !== e && x && x.slot === e.slot)) continue; }   // shape C: it was not handed; a newer slot entry wins
+      if (!q.includes(e)) q.push(e);
+    }   // judged at the write like every entry (verify r4)
     q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
     // NO cap here (verify r4): the restored entries are the OLDEST, so trimming would evict exactly what came back
     // while answering "restored". They wait as if the hand-over had never happened; the next arrival's cap applies.
@@ -1780,7 +1823,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
-    deliverToConversation, peerReachable, stashFor, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
+    deliverToConversation, peerReachable, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
     stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer

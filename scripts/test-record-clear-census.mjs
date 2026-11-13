@@ -151,7 +151,8 @@ function enclosing(lines, idx) {
 // groups-engine: the ONLY functions that may read the log raw — the fold, and the clear's own lookup `originalsOf`
 // (verify r4: shared by clearMessages and the held-entry judge the ladder asks at every stash write; neither SERVES an
 // original — the clear returns cleared copies, the judge only matches a held report's lines against the 40-code-point witness)
-const GROUPS_RAW_OK = new Set(['readFolded', 'originalsOf']);
+// lane queued-is-not-woke laws 2 + 3 (shape C): + readFoldedAsync — the same fold over the store's async tail (the wait reading, off the loop)
+const GROUPS_RAW_OK = new Set(['readFolded', 'readFoldedAsync', 'originalsOf']);
 // channels-engine: every function that reads a store log, with the GATE that stands before the read (a
 // conversation this engine KNOWS = an adapter record + an index row — never the groups adapter)
 const CHANNELS_GATES = {

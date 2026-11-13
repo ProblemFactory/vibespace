@@ -112,7 +112,7 @@ if (!COST_SPEC) {
 // THE DOORS: the TRANSPORTS every path to an agent passes (the ladder, the stash, the notice queue, the wire, the
 // hook payload, the card door, the notice head) and the RENDERERS that compose what rides them. A door nobody
 // calls is red (a dead token is a lie about the tree); a site the table does not name is red by name.
-const DOORS = ['deliverToConversation(', 'stashFor(', 'pushNotice(', 'postToPeer(', 'peerPost(', 'hookSpecificOutput', 'emitPeerCard(', 'vibespaceNoticeText(', 'renderNotices(',
+const DOORS = ['deliverToConversation(', 'stashFor(', 'stashSlot(', 'pushNotice(', 'postToPeer(', 'peerPost(', 'hookSpecificOutput', 'emitPeerCard(', 'vibespaceNoticeText(', 'renderNotices(',
   'composeReply(', 'reportFor(', 'reportsForTurn(', 'renderWakeBlock(', 'renderDigestBlock(', 'renderScopeDigestBlock(', 'renderOwnerNotify(', 'renderNotifStash(', 'renderJobsUpdate(', 'renderJobsDigest(', 'renderMsgStash(',
   'dialogText(', 'renderDialogNotice(', 'answeredNote(', 'answerDoneText(', 'stuckAgentText(', 'loadingText(', 'alertsNote(', 'pageText(', 'agentCopy(', 'readThreadFor(', 'searchFor(',
   // lane channel-attach-read (B-d6b9): the agent's ATTACHMENT answer — who sent it, where, the vendor's type (one header the CLI prints)
@@ -312,7 +312,9 @@ const TABLE = {
   'src/server/stash-handover.js :: vibespaceNoticeText(': { rules: ['declared:VibeSpace\'s own head remembered for the echo check — adds no peer text'], pin: null, why: 'the delivered frame\'s memory' },
   // ── transports: they carry what a producer row judged; the text is never re-composed ──
   'src/server/conversation-deliver.js :: deliverToConversation(': { rules: ['declared:THE ladder — transports its producer rows\' text; a stashed PEER entry is re-judged at its drain (src/agent-routes.js renderMsgStash row)'], pin: /if \(kind === 'notification'\) text = vibespaceNoticeText\(text\)/, why: 'the one head is the only composition here' },
+  'src/server/wait-watch.js :: stashSlot(': { rules: ['declared:the sender\'s ONE waiting entry is PURE src/wait-words.js senderEntry — each member\'s name through toAgentText (line, bounded), counts and clock times (owner-facts.when), never a message\'s words; drained through renderMsgStash (whole)'], pin: /name: agentText\(String\(s\.name \|\| id\), \{ max: 80, kind: 'line' \}\)/, why: 'lane queued-is-not-woke laws 2 + 3 (shape C): the sender told at one hour, in the ladder\'s keyed slot' },
   'src/server/conversation-deliver.js :: stashFor(': { rules: ['declared:THE stash — stores the envelope as given; drained through renderMsgStash (re-judged-at-read)'], pin: null, why: 'the durable store' },
+  'src/server/conversation-deliver.js :: stashSlot(': { rules: ['declared:THE keyed slot — stores the envelope\'s text as given, one entry per (conversation, slot); drained through renderMsgStash (whole, re-judged-at-read)'], pin: null, why: 'lane queued-is-not-woke laws 2 + 3 (shape C): the sender\'s one waiting entry' },
   'src/server/conversation-deliver.js :: postToPeer(': { rules: ['declared:the wire (rung 1)'], pin: null, why: 'transport' },
   'src/server/conversation-deliver.js :: peerPost(': { rules: ['declared:the wire (rung 2, the owning machine\'s daemon)'], pin: null, why: 'transport' },
   'src/server/conversation-deliver.js :: vibespaceNoticeText(': { rules: ['declared:VibeSpace\'s own head on a notification — adds no peer text'], pin: null, why: 'the one head' },

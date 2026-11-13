@@ -5,7 +5,7 @@
 
 const { MessageManager } = require('./message-manager');
 const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor, artifactDeriveOpts } = require('./normalizers');
-const { pendingAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks of a normalizer that keeps no index (codex / ACP)
+const { chipAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks, per harness — the ONE function the chip and the wait watch read
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
@@ -1460,7 +1460,7 @@ function registerWsHandler(wss, ctx) {
                 // lane S1: EVERY ask the user can answer here (the session's own permission
                 // cards and each helper's), oldest first — the waiting chip names who waits and
                 // jumps to the card even when it is outside the loaded window (`msgIndex`)
-                pendingAsks: (() => { try { const mm = session._normalizer; return mm ? (typeof mm.pendingAsks === 'function' ? mm.pendingAsks() : pendingAsksOf(mm.messages)) : []; } catch { return []; } })(),
+                pendingAsks: chipAsksOf(session),
                 // lane door-healthy-chat: the kinds of record the harness added (never drawn in the chat — the bar's quiet chip)
                 recordKinds: (() => { try { return session._normalizer?.addedKinds?.() || []; } catch { return []; } })(),
                 normEpoch: session._normEpoch || 0,

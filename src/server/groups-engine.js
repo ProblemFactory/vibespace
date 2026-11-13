@@ -424,6 +424,15 @@ function create({
     return RC.foldClears(store.readTail(A, gid, { ...opts, limit: n + clearedCountOf(g) }), g && g.cleared).slice(-n);
   }
   const readLog = (gid) => readFolded(gid, { limit: LOG_READ });
+  /** readFolded's ASYNC twin (lane queued-is-not-woke laws 2 + 3, shape C — the reading's log read, OFF THE LOOP): the same
+   *  fold over the store's async tail (a FileHandle) */
+  async function readFoldedAsync(gid, opts) {
+    const g = getGroup(gid);
+    const n = Math.max(1, Number(opts.limit) || 50);
+    const o = { ...opts, limit: n + clearedCountOf(g) };
+    const raw = typeof store.readTailAsync === 'function' ? await store.readTailAsync(A, gid, o) : store.readTail(A, gid, o);
+    return RC.foldClears(raw, g && g.cleared).slice(-n);
+  }
 
   async function markReported(gid, member, upTo) {
     if (!Number.isFinite(upTo)) return;
@@ -564,6 +573,48 @@ function create({
     return (r) => !!r && (G.reachesReport(g, member, r) || spans.some(([from, to]) => Number(r.at) > from && Number(r.at) <= to));
   }
   const isMessage = (r) => !!r && ((r.raw && r.raw.kind) || 'message') === 'message';   // a record with no kind is an old message
+  /** WHAT HAS NOT BEEN HANDED TO `cid` — lane queued-is-not-woke laws 2 + 3, SHAPE C (主开发 2026-11-13 13:35Z, 13:42Z). Asked
+   *  of the hub's own record AT THIS MOMENT and nothing kept: each group's log (the fold, read off the loop) and the member's
+   *  marks, through the SAME reach the next report uses (reportsForTurn → reportFor with `also: reachFor` — mute reaches
+   *  nothing, `mention` only what @-names it or an awaited reply) — unreceivedFor, THE one record filter — never its own; plus each frame groups.json
+   *  holds behind its turn (queued / restashed: its records in (from, upTo]). THE GATE (law 1 as ruled): a group is read only
+   *  when its mark — or a held frame's start — is older than `olderThan` with records after it (persisted facts: a restart
+   *  changes nothing). An ended conversation, an archived group or a closed pair waits for nothing. At the read's bound (the
+   *  tail does not reach back to the mark or a frame's start) no count is said and the oldest is the oldest it SAW
+   *  (`atLeast`). → {groups: [{gid, name, n (null at the bound), oldest, atLeast, senders: {cid: {n, oldest}}}], reads} */
+  async function readWaiting(cid, { now: t = now(), olderThan = 0 } = {}) {
+    const out = { groups: [], reads: 0 };
+    if (!G.isCid(cid) || endedOf(cid)) return out;
+    const cut = t - olderThan;
+    const live = (g) => g && !g.archivedAt && !g.closed;
+    const floorOf = (m) => Math.max(Number.isFinite(m.reportedUpTo) ? m.reportedUpTo : -Infinity, Number(m.joinedAt) - 1);
+    const heldOf = (m) => (Array.isArray(m.queued) ? m.queued : []).filter((q) => q && (q.state === 'queued' || q.state === 'restashed') && Number.isFinite(Number(q.upTo)));
+    const fromOf = (m, q) => Math.max(Number.isFinite(q.from) ? q.from : -Infinity, Number(m.joinedAt) - 1);
+    for (const g0 of Object.values(all())) {
+      const m0 = live(g0) ? G.memberOf(g0, cid) : null;
+      if (!m0 || m0.notify === 'mute') continue;
+      const fl0 = floorOf(m0);
+      if (!((Number(g0.lastAt) > fl0 && fl0 <= cut) || heldOf(m0).some((q) => fromOf(m0, q) <= cut))) continue;
+      out.reads++; waitReads++;
+      const tail = await readFoldedAsync(g0.id, { limit: LOG_READ });
+      // after the read: the group and the marks as they are NOW (a report may have landed while it read)
+      const g = getGroup(g0.id), m = live(g) ? G.memberOf(g, cid) : null;
+      if (!m || m.notify === 'mute' || endedOf(cid)) continue;
+      const take = unreceivedFor(g, cid);   // THE one record filter (messages; for `mention`, reachFor — the next report's reach, an awaited reply included); mute never gets here
+      const mine = (r) => !!r && !!r.author && r.author.id !== cid && take(r);
+      const fl = floorOf(m), held = heldOf(m);
+      const first = tail.length ? Number(tail[0].at) : Infinity;
+      const whole = tail.length < LOG_READ || first <= Math.min(fl, ...held.map((q) => fromOf(m, q)));
+      const recs = tail.filter((r) => mine(r) && (Number(r.at) > fl || held.some((q) => Number(r.at) > fromOf(m, q) && Number(r.at) <= Number(q.upTo))));
+      if (!recs.length) continue;
+      const senders = {};
+      for (const r of recs) { const s = senders[r.author.id] || (senders[r.author.id] = { n: 0, oldest: Number(r.at) }); s.n++; if (Number(r.at) < s.oldest) s.oldest = Number(r.at); }
+      if (!whole) for (const s of Object.values(senders)) s.n = null;
+      out.groups.push({ gid: g.id, name: g.name, n: whole ? recs.length : null, oldest: Math.min(...recs.map((r) => Number(r.at))), atLeast: !whole, senders });
+    }
+    return out;
+  }
+  let waitReads = 0;   // the reading's group-log reads (the suites' pin: what a sweep costs)
   /** «NEVER RECEIVED», THE ONE COUNT (acceptance r8, F3, measured: the ended pair's count read «reaches» and called a
    *  muted member's 3 undelivered messages 0, while its unread count said 3): every record for a mode that hands everything
    *  (always / next-turn) or nothing (mute — none of them was received); for `mention`, what reaches it (reachFor). The
@@ -1713,6 +1764,7 @@ function create({
 
   return {
     onConversationEnded, onConversationRevived, sweepEnded, endedOf, endedRefusal,
+    readWaiting, waitingReads: () => waitReads,   // lane queued-is-not-woke laws 2 + 3, shape C: the reading (src/server/wait-watch.js)
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
     sharesGroup, dispatchLedger,   // lane worker-dispatch verify r1 ④ / ②
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),

@@ -12382,4 +12382,13 @@ export default {
   "This account holds no long-lived token": "这个账号没有长期 token",
   "The long-lived token could not be opened — nothing was saved": "长期 token 打不开——什么都没保存",
   "Only a person can choose the subscription type": "只有本人能选择订阅类型",
+  // lane queued-is-not-woke laws 2 + 3 (shape C): the owner's item when group messages have not been handed for four hours (src/wait-words.js, src/foryou-actions.js)
+  "1 group message has not been handed to {name} yet — sent at {since}": "1 条群消息还没有交给 {name} —— 发于 {since}",
+  "{n} group messages have not been handed to {name} yet — the oldest sent at {since}": "{n} 条群消息还没有交给 {name} —— 最早一条发于 {since}",
+  "the turn ended": "那一轮已结束",
+  "Group messages have not been handed to {name} yet — since at least {since}": "有群消息还没有交给 {name} —— 至少从 {since} 起",
+  "they were handed to it": "它们已交给它",
+  "Its turn opened at {opened}.": "它的这一轮开始于 {opened}。",
+  "It is in a turn.": "它正在一轮之中。",
+  "A waiting-for-you card is open in it.": "其中有一张「等你操作」的卡片。",
 };

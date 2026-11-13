@@ -151,6 +151,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     }
     const wasInFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }); // read BEFORE the flag write
     session._isStreaming = true;
+    if (!wasInFlight) delete session._turnOpenSaidAt;   // lane queued-is-not-woke (the cut, D): a turn marked running with no opening record yet says «it is in a turn»
     // the in-flight cache fact (lane cache-warmth-tiles r5): a send STARTS a request only when none was in flight. Mid-turn
     // (a steer, a dispatch) nothing goes out now — the wrapper holds the frame, a steer rides the next tool result (that
     // record re-stamps) — so the flag writer, which keeps the instant; else the request goes out NOW

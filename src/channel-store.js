@@ -1172,6 +1172,40 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return strict ? out.slice(-want) : patched(adapterId, convId, out.slice(-want));
   }
 
+  /** readTail's ASYNC twin (lane queued-is-not-woke laws 2 + 3, shape C — the wait reading's log read, OFF THE LOOP): the same backward window
+   *  walk, order and patches, through a FileHandle — no synchronous call. An unreadable log throws (never an empty read):
+   *  its caller says nothing until it can read. */
+  async function readTailAsync(adapterId, convId, { limit = 50 } = {}) {
+    const fp = logPath(adapterId, convId);
+    const want = Math.max(1, limit);
+    const out = [];
+    let fh;
+    try { fh = await fs.promises.open(fp, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+    try {
+      let end = (await fh.stat()).size;
+      let carry = Buffer.alloc(0);
+      while (end > 0 && out.length < want) {
+        const start = Math.max(0, end - TAIL_BYTES);
+        const buf = Buffer.allocUnsafe(end - start);
+        await fh.read(buf, 0, buf.length, start);
+        let chunk = carry.length ? Buffer.concat([buf, carry]) : buf;
+        if (start > 0) {
+          const nl = chunk.indexOf(0x0a);
+          carry = nl < 0 ? chunk : chunk.subarray(0, nl);
+          chunk = nl < 0 ? Buffer.alloc(0) : chunk.subarray(nl + 1);
+        } else carry = Buffer.alloc(0);
+        for (const line of chunk.toString('utf-8').split('\n')) {
+          if (!line) continue;
+          let r; try { r = JSON.parse(line); } catch { continue; }
+          out.push(r);
+        }
+        end = start;
+      }
+    } finally { try { await fh.close(); } catch {} }
+    out.sort(cmpRecord);
+    return patched(adapterId, convId, out.slice(-want));
+  }
+
   /**
    * ONE record by its `vendorId` (R3 §23 — the attachment route names the
    * message that carries the picture): the same backward window walk as
@@ -2181,7 +2215,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     pace: { live: () => pc, set: paceSet, flush: paceFlush },
     dispatch: { live: () => dl, set: dispatchSet, flush: dispatchFlush },
     quarantined,
-    appendRecords, readTail, countSince, trim, audit, auditTail, close,
+    appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
     searchMemoRead, searchMemoWrite, searchMemoDrop,

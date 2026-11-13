@@ -21,6 +21,7 @@
 // A registered window type (`inbox`, singleton), so layout restore, cross-client sync,
 // desktops, tab groups and the taskbar work for free; `app.openInbox({itemId, sessionKey})`
 // is THE door (the popup's ⤢, a row's ⤢, the mini inbox's ⤢, ⚙ Communication ▸ For you…).
+import { buttonsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { t, tc, resolveLang } from './i18n.js';
 import { cardWords } from './app-card-model.js'; // design 009: THE words of an app install's one card
 import { copyText, showContextMenu, showToast } from './utils.js';
@@ -319,6 +320,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     if (st.loadErr && st.loadErr.id !== id) st.loadErr = null;
     model.ensureDetail(id).then(({ error }) => { if (error) { st.loadErr = { id, why: error }; if (st.selected === id) renderPane(); } });
   };
+  /** a row's DECLARED button (foryou-actions buttonsOf) as a window action `btn:<answer>` — its label and title are the row's */
+  const btnOf = (it, a) => ((it && it.action && buttonsOf(it.action.type)) || []).find((b) => 'btn:' + b.answer === a) || null;
+  const btnAct = (a, it) => { const b = btnOf(it, a); return actBtn(a, null, b ? t(b.label) : a, b ? t(b.title) : a, b && b.door === 'jump' ? 'iw-act-primary' : ''); };
   const actBtn = (id, icon, label, title, cls = '') => {
     const b = mk('button', 'iw-act' + (cls ? ' ' + cls : ''));
     b.type = 'button';
@@ -381,7 +385,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     more: () => actBtn('more', null, '⋯', t('More')),
     'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
-  const viewOf = (it, e) => itemView(it, {
+  const viewOf = (it, e) => itemView(it, { buttonsOf,   // lane queued-is-not-woke: a row's declared buttons (the layout imports nothing)
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
     reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
@@ -550,7 +554,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const whint = run && !v.resolved && acts.includes('shape-window') && run.window && run.window.hint ? run.window.hint : run && !v.resolved && run.window && run.window.excepted ? run.window.excepted : null;   // r7: «Allow for 1 hour»'s own words; r8: or why it is not offered (除了)
     const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint) + '\u0000' + JSON.stringify(whint);
     if (c.sig.actions !== actSig) {
-      c.actions.replaceChildren(...acts.map((a) => ACT[a](it)));
+      c.actions.replaceChildren(...acts.map((a) => (ACT[a] || ((x) => btnAct(a, x)))(it)));
       const deny = hint && c.actions.querySelector('[data-act="hub-deny"]');
       if (deny) { const h = mk('span', 'ut-run-hint'); h.append(...hint.map((x) => (x.code != null ? mk('code', 'ut-run-code', x.code) : x.mono != null ? mk('span', 'ut-run-mono', x.mono) : document.createTextNode(x.text || '')))); deny.after(h); } // TEXT nodes
       const denyW = whint && c.actions.querySelector('[data-act="hub-deny"]');
@@ -772,6 +776,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       if (await model.runAction(it, 'grant')) advance(id);
       return;
     }
+    if (a.startsWith('btn:')) { const b = btnOf(it, a); if (b && await model.runAction(it, b.answer) && b.door !== 'jump') advance(id); return; }   // a row's declared button (lane queued-is-not-woke)
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
     if (CHECK_AGAIN_TYPES.includes(a)) { if (await model.runAction(it)) advance(id); return; } // B-0b8c + lane cli-self-measure: one check now — an answer withdraws the item server-side
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }

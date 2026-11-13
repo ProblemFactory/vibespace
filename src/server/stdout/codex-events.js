@@ -185,10 +185,12 @@ function create({ engine, deliverRef, permissionRulesRef }) {
                 session._isStreaming = true; newLabel = 'thinking...';
                 // lane queued-is-not-woke (law 1): the turn's start (said as «running since»), the edge a queued frame waits for
                 session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
+                session._turnOpenSaidAt = Date.parse(msg.timestamp) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»
                 try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteTurnStarted?.(qc); } catch (e) { console.warn(`[deliver] ${id}: turn-start note failed: ${e.message}`); }
               }
               else if (evType === 'task_complete' || evType === 'turn_aborted' || evType === 'task_failed') {
                 session._isStreaming = false; newLabel = '';
+                delete session._turnOpenSaidAt;   // the cut (D): the opening said is the turn running NOW — cleared at its end record
                 try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteTurnEnded?.(qc); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
               }
               if (evType === 'queue_changed') { try { const qc = session.backendSessionId || session.claudeSessionId; if (qc) deliverRef?.noteQueueItems?.(qc, payload.items, { fresh: payload.fresh === true }); } catch (e) { console.warn(`[deliver] ${id}: queue note failed: ${e.message}`); } }
