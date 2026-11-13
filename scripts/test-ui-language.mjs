@@ -36,7 +36,10 @@
 //      automation-engine's key.* acts, jobs.js's run causes and triggers, channel-caps PUSH_CLAIMS, themes.js THEMES) and every delegated word (job-model STATE_WORDS)
 //      has zh + ja rows — a new enum value without words is RED. (c) A code-named field (.state .status .role .urgency
 //      .stopReason .verb .trigger .cause .tier .theme .permissionMode .effort …) put straight into a visible sink, never
-//      through a words function, is RED unless held by its own shrink-only baseline (`raw`).
+//      through a words function, is RED unless held by its own shrink-only baseline (`raw`). (d) A value capitalised BY HAND
+//      (`x.charAt(0).toUpperCase() + x.slice(1)`, `x[0].toUpperCase()`) is an id dressed as a word (the theme menus showed
+//      «Dark» in a Chinese interface): word it through the door (themeWord …) — zero tolerance; a first letter that is not
+//      a value's (a worded sentence's, a brand's) says `// ui-words: <why>` on the line above.
 //   ⑦ ONE FORMATTER OF A TIME (src/lib/page-time.js — pick 4; 主开发's shape: zh / ja «2026/11/12 19:27», today «19:27», this
 //      year «11/12 19:27», en the device's own): outside page-time.js no toLocaleString / toLocaleDateString / toLocaleTimeString,
 //      no Intl.DateTimeFormat / RelativeTimeFormat, no hand-built `getMonth() + 1` date in the browser bundle — ZERO tolerance;
@@ -158,6 +161,7 @@ function exemptLines(src) {
   lines.forEach((ln, i) => { const m = ln.match(/\/\/\s*ui-words:\s*(.{8,})/); if (m) { set.add(i + 1); set.add(i + 2); } });
   return set;
 }
+const CAPS_RE = /\.charAt\(0\)\.toUpperCase\(\)|\[0\]\.toUpperCase\(\)/;   // ⑥(d)
 const MARKUP = /<\/?(?:b|br|i|em|strong|code)\b[^>]*>|\*\*[^*]+\*\*|`[^`]+`/;
 const TEXT_SINK = (sink) => !!sink && !HTML_PROPS.has(sink.replace(/^prop:/, '')) && sink !== 'html' && sink !== 'call:insertAdjacentHTML';
 /** One file → { visible: [{line, sink, text}], markup: [{line, sink, key}], params: [{line, key, missing}] } */
@@ -168,6 +172,9 @@ export function scanFile(file, src, ast = parse(src)) {
   const timeHit = (node, what, kind = 'fmt') => { const line = at(node); if (!isPageTime && !ptEx.has(line)) time.push({ line, text: what, kind }); };
   const enLocale = (arg) => !!arg && arg.type === 'Literal' && typeof arg.value === 'string' && /^en-/.test(arg.value);
   const ex = exemptLines(src);
+  // ⑥(d) a value capitalised by hand (the line's code — a trailing comment is not code)
+  const caps = [];
+  src.split('\n').forEach((ln, i) => { if (CAPS_RE.test(ln.replace(/\s\/\/\s.*$/, '')) && !ex.has(i + 1)) caps.push({ line: i + 1, text: ln.trim().slice(0, 140) }); });
   const at = (node) => lineAt(src, node.start);
   const hit = (node, sink, text) => { const line = at(node); if (!ex.has(line)) visible.push({ line, sink, text }); };
   const deferred = new WeakSet();   // t() calls whose params ride beside them: [t(key), { params }]
@@ -281,7 +288,7 @@ export function scanFile(file, src, ast = parse(src)) {
   };
   walk(ast, null);
   for (const sh of shadowFindings(ast)) timeHit({ start: sh.start }, `${sh.name}() where a local «${sh.name}» shadows the page-time import`);
-  return { visible, markup, params, raw, time };
+  return { visible, markup, params, raw, time, caps };
 }
 
 // ── ②④⑤ the dictionaries ──
@@ -410,12 +417,13 @@ export async function census(repo = REPO) {
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
     dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {};
+  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, caps = [];
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
     if (r.raw.length) raw[r.file] = r.raw;
     for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
+    for (const c of r.caps) caps.push(`${r.file}:${c.line} ${c.text} — word the value through src/lib/value-words.js (or say \`// ui-words: <why>\` above it)`);
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
     for (const x of r.reached) if (!inUni.has(x) && !Object.values(DICTS).includes(x)) missed.push(`${r.file} → ${x}`);
@@ -426,7 +434,7 @@ export async function census(repo = REPO) {
   const loginRows = loginFindings(lw.LOGIN_WORDS);
   const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
-  return { files: files.length, visible, raw, time, units, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, visible, raw, time, units, caps, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -463,6 +471,9 @@ if (isMain) {
     ok(scanFile('src/lib/page-time.js', 'x = new Date(1).toLocaleString();').time.length === 0, '⑦ …and page-time.js itself is the one place a time is formatted');
     const sh = scanFile('src/lib/sh.js', "import { stampAt as when } from './page-time.js';\nfunction f(d) { let when; when = d ? when(d) : ''; return when; }\nfunction g(d) { return when(d); }");
     ok(sh.time.length === 1 && /shadows/.test(sh.time[0].text), '⑦ a page-time import shadowed by a local where it is called is named (the usage meter\'s and the job detail\'s bug); a plain call is not', JSON.stringify(sh.time));
+    // ⑥(d) control: an id capitalised by hand is named (both spellings); the same value through the door, and a declared first letter, are not
+    const cp = scanFile('c.js', "a.textContent = name.charAt(0).toUpperCase() + name.slice(1);\nb.textContent = themeWord(name, t);\nc.title = v[0].toUpperCase() + v.slice(1);\n// ui-words: the first letter of a sentence t() already worded\nd.textContent = s.charAt(0).toUpperCase() + s.slice(1);");
+    ok(cp.caps.length === 2 && cp.caps.map((x) => x.line).join() === '1,3', '⑥(d) a value capitalised by hand is named (charAt(0) and [0]); the same value through themeWord, and a `// ui-words:` first letter, are not', JSON.stringify(cp.caps));
     const lf = loginFindings({ a: { en: 'Sign in', zh: '登录', ja: 'サインイン' }, b: { en: 'Password', zh: 'Password', ja: '' } });
     ok(lf.length === 2 && /b: no ja/.test(lf.join()) && /b: the zh row is not Chinese/.test(lf.join()), '⑧ a sign-in row with no ja and an English zh row are named; a whole row is not', JSON.stringify(lf));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
@@ -501,6 +512,7 @@ if (isMain) {
   ok(v.fresh.length === 0, `① no NEW visible English literal outside t() (${count(now.visible)} today = the baseline's ${count(base.visible || {})} rows)`, v.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}  — word it through t() (+ zh / ja rows), or mark \`// ui-words: <why>\``));
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.time.length === 0, `⑦ every time and number a person reads goes through src/lib/page-time.js (zero tolerance)`, now.time);
+  ok(now.caps.length === 0, `⑥(d) no value capitalised by hand in the browser bundle (zero tolerance) — a theme / an id is worded through src/lib/value-words.js`, now.caps);
   ok(un.fresh.length === 0, `⑦ no NEW English unit template (${count(now.units)} today = the baseline's ${count(base.units || {})}) — say a duration with page-time's span / ago`, un.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
   ok(un.stale.length === 0, `⑦ no unit-template baseline row the tree no longer holds (lower it)`, un.stale.map((h) => `${h.file}: ${h.text}`));
   console.log('§2 the dictionaries');

@@ -19,12 +19,14 @@ import { ThemeEditor } from './theme-editor.js';
 import { getAvailableFonts } from './terminal.js';
 import { applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX } from './utils.js';
 import { t } from './i18n.js';
+import { themeWord } from './value-words.js'; // a theme id → its name in the reader's words (lane ui-language: never the id capitalised)
 
 /** The head row's live caption: `Dark · 14px · 100%` — theme, terminal font
  *  size and UI scale, so the common state is visible without opening it. */
 export function appearanceCaption(app) {
   const cur = String(app?.themeManager?.current || '');
-  const theme = cur.startsWith('custom-') ? cur.slice(7) : (cur ? cur.charAt(0).toUpperCase() + cur.slice(1) : '');
+  const plugin = cur.startsWith('plugin-') ? (app?.themeManager?.getPluginThemes?.() || []).find((p) => p.key === cur) : null;
+  const theme = cur ? themeWord(cur, t, plugin && plugin.label) : '';
   const parts = [theme, app?._fontSize ? `${app._fontSize}px` : '', `${getUiPref('vibespace.uiScale')}%`].filter(Boolean);
   return parts.join(' · ');
 }

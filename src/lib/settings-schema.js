@@ -1818,6 +1818,7 @@ export function channelSettingPaths(vendor) { return [...(CHANNEL_SETTING_OWNERS
 /** A channel vendor's name in the user's language ('Lark', 'Gmail'); a vendor without a table reads its slug capitalised. */
 export function channelVendorName(vendor) {
   const own = CHANNEL_SETTING_OWNERS.get(vendor);
+  // ui-words: a channel vendor with no table of its own: its slug as its name (a brand)
   return own ? t(own.vendorName) : String(vendor || '').charAt(0).toUpperCase() + String(vendor || '').slice(1);
 }
 

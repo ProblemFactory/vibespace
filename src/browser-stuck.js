@@ -864,6 +864,7 @@ function answeringText(label, v) {
   const n = v.answered.length, m = n + v.silent.length;
   const said = v.why === 'no-pages' ? 'its page list answered (it has no page open)' : `${n} of ${m} page${m === 1 ? '' : 's'} answered within ${secs(v.boundMs)} (${tabs(v.answered)})`;
   const silent = v.silent.length ? `; ${v.silent.length} did not (${tabs(v.silent)}) — close a tab that does not answer: \`vibespace-browser tab close <tab>\`` : '; a slow page is `vibespace-browser tab close`, or the user\'s Restart in the Browser panel';
+  // ui-words: the first letter of the agent's own English sentence (its rule clause starts it)
   return `${head} — ${said}${silent}. ${rule[0].toUpperCase()}${rule.slice(1)}.`;
 }
 /** The journal's words for an admitted agent restart (what the verdict read). */
