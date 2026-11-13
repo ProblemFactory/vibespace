@@ -971,13 +971,16 @@
 - **What happened.** The hub's ledger walk runs in-process over the hub's OWN cursor store, and the mount-health gate stops a timed walk at a budget point.
   - The walker advanced the store's entries in place, while the stopped walk dropped its buffered rows.
   - The next walk started past those bytes, so their requests never reached the ledger. The acceptance's drivers lost 7 of 22, and 2–5 per scene.
-- **The same shape in the shipped scanner.** Node calls a write's callback FIRST with EPIPE and emits 'error' after. The scanner wrote its cursor file in that callback, so a harvest the hub cut off (ssh's 180 s timeout, 128 MiB of output) moved the remote cursor past rows nobody received.
+- **The same shape in the shipped scanner.** Node calls a write's callback FIRST with EPIPE and emits 'error' after. The scanner wrote its cursor file in that callback, so a write the scanner SAW fail still moved the remote cursor past rows nobody received.
 - **Why the pins missed it.** test-mount-health's «a walk in flight stops at its next yield, cursors untouched» ran on an EMPTY map. There an entry is added only at a file's end, so an existing entry advancing in place was invisible.
 - **不变量 = a walk that does not reach its commit point leaves the cursor map as it found it.**
   - The walker's cursors are its own: a map handed in is copied, and each entry is copied before it advances. The caller installs the returned map.
   - UsageHistory installs that map AFTER every shard append, just before the cursor write. A paused walk, a thrown one, or a failed append ⇒ `_cursors` as it was. The next walk re-reads, and the ledger's id filter refuses what a shard already holds.
   - The scanner writes its cursor only when stdout's write succeeded.
-- **Pins:** test-usage-walk-parity «B-6ded»: the module, the hub ×10 (the readers' nine pause scenes + a failed append), the scanner's dead pipe, and a planted control. All RED on the release.
+  - A walk that can never reach its commit point must still make progress (the readers' list 1): one scanner run is bounded below what the hub takes (src/hosts.js `USAGE_HARVEST_LIMITS` ⇒ half the bytes, a third of the seconds, passed in the ssh command). It stops after a whole line, its cursor written for exactly what it printed, so a backlog of any size lands over several harvests. A failed harvest backs off (1 min, doubling, ≤ 30 min).
+  - A commit that appended some shards and failed on the next leaves the ids it DID append to the next walk's filter (`_partialRids`), so the re-read is refused on a warm ledger too.
+- **Where it ends (known):** on the ssh road the scanner commits at its flushed stdout, BEFORE the hub's durable ingest. A deferred ingest (the index still loading after a hub start), a failed ingest, or a cut after the bytes left still loses that batch. The lasting cure is the device road's shape, where the hub keeps the cursor (ledger-dedup-law F2).
+- **Pins:** test-usage-walk-parity «B-6ded»: the module and its codex half, the hub ×10 (the readers' nine pause scenes + a failed append) + the codex scenes + a warm failed append, the scanner's dead pipe, the harvest's bound / convergence / backoff through `harvestUsage`, the scanner's bounded runs ≡ one walk, and two planted controls.
 
 ## «SET UP ONCE: INSTALL TIGHTVNC SERVER» WITH NO BUTTON (the owner, 2026-11-13 01:2xZ; lane machine-needs-at-pairing pick 1, .399)
 

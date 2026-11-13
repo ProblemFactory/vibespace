@@ -780,7 +780,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     const h = new UsageHistory({ dataDir: hd, homeDir: hh, scanBudgetBytes: budget, scanYield: () => { yields++; return new Promise(setImmediate); }, paused: () => pauseAt > 0 && yields >= pauseAt });
     if (prevCx === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCx;
     const sc = {
-      h, PJ, A,
+      h, PJ, A, home: hh,
       add(dir, sid, c, month = 10) { for (let i = 0; i < c; i++) fs.appendFileSync(path.join(dir, sid + '.jsonl'), line6(++k, month)); },
       // one timed walk; `at` = the yield at which the mount gate trips (0 = open); `kept` = `_cursors` as the walk found it
       async walk(at = 0) { h._lastScanAt = 0; yields = 0; pauseAt = at; const before = JSON.stringify(h._cursors); const r = await h.scan(false); pauseAt = 0; return { r, yields, kept: JSON.stringify(h._cursors) === before }; },
@@ -859,6 +859,149 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
       `first ${first.length}, dead run exit ${dead.code}/${dead.sig}, cursor ${kept ? 'as found' : 'WRITTEN'}, next run ${next.length} events`);
   }
 
+  // ── THE READERS' LIST (B-6ded, 主开发 09:13Z) ──
+  // (2) THE CODEX HALF: the same law on a rollout — a map handed to the module, and the hub's paused walk over a grown rollout
+  const TID = '0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b';
+  const rolloutOf = (cxRoot) => { const d = path.join(cxRoot, 'sessions', '2026', '11', '12'); fs.mkdirSync(d, { recursive: true }); return path.join(d, `rollout-2026-11-12T10-00-00-${TID}.jsonl`); };
+  const cxWriter = (fp) => { let n = 0, total = 0; return {
+    open: () => fs.writeFileSync(fp, JSON.stringify({ timestamp: '2026-11-12T10:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-x', cwd: '/srv/p' } }) + '\n'),
+    add: (c) => { let s = ''; for (let i = 0; i < c; i++) { n++; total += 11; s += JSON.stringify({ timestamp: new Date(Date.UTC(2026, 10, 12, 10) + n * 1000).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 1 }, total_token_usage: { total_tokens: total } } } }) + '\n'; } fs.appendFileSync(fp, s); },
+    get n() { return n; } }; };
+  const codexModLeg = async (walkFn, tag) => {
+    const ch = path.join(b6Root, 'cxmod-' + tag), cxRoot = path.join(ch, '.codex'), fp = rolloutOf(cxRoot), w = cxWriter(fp);
+    w.open(); w.add(2);
+    const handed = walkFn({ home: ch, codexSessionsDir: path.join(cxRoot, 'sessions'), cursors: {} }).cursors;
+    const entry = handed[fp], before = JSON.stringify(handed);
+    w.add(20);
+    let calls = 0, threw = null;
+    try { await walkFn({ home: ch, codexSessionsDir: path.join(cxRoot, 'sessions'), cursors: handed, budgetBytes: 300, onBudget: () => (++calls === 2 ? Promise.reject(Object.assign(new Error('paused'), { paused: true })) : new Promise(setImmediate)) }); } catch (e) { threw = e; }
+    return { stopped: !!(threw && threw.paused) && JSON.stringify(handed) === before && handed[fp] === entry, after: JSON.stringify(handed) === before ? 'as found' : 'ADVANCED' };
+  };
+  const cm = await codexModLeg(walk6, 'real');
+  ok(cm.stopped, `B-6ded CODEX MODULE: a walk over a grown rollout stopped at its 2nd budget point leaves the handed map as it found it — the rollout's entry the same object (${cm.after})`);
+  for (const at of [1, 3, 6]) {
+    const sc = hubScene(300), cxRoot = path.join(sc.home, '.codex'), w = cxWriter(rolloutOf(cxRoot));
+    w.open(); w.add(2); await sc.walk();
+    w.add(20);
+    const cut = await sc.walk(at); await sc.walk(); await sc.walk();
+    const rows = sc.rows(), distinct = new Set(rows).size;
+    ok(cut.r && cut.r.paused === true && cut.kept && distinct === w.n && rows.length === distinct,
+      `B-6ded CODEX HUB a paused walk over a grown rollout (the gate at yield ${at}): \`_cursors\` as it found it; after the next walk all ${w.n} requests in the ledger, once`,
+      `paused ${!!(cut.r && cut.r.paused)} at yield ${cut.yields}, map ${cut.kept ? 'as found' : 'MOVED'}, ${rows.length} rows / ${distinct} distinct of ${w.n}`);
+  }
+
+  // (4) THE ID FILTER ON A WARM LEDGER: the commit's sentence «the ledger's id filter refuses what a shard already holds» —
+  // after a commit that wrote one shard and failed on the next, the warm cache has not loaded what landed; the next walk
+  // must refuse it all the same (the cold road reads the shards' tails — the leg above)
+  {
+    const sc = hubScene(300);
+    sc.add(sc.A, S1, 2); await sc.walk(); sc.h.warm();
+    sc.add(sc.A, S1, 3, 10); sc.add(sc.A, S1, 3, 11);
+    const dec = path.join(sc.h.dir, 'events-2026-12.ndjson');
+    fs.mkdirSync(dec);
+    const failed = await sc.walk();
+    fs.rmdirSync(dec);
+    const after = await sc.walk();
+    const rows = sc.rows(), miss = sc.missing();
+    ok(failed.r && failed.r.error && failed.kept && miss.length === 0 && rows.length === new Set(rows).size && after.r.added === 3 && after.r.reWalked === 3,
+      'B-6ded HUB a WARM ledger, an append that fails at the commit after one shard landed: the next walk refuses what landed (the filter knows a half-done commit\'s rows) — every request once',
+      `map ${failed.kept ? 'as found' : 'ADVANCED'}, then added ${after.r.added} reWalked ${after.r.reWalked}, ${rows.length} rows / ${new Set(rows).size}, missing ${JSON.stringify(miss)}`);
+  }
+
+  // (1) A HARVEST THAT CANNOT FINISH MAKES PROGRESS EVERY RUN. The ssh road, through the hub's own harvestUsage: its limits
+  // (scaled here) give the scanner its bound in the command; the ssh stand-in relays the remote command's output through a
+  // pipe (sshd's shape). A backlog over the hub's limits lands over several harvests, spend made after it lands too, and a
+  // failed harvest backs off. (Before: every harvest over the limits failed the same way — the cursor rightly kept — and
+  // was retried at the next kick, for ever.)
+  {
+    const hostsMod = require(path.join(REPO, 'src/hosts.js')), { HostManager } = hostsMod;
+    const LIM = hostsMod.USAGE_HARVEST_LIMITS || null, usageScanBound = hostsMod.usageScanBound || null;   // absent before the list: the legs say so, never a crash
+    const SCANNER = path.join(REPO, 'data/bin/vibespace-usage-scan');
+    const rh = path.join(b6Root, 'remote-home'), rA = path.join(rh, '.claude', 'projects', '-srv-proj-a');
+    fs.mkdirSync(rA, { recursive: true });
+    const okBin = path.join(b6Root, 'ssh-ok'), badBin = path.join(b6Root, 'ssh-down'), CALLS = path.join(b6Root, 'ssh-calls.log');
+    fs.mkdirSync(okBin); fs.mkdirSync(badBin);
+    fs.writeFileSync(path.join(okBin, 'ssh'), `#!/bin/sh\nfor a; do last="$a"; done\nprintf '%s\\n' "$last" >> '${CALLS}'\nunset CODEX_HOME VIBESPACE_USAGE_CURSOR\nHOME='${rh}' /bin/sh -c "$last" | cat\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(badBin, 'ssh'), `#!/bin/sh\nprintf 'down\\n' >> '${CALLS}'\ncat >/dev/null\necho "ssh: connect to host box.example.test port 22: Connection refused" >&2\nexit 255\n`, { mode: 0o755 });
+    const calls = () => { try { return fs.readFileSync(CALLS, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+    const PATH0 = process.env.PATH, onPath = (bin) => { process.env.PATH = `${bin}:${PATH0}`; };
+    const hm = new HostManager({ dataDir: path.join(b6Root, 'hub-hosts') });
+    hm._state.hosts.push({ id: 'h-ssh', name: 'box-b', host: 'box.example.test', user: 'u', port: 22, transport: 'ssh' });
+    hm.usageHarvestLimits = { maxBuffer: 30000, timeoutMs: 60000 };   // the hub's limits, scaled to the fixture
+    const prevCx = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(b6Root, 'hub-home', '.codex');
+    const uh = new UsageHistory({ dataDir: path.join(b6Root, 'hub-data'), homeDir: path.join(b6Root, 'hub-home') });
+    if (prevCx === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCx;
+    let k = 0; const addR = (c) => { let s = ''; for (let i = 0; i < c; i++) s += line6(++k); fs.appendFileSync(path.join(rA, S1 + '.jsonl'), s); };
+    const missingR = () => { const have = new Set(); for (const f of fs.readdirSync(uh.dir)) if (/^events-\d{4}-\d{2}\.ndjson$/.test(f)) for (const l of fs.readFileSync(path.join(uh.dir, f), 'utf8').split('\n')) if (l) have.add(JSON.parse(l).rid); let m = 0; for (let i = 1; i <= k; i++) if (!have.has(`h:h-ssh:req_${i}`)) m++; return m; };
+    const harvest = async (opts = { force: true }) => { try { return await hm.harvestUsage('h-ssh', { scannerPath: SCANNER, ledger: uh, ...opts }); } catch (e) { return { err: String((e && (e.code || e.message)) || e).slice(0, 80) }; } };
+    const D = usageScanBound && LIM ? usageScanBound(LIM) : null, B = usageScanBound ? usageScanBound(hm.usageHarvestLimits) : { maxBytes: 15000, maxMs: 20000 };
+    ok(!!D && D.maxBytes < LIM.maxBuffer && D.maxMs < LIM.timeoutMs && B.maxBytes === 15000,
+      `B-6ded HARVEST the bound a run is held to is BELOW what the hub takes: ${D ? `${D.maxBytes} of ${LIM.maxBuffer} bytes, ${D.maxMs} of ${LIM.timeoutMs} ms` : 'the hub states no limits and passes no bound'}`);
+    onPath(okBin);
+    addR(2); const first = await harvest();
+    addR(200);
+    const rounds = [];
+    for (let i = 1; i <= 12 && (i <= 3 || missingR() > 0); i++) { if (i === 2 || i === 3) addR(20); const r = await harvest(); rounds.push(r.err ? 'ERR ' + r.err : r.appended); }
+    const said = calls().filter((l) => l !== 'down');
+    ok(first.appended === 2 && rounds.length >= 3 && rounds.every((x) => typeof x === 'number' && x > 0 && x <= Math.ceil(B.maxBytes / 190))   /* an event line is ≥ 190 bytes here: a run stops at the line that crosses the bound */ && missingR() === 0 && said.every((l) => l.includes(`VIBESPACE_USAGE_SCAN_MAX_BYTES=${B.maxBytes} VIBESPACE_USAGE_SCAN_MAX_MS=${B.maxMs} node `)),
+      `B-6ded HARVEST a backlog over the hub's limits (240 requests, a ${hm.usageHarvestLimits.maxBuffer}-byte buffer) lands over ${rounds.length} harvests, each one within the bound the command carries, the spend made meanwhile with it — none missing`,
+      `rounds ${JSON.stringify(rounds)}, missing ${missingR()} of ${k}, command ${said.length ? said[said.length - 1].slice(-110) : '—'}`);
+    // a failed harvest backs off: the next kick does not walk the machine again at once
+    onPath(badBin); hm._usageHarvestAt.set('h-ssh', 0);
+    const n0 = calls().length;
+    const f1 = await harvest({ minIntervalMs: 60000 }), f2 = await harvest({ minIntervalMs: 60000 });
+    const b1 = hm._usageHarvestFail && hm._usageHarvestFail.get('h-ssh');
+    if (b1) b1.until = 0;   // the clock past the first pause
+    const f3 = await harvest({ minIntervalMs: 60000 });
+    const b2 = hm._usageHarvestFail && hm._usageHarvestFail.get('h-ssh'), wait2 = b2 ? b2.until - Date.now() : 0;
+    ok(f1.err && f2.throttled && f2.backoff && f2.backoff.failures === 1 && calls().length - n0 === 2 && f3.err && b2 && b2.n === 2 && wait2 > 110000 && wait2 <= 120000,
+      'B-6ded HARVEST a failed harvest BACKS OFF: the kick right after it walks nothing (1 min), the next failure doubles the pause (2 min)',
+      `f1 ${JSON.stringify(f1)}, f2 ${JSON.stringify(f2)}, ssh runs ${calls().length - n0}, then ${b2 ? b2.n : '—'} failures, ${Math.round(wait2 / 1000)} s`);
+    onPath(okBin); if (b2) b2.until = 0; addR(3);
+    const back = await harvest({ minIntervalMs: 60000 });
+    ok(back.appended === 3 && !(hm._usageHarvestFail && hm._usageHarvestFail.has('h-ssh')), 'B-6ded HARVEST the link back: the next harvest lands what was made meanwhile and the pause is gone', JSON.stringify(back));
+    process.env.PATH = PATH0;
+  }
+
+  // (1) …the scanner's side, both spellings: runs held to a small bound — in bytes, then in milliseconds — emit, run after
+  // run, exactly the events one unbounded walk emits, in its order, and end at the cursors a walk ends at (a rollout read
+  // part-way, compressed or not, is read on from where the run stopped)
+  {
+    const SCANNER = path.join(REPO, 'data/bin/vibespace-usage-scan');
+    const { ZSTD_OK: zOK } = require(path.join(REPO, 'src/usage-walker.js'));
+    const ph = path.join(b6Root, 'bound-home'), pA = path.join(ph, '.claude', 'projects', '-srv-proj-a'), pCx = path.join(ph, '.codex');
+    fs.mkdirSync(path.join(pA, S1, 'subagents'), { recursive: true });
+    let k = 0; const addP = (fp, c) => { let s = ''; for (let i = 0; i < c; i++) s += line6(++k); fs.appendFileSync(fp, s); };
+    addP(path.join(pA, S1 + '.jsonl'), 25); addP(path.join(pA, S1, 'subagents', 'agent-b1.jsonl'), 10); addP(path.join(pA, S2 + '.jsonl'), 15);
+    const w = cxWriter(rolloutOf(pCx)); w.open(); w.add(20);
+    if (zOK) { const zfp = path.join(pCx, 'sessions', '2026', '11', '12', 'rollout-2026-11-12T11-00-00-0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2c.jsonl.zst'); let s = JSON.stringify({ timestamp: '2026-11-12T11:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-z', cwd: '/srv/z' } }) + '\n'; for (let i = 1; i <= 20; i++) s += JSON.stringify({ timestamp: new Date(Date.UTC(2026, 10, 12, 11) + i * 1000).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 7, output_tokens: 2 }, total_token_usage: { total_tokens: 9 * i } } } }) + '\n'; fs.writeFileSync(zfp, require('node:zlib').zstdCompressSync(Buffer.from(s))); }
+    const w1 = walk6({ home: ph, codexSessionsDir: path.join(pCx, 'sessions'), cursors: {} });
+    const w2 = walk6({ home: ph, codexSessionsDir: path.join(pCx, 'sessions'), cursors: JSON.parse(JSON.stringify(w1.cursors)) });   // the walk's own end state (an unchanged file keeps its sid)
+    // the shipped scanner IN-PROCESS: its env read at load, stdout stubbed (the write succeeds), re-required per run
+    const runIn = (cur, env, tick = false) => {
+      const keep = {}; for (const k2 of ['HOME', 'CODEX_HOME', 'VIBESPACE_USAGE_CURSOR', 'VIBESPACE_USAGE_SCAN_MAX_BYTES', 'VIBESPACE_USAGE_SCAN_MAX_MS']) keep[k2] = process.env[k2];
+      Object.assign(process.env, { HOME: ph, CODEX_HOME: pCx, VIBESPACE_USAGE_CURSOR: cur }, env);
+      const w0 = process.stdout.write, errs = process.stdout.listeners('error'), now0 = Date.now; let text = '';
+      if (tick) { let t = now0(); Date.now = () => (t += 1); }   // a clock that moves 1 ms per look: the time bound cuts at a fixed line
+      process.stdout.write = (s, cb) => { text += s; if (typeof cb === 'function') cb(); return true; };
+      try { delete require.cache[require.resolve(SCANNER)]; require(SCANNER); } finally {
+        process.stdout.write = w0; Date.now = now0;
+        for (const l of process.stdout.listeners('error')) if (!errs.includes(l)) process.stdout.removeListener('error', l);
+        for (const [k2, v] of Object.entries(keep)) if (v === undefined) delete process.env[k2]; else process.env[k2] = v;
+      }
+      return text.split('\n').filter(Boolean);
+    };
+    for (const [label, env, tick] of [['bytes', { VIBESPACE_USAGE_SCAN_MAX_BYTES: '1500' }, false], ['milliseconds', { VIBESPACE_USAGE_SCAN_MAX_MS: '12', VIBESPACE_USAGE_SCAN_MAX_BYTES: '' }, true]]) {
+      const cur = path.join(b6Root, 'bound-cursor-' + label + '.json'); fs.rmSync(cur, { force: true });
+      const all = [], sizes = []; let sawPart = false;
+      for (let i = 0; i < 400; i++) { const evs = runIn(cur, env, tick); sizes.push(evs.length); all.push(...evs); try { if (Object.values(JSON.parse(fs.readFileSync(cur, 'utf8'))).some((c) => c.zpart)) sawPart = true; } catch { } if (!evs.length) break; }
+      const endCur = fs.readFileSync(cur, 'utf8');
+      ok(sizes.length > 3 && JSON.stringify(all) === JSON.stringify(w1.events) && endCur === JSON.stringify(w2.cursors) && (!zOK || label !== 'bytes' || sawPart),
+        `B-6ded SCANNER runs held to a small bound in ${label} emit, over ${sizes.length - 1} runs, exactly the ${w1.events.length} events of one walk in its order, and end at the walk's cursors${zOK && label === 'bytes' ? ' (a compressed rollout read part-way, then on)' : ''}`,
+        `runs ${sizes.length}, events ${all.length} vs ${w1.events.length}, cursor ${endCur === JSON.stringify(w2.cursors) ? 'equal' : 'DIFFERS'}, zpart seen ${sawPart}`);
+    }
+  }
+
   // NEGATIVE CONTROL (a scratch-dir patched copy): the walker that hands the CALLER'S entry to the walk again (the copy
   // removed at the transcript road) — the module leg must see it
   {
@@ -869,6 +1012,12 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     const { runUsageWalk: walkCtl } = M.load('src/usage-walker.js', mutated, 'b6ded-in-place');
     const mc = await modLegs(walkCtl, 'ctl');
     ok(!mc.stopped, `NEGATIVE CONTROL: the walker advancing the caller's own entry FAILS the module leg (the handed map ${mc.after})`);
+    // …and the CODEX half's copy (the readers' list 2): reverted, the codex module leg must see it
+    const mutCx = src0.replace("    const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)\n    if (zst)", "    const cur = cursors[fp] || { offset: 0, lastRid: null };\n    if (zst)");
+    ok(mutCx !== src0, 'the codex control mutation applies to the shipped source');
+    const { runUsageWalk: walkCx } = M.load('src/usage-walker.js', mutCx, 'b6ded-codex-in-place');
+    const cc = await codexModLeg(walkCx, 'ctl');
+    ok(!cc.stopped, `NEGATIVE CONTROL: the walker advancing the caller's own ROLLOUT entry FAILS the codex module leg (the handed map ${cc.after})`);
   }
   fs.rmSync(b6Root, { recursive: true, force: true });
 }
