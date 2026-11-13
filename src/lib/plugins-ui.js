@@ -285,7 +285,7 @@ export function installPluginsUI(App) {
             install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: p.label })); await api('install'); showToast(t('Installed')); });
           }
         }
-        list.appendChild(pluginRow({ id: p.id, label: p.label, description: t(p.description), tone, chip, chipTitle, onChip,
+        list.appendChild(pluginRow({ id: p.id, label: t(p.label), description: t(p.description),   // a built-in's label is a declared word (lane ui-language) tone, chip, chipTitle, onChip,
           sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: p.label }), onChange: (on, cb) => onSwitch(on, cb) }),
           install, fact, gear: this._pluginGear(p.id, p.label) }));
       }
@@ -431,7 +431,7 @@ export function installPluginsUI(App) {
   /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
    *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
   _voiceSheet(p, rerender, { focus = null } = {}) {
-    const { body, close, raised } = createModalShell({ id: 'voice-sheet', key: p && p.id, title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, opener: 'person', kind: 'form' });
+    const { body, close, raised } = createModalShell({ id: 'voice-sheet', key: p && p.id, title: t(p.label), bodyClass: 'mounts-dialog-body', escapeToClose: true, opener: 'person', kind: 'form' });
     if (raised) return;   // raised: the same subject's form, as it was // (the person's: re-opened by its own Connect flow once the sign-in tab answers — in front, lane dialog-yield r2)
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
     // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only

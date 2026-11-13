@@ -35,6 +35,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage popup's reset times and countdowns, a message's time, job runs, file times and the vault's key history all use this format.
 - When VibeSpace's time zone is not this device's, a time says which zone it is in.
 - An email's date is shown in your format, and the layout history's Restore button matches its title.
+- The sign-in page is in your language.
+- The Settings sidebar and section titles keep their own capitals instead of shouting «HARNESS» and «CLAUDE».
+- An agent CLI setting's note says when it applies; its technical detail shows on hover, or in full with advanced settings on.
+- Built-in plugins' names and descriptions, and the voice input sheet's title, are in your language.
+- Spending settings, the task group window and the diagnostics report use your language's words where English had stayed.
+- The For you list's one-line preview drops a leading heading or quote mark and backticks; the detail still shows the text exactly as written.
 
 ## 2.369.402 — 2026-11-14
 

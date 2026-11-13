@@ -146,7 +146,9 @@ export function scopeRows(entries, { sessionKey = null, query = '', tab = null, 
 export function rowPreview(detail, max = 160) {
   // lane foryou-honest (P1-2): the words EXACTLY as written — no markdown mark is stripped (the strip made the agent's
   // `B __tests__/` read «B tests__/»); the pane draws the same words through the tray's renderer
-  const plain = (String(detail || '').split('\n').find((l) => l.trim()) || '').trim();
+  // lane ui-language (the walk's for-you-6, 主开发's ruling: the pane stays never-markdown; the LIST subtitle drops the line's
+  // LEADING heading / quote mark and a `…` pair's backticks — never an underscore: `B __tests__/` stays as written)
+  const plain = (String(detail || '').split('\n').find((l) => l.trim()) || '').trim().replace(/^(?:#{1,6}|>)\s+/, '').replace(/`([^`\n]+)`/g, '$1');
   return plain.length > max ? plain.slice(0, Math.max(0, max - 1)).trimEnd() + '…' : plain;
 }
 

@@ -85,6 +85,20 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The baseline:** ① **482** (no English literal moved in this pick).
 - **Found by this pick's own AFTER pictures:** a function-scope `when` shadowed the imported one in usage-meter's reset formatter (`let when; … when(d)`) and in jobs-panel's job detail (a later `const when`, a TDZ). The taskbar meter and the job detail did not draw. Both now call `stampAt`. Census ⑦ names any page-time import shadowed by a local where it is called.
 
+### ui-language pick 5 — the zh rows that kept English, the settings notes, the plugin labels, the sign-in page
+- **The sign-in page** (src/auth.js loginHtml) is served BEFORE sign-in: no bundle, no dictionary.
+  - Its words now live in the PURE src/login-words.js, whole in en / zh / ja (the consent-road LANDING pattern).
+  - The server renders the browser's asked language (consent-road landingLang); the page's own script re-applies this device's `vibespace.lang` (the app's per-device rule).
+  - /api/login's refusals carry codes (`wrong-password`, `too-many`) that the page words.
+  - Census ⑧: every row whole in its own script, and no English literal on the page outside the table. The ① scan now drops what a `<style>` / `<script>` block holds, so code is never read as words.
+- **cli-config-chips `applyHead`:** `apply.how` (CLI flags, an engine's rung in English) no longer joins the visible head unless advanced settings are on; it rides the head's tooltip. test-harness-settings pins both.
+- **Plugins:** a built-in plugin's label goes through t() (plugins-ui, the voice sheet's title — handed by ui-needs-a-button — and settings-schema's «Plugin: {name}»). The OpenCode description gets its rows.
+- **zh rows:** «turn» → 轮 (the spending rows), «Background Work» → 后台工作, “For you” → 「待你处理」, Find / GoTo / Backlog / Context table / «detail» in the reader's words. «agent» stays «agent» (the owner); harness / reset credit wait for their word.
+- **CSS:** `text-transform: uppercase` is dropped from the four label rules that carry translated words (session details, settings section / nav group, task details). It shouted the English left in them and changed brand names.
+- **The diagnostics metrics table's headers** are worded.
+- **for-you-6 (主开发's ruling: the pane stays never-markdown):** inbox-window-layout `rowPreview` — the LIST row drops the line's leading heading / quote mark and a backtick pair's backticks, never an underscore (`B __tests__/` stays). test-inbox-window-model's pins and its red control follow (the base strip now agrees on two rows, so ≥ 4 red).
+- **The baseline:** ① 482 → **480**.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)
