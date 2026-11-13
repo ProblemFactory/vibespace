@@ -9,7 +9,7 @@ import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, modelLabelFor, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
-import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
 import { valueWord, modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
@@ -994,14 +994,16 @@ export class ChatStatusBar {
     // it turns loud (amber, with the time) once a wait is actually armed.
     if (autoResumeCapsFor(this._backend).supported && this._autoResume) {
       const a = this._autoResume;
-      const when = a.armed && a.resetsAt ? clockOf(a.resetsAt) : '';
+      // the reset in the page's one format — a reset tomorrow carries its date (lane ui-language; the local is named apart
+      // from the page-time import `when`: the pool lines below call it inside a closure)
+      const resetAt = a.armed && a.resetsAt ? when(a.resetsAt) : '';
       // A WATCH (the reset is past the 26h ceiling) promises no TIME — only
       // that a reading saying the quota is back will continue the session. The
       // chip must not print a clock it cannot keep.
       let title = a.armed
         ? (a.watch
           ? t('Usage limit hit — the reset is too far out to wait for, but this session will continue by itself as soon as the quota is back. Click to cancel.')
-          : t('Usage limit hit — this session will continue by itself at {t}. Click to cancel.', { t: when }))
+          : t('Usage limit hit — this session will continue by itself at {t}. Click to cancel.', { t: resetAt }))
         : (a.enabled ? t('Auto-continue is ON: if the quota runs out with no account to switch to, this session waits for the reset and continues. Click to turn off.')
           : t('Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.'));
       // B-73fe (2026-09-17, owner "7am 重置却提示 12pm"): a POOL wait says WHOSE
@@ -1041,7 +1043,7 @@ export class ChatStatusBar {
       // auto-continue that is OFF is its ICON there (as on 2.369.400; its words in the tooltip and the panel), its words on the
       // wide bar; armed, with its time, it keeps its words everywhere
       const offWords = this._oneRow() ? '' : ' ' + escHtml(t('Auto-continue: off'));
-      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: when }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
+      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
       chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
@@ -2385,6 +2387,7 @@ export class ChatStatusBar {
       item.className = 'chat-status-dropdown-item chat-status-perm-item' + (mode === this._statusPermMode ? ' active' : '') + (permissionModeDanger(this._backend, mode) ? ' danger' : '');
       // the words a person reads; the protocol value stays as a dim hint (the word a manual or an error uses)
       const words = document.createElement('span');
+      words.className = 'chat-status-perm-words';
       words.textContent = permissionModeWords(this._backend, mode, t) || mode;
       item.appendChild(words);
       if (permissionModeWords(this._backend, mode, t)) { const raw = document.createElement('span'); raw.className = 'chat-status-perm-raw'; raw.textContent = mode; item.appendChild(raw); }

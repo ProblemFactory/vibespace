@@ -1349,6 +1349,7 @@ function scopedLimitId(name) {
   return 'model:' + n.replace(/\s+/g, '-');
 }
 function isPlaceholderCap(limit) { return !!limit && limit.limitId === MODEL_CAP_PLACEHOLDER.limitId; }
+// ui-words: a model family's name (a brand: «opus 4» → «Opus 4») for a cap the sidecar reads, never a stored value worded
 const capitalize = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
 
 /** Which lane is a model-cap window? `limits` = the account's typed limits,

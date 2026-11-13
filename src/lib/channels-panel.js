@@ -84,7 +84,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
 import { offersPaths, accountSectionOrder } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
 import { showNewPathDialog, showJoinDialog } from './channel-webhook.js';
-import { grainSummaryText, groupSysWords } from './channel-words.js';
+import { grainSummaryText, groupLastLine } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog, showAccountReachDialog } from './channel-reach-editor.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
@@ -1960,7 +1960,7 @@ export function renderChannelsPanel(app, c) {
     const last = document.createElement('span');
     last.className = 'chan-grow-last';
     // a system line in the reader's words (its structure rides as lastRaw — lane ui-language); a message as written
-    last.textContent = (r.lastRaw && groupSysWords(r.lastRaw, r.lastRaw.by, r.lastRaw.member)) || r.lastText || '';
+    last.textContent = groupLastLine(r);
     // lane attention-rule-at-you: a row listed for an @ of the owner quotes the mentioning message
     if (st && st.code === 'at-you' && r.conv && r.conv.atYouText) last.textContent = (r.conv.atYouWho ? r.conv.atYouWho + ': ' : '') + r.conv.atYouText;
     // "Clear content…": the newest line was cleared — the sentence in this device's words, dimmed

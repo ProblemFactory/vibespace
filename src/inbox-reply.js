@@ -82,6 +82,7 @@ const pad = (n) => String(n).padStart(2, '0');
 function utcStamp(ms) {
   const d = new Date(ms);
   if (!Number.isFinite(d.getTime())) return 'unknown time';
+  // page-time: the quote a reply hands the AGENT (its UTC clock) — never a time drawn on the page
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 }
 function relAgo(ms, now) {

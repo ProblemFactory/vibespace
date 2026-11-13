@@ -411,6 +411,7 @@ export const MACHINE_WORDS = Object.freeze({
   lookups: '{n} lookups', // lane exit-calls-in-history: list / runs / use / url — informational, never the last outcome
   exit: 'last: exit {code}', timed_out: 'last: timed out', refused: 'last: did not run', copyFailed: 'last: copy failed', copied: 'last: copied',
 });
+// page-time: a PURE module's default for its own tests — the chat passes page-time's stampAt (chat-view machineRunPart)
 const hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 /**
  * The run head's machine part — ONE line: the machine, the counts, the last outcome (or "still running"), the time span:

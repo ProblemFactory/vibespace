@@ -1518,12 +1518,13 @@ console.log('— §6d lane exit-item-heal: a resume answers the "resume it" item
   const R = await import(path.join(REPO, 'src/lib/user-todos-row.js'));
   const L = await import(path.join(REPO, 'src/lib/inbox-window-layout.js'));
   const tt = (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));
-  const hm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+  // the page's one format (lane ui-language: the row prints the instant through page-time — today its clock, else with its date)
+  const hm = (await import(path.join(REPO, 'src/lib/page-time.js'))).stampAt;
   const item = { id: 'u1', status: 'done', resolvedBy: 'resumed', resolvedFact: { resumedAt: startA }, createdAt: startA - 1, resolvedAt: startA, text: 'x' };
   const pane = L.itemView(item, { t: tt, resolvedBy: (by, it) => R.resolvedByText(by, tt, it) });
   ok(R.resolvedByText('resumed', tt, item) === `running again (resumed ${hm(startA)})` && R.resolvedByText('resumed', tt) === 'running again'
     && pane.meta.some((m) => m.kind === 'by' && m.text === `running again (resumed ${hm(startA)})`),
-    'the resolution says it: "running again (resumed HH:MM)" on the row and in the For-you window pane (no fact ⇒ "running again")', pane.meta);
+    'the resolution says it: "running again (resumed <its time in the page\'s one format>)" on the row and in the For-you window pane (no fact ⇒ "running again")', pane.meta);
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   ok(['running again', 'running again (resumed {time})'].every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')), 'the resolution\'s words have zh + ja');
   // ONE entry point: the active-sessions payload builder (every broadcast + a fresh client's first list) — no other caller

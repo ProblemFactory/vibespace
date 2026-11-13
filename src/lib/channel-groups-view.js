@@ -79,6 +79,9 @@ export function groupListRows({ groups = [], conversations = [], adapters = [], 
     const row = {
       kind: 'group', key: `${GROUP_ADAPTER_ID}/${g.id}`, adapterId: GROUP_ADAPTER_ID, id: g.id,
       title: g.name || g.id, lastAt: num(g.lastAt || g.createdAt), lastText: g.lastText || '',
+      // a system line's STRUCTURE beside its stored English (lane ui-language): the list words it in the reader's language
+      // (channel-words groupLastLine) — the reader's round found the row never carried it
+      lastRaw: g.lastRaw && typeof g.lastRaw === 'object' ? g.lastRaw : null,
       unread: num(g.unread), pair: !!(g.pair && g.pair.length), memberCount: Array.isArray(g.members) ? g.members.length : 0,
       archived: !!g.archivedAt, group: g,
       // lane channels-badges: VibeSpace's own talk — the VibeSpace badge, the internal fold (`atYou` = the owner's @s the

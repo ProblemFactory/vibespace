@@ -144,6 +144,18 @@ const SINK_FNS = new Set(['showToast', 'showConfirmDialog', 'showInputDialog', '
 const SINK_KEYS = new Set(['label', 'title', 'text', 'placeholder', 'hint', 'tip', 'tooltip', 'desc', 'description', 'message', 'note', 'empty', 'okLabel', 'cancelLabel', 'confirmLabel', 'confirmText', 'body', 'heading', 'subtitle', 'caption', 'help', 'sub', 'detail', 'words', 'say', 'line']);
 // a lone word that is a name, not a sentence: brands, products, protocols, units
 export const NAMES = new Set(['VibeSpace', 'Claude', 'Codex', 'OpenCode', 'Antigravity', 'Gemini', 'ChatGPT', 'GitHub', 'GitLab', 'Gmail', 'Google', 'Lark', 'Feishu', 'Slack', 'Chrome', 'Chromium', 'Firefox', 'Safari', 'Linux', 'Windows', 'Ubuntu', 'Debian', 'Docker', 'Tailscale', 'TightVNC', 'Xpra', 'Node', 'Python', 'Markdown', 'JSON', 'YAML', 'HTML', 'CSS', 'SSH', 'MCP', 'OAuth', 'Anthropic', 'OpenAI', 'Fable', 'Opus', 'Sonnet', 'Haiku', 'Dropline', 'LibreOffice', 'Excel', 'Word', 'PowerPoint', 'Mermaid', 'CodeMirror', 'Monaco', 'Dracula', 'Nord', 'Solarized', 'Monokai']);
+/** ⑥(e) the built-in plugins' own words (src/plugins/index.js — server modules the page words through a DYNAMIC t(p.label),
+ *  which no extractor sees; the reader's round found «OpenCode background service» with no row): every label / description
+ *  that is words has zh + ja rows. A name («Tailscale», «LLM») needs none. PURE over (plugins, {zh, ja} row sets). */
+export function pluginFindings(plugins, rows) {
+  const out = [];
+  for (const p of plugins || []) for (const k of ['label', 'description']) {
+    const v = p && p[k];
+    if (typeof v !== 'string' || !v || englishOf(v) === null) continue;
+    for (const lang of ['zh', 'ja']) if (!rows[lang].has(v)) out.push(`${p.id}.${k}: no ${lang} row — ${v.slice(0, 70)}`);
+  }
+  return out;
+}
 export function englishOf(s) {
   const x = String(s).replace(/\$\{[^}]*\}/g, ' ').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;|&#\d+;/g, ' ').replace(/\{\w+\}/g, ' ').trim();
   if (!x) return null;
@@ -161,7 +173,9 @@ function exemptLines(src) {
   lines.forEach((ln, i) => { const m = ln.match(/\/\/\s*ui-words:\s*(.{8,})/); if (m) { set.add(i + 1); set.add(i + 2); } });
   return set;
 }
-const CAPS_RE = /\.charAt\(0\)\.toUpperCase\(\)|\[0\]\.toUpperCase\(\)/;   // ⑥(d)
+const CAPS_RE = /\.charAt\(0\)\.to(?:Locale)?UpperCase\(\)|\[0\]\.to(?:Locale)?UpperCase\(\)|\.replace\(\s*\/(?:\^|\\b)(?:\.|\\w|\\S|\[a-z\])\/[gimsuy]*\s*,[^;]*?\.to(?:Locale)?UpperCase\(\)/;   // ⑥(d) — also `.replace(/^./, (c) => c.toUpperCase())` (the reader's M2c)
+/** ⑦ a clock part read off a Date by hand (`d.getHours()`, `String(d.getMinutes()).padStart(2, '0')` …). */
+const CLOCK_PART = (e) => { let hit = false; const v = (x) => { if (hit || !x || typeof x.type !== 'string') return; if (x.type === 'CallExpression' && x.callee.type === 'MemberExpression' && !x.callee.computed && /^get(UTC)?(Hours|Minutes)$/.test(x.callee.property.name || '')) { hit = true; return; } for (const k in x) { const y = x[k]; if (Array.isArray(y)) y.forEach(v); else if (y && typeof y.type === 'string') v(y); } }; v(e); return hit; };
 const MARKUP = /<\/?(?:b|br|i|em|strong|code)\b[^>]*>|\*\*[^*]+\*\*|`[^`]+`/;
 const TEXT_SINK = (sink) => !!sink && !HTML_PROPS.has(sink.replace(/^prop:/, '')) && sink !== 'html' && sink !== 'call:insertAdjacentHTML';
 /** One file → { visible: [{line, sink, text}], markup: [{line, sink, key}], params: [{line, key, missing}] } */
@@ -205,6 +219,9 @@ export function scanFile(file, src, ast = parse(src)) {
         if (c.type === 'Identifier' && T_FNS.has(c.name)) return tCall(node, sink);
         const name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed ? c.property.name : null;
         if (name && /^toLocale(Date|Time)?String$/.test(name) && !enLocale(node.arguments[0])) timeHit(node, name + '()');
+        // ① a sentence with {param} slots filled by hand (`'{by} created the group'.replace('{by}', by)`) never reaches the
+        // dictionary: it is a key that skipped t() — named wherever it stands, sink or not (the reader's M1c)
+        if ((name === 'replace' || name === 'replaceAll') && c.type === 'MemberExpression' && c.object.type === 'Literal' && typeof c.object.value === 'string' && /\{[a-z]\w*\}/i.test(c.object.value) && /[A-Za-z]{2,}\s+[A-Za-z]{2,}/.test(c.object.value.replace(/\{\w+\}/g, '')) && !ex.has(at(node))) visible.push({ line: at(node), sink: 'hand-filled', text: c.object.value });
         if (c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'Intl' && /^(DateTimeFormat|RelativeTimeFormat)$/.test(name || '') && !enLocale(node.arguments[0]) && !/^\s*\.\s*resolvedOptions/.test(src.slice(node.end, node.end + 24))) timeHit(node, 'Intl.' + name);
         const obj = c.type === 'MemberExpression' && c.object.type === 'Identifier' ? c.object.name : null;
         if ((obj && QUIET_OBJ.has(obj)) || (name && NOT_SINK_CALLS.has(name))) return;
@@ -222,6 +239,7 @@ export function scanFile(file, src, ast = parse(src)) {
       case 'ThrowStatement': case 'ImportDeclaration': case 'ExportAllDeclaration': return;
       case 'BinaryExpression':
         if (/^[!=]==?$|^in$|^instanceof$/.test(node.operator)) return;
+        if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === ':' && CLOCK_PART(node.left)) timeHit(node, 'hh:mm built by hand (getHours / getMinutes)', 'clock');
         if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === 1 && node.left.type === 'CallExpression' && node.left.callee.type === 'MemberExpression' && node.left.callee.property.name === 'getMonth') timeHit(node, 'getMonth() + 1');
         if (node.operator === '+' && node.right.type === 'Literal' && typeof node.right.value === 'string' && /^(m|h|d)( ago)?$/.test(node.right.value)) timeHit(node, `+ '${node.right.value}'`, 'unit');
         break;
@@ -254,6 +272,7 @@ export function scanFile(file, src, ast = parse(src)) {
         if (sink && sink !== CODE && typeof node.value === 'string') { const e = englishOf(node.value); if (e) hit(node, sink, e); }
         return;
       case 'TemplateLiteral': {
+        if (node.expressions.some((e) => CLOCK_PART(e)) && node.quasis.some((q) => /:/.test(q.value.cooked || ''))) timeHit(node, 'hh:mm built by hand (getHours / getMinutes)', 'clock');
         const html = sink !== CODE && node.quasis.some((q) => /<[a-z][\w-]*[\s>/]|<\/[a-z]/.test(q.value.cooked || ''));
         const codeAfter = [];   // per quasi: is a <style> / <script> block open after it (its expression is code, not words)
         node.quasis.forEach((q, qi) => { if (qi > 0 && /^(m|h|d|s)( ago)?(?![A-Za-z0-9])/.test(q.value.cooked || '')) timeHit(q, '${…}' + (q.value.cooked || '').slice(0, 6), 'unit'); });
@@ -316,28 +335,46 @@ export function dictFindings(keys, dicts) {
   return out;
 }
 
-/** ⑦ (the bug pick 4's pictures caught): a function that DECLARES a name a page-time import binds (`when`, `span`, `num` …) and
- *  CALLS it — the call reaches the local (a TDZ ReferenceError, or a string called), never the formatter. */
+/** ⑦ (the bug pick 4's pictures caught; the reader's round found the closure case): a call of a name a page-time import binds
+ *  (`when`, `span`, `num` …) where ANY enclosing function declares that name — a param, a var / let / const (any pattern), a
+ *  function or class declaration, a catch param. The call reaches the local (a TDZ ReferenceError, or a string called), never
+ *  the formatter — also from inside a nested closure (chat-status-bar's pool lines: `const clock = (ms) => when(ms)` under a
+ *  local string `when`). Function-level scopes: a let / const in a sibling block counts too (rename it — never a reason). */
 export function shadowFindings(ast) {
   const names = new Set();
   for (const n of ast.body || []) if (n.type === 'ImportDeclaration' && /(^|\/)page-time\.js$/.test(n.source.value)) for (const sp of n.specifiers) names.add(sp.local.name);
   if (!names.size) return [];
   const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']), out = [];
-  const visit = (n) => {
-    if (!n || typeof n.type !== 'string') return;
-    if (FN.has(n.type)) {
-      const declared = new Set(), calls = [];
-      for (const p of n.params || []) if (p.type === 'Identifier') declared.add(p.name);
-      const scan = (x) => { if (!x || typeof x.type !== 'string' || (x !== n.body && FN.has(x.type))) return;
-        if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier') declared.add(x.id.name);
-        if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && names.has(x.callee.name)) calls.push(x);
-        for (const k in x) { const v = x[k]; if (Array.isArray(v)) v.forEach(scan); else if (v && typeof v.type === 'string') scan(v); } };
-      scan(n.body);
-      for (const c of calls) if (declared.has(c.callee.name)) out.push({ name: c.callee.name, start: c.start });
-    }
-    for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v.type === 'string') visit(v); }
+  const bind = (pat, set) => {
+    if (!pat) return;
+    if (pat.type === 'Identifier') set.add(pat.name);
+    else if (pat.type === 'ObjectPattern') for (const q of pat.properties) bind(q.type === 'RestElement' ? q.argument : q.value, set);
+    else if (pat.type === 'ArrayPattern') for (const q of pat.elements) bind(q, set);
+    else if (pat.type === 'AssignmentPattern') bind(pat.left, set);
+    else if (pat.type === 'RestElement') bind(pat.argument, set);
   };
-  visit(ast);
+  /** The names a function declares in its own scope (its params + every declaration in its body, not inside a nested function). */
+  const declaredIn = (fn) => {
+    const set = new Set();
+    for (const p of fn.params || []) bind(p, set);
+    const scan = (x) => {
+      if (!x || typeof x.type !== 'string') return;
+      if (x !== fn.body && FN.has(x.type)) { if (x.type === 'FunctionDeclaration' && x.id) set.add(x.id.name); return; }
+      if (x.type === 'VariableDeclarator') bind(x.id, set);
+      if (x.type === 'ClassDeclaration' && x.id) set.add(x.id.name);
+      if (x.type === 'CatchClause' && x.param) bind(x.param, set);
+      for (const k in x) { const v = x[k]; if (Array.isArray(v)) v.forEach(scan); else if (v && typeof v.type === 'string') scan(v); }
+    };
+    scan(fn.body);
+    return set;
+  };
+  const visit = (n, scopes) => {
+    if (!n || typeof n.type !== 'string') return;
+    if (FN.has(n.type)) scopes = [...scopes, declaredIn(n)];
+    if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && names.has(n.callee.name) && scopes.some((sc) => sc.has(n.callee.name))) out.push({ name: n.callee.name, start: n.start });
+    for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach((x) => visit(x, scopes)); else if (v && typeof v.type === 'string') visit(v, scopes); }
+  };
+  visit(ast, []);
   return out;
 }
 
@@ -417,12 +454,12 @@ export async function census(repo = REPO) {
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
     dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, caps = [];
+  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, clocks = {}, caps = [];
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
     if (r.raw.length) raw[r.file] = r.raw;
-    for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
+    for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else if (h.kind === 'clock') (clocks[r.file] = clocks[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
     for (const c of r.caps) caps.push(`${r.file}:${c.line} ${c.text} — word the value through src/lib/value-words.js (or say \`// ui-words: <why>\` above it)`);
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
@@ -430,11 +467,12 @@ export async function census(repo = REPO) {
   }
   const rowsOf = (d) => new Set(d.map((x) => x.key));
   const sets = { findings: setFindings(vsets.lists, vsets.sets, vsets.delegated, { zh: rowsOf(zh), ja: rowsOf(ja) }), lists: Object.values(vsets.lists).reduce((a, l) => a + l.length, 0) };
+  const plugins = pluginFindings(createRequire(path.join(repo, 'package.json'))(path.join(repo, 'src', 'plugins', 'index.js')), { zh: rowsOf(zh), ja: rowsOf(ja) });
   const lw = createRequire(path.join(repo, 'package.json'))(path.join(repo, 'src', 'login-words.js'));
   const loginRows = loginFindings(lw.LOGIN_WORDS);
   const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
-  return { files: files.length, visible, raw, time, units, caps, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -474,6 +512,17 @@ if (isMain) {
     // ⑥(d) control: an id capitalised by hand is named (both spellings); the same value through the door, and a declared first letter, are not
     const cp = scanFile('c.js', "a.textContent = name.charAt(0).toUpperCase() + name.slice(1);\nb.textContent = themeWord(name, t);\nc.title = v[0].toUpperCase() + v.slice(1);\n// ui-words: the first letter of a sentence t() already worded\nd.textContent = s.charAt(0).toUpperCase() + s.slice(1);");
     ok(cp.caps.length === 2 && cp.caps.map((x) => x.line).join() === '1,3', '⑥(d) a value capitalised by hand is named (charAt(0) and [0]); the same value through themeWord, and a `// ui-words:` first letter, are not', JSON.stringify(cp.caps));
+    const pf = pluginFindings([{ id: 'a', label: 'OpenCode background service', description: 'Runs it' }, { id: 'b', label: 'Tailscale' }, { id: 'c', label: 'Public URLs (frp)' }], { zh: new Set(['Runs it', 'Public URLs (frp)']), ja: new Set(['Runs it', 'Public URLs (frp)']) });
+    ok(pf.length === 2 && pf.every((x) => /^a\.label: no (zh|ja) row/.test(x)), '⑥(e) a built-in plugin label with no zh / ja row is named (the reader\'s «OpenCode background service»); a name and a held row are not', JSON.stringify(pf));
+    // the reader's round (13:41Z): its four green mutants, planted — each shape is RED here
+    const m1c = scanFile('src/lib/m1c.js', "function sysLine(by) { return '{by} created the group'.replace('{by}', by); }\nfunction ok2(by) { return t('{by} created the group', { by }); }\nconst path = '/api/{id}/x'.replace('{id}', id);");
+    ok(m1c.visible.length === 1 && m1c.visible[0].line === 1 && m1c.visible[0].sink === 'hand-filled', '① M1c: a {param} sentence filled by hand (`.replace(\'{by}\', by)`) is named wherever it stands; the same key through t(), and a path template, are not', JSON.stringify(m1c.visible));
+    const m2c = scanFile('src/lib/m2c.js', "o.textContent = name.replace(/^./, (c) => c.toUpperCase());\np.textContent = name.replace(/\\b\\w/g, (c) => c.toLocaleUpperCase());\nq.textContent = name.replace(/^-/, '');");
+    ok(m2c.caps.length === 2 && m2c.caps.map((x) => x.line).join() === '1,2', '⑥(d) M2c: a value capitalised by a regex (`.replace(/^./, c => c.toUpperCase())`, a \\b\\w title-case) is named; a plain replace is not', JSON.stringify(m2c.caps));
+    const m3b = scanFile('src/lib/m3b.js', "a.textContent = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;\nb.textContent = d.getHours() + ':' + d.getMinutes();\nc.textContent = `${d.getHours()} h`;");
+    ok(m3b.time.filter((x) => /by hand/.test(x.text) && x.kind === 'clock').length === 2, '⑦ M3b: an hh:mm built by hand from getHours / getMinutes (a template or a + \':\' +) is named; an hour count is not', JSON.stringify(m3b.time));
+    const m3c = scanFile('src/lib/m3c.js', "import { stampAt as when, clockOf } from './page-time.js';\nfunction render(a) { const when = a ? 'x' : ''; const clock = (ms) => when(ms); return clock(1); }\nconst zz = function () { let clockOf = 1; return () => clockOf(5); };\nfunction fine(d) { const resetAt = when(d); return () => when(d) + resetAt; }");
+    ok(m3c.time.length === 2 && m3c.time.every((x) => /shadows/.test(x.text)), '⑦ M3c: a shadowed page-time import called from INSIDE a closure is named (chat-status-bar\'s pool lines); a closure over a renamed local is not', JSON.stringify(m3c.time));
     const lf = loginFindings({ a: { en: 'Sign in', zh: '登录', ja: 'サインイン' }, b: { en: 'Password', zh: 'Password', ja: '' } });
     ok(lf.length === 2 && /b: no ja/.test(lf.join()) && /b: the zh row is not Chinese/.test(lf.join()), '⑧ a sign-in row with no ja and an English zh row are named; a whole row is not', JSON.stringify(lf));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
@@ -486,6 +535,7 @@ if (isMain) {
   const e = multisetDiff({ dict: now.dict.english }, { dict: base.english || [] });
   const rw = multisetDiff(now.raw, base.raw || {});
   const un = multisetDiff(now.units, base.units || {});
+  const ck = multisetDiff(now.clocks, base.clocks || {});
   if (process.argv.includes('--lower')) {
     // min(baseline, now): stale rows leave, a NEW hit is never written in
     const keep = (nowMap, baseMap) => Object.fromEntries(Object.entries(baseMap).map(([f, list]) => {
@@ -499,10 +549,11 @@ if (isMain) {
       : { note: base.note, visible: keep(now.visible, base.visible || {}), english: (keep({ dict: now.dict.english }, { dict: base.english || [] }).dict) || [],
           // a leg's section is SEEDED once, by the lane that adds the leg; after that it only shrinks
           raw: base.raw ? keep(now.raw, base.raw) : Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])),
-          units: base.units ? keep(now.units, base.units) : Object.fromEntries(Object.entries(now.units).map(([f, hs]) => [f, hs.map((h) => h.text)])) };
+          units: base.units ? keep(now.units, base.units) : Object.fromEntries(Object.entries(now.units).map(([f, hs]) => [f, hs.map((h) => h.text)])),
+          clocks: base.clocks ? keep(now.clocks, base.clocks) : Object.fromEntries(Object.entries(now.clocks).map(([f, hs]) => [f, hs.map((h) => h.text)])) };
     fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
     fs.writeFileSync(BASELINE, JSON.stringify(next, null, 1) + '\n');
-    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length} · ⑥(c) ${count(next.raw || {})} · ⑦ units ${count(next.units || {})}`);
+    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length} · ⑥(c) ${count(next.raw || {})} · ⑦ units ${count(next.units || {})} · ⑦ clocks ${count(next.clocks || {})}`);
     process.exit(0);
   }
   if (process.argv.includes('--print')) { for (const [f, hs] of Object.entries(now.visible)) for (const h of hs) console.log(`${f}:${h.line} [${h.sink}] ${h.text}`); }
@@ -515,7 +566,21 @@ if (isMain) {
   ok(now.caps.length === 0, `⑥(d) no value capitalised by hand in the browser bundle (zero tolerance) — a theme / an id is worded through src/lib/value-words.js`, now.caps);
   ok(un.fresh.length === 0, `⑦ no NEW English unit template (${count(now.units)} today = the baseline's ${count(base.units || {})}) — say a duration with page-time's span / ago`, un.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
   ok(un.stale.length === 0, `⑦ no unit-template baseline row the tree no longer holds (lower it)`, un.stale.map((h) => `${h.file}: ${h.text}`));
+  // the reader's round: an hh:mm read off a Date by hand skips the near rule and the page's zone — a NEW one is red; the ones the
+  // tree holds today are a shrink-only list (`clocks`), each to be moved to page-time (a machine clock says `// page-time: <why>`)
+  ok(ck.fresh.length === 0, `⑦ no NEW hh:mm built by hand (${count(now.clocks)} today = the baseline's ${count(base.clocks || {})}) — print it with page-time's stampAt / clockOf`, ck.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
+  ok(ck.stale.length === 0, `⑦ no hand-clock baseline row the tree no longer holds (lower it)`, ck.stale.map((h) => `${h.file}: ${h.text}`));
   console.log('§2 the dictionaries');
+  // a caption SENTENCE drawn inside an upper-cased head inherits text-transform — «运行 AGENT 会话» (主开发's look, the Machines
+  // section): each known (head, sentence) pair says text-transform: none on the sentence
+  {
+    const css = ['public/style.css', 'public/chat.css'].map((f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } }).join('\n');
+    const ruleOf = (sel) => [...css.matchAll(new RegExp('(?:^|[}\\s,])' + sel.replace(/[.]/g, '\\.') + '\\s*\\{([^}]*)\\}', 'g'))].map((m) => m[1]).join(';');
+    const PAIRS = [['.mounts-sec-head', '.mounts-sec-sub']];
+    const bad = PAIRS.filter(([h, c]) => /text-transform:\s*uppercase/.test(ruleOf(h)) && !/text-transform:\s*none/.test(ruleOf(c)));
+    ok(bad.length === 0, 'CSS: a caption sentence inside an upper-cased head is not upper-cased (the Machines caption «运行 AGENT 会话»)', bad);
+  }
+  ok(now.plugins.length === 0, `⑥(e) every built-in plugin's label and description that is words has zh + ja rows (src/plugins — drawn through a dynamic t(p.label))`, now.plugins);
   ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);
   ok(rw.fresh.length === 0, `⑥ no NEW code-named field drawn raw in a visible sink (${count(now.raw)} today = the baseline's ${count(base.raw || {})}) — word it through src/lib/value-words.js`, rw.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}`));
   ok(rw.stale.length === 0, `⑥ no raw-field baseline row the tree no longer holds (lower it)`, rw.stale.map((h) => `${h.file}: ${h.text}`));

@@ -1661,9 +1661,10 @@ export function hostStateChip(state, { text = '', age = 0, title = '' } = {}) {
   el.className = 'host-state-chip host-state-' + state;
   let label = text;
   if (!label) {
-    if (state === 'pending') label = 'checking…';
-    else if (state === 'stale') label = age ? `as of ${agoText(age)}` : 'cached';
-    else if (state === 'error') label = 'unreachable';
+    // the default words in the reader's language (lane ui-language, the reader's round: «as of 4 分钟前» mixed two languages)
+    if (state === 'pending') label = t('checking…');
+    else if (state === 'stale') label = age ? t('as of {when}', { when: agoText(age) }) : t('cached');
+    else if (state === 'error') label = t('unreachable');
   }
   el.textContent = label;
   if (title) el.title = title;

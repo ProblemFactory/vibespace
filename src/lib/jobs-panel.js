@@ -129,7 +129,7 @@ function stateLine(j) {
   if (j.nextFireAt) bits.push(t('next') + ' ~' + span(j.nextFireAt - Date.now()));
   const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
   if (memEnd) bits.push(memEnd);
-  const left = runLeftWords(run, t); // round 5: what the job left running — stopped (a task's), kept (a service's)
+  const left = runLeftWords(run, t, (ms) => stampAt(ms)); // round 5: what the job left running — stopped (a task's), kept (a service's)
   if (left) bits.push(left);
   return bits.join(' · ');
 }
@@ -454,7 +454,7 @@ async function expandDetail(app, el, j, refresh) {
   }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
-    const left = runLeftWords(run, t); // round 5: what it left running
+    const left = runLeftWords(run, t, (ms) => stampAt(ms)); // round 5: what it left running
     rr.textContent = `${stampAt(run.startedAt)} · ${run.endedAt ? span(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
