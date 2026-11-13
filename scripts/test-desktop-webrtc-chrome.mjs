@@ -293,7 +293,7 @@ const soundRestore = { name: 'sound-restore', setup(b) { b.onLoad({ filter: /str
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-soundrestore.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [soundRestore] });
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prepin.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [prePin] });
 // ⑲'s NEVER SILENT RED CONTROL (lane werift-lite-multihomed): the window before the lane — its connect-budget words gone
-const SLOW_SAID = "        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); }\n";
+const SLOW_SAID = "        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(slowWords(v)); } // lane stream-udp-leg-fallback R4: «reconnecting…» only when no road answered\n";
 const preSilent = { name: 'pre-silent', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(SLOW_SAID)) throw new Error('the connect-budget words\' line moved'); return { contents: src.replace(SLOW_SAID, ''), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-presilent.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preSilent] });
 const app = express(); app.use(express.json());
@@ -1367,7 +1367,7 @@ console.log('⑲ NEVER SILENT before a picture (lane werift-lite-multihomed): IC
   const ms = Date.now() - t0;
   const sa = await stripText(a), sb = await stripText(b), nb = await b.ev(NOTE);
   ok(said && ms >= 14000 && /连接中/.test(sa.chip || '') && !(await a.ev(`!!document.querySelector('${WIN} .stream-video') && document.querySelector('${WIN} .stream-video').currentTime > 0`)), `⑲ an agent that answers no check: at the connect budget (${ms} ms) the strip says 「串流中断：没能及时连上——正在重新连接…」 (leg ⑥'s words; the view asks an ICE restart), still connecting, no picture`, { said, ms, sa });
-  ok(!nb && /连接中/.test(sb.chip || ''), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about why (it spoke at the 45 s fallback)', { nb, sb });
+  ok(!/没能及时连上|正在重新连接/.test(nb || '') && /连接中/.test(sb.chip || ''), '⑲ RED CONTROL: the window before this lane says only 「串流 · 连接中…」 at that same moment — nothing about the connect budget (it spoke at the 45 s fallback; lane stream-udp-leg-fallback: a leg fallback\'s own one line may stand there)', { nb, sb });
   await a.close(); await b.close();
   fs.rmSync(DEAF_ICE, { force: true });
 }

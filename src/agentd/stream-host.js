@@ -79,7 +79,14 @@
  * 20 s, the picture black): a PING unanswered for legEchoMs is a MISS — the picture stays on the leg and the next PING goes
  * at once (a late PONG still counts); legMissMax misses IN A ROW = DOWN: the device link carries the datagrams again
  * (re-asked every legReprobeMs; a PONG brings the leg back); a socket error drops one datagram and is counted, never a
- * verdict. The ladder: direct
+ * verdict. THE HUB'S WORD (lane stream-udp-leg-fallback — 2026-10-26 the owner's Mac said «leg up» at the offer while its leg
+ * carried nothing, and the page sat black 45 s): this daemon's PINGs say it ANSWERS; a hub that says WORDS in its PONG probes
+ * the leg with a datagram of a picture packet's size (answered here as its ECHO) and only then says TAKE — the shims' datagrams
+ * go out on the leg from that word on, and from LEAVE on (the hub measured the leg dead: it carried nothing, or it fell back
+ * too often) the device link carries them again — ONE election, the hub's, followed here (r2: the PING says the road it is on,
+ * so a lost word is said again; a trial that never heard its ending word ends at its own bound — createLeg). An older hub never says WORDS: the
+ * first PONG is UP, as before. The leg's facts name what this side can see (a socket that did not bind, the last send error,
+ * the probes heard) — the hub's verdict reads them. The ladder: direct
  * (ICE-lite host pairs) → the hub relay over this leg → the hub relay over the device link. Said on the record (stats
  * `relay.via` + `relay.leg`, the log) and on the strip.
  * THE SOUND (lane speaker-passthrough-v1 — backlog B-aec9; the measured road: lane stream-audio-probe): `stream-offer {audio: true}`
@@ -174,9 +181,18 @@ function fakeStill() {
  * = more hosts to try (the host this daemon dials); `onData(ip, port, payload)` = a browser's datagram the hub sent over the
  * leg (→ the shims); `onChange(leg)` = UP / DOWN (the stats push, the log). Injectable for the fast suite: `now`, `socket`
  * (a dgram-like {bind, send, on, close, address}), `timer: false` (the suite calls tick()); `missMax` = the misses in a row
- * that make it DOWN (the suites' RED control hands in 1 — the .330 rule). → the leg | null (a bad spec)
+ * that make it DOWN (the suites' RED control hands in 1 — the .330 rule); `answers: false` = the .358 daemon (no ANSWERS flag,
+ * a probe and a word ignored, UP at the first PONG — the suites' older-daemon control). States: probing → ready (a hub that
+ * words heard us; its TAKE pending) → trial (TAKE + TRIAL: the leg AND the device link) → up (TAKE: the hub heard the leg carry)
+ * ⇄ held (its LEAVE) · down (unanswered). r2 (a lost trial-ending TAKE kept every datagram on both roads for the session): the
+ * PING says the road (UP · UP + TRIAL · neither) so the hub says its word again, and THE TRIAL'S BOUND — a trial whose first DATA
+ * went out legTrialMaxMs ago without the hub's plain TAKE ends here: up when the hub's datagrams come on the leg alone (it ended the
+ * trial), the device link when they come over the link (it left the leg), the bound again when both still come (the hub is on
+ * trial again) — `trialEndedBy` word | bound in the facts; `linkIn()` = the relay heard the hub over the device link. r3: THE
+ * TAKE'S NUMBER — a word of a new take (src/stream-model.js legSeqOf) starts its trial's facts afresh; the PING echoes it and the
+ * facts say it (`takeSeq`), so the hub never reads the take before's ending as this one's. → the leg | null (a bad spec)
  */
-function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { }, log = () => { }, now = Date.now, socket = null, timer = true, random = crypto.randomBytes, missMax = L.legMissMax } = {}) {
+function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { }, log = () => { }, now = Date.now, socket = null, timer = true, random = crypto.randomBytes, missMax = L.legMissMax, answers = true } = {}) {
   const key = spec && typeof spec.key === 'string' && /^[A-Za-z0-9+/]{43}=$/.test(spec.key) ? Buffer.from(spec.key, 'base64') : null;
   const port = spec && Number.isInteger(spec.port) && spec.port > 0 && spec.port <= 65535 ? spec.port : 0;
   if (!key || key.length !== SM.LEG.keyBytes || !port) return null;
@@ -186,19 +202,22 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
   const mac = (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, SM.LEG.macBytes);
   const sock = socket || dgram.createSocket('udp4');
   const g = { state: 'probing', why: null, target: null, targets, port, counter: 0, pending: new Map(), lastPingAt: 0, heardAt: 0, sent: false,
-    rttMs: null, pings: 0, pongs: 0, up: 0, down: 0, stray: 0, misses: 0, missed: 0, sendErrors: 0, since: now(), changes: [], closed: false, timer: null };
+    rttMs: null, pings: 0, pongs: 0, up: 0, down: 0, stray: 0, misses: 0, missed: 0, sendErrors: 0, since: now(), changes: [], closed: false, timer: null,
+    hubWords: false, word: 0, words: 0, probes: 0, bound: false, bindError: null, lastSendError: null, dataInAt: 0, linkInAt: 0, trialSentAt: 0, trialEndedBy: null, takeSeq: 0 };
+  const carrying = () => g.state === 'up' || g.state === 'trial'; // trial: on the leg AND over the device link (the hub's TAKE + TRIAL)
   const setState = (st, why = null) => {
     if (g.state === st) return;
+    if (st === 'trial') { g.trialSentAt = 0; g.trialEndedBy = null; } // a new trial: its bound starts at its first DATA
     g.state = st; g.why = why; g.since = now();
     g.changes.push({ at: g.since, state: st, why }); if (g.changes.length > 8) g.changes.shift();
-    log(st === 'up' ? `relay leg up: udp to ${g.target.ip}:${g.target.port} (rtt ${g.rttMs} ms)` : `relay leg ${st}${why ? ` (${why})` : ''} — the device link carries the stream`);
+    log(st === 'up' ? `relay leg up: udp to ${g.target.ip}:${g.target.port} (rtt ${g.rttMs} ms${why === 'trial_bound' ? ' — its trial ended at its own bound: the hub\'s word never came, its datagrams come on the leg alone' : g.hubWords ? ' — the hub took it' : ''})` : st === 'trial' ? `relay leg on trial: udp to ${g.target.ip}:${g.target.port} and the device link both, until the hub hears the leg carry` : st === 'ready' ? `relay leg ready: the hub at ${g.target.ip}:${g.target.port} answers (rtt ${g.rttMs} ms) — its probe and its word decide` : `relay leg ${st}${why ? ` (${why})` : ''} — the device link carries the stream`);
     try { onChange(g); } catch { /* the host's */ }
   };
   const ping = () => {
     if (g.closed) return;
     g.counter = (g.counter + 1) >>> 0;
     const nonce = random(SM.LEG.nonceBytes);
-    const pkt = SM.legControl(SM.LEG.PING, { flags: g.state === 'up' ? SM.LEG.UP : 0, counter: g.counter, nonce, mac });
+    const pkt = SM.legControl(SM.LEG.PING, { flags: (carrying() ? SM.LEG.UP : 0) | (g.state === 'trial' ? SM.LEG.TRIAL : 0) | (answers ? SM.LEG.ANSWERS : 0) | SM.legSeqFlags(g.takeSeq), counter: g.counter, nonce, mac }); // r2: the road it is on — the hub says its word until it matches (r3: and the take it heard)
     g.pending.set(g.counter, { nonce: Buffer.from(nonce), at: now() });
     while (g.pending.size > 8) g.pending.delete(g.pending.keys().next().value);
     g.lastPingAt = now(); g.sent = false; g.pings++;
@@ -214,40 +233,73 @@ function createLeg(spec, { extra = [], onData = () => { }, onChange = () => { },
       for (const c of [...g.pending.keys()]) if (c <= p.counter) g.pending.delete(c);
       g.rttMs = Math.max(0, now() - want.at); g.pongs++; g.heardAt = now(); g.misses = 0; // an answer — a late one too — ends the run of misses
       if (!g.target) g.target = { ip: from.address, port };
-      if (g.state !== 'up') { setState('up'); ping(); } // the hub hears at once that the picture now rides the leg
+      if (answers && (p.flags & SM.LEG.WORDS)) g.hubWords = true; // a hub that probes and words: its TAKE decides (lane stream-udp-leg-fallback)
+      if (g.state === 'probing' || g.state === 'down') { if (g.hubWords) setState('ready'); else { setState('up'); ping(); } } // an older hub: the hub hears at once that the picture now rides the leg
+      return;
+    }
+    if (answers && (p.type === 'probe' || p.type === 'word')) { // THE HUB'S PROBE (answered as its ECHO, the same size) and WORD
+      if (!p.ok || from.port !== port || !(g.target ? from.address === g.target.ip : g.targets.includes(from.address))) { g.stray++; return; }
+      if (p.type === 'probe') {
+        g.probes++;
+        const echo = SM.legControl(SM.LEG.ECHO, { counter: p.counter, nonce: p.nonce, mac, bytes: p.bytes });
+        if (echo) { try { sock.send(Buffer.from(echo), from.port, from.address); } catch { /* the hub probes again */ } }
+        return;
+      }
+      if (!(p.counter > g.word)) { g.stray++; return; } // a replayed word
+      g.word = p.counter; g.words++;
+      const q = SM.legSeqOf(p.flags);
+      if (q !== g.takeSeq) { g.takeSeq = q; g.trialSentAt = 0; g.trialEndedBy = null; } // r3: a new take — its trial's facts start afresh
+      if (!g.target) g.target = { ip: from.address, port };
+      if (p.flags & SM.LEG.TAKE) { const st = p.flags & SM.LEG.TRIAL ? 'trial' : 'up'; if (g.state === 'trial' && st === 'up') g.trialEndedBy = 'word'; if (g.state !== st) { g.misses = 0; setState(st); ping(); } } // the shims' datagrams ride the leg from now on (a trial: the device link too, until the hub heard it carry)
+      else if ((p.flags & SM.LEG.LEAVE) && carrying()) setState('held', 'hub_left'); // the hub measured it dead: the device link
       return;
     }
     if (p.type === 'data') {
       if (!g.target || from.address !== g.target.ip || from.port !== port) { g.stray++; return; }
-      g.heardAt = now(); g.down++;
+      g.heardAt = now(); g.dataInAt = g.heardAt; g.down++;
       try { onData(p.ip, p.port, p.payload); } catch { /* the shim's */ }
     }
   });
-  sock.on('error', () => { if (!g.closed) g.sendErrors++; }); // one datagram dropped (a Mac's ENOBUFS under a burst): counted — the echo judges the leg
-  /** One datagram of werift's toward a browser → the hub over the leg. → false when the leg is not up (the link's turn). */
-  g.send = (ip, p, payload) => {
-    if (g.closed || g.state !== 'up' || !g.target) return false;
-    const pkt = SM.legData(ip, p, payload);
-    if (!pkt) return true; // over the bound: dropped, like UDP
-    try { sock.send(Buffer.from(pkt.buffer, pkt.byteOffset, pkt.length), g.target.port, g.target.ip); g.up++; g.sent = true; } catch { return false; }
-    return true;
-  };
-  g.tick = () => {
+  sock.on('error', (e) => { // one datagram dropped (a Mac's ENOBUFS under a burst): counted — the echo judges the leg; before the bind: the leg has no socket
     if (g.closed) return;
+    const code = String((e && e.code) || 'error').slice(0, 40);
+    if (!g.bound) { g.bindError = code; setState('down', 'bind_failed'); return; }
+    g.sendErrors++; g.lastSendError = code;
+  });
+  /** One datagram of werift's toward a browser → the hub over the leg. → false when the device link must carry it (the leg is not
+   *  up — or on trial: then it went on the leg too, make before break). */
+  g.send = (ip, p, payload) => {
+    if (g.closed || !carrying() || !g.target) return false;
+    const pkt = SM.legData(ip, p, payload);
+    if (!pkt) return g.state === 'up'; // over the bound: dropped, like UDP
+    try { sock.send(Buffer.from(pkt.buffer, pkt.byteOffset, pkt.length), g.target.port, g.target.ip); g.up++; g.sent = true; } catch { return false; }
+    if (g.state === 'trial' && !g.trialSentAt) g.trialSentAt = now(); // the trial's bound runs from its first DATA
+    return g.state === 'up';
+  };
+  /** The relay heard the hub over the device link (the trial's bound reads which road the hub uses). */
+  g.linkIn = () => { g.linkInAt = now(); };
+  g.tick = () => {
+    if (g.closed || g.bindError) return;
     const t = now();
     let fresh = 0, missedNow = 0; // a PING past legEchoMs is a MISS once (it stays pending: its late PONG still counts)
     for (const v of g.pending.values()) { if (v.missed) continue; if (t - v.at >= L.legEchoMs) { v.missed = true; missedNow++; } else fresh++; }
     if (missedNow) {
-      if (g.state === 'up') { g.misses += missedNow; g.missed += missedNow; if (g.misses >= missMax) { g.pending.clear(); setState('down', 'no_echo'); } }
+      if (carrying()) { g.misses += missedNow; g.missed += missedNow; if (g.misses >= missMax) { g.pending.clear(); setState('down', 'no_echo'); } }
       else { g.pending.clear(); if (g.state !== 'down') setState('down', 'no_echo'); } // never up: the device link carried it all along
     }
-    const every = g.state === 'up' ? (g.sent ? L.legLiveMs : L.legKeepaliveMs) : g.state === 'probing' ? L.legProbeMs : L.legReprobeMs;
-    if (g.state === 'up' ? !fresh && (missedNow > 0 || t - g.lastPingAt >= every) : t - g.lastPingAt >= every) ping(); // up: a miss is re-asked at once
+    if (g.state === 'trial' && g.trialSentAt && t - g.trialSentAt >= L.legTrialMaxMs) { // THE TRIAL'S BOUND (r2): no plain TAKE — by now the hub took the leg or left it
+      const onLeg = t - g.dataInAt < L.legLiveMs, onLink = t - g.linkInAt < L.legLiveMs;
+      if (onLeg && onLink) g.trialSentAt = t; // the hub sends both ways: on trial again (a re-take) — its word may still come
+      else { g.trialEndedBy = 'bound'; setState(onLeg ? 'up' : 'held', 'trial_bound'); ping(); }
+    }
+    const every = carrying() ? (g.sent ? L.legLiveMs : L.legKeepaliveMs) : g.state === 'probing' ? L.legProbeMs : g.state === 'ready' && t - g.since < (L.legProbeMax + 1) * L.legEchoMs ? L.legReadyMs : L.legReprobeMs; // ready: the hub's probes ride our PINGs (its first round quick, then every re-ask)
+    if (carrying() ? !fresh && (missedNow > 0 || t - g.lastPingAt >= every) : t - g.lastPingAt >= every) ping(); // up: a miss is re-asked at once
   };
-  g.facts = () => ({ state: g.state, why: g.why, target: g.target ? `${g.target.ip}:${g.target.port}` : null, rttMs: g.rttMs, pings: g.pings, pongs: g.pongs, up: g.up, down: g.down, stray: g.stray, misses: g.misses, missed: g.missed, sendErrors: g.sendErrors, since: g.since });
+  g.facts = () => ({ state: g.state, why: g.why, target: g.target ? `${g.target.ip}:${g.target.port}` : null, rttMs: g.rttMs, pings: g.pings, pongs: g.pongs, up: g.up, down: g.down, stray: g.stray, misses: g.misses, missed: g.missed, sendErrors: g.sendErrors, since: g.since,
+    hubWords: g.hubWords, probes: g.probes, words: g.words, bindError: g.bindError, lastSendError: g.lastSendError, trialEndedBy: g.trialEndedBy, takeSeq: g.takeSeq }); // lane stream-udp-leg-fallback: what the hub's verdict reads (r2: how the last trial ended; r3: of which take)
   g.close = () => { g.closed = true; clearInterval(g.timer); try { sock.close(); } catch { /* gone */ } };
-  if (timer) { g.timer = setInterval(g.tick, 250); g.timer.unref?.(); }
-  if (socket) ping(); else sock.bind(0, () => ping());
+  if (timer) { g.timer = setInterval(g.tick, L.legTickMs); g.timer.unref?.(); }
+  if (socket && typeof socket.bind !== 'function') { g.bound = true; ping(); } else sock.bind(0, () => { g.bound = true; ping(); });
   return g;
 }
 
@@ -551,6 +603,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
           const u = SM.relayUnframe(all);
           if (u.bad) { c.destroy(); return; }
           r.rest = new Uint8Array(u.rest); // copy: the rest outlives this chunk
+          if (u.frames.length && s.leg) s.leg.linkIn(); // r2: the hub's road, for the leg's trial bound
           for (const f of u.frames) r.deliver(f.ip, f.port, f.payload);
         });
       });

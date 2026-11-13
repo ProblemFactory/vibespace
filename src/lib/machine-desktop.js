@@ -39,7 +39,7 @@ import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane 
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, modeOf, displayRows, displayName, displayLabel, sumStats, stillOf, MODE_WORDS, MODE_ICONS, modeRowHtml } from './machine-displays.js'; // lane desktop-display-modes: a machine's several displays — the three modes
 import { enterSubmits } from './chat-enter-keys.js';
-import { endingVerdict, NEVER_SILENT } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
+import { endingVerdict, NEVER_SILENT, STREAM_LIMITS } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 import { createMicToggle, createMicCard, createSoundToggle, createSoundCard } from './stream-mic-strip.js'; // lane stream-mic-road: 「麦克风」 — the viewer's voice to the machine's apps; lane speaker-passthrough-v1: 「声音」 — the machine's sound here
 import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 on the line that states the need
@@ -568,14 +568,36 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     encoder_failed: () => t('the machine’s video encoder stopped'), no_window_source: () => t('the machine’s agent cannot stream one window yet'),
   };
   const streamWords = (code, info) => (STREAM_WHY[code] ? STREAM_WHY[code](info) : t('the machine ended it ({code})', { code: code || '?' }));
+  // lane stream-udp-leg-fallback R4: THE ROAD on the chip (src/stream-model.js streamRoadOf through the view — a relayed picture names
+  // the hub's road, a host pair says nothing more) and, when the device link carries it because the leg is dead, WHY in one line
+  // (the chip's title and once the strip's note); «reconnecting…» only when no road delivered anything
+  const ROAD_WORDS = { udp: () => t('direct UDP'), link: () => t('device link') };
+  const LEG_WHY = {
+    carried_nothing: () => t('Direct UDP sent nothing back for {s} s — the device link carries it', { s: STREAM_LIMITS.legFirstMs / 1000 }),
+    probe_lost: () => t('Direct UDP loses packets of a picture’s size — the device link carries it'),
+    flapping: () => t('Direct UDP kept dropping — the device link carries it for the rest of this stream'),
+    'firewall?': () => t('The machine gets nothing back on direct UDP (its firewall?) — the device link carries it'),
+    unreachable: () => t('The machine’s direct UDP does not reach this hub — the device link carries it'),
+    bind_failed: () => t('The machine could not open direct UDP — the device link carries it'),
+    no_socket: () => t('The machine’s agent has no direct UDP — the device link carries it'),
+    silent: () => t('Direct UDP went silent — the device link carries it'),
+  };
+  const roadOf = (v) => (v && typeof v.road === 'function' ? v.road() : null);
+  const roadWord = (rd) => (rd && ROAD_WORDS[rd.road] ? ROAD_WORDS[rd.road]() : null);
+  const whyOf = (rd) => (rd && rd.code && LEG_WHY[rd.code] ? LEG_WHY[rd.code]() : null);
+  let roadSaidFor = null, roadSaidWhy = null;
+  const sayRoad = (v, why) => { if (!why || (v === roadSaidFor && why === roadSaidWhy)) return; roadSaidFor = v; roadSaidWhy = why; note(why, why, 8000); };
+  const slowWords = (v) => { const rd = roadOf(v); return rd && rd.answered && ROAD_WORDS[rd.via] ? t('Still connecting — the {road} answers…', { road: ROAD_WORDS[rd.via]() }) : t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') }); };
   const ms = (v) => (v == null ? '—' : v);
   const drawStream = () => {
     if (!stream && many.size) { drawMany(); return; }
     const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)
-    chip.textContent = (playing ? t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · connecting…')) + (a && a.screen && a.screen.hdr ? ' · HDR' : ''); // lane stream-hdr-passthrough
-    if (!p) return;
+    const rd = roadOf(stream), road = roadWord(rd), why = whyOf(rd); // lane stream-udp-leg-fallback R4
+    chip.textContent = (playing ? (road ? t('Stream · {road} · {ms} ms · {fps} fps', { road, ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…')) + (a && a.screen && a.screen.hdr ? ' · HDR' : ''); // lane stream-hdr-passthrough
+    sayRoad(stream, why);
+    if (!p) { if (why) chip.title = [scope, why].join('\n'); return; }
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
-    chip.title = [scope, ...(words ? [words] : []), t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }), // lane stream-stats-popup: the numbers sentence, here now
+    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), t('WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps', { w: ms(p.width), h: ms(p.height), sent: ms(a && a.fps), kbps: ms(a && a.kbps) }), // lane stream-stats-popup: the numbers sentence, here now
       ...(sc && sc.floor != null && sc.kbps != null ? [t('The machine encodes it at {kbps} kbps — never under {floor} kbps for a screen this size', { kbps: sc.kbps, floor: sc.floor })] : []), // lane stream-mac-rate: THE RATE's decision, beside what the page receives
       ...(sc && sc.hdr ? [t('HDR passthrough: AV1 10-bit PQ, at the brightness the machine’s display shows')] : sc && sc.white ? [t('HDR mapped on the machine (SDR white {nits} nits)', { nits: Math.round(sc.white * 0.08) })] : []), ...(sc && sc.note === 'no_hw_encoder' ? [t('software encoding (no hardware encoder found)')] : []),
       t('Pointer: yours — the machine draws none into the picture')].join('\n'); // lane stream-cursor: no source paints the machine's
@@ -586,11 +608,14 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   const drawMany = () => {
     const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing', fps: p && p.fps, kbps: p && p.kbps }; });
     const sum = sumStats(rows), vs = [...many.values()];
-    stats.draw(vs.find((v) => v.state === 'playing') || vs[0]); // the firewall notice + the details: any playing display's (one machine, one path)
+    const lead = vs.find((v) => v.state === 'playing') || vs[0];
+    stats.draw(lead); // the firewall notice + the details: any playing display's (one machine, one path)
+    const rd = roadOf(lead), road = roadWord(rd), why = whyOf(rd); // lane stream-udp-leg-fallback R4: one machine, one road
+    sayRoad(lead, why);
     const slow = sum.slowest ? rowOf(sum.slowest.id) : null;
     const words = sum.playing ? t('{n} displays · {fps} fps · {kbps} kbps', { n: sum.playing, fps: sum.fps, kbps: sum.kbps }) + (slow ? ' · ' + t('slowest: {display} at {fps} fps', { display: `${slow.n} · ${displayName(slow)}`, fps: sum.slowest.fps }) : '') : '';
-    chip.textContent = sum.playing ? t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps }) : t('Stream · connecting…');
-    chip.title = [scope, ...(words ? [words] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
+    chip.textContent = sum.playing ? (road ? t('Stream · {road} · {n} displays · {fps} fps', { road, n: sum.playing, fps: sum.fps }) : t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…');
+    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
   };
   const inputWords = (ref) => {
     const code = ref && ref.code;
@@ -767,7 +792,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         // lane werift-lite-multihomed: NEVER SILENT before a picture too — ICE did not reach `connected` within the connect budget
         // (STREAM_LIMITS.connectMs) and the view asks an ICE restart: leg ⑥'s words, until a picture plays (before: 「连接中…」 for
         // the whole restart budget, 45 s, then the VNC picture)
-        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); }
+        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(slowWords(v)); } // lane stream-udp-leg-fallback R4: «reconnecting…» only when no road answered
         if (state === 'playing' && slowSaid) { slowSaid = false; note(''); }
         if (state === 'fallback' && v === stream && v.played && !held) held = stillOf(v, panes.pane('')); // its last picture stays through the ladder
         if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },

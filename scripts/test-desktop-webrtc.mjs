@@ -40,6 +40,15 @@
 //       minute while it carries the picture — RED CONTROL: one miss = DOWN (the .330 daemon: missMax 1) goes DOWN ≥ 3 times
 //   §14d THE STALL (lane stream-leg-flap): stallStep — a playing picture that decodes nothing for stallMs while the machine
 //       sends ⇒ stalled; a still screen (the machine sends nothing), a hidden page, a picture still decoding ⇒ never
+//   §14e THE LEG'S HEALTH, PURE (lane stream-udp-leg-fallback — 2026-10-26 the owner's Mac: «leg up» at the offer, 45 s black):
+//       the PROBE / ECHO padded to the largest datagram the leg carries (r2: legProbeBytes ≥ the leg DATA of the packetizers'
+//       largest payload in werift's own RTP packet, sealed by werift's SRTP; no probe literal — round 1's 1200 was the payload alone) and the
+//       WORD (the .358 parser drops all three; a PING flagged TRIAL is still UP to an older hub; r3: the take's number rides the
+//       flags' high bits beside every low flag, an older hub still reads UP; the daemon's tick and the hub's «still on trial»
+//       margin are derived, no literal); legElect — R1 the first
+//       datagram on a taken leg starts THE FIRST-DATA clock, nothing back for legFirstMs = dead however many PINGs; a probe's ECHO
+//       takes, a claim ('alive') never; R3 legFlapMax falls within legFlapMs pin — RED CONTROL: the .358 election stays on the
+//       leg; legVerdictOf names every reason in order; streamRoadOf (the chip's road). The loopback runs: test-stream-leg-fallback
 //   §15 THE BROWSER'S CHOICE (lane werift-lite-multihomed — a browser allowed the microphone offers every adapter, and every NEW
 //       stream stayed black): liteSessionSdp (PURE) puts werift's per-media a=ice-lite ONCE at the session level; the REAL stream
 //       host + werift in this process, the browser = two raw UDP sockets that nominate (USE-CANDIDATE) in turn: the agent's offer
@@ -413,10 +422,10 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   const changes = [], fromLeg = [];
   ok(SH.createLeg({ port: HP, key: 'short', hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null && SH.createLeg({ port: 0, key: hubKey.toString('base64'), hosts: ['10.0.0.9'] }, { socket: fakeSock, timer: false }) === null, 'a spec without a 32-byte key or a port opens no leg');
   const g = SH.createLeg({ port: HP, key: hubKey.toString('base64'), hosts: ['10.0.0.9', '127.0.0.1', 'bad host!'] }, { extra: ['hub.example'], socket: fakeSock, timer: false, now: () => clock, onChange: (x) => changes.push(x.state), onData: (ip, port, payload) => fromLeg.push([ip, port, [...payload]]) });
-  ok(g.state === 'probing' && same(sent.map((x) => `${x.ip}:${x.port}`), [`hub.example:${HP}`, `10.0.0.9:${HP}`, `127.0.0.1:${HP}`]) && SM.legParse(sent[0].b, hmac).ok && SM.legParse(sent[0].b, hmac).flags === 0, 'the first PING goes at once to the dialled host + each hub address (a malformed host skipped), authenticated, not flagged UP');
+  ok(g.state === 'probing' && same(sent.map((x) => `${x.ip}:${x.port}`), [`hub.example:${HP}`, `10.0.0.9:${HP}`, `127.0.0.1:${HP}`]) && SM.legParse(sent[0].b, hmac).ok && SM.legParse(sent[0].b, hmac).flags === SM.LEG.ANSWERS, 'the first PING goes at once to the dialled host + each hub address (a malformed host skipped), authenticated, not flagged UP (flagged ANSWERS — lane stream-udp-leg-fallback: this daemon answers the hub\'s probe)');
   clock += 120; answer(sent[1].b);
   const confirm = sent[sent.length - 1];
-  ok(g.state === 'up' && g.facts().target === `10.0.0.9:${HP}` && g.facts().rttMs === 120 && same(changes, ['up']) && confirm.ip === '10.0.0.9' && SM.legParse(confirm.b, hmac).flags === SM.LEG.UP, 'the first authenticated PONG: UP — the hub\'s address locked (10.0.0.9), its rtt 120 ms, and a PING flagged UP goes at once (the hub switches without waiting 15 s)', g.facts());
+  ok(g.state === 'up' && g.facts().target === `10.0.0.9:${HP}` && g.facts().rttMs === 120 && same(changes, ['up']) && confirm.ip === '10.0.0.9' && SM.legParse(confirm.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS), 'the first authenticated PONG (an older hub\'s: no WORDS flag): UP — the hub\'s address locked (10.0.0.9), its rtt 120 ms, and a PING flagged UP goes at once (the hub switches without waiting 15 s)', g.facts());
   answer(confirm.b);
   handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.66', port: HP });
   handlers.message(Buffer.from(SM.legData('192.168.1.5', 50000, new Uint8Array([4, 2]))), { address: '10.0.0.9', port: HP });
@@ -436,7 +445,7 @@ console.log('§14 THE UDP LEG (lane stream-relay-udp)');
   const quietWait = g.state === 'up' && sent.length === n1 + 1;
   clock += 1100; g.tick();
   const p2 = sent[sent.length - 1];
-  ok(quietWait && g.state === 'up' && g.facts().misses === 1 && sent.length === n1 + 2 && SM.legParse(p2.b, hmac).flags === SM.LEG.UP && g.send('1.2.3.4', 1, new Uint8Array([1])) === true, 'that PING unanswered for 2 s: a MISS, not a verdict (lane stream-leg-flap) — the leg stays UP and carries the picture, the next PING (flagged UP) goes at once', g.facts());
+  ok(quietWait && g.state === 'up' && g.facts().misses === 1 && sent.length === n1 + 2 && SM.legParse(p2.b, hmac).flags === (SM.LEG.UP | SM.LEG.ANSWERS) && g.send('1.2.3.4', 1, new Uint8Array([1])) === true, 'that PING unanswered for 2 s: a MISS, not a verdict (lane stream-leg-flap) — the leg stays UP and carries the picture, the next PING (flagged UP) goes at once', g.facts());
   clock += 500; answer(p1.b);
   ok(g.state === 'up' && g.facts().misses === 0 && g.facts().missed === 1 && same(changes, ['up']), 'its PONG arriving 2.6 s late still counts: the run of misses ends (missed 1 on the record)', g.facts());
   const nm = sent.length;
@@ -628,6 +637,84 @@ console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident i
   for (const [now, gone] of [[T, false], [T + 2000, false], [T + 4000, false], [T + 6000, true]]) { const x = SM.endingVerdict({ ...st, now, gone, named: true }); acts.push(x.act); st = { played: true, step: x.step, at: x.at }; }
   ok(same(acts, ['retry', 'ask', 'ask', 'ask']) && !acts.includes('fallback'), 'a stream that keeps ending (the window carries step/at): retry once, then the ask every time — the verdict never answers fallback once a picture played', acts);
 }
+console.log('§14e THE LEG\'S HEALTH, PURE (lane stream-udp-leg-fallback): the probe, the word, the first data, the damper, the verdict, the road');
+{
+  const crypto = require('node:crypto');
+  const key = crypto.randomBytes(32), hmac = (b) => crypto.createHmac('sha256', key).update(b).digest().subarray(0, 16), nonce = crypto.randomBytes(8);
+  const PB = SM.legProbeBytes();
+  const pr = SM.legControl(SM.LEG.PROBE, { counter: 7, nonce, mac: hmac, bytes: PB }), ec = SM.legControl(SM.LEG.ECHO, { counter: 7, nonce, mac: hmac, bytes: pr.length });
+  const wd = SM.legControl(SM.LEG.WORD, { flags: SM.LEG.LEAVE, counter: 2, nonce, mac: hmac });
+  const pp = SM.legParse(pr, hmac), pe = SM.legParse(ec, hmac), pw = SM.legParse(wd, hmac);
+  ok(pr.length === PB && pp.type === 'probe' && pp.ok && pp.bytes === PB && pp.counter === 7 && pe.type === 'echo' && pe.ok && pw.type === 'word' && pw.ok && pw.flags === SM.LEG.LEAVE && wd.length === 34 && !SM.legParse(pr, (b) => hmac(Buffer.concat([b, Buffer.from([1])]))).ok,
+    `the PROBE and its ECHO are padded to the largest datagram the leg carries (${PB} bytes, the mac over the head), the WORD is 34 bytes — authenticated, another key fails`);
+  // r2 THE PROBE'S SIZE from the real packetizers + werift's own wire: the largest RTP payload either packetizer writes, in werift's
+  // RTP packet with the one header extension it negotiates (transport-cc), sealed under each SRTP profile it offers, as leg DATA
+  const w = require(path.join(REPO, 'node_modules/werift')), AV1 = require(path.join(REPO, 'src/stream-av1.js'));
+  const hMax = Math.max(...H.rtpPayloads([Buffer.alloc(50000, 0x65)]).map((x) => x.payload.length));
+  const obu = Buffer.alloc(40000, 0x11), tu = Buffer.concat([Buffer.from([(6 << 3) | 2]), Buffer.from(AV1.leb128(obu.length)), obu]);
+  const aMax = Math.max(...AV1.rtpPayloads(tu).payloads.map((x) => x.payload.length));
+  const hd = new w.RtpHeader({ payloadType: 96, sequenceNumber: 9, timestamp: 9, marker: true, ssrc: 1, extension: true, extensions: [{ id: 1, payload: w.serializeTransportWideCC(65535) }] });
+  const sealed = (profile) => { const sl = profile === w.ProtectionProfileAeadAes128Gcm ? 12 : 14; return new w.SrtpSession({ keys: { localMasterKey: Buffer.alloc(16, 1), localMasterSalt: Buffer.alloc(sl, 2), remoteMasterKey: Buffer.alloc(16, 3), remoteMasterSalt: Buffer.alloc(sl, 4) }, profile }).encrypt(Buffer.alloc(Math.max(hMax, aMax), 0x5a), hd); };
+  const gcm = SM.legData('192.168.1.5', 50000, sealed(w.ProtectionProfileAeadAes128Gcm)).length, sha = SM.legData('192.168.1.5', 50000, sealed(w.ProtectionProfileAes128CmHmacSha1_80)).length;
+  const sctp = SM.LEG.dataHead + require(path.join(REPO, 'node_modules/werift/lib/sctp/src/sctp.js')).DEFAULT_SCTP_MTU + 13 + 8 + 16; // werift's SCTP packet in a DTLS 1.2 AEAD record (head 13, explicit nonce 8, tag 16)
+  ok(hMax === H.MAX_PAYLOAD && aMax <= H.MAX_PAYLOAD && AV1.MAX_PAYLOAD <= H.MAX_PAYLOAD && new w.RtpPacket(hd, Buffer.alloc(1)).serialize().length - 1 === H.RTP_OVERHEAD.header + H.RTP_OVERHEAD.extensions && gcm === PB && sha <= PB && sctp <= PB && PB === SM.LEG.dataHead + H.maxDatagram(),
+    `r2: the probe (${PB} B) is the largest leg DATA — the packetizers' largest payload (H.264 ${hMax}, AV1 ${aMax}) in werift's RTP packet with transport-cc, sealed AEAD-GCM: ${gcm} B (HMAC-SHA1-80: ${sha}, an SCTP packet in a DTLS record: ${sctp}) — derived (legProbeBytes = dataHead + maxDatagram), no second literal`);
+  ok(SM.STREAM_LIMITS.legProbeBytes === undefined && !/legProbeBytes: \d/.test(read('src/stream-model.js')), `no second literal: STREAM_LIMITS carries no probe size (round 1 wrote 1200 — the payload alone, ${gcm - 1200} bytes under a full picture packet on the leg)`);
+  ok(SM.legControl(SM.LEG.PROBE, { counter: 1, nonce, mac: hmac, bytes: SM.LEG.dataHead + SM.STREAM_LIMITS.relayMaxDatagram + 1 }) === null && SM.legParse(pr.subarray(0, 33), hmac) === null && SM.legParse(Uint8Array.from([...wd, 0]), hmac) === null, 'bounded: a probe over the datagram bound is never built; a cut one and a WORD of the wrong size never parse');
+  // THE .358 PARSER (its shape, copied): only PING / PONG at exactly 34 bytes are control — an older daemon drops what it does not know
+  const oldParse = (b) => (SM.isLegPacket(b) && b[4] !== SM.LEG.DATA ? ((b[4] !== SM.LEG.PING && b[4] !== SM.LEG.PONG) || b.length !== 34 ? null : 'control') : null);
+  const onTrial = SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS, counter: 1, nonce, mac: hmac });
+  ok(oldParse(pr) === null && oldParse(ec) === null && oldParse(wd) === null && oldParse(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP | SM.LEG.ANSWERS, counter: 1, nonce, mac: hmac })) === 'control' && oldParse(onTrial) === 'control' && (SM.legParse(onTrial, hmac).flags & SM.LEG.UP) !== 0,
+    'an older daemon\'s parser drops the probe, the echo and the word; a PING flagged ANSWERS is still a PING to it (the flag is a bit it never reads); r2: a PING flagged TRIAL is still UP to an older hub');
+  // r3 THE TAKE'S NUMBER (a re-take's trial was judged by the facts of the take before it): above the low flags, every number beside
+  // every flag a WORD or a PING carries, the packet still 34 bytes
+  const low = (1 << SM.LEG.seqShift) - 1, flagSets = [0, SM.LEG.UP, SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS, SM.LEG.TAKE | SM.LEG.TRIAL, SM.LEG.LEAVE];
+  const seqRt = [0, 1, 2, 17, SM.LEG.seqMax].every((q) => flagSets.every((f) => [SM.LEG.PING, SM.LEG.WORD].every((ty) => { const b = SM.legControl(ty, { flags: f | SM.legSeqFlags(q), counter: 1, nonce, mac: hmac }), p = SM.legParse(b, hmac); return b.length === 34 && p.ok && SM.legSeqOf(p.flags) === q && (p.flags & low) === f; })));
+  ok(seqRt && (SM.LEG.UP | SM.LEG.ANSWERS | SM.LEG.TRIAL | SM.LEG.TAKE | SM.LEG.LEAVE) <= low && SM.legSeqFlags(SM.LEG.seqMax + 1) === 0 && SM.legSeqOf(SM.LEG.UP | SM.LEG.TRIAL | SM.LEG.ANSWERS) === 0 && oldParse(SM.legControl(SM.LEG.PING, { flags: SM.LEG.UP | SM.legSeqFlags(SM.LEG.seqMax), counter: 1, nonce, mac: hmac })) === 'control',
+    `r3: the take's number (0 … ${SM.LEG.seqMax}) rides a WORD's and a PING's flags above TAKE / LEAVE / TRIAL / UP / ANSWERS — it round-trips beside each and never touches them, a flag set alone reads number 0 (an older peer's), the packet stays 34 bytes and an older hub still takes the PING`);
+  ok(SM.STREAM_LIMITS.legTickMs > 0 && /setInterval\(g\.tick, L\.legTickMs\)/.test(read('src/agentd/stream-host.js')) && /L\.legTrialMaxMs \+ L\.legTickMs \+ \(g\.rttMs \|\| 0\) \+ L\.statsMs/.test(read('src/server/desktop-webrtc.js')),
+    `r3: derived, no literal — the daemon's leg ticks every legTickMs (${SM.STREAM_LIMITS.legTickMs} ms), and the hub calls a trial «still on trial» only past legTrialMaxMs + legTickMs + the probe's round trip + statsMs`);
+  const E = SM.legElect, F1 = SM.STREAM_LIMITS.legFirstMs;
+  const taken = E({ via: 'link' }, { type: 'echo', at: 1000, why: 'leg up — probed' });
+  ok(taken.via === 'udp' && taken.changed && taken.why === 'leg up — probed' && taken.takenAt === 1000 && !E({ via: 'link' }, { type: 'alive', at: 1000 }).changed && E(taken, { type: 'alive', at: 4000 }).aliveAt === 4000,
+    'a probe\'s ECHO takes the leg (its words on the line); a claim (a PING flagged UP from a daemon that answers) never takes it — it only keeps a taken leg alive');
+  const asked = E(taken, { type: 'ask', at: 1250 }), pinged = E(E(asked, { type: 'alive', at: 3000 }), { type: 'alive', at: 7000 });
+  const j1 = E(pinged, { type: 'judge', at: 1250 + F1 - 1 }), j2 = E(pinged, { type: 'judge', at: 1250 + F1 });
+  ok(F1 === 7000 && asked.askAt === 1250 && E(asked, { type: 'ask', at: 2000 }).askAt === 1250 && !j1.changed && j2.changed && j2.via === 'link' && j2.fell === 'nothing' && j2.why === 'the leg carried nothing for 7 s' && F1 < SM.STREAM_LIMITS.connectMs,
+    `R1: the first datagram out on a taken leg starts the clock; nothing back for legFirstMs (${F1} ms — inside the page's ${SM.STREAM_LIMITS.connectMs} ms connect budget) ⇒ «the leg carried nothing for 7 s» although its PINGs kept coming — not a millisecond before`);
+  const fed = E(asked, { type: 'data', at: 1300 });
+  const fedAlive = E(fed, { type: 'alive', at: 5000 });
+  ok(fed.askAt === 0 && !E(fedAlive, { type: 'judge', at: 1250 + F1 }).changed && !E(fed, { type: 'ask', at: 1400 }).askAt && E(fed, { type: 'judge', at: 1300 + SM.STREAM_LIMITS.legDeadMs }).fell === 'silent', 'one DATA back disarms it for this take — the mid-stream silence bound judges from then on (legDeadMs after its last sign: «silent»)');
+  const BASE = (el, ev) => { const via = el.via === 'udp' ? 'udp' : 'link', aliveAt = el.aliveAt || 0, dataAt = el.dataAt || 0; if (ev.type === 'up' || ev.type === 'data') return { via: 'udp', aliveAt: ev.at, dataAt: ev.type === 'data' ? ev.at : dataAt, changed: via !== 'udp' }; if (ev.type === 'judge' && via === 'udp' && ev.at - aliveAt >= (dataAt && aliveAt - dataAt < 15000 ? 6000 : 35000)) return { via: 'link', aliveAt, dataAt, changed: true }; return { via, aliveAt, dataAt, changed: false }; };
+  let b = BASE({ via: 'link' }, { type: 'up', at: 1000 }); for (let t = 16000; t <= 46000; t += 15000) b = BASE(b, { type: 'up', at: t });
+  ok(BASE(b, { type: 'judge', at: 46000 }).via === 'udp', 'RED CONTROL — the .358 election (copied): the same leg, carrying nothing, its UP PINGs every 15 s — still elected at 45 s (the owner\'s black pane)');
+  let el = { via: 'link' }; const lines = [];
+  for (const t of [1000, 21000, 41000]) { el = E(el, { type: 'echo', at: t }); el = E(el, { type: 'ask', at: t + 250 }); const j = E(el, { type: 'judge', at: t + 250 + F1 }); lines.push(j.why); el = j; }
+  ok(el.via === 'link' && el.pinned && el.pinned.falls === 3 && el.falls.length === 3 && /^the leg carried nothing for 7 s — the device link for the rest of the session: it fell back 3 times within 2 min$/.test(lines[2]) && !E(el, { type: 'echo', at: 61000 }).changed && !E(el, { type: 'up', at: 61000 }).changed,
+    `R3: the third fall within legFlapMs (${SM.STREAM_LIMITS.legFlapMs / 60000} min) PINS the session to the device link (its line says so) — no echo or claim takes the leg again`, lines);
+  const spaced = [1000, 71000, 141000].reduce((x, t) => { const y = E(E(E(x, { type: 'echo', at: t }), { type: 'ask', at: t + 1 }), { type: 'judge', at: t + 1 + F1 }); return y; }, { via: 'link' });
+  ok(!spaced.pinned && spaced.falls.length === 2, 'falls further apart than legFlapMs never pin (two in the window)');
+  const V = SM.legVerdictOf;
+  const rows = [
+    [{ via: 'udp', echoes: 1 }, {}, 'up', null], [{ via: 'link' }, null, 'dead', 'no_socket'], [{ via: 'link', pinned: { why: 'x' } }, { bindError: 'EACCES' }, 'dead', 'bind_failed'],
+    [{ via: 'link', pinned: { why: 'it fell back 3 times within 2 min' }, fell: 'nothing' }, {}, 'dead', 'flapping'], [{ via: 'link', fell: 'nothing', probeLost: 9 }, {}, 'dead', 'carried_nothing'],
+    [{ via: 'link', probeLost: 3, pings: 4 }, { state: 'down', pings: 4, pongs: 0 }, 'dead', 'probe_lost'], [{ via: 'link', pings: 4 }, { state: 'down', pings: 4, pongs: 0 }, 'dead', 'firewall?'],
+    [{ via: 'link', pings: 0 }, { state: 'down', pings: 4, pongs: 0, lastSendError: 'EHOSTUNREACH' }, 'dead', 'unreachable'], [{ via: 'link', fell: 'silent' }, { state: 'ready', pings: 3, pongs: 3 }, 'dead', 'silent'],
+    [{ via: 'link' }, undefined, 'probing', null], [{ via: 'link', probeLost: 2 }, { state: 'ready', pings: 2, pongs: 2 }, 'probing', null],
+  ];
+  const got = rows.map(([h, d]) => V(h, d));
+  ok(rows.every(([, , st, re], i) => got[i].state === st && got[i].code === re) && /EHOSTUNREACH/.test(got[7].words) && /answered 4 of its PINGs/.test(got[6].words) && got[5].bytes === PB && new RegExp(`^the leg drops ${PB}-byte packets; 34-byte pings pass \\(3 of the hub's probes in a row never reached the machine\\)$`).test(got[5].words),
+    'legVerdictOf: up · no_socket · bind_failed · flapping · carried_nothing · probe_lost · firewall? · unreachable · silent · probing — each in its order, the words carry the counts', got.map((x) => `${x.state}:${x.code}`));
+  const R = SM.streamRoadOf;
+  const dead = { via: 'link', link: true, down: 0, leg: { pinned: null, verdict: { state: 'dead', code: 'carried_nothing' } } };
+  ok(R({ path: 'host' }, dead).road === 'direct' && R({ path: 'relay' }, { via: 'udp', down: 5, leg: { verdict: { state: 'up' } } }).road === 'udp' && R(null, { via: 'udp', down: 0 }).road === null && R(null, dead).road === 'link' && R(null, dead).code === 'carried_nothing' && !R(null, dead).answered && R(null, { ...dead, down: 3 }).answered && R({ path: 'host' }, null).answered,
+    'streamRoadOf: a host pair is direct; a relayed pair names the hub\'s road; before a pair, the device link only once the leg fell back (with its reason); «answered» = a road delivered the machine\'s datagrams');
+  const FS = SM.legFallStep, fell1 = { via: 'link', leg: { falls: 1 } };
+  const a1 = FS(0, fell1, 'connecting'), a2 = FS(a1.seen, fell1, 'connecting');
+  ok(a1.restart && a1.seen === 1 && !a2.restart && !FS(0, fell1, 'playing').restart && FS(0, fell1, 'playing').seen === 1 && !FS(0, { via: 'udp', leg: { falls: 1 } }, 'connecting').restart && !FS(0, null, 'connecting').restart && !FS(0, fell1, 'offered').restart,
+    'legFallStep: ONE more fall while the page connects ⇒ an ICE restart now (a browser gave the dead pair up); the same fall twice, a playing picture, a hub back on the leg, no record, no answer yet ⇒ none');
+}
+
 console.log('§15 THE BROWSER\'S CHOICE (lane werift-lite-multihomed — a browser allowed the microphone offers every adapter: every NEW stream stayed black)');
 {
   // liteSessionSdp (PURE): werift's placement (a=ice-lite inside each media section — no browser reads it there) → ONE session line

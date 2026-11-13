@@ -9355,6 +9355,20 @@ export default {
   "RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps": "往復 {rtt} ms · ジッタ {jitter} ms · {fps} fps · デコード {decode} ms · {kbps} kbps",
   "via the hub": "hub 経由",
   "via the hub · UDP": "hub 経由 · UDP", // lane stream-relay-udp
+  "direct UDP": "直接 UDP", // lane stream-udp-leg-fallback
+  "device link": "デバイスリンク",
+  "Stream · {road} · {ms} ms · {fps} fps": "ストリーム · {road} · {ms} ms · {fps} fps",
+  "Stream · {road} · connecting…": "ストリーム · {road} · 接続中…",
+  "Stream · {road} · {n} displays · {fps} fps": "ストリーム · {road} · ディスプレイ {n} 台 · {fps} fps",
+  "Still connecting — the {road} answers…": "まだ接続中です — {road} は応答しています…",
+  "Direct UDP sent nothing back for {s} s — the device link carries it": "直接 UDP が {s} 秒間応答しません — デバイスリンクで送ります",
+  "Direct UDP loses packets of a picture’s size — the device link carries it": "直接 UDP は画面サイズのパケットを失います — デバイスリンクで送ります",
+  "Direct UDP kept dropping — the device link carries it for the rest of this stream": "直接 UDP が何度も途切れました — このストリームは最後までデバイスリンクで送ります",
+  "The machine gets nothing back on direct UDP (its firewall?) — the device link carries it": "マシンに直接 UDP の応答が届きません（ファイアウォール？）— デバイスリンクで送ります",
+  "The machine’s direct UDP does not reach this hub — the device link carries it": "マシンの直接 UDP はこの hub に届きません — デバイスリンクで送ります",
+  "The machine could not open direct UDP — the device link carries it": "マシンは直接 UDP を開けませんでした — デバイスリンクで送ります",
+  "The machine’s agent has no direct UDP — the device link carries it": "マシンのエージェントには直接 UDP がありません — デバイスリンクで送ります",
+  "Direct UDP went silent — the device link carries it": "直接 UDP が途絶えました — デバイスリンクで送ります",
   "via the device link": "デバイスリンク経由", // lane stream-relay-udp
   "The machine’s firewall blocks the direct path; going through the hub": "マシンのファイアウォールが直接接続を遮断しているため、hub 経由で中継します", // lane stream-relay-udp
   "WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps": "マシンのエージェントからの WebRTC：{w}×{h}、送信 {sent} fps・{kbps} kbps",

@@ -35,7 +35,7 @@
 //     strip's 「声音」 — `unmute()` in the press itself (the browser's autoplay wants that gesture), then `setSound(true)` (the
 //     machine starts capturing); `soundReady` = the track is there; `onSoundReady(bool)` after each answer
 import { fetchJson } from './utils.js';
-import { STREAM_LIMITS, streamStep, fallbackVerdict, stallStep, statsOf, relayPathOf, firewallRuleCommand } from '../stream-model.js';
+import { STREAM_LIMITS, streamStep, fallbackVerdict, stallStep, statsOf, relayPathOf, streamRoadOf, legFallStep, firewallRuleCommand } from '../stream-model.js';
 import { viewerPlatform, keyMapFor, keyMessage, pointerMessage, wheelMessage } from './stream-input.js';
 import { hdrStallStep } from '../hdr-viewer.js';
 
@@ -61,6 +61,7 @@ export function createStreamView(host, opts = {}) {
   let polling = false, statsTimer = null, connectTimer = null, prev = null, page = null, agent = null, pathSent = null, pcSince = 0;
   let source = null; // the offer's source facts (a window's: {kind: 'window', window: {id, title, app, w, h, dpi, display}})
   let hubRelay = null; // lane stream-relay-udp: the hub relay's facts (the long poll's `relay` — which way it forwards: udp | link)
+  let fallsSeen = 0; // lane stream-udp-leg-fallback: the hub's leg falls this page already acted on (legFallStep)
   let map = keyMapFor(viewerPlatform(), opts.hostPlatform || null);
   let refusedSeen = null, switchSaid = 0, played = false;
   let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
@@ -181,6 +182,8 @@ export function createStreamView(host, opts = {}) {
       n = r.n || n; seq = r.seq;
       if (r.stats) { agent = r.stats; inputWords(); }
       if (r.relay !== undefined) hubRelay = r.relay;
+      const lf = legFallStep(fallsSeen, hubRelay, st.state); fallsSeen = lf.seen;
+      if (lf.restart) step('failed', 'leg_fell'); // lane stream-udp-leg-fallback R1: the hub left a leg that carried nothing before a picture — fresh checks now
       try { opts.onHandover?.(r.handover || null); } catch { /* the shell's */ } // lane desktop-handover: the lease's facts
       if (r.ended) { why = null; step('ended', r.ended === 'not_found' ? 'stream_ended' : r.ended); break; }
     }
@@ -317,6 +320,9 @@ export function createStreamView(host, opts = {}) {
     // lane stream-relay-udp: which way the picture comes (direct | udp — the hub relay over the daemon's UDP leg | link — over
     // the device link | relay) and the machine's firewall fact ({command} = the owner's admin line, null where none is safe)
     path: () => relayPathOf(page, hubRelay || (agent && agent.relay)),
+    // lane stream-udp-leg-fallback R4: THE ROAD for the window's chip — direct | udp | link, the leg's reason when it fell back,
+    // whether any road delivered the machine's datagrams (the hub's own record: the long poll's `relay`)
+    road: () => streamRoadOf(page, hubRelay),
     firewall: () => (agent && agent.directInbound && agent.directInbound.verdict === 'blocked' ? { command: firewallRuleCommand(agent.directInbound.program) } : null),
     dispose(reason = 'closed') { disposed = true; closeWhy = String(reason || 'closed'); step('close'); teardown(closeWhy); },
   };

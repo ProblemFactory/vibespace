@@ -32,6 +32,7 @@
 //     and the same display again; ended again within the minute ⇒ 「串流中断：…」 over the last picture with 「重试」 「显示 VNC 画面」
 //     and NOTHING by itself; the VNC picture only on that press; a display really gone ⇒ the main one; a switch = one session
 //     (`switched` in the hub's log) — RED CONTROL: the pre-lane fallback opens the VNC picture by itself      never-silent*.png
+//   ⑥ (lane stream-udp-leg-fallback R4: a relayed chip names its road — «串流 · 设备链路 · 2 个显示器 · …» here, the device link alone)
 //   ⑥ THE STALL (lane stream-leg-flap — the owner's Mac, 2026-10-20: both displays black at «串流 · 2 个显示器 · 0 fps» while ICE
 //     stayed connected): ② over a relay-only hub whose device-link half drops the machine's RTP (a black hole — STUN, DTLS,
 //     RTCP pass) ⇒ the chip reads the owner's 0 fps; within stallMs each pane says 「串流中断：画面不再传过来——正在重新连接…」,
@@ -648,12 +649,12 @@ console.log('⑥ THE STALL (lane stream-leg-flap — the owner\'s two displays s
     const first = (await live()).map((s) => s.key);
     const vncAt = vnc.seen.conns, l0 = hubLines.length;
     hole.armed = true; const t0 = Date.now();
-    const black = await p.until(`/^串流 · 2 个显示器 · 0 fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 9000);
+    const black = await p.until(`/^串流 · (?:设备链路 · )?2 个显示器 · 0 fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 9000);
     const blackChip = await chip();
     const said = await p.until(`[...document.querySelectorAll('${WIN} .desktop-display-say span')].filter((s) => /^串流中断：画面不再传过来——正在重新连接…$/.test(s.textContent)).length === 2`, SM.STREAM_LIMITS.stallMs + 6000);
     const saidMs = Date.now() - t0, saidWords = await says();
     const again = said && (await untilN(async () => { const l = await live(); return l.length === 2 && l.every((s) => !first.includes(s.key)); }, 15000)) && (await p.until(`[...document.querySelectorAll('${WIN} .stream-video')].filter((v) => v.videoWidth === 1280 && v.currentTime > 0.2).length === 2 && !document.querySelector('${WIN} .desktop-display-say')`, 25000));
-    if (again) await p.until(`/^串流 · 2 个显示器 · [1-9]\\d* fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 8000); // the new views' first second of numbers
+    if (again) await p.until(`/^串流 · (?:设备链路 · )?2 个显示器 · [1-9]\\d* fps$/.test((document.querySelector('${WIN} .desktop-strip-status') || {}).textContent || '')`, 8000); // the new views' first second of numbers
     const lines = hubLines.slice(l0);
     const r = { both, black, blackChip, said, saidMs, saidWords, again, stalled: lines.filter((l) => / stopped \(stalled\)$/.test(l)).length, offered: lines.filter((l) => / offered \(/.test(l)).length, dropped: hole.dropped, vnc: vnc.seen.conns - vncAt, chip: await chip() };
     if (at === '/') await p.shot('stall.png', WIN);
@@ -664,9 +665,9 @@ console.log('⑥ THE STALL (lane stream-leg-flap — the owner\'s two displays s
   const S = await stallRun('/');
   ok(S.both && S.black && S.dropped > 100, `② both displays play over the relay; the machine's pictures then fall into the black hole (${S.dropped} RTP datagrams dropped, ICE still connected) — the chip reads the owner's «${S.blackChip}»`, S);
   ok(S.said && S.saidMs >= SM.STREAM_LIMITS.stallMs - 2000 && S.saidMs <= SM.STREAM_LIMITS.stallMs + 6000 && S.stalled === 2, `THE STALL: ${S.saidMs} ms after the pictures stopped (stallMs ${SM.STREAM_LIMITS.stallMs}) each pane says 「串流中断：画面不再传过来——正在重新连接…」 and both sessions end «stopped (stalled)» on the hub's record`, S);
-  ok(S.again && S.offered === 2 && S.vnc === 0 && /^串流 · 2 个显示器 · [1-9]\d* fps$/.test(S.chip), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
+  ok(S.again && S.offered === 2 && S.vnc === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · [1-9]\d* fps$/.test(S.chip), `…and the window offers both displays again BY ITSELF (2 new sessions), both play, the words go — no VNC picture, nothing to press (${S.chip})`, S);
   const C = await stallRun('/nostall');
-  ok(C.both && C.black && !C.said && C.stalled === 0 && C.offered === 0 && /^串流 · 2 个显示器 · 0 fps$/.test(C.chip), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
+  ok(C.both && C.black && !C.said && C.stalled === 0 && C.offered === 0 && /^串流 · (?:设备链路 · )?2 个显示器 · 0 fps$/.test(C.chip), `RED CONTROL — the page without THE STALL rule in the same black hole: «${C.chip}» ${Math.round((SM.STREAM_LIMITS.stallMs + 6000) / 1000)} s on, nothing said, no session ended or offered (the owner's window)`, C);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
