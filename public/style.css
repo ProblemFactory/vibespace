@@ -4512,8 +4512,8 @@ label.cfg-row {
 /* lane ui-controls-and-bugs — THE WRITE-ONLY LAW: a held OAuth token is ONE sign-in line with its Re-authorize door, never a box */
 .mounts-signin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; margin-top: 2px; }
 .mounts-signin-state { font-size: 12px; font-weight: 600; }
-.mounts-signin-state.on { color: var(--ok-text, var(--green, #3fb950)); }
-.mounts-signin-state.off { color: var(--warn-text, var(--yellow, #e5c07b)); }
+.mounts-signin-state.on { color: var(--green); }
+.mounts-signin-state.off { color: var(--yellow); }
 .mounts-held { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; margin-top: 2px; }
 .mounts-held-state { font-size: 12px; color: var(--text-secondary); }
 .mounts-held-replace[hidden], .mounts-form [name][hidden] { display: none; }

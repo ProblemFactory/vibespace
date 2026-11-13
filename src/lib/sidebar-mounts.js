@@ -110,11 +110,15 @@ function maskVaultFields(fields, cfg) {
  *  record's secrets come back only NAMED in `cfg.held`, never as bytes. A held secret is «已保存» with «替换…», which opens an EMPTY
  *  box sent only when typed (the Integrations page's shape); an unset one is an empty password box; the OAuth token is ONE line
  *  «已授权 · Google Drive»; its Re-authorize door stays in the footer, as the channel Edit's (`door`: the row has one — a row
- *  without one gets «替换…» to paste a new token). SECRET_FIELD = the cells the server seals (+ a raw rclone parameter by the server's own name rule). */
-const SECRET_FIELD = (k) => /^(token|clientSecret|secretKey|sessionToken|pass|bearerToken|cephSecret)$/.test(k)
-  || (/^(param|extraParams):/.test(k) && /(^|_)(token|secret|pass(word)?\d*|key|sas_url|credentials|pem)(_|$)/i.test(k.split(':')[1]) && !/(_id|_file|_path)$/i.test(k));
+ *  without one gets «替换…» to paste a new token). A secret field = a cell the server seals, or a raw rclone parameter the server
+ *  names in `secretParams` (its own rule — the page keeps no copy); a held parameter also has «删除». */
+const SECRET_CELL = (k) => /^(token|clientSecret|secretKey|sessionToken|pass|bearerToken|cephSecret)$/.test(k);
 function heldFields(fields, cfg, provider, door) {
   const held = new Set(Array.isArray(cfg && cfg.held) ? cfg.held : []);
+  // a raw rclone parameter is secret by THE SERVER'S rule (src/mounts.js SECRET_PARAM — every parameter but the plain ones):
+  // it names each one it blanked in `secretParams`, so the page never keeps a second copy of the rule (the acceptance reader)
+  const secretParams = new Set(Array.isArray(cfg && cfg.secretParams) ? cfg.secretParams : []);
+  const SECRET_FIELD = (k) => SECRET_CELL(k) || secretParams.has(k);
   const replaceBtn = `<button type="button" class="mounts-btn mounts-held-replace">${escHtml(tr('Replace…'))}</button>`;
   for (const f of fields) {
     const k = f[0];
@@ -126,14 +130,25 @@ function heldFields(fields, cfg, provider, door) {
       f[3] = '';
     } else if (SECRET_FIELD(k)) {
       const box = `<input type="password" name="${escHtml(k)}" value="" placeholder="${escHtml(tr('Type the new value'))}" autocomplete="new-password"${held.has(k) ? ' hidden' : ''}>`;
-      f[4] = { html: held.has(k) ? `<label>${escHtml(f[1])}<span class="mounts-held"><span class="mounts-held-state">${escHtml(tr('Saved'))}</span>${replaceBtn}</span>${box}</label>` : `<label>${escHtml(f[1])}${box}</label>` };
+      // a held rclone PARAMETER can also be removed (the dialog's «clear a parameter's value to remove it» stays true): «删除»
+      // marks it, the submit sends the empty value the server deletes on
+      const removeBtn = /^param:/.test(k) ? `<button type="button" class="mounts-btn mounts-held-remove">${escHtml(tr('Remove'))}</button>` : '';
+      f[4] = { html: held.has(k) ? `<label>${escHtml(f[1])}<span class="mounts-held"><span class="mounts-held-state">${escHtml(tr('Saved'))}</span>${replaceBtn}${removeBtn}</span>${box}</label>` : `<label>${escHtml(f[1])}${box}</label>` };
       f[3] = '';
     }
   }
 }
-/** «替换…» opens its field's empty box (one delegated listener per form). */
+/** «替换…» opens its field's empty box; «删除» marks a held parameter for removal (one delegated listener per form). */
 function wireHeld(form) {
   form.addEventListener('click', (e) => {
+    const rm = e.target.closest('.mounts-held-remove');
+    if (rm) {
+      e.preventDefault(); const lab = rm.closest('label'), box = lab.querySelector('[name]');
+      if (box) { box.dataset.remove = '1'; box.value = ''; box.hidden = true; }
+      const st = lab.querySelector('.mounts-held-state'); if (st) st.textContent = tr('Removed when you save');
+      lab.querySelectorAll('.mounts-held-replace, .mounts-held-remove').forEach((x) => { x.hidden = true; });
+      return;
+    }
     const b = e.target.closest('.mounts-held-replace'); if (!b) return;
     e.preventDefault(); const box = b.closest('label').querySelector('[name]');
     if (box) { box.hidden = false; box.focus(); } b.hidden = true;
@@ -2661,7 +2676,8 @@ export function installSidebarMounts(Sidebar) {
           if (k.startsWith('param:')) {
             // prefilled with the current value; clearing it removes the
             // parameter (server deletes on empty), any other change updates it.
-            if (v !== orig) params[k.slice(6)] = v;
+            if (box.dataset.remove === '1') params[k.slice(6)] = '';   // «删除» on a held parameter: the server deletes on empty
+            else if (v !== orig) params[k.slice(6)] = v;
           }
           else if (k === 'newParamKey') newKey = v.trim();
           else if (k === 'newParamValue') newVal = v;

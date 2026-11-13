@@ -192,10 +192,11 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     // lane ui-controls-and-bugs (THE WRITE-ONLY LAW, src/mounts.js writeOnly; 主开发's ruling 2026-11-13): config() answers no SECRET —
     // every cell the record seals (the scenario's own `rec` names them: `<k>Enc`) and a secret-named rclone parameter — and names them in
     // `held`: the named delta, applied to the base's answer from the record beside it (and proven real)
-    const LAW = (f) => { const c = JSON.parse(JSON.stringify(f.config)), held = [];
+    // (+ `secretParams`, the reader's round: every write-only parameter field named, set or not — the page draws them from it)
+    const LAW = (f) => { const c = JSON.parse(JSON.stringify(f.config)), held = [], secretParams = [];
       for (const [k, v] of Object.entries(f.rec || {})) if (/Enc$/.test(k) && typeof v === 'string') { delete c[k.slice(0, -3)]; if (v !== 'dec:') held.push(k.slice(0, -3)); }
-      for (const [bag, pre] of [['params', 'param:'], ['extraParams', 'extraParams:']]) if (c[bag] && typeof c[bag] === 'object') for (const q of Object.keys(c[bag])) if (MountManager.SECRET_PARAM(q)) { if (c[bag][q]) held.push(pre + q); c[bag][q] = ''; }
-      if (held.length) c.held = held; return { ...f, config: c }; };
+      for (const [bag, pre] of [['params', 'param:'], ['extraParams', 'extraParams:']]) if (c[bag] && typeof c[bag] === 'object') for (const q of Object.keys(c[bag])) if (MountManager.SECRET_PARAM(q, c[bag][q])) { secretParams.push(pre + q); if (c[bag][q]) held.push(pre + q); c[bag][q] = ''; }
+      if (held.length) c.held = held; if (secretParams.length) c.secretParams = secretParams; return { ...f, config: c }; };
     const lawed = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'rec' in v && v.config && typeof v.config === 'object' && 'type' in v.config ? LAW(v) : v)));
     const lawedN = before.filter((b) => JSON.stringify(lawed(b)) !== JSON.stringify(b)).length;
     ok(lawedN > 0, `③ the write-only delta is real: ${lawedN} scenarios' base config() answered a secret the tree now only names in \`held\``);
