@@ -293,6 +293,27 @@ console.log('— ⑩ every row\'s class equals the committed snapshot the census
   for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: 2, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
 }
 
+// ═══ ⑪ the method-name SHAPE, as a FAST pin (主开发's .400 merged-tip read: the regex given the m flag let «Evil.x NEWLINE forged line»
+//     through — refused unclassified, written into the journal — and every FAST suite stayed green; only heavy test-browser-mediation claimed it)
+console.log('— ⑪ a method name is judged for SHAPE first on the no-row branch: a newline, a NUL, a trailing space, 101 characters ⇒ bad_message in both driving states');
+{
+  const BAD = ['Evil.x\nforged line', 'DOM.get\u0000x', 'DOM.getDocument ', 'DOM.' + 'x'.repeat(97)];   // (test data names no navigation: the onboarding census reads a file with that literal as a suite that navigates)
+  ok(BAD.every((m) => !M.methodShaped(m)) && BAD[3].length === 101 && M.methodShaped('DOM.getDocument') && M.methodShaped('VibeSpace.getVersion') && M.methodShaped('DOM.' + 'x'.repeat(96)) && M.METHOD_NAME_MAX === 100,
+    '⑪ methodShaped: false for a newline, a NUL, a trailing space and 101 characters; true for a CDP name, 100 characters the bound');
+  ok(BAD.every((m) => [false, true].every((p) => { const v = M.judge({ id: 30, method: m, params: {} }, scope(), { paused: p }); return v.kind === 'refuse' && v.why === 'malformed' && M.refusalCodeOf(v.reply) === 'bad_message' && !/[\n\u0000]/.test(v.reply.error.message) && v.reply.error.message.length < 400; })),
+    '⑪ judge answers bad_message in BOTH driving states — the words one line, an escaped head only');
+  // RED CONTROL: the m flag planted in a copy of src/browser-mediation.js — «Evil.x NEWLINE forged line» then passes the shape and is refused unclassified
+  const MUT11 = mutantCopies('cdp-census-shape', REPO);
+  const medSrc11 = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
+  const shapeA = 'const METHOD_NAME_SHAPE = /^[A-Za-z][A-Za-z0-9]*\\.[A-Za-z][A-Za-z0-9]*$/;';
+  ok(medSrc11.split(shapeA).length === 2, '⑪ control setup: the shape is spelled once in src/browser-mediation.js');
+  const Mm = MUT11.load('src/browser-mediation.js', medSrc11.replace(shapeA, shapeA.replace('$/;', '$/m;')).replace("require('./cdp-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/cdp-census.js'))})`), 'shape-m-flag');
+  const vm = Mm.judge({ id: 31, method: BAD[0], params: {} }, scope(), {});
+  ok(Mm.methodShaped(BAD[0]) === true && Mm.refusalCodeOf(vm.reply) === 'method_unclassified',
+    '⑪ CONTROL (the m flag planted in a copy): «Evil.x NEWLINE forged line» passes the shape and is refused method_unclassified, not bad_message — the two legs above are RED on it', JSON.stringify({ shaped: Mm.methodShaped(BAD[0]), code: Mm.refusalCodeOf(vm.reply) }));
+  for (const r of copiesCensus(MUT11.files, MUT11.dir, REPO, { minCopies: 1, label: '⑪ ' })) ok(r.pass, r.name, r.detail);
+}
+
 // ═══ CONTROLS ═══════════════════════════════════════════════════════════════
 console.log('— CONTROLS: patched census copies — a new row removed, an until mark dropped, a surviving row mis-marked, a chrome mark dropped, a view classed read');
 {

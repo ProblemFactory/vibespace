@@ -775,11 +775,12 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   something of yours was interrupted or refused; otherwise it reaches you as a
   notice on your next turn. Only one view holds the browser at a time: a second
   view's Take over is refused `held` while the first is live. A method
-  VibeSpace's CDP census has no row for (a newer Chrome's, or one no Chrome
-  has) answers `method_unclassified` on a separate-tabs connection WHOEVER
-  drives: the refusal names the method and the browser, and there is no way
-  round it — a VibeSpace update that classes the method lifts it, so do not
-  retry it after the handback. A name that is not a CDP method's shape
+  VibeSpace's CDP census has no row for (a newer Chrome's, an OLDER Chrome's,
+  or one no Chrome has) answers `method_unclassified` on a separate-tabs
+  connection WHOEVER drives: the refusal names the method and the browser, and
+  there is no way round it — a VibeSpace update that classes the method lifts
+  it. Do not retry it (not after the handback either); tell the user which
+  method was refused and on which browser, so the census can be extended. A name that is not a CDP method's shape
   (`Domain.method`, letters and digits) answers `bad_message`.
 
 ### A Background Work job uses your browser as you

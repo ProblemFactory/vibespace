@@ -2310,10 +2310,19 @@ class comes from ONE row per method of each censused Chrome's own
   `Page.getSubApps` / `getSiblingSubApps` read; the five Private
   Verification Token verbs classed like the Trust Token pair;
   `Storage.getRelatedWebsiteSets` kept, marked `until`.
+- **157.0.8103.50** (lane chrome-157, 2026-11-12; one .397 mirror shard ran on
+  the 157 image, read on Chrome for Testing 157): +3 −0 — `CSS.forcePositionTryOption`
+  page-mutation (measured: the anchored element moves, the page's script sees it);
+  `Page.setInputVisualization` view (a click changes the picture, the DOM unchanged);
+  `Page.getSpellCheckCustomDictionary` read on the vendor's own description (NOT
+  measured: stock 157 answers [] whatever the profile holds).
 
-A newer Chrome's methods with no row are refused BY NAME while the user
-drives, and test-browser-mediation-chrome ⑥ prints them and fails until they
-are classed. When the runner's Chrome moves before this box's, get that
+A method with no row (a newer Chrome's, or an OLDER one's — the fleet's
+Chrome 149–152 list 6–12 the census never read) is refused BY NAME on every
+mediated lease, WHOEVER drives (`method_unclassified`, lane chrome-157; a name
+that is not `Domain.method` in letters and digits, at most 100 characters, is
+`bad_message` and nothing of it is kept), and test-browser-mediation-chrome ⑥
+prints a newer Chrome's and fails until they are classed. When the runner's Chrome moves before this box's, get that
 version's Chrome for Testing build, run `scripts/cdp-protocol-fetch.mjs
 --chrome <it>` and the suite with `--chrome <it>`. Gates: test-cdp-census
 (fast), test-browser-mediation ⑥, test-browser-mediation-chrome ⑥ (heavy).
