@@ -1120,6 +1120,22 @@ export function attachPopoverClose(popover, ...excludeEls) {
  * @param {string} className - CSS class (also used to remove duplicates)
  * @param {object} [opts] - { parent, position: 'below'|'cursor', x, y, toggle: false (a programmatic rebuild) }
  */
+/** ONE LATEST RENDER of an async panel (lane ui-controls-and-bugs — the walk found the Ports panel drawn TWICE: its render cleared,
+ *  awaited, then appended, so two overlapping calls each appended a copy). `build(out)` fills a DETACHED element; when it ends, a
+ *  newer call has not started since and the container is still in the page, ONE replaceChildren lands it — else it is dropped.
+ *  → `render()`, to call as often as broadcasts and buttons want. (scripts/test-control-says-why.mjs pins the rule.) */
+export function latestRender(container, build) {
+  let gen = 0;
+  return async () => {
+    const mine = ++gen;
+    if (!container.isConnected) return false;
+    const out = document.createElement('div');
+    await build(out);
+    if (mine !== gen || !container.isConnected) return false;
+    container.replaceChildren(...out.childNodes);
+    return true;
+  };
+}
 export function createPopover(anchor, className, opts = {}) {
   // THE ANCHOR TOGGLES (lane menu-close-residue, B-5bd5 ②): the dedup already knows the open popover of this class —
   // when it hangs off THIS anchor, this call is the anchor pressed again (the anchor is exempt from the closer, so the
