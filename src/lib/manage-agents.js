@@ -22,6 +22,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 }
 import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
+import { needLine, pairDoor } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
@@ -2506,8 +2507,11 @@ export function installManageAgents(App, ctx = {}) {
         // distinction (2.268.4, user report) — the machine-wide login demotes
         // into the Add-account menu then ("Log in machine-wide…"); a machine
         // with NO named accounts keeps the button (it IS the primary path).
-        if (info.installed && !info.loggedIn && !(b.key === 'claude' && !selectedHost && info.namedLoggedIn > 0)) {
-          const loginBtn = document.createElement('button'); loginBtn.className = 'agent-btn primary'; loginBtn.textContent = t('Log in');
+        // lane ui-needs-a-button (agents-accounts-8): with named accounts in use the machine login stays ON its row — a quiet
+        // «Log in on this machine…» (two green look-alikes were the 2.268.4 report), never only the last item of a menu
+        const quietLogin = b.key === 'claude' && !selectedHost && info.namedLoggedIn > 0;
+        if (info.installed && !info.loggedIn) {
+          const loginBtn = document.createElement('button'); loginBtn.className = quietLogin ? 'agent-btn' : 'agent-btn primary'; loginBtn.textContent = quietLogin ? t('Log in on this machine…') : t('Log in');
           loginBtn.title = selectedHost ? t('Logs in ON the selected remote host (its own login, not VibeSpace)') : '';
           loginBtn.onclick = () => run(selectedHost && b.remoteLoginCmd ? b.remoteLoginCmd : absCmd(b.loginCmd), { signIn: true });
           actions.appendChild(loginBtn);
@@ -2875,10 +2879,9 @@ export function installManageAgents(App, ctx = {}) {
         fills.push(renderMachine(mkSection('', ''), '', null, null, stale));
       } else if (tab === 'machines') {
         if (!hostsList.length) {
-          const eh = document.createElement('div');
-          eh.className = 'empty-hint';
-          eh.textContent = t('No machines yet — add an SSH host or pair a device in the Remote tab.');
-          body.appendChild(eh);
+          // lane ui-needs-a-button (agents-accounts-6): the two ways are DOORS on the line, never «in the Remote tab»
+          const addSsh = { label: t('Add an SSH machine…'), kind: 'primary', door: 'add-ssh-host', run: async () => { const hd = await fetchJson('/api/hosts').catch(() => null); if (hd && hd.key && this.sidebar && typeof this.sidebar._showAddHostDialog === 'function') this.sidebar._showAddHostDialog(hd); } };
+          body.appendChild(needLine({ words: t('No machines yet — add an SSH machine or pair a device.'), cls: 'empty-hint', doors: [addSsh, pairDoor(this, null, { kind: 'secondary' })] }));
         }
         // Accordion: one collapsible card per host; the ssh/dial probe runs
         // LAZILY on first expand (opening the dialog no longer fans probes to
@@ -3529,7 +3532,7 @@ export function installManageAgents(App, ctx = {}) {
       if (!selectedHost && st?.claude?.installed && !st.claude.loggedIn && (st.claude.namedLoggedIn || 0) > 0) {
         const cmd = st.claude.cmdPath ? `"${st.claude.cmdPath}"` : 'claude';
         items.push({ separator: true }, {
-          label: t('Log in machine-wide (claude /login)…'),
+          label: t('Log in on this machine…'),
           action: () => { done(); run(cmd); },
         });
       }

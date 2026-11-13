@@ -1207,7 +1207,11 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
         const b = textBtn(pkw.cancel, () => { if (st.passkeyCancelling) return; st.passkeyCancelling = true; renderDialog(); send({ type: 'passkey-cancel' }); }, 'browser-live-dialog-dismiss browser-live-passkey-cancel');
         b.disabled = !!st.passkeyCancelling;
-        acts.append(b); dialogBar.append(acts);
+        acts.append(b);
+        // lane ui-needs-a-button (browser-live-13): «Passkey settings…» — the Agent browser panel at this profile, its Passkeys open
+        const pid = st.target && st.target.profileId ? st.target.profileId : null;
+        if (pkw.settings && pid && typeof app.openBrowserProfiles === 'function') acts.append(textBtn(pkw.settings, () => app.openBrowserProfiles({ focus: pid, open: 'passkeys' }), 'browser-live-dialog-dismiss browser-live-passkey-settings'));
+        dialogBar.append(acts);
       }
       dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true); dialogBar.classList.toggle('blind', false); // acceptance r1: an unknown line before it left the quiet look on (an urgent banner painted grey)
       return;

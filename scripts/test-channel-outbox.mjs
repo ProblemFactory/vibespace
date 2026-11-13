@@ -3720,7 +3720,7 @@ async function chatReadLegs(ENGmod, name) {
             ['src/lib/channel-outbox.js', 'c.app.openChannelOutbox() })', 'outside', '⚙ command «Outbox…»'],
             ['src/lib/channel-outbox.js', 'run: (c) => c.app.openChannelOutbox(),', 'outside', '⚙ menu «Outbox…»'],
             ['src/lib/channels-panel.js', '() => app.openChannelOutbox()', 'outside', 'the rail panel\'s Outbox button'],
-            ['src/lib/channel-account-dialogs.js', 'close(); app.openChannelOutbox();', 'outside', 'an account dialog\'s «Open Outbox»'],
+            ['src/lib/channel-account-dialogs.js', "door: 'outbox', run: open(() => app.openChannelOutbox())", 'outside', 'an account dialog\'s «Open Outbox» (an outbox reference\'s door — lane ui-needs-a-button)'],
           ];
           const files = [...new Set(DOORS.map((d) => d[0]))];
           const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));

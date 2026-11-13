@@ -188,6 +188,14 @@ export function dialReasonText(reason) {
 // naive-user L-time: the DEVICE's locale (i18n.js deviceLocale — the one Intl tag every surface prints dates with), never
 // the browser's own: a zh page on an en-US browser read "最近一次拨号：被拒绝（令牌不匹配），04:24 PM"
 const hhmm = (ms) => when(ms, { words: true });   // every use is inside a sentence or a «{time} · …» line: the words form
+/** lane ui-needs-a-button (machines-6): an OFFLINE row's state, SHORT — the row draws it with the pairing sheet's door on its
+ *  line and folds the whole sentence (dialStateText: what to check) under it. '' = the row says the whole sentence. */
+export function dialStateShort(rs) {
+  if (!rs) return '';
+  if (rs.state === 'silent') return t('Offline since {time}', { time: rs.at ? hhmm(rs.at) : '' });
+  if (rs.state === 'never') return t('Never connected');
+  return '';
+}
 /** THE sentence of a dial row state (PURE dialRowState's structure → words; the device's own language). */
 export function dialStateText(rs) {
   const base = dialStateBase(rs);

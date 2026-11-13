@@ -436,12 +436,14 @@ export async function showSendToCallersDialog(app, slug, { title = '' } = {}) {
   m.body.appendChild(el('div', 'chan-q', t('To')));
   m.body.appendChild(allLab);
   for (const pk of picks) {
-    const lab = el('label', 'dialog-check-row chan-wh-pick' + (pk.disabled ? ' chan-wh-pick-off' : ''));
-    const b = document.createElement('input'); b.type = 'checkbox'; b.disabled = pk.disabled; b.dataset.whPick = pk.id;
+    // lane ui-needs-a-button (channels-groups-outbox-2): a caller that takes no replies is NOT a greyed box — its name, why, and
+    // the door that changes it (Callers…, where its delivery is set)
+    if (pk.disabled) { m.body.appendChild(needLine({ words: `${pk.name} — ${pk.why}`, tone: 'off', cls: 'chan-wh-pick chan-wh-pick-off', doors: [{ label: t('Change delivery…'), kind: 'secondary', door: 'callers', run: () => { m.close(); showCallersDialog(app, slug, { adapterId: 'webhook', title }); } }] })); continue; }
+    const lab = el('label', 'dialog-check-row chan-wh-pick');
+    const b = document.createElement('input'); b.type = 'checkbox'; b.dataset.whPick = pk.id;
     lab.append(b, el('span', '', pk.name));
-    if (pk.why) lab.appendChild(el('span', 'chan-wh-why', pk.why));
     m.body.appendChild(lab);
-    if (!pk.disabled) boxes.push(b);
+    boxes.push(b);
   }
   if (!picks.length) m.body.appendChild(whNote(t('This path has no caller yet.'), true));
   all.disabled = !boxes.length;

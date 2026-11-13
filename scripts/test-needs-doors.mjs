@@ -772,6 +772,63 @@ console.log('⑦ THE RELEASE FACTS (verifier #4 / #5)');
     `verifier #5: CHANGELOG ${en.head} «Fixed» says what a user of the release notices — no bullet names a door this version adds (${en.fixed.length} bullets, the same in zh / ja)`, { named, counts: [en.fixed.length, zh.fixed.length, ja.fixed.length] });
 }
 
+console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 3)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const imp = (f) => import(pathToFileURL(path.join(REPO, f)).href);
+  // machines-6: an offline device's state SHORT (the row draws the pairing sheet's door beside it; the whole sentence folded)
+  const DA = await imp('src/lib/dial-address-picker.js');
+  const short = typeof DA.dialStateShort === 'function' ? [DA.dialStateShort({ state: 'silent', at: Date.now(), host: 'h' }), DA.dialStateShort({ state: 'never', at: Date.now() }), DA.dialStateShort({ state: 'connected', at: Date.now() })] : [];
+  const SM = src('src/lib/sidebar-mounts.js');
+  ok(/^Offline since \S/.test(short[0] || '') && short[1] === 'Never connected' && short[2] === '' && /const shortOff = dialStateShort\(rs\);[\s\S]{0,300}doors: \[pairDoor\(this\.app, h, \{ kind: 'secondary' \}\)\][\s\S]{0,300}tx\.textContent = dialWords/.test(SM),
+    'machines-6: an offline device says «Offline since …» / «Never connected» with «Show the pairing command…» on the row; what to check is folded under it', short);
+  const NL = src('src/lib/need-line.js');
+  ok(/export function pairDoor\(app, host = null/.test(NL) && /run: \(\) => sb\._showDevicePairDialog\(host \|\| null\)/.test(NL),
+    'need-line: pairDoor opens THE pairing sheet (pair-dialog-polish\'s dialog, never changed) — that machine\'s, or a new pairing');
+  ok(/doors: \[pairDoor\(this\.app, h, \{ kind: 'primary' \}\)/.test(SM) && /copy\.className = 'btn-cancel'; copy\.textContent = tr\('Copy'\)/.test(SM),
+    'machines-29: «Show the pairing command…» is the primary of the elevate dialog; the PowerShell recipe\'s Copy the second way');
+  ok(/if \(!h\.dialLive\) \{[\s\S]{0,200}dataset\.door = 'dial-reinstall'[\s\S]{0,200}this\._showGraduateDialog\(\{ \.\.\.h, graduated: false \}\)/.test(SM) && /rm\.className = h\.dialLive \? 'btn-create danger' : 'btn-cancel danger'/.test(SM),
+    'machines-27: installed but not dialed in ⇒ «Reinstall…» (the install form again) is the primary, «Remove dial-out» a secondary danger');
+  ok(/_offlineMountNeed\(h\) \{[\s\S]{0,400}rs\.state === 'connected'\) return;[\s\S]{0,200}ctx\.body\.prepend\(needLine/.test(SM) && /this\._offlineMountNeed\(h\); \/\/ lane ui-needs-a-button \(storage-5\)/.test(SM),
+    'storage-5: a mount onto a dial machine that is not connected says so first, with its pairing sheet on the line (Mount stays live)');
+  ok(/if \(e && e\.code === 'host-name-taken'\) e\.door = this\._hostRowDoor\(v\.name, close\)/.test(SM) && /e\.door && typeof e\.door\.run === 'function'\) err\.append\(' ', needDoorButton\(e\.door\)\)/.test(src('src/lib/mounts-dialog.js')),
+    'machines-12: a name already taken (ui-language\'s code host-name-taken) carries «Open that machine» on the error line');
+  // agents-accounts-6 / -8
+  const MA = src('src/lib/manage-agents.js');
+  ok(/needLine\(\{ words: t\('No machines yet — add an SSH machine or pair a device\.'\)[\s\S]{0,80}doors: \[addSsh, pairDoor\(this, null/.test(MA) && !/t\('No machines yet — add an SSH host or pair a device in the Remote tab\.'\)/.test(MA),
+    'agents-accounts-6: no machine yet — «Add an SSH machine…» and «Pair a device…» on the line, never «in the Remote tab»');
+  ok(/if \(info\.installed && !info\.loggedIn\) \{[\s\S]{0,200}quietLogin \? t\('Log in on this machine…'\)/.test(MA) && !/claude \/login\)…'\)/.test(MA),
+    'agents-accounts-8: the machine login stays a door on its row (quiet beside the named accounts); the menu item names no command');
+  // gear-and-system-12
+  const AP = src('src/lib/app.js');
+  ok(/\]\.filter\(Boolean\);\n\s*if \(sensRows\.length\) sensWrap\.append\(\.\.\.sensRows\);/.test(AP) && /door: 'set-password', run: \(\) => this\._showPasswordDialog\(\)/.test(AP) && !/disabled: !info\.sensitive\./.test(AP),
+    'gear-and-system-12: only the sensitive data that exists is a row (no greyed rows); none ⇒ one line; no password ⇒ «Set a password…»');
+  // channels-accounts-4 / outbox-2 / policy-7 / policy-1
+  const CA = src('src/lib/channel-account-dialogs.js');
+  ok(/function refDoor\(app, a, ref, close\)/.test(CA) && /showGrantAccessDialog\(app, target\)/.test(CA) && /showAccountReachDialog\(app, a\)/.test(CA) && /disc\.dataset\.door = 'disconnect'/.test(CA) && !/same rule as a credential with submounts/.test(CA),
+    'channels-accounts-4: each reference carries «Release…» (its Grant access / Reach & policy), «Disconnect» sits beside them; the rule\'s echo is gone');
+  const WV = await imp('src/lib/webhook-view.js');
+  const pk = typeof WV.pickerRows === 'function' ? WV.pickerRows([{ id: 'c1', name: 'Billing', delivery: { mode: 'none' } }, { id: 'c2', name: 'Ops', delivery: { mode: 'reply-url' } }]) : [];
+  ok(pk.length === 2 && pk[0].disabled && pk[0].why === 'takes no replies' && /if \(pk\.disabled\) \{ m\.body\.appendChild\(needLine\([\s\S]{0,200}door: 'callers', run: \(\) => \{ m\.close\(\); showCallersDialog\(app, slug/.test(src('src/lib/channel-webhook.js')),
+    'channels-groups-outbox-2: a caller that takes no replies is its line with «Change delivery…» (Callers…), never a greyed box', pk);
+  const CP = require(path.join(REPO, 'src/channel-policy.js'));
+  const d1 = typeof CP.policyDoorOf === 'function' ? CP.policyDoorOf({ grain: 'conversation', source: 'conversation' }) : null, d2 = d1 ? CP.policyDoorOf({ grain: 'conversation', source: 'account' }) : null;
+  const FE = src('src/lib/channel-filter-editor.js');
+  ok(d1 && d1.grain === 'conversation' && d2.grain === 'account' && d1.label === 'Change the sending policy…' && /cap\.code === 'policy-review' && policyAbove\) capNote\.textContent/.test(FE) && /door: 'policy', run \}/.test(FE)
+    && /policyAbove: true \}\);/.test(src('src/lib/channel-reach-editor.js')) && /if \(opts\.length === 1\) auth\.appendChild\(el\('span', 'chan-radio-words chan-auth-only', t\('Can only draft \(you approve\)'\)\)\)/.test(FE),
+    'channels-policy-7 / -1: a review policy\'s refusal opens WHERE it is set (the conversation\'s or the account\'s Reach & policy); inside Reach & policy it names the row above; one possible answer is said, not a lone radio');
+  // browser-profiles-19 / browser-live-13
+  const SWm = require(path.join(REPO, 'src/browser-switch.js'));
+  const L = SWm.proposalLines({ why: 'sign-in-refused', host: 'shop.example', plan: { kind: 'none' } });
+  ok(L && L.none && Array.isArray(L.none.doors) && L.none.doors.join() === 'browser-plugin,agent-browser' && !/⚙|→/.test(L.none.key) && /'browser-plugin': app && typeof app\._pluginInstallDialog === 'function'/.test(src('src/lib/browser-proposal-card.js')),
+    'browser-profiles-19: why no switch is offered names its two ways as doors on the card («Install a browser plugin…», «Agent browser…»), no menu path', L && L.none);
+  const BP = require(path.join(REPO, 'src/browser-passkey.js'));
+  const pw = BP.passkeyWords({ state: BP.PASSKEY_OPEN_CODE, rpId: 'shop.example', id: 'p1' }, null, {});
+  ok(pw && pw.settings === 'Passkey settings…' && !/Agent browser panel/.test(pw.line) && /open: 'passkeys'/.test(src('src/lib/browser-live-window.js')) && /if \(r && !pkOpen\.has\(r\.id\)\) pkToggle\(r\);/.test(src('src/lib/browser-trace-view.js')),
+    'browser-live-13: a page waiting for a passkey has «Passkey settings…» beside Cancel — the Agent browser panel at that profile, its Passkeys open', pw);
+}
+
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

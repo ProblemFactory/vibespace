@@ -603,8 +603,11 @@ function lineText(l) { return String(l.key).replace(/\{(\w+)\}/g, (m, k) => (l.p
 /** lane engine-spi-egress L3 (主开发's D5): why no switch is offered — a sentence TRUE with or without a browser plugin installed
  *  (this version targets no engine yet; the user's own door is Change build…). */
 const NO_SWITCH_WORDS = Object.freeze({
-  unavailable: i18nKey('No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….'),
+  unavailable: i18nKey('No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet. A browser plugin can be installed, then chosen for this profile with Change build….'),
 });
+/** lane ui-needs-a-button (browser-profiles-19): the ways the `unavailable` line names, as DOORS the card draws on its line
+ *  (`browser-plugin` = the plugin install dialog, `agent-browser` = the Agent browser panel where Change build… is). */
+const NO_SWITCH_DOORS = Object.freeze(['browser-plugin', 'agent-browser']);
 /**
  * THE WORDS of a proposal, as STRUCTURE (`{key, params}` lines the client says through its own t() — the chat card and
  * the For-you row alike): `claim` (who says what), `plan` (what Approve runs, in order — none in this version), `none`
@@ -623,7 +626,7 @@ function proposalLines(b) {
         : { key: i18nKey('The agent says {host} blocked it.'), params: { host } };
   const why = pl.why === 'remote' ? { key: i18nKey('No switch can be offered: this conversation runs on another machine, and its browser is that machine\'s.') }
     : pl.why === 'other-machine' ? { key: i18nKey('No switch can be offered: this conversation\'s browser "{profile}" runs on a paired machine.'), params: { profile: pl.profileLabel || '' } }
-      : { key: NO_SWITCH_WORDS.unavailable };
+      : { key: NO_SWITCH_WORDS.unavailable, doors: NO_SWITCH_DOORS };
   return { claim, plan: [], none: why };
 }
 /** The For-you item a proposal files: English words (the dedupe key and the agent CLI's contract) + the same as

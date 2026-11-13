@@ -239,10 +239,11 @@ function policyRowModel({ grain = 'account', policy = null, guards = null, t = f
 }
 /** WHERE A POLICY IS CHANGED (the invariant: a refusal that names a value names where to change it) — the account's
  *  ⋯ → Reach & policy… for an account-grain value, the conversation's row menu for its own. */
-function policyWhereText({ grain = 'account', source = 'account' } = {}, t = fillT) {
-  return grain === 'conversation' && source === 'conversation'
-    ? t('change it in this conversation\'s Reach & policy… (its row menu)')
-    : t('change it in the account\'s Reach & policy… (the account\'s ⋯ menu)');
+/** lane ui-needs-a-button (channels-policy-7): WHERE a review policy is changed is the DOOR on the refusal's line (never «the
+ *  account's ⋯ menu» in words): the conversation's own Reach & policy when the policy is that conversation's, else the account's.
+ *  → { label, grain: 'conversation' | 'account' } (the client opens that dialog). */
+function policyDoorOf({ grain = 'account', source = 'account' } = {}, t = fillT) {
+  return { label: t('Change the sending policy…'), grain: grain === 'conversation' && source === 'conversation' ? 'conversation' : 'account' };
 }
 
 /** Does the text carry a link? Conservative: a scheme or a www. host. */
@@ -1733,7 +1734,7 @@ module.exports = {
   WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
   RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, receiptPacedText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
   COLLECT_WINDOW_MS, receiptRoad, STASH_HEADINGS, stashHeading,   // lane channel-direct-send-sync: a direct send's receipt road + the held-batch heading by cause
-  canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyWhereText, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
+  canTransition, isTerminal, policyMode, policyModesOf, policyRowModel, policyDoorOf, GUARD_KEYS, GUARD_REASONS, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   ACCESS_REMOVED_NOTE, withheldReceiptLine,
   REACTION_POLICIES, reactionPolicyOf, REACTION_OPS, validateReaction, reactionQuote, decideReaction, decideRecall, recallVerdict,
   PLACEMENTS, THREAD_PLACEMENTS, ROOT_REPLIES, PLACEMENT_NOUNS, isThreadPlacement, placementsOf, filePlacementsOf, rootReplyOf, placementOf, placementWords, placementVerdict, placementText, placementRefusalText,

@@ -10,11 +10,11 @@ import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from 
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
-import { dialAddressPicker, dialStateText, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
+import { dialAddressPicker, dialStateText, dialStateShort, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { UI_ICONS } from './icons.js';
-import { needLine, needDoorButton } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
+import { needLine, needDoorButton, pairDoor } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
@@ -1036,6 +1036,7 @@ export function installSidebarMounts(Sidebar) {
       const row = document.createElement('div');
       row.className = 'mounts-row';
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
+      row.dataset.hostId = h.id; // lane ui-needs-a-button: «Open that machine» finds its row
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
       if (st && st.ok) this._keyAnswers?.delete(h.id);   // verifier #2: a re-test that passed ends the key answer
       // lane-pairing ③: a dial row's dot, badge, sub-line and tooltip all read THE one state (PURE dialRowState) —
@@ -1117,11 +1118,12 @@ export function installSidebarMounts(Sidebar) {
         if (raised) return;   // raised: the same subject's form, as it was
         const p1 = document.createElement('p'); p1.className = 'agents-note';
         p1.textContent = tr('When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.');
-        const p2 = document.createElement('p'); p2.className = 'agents-note';
-        p2.textContent = tr('Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:');
+        // lane ui-needs-a-button (machines-29): the easiest way is a DOOR (the machine's pairing sheet, primary); the recipe is the second way
+        const p2 = needLine({ words: tr('Easiest: run the pairing command again on the machine — it runs as administrator and asks you to confirm once.'), cls: 'agents-note', doors: [pairDoor(this.app, h, { kind: 'primary' }) && { ...pairDoor(this.app, h, { kind: 'primary' }), run: () => { close(); this._showDevicePairDialog(h); } }] });
+        p2.appendChild(Object.assign(document.createElement('div'), { className: 'agents-note device-elevate-or', textContent: tr('Or, in an administrator PowerShell on the machine, run:') }));
         const pre = document.createElement('pre'); pre.className = 'device-elevate-recipe';
         pre.textContent = "$t = Get-ScheduledTask -TaskName 'VibeSpaceDevice-*' | Select-Object -First 1\n$p = New-ScheduledTaskPrincipal -UserId $t.Principal.UserId -LogonType $t.Principal.LogonType -RunLevel Highest\nSet-ScheduledTask -TaskName $t.TaskName -Principal $p\n# back to normal rights: re-run with -RunLevel Limited";
-        const copy = document.createElement('button'); copy.className = 'btn-create'; copy.textContent = tr('Copy'); copy.onclick = () => { copyText(pre.textContent); showToast(tr('Copied — run it in an administrator PowerShell on the machine')); };
+        const copy = document.createElement('button'); copy.className = 'btn-cancel'; copy.textContent = tr('Copy'); copy.onclick = () => { copyText(pre.textContent); showToast(tr('Copied — run it in an administrator PowerShell on the machine')); };
         const closeBtn = document.createElement('button'); closeBtn.className = 'btn-cancel'; closeBtn.textContent = tr('Close'); closeBtn.onclick = () => close();
         const acts = document.createElement('div'); acts.className = 'dialog-actions'; acts.append(closeBtn, copy);
         body.append(p1, p2, pre, acts);
@@ -1154,7 +1156,16 @@ export function installSidebarMounts(Sidebar) {
         // lane-exit-run-output E1: the device's STATED platform (the hub keeps it from its dial headers) — a Windows
         // machine runs an agent's command under cmd.exe, so the row says what it is
         const plat = platformLabel(h.dial && h.dial.lastAccept && h.dial.lastAccept.platform);
-        sub.textContent = (rs.state === 'connected' ? `${tr('dial-out device')} · ${dialWords}` : dialWords) + (plat ? ` · ${plat}` : '');
+        // lane ui-needs-a-button (machines-6): an offline device says its state SHORT with its door on the line — the pairing
+        // sheet of this machine (pair-dialog-polish's dialog, opened); the check-list sentence folds under it
+        const shortOff = dialStateShort(rs);
+        if (shortOff) {
+          sub.append(needLine({ words: shortOff + (plat ? ` · ${plat}` : ''), tone: 'off', cls: 'mounts-dial-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] }));
+          const fold = document.createElement('details'); fold.className = 'mounts-errline-details';
+          const sm = document.createElement('summary'); sm.textContent = tr('What to check');
+          const tx = document.createElement('div'); tx.textContent = dialWords;
+          fold.append(sm, tx); sub.append(fold);
+        } else sub.textContent = (rs.state === 'connected' ? `${tr('dial-out device')} · ${dialWords}` : dialWords) + (plat ? ` · ${plat}` : '');
         sub.title = dotTip;
         sub.classList.add('mounts-dial-state');
         sub.dataset.dialState = rs.state;
@@ -1359,6 +1370,16 @@ export function installSidebarMounts(Sidebar) {
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
         this._renderMounts();
       }, { id: 'share-onto-dialog', key: `${h.id}:${(prefillFolder && prefillFolder.path) || prefillFolder || ''}` });   // the machine AND the folder (lane dialog-yield r5: F2 on a one-machine hub raised F1's form and mounted F1)
+      this._offlineMountNeed(h); // lane ui-needs-a-button (storage-5)
+    },
+    /** lane ui-needs-a-button (storage-5): a mount dialog for a dial machine that is not connected says so FIRST, with the
+     *  machine's pairing sheet on the line — the Mount button still works once it connects (nothing is greyed). */
+    _offlineMountNeed(h) {
+      const ctx = this._lastMountsDialog;
+      if (!ctx || ctx.raised || !ctx.body || !h || h.transport !== 'dial') return;
+      const rs = dialRowState(h);
+      if (!rs || rs.state === 'connected') return;
+      ctx.body.prepend(needLine({ words: tr('“{name}” is offline — a mount works once it is connected.', { name: h.name }), tone: 'off', cls: 'mounts-offline-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] }));
     },
 
     // The PULL direction on any machine row (B-f3e8 — ONE dialog for ssh and
@@ -1674,6 +1695,18 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
+    /** lane ui-needs-a-button (machines-12): the door to the machine a refused name already belongs to — the dialog closes and
+     *  that row is shown (scrolled to, marked a moment). null when no row of that name is drawn. */
+    _hostRowDoor(name, close) {
+      const h = (this._hostsData?.hosts || []).find((x) => x && x.name === name);
+      if (!h) return null;
+      return { label: tr('Open that machine'), kind: 'secondary', door: 'host-row', run: () => { try { close(); } catch { } this._focusHostRow(h.id); } };
+    },
+    _focusHostRow(id) {
+      const row = [...document.querySelectorAll('.mounts-row[data-host-id]')].find((r) => r.dataset.hostId === String(id));
+      if (!row) return;
+      row.scrollIntoView({ block: 'center' }); row.classList.add('need-focus'); setTimeout(() => row.classList.remove('need-focus'), 2500);
+    },
     _showAddHostDialog(hd, from = null) {
       // verifier #3: «Add it again with a key…» opens THIS form for the ssh machine `from` — its name, user, address and port filled
       // in; the new record REPLACES it (POST /api/hosts `replaces`: its name is no clash, and it is removed once the new one is saved)
@@ -1747,6 +1780,7 @@ export function installSidebarMounts(Sidebar) {
           } catch (e) {
             // the server names its refusal by code; the words are the page's (lane ui-language, the walk's machines-12)
             if (e.code === 'host-name-taken') throw new Error(tr('A machine named “{name}” already exists — pick another name.', { name: v.name }));
+            if (e && e.code === 'host-name-taken') e.door = this._hostRowDoor(v.name, close); // lane ui-needs-a-button (machines-12)
             if (!privateKey || !KEY_ERR_CODES.has(e.code)) throw e;
             const again = await this._askPrivateKey({
               text: privateKey,
@@ -2249,7 +2283,14 @@ export function installSidebarMounts(Sidebar) {
           ? tr('The daemon on this machine is <b>dialing in</b> — data-plane ops (files, discovery, transcripts) ride that ws link instead of ssh. ssh stays as the rescue channel.')
           : tr('The daemon is installed but <b>not currently dialed in</b> — ops fall back to ssh until it reconnects (it retries from the machine side).');
         body.appendChild(st);
-        const rm = document.createElement('button'); rm.className = 'btn-create danger'; rm.textContent = tr('Remove dial-out (keep the ssh machine)');
+        // lane ui-needs-a-button (machines-27): not dialed in ⇒ the repair is the primary (the install form again, on this machine:
+        // POST graduate-dial re-installs an ssh machine's daemon); the removal stays, a secondary danger
+        if (!h.dialLive) {
+          const re = document.createElement('button'); re.className = 'btn-create'; re.dataset.door = 'dial-reinstall'; re.textContent = tr('Reinstall…');
+          re.onclick = () => { close(); this._showGraduateDialog({ ...h, graduated: false }); };
+          body.appendChild(re);
+        }
+        const rm = document.createElement('button'); rm.className = h.dialLive ? 'btn-create danger' : 'btn-cancel danger'; rm.textContent = tr('Remove dial-out (keep the ssh machine)');
         rm.onclick = async () => {
           rm.disabled = true; rm.textContent = tr('Removing…');
           try { const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ remove: true }) });

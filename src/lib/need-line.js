@@ -14,6 +14,7 @@
 //                                         «not in use here: …» chip, which names the switch that gates it)
 //   integrationDoor(app, id, { label }) → the Integrations window at that card (app.openIntegration; no id = the window)
 //   reloadDoor({ label })               → the page reloaded (a setting that takes effect on the next load)
+//   pairDoor(app, host, { label })      → the pairing sheet of that machine (none = a new pairing; app.sidebar._showDevicePairDialog)
 // THE CENSUS (scripts/test-needs-doors.mjs over src/ui-needs.js): a need sentence the net catches is a row; a row whose door is
 // present is drawn through this file on every surface that states it.
 import { t } from './i18n.js';
@@ -65,6 +66,14 @@ export function settingsDoor(app, path, { label = '', kind = 'primary', section 
 export function integrationDoor(app, id, { label = '', kind = 'primary' } = {}) {
   if (!app || typeof app.openIntegration !== 'function') return null;   // no id ⇒ the window, nothing highlighted
   return { label: label || t('Open Integrations…'), kind, door: 'integration:' + (id || '*'), run: () => app.openIntegration(id || null) };
+}
+/** The pairing sheet (lane pair-dialog-polish's dialog, opened — never changed): `host` = that machine's own sheet (its state,
+ *  a new command), none = a new pairing. Four surfaces need it: a machine row that is offline, a mount onto an offline
+ *  machine, the agents panel with no machine, the elevate dialog's «run the pairing command again». */
+export function pairDoor(app, host = null, { label = '', kind = 'primary' } = {}) {
+  const sb = app && app.sidebar;
+  if (!sb || typeof sb._showDevicePairDialog !== 'function') return null;
+  return { label: label || (host ? t('Show the pairing command…') : t('Pair a device…')), kind, door: 'pair' + (host ? ':' + String(host.id || '') : ''), run: () => sb._showDevicePairDialog(host || null) };
 }
 /** The page reloaded — a setting that takes effect on the next load. */
 export function reloadDoor({ label = '', kind = 'primary' } = {}) {

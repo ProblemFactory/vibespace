@@ -236,7 +236,8 @@ function passkeyWords(b, tIn, { headed = false, card = null, display = null, des
   }
   const w = {
     title: t('This page is waiting for a passkey ({rp})', { rp }),
-    line: t('A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page\'s other way in, or sign in on your own device.'),
+    line: t('Cancel the request to use the page’s other way in, or sign in on your own device. A kept passkey signs in by this profile’s passkey settings; a new one is registered only after you allow it.'),
+    settings: t('Passkey settings…'), // lane ui-needs-a-button (browser-live-13): the door the line names, beside Cancel
     // lane passkey-browse-yourself: a browser on a VIRTUAL display (the attach road) — the sentence names the display and the ways in
     desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : t('Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.')) : '',
     cancel: t('Cancel passkey request'),

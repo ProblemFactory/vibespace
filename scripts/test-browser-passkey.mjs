@@ -138,7 +138,7 @@ console.log('② the words en / zh / ja');
   used.push(PK.FOR_YOU_WORDS.text, PK.FOR_YOU_WORDS.detail, 'The passkey request could not be cancelled: {why}');
   const keys = [...new Set(used)];
   const miss = keys.filter((k) => !zh[k] || !ja[k]);
-  ok(w && w.title === 'This page is waiting for a passkey (vercel.com)' && /keeps no passkey for/.test(w.line) && !/no passkey of yours/.test(w.line) && !/no passkey of yours/.test(PK.FOR_YOU_WORDS.detail) && /desktop/.test(w.desktop) && w.cancel && sw && sw.chip === 'page waits for a passkey', 'the banner: title (the site), the line, the desktop note when headed, ONE button; the chip');
+  ok(w && w.title === 'This page is waiting for a passkey (vercel.com)' && /^Cancel the request to use the page’s other way in/.test(w.line) && w.settings === 'Passkey settings…' && !/no passkey of yours/.test(w.line) && !/no passkey of yours/.test(PK.FOR_YOU_WORDS.detail) && /desktop/.test(w.desktop) && w.cancel && sw && sw.chip === 'page waits for a passkey', 'the banner: title (the site), the line, the desktop note when headed, ONE button; the chip');
   ok(PK.passkeyWords(b, t, { headed: false }).desktop === '', 'a headless browser\'s banner says nothing about a desktop');
   ok(askW && askW.ask && askW.title === 'This page is waiting for you to allow the passkey for github.com' && askW.buttons.map((x) => x.choice).join() === 'once,always,no,never' && askW.buttons[0].primary && askW.shown === cardS.shown && /as alice until you change the policy/.test(askW.line) && askChip && askChip.chip === 'page waits for your passkey answer', 'lane passkey-ui: the passkey_ask banner = the card\'s words + its four choices (the first primary) + the digest it posts; its chip');
   const wr = PK.passkeyCardWords(cardR, null);

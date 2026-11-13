@@ -327,7 +327,7 @@ export async function showGrantAccessDialog(app, target) {
  *  offered without a reopen; turned review ⇒ every row reads draft again. `reopen` = what a `grain-changed` re-opens.
  *  `isDirty()` / `save()` (lane dialog-unsaved-guard) = the rows (and a rule's conditions) against what it drew, and its
  *  Save as a function — the dialog that hosts it hands both to createModalShell's `unsaved`. */
-export function grantAccessBody(app, st, body, { close, target, notify = true, reopen = null } = {}) {
+export function grantAccessBody(app, st, body, { close, target, notify = true, reopen = null, policyAbove = false } = {}) {
   let picker = null;
   body.appendChild(el('div', 'chan-dialog-sub', st.kind === 'conversation' ? st.name : st.kind === 'account' ? t('The whole account — {label}', { label: st.name }) : t('The conversations matching a rule — {label}', { label: st.name })));
   body.appendChild(noteEl(st.kind === 'account'
@@ -390,10 +390,21 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     mootNote.style.display = names.length ? '' : 'none';
   };
   // a refusal that names a value names WHERE to change it (lane account-policy-door): the policy's own door
-  const capNote = noteEl('');
+  // lane ui-needs-a-button (channels-policy-7 / -1): a review policy's refusal — INSIDE Reach & policy (`policyAbove`) it names
+  // the Sending policy row above it (the row is there: no door); anywhere else the door that opens where it is set
+  const capNote = el('div', 'chan-flow-note chan-cap-note');
   body.appendChild(capNote);
   const syncCap = () => {
-    capNote.textContent = cap ? t('Direct send is not offered here: {why}', { why: capWords(cap) }) + (cap.code === 'policy-review' ? ` — ${P.policyWhereText({ grain: st.kind === 'conversation' ? 'conversation' : 'account', source: st.kind === 'conversation' && st.conv && st.conv.policy ? st.conv.policy.source : 'account' }, t)}` : '') : '';
+    capNote.textContent = '';
+    if (cap) {
+      const words = t('Direct send is not offered here: {why}', { why: capWords(cap) });
+      if (cap.code === 'policy-review' && policyAbove) capNote.textContent = `${words} — ${t('to allow it, change the Sending policy above.')}`;
+      else if (cap.code === 'policy-review') {
+        const pd = P.policyDoorOf({ grain: st.kind === 'conversation' ? 'conversation' : 'account', source: st.kind === 'conversation' && st.conv && st.conv.policy ? st.conv.policy.source : 'account' }, t);
+        const run = () => { if (typeof close === 'function') close(); import('./channel-reach-editor.js').then((m) => (pd.grain === 'conversation' && st.conv ? m.showReachDialog(app, st.conv) : m.showAccountReachDialog(app, st.adapter || (target && target.adapter) || (st.conv ? { id: st.conv.adapterId } : null)))); };
+        capNote.appendChild(needLine({ words, tone: 'off', doors: [{ label: pd.label, kind: 'secondary', door: 'policy', run }] }));
+      } else capNote.textContent = words;
+    }
     capNote.style.display = cap ? '' : 'none';
   };
   syncCap();
@@ -412,7 +423,9 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
       auth.setAttribute('role', 'radiogroup');
       auth.setAttribute('aria-label', t('Authority'));
       const opts = cap ? [['draft', t('May draft replies (you approve)')]] : [['draft', t('May draft replies (you approve)')], ['send', t('May reply directly')]];
-      for (const [value, words] of opts) {
+      // lane ui-needs-a-button (channels-policy-7): ONE possible answer is said, not offered — no lone radio
+      if (opts.length === 1) auth.appendChild(el('span', 'chan-radio-words chan-auth-only', t('Can only draft (you approve)')));
+      else for (const [value, words] of opts) {
         const lab = el('label', 'dialog-check-row chan-radio-row');
         const inp = document.createElement('input');
         inp.type = 'radio'; inp.name = `chan-auth-${i}-${r.key}`; inp.value = value; inp.checked = r.authority === value;

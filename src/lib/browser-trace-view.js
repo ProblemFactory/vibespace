@@ -764,11 +764,11 @@ function sayRefusal(r, what, act) {
 }
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
-export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
-  for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.revealWindow(w.id, { replay: !!syncId }); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus); return w; }
+export function openBrowserProfilesWindow(app, { syncId, focus = null, open = null } = {}) {
+  for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.revealWindow(w.id, { replay: !!syncId }); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus, open); return w; }
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({ title: t('Agent browser'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
-  const st = { view: null, error: null, busy: false, closed: false, timer: null, focus, orphansOpen: false };
+  const st = { view: null, error: null, busy: false, closed: false, timer: null, focus, open, orphansOpen: false }; // `open`: 'passkeys' (lane ui-needs-a-button)
   // KEYED (2026-09-27): each profile's "Who can use it" cell and its row are kept across loads — a load whose only change
   // for a row is its list PATCHES the cell in place; a row whose other facts moved is rebuilt around the SAME cell
   const whoCells = new Map();   // profileId → whoCell
@@ -1223,7 +1223,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const swl = el('div', 'bprof-sweep');
     swl.append(el('span', 'chat-status-dim', s ? t('Last sweep {ago}: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes}); every action list is kept.', { ago: agoText(Date.now() - Number(s.at || 0)), n: s.removed || 0, bytes: bytesText(s.bytesRemoved || 0), r: s.recordingsRemoved || 0, rbytes: bytesText(s.recordingBytesRemoved || 0) }) : t('No sweep has run yet (it runs at boot and every hour).')), sweepBtn);
     mt.append(cliRow, swl, hint);
-    if (st.focus) focusRow(st.focus);
+    if (st.focus) focusRow(st.focus, st.open);
     layout();
   }
   /** design 015 §2b: what the CSS cannot know — the stacked re-flow when the grid's minimums plus the widest row's acts
@@ -1245,10 +1245,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   }
   const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => layout()) : null;
   if (ro) ro.observe(body);
-  function focusRow(profileId) {
-    st.focus = null;
+  function focusRow(profileId, open = null) {
+    st.focus = null; st.open = null;
     const row = body.querySelector(`.bprof-profile[data-profile-id="${String(profileId).replace(/[^a-z0-9-]/gi, '')}"]`);
     if (row) { row.classList.add('focus'); row.scrollIntoView({ block: 'center' }); setTimeout(() => row.classList.remove('focus'), 2500); }
+    // lane ui-needs-a-button (browser-live-13): `open: 'passkeys'` — that profile's Passkeys table opened (a door from the live view)
+    const r = open === 'passkeys' ? ((st.view && st.view.profiles) || []).find((x) => x && x.id === profileId) : null;
+    if (r && !pkOpen.has(r.id)) pkToggle(r);
   }
   function renderCli() {
     const w = cliRowWords(st.cli, t);

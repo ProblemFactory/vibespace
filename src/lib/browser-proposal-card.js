@@ -8,6 +8,7 @@
 // the element it has. ONE primary button (Approve) + a quiet Reject — shown only while they WORK (open / failed);
 // Approve sends the digest of the card it was pressed on (`shown`), so what runs is exactly what this card showed.
 import { t } from './i18n.js';
+import { needDoorButton } from './need-line.js'; // lane ui-needs-a-button (browser-profiles-19)
 import { fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { btn, el } from './channel-chrome.js';
@@ -169,6 +170,7 @@ export function renderProposalCard(msg, { app = null } = {}) {
   const el0 = document.createElement('div');
   el0.className = 'chat-msg chat-msg-system chat-vs-notice chat-browser-proposal';
   el0._rawMsg = msg;
+  el0._app = app; // lane ui-needs-a-button: the none line's doors open the app's dialogs
   const b = msg.content[0];
   el0.dataset.proposal = String(b.id || '');
   const head = el('div', 'chat-vs-notice-head');
@@ -215,6 +217,19 @@ export function patchProposalCard(el0, msg) {
     list.style.display = words.length ? '' : 'none';
   }
   set('.chat-browser-proposal-none', L.none ? say(L.none, t) : '');
+  // lane ui-needs-a-button (browser-profiles-19): the ways the line names are buttons on it (never «⚙ → Plugins → …»)
+  const app = el0._app || null, doorsWant = (L.none && Array.isArray(L.none.doors) ? L.none.doors : []).join(',');
+  let nd = el0.querySelector('.chat-browser-proposal-none-doors');
+  if (!nd) { nd = el('div', 'chat-browser-proposal-none-doors need-doors'); const none = el0.querySelector('.chat-browser-proposal-none'); if (none) none.after(nd); }
+  if (nd.dataset.doors !== doorsWant) {
+    nd.dataset.doors = doorsWant;
+    const DOORS = {
+      'browser-plugin': app && typeof app._pluginInstallDialog === 'function' ? { label: t('Install a browser plugin…'), kind: 'secondary', door: 'browser-plugin', run: () => app._pluginInstallDialog(() => { }) } : null,
+      'agent-browser': app && typeof app.openBrowserProfiles === 'function' ? { label: t('Agent browser…'), kind: 'secondary', door: 'agent-browser', run: () => app.openBrowserProfiles() } : null,
+    };
+    nd.replaceChildren(...(doorsWant ? doorsWant.split(',') : []).map((k) => DOORS[k]).filter(Boolean).map((d) => needDoorButton(d)));
+  }
+  nd.style.display = nd.childNodes.length ? '' : 'none';
   set('.chat-browser-proposal-state', proposalStateText(b, t));
   const st = el0.querySelector('.chat-browser-proposal-state');
   if (st) st.dataset.state = String(b.state || '');

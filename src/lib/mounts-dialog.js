@@ -38,6 +38,7 @@
 import { createModalShell, showToast, copyText } from './utils.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
 import { t as tr } from './i18n.js';
+import { needDoorButton } from './need-line.js'; // lane ui-needs-a-button (machines-12): an error with its door on the line
 
 // the storage consent routes (rclone authorize over the server) — the default
 export const MOUNT_OAUTH_ENDPOINTS = Object.freeze({
@@ -295,7 +296,7 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
       }
       const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
       await onSubmit(vals, { close, body, err });
-    } catch (e) { err.textContent = e.message || tr('Failed'); submit.disabled = false; }
+    } catch (e) { err.textContent = e.message || tr('Failed'); if (e && e.door && typeof e.door.run === 'function') err.append(' ', needDoorButton(e.door)); submit.disabled = false; } // e.door: lane ui-needs-a-button
   };
   // the caller is TOLD like createModalShell's (lane dialog-yield r5): `asked` (queued behind the open one's ask), `ready` (→ the
   // shell when it opens, null when the person kept that one), `live()` — THE liveness predicate

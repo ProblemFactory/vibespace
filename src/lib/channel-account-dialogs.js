@@ -47,11 +47,12 @@ import { fetchJson, showToast, showConfirmDialog, createModalShell } from './uti
 import { t as tr, deviceLocale } from './i18n.js';
 import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
+import { needLine } from './need-line.js'; // lane ui-needs-a-button (channels-accounts-4): a reference with its release door
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
 import { narrowRowVerdict, consentEndOf } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse; lane lark-signin-dialog: a consent's end
-import { ownerPolicyModel, guardRowsEl } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
+import { ownerPolicyModel, guardRowsEl, showAccountReachDialog } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
 import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
 // PURE, bundled: the row's `signinName` (the brand of the sign-in page — Gmail signs in with Google)
@@ -994,6 +995,18 @@ function refText(ref, outboxN) {
   if (ref.kind === 'outbox') return tr('outbox: {n} proposal(s) awaiting approval', { n: outboxN });
   return String(ref.kind || '');
 }
+/** lane ui-needs-a-button (channels-accounts-4): the door that releases ONE reference — the dialog that holds it (an access row:
+ *  the account's or that conversation's Grant access; a reach: the account's Reach & policy); an outbox proposal: the Outbox. */
+function refDoor(app, a, ref, close) {
+  const open = (fn) => () => { close(); fn(); };
+  if (ref.kind === 'access' || ref.kind === 'assignment') {
+    const target = ref.scope === 'account' || !ref.convId ? { kind: 'account', adapter: a } : { kind: 'conversation', conv: { adapterId: a.id, id: ref.convId } };
+    return { label: tr('Release…'), kind: 'secondary', door: 'release-access', run: open(() => import('./channel-filter-editor.js').then((m) => m.showGrantAccessDialog(app, target))) };
+  }
+  if (ref.kind === 'reach') return { label: tr('Release…'), kind: 'secondary', door: 'release-reach', run: open(() => showAccountReachDialog(app, a)) };
+  if (ref.kind === 'outbox' && app && typeof app.openChannelOutbox === 'function') return { label: tr('Open Outbox'), kind: 'secondary', door: 'outbox', run: open(() => app.openChannelOutbox()) };
+  return null;
+}
 export function showRemoveRefusedDialog(app, a, refs) {
   const { body, close, raised } = createModalShell({ id: 'chan-remove-refused', key: a && a.id, title: tr('Cannot remove "{name}"', { name: accountName(a) }), dialogClass: 'chan-dialog', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
@@ -1005,13 +1018,23 @@ export function showRemoveRefusedDialog(app, a, refs) {
   let outboxDrawn = false;
   for (const ref of refs) {
     if (ref.kind === 'outbox') { if (outboxDrawn) continue; outboxDrawn = true; }
-    const line = el('div', 'dialog-hint', `· ${refText(ref, outboxN)}`);
+    // lane ui-needs-a-button (channels-accounts-4): each reference carries the door that releases it (the dialog that holds it)
+    const release = refDoor(app, a, ref, close);
+    const line = needLine({ words: `· ${refText(ref, outboxN)}`, cls: 'dialog-hint', doors: [release] });
     line.dataset.refKind = ref.kind;
     list.appendChild(line);
   }
-  const p = el('p', 'dialog-hint', tr('Disconnect only drops the token and keeps these; Remove needs them released first — the same rule as a credential with submounts.'));
+  const p = el('p', 'dialog-hint', tr('Disconnect only drops the token and keeps these; Remove needs them released first.'));
   const actions = el('div', 'dialog-actions');
-  if (outboxN) actions.appendChild(btn(tr('Open Outbox'), () => { close(); app.openChannelOutbox(); }));
+  const disc = btn(tr('Disconnect'), async () => {
+    const yes = await showConfirmDialog({ title: tr('Disconnect'), message: tr('Disconnect {label}? The token is dropped; conversations stay.', { label: accountName(a) }), confirmText: tr('Disconnect'), danger: true });
+    if (!yes) return;
+    const r = await fetchJson(`/api/channels/adapters/${enc(a.id)}/disconnect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return; }
+    close();
+  });
+  disc.dataset.door = 'disconnect';
+  actions.appendChild(disc);
   const done = document.createElement('button');
   done.type = 'button'; done.className = 'btn-create'; done.textContent = tr('Close');
   done.onclick = close;

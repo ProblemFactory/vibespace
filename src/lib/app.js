@@ -10,6 +10,7 @@ import { buildGearMenu } from './gear-menu.js';
 import { BUILD_VERSION } from './build-version.js';
 import { navNote } from './nav-log.js'; // lane phone-back-reload: the stale-tab step is a row of the tab's diary
 import { track } from './telemetry-client.js';
+import { needLine } from './need-line.js'; // lane ui-needs-a-button (gear-and-system-12)
 import { WsManager } from './ws.js';
 import { WindowManager } from './window.js';
 import { installFormHost } from './form-window.js'; // lane dialog-yield: createModalShell's kind 'form' = a small window that yields (desktop tier)
@@ -1044,14 +1045,20 @@ class App {
     sensHead.innerHTML = `<b>${t('Sensitive')}</b><span> — ${t('off by default; encrypted with a passphrase. The file lets anyone who has it (and the passphrase) log in / use your agent accounts. Treat it like a key.')}</span>`;
     const sensWrap = document.createElement('div');
     sensWrap.className = 'cfg-rows cfg-rows-sens';
-    sensWrap.append(
-      mkRow('vsPassword', t('VibeSpace password'), info.sensitive.vsPassword ? t('password hash — same password works after import') : t('no password configured'), { checked: false, disabled: !info.sensitive.vsPassword }),
-      mkRow('claudeCreds', t('Claude CLI credentials'), info.sensitive.claudeCreds ? t('~/.claude/.credentials.json — no re-login on the new instance') : t('not found on this machine'), { checked: false, disabled: !info.sensitive.claudeCreds }),
-      mkRow('codexCreds', t('Codex CLI credentials'), info.sensitive.codexCreds ? '~/.codex/auth.json' : t('not found on this machine'), { checked: false, disabled: !info.sensitive.codexCreds }),
-      mkRow('hosts', t('Remote hosts'), info.sensitive.hosts ? t('{n} ssh host(s) + uploaded keys', { n: info.sensitive.hosts }) : t('no hosts configured'), { checked: false, disabled: !info.sensitive.hosts }),
-      mkRow('mounts', t('S3 mounts & shares'), info.sensitive.mounts ? t('{n} mount(s) incl. credentials', { n: info.sensitive.mounts }) : t('no mounts configured'), { checked: false, disabled: !info.sensitive.mounts }),
-      mkRow('accounts', t('Billing accounts'), info.sensitive.accounts ? t('{n} account(s) — API keys + subscription logins', { n: info.sensitive.accounts }) : t('no accounts configured'), { checked: false, disabled: !info.sensitive.accounts }),
-    );
+    // lane ui-needs-a-button (gear-and-system-12): only what EXISTS is a row (a greyed row with «not configured» was a control
+    // with a hint); nothing at all ⇒ one line; no VibeSpace password ⇒ that need with «Set a password…» on its line
+    const sens = info.sensitive || {};
+    const sensRows = [
+      sens.vsPassword && mkRow('vsPassword', t('VibeSpace password'), t('password hash — same password works after import'), { checked: false }),
+      sens.claudeCreds && mkRow('claudeCreds', t('Claude CLI credentials'), t('~/.claude/.credentials.json — no re-login on the new instance'), { checked: false }),
+      sens.codexCreds && mkRow('codexCreds', t('Codex CLI credentials'), '~/.codex/auth.json', { checked: false }),
+      sens.hosts && mkRow('hosts', t('Remote hosts'), t('{n} ssh host(s) + uploaded keys', { n: sens.hosts }), { checked: false }),
+      sens.mounts && mkRow('mounts', t('S3 mounts & shares'), t('{n} mount(s) incl. credentials', { n: sens.mounts }), { checked: false }),
+      sens.accounts && mkRow('accounts', t('Billing accounts'), t('{n} account(s) — API keys + subscription logins', { n: sens.accounts }), { checked: false }),
+    ].filter(Boolean);
+    if (sensRows.length) sensWrap.append(...sensRows);
+    else sensWrap.append(Object.assign(document.createElement('div'), { className: 'cfg-sens-none chat-status-dim', textContent: t('There is no sensitive data to export right now.') }));
+    if (!sens.vsPassword && typeof this._showPasswordDialog === 'function') sensWrap.append(needLine({ words: t('No VibeSpace password is set.'), tone: 'info', cls: 'cfg-sens-pass', doors: [{ label: t('Set a password…'), kind: 'secondary', door: 'set-password', run: () => this._showPasswordDialog() }] }));
     const passRow = document.createElement('div');
     passRow.className = 'cfg-pass-row hidden';
     passRow.innerHTML = `<label>${t('Encryption passphrase')} <input type="password" id="cfg-exp-pass" placeholder="${t('min 4 chars')}" autocomplete="new-password"></label>` + (info.sensitive.secondPassword ? `<label class="cfg-second-row">${t('Second password (the vault)')} <input type="password" id="cfg-exp-second" autocomplete="off"></label>` : ''); // lane vault-contents-window r2: credentials leave a set-up vault only with the second password

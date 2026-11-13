@@ -1063,7 +1063,6 @@ export default {
   "S3 mounts & shares": "S3 挂载与共享",
   "Billing accounts": "计费账号",
   "Usage pricing table": "用量价格表",
-  "no accounts configured": "未配置账号",
   "theme, font, language, usage-view choices": "主题、字体、语言、用量视图选择",
   "{count} model rate(s) / account discount(s)": "{count} 条模型价格/账号折扣",
   "{n} account(s) — API keys + subscription logins": "{n} 个账号——API key 与订阅登录",
@@ -1119,7 +1118,6 @@ export default {
   "Accounts": "账号",
   "Instructions": "指令",
   "Accounts & quota on this machine": "本机账号与配额",
-  "No machines yet — add an SSH host or pair a device in the Remote tab.": "还没有机器——在 Remote 标签添加 SSH 主机或配对设备。",
   "Set model": "设置模型",
   "Set password": "设置密码",
   "Set password…": "设置密码…",
@@ -1244,13 +1242,9 @@ export default {
   "model: ?": "模型：?",
   "needs attention": "需要关注",
   "needs input": "待输入",
-  "no hosts configured": "未配置远程主机",
-  "no mounts configured": "未配置挂载",
-  "no password configured": "未配置密码",
   "none checked = show all states": "未勾选任何项 = 显示所有状态",
   "none declared": "未声明",
   "normal": "普通",
-  "not found on this machine": "在本机上未找到",
   "not installed": "未安装",
   "not logged in": "未登录",
   "notification": "通知",
@@ -1727,7 +1721,6 @@ export default {
   "Billing account": "计费账号",
   "machine login inactive": "机器登录已失效",
   "machine login not set up": "未配置机器登录",
-  "Log in machine-wide (claude /login)…": "机器全局登录（claude /login）…",
   "{n} named account(s) in use": "{n} 个命名账号在用",
   "Accounts & pool…": "账号与池…",
   "Tip: named accounts and account pools work without the machine-wide login — add them via “Accounts & pool…”.": "提示：命名账号和账号池无需机器全局登录即可使用——通过“账号与池…”直接添加。",
@@ -5114,7 +5107,6 @@ export default {
   "outbox: {n} proposal(s) awaiting approval": "Outbox：{n} 条待审批的提议",
   "Cannot remove \"{name}\"": "无法移除 \"{name}\"",
   "This account is still referenced — release these first:": "这个账号还被引用着 —— 先解除，再移除：",
-  "Disconnect only drops the token and keeps these; Remove needs them released first — the same rule as a credential with submounts.": "「断开」只丢弃 token 并保留这些；「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。",
   "Open Outbox": "打开 Outbox",
   "exclusive": "独占",
   "undeclared": "未声明",
@@ -6853,7 +6845,6 @@ export default {
   "The page shows a message": "网页弹出了一条消息",
   "The page asks you to confirm": "网页请你确认",
   "This page is waiting for a passkey ({rp})": "此网页正在等待通行密钥（{rp}）", // lane browser-passkey
-  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page's other way in, or sign in on your own device.": "这个 profile 没存通行密钥的网站会给出它自己的其他登录方式；存着的通行密钥按你在 Agent 浏览器面板里设的策略登录；新的通行密钥只有你允许后才会注册。请取消这个请求，再用网页的其他登录方式，或在你自己的设备上登录。", // lane passkey-ui (replaces the old no-passkey line)
   "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自己的通行密钥窗口开在这台电脑的桌面上——这个视图里看不到它。", // lane browser-passkey
   "Cancel passkey request": "取消通行密钥请求", // lane browser-passkey
   "page waits for a passkey": "网页在等通行密钥", // lane browser-passkey
@@ -7002,7 +6993,7 @@ export default {
   "Stop drawing in a browser nobody watches": "停止绘制没人看的浏览器",
   "ON (default): a browser nobody watches or drives for 30 s (hidden window / headless) stops drawing. It draws again before the next command, or within a frame when you open its live view. Turn it off to keep every page drawing.": "开（默认）：无人观看、也没有命令驱动满 30 秒的浏览器（隐藏窗口 / 无头）停止绘制。下一条命令执行前会先恢复它；打开它的实时视图时一帧之内恢复。关掉则所有页面一直绘制。",
   "Do not announce the agent browser as automated": "不要让 agent 浏览器自报是自动化的",
-  "The agent says {host} refused to sign in this browser (the page says it may not be secure).": "agent 说 {host} 拒绝在这个浏览器里登录(页面说它可能不安全)。",
+  "The agent says {host} refused to sign in this browser (the page says it may not be secure).": "agent 说 {host} 拒绝在这个浏览器里登录（页面说它可能不安全）。",
   "The agent says {host} answered HTTP {status}.": "agent 说 {host} 返回了 HTTP {status}。",
   "The agent says {host} blocked it ({why}).": "agent 说 {host} 挡住了它({why})。",
   "The agent says {host} blocked it.": "agent 说 {host} 挡住了它。",
@@ -8704,8 +8695,6 @@ export default {
   "off-hours ({tz})": "非工作时间（{tz}）",
   "Guards on top (also in Settings → Channels): {list} always needs your approval, whatever the policy": "叠加的护栏（也在 设置 → 渠道）：{list} 无论策略如何都需要你批准",
   "No guard is on (also in Settings → Channels) — the policy alone decides": "没有开启护栏（也在 设置 → 渠道）—— 只由策略决定",
-  "change it in this conversation's Reach & policy… (its row menu)": "在这个会话的「可见性与策略…」里修改（会话行的菜单）",
-  "change it in the account's Reach & policy… (the account's ⋯ menu)": "在账户的「可见性与策略…」里修改（账户的 ⋯ 菜单）",
   "The sending policy changed while this dialog was open (another window, or the other door) — here it is as it is now; nothing was saved": "这个对话框打开期间发送策略被改了（另一个窗口，或另一个入口）—— 这里显示的是现在的值；什么都没保存",
   "Who is woken": "谁会被唤醒",
   "{n} notification(s) on the whole account — access alone never wakes anyone": "整个账户上有 {n} 条通知 —— 仅有访问权限不会唤醒任何人",
@@ -9049,7 +9038,6 @@ export default {
   "rotated {at}": "轮换于 {at}",
   "last call {at}": "最近调用 {at}",
   "revoked {at}": "撤销于 {at}",
-  "takes no replies (its delivery is none) — change it in Callers…": "不接收回复（送达方式为无）——可在“调用方…”里修改",
   "path {slug}: {n} / {m} wakes this hour": "路径 {slug}：本小时已叫醒 {n} / {m}",
   "to {name} (caller)": "发给 {name}（调用方）",
   "Quote a call to answer its caller — or Send a message… to pick callers": "引用一次调用来回复它的调用方——或用“发消息…”选择调用方",
@@ -10417,7 +10405,6 @@ export default {
   "Run as administrator…": "以管理员权限运行…", // lane win-input-elevated
   "Run \"{name}\"’s device agent as administrator": "让\"{name}\"的设备代理以管理员权限运行", // lane win-input-elevated
   "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "当设备代理以管理员权限运行时，代理能向你以管理员身份打开的窗口输入 — 允许哪些由你在允许清单里选。VibeSpace 从不自行提权；由 Windows 请你确认。", // lane win-input-elevated
-  "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "最简单：再运行一次配对命令 — 它现在默认以管理员权限运行，并会请你确认一次。或者，在那台机器的管理员 PowerShell 里运行：", // lane win-input-elevated
   "Copied — run it in an administrator PowerShell on the machine": "已复制 — 在那台机器的管理员 PowerShell 里运行", // lane win-input-elevated
   "Install with normal rights (no administrator)": "以普通权限安装（非管理员）", // lane win-input-elevated
   "administrator": "管理员", // lane win-input-elevated
@@ -12493,7 +12480,6 @@ export default {
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
   // lane engine-spi-egress L3: the anti-bot backend left the core — the words that replace its offers
-  "No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….": "无法提供切换：这个版本的 VibeSpace 还不能替 agent 切换浏览器。如果某个网站拒绝这个浏览器，请安装一个浏览器插件（⚙ → 插件 → 安装插件…），再用「更换版本…」为这个配置选择它。",
   "The agent says its page needs {host}, which its browser's site list refused.": "agent 说它的页面需要 {host}，而它的浏览器的站点列表拒绝了它。",
   "The proposal failed: {error}": "提议失败：{error}",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser is told to you by the agent. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts.": "开(默认): agent 的浏览器启动时带 --disable-blink-features=AutomationControlled，网页不再把它读成自动化浏览器(navigator.webdriver 为 false)。它只隐藏这一个信号——网站仍然拒绝这个浏览器时，agent 会告诉你。如果你自己的 ~/.agent-browser/config.json 已经写了 AutomationControlled 的值，保留你的。对下一个启动的浏览器生效。",
@@ -13794,4 +13780,31 @@ export default {
   // lane ui-needs-a-button (closure)
   "This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.": "这会替换“{name}”：用你在这里选的密钥重新添加它，新的保存好之后，旧的那条才会被删除。",
   "Add and replace": "添加并替换",
+  // lane ui-needs-a-button (pick 3): windows, dialogs and machine rows
+  "Show the pairing command…": "查看配对命令…",
+  "Pair a device…": "配对设备…",
+  "Open that machine": "打开那台机器",
+  "Offline since {time}": "自{time}起离线",
+  "Never connected": "从未连接",
+  "What to check": "检查什么",
+  "Easiest: run the pairing command again on the machine — it runs as administrator and asks you to confirm once.": "最简单：在那台机器上再运行一次配对命令——它会以管理员身份运行，只需确认一次。",
+  "Or, in an administrator PowerShell on the machine, run:": "或者，在那台机器的管理员 PowerShell 里运行：",
+  "Reinstall…": "重新安装…",
+  "“{name}” is offline — a mount works once it is connected.": "「{name}」现在离线，连上后才能挂载。",
+  "Add an SSH machine…": "添加 SSH 机器…",
+  "No machines yet — add an SSH machine or pair a device.": "还没有机器——添加一台 SSH 机器，或配对一台设备。",
+  "There is no sensitive data to export right now.": "目前没有可导出的敏感数据。",
+  "No VibeSpace password is set.": "VibeSpace 还没有设置密码。",
+  "Set a password…": "设置密码…",
+  "Release…": "解除…",
+  "Disconnect only drops the token and keeps these; Remove needs them released first.": "「断开」只丢弃 token，并保留这些；「移除」要求先把它们解除。",
+  "takes no replies": "不接收回复",
+  "Change delivery…": "修改送达方式…",
+  "Change the sending policy…": "修改发送策略…",
+  "to allow it, change the Sending policy above.": "要允许直接发送，请修改上方的「发送策略」。",
+  "Can only draft (you approve)": "只能起草，由你批准",
+  "No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet. A browser plugin can be installed, then chosen for this profile with Change build….": "无法提供切换：这个版本的 VibeSpace 还不能为 agent 更换浏览器。可以先安装一个浏览器插件，再用「更换版本…」为这个配置选择它。",
+  "Install a browser plugin…": "安装浏览器插件…",
+  "Cancel the request to use the page’s other way in, or sign in on your own device. A kept passkey signs in by this profile’s passkey settings; a new one is registered only after you allow it.": "取消这个请求后，可以用网页的其他登录方式，或在你自己的设备上登录。已保存的通行密钥按这个配置的通行密钥设置登录；新的通行密钥只有在你允许后才会注册。",
+  "Passkey settings…": "通行密钥设置…",
 };

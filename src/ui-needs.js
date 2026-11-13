@@ -15,7 +15,7 @@
  * THE ROW SHAPE IS lane machine-needs-at-pairing's (src/machine-needs.js); ONE suite reads both tables (scripts/test-needs-doors.mjs).
  * A sentence the MACHINE table claims (a machine's need) is its; this table claims the rest. PURE (no imports).
  */
-const DEFERRED = 'ui-needs-a-button · picks 3–4';
+const DEFERRED = 'ui-needs-a-button · pick 4';
 // ── THE REST OF THE NET on 935960b7e (derived: work/dump-net.mjs), each claimed by name — the first 64 characters of the sentence ──
 const oneOf = (list) => new RegExp('^(?:' + list.map((s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('|') + ')');
 const PATHS_LEFT = Object.freeze([
@@ -38,7 +38,6 @@ const PATHS_LEFT = Object.freeze([
     "Model-scoped weekly limits (e.g. Fable) aren’t in the passive fe",
     "Nextcloud: Settings → Files shows this address. Use an app passw",
     "No guard is on (also in Settings → Channels) — the policy alone ",
-    "No switch can be offered: this version of VibeSpace cannot switc",
     "Not set here: enter it in Settings → Channels → relay page to us",
     "Not set — the default in Settings applies (Integration → Hub aut",
     "On-demand quota refresh is disabled in Settings",
@@ -78,7 +77,6 @@ const PATHS_LEFT = Object.freeze([
     "VibeSpace asks Anthropic once how much of this account’s usage l",
     "VibeSpace's earlier download at {path} is now the program named ",
     "action trace is off (Settings → Agent browser)",
-    "change it in the account's Reach & policy… (the account's ⋯ menu",
     "keeping is off (Settings → Agent browser)",
     "the drafter is switched off in Settings › Plugins › LLM",
     "waiting for your consent — its kernel is not fetched; enable it ",
@@ -219,6 +217,33 @@ const NEEDS = Object.freeze([
     match: /^Suggesting words is off\.$/, door: { present: { marker: /door: 'plugin-settings', run: \(\) => app\._openPluginSettings\('voice-input'\)/, surfaces: ['src/lib/voice-teach-ui.js'] } } },
   { id: 'llm-key', need: 'the LLM plugin is on with no key — its chip is the door to the key\'s card (usage-16)',
     match: /^On — no API key yet$/, door: { present: { marker: /onChip = \(\) => this\.openIntegration\?\.\(p\.integration \|\| 'llm'\)/, surfaces: ['src/lib/plugins-ui.js'] } } },
+  // ── pick 3: windows, dialogs and machine rows (the way a sentence named became the door on its line) ──
+  { id: 'dial-offline', need: 'a paired device that is offline — its state short + «Show the pairing command…» on the row; what to check folded (machines-6)',
+    match: /^Offline since \{time\}$|^Never connected$/, door: { present: { marker: /pairDoor\(this\.app, h, \{ kind: 'secondary' \}\)/, surfaces: ['src/lib/sidebar-mounts.js'] }, via: { 'src/lib/dial-address-picker.js': 'src/lib/sidebar-mounts.js' } } },
+  { id: 'elevate-pair', need: 'raise a Windows device agent — «Show the pairing command…» is the primary, the PowerShell recipe the second way (machines-29)',
+    match: /^Easiest: run the pairing command again on the machine/, door: { present: { marker: /doors: \[pairDoor\(this\.app, h, \{ kind: 'primary' \}\)/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
+  { id: 'dial-reinstall', need: 'a dial-out daemon installed but not dialed in — «Reinstall…» is the primary, the removal a secondary danger (machines-27)',
+    match: /^The daemon is installed but <b>not currently dialed in<\/b>/, door: { present: { marker: /dataset\.door = 'dial-reinstall'/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
+  { id: 'mount-offline', need: 'a mount onto a machine that is offline — said first, the machine\'s pairing sheet on the line (storage-5)',
+    match: /^“\{name\}” is offline — a mount works once it is connected\.$/, door: { present: { marker: /ctx\.body\.prepend\(needLine\(\{[\s\S]{0,240}pairDoor\(this\.app, h/, surfaces: ['src/lib/sidebar-mounts.js'] } } },
+  { id: 'no-machine', need: 'no machine yet — «Add an SSH machine…» and «Pair a device…» on the line, never «in the Remote tab» (agents-accounts-6)',
+    match: /^No machines yet — add an SSH machine or pair a device\.$/, door: { present: { marker: /door: 'add-ssh-host'[\s\S]{0,400}pairDoor\(this, null/, surfaces: ['src/lib/manage-agents.js'] } } },
+  { id: 'machine-login', need: 'the machine login is not set up while named accounts run — «Log in on this machine…» stays on the row (agents-accounts-8)',
+    match: /^machine login not set up$|^machine login inactive$/, door: { present: { marker: /quietLogin \? t\('Log in on this machine…'\)/, surfaces: ['src/lib/manage-agents.js'] } } },
+  { id: 'no-password', need: 'the export dialog with no VibeSpace password — «Set a password…» on the line; rows only for what exists (gear-and-system-12)',
+    match: /^No VibeSpace password is set\.$|^There is no sensitive data to export right now\.$/, door: { present: { marker: /door: 'set-password'/, surfaces: ['src/lib/app.js'] } } },
+  { id: 'ref-release', need: 'an account still referenced — each reference with its «Release…» door, «Disconnect» beside them (channels-accounts-4)',
+    match: /^This account is still referenced — release these first:$/, door: { present: { marker: /refDoor\(app, a, ref, close\)/, surfaces: ['src/lib/channel-account-dialogs.js'] } } },
+  { id: 'no-replies', need: 'a caller that takes no replies — its line with «Change delivery…», never a greyed box (channels-groups-outbox-2)',
+    match: /^takes no replies$/, door: { present: { marker: /door: 'callers'/, surfaces: ['src/lib/channel-webhook.js'] }, via: { 'src/lib/webhook-view.js': 'src/lib/channel-webhook.js' } } },
+  { id: 'policy-review', need: 'direct send refused by a review policy — «Change the sending policy…» on the line (channels-policy-7)',
+    match: /^Direct send is not offered here: \{why\}$/, door: { present: { marker: /door: 'policy', run/, surfaces: ['src/lib/channel-filter-editor.js'] } } },
+  { id: 'policy-above', need: 'the same refusal INSIDE Reach & policy — it names the Sending policy row above it (channels-policy-1)',
+    match: /^to allow it, change the Sending policy above\.$/, door: { none: 'the row it names is in the same dialog, directly above this line — a door would open the dialog the person is in' } },
+  { id: 'no-switch', need: 'no browser switch can be offered — «Install a browser plugin…» and «Agent browser…» (Change build…) on the line (browser-profiles-19)',
+    match: /^No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet/, door: { present: { marker: /'browser-plugin': app && typeof app\._pluginInstallDialog/, surfaces: ['src/lib/browser-proposal-card.js'] }, via: { 'src/browser-switch.js': 'src/lib/browser-proposal-card.js' } } },
+  { id: 'passkey-wait', need: 'a page waits for a passkey — «Passkey settings…» beside «Cancel passkey request» (browser-live-13)',
+    match: /^Cancel the request to use the page’s other way in, or sign in on your own device/, door: { present: { marker: /open: 'passkeys'/, surfaces: ['src/lib/browser-live-window.js'] }, via: { 'src/browser-passkey.js': 'src/lib/browser-live-window.js' } } },
   { id: 'settings-paths', need: 'a sentence that routes a person by a menu / settings path — its door (src/lib/need-line.js settingsDoor / integrationDoor / a window\'s opener) replaces the path (picks 2–3)', match: new RegExp([oneOf(PATHS_LEFT).source, ...PATHS_LEFT_SHAPES.map((r) => r.source)].join('|')), door: { deferred: DEFERRED } },
   { id: 'directions', need: 'a hint that points at a control by a direction — checked on its surface: the door on the line, or the direction kept where it is true (pick 4)', match: oneOf(DIRECTIONS_LEFT), door: { deferred: DEFERRED } },
   { id: 'company-words', need: 'a sentence that assumes a company / an administrator — said only where a company preset of that kind exists (pick 4)', match: oneOf(COMPANY_LEFT), door: { deferred: DEFERRED } },

@@ -301,7 +301,7 @@ export const DESIGN_I18N = [
   { key: 'assignment: {conv} → {who}', built: 'access: {conv} → {who}', where: 'channels', why: 'R4 (2026-09-27): what points at an account is its ACCESS rows (a notification always rides one)' },
   { key: 'reach: {who} may see the whole account', where: 'channels' },
   { key: 'outbox: {n} proposal(s) awaiting approval', where: 'channels' },
-  { key: 'Disconnect only drops the token and keeps these; Remove needs them released first — the same rule as a credential with submounts.', where: 'channels' },
+  { key: 'Disconnect only drops the token and keeps these; Remove needs them released first.', where: 'channels' },
   { key: 'Open conversation window', where: 'channels' },
   { key: 'Custom App ID', where: 'channels' },
   { key: 'Custom App Secret', where: 'channels' },
@@ -418,8 +418,8 @@ export function census(texts) {
   out.push({ rule: '§7 Remove… lives in the Edit dialog on both sides — the storage row carries no remove icon; the channel ⋯ carries it too (D6)',
     ok: !!editM && editM.includes("tr('Remove…')") && !!rowM && !/ibtn\([^)]*'Remove/.test(rowM) && !/tr\('Remove/.test(rowM) && editC.includes("tr('Remove…')") && D6_ORDER.includes('Remove…'),
     why: JSON.stringify({ storageEdit: editM.includes("tr('Remove…')"), storageRowIcon: /tr\('Remove/.test(rowM), channelEdit: editC.includes("tr('Remove…')") }) });
-  out.push({ rule: '§7 Remove refused by reference names the storage rule (a credential with submounts)',
-    ok: /export function showRemoveRefusedDialog\(/.test(dlg || '') && (dlg || '').includes('the same rule as a credential with submounts'), why: 'the refusal dialog or its sentence is gone' });
+  out.push({ rule: '§7 Remove refused by reference: each reference carries the door that releases it, «Disconnect» beside them (lane ui-needs-a-button — the rule\'s echo dropped)',
+    ok: /export function showRemoveRefusedDialog\(/.test(dlg || '') && /function refDoor\(app, a, ref, close\)/.test(dlg || '') && (dlg || '').includes('Remove needs them released first.'), why: 'the refusal dialog, its doors or its sentence is gone' });
   const srv = texts[MOUNTS_SERVER] || '';
   const mDeath = (/'(connected but the sign-in has expired or been revoked — [^']*; re-authorize to fix)'/.exec(srv) || [])[1] || '';
   const cDeath = (/t\('(connected but the sign-in has expired or been revoked — [^']*; re-authorize to fix)'\)/.exec(panel || '') || [])[1] || '';

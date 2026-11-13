@@ -1062,7 +1062,6 @@ export default {
   "S3 mounts & shares": "S3 マウントと共有",
   "Billing accounts": "課金アカウント",
   "Usage pricing table": "使用量価格テーブル",
-  "no accounts configured": "アカウント未設定",
   "theme, font, language, usage-view choices": "テーマ・フォント・言語・使用量ビューの選択",
   "{count} model rate(s) / account discount(s)": "{count} 件のモデル料金／アカウント割引",
   "{n} account(s) — API keys + subscription logins": "{n} 個のアカウント — API キーとサブスクリプションログイン",
@@ -1118,7 +1117,6 @@ export default {
   "Accounts": "アカウント",
   "Instructions": "指示",
   "Accounts & quota on this machine": "このマシンのアカウントとクォータ",
-  "No machines yet — add an SSH host or pair a device in the Remote tab.": "マシンがまだありません——Remote タブで SSH ホストを追加するかデバイスをペアリングしてください。",
   "Set model": "モデルを設定",
   "Set password": "パスワードを設定",
   "Set password…": "パスワードを設定…",
@@ -1243,13 +1241,9 @@ export default {
   "model: ?": "モデル: ?",
   "needs attention": "要対応",
   "needs input": "入力待ち",
-  "no hosts configured": "設定済みのリモートホストなし",
-  "no mounts configured": "設定済みのマウントなし",
-  "no password configured": "パスワード未設定",
   "none checked = show all states": "何もチェックしない = すべての状態を表示",
   "none declared": "宣言なし",
   "normal": "標準",
-  "not found on this machine": "このマシンに見つかりません",
   "not installed": "未インストール",
   "not logged in": "未ログイン",
   "notification": "通知",
@@ -1726,7 +1720,6 @@ export default {
   "Billing account": "課金アカウント",
   "machine login inactive": "マシンログイン失効",
   "machine login not set up": "マシンログイン未設定",
-  "Log in machine-wide (claude /login)…": "マシン全体でログイン（claude /login）…",
   "{n} named account(s) in use": "名前付きアカウント {n} 件使用中",
   "Accounts & pool…": "アカウントとプール…",
   "Tip: named accounts and account pools work without the machine-wide login — add them via “Accounts & pool…”.": "ヒント：名前付きアカウントとアカウント プールはマシン全体のログインなしで使えます——「アカウントとプール…」から直接追加できます。",
@@ -5113,7 +5106,6 @@ export default {
   "outbox: {n} proposal(s) awaiting approval": "Outbox：承認待ちの提案 {n} 件",
   "Cannot remove \"{name}\"": "「{name}」を削除できません",
   "This account is still referenced — release these first:": "このアカウントはまだ参照されています — 先にこれらを解除してください：",
-  "Disconnect only drops the token and keeps these; Remove needs them released first — the same rule as a credential with submounts.": "「切断」はトークンだけを破棄してこれらを残します。「削除」は先にこれらの解除が必要です — サブマウントを持つ資格情報と同じルールです。",
   "Open Outbox": "Outbox を開く",
   "exclusive": "専有",
   "undeclared": "未宣言",
@@ -6852,7 +6844,6 @@ export default {
   "The page shows a message": "ページがメッセージを表示しています",
   "The page asks you to confirm": "ページが確認を求めています",
   "This page is waiting for a passkey ({rp})": "このページはパスキーを待っています（{rp}）", // lane browser-passkey
-  "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page's other way in, or sign in on your own device.": "このプロファイルがパスキーを持っていないサイトは独自の別のログイン方法を示します。保存済みのパスキーは Agent ブラウザパネルで設定したポリシーに従ってログインし、新しいパスキーはあなたが許可した後にだけ登録されます。このリクエストをキャンセルし、ページの別のログイン方法を使うか、ご自身のデバイスでログインしてください。", // lane passkey-ui (replaces the old no-passkey line)
   "Chrome's own passkey window is open on this computer's desktop — it does not show in this view.": "Chrome 自身のパスキーウィンドウがこのコンピューターのデスクトップに開いています。このビューには表示されません。", // lane browser-passkey
   "Cancel passkey request": "パスキーのリクエストをキャンセル", // lane browser-passkey
   "page waits for a passkey": "ページがパスキー待ち", // lane browser-passkey
@@ -8703,8 +8694,6 @@ export default {
   "off-hours ({tz})": "時間外（{tz}）",
   "Guards on top (also in Settings → Channels): {list} always needs your approval, whatever the policy": "上乗せのガード（設定 → チャネル にもあります）：{list} はポリシーに関係なく常にあなたの承認が必要です",
   "No guard is on (also in Settings → Channels) — the policy alone decides": "ガードはオフです（設定 → チャネル にもあります）— ポリシーだけで決まります",
-  "change it in this conversation's Reach & policy… (its row menu)": "この会話の「閲覧権とポリシー…」で変更できます（行のメニュー）",
-  "change it in the account's Reach & policy… (the account's ⋯ menu)": "アカウントの「閲覧権とポリシー…」で変更できます（アカウントの ⋯ メニュー）",
   "The sending policy changed while this dialog was open (another window, or the other door) — here it is as it is now; nothing was saved": "このダイアログを開いている間に送信ポリシーが変更されました（別のウィンドウ、または別の入口）— 現在の値を表示しています。何も保存されていません",
   "Who is woken": "誰が起こされるか",
   "{n} notification(s) on the whole account — access alone never wakes anyone": "アカウント全体に {n} 件の通知 — アクセス権だけでは誰も起こされません",
@@ -9048,7 +9037,6 @@ export default {
   "rotated {at}": "ローテーション {at}",
   "last call {at}": "最終呼び出し {at}",
   "revoked {at}": "取り消し {at}",
-  "takes no replies (its delivery is none) — change it in Callers…": "返信を受け取りません（届け方：なし）— 「呼び出し元…」で変更できます",
   "path {slug}: {n} / {m} wakes this hour": "パス {slug}：この 1 時間の起動 {n} / {m}",
   "to {name} (caller)": "宛先 {name}（呼び出し元）",
   "Quote a call to answer its caller — or Send a message… to pick callers": "呼び出しを引用してその呼び出し元に返信 — または「メッセージを送信…」で呼び出し元を選択",
@@ -10416,7 +10404,6 @@ export default {
   "Run as administrator…": "管理者として実行…", // lane win-input-elevated
   "Run \"{name}\"’s device agent as administrator": "\"{name}\" のデバイスエージェントを管理者として実行", // lane win-input-elevated
   "When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.": "デバイスエージェントが管理者として動作すると、あなたが管理者として開いたウィンドウにエージェントが入力できます — どれを許可するかは許可リストで選びます。VibeSpace が自分で昇格することはなく、Windows が確認を求めます。", // lane win-input-elevated
-  "Easiest: run the pairing command again — it now runs as administrator by default and asks you to confirm once. Or, in an administrator PowerShell on the machine, run:": "一番簡単なのは、ペアリングコマンドをもう一度実行することです — 既定で管理者として動作し、一度だけ確認を求めます。または、そのマシンの管理者 PowerShell で次を実行します：", // lane win-input-elevated
   "Copied — run it in an administrator PowerShell on the machine": "コピーしました — そのマシンの管理者 PowerShell で実行してください", // lane win-input-elevated
   "Install with normal rights (no administrator)": "通常の権限でインストール（管理者なし）", // lane win-input-elevated
   "administrator": "管理者", // lane win-input-elevated
@@ -12492,7 +12479,6 @@ export default {
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
   // lane engine-spi-egress L3: the anti-bot backend left the core — the words that replace its offers
-  "No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….": "切り替えは提案できません: このバージョンの VibeSpace はまだエージェントのためにブラウザを切り替えられません。サイトがこのブラウザを拒否する場合は、ブラウザプラグインをインストールし(⚙ → プラグイン → プラグインをインストール…)、「ビルドを変更…」でこのプロファイルに選んでください。",
   "The agent says its page needs {host}, which its browser's site list refused.": "エージェントによると、ページには {host} が必要ですが、そのブラウザのサイト一覧がそれを拒否しました。",
   "The proposal failed: {error}": "提案が失敗しました: {error}",
   "ON (default): the agent's browser starts with --disable-blink-features=AutomationControlled, so pages no longer read it as an automated browser (navigator.webdriver is false). It hides that one signal only — a site that still refuses the browser is told to you by the agent. If your own ~/.agent-browser/config.json already names an AutomationControlled value, yours is kept. Applies to the next browser that starts.": "オン(既定): エージェントのブラウザは --disable-blink-features=AutomationControlled 付きで起動し、ページはそれを自動操作のブラウザとして読まなくなります(navigator.webdriver が false)。隠すのはこの一つの信号だけです——それでもサイトがブラウザを拒むと、エージェントがあなたに伝えます。ご自身の ~/.agent-browser/config.json に AutomationControlled の値がすでにあれば、そちらを保ちます。次に起動するブラウザから適用されます。",
@@ -13793,4 +13779,31 @@ export default {
   // lane ui-needs-a-button (closure)
   "This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.": "「{name}」を置き換えます：ここで選ぶ鍵で追加し直し、新しいものが保存されたあとで古い項目を削除します。",
   "Add and replace": "追加して置き換える",
+  // lane ui-needs-a-button (pick 3): windows, dialogs and machine rows
+  "Show the pairing command…": "ペアリングコマンドを表示…",
+  "Pair a device…": "デバイスをペアリング…",
+  "Open that machine": "そのマシンを開く",
+  "Offline since {time}": "{time}からオフライン",
+  "Never connected": "未接続",
+  "What to check": "確認すること",
+  "Easiest: run the pairing command again on the machine — it runs as administrator and asks you to confirm once.": "いちばん簡単なのは、マシンでペアリングコマンドをもう一度実行することです——管理者として実行され、確認は一度だけです。",
+  "Or, in an administrator PowerShell on the machine, run:": "または、マシンの管理者 PowerShell で次を実行します：",
+  "Reinstall…": "再インストール…",
+  "“{name}” is offline — a mount works once it is connected.": "「{name}」はオフラインです——接続されるとマウントできます。",
+  "Add an SSH machine…": "SSH マシンを追加…",
+  "No machines yet — add an SSH machine or pair a device.": "マシンはまだありません——SSH マシンを追加するか、デバイスをペアリングしてください。",
+  "There is no sensitive data to export right now.": "今エクスポートできる機密データはありません。",
+  "No VibeSpace password is set.": "VibeSpace のパスワードは設定されていません。",
+  "Set a password…": "パスワードを設定…",
+  "Release…": "解除…",
+  "Disconnect only drops the token and keeps these; Remove needs them released first.": "「切断」はトークンだけを破棄し、これらは残します。「削除」するには先にこれらを解除してください。",
+  "takes no replies": "返信を受け取りません",
+  "Change delivery…": "配信方法を変更…",
+  "Change the sending policy…": "送信ポリシーを変更…",
+  "to allow it, change the Sending policy above.": "許可するには、上の「送信ポリシー」を変更してください。",
+  "Can only draft (you approve)": "下書きのみ（あなたが承認）",
+  "No switch can be offered: this version of VibeSpace cannot switch the agent’s browser yet. A browser plugin can be installed, then chosen for this profile with Change build….": "切り替えは提示できません：この VibeSpace はまだエージェントのブラウザを切り替えられません。ブラウザプラグインを入れてから、「ビルドを変更…」でこのプロファイルに選べます。",
+  "Install a browser plugin…": "ブラウザプラグインをインストール…",
+  "Cancel the request to use the page’s other way in, or sign in on your own device. A kept passkey signs in by this profile’s passkey settings; a new one is registered only after you allow it.": "リクエストを取り消すと、ページの別のログイン方法か、自分のデバイスでのサインインが使えます。保存済みのパスキーはこのプロファイルのパスキー設定に従ってサインインし、新しいパスキーはあなたが許可した後にだけ登録されます。",
+  "Passkey settings…": "パスキーの設定…",
 };

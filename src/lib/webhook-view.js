@@ -64,7 +64,7 @@ export function callerRow(c, { t = tDevice } = {}) {
 export function pickerRows(callers, { t = tDevice } = {}) {
   return (Array.isArray(callers) ? callers : []).filter((c) => c && !c.revokedAt).map((c) => {
     const none = !c.delivery || c.delivery.mode === 'none' || !DELIVERY_MODES.includes(c.delivery.mode);
-    return { id: String(c.id), name: String(c.name || c.id), disabled: none, why: none ? t('takes no replies (its delivery is none) — change it in Callers…') : null };
+    return { id: String(c.id), name: String(c.name || c.id), disabled: none, why: none ? t('takes no replies') : null }; // its door: «Change delivery…» (lane ui-needs-a-button)
   });
 }
 

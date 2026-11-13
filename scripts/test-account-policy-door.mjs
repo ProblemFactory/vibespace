@@ -47,8 +47,8 @@ for (const modes of [LARK, SLACK]) for (const grain of ['account', 'conversation
   { mode: 'direct', source: 'adapter-default', declared: 'direct', inherits: null },
 ]) grid.push({ grain, modes, pol: { ...pol, modes } });
 for (const D of [null, ZH, JA]) for (const g of grid) for (const guards of [{}, { linksReview: false, attachmentsReview: false }, { offHoursTz: 'Asia/Shanghai' }, { offHoursTz: 'Asia/Shanghai', offHoursOn: false, linksReview: false }, { linksReview: false, attachmentsReview: false, offHoursTz: '' }]) for (const owner of [false, true]) P.policyRowModel({ grain: g.grain, policy: g.pol, guards, t: tOf(D), owner, localTz: 'Asia/Tokyo' });
-P.policyWhereText({ grain: 'account' }, tOf(ZH)); P.policyWhereText({ grain: 'conversation', source: 'conversation' }, tOf(ZH));
-P.policyWhereText({ grain: 'account' }, tOf(JA)); P.policyWhereText({ grain: 'conversation', source: 'conversation' }, tOf(JA));
+P.policyDoorOf({ grain: 'account' }, tOf(ZH)); P.policyDoorOf({ grain: 'conversation', source: 'conversation' }, tOf(ZH));
+P.policyDoorOf({ grain: 'account' }, tOf(JA)); P.policyDoorOf({ grain: 'conversation', source: 'conversation' }, tOf(JA));
 ok(miss.size === 0, `every word the row model says is in zh AND ja (${grid.length} rows × 3 guard sets)`, [...miss].join(' | '));
 const m = (grain, pol, extra = {}) => P.policyRowModel({ grain, policy: pol, ...extra });
 const acctNone = m('account', { mode: 'review', source: 'default', declared: null, modes: LARK, inherits: null });
@@ -67,7 +67,7 @@ const g0 = m('account', null, { guards: { linksReview: true, attachmentsReview: 
 const g1 = m('account', null, { guards: { linksReview: false, attachmentsReview: false, offHoursTz: '' } });
 ok(/a link · an attachment · off-hours \(Asia\/Tokyo\) always needs your approval/.test(g0.guardsText) && /^No guard is on/.test(g1.guardsText), 'the guards line names exactly the guards that are on (read from the settings handed in)', `${g0.guardsText} || ${g1.guardsText}`);
 ok(m('account', null).mode === 'review' && m('account', { mode: 'bogus', source: 'account', declared: 'bogus' }).mode === 'review', 'an unreadable view reads review (fail closed)');
-ok(/account's Reach & policy… \(the account's ⋯ menu\)/.test(P.policyWhereText({ grain: 'account' })) && /this conversation's Reach & policy…/.test(P.policyWhereText({ grain: 'conversation', source: 'conversation' })) && /account's Reach/.test(P.policyWhereText({ grain: 'conversation', source: 'account' })), 'a refusal names WHERE the value it names is changed (the account door / the conversation\'s)');
+ok(P.policyDoorOf({ grain: 'account' }).grain === 'account' && P.policyDoorOf({ grain: 'conversation', source: 'conversation' }).grain === 'conversation' && P.policyDoorOf({ grain: 'conversation', source: 'account' }).grain === 'account' && P.policyDoorOf({}).label === 'Change the sending policy…', 'a refusal opens WHERE the policy is set (lane ui-needs-a-button: a door, never «the account\'s ⋯ menu» in words) — the conversation\'s own Reach & policy when the policy is its own, else the account\'s');
 
 console.log('② ③ ④ a real engine behind the real routes');
 const sent = [];
@@ -133,7 +133,7 @@ const doorPins = ({ panel, reach, dlg, editor }) => [
   ['a pick PUTs {policy, base}, re-reads the view and re-draws section 2 in place (setCaps — no reopen)', /JSON\.stringify\(\{ policy: mode, base: m\.own \}\)[\s\S]*?part\.setCaps\(\{ \.\.\.st\.caps, policyRequiresReview: !\(pol && pol\.mode === 'direct'\) \}\)/.test(reach) && /const setCaps = \(caps\) => \{\s*st\.caps = caps;\s*cap = F\.authorityCapCode\(caps\);/.test(editor)],
   ['the conversation dialog draws the SAME row (its source said)', /policyRowEl\(app, \{ grain: 'conversation', policy: current\.policy/.test(reach)],
   ['the account Edit dialog carries the policy select from the SAME model, saved with its base', /ownerPolicyModel\(app, \{ grain: 'account', policy: a\.policy, tr \}\)/.test(dlg) && /P\.policyRowModel\(\{ grain, policy, guards: policyGuards\(app\)/.test(reach) && /patch\.policy = v\.policy \|\| null; patch\.base = pol\.own;/.test(dlg)],
-  ['the Grant access refusal names where to change the policy', /cap\.code === 'policy-review' \? ` — \$\{P\.policyWhereText\(/.test(editor)],
+  ['the Grant access refusal carries the door to where the policy is set', /const pd = P\.policyDoorOf\(/.test(editor) && /door: 'policy', run \}/.test(editor)],
 ];
 const real = { panel: SRC('src/lib/channels-panel.js'), reach: SRC('src/lib/channel-reach-editor.js'), dlg: SRC('src/lib/channel-account-dialogs.js'), editor: SRC('src/lib/channel-filter-editor.js') };
 for (const [name, held] of doorPins(real)) ok(held, name);

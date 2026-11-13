@@ -318,7 +318,6 @@
     "failed ({code})",
     "it could not be stored for the next turn (the disk write failed)",
     "its wake could not be recorded (the store write failed) — kept f",
-    "machine login not set up",
     "needs attention",
     "needs input",
     "needs re-authorization ({why})",

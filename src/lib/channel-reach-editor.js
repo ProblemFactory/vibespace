@@ -188,7 +188,7 @@ export async function showAccountReachDialog(app, adapter) {
   body.appendChild(polHost);
   const sec2 = el('div', 'chan-account-access');
   body.appendChild(sec2);
-  part = grantAccessBody(app, st, sec2, { close, target, notify: false, reopen: () => showAccountReachDialog(app, adapter) });
+  part = grantAccessBody(app, st, sec2, { close, target, notify: false, reopen: () => showAccountReachDialog(app, adapter), policyAbove: true });
   const n = (st.watchers || []).length;
   body.appendChild(el('div', 'chan-opt-label', t('Who is woken')));
   const wk = el('div', 'chan-flow-actions chan-account-woken');
