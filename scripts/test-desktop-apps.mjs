@@ -1195,10 +1195,10 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
 {
   const df = read('deploy/docker/Dockerfile');
   const steps = M.xpraRepoSteps('bookworm'), line = (re) => steps.find((l) => re.test(l)) || '';
-  const keyLine = line(/curl -fsSL/), checkLine = line(/fpr:::::::::/), moveLine = line(/^mv -f /), srcLine = line(/Types: deb/), pinLine = line(/Pin-Priority/);
+  const keyLine = line(/curl -fsSL/), checkLine = line(/sha256sum -c --status/), moveLine = line(/^mv -f /), srcLine = line(/Types: deb/), pinLine = line(/Pin-Priority/);
   ok(df.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`) && keyLine.includes(`curl -fsSL ${M.XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new`), 'the image fetches the key the plan fetches (XPRA_KEY_URL), beside the keyring until it is checked');
   // lane machine-needs-at-pairing pick 3: THE KEY IS PINNED — the check runs before the move, the move before any apt source names it
-  ok(checkLine === M.XPRA_KEY_CHECK && steps.indexOf(keyLine) < steps.indexOf(checkLine) && steps.indexOf(checkLine) < steps.indexOf(moveLine) && steps.indexOf(moveLine) < steps.indexOf(srcLine) && df.includes(`&& ${checkLine} \\\n`) && df.includes(`&& ${moveLine} \\\n`), 'the key is checked (its pinned fingerprint) BEFORE it is moved into the keyring, and moved before the apt source names it — the image runs the same lines');
+  ok(checkLine === M.XPRA_KEY_CHECK && steps.indexOf(keyLine) < steps.indexOf(checkLine) && steps.indexOf(checkLine) < steps.indexOf(moveLine) && steps.indexOf(moveLine) < steps.indexOf(srcLine) && df.includes(`&& ${checkLine} \\\n`) && df.includes(`&& ${moveLine} \\\n`), 'the key is checked (its pinned SHA-256) BEFORE it is moved into the keyring, and moved before the apt source names it — the image runs the same lines');
   {
     const cp = require('node:child_process'), os = require('node:os');
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-xpra-key-')), k = path.join(d, 'k.asc');
@@ -1209,11 +1209,37 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
     for (const t of ['sh', 'mktemp', 'sha256sum', 'rm', 'cat', 'echo', '[']) { const w = cp.spawnSync('sh', ['-c', `command -v ${t === '[' ? 'test' : t}`], { encoding: 'utf8' }).stdout.trim(); if (w.startsWith('/')) fs.symlinkSync(w, path.join(nogpg, t)); }
     const a = run(real), b = other ? run(other) : null, c = run(real, { PATH: nogpg });
     const realHasGpg = cp.spawnSync('sh', ['-c', 'command -v gpg']).status === 0;
-    ok(a.rc === 0 && a.kept && (!realHasGpg || (b && b.rc === 3 && !b.kept && /not xpra\.org's pinned key/.test(b.err))) && c.rc === 0, `the check: xpra.org's key (the fixture) passes; ${other ? 'another key' : '(no other key on this box)'} is refused (exit 3), its download removed, the reason said; with no gpg on PATH the file's pinned SHA-256 passes it`, { a, b, c });
+    ok(a.rc === 0 && a.kept && (!realHasGpg || (b && b.rc === 3 && !b.kept && /is not the pinned one/.test(b.err))) && c.rc === 0, `the check: xpra.org's key (the fixture) passes; ${other ? 'another key' : '(no other key on this box)'} is refused (exit 3), its download removed, the reason said; with no gpg on PATH the file's pinned SHA-256 passes it`, { a, b, c });
     const tampered = path.join(d, 'tampered.asc'); fs.writeFileSync(tampered, fs.readFileSync(real, 'utf8').replace('mQINB', 'mQINC'));
     const e = run(tampered, { PATH: nogpg });
     ok(e.rc === 3 && !e.kept, 'with no gpg, a changed key file fails the pinned SHA-256 and is removed (exit 3)', e);
+    // machine-needs pick 3d (the reader's MUST): EXACTLY the pinned file — the pinned key PLUS another key (either order) and a
+    // truncated file are refused WITH gpg on PATH as without it (the fingerprint alone passed them: apt then trusted every key in it)
+    const fx = fs.readFileSync(real, 'utf8');
+    const crc24 = (buf) => { let c = 0xB704CE; for (const b of buf) { c ^= b << 16; for (let i = 0; i < 8; i++) { c <<= 1; if (c & 0x1000000) c ^= 0x1864CFB; } } return c & 0xFFFFFF; };
+    const armor = (bin) => { const c = crc24(bin); return `-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n${bin.toString('base64').match(/.{1,64}/g).join('\n')}\n=${Buffer.from([c >> 16, (c >> 8) & 255, c & 255]).toString('base64')}\n-----END PGP PUBLIC KEY BLOCK-----\n`; };
+    const otherKey = other ? armor(fs.readFileSync(other)) : fx.replace('mQINB', 'mQINC');
+    const cases = { pinned_plus_other: fx + otherKey, other_plus_pinned: otherKey + fx, truncated: fx.slice(0, Math.floor(fx.length / 2)) };
+    const got = {};
+    for (const [name, body] of Object.entries(cases)) { const f = path.join(d, name + '.asc'); fs.writeFileSync(f, body); const g = run(f), n = run(f, { PATH: nogpg }); got[name] = [g.rc, g.kept, n.rc, n.kept, /is not the pinned one/.test(g.err)]; }
+    ok(Object.values(got).every(([gr, gk, nr, nk, said]) => gr === 3 && !gk && nr === 3 && !nk && said), `EXACTLY the pinned key file: the pinned key + another key (either order) and a truncated file are refused (exit 3, the download removed, the reason said) — with gpg on PATH${realHasGpg ? '' : ' (none on this box)'} as without it`, got);
+    // a fetch that fails leaves nothing in the keyring folder (wget makes its -O file before it fails)
+    const kr = path.join(d, 'kr'); fs.mkdirSync(kr); const stub = path.join(d, 'stub'); fs.mkdirSync(stub);
+    fs.writeFileSync(path.join(stub, 'curl'), '#!/bin/sh\nexit 22\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(stub, 'wget'), '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = -qO ] && { : > "$2"; shift; }; shift; done\nexit 8\n', { mode: 0o755 });
+    const fr = cp.spawnSync('sh', ['-c', `set -e; ${String(M.XPRA_KEY_FETCH || ': no fetch line').split('/usr/share/keyrings').join(kr)}`], { encoding: 'utf8', env: { PATH: `${stub}:${process.env.PATH}` } });
+    ok(fr.status === 3 && fs.readdirSync(kr).length === 0 && /could not be fetched/.test(fr.stderr), 'a key fetch that fails (curl, then wget) leaves NOTHING in the keyring folder and says so (exit 3)', { rc: fr.status, left: fs.readdirSync(kr), err: fr.stderr.slice(0, 160) });
     fs.rmSync(d, { recursive: true, force: true });
+  }
+  // the source names EXACTLY the pinned keyring file (apt never falls back to the machine-wide keyring)
+  ok(srcLine.includes("'Signed-By: /usr/share/keyrings/xpra.asc'") && df.includes("'Signed-By: /usr/share/keyrings/xpra.asc'"), 'the apt source says Signed-By: /usr/share/keyrings/xpra.asc — in the plan and in the image (never the machine-wide keyring)');
+  // hostile facts never reach the root script: every free-text fact set to shell text ⇒ the script byte-equal to the clean one
+  {
+    const clean = { platform: 'linux', apt: '/usr/bin/apt-get', distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true };
+    const evil = '$(touch /tmp/vs-pwn)`id`;"\'\n|&';
+    const hostile = { ...clean, prettyName: evil, like: ['debian', evil], version: evil, id: evil, kernel: evil, arch: evil };
+    const a = M.xpraInstallPlan(clean), b = M.xpraInstallPlan(hostile), c = M.xpraInstallPlan({ ...clean, codename: 'bookworm; rm -rf /' });
+    ok(a.ok && b.ok && a.script === b.script && !b.script.includes('vs-pwn') && !c.ok, 'hostile facts never reach the root script (every free-text field set to shell text ⇒ byte-equal to the clean one); a hostile codename is refused by name', { cOk: c.ok, cCode: c.code });
   }
   ok(df.includes(`&& ${srcLine} \\\n`) && df.includes(`&& ${pinLine}\n`), 'the image writes the plan\'s deb822 source + pin lines verbatim (xpraRepoSteps(bookworm): XPRA_REPO_URL, XPRA_PIN_MAJOR)');
   const pl = M.xpraInstallPlan({ platform: 'linux', apt: true, distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true });

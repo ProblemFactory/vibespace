@@ -35,8 +35,6 @@ export function ffmpegFailText(rows, machine) {
   const reasons = rows.map((r) => (Object.prototype.hasOwnProperty.call(FAIL_WORDS, r.code) ? FAIL_WORDS[r.code](r.label) : t('{build}: it stopped ({code})', { build: r.label, code: r.code })));
   return t('{app} was not fetched on {machine}, and nothing was changed there: {reasons}', { app: FFMPEG.label, machine, reasons: reasons.join(' · ') });
 }
-/** ONE name for the machine: the hub's words name it by its id; the page says the name its title uses. */
-const named = (text, hostId, machine) => (machine && hostId && machine !== hostId ? String(text).split(hostId).join(machine) : String(text));
 export async function getFfmpeg(hostId, say = () => { }, { machine = null } = {}) {
   const shown = await fetchJson(`/api/desktop/install-plan?host=${encodeURIComponent(hostId)}&what=ffmpeg`);
   const plan = shown && shown.plan;
@@ -62,7 +60,7 @@ export async function getFfmpeg(hostId, say = () => { }, { machine = null } = {}
   }
   if (end && end.done) say(t('Fetched {app} — both SHA-256 fingerprints checked — into {folder}', { app: end.label || FFMPEG.label, folder: FFMPEG_FOLDER }), false);
   else if (end && Array.isArray(end.rows) && end.rows.length) say(ffmpegFailText(end.rows, machine || hostId), true);
-  else say(t('{app} was not fetched: {why}', { app: FFMPEG.label, why: named((end && end.error) || last || t('no answer'), hostId, machine) }), true);
+  else say(t('{app} was not fetched on {machine}: {why}', { app: FFMPEG.label, machine: machine || hostId, why: (end && end.error) || last || t('no answer') }), true); // pick 3d: the machine by the title's name; the hub's words carry no id (never a rewrite of free text)
   return end;
 }
 

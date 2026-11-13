@@ -79,7 +79,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `capture_unavailable` without it).
 RUN install -d -m 0755 /usr/share/keyrings \
     && curl -fsSL https://xpra.org/xpra.asc -o /usr/share/keyrings/xpra.asc.new \
-    && (K=/usr/share/keyrings/xpra.asc.new; G=$(mktemp -d) && { if command -v gpg >/dev/null 2>&1; then gpg --homedir "$G" --batch --show-keys --with-colons "$K" 2>/dev/null | grep -qx 'fpr:::::::::B4993B57323148E37977E5D873254CAD17978FAF:'; else echo '4df3209ea4b759f0b5838b60baedb6893ec62df7abad9046462176a6e6a7ed7d  '"$K" | sha256sum -c --status; fi; r=$?; rm -rf "$G"; [ $r -eq 0 ]; } || { rm -f "$K"; echo "the key at https://xpra.org/xpra.asc is not xpra.org's pinned key (fingerprint B4993B57323148E37977E5D873254CAD17978FAF) - nothing was changed" >&2; exit 3; }) \
+    && (K=/usr/share/keyrings/xpra.asc.new; echo '4df3209ea4b759f0b5838b60baedb6893ec62df7abad9046462176a6e6a7ed7d  '"$K" | sha256sum -c --status || { rm -f "$K"; echo "the key file at https://xpra.org/xpra.asc is not the pinned one (SHA-256 4df3209ea4b759f0b5838b60baedb6893ec62df7abad9046462176a6e6a7ed7d, xpra.org's key B4993B57323148E37977E5D873254CAD17978FAF alone) - a key the publisher changed is refused too - nothing was changed" >&2; exit 3; }) \
     && mv -f /usr/share/keyrings/xpra.asc.new /usr/share/keyrings/xpra.asc \
     && printf '%s\n' 'Types: deb' 'URIs: https://xpra.org' 'Suites: bookworm' 'Components: main' 'Signed-By: /usr/share/keyrings/xpra.asc' > /etc/apt/sources.list.d/xpra.sources \
     && printf '%s\n' 'Package: xpra*' 'Pin: version 6.*' 'Pin-Priority: 1001' > /etc/apt/preferences.d/xpra-vibespace

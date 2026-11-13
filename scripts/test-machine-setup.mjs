@@ -17,6 +17,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url); // pick 3d: the PURE rows and setup-mode's answer, read directly
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 700) : '')); } };
@@ -78,6 +80,39 @@ console.log('④ THE WINDOWS INSTALLER (read)');
   ok(/TightVNC's result is what listens now/.test(ps) && /Get-NetTCPConnection -LocalPort 5900 -State Listen/.test(ps), 'TightVNC\'s result is what listens on 5900 afterwards — never the window\'s exit');
   const iSummary = ps.lastIndexOf("Write-Host 'What this machine will be used for:'");
   ok(iSummary > ps.indexOf('function Get-VsDial') && !/exit \d/.test(ps.slice(iSummary)), 'the summary is the LAST lines (after the older installs are retired) and ends nothing: the pairing stays done');
+}
+
+
+console.log('⑤ THE READER\'S LIST ON PICK 3 (主开发 15:15Z — pick 3d)');
+{
+  // «already installed» only when nothing is left to do
+  let SM = null; try { SM = require(path.join(REPO, 'src/agentd/setup-mode.js')); } catch { SM = null; }
+  const M = require(path.join(REPO, 'src/desktop-apps.js'));
+  const facts = { platform: 'linux', apt: '/usr/bin/apt-get', distro: 'debian', codename: 'bookworm', aptXpra: '3.1', sudo: true };
+  const present = M.xpraInstallPlan({ ...facts, xpra: '6.5.3' });
+  const A = SM && typeof SM.planAnswer === 'function' ? SM.planAnswer(present) : null, B = SM && typeof SM.planAnswer === 'function' ? SM.planAnswer({ ...present, packages: [] }) : null;
+  ok(present.already && present.packages.length > 0 && A && A.rc === 0 && A.text === present.script && B && B.rc === 5, '--setup-plan says «there already» (exit 5) ONLY when the plan has nothing left to do: xpra present with its companions still to install ⇒ the plan runs', { already: present.already, packages: present.packages, A: A && A.rc, B: B && B.rc });
+  // Linux: the text sudo runs is the plan's stdout only — the agent's stderr never joins it
+  const sh = read('scripts/vibespace-agentd-install.sh');
+  const block = sh.slice(Math.max(0, sh.indexOf('# WHAT THIS MACHINE WILL BE USED FOR (lane machine-needs-at-pairing pick 3')));
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-setup-err-'));
+  fs.mkdirSync(path.join(T, 'root/current'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'block.sh'), block.split('< /dev/tty').join('< /dev/null'));
+  fs.writeFileSync(path.join(T, 'agent'), '#!/bin/sh\ncase "$*" in *--setup-plan*) echo "(node:4242) Warning: a stand-in warning line on stderr" >&2; echo "echo PLAN-RAN"; exit 0;; esac\nexit 0\n', { mode: 0o755 });
+  const r = spawnSync('bash', ['-c', `set -euo pipefail; uname() { echo Linux; }; sudo() { printf '%s' "$3" > ${T}/ran.sh; }; ROOT=${T}/root; NODE_BIN=${T}/agent; SETUP=xpra; source ${T}/block.sh; echo SCRIPT-WENT-ON`], { encoding: 'utf8', timeout: 20000 });
+  const ran = fs.existsSync(path.join(T, 'ran.sh')) ? fs.readFileSync(path.join(T, 'ran.sh'), 'utf8') : null;
+  ok(r.status === 0 && ran === 'echo PLAN-RAN', 'Linux: what sudo runs is the plan\'s STDOUT only — a warning the agent writes on stderr never becomes root shell text', { ran, status: r.status });
+  fs.rmSync(T, { recursive: true, force: true });
+  // Windows: an optional need can never end the installer (read — no PowerShell here; the owner's first run checks it)
+  const ps = read('scripts/vibespace-agentd-install.ps1');
+  const iS = ps.indexOf("if ($Setup -match '(^|,)desktop(,|$)')"), seg = iS >= 0 ? ps.slice(iS, ps.indexOf("$persist = 'none", iS)) : '';
+  const iC = seg.indexOf("$ErrorActionPreference = 'Continue'"), iT = seg.indexOf('  try {'), iFf = seg.indexOf('--setup ffmpeg'), iVnc = seg.indexOf('--setup-plan tightvnc'), iCatch = seg.indexOf("  } catch { $setupLines += ('x the setup stopped: "), iFin = seg.indexOf('  finally { $ErrorActionPreference = $eapWas }');
+  ok(iC > 0 && iC < iT && iT < iFf && iFf < iVnc && iVnc < iCatch && iCatch < iFin, 'Windows: the two setup calls run under ErrorActionPreference Continue inside try — anything thrown is SAID and the installer goes on to register its task (the preference restored after)', { iC, iT, iFf, iVnc, iCatch, iFin });
+  // step ②'s words: what will be installed, from where, with whose key, what persists, what runs as administrator / root
+  const sm = read('src/lib/sidebar-mounts.js');
+  const ffRow = (sm.match(/tr\('\{app\} \(\{publisher\}, \{mb\} MB, \{licence\}\)[^\n]*/) || [''])[0], xRow = (sm.match(/tr\('From the distribution, or from xpra\.org[^\n]*/) || [''])[0];
+  ok(/from its release on GitHub \(\{where\}\) into \{folder\}/.test(ffRow) && /VibeSpace did not build it/.test(ffRow) && /as administrator/.test(ffRow) && /where: FFI\.FFMPEG\.url/.test(ffRow) && /folder: FFI\.FFMPEG_FOLDER/.test(ffRow), 'step ② (Windows): the ffmpeg row says where from (its release address) and where it lands, that VibeSpace did not build it, and who runs it — from the PURE row', ffRow.slice(0, 200));
+  ok(M.XPRA_APT_PACKAGES.every((p) => new RegExp(`\\b${p}\\b`).test(xRow)) && /stays an apt source/.test(xRow) && new RegExp(`held at ${M.XPRA_PIN_MAJOR}\\.x`).test(xRow) && /one sudo/.test(xRow) && /SHA-256/.test(xRow), 'step ② (Linux): the xpra row names every package the plan installs (XPRA_APT_PACKAGES), that xpra.org stays an apt source, the 6.x hold, the key file\'s SHA-256, and the one sudo', xRow.slice(0, 200));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

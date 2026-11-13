@@ -38,7 +38,7 @@ export function micRefusalText(code) {
 
 /** `carrier()` = the stream view the voice rides (null while none plays); `install()` = the 「安装虚拟麦克风…」 door.
  *  → { el, ready(view, ok), ended(view), dispose(), get state() } */
-export function createMicToggle({ hostId, strip, before = null, install = null, getUserMedia = null, secure = () => (typeof window === 'undefined' || window.isSecureContext !== false), doc = typeof document !== 'undefined' ? document : null } = {}) {
+export function createMicToggle({ hostId, machine = null, strip, before = null, install = null, getUserMedia = null, secure = () => (typeof window === 'undefined' || window.isSecureContext !== false), doc = typeof document !== 'undefined' ? document : null } = {}) {
   let st = { state: 'off' }, track = null, view = null, facts = null, askSeq = 0, disposed = false, factsAsked = false, said = '';
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'desktop-strip-btn desktop-strip-mic'; b.hidden = true; b.setAttribute('aria-pressed', 'false');
@@ -50,7 +50,7 @@ export function createMicToggle({ hostId, strip, before = null, install = null, 
   const door = document.createElement('button'); door.type = 'button'; door.className = 'desktop-strip-mic-install'; door.textContent = t('Install a virtual microphone…'); door.hidden = true;
   door.onclick = () => { try { install?.(); } catch { /* the shell's */ } };
   // lane machine-needs-at-pairing pick 2: the machine's receiver has no ffmpeg to play the voice ⇒ 「取得 FFmpeg …」 on the same words
-  const ffDoor = ffmpegDoor(hostId, { cls: 'desktop-strip-mic-install', say: (text) => { wordsText.textContent = text; } }); ffDoor.hidden = true;
+  const ffDoor = ffmpegDoor(hostId, { machine, cls: 'desktop-strip-mic-install', say: (text) => { wordsText.textContent = text; } }); ffDoor.hidden = true; // pick 3d: the sheet names the machine as the window does
   words.append(wordsText, door, ffDoor);
   strip.insertBefore(b, before && before.parentNode === strip ? before : null);
   strip.insertBefore(words, before && before.parentNode === strip ? before : null);
