@@ -209,7 +209,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // `i18n` (lane owner-press-attended): the refusal as STRUCTURE — the client says the next free slot in the viewer's
     // zone from its epoch (A.refusalI18n), never a time string this hub rendered
     // B-0a33 round 1: `about` = the conversation waiting frames wait behind — the notice is filed under ITS key, so it opens it
-    try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt, ...(about && about.key ? { sessionName: about.name || 'Spending' } : {}) }); return true; }
+    try { userTodos.add(about && about.key ? about.key : INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
@@ -290,7 +290,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key, name: wait.name } : null);
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null);
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
