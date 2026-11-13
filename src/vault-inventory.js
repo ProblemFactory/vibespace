@@ -521,6 +521,20 @@ function paceVerdict(stamps, now, max = REVEAL_PACE_MAX) {
   if (recent.length < max) return { ok: true };
   return { ok: false, code: 'paced', retryInMs: Math.max(1, REVEAL_PACE_MS - (now - Math.min(...recent))) };
 }
+/** ONE pace answer for a two-step code across both agent doors (`vibespace-vault totp` and `fill --vault …/otp`):
+ *  one code (`code_paced`), one sentence, carrying `retryInMs` and `secondsLeft`. */
+function codePaceVerdict(stamps, now, max = REVEAL_PACE_MAX) {
+  const p = paceVerdict(stamps, now, max);
+  if (p.ok) return p;
+  const secondsLeft = Math.max(1, Math.ceil(p.retryInMs / 1000));
+  return {
+    ok: false,
+    code: 'code_paced',
+    retryInMs: p.retryInMs,
+    secondsLeft,
+    error: `too many two-step codes requested in the last minute — wait ${secondsLeft} seconds, then try again`,
+  };
+}
 /** mm:ss of a window's time left (the countdown chip). */
 function countdownText(ms) {
   const s = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
@@ -529,7 +543,7 @@ function countdownText(ms) {
 
 module.exports = {
   STORES, STORE_IDS, GROUPS, GROUP_IDS, revealableOf, secretRowOf, AGENT_PROV, storeOf, KINDS, KIND_WORDS, kindOfField, SIZE_CLASSES, sizeClassOf, plainBytesOf, refOf, parseRef, doorsOf, rowOf,
-  inventoryOf, searchRows, SEARCHED_FIELDS, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
+  inventoryOf, searchRows, SEARCHED_FIELDS, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, codePaceVerdict, countdownText,
   // lane vault-window-v2 (design q-047 §3): the purposes, the provenance, the state chips, the window's view, the band, the two producers' rules
   ORIGINS, PURPOSES, PURPOSE_IDS, purposeOf, groupByPurpose, PROVENANCES, PROVENANCE_IDS, PROVENANCE_FILTERS, provenanceOf, provenanceFilterOf, EXPIRY_WARN_MS, stateChipsOf, viewOf,
   BAND_MAX, bandItemsOf, bandDoorsOf, USE_FAIL_CAUSES, USE_FAIL_MERGE_MS, USE_FAIL_HEADS, USE_FAIL_LINES, USE_FAIL_REACH_LINES, USE_FAIL_NAMELESS, useFailVerdict, useFailCard, rotateCard,

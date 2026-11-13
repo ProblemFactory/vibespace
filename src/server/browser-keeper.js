@@ -6906,19 +6906,20 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     ensureLoaded();
     const pid = String(profileId || '');
     const st = reg.loginFences && reg.loginFences[pid];
-    if (!st || typeof st !== 'object') return { fences: [], scrubs: [] };
+    if (!st || typeof st !== 'object') return { fences: [], scrubs: [], guards: [] };
     return {
       fences: Array.isArray(st.fences) ? st.fences.map((f) => ({ ...f, ...(Array.isArray(f.also) ? { also: f.also.map((a) => ({ ...a })) } : {}) })) : [],
       scrubs: Array.isArray(st.scrubs) ? st.scrubs.map((s) => ({ ...s })) : [],
+      guards: Array.isArray(st.guards) ? st.guards.map((g) => ({ ...g, ...(Array.isArray(g.also) ? { also: g.also.map((a) => ({ ...a })) } : {}) })) : [],
     };
   }
-  function saveLoginFenceState(profileId, { fences = [], scrubs = [] } = {}) {
+  function saveLoginFenceState(profileId, { fences = [], scrubs = [], guards = [] } = {}) {
     ensureLoaded();
     const pid = String(profileId || '');
     if (!pid || !B.isProfileId(pid)) return false;
     if (!reg.loginFences || typeof reg.loginFences !== 'object') reg.loginFences = {};
-    const nf = (Array.isArray(fences) ? fences : []).filter((f) => f && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => {
-      const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
+    const normFence = (f, includeHold = true) => {
+      const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a === 'object' && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
         loginId: String(a.loginId).slice(0, 320),
         ...(a.typedSlot === 'current' || a.typedSlot === 'password' || a.typedSlot === 'previous' || a.typedSlot === 'pending' || a.typedSlot === 'otp' ? { typedSlot: a.typedSlot } : {}),
         ...(Number.isInteger(a.rev) && a.rev >= 1 ? { rev: a.rev } : {}),
@@ -6934,20 +6935,23 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         at: Number(f.at) || 0,
         ...(typeof f.mode === 'string' && f.mode ? { mode: String(f.mode).slice(0, 24) } : {}),
         ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
-        ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
+        ...(includeHold && typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
         ...(f.typedSlot === 'current' || f.typedSlot === 'password' || f.typedSlot === 'previous' || f.typedSlot === 'pending' || f.typedSlot === 'otp' ? { typedSlot: f.typedSlot } : {}),
         ...(Number.isInteger(f.rev) && f.rev >= 1 ? { rev: f.rev } : {}),
         ...(typeof f.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(f.entryGen) ? { entryGen: f.entryGen } : {}),
         ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
-        ...(f.unknownTyped === true ? { unknownTyped: true } : {}),
+        ...(includeHold && f.unknownTyped === true ? { unknownTyped: true } : {}),
+        ...(includeHold && f.postLiftHeld === true ? { postLiftHeld: true } : {}),
         ...(also.length ? { also } : {}),
       };
-    });
+    };
+    const nf = (Array.isArray(fences) ? fences : []).filter((f) => f && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => normFence(f, true));
+    const ng = (Array.isArray(guards) ? guards : []).filter((g) => g && typeof g.targetId === 'string' && g.targetId && typeof g.origin === 'string' && g.origin).slice(-32).map((g) => normFence(g, false));
     const ns = (Array.isArray(scrubs) ? scrubs : []).filter((s) => s && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
       name: String(s.name).slice(0, 320),
       at: Number(s.at) || 0,
     }));
-    const next = nf.length || ns.length ? { fences: nf, scrubs: ns } : null;
+    const next = nf.length || ns.length || ng.length ? { fences: nf, scrubs: ns, ...(ng.length ? { guards: ng } : {}) } : null;
     const prev = reg.loginFences[pid] || null;
     if (JSON.stringify(prev) === JSON.stringify(next)) return true;
     if (next) reg.loginFences[pid] = next;

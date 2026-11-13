@@ -235,7 +235,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     if (!v.ok) return done(v);
     const t = now(), k = subject;
     const mine = (usePace.get(k) || []).filter((x) => t - x < VI.REVEAL_PACE_MS && t >= x);
-    const p = VI.paceVerdict(mine, t, T.USE_PACE_MAX);
+    const p = VI.codePaceVerdict(mine, t, T.USE_PACE_MAX);
     if (!p.ok) { usePace.set(k, mine); return done(p); }
     const r = withRecord(entry, codeOf);
     if (!r.ok) return done(r);
@@ -258,7 +258,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     if (Array.isArray(owners)) { const ow = ownerOf(entry); if (!ow || !owners.includes(ow)) return done(named('not_granted')); }
     const t = now(), k = subject;
     const mine = (usePace.get(k) || []).filter((x) => t - x < VI.REVEAL_PACE_MS && t >= x);
-    const p = VI.paceVerdict(mine, t, T.USE_PACE_MAX);
+    const p = VI.codePaceVerdict(mine, t, T.USE_PACE_MAX);
     if (!p.ok) { usePace.set(k, mine); return done(p); }
     const r = withRecord(entry, codeOf);
     if (!r.ok) return done(r);

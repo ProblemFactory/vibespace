@@ -248,6 +248,7 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
   const express = req('express');
   const { WebSocket } = req('ws');
   const BL = req('./src/browser-login.js');
+  const BM = req('./src/browser-mediation.js');
   const VE = req('./src/server/vault-engine.js');
   const GS = req('./src/server/grants-store.js');
   const BK = req('./src/server/browser-keeper.js');
@@ -369,6 +370,10 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
         mediator: () => mediator,
         saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
         loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
+        loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
+          BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+          { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(wsEndpoint), usableProfiles: [prof.label], profileLabel: prof.label, action },
+        ),
       };
       dialogs2 = Dm.create({
         keeper: stubKeeper2,
@@ -464,6 +469,10 @@ async function runFirstFillWorker(repoDir, kind, mode, extOpts = {}) {
       mediator: () => mediator,
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
+        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(wsEndpoint), usableProfiles: [prof.label], profileLabel: prof.label, action },
+      ),
     });
 
     const stubKeeper = makeStubKeeper();
@@ -613,6 +622,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
   const { WebSocket } = req('ws');
   const { Auth } = req('./src/auth.js');
   const BL = req('./src/browser-login.js');
+  const BM = req('./src/browser-mediation.js');
   const VE = req('./src/server/vault-engine.js');
   const GS = req('./src/server/grants-store.js');
   const BK = req('./src/server/browser-keeper.js');
@@ -625,6 +635,15 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
   const { startFakeKernel } = await import(pathToFileURL(path.join(repoDir, 'scripts/fixtures/fake-kernel.mjs')).href);
 
   console.log('⑧ Round 28 regression nails: full-window fence, W0 in-flight abort (0 terminateExecution), pre-planted timer events, postData/trace/HAR during+after fill, protocol fault fail-closed + SPA ref guard + generate rollback, Property 4 (4-1 / 4-2 / 3 fresh-process first fills)');
+
+  const r28ChildrenPromise = Promise.all([
+    spawnFirstFillChild(repoDir, 'long', 'same-proc-lock'),
+    spawnFirstFillChild(repoDir, 'short', 'same-proc-lock'),
+    spawnFirstFillChild(repoDir, 'otp', 'same-proc-lock'),
+    runColdLockedPair(repoDir, 'long'),
+    runColdLockedPair(repoDir, 'short'),
+    runColdLockedPair(repoDir, 'otp'),
+  ]);
 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r28-nails-'));
   const dataDir = path.join(tmpRoot, 'data');
@@ -804,6 +823,10 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
       mediator: () => mediator,
       saveLoginFenceState: (id, st) => keeperReal.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => keeperReal.loginFenceStateOf(id),
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM.loginFillChannelVerdict(
+        BM.leaseRoadVerdict({ mediated: false, proxy: Boolean(mediator), ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        { proxy: Boolean(mediator), external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(relay.wsUrl), usableProfiles: [prof.label], profileLabel: prof.label, action },
+      ),
     };
 
     dialogs = Dm.create({
@@ -1260,7 +1283,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
 
       ok(
         !traceStartBefore.error
-          && Boolean(traceStartDuring.error)
+          && !traceStartDuring.error
           && fenceLifted
           && !allReceived.includes(OTP_VAL)
           && !allReceived.includes(PW_ALICE)
@@ -1857,14 +1880,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
 
     // ── R28-6c: Addendum — 3 True First-Fill Child-Process Scenarios (`long`, `short`, `otp`) ──
     {
-      const [longSame, shortSame, otpSame, longCold, shortCold, otpCold] = await Promise.all([
-        spawnFirstFillChild(repoDir, 'long', 'same-proc-lock'),
-        spawnFirstFillChild(repoDir, 'short', 'same-proc-lock'),
-        spawnFirstFillChild(repoDir, 'otp', 'same-proc-lock'),
-        runColdLockedPair(repoDir, 'long'),
-        runColdLockedPair(repoDir, 'short'),
-        runColdLockedPair(repoDir, 'otp'),
-      ]);
+      const [longSame, shortSame, otpSame, longCold, shortCold, otpCold] = await r28ChildrenPromise;
       ok(
         longSame.ok === true && shortSame.ok === true && otpSame.ok === true
           && longCold.ok === true && shortCold.ok === true && otpCold.ok === true,

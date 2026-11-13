@@ -523,7 +523,15 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       try { c = totpCode(o.rec.totpName, { conv, ...(isOwn ? { owners: [...ownSet] } : {}) }); } catch { c = null; }
       if (!c || !c.ok || !c.code) {
         if (c && (c.code === 'paced' || c.code === 'code_paced')) {
-          return named('code_paced', c.error || c.why || 'too many two-step codes requested in the last minute — wait a moment and try again');
+          const retryInMs = Math.max(1, Number(c.retryInMs) || 1000);
+          const secondsLeft = Math.max(1, Number(c.secondsLeft) || Math.ceil(retryInMs / 1000));
+          return {
+            ok: false,
+            code: 'code_paced',
+            retryInMs,
+            secondsLeft,
+            error: c.error || c.why || `too many two-step codes requested in the last minute — wait ${secondsLeft} seconds, then try again`,
+          };
         }
         return named('login_no_otp', `the paired two-step code (${o.rec.totpName}) could not be opened — ask the owner in the Vault window`);
       }

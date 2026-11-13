@@ -49,6 +49,27 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SELF_PATH = fileURLToPath(import.meta.url);
 const quiet = { log() {}, warn() {}, error() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ALLOWED_ROAD_MODES = new Set(['mediated', 'scope', null]);
+
+export function inspectLeaseRoadSource(medSrc, BM = {}) {
+  const lrvMatch = String(medSrc || '').match(/function\s+leaseRoadVerdict\s*\([\s\S]*?\n\}/);
+  const lrvBody = lrvMatch ? lrvMatch[0] : '';
+  const whyLiterals = [...new Set([...lrvBody.matchAll(/\bwhy\s*:\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`|([^\s,}]+))/g)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]))];
+  const modeRaw = [...lrvBody.matchAll(/\bmode\s*:\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`|([^\s,}]+))/g)].map((m) => {
+    if (m[1] !== undefined) return { literal: true, raw: m[1] };
+    if (m[2] !== undefined) return { literal: true, raw: m[2] };
+    if (m[3] !== undefined) return { literal: true, raw: m[3] };
+    return { literal: false, raw: m[4] };
+  });
+  const modeValues = [...new Set(modeRaw.map((tok) => {
+    if (tok.literal) return tok.raw;
+    if (tok.raw === 'null') return null;
+    if (Object.prototype.hasOwnProperty.call(BM, tok.raw)) return BM[tok.raw];
+    return tok.raw;
+  }))];
+  const illegalModes = modeValues.filter((m) => !ALLOWED_ROAD_MODES.has(m));
+  return { lrvBody, whyLiterals, modeValues, illegalModes };
+}
 
 async function startKernelRelay(fk) {
   const { WebSocketServer, WebSocket } = createRequire(import.meta.url)('ws');
@@ -317,11 +338,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
 
     // R29-1d: Dynamic grid census parsed from `leaseRoadVerdict` in `src/browser-mediation.js`
     {
-      const lrvMatch = medSrc.match(/function\s+leaseRoadVerdict\s*\([\s\S]*?\n\}/);
-      const lrvBody = lrvMatch ? lrvMatch[0] : '';
-      const whyLiterals = [...new Set([...lrvBody.matchAll(/why:\s*'([^']+)'/g)].map((m) => m[1]))];
-      const modeTokens = [...new Set([...lrvBody.matchAll(/mode:\s*([A-Za-z0-9_]+)/g)].map((m) => m[1]))];
-      const modeValues = modeTokens.map((t) => (t === 'null' ? null : (BM[t] ?? t)));
+      const { whyLiterals, modeValues, illegalModes } = inspectLeaseRoadSource(medSrc, BM);
 
       const GRID = [
         // Admitted cells (ONLY local mediated channels: 'mediated' and 'scope')
@@ -366,11 +383,12 @@ export async function runR29LoginNails({ repoDir, ok }) {
       ok(
         hasVerdictFn
           && whyLiterals.length >= 6
+          && illegalModes.length === 0
           && uncoveredWhys.length === 0
           && uncoveredModes.length === 0
           && mismatches.length === 0,
-        'R29-1d (Channel Law 1-4 dynamic grid census): every mode & why literal in leaseRoadVerdict × profile kind is covered, admitting ONLY local mediated/scope channels and refusing every other cell with login_channel_unmediated',
-        { whyLiterals, modeValues, uncoveredWhys, uncoveredModes, mismatches },
+        'R29-1d (Channel Law 1-4 dynamic grid census): every mode & why literal in leaseRoadVerdict × profile kind is in {mediated, scope, null} and covered, admitting ONLY local mediated/scope channels and refusing every other cell with login_channel_unmediated',
+        { whyLiterals, modeValues, illegalModes, uncoveredWhys, uncoveredModes, mismatches },
       );
     }
 
@@ -855,18 +873,21 @@ export async function runR29LoginNails({ repoDir, ok }) {
           mode: 'scope',
         });
         const wsScope = await openCdpWs(WebSocket, grantScope.url, tidB);
+        const attA = await wsScope.call('Target.attachToTarget', { targetId: tidA, flatten: false });
+        const sidA = attA.result && attA.result.sessionId;
         // 1) Unfenced scope session: Target.sendMessageToTarget & sessionless Browser.getVersion MUST succeed (identical to master!)
         const sendUnfenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":1,"method":"Runtime.enable"}' });
         const verUnfenced = await wsScope.call('Browser.getVersion', {});
 
-        // 2) Fence Tab A via real fillVaultField -> sessionless Browser.getVersion & Tab B reads MUST still succeed, while Target.sendMessageToTarget is refused login_fill_live!
+        // 2) Fence Tab A via real fillVaultField -> sessionless Browser.getVersion, Tab B reads, AND Tab B Target.sendMessageToTarget MUST still succeed, while Tab A Target.sendMessageToTarget is refused login_fill_live!
         const fillA = await dialogs.fillVaultField(
           { profileId: PID, browserKey: KEY },
           { target: '#pw', spec: 'untouched29.example.test#alice/password', targetId: tidA, facts: { conversationKeys: [KEY] } },
         );
         const verWhileAFenced = await wsScope.call('Browser.getVersion', {});
         const readBWhileAFenced = await wsScope.evalInDom('document.querySelector("#txt").value');
-        const sendWhileAFenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":2,"method":"Runtime.evaluate"}' });
+        const sendBWhileAFenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":2,"method":"Runtime.enable"}' });
+        const sendAWhileAFenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: sidA, message: '{"id":3,"method":"Runtime.evaluate"}' });
         wsScope.close();
 
         ok(
@@ -875,9 +896,10 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && Boolean(fillA && fillA.ok === true)
             && Boolean(verWhileAFenced && verWhileAFenced.result && !verWhileAFenced.error)
             && readBWhileAFenced?.result?.result?.value === 'hello-B'
-            && Boolean(sendWhileAFenced && sendWhileAFenced.error && /Target\.sendMessageToTarget is refused|login_fill_live/.test(String(sendWhileAFenced.error.message || ''))),
-          'R29-2 (Compulsory 2 untouched parity): unfenced Target.sendMessageToTarget forwards on scope grant, sessionless Browser.getVersion succeeds both unfenced and while another tab is fenced, Tab B reads stay 200, and fenced Target.sendMessageToTarget is refused',
-          { sendUnfenced, verUnfenced, fillA, verWhileAFenced, readBWhileAFenced, sendWhileAFenced },
+            && Boolean(sendBWhileAFenced && sendBWhileAFenced.result && !sendBWhileAFenced.error)
+            && Boolean(sendAWhileAFenced && sendAWhileAFenced.error && /login_fill_live/.test(String(sendAWhileAFenced.error.message || ''))),
+          'R29-2 (Compulsory 2 untouched parity): unfenced Target.sendMessageToTarget forwards on scope grant, sessionless Browser.getVersion & Tab B reads & Tab B Target.sendMessageToTarget stay 200 while Tab A is fenced, and Tab A Target.sendMessageToTarget is refused login_fill_live',
+          { sendUnfenced, verUnfenced, fillA, verWhileAFenced, readBWhileAFenced, sendBWhileAFenced, sendAWhileAFenced },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
@@ -1223,7 +1245,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
           const tick = () => {
             if (++n > 200) return;
             if (el.value) stashed = el.value;
-            else if (stashed) { el.value = stashed; return; }
+            else if (stashed) { setTimeout(() => { el.value = stashed; }, 55); return; }
             setTimeout(tick, 10);
           };
           tick();
@@ -1233,14 +1255,14 @@ export async function runR29LoginNails({ repoDir, ok }) {
           { target: '#otp', spec: 'item4r29.example.test#alice/otp', targetId: tidOtp, facts: { conversationKeys: [KEY] } },
         );
         clock += 250;
-        await sleep(300); // ceiling fires at 180ms, wipes `#otp`, site re-injects within 10ms, `postLiftTimer` re-arms at +35ms
+        await sleep(300); // ceiling fires at 180ms, wipes `#otp`, site re-injects at +55ms (after initial +35ms check), caught on agent read
         const medOtp = await openCdpWs(WebSocket, grant.url, tidOtp);
         const readP2cOtp = await medOtp.evalInDom('document.querySelector("#otp").value');
         const p2cRearmed = dialogs.liveFillOnTarget(PID, tidOtp);
         medOtp.close();
         rawOtp.close();
 
-        // Scene P2e (same-origin failed submit + site re-injecting password 10ms after wipe, then top-frame navigation lifts!)
+        // Scene P2e (same-origin failed submit + site re-injecting password 55ms after wipe, then top-frame navigation lifts!)
         const rawPw = await openCdpWs(WebSocket, relay.wsUrl, tidPw);
         await rawPw.evalInDom(`(() => {
           const el = document.querySelector('#pw');
@@ -1249,7 +1271,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
           const tick = () => {
             if (++n > 250) return;
             if (el.value) stashed = el.value;
-            else if (stashed) { el.value = stashed; return; }
+            else if (stashed) { setTimeout(() => { el.value = stashed; }, 55); return; }
             setTimeout(tick, 10);
           };
           tick();

@@ -60,6 +60,7 @@ const REFUSALS = Object.freeze([
   'login_pending_exists',
   'login_fence_unavailable',
   'login_channel_unmediated',
+  'login_check_failed',
   'code_paced',
   'target_not_found',
 ]);

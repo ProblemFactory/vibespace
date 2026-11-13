@@ -1357,7 +1357,7 @@ function normalizeRegistry(doc) {
     // lane vault-login: persisted live-fill tab fences (`{targetId, urlAtFill, origin, loginId, at, mode?, browserKey?, holdReason?, typedSlot?, rev?, entryGen?, typedPrevious?, unknownTyped?, also?}`)
     // and scrub entry names (`{name, at}` — NEVER a secret value or digest) per profile so hub/watch restarts re-arm both layers
     loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => {
-      const fences = (Array.isArray(v.fences) ? v.fences : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => {
+      const normFenceRow = (f) => {
         const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a === 'object' && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
           loginId: String(a.loginId).slice(0, 320),
           ...(a.typedSlot === 'current' || a.typedSlot === 'password' || a.typedSlot === 'previous' || a.typedSlot === 'pending' || a.typedSlot === 'otp' ? { typedSlot: a.typedSlot } : {}),
@@ -1380,15 +1380,24 @@ function normalizeRegistry(doc) {
           ...(typeof f.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(f.entryGen) ? { entryGen: f.entryGen } : {}),
           ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
           ...(f.unknownTyped === true ? { unknownTyped: true } : {}),
+          ...(f.postLiftHeld === true ? { postLiftHeld: true } : {}),
           ...(also.length ? { also } : {}),
         };
+      };
+      const fences = (Array.isArray(v.fences) ? v.fences : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map(normFenceRow);
+      const guards = (Array.isArray(v.guards) ? v.guards : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => {
+        const nr = normFenceRow(f);
+        delete nr.holdReason;
+        delete nr.unknownTyped;
+        delete nr.postLiftHeld;
+        return nr;
       });
       const scrubs = (Array.isArray(v.scrubs) ? v.scrubs : []).filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
         name: String(s.name).slice(0, 320),
         at: Number(s.at) || 0,
       }));
-      return [k, { fences, scrubs }];
-    }).filter(([, v]) => v.fences.length || v.scrubs.length)),
+      return [k, { fences, scrubs, ...(guards.length ? { guards } : {}) }];
+    }).filter(([, v]) => v.fences.length || v.scrubs.length || (v.guards && v.guards.length))),
   };
 }
 /** Resolve a profile by id or by label (exact, case-insensitive). */
