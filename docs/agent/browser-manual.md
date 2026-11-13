@@ -782,6 +782,25 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   it. Do not retry it (not after the handback either); tell the user which
   method was refused and on which browser, so the census can be extended. A name that is not a CDP method's shape
   (`Domain.method`, letters and digits) answers `bad_message`.
+* **The whole profile is the person's** (the owner's law): on a profile a
+  person shares with agents — Separate tabs, or a profile shared through
+  "Who can use it" on this machine — your lease never acts on the WHOLE
+  profile. These answer `method_refused`, each saying what to do instead:
+  `cookies clear` (it would empty the person's whole cookie jar) — clear ONE
+  site's data with `vibespace-browser site-reset --host <host>` (on a shared
+  profile it asks the person), or use your conversation's own browser for a
+  throwaway session; ignoring certificate errors for every tab, a profile-wide
+  cache or site-state wipe — open such a site in your own browser; installing,
+  removing or re-setting a web app — ask the person; site permissions
+  (grant / set / reset) are answered only for a browser context your lease
+  created, otherwise ask the person. `download` WORKS: VibeSpace lets it set
+  the profile's download folder and puts the folder back when your download
+  ends (or the person takes over, or your lease ends) — while your download is
+  in flight, a file the person starts in that profile lands in your folder, so
+  finish it and move on. A paired machine's profile, or a hub with no
+  mediating proxy, hands your driver the browser directly: nothing is refused
+  there — leave the person's profile as you found it. Your conversation's own
+  temporary browser is yours: none of this applies to it.
 
 ### A Background Work job uses your browser as you
 

@@ -40,7 +40,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { btn, el as chromeEl, icon as chromeIcon } from './channel-chrome.js';
 import { createBackendIcon } from './agent-meta.js';
-import { whoChips, foldChips, CHIPS_WIDE } from './browser-who-model.js';
+import { whoChips, foldChips, CHIPS_WIDE, allAgentsSentence } from './browser-who-model.js';
 import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
 import { openNewProfileDialog } from './browser-new-profile.js'; // lane browser-admin: the panel's New profile…
 import { openBuildDialog } from './browser-build-dialog.js'; // lane browser-admin 2a: a row's Change build…
@@ -718,7 +718,7 @@ export function whoCell(app, { onChange = null } = {}) {
     setText(noteText, m.nobody || '');
     note.style.display = m.nobody ? '' : 'none';
     // BROWSE YOURSELF (B-6ae8): the list names conversations and Task Groups — never the user, who may always browse it
-    const tip = (m.mode === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.')) + ' ' + t('You can always browse it yourself.');
+    const tip = (m.mode === 'all' ? allAgentsSentence(r && r.agentRoad, t) : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.')) + ' ' + t('You can always browse it yourself.');
     if (root.title !== tip) root.title = tip;
     root.dataset.mode = m.mode;
     fit();

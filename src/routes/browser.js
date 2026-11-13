@@ -580,7 +580,7 @@ router.get('/api/browser/providers', (req, res) => {
   const h = LOCAL.has(host) ? null : host;
   try {
     const rows = B.providerRows({ host: h, desktopConsent: typeof k.desktopConsent === 'function' ? k.desktopConsent() : undefined });
-    res.json({ providers: rows, host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [] });
+    res.json({ providers: rows, host: h, hostKnown: h ? k.hostKnown(h) : true, forwards: typeof ctx.forwards === 'function' ? ctx.forwards() : [], road: typeof k.agentRoadFor === 'function' ? k.agentRoadFor(null, { host: h }).why : null });   // (lane chrome-157: the road a new profile here would take)
   } catch (e) { fail(res, e); }
 });
 router.get('/api/browser/profiles/:id', (req, res) => {

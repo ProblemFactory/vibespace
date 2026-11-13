@@ -15,7 +15,7 @@ import { fetchJson, showToast, createModalShell, copyText } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
-import { pickerRows, draftWho, EVERYONE_KEY } from './browser-who-model.js';
+import { pickerRows, draftWho, EVERYONE_KEY, allAgentsSentence } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn
@@ -123,7 +123,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const whoMode = () => (picker.selected().includes(EVERYONE_KEY) ? 'all' : 'only');
   const syncWho = () => {
     const sentence = whoMode() === 'all'
-      ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
+      ? allAgentsSentence(st.host ? st.hostRoad : st.road, t)   // (lane chrome-157: the road a new profile here would take)
       : t('Pick conversations and Task Groups. A Task Group means every conversation in it — bound to it or started in its folders — now or later.');
     if (meaning.textContent !== sentence) meaning.textContent = sentence;
   };
@@ -319,13 +319,15 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   }
   async function loadFacts() {
     const [pv, mv] = await Promise.all([fetchJson('/api/browser/providers'), fetchJson('/api/desktop/machines')]);
+    st.road = pv && pv.road ? pv.road : null;   // (lane chrome-157: the road a new profile on this machine would take)
+    try { syncWho(); } catch { /* drawn before the picker */ }
     if (st.closed) return;
     st.providers = pv && Array.isArray(pv.providers) ? pv.providers : [];
     st.machines = mv && Array.isArray(mv.machines) ? mv.machines : [{ hostId: 'local' }];
     // a paired machine's verdicts (the structural rules — a key that cannot leave this computer, a browser with no remote
     // transport — are the same on every paired machine): asked once, of the first machine that could run one
     const remote = st.machines.find((m) => m && m.hostId && m.hostId !== 'local');
-    if (remote) { const hv = await fetchJson(`/api/browser/providers?host=${encodeURIComponent(remote.hostId)}`); if (st.closed) return; st.hostRows = hv && Array.isArray(hv.providers) ? hv.providers : null; }
+    if (remote) { const hv = await fetchJson(`/api/browser/providers?host=${encodeURIComponent(remote.hostId)}`); if (st.closed) return; st.hostRoad = hv && hv.road ? hv.road : 'remote'; st.hostRows = hv && Array.isArray(hv.providers) ? hv.providers : null; }
     // lane remote-profile-start: can a browser run on each paired machine at all (its CLI, a Chrome) — its own answer, asked once per open
     const serving = st.machines.filter((m) => m && m.hostId && m.hostId !== 'local' && m.connected && Array.isArray(m.capabilities) && m.capabilities.includes('browser-serve'));
     if (serving.length) { const rs = await Promise.all(serving.map((m) => fetchJson(`/api/browser/builds?host=${encodeURIComponent(m.hostId)}`))); if (st.closed) return; st.ready = {}; serving.forEach((m, i) => { const r = rs[i]; if (r && !r.error && r.ready) st.ready[m.hostId] = r.ready; }); }

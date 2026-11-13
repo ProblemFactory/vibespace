@@ -42,7 +42,12 @@
  *                  crash*, exposeDevToolsProtocol, setRemoteLocations, sendMessageToTarget, Tethering, an unpacked
  *                  extension, desktop mirroring, a renderer crash, the deaf-page arm, and — Chrome 154 — a whole-browser
  *                  setting no lease can scope to its own tabs: a mock camera in the SHARED device list, the browser-wide
- *                  Global Privacy Control signal) — refused on every lease, paused or not (method_refused)
+ *                  Global Privacy Control signal; and — the owner's law of 2026-11-13, lane chrome-157 — the acts on a
+ *                  person's WHOLE profile: its cookie jar, cache, certificate checks, installed apps, site state, rows
+ *                  marked law 'whole-profile') — refused on every lease, paused or not (method_refused). Two more marks:
+ *                  'whole-profile-own-context' (answered only for a browser context the lease made) and
+ *                  'whole-profile-window' (Browser.setDownloadBehavior: forwarded, the profile put back when the
+ *                  download ends — src/server/cdp-mediator.js)
  *
  * TAB SCOPING — the rule per class is LEASE-WIDE for every class (decided r4, said here so it is not re-litigated one
  * method at a time): (1) the mediator cannot tell a tab from a frame under the driven tab — an out-of-process iframe's
@@ -128,7 +133,7 @@ const ROWS = Object.freeze({
     simulateGATTDisconnection: 'page-mutation',
   },
   Browser: {
-    setPermission: 'page-mutation', grantPermissions: 'page-mutation', resetPermissions: 'page-mutation', setDownloadBehavior: 'page-mutation',
+    setPermission: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, grantPermissions: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, resetPermissions: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, setDownloadBehavior: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-window' },
     cancelDownload: 'page-mutation', close: ['refused', '2026-09-21'], crash: ['refused', '2026-09-21'], crashGpuProcess: ['refused', '2026-09-21'],
     getVersion: 'read', getBrowserCommandLine: 'read', getHistograms: 'read', getHistogram: 'read', getWindowBounds: 'read', getWindowForTarget: 'read',
     setWindowBounds: 'view', setContentsSize: 'view', setDockTile: 'harmless', executeBrowserCommand: 'refused',
@@ -289,8 +294,8 @@ const ROWS = Object.freeze({
     stopSampling: 'harmless', getAllTimeSamplingProfile: 'read', getBrowserSamplingProfile: 'read', getSamplingProfile: 'read',
   },
   Network: {
-    canClearBrowserCache: 'read', canClearBrowserCookies: 'read', canEmulateNetworkConditions: 'read', clearBrowserCache: 'page-mutation',
-    clearBrowserCookies: 'page-mutation', deleteCookies: 'page-mutation', disable: 'harmless', emulateNetworkConditions: 'page-mutation',
+    canClearBrowserCache: 'read', canClearBrowserCookies: 'read', canEmulateNetworkConditions: 'read', clearBrowserCache: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) empties the profile's whole HTTP cache, every tab's; it is never needed to read a page — reload the page, or use your conversation's own browser" },
+    clearBrowserCookies: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) empties the person's WHOLE cookie jar — every site signs out; clear one site's data with `vibespace-browser site-reset --host <host>` (on a shared profile it asks the person), or use your conversation's own browser for a throwaway session" }, deleteCookies: 'page-mutation', disable: 'harmless', emulateNetworkConditions: 'page-mutation',
     emulateNetworkConditionsByRule: 'page-mutation', overrideNetworkState: 'page-mutation', enable: 'harmless', configureDurableMessages: 'harmless',
     getAllCookies: 'read', getCertificate: 'read', getCookies: 'read', getResponseBody: 'read', getRequestPostData: 'read', replayXHR: 'page-mutation',
     searchInResponseBody: 'read', setBlockedURLs: 'page-mutation', setBypassServiceWorker: 'page-mutation', setCacheDisabled: 'page-mutation',
@@ -309,8 +314,8 @@ const ROWS = Object.freeze({
     setShowHinge: 'view', setShowDisplayCutout: 'view', setShowIsolatedElements: 'view', setShowWindowControlsOverlay: 'view',
   },
   PWA: {
-    getOsAppState: 'read', install: 'page-mutation', uninstall: 'page-mutation', launch: 'view', launchFilesInApp: 'view', openCurrentPageInApp: 'view',
-    changeAppUserSettings: 'page-mutation',
+    getOsAppState: 'read', install: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) installs a web app into the person's profile (and the machine's app list) — ask the person to install it" }, uninstall: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) removes one of the person's web apps and closes its open windows — ask the person" }, launch: 'view', launchFilesInApp: 'view', openCurrentPageInApp: 'view',
+    changeAppUserSettings: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) changes an installed web app's settings for the whole profile — ask the person" },
   },
   Page: {
     addScriptToEvaluateOnLoad: 'page-mutation', addScriptToEvaluateOnNewDocument: 'page-mutation',
@@ -327,7 +332,7 @@ const ROWS = Object.freeze({
     removeScriptToEvaluateOnNewDocument: 'page-mutation', screencastFrameAck: 'read', searchInResource: 'read', setAdBlockingEnabled: 'page-mutation',
     setBypassCSP: 'page-mutation', getPermissionsPolicyState: 'read', getOriginTrials: 'read', setDeviceMetricsOverride: 'view',
     setDeviceOrientationOverride: 'page-mutation', setFontFamilies: 'page-mutation', setFontSizes: 'page-mutation',
-    setDocumentContent: ['view', '2026-09-21'], setDownloadBehavior: 'page-mutation', setGeolocationOverride: 'page-mutation',
+    setDocumentContent: ['view', '2026-09-21'], setDownloadBehavior: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) (the deprecated page form) sets the download folder of the page's WHOLE browser context — measured on Chrome 154 + 157: not scoped to its page; downloads work through Browser.setDownloadBehavior, which the mediator forwards and puts back when your download ends" }, setGeolocationOverride: 'page-mutation',
     setLifecycleEventsEnabled: 'harmless', setTouchEmulationEnabled: 'view', startScreencast: 'read', startScreenRecording: 'read',
     stopScreenRecording: 'read', stopLoading: ['view', '2026-09-21'], crash: 'refused', close: ['view', '2026-09-21'], setWebLifecycleState: 'view',
     stopScreencast: 'read', produceCompilationCache: 'harmless', addCompilationCache: 'harmless', clearCompilationCache: 'harmless',
@@ -346,7 +351,7 @@ const ROWS = Object.freeze({
     enable: 'harmless', disable: 'harmless',
   },
   Security: {
-    disable: 'harmless', enable: 'harmless', setIgnoreCertificateErrors: 'page-mutation', handleCertificateError: 'page-mutation',
+    disable: 'harmless', enable: 'harmless', setIgnoreCertificateErrors: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) turns certificate checking off for EVERY tab of every context — no lease can scope it to its own tabs; a site with a bad certificate is the person's to open, or open it in your conversation's own browser" }, handleCertificateError: 'page-mutation',
     setOverrideCertificateErrors: 'page-mutation',
   },
   ServiceWorker: {
@@ -362,12 +367,12 @@ const ROWS = Object.freeze({
   },
   Storage: {
     getStorageKeyForFrame: 'read', getStorageKey: 'read', clearDataForOrigin: 'page-mutation', clearDataForStorageKey: 'page-mutation',
-    getCookies: 'read', setCookies: 'page-mutation', clearCookies: 'page-mutation', getUsageAndQuota: 'read', overrideQuotaForOrigin: 'page-mutation',
+    getCookies: 'read', setCookies: 'page-mutation', clearCookies: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, getUsageAndQuota: 'read', overrideQuotaForOrigin: 'page-mutation',
     trackCacheStorageForOrigin: 'harmless', trackCacheStorageForStorageKey: 'harmless', trackIndexedDBForOrigin: 'harmless',
     trackIndexedDBForStorageKey: 'harmless', untrackCacheStorageForOrigin: 'harmless', untrackCacheStorageForStorageKey: 'harmless',
     untrackIndexedDBForOrigin: 'harmless', untrackIndexedDBForStorageKey: 'harmless', getTrustTokens: 'read', clearTrustTokens: 'page-mutation',
     setStorageBucketTracking: 'harmless', deleteStorageBucket: 'page-mutation',
-    runBounceTrackingMitigations: 'page-mutation',
+    runBounceTrackingMitigations: { cls: 'refused', since: '2026-11-13', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) deletes site state profile-wide — clear one site's data with `vibespace-browser site-reset --host <host>`" },
     // Related Website Sets left the protocol in Chrome 156: the row stays for a 153–155 that still ships it
     getRelatedWebsiteSets: { cls: 'read', until: C156 },
     // Chrome 156 (lane chrome-156-drift, 2026-10-22): the Private Verification Tokens — the profile's credential-class
@@ -476,7 +481,7 @@ function rowOf(method) {
   if (!dom || !Object.prototype.hasOwnProperty.call(dom, m.slice(dot + 1))) return null;
   const v = dom[m.slice(dot + 1)];
   const o = typeof v === 'string' ? { cls: v } : Array.isArray(v) ? { cls: v[0], since: v[1] } : { ...v };
-  return { domain: m.slice(0, dot), method: m.slice(dot + 1), cls: o.cls, since: o.since || SINCE, fence: o.fence || 'mediator', why: o.why || null, chrome: o.chrome || CENSUS_CHROMES[0], until: o.until || null };
+  return { domain: m.slice(0, dot), method: m.slice(dot + 1), cls: o.cls, since: o.since || SINCE, fence: o.fence || 'mediator', why: o.why || null, chrome: o.chrome || CENSUS_CHROMES[0], until: o.until || null, law: o.law || null };
 }
 /** lane chrome-157 r2: THE NAMES the census has rows for, built ONCE at load — `hasRow` is the one lookup the mediator does
  *  per message (rowOf allocates a row; the judge only asks «is there one»). Closed over, never exported as a Set. */
