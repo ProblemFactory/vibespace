@@ -12803,7 +12803,6 @@ export default {
   "no permissions block": "権限の設定がありません",
   "permissions block is empty": "権限の設定が空です",
   "{span} ago": "{span}前",
-  "in {span}": "あと {span}",
   "expires {date}": "{date} に期限切れ",
   "layout::Restore": "復元",
   "Lists, opens, resumes and forks STOPPED OpenCode conversations. OpenCode keeps its sessions in its own database rather than in files, so VibeSpace runs `opencode serve` on 127.0.0.1 to read them. Off by default; it stops when you disable it.": "停止した OpenCode の会話を一覧・表示・再開・フォークします。OpenCode はセッションをファイルではなく独自のデータベースに保存するため、VibeSpace は 127.0.0.1 で「opencode serve」を動かして読み取ります。既定ではオフで、無効にすると停止します。",

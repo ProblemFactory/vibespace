@@ -12804,7 +12804,6 @@ export default {
   "no permissions block": "没有权限设置",
   "permissions block is empty": "权限设置是空的",
   "{span} ago": "{span}前",
-  "in {span}": "还有 {span}",
   "expires {date}": "{date} 到期",
   "layout::Restore": "恢复",
   "Lists, opens, resumes and forks STOPPED OpenCode conversations. OpenCode keeps its sessions in its own database rather than in files, so VibeSpace runs `opencode serve` on 127.0.0.1 to read them. Off by default; it stops when you disable it.": "列出、打开、继续和分叉已停止的 OpenCode 对话。OpenCode 把会话存在自己的数据库里而不是文件里，所以 VibeSpace 在 127.0.0.1 上运行「opencode serve」来读取它们。默认关闭；关闭后它就停止。",

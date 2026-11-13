@@ -199,10 +199,7 @@
   ],
   "src/lib/code-editor.js": [
    "Auto",
-   "Plain Text",
-   "Edit",
-   "Preview",
-   "Preview"
+   "Plain Text"
   ],
   "src/plugin-settings.js": [
    "Voice input · Dropline",
