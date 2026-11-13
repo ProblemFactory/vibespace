@@ -14,6 +14,8 @@
  *                              decoders take parameter sets as single NAL units the same)
  *   keyIndexAfter(aus, i)      the next access unit at or after `i` that is a key frame — what a keyframe request (PLI /
  *                              FIR from the browser) jumps a pre-encoded source to
+ *   maxDatagram(max)           the largest datagram werift sends for a payload of at most `max` bytes (RTP_OVERHEAD: the RTP
+ *                              header, its one header extension, the longer SRTP tag) — the hub's leg probe is that size
  *
  * The SOURCE INTERFACE part B fills (src/agentd/stream-host.js `sourceKind: 'screen'`) hands the daemon access units the
  * same shape: `{ nalus: Buffer[], key: boolean, ts90k: number }`.
@@ -21,6 +23,12 @@
 
 const NAL = Object.freeze({ slice: 1, idr: 5, sei: 6, sps: 7, pps: 8, aud: 9 });
 const MAX_PAYLOAD = 1200; // bytes of RTP payload: under a 1280-byte path MTU after SRTP + UDP + IP (werift's own default)
+// THE WIRE (lane stream-udp-leg-fallback r2 — a 1200-byte probe crossed a path that may drop the picture's own packets): a payload
+// of `max` bytes leaves werift as the RTP fixed header + its ONE header extension (transport-cc — RFC 8285's one-byte form: the
+// 4-byte block head + 1 + 2 bytes, padded to 4) + the SRTP tag of the longer of the two profiles werift offers (AEAD AES-128-GCM's
+// 16, its first choice; HMAC-SHA1-80's 10). test-desktop-webrtc §14e serializes and seals one with werift itself
+const RTP_OVERHEAD = Object.freeze({ header: 12, extensions: 8, srtpTag: 16 });
+const maxDatagram = (max = MAX_PAYLOAD) => max + RTP_OVERHEAD.header + RTP_OVERHEAD.extensions + RTP_OVERHEAD.srtpTag;
 
 const typeOf = (nal) => nal[0] & 0x1f;
 const isVcl = (t) => t >= 1 && t <= 5;
@@ -101,4 +109,4 @@ function keyIndexAfter(aus, i) {
   return -1;
 }
 
-module.exports = { NAL, MAX_PAYLOAD, typeOf, splitNalus, accessUnits, rtpPayloads, depacketize, keyIndexAfter };
+module.exports = { NAL, MAX_PAYLOAD, RTP_OVERHEAD, maxDatagram, typeOf, splitNalus, accessUnits, rtpPayloads, depacketize, keyIndexAfter };

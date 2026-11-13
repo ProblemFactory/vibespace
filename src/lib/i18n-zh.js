@@ -9356,6 +9356,20 @@ export default {
   "RTT {rtt} ms · jitter {jitter} ms · {fps} fps · decode {decode} ms · {kbps} kbps": "往返 {rtt} ms · 抖动 {jitter} ms · {fps} fps · 解码 {decode} ms · {kbps} kbps",
   "via the hub": "经 hub 中转",
   "via the hub · UDP": "经 hub 中转 · UDP", // lane stream-relay-udp
+  "direct UDP": "直连 UDP", // lane stream-udp-leg-fallback
+  "device link": "设备链路",
+  "Stream · {road} · {ms} ms · {fps} fps": "串流 · {road} · {ms} ms · {fps} fps",
+  "Stream · {road} · connecting…": "串流 · {road} · 连接中…",
+  "Stream · {road} · {n} displays · {fps} fps": "串流 · {road} · {n} 个显示器 · {fps} fps",
+  "Still connecting — the {road} answers…": "仍在连接——{road}有回应…",
+  "Direct UDP sent nothing back for {s} s — the device link carries it": "UDP 直连 {s} 秒没有回应——改走设备链路",
+  "Direct UDP loses packets of a picture’s size — the device link carries it": "UDP 直连丢失画面大小的数据包——改走设备链路",
+  "Direct UDP kept dropping — the device link carries it for the rest of this stream": "UDP 直连反复中断——本次串流一直走设备链路",
+  "The machine gets nothing back on direct UDP (its firewall?) — the device link carries it": "机器在 UDP 直连上收不到回包（它的防火墙？）——改走设备链路",
+  "The machine’s direct UDP does not reach this hub — the device link carries it": "机器的 UDP 直连到不了这个 hub——改走设备链路",
+  "The machine could not open direct UDP — the device link carries it": "机器打不开 UDP 直连——改走设备链路",
+  "The machine’s agent has no direct UDP — the device link carries it": "机器的 agent 没有 UDP 直连——走设备链路",
+  "Direct UDP went silent — the device link carries it": "UDP 直连断了——改走设备链路",
   "via the device link": "经设备链路", // lane stream-relay-udp
   "The machine’s firewall blocks the direct path; going through the hub": "机器防火墙挡住直连，经 hub 中转", // lane stream-relay-udp
   "WebRTC from the machine’s agent: {w}×{h}, sent {sent} fps at {kbps} kbps": "来自机器 agent 的 WebRTC：{w}×{h}，发出 {sent} fps、{kbps} kbps",
