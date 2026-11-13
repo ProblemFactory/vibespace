@@ -1557,8 +1557,8 @@ export function installSidebarMounts(Sidebar) {
               ? tr('A new command for "{id}" — the one you generated before stops working now. Run this on the device:', { id: r.deviceId })
               // verify-r5 A1: "Replace its pairing" from "Pair a device" — the command it replaced was made elsewhere
               : tr('Replaced the pairing of "{id}" — the command it held stops working now. Run this on the device:', { id: r.deviceId }))
-          : tr('Paired as "{id}". Put it on the device in three steps:', { id: r.deviceId });
-      // ① ② ③ — what the person does, in order
+          : tr('Paired as "{id}". Put it on the device in four steps:', { id: r.deviceId }); // machine-needs pick 3: step ② «what this device will be used for» made it four
+      // ① ② ③ ④ — what the person does, in order
       const steps = document.createElement('ol');
       steps.className = 'device-pair-steps';
       const step = (key, title) => {
@@ -1587,7 +1587,7 @@ export function installSidebarMounts(Sidebar) {
       const MB = (n) => Math.max(1, Math.round(n / 1e6 * 10) / 10);
       const NEEDS_OF = {
         win: [{ key: 'desktop', word: tr('Its desktop and streaming (recommended)'), hints: [
-          tr('{app} ({publisher}, {mb} MB, {licence}) from its release on GitHub ({where}) into {folder}. VibeSpace did not build it; no publisher signs ffmpeg, so its bytes are checked against two fixed SHA-256 fingerprints. It needs no administrator rights (run this command as administrator and it is fetched as administrator), and it listens on nothing.', { app: FFI.FFMPEG.label, publisher: FFI.FFMPEG.publisher, mb: Math.round(MB(FFI.FFMPEG.bytes)), licence: FFI.FFMPEG.licence, where: FFI.FFMPEG.url.replace(/^https:\/\//, ''), folder: FFI.FFMPEG_FOLDER }), // pick 3d: what, from where, where it lands, not built by VibeSpace, who runs it
+          tr('{app} ({publisher}, {mb} MB, {licence}) from its release on GitHub ({where}) into {folder}. VibeSpace did not build it; no publisher signs ffmpeg, so its bytes are checked against two fixed SHA-256 fingerprints. It needs no administrator rights (run this command as administrator and it is fetched as administrator), and it listens on nothing.', { app: FFI.FFMPEG.label, publisher: FFI.FFMPEG.publisher, mb: Math.round(MB(FFI.FFMPEG.bytes)), licence: FFI.FFMPEG.licence, where: FFI.FFMPEG.url.replace(/^https:\/\/(github\.com\/[^/]+\/[^/]+)\/.*$/, '$1'), folder: FFI.FFMPEG_FOLDER }), // pick 3g: the release's repository (the asset's whole address is one unbreakable word — a 390 px sheet scrolled sideways; the Get FFmpeg sheet names it whole); pick 3d: what, from where, where it lands, not built by VibeSpace, who runs it
           tr('{app} (tightvnc.com, {mb} MB): Windows asks for administrator rights once and you type its VNC password there; it listens on this PC only (127.0.0.1 and ::1, port 5900).', { app: MDM.TIGHTVNC.label, mb: MB(MDM.TIGHTVNC.bytes) }),
         ] }],
         mac: [

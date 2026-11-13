@@ -583,7 +583,7 @@ try {
     ok(/--allow run,files,input,upgrade$/.test(b2.cmd) && b2.flags.every((x) => !x.held), 'untick 会话 ⇒ run / files no longer held; `--allow run,files,input,upgrade`', b2);
     await Z.evalJs(`[...document.querySelectorAll('#device-pair-dialog .device-pair-os button')].find((b) => b.textContent === 'Windows').click(); true`);
     const b3 = await boxes();
-    ok(/`\n  -Allow run,files,input,upgrade$/.test(b3.cmd), 'the Windows command says -Allow run,files,input,upgrade', b3.cmd.slice(-60));
+    ok(/`\n  -Allow run,files,input,upgrade `\n  -Setup desktop$/.test(b3.cmd), 'the Windows command says -Allow run,files,input,upgrade (then step ②\'s default -Setup desktop — machine-needs pick 3)', b3.cmd.slice(-80));
     await Z.cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 1, mobile: true });
     await sleep(300);
     const r360 = await Z.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog .dialog'); const f = d.querySelector('.device-pair-allow'); const dr = d.getBoundingClientRect(), fr = f.getBoundingClientRect(); const labs = [...f.querySelectorAll('.device-pair-allow-flag')].map((l) => l.getBoundingClientRect()); return { inside: fr.left >= dr.left - 1 && fr.right <= dr.right + 1, fits: dr.right <= document.documentElement.clientWidth + 1, labsIn: labs.every((r) => r.left >= fr.left - 1 && r.right <= fr.right + 1), minH: Math.min(...labs.map((r) => r.height)) }; })()`);

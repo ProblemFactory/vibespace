@@ -66,7 +66,7 @@ const NOT_NEEDS = Object.freeze([
   { why: 'the hub\'s own record of usage (its data, not a machine\'s need)', match: /usage-history/ },
   { why: 'a door\'s own label or outcome (the need\'s row owns the sentence that states it)', match: /^(Install (xpra|LibreOffice|the Calibri|TightVNC)|\{app\} is not installed on \{machine\}$|Not installed — this machine could not start it|This machine has no virtual microphone to remove)/ },
   { why: 'a platform fact with its alternative said (desktop apps are Linux\'s; a Mac / Windows machine has its whole desktop)', match: /no X11 server/ },
-  { why: 'a file or a pairing fact, not a need', match: /no absolute path on its machine|Where to put it on this computer|The machine VibeSpace itself runs on|Put it on the device in three steps/ }, // + pair-dialog-polish's step heading (61d795562 — the seam ruled 主开发 11-13)
+  { why: 'a file or a pairing fact, not a need', match: /no absolute path on its machine|Where to put it on this computer|The machine VibeSpace itself runs on|Put it on the device in four steps/ }, // + pair-dialog-polish's step heading (61d795562 — the seam ruled 主开发 11-13)
 ]);
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
 const notNeedOf = (sentence) => NOT_NEEDS.find((r) => r.match.test(String(sentence))) || null;
