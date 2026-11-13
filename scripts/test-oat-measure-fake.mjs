@@ -321,5 +321,25 @@ if (!haveStrace) {
   }
 }
 
+// THE MINT'S SCOPES (lane oat-add-door, 2.369.399): the release road's `--variant mint --write-mint-fixture` over the fake's
+// `setup-token` (a pty through util-linux script; the run ends by the tracer's kill by design) — the scopes it PRINTS recorded, the
+// fixture written by withMeasured; a fake whose URL names no scope ⇒ FAIL, no scopes, never a void
+console.log('the mint variant over the FAKE claude');
+if (!haveStrace) { skip++; console.log('  SKIP the mint runs: no strace on this machine'); }
+else {
+  const mfx = path.join(tmp, 'mint-fx.json'), mrec = path.join(tmp, 'mint-rec.json');
+  const r = measure(['--claude', wrap('good'), '--variant', 'mint', '--write-mint-fixture', '--mint-fixture', mfx, '--out', mrec]);
+  let F = null, R = null;
+  try { F = JSON.parse(fs.readFileSync(mfx, 'utf8')); R = JSON.parse(fs.readFileSync(mrec, 'utf8')); } catch { }
+  const m = R && R.results.find((x) => x.variant === 'oat-mint-scopes');
+  ok('the good fake: the mint PASSes with the scope it printed; the run is not void and nothing left loopback', r.status === 0 && !!m && m.verdict === 'PASS' && JSON.stringify(m.scopes) === '["user:inference"]' && !R.void && !R.aborted && R.escapes.length === 0 && m.outboundConnects.length === 0 && m.oauthCalls === 0 && m.guardedReads.length === 0, { status: r.status, m: m && { v: m.verdict, s: m.scopes, n: m.note }, err: String(r.stderr).slice(-300) });
+  ok('…the fixture: {versions: {"9.9.9": {verdict PASS, scopes}}} — mintScopesOf reads it for 9.9.9 only', !!F && C.mintScopesOf('9.9.9', F)?.join() === 'user:inference' && C.mintScopesOf('2.1.321', F) === null && F.versions['9.9.9'].script === 'scripts/measure-claude-cred-read.mjs');
+  ok('…its record ended by the tracer\'s kill, said so — and the six were never run (the mint is its own variant)', !!m && /the run ended by the tracer's kill/.test(m.note) && R.results.length === 1, m && m.note);
+  const r2 = measure(['--claude', wrap('mint-noscope'), '--variant', 'mint', '--scope-wait-ms', '4000', '--out', mrec]);
+  let R2 = null; try { R2 = JSON.parse(fs.readFileSync(mrec, 'utf8')); } catch { }
+  const m2 = R2 && R2.results.find((x) => x.variant === 'oat-mint-scopes');
+  ok('a fake whose URL names no scope ⇒ FAIL, no scopes, the run NOT void (a mechanical miss never voids the gate)', r2.status === 0 && !!m2 && m2.verdict === 'FAIL' && m2.scopes === null && !R2.void, m2 && m2.note);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed${skip ? `, ${skip} skipped` : ''})` : `ALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

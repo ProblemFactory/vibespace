@@ -65,9 +65,12 @@
 //        [--write-fixture [--fixture path]]   the six oat variants ⇒ THIS CLI's record ADDED to
 //                                             scripts/fixtures/oat-in-file.json (cli-caps withMeasured:
 //                                             every other version's record kept — lane oat-in-file-2-1-306)
+//        [--variant mint --write-mint-fixture]   lane oat-add-door: the mint's own scopes (`setup-token` in a pty, its printed
+//                                             authorize URL's scope= — nothing pasted, nothing minted) ⇒ THIS CLI's record ADDED
+//                                             to scripts/fixtures/oat-mint-scopes.json (withMeasured, every other version kept)
 //        [--no-netns --claude <fake script>]   no namespace: a FAKE claude only (below)
 //        [--no-netns --loopback-real --claude <the real claude>]   no namespace, the REAL binary (the loopback-real rung, below)
-//        [--gap ms] [--flush-ms ms] [--near-ms ms]   (the fake's fast self-test shortens the waits)
+//        [--gap ms] [--flush-ms ms] [--near-ms ms] [--scope-wait-ms ms]   (the fake's fast self-test shortens the waits)
 //
 // Needs `sudo -n` (for the network namespace) and `strace`. Without them it
 // REFUSES — it never runs a claude process that could reach the network.
@@ -114,7 +117,7 @@ const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i
 const flag = (k) => argv.includes('--' + k);
 const NETNS = !flag('no-netns');
 const LOOPBACK_REAL = flag('loopback-real') && !NETNS; // the real binary without the namespace (header)
-const { OAT_VARIANTS, oatInFile, cliVersionOf, measuredVersions, withMeasured } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
+const { OAT_VARIANTS, MINT_VARIANT, oatInFile, mintScopesOf, cliVersionOf, measuredVersions, withMeasured } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
 // THE MEASUREMENT IS ONE MODULE (lane cli-self-measure, 2026-11-09): the mock, the variants, the belt and the verdicts live in
 // src/claude-oat-probe.js, which the hub also runs (src/server/cli-self-measure.js) when it first sees a CLI build with no PASS;
 // this script keeps the argv, the sudo netns re-exec and the fixture writer (test-cli-self-measure §1 fails a copy of either; test-oat-measure-fake runs both roads over one fake)
@@ -158,7 +161,11 @@ async function main() {
   const OUT = opt('out', '');
   const all = ['slowstream', 'baseline', 'symlink', 'symlink-bare', 'overwrite', 'hardlink-mtime', 'hardlink-same', 'utimes', 'refresh', 'gate429'];
   const v = opt('variant', 'all');
-  const want = v === 'all' ? all : v === 'oat' ? [...OAT_VARIANTS] : v.split(',').flatMap((x) => (x === 'oat' ? OAT_VARIANTS : [x]));
+  const want = v === 'all' ? all : v === 'oat' ? [...OAT_VARIANTS] : v.split(',').flatMap((x) => (x === 'oat' ? OAT_VARIANTS : x === 'mint' ? [MINT_VARIANT] : [x]));
+  if (flag('write-mint-fixture') && !want.includes(MINT_VARIANT)) { console.error(`REFUSED: --write-mint-fixture needs the mint variant in the run (--variant mint)`); process.exit(2); }
+  const MINT_FIXTURE = opt('mint-fixture', path.join(path.dirname(SELF), 'fixtures', 'oat-mint-scopes.json'));
+  const mintFixtureNow = () => { try { return JSON.parse(fs.readFileSync(MINT_FIXTURE, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return null; throw new Error(`${MINT_FIXTURE} does not read (${e.message})`); } };
+  if (flag('write-mint-fixture')) { try { withMeasured(mintFixtureNow(), { cliVersion: '0.0.0' }); } catch (e) { console.error(`REFUSED: --write-mint-fixture adds this CLI's record and keeps every other version's — ${e.message}`); process.exit(2); } }
   if (flag('write-fixture') && OAT_VARIANTS.some((x) => !want.includes(x))) { console.error(`REFUSED: --write-fixture needs all six oat variants in one run (--variant oat): ${OAT_VARIANTS.join(', ')}`); process.exit(2); }
   // the fixture holds ONE record per measured version: this run's is ADDED, every other kept — refused before
   // the run when it could not be (a file that is neither shape); the version is checked again at write time
@@ -167,7 +174,7 @@ async function main() {
   if (flag('write-fixture')) { try { withMeasured(fixtureNow(), { cliVersion: '0.0.0', variants: {} }); } catch (e) { console.error(`REFUSED: --write-fixture adds this CLI's record to the fixture and keeps every other version's — ${e.message}`); process.exit(2); } }
   let record = null;
   try {
-    record = await PROBE.measure({ claude: opt('claude', ''), rung: RUNG, variants: want, gapMs: Number(opt('gap', '65000')), flushMs: Number(opt('flush-ms', '2500')), nearMs: Number(opt('near-ms', '30000')), keep: flag('keep'), dump: opt('dump', '') || null });
+    record = await PROBE.measure({ claude: opt('claude', ''), rung: RUNG, variants: want, gapMs: Number(opt('gap', '65000')), flushMs: Number(opt('flush-ms', '2500')), nearMs: Number(opt('near-ms', '30000')), ...(Number(opt('scope-wait-ms', '0')) > 0 ? { scopeWaitMs: Number(opt('scope-wait-ms', '0')) } : {}), keep: flag('keep'), dump: opt('dump', '') || null });
   } catch (e) {
     if (e && e.refusal) { console.error(`REFUSED: ${e.detail || e.refusal}`); process.exit(2); }
     throw e;
@@ -184,6 +191,16 @@ async function main() {
     const next = withMeasured(fixtureNow(), fx); // re-read: every other version's record as the file holds it now
     fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1) + '\n');
     process.stderr.write(`[oat] fixture ${FIXTURE}: oatInFile(${fx.cliVersion}) = ${oatInFile(fx.cliVersion, next)} · it holds ${measuredVersions(next).join(', ')}\n`);
+  }
+  if (flag('write-mint-fixture')) {
+    if (record.void) { console.error(`REFUSED: the run is void here (${record.void}) — no mint record from it`); process.exit(2); }
+    const r = results.find((x) => x.variant === MINT_VARIANT);
+    if (!r) { console.error('REFUSED: the mint variant did not run'); process.exit(2); }
+    const mx = { cliVersion: cliVersionOf(record.version), measuredAt: new Date().toISOString().slice(0, 10), script: 'scripts/measure-claude-cred-read.mjs', netns: NETNS, ...(LOOPBACK_REAL ? { rung: 'loopback-real' } : {}), proxy: 'loopback-mock', verdict: r.verdict, ...(r.verdict === 'PASS' ? { scopes: r.scopes } : {}), note: r.note };
+    try { withMeasured(mintFixtureNow(), mx); } catch (e) { console.error(`REFUSED: --write-mint-fixture adds this CLI's record and keeps every other version's — ${e.message}`); process.exit(2); }
+    const next = withMeasured(mintFixtureNow(), mx);
+    fs.writeFileSync(MINT_FIXTURE, JSON.stringify(next, null, 1) + '\n');
+    process.stderr.write(`[mint] fixture ${MINT_FIXTURE}: mintScopesOf(${mx.cliVersion}) = ${JSON.stringify(mintScopesOf(mx.cliVersion, next))} · it holds ${measuredVersions(next).join(', ')}\n`);
   }
   process.exit(0);
 }

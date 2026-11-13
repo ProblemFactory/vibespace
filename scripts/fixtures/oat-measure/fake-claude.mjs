@@ -43,6 +43,7 @@
 //   rewrite-launcher    appends a line to the launcher copy in the scratch (<ROOT>/.trampoline.js) — the next variant must not start
 //   link-in:<p>         hard-links <p> (a file under the data dir) into its HOME and reads the new name — the link's SOURCE voids
 // …and the incident of 2026-11-11 (the owner's hub: a data directory under the home), behaving `good` otherwise:
+//   mint-noscope        `setup-token` prints an authorize URL with NO scope (lane oat-add-door: the mint variant must FAIL)
 //   walk                at its start (never for --version) walks UP from its cwd to / the way 2.1.321 does (its clean trace):
 //                       CLAUDE.md, CLAUDE.local.md, AGENTS.md, .mcp.json read, .claude/ listed (+ its CLAUDE.md, AGENTS.md), .git
 //                       looked at (+ its HEAD read) at EVERY ancestor — what a run's place puts in reach
@@ -61,6 +62,18 @@ import { spawn } from 'node:child_process';
 const mode = process.argv[2];
 const KIND = String(mode || '').split(':')[0], ARG = String(mode || '').slice(KIND.length + 1);
 if (process.argv.includes('--version')) { if (KIND === 'version-read') { try { fs.readFileSync(ARG); } catch { } } console.log('9.9.9 (Fake Claude)'); process.exit(0); }
+// lane oat-add-door — `setup-token` (the probe's mint variant): on a pty it prints what 2.1.321 prints (measured: the URL wrapped at
+// the screen's width, the vendor's origin, `scope=user:inference`, then the code prompt) and waits for a code for ever; on a pipe it
+// prints nothing (measured). Mode `mint-noscope` prints a URL with no scope (the variant must FAIL: no scopes recorded)
+if (process.argv.includes('setup-token')) {
+  if (process.stdout.isTTY) {
+    const scope = KIND === 'mint-noscope' ? '' : '&scope=user%3Ainference';
+    const url = `https://claude.example.invalid/cai/oauth/authorize?code=true&client_id=00000000-0000-4000-8000-00000000fake&response_type=code&redirect_uri=https%3A%2F%2Fplatform.example.invalid%2Foauth%2Fcode%2Fcallback${scope}&code_challenge=FAKECHALLENGE&code_challenge_method=S256&state=FAKESTATE`;
+    process.stdout.write("\x1b[1mBrowser didn't open?\x1b[22m Use the url below to sign in\r\n\r\n" + url.match(/.{1,80}/g).join('\r\n') + '\r\n\r\nPaste code here if prompted > ');
+  }
+  setInterval(() => { }, 1 << 30);
+  await new Promise(() => { }); // never past here: the stream-json fake below is not this command
+}
 if (KIND === 'daemon-hang') { const d = spawn('sleep', ['120'], { detached: true, stdio: 'ignore' }); d.unref(); fs.writeFileSync(ARG, JSON.stringify({ cli: process.pid, daemon: d.pid })); }
 if (KIND === 'hang') fs.writeFileSync(ARG, String(process.pid));
 const file = path.join(process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR || path.join(process.env.HOME || '/', '.claude'), '.credentials.json');

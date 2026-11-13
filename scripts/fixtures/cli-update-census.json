@@ -411,10 +411,10 @@
    "file": "src/cli-caps.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "a record is read only for the build it names (cliVersionOf(rec.cliVersion) === v) — a new build is a record the hub writes, no release",
+   "road": "a record is read only for the build it names (cliVersionOf(rec.cliVersion) === v) — a new build is a record the hub writes, no release — the mint's scopes too (mintScopesOf, lane oat-add-door: the hub's own check measures a new build's mint)",
    "suite": "test-cli-self-measure",
    "match": "version-compare",
-   "sites": 2
+   "sites": 3
   },
   {
    "id": "oat-file-caps",
@@ -441,10 +441,10 @@
    "file": "src/accounts.js",
    "keyedOn": "version",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "reads scripts/fixtures/oat-in-file.json (a table keyed by build): the release road's SEED; the hub's own ledger (data/cli-self-measure.json) answers every build it does not name",
+   "road": "reads scripts/fixtures/oat-in-file.json (a table keyed by build): the release road's SEED; the hub's own ledger (data/cli-self-measure.json) answers every build it does not name — and scripts/fixtures/oat-mint-scopes.json (the mint's scopes per build, lane oat-add-door: the same SEED; the hub's own check answers a build it does not name)",
    "suite": "test-cli-self-measure",
    "match": "json-table",
-   "sites": 1
+   "sites": 2
   },
   {
    "id": "record-oracle",

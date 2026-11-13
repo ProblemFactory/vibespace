@@ -44,7 +44,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { fork } = require('child_process');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
-const { cliVersionOf, OAT_IN_FILE_GATE, oatInFile } = require('../cli-caps.js'); // PURE — oatInFile is THE judge (law I)
+const { cliVersionOf, OAT_IN_FILE_GATE, oatInFile, MINT_VARIANT, scopesOk } = require('../cli-caps.js'); // PURE — oatInFile is THE judge (law I)
 const PROBE = require('../claude-oat-probe.js'); // SHARED: its constants here; the measurement itself runs only in the forked child
 
 const TYPICAL_MS = 271e3;          // the gate on 2.1.321, this box, 2026-11-09 (the hotfix lane's record: 68 + 70 + 133 s)
@@ -163,7 +163,9 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     viewKey = k;
     acc.noteCliMeasured(view);
   }
-  const viewOfRec = (v, sha, r) => ({ cli: v, sha256: sha, state: r.state, startedAt: r.startedAt || null, ...(r.reason ? { reason: r.reason } : {}) });
+  // the mint's scopes ride the view (lane oat-add-door): a PASS of the variant for exactly these bytes, re-checked by the grammar
+  const mintOf = (r) => { const m = r && r.variants && r.variants[MINT_VARIANT]; return m && m.verdict === 'PASS' ? scopesOk(m.scopes) : null; };
+  const viewOfRec = (v, sha, r) => { const sc = mintOf(r); return { cli: v, sha256: sha, state: r.state, startedAt: r.startedAt || null, ...(r.reason ? { reason: r.reason } : {}), ...(sc ? { mintScopes: sc } : {}) }; };
   const checkingView = (r) => ({ cli: r.cli, sha256: r.sha, state: 'checking', startedAt: r.startedAt, lateAt: r.startedAt + B.late, killAt: r.startedAt + B.kill, typicalMs: B.typical });
 
   // ── the decision (synchronous: the store's note hook calls it inside noteCliVersion, so the words never lag the hold) ──
@@ -234,7 +236,7 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
         if (child.stderr) child.stderr.on('data', (d) => { me.err = (me.err + d).slice(-4000); });
         child.on('message', (m) => { try { onMessage(me, m); } catch (e) { log('[cli-self-measure] a message from the check failed:', (e && e.message) || e); } });
         child.on('exit', (code, sig) => onExit(me, code, sig));
-        child.send({ claude: binPath, root: path.join(root, 'm'), runDir: root, dataDir, ...(home && home !== PROBE.REAL_HOME ? { home } : {}), deadline: startedAt + B.record + 30e3, variants: [...PROBE.RUN_ORDER], forbid: forbidDirs(), ...job }); // law C: the child's own deadline
+        child.send({ claude: binPath, root: path.join(root, 'm'), runDir: root, dataDir, ...(home && home !== PROBE.REAL_HOME ? { home } : {}), deadline: startedAt + B.record + 30e3, variants: [...PROBE.RUN_ORDER, MINT_VARIANT], forbid: forbidDirs(), ...job }); // + the mint's scopes LAST (lane oat-add-door): never in the gate // law C: the child's own deadline
         me.timer = setTimeout(() => timeUp(me), B.kill); if (me.timer.unref) me.timer.unref();
       } catch (e) { finish(me, { state: 'cannot-run', reason: { code: 'setup', observation: String((e && e.message) || e).slice(0, 200) } }); }
     });
@@ -289,7 +291,8 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
   }
   const recordBase = (me, extra) => ({ cli: me.cli, sha256: me.sha, path: me.path, probe: PROBE.PROBE_VERSION, startedAt: me.startedAt, gateAt: me.gateAt, endedAt: now(), ...extra });
   function onRecord(me, record) {
-    const six = {}; for (const r of Array.isArray(record.results) ? record.results : []) if (r && r.variant) six[r.variant] = { verdict: r.verdict, note: String(r.note || '').slice(0, 600) };
+    // the six + the mint's scopes (lane oat-add-door: its PASS keeps the scopes it read — the guided door's way ② for exactly these bytes)
+    const six = {}; for (const r of Array.isArray(record.results) ? record.results : []) if (r && r.variant) { const sc = r.variant === MINT_VARIANT && r.verdict === 'PASS' ? scopesOk(r.scopes) : null; six[r.variant] = { verdict: r.verdict, note: String(r.note || '').slice(0, 600), ...(sc ? { scopes: sc } : {}) }; }
     const of = (record.results || []).find((x) => x && x.variant === 'oat-file');
     const evidence = {
       bearer: of ? `${(of.heads || []).filter((h) => /<O oat>/.test(String(h.headers && h.headers.authorization))).length}/${(of.heads || []).length} of oat-file's requests carried the file's token` : null,
@@ -304,7 +307,7 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
       settle(me, { state: record.aborted ? 'aborted' : 'cannot-run', gate: (me.gate && me.gate.gate) || null, variants: six, evidence, ms: Number(record.ms) || null, reason: record.aborted ? { code: 'aborted', observation: '' } : { code: reasonOf(record.void), observation: readsOf(record, home).join(', ') } });
       return;
     }
-    if (was && was.state === 'pass') { keep(me.cli, me.sha, { ...was, variants: six, evidence, ms: Number(record.ms) || null, endedAt: now() }); stopRun(null); return; }
+    if (was && was.state === 'pass') { const full = { ...was, variants: six, evidence, ms: Number(record.ms) || null, endedAt: now() }; keep(me.cli, me.sha, full); stopRun(null); setView(viewOfRec(me.cli, me.sha, full)); return; } // the view gains the mint's scopes (lane oat-add-door)
     if (record.gate && !me.gate) { onMessage(me, { type: 'gate', gate: record.gate }); if (run === me) onRecord(me, record); return; }
     if (was) { keep(me.cli, me.sha, { ...was, variants: six, evidence, ms: Number(record.ms) || null }); stopRun(null); return; }
     finish(me, { state: 'cannot-run', reason: { code: 'setup', observation: 'the check ended without a verdict' } });

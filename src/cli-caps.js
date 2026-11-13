@@ -205,4 +205,42 @@ function cliHeldSpawnText({ pool = '', cli = '', local = null } = {}) {
   return `pool "${pool}" can't start a conversation: its members hold only long-lived tokens and Claude Code ${v} is not in this VibeSpace's records yet — sign a member in; conversations already running continue`;
 }
 
-module.exports = { oatInFile, cliVersionOf, measuredVersions, withMeasured, cliUnmeasuredItem, cliUnmeasuredPrefix, cliHeldSpawnText, observationText, reasonText, reasonWords, OBSERVATIONS, REASONS, OAT_VARIANTS, OAT_IN_FILE_GATE };
+// THE MINT'S OWN SCOPES (lane oat-add-door, 2.369.399 — the owner, 2026-11-13: an account added by its long-lived token may
+// say its subscription type itself). The scopes a person-stated file carries are the ones the CLI's OWN mint asks for — read
+// by the ONE measurement (src/claude-oat-probe.js, variant MINT_VARIANT: `claude setup-token` in a pty, its printed authorize
+// URL's `scope=`; measured on 2.1.321: `user:inference` alone), never typed here. Recorded per exact version: the release road
+// in scripts/fixtures/oat-mint-scopes.json ({versions: {v: {cliVersion, measuredAt, script, verdict, scopes, note}}}, written
+// by withMeasured like the oat fixture), the hub's own check in its ledger (cli-self-measure: the variant's `scopes`). A version
+// with neither offers only «sign in once».
+const MINT_VARIANT = 'oat-mint-scopes';
+const SCOPE_RE = /^[a-z][a-z0-9_.-]{0,40}(?::[a-z0-9_.-]{1,40}){0,4}$/;
+/** a scope list as the grammar allows it → a new array, or null (empty, too many, a value the grammar refuses) */
+function scopesOk(list) {
+  if (!Array.isArray(list) || !list.length || list.length > 16) return null;
+  if (!list.every((x) => typeof x === 'string' && SCOPE_RE.test(x))) return null;
+  return [...new Set(list)];
+}
+/** THE READER of what `setup-token` prints (the probe feeds it the pty's bytes as they come): the first authorize URL, its
+ *  `scope=` → {scopes, origin} or null (no URL yet, or a scope the grammar refuses — a URL cut by the screen's wrap is read
+ *  whole: the terminal's escapes and every whitespace are removed first; the URL holds none). */
+function mintScopesIn(text) {
+  const plain = String(text == null ? '' : text).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\s+/g, '');
+  const m = /(https?:\/\/[A-Za-z0-9.:[\]-]{1,100})(?:\/[A-Za-z0-9._~-]{1,40}){0,4}\/oauth\/authorize\?([A-Za-z0-9%&=_.~+:-]{1,4000})/.exec(plain); // 2.1.321 prints https://claude.com/cai/oauth/authorize?… (the vendor's page — printed, never fetched here)
+  if (!m) return null;
+  const q = /(?:^|&)scope=([^&]*)&/.exec(m[2] + '&'); // a scope that is NOT the last parameter (2.1.321: code_challenge follows) — a last one is read up to its end
+  if (!q) return null;
+  let raw; try { raw = decodeURIComponent(q[1].replace(/\+/g, ' ')); } catch { return null; }
+  const scopes = scopesOk(raw.split(' ').filter(Boolean));
+  return scopes ? { scopes, origin: m[1] } : null;
+}
+/** the scopes version `version`'s mint asks for, as `fixture` recorded them (exact version, verdict PASS) → array or null */
+function mintScopesOf(version, fixture) {
+  const v = cliVersionOf(version);
+  if (!v) return null;
+  const rec = recordOf(fixture, v);
+  if (!rec || cliVersionOf(rec.cliVersion) !== v || rec.verdict !== 'PASS') return null;
+  return scopesOk(rec.scopes);
+}
+
+module.exports = { oatInFile, cliVersionOf, measuredVersions, withMeasured, cliUnmeasuredItem, cliUnmeasuredPrefix, cliHeldSpawnText, observationText, reasonText, reasonWords, OBSERVATIONS, REASONS, OAT_VARIANTS, OAT_IN_FILE_GATE,
+  MINT_VARIANT, mintScopesIn, mintScopesOf, scopesOk };

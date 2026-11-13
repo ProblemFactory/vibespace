@@ -10,7 +10,9 @@
 // (src/model-providers.js) — a value out of bounds is refused by name, never clamped, and its id keeps the shipped row.
 const MP = require('./model-providers.js');
 
-const READER_VERSION = 1;
+// 2 (lane oat-add-door, 2.369.399): the same streamed read also reads the CLI's own subscription values (src/claude-plan-catalog.js)
+// — a binary read by 1 is read once more
+const READER_VERSION = 2;
 const ANCHOR = 'schema_version:1,pricing_tiers:{';
 const LITERAL_MAX = 512 * 1024;
 const BACK_MAX = 4096;          // how far before the anchor the literal's `{` may sit (the `"//"` comment is ~250 B)

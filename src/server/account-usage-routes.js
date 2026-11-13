@@ -669,6 +669,8 @@ app.delete('/api/accounts/:id/oat', (req, res) => {
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// THE GUIDED DOOR'S WAY ② (lane oat-add-door, 2.369.399): GET/POST /api/accounts/:id/oat-shape — src/server/oat-shape-routes.js
+require('./oat-shape-routes.js').registerOatShapeRoutes(app, { accounts, isAgentBearer });
 // 改绑 — RE-BIND (lane oat-identity-postcheck, B-3102 (b)): the identity post-check found a row's long-lived token to
 // be ANOTHER account's; the owner moves it to the row it belongs to. Human-only (an agent's session / job token is
 // refused by name); the sealed token moves as it is, its mint time kept, and is checked again on its new row.

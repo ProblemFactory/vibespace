@@ -486,10 +486,10 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
   ok(M.memberState({ loggedIn: true, loginState: { state: 'oat-only', oatFile: true } }).code !== 'login-expired' && M.memberState({ loggedIn: true, loginState: { state: 'oat-only' } }).code === 'login-expired', 'the Members… dialog: oat-only WITH the file is not "login expired"; without it, unchanged');
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   // the chip is a NOUN (lane oat-chip-words, 2026-10-15); the sentence it carried leads the hover (K[5]; HELD = K[6])
-  const K = ['Long-lived token', 'this Claude Code version is not cleared on this machine yet', 'mint again to record the subscription type', 'could not write it to the account folder', 'long-lived token ends in {left}',
+  const K = ['Long-lived token', 'this Claude Code version is not cleared on this machine yet', 'the subscription type is missing — sign in once, or choose it', 'could not write it to the account folder', 'long-lived token ends in {left}',
     'Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.',
     'Written to this account’s folder, but Claude Code {cli} is not in this VibeSpace’s records yet: running sessions continue, no new ones are placed here. The long-lived token is valid until {date}; only the quota refresh (⟳) needs you to sign in.'];
-  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '这个 Claude Code 版本还没有在本机确认通过' && zh[K[2]] === '重新铸造一次以记录订阅类型' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入这个账号的文件夹，但 Claude Code {cli} 还不在这个 VibeSpace 的记录里'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 这个 Claude Code 版本还没有在本机确认通过 (lane cli-self-measure: never «未测量») / 重新铸造一次以记录订阅类型');
+  ok(zh[K[0]] === '长期 token' && ja[K[0]] === '長期トークン' && zh[K[1]] === '这个 Claude Code 版本还没有在本机确认通过' && zh[K[2]] === '还差订阅类型：登录一次，或自己选' && zh[K[5]].startsWith('已写入此账号目录；CLI {cli} 已验。') && zh[K[6]].startsWith('已写入这个账号的文件夹，但 Claude Code {cli} 还不在这个 VibeSpace 的记录里'), 'zh says the brief\'s words: chip 长期 token (ja 長期トークン), hover 已写入此账号目录；CLI {cli} 已验 / 这个 Claude Code 版本还没有在本机确认通过 (lane cli-self-measure: never «未测量») / 重新铸造一次以记录订阅类型');
   ok(K.every((k) => zh[k] && ja[k] && zh[k].includes('{cli}') === k.includes('{cli}') && ja[k].includes('{left}') === k.includes('{left}')), 'every new door word has zh + ja with its placeholders');
   // the chip itself, rendered by the real manage-agents module (esbuild, a fake DOM)
   let MA = null, why = null;
@@ -520,7 +520,7 @@ console.log('§5 THE DOORS — the row, the pool row, the client chip and model,
     const escRow = { id: 'pool-x', name: 'P', type: 'pooled', pooled: true, loginState: { state: 'expired', msLeft: -H, refreshExpiresAt: NOW - H, worstId: 'sub-1', worstName: 'Old', worstOatValidUntil: NOW + 99 * DAY, worstOatFileRefused: 'cli-unmeasured' } };
     ok(/the pool can’t use its long-lived token · this Claude Code version is not cleared on this machine yet/.test(MA.loginExpiryChipHtml(escRow)), 'gate shut: the pool row keeps 「池用不了它的长期 token」 and adds 「这个 Claude Code 版本还没有在本机确认通过」 (en words here)', MA.loginExpiryChipHtml(escRow).slice(0, 300));
     const noSc = { ...escRow, loginState: { ...escRow.loginState, worstOatFileRefused: 'no-scopes' } };
-    ok(/mint again to record the subscription type/.test(MA.loginExpiryChipHtml(noSc)), '…no shape known: 「重新铸造一次以记录订阅类型」 names what to do');
+    ok(/the subscription type is missing — sign in once, or choose it/.test(MA.loginExpiryChipHtml(noSc)), '…no shape known: 「还差订阅类型：登录一次，或自己选」 names the two ways (lane oat-add-door: never «mint again» / «re-login» alone)');
   }
 }
 
