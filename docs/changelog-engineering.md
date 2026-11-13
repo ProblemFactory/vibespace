@@ -90,6 +90,50 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The cure before the .399 cut (主开发's merged-tip read, 09:05Z):** K7 reworded four templates, and an item a 2.369.398 hub already filed keeps the old template as its key (filed once — heldSaid): its zh / ja rows had gone, so it read wholly in English after the update. src/job-model.js FOR_YOU_WORDS_LEGACY names the four old templates (left in 2.369.399) and their zh / ja rows are restored verbatim from 935960b7e; a leg renders each old item, as the release built it, in zh and ja with no English sentence (red on the uncured K7). The ja changelog line says the tray's own name, 「あなた宛て」.
 - Pins (scripts/test-job-logs-sweep.mjs, PURE, 41): the four lifting copies carry the consequence; the params' shapes; every key with its zh and ja row; the zh rendering holds no English word; fillWords. RED on 935960b7e: 5 by name, none thrown. The heavy suite's three text legs read the new words.
 
+### Known in 2.369.399 — still open from 2.369.398, and the minors named by the .399 merged-tip read (2026-11-13 09:06Z); each a pick of a later train
+- **K1 (minor, from .398 K4).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it. A plugin status child in flight at a stop outlives the hub.
+- **K2 (from .398 K6).** Laws 2 and 3 of queued-is-not-woke are not in this release: a message behind a turn that never ends waits with no bound and no For-you item. Their new shape is under readers.
+- **K3 (from .398 K11, the hosted runners' Claude Code 2.1.323).** The suite of the hold door and of Stop (test-claude-steer-chrome) is red on about half its tries on the hosted runners, on 2.369.397 as well. On this box, with 2.1.322, it is green on every tree. Whether 2.1.323 moved the CLI's Stop window is still being measured; nothing in this release touches it.
+- **K4 (file preview on a mount).** A healthy workbook queued behind one on a hung mount is told «Storage not responding».
+- **K5 (the pairing sheet).** One Windows machine has three names along its pairing path: device, PC, machine.
+- **K6 (the pairing sheet).** On one allow row of the sheet, «sessions» is explained as «conversations».
+- **K7 (law 1).** A queued entry the release had already bound wrongly keeps that binding through the update, and is marked carried at its first listing.
+
+### int399 — the .399 train's own notes (lane int361; on 935960b7e = 2.369.398)
+- **Eight units in the coordinator's order, rebuilt twice for their cures (each cure picked right behind its own pick).** Each pick's changed lines, outside the changelogs, are its lane's byte for byte. The coordinator's comparison: 66 train files, every non-doc file identical to its one pick or union-equal; the only bytes from no pick are the cap commit. The units:
+  - connection-notice-once A, + the clock cure: the notice's clock speaks the interface's language through the product's formatter.
+  - machine-needs-at-pairing pick 1.
+  - pair-dialog-polish.
+  - file-preview-mount, + its cure: the device bundle keeps the spreadsheet library EXTERNAL (architecture §107: within 2 % of the .398 bundle); the refusal in plain words, with no version; the mermaid pin.
+  - the law 1 follow-up.
+  - k3-hours-units, + the test pin: test-login-expiry §12 follows the K3 units.
+  - the usage-walk pin (test-only).
+  - job-logs-sweep K7 + K10, + the legacy keys: the For-you items a .398 hub already filed keep their zh / ja words.
+- **Every pick was scanned for gendered pronouns BEFORE the first cherry-pick** (the coordinator's standing step, 2026-11-13). Two hits went back to their lanes for a one-word amend: machine-needs ea60df289, file-preview-mount d94bbf9e8.
+- **The fast tier's sum cap 1068 → 1070 s by arithmetic.** .398 states 1067.750 s. On top of that:
+  - connection-notice A +0.070 (test-connection-notice);
+  - machine-needs +0.025 (test-installed-apps 0.375 → 0.400, by its own measurement);
+  - the usage-walk pin +1.250 (test-ledger-readers-census).
+  That totals 1069.095 s over 574 rows; the cures restate no row.
+- **The device agent bundle changes through TWO picks: machine-needs and file-preview-mount** (safe-fs.js / safe-fs-worker.js, found by esbuild's metafile over the tip). Built with build:agentd's own flags at the version string 2.369.398:
+  - the release, 6 037 978 bytes — the same bytes as its signed manifest;
+  - the first tip, 7 939 685 bytes (+31 %: the whole spreadsheet library);
+  - the final pre-bump tip, 6 048 965 bytes (+0.18 %).
+  The cut signs it (build:agentd + sign:agentd between the bump and the commit); the manifest is committed with the release.
+- **The prep, before the bump.**
+  - Two whole fast tiers: 573 / 573 on 1384b036c; 571 / 573 on 0abf1b33e, the two reds being the first file-preview cure's sentence. Then a delta run on the final tip fd8f2725d: the build (§107 at 6 048 965) + 88 suites, 0 red.
+  - Two prep mirrors, read job by job. Mirror 1 on 1384b036c had two reds, both the train's and both cured by test-only commits (test-login-expiry, test-chat-mermaid-chrome). Mirror 2 on 0abf1b33e: every heavy shard green — the two cured, test-dead-bridge green on its first try, test-connection-notice-chrome with the clock line.
+  - FLAKY in them, ✗ then ✓:
+    - named on the control (red-then-green on master .397's own CI, reached by no pick): test-cpu-capture-live, test-loop-hold-live;
+    - named: test-jobs-memory-scopes, on B-c865's leg;
+    - reached by a pick and first seen here, run again in the «before» class: test-channel-names-ui and test-auto-resume-loop (the cut mirror's FIRST try decides); test-dead-bridge's card leg is the suite's own one-shot read of the journal (the K7 lane read it: no product road reaches it) — a test row, not a line.
+  - The merged-tip read of 1384b036c (three lenses): ship, with named lines; three things cured before the cut (above).
+- **The self-hosted classes (the coordinator's rule).** The eight reach 54 self-hosted heavies; the file-preview cure's package.json line (build:agentd only) is a global input, which names all 63. With it set aside, the split of .398's rule:
+  - BEFORE, on the final tip, 6 claims: 34 = 26 by a pick's own module / doc / fixture + test-loop-hold-live + test-login-expiry, test-chat-mermaid-chrome, test-dead-bridge, test-jobs-memory-scopes, test-channel-names-ui, test-auto-resume-loop, test-page-link-ui — 31 GREEN on their first try, 2 SKIPS by name (below), and 1 FLAKY NAMED ON THE CONTROL: test-browser-hidden-paint. Claim 5 had it red on both tries at leg c («0 frames reached the view in ~3 s»). The control ran back to back in one claim: the RELEASE 935960b7e alone, RED with the very same line (13:15Z, 0 frames); then the tip fd8f2725d alone, GREEN (13:20Z, 88 frames). It was red the same way once before, at .397 (the before claim 4 on c3215f7b5). Both whole outputs went to the browser lane with the coordinator's row.
+  - AFTER, named: 37 = the 28 that only boot the product through public/chat.css + the 9 that only package.json names. Out by name: test-desktop-xpra-window-close (B-baa5).
+  - THE TWO SKIPS BY NAME: test-device-mount-rclone (no rclone / fuse on this box); test-agy-cli-probe (its fixture is behind the installed CLI: agy 1.5.8, the repo records only antigravity-cli-1.4.3.json, so 0 legs run — not «needs the real CLI», which the .398 word said wrongly).
+- **Not in this release:** the owner's For-you strip case (it leads .400); B-0a33; shape B; chat-attachments; connection-notice B; hub-loop-stalls (b); vault-login.
+
 ## 2.369.398 — 2026-11-12
 
 ### test-cache-bounds §30 — the fold's soft cap sits where neither verdict follows the collector (B-a77d; 主开发 21:42Z, addendum 21:45Z)
