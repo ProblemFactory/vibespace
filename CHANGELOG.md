@@ -18,6 +18,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Excel and Word files on a mounted drive open in the preview instead of an error, and a file VibeSpace still cannot read there says why and what to do.
 - A message to a busy Antigravity or Codex conversation is no longer shown as read while it still waits, when someone else’s message joined the queue first.
 - In a group, a member’s dropped copy now says it was dropped and to send it again, instead of saying the conversation ended.
+- In Chinese and Japanese, an age in hours is now written in the interface's language, like minutes and days.
 
 ## 2.369.398 — 2026-11-12
 

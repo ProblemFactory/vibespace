@@ -61,6 +61,15 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Pins**: test-queued-wake ㉑ (A–D; A, B, C RED on ccb6bb974), test-msg-cli-groups K9 (RED on ccb6bb974).
 - **The readers' pin** (主开发 07:20Z, verdict wf_9fd73228): the kind filter had no behaviour pin (dropping every item's kind at capture left all suites green). test-queued-wake ㉑ E / E′ (the person's line, or a wrapper nudge, listed BEFORE the peer frame — both unseen at the write) now go red when the kind is not captured, not checked, or only 'user' is excluded; the readers' 12 mutants: 9 red, the 3 they judged equivalent or arguable green. The kb names the limit of a listing with no kinds (the earliest — no better than the newest).
 
+### k3-hours-units — the age mark's hours in the interface's language (主开发's .398 merged-tip read, the «known» line K8)
+- The «{n}h» row was «{n}h» in zh and ja; «{n}m» and «{n}d» were translated. K3's changelog line said the units follow the interface, which was true except for hours. The rows are now «{n}小时» / «{n}時間».
+- The row serves four compact age marks, each paired with «{n}m» (and two with «{n}d»), so each one reads consistently now:
+  - src/lib/account-wall-words.js staleLaneAge (K3);
+  - src/lib/channels-panel.js reauthEta;
+  - src/lib/manage-agents.js ageLabel;
+  - src/lib/session-lifecycle.js ageTxt.
+- Pin: test-account-reset-door page-k3 reads the three unit rows from both dictionaries and asserts hours = 小时 / 時間, with no row left as the English letter. RED CONTROL: the same row over 7177b207c's dictionaries is false.
+
 ## 2.369.398 — 2026-11-12
 
 ### test-cache-bounds §30 — the fold's soft cap sits where neither verdict follows the collector (B-a77d; 主开发 21:42Z, addendum 21:45Z)
