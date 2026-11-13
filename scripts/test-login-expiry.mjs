@@ -2257,16 +2257,18 @@ console.log('— §12 the row says why its reading ages: never probed / the last
           return { rows: out, xss: window.__xss === 1, repainted: window.repainted }; })()`);
       };
       const W = {
-        en: { never: 'Long-lived token only, and Claude Code 2.1.308 isn’t cleared for it on this machine yet: can’t be probed — refreshes when a session uses it', noProfile: 'Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it', failed: 'Last probe failed: ', chip: 'long-lived token only', ago: 'Last refreshed 2100 min ago' },
-        zh: { never: '只有长期 token，而 Claude Code 2.1.308 还没有在本机为它确认通过：无法探测——会话使用它时会刷新', noProfile: '仅长期 token（无 profile 权限）：无法主动探测，用到时才刷新', failed: '上次探测失败：', chip: '仅长期 token', ago: '2100 分钟前刷新' },
-        ja: { never: '長期トークンのみで、Claude Code 2.1.308 はまだこのマシンでその確認が通っていません：調べられません——セッションが使うときに更新されます', noProfile: '長期トークンのみ（profile 権限なし）：自動では確認できません。セッションで使われたときに更新されます', failed: '前回の確認に失敗しました：', chip: '長期トークンのみ', ago: '2100 分前に更新' },
+        // `age`: the row's 2100 minutes in the interface's OWN unit (k3-hours-units, .399: «{n}h» is «{n}小时» / «{n}時間» in zh / ja,
+        // like minutes and days — until then zh and ja drew the English «35h», which this leg pinned by comparing with the en base)
+        en: { age: '35h', never: 'Long-lived token only, and Claude Code 2.1.308 isn’t cleared for it on this machine yet: can’t be probed — refreshes when a session uses it', noProfile: 'Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it', failed: 'Last probe failed: ', chip: 'long-lived token only', ago: 'Last refreshed 2100 min ago' },
+        zh: { age: '35小时', never: '只有长期 token，而 Claude Code 2.1.308 还没有在本机为它确认通过：无法探测——会话使用它时会刷新', noProfile: '仅长期 token（无 profile 权限）：无法主动探测，用到时才刷新', failed: '上次探测失败：', chip: '仅长期 token', ago: '2100 分钟前刷新' },
+        ja: { age: '35時間', never: '長期トークンのみで、Claude Code 2.1.308 はまだこのマシンでその確認が通っていません：調べられません——セッションが使うときに更新されます', noProfile: '長期トークンのみ（profile 権限なし）：自動では確認できません。セッションで使われたときに更新されます', failed: '前回の確認に失敗しました：', chip: '長期トークンのみ', ago: '2100 分前に更新' },
       };
       const base = await look('base-en');
       for (const lang of ['en', 'zh', 'ja']) {
         const { rows: R, xss, repainted } = await look(lang), w = W[lang];
         console.log('    ' + lang + ' O age [' + R.O.age + '] «' + R.O.ageTitle + '» · chip «' + R.O.chipTitle.slice(0, 80) + '…»\n    ' + lang + ' F age «' + R.F.ageTitle + '»');
-        ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '», as the base draws it) and its age chip\'s tooltip says it is not probed and why (Claude Code 2.1.308 not cleared on this machine yet), refreshed by use',
-          R.O.age === base.rows.O.age && R.O.age !== '' && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
+        ck('§12 BROWSER ' + lang + ': an oat-only row keeps its age («' + R.O.age + '» — the base\'s «' + base.rows.O.age + '» in this interface\'s unit) and its age chip\'s tooltip says it is not probed and why (Claude Code 2.1.308 not cleared on this machine yet), refreshed by use',
+          base.rows.O.age === W.en.age && R.O.age === w.age && R.O.ageTitle.startsWith(w.ago) && R.O.ageTitle.endsWith(w.never));
         ck('§12 BROWSER ' + lang + ': …its quiet chip (lane oat-chip-icon: the clock alone, 「仅长期 token」 its screen-reader name) — its tooltip ENDS with the same sentence (after the facts that lead it), the 登录 door stays (no new control)',
           R.O.chip === '' && R.O.chipAria === w.chip && R.O.chipTitle.endsWith(' · ' + w.never) && R.O.chipTitle.length > w.never.length + 30 && R.O.relogin === 'sub-o' && !R.O.text.includes(w.never));
         ck('§12 BROWSER ' + lang + ': a probeable row whose last probe failed says why on its age chip («' + w.failed + '<why>»)', R.F.ageTitle.endsWith(w.failed + 'exit 1: Not logged in · Please run /login') && !R.F.chip);
