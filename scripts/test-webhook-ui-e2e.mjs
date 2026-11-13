@@ -290,10 +290,19 @@ try {
   const got = await waitFor(() => received.slice(n0).find((x) => x.body.includes('rolling back db1 now')), 15000);
   ok(got && /^v1=[0-9a-f]{64}$/.test(String(got.headers['x-webhook-signature'] || '')) && JSON.parse(got.body).from.name === 'VibeSpace' && !!JSON.parse(got.body).inReplyTo, 'the stub received the reply as a signed POST, from VibeSpace, in reply to the call', got && { h: got.headers['x-webhook-signature'], b: got.body.slice(0, 200) });
 
-  console.log('§8 Send a message… → All ⇒ two proposals; the no-reply caller disabled WITH its reason');
+  console.log('§8 Send a message… → All ⇒ two proposals; the no-reply caller is a need line with its door (lane ui-needs-a-button pick 3)');
   ok(await p1.evaljs(CLICK('[data-wh-send-open]')) && !!(await p1.until(`!!document.querySelector('[data-wh-send="deploys"]')`)), 'Send a message… opens the caller picker');
-  const pick = await p1.evaljs(`[...document.querySelectorAll('[data-wh-send] .chan-wh-pick')].map((l) => ({ text: l.textContent, off: !!(l.querySelector('input[data-wh-pick]') || {}).disabled, why: (l.querySelector('.chan-wh-why') || {}).textContent || null }))`);
-  ok(pick.length === 4 && pick[3].off && /takes no replies/.test(pick[3].why || '') && !pick[1].off && !pick[2].off, 'All + three callers; "Audit log" (delivery none) is disabled WITH its reason beside it', pick);
+  // lane ui-needs-a-button pick 3 (channels-groups-outbox-2): a caller that takes no replies is NOT a greyed box — its line says
+  // «<name> — takes no replies» with «Change delivery…» (data-door="callers") on it; no checkbox, no .chan-wh-why
+  const pick = await p1.evaljs(`[...document.querySelectorAll('[data-wh-send] .chan-wh-pick')].map((l) => ({ text: l.textContent, box: !!l.querySelector('input[data-wh-pick]'), off: l.classList.contains('chan-wh-pick-off'), words: (l.querySelector('.need-words') || {}).textContent || null, door: (l.querySelector('.need-doors button[data-door="callers"]') || {}).textContent || null }))`);
+  ok(pick.length === 4 && pick[3].off && !pick[3].box && /^Audit log — takes no replies$/.test(pick[3].words || '') && pick[3].door === 'Change delivery…' && !pick[1].off && pick[1].box && !pick[2].off && pick[2].box,
+    'All + three callers; "Audit log" (delivery none) is a need line — «Audit log — takes no replies» with «Change delivery…» on it, no box to tick', pick);
+  // its door: the picker closes and the path's Callers dialog opens (where a caller's delivery is set) — then the picker again
+  ok(await p1.evaljs(CLICK('[data-wh-send] .chan-wh-pick-off .need-doors button[data-door="callers"]')), '«Change delivery…» is pressed');
+  const viaDoor = await p1.until(`(() => { const d = document.querySelector('[data-wh-callers-dialog="deploys"]'); return d && !document.querySelector('[data-wh-send]') && d.querySelectorAll('[data-wh-caller]').length === 3 ? d.querySelectorAll('[data-wh-caller]').length : null; })()`, 15000);
+  ok(viaDoor === 3, '«Change delivery…» closes the picker and opens the path\'s Callers dialog with its three callers', viaDoor);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
+  ok(await p1.evaljs(CLICK('[data-wh-send-open]')) && !!(await p1.until(`!!document.querySelector('[data-wh-send="deploys"]')`)), 'Send a message… opens the caller picker again');
   await p1.evaljs(`(() => { const a = document.querySelector('[data-wh-pick-all]'); a.checked = true; a.dispatchEvent(new Event('change')); const ta = document.querySelector('[data-wh-send] textarea'); ta.value = 'maintenance at 22:00'; return true; })()`);
   await p1.shot('send.png', '[data-wh-send]');
   const n1 = received.length;

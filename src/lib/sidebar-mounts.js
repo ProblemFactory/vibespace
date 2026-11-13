@@ -1717,7 +1717,7 @@ export function installSidebarMounts(Sidebar) {
       // one subject: one machine being added (or added again in place of `again`)
       // not the subject: from — the machine whose words fill the fields; the form is the one Add machine form
       this._mountsDialog(tr('Add remote machine'), [
-        ...(again ? [{ key: 'replaces', type: 'note', value: tr('This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.', { name: again.name || again.host }) }] : []),
+        ...(again ? [{ key: 'replaces', type: 'note', value: tr('This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.', { name: again.name || again.host }) + ' ' + tr('Its exit grants and port forwards go with the old entry — set them again once the machine is added.') }] : []),
         { key: 'name', label: tr('Name'), placeholder: 'gpu-01', value: again ? again.name : '', hint: tr('Any label you like — how this machine shows in your lists.') },
         { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu', value: again ? again.user : '' },
         { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), value: again ? again.host : '', hint: tr('The machine’s IP address or hostname.') },

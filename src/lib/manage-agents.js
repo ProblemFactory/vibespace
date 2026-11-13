@@ -22,7 +22,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
 }
 import { t } from './i18n.js';
 import { dateOf, stampAt as when, durationMark } from './page-time.js';
-import { needLine, pairDoor, needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
+import { needLine, pairDoor, needDoorButton, settingsDoor, sayOnLine } from './need-line.js'; // lane ui-needs-a-button (agents-accounts-6): a need + its doors
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { markLandedOnSave, carryUnsaved, agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
@@ -311,8 +311,9 @@ export function serveLapsedChipHtml(a, { mode = 'manual', pooled = true } = {}) 
     : mode === 'auto-cli' ? t('It rejoins by itself once it answers again (checked about hourly). Click to check now.')
     : t('Nothing asks it by itself under the current usage-refresh setting — after renewing, click to check it now.');
   const label = `${ROSTER_ICONS.CLOCK}${t('subscription inactive since {when}', { when: escHtml(when) })}`;
-  // lane ui-needs-a-button pick 5: under 'off' the chip is the SETTING's door (the ⟳ route refuses — no Re-check verb)
-  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" role="button" tabindex="0" data-serve-setting="accounts.onDemandQuotaRefresh" style="color:var(--red,#e55)" title="${head} ${tail}">${label}</span>`;
+  // lane ui-needs-a-button pick 5: under 'off' the chip is the SETTING's door (the ⟳ route refuses — no Re-check verb); the verifier's
+  // list (picks 3–6): its words say that act («· Turn on usage refresh…», as the other chip says «· Re-check»), never only its title
+  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" role="button" tabindex="0" data-serve-setting="accounts.onDemandQuotaRefresh" style="color:var(--red,#e55)" title="${head} ${tail}">${label} · ${t('Turn on usage refresh…')}</span>`;
   return ` <span class="acct-blocked-hint acct-serve-chip" role="button" tabindex="0" data-serve-recheck="${escHtml(a.id)}" style="color:var(--red,#e55)"`
     + ` title="${head} ${tail}">${label} · ${t('Re-check')}</span>`;
 }
@@ -2882,9 +2883,11 @@ export function installManageAgents(App, ctx = {}) {
         fills.push(renderMachine(mkSection('', ''), '', null, null, stale));
       } else if (tab === 'machines') {
         if (!hostsList.length) {
-          // lane ui-needs-a-button (agents-accounts-6): the two ways are DOORS on the line, never «in the Remote tab»
-          const addSsh = { label: t('Add an SSH machine…'), kind: 'primary', door: 'add-ssh-host', run: async () => { const hd = await fetchJson('/api/hosts').catch(() => null); if (hd && hd.key && this.sidebar && typeof this.sidebar._showAddHostDialog === 'function') this.sidebar._showAddHostDialog(hd); } };
-          body.appendChild(needLine({ words: t('No machines yet — add an SSH machine or pair a device.'), cls: 'empty-hint', doors: [addSsh, pairDoor(this, null, { kind: 'secondary' })] }));
+          // lane ui-needs-a-button (agents-accounts-6): the two ways are DOORS on the line, never «in the Remote tab»; the verifier's list
+          // (picks 3–6): a press that cannot open the form SAYS why on this line (fetchJson never throws: null = unreachable, {error})
+          const sbHost = this.sidebar && typeof this.sidebar._showAddHostDialog === 'function' ? this.sidebar : null;
+          const addSsh = sbHost ? { label: t('Add an SSH machine…'), kind: 'primary', door: 'add-ssh-host', run: async () => { const hd = await fetchJson('/api/hosts'); if (hd && hd.key) { sayOnLine(noneLine, ''); sbHost._showAddHostDialog(hd); return; } sayOnLine(noneLine, t('Could not open it: {why}', { why: hd && hd.error ? String(hd.error) : t('Could not reach the server') })); } } : null;
+          const noneLine = body.appendChild(needLine({ words: t('No machines yet — add an SSH machine or pair a device.'), cls: 'empty-hint', doors: [addSsh, pairDoor(this, null, { kind: 'secondary' })] }));
         }
         // Accordion: one collapsible card per host; the ssh/dial probe runs
         // LAZILY on first expand (opening the dialog no longer fans probes to

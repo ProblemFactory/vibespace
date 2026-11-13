@@ -8,6 +8,9 @@
 //   ② A DOOR ON EVERY SURFACE THAT STATES IT: a row whose door is present — every file that states one of its sentences (a PURE
 //      model's words count for the surface that draws them: `via` — one file, or every surface that draws them) carries the
 //      door's marker in its source
+//   ②b THE DOOR ON ITS LINE (the verifier's list for picks 3–6 — a marker cannot see placement): every present row's surfaces read
+//      as an AST (acorn): the sentence and a LIVE door (a `run` that calls something) are drawn TOGETHER in the shape the row
+//      declares — by default the sentence IS the `words` of a needLine call whose `doors` hold the live door
 //   ③ CONTROLS: a new sentence a net catches that no row claims is RED by name; a surface stating a present-door need without its
 //      door is RED by name
 // The machine table is read when it exists (it lands on its own lane's pick); the ui table always.
@@ -74,6 +77,494 @@ for (const c of C) {
 
 console.log('② A DOOR ON EVERY SURFACE THAT STATES IT');
 for (const c of C) for (const e of c.rows.values()) if (e.row.door.present) ok(doorless(e).length === 0 && e.files.size > 0, `[${c.scope}] ${e.row.id}: every surface that states it draws its door (${[...e.files].sort().join(', ')})`, doorless(e));
+
+console.log('②b THE DOOR ON ITS LINE — each surface read as an AST (the verifier\'s list for picks 3–6: a marker cannot see placement)');
+// THE SHAPE READER: an expression's WORDS (the t() / tr() / i18nKey() literals that can flow into it) and its DOORS (the door objects
+// it can hold, and whether each `run` calls something), followed through bindings, calls, returns, a helper's parameters and the
+// imports of the files the census names. A row's shape (src/ui-needs.js `shape`) says how its sentence and its door are tied.
+function shapeReader({ follow = null, read = null } = {}) {
+  const acorn = require(path.join(REPO, 'node_modules/acorn'));
+  const FILES = new Map();
+  const kids = (n) => { const out = []; for (const k in n) { if (k === 'parent' || k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') out.push(x); } else if (v && typeof v.type === 'string') out.push(v); } return out; };
+  const fileOf = (f) => {
+    if (FILES.has(f)) return FILES.get(f);
+    let src = read ? read(f) : undefined; if (typeof src !== 'string') { try { src = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { FILES.set(f, null); return null; } }
+    let ast = null;
+    for (const sourceType of ['module', 'script']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { /* the other */ } }
+    if (!ast) { FILES.set(f, null); return null; }
+    const nodes = [];
+    const stack = [[ast, null]];
+    while (stack.length) { const [n, p] = stack.pop(); n.parent = p; n.file = f; nodes.push(n); for (const c of kids(n)) stack.push([c, n]); }
+    const asg = new Map(), masg = new Map(), byCallee = new Map();
+    const add = (m, k, v) => { if (k == null) return; let a = m.get(k); if (!a) m.set(k, a = []); a.push(v); };
+    for (const n of nodes) {
+      if (n.type === 'AssignmentExpression') { if (n.left.type === 'Identifier') add(asg, n.left.name, n); else if (n.left.type === 'MemberExpression') add(masg, n.left.computed ? null : nameOf(n.left.property), n); }
+      if (n.type === 'CallExpression') { const c = n.callee.type === 'ChainExpression' ? n.callee.expression : n.callee; add(byCallee, c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed ? nameOf(c.property) : null, n); }
+    }
+    const rec = { f, src, ast, nodes, asg, masg, byCallee };
+    FILES.set(f, rec);
+    return rec;
+  };
+  const T_FN = /^(t|tr|i18nKey|tc|tDevice)$/;
+  const isFn = (n) => n && /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(n.type);
+  const nameOf = (k) => (k && (k.type === 'Identifier' ? k.name : k.type === 'Literal' ? String(k.value) : null));
+  const srcOf = (n) => (n && FILES.get(n.file) ? FILES.get(n.file).src.slice(n.start, n.end) : '');
+  // ── bindings ──
+  const patNames = (p, pathTo = [], out = []) => {
+    if (!p) return out;
+    if (p.type === 'Identifier') out.push({ name: p.name, path: pathTo, id: p });
+    else if (p.type === 'ObjectPattern') for (const q of p.properties) { if (q.type === 'RestElement') patNames(q.argument, pathTo, out); else patNames(q.value, [...pathTo, nameOf(q.key)], out); }
+    else if (p.type === 'ArrayPattern') p.elements.forEach((e, i) => patNames(e, [...pathTo, i], out));
+    else if (p.type === 'AssignmentPattern') { const o = patNames(p.left, pathTo, []); for (const x of o) out.push({ ...x, dflt: p.right }); }
+    else if (p.type === 'RestElement') patNames(p.argument, pathTo, out);
+    return out;
+  };
+  const declIn = (stmts, name) => {
+    for (const s of stmts) {
+      const d = s && s.type === 'ExportNamedDeclaration' ? s.declaration : s;
+      if (!d) continue;
+      if (d.type === 'VariableDeclaration') for (const v of d.declarations) for (const b of patNames(v.id)) if (b.name === name) return { kind: 'var', decl: v, path: b.path, id: b.id };
+      if ((d.type === 'FunctionDeclaration' || d.type === 'ClassDeclaration') && d.id && d.id.name === name) return { kind: 'fn', node: d, id: d.id };
+      if (d.type === 'ImportDeclaration') for (const sp of d.specifiers) if (sp.local.name === name) return { kind: 'import', decl: d, spec: sp, id: sp.local };
+    }
+    return null;
+  };
+  // each scope's names, read once (a block / the program / a function's params / a loop head / a catch)
+  const SCOPES = new WeakMap();
+  const scopeNames = (n) => {
+    if (SCOPES.has(n)) return SCOPES.get(n);
+    const m = new Map();
+    const put = (name, b) => { if (!m.has(name)) m.set(name, b); };
+    const stmts = (list) => { for (const s0 of list) { const d = s0 && s0.type === 'ExportNamedDeclaration' ? s0.declaration : s0; if (!d) continue; if (d.type === 'VariableDeclaration') for (const v of d.declarations) for (const x of patNames(v.id)) put(x.name, { kind: 'var', decl: v, path: x.path, id: x.id }); if ((d.type === 'FunctionDeclaration' || d.type === 'ClassDeclaration') && d.id) put(d.id.name, { kind: 'fn', node: d, id: d.id }); if (d.type === 'ImportDeclaration') for (const sp of d.specifiers) put(sp.local.name, { kind: 'import', decl: d, spec: sp, id: sp.local }); } };
+    if (isFn(n)) { n.params.forEach((p, i) => { for (const x of patNames(p)) put(x.name, { kind: 'param', fn: n, index: i, path: x.path, dflt: x.dflt, id: x.id }); }); if (n.type === 'FunctionExpression' && n.id) put(n.id.name, { kind: 'fn', node: n, id: n.id }); }
+    else if (n.type === 'BlockStatement' || n.type === 'Program' || n.type === 'StaticBlock') stmts(n.body);
+    else if (n.type === 'SwitchCase') stmts(n.consequent);
+    else if ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && n.left.type === 'VariableDeclaration') for (const x of patNames(n.left.declarations[0].id)) put(x.name, { kind: n.type === 'ForOfStatement' ? 'forof' : 'forin', loop: n, path: x.path, id: x.id });
+    else if (n.type === 'ForStatement' && n.init && n.init.type === 'VariableDeclaration') stmts([n.init]);
+    else if (n.type === 'CatchClause' && n.param) for (const x of patNames(n.param)) put(x.name, { kind: 'catch', id: x.id });
+    SCOPES.set(n, m);
+    return m;
+  };
+  const BIND = new WeakMap();
+  const bindingOf = (id) => {
+    if (BIND.has(id)) return BIND.get(id);
+    let r = null;
+    for (let n = id.parent; n && !r; n = n.parent) { const m = scopeNames(n); if (m.size && m.has(id.name)) r = m.get(id.name); }
+    BIND.set(id, r);
+    return r;
+  };
+  const sameBinding = (a, b) => !!(a && b && a.id && a.id === b.id);
+  // ── modules ──
+  // an import is followed only into a file the census names (a file that states a row's sentence, a surface, need-line.js)
+  const resolveModule = (from, spec) => { if (!/^\.\.?\//.test(spec)) return null; const p = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec)); for (const c of [p, p + '.js', p + '/index.js']) if ((!follow || follow.has(c)) && fs.existsSync(path.join(REPO, c)) && fs.statSync(path.join(REPO, c)).isFile()) return c; return null; };
+  const EXP = new Map();
+  const exportOf = (f, name) => { const k = f + '\0' + name; if (!EXP.has(k)) { EXP.set(k, []); EXP.set(k, exportOf1(f, name)); } return EXP.get(k); };
+  const exportOf1 = (f, name) => {
+    const R = fileOf(f); if (!R) return [];
+    const out = [];
+    for (const s of R.ast.body) {
+      if (s.type === 'ExportNamedDeclaration' && s.declaration) { const d = s.declaration; if ((d.type === 'FunctionDeclaration' || d.type === 'ClassDeclaration') && d.id.name === name) out.push(d); if (d.type === 'VariableDeclaration') for (const v of d.declarations) if (v.id.type === 'Identifier' && v.id.name === name && v.init) out.push(v.init); }
+      if (s.type === 'ExportNamedDeclaration' && !s.declaration) for (const sp of s.specifiers) if (nameOf(sp.exported) === name) { const d = declIn(R.ast.body, nameOf(sp.local)); if (d) out.push(...valOfBinding(d)); }
+    }
+    // CommonJS: module.exports = { name, … } / module.exports.name = …
+    for (const n of R.masg.get('exports') || []) {
+      if (n.type === 'AssignmentExpression' && srcOf(n.left) === 'module.exports' && n.right.type === 'ObjectExpression') for (const p of n.right.properties) if (p.type === 'Property' && nameOf(p.key) === name) out.push(...(p.value.type === 'Identifier' ? valOf(p.value) : [p.value]));
+    }
+    for (const n of R.masg.get(name) || []) if (srcOf(n.left) === `module.exports.${name}`) out.push(n.right);
+    return out;
+  };
+  // ── values: the expressions a node can stand for (followed one hop at a time; cycles cut) ──
+  let BUDGET = 0;
+  const valOfBinding = (b, seen = new Set()) => {
+    if (!b) return [];
+    if (b.kind === 'fn') return [b.node];
+    if (b.kind === 'var') {
+      const base = b.decl.init ? [b.decl.init] : [];
+      // assignments to the same binding (x = …) anywhere in its file
+      const R = FILES.get(b.id.file);
+      const asg = R ? (R.asg.get(b.id.name) || []).filter((n) => sameBinding(bindingOf(n.left), b)).map((n) => n.right) : [];
+      const all = [...base, ...asg];
+      return b.path.length ? selectPath(all, b.path, seen) : all;
+    }
+    if (b.kind === 'import') {
+      const f = resolveModule(b.decl.file || b.id.file, b.decl.source.value); if (!f) return [];
+      if (b.spec.type === 'ImportNamespaceSpecifier') return [{ type: '#namespace', file: f }];
+      return exportOf(f, b.spec.type === 'ImportDefaultSpecifier' ? 'default' : nameOf(b.spec.imported));
+    }
+    if (b.kind === 'param') {
+      const out = b.dflt ? [b.dflt] : [];
+      const args = callersOf(b.fn).map((c) => c.arguments[b.index]).filter(Boolean);
+      out.push(...(b.path.length ? selectPath(args, b.path, seen) : args));
+      // a callback's parameter: an element of what it walks (.map / .forEach / .filter / .find / .some / .every on a receiver)
+      const call = b.fn.parent;
+      if (call && call.type === 'CallExpression' && call.arguments[0] === b.fn && call.callee.type === 'MemberExpression' && /^(map|forEach|filter|find|some|every|flatMap)$/.test(nameOf(call.callee.property)) && b.index === 0) out.push(...elementsOf(call.callee.object, seen));
+      return out;
+    }
+    if (b.kind === 'forof') return selectPath(elementsOf(b.loop.right, seen), b.path, seen);
+    return [];
+  };
+  const elementsOf = (n, seen = new Set(), d = 0) => {
+    if (!n || d > 14 || seen.has(n)) return [];
+    seen.add(n);
+    const out = [];
+    switch (n.type) {
+      case 'Identifier': {
+        const b = bindingOf(n); if (!b) return out;
+        const R = FILES.get(n.file);
+        if (R) for (const c of [...(R.byCallee.get('push') || []), ...(R.byCallee.get('unshift') || [])]) if (c.callee.type === 'MemberExpression' && c.callee.object.type === 'Identifier' && c.callee.object.name === n.name && sameBinding(bindingOf(c.callee.object), b)) out.push(...c.arguments);
+        for (const v of valOfBinding(b, new Set())) out.push(...elementsOf(v, seen, d + 1));
+        return out;
+      }
+      case 'ArrayExpression': for (const e of n.elements) { if (!e) continue; if (e.type === 'SpreadElement') out.push(...elementsOf(e.argument, seen, d + 1)); else out.push(e); } return out;
+      case 'ConditionalExpression': return [...elementsOf(n.consequent, seen, d + 1), ...elementsOf(n.alternate, seen, d + 1)];
+      case 'LogicalExpression': return [...elementsOf(n.left, seen, d + 1), ...elementsOf(n.right, seen, d + 1)];
+      case 'ChainExpression': case 'ParenthesizedExpression': return elementsOf(n.expression, seen, d + 1);
+      case 'AwaitExpression': return elementsOf(n.argument, seen, d + 1);
+      case 'CallExpression': {
+        const c = n.callee.type === 'ChainExpression' ? n.callee.expression : n.callee;
+        const pn = c.type === 'MemberExpression' ? nameOf(c.property) : null;
+        if (pn === 'map' && isFn(n.arguments[0])) return returnsOf(n.arguments[0]);
+        if (pn === 'flatMap' && isFn(n.arguments[0])) { for (const r of returnsOf(n.arguments[0])) out.push(...elementsOf(r, seen, d + 1)); return out; }
+        if (pn && /^(filter|slice|concat|sort|reverse)$/.test(pn)) { out.push(...elementsOf(c.object, seen, d + 1)); if (pn === 'concat') for (const a of n.arguments) out.push(...elementsOf(a, seen, d + 1)); return out; }
+        if (c.type === 'Identifier' && T_FN.test(c.name)) return [n];
+        const fns = calleeFns(n, new Set());
+        if (fns.length) { for (const f of fns) for (const r of returnsOf(f)) out.push(...elementsOf(r, seen, d + 1)); return out; }
+        return [n];
+      }
+      default: return [n];
+    }
+  };
+  const selectPath = (vals, p, seen) => { let cur = vals; for (const k of p) { const nx = []; for (const v of cur.flatMap((x) => valOf(x, seen))) { if (v.type === 'ObjectExpression') { for (const q of v.properties) if (q.type === 'Property' && nameOf(q.key) === String(k)) nx.push(q.value); } else if (v.type === 'ArrayExpression' && typeof k === 'number') { if (v.elements[k]) nx.push(v.elements[k]); } } cur = nx; } return cur; };
+  const FBM = new Map();
+  const fnByMember = (file, name) => { const key = file + '\0' + name; if (FBM.has(key)) return FBM.get(key); const R = fileOf(file); if (!R) return []; const out = []; FBM.set(key, out); for (const n of R.nodes) { if ((n.type === 'MethodDefinition' || (n.type === 'Property' && (n.method || isFn(n.value)))) && nameOf(n.key) === name && isFn(n.value)) out.push(n.value); if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' && nameOf(n.left.property) === name && isFn(n.right)) out.push(n.right); } return out; };
+  const calleeFns = (call, seen) => {
+    const c = call.callee.type === 'ChainExpression' ? call.callee.expression : call.callee;
+    if (c.type === 'Identifier') return valOf(c, seen).filter(isFn);
+    if (c.type === 'MemberExpression') {
+      if (c.computed && c.property.type !== 'Literal') return valOf(c, new Set()).filter(isFn);
+      const pn = nameOf(c.property);
+      if (c.object.type === 'ThisExpression') return fnByMember(call.file, pn);
+      const objs = valOf(c.object, seen);
+      const out = [];
+      for (const o of objs) { if (o.type === '#namespace') out.push(...exportOf(o.file, pn).filter(isFn)); if (o.type === 'ObjectExpression') for (const q of o.properties) if (q.type === 'Property' && nameOf(q.key) === pn && isFn(q.value)) out.push(q.value); }
+      return out;
+    }
+    return isFn(c) ? [c] : [];
+  };
+  const RET = new WeakMap();
+  const returnsOf = (fn) => { if (fn.type === 'ArrowFunctionExpression' && fn.expression) return [fn.body]; if (RET.has(fn)) return RET.get(fn); const out = []; const st = [fn.body]; while (st.length) { const x = st.pop(); if (x.type === 'ReturnStatement') { if (x.argument) out.push(x.argument); continue; } if (isFn(x)) continue; st.push(...kids(x)); } RET.set(fn, out); return out; };
+  const callersOf = (fn) => {
+    const R = FILES.get(fn.file); if (!R) return [];
+    const p = fn.parent;
+    let name = null, b = null;
+    if (p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier') { name = p.id.name; b = bindingOf(p.id); }
+    else if (fn.type === 'FunctionDeclaration' && fn.id) { name = fn.id.name; b = { kind: 'fn', node: fn, id: fn.id }; }
+    else if (p && (p.type === 'MethodDefinition' || p.type === 'Property')) name = nameOf(p.key);
+    if (!name) return [];
+    return (R.byCallee.get(name) || []).filter((n) => (n.callee.type === 'Identifier' && (!b || sameBinding(bindingOf(n.callee), b))) || (n.callee.type === 'MemberExpression' && !b));
+  };
+  let DEPTH = 0;
+  function valOf(n, seen = new Set()) {
+    if (DEPTH > 40) return [];
+    DEPTH++;
+    try { return valOf1(n, seen); } finally { DEPTH--; }
+  }
+  function valOf1(n, seen) {
+    if (!n || ++BUDGET > 400000) return [];
+    if (n.type === '#namespace' || isFn(n) || n.type === 'ObjectExpression' || n.type === 'ArrayExpression' || n.type === 'Literal' || n.type === 'TemplateLiteral') return [n];
+    if (seen.has(n)) return [];
+    seen.add(n);
+    switch (n.type) {
+      case 'Identifier': { if (n.name === 'undefined') return []; const b = bindingOf(n); return b ? valOfBinding(b, seen).flatMap((v) => valOf(v, seen)) : []; }
+      case 'ChainExpression': return valOf(n.expression, seen);
+      case 'AwaitExpression': return valOf(n.argument, seen);
+      case 'ParenthesizedExpression': return valOf(n.expression, seen);
+      case 'SequenceExpression': return valOf(n.expressions[n.expressions.length - 1], seen);
+      case 'AssignmentExpression': return valOf(n.right, seen);
+      case 'ConditionalExpression': return [...valOf(n.consequent, seen), ...valOf(n.alternate, seen)];
+      case 'MemberExpression': {
+        if (n.computed && !(n.property.type === 'Literal')) { const out = []; for (const o of valOf(n.object, seen)) if (o.type === 'ObjectExpression') for (const q of o.properties) if (q.type === 'Property') out.push(...valOf(q.value, seen)); return out.length ? out : [n]; }
+        const pn = nameOf(n.property); const out = [];
+        for (const o of valOf(n.object, seen)) { if (o.type === 'ObjectExpression') { for (const q of o.properties) if (q.type === 'Property' && nameOf(q.key) === pn) out.push(...valOf(q.value, seen)); } else if (o.type === '#namespace') out.push(...exportOf(o.file, pn)); }
+        return out.length ? out : [n];
+      }
+      case 'LogicalExpression': return [...valOf(n.left, seen), ...valOf(n.right, seen)];
+      case 'CallExpression': { if (n.callee.type === 'Identifier' && T_FN.test(n.callee.name)) return [n]; if (n.callee.type === 'MemberExpression' && srcOf(n.callee) === 'Object.freeze' && n.arguments[0]) return valOf(n.arguments[0], seen); const fns = calleeFns(n, new Set()); return fns.length ? fns.flatMap((f) => returnsOf(f)).flatMap((r) => valOf(r, seen)) : [n]; }
+      default: return [n];
+    }
+  }
+  // ── WORDS: the t() literals that can flow into an expression ──
+  const WMEMO = new WeakMap();
+  function wordsOf(n, seen = null) {
+    if (!seen && n && typeof n === 'object') { if (WMEMO.has(n)) return WMEMO.get(n); const r = wordsOf1(n, new Set()); WMEMO.set(n, r); return r; }
+    return wordsOf1(n, seen || new Set());
+  }
+  function wordsOf1(n, seen) {
+    const out = new Set();
+    const go = (x) => {
+      if (!x || seen.has(x) || ++BUDGET > 400000) return;
+      seen.add(x);
+      switch (x.type) {
+        case 'CallExpression': {
+          const c = x.callee.type === 'ChainExpression' ? x.callee.expression : x.callee;
+          if (c.type === 'Identifier' && T_FN.test(c.name)) { const a = x.arguments[0]; if (a && a.type === 'Literal' && typeof a.value === 'string') out.add(a.value); else go(a); if (x.arguments[1]) go(x.arguments[1]); return; }
+          const fns = calleeFns(x, new Set());
+          if (fns.length) { for (const f of fns) for (const r of returnsOf(f)) go(r); for (const a of x.arguments) if (!isFn(a)) go(a); return; }
+          if (c.type === 'MemberExpression' && /^(map|flatMap)$/.test(nameOf(c.property)) && isFn(x.arguments[0])) { for (const r of returnsOf(x.arguments[0])) go(r); return; }
+          for (const a of x.arguments) if (!isFn(a)) go(a);
+          if (c.type === 'MemberExpression') go(c.object);
+          return;
+        }
+        case 'Identifier': { const vs = valOf(x, new Set()); for (const v of vs) go(v); for (const e of elementsOf(x)) if (!vs.includes(e)) go(e); return; }
+        case 'MemberExpression': {
+          const objs = valOf(x.object, new Set());
+          const pn = x.computed ? null : nameOf(x.property);
+          let hit = false;
+          for (const o of objs) if (o.type === 'ObjectExpression') { for (const q of o.properties) if (q.type === 'Property' && (pn === null || nameOf(q.key) === pn)) { hit = true; go(q.value); } }
+          // writes to the same member of the same binding (cl.textContent = …)
+          if (x.object.type === 'Identifier' && pn) { const b = bindingOf(x.object); const R = FILES.get(x.file); if (b && R) for (const a of R.masg.get(pn) || []) if (a.left.object.type === 'Identifier' && a.left.object.name === x.object.name && sameBinding(bindingOf(a.left.object), b)) { hit = true; go(a.right); } }
+          if (!hit && pn === null) for (const o of objs) go(o);
+          return;
+        }
+        case 'TemplateLiteral': for (const e of x.expressions) go(e); return;
+        case 'TaggedTemplateExpression': go(x.quasi); return;
+        case 'BinaryExpression': case 'LogicalExpression': go(x.left); go(x.right); return;
+        case 'ConditionalExpression': go(x.consequent); go(x.alternate); return;
+        case 'ArrayExpression': for (const e of x.elements) go(e); return;
+        case 'ObjectExpression': for (const q of x.properties) go(q.type === 'Property' ? q.value : q.argument); return;
+        case 'SpreadElement': go(x.argument); return;
+        case 'ChainExpression': case 'ParenthesizedExpression': go(x.expression); return;
+        case 'AwaitExpression': go(x.argument); return;
+        case 'AssignmentExpression': go(x.right); return;
+        case 'SequenceExpression': go(x.expressions[x.expressions.length - 1]); return;
+        default: return;
+      }
+    };
+    go(n);
+    return out;
+  }
+  // ── DOORS: the door objects an expression can hold, and whether each one's run calls something ──
+  const containsCall = (n) => { let hit = false; const st = [n]; while (st.length && !hit) { const x = st.pop(); if (x.type === 'CallExpression' || x.type === 'NewExpression' || x.type === 'ImportExpression') hit = true; else st.push(...kids(x)); } return hit; };
+  const liveFn = (f) => (f.type === 'ArrowFunctionExpression' && f.expression ? containsCall(f.body) : f.body.type === 'BlockStatement' && f.body.body.length > 0 && containsCall(f.body));
+  function liveRun(v, seen = new Set()) {
+    if (!v || seen.has(v)) return false;
+    seen.add(v);
+    if (isFn(v)) return liveFn(v);
+    if (v.type === 'Identifier') { const vals = valOf(v, new Set()); return vals.length ? vals.some((x) => liveRun(x, seen)) : true; }   // an unbound reference: a function handed in (an opener)
+    if (v.type === 'MemberExpression') return true;
+    if (v.type === 'ConditionalExpression') return liveRun(v.consequent, seen) || liveRun(v.alternate, seen);
+    if (v.type === 'LogicalExpression') return liveRun(v.left, seen) || liveRun(v.right, seen);
+    if (v.type === 'CallExpression') { const fa = v.arguments.filter(isFn); if (fa.length) return fa.some(liveFn); const fns = calleeFns(v, new Set()); return fns.length ? fns.some((f) => returnsOf(f).some((r) => liveRun(r, seen))) : true; }
+    return false;
+  }
+  const propOf = (o, name) => (o.properties || []).find((p) => p.type === 'Property' && nameOf(p.key) === name);
+  function doorsOf(n, seen = new Set()) {
+    const objs = [], opaque = [];
+    const go = (x) => {
+      if (!x || seen.has(x) || ++BUDGET > 400000) return;
+      seen.add(x);
+      switch (x.type) {
+        case 'ArrayExpression': for (const e of x.elements) go(e); return;
+        case 'ObjectExpression': objs.push(x); return;
+        case 'SpreadElement': go(x.argument); return;
+        case 'ConditionalExpression': go(x.consequent); go(x.alternate); return;
+        case 'LogicalExpression': if (x.operator === '&&') go(x.right); else { go(x.left); go(x.right); } return;
+        case 'Identifier': { const vals = valOf(x, new Set()); for (const v of vals) go(v); for (const e of elementsOf(x, new Set())) if (!vals.includes(e)) go(e); if (!vals.length) opaque.push(x); return; }
+        case 'CallExpression': { const c = x.callee.type === 'ChainExpression' ? x.callee.expression : x.callee; if (c.type === 'MemberExpression' && /^(filter|concat|slice)$/.test(nameOf(c.property))) { go(c.object); for (const a of x.arguments) if (!isFn(a)) go(a); return; } if (c.type === 'MemberExpression' && nameOf(c.property) === 'map' && isFn(x.arguments[0])) { for (const r of returnsOf(x.arguments[0])) go(r); return; } const fns = calleeFns(x, new Set()); if (fns.length) for (const f of fns) for (const r of returnsOf(f)) go(r); else opaque.push(x); return; }
+        case 'Literal': return;
+        case 'ChainExpression': case 'ParenthesizedExpression': go(x.expression); return;
+        case 'AwaitExpression': go(x.argument); return;
+        case 'MemberExpression': { for (const v of valOf(x.object, new Set())) if (v.type === 'ObjectExpression') { const q = propOf(v, nameOf(x.property)); if (q) go(q.value); } return; }
+        default: opaque.push(x);
+      }
+    };
+    go(n);
+    const doors = objs.filter((o) => propOf(o, 'run') || propOf(o, 'label'));
+    return { doors, live: doors.filter((o) => liveRun((propOf(o, 'run') || {}).value)), dead: doors.filter((o) => !liveRun((propOf(o, 'run') || {}).value)), opaque };
+  }
+  const calls = (f, name) => { const R = fileOf(f); return R ? (R.byCallee.get(name) || []) : []; };
+  // ── THE SHAPES: how a row's sentence and its door are tied on screen (each kind checked over the surface's AST) ──
+  const ancestors = (n) => { const out = []; for (let x = n.parent; x; x = x.parent) out.push(x); return out; };
+  const fnsAround = (n) => ancestors(n).filter(isFn);
+  const hits = (n, S, tok) => (tok ? srcOf(n).includes(tok) : false) || [...wordsOf(n)].some((k) => S.has(k));
+  const VISIBLE = new Set(['textContent', 'innerHTML', 'innerText', 'nodeValue']);
+  const ADDS = new Set(['append', 'appendChild', 'prepend', 'replaceChildren', 'insertBefore', 'after', 'before']);
+  const TEXT_MAKERS = { el: 2, mk: 2, noteLine: 1, whNote: 0, textNode: 0, createTextNode: 0 };
+  const WRITERS = { noteText: [0, 1], setText: [0, 1] };   // the tree's own text writers (utils): (element, words)
+  const HF = new Map();
+  const helperFns = (call) => { const b = bindingOf(call.callee); if (!b || (b.kind !== 'var' && b.kind !== 'fn')) return []; if (HF.has(b.id)) return HF.get(b.id); HF.set(b.id, []); const fns = valOfBinding(b, new Set()).filter(isFn); HF.set(b.id, fns); return fns; };
+  const HS = new WeakMap();
+  /** in a helper: a visible write whose words are its parameter #vi, onto its parameter #ti (or an element it closes over) */
+  const helperSinks = (fn, depth = 0) => {
+    if (depth > 1) return [];
+    if (HS.has(fn)) return HS.get(fn);
+    HS.set(fn, []);
+    const out = [];
+    const pIdx = (x, hop = 0) => {
+      if (!x || hop > 2) return -1;
+      if (x.type === 'LogicalExpression') return pIdx(x.left, hop + 1);
+      if (x.type !== 'Identifier') return -1;
+      const i = fn.params.findIndex((p) => p.type === 'Identifier' && p.name === x.name);
+      if (i >= 0) return i;
+      const b = bindingOf(x);   // a local copy of a parameter (const v = text || '')
+      return b && b.kind === 'var' && b.decl.init && b.decl.start >= fn.start && b.decl.end <= fn.end ? pIdx(b.decl.init, hop + 1) : -1;
+    };
+    const st = [fn.body];
+    while (st.length) {
+      const x = st.pop();
+      if (x !== fn.body && isFn(x)) continue;
+      if (x.type === 'AssignmentExpression' && x.left.type === 'MemberExpression' && VISIBLE.has(nameOf(x.left.property))) { const vi = pIdx(x.right.type === 'LogicalExpression' ? x.right.left : x.right); if (vi >= 0) out.push({ vi, ti: pIdx(x.left.object), target: x.left.object }); }
+      if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && WRITERS[x.callee.name]) { const [wti, wvi] = WRITERS[x.callee.name]; const va = x.arguments[wvi]; const vi = pIdx(va && va.type === 'LogicalExpression' ? va.left : va); if (vi >= 0) out.push({ vi, ti: pIdx(x.arguments[wti]), target: x.arguments[wti] }); }
+      else if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && x.callee !== fn) { for (const inner of (x.callee.name !== (fn.parent && fn.parent.id && fn.parent.id.name) ? helperFns(x) : [])) for (const hp of helperSinks(inner, depth + 1)) { const va = x.arguments[hp.vi]; const vi = pIdx(va && va.type === 'LogicalExpression' ? va.left : va); if (vi >= 0) out.push({ vi, ti: hp.ti >= 0 ? pIdx(x.arguments[hp.ti]) : -1, target: hp.ti >= 0 ? x.arguments[hp.ti] : hp.target }); } }
+      st.push(...kids(x));
+    }
+    HS.set(fn, out);
+    return out;
+  };
+  /** every place the file writes WORDS a person reads (never a title / placeholder / aria label): { site, target, value } */
+  const SINKS = new Map();
+  const sinksOf = (f) => {
+    if (SINKS.has(f)) return SINKS.get(f);
+    const R = fileOf(f); const out = [];
+    if (R) for (const n of R.nodes) {
+      if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' && VISIBLE.has(nameOf(n.left.property))) out.push({ site: n, target: n.left.object, value: n.right });
+      if (n.type === 'CallExpression') {
+        const c = n.callee.type === 'ChainExpression' ? n.callee.expression : n.callee;
+        const cn = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' ? nameOf(c.property) : null;
+        if (c.type === 'MemberExpression' && ADDS.has(cn)) for (const a of n.arguments) out.push({ site: n, target: c.object, value: a });
+        if (cn in TEXT_MAKERS && n.arguments[TEXT_MAKERS[cn]]) out.push({ site: n, target: n, value: n.arguments[TEXT_MAKERS[cn]] });
+      }
+      if (n.type === 'Property' && nameOf(n.key) === 'textContent' && n.parent && n.parent.type === 'ObjectExpression') out.push({ site: n, target: n.parent.parent || n, value: n.value });
+    }
+    // a call to a helper that writes one of its arguments as another's words (noteText(el, text), say(text) over a bound element)
+    if (R) for (const n of R.nodes) {
+      if (n.type !== 'CallExpression' || n.callee.type !== 'Identifier' || T_FN.test(n.callee.name) || n.callee.name in TEXT_MAKERS || !n.arguments.length) continue;
+      if (WRITERS[n.callee.name]) { const [ti, vi] = WRITERS[n.callee.name]; if (n.arguments[vi]) out.push({ site: n, target: n.arguments[ti], value: n.arguments[vi] }); continue; }
+      for (const fn of helperFns(n)) for (const hp of helperSinks(fn)) { const v = n.arguments[hp.vi]; if (!v) continue; out.push({ site: n, target: hp.ti >= 0 ? n.arguments[hp.ti] : hp.target, value: v }); }
+    }
+    SINKS.set(f, out);
+    return out;
+  };
+  // the binding an element expression stands for (an identifier's, or the declarator a maker call initialises)
+  const elBinding = (x) => {
+    if (!x) return null;
+    if (x.type === 'Identifier') return bindingOf(x);
+    if (x.type === 'MemberExpression' && x.computed && x.object.type === 'Identifier') return bindingOf(x.object);
+    if (x.parent && x.parent.type === 'VariableDeclarator' && x.parent.init === x && x.parent.id.type === 'Identifier') return bindingOf(x.parent.id);
+    return null;
+  };
+  const childrenOf = (c) => { const out = []; for (const a of c.arguments) { if (a.type === 'SpreadElement') out.push(...elementsOf(a.argument)); else if (a.type === 'Identifier') { const b = bindingOf(a); if (b && b.kind === 'forof') out.push(...elementsOf(b.loop.right)); else out.push(a); } else out.push(a); } return out; };
+  const isEl = (o, b) => { if (!o || !b) return false; if (sameBinding(elBinding(o), b)) return true; if (o.type === 'MemberExpression' && o.computed && o.object.type === 'Identifier') return elementsOf(o.object).some((e) => sameBinding(elBinding(e), b) || (e.type === 'Identifier' && sameBinding(bindingOf(e), b))); return false; };
+  const addsTo = (f, b) => { const R = fileOf(f); const out = []; if (!R || !b) return out; for (const nm of ADDS) for (const c of R.byCallee.get(nm) || []) { const o = c.callee.type === 'MemberExpression' ? c.callee.object : null; if (o && isEl(o, b)) out.push(c); } return out; };
+  const handlersOf = (f, b) => { const R = fileOf(f); const out = []; if (!R || !b) return out; for (const a of [...(R.masg.get('onclick') || []), ...(R.masg.get('onchange') || [])]) if (sameBinding(elBinding(a.left.object), b)) out.push(a.right); for (const c of R.byCallee.get('addEventListener') || []) if (c.callee.type === 'MemberExpression' && sameBinding(elBinding(c.callee.object), b) && c.arguments[0] && /^(click|change|keydown)$/.test(String(c.arguments[0].value))) out.push(c.arguments[1]); return out; };
+  /** a node that puts a LIVE door on screen: needDoorButton(door) / a button maker with its handler / a needLine with its doors /
+   *  a button element whose click handler calls something / a container holding one (one level) */
+  function liveDoorNode(f, d, depth = 0) {
+    if (!d || depth > 3) return false;
+    if (d.type === 'SpreadElement') return liveDoorNode(f, d.argument, depth);
+    if (d.type === 'ConditionalExpression') return liveDoorNode(f, d.consequent, depth) || liveDoorNode(f, d.alternate, depth);
+    if (d.type === 'LogicalExpression') return liveDoorNode(f, d.right, depth) || (d.operator !== '&&' && liveDoorNode(f, d.left, depth));
+    if (d.type === 'CallExpression') {
+      const c = d.callee.type === 'ChainExpression' ? d.callee.expression : d.callee;
+      const cn = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' ? nameOf(c.property) : null;
+      if (cn === 'needDoorButton') { const x = doorsOf(d.arguments[0]); return x.live.length > 0 && x.dead.length === 0; }
+      if (cn === 'needLine') { const o = d.arguments[0]; const dp = o && o.type === 'ObjectExpression' ? propOf(o, 'doors') : null; const x = dp ? doorsOf(dp.value) : { live: [], dead: [] }; return x.live.length > 0 && x.dead.length === 0; }
+      if (/^(textBtn|btn|button|door)$/.test(cn || '')) { const fa = d.arguments.find((a) => isFn(a) || a.type === 'Identifier'); if (fa) return liveRun(fa); const fns = calleeFns(d, new Set()); return fns.some((fn) => returnsOf(fn).some((r) => liveDoorNode(f, r, depth + 1)) || (handlersInFn(fn).length && handlersInFn(fn).every((h) => liveRun(h)))); }
+      if (cn === 'map' && isFn(d.arguments[0])) return returnsOf(d.arguments[0]).some((r) => liveDoorNode(f, r, depth + 1));
+      return false;
+    }
+    if (d.type === 'Identifier') {
+      const b = bindingOf(d); if (!b) return false;
+      if (b.kind === 'var' && b.decl.init && b.decl.init !== d && liveDoorNode(f, b.decl.init, depth + 1)) return true;
+      const hs = handlersOf(f, b);
+      if (hs.length && hs.some((h) => liveRun(h))) return true;
+      return addsTo(f, b).some((c) => childrenOf(c).some((a) => liveDoorNode(f, a, depth + 1)));
+    }
+    return false;
+  }
+  const handlersInFn = (fn) => { const out = []; const st = [fn.body]; while (st.length) { const x = st.pop(); if (x.type === 'AssignmentExpression' && x.left.type === 'MemberExpression' && /^on(click|change)$/.test(nameOf(x.left.property) || '')) out.push(x.right); if (x !== fn.body && isFn(x)) continue; st.push(...kids(x)); } return out; };
+  const doorLive = (o) => liveRun((propOf(o, 'run') || {}).value);
+  // a door named by its id: an object { door: '<id>', run }, an element with dataset.door = '<id>' and its handler, a maker's id
+  function doorsById(f, id) {
+    const R = fileOf(f); const out = [];
+    if (!R) return out;
+    for (const n of R.nodes) {
+      if (n.type === 'ObjectExpression') { const q = propOf(n, 'door'); if (q && q.value.type === 'Literal' && q.value.value === id) out.push({ node: n, live: doorLive(n) }); }
+      if (n.type === 'AssignmentExpression' && srcOf(n.left).endsWith('.dataset.door') && n.right.type === 'Literal' && n.right.value === id) { const b = elBinding(n.left.object.object); const hs = handlersOf(f, b); out.push({ node: n, live: hs.length > 0 && hs.some((h) => liveRun(h)) }); }
+      if (n.type === 'CallExpression' && /^settingsDoor|^pluginsDoor|^pluginDoor|^integrationDoor$/.test(nameOf(n.callee.type === 'Identifier' ? n.callee : n.callee.property) || '')) {
+        const mk = nameOf(n.callee.type === 'Identifier' ? n.callee : n.callee.property); const a1 = n.arguments[1];
+        const mid = mk === 'settingsDoor' && a1 && a1.type === 'Literal' ? 'settings:' + a1.value : mk === 'pluginsDoor' ? 'plugins' : mk === 'integrationDoor' && a1 && a1.type === 'Literal' ? 'integration:' + a1.value : null;
+        if (mid === id) { const x = doorsOf(n); out.push({ node: n, live: x.live.length > 0 && x.dead.length === 0 }); }
+      }
+    }
+    return out;
+  }
+  const t_sites = (f, S) => { const R = fileOf(f); return R ? R.nodes.filter((n) => n.type === 'CallExpression' && n.callee.type === 'Identifier' && T_FN.test(n.callee.name) && n.arguments[0] && n.arguments[0].type === 'Literal' && S.has(n.arguments[0].value)) : []; };
+  const carriers = (f, S, tok) => [...t_sites(f, S), ...sinksOf(f).filter((k) => hits(k.value, S, tok)).map((k) => k.site)];
+  const SHAPE = {
+    // the sentence IS the words of a needLine call, and the same call's doors hold a live door (every door it can draw is live)
+    line(f, S, sh) { for (const c of calls(f, 'needLine')) { const o = c.arguments[0]; if (!o || o.type !== 'ObjectExpression') continue; const w = propOf(o, 'words'); if (!w || !hits(w.value, S, sh.words)) continue; const dp = propOf(o, 'doors'); const x = dp ? doorsOf(dp.value) : { live: [], dead: [] }; if (x.live.length && !x.dead.length) return { ok: true }; } return { ok: false, why: 'no needLine call whose words carry the sentence holds a live door' }; },
+    // a toast that says the sentence with its door (`action`) — a live one
+    toast(f, S, sh) { for (const c of calls(f, 'showToast')) { if (!c.arguments[0] || !hits(c.arguments[0], S, sh.words)) continue; const o = c.arguments[1]; const acts = []; const walkO = (x) => { if (!x) return; if (x.type === 'ObjectExpression') for (const q of x.properties) { if (q.type === 'SpreadElement') walkO(q.argument); else if (nameOf(q.key) === 'action') acts.push(q.value); } else if (x.type === 'ConditionalExpression') { walkO(x.consequent); walkO(x.alternate); } else if (x.type === 'LogicalExpression') walkO(x.right); }; walkO(o); for (const a of acts) { const x = doorsOf(a); if (x.live.length && !x.dead.length) return { ok: true }; } } return { ok: false, why: 'no showToast that says the sentence carries a live door (action)' }; },
+    // the element that SAYS the sentence (or its parent) also holds a live door (needDoorButton / a button with its handler / a needLine)
+    element(f, S, sh) { for (const k of sinksOf(f)) { if (!hits(k.value, S, sh.words)) continue; const b = elBinding(k.target); if (!b) continue; if (addsTo(f, b).some((c) => childrenOf(c).some((a) => a !== k.value && liveDoorNode(f, a)))) return { ok: true }; const R = fileOf(f); for (const nm of ADDS) for (const c of R.byCallee.get(nm) || []) { const kids0 = childrenOf(c); if (!kids0.some((a) => sameBinding(elBinding(a), b) || a === k.target)) continue; const pb = c.callee.type === 'MemberExpression' ? elBinding(c.callee.object) : null; if (pb && addsTo(f, pb).some((cc) => childrenOf(cc).some((a) => !sameBinding(elBinding(a), b) && a !== k.target && liveDoorNode(f, a)))) return { ok: true }; } } return { ok: false, why: 'no element that says the sentence (nor its parent) holds a live door' }; },
+    // a heading over need lines: the function that says it draws need lines, each with a live door (every door they can draw is live)
+    lines(f, S) { const at = carriers(f, S); for (const site of at) for (const fn of fnsAround(site)) { const ls = calls(f, 'needLine').filter((c) => c.start >= fn.start && c.end <= fn.end); if (!ls.length) continue; return ls.every((c) => { const dp = c.arguments[0] && c.arguments[0].type === 'ObjectExpression' ? propOf(c.arguments[0], 'doors') : null; const x = dp ? doorsOf(dp.value) : { live: [], dead: [] }; return x.live.length && !x.dead.length; }) ? { ok: true } : { ok: false, why: 'a need line under the heading holds no live door' }; } return { ok: false, why: 'no need line drawn by the function that says the heading' }; },
+    // an HTML template that says the sentence AND carries the door's attribute; the attribute's handler (or a link's href) is live
+    html(f, S, sh) { const R = fileOf(f); const attr = sh.html; for (const st of R.nodes.filter((n) => n.type === 'TemplateLiteral' && n.quasis.some((q) => q.value.raw.includes(attr)))) { let top = st; while (top.parent && (top.parent.type === 'BinaryExpression' || top.parent.type === 'TemplateLiteral' || top.parent.type === 'ConditionalExpression' || top.parent.type === 'ParenthesizedExpression')) top = top.parent; if (!hits(top, S, sh.words)) continue; if (/^<a\b|href="https?:/.test(attr) || new RegExp(`<a [^>]*${attr.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}[^>]*href="https?:`).test(srcOf(st))) return { ok: true }; const key = sh.key || attr;
+        // a delegated door: `const x = e.target.closest('<key>')` and the branch on x opens something
+        for (const c of R.byCallee.get('closest') || []) { const a = c.arguments[0]; if (!a || a.type !== 'Literal' || !String(a.value).includes(key)) continue; let d = c; while (d.parent && d.parent.type !== 'VariableDeclarator' && !/Statement$/.test(d.parent.type)) d = d.parent; const v = d.parent && d.parent.type === 'VariableDeclarator' && d.parent.id.type === 'Identifier' ? d.parent.id.name : null; const fn = fnsAround(c)[0]; if (!v || !fn) continue; if (R.nodes.some((n) => n.type === 'IfStatement' && n.start >= fn.start && n.end <= fn.end && new RegExp(`^${v}\\b`).test(srcOf(n.test)) && (n.consequent.type === 'BlockStatement' ? n.consequent.body.length > 0 : true) && containsCall(n.consequent))) return { ok: true }; }
+        const fns = R.nodes.filter((n) => isFn(n) && srcOf(n).length < 4000 && srcOf(n).includes(key) && liveFn(n)); if (fns.length) return { ok: true }; } return { ok: false, why: `no template says the sentence with ${attr} and a live handler for it` }; },
+    // a chip that IS the door: the function that says the sentence gives the chip a live handler (`<binding> = () => opener()`)
+    chip(f, S, sh) { const R = fileOf(f); const as = R.asg.get(sh.chip) || []; if (!as.length || !as.every((a) => liveRun(a.right))) return { ok: false, why: `the chip's handler ${sh.chip} is missing or empty` }; for (const a of as) { const fn = fnsAround(a)[0]; if (!fn) continue; const said = [...R.asg.values()].flat().filter((x) => x.start >= fn.start && x.end <= fn.end && x.left.type === 'Identifier' && x.left.name !== sh.chip); if (said.some((x) => hits(x.right, S, sh.words))) return { ok: true }; } return { ok: false, why: `the chip's handler ${sh.chip} is not given where its words are said` }; },
+    // the door named by its id is live and is built in a function around a place that says the sentence
+    beside(f, S, sh) { const ds = doorsById(f, sh.beside); if (!ds.length) return { ok: false, why: `no door ${sh.beside}` }; if (!ds.every((d) => d.live)) return { ok: false, why: `the door ${sh.beside} has an empty handler` }; for (const site of carriers(f, S, sh.words)) for (const fn of fnsAround(site)) if (ds.some((d) => d.node.start >= fn.start && d.node.end <= fn.end)) return { ok: true }; return { ok: false, why: `the door ${sh.beside} is not built where the sentence is said` }; },
+    // words said only under a condition (no door: the need is WHERE they are said)
+    // a For-you item (the hub filed its words): its door is the item's own — the registry row's (`opens`) or its bucket's
+    item(f, S, sh) { const A = fileOf('src/lib/user-todos-actions.js'); if (!A) return { ok: false, why: 'no user-todos-actions.js' }; if (sh.opens) { const rd = A.nodes.find((n) => n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === 'ROW_DOORS' && n.init && n.init.type === 'ObjectExpression'); const q = rd && propOf(rd.init, sh.opens); if (!q || !liveRun(q.value)) return { ok: false, why: `ROW_DOORS.${sh.opens} is missing or empty` }; const R = fileOf(f); return (R.byCallee.get('doorOf') || []).length ? { ok: true } : { ok: false, why: 'the surface never draws the row\'s declared door (doorOf)' }; } if (sh.bucket) { const ifs = A.nodes.filter((n) => n.type === 'IfStatement' && new RegExp(`^key === '${sh.bucket}'$`).test(srcOf(n.test))); return ifs.length && ifs.every((n) => n.consequent.type === 'BlockStatement' ? n.consequent.body.length && containsCall(n.consequent) : containsCall(n.consequent)) ? { ok: true } : { ok: false, why: `the «${sh.bucket}» bucket has no live door` }; } return { ok: false, why: 'an item shape names its door (opens / bucket)' }; },
+    guard(f, S, sh) { for (const site of carriers(f, S, sh.words)) for (const a of ancestors(site)) if ((a.type === 'IfStatement' || a.type === 'ConditionalExpression') && srcOf(a.test).includes(sh.guard)) return { ok: true }; return { ok: false, why: `the sentence is said outside «${sh.guard}»` }; },
+  };
+  const shapesOf = (row) => { const sh = row.door && row.door.present && row.door.present.shape; return (Array.isArray(sh) ? sh : [sh || 'line']).map((x) => (typeof x === 'string' ? { kind: x } : { kind: Object.keys(x).find((k) => k in SHAPE), ...x })); };
+  /** a row on one surface: every sentence it states there is carried by one of its declared shapes, with a live door */
+  function shapeVerdict(row, f, sentences) {
+    const out = [];
+    for (const s of sentences) {
+      const S = new Set([s]); const tried = [];
+      let ok = false;
+      for (const sh of shapesOf(row)) { const fnk = SHAPE[sh.kind]; if (!fnk) { tried.push(`unknown shape ${sh.kind}`); continue; } const r = fnk(f, S, sh); if (r.ok) { ok = true; break; } tried.push(`${sh.kind}: ${r.why}`); }
+      if (!ok) out.push({ s: s.slice(0, 60), why: tried.join('; ') });
+    }
+    return out;
+  }
+  return { shapeVerdict, shapesOf };
+}
+const uiC = C.find((c) => c.scope === 'ui');
+const SHAPE_FOLLOW = new Set(['src/lib/need-line.js']);
+/** a row's surfaces, each with the sentences it states (a PURE model's words count for the surfaces `via` names) */
+const surfacesOf = (e) => { const by = new Map(); for (const s of e.sentences) for (const f of words.get(s) || []) for (const g of [].concat((e.row.door.via && e.row.door.via[f]) || f)) { SHAPE_FOLLOW.add(f); SHAPE_FOLLOW.add(g); if (!by.has(g)) by.set(g, new Set()); by.get(g).add(s); } return by; };
+const shapeRows = uiC ? [...uiC.rows.values()].filter((e) => e.row.door.present).map((e) => ({ e, by: surfacesOf(e) })) : [];
+const SR = shapeReader({ follow: SHAPE_FOLLOW, read: (f) => sources.get(f) });
+const shapeRed = (R, e, by) => [...by].flatMap(([f, ss]) => R.shapeVerdict(e.row, f, [...ss]).map((x) => ({ f, ...x })));
+for (const { e, by } of shapeRows) {
+  const red = shapeRed(SR, e, by);
+  ok(red.length === 0, `[ui] ${e.row.id}: its words and a live door are drawn together — ${SR.shapesOf(e.row).map((x) => x.kind).join(' / ')} (${[...by.keys()].sort().join(', ')})`, red);
+}
+// CONTROLS — the three mutants the marker census let through at 152 green (the verifier's mutants.mjs M2b / M4 and mutant-m3b.mjs),
+// planted in memory: each is RED here by its row's name while the marker census stays green
+const PLANTS = [
+  ['ref-release', 'src/lib/channel-account-dialogs.js', "cls: 'dialog-hint', doors: [release] }", "cls: 'dialog-hint', doors: [] }", 'a reference line with its «Release…» taken off (doors: [])'],
+  ['remove-failed', 'src/lib/desktop-app-launcher.js', 'run: () => { rclose(); removeRegistered(row, { forget: true, onDone }); } }', 'run: () => { } }', '«Forget it» with its handler emptied'],
+  ['mount-offline', 'src/lib/sidebar-mounts.js', "ctx.body.prepend(needLine({ words: tr('“{name}” is offline — a mount works once it is connected.', { name: h.name }), tone: 'off', cls: 'mounts-offline-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] }));",
+    "ctx.body.prepend(needLine({ words: '', tone: 'off', cls: 'mounts-offline-need', doors: [pairDoor(this.app, h, { kind: 'secondary' })] })); ctx.body.firstChild.title = tr('“{name}” is offline — a mount works once it is connected.', { name: h.name });", 'the need words moved into the line\'s title, the marker kept'],
+];
+for (const [id, f, a, b, what] of PLANTS) {
+  const s0 = sources.get(f) || '';
+  const planted = s0.split(a).length === 2 ? s0.replace(a, b) : null;
+  const row = shapeRows.find((x) => x.e.row.id === id);
+  const red = planted && row ? shapeRed(shapeReader({ follow: SHAPE_FOLLOW, read: (g) => (g === f ? planted : sources.get(g)) }), row.e, row.by) : null;
+  const markerGreen = planted && row ? doorless(row.e, (g) => (g === f ? planted : sources.get(g) || '')).length === 0 : false;
+  ok(!!red && red.length > 0 && red.every((x) => x.f === f) && markerGreen, `CONTROL: ${id} — ${what} — is RED by its name here (the marker census stays green)`, red || { anchor: !!planted, row: !!row });
+}
 
 console.log('③ CONTROLS');
 const ui = C.find((c) => c.scope === 'ui');
@@ -338,6 +829,7 @@ class Nd {
   dispatchEvent(ev) { for (const f of [...(this._ls[ev.type] || [])]) f(ev); return true; }
   matches(sel) { return matchSel(this, sel); }
   closest(sel) { for (let n = this; n && n.nodeType === 1; n = n.parentNode) if (matchSel(n, sel)) return n; return null; }
+  contains(x) { for (let n = x; n; n = n.parentNode) if (n === this) return true; return false; }
   querySelectorAll(sel) { const out = []; const walk = (n) => { for (const c of n.children) { if (matchSel(c, sel)) out.push(c); walk(c); } }; walk(this); return out; }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   focus() { DOC.activeElement = this; }
@@ -379,7 +871,7 @@ globalThis.fetch = (...a) => FETCH(...a);
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
 const ENTRY = [['NL', 'need-line'], ['UT', 'utils'], ['SM', 'sidebar-mounts'], ['WN', 'window'], ['LB', 'browser-loop-banner'], ['SU', 'settings-ui'], ['SET', 'settings'], ['SS', 'settings-schema'],
-  ['DAL', 'desktop-app-launcher'], ['AID', 'app-install-dialog'], ['UTR', 'user-todos-row'], ['IW', 'inbox-window'], ['LAY', 'inbox-window-layout'], ['OCR', 'oauth-connect-row'], ['BNP', 'browser-new-profile-model']]
+  ['DAL', 'desktop-app-launcher'], ['AID', 'app-install-dialog'], ['UTR', 'user-todos-row'], ['IW', 'inbox-window'], ['LAY', 'inbox-window-layout'], ['OCR', 'oauth-connect-row'], ['BNP', 'browser-new-profile-model'], ['CAD', 'channel-account-dialogs']]
   .map(([k, f]) => `export * as ${k} from './${f}.js';`).join('\n');
 let CL = null;
 try {
@@ -391,7 +883,7 @@ try {
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
 if (CL) {
-  const { NL, UT, SM, WN, LB, SU, SET, SS, DAL, AID, UTR, IW, OCR, BNP } = CL;
+  const { NL, UT, SM, WN, LB, SU, SET, SS, DAL, AID, UTR, IW, OCR, BNP, CAD } = CL;
   // need-line: the door makers DRIVEN (reader #4) — settingsDoor {section} opens the row's whole section; without, Settings searched
   // for the row's own words; integrationDoor with no id opens the window
   {
@@ -474,6 +966,10 @@ if (CL) {
     ok(handed && handed.id === 'h1' && dA && ['name', 'user', 'host', 'port'].map((k) => val(dA, k)).join('|') === 'gpu-01|ubuntu|gpu-01.example|2222' && /replaces “gpu-01”/.test(note) && /replace/i.test(dA.submit)
       && sent && sent.replaces === 'h1' && sent.name === 'gpu-01' && sent.port === '2222' && dP && ['name', 'user', 'host'].every((k) => !val(dP, k)) && !dP.fields.some((x) => x.type === 'note') && val(dP, 'port') === '22',
       'machines-1 (verifier #3): «Add it again with a key…» opens THIS machine\'s form — filled from it (name, user, address, port), saying it REPLACES it, its submit naming the record it replaces; the plain Add machine stays blank (r.dcd495a1f: a blank form, the refusing row kept)', { handed: handed && handed.id, fields: dA && dA.fields.map((x) => [x.key, x.value]), submit: dA && dA.submit, sent });
+    // the verifier's list for picks 1–2 (closure): the replaced machine's exit grants and port forwards go with its old entry (a new
+    // record, a new id) — the note SAYS so, and says to set them again (never carried over)
+    ok(/old entry is removed once the new one is saved/.test(note) && /Its exit grants and port forwards go with the old entry — set them again once the machine is added\./.test(note),
+      '«Add and replace» (closure, picks 1–2): the form\'s note names what goes with the old entry — its exit grants and port forwards — and says to set them again', note);
     FETCH = async () => { throw new Error('no fetch in this leg'); };
   }
   // machines-1 (verifier #2): the public-key door's answer is the PANEL's, per machine — a Machines re-render (the hosts-updated /
@@ -717,6 +1213,49 @@ if (CL) {
     ok(/white-space: normal/.test(rule) && /text-overflow: clip/.test(rule) && CSS.lastIndexOf(rule) > CSS.indexOf('.plugin-chip { max-width: 100%'),
       'usage-16 (reader #6): a primary chip is a DOOR — its words wrap in the narrow rail, never ellipsized («填写 API ...» at 1440)', rule);
   }
+  // the verifier's list for picks 3–6 (#2): «Release…» beside a RULE's reference opens THAT rule's Grant access — the account's does not
+  // hold the rule's row. refTarget is the grain each reference's door opens; pressed, the rule's door READS the rule (a rule the
+  // account no longer lists is said by the dialog's own words — the account's Grant access never says them)
+  {
+    const RT = CAD && typeof CAD.refTarget === 'function' ? CAD.refTarget : null;
+    const acct = { id: 'mail-1', label: 'Mail' };
+    const who = { kind: 'agent', id: 'c1', name: 'alpha' };
+    const rRule = { kind: 'access', key: 'pat-1', scope: 'pattern', title: 'title has deploy', principal: who }, rAcct = { kind: 'access', key: 'mail-1', scope: 'account', principal: who }, rConv = { kind: 'access', key: 'k9', convId: 'c9', title: 'Ops', scope: 'conversation', principal: who };
+    const tg = RT ? [RT(acct, rRule), RT(acct, rAcct), RT(acct, rConv)] : [];
+    let pressed = null;
+    if (RT && typeof CAD.showRemoveRefusedDialog === 'function') {
+      const seen = [], before = new Set(DOC.body.children);
+      FETCH = async (url) => { seen.push(String(url)); return { ok: true, status: 200, json: async () => ({ adapter: { id: 'mail-1', label: 'Mail', patterns: [] } }) }; };
+      CAD.showRemoveRefusedDialog({}, acct, [rRule]);
+      const line = DOC.body.querySelectorAll('[data-ref-kind="access"]')[0] || null;
+      const door = line ? line.querySelector('button') : null;
+      if (door) door.click();
+      for (let i = 0; i < 20 && !DOC.body.querySelectorAll('.global-toast-body').some((x) => /That rule no longer exists/.test(x.textContent)); i++) await tick(10);
+      pressed = { door: door ? door.textContent : null, fetched: seen, said: DOC.body.querySelectorAll('.global-toast-body').map((x) => x.textContent) };
+      for (const n of DOC.body.children.filter((c) => !before.has(c))) Nd.prototype.remove.call(n);   // the refusal dialog, the toast
+      FETCH = async () => { throw new Error('no fetch in this leg'); };
+    }
+    ok(tg.length === 3 && tg[0].kind === 'pattern' && tg[0].id === 'pat-1' && tg[0].adapter === acct && tg[1].kind === 'account' && tg[2].kind === 'conversation' && tg[2].conv.id === 'c9'
+      && !!pressed && pressed.door === 'Release…' && pressed.fetched.join() === '/api/channels/adapters/mail-1/view' && pressed.said.some((x) => /That rule no longer exists/.test(x))
+      && /const target = refTarget\(a, ref\);[\s\S]{0,200}showGrantAccessDialog\(app, target\)/.test(fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf8')),
+      'channels-accounts-4 (verifier #2, picks 3–6): «Release…» beside a RULE\'s reference opens that RULE\'s Grant access (showGrantAccessDialog {kind: pattern, id}) — pressed, it reads the rule; an account-scope reference opens the account\'s, a conversation\'s its own', { targets: tg.map((x) => x && { kind: x.kind, id: x.id || (x.conv && x.conv.id) || null }), pressed });
+  }
+  // the verifier's list for picks 3–6 (#6): a door that could not do its act SAYS why on its own line — «Add an SSH machine…» whose
+  // answer is an error (fetchJson: null = unreachable, {error}) puts the words on the no-machine line, never a silent press
+  {
+    const say = typeof NL.sayOnLine === 'function' ? NL.sayOnLine : null;
+    const line = NL.needLine({ words: 'No machines yet — add an SSH machine or pair a device.', doors: [{ label: 'x', run: () => {} }] });
+    const kids = (n) => n.children.filter((c) => c.classList.contains('need-said'));
+    const a1 = say ? say(line, 'Could not open it: Could not reach the server') : null, n1 = kids(line).length;
+    const a2 = say ? say(line, 'Could not open it: forbidden') : null, n2 = kids(line).length;
+    if (say) say(line, '');
+    const n3 = kids(line).length;
+    const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+    ok(!!a1 && a1 === a2 && n1 === 1 && n2 === 1 && n3 === 0 && a2.textContent === 'Could not open it: forbidden' && a2.getAttribute('role') === 'alert' && a2.parentNode === null
+      && /door: 'add-ssh-host', run: async \(\) => \{ const hd = await fetchJson\('\/api\/hosts'\); if \(hd && hd\.key\) \{[^}]*\} sayOnLine\(noneLine, t\('Could not open it: \{why\}', \{ why: hd && hd\.error \? String\(hd\.error\) : t\('Could not reach the server'\) \}\)\);/.test(MA)
+      && /const noneLine = body\.appendChild\(needLine\(\{ words: t\('No machines yet/.test(MA),
+      'agents-accounts-6 (verifier #6, picks 3–6): «Add an SSH machine…» that cannot open the form SAYS why on its line (sayOnLine: one .need-said, role=alert, replaced, taken away) — the hub\'s error, or «Could not reach the server»', { n1, n2, n3, said: a2 && a2.textContent });
+  }
 }
 globalThis.fetch = realFetch;
 
@@ -943,6 +1482,57 @@ console.log('⑨ THE OUTBOX POINTER\'S DOOR (lane ui-needs-a-button pick 6 — �
   const noDoor = (f) => (f === 'src/lib/user-todos-row.js' ? (sources.get(f) || '').replace(' + doorHtml(i, t)', '') : sources.get(f) || '');
   ok(!!ob && !!ob.row.door.present && [...ob.files].sort().join() === 'src/lib/inbox-window.js,src/lib/user-todos-row.js' && JSON.stringify(doorless(ob, noDoor)) === JSON.stringify(['src/lib/user-todos-row.js']),
     'CONTROL: the pointer\'s sentence is stated by the tray row AND the For-you window (`via`); the row without its door is RED by name', ob && { files: [...ob.files], red: doorless(ob, noDoor) });
+}
+
+console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words, the overage door, the lapsed chip\'s act)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const imp = (f) => import(pathToFileURL(path.join(REPO, f)).href);
+  // #0 STORED WORDS: an item an older hub already STORED keeps its key — the five templates picks 3 and 5 reworded keep their zh / ja
+  // rows (restored verbatim from 4d63ec1b4), named as legacy keys (src/foryou-actions.js STORED_WORDS_LEGACY: the release each left
+  // in, the producer that filed it — the job-model FOR_YOU_WORDS_LEGACY way), and an item stored with one says it in zh / ja
+  const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  const LEG = FA.STORED_WORDS_LEGACY || {};
+  const ZH = (await imp('src/lib/i18n-zh.js')).default, JA = (await imp('src/lib/i18n-ja.js')).default;
+  const UTL = await imp('src/lib/user-todos-layout.js');
+  const tOf = (dict) => (k, p) => String(Object.prototype.hasOwnProperty.call(dict, k) ? dict[k] : k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const sentence = /\b[A-Za-z]{2,}(?: [A-Za-z]{2,}){3,}\b/;   // four English words in a row = an English sentence on a zh / ja page
+  const OLD = [   // the five, as the release's producers STORED them (the item's i18n: a detail line, or the lapsed notice's text)
+    ['no-switch', 'No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….', 'detail'],
+    ['outbox-account', 'Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.', 'detail'],
+    ['outbox-conversation', 'Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.', 'detail'],
+    ['reach-ask', 'Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.', 'detail'],
+    ['pool-lapsed-off', '{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly', 'text'],
+  ];
+  const drawn = OLD.map(([name, key, where]) => {
+    const item = where === 'text' ? { id: 'ut-1', text: 'x', i18n: { text: { key, params: { account: 'UCI Max', since: '10/8/26, 1:30 PM' } } } } : { id: 'ut-1', text: 'x', i18n: { detail: [{ key }] } };
+    const say = (dict) => { const t0 = tOf(dict); const said = (l) => UTL.saidLine(l, t0); return where === 'text' ? UTL.itemTextOf(item, said) : UTL.itemDetailLinesOf(item, said).join(' '); };
+    const zh = say(ZH), ja = say(JA);
+    return { name, named: !!LEG[name] && LEG[name].key === key && LEG[name].left === '2.369.400' && typeof LEG[name].filedBy === 'string' && fs.existsSync(path.join(REPO, LEG[name].filedBy)),
+      rows: Object.prototype.hasOwnProperty.call(ZH, key) && Object.prototype.hasOwnProperty.call(JA, key), filedNow: words.has(key), zh, ja, english: sentence.test(zh) || sentence.test(ja) };
+  });
+  for (const d of drawn) ok(d.named && d.rows && !d.filedNow && !d.english, `stored words (verifier #0, picks 3–6): «${d.name}» — a key a 2.369.399 hub stored is a NAMED legacy key (STORED_WORDS_LEGACY, left in 2.369.400) with its zh and ja rows; an item stored with it says it in zh / ja, not English; no producer files it any more`, { named: d.named, rows: d.rows, filedNow: d.filedNow, zh: d.zh.slice(0, 90), ja: d.ja.slice(0, 90) });
+  ok(Object.keys(LEG).length === OLD.length, `STORED_WORDS_LEGACY names exactly the ${OLD.length} reworded templates of stored items`, Object.keys(LEG));
+  // #4 the overage refusal is a need with its door (a rewording had taken it out of the net): the row, present, its door beside the chip
+  const UI = TABLES.find((x) => x.scope === 'ui').T;
+  const ov = UI.NEEDS.find((r) => r.id === 'overage-turns');
+  const ovSentence = 'Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).';
+  const UM = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
+  ok(!!ov && !!ov.door.present && UI.needOf(ovSentence) === ov && UI.inNet(ovSentence) && (ov.door.via || {})['src/lib/usage-source.js'] === 'src/lib/usage-meter.js'
+    && /ovc\.kind === 'inUse' \? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend\.allowOverageTurns">\$\{escHtml\(t\('Allow automatic turns…'\)\)\}<\/button>`/.test(UM)
+    && /const sp = e\.target\.closest\('\.usage-spend-door'\);[^\n]*\n\s*if \(sp\) \{ e\.stopPropagation\(\); const d = settingsDoor\(this, 'spend\.allowOverageTurns'/.test(UM),
+    'overage (verifier #4, picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)» is a present row again — «Allow automatic turns…» beside the Credits chip in the usage popup opens the Spending row that allows them', ov && ov.door);
+  // #5 the lapsed chip under refresh 'off' is the setting's door — its VISIBLE words say the act (never only its title)
+  const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
+  const cs = MA.indexOf('export function serveLapsedChipHtml('), ce = MA.indexOf('\n}\n', cs);
+  let chipOff = '';
+  try {
+    const chipFn = new Function('t', 'escHtml', 'loginWhenText', 'ROSTER_ICONS', MA.slice(cs, ce + 2).replace(/^export /, '') + '\nreturn serveLapsedChipHtml;')((k, p) => k.replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : '')), (x) => String(x), () => '10/8/26, 1:30 PM', { CLOCK: '' });
+    chipOff = chipFn({ id: 'sub-1', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'off' });
+  } catch (e) { chipOff = 'THREW ' + e.message; }
+  const visible = chipOff.replace(/ title="[^"]*"/g, '').replace(/<[^>]+>/g, '').trim();
+  ok(/role="button"/.test(chipOff) && /data-serve-setting="accounts\.onDemandQuotaRefresh"/.test(chipOff) && /· Turn on usage refresh…$/.test(visible) && /^subscription inactive since /.test(visible),
+    'lapsed chip (verifier #5, picks 3–6): under usage refresh «off» the chip is the setting\'s door and its visible words say that act («… · Turn on usage refresh…»), as the other chip says «· Re-check»', visible);
 }
 
 { // pick 6, the 390 px picture: a touch row folds to its sentence + ONE trailing door — a pointer's declared door is that door

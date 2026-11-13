@@ -13830,4 +13830,14 @@ export default {
   "② Your own copy of the relay page (its address is this account type’s relay page setting).": "② 自分で置いた中継ページ（アドレスはこのアカウント種別の中継ページ設定）。",
   // lane ui-needs-a-button (pick 6)
   "Approve, edit or reject each message there": "そこで各メッセージを承認・編集・却下できます",
+  // lane ui-needs-a-button (closure 3–6): the words of For-you items a 2.369.399 hub STORED (foryou-actions STORED_WORDS_LEGACY), restored verbatim from 4d63ec1b4
+  "No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….": "切り替えは提案できません: このバージョンの VibeSpace はまだエージェントのためにブラウザを切り替えられません。サイトがこのブラウザを拒否する場合は、ブラウザプラグインをインストールし(⚙ → プラグイン → プラグインをインストール…)、「ビルドを変更…」でこのプロファイルに選んでください。",
+  "Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.": "送信トレイ（レール → チャンネル → 送信トレイ）を開いて、承認・編集・却下してください。",
+  "Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.": "送信箱（レール → チャンネル → 送信箱）か会話ウィンドウを開いて、承認・編集・却下してください。最後の提案が承認待ちでなくなると、チャンネルエンジンがこの項目を自動で取り下げます。",
+  "Approve or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.": "この会話の「閲覧権とポリシー」ダイアログで承認または拒否してください（レール → チャンネル → 行メニュー → 閲覧権とポリシー…）。承認するとそのセッション 1 つだけがその会話 1 つを閲覧できます。グループの既定は変わりません。",
+  "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly": "{account} のサブスクリプションは無効になりました（{since} から）：再び応答するまでプールはスキップします — 使用量の更新は設定でオフです：オンにして再確認するか、このアカウントで直接 1 ターン実行してください",
+  // lane ui-needs-a-button (closure 3–6): the verifier's list — the act on the lapsed chip, the overage door, the replace note
+  "Turn on usage refresh…": "使用量の更新をオンにする…",
+  "Allow automatic turns…": "自動ターンを許可…",
+  "Its exit grants and port forwards go with the old entry — set them again once the machine is added.": "古い項目の出口の許可とポート転送も一緒に削除されます — マシンを追加したあとで設定し直してください。",
 };

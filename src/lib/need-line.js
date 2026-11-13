@@ -89,3 +89,13 @@ export function pluginsDoor(app, { label = '', kind = 'primary' } = {}) {
 export function reloadDoor({ label = '', kind = 'primary' } = {}) {
   return { label: label || t('Reload now'), kind, door: 'reload', run: () => { try { location.reload(); } catch { /* not in a page */ } } };
 }
+/** A door that could not do its act SAYS why on its own line (never a silent press — the verifier's list for picks 3–6): the
+ *  line's `.need-said` words (role=alert), replaced on the next say; '' takes them away. Returns the words' node (or null). */
+export function sayOnLine(line, words = '', doc = document) {
+  if (!line || typeof line.appendChild !== 'function') return null;
+  let said = [...(line.children || [])].find((c) => c && c.classList && c.classList.contains('need-said')) || null;
+  if (!words) { if (said) said.remove(); return null; }
+  if (!said) { said = doc.createElement('span'); said.className = 'need-said'; said.setAttribute('role', 'alert'); line.appendChild(said); }
+  said.textContent = String(words);
+  return said;
+}

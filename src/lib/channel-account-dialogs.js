@@ -995,12 +995,19 @@ function refText(ref, outboxN) {
   if (ref.kind === 'outbox') return tr('outbox: {n} proposal(s) awaiting approval', { n: outboxN });
   return String(ref.kind || '');
 }
+/** lane ui-needs-a-button (the verifier's list for picks 3–6): the grain that HOLDS an access reference — a RULE's own (`scope:
+ *  'pattern'`, `key` = the rule's id: channels-auth referencesOf), the whole account's, or that conversation's. A rule's row is in
+ *  neither the account's nor a conversation's Grant access, so its «Release…» opens the rule's (showGrantAccessDialog {kind:'pattern'}). */
+export function refTarget(a, ref) {
+  if (ref && ref.scope === 'pattern' && ref.key) return { kind: 'pattern', adapter: a, id: String(ref.key) };
+  return !ref || ref.scope === 'account' || !ref.convId ? { kind: 'account', adapter: a } : { kind: 'conversation', conv: { adapterId: a.id, id: ref.convId } };
+}
 /** lane ui-needs-a-button (channels-accounts-4): the door that releases ONE reference — the dialog that holds it (an access row:
- *  the account's or that conversation's Grant access; a reach: the account's Reach & policy); an outbox proposal: the Outbox. */
+ *  the Grant access of its grain — refTarget; a reach: the account's Reach & policy); an outbox proposal: the Outbox. */
 function refDoor(app, a, ref, close) {
   const open = (fn) => () => { close(); fn(); };
   if (ref.kind === 'access' || ref.kind === 'assignment') {
-    const target = ref.scope === 'account' || !ref.convId ? { kind: 'account', adapter: a } : { kind: 'conversation', conv: { adapterId: a.id, id: ref.convId } };
+    const target = refTarget(a, ref);
     return { label: tr('Release…'), kind: 'secondary', door: 'release-access', run: open(() => import('./channel-filter-editor.js').then((m) => m.showGrantAccessDialog(app, target))) };
   }
   if (ref.kind === 'reach') return { label: tr('Release…'), kind: 'secondary', door: 'release-reach', run: open(() => showAccountReachDialog(app, a)) };

@@ -13831,4 +13831,14 @@ export default {
   "② Your own copy of the relay page (its address is this account type’s relay page setting).": "② 你自己部署的中转页（地址填在这个账号类型的中转页设置里）。",
   // lane ui-needs-a-button (pick 6)
   "Approve, edit or reject each message there": "在那里逐条批准、编辑或拒绝",
+  // lane ui-needs-a-button (closure 3–6): the words of For-you items a 2.369.399 hub STORED (foryou-actions STORED_WORDS_LEGACY), restored verbatim from 4d63ec1b4
+  "No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….": "无法提供切换：这个版本的 VibeSpace 还不能替 agent 切换浏览器。如果某个网站拒绝这个浏览器，请安装一个浏览器插件（⚙ → 插件 → 安装插件…），再用「更换版本…」为这个配置选择它。",
+  "Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.": "打开发件箱（侧栏 → 频道 → 发件箱）来批准、编辑或拒绝。",
+  "Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.": "打开发件箱（侧栏 → 频道 → 发件箱）或对话窗口来批准、编辑或拒绝。最后一条提案离开“等你审批”状态时，频道引擎会自动撤回这一项。",
+  "Approve or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.": "在这个对话的“可见性与策略”对话框里批准或拒绝（侧栏 → 频道 → 行菜单 → 可见性与策略…）。批准只让这一个会话看到这一个对话；组的默认设置不变。",
+  "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly": "{account} 的订阅已失效（自 {since} 起）：在它重新应答之前池会跳过它 — 用量刷新在设置里已关闭：打开它才能重新检查，或直接在这个账户上跑一轮对话",
+  // lane ui-needs-a-button (closure 3–6): the verifier's list — the act on the lapsed chip, the overage door, the replace note
+  "Turn on usage refresh…": "打开用量刷新…",
+  "Allow automatic turns…": "允许自动 turn…",
+  "Its exit grants and port forwards go with the old entry — set them again once the machine is added.": "旧条目的出口授权和端口转发也会随它一起删除——机器添加好之后请重新设置。",
 };

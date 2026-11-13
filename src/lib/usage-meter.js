@@ -1,5 +1,6 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
 import { UI_ICONS } from './icons.js'; // the credits chip's money glyph (2.369.189)
+import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button: the Credits chip's refusal has its door (the setting that allows the turns)
 import { createBackendIconHtml, billingRow, getBackendMeta } from './agent-meta.js';
 import { t, tc, deviceLocale } from './i18n.js';
 import { stampAt as when, clockOf, stampAt, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -82,6 +83,8 @@ export function installUsageMeter(App, ctx = {}) {
       if (cbtn) { e.stopPropagation(); this._resetClaim(cbtn.dataset.claimKey, [cbtn.dataset.claimLane], { capName: cbtn.dataset.capName || null }); return; }
       const ox = e.target.closest('.usage-outcome-x');
       if (ox) { e.stopPropagation(); this._dismissClaimOutcome(ox.dataset.outcomeKey, ox.dataset.outcomeLane); return; }
+      const sp = e.target.closest('.usage-spend-door');   // lane ui-needs-a-button: the Credits chip's «Allow automatic turns…»
+      if (sp) { e.stopPropagation(); const d = settingsDoor(this, 'spend.allowOverageTurns', { label: t('Allow automatic turns…') }); if (d) d.run(); return; }
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
@@ -421,7 +424,9 @@ export function installUsageMeter(App, ctx = {}) {
       // credits chip (2.369.189: the money icon + one word, the sentence in
       // title + aria-label) — the same builder the Agents roster rows use.
       const ovc = overageChip(overageState(snap), { t });
-      if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }));
+      // lane ui-needs-a-button (the verifier's list for picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)»
+      // is the in-use chip's tip — its door sits beside the chip: the setting that allows them (the popup's click delegate)
+      if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }) + (ovc.kind === 'inUse' ? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend.allowOverageTurns">${escHtml(t('Allow automatic turns…'))}</button>` : ''));
       // …and the harness's own "this account is refusing requests" fact, which
       // leaves the donut friendly (nothing marks a window spent for it).
       const scc = spendControlChip(spendControlState(snap), { t });

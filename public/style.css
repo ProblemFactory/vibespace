@@ -4638,6 +4638,8 @@ label.cfg-row {
 .need-line > .need-doors > .need-door { padding: 3px 10px; font-size: 12px; line-height: 1.35; border-radius: var(--radius-sm); }
 .need-line[data-tone="fail"] > .need-words { color: var(--red, #e55); }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .need-door { min-height: 36px; } } /* a finger's target (every phone target ≥ 36 px) */
+.need-line > .need-said { flex: 1 1 100%; min-width: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }   /* a door that could not do its act says why on its line (sayOnLine) */
+.usage-updated > .usage-spend-door { padding: 1px 8px; font-size: 11px; line-height: 1.35; border-radius: var(--radius-sm); vertical-align: baseline; }   /* the Credits chip's door (the setting that allows the turns) */
 /* lane ui-needs-a-button pick 2: a need line INSIDE a heading's state slot (the Apps dialog's real-desktop switch) stays on the heading's line */
 .desktop-launch-desk-state > .need-line { display: inline-flex; margin-left: 8px; font-weight: 400; vertical-align: middle; }
 .desktop-launch-desk-state > .need-line > .need-words { flex: 0 1 auto; }
