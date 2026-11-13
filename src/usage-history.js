@@ -754,17 +754,29 @@ class UsageHistory {
       // threw, or an append that failed leaves `_cursors` as the walk found it, and the next walk re-reads those bytes
       let appendedNow = false, reAppended = 0;
       const knows = this._evCache && !(typeof this.ledgerLoading === 'function' && this.ledgerLoading()) ? (id) => this.ledgerKnowsId(id) : tailRids ? (id) => tailRids.has(id) : null;
-      if (knows) for (const shard of Object.keys(shardBuffers)) shardBuffers[shard] = shardBuffers[shard].filter((l) => { let rid = null; try { rid = JSON.parse(l).rid; } catch { } if (rid && knows(rid)) { reAppended++; return false; } return true; });
+      // B-6ded list 4: the rows a commit that did not complete DID append (one shard written, the next refused). The walk
+      // after it re-reads their bytes, and a warm cache has not loaded them (our append only marks it for a re-check), so
+      // this set is how the filter knows them until a commit completes — on the cold road the shards' tails know them too
+      const partial = this._partialRids || null;
+      const refuses = partial ? (id) => partial.has(id) || !!(knows && knows(id)) : knows;
+      if (refuses) for (const shard of Object.keys(shardBuffers)) shardBuffers[shard] = shardBuffers[shard].filter((l) => { let rid = null; try { rid = JSON.parse(l).rid; } catch { } if (rid && refuses(rid)) { reAppended++; return false; } return true; });
       added -= reAppended;
       if (reAppended) console.log(`[usage-history] the walk met ${reAppended} request${reAppended === 1 ? '' : 's'} the ledger already holds (a re-walk after a lost cursor write${tailRids ? ' — the ledger cold: its shards\' tails read' : ''}) — not appended again`);
       this._lastReWalked = reAppended;
-      for (const [shard, lines] of Object.entries(shardBuffers)) {
-        if (lines.length) { appendedNow = true; const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+      const landed = [];
+      try {
+        for (const [shard, lines] of Object.entries(shardBuffers)) {
+          if (lines.length) { appendedNow = true; const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); landed.push(lines); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+        }
+      } catch (e) {   // B-6ded list 4: an append failed after others landed — what landed is known to the next walk's filter
+        if (landed.length) { const p = this._partialRids || (this._partialRids = new Set()); for (const ls of landed) for (const l of ls) { try { const rid = JSON.parse(l).rid; if (rid) p.add(rid); } catch { } } }
+        throw e;
       }
       // round 2 (smaller 1): THE CURSOR FOLLOWS ITS APPEND IN ORDER — after rows were appended, the cursors are the writer's
       // NEXT write (never its pace): a kill between the two re-appends at most what one cursor write's time let through
       // (the readers' rid dedup absorbs those rows), never a window per kill
       this._cursors = walk.cursors;
+      this._partialRids = null; // a commit completed: what an earlier one left half-done is in the shards and behind the cursors
       if (this._writeCursors(deadFacts) && appendedNow) { try { require('./store-writer.js').storeWriter().durable(this.cursorsFile).catch(() => { }); } catch { } }
       this._lastScan = Date.now();
     } catch (e) {

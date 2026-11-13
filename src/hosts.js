@@ -29,6 +29,13 @@ const { fdScanShellFns, cliIdentityShellFns } = require('./writer-sweep');
 // reason left to get wrong.
 const { pidAliveShellFn } = require('./cli-identity');
 
+// THE SSH HARVEST'S LIMITS (B-6ded, list 1) — what the hub takes from one run of the shipped scanner, and the bound that
+// run is held to (usageScanBound: half the bytes, a third of the seconds), passed down in the command. The scanner keeps
+// its cursor when its stdout write fails; without a bound a backlog over these limits failed every harvest the same way.
+const USAGE_HARVEST_LIMITS = Object.freeze({ maxBuffer: 128 * 1024 * 1024, timeoutMs: 180000 });
+const usageScanBound = (L) => ({ maxBytes: Math.floor(L.maxBuffer / 2), maxMs: Math.floor(L.timeoutMs / 3) });
+// …and a harvest that failed backs off: 1 min, doubling, at most 30 min (a forced harvest — the owner's own ask — goes)
+const HARVEST_BACKOFF_MS = 60 * 1000, HARVEST_BACKOFF_MAX_MS = 30 * 60 * 1000;
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=6',
@@ -2393,6 +2400,15 @@ class HostManager {
    *  at the hub-act gate (a cluster instance held that `files` act for an owner who never answered, and every harvest
    *  re-sent the whole window). An older daemon that cannot take the hub's cursor walks from its own, the ledger drops
    *  what it already holds (0 bytes) and this says `since-unsupported` once per machine. */
+  /** B-6ded list 1: a harvest that failed backs off (1 min, doubling, at most 30 min) instead of the next kick walking the
+   *  whole remote backlog again at once; one that came back resets it. */
+  _harvestFailed(id) {
+    if (!this._usageHarvestFail) this._usageHarvestFail = new Map();
+    const n = ((this._usageHarvestFail.get(id) || {}).n || 0) + 1;
+    this._usageHarvestFail.set(id, { n, until: Date.now() + Math.min(HARVEST_BACKOFF_MAX_MS, HARVEST_BACKOFF_MS * 2 ** (n - 1)) });
+    this._usageHarvestAt.set(id, 0); // the throttle never counts a failed run; the backoff above is the pause
+  }
+  _harvestLanded(id) { if (this._usageHarvestFail) this._usageHarvestFail.delete(id); }
   async harvestUsage(id, { force = false, scannerPath, minIntervalMs, ledger = null } = {}) {
     const h = this.get(id);
     const ingest = (text, { cursors = null, since = null } = {}) => {
@@ -2409,6 +2425,8 @@ class HostManager {
     // device round trip per call — never sub-minute.
     const gate = Math.max(60 * 1000, minIntervalMs ?? 15 * 60 * 1000);
     if (!force && Date.now() - last < gate) return ledger ? { added: 0, throttled: true } : '';
+    const fail = this._usageHarvestFail && this._usageHarvestFail.get(id);
+    if (!force && fail && Date.now() < fail.until) return ledger ? { added: 0, throttled: true, backoff: { failures: fail.n, until: fail.until } } : '';
     this._usageHarvestAt.set(id, Date.now());
     const script = fs.readFileSync(scannerPath, 'utf-8');
     // CS data-plane: ship+run the scanner through the daemon (streaming exec —
@@ -2455,17 +2473,19 @@ class HostManager {
         // transport-absent one (2.271.0 T3-6). Rethrow the real error and
         // reset the throttle so the next kick retries instead of a silent
         // 15-min block on a misleading message.
-        if (h.transport === 'dial') { this._usageHarvestAt.set(id, 0); throw e2; }
+        if (h.transport === 'dial') { this._harvestFailed(id); throw e2; }
         /* ssh host: fall through to the legacy ssh path below */
       }
       // the ingest is the hub's own (an ingest that throws is never a reason to walk the machine again by another road)
-      if (got) return ingest(got.text, got);
+      if (got) { this._harvestLanded(id); return ingest(got.text, got); }
     }
+    const L = this.usageHarvestLimits || USAGE_HARVEST_LIMITS, B = usageScanBound(L);
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
-        'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
-        { env: this.sshEnv(), timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
-          if (err) { this._usageHarvestAt.set(id, 0); return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr || err.message || '').toString().slice(0, 200))); }
+        'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + `VIBESPACE_USAGE_SCAN_MAX_BYTES=${B.maxBytes} VIBESPACE_USAGE_SCAN_MAX_MS=${B.maxMs} node "$HOME/.vibespace/bin/vibespace-usage-scan"`],
+        { env: this.sshEnv(), timeout: L.timeoutMs, maxBuffer: L.maxBuffer }, (err, stdout, stderr) => {
+          if (err) { this._harvestFailed(id); return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr || err.message || '').toString().slice(0, 200))); }
+          this._harvestLanded(id);
           try { resolve(ingest(stdout.toString())); } catch (e) { reject(e); }
         });
       const fed = feedStdin(child, script);
@@ -3016,4 +3036,4 @@ HostManager.prototype.bootstrap = function (id, onEvent) {
   });
 };
 
-module.exports = { HostManager, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody };
+module.exports = { HostManager, USAGE_HARVEST_LIMITS, usageScanBound, codexOpenRolloutsShell, killPidShell, installAgentdScript, installAgentdAnswer, feedStdin, sshRefusal, unreachableError, refusalBody };

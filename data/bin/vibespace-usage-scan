@@ -46,6 +46,18 @@ function isFixtureProjectDir(name, tmpRoots = TMP_ROOTS) {
 const isFixtureSid = (sid) => typeof sid === 'string' && sid.toLowerCase().startsWith(FIXTURE_SID_PREFIX);
 
 const out = [];
+// THE RUN'S BOUND (B-6ded, list 1). One run's output stays below what the hub takes from it. The hub passes its own limits
+// down (src/hosts.js USAGE_HARVEST_LIMITS ⇒ VIBESPACE_USAGE_SCAN_MAX_BYTES / _MAX_MS: half its output buffer, a third of its
+// deadline); without them, 32 MiB and 60 s. A run that has read something stops after a WHOLE line once either is spent:
+// the file it stopped in keeps the cursor of that line, the files after it keep theirs, so the cursor written is exactly
+// what was printed and a backlog of any size lands over several runs. (With the cursor kept on a failed write and no
+// bound, a backlog over the hub's limits failed every harvest the same way and nothing after it ever landed.)
+const MAX_OUT = Number(process.env.VIBESPACE_USAGE_SCAN_MAX_BYTES) > 0 ? Number(process.env.VIBESPACE_USAGE_SCAN_MAX_BYTES) : 32 * 1024 * 1024;
+const MAX_MS = Number(process.env.VIBESPACE_USAGE_SCAN_MAX_MS) > 0 ? Number(process.env.VIBESPACE_USAGE_SCAN_MAX_MS) : 60 * 1000;
+const T0 = Date.now();
+let outBytes = 0, readAny = false, full = false;
+function emit(s) { out.push(s); outBytes += Buffer.byteLength(s, 'utf8') + 1; }
+function spent() { return full || (full = readAny && (outBytes >= MAX_OUT || Date.now() - T0 >= MAX_MS)); }
 // A UUIDv7's millisecond stamp (its first 48 bits); null for any other id
 // shape. Codex mints thread AND turn ids as v7, so "minted after the fork" is
 // readable off a turn id itself (FORK REPLAY's identity end).
@@ -74,7 +86,10 @@ function scanFileWith(fp, cur, size, onLine) {
         lineStart = idx + 1;
         cur.offset += Buffer.byteLength(line, 'utf8') + 1;
         onLine(line);
+        readAny = true;
+        if (spent()) break; // the run's bound: stop after this whole line
       }
+      if (full) break;
       rest = data.subarray(lineStart);
     }
     // incomplete trailing line stays unconsumed (offset not advanced past it)
@@ -158,7 +173,7 @@ function handleLine(line, cur, info) {
   const cc = u.cache_creation || {};
   const own = r.cwd || null;
   const par = (info && info.pcwd) || null;  // null for a top-level transcript
-  out.push(JSON.stringify({
+  emit(JSON.stringify({
     rid,
     // message.id join field (2.267.3 rule — live stdout records lack
     // requestId, so per-message billing lookups join on mid): keep field
@@ -185,6 +200,7 @@ function handleLine(line, cur, info) {
 let projDirs = [];
 try { projDirs = fs.readdirSync(PROJECTS); } catch { }
 for (const pd of projDirs) {
+  if (spent()) break; // the run's bound
   if (isFixtureProjectDir(pd)) continue; // a suite's throwaway cwd — never usage
   const pdAbs = path.join(PROJECTS, pd);
   let entries = [];
@@ -214,6 +230,7 @@ for (const pd of projDirs) {
   }
   mains.sort(); // the sibling fallback must pick the SAME file in both spellings
   for (const { fp, sid, origin, wf, agent } of files) {
+    if (spent()) break; // the run's bound: the files after it keep their cursors
     if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
@@ -252,14 +269,17 @@ function zstdPlain(buf) {
   }
   return parts.length === 1 ? parts[0] : Buffer.concat(parts);
 }
-function scanBufferWith(data, cur, onLine) {
+function scanBufferWith(data, cur, onLine) {   // → false when the run's bound stopped it before the buffer's end
   let lineStart = cur.offset, idx;
   while ((idx = data.indexOf(10, lineStart)) !== -1) {
     const line = data.subarray(lineStart, idx).toString('utf8');
     lineStart = idx + 1;
     cur.offset += Buffer.byteLength(line, 'utf8') + 1;
     onLine(line);
+    readAny = true;
+    if (spent()) return false;
   }
+  return true;
 }
 // ── Codex rollouts (v2, R4 — keep in lockstep with src/usage-walker.js;
 // test-usage-walk-parity fails any one-sided change). Synthetic rid =
@@ -269,6 +289,7 @@ const CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'),
 let rollouts = [];
 try { rollouts = fs.readdirSync(CODEX_DIR, { recursive: true }); } catch { }
 for (const rel of rollouts) {
+  if (spent()) break; // the run's bound
   const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(String(rel));
   if (!m) continue;
   if (isFixtureSid(m[1])) continue; // synthetic thread id — same rule, both harnesses
@@ -278,15 +299,16 @@ for (const rel of rollouts) {
   const zst = !!m[2];
   if (zst && !ZSTD_OK) continue; // this runtime cannot read compressed rollouts
   const cur = cursors[fp] || { offset: 0, lastRid: null };
-  if (zst) { if (cur.zsize === st.size) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
+  if (zst) { if (cur.zsize === st.size && !cur.zpart) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
   else { if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } if (st.size === cur.offset) { cursors[fp] = cur; continue; } }
   const sid = m[1].toLowerCase();
   const scanRollout = (onLine) => {
     if (!zst) return scanFileWith(fp, cur, st.size, onLine);
     let plain; try { plain = zstdPlain(fs.readFileSync(fp)); } catch { return; }
     if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
-    scanBufferWith(plain, cur, onLine);
+    const whole = scanBufferWith(plain, cur, onLine);
     cur.zsize = st.size;
+    if (whole) delete cur.zpart; else cur.zpart = 1; // read part-way (the run's bound): the next run goes on from its offset
   };
   scanRollout((line) => {
     // FORK REPLAY (2.369.203) — mirror of src/usage-walker.js: a forked rollout (session_meta
@@ -362,7 +384,7 @@ for (const rel of rollouts) {
     cur.lastRid = rid;
     const cached = last.cached_input_tokens || 0;
     const mid = pendMid && (pendTotal == null || typeof last.total_tokens !== 'number' || pendTotal === last.total_tokens) ? pendMid : undefined;
-    out.push(JSON.stringify({
+    emit(JSON.stringify({
       rid, mid, be: 'codex', ts, sid,
       model: cur.model || null,
       cwd: cur.cwd || null,

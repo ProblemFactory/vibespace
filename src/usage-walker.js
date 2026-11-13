@@ -348,7 +348,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     const zst = !!m[2];
     if (zst && !ZSTD_OK) continue; // this runtime cannot read compressed rollouts
     const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)
-    if (zst) { if (cur.zsize === st.size) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
+    if (zst) { if (cur.zsize === st.size && !cur.zpart) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
     else { if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } if (st.size === cur.offset) { cursors[fp] = cur; continue; } }
     const sid = m[1].toLowerCase();
     filesTouched++;
@@ -357,7 +357,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       let plain; try { plain = zstdPlain(fs.readFileSync(fp)); } catch { return; }
       if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
       yield* scanBufferSteps(plain, cur, onLine, meter);
-      cur.zsize = st.size;
+      cur.zsize = st.size; delete cur.zpart; // `zpart`: the shipped scanner's run stopped part-way (its bound) — read on
     };
     yield* scanRollout((line) => {
       // FORK REPLAY (2.369.203): a forked rollout (session_meta
