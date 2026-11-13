@@ -48,8 +48,8 @@ export async function paintIndexLine(host) {
   if (!host.isConnected || !st || st.error) return;
   host.textContent = '';
   const line = el('div', 'sys-search-line');
-  line.append(el('span', null, t('Search index') + ': ' + indexStateText(st) + (st.index ? ' · ' + fmtMb(st.index.bytes) : '')));
-  const btn = el('button', 'sys-search-rebuild', t('Rebuild'));
+  line.append(el('span', null, t('{label}: {value}', { label: t('Search index'), value: indexStateText(st) + (st.index ? ' · ' + fmtMb(st.index.bytes) : '') })));   // the language's colon (lane ui-controls-and-bugs)
+  const btn = el('button', 'mounts-btn sys-search-rebuild', t('Rebuild'));
   btn.onclick = async () => { btn.disabled = true; const r = await fetchJson('/api/search/rebuild', { method: 'POST' }).catch((e) => ({ error: e.message })); showToast(r && !r.error ? t('Rebuilding the search index…') : t('Could not rebuild: {why}', { why: (r && r.error) || '' }), { type: r && !r.error ? 'info' : 'error' }); paintIndexLine(host); };
   line.append(btn);
   host.append(line);

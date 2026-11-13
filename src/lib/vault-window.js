@@ -778,8 +778,10 @@ export async function paintVaultLine(host, app) {
   host.textContent = '';
   const line = vwEl('div', 'sys-search-line sys-vault-line');
   const word = f.state === 'unlocked' ? t('Unlocked') : f.state === 'locked' ? t('Locked') : t('Not set up');
-  line.append(vwEl('span', null, t('Vault') + ': ' + word));
-  const btn = vwEl('button', 'sys-search-rebuild sys-vault-open', t('View contents…'));
+  line.append(vwEl('span', null, t('{label}: {value}', { label: t('Vault'), value: word })));   // the colon is the language's (zh / ja ：)
+  // lane ui-controls-and-bugs (the walk's system-ports-11: «保险库: 未设置 [查看内容…]»): a vault not set up has nothing to
+  // view — its door says what it does; the button is the theme's secondary one
+  const btn = vwEl('button', 'mounts-btn sys-search-rebuild sys-vault-open', ['unlocked', 'locked'].includes(f.state) ? t('View contents…') : t('Set up the vault…'));
   btn.type = 'button';
   btn.onclick = () => openVaultWindow(app);
   line.append(btn);

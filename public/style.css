@@ -5618,6 +5618,9 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 /* lane ui-controls-and-bugs: a plugin with nothing to configure has no ⚙ — an unseen place keeps the row's columns; a DOOR chip
    (a chip that acts, in the primary tone — «Connect with Fish Audio», «Add the API key…») is drawn as a button, not a status tag */
 .plugin-gear-none { visibility: hidden; pointer-events: none; }
+/* lane ui-controls-and-bugs (browser-profiles-7): «Download another build…» is a button, its source line a hint under it */
+.bbuild-download { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0 2px; }
+.bbuild-download-btn .bwho-answer-head { font-weight: normal; color: inherit; }
 button.plugin-chip.plugin-chip-primary { border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--radius-sm); padding: 3px 10px; font-size: 11px; }
 .plugin-row:not(:has(> .plugin-install)) > button.plugin-chip.plugin-chip-primary { grid-column: 2 / -1; }   /* the door reads whole in the narrow rail */
 .settings-link-row .settings-row-control { display: flex; gap: 6px; align-items: center; }

@@ -8,6 +8,12 @@
 //    src/lib carries `disabled: true` (the walk: «— 不提供» rows greyed with the reason in a tooltip, a billing menu with two
 //    greyed accounts and no title, a zoom menu whose heading and current choice were greyed ticks); the COMPUTED ones are a
 //    frozen ledger that only shrinks
+// pick 5 —
+// ⑨ THE SINGLE DEFECTS of pick 5, each pinned where it lives: the process table draws every row the server sent and says
+//    «显示 350 / 共 1131 个进程» (no «show all» that showed 350); the System panel's vault / index lines in the language's
+//    colon, a vault not set up offers «设置保险库…» (not «查看内容…»); a job row's menu holds the row's own verbs (one table
+//    with its buttons); «下载其他版本…» is a button; a console's prerequisites are a checklist under one line; the host
+//    set-up's Log fold appears with its first line
 // pick 4 —
 // ⑦ A MENU IS BOUNDED BY THE SCREEN (主开发's width-sweep rule 4): every context menu is placed by utils.js placeMenu — a
 //    module that makes its own `.context-menu` element calls it (the file explorer's builder had a clamp of its own and grew
@@ -161,6 +167,29 @@ ok(/const mo = new MutationObserver\(/.test(PM) && /if \(at\.maxH != null\) \{ p
   const CSB = read('src/lib/chat-status-bar.js'), sd = CSB.slice(CSB.indexOf('const showDropdown = (anchor,'), CSB.indexOf('\n    };', CSB.indexOf('const showDropdown = (anchor,')));
   ok(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd) && /queueMicrotask\(settle\);/.test(sd) && /mo\.observe\(dropdown, \{ childList: true, subtree: true, characterData: true \}\);/.test(sd),
     'the status bar\'s one showDropdown places a panel AFTER the caller filled it, and again when its content changes'); }
+
+// ── ⑨ the single defects of pick 5 ──
+console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
+{ const SR = read('src/lib/sidebar-rail.js');
+  ok(!/prc-more/.test(SR) && !/const CAP = /.test(SR) && /tr\('Showing \{shown\} of \{total\} processes', \{ shown: list\.length, total \}\)/.test(SR),
+    'processes: every transported row is drawn and the head says «Showing 350 of 1131 processes» — no «+ show all 350» beside «350 / 1131»'); }
+{ const VW = read('src/lib/vault-window.js'), SW = read('src/lib/search-window.js');
+  ok(/t\('\{label\}: \{value\}', \{ label: t\('Vault'\), value: word \}\)/.test(VW) && /\['unlocked', 'locked'\]\.includes\(f\.state\) \? t\('View contents…'\) : t\('Set up the vault…'\)/.test(VW)
+    && /t\('\{label\}: \{value\}', \{ label: t\('Search index'\)/.test(SW) && /'mounts-btn sys-search-rebuild'/.test(SW),
+    'the System panel: «保险库：未设置» in the language\'s colon, its door «设置保险库…» (never «查看内容…» of nothing), the theme\'s secondary buttons'); }
+{ const JP = read('src/lib/jobs-panel.js'), at = JP.indexOf('export function rowVerbs(');
+  const rv = at < 0 ? null : new Function('t', `${JP.slice(at, JP.indexOf('\n}\n', at) + 3).replace('export function', 'function')}; return rowVerbs;`)((x) => x);
+  const acts = (j) => (rv ? rv(j).map((v) => v.act).join(',') : 'none');
+  ok(!!rv && acts({ state: 'up' }) === 'stop' && acts({ state: 'failed' }) === 'start,rm' && acts({ state: 'done' }) === 'rm' && acts({ state: 'up', pendingPanel: true }) === 'panel,stop'
+    && /const verbs = archived \? \[\] : rowVerbs\(j\)\.map\(\(v\) => \(\{ label: v\.label, action: \(\) => jobAction\(app, j, v\.act, refresh\) \}\)\);/.test(JP) && /return rowVerbs\(j\)\.filter\(/.test(JP),
+    'jobs: ONE verb table — the row\'s buttons and its menu (Stop / Start / Remove / Open panel, then «Clear content…»)', JSON.stringify([acts({ state: 'up' }), acts({ state: 'failed' })])); }
+{ const BB = read('src/lib/browser-build-dialog.js');
+  ok(/const btn = el\('button', 'mounts-btn bbuild-download-btn'\);/.test(BB) && !/bwho-answer bbuild-row bbuild-download/.test(BB), '«下载其他版本…» is a button (its source line a hint under it), never a radio row\'s head'); }
+{ const MD = read('src/lib/mounts-dialog.js'), CA = read('src/lib/channel-account-dialogs.js');
+  ok(/head\.textContent = tr\('Before you start, check:'\);/.test(MD) && /ul\.className = 'integ-prereq';/.test(MD) && /const prereqs = spec\.setup \? \(spec\.setup\.prerequisites \|\| \[\]\)\.map\(\(p\) => tr\(p\)\) : \[\];/.test(CA),
+    'a console\'s prerequisites: «开始前请确认：» over a list — never three run-on hint sentences'); }
+{ const SM = read('src/lib/sidebar-mounts.js');
+  ok(/<details class="bs-log-wrap" hidden>/.test(SM) && /const appendLog = \(line\) => \{ logWrap\.hidden = false;/.test(SM), 'the host set-up\'s Log fold appears with its first line — never a fold onto an empty box'); }
 
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);
