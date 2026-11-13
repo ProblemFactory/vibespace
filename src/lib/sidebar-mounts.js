@@ -17,6 +17,8 @@ import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores:
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
 import { FLAGS, SHOWN, IMPLIES, normalize, allowWord, allowArgOf } from './device-allow-words.js'; // lane device-allow-flags: the device's own allow list, ticked here
+import * as FFI from '../ffmpeg-install.js'; // lane machine-needs-at-pairing pick 3: step ②'s ffmpeg row (the pinned build's facts)
+import * as MDM from '../machine-desktop-model.js'; // lane machine-needs-at-pairing pick 3: step ②'s TightVNC row
 
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
@@ -1516,7 +1518,11 @@ export function installSidebarMounts(Sidebar) {
       // & mouse off); the device keeps it, and only running the command again THERE changes it
       let allow = normalize(Array.isArray(allowNow) ? allowNow : Array.isArray(r.allowDefault) ? r.allowDefault : FLAGS);
       let winNoElevate = false; // lane win-input-elevated: the Windows command registers the agent to run as administrator by DEFAULT; this appends -NoElevate for a normal-rights install
-      const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}${winNoElevate ? ' `\n  -NoElevate' : ''}` : ` \\\n  --allow ${allowArgOf(allow)}`);
+      // lane machine-needs-at-pairing pick 3: WHAT THIS DEVICE WILL BE USED FOR — the ticks of step ② (主开发's Q1–Q4: Windows' desktop set
+      // and a Mac's screen set ticked; a Mac's Screen Sharing — it listens on the local network — and Linux's xpra unticked)
+      const setupOn = { win: { desktop: true }, mac: { mac: true, sharing: false }, linux: { xpra: false } };
+      const setupArg = (k) => { const on = Object.keys(setupOn[k]).filter((w) => setupOn[k][w]); return !on.length ? '' : k === 'win' ? ' `\n  -Setup ' + on.join(',') : ' \\\n  --setup ' + on.join(','); };
+      const cmdOf = (k) => CMDS[k] + (k === 'win' ? ` \`\n  -Allow ${allowArgOf(allow)}${winNoElevate ? ' `\n  -NoElevate' : ''}` : ` \\\n  --allow ${allowArgOf(allow)}`) + setupArg(k);
       let curOs = null;
       // lane pair-dialog-polish (for 2.369.399 — the owner's screen, 2026-11-13: «你看看这个界面是不是应该优化下»): the sheet leads with
       // what the person DOES — three numbered steps (the system · the command, shown WHOLE, and its Copy · where to run it) — then
@@ -1567,6 +1573,46 @@ export function installSidebarMounts(Sidebar) {
       const seg = document.createElement('div');
       seg.className = 'device-pair-os';
       s1.li.appendChild(seg);
+      // ② WHAT THIS DEVICE WILL BE USED FOR (lane machine-needs-at-pairing pick 3, the owner 2026-11-13: «需要 ffmpeg 之类的事情不能在安装的
+      // 时候自动解决吗？» — the place agreed with pair-dialog-polish: between the system and the command, since the tick changes the
+      // command). Each thing by name, its source, its size and what it listens on, BEFORE the person copies; nothing here can stop
+      // the pairing (law 3). The rows' facts come from the PURE rows (src/ffmpeg-install.js, src/machine-desktop-model.js TIGHTVNC).
+      const sN = step('needs', tr('What this device will be used for'));
+      const needsRows = document.createElement('div');
+      needsRows.className = 'device-pair-needs';
+      const needsNote = document.createElement('p');
+      needsNote.className = 'agents-note device-pair-needs-note';
+      needsNote.textContent = tr('Nothing here can stop the pairing: whatever is not set up keeps its own button in the machine’s windows, and the command’s last lines say what is ready.');
+      sN.li.append(needsRows, needsNote);
+      const MB = (n) => Math.max(1, Math.round(n / 1e6 * 10) / 10);
+      const NEEDS_OF = {
+        win: [{ key: 'desktop', word: tr('Its desktop and streaming (recommended)'), hints: [
+          tr('{app} ({publisher}, {mb} MB, {licence}): no administrator rights, and it listens on nothing. No publisher signs ffmpeg, so its bytes are checked against two fixed SHA-256 fingerprints.', { app: FFI.FFMPEG.label, publisher: FFI.FFMPEG.publisher, mb: Math.round(MB(FFI.FFMPEG.bytes)), licence: FFI.FFMPEG.licence }),
+          tr('{app} (tightvnc.com, {mb} MB): Windows asks for administrator rights once and you type its VNC password there; it listens on this PC only (127.0.0.1 and ::1, port 5900).', { app: MDM.TIGHTVNC.label, mb: MB(MDM.TIGHTVNC.bytes) }),
+        ] }],
+        mac: [
+          { key: 'mac', word: tr('Its screen, sound, keys and clicks (recommended)'), hints: [tr('System Settings opens at Screen & System Audio Recording and at Accessibility: switch vibespace-screen on in each. Its screen helper comes from this VibeSpace, or the Command Line Tools installer opens. Nothing listens on the network.')] },
+          { key: 'sharing', word: tr('Its whole desktop through macOS Screen Sharing'), hints: [tr('Opens General › Sharing for you to turn Screen Sharing on. macOS’s Screen Sharing listens on the local network (port 5900, your Mac’s sign-in), not only on this Mac.')] },
+        ],
+        linux: [{ key: 'xpra', word: tr('Desktop apps (xpra 6.x)'), hints: [tr('From the distribution or xpra.org (its key checked against a pinned fingerprint); sudo asks for your password once. Each app listens on this machine only.')] }],
+      };
+      const drawNeeds = (k) => {
+        needsRows.replaceChildren(...NEEDS_OF[k].map((n) => {
+          const lab = document.createElement('label');
+          lab.className = 'dialog-check-row device-pair-need-row'; lab.dataset.need = n.key;
+          const cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.checked = !!setupOn[k][n.key];
+          cb.onchange = () => { setupOn[k][n.key] = cb.checked; setOs(k); };
+          const word = document.createElement('span');
+          word.className = 'device-pair-allow-word'; word.textContent = n.word;
+          lab.append(cb, word);
+          for (const h of n.hints) { const hint = document.createElement('span'); hint.className = 'dialog-check-hint'; hint.textContent = h; lab.append(hint); }
+          return lab;
+        }));
+        // 主开发's Q2: with normal rights, TightVNC alone asks — said above the command
+        if (k === 'win' && winNoElevate && setupOn.win.desktop) { const q2 = document.createElement('p'); q2.className = 'agents-note device-pair-need-rights'; q2.textContent = tr('With normal rights, TightVNC alone still asks Windows for administrator rights once.'); needsRows.append(q2); }
+        afterSetup.style.display = Object.values(setupOn[k]).some(Boolean) ? '' : 'none';
+      };
       const s2 = step('copy', tr('Copy the command'));
       const ta = document.createElement('textarea');
       ta.readOnly = true; ta.className = 'device-pair-cmd'; ta.spellcheck = false; ta.rows = 1;
@@ -1584,7 +1630,10 @@ export function installSidebarMounts(Sidebar) {
       const after = document.createElement('p');
       after.className = 'agents-note device-pair-after';
       after.textContent = tr('Once it connects, the device shows in Machines with a green dot.');
-      s3.li.append(note, after);
+      const afterSetup = document.createElement('p'); // lane machine-needs-at-pairing pick 3: the run's last lines name what is set up
+      afterSetup.className = 'agents-note device-pair-after-setup';
+      afterSetup.textContent = tr('Its last lines say what was set up for it and what was not.');
+      s3.li.append(note, after, afterSetup);
       // the command shows WHOLE — wrapped, at its own height, never a box that cuts lines off — re-measured when its text or width changes
       const fitCmd = () => { if (!ta.isConnected) return; ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight + 2}px`; };
       if (typeof ResizeObserver === 'function') {
@@ -1629,7 +1678,7 @@ export function installSidebarMounts(Sidebar) {
       const guessOs = deviceOs || (/Mac/i.test(navigator.platform || '') ? 'mac' : /Win/i.test(navigator.platform || '') ? 'win' : 'linux');
       const chips = {};
       const setOs = (k) => {
-        curOs = k; ta.value = cmdOf(k); fitCmd(); paintCopy();
+        curOs = k; drawNeeds(k); ta.value = cmdOf(k); fitCmd(); paintCopy();
         s3.h.textContent = OS[k].run; note.textContent = OS[k].need;
         elevWrap.style.display = k === 'win' ? '' : 'none';
         facts.replaceChildren(...[OS[k].starts, tr('Everything it installs, including a private Node if the device had none, lives under {dir}; removing that folder removes it all.', { dir: OS[k].dir }), tr('Pairing the same name again replaces its token.'), tr('One machine can pair with several VibeSpace instances — each install keeps its own state.')].map((x) => { const li = document.createElement('li'); li.textContent = x; return li; }));

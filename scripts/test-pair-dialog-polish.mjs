@@ -84,7 +84,7 @@ const censusJs = (os) => `(() => {
 })()`;
 const judge = (c, os, lc, rc) => ({
   labels: lc.ok && lc.n >= 7, greyed: Array.isArray(c.greyed) && c.greyed.length === 0, words: !!c.wrong && c.wrong.length === 0 && c.missing.length === 0,
-  whole: c.cut === 0 && c.resize === 'none', order: c.order && c.nSteps === 3 && c.elevShown === (os === 'win'), rect: rc.ok,
+  whole: c.cut === 0 && c.resize === 'none', order: c.order && c.nSteps === 4 && c.elevShown === (os === 'win'), rect: rc.ok,
 });
 async function shoot(P, phase, name) {
   if (!OUT) return null;
@@ -176,7 +176,7 @@ try {
   ok(c1.btn === (isZh ? '已复制' : 'Copied'), 'a real click on Copy ⇒ the button says it copied', c1);
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="lan"]`); await sleep(200);
   const c2 = await copyState();
-  ok(c2.btn === (isZh ? '复制命令' : 'Copy command') && c2.state === (isZh ? '命令已经变了——请重新复制。' : 'The command changed — copy it again.') && c2.cmd !== c1.cmd && /\n  --allow all$/.test(c1.cmd) && /\n  --allow run,files,input,socks,sessions,upgrade$/.test(c2.cmd), 'a click on 局域网\'s ROW (a local instance starts with everything on) changes the command ⇒ Copy says so: «copy it again»', { c1: c1.cmd.slice(-40), c2 });
+  ok(c2.btn === (isZh ? '复制命令' : 'Copy command') && c2.state === (isZh ? '命令已经变了——请重新复制。' : 'The command changed — copy it again.') && c2.cmd !== c1.cmd && /\n  --allow all(?: \\\n  --setup [a-z,]+)?$/.test(c1.cmd) && /\n  --allow run,files,input,socks,sessions,upgrade(?: \\\n  --setup [a-z,]+)?$/.test(c2.cmd), 'a click on 局域网\'s ROW (a local instance starts with everything on) changes the command ⇒ Copy says so: «copy it again»', { c1: c1.cmd.slice(-40), c2 });
   await P.realClick(`#device-pair-dialog .device-pair-copy`); await sleep(200);
   ok((await copyState()).btn === (isZh ? '已复制' : 'Copied'), '…and copying again says it copied');
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="lan"]`); await sleep(150);
@@ -190,8 +190,31 @@ try {
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="sessions"]`); await sleep(200);
   const h1 = await held();
   ok(h1.every((x) => !x.held && x.shown) && h1.find((x) => x.f === 'run').on && !h1.find((x) => x.f === 'sessions').on, 'untick 会话 ⇒ 命令 and 文件 are boxes again (still ticked), nothing held', h1);
-  ok(/\n  --allow run,files,input,socks,lan,upgrade$/.test((await copyState()).cmd), '…and the command says --allow run,files,input,socks,lan,upgrade (the flags as before)', (await copyState()).cmd.slice(-60));
+  ok(/\n  --allow run,files,input,socks,lan,upgrade(?: \\\n  --setup [a-z,]+)?$/.test((await copyState()).cmd), '…and the command says --allow run,files,input,socks,lan,upgrade (the flags as before)', (await copyState()).cmd.slice(-60));
   await P.realClick(`#device-pair-dialog .device-pair-allow-flag[data-flag="sessions"]`); await sleep(150);
+  // ── lane machine-needs-at-pairing pick 3: STEP ② — what this device will be used for (主开发's Q1–Q4) ──
+  console.log('⑦ step ② — what the device will be used for: the defaults, and the tick IS the command');
+  const needs = () => P.evalJs(`(() => { const d = document.querySelector('#device-pair-dialog'); const st = d.querySelector('.device-pair-step[data-step="needs"]'); const rows = st ? [...st.querySelectorAll('.device-pair-need-row')].map((l) => ({ k: l.dataset.need, on: l.querySelector('input').checked, row: l.classList.contains('dialog-check-row'), hint: [...l.querySelectorAll('.dialog-check-hint')].map((h) => h.textContent).join(' ') })) : null; const steps = [...d.querySelectorAll('.device-pair-steps > .device-pair-step')].map((x) => x.dataset.step); return { rows, steps, cmd: d.querySelector('.device-pair-cmd').value }; })()`);
+  const want = { macOS: [['mac', true], ['sharing', false]], Linux: [['xpra', false]], Windows: [['desktop', true]] };
+  for (const [label, rows] of Object.entries(want)) {
+    await pickOs(P, label); await sleep(200);
+    const n = await needs();
+    const last = n.cmd.split('\n').pop().trim();
+    ok(n.steps.join(' ') === 'os needs copy run' && n.rows && JSON.stringify(n.rows.map((r) => [r.k, r.on])) === JSON.stringify(rows) && n.rows.every((r) => r.row && r.hint.length > 20), `⑦ ${label}: step ② sits between the system and the command; its rows and their default ticks ${JSON.stringify(rows)}, each a house check row with its facts`, n);
+    const flag = label === 'Windows' ? '-Setup desktop' : label === 'macOS' ? '--setup mac' : null;
+    ok(flag ? last === flag : !/--setup|-Setup/.test(n.cmd), `⑦ ${label}: the command's last line is ${flag ? `«${flag}»` : 'no setup flag (xpra unticked)'}`, last);
+  }
+  await pickOs(P, 'macOS'); await sleep(150);
+  await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="sharing"]`); await sleep(200);
+  const ns = await needs();
+  ok(ns.cmd.split('\n').pop().trim() === '--setup mac,sharing' && /5900/.test(ns.rows.find((r) => r.k === 'sharing').hint), '⑦ ticking a Mac\'s Screen Sharing (its row says it listens on the local network, port 5900) ⇒ --setup mac,sharing', ns.cmd.slice(-40));
+  await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="sharing"]`); await sleep(150);
+  await pickOs(P, 'Windows'); await sleep(150);
+  await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="desktop"]`); await sleep(200);
+  const nw = await needs();
+  ok(!/-Setup/.test(nw.cmd), '⑦ unticking Windows\' desktop set ⇒ no -Setup: the agent alone is installed', nw.cmd.slice(-40));
+  await P.realClick(`#device-pair-dialog .device-pair-need-row[data-need="desktop"]`); await sleep(150);
+  await shootBoth(P, 'after', `${isZh ? 'zh' : 'en'}-needs-win`);
   // ── the long command (a long relay address): whole at both widths ──
   console.log('the long command — whole at both widths');
   const longR = { httpBase: 'https://' + 'a-very-long-relay-hostname-for-this-instance.'.repeat(3) + 'example.com:8443/vibespace/prefix', dialUrl: 'wss://' + 'a-very-long-relay-hostname-for-this-instance.'.repeat(3) + 'example.com:8443/vibespace/prefix/api/device-dial?device=polish-long', dialToken: 'vsdt_' + 'f0'.repeat(32), hostToken: 'vsht_' + 'e1'.repeat(32), deviceId: 'polish-long' };
@@ -225,7 +248,7 @@ try {
       const c = await P.evalJs(censusJs('win'));
       const lc = await P.evalJs(labelRowCensusJs('#device-pair-dialog'));
       const head = await P.evalJs(`document.querySelector('#device-pair-dialog .device-pair-head').textContent`);
-      ok(judge(c, 'win', lc, { ok: true }).labels && c.greyed.length === 0 && c.wrong.length === 0 && c.cut === 0 && c.order && c.nSteps === 3 && head.includes(nm), `the re-pair command at ${m.tag} px: its own head («${head.slice(0, 60)}…»), the same steps, boxes beside words, Windows' facts only`, { c, lc: lc.bad.slice(0, 2), head });
+      ok(judge(c, 'win', lc, { ok: true }).labels && c.greyed.length === 0 && c.wrong.length === 0 && c.cut === 0 && c.order && c.nSteps === 4 && head.includes(nm), `the re-pair command at ${m.tag} px: its own head («${head.slice(0, 60)}…»), the same steps, boxes beside words, Windows' facts only`, { c, lc: lc.bad.slice(0, 2), head });
       await shootBoth(P, 'after', `${isZh ? 'zh' : 'en'}-${m.tag}-win-repair`);
     }
     await setMetrics(P, WIDTHS[0]); await sleep(200);
