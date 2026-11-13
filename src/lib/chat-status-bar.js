@@ -5,7 +5,7 @@ import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: 
 import { UI_ICONS } from './icons.js';
 import { systemSelect } from './design-home.js'; // lane design-systems-home: the design chip's "Design system" select
 import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (lane pages-chip-groups): the Pages chip's two groups
-import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, billingRow, statusBarRow } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
@@ -24,7 +24,7 @@ import { chipText as channelChipText, rowName as channelRowName, rowWords as cha
 import { costBasisOf, costChipWords, addedKindsChipWords } from './chat-bar-words.js'; // PURE (lane door-healthy-chat): the cost's words + the record-kinds chip
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
-import { MENU_EMPTY, resolvePick, sourceOf } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
+import { MENU_EMPTY, resolvePick, sourceOf, namedModel } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
 import { openAccountModelsDialog } from './account-models.js';
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper, in the device's words
@@ -142,6 +142,11 @@ export class ChatStatusBar {
 
     // Status state
     this._statusModel = '';
+    // ONE BAR (lane fable-52-cli-321 round 13): the newest numbers a live session's facts carried — a stale frame changes no model field —
+    // this bar's last pick (the API's refusal of it is said once, round 15: nothing is undone) and its press's hold
+    this._askSeq = 0; this._servedSeq = 0;
+    this._lastPick = null; this._pressAt = null;
+    this._echoSeq = null;   // the live-echo count this bar has seen (null until its first facts — round 14)
     this._statusLastInputTokens = 0;
     this._statusLastCacheRead = 0;
     this._statusTurnMs = 0;       // lane agy-status-bar-facts: the last turn's own time (a harness whose row declares `duration`)
@@ -291,7 +296,50 @@ export class ChatStatusBar {
 
   applyStatus(status) {
     if (!status) return;
-    if (status.model) this._statusModel = status.model; // as reported — no stripping, no guessing
+    // ONE BAR, MASTER'S FIELDS (lane fable-52-cli-321 round 13): a status names the model as master's did; a LIVE session's numbered facts (a
+    // status that DECLARES them — its harness's capability row) WRITE the same fields master's code reads: the model it wants (the ask, else
+    // the CLI's own, else the record's last — model-ask decides), the served model only when the server numbered it AFTER the ask (the one
+    // judgement the facts own: master's mismatch over these fields says «fallback» only then). A status older than the newest numbers
+    // seen — older in EITHER number; a transcript's carries none — changes no model field, WHOLE (round 14): nothing is translated at an
+    // end, a wall, a reconnect or a start. THE LOCK ROAD IS MASTER'S (round 14): the lock comes on master's roads only (the attach status,
+    // the model-lock op — master's lines below), and WHILE A LOCK STANDS the chip reads the last served model as master's F1 does.
+    const declared = status.modelFacts === true;
+    const askN = declared ? Number(status.askSeq) || 0 : 0, servedN = declared ? Number(status.servedSeq) || 0 : 0;
+    let fresh = askN >= this._askSeq && servedN >= this._servedSeq;
+    // a FRAME the server sent before it took this bar's press (in flight during it) never overwrites the press: the hold ends only on a
+    // newer ASK number (the hub took a press) or the press's own answer (rounds 14–15); an ATTACH status — it always carries the lock's
+    // lines (`modelLocked`), a facts frame never does — is a new attach, never in flight: it applies and ends the hold
+    const attach = 'modelLocked' in status;
+    if (declared && fresh && this._pressAt) { if (attach || askN > this._pressAt.ask) this._pressAt = null; else fresh = false; }
+    const lockedNow = status.modelLocked != null ? !!status.modelLocked : !!this._modelLocked;
+    if (declared && fresh && status.askRefused && this._lastPick === status.askRefused) {
+      // the API refused the model this bar picked (its 404 naming it): A REFUSAL CHANGES NOTHING A PERSON SET (round 15) — the chip, the
+      // saved config and the lock are master's after it (the refused ask stands, amber as master draws it); the pressing page says it once
+      const pk = this._lastPick; this._lastPick = null;
+      showToast(lockedNow ? t('The API refused {model} — the lock still asks for it; unlock or pick another', { model: pk }) : t('The API refused {model} — pick another model', { model: pk }), { type: 'error' });
+    }
+    if (fresh) {
+      this._askSeq = askN;
+      // (WHILE A LOCK STANDS the chip's model is master's road — the pick, the live init, the live echo — and at an ATTACH the attach's own
+      // model, else (it names none) the CLI's last report the hub saw live — rounds 14–15)
+      if (declared) { const w = lockedNow ? (attach ? status.model || status.cliModel : status.model) : (status.want || status.model); if (w) this._statusModel = w; }
+      else if (status.lastAsked || status.model) this._statusModel = status.lastAsked || status.model; // law B: a transcript names master's model — the newest turn's ASKED model where its record states one (rounds 14–15) — and judges nothing
+    }
+    if (declared && fresh) {
+      // UNLOCKED: the served model numbered after the ask (the order judgement). WHILE A LOCK STANDS: master's F1 over the served model
+      // master's page knows — its own served-model op (setServedModel) — below
+      this._servedSeq = servedN;
+      this._judgedServed = status.served || null;
+      // the press is let go when THE PICK is served — the served model is the one the CLI reported for it (the want) — never by a record
+      // of the turn in flight on the old model (round 16: a pick made mid-turn is still this page's to say when the API refuses it)
+      const core = (m) => String(m || '').toLowerCase().replace(/\s*\[1m\]$/, '');
+      if (status.served && this._lastPick && core(status.served) === core(status.want)) this._lastPick = null;
+      // the CLI's LIVE echo, once (master's echo road — its setModel as the record arrived): WHILE A LOCK STANDS it moves the chip's model;
+      // unlocked, the want already names it. The first facts this bar holds set the count: an echo older than the page moves nothing
+      const echoN = Number(status.echoSeq) || 0;
+      if (this._echoSeq != null && echoN > this._echoSeq && lockedNow && status.echoModel) this._statusModel = status.echoModel;
+      this._echoSeq = Math.max(this._echoSeq || 0, echoN);
+    }
     if (status.contextWindow) this._statusContextWindow = status.contextWindow;
     if (status.lastUsage) {
       const u = status.lastUsage;
@@ -314,6 +362,7 @@ export class ChatStatusBar {
     // 'in' not truthy: the server always sends lockedModel (null after an
     // unlock) — a truthy guard left other clients showing the stale target
     if ('lockedModel' in status) this._lockedModel = status.lockedModel || null;
+    this._syncServed();   // (the served model a live session's facts decide — at every render too: a press with no frame back, round 15)
     if (status.lockMoved) this._servedBeforeLock = true; // F1: the lock moved (chat-view's model-lock op) — the served fact standing now is older than it
     if (status.sandbox) this._statusSandbox = status.sandbox;
     if (status.totalUsage) this._statusTotalUsage = status.totalUsage;
@@ -515,11 +564,33 @@ export class ChatStatusBar {
   // from the commanded/reported one, the harness auto-fell-back (e.g. fable
   // overloaded → opus). Alias-tolerant compare ('fable' vs 'claude-fable-5').
   setServedModel(model) {
+    this._masterServed = model;   // what master's page knows (its op) — a LOCKED chip's F1 reads it (round 14)
+    if (this._judgedServed !== undefined && !this._modelLocked) return;   // unlocked under a live session's facts: the order-judged served model stands
     if (this._servedModel === model) return;
     this._servedModel = model;
     this._servedBeforeLock = false;
     this.render();
   }
+
+  /** A press's id (round 13): it rides the set-model frame, and the server's answer names it. */
+  _pressId() { return `mp-${(this._pressSeq = (this._pressSeq || 0) + 1)}-${Math.random().toString(36).slice(2, 8)}`; }
+  /** THE SERVER'S ANSWER to this bar's set-model frame (`model-answer` {ok, facts}, or the door's refusal {ok:false}): its facts are
+   *  facts, and it ends its press's hold; a refusal undoes nothing (round 15 — nothing was shown or saved: the door's rule is the bar's). */
+  answerModel(a) {
+    if (!a) return;
+    if (this._pressAt && (a.answer == null || a.answer === this._pressAt.reqId)) this._pressAt = null;   // ITS answer ends the press's hold
+    if (a.ok && a.facts) this.applyStatus(a.facts);
+  }
+  /** The served model the chip judges, where a live session's facts stand: UNLOCKED, the one numbered after the ask (the order judgement),
+   *  or — a pick not answered yet — what master's page knows; WHILE A LOCK STANDS, master's F1 over master's served-model op (round 14).
+   *  Derived at every render: a Lock or a pick with no frame back (an ended window) reads it at once (round 15). */
+  _syncServed() {
+    if (this._judgedServed === undefined) return;
+    this._servedModel = this._modelLocked || this._pressAt ? (this._masterServed || null) : this._judgedServed;
+  }
+  /** The Lock row — by the harness's CAPABILITY row (it re-pins a lock), and wherever a lock stands so it can be lifted (round 11's one
+   *  ruled difference from master: a harness that cannot keep a lock is never offered one). */
+  _lockRowOffered() { return (!!uiRow(this._backend).modelLock && declaresModelFacts(this._backend)) || !!this._modelLocked; }
 
   /** THE LOCKED CHIP (lane fable-52-cli-321, F1). LOCKED with a known target ⇒ the served model is held against the LOCK
    *  TARGET (an alias lock family-wide, a full id exactly) — never against the model a DRAWN record set (an old init or /model
@@ -722,6 +793,7 @@ export class ChatStatusBar {
   }
 
   render() {
+    this._syncServed();
     const fmtK = (n) => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n);
     // Semantic tier colors — theme vars (CSS vars work in inline styles), never
     // hardcoded hexes; "orange" is the midpoint between the red and yellow tiers.
@@ -759,7 +831,7 @@ export class ChatStatusBar {
         : known
           ? t('Model (as last reported by the CLI) — click to change')
           : t('Model not reported by the CLI yet — click to set');
-      const lockTip = locked ? ' \u00b7 ' + t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : '';
+      const lockTip = locked ? ' \u00b7 ' + (declaresModelFacts(this._backend) ? t('LOCKED — retries {model} after any fallback', { model: this._lockedModel || this._statusModel || '?' }) : t('LOCKED by an earlier version — this harness never retries a model; unlock it from the model menu')) : '';   // a harness that never re-pins (round 11): its standing lock says what it is
       const why = refusal ? ` \u00b7 ${escHtml(t('refusal'))}${refusal.category ? ` (${escHtml(refusal.category)})` : ''}` : '';
       const label = locked
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}${why}` : escHtml((target && (this._servedModel || target)) || this._statusModel || '?'))
@@ -2070,7 +2142,16 @@ export class ChatStatusBar {
       }
       const backend = this._backend || 'claude'; // the real id — META/model lists are per backend since P4
       const pick = (model) => {
-        this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
+        // ONE WAY TO PRESS (round 13): master's pick on every page — shown and saved at once; its id rides the frame (the answer names
+        // it); only an id the hub's door accepts is shown or saved (round 11 — the door's own rule, model-providers namedModel)
+        const reqId = this._pressId(), named = !!namedModel(model);
+        // (BEFORE the frame leaves — its answer may come back inside the send)
+        if (named) this._lastPick = model;   // the API's refusal of it is said once by this page (round 15)
+        // a live session's facts stand (round 14): a frame in flight never overwrites this press; until its answer the pick is judged
+        // against the served model master's page knows (_syncServed)
+        if (named && (this._askSeq || this._servedSeq)) this._pressAt = { ask: this._askSeq, reqId };
+        this._ws.send({ type: 'set-model', sessionId: this._sessionId, model, reqId });
+        if (!named) return;
         // changing the model while LOCKED re-targets the lock (A4 sub-item:
         // the tooltip kept naming the old target while the server retried the
         // new one) — the server's retarget branch does the same with data.model
@@ -2175,7 +2256,7 @@ export class ChatStatusBar {
       // completes its turn on the fallback but every subsequent turn retries
       // the original (the user's '总是变成opus 4.8' fix). Claude only — codex
       // has no fallback mechanism (a toggle would falsely imply protection).
-      if (uiRow(this._backend).modelLock) {
+      if (this._lockRowOffered()) {
         const lockItem = document.createElement('div');
         lockItem.className = 'chat-status-dropdown-item' + (this._modelLocked ? ' active' : '');
         lockItem.classList.add('chat-status-dropdown-lock');

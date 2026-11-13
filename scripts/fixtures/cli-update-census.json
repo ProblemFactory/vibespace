@@ -33,6 +33,16 @@
    "sites": 4
   },
   {
+   "id": "facts-same-model",
+   "file": "src/server/model-ask.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "master's modelsMatch restated for the model facts (lane fable-52-cli-321 round 14): a [1m] mark is the same model — what the want and a refusal's attribution read; and (round 16) noteRefusal's exact compare of the 404's model with what the CLI ran for the pick, its [1m] mark aside; no model id is named",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "one-m-suffix",
+   "sites": 2
+  },
+  {
    "id": "picker-seed",
    "file": "src/server/cli-env.js",
    "keyedOn": "model",
@@ -127,10 +137,10 @@
    "file": "src/lib/chat-status-bar.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "sameModel holds an alias by its word — the same catalog alias guard",
+   "road": "sameModel holds an alias by its word — the same catalog alias guard; and (lane fable-52-cli-321 round 16) the press is let go when the served model is the pick's report, its [1m] mark aside; no model id is named",
    "suite": "test-claude-update-needs-nothing",
    "match": "one-m-suffix",
-   "sites": 1
+   "sites": 2
   },
   {
    "id": "anchors-split",

@@ -195,7 +195,7 @@ function claudeSideEffects(session, sid, msg) {
       // changes nothing observable in §14e's own leg and only that census sees it.
       const announced = rerouteAnnouncedBy(msg);
       if (announced) noteModelFallback(session, announced.from, announced.to);
-      noteServedModel(session, msg.message.model); // the engine's granular consumer — same fallback rule as the parse (2026-09-13)
+      noteServedModel(session, msg.message.model, msg, 'device'); // the engine's granular consumer — same fallback rule as the parse (2026-09-13); the record rides along: one verdict per record (r7)
     }
     try { noteModelRequest?.(session, msg); } catch { } // the conversation's LAST MODEL REQUEST (lane cache-warmth-tiles) — the parse's twin call
     try { noteCompacted?.(session, msg); } catch { } // a compaction's END resets the cache fact (lane cache-warmth-compact) — the parse's twin call

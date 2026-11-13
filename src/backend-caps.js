@@ -378,6 +378,11 @@ const BACKEND_CAPS = {
     renameWriteback: false,       // the JSONL transcript has no title to write back
     titleRecord: 'session_title_changed', // 2.1.288: the CLI names the session itself (session-brain noteSessionTitle → cliTitle)
     streamProtocol: 'stream-json',
+    // THE MODEL FACTS (lane fable-52-cli-321 r5–r15): this harness's server states the chat's model facts — the ask, the served
+    // model and the CLI's report, numbered from one counter (src/server/model-ask.js) — so the attach status carries them
+    // (`modelFacts: true`) and the model-facts op is broadcast. A harness that does not (false) keeps the model its LIVE init
+    // names; a drawn record never sets it. DECLARED here, never inferred from a key being present.
+    modelFacts: true,
     peerDelivery: 'cli-inbox',
     // THE WRAPPER OWNS THE MID-TURN QUEUE (2.369.354, lane claude-wrapper-queue — the owner, 2026-10-25): a frame sent
     // while a turn runs is held by data/bin/chat-wrapper.js (never written to the CLI's stdin), published as
@@ -441,6 +446,7 @@ const BACKEND_CAPS = {
     renameWriteback: true,        // set-thread-name → the thread's own name in codex's store
     titleRecord: null,            // no title record (the thread name is OURS, written back) — the ladder's CLI-title rung is absent
     streamProtocol: 'codex-events',
+    modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'rpc-queue',
     // null (lane worker-dispatch): the wrapper runs `/compact` as thread/compact/start, but the codex consumer never
     // retires the 'compacting' claim nor notifies the compaction watch — a dispatch sends the brief without compacting
@@ -482,6 +488,7 @@ const BACKEND_CAPS = {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false,
     forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: null, // terminal-only: no chat parse pipeline
+    modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'stash-only',
     compactEnd: null,      // terminal-only: no compaction to observe
     inputModes: { queue: false, queueVerbs: [] },
@@ -505,6 +512,7 @@ const BACKEND_CAPS = {
   opencode: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
+    modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'stash-only',
     compactEnd: null,      // ACP v1 has no compaction verb we send or observe
     frameFile: true,
@@ -555,6 +563,7 @@ const BACKEND_CAPS = {
   antigravity: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
+    modelFacts: false,          // its server states no model facts: the chip takes the model a LIVE init names (lane fable-52-cli-321 r5)
     peerDelivery: 'rpc-queue',
     compactEnd: null,
     frameFile: true,
@@ -576,7 +585,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed

@@ -14,8 +14,9 @@
 //      the envelope is required).
 //   ② the REAL renderer (esbuild → node): the command card label is spelled
 //      without backticks.
-//   ③ WIRING PINS (the 2.355.0 unstaged-wiring lesson): the three readers call
-//      the helper and no inline `Set model to` regex is left anywhere in src/.
+//   ③ WIRING PINS (the 2.355.0 unstaged-wiring lesson): the card label calls the
+//      helper and no inline `Set model to` regex is left anywhere in src/; since
+//      lane fable-52-cli-321 r4 the status bar and the server read NO echo at all.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,9 +98,9 @@ console.log('— ③ wiring pins');
   const cv = read('src/lib/chat-view.js');
   const cr = read('src/lib/chat-renderers.js');
   const sj = read('src/server/stdout/claude-stream-json.js');
-  ok('chat-view imports the parser and feeds the status bar id || alias from it', /import \{ parseSetModelEcho \} from '\.\.\/model-echo\.js';/.test(cv) && /const echo = parseSetModelEcho\(txt, \{ envelope: 'required' \}\);\s*if \(echo\) this\._statusBar\.setModel\(echo\.id \|\| echo\.alias\);/.test(cv));
+  ok('chat-view reads NO `/model` echo for the status bar (lane fable-52-cli-321 r4, law A: the chip shows the SERVER\'s facts — a record the view draws moves nothing): no parser import, no echo parse, no model setter fed from it', !/parseSetModelEcho/.test(cv) && !/noteEchoAsk/.test(cv) && !/_statusBar\.setModel\(echo/.test(cv));
   ok('chat-renderers imports the label helper and runs the stdout label through it', /import \{ stripSetModelBackticks \} from '\.\.\/model-echo\.js';/.test(cr) && /const so = stripSetModelBackticks\(stripAnsi\(stdoutMatch\[1\]\)\.trim\(\)\);/.test(cr));
-  ok('the lock repin takes the resolved id from the parser', /require\('\.\.\/\.\.\/model-echo\.js'\)/.test(sj) && /const echo = parseSetModelEcho\(uText, \{ envelope: 'required' \}\);\s*if \(echo && echo\.id && modelsMatch\(session\._lockedModel, echo\.id\)\)/.test(sj) && /session\._lockedModel = echo\.id;/.test(sj));
+  ok('the lock repin takes the resolved id from the parser (master\'s A5, back in round 14 — lane fable-52-cli-321), and the same LIVE record is the CLI\'s report of the pick in flight (model-ask noteEcho)', /require\('\.\.\/\.\.\/model-echo\.js'\)/.test(sj) && /const echo = parseSetModelEcho\(uText, \{ envelope: 'required' \}\);\s*if \(echo && echo\.id && modelsMatch\(session\._lockedModel, echo\.id\)\)/.test(sj) && /session\._lockedModel = echo\.id;/.test(sj) && /MA\.noteEcho\(session, parseSetModelEcho\(uText, \{ envelope: 'required' \}\)/.test(sj));
   // census: no inline `Set model to` REGEX left anywhere in src/ (comments and the module itself excepted)
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : (/\.(m?js|cjs)$/.test(e.name) ? [path.join(d, e.name)] : []));
   const files = walk('src').filter((f) => f !== path.join('src', 'model-echo.js'));

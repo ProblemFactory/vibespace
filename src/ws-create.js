@@ -190,6 +190,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `Unknown backend "${backend}".` })); // the request named (r4 N2)
             break;
           }
+          // THE SAME DOOR as set-model (lane fable-52-cli-321 r6, model-providers namedModel), ONE behavior with the client's road
+          // (round 14): a saved model or lock target that is no model id is DROPPED — the conversation starts on its default (the client
+          // says so in one line before it sends; an older bundle's frame starts the same way) — never a resume on the model a door refused
+          { const MP = require('./model-providers.js');
+            for (const k of ['model', 'lockModel']) if (data[k] != null && data[k] !== '') { const named = MP.namedModel(data[k]); if (!named) console.warn(`[create] ${k} is not a model id — dropped, the default spawns`); data[k] = named || undefined; } }
           // An ACP harness whose executable is not on this machine (S8) is refused by THE ONE verdict below
           // (cliCmds.forSpawn's cli-missing, lane cli-shell-truth) — one road for every harness, before any spawn.
           // Writer-sweep options per backend (P1 codex double-writer, see

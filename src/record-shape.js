@@ -796,7 +796,7 @@ function unknownFieldsSample(record) {
 // correction, a RUNNING call stopped (src/permission-outcome.js `stopped`) — so no FIELDS_314) + 2.1.319 (2026-11-06 — the box's claude
 // self-updated: one new subtype (session_writes_lost, HANDLED, a warning line), 19 fields + one nested key: FIELDS_319; two zod non-records,
 // file_unchanged gone (no row ever named it); one more sentence, OU — an Agent call its process died under) + 2.1.321 (2026-11-09 —
-// npm's newest, NOT the box's (it stays on 2.1.319 until the owner updates): two new subtypes (ui_notify, ui_notify_cancel, the plugin
+// npm's newest that day, and the box's claude from 12:54 PT (the owner installed it; the hotfix .387): two new subtypes (ui_notify, ui_notify_cancel, the plugin
 // UI host's, card-less), 2 fields on result: FIELDS_321; one field off a stream shape: FIELDS_321_ELSEWHERE; the 16 sentences renamed). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build

@@ -269,7 +269,6 @@ console.log('§4 THE CENSUS — every role === \'user\' site in src/lib/ reads t
     ['src/lib/chat-run-summary.js', "if (m.role === 'user') return userNoteOf(m);", true],
     ['src/lib/chat-view.js', "const msgId = msg.role === 'user' ? (msg.webuiMsgId", 'a bubble\'s queue identity (the wrapper\'s queue row joins it), not who wrote it'],
     ['src/lib/chat-view.js', "add(t('Role'), msg.role === 'assistant'", 'the record-info dialog prints the record\'s ROLE field verbatim — a role, not an author'],
-    ['src/lib/chat-view.js', "if (msg.role === 'user' && this._statusBar) {", 'the /model echo parser (the status bar\'s model), not a list'],
     ['src/lib/chat-view.js', "this._channelTouches?.noteTurn(msg.ts)", 'a turn\'s instant on the channel-touch timeline (any user record starts a turn), not a list of the person\'s words'],
     ['src/lib/chat-view.js', "if (msg.role === 'user' && !msg.imageAttachment) {", true],
     ['src/lib/chat-view.js', "this._renderers?.resolveContextFullCards && isCompactSummaryText(", 'the compaction marks retire the "Prompt is too long" cards by the summary\'s own text rule (isCompactSummaryText — personRow asks it for a record nobody typed): a retirement of advice cards, not a list of who wrote what'],

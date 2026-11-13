@@ -721,7 +721,7 @@ function restoreSessions() {
     }
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
-    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     session._lastRequestAt = Number(meta.lastRequestAt) || undefined; // lane cache-warmth-tiles r1a′: the last model request survives a restart (the prompt cache does)
     session._lastRequestMember = (typeof meta.lastRequestMember === 'string' && meta.lastRequestMember) || null; // r3: and the member that served it (where the cache lives)
@@ -882,7 +882,7 @@ function restoreAgentdPipeSessions() {
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
       _forkRequested: restoredForkPending(meta), // a pending fork re-opened by the daemon still adopts its own id (parser or lock capture) — round 3
       agentdSession: true, keeperSid: id, agentdPipe: true,
-      _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
+      _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0, ...require('./model-ask.js').hydratedFacts(meta),
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _lastRequestAt: Number(meta.lastRequestAt) || undefined, // lane cache-warmth-tiles r1a′: the last model request survives a restart
       _lastRequestMember: (typeof meta.lastRequestMember === 'string' && meta.lastRequestMember) || null, // r3: and the member that served it
@@ -998,7 +998,7 @@ async function readoptOrphanKeeperSessions() {
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
-    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     session._lastRequestAt = Number(meta.lastRequestAt) || undefined; // lane cache-warmth-tiles r1a′: the last model request survives a restart (the prompt cache does)
     session._lastRequestMember = (typeof meta.lastRequestMember === 'string' && meta.lastRequestMember) || null; // r3: and the member that served it (where the cache lives)

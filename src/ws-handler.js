@@ -676,12 +676,26 @@ function registerWsHandler(wss, ctx) {
           break;
         }
         case 'set-model': {
-          { const s2 = activeSessions.get(data.sessionId); if (s2) { s2._pickedModel = data.model || null; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }, { durable: true }).then((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } }); } catch { } } }   // round 3 (smaller 6a): its promise is never dropped — a failure is said
+          // THE DOOR (lane fable-52-cli-321 r5): a model a frame names is a string, trimmed, bounded, id-shaped — anything else and
+          // the frame is refused WHOLE (nothing changes, nothing reaches the CLI) and its sender is told. A frame that names no model
+          // (a lock set or lifted) changes no model (law D). THE LOCK ROAD IS MASTER'S CODE (round 14): what a Lock holds, its echo
+          // upgrade (A5), the repin — master's lines; where the 1M context lives is B-6c55's.
+          const MA = require('./server/model-ask.js');
+          const door = MA.setModelDoor(data);
+          // the refusal names its press (reqId) and its REASON (a code the client turns into the person's language — r7)
+          const refuse = (reason, why) => { try { ws.send(JSON.stringify({ type: 'error', code: 'model-refused', reason, scope: 'action', sessionId: data.sessionId, reqId: data.reqId ?? null, error: `Model not changed: ${why}`, message: `Model not changed: ${why}` })); } catch { } };
+          if (!door.ok) { refuse('not-a-model-id', door.why); break; }
+          const model = door.model;
+          const ask0 = (() => { const s0 = activeSessions.get(data.sessionId); return s0 ? require('./server/stream-wall.js').ownModelOf(s0) : null; })();
+          // a pick goes to the CLI: its live echo answers it, in the order sent (model-ask notePick / noteEcho — round 15)
+          { const s1 = activeSessions.get(data.sessionId); if (s1 && model) MA.notePick(s1, model); }
+          { const s2 = activeSessions.get(data.sessionId); if (s2 && model) { s2._pickedModel = model; s2._pickedModelAt = Date.now(); if (data.model) s2._modelOrigin = 'chosen'; try { writeSessionMeta(s2.sockName, { ...readSessionMeta(s2.sockName), pickedModel: s2._pickedModel, pickedModelAt: s2._pickedModelAt, modelOrigin: s2._modelOrigin || null }, { durable: true }).then((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } }); } catch { } } }   // round 3 (smaller 6a): its promise is never dropped — a failure is said
           const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat' && (data.model || 'lock' in data)) {
+          let lockSaid = null;   // the lock frame's promise, when this frame moved the lock (its broadcast waits for the durable write)
+          if (session?.pty && session.mode === 'chat' && (model || 'lock' in data)) {
             const adapter = adapterRegistry.get(session.backend);
             try {
-              if (data.model && adapter?.formatSetModel) session.pty.write(adapter.formatSetModel(data.model) + '\n');
+              if (model && adapter?.formatSetModel) session.pty.write(adapter.formatSetModel(model) + '\n');
               // Model LOCK v2 (#6, user-corrected semantics): fallback stays
               // ALLOWED — the lock records the TARGET model, and the server
               // re-pins it via set_model at every turn end where the served
@@ -691,20 +705,30 @@ function registerWsHandler(wss, ctx) {
               if ('lock' in data) {
                 session._modelLocked = !!data.lock;
                 session._lockedModel = data.lock ? (data.lockModel || session._servedModel || null) : null;
-                Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), modelLocked: session._modelLocked, lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {   // round 2 (law B): a person's act — the writer's NEXT write, the ANSWER after it
+                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), modelLocked: session._modelLocked, lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {   // round 2 (law B): a person's act — the writer's NEXT write, the ANSWER after it
                   broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                   broadcastActiveSessions(); ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
                 }, () => { });
-              } else if (data.model && session._modelLocked) {
+              } else if (model && session._modelLocked) {
                 // changing the model while locked re-targets the lock
-                session._lockedModel = data.model;
-                Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {
+                session._lockedModel = model;
+                lockSaid = Promise.resolve(session.sockName ? writeSessionMeta(session.sockName, { ...readSessionMeta(session.sockName), lockedModel: session._lockedModel }, { durable: true }) : true).then((ok) => {
                   broadcastToSession(session, data.sessionId, require('./server/stream-wall.js').lockFrame(session, data.sessionId)); // every client of the conversation, live (F1)
                   ((ok) => { if (ok === false) { try { ws.send(JSON.stringify({ type: 'error', code: 'not-durable', scope: 'action', sessionId: data.sessionId, error: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.', message: 'Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.' })); } catch { } } })(ok);
                 }, () => { });
               }
             } catch {}
           }
+          // the ask moved only if its VALUE moved (law D: a lock set or lifted on the same value takes no number), and EVERY client of a
+          // harness that declares these facts is told (src/server/model-ask.js — lane fable-52-cli-321 r4, r5, round 14)
+          // (the facts and the answer go AFTER the lock frame when this frame moved the lock — hub-loop-stalls commit 2 sends that frame once
+          // its durable write answers; a page told the facts while it still held the old lock would draw them under it, then unlock stale)
+          { const s3 = activeSessions.get(data.sessionId); if (s3 && (model || 'lock' in data)) MA.askAfter(s3, ask0, { readSessionMeta, writeSessionMeta }); }
+          const tellFacts = () => { const s3 = activeSessions.get(data.sessionId); if (s3 && (model || 'lock' in data)) MA.broadcastFacts(s3, data.sessionId, broadcastToSession); };
+          // EVERY frame that passed the door is ANSWERED to its sender (r6) — the facts as they stand, even when nothing moved — so the
+          // pressing client's press always hears its fate; it never invents a fact or a number of its own
+          const answer = () => { const s4 = activeSessions.get(data.sessionId); if (s4) { try { ws.send(JSON.stringify(MA.answerFrame(s4, data.sessionId, data.reqId))); } catch { } } };
+          if (lockSaid) lockSaid.then(() => { tellFacts(); answer(); }, () => { tellFacts(); answer(); }); else { tellFacts(); answer(); }
           break;
         }
 
@@ -1389,6 +1413,10 @@ function registerWsHandler(wss, ctx) {
               // reconnecting second client showing LOCKED forever after an unlock
               chatStatus.modelLocked = !!session._modelLocked;
               chatStatus.lockedModel = session._lockedModel || null;
+              session._transcriptModel = chatStatus.lastAsked || chatStatus.model || null;   // the model the conversation would continue with — the record's LAST (round 11; else the attach's) — a Lock's target when nothing else is known (round 9)
+              // THE MODEL FACTS (lane fable-52-cli-321 r4): the ask (the lock, else the pick, else the spawn model), the lock and the
+              // served model, each numbered from the conversation's one counter — the chip shows these and nothing a client draws
+              { const MA = require('./server/model-ask.js'); if (MA.declares(session)) Object.assign(chatStatus, MA.modelFacts(session)); }   // DECLARED on the harness's capability row (r5) — never inferred from a key
               // ONE sidecar read for BOTH wrapper adverts below: resolveWrapperFiles
               // walks /proc when the sidecar is missing (collision sessions), and
               // doing that twice inside the ws attach handler is the 2.369.16 law
