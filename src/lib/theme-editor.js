@@ -1,82 +1,83 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
-import { showToast, showConfirmDialog, uiScale } from './utils.js';
+import { showToast, showConfirmDialog, uiScale, escHtml } from './utils.js';
+import { t, tc } from './i18n.js'; // lane ui-language (the walk's gear-and-system-2: the Theme Editor was English in every language)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 
 // All CSS custom properties that themes define
 const CSS_VAR_DEFS = [
   // Backgrounds
-  { key: '--bg-root', label: 'Root', group: 'Backgrounds' },
-  { key: '--bg-workspace', label: 'Workspace', group: 'Backgrounds' },
-  { key: '--bg-window', label: 'Window', group: 'Backgrounds' },
-  { key: '--bg-titlebar', label: 'Title Bar', group: 'Backgrounds' },
-  { key: '--bg-titlebar-active', label: 'Title Bar (active)', group: 'Backgrounds' },
-  { key: '--bg-toolbar', label: 'Toolbar', group: 'Backgrounds' },
-  { key: '--bg-taskbar', label: 'Taskbar', group: 'Backgrounds' },
-  { key: '--bg-input', label: 'Input', group: 'Backgrounds' },
-  { key: '--bg-dialog', label: 'Dialog', group: 'Backgrounds' },
-  { key: '--bg-sidebar', label: 'Sidebar', group: 'Backgrounds' },
+  { key: '--bg-root', label: t('Root'), group: 'Backgrounds' },
+  { key: '--bg-workspace', label: t('Workspace'), group: 'Backgrounds' },
+  { key: '--bg-window', label: t('Window'), group: 'Backgrounds' },
+  { key: '--bg-titlebar', label: t('Title Bar'), group: 'Backgrounds' },
+  { key: '--bg-titlebar-active', label: t('Title Bar (active)'), group: 'Backgrounds' },
+  { key: '--bg-toolbar', label: t('Toolbar'), group: 'Backgrounds' },
+  { key: '--bg-taskbar', label: t('Taskbar'), group: 'Backgrounds' },
+  { key: '--bg-input', label: t('Input'), group: 'Backgrounds' },
+  { key: '--bg-dialog', label: t('Dialog'), group: 'Backgrounds' },
+  { key: '--bg-sidebar', label: t('Sidebar'), group: 'Backgrounds' },
   // Text
-  { key: '--text', label: 'Primary', group: 'Text' },
-  { key: '--text-secondary', label: 'Secondary', group: 'Text' },
-  { key: '--text-dim', label: 'Dim', group: 'Text' },
+  { key: '--text', label: t('Primary'), group: 'Text' },
+  { key: '--text-secondary', label: t('Secondary'), group: 'Text' },
+  { key: '--text-dim', label: t('Dim'), group: 'Text' },
   // Accent
-  { key: '--accent', label: 'Accent', group: 'Accent' },
-  { key: '--accent-hover', label: 'Accent Hover', group: 'Accent' },
-  { key: '--accent-dim', label: 'Accent Dim', group: 'Accent', isRgba: true },
+  { key: '--accent', label: t('Accent'), group: 'Accent' },
+  { key: '--accent-hover', label: t('Accent Hover'), group: 'Accent' },
+  { key: '--accent-dim', label: t('Accent Dim'), group: 'Accent', isRgba: true },
   // Status
-  { key: '--green', label: 'Green', group: 'Status' },
-  { key: '--red', label: 'Red', group: 'Status' },
-  { key: '--yellow', label: 'Yellow', group: 'Status' },
-  { key: '--blue', label: 'Blue', group: 'Status' },
+  { key: '--green', label: t('Green'), group: 'Status' },
+  { key: '--red', label: t('Red'), group: 'Status' },
+  { key: '--yellow', label: t('Yellow'), group: 'Status' },
+  { key: '--blue', label: t('Blue'), group: 'Status' },
   // lane cache-warmth-tiles: the five warmth tokens. `derived` = the theme's own default (public/style.css derives each
   // from the theme's raw status hues — q-059 r5: green → blue → amber → red, expired = dim text at 45 %) — a row starts as
   // that text, so a theme saved from a built-in base keeps deriving from ITS hues instead of freezing the base's; any CSS
   // colour typed here overrides it
-  { key: '--warmth-fresh', label: 'Fresh (0–20 of 60 min)', group: 'Cache warmth', isText: true, derived: 'var(--green)' },
-  { key: '--warmth-mid', label: 'Mid (20–40)', group: 'Cache warmth', isText: true, derived: 'var(--blue, #3b82f6)' },
-  { key: '--warmth-late', label: 'Late (40–50)', group: 'Cache warmth', isText: true, derived: 'var(--yellow)' },
-  { key: '--warmth-critical', label: 'Critical (50–60)', group: 'Cache warmth', isText: true, derived: 'var(--red)' },
-  { key: '--warmth-expired', label: 'Expired', group: 'Cache warmth', isText: true, derived: 'color-mix(in srgb, var(--text-dim) 45%, transparent)' },
+  { key: '--warmth-fresh', label: t('Fresh (0–20 of 60 min)'), group: 'Cache warmth', isText: true, derived: 'var(--green)' },
+  { key: '--warmth-mid', label: t('Mid (20–40)'), group: 'Cache warmth', isText: true, derived: 'var(--blue, #3b82f6)' },
+  { key: '--warmth-late', label: t('Late (40–50)'), group: 'Cache warmth', isText: true, derived: 'var(--yellow)' },
+  { key: '--warmth-critical', label: t('Critical (50–60)'), group: 'Cache warmth', isText: true, derived: 'var(--red)' },
+  { key: '--warmth-expired', label: t('Expired'), group: 'Cache warmth', isText: true, derived: 'color-mix(in srgb, var(--text-dim) 45%, transparent)' },
   // Borders
-  { key: '--border', label: 'Border', group: 'Borders', isRgba: true },
-  { key: '--border-active', label: 'Border Active', group: 'Borders', isRgba: true },
-  { key: '--bg-hover', label: 'Hover', group: 'Borders', isRgba: true },
+  { key: '--border', label: t('Border'), group: 'Borders', isRgba: true },
+  { key: '--border-active', label: t('Border Active'), group: 'Borders', isRgba: true },
+  { key: '--bg-hover', label: t('Hover'), group: 'Borders', isRgba: true },
   // Terminal
-  { key: '--terminal-bg', label: 'Terminal BG', group: 'Terminal CSS' },
-  { key: '--terminal-fg', label: 'Terminal FG', group: 'Terminal CSS' },
-  { key: '--terminal-cursor', label: 'Terminal Cursor', group: 'Terminal CSS' },
+  { key: '--terminal-bg', label: t('Terminal BG'), group: 'Terminal CSS' },
+  { key: '--terminal-fg', label: t('Terminal FG'), group: 'Terminal CSS' },
+  { key: '--terminal-cursor', label: t('Terminal Cursor'), group: 'Terminal CSS' },
   // Effects
-  { key: '--shadow-window', label: 'Window Shadow', group: 'Effects', isText: true },
-  { key: '--shadow-active', label: 'Active Shadow', group: 'Effects', isText: true },
+  { key: '--shadow-window', label: t('Window Shadow'), group: 'Effects', isText: true },
+  { key: '--shadow-active', label: t('Active Shadow'), group: 'Effects', isText: true },
   // Dimensions
-  { key: '--radius', label: 'Border Radius', group: 'Dimensions', isText: true },
-  { key: '--radius-sm', label: 'Border Radius (sm)', group: 'Dimensions', isText: true },
+  { key: '--radius', label: t('Border Radius'), group: 'Dimensions', isText: true },
+  { key: '--radius-sm', label: t('Border Radius (sm)'), group: 'Dimensions', isText: true },
 ];
 
 const TERMINAL_COLOR_DEFS = [
-  { key: 'background', label: 'Background', group: 'Base' },
-  { key: 'foreground', label: 'Foreground', group: 'Base' },
-  { key: 'cursor', label: 'Cursor', group: 'Base' },
-  { key: 'cursorAccent', label: 'Cursor Accent', group: 'Base' },
-  { key: 'selectionBackground', label: 'Selection', group: 'Base', isRgba: true },
+  { key: 'background', label: t('Background'), group: 'Base' },
+  { key: 'foreground', label: t('Foreground'), group: 'Base' },
+  { key: 'cursor', label: t('Cursor'), group: 'Base' },
+  { key: 'cursorAccent', label: t('Cursor Accent'), group: 'Base' },
+  { key: 'selectionBackground', label: t('Selection'), group: 'Base', isRgba: true },
   // Normal
-  { key: 'black', label: 'Black', group: 'Normal' },
-  { key: 'red', label: 'Red', group: 'Normal' },
-  { key: 'green', label: 'Green', group: 'Normal' },
-  { key: 'yellow', label: 'Yellow', group: 'Normal' },
-  { key: 'blue', label: 'Blue', group: 'Normal' },
-  { key: 'magenta', label: 'Magenta', group: 'Normal' },
-  { key: 'cyan', label: 'Cyan', group: 'Normal' },
-  { key: 'white', label: 'White', group: 'Normal' },
+  { key: 'black', label: t('Black'), group: 'Normal' },
+  { key: 'red', label: t('Red'), group: 'Normal' },
+  { key: 'green', label: t('Green'), group: 'Normal' },
+  { key: 'yellow', label: t('Yellow'), group: 'Normal' },
+  { key: 'blue', label: t('Blue'), group: 'Normal' },
+  { key: 'magenta', label: t('Magenta'), group: 'Normal' },
+  { key: 'cyan', label: t('Cyan'), group: 'Normal' },
+  { key: 'white', label: t('White'), group: 'Normal' },
   // Bright
-  { key: 'brightBlack', label: 'Bright Black', group: 'Bright' },
-  { key: 'brightRed', label: 'Bright Red', group: 'Bright' },
-  { key: 'brightGreen', label: 'Bright Green', group: 'Bright' },
-  { key: 'brightYellow', label: 'Bright Yellow', group: 'Bright' },
-  { key: 'brightBlue', label: 'Bright Blue', group: 'Bright' },
-  { key: 'brightMagenta', label: 'Bright Magenta', group: 'Bright' },
-  { key: 'brightCyan', label: 'Bright Cyan', group: 'Bright' },
-  { key: 'brightWhite', label: 'Bright White', group: 'Bright' },
+  { key: 'brightBlack', label: t('Bright Black'), group: 'Bright' },
+  { key: 'brightRed', label: t('Bright Red'), group: 'Bright' },
+  { key: 'brightGreen', label: t('Bright Green'), group: 'Bright' },
+  { key: 'brightYellow', label: t('Bright Yellow'), group: 'Bright' },
+  { key: 'brightBlue', label: t('Bright Blue'), group: 'Bright' },
+  { key: 'brightMagenta', label: t('Bright Magenta'), group: 'Bright' },
+  { key: 'brightCyan', label: t('Bright Cyan'), group: 'Bright' },
+  { key: 'brightWhite', label: t('Bright White'), group: 'Bright' },
 ];
 
 const CSS_VAR_GROUPS = [...new Set(CSS_VAR_DEFS.map(d => d.group))];
@@ -141,7 +142,7 @@ class ThemeEditor {
     const header = document.createElement('div');
     header.className = 'theme-editor-header';
     const title = document.createElement('h3');
-    title.textContent = 'Theme Editor';
+    title.textContent = t('Theme Editor');
     const closeBtn = document.createElement('button');
     closeBtn.className = 'dialog-close';
     closeBtn.textContent = '\u2715';
@@ -157,7 +158,7 @@ class ThemeEditor {
 
     // "Start from" selector
     const fromLabel = document.createElement('label');
-    fromLabel.textContent = 'Base:';
+    fromLabel.textContent = t('Base:');
     const fromSel = document.createElement('select');
     fromSel.className = 'theme-editor-select';
     for (const name of BUILTIN_THEMES) {
@@ -168,7 +169,7 @@ class ThemeEditor {
     const customNames = Object.keys(this._customThemes);
     if (customNames.length) {
       const sep = document.createElement('option');
-      sep.disabled = true; sep.textContent = '\u2500\u2500 Custom \u2500\u2500';
+      sep.disabled = true; sep.textContent = '\u2500\u2500 ' + t('Custom') + ' \u2500\u2500';
       fromSel.appendChild(sep);
       for (const name of customNames) {
         const o = document.createElement('option');
@@ -185,10 +186,10 @@ class ThemeEditor {
 
     // Theme name input
     const nameLabel = document.createElement('label');
-    nameLabel.textContent = 'Name:';
+    nameLabel.textContent = t('Name:');
     const nameInput = document.createElement('input');
     nameInput.className = 'theme-editor-name';
-    nameInput.placeholder = 'My Theme';
+    nameInput.placeholder = t('My Theme');
     if (baseTheme.startsWith('custom-')) {
       nameInput.value = baseTheme.slice(7);
     }
@@ -196,13 +197,13 @@ class ThemeEditor {
     // Save button
     const saveBtn = document.createElement('button');
     saveBtn.className = 'theme-editor-save';
-    saveBtn.textContent = 'Save';
+    saveBtn.textContent = t('Save');
     saveBtn.onclick = () => this._save(nameInput.value.trim());
 
     // Delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'theme-editor-delete';
-    deleteBtn.textContent = 'Delete';
+    deleteBtn.textContent = t('Delete');
     deleteBtn.onclick = () => this._delete(fromSel, nameInput);
 
     controls.append(fromLabel, fromSel, nameLabel, nameInput, saveBtn, deleteBtn);
@@ -275,7 +276,7 @@ class ThemeEditor {
     const cssSection = document.createElement('div');
     cssSection.className = 'theme-editor-section';
     const cssSectionTitle = document.createElement('h4');
-    cssSectionTitle.textContent = 'UI Colors';
+    cssSectionTitle.textContent = t('UI Colors');
     cssSectionTitle.className = 'theme-editor-section-title';
     cssSection.appendChild(cssSectionTitle);
 
@@ -291,7 +292,7 @@ class ThemeEditor {
     const termSection = document.createElement('div');
     termSection.className = 'theme-editor-section';
     const termTitle = document.createElement('h4');
-    termTitle.textContent = 'Terminal ANSI Colors';
+    termTitle.textContent = t('Terminal ANSI Colors');
     termTitle.className = 'theme-editor-section-title';
     termSection.appendChild(termTitle);
 
@@ -307,71 +308,72 @@ class ThemeEditor {
   _buildPreviewCard() {
     const card = document.createElement('div');
     card.className = 'theme-preview-card';
+    const w = (x) => escHtml(t(x)), a = (x) => escHtml(tc('ansi', x)); // the preview's words, in the reader's language
     card.innerHTML = `
       <div class="tp-row">
         <div class="tp-bg" style="background:var(--bg-root)" title="--bg-root">
           <div class="tp-bg" style="background:var(--bg-sidebar);flex:0 0 60px;padding:6px" title="--bg-sidebar">
-            <div style="font-size:9px;color:var(--text-dim)">Sidebar</div>
-            <div style="font-size:10px;color:var(--text);margin-top:3px">Session</div>
+            <div style="font-size:9px;color:var(--text-dim)">${w('Sidebar')}</div>
+            <div style="font-size:10px;color:var(--text);margin-top:3px">${w('Session')}</div>
             <div style="font-size:9px;color:var(--text-secondary);margin-top:1px">~/project</div>
           </div>
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;padding:4px">
             <div class="tp-bg" style="background:var(--bg-toolbar);padding:4px 8px;border-radius:var(--radius-sm)" title="--bg-toolbar">
-              <span style="font-size:9px;color:var(--text-dim)">Toolbar</span>
-              <span style="font-size:9px;color:var(--accent);margin-left:8px;cursor:default" title="--accent">Accent</span>
-              <span style="font-size:9px;color:var(--accent-hover);margin-left:4px" title="--accent-hover">Hover</span>
+              <span style="font-size:9px;color:var(--text-dim)">${w('Toolbar')}</span>
+              <span style="font-size:9px;color:var(--accent);margin-left:8px;cursor:default" title="--accent">${w('Accent')}</span>
+              <span style="font-size:9px;color:var(--accent-hover);margin-left:4px" title="--accent-hover">${w('Hover')}</span>
             </div>
             <div style="flex:1;display:flex;gap:4px">
               <div class="tp-bg" style="background:var(--bg-window);flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);display:flex;flex-direction:column" title="--bg-window">
                 <div style="background:var(--bg-titlebar);padding:3px 6px;border-radius:var(--radius-sm) var(--radius-sm) 0 0;font-size:9px;color:var(--text-dim);display:flex;justify-content:space-between" title="--bg-titlebar">
-                  <span>Window</span><span style="color:var(--green)" title="--green">LIVE</span>
+                  <span>${w('Window')}</span><span style="color:var(--green)" title="--green">${w('Live')}</span>
                 </div>
-                <div style="background:var(--bg-titlebar-active);padding:3px 6px;font-size:9px;color:var(--text);border-bottom:1px solid var(--border-active)" title="--bg-titlebar-active + --border-active">Active Title</div>
+                <div style="background:var(--bg-titlebar-active);padding:3px 6px;font-size:9px;color:var(--text);border-bottom:1px solid var(--border-active)" title="--bg-titlebar-active + --border-active">${w('Active Title')}</div>
                 <div style="flex:1;padding:6px;font-size:9px">
-                  <span style="color:var(--text)" title="--text">Primary text</span><br>
-                  <span style="color:var(--text-secondary)" title="--text-secondary">Secondary text</span><br>
-                  <span style="color:var(--text-dim)" title="--text-dim">Dim text</span>
+                  <span style="color:var(--text)" title="--text">${w('Primary text')}</span><br>
+                  <span style="color:var(--text-secondary)" title="--text-secondary">${w('Secondary text')}</span><br>
+                  <span style="color:var(--text-dim)" title="--text-dim">${w('Dim text')}</span>
                 </div>
               </div>
               <div style="flex:1;display:flex;flex-direction:column;gap:4px">
                 <div class="tp-bg" style="background:var(--bg-dialog);flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px" title="--bg-dialog">
-                  <div style="font-size:9px;color:var(--text)">Dialog</div>
-                  <input style="margin-top:3px;width:calc(100% - 12px);background:var(--bg-input);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:var(--radius-sm);font-size:9px" value="Input field" readonly title="--bg-input">
+                  <div style="font-size:9px;color:var(--text)">${w('Dialog')}</div>
+                  <input style="margin-top:3px;width:calc(100% - 12px);background:var(--bg-input);border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:var(--radius-sm);font-size:9px" value="${w('Input field')}" readonly title="--bg-input">
                   <div style="margin-top:4px;display:flex;gap:3px;flex-wrap:wrap">
-                    <span class="tp-badge" style="background:var(--green);color:#fff" title="--green">Live</span>
-                    <span class="tp-badge" style="background:var(--red);color:#fff" title="--red">Error</span>
-                    <span class="tp-badge" style="background:var(--yellow);color:#000" title="--yellow">Warn</span>
-                    <span class="tp-badge" style="background:var(--blue);color:#fff" title="--blue">Info</span>
+                    <span class="tp-badge" style="background:var(--green);color:#fff" title="--green">${w('Live')}</span>
+                    <span class="tp-badge" style="background:var(--red);color:#fff" title="--red">${w('Error')}</span>
+                    <span class="tp-badge" style="background:var(--yellow);color:#000" title="--yellow">${w('Warn')}</span>
+                    <span class="tp-badge" style="background:var(--blue);color:#fff" title="--blue">${w('Info')}</span>
                   </div>
-                  <div style="margin-top:4px;padding:3px 6px;background:var(--bg-hover);border-radius:var(--radius-sm);font-size:9px;color:var(--text-secondary)" title="--bg-hover">Hover state</div>
+                  <div style="margin-top:4px;padding:3px 6px;background:var(--bg-hover);border-radius:var(--radius-sm);font-size:9px;color:var(--text-secondary)" title="--bg-hover">${w('Hover state')}</div>
                 </div>
               </div>
             </div>
-            <div class="tp-bg" style="background:var(--bg-taskbar);padding:3px 8px;border-radius:var(--radius-sm);font-size:9px;color:var(--text-dim)" title="--bg-taskbar">Taskbar</div>
+            <div class="tp-bg" style="background:var(--bg-taskbar);padding:3px 8px;border-radius:var(--radius-sm);font-size:9px;color:var(--text-dim)" title="--bg-taskbar">${w('Taskbar')}</div>
           </div>
         </div>
       </div>
       <div class="tp-row" style="margin-top:6px">
-        <div class="tp-terminal" style="background:var(--terminal-bg);border-radius:var(--radius-sm);padding:6px;font-family:'SF Mono','Fira Code',monospace;font-size:10px;line-height:1.5" title="Terminal">
+        <div class="tp-terminal" style="background:var(--terminal-bg);border-radius:var(--radius-sm);padding:6px;font-family:'SF Mono','Fira Code',monospace;font-size:10px;line-height:1.5" title="${w('Terminal')}">
           <span style="color:var(--terminal-fg)" title="--terminal-fg">$ </span><span style="color:var(--terminal-cursor);text-decoration:underline" title="--terminal-cursor">_</span><br>
-          <span style="color:var(--terminal-fg)">Normal </span>
-          <span class="tp-ansi" style="color:var(--t-black,#000)" data-c="black">Blk</span>
-          <span class="tp-ansi" style="color:var(--t-red,red)" data-c="red">Red</span>
-          <span class="tp-ansi" style="color:var(--t-green,green)" data-c="green">Grn</span>
-          <span class="tp-ansi" style="color:var(--t-yellow,yellow)" data-c="yellow">Yel</span>
-          <span class="tp-ansi" style="color:var(--t-blue,blue)" data-c="blue">Blu</span>
-          <span class="tp-ansi" style="color:var(--t-magenta,magenta)" data-c="magenta">Mag</span>
-          <span class="tp-ansi" style="color:var(--t-cyan,cyan)" data-c="cyan">Cyn</span>
-          <span class="tp-ansi" style="color:var(--t-white,white)" data-c="white">Wht</span><br>
-          <span style="color:var(--terminal-fg)">Bright </span>
-          <span class="tp-ansi" data-c="brightBlack">Blk</span>
-          <span class="tp-ansi" data-c="brightRed">Red</span>
-          <span class="tp-ansi" data-c="brightGreen">Grn</span>
-          <span class="tp-ansi" data-c="brightYellow">Yel</span>
-          <span class="tp-ansi" data-c="brightBlue">Blu</span>
-          <span class="tp-ansi" data-c="brightMagenta">Mag</span>
-          <span class="tp-ansi" data-c="brightCyan">Cyn</span>
-          <span class="tp-ansi" data-c="brightWhite">Wht</span>
+          <span style="color:var(--terminal-fg)">${w('Normal')} </span>
+          <span class="tp-ansi" style="color:var(--t-black,#000)" data-c="black">${a('Blk')}</span>
+          <span class="tp-ansi" style="color:var(--t-red,red)" data-c="red">${a('Red')}</span>
+          <span class="tp-ansi" style="color:var(--t-green,green)" data-c="green">${a('Grn')}</span>
+          <span class="tp-ansi" style="color:var(--t-yellow,yellow)" data-c="yellow">${a('Yel')}</span>
+          <span class="tp-ansi" style="color:var(--t-blue,blue)" data-c="blue">${a('Blu')}</span>
+          <span class="tp-ansi" style="color:var(--t-magenta,magenta)" data-c="magenta">${a('Mag')}</span>
+          <span class="tp-ansi" style="color:var(--t-cyan,cyan)" data-c="cyan">${a('Cyn')}</span>
+          <span class="tp-ansi" style="color:var(--t-white,white)" data-c="white">${a('Wht')}</span><br>
+          <span style="color:var(--terminal-fg)">${w('Bright')} </span>
+          <span class="tp-ansi" data-c="brightBlack">${a('Blk')}</span>
+          <span class="tp-ansi" data-c="brightRed">${a('Red')}</span>
+          <span class="tp-ansi" data-c="brightGreen">${a('Grn')}</span>
+          <span class="tp-ansi" data-c="brightYellow">${a('Yel')}</span>
+          <span class="tp-ansi" data-c="brightBlue">${a('Blu')}</span>
+          <span class="tp-ansi" data-c="brightMagenta">${a('Mag')}</span>
+          <span class="tp-ansi" data-c="brightCyan">${a('Cyn')}</span>
+          <span class="tp-ansi" data-c="brightWhite">${a('Wht')}</span>
         </div>
       </div>`;
 
@@ -396,7 +398,7 @@ class ThemeEditor {
 
     const label = document.createElement('div');
     label.className = 'theme-editor-group-label';
-    label.textContent = groupName;
+    label.textContent = t(groupName);
     wrapper.appendChild(label);
 
     const grid = document.createElement('div');
@@ -521,11 +523,11 @@ class ThemeEditor {
   }
 
   async _save(name) {
-    if (!name) { showToast('Please enter a theme name.', { type: 'error' }); return; }
-    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) { showToast('Name must be alphanumeric (spaces, hyphens, underscores allowed).', { type: 'error' }); return; }
-    if (name.length > 50) { showToast('Name too long (max 50 characters).', { type: 'error' }); return; }
+    if (!name) { showToast(t('Please enter a theme name.'), { type: 'error' }); return; }
+    if (!/^[a-zA-Z0-9 _-]+$/.test(name)) { showToast(t('Name must be letters, digits, spaces, hyphens or underscores.'), { type: 'error' }); return; }
+    if (name.length > 50) { showToast(t('Name too long (max 50 characters).'), { type: 'error' }); return; }
     const builtIn = ['dark', 'light', 'dracula', 'nord', 'solarized', 'monokai'];
-    if (builtIn.includes(name.toLowerCase())) { showToast('Cannot use a built-in theme name.', { type: 'error' }); return; }
+    if (builtIn.includes(name.toLowerCase())) { showToast(t('Cannot use a built-in theme name.'), { type: 'error' }); return; }
 
     try {
       const res = await fetch('/api/custom-themes', {
@@ -533,8 +535,8 @@ class ThemeEditor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, css: this._cssValues, terminal: this._termValues }),
       });
-      if (!res.ok) { const e = await res.json(); showToast(e.error || 'Save failed', { type: 'error' }); return; }
-    } catch (e) { showToast('Save failed: ' + e.message, { type: 'error' }); return; }
+      if (!res.ok) { const e = await res.json(); showToast(e.error || t('Save failed'), { type: 'error' }); return; }
+    } catch (e) { showToast(t('Save failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     // Register locally
     this.app.themeManager.registerCustomTheme(name, this._cssValues, this._termValues);
@@ -550,14 +552,14 @@ class ThemeEditor {
 
   async _delete(fromSel, nameInput) {
     const current = fromSel.value;
-    if (!current.startsWith('custom-')) { showToast('Can only delete custom themes.', { type: 'error' }); return; }
+    if (!current.startsWith('custom-')) { showToast(t('Can only delete custom themes.'), { type: 'error' }); return; }
     const name = current.slice(7);
-    if (!(await showConfirmDialog({ title: 'Delete Theme', message: `Delete custom theme "${name}"?`, confirmText: 'Delete', danger: true }))) return;
+    if (!(await showConfirmDialog({ title: t('Delete theme'), message: t('Delete custom theme “{name}”?', { name }), confirmText: t('Delete'), danger: true }))) return;
 
     try {
       const res = await fetch('/api/custom-themes/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (!res.ok) { const e = await res.json(); showToast(e.error || 'Delete failed', { type: 'error' }); return; }
-    } catch (e) { showToast('Delete failed: ' + e.message, { type: 'error' }); return; }
+      if (!res.ok) { const e = await res.json(); showToast(e.error || t('Delete failed'), { type: 'error' }); return; }
+    } catch (e) { showToast(t('Delete failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     const wasActive = this.app.themeManager.current === name;
     this.app.themeManager.unregisterCustomTheme(name);

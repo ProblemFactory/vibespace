@@ -9,6 +9,7 @@ import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
+import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js'; // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
 const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
@@ -1137,9 +1138,11 @@ export class ChatStatusBar {
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
-    const permLabel = this._statusPermMode || 'default';
-    const permTitle = this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode');
-    chip('perm', 'chat-status-perm chat-status-clickable', permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
+    const permMode = this._statusPermMode || 'default';
+    const permLabel = permissionModeShort(this._backend, permMode, t) || permMode;
+    const permWords = permissionModeWords(this._backend, permMode, t);
+    const permTitle = (permWords ? permWords + ' — ' : '') + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
+    chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
 
     // Background tasks. The harness's LEVEL signal (setBackgroundTasks), when
     // published, is the count's truth — "N background tasks" — with the
@@ -2377,8 +2380,12 @@ export class ChatStatusBar {
     if (!dropdown) return;
     for (const mode of modes) {
       const item = document.createElement('div');
-      item.className = 'chat-status-dropdown-item' + (mode === this._statusPermMode ? ' active' : '');
-      item.textContent = mode;
+      item.className = 'chat-status-dropdown-item chat-status-perm-item' + (mode === this._statusPermMode ? ' active' : '') + (permissionModeDanger(this._backend, mode) ? ' danger' : '');
+      // the words a person reads; the protocol value stays as a dim hint (the word a manual or an error uses)
+      const words = document.createElement('span');
+      words.textContent = permissionModeWords(this._backend, mode, t) || mode;
+      item.appendChild(words);
+      if (permissionModeWords(this._backend, mode, t)) { const raw = document.createElement('span'); raw.className = 'chat-status-perm-raw'; raw.textContent = mode; item.appendChild(raw); }
       item.onclick = (ev) => {
         ev.stopPropagation();
         dropdown.remove();

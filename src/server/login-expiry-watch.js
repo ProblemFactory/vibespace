@@ -64,6 +64,53 @@ const RESOLVED_BY = 'system';
 // after a scheduled one) still counts as continuous observation.
 const WITNESS_SWEEPS = 3;
 
+// lane ui-language (the walk's chat-cards-3: this item stood English on a Chinese card): the SAME words as keys — the page
+// words them in the reader's language; an instant rides as { at } (the page prints it in its own zone and format), a span as
+// a unit key. The stored `text` stays the English above (UserTodoManager.add is idempotent BY TEXT).
+const i18nKey = (s) => s;
+const atOf = (ms) => (Number(ms) > 0 ? { at: Number(ms) } : { key: i18nKey('an unknown time') });
+function spanOf(ms) {
+  const v = Math.abs(Number(ms) || 0);
+  if (v < 90 * 1000) return { key: i18nKey('{n} sec'), params: { n: Math.max(1, Math.round(v / 1000)) } };
+  if (v < 90 * 60e3) return { key: i18nKey('{n} min'), params: { n: Math.round(v / 60e3) } };
+  if (v < 36 * 3600e3) return { key: i18nKey('{n} h'), params: { n: Math.round(v / 3600e3) } };
+  return { key: i18nKey('{n} days'), params: { n: Math.round(v / 86400e3) } };
+}
+/** The item's words as keys (the twin of itemTextFor, branch for branch). */
+function itemWordsFor(stage, name, info, opts = {}) {
+  const when = atOf(info.refreshExpiresAt);
+  if (info?.state === OAT_ONLY) {
+    const until = atOf(info.oatValidUntil);
+    if (stage === OAT_ONLY) return { key: i18nKey('Claude login for "{name}" ended {when} — its sessions keep running on the long-lived token (valid until {until}); only the usage refresh (⟳) needs a re-login in Manage Agents'), params: { name, when, until } };
+    return { key: i18nKey('The long-lived token for "{name}" ends in {left} ({until}) and its login already ended — re-mint the token or re-login in Manage Agents'), params: { name, left: spanOf(info.msLeft), until } };
+  }
+  if (info?.oatExpired) return { key: i18nKey('Claude login and the long-lived token for "{name}" have both ended (token {until}) — every session on it fails; re-mint the token or re-login in Manage Agents'), params: { name, until: atOf(info.oatValidUntil) } };
+  if (info?.state === 'logged-out') {
+    return typeof info.msLeft === 'number' && info.msLeft <= 0
+      ? { key: i18nKey('Claude login for "{name}" is signed out — the CLI cleared its tokens (its login session ended {when}); re-login it in Manage Agents'), params: { name, when } }
+      : { key: i18nKey('Claude login for "{name}" is signed out — the CLI cleared its tokens; re-login it in Manage Agents'), params: { name } };
+  }
+  if (stage === 'expired' || info?.state === 'expired') return { key: i18nKey('Claude login for "{name}" expired {when} — re-login it in Manage Agents'), params: { name, when } };
+  const fits = typeof info.msLeft === 'number' && typeof opts.spanMs === 'number' && opts.spanMs >= info.msLeft && shortSession(opts.spanMs);
+  return fits
+    ? { key: i18nKey('Claude login for "{name}" expires in {left} ({when}) — re-login it in Manage Agents (its last login session lasted only ~{span} — this org\'s session policy may be short)'), params: { name, left: spanOf(info.msLeft), when, span: spanOf(opts.spanMs) } }
+    : { key: i18nKey('Claude login for "{name}" expires in {left} ({when}) — re-login it in Manage Agents'), params: { name, left: spanOf(info.msLeft), when } };
+}
+/** The detail's lines as keys (the twin of the English detail below). */
+function detailWordsFor(a, info) {
+  const ended = typeof info.msLeft === 'number' && info.msLeft <= 0;
+  const state = { 'oat-only': i18nKey('login ended, long-lived token valid'), 'logged-out': i18nKey('signed out'), expired: i18nKey('expired'), expiring: i18nKey('expiring') }[info.state];
+  return [
+    { key: i18nKey('Account: {name}'), params: { name: a.name || a.id } },
+    info.state === OAT_ONLY || ended ? { key: i18nKey('Login session ended: {when}'), params: { when: atOf(info.refreshExpiresAt) } } : { key: i18nKey('Login session ends: {when}'), params: { when: atOf(info.refreshExpiresAt) } },
+    ...(info.state === OAT_ONLY ? [{ key: i18nKey('Long-lived token valid until: {until}'), params: { until: atOf(info.oatValidUntil) } }] : []),
+    { key: i18nKey('State: {state}'), params: { state: state ? { key: state } : String(info.state || '') } },
+    info.state === OAT_ONLY
+      ? { key: i18nKey('This account\'s OAuth login and its long-lived token are two separate facts. Its own sessions start on the token, so they keep running; the usage refresh (⟳) reads the usage panel, which needs the OAuth login (the token is inference-only), and a POOL cannot use the token (a pooled session reads the login file). Re-login from Manage Agents → the account\'s ⋯ menu → Re-login on this machine.') }
+      : { key: i18nKey('A Claude subscription login has its own absolute lifetime — refreshing the access token does NOT extend it. When it runs out the CLI cannot refresh, every turn on this account fails, and VibeSpace can only route around it (pooled sessions) or stop (everything else). Re-login from Manage Agents → the account\'s ⋯ menu → Re-login on this machine.') },
+  ];
+}
+
 function fmtWhen(ms) {
   if (!ms) return 'an unknown time';
   try { return OF.when(ms); } catch { return 'an unknown time'; }
@@ -317,6 +364,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
           urgency: URGENCY[emit] || 'normal',
           by: 'agent',
           sessionName: 'Manage Agents',
+          i18n: { text: itemWordsFor(emit, name, info, { spanMs: span }), detail: detailWordsFor(a, info), source: { key: i18nKey('Manage agents') } },
           // Same tense rule as the text: a deadline in the past "ended", one
           // in the future "ends" — a wiped record can carry either.
           detail: info.state === OAT_ONLY
@@ -365,4 +413,4 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   return { sweep, start, stop, ledger: () => JSON.parse(JSON.stringify(ledger)), seen: () => JSON.parse(JSON.stringify(seen)), watchingSince: () => since, INBOX_KEY, WARN_STAGES };
 }
 
-module.exports = { create, itemTextFor, shortSessionHint, measureLoginSpan, INBOX_KEY, SWEEP_MS, RESOLVED_BY };
+module.exports = { create, itemTextFor, itemWordsFor, detailWordsFor, shortSessionHint, measureLoginSpan, INBOX_KEY, SWEEP_MS, RESOLVED_BY };

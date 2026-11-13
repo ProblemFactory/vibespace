@@ -1119,5 +1119,34 @@ function filedLine(x, id, tray = null) {
 function buttonsOf(type) { const r = ROW_OF[type]; return r && Array.isArray(r.buttons) && r.buttons.length ? r.buttons : null; }
 function buttonsNoteOf(type) { const r = ROW_OF[type]; return r && typeof r.note === 'string' ? r.note : ''; }
 
+/** THE HEADS a system producer files as `sessionName` (lane ui-language, the walk's chat-cards-3: «Manage Agents» stood
+ *  English on a Chinese card). The STORE keeps the producer's English — the page words it HERE, at display, through t();
+ *  a head no live conversation owns and this table does not hold is printed as filed. test-ui-language ⑥ reds a literal
+ *  sessionName head anywhere in src/ that this table does not hold — a new producer adds its row here. */
+const FORYOU_HEADS = Object.freeze({
+  'Channels': i18nKey('Channels'),
+  'Vault': i18nKey('Vault'),
+  'Agent browser': i18nKey('Agent browser'),
+  'Machines': i18nKey('Machines'),
+  'Manage Agents': i18nKey('Manage agents'),
+  'Storage': i18nKey('Storage'),
+  'Voice input · Dropline': i18nKey('Voice input · Dropline'),
+  'VibeSpace integration': i18nKey('VibeSpace integration'),
+  'Usage': i18nKey('Usage'),
+  'Spending': i18nKey('Spending'),
+  'Public URLs (frp)': i18nKey('Public URLs (frp)'),
+  'Plugins': i18nKey('Plugins'),
+  'Page security': i18nKey('Page security'),
+  'Migrations': i18nKey('Migrations'),
+  'Memory': i18nKey('Memory'),
+  'LLM plugin': i18nKey('LLM plugin'),
+  'HTTPS': i18nKey('HTTPS'),
+  'For you': i18nKey('For you'),
+  'Apps': i18nKey('Apps'),
+  'Agent feedback': i18nKey('Agent feedback'),
+});
+/** The words of a filed head, in the reader's language (an unknown head = itself). */
+function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
+
 module.exports = {
-  buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

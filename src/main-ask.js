@@ -33,7 +33,8 @@ const i18nKey = (s) => s;
  *  zh / ja — the suite proves it). `{name}` = the conversation, `{tool}` the
  *  tool, `{line}` the ask's one line. */
 const MAIN_ASK_KINDS = Object.freeze({
-  command: Object.freeze({ en: i18nKey('{name} is waiting for you: permission to run `{line}`'), zh: '{name} 在等你：运行 `{line}` 的许可', ja: '{name} があなたを待っています：`{line}` の実行許可' }),
+  // lane ui-language (the walk's for-you-3): no `…` — the tray draws TEXT, so a backtick showed raw; the whole command is the detail's own line
+  command: Object.freeze({ en: i18nKey('{name} is waiting for your permission to run: {line}'), zh: '{name} 在等你允许运行：{line}', ja: '{name} が実行の許可を待っています：{line}' }),
   tool: Object.freeze({ en: i18nKey('{name} is waiting for you: permission to use {tool} ({line})'), zh: '{name} 在等你：使用 {tool} 的许可（{line}）', ja: '{name} があなたを待っています：{tool} の使用許可（{line}）' }),
   'tool-bare': Object.freeze({ en: i18nKey('{name} is waiting for you: permission to use {tool}'), zh: '{name} 在等你：使用 {tool} 的许可', ja: '{name} があなたを待っています：{tool} の使用許可' }),
   question: Object.freeze({ en: i18nKey('{name} is waiting for you: a question: {line}'), zh: '{name} 在等你：一个问题：{line}', ja: '{name} があなたを待っています：質問：{line}' }),
@@ -43,8 +44,11 @@ const MAIN_ASK_KINDS = Object.freeze({
 const RECORD_KINDS = Object.freeze({ '': 'permission', approval: 'permission', user_input: 'question' });
 /** The tools whose permission ask IS the plan approval. */
 const PLAN_TOOLS = Object.freeze(['ExitPlanMode']);
-/** The detail's way out (English: the store's words; the card in the chat is the answer surface). */
-const WAY_OUT = 'The conversation is paused until you answer. Open the conversation and answer on its card (the “waiting for you” chip at the bottom of the chat jumps to it), or Stop it.';
+/** The detail's way out (English: the store's words; the card in the chat is the answer surface) — filed as an i18n line
+ *  too (lane ui-language, the walk's for-you-1: the tray showed this English sentence in a Chinese interface). */
+const WAY_OUT = i18nKey('The conversation is paused until you answer. Open the conversation and answer on its card (the “waiting for you” chip at the bottom of the chat jumps to it), or Stop it.');
+const REQUEST_LINE = i18nKey('{tool}: {request}');
+const CUT_LINE = i18nKey('… cut here — {n} more characters; the card in the conversation shows the whole request');
 
 const LINE_MAX = 80;
 function oneLine(s) {
@@ -92,9 +96,12 @@ function inboxItemFor(ask, { name = '', sessionId = null } = {}) {
   const whole = String(a.subject || '');
   const cut = whole.length > 6000 ? `${whole.slice(0, 6000)}\n[… cut here — ${whole.length - 6000} more characters; the card in the conversation shows the whole request]` : whole;
   const detail = (cut && row !== 'question' ? `${params.tool}: ${cut}\n\n` : '') + WAY_OUT;
+  // the page's words: a name or tool the ask lacks is a KEY (worded in the person's language), never the store's English
+  const said = { ...params, name: String(name || '').trim() || { key: i18nKey('A conversation') }, tool: a.tool ? a.tool : { key: i18nKey('a tool') } };
+  const lines = cut && row !== 'question' ? [{ key: REQUEST_LINE, params: { tool: said.tool, request: whole.length > 6000 ? whole.slice(0, 6000) : whole } }, ...(whole.length > 6000 ? [{ key: CUT_LINE, params: { n: whole.length - 6000 } }] : [])] : [];
   return {
     text: fill(MAIN_ASK_KINDS[row].en, params), detail,
-    i18n: { text: { key: MAIN_ASK_KINDS[row].en, params } },
+    i18n: { text: { key: MAIN_ASK_KINDS[row].en, params: said }, detail: [...lines, { key: WAY_OUT }] },
     action: { type: MAIN_ASK_ACTION, requestId: String(a.requestId || ''), ...(sessionId ? { sessionId: String(sessionId) } : {}) },
   };
 }

@@ -236,7 +236,8 @@ console.log('— ⑥ the tokens');
   ok('…declared in the block every theme inherits (`:root, [data-theme]`) beside the status tokens they read', /\/\*[\s\S]*\*\/\s*:root, \[data-theme\]$|^:root, \[data-theme\]$/.test(sel) || sel.endsWith(':root, [data-theme]'), sel.slice(-80));
   ok('…and no built-in theme block spells a literal warmth colour of its own', (css.match(/--warmth-(fresh|mid|late|critical|expired)\s*:/g) || []).length === 5);
   const ed = read('src/lib/theme-editor.js');
-  const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: '([^']+)', group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
+  // lane ui-language: a row's label is worded at definition — `label: t('…')` (the Theme Editor was English in every language)
+  const rows = [...ed.matchAll(/\{ key: '(--warmth-[a-z]+)', label: (?:t\()?'([^']+)'\)?, group: 'Cache warmth', isText: true, derived: '([^']+)' \}/g)].map((m) => [m[1], m[3]]);
   ok('the theme editor lists the five under «Cache warmth», each starting as the theme\'s own derivation (r5: the raw hues, expired dim)', rows.length === 5 && rows.every(([k, v]) => want[k] === v), JSON.stringify(rows));
   ok('…and seeds them so (a theme saved from a built-in base keeps deriving from ITS status colours)', /for \(const d of CSS_VAR_DEFS\) if \(d\.derived\) this\._cssValues\[d\.key\] = d\.derived;/.test(code('src/lib/theme-editor.js')));
 }
