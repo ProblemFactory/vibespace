@@ -405,6 +405,27 @@ console.log('⑫ ONE NAME, EACH BUILD\'S REASON IN THE INTERFACE\'S LANGUAGE (�
   await D.getFfmpeg('win-a', (x, bad) => said.push([x, !!bad]), { machine: 'WIN-DESK1' });
   const last = said.length ? said[said.length - 1] : ['', false];
   ok(last[1] && /^FFmpeg 9\.0\.2 was not fetched on WIN-DESK1, and nothing was changed there: FFmpeg 9\.0\.2 \(gyan\.dev\): the download is not the pinned file \(its SHA-256 differs\) · FFmpeg 9\.0\.2 \(BtbN FFmpeg-Builds\): the download failed \(no network, or its address did not answer\)$/.test(last[0]) && !said.some(([x]) => /VS-FFMPEG-ROW|win-a/.test(x)), 'the line says the machine by ONE name (the title\'s), each build\'s reason as the page\'s own sentence; a code line is never said as it streams', said);
+  // pick 3e (主开发's mutant on 3d: host_needs_daemon given the host id again): EVERY fetch road's words from the hub carry no
+  // id — an old agent, the shown digest moved, past its deadline, a lost link, an exit with no line, the machine's own last line
+  {
+    const ID = 'win-zz9';
+    const shaped = (over) => ({ status: () => ({ connected: true, info: { platform: 'win32', capabilities: [] } }), desktopServe: () => { }, streamFacts: async () => ({ ok: true, platform: 'win32', ffmpeg: null }), ...over });
+    const roads = {
+      old_agent: shaped({ runStream: undefined }),
+      past_deadline: shaped({ runStream: async () => ({ code: null, timedOut: true }) }),
+      link_lost: shaped({ runStream: async () => ({ code: null }) }),
+      no_line: shaped({ runStream: async () => ({ code: 1 }) }),
+      its_line: shaped({ runStream: async (c, a, o) => { o.onData(Buffer.from('ffmpeg was not fetched - … - nothing was changed\n')); return { code: 1 }; } }),
+    };
+    const said = {};
+    for (const [name, h] of Object.entries(roads)) {
+      const acc = DA.create({ hosts: { deviceBounded: async () => h, get: (x) => (x === ID ? { id: x } : null), isLocal: () => false }, log: { log() { }, warn() { } }, installMs: 300, pollMs: 25 });
+      try { await acc.installPackage(ID, { what: 'ffmpeg', expectDigest: name === 'its_line' ? 'f'.repeat(32) : null }); said[name] = 'ran'; } catch (e) { said[name] = `${e.code}: ${e.message}`; }
+      if (typeof acc.shutdown === 'function') try { acc.shutdown(); } catch { /* gone */ }
+    }
+    const withId = Object.entries(said).filter(([, w]) => w.includes(ID)).map(([k]) => k);
+    ok(Object.values(said).every((w) => w !== 'ran') && withId.length === 0 && /^host_needs_daemon/.test(said.old_agent) && /^plan_changed/.test(said.its_line), 'EVERY fetch road\'s words from the hub carry NO machine id — an old agent, a moved digest, past its deadline, a lost link, an exit with no line (the page names the machine once, by the title\'s name)', said);
+  }
   // pick 3d (the reader): ONE name — a road with no codes names the machine by the title's name and NEVER rewrites free text
   // (a host id «mac» used to turn «machine» into «WIN-DESK1hine»); the microphone strip's sheet names its machine too
   globalThis.fetch = async () => ({ ok: true, body: new Response(JSON.stringify({ error: 'the fetch reported no exit (the link dropped) — check again; this machine may still be fetching', code: 'install_link_lost' }) + '\n').body });
