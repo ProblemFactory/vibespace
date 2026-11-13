@@ -14,7 +14,7 @@ import { dialAddressPicker, dialStateText, generateConsequenceText } from './dia
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
 import { UI_ICONS } from './icons.js';
-import { needLine } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
+import { needLine, needDoorButton } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line // lane host-stale-dialer: the second-dialer line's warning glyph
 import { keyFileWords } from './key-file-words.js'; // lane key-file-law-stores: .mounts-key cannot open a row's secret ⇒ the row says restore
 import { platformLabel } from '../exit-shell.js'; // lane-exit-run-output E1: the device's stated platform on its row (its shell follows it: Windows ⇒ cmd.exe)
 import { enterSubmits } from './chat-enter-keys.js';
@@ -363,6 +363,8 @@ export function installSidebarMounts(Sidebar) {
       this._hostsData = hd;
       // B-a31a: a refresh keeps the place the person scrolled to — both scrollers, as Sidebar._render keeps them (2.228.3)
       const scrollers = [this.listEl, this.listEl.closest && this.listEl.closest('.sidebar-section')].filter(Boolean), keepScroll = scrollers.map((el) => el.scrollTop);
+      // verifier #2: a key answer leaves with its machine (removed here, or replaced by «Add it again with a key…»)
+      if (this._keyAnswers) for (const id of [...this._keyAnswers.keys()]) if (!hd.hosts.some((h) => h.id === id)) this._keyAnswers.delete(id);
       this.listEl.innerHTML = '';
       const root = document.createElement('div');
       root.className = 'mounts-panel';
@@ -1035,6 +1037,7 @@ export function installSidebarMounts(Sidebar) {
       row.className = 'mounts-row';
       row._hostId = h.id; // in-place replacement key (_autoTestHosts)
       const st = this._hostStatus?.[h.id]; // {ok, latencyMs, tools} | {error} | undefined
+      if (st && st.ok) this._keyAnswers?.delete(h.id);   // verifier #2: a re-test that passed ends the key answer
       // lane-pairing ③: a dial row's dot, badge, sub-line and tooltip all read THE one state (PURE dialRowState) —
       // never `online` alone (a refused dial read "offline" while the server had refused it by name)
       const rs = isDial ? dialRowState(h) : null;
@@ -1200,7 +1203,9 @@ export function installSidebarMounts(Sidebar) {
         const { refused, words } = hostErrorWords(raw, target);
         const doors = [];
         // reader follow-up #0 / #8: the door's answer lands on THIS row — the key copied, or shown in a field to select, or the cause by code
-        const place = (n) => { for (const o of [...row.querySelectorAll('.mounts-key-shown')]) o.remove(); row.insertBefore(n, more); };
+        // verifier #2: …and it is the PANEL's, per machine (`_keyAnswers`): every row a render builds for this machine gets it back, until
+        // the person dismisses it, the machine is removed or a re-test passes
+        const place = (n) => { for (const o of [...row.querySelectorAll('.mounts-key-shown')]) o.remove(); row.insertBefore(n, more); (this._keyAnswers ||= new Map()).set(h.id, n); };
         if (refused) doors.push({ label: tr('Copy the public key to add'), kind: 'primary', door: 'public-key', run: () => this._publicKeyDoor(h, target, place) });
         doors.push({ label: tr('Try again'), kind: refused ? 'secondary' : 'primary', door: 'retest', run: async () => {
           this._hostStatus = this._hostStatus || {};
@@ -1214,6 +1219,8 @@ export function installSidebarMounts(Sidebar) {
         const sm = document.createElement('summary'); sm.textContent = tr('Details');
         const pre = document.createElement('pre'); pre.textContent = raw.slice(0, 2000);
         more.append(sm, pre); row.appendChild(more);
+        const kept = this._keyAnswers?.get(h.id);
+        if (kept) place(kept);
       }
       return row;
     },
@@ -1667,19 +1674,24 @@ export function installSidebarMounts(Sidebar) {
       });
     },
 
-    _showAddHostDialog(hd) {
-      // one subject: one machine being added
+    _showAddHostDialog(hd, from = null) {
+      // verifier #3: «Add it again with a key…» opens THIS form for the ssh machine `from` — its name, user, address and port filled
+      // in; the new record REPLACES it (POST /api/hosts `replaces`: its name is no clash, and it is removed once the new one is saved)
+      const again = from && from.id && from.transport !== 'dial' ? from : null;
+      // one subject: one machine being added (or added again in place of `again`)
+      // not the subject: from — the machine whose words fill the fields; the form is the one Add machine form
       this._mountsDialog(tr('Add remote machine'), [
-        { key: 'name', label: tr('Name'), placeholder: 'gpu-01', hint: tr('Any label you like — how this machine shows in your lists.') },
-        { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu' },
-        { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), hint: tr('The machine’s IP address or hostname.') },
-        { key: 'port', label: tr('Port'), value: '22', hint: tr('Usually 22 — leave as-is unless told otherwise.') },
+        ...(again ? [{ key: 'replaces', type: 'note', value: tr('This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.', { name: again.name || again.host }) }] : []),
+        { key: 'name', label: tr('Name'), placeholder: 'gpu-01', value: again ? again.name : '', hint: tr('Any label you like — how this machine shows in your lists.') },
+        { key: 'user', label: tr('Username on that machine'), placeholder: 'ubuntu', value: again ? again.user : '' },
+        { key: 'host', label: tr('Address'), placeholder: tr('10.0.0.5 or gpu01.example.com'), value: again ? again.host : '', hint: tr('The machine’s IP address or hostname.') },
+        { key: 'port', label: tr('Port'), value: again ? String(again.port || 22) : '22', hint: tr('Usually 22 — leave as-is unless told otherwise.') },
         { key: 'keyChoice', label: tr('How to log in'), type: 'select', options: [
           ['default', tr('The SSH keys already on this server')],
           ['app', hd.key.exists ? tr('VibeSpace’s own key (recommended)') : tr('Create a key for VibeSpace (recommended)')],
           ['paste', tr('Paste or upload my own key…')],
         ], hint: tr('An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.') },
-      ], tr('Add machine'), async (v, { close, err }) => {
+      ], again ? tr('Add and replace') : tr('Add machine'), async (v, { close, err }) => {
        // A sub-dialog (key paste / generated public key) stands BESIDE this one under its own id (lane dialog-yield r2: a form
        // is never replaced — before, it reused this id and removed this dialog); a thrown error after this dialog closed is
        // still surfaced as a toast instead of failing silently.
@@ -1729,7 +1741,7 @@ export function installSidebarMounts(Sidebar) {
           try {
             r = await api('/api/hosts', {
               method: 'POST',
-              body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey, keyPassphrase: keyPassphrase || undefined }),
+              body: JSON.stringify({ name: v.name, user: v.user, host: v.host, port: v.port, keyPath, privateKey, keyPassphrase: keyPassphrase || undefined, replaces: again ? again.id : undefined }),
             });
             break;
           } catch (e) {
@@ -1765,16 +1777,20 @@ export function installSidebarMounts(Sidebar) {
     /** lane ui-needs-a-button (machines-1; reader follow-up #0 / #8): «Copy the public key to add» — the key READ from the hub (GET
      *  /api/hosts/:id/public-key) and copied; a clipboard that refused shows the key itself in a read-only field to select (the words
      *  point at THAT field); a key the hub cannot read says its cause by code, and «no key» offers the key door (Add machine's
-     *  «create a key for VibeSpace» / «paste my own key»). `place(node)` puts the answer on the machine's row. */
+     *  «create a key for VibeSpace» / «paste my own key»). `place(node)` puts the answer on the machine's row. verifier #2: the answer
+     *  stays the machine's until its «Dismiss»; verifier #3: «Add it again with a key…» opens THIS machine's form (its fields filled,
+     *  the new record replacing it). */
     async _publicKeyDoor(h, target, place) {
       const r = await fetchJson(`/api/hosts/${encodeURIComponent(h.id)}/public-key`);
       const k = r && r.ok && Array.isArray(r.keys) && r.keys[0] && r.keys[0].publicKey;
+      let shown = null;
+      const dismiss = { label: tr('Dismiss'), kind: 'secondary', door: 'dismiss', run: () => { if (shown) shown.remove(); if (this._keyAnswers?.get(h.id) === shown) this._keyAnswers.delete(h.id); } };
       if (!k) {
         const code = (r && r.code) || 'network';
-        const doors = code === 'no_key' && this._hostsData ? [{ label: tr('Add it again with a key…'), kind: 'primary', door: 'key-setup', run: () => this._showAddHostDialog(this._hostsData) }] : [];
-        const line = needLine({ words: publicKeyWhy(code), doors, tone: 'fail', cls: 'mounts-key-shown' });
-        line.dataset.code = code;
-        place(line);
+        const doors = code === 'no_key' && this._hostsData ? [{ label: tr('Add it again with a key…'), kind: 'primary', door: 'key-setup', run: () => this._showAddHostDialog(this._hostsData, h) }] : [];
+        shown = needLine({ words: publicKeyWhy(code), doors: [...doors, dismiss], tone: 'fail', cls: 'mounts-key-shown' });
+        shown.dataset.code = code;
+        place(shown);
         return;
       }
       if (await copyText(k)) { showToast(tr('Copied — add it to ~/.ssh/authorized_keys of {target}', { target }), { duration: 6000 }); return; }
@@ -1785,7 +1801,8 @@ export function installSidebarMounts(Sidebar) {
       const field = document.createElement('textarea');
       field.readOnly = true; field.rows = 2; field.value = k; field.className = 'mounts-key-field'; field.spellcheck = false;
       field.onfocus = () => field.select();
-      box.append(words, field);
+      shown = box;
+      box.append(words, field, needDoorButton(dismiss));
       place(box);
       try { field.focus(); field.select(); } catch { /* not in a page */ }
     },

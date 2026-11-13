@@ -13791,4 +13791,7 @@ export default {
   "The .deb file cannot be read.": "这个 .deb 文件读不了。",
   "This instance already asks Tailscale for a certificate — turn on HTTPS Certificates for your tailnet in the Tailscale admin console.": "这个实例已经在向 Tailscale 申请证书——请在 Tailscale 管理后台为你的 tailnet 开启 HTTPS 证书。",
   "Use my own certificate files…": "使用我自己的证书文件…",
+  // lane ui-needs-a-button (closure)
+  "This replaces “{name}”: it is added again with the key you choose in this form, and the old entry is removed once the new one is saved.": "这会替换“{name}”：用你在这里选的密钥重新添加它，新的保存好之后，旧的那条才会被删除。",
+  "Add and replace": "添加并替换",
 };

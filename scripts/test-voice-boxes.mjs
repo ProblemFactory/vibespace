@@ -67,6 +67,7 @@ const ROWS = [
   ['sidebar-mounts.js', 'mounts-key-paste', 'an SSH private key paste', 1],
   ['channel-webhook.js', 'chan-wh-paste', 'a pairing code paste (a credential — lane webhook-pair-join)', 1],
   ['sidebar-mounts.js', 'k.publicKey', 'a read-only public key to copy', 1],
+  ['sidebar-mounts.js', 'mounts-key-field', 'a read-only public key to select and copy (the clipboard refused it; lane ui-needs-a-button)', 1],
   ['sidebar-mounts.js', 'device-pair-cmd', 'a read-only pairing command to copy', 1],
   ['sidebar-mounts.js', '[gdrive]', 'an rclone.conf paste', 1],
   ['sidebar-mounts.js', '<textarea readonly', 'read-only links / tokens / config to copy', 5],

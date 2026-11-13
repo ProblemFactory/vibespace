@@ -87,6 +87,7 @@ const http = await import('node:http');
 const { execFileSync } = await import('node:child_process');
 const { pathToFileURL } = await import('node:url');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-needs-doors-'));
+const FIFO_BOUND_MS = 400;   // the FIFO leg's read bound: this suite WAITS it on purpose (verifier #4: its ci.mjs row can state no less)
 const T32 = (c) => String(c).repeat(32);
 {
   // for-you-2: a parked ask is a POINTER — its one closer says what stays true; the note's words name the conversation's card
@@ -213,14 +214,12 @@ const T32 = (c) => String(c).repeat(32);
   // is given up at the bound and the derive answers; r.399 picks: fs.promises.readFile held a threadpool thread and never answered
   const fifo = key + '.pub';
   execFileSync('mkfifo', [fifo]);
-  const t0 = Date.now();
-  const c = await Promise.race([Promise.resolve(readPub(id, { timeoutMs: 400 })), new Promise((r) => setTimeout(() => r({ hung: true }), 3500))]);
-  const ms = Date.now() - t0;
+  const c = await Promise.race([Promise.resolve(readPub(id, { timeoutMs: FIFO_BOUND_MS })), new Promise((r) => setTimeout(() => r({ hung: true }), 3500))]);
   try { const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); fs.closeSync(fd); } catch { /* no reader left: nothing waits on it */ }
   const HS = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
   const pk = (/async publicKeyOf\([\s\S]*?\n  \}\n/.exec(HS) || [''])[0];
-  ok(c && c.ok && c.keys[0].source === 'derived' && ms < 2500 && pk && !/fs\.promises|readFileSync|readFile\(/.test(pk),
-    `reader #3: a .pub read that never answers (a FIFO standing in for a hung mount) is given up at the bound — the derive answers in ${ms} ms; publicKeyOf reads through a bounded child, never fs on the hub`, { c, ms });
+  ok(c && c.ok && c.keys[0].source === 'derived' && pk && !/fs\.promises|readFileSync|readFile\(/.test(pk),
+    'reader #3: a .pub read that never answers (a FIFO standing in for a hung mount) is given up at the bound — the derive answers before the watchdog (a hang is { hung }); publicKeyOf reads through a bounded child, never fs on the hub', { c });
   // GET /api/hosts/:id/public-key — DRIVEN through an in-process app (reader #4 / #7): THE person verdict (routes/vault.js personVerdict)
   const express = require(path.join(REPO, 'node_modules/express'));
   const app = express();
@@ -244,6 +243,31 @@ const T32 = (c) => String(c).repeat(32);
     noKey: await get('/api/hosts/h2/public-key', SAME),
   };
   await new Promise((r) => srv.close(r));
+  // verifier #3 (the route): «Add it again with a key…» — POST /api/hosts `replaces` names the ssh machine the new record REPLACES: its
+  // name is no clash, and the old record is removed only AFTER the new one is saved (a refused add leaves it as it was); without
+  // `replaces` the name is still refused (the host-name-taken refusal)
+  {
+    fs.mkdirSync(path.join(TMP, 'data-replace'), { recursive: true });
+    const H2 = new HostManager({ dataDir: path.join(TMP, 'data-replace') });
+    const oldId = H2.add({ name: 'gpu-02', user: 'ubuntu', host: '10.0.0.5', port: 2222 });
+    const app2 = express();
+    app2.use(express.json());
+    let made2 = null;
+    try { ER.create({ app: app2, rootDir: REPO, AGENT_BIN_DIR: path.join(TMP, 'no-bin'), activeSessions: new Map(), auth: { enabled: false, requestAuthed: () => true, checkToken: () => true }, wss: null, WS_OPEN: 1, bcastAll: () => {}, integrationEnabled: () => true, unpairDialDevice: () => {}, hosts: H2, getExitProxy: () => null, getMounts: () => null, getPortForwards: () => null }); } catch (e) { made2 = e.message; }
+    const srv2 = await new Promise((r) => { const x = app2.listen(0, '127.0.0.1', () => r(x)); });
+    const post = (p, body) => new Promise((res) => { const data = JSON.stringify(body); const rq = http.request({ host: '127.0.0.1', port: srv2.address().port, path: p, method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } }, (r) => { let b = ''; r.on('data', (d) => { b += d; }); r.on('end', () => { let j = null; try { j = JSON.parse(b); } catch { /* not json */ } res({ status: r.statusCode, id: j && j.id, error: j && j.error }); }); }); rq.on('error', (e) => res({ err: e.message })); rq.end(data); });
+    const rows2 = () => H2._state.hosts.map((h) => `${h.name}@${h.host}:${h.port}${h.id === oldId ? ' (old)' : ''}`);
+    const taken = await post('/api/hosts', { name: 'gpu-02', user: 'ubuntu', host: '10.0.0.6', port: '2222' });
+    const after1 = rows2();
+    const refused = await post('/api/hosts', { name: 'gpu-02', user: '', host: '10.0.0.6', port: '2222', replaces: oldId });
+    const after2 = rows2();
+    const done = await post('/api/hosts', { name: 'gpu-02', user: 'ubuntu', host: '10.0.0.6', port: '2222', replaces: oldId });
+    const after3 = rows2();
+    await new Promise((r) => srv2.close(r));
+    ok(!made2 && taken.status === 400 && JSON.stringify(after1) === '["gpu-02@10.0.0.5:2222 (old)"]' && refused.status === 400 && JSON.stringify(after2) === JSON.stringify(after1)
+      && done.status === 200 && done.id && done.id !== oldId && JSON.stringify(after3) === '["gpu-02@10.0.0.6:2222"]',
+      'machines-1 (verifier #3): POST /api/hosts `replaces`, DRIVEN — the same name without it is still refused; a refused add leaves the old machine as it was; a saved one REPLACES it (one «gpu-02», the new address; the old record removed only after the new one is saved)', { made2, taken, refused, done, after1, after2, after3 });
+  }
   const ERS = fs.readFileSync(path.join(REPO, 'src/server/exit-routes.js'), 'utf8');
   const route = (/app\.get\('\/api\/hosts\/:id\/public-key'[\s\S]*?\n\}\);/.exec(ERS) || [''])[0];
   ok(!made && rows.page.status === 200 && rows.page.key && ['session', 'job', 'automation', 'lowercase'].every((k) => rows[k].status === 403 && rows[k].code === 'human_only' && !rows[k].key)
@@ -396,7 +420,7 @@ if (CL) {
     const sb = new FakeSidebar();
     const opened = [];
     sb._hostsData = { key: { exists: false }, hosts: [] };
-    sb._showAddHostDialog = (hd) => opened.push(hd);
+    sb._showAddHostDialog = (hd, from) => opened.push([hd, from]);
     const nav = globalThis.navigator;
     const press = async (answer, clip = { writeText: async (x) => { clip.got = x; } }, exec = false) => {
       FETCH = answer instanceof Error ? async () => { throw answer; } : async () => ({ ok: answer.status === 200, status: answer.status, json: async () => answer.body });
@@ -408,7 +432,7 @@ if (CL) {
       await sb._publicKeyDoor({ id: 'h1', name: 'gpu-01', user: 'ubuntu', host: 'gpu-01' }, 'ubuntu@gpu-01', place);
       const shown = row.querySelector('.mounts-key-shown');
       row.remove();
-      return { shown, clip, code: shown ? shown.dataset.code : null, words: shown ? (shown.querySelector('.need-words') || shown).textContent : '', field: shown ? shown.querySelector('textarea') : null, doors: shown ? shown.querySelectorAll('button') : [] };
+      return { shown, clip, code: shown ? shown.dataset.code : null, words: shown ? (shown.querySelector('.need-words') || shown).textContent : '', field: shown ? shown.querySelector('textarea') : null, doors: shown ? shown.querySelectorAll('button').filter((b) => b.dataset.door !== 'dismiss') : [] };
     };
     const KEY = 'ssh-ed25519 AAAAC3fake needs-doors';
     const okKey = { status: 200, body: { ok: true, keys: [{ publicKey: KEY, source: 'file' }] } };
@@ -425,6 +449,72 @@ if (CL) {
     ok(r3.code === 'no_key' && /^No public key to show/.test(r3.words) && r3.doors.length === 1 && r3.doors[0].dataset.door === 'key-setup' && r3.doors[0].textContent === 'Add it again with a key…' && opened.length === before3 + 1
       && r4.code === 'not_ssh' && /dials in/.test(r4.words) && r4.doors.length === 0 && r5.code === 'human_only' && /shown only to you/.test(r5.words) && r6.code === 'network' && /Could not reach VibeSpace/.test(r6.words),
       'machines-1 (reader #8): a key that cannot be shown says WHY by its code — no key (and «Add it again with a key…»: Add machine\'s create / paste a key) / a dial machine / refused / the hub not reached (r.399: one «no key» toast for all)', { r3: [r3.code, r3.words], r4: [r4.code, r4.words], r5: [r5.code, r5.words], r6: [r6.code, r6.words] });
+    // verifier #3: «Add it again with a key…» does what its words say for THIS machine — the door hands the machine to the form; the form
+    // is filled from it (name, user, address, port), SAYS it replaces it, and its submit names the record it replaces; the plain
+    // «Add machine» is blank and replaces nothing
+    const handed = opened.length ? opened[opened.length - 1][1] : null;
+    const seen = [];
+    const sb3 = new FakeSidebar();
+    sb3._hostsData = { key: { exists: true, path: '/k' }, hosts: [] };
+    sb3._mountsDialog = (title, fields, submit, onSubmit, opts) => { seen.push({ title, fields, submit, onSubmit, opts }); return {}; };
+    sb3._renderMounts = () => {};
+    const H3 = { id: 'h1', name: 'gpu-01', user: 'ubuntu', host: 'gpu-01.example', port: 2222 };
+    FakeSidebar.prototype._showAddHostDialog.call(sb3, sb3._hostsData, H3);
+    FakeSidebar.prototype._showAddHostDialog.call(sb3, sb3._hostsData);
+    const [dA, dP] = seen;
+    const val = (d, k) => (d && (d.fields.find((x) => x.key === k) || {}).value) || '';
+    const note = dA ? dA.fields.filter((x) => x.type === 'note').map((x) => x.value).join(' ') : '';
+    const posts = [];
+    FETCH = async (url, o) => { posts.push([String(url), o && o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => (String(url) === '/api/hosts' ? { success: true, id: 'h2' } : { ok: true }) }; };
+    if (dA) await dA.onSubmit({ name: val(dA, 'name'), user: val(dA, 'user'), host: val(dA, 'host'), port: val(dA, 'port'), keyChoice: 'default' }, { close() {}, err: { isConnected: true } }).catch(() => {});
+    const sent = (posts.find(([u]) => u === '/api/hosts') || [])[1];
+    ok(handed && handed.id === 'h1' && dA && ['name', 'user', 'host', 'port'].map((k) => val(dA, k)).join('|') === 'gpu-01|ubuntu|gpu-01.example|2222' && /replaces “gpu-01”/.test(note) && /replace/i.test(dA.submit)
+      && sent && sent.replaces === 'h1' && sent.name === 'gpu-01' && sent.port === '2222' && dP && ['name', 'user', 'host'].every((k) => !val(dP, k)) && !dP.fields.some((x) => x.type === 'note') && val(dP, 'port') === '22',
+      'machines-1 (verifier #3): «Add it again with a key…» opens THIS machine\'s form — filled from it (name, user, address, port), saying it REPLACES it, its submit naming the record it replaces; the plain Add machine stays blank (r.dcd495a1f: a blank form, the refusing row kept)', { handed: handed && handed.id, fields: dA && dA.fields.map((x) => [x.key, x.value]), submit: dA && dA.submit, sent });
+    FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // machines-1 (verifier #2): the public-key door's answer is the PANEL's, per machine — a Machines re-render (the hosts-updated /
+  // mounts-updated broadcast) puts it back on the machine's row; its «Dismiss» ends it, as do the machine's removal and a re-test that passes
+  {
+    class Sb2 {}
+    SM.installSidebarMounts(Sb2);
+    const sb2 = new Sb2();
+    let onGlobal = null;
+    sb2.app = { ws: { onGlobal: (f) => { onGlobal = f; } } };
+    sb2.listEl = DOC.createElement('div'); DOC.body.appendChild(sb2.listEl);
+    sb2._activeTab = 'mounts';
+    const H1 = { id: 'h1', name: 'gpu-01', user: 'ubuntu', host: 'gpu-01', port: 22, keyPath: '/k', keySource: 'app' };
+    let hostsNow = [H1];
+    const failing = () => ({ ok: false, error: 'ubuntu@gpu-01: Permission denied (publickey).', at: Date.now() });
+    sb2._hostStatus = { h1: failing() };
+    const KEY2 = 'ssh-ed25519 AAAAC3fake needs-doors-2';
+    FETCH = async (url) => {
+      const u = String(url);
+      const body = u === '/api/mounts' ? { mounts: [], shares: [], rcloneAvailable: true } : u === '/api/hosts' ? { hosts: hostsNow, key: { exists: true } } : u === '/api/mount-tokens' ? { tokens: [] } : u === '/api/machine-mounts' ? { mounts: [] } : /\/public-key$/.test(u) ? { ok: true, keys: [{ publicKey: KEY2, source: 'file' }] } : {};
+      return { ok: true, status: 200, json: async () => body };
+    };
+    globalThis.navigator.clipboard = { writeText: async () => { throw new Error('denied'); } }; EXEC_COPY = false;
+    const rowOf = () => sb2.listEl.querySelectorAll('.mounts-row').find((r) => r._hostId === 'h1') || null;
+    const answerOf = () => { const r = rowOf(); const a = r && r.querySelector('.mounts-key-shown'); return a ? `${a.dataset.code}:${(a.querySelector('textarea') || {}).value || ''}` : null; };
+    const doorOf = (root, name) => (root ? root.querySelectorAll('.need-door').find((b) => b.dataset.door === name) || null : null);
+    const ask = async () => { const d = doorOf(rowOf(), 'public-key'); if (d) d.click(); await tick(10); };
+    const render = async (ev) => { if (ev && onGlobal) onGlobal({ type: ev }); else await sb2._renderMounts(); await tick(10); };
+    let err2 = null;
+    const seen2 = {};
+    try {
+      await render();
+      await ask(); seen2.answered = answerOf();
+      await render('hosts-updated'); seen2.hostsUpdated = answerOf();
+      await render('mounts-updated'); seen2.mountsUpdated = answerOf();
+      const dis = doorOf(rowOf() && rowOf().querySelector('.mounts-key-shown'), 'dismiss');
+      if (dis) dis.click();
+      seen2.dismissed = answerOf(); await render(); seen2.dismissedRerender = answerOf();
+      await ask(); sb2._hostStatus.h1 = { ok: true, latencyMs: 5, at: Date.now() }; await render(); sb2._hostStatus.h1 = failing(); await render(); seen2.afterPass = answerOf();
+      await ask(); hostsNow = []; await render(); hostsNow = [H1]; await render(); seen2.afterRemove = answerOf();
+    } catch (e) { err2 = String((e && e.stack) || e).slice(0, 400); }
+    sb2.listEl.remove();
+    ok(!err2 && seen2.answered === 'copy_refused:' + KEY2 && seen2.hostsUpdated === seen2.answered && seen2.mountsUpdated === seen2.answered && seen2.dismissed === null && seen2.dismissedRerender === null && seen2.afterPass === null && seen2.afterRemove === null,
+      'machines-1 (verifier #2): the public-key door\'s answer (here the key in its field) survives a Machines re-render — the hosts-updated and mounts-updated broadcasts put it back on the machine\'s row; its «Dismiss» ends it, and so do a re-test that passes and the machine\'s removal (r.dcd495a1f: gone at the next render)', { err2, seen2 });
     FETCH = async () => { throw new Error('no fetch in this leg'); };
   }
   // for-you-2: the For-you window's door DRAWN and PRESSED (reader #4), the tray row's closer and its door (reader #4 / #10)
@@ -484,16 +574,22 @@ if (CL) {
     const fire = (type, init = {}) => DOC.dispatchEvent({ type, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}, ...init });
     const listening = () => ['mousemove', 'mousedown', 'keydown'].map((x) => DOC.listening(x)).join(',');
     const overlayUp = () => DOC.body.children.some((c) => c.querySelector && c.querySelector('.move-mode-hint'));
+    let witnessed = 0;
+    wm.witnessGeometry = () => { witnessed++; };
     const run = async (end) => {
+      witnessed = 0;
       wm.startMoveMode('w1');
       const hint = DOC.body.querySelector('.move-mode-hint'), cancel = hint ? hint.querySelector('.move-mode-cancel') : null;
       fire('mousemove', { clientX: 900, clientY: 700 });
       await tick(8);
       const moved = { left: el.style.left, preview: PREVIEW.style.left };
       if (end === 'esc') fire('keydown', { key: 'Escape' });
-      if (end === 'cancel') { fire('mousedown', { target: cancel || el }); if (cancel) cancel.click(); }
+      // verifier #0: a REAL press on «Cancel» — its mousedown reaches the document's CAPTURE listener first (the drop's), then the click
+      // comes only to a button still on the page (a mousedown that dropped the window took the hint, and the click never comes)
+      let mid = null;
+      if (end === 'cancel') { fire('mousedown', { target: cancel || el }); mid = { listening: listening(), overlay: overlayUp(), witnessed }; if (cancel && cancel.isConnected) cancel.click(); }
       if (end === 'drop') fire('mousedown', { target: DOC.body });
-      return { moved, cancel: cancel ? cancel.textContent : null, left: el.style.left, top: el.style.top, z: el.style.zIndex, preview: PREVIEW.style.left, listening: listening(), overlay: overlayUp() };
+      return { moved, mid, cancel: cancel ? cancel.textContent : null, left: el.style.left, top: el.style.top, z: el.style.zIndex, preview: PREVIEW.style.left, listening: listening(), overlay: overlayUp(), witnessed };
     };
     const esc = await run('esc');
     const can = await run('cancel');
@@ -503,6 +599,8 @@ if (CL) {
     ok(can.cancel === 'Cancel' && can.left === '100px' && can.preview === '10%' && can.listening === '0,0,0' && !can.overlay,
       'reader #12: the hint carries «Cancel» — a button every input can press (a touch tablet has no Esc); its press does what Esc does, never a drop', can);
     ok(drop.left !== '100px' && drop.listening === '0,0,0' && !drop.overlay, 'window-manager-1 (reader #4): a click drops the window where it is and removes EVERY listener of the mode — the Esc one too', drop);
+    ok(can.mid && can.mid.overlay && can.mid.listening === '1,1,1' && can.mid.witnessed === 0 && can.left === '100px' && can.top === '50px' && can.preview === '10%' && can.witnessed === 0 && can.listening === '0,0,0' && !can.overlay && drop.witnessed === 1,
+      'window-manager-1 (verifier #0): a REAL press on «Cancel» — its mousedown through the document\'s capture listener is NO drop (the mode still on: the hint up, its three listeners, no placement recorded), the click that follows puts the window back in place; a press anywhere else is the drop', { can, dropWitnessed: drop.witnessed });
     const CSS = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     const hintCss = (/\.move-mode-hint \{[^}]*\}/.exec(CSS) || [''])[0];
     ok(/box-shadow: var\(--shadow-window\)/.test(hintCss) && !/rgba\(/.test(hintCss) && /\.move-mode-hint > \.move-mode-cancel \{ pointer-events: auto; \}/.test(CSS), 'reader #12: the hint\'s shadow is the theme\'s (--shadow-window, no literal colour); its Cancel takes the pointer (the hint itself lets it through)', hintCss);
@@ -547,6 +645,35 @@ if (CL) {
       `settings-13 (reader #4 / #13): a row that takes effect at the next load (${path13}) shows «Takes effect after a reload» + «Reload now» once its value differs from the one this PAGE LOADED with — re-judged on the store's change (this page, another client's broadcast); a value moved before Settings was first drawn shows it too`, { s: [s0, s1, s2, s3], l2: l2 && l2.style.display, reloads: RELOADS });
     if (l) l.remove();
     if (l2) l2.remove();
+    FETCH = async () => { throw new Error('no fetch in this leg'); };
+  }
+  // settings-13 (verifier #1): the reload lines' store listeners leave with the surface that bound them — a Settings window opened on
+  // the row, drawn again twice (a re-render, a search keystroke) and closed: ONE listener for the row while it is drawn, NONE after the close
+  {
+    const path1 = Object.keys(SS.SETTINGS_SCHEMA).find((p) => { const r = SS.SETTINGS_SCHEMA[p]; return r && !r.liveApply && r.type === 'boolean' && !r.store; });
+    FETCH = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    const m = new SET.SettingsManager(); await m.load();
+    const wins = new Map();
+    let win = null;
+    const app = { settings: m, isMobile: false, wm: { windows: wins, revealWindow() {}, createWindow: (o) => { win = { id: 'settings-1', type: o.type, content: DOC.createElement('div'), onClose: null }; wins.set(win.id, win); DOC.body.appendChild(win.content); return win; } } };
+    const counts = [];
+    let err1 = null, drawn = false;
+    const count = () => (m._listeners && m._listeners[path1] ? m._listeners[path1].size : 0);
+    try {
+      const ui = new SU.SettingsUI(app);
+      const label = String(SS.SETTINGS_SCHEMA[path1].label);
+      ui.open({ search: label }); counts.push(count());
+      drawn = !!win.content.querySelector('.settings-reload-need');
+      const content = win.content.querySelector('.settings-content'), nav = win.content.querySelector('.settings-nav');
+      ui._renderContent(content, nav); counts.push(count());
+      const inp = win.content.querySelector('.settings-search');
+      inp.value = label; inp.oninput(); counts.push(count());
+      if (typeof win.onClose === 'function') win.onClose();
+      win.content.remove();
+      counts.push(count());
+    } catch (e) { err1 = String((e && e.stack) || e).slice(0, 400); }
+    ok(!err1 && drawn && JSON.stringify(counts) === '[1,1,1,0]',
+      `settings-13 (verifier #1): the reload line's store listener (${path1}) leaves with the surface that bound it — one while the row is drawn (open, a re-render, a search keystroke), none after the window closes (r.dcd495a1f: one more per render, kept after the close)`, { err1, drawn, counts });
     FETCH = async () => { throw new Error('no fetch in this leg'); };
   }
   // plugins-integrations-13: the https why's door, DRAWN (reader #4 / #14) — on the default «auto» the line also says what is missing
@@ -626,6 +753,23 @@ console.log('⑥ THE NEED-WORD NET (reader #5: a sentence that says something fa
   const redNeed = PN.fresh.map((x) => x.s), redNet = PC ? PC.unclaimed.map((x) => x.s) : [];
   ok(PLANTED.slice(0, 3).every((s) => redNeed.includes(s)) && redNet.includes(PLANTED[3]) && PN.fresh.every((x) => PLANTED.includes(x.s)),
     'CONTROL: the reader\'s planted sentences go RED by name — «Sign-in failed…», «This machine needs a key…», «Turn it on in the Advanced section…» (the need net), «Enable it with the switch below.» (the direction net)', { redNeed, redNet: redNet.filter((s) => PLANTED.includes(s)) });
+}
+
+console.log('⑦ THE RELEASE FACTS (verifier #4 / #5)');
+{
+  // verifier #4: the ci.mjs row states this suite's cost truly — never less than what the suite WAITS on purpose (the FIFO read's bound)
+  const CI = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
+  const rowM = /\{ name: 'test-needs-doors', tier: 'fast', why: 'in-process · ([\d.]+) (ms|s)' \}/.exec(CI);
+  const statedMs = rowM ? Number(rowM[1]) * (rowM[2] === 's' ? 1000 : 1) : null;
+  ok(statedMs !== null && statedMs > FIFO_BOUND_MS, `verifier #4: scripts/ci.mjs's test-needs-doors row states a cost above the ${FIFO_BOUND_MS} ms this suite waits on purpose (the FIFO read's bound) — it states ${rowM ? rowM[1] + ' ' + rowM[2] : 'no time'}`, rowM && rowM[0]);
+  // verifier #5: the user CHANGELOG's newest «Fixed» is what a user of the RELEASE notices — none of its bullets names a door the same
+  // version ADDS (a defect of a door the release never had is the engineering log's); the three languages keep one bullet count
+  const sectionOf = (file) => { const t = fs.readFileSync(path.join(REPO, file), 'utf8'); const top = t.split(/\n## /)[1] || ''; const fixed = (top.split(/\n### /).find((x) => /^(Fixed|修复|修正)\s/.test(x)) || ''); return { head: top.split('\n')[0], fixed: fixed.split('\n').filter((l) => l.startsWith('- ')) }; };
+  const en = sectionOf('CHANGELOG.md'), zh = sectionOf('CHANGELOG.zh.md'), ja = sectionOf('CHANGELOG.ja.md');
+  const ADDED_DOORS = ['Copy the public key to add', 'Stop loading', 'Close this tab', 'Reload now', 'Add the API key'];   // the doors picks 1–2 ADD (CHANGELOG «Added»)
+  const named = en.fixed.filter((b) => ADDED_DOORS.some((d) => b.includes(d)));
+  ok(/^2\.369\.\d+ — /.test(en.head) && en.fixed.length > 0 && named.length === 0 && zh.fixed.length === en.fixed.length && ja.fixed.length === en.fixed.length,
+    `verifier #5: CHANGELOG ${en.head} «Fixed» says what a user of the release notices — no bullet names a door this version adds (${en.fixed.length} bullets, the same in zh / ja)`, { named, counts: [en.fixed.length, zh.fixed.length, ja.fixed.length] });
 }
 
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }

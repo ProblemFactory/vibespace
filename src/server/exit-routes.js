@@ -266,7 +266,13 @@ app.post('/api/hosts', async (req, res) => {
       b.privateKey = key.body;
     }
     delete b.keyPassphrase; // consumed here and nowhere else
-    const id = hosts.add(b);
+    // verifier #3 («Add it again with a key…»): `replaces` names the ssh machine this record REPLACES — its name is no clash for the
+    // new one, and it is removed only AFTER the new record is saved (a refused add leaves it as it was)
+    let old = null;
+    if (b.replaces) { try { old = hosts.get(String(b.replaces)); } catch { old = null; } }
+    if (old && old.transport === 'dial') old = null;
+    const id = hosts.add({ ...b, replaces: old ? old.id : null });
+    if (old) { try { await removeHost(old); } catch (e) { console.warn('[hosts] the replaced machine stays — its removal failed:', e && e.message); } }   // the add stands
     bcastAll({ type: 'hosts-updated' });
     if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ success: true, id, key: key && { type: key.type, fingerprint: key.fingerprint, wasEncrypted: key.wasEncrypted } });
@@ -297,22 +303,26 @@ app.get('/api/hosts/:id/sessions', async (req, res) => {
   try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+/** ONE removal of a machine record — DELETE /api/hosts/:id, and a replaced machine once its new record is saved (POST /api/hosts
+ *  `replaces`, verifier #3). */
+async function removeHost(h) {
+  // dial machine: removing the record IS the unpair (token hash lives on
+  // it) — tear down mounts / token file / live stream first (B-f3e8).
+  // ssh machines keep the OLD preserve-as-orphan semantics (review finding:
+  // remove+re-add is the only way to edit a host's address/key, and the
+  // confirm dialog promises nothing on the remote is touched — the orphan
+  // rows remain manageable/unmountable).
+  if (h.transport === 'dial') await unpairDialDevice(h.deviceId);
+  // port-forwards are pure local plumbing (unlike mounts, which keep their
+  // preserve-as-orphan semantics for ssh) — with the host record gone their
+  // records become invisible, undeletable orphans (review finding)
+  else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
+  try { exitProxy.onMachineUnpaired(h.id); } catch { }
+  hosts.remove(h.id);
+}
 app.delete('/api/hosts/:id', async (req, res) => {
   try {
-    const h = hosts.get(req.params.id);
-    // dial machine: removing the record IS the unpair (token hash lives on
-    // it) — tear down mounts / token file / live stream first (B-f3e8).
-    // ssh machines keep the OLD preserve-as-orphan semantics (review finding:
-    // remove+re-add is the only way to edit a host's address/key, and the
-    // confirm dialog promises nothing on the remote is touched — the orphan
-    // rows remain manageable/unmountable).
-    if (h.transport === 'dial') await unpairDialDevice(h.deviceId);
-    // port-forwards are pure local plumbing (unlike mounts, which keep their
-    // preserve-as-orphan semantics for ssh) — with the host record gone their
-    // records become invisible, undeletable orphans (review finding)
-    else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
-    try { exitProxy.onMachineUnpaired(h.id); } catch { }
-    hosts.remove(req.params.id);
+    await removeHost(hosts.get(req.params.id));
     bcastAll({ type: 'hosts-updated' });
     if (await notDurable(res)) return;   // B-48a4 cure
     res.json({ success: true });

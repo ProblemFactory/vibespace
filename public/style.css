@@ -4648,6 +4648,7 @@ label.cfg-row {
 /* reader #0: a clipboard that refused — the key itself, in a field to select, under the words that point at it */
 label.mounts-key-shown { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 0; font-size: 12px; }
 label.mounts-key-shown > .mounts-key-field { width: 100%; box-sizing: border-box; font-size: 11px; font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); resize: vertical; }
+label.mounts-key-shown > .need-door { align-self: flex-start; }   /* verifier #2: the answer's own «Dismiss», its size, not the row's width */
 .mounts-errline-details > summary { cursor: pointer; }
 .mounts-errline-details > pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0 0; }
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }

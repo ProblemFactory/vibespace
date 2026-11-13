@@ -563,7 +563,7 @@ class HostManager {
     return true;
   }
 
-  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash }) {
+  add({ name, user, host, port, keyPath, privateKey, transport, deviceId, dialTokenHash, replaces = null }) {
     // DIAL host (graduation slice B): a paired dial-out device promoted to a
     // full machine — no ssh fields; every data path rides deviceForDial.
     if (transport === 'dial') {
@@ -594,9 +594,10 @@ class HostManager {
     };
     // Name collision is checked BEFORE any file write — the old order wrote
     // data/ssh/<id>.key and THEN threw, orphaning a key file no record ever
-    // referenced again.
+    // referenced again. `replaces` (verifier #3): the record this one REPLACES keeps no claim on its name — the route removes it
+    // once this one is saved.
     // the refusal carries a CODE (exit-routes sends it; the page words it — lane ui-language, the walk's machines-12)
-    if (this._state.hosts.some(h => h.name === rec.name)) throw Object.assign(new Error('A host with that name exists'), { code: 'host-name-taken' });
+    if (this._state.hosts.some(h => h.name === rec.name && h.id !== replaces)) throw Object.assign(new Error('A host with that name exists'), { code: 'host-name-taken' });
     // Pasted/uploaded private key → stored per-host under data/ssh, 0600.
     // add() stays SYNCHRONOUS (setDialToken calls it and immediately does
     // findByDeviceId on the result), so it cannot run the ssh-keygen unlock —

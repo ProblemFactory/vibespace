@@ -127,6 +127,7 @@ class SettingsUI {
     // openSpec (2.106.0, user request): the Settings window participates in
     // layout sync/persistence like any other window — it used to be transient.
     const winInfo = this.app.wm.createWindow({ title: t('Settings'), type: 'settings', width: 720, height: 560, syncId, openSpec: { action: 'openSettings' } });
+    winInfo.onClose = () => this._dropReloadSubs();   // verifier #1: the reload lines' listeners leave with the window
     const dialog = document.createElement('div');
     dialog.className = 'settings-dialog settings-window';
     winInfo.content.appendChild(dialog);
@@ -269,6 +270,7 @@ class SettingsUI {
   }
 
   _renderContent(content, nav) {
+    this._dropReloadSubs();   // verifier #1: the rows drawn last time leave with their listeners
     content.innerHTML = '';
     nav.innerHTML = '';
 
@@ -448,8 +450,9 @@ class SettingsUI {
 
   /** lane ui-needs-a-button (settings-13; reader follow-up #13): the «reload» badge is a fact about the row; once ITS value differs
    *  from the value this PAGE loaded with (the settings store's first load — src/lib/settings.js loadedValue) the row's line says so
-   *  with «Reload now». Re-judged on the store's change event (this page's control, another client's broadcast, a quick menu) — the
-   *  listener leaves once its row is gone. null for a row that applies live. */
+   *  with «Reload now». Re-judged on the store's change event (this page's control, another client's broadcast, a quick menu).
+   *  verifier #1: the listener is kept in ONE list on this SettingsUI (`_reloadSubs`), taken down with the surface that bound it —
+   *  at every re-render of the rows and when the Settings window closes (`_dropReloadSubs`). null for a row that applies live. */
   _reloadLine(path, schema) {
     if (schema.liveApply) return null;
     const json = (v) => { try { return JSON.stringify(v ?? null); } catch { return ''; } };
@@ -459,7 +462,13 @@ class SettingsUI {
     const onSet = () => { if (!reloadLine.isConnected) { this.settings.off(path, onSet); return; } sync(); };
     sync();
     this.settings.on(path, onSet);
+    (this._reloadSubs ||= []).push([path, onSet]);
     return reloadLine;
+  }
+  /** verifier #1: every reload line's store listener off — the rows they judged are being drawn again, or the window closed */
+  _dropReloadSubs() {
+    for (const [path, onSet] of this._reloadSubs || []) this.settings.off(path, onSet);
+    this._reloadSubs = [];
   }
 
   _renderSetting(path, schema, chips = null) {

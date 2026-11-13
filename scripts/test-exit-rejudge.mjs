@@ -92,7 +92,9 @@ function census(T) {
   for (const m of X) if (/'revoked'\)/.test(m.body) && /this\._asks\.values\(\)/.test(m.body) && m.name !== 'rejudgeAll') v.push(`exit-proxy.js ${m.name}() runs a second ask re-judge loop`);
   // C6 — a machine's un-pairing tells the manager (the routes; before its record goes)
   if (!/exitProxy\.onMachineUnpaired\(/.test(T.dialPairing)) v.push('dial-pairing.js unpairDialDevice does not call exitProxy.onMachineUnpaired');
-  if (!/try \{ exitProxy\.onMachineUnpaired\(h\.id\); \} catch \{ \}\s*\n\s*hosts\.remove\(req\.params\.id\);/.test(T.exitRoutes)) v.push('exit-routes.js DELETE /api/hosts/:id does not call exitProxy.onMachineUnpaired before hosts.remove');
+  // (lane ui-needs-a-button, verifier #3: the removal is ONE function, removeHost — DELETE /api/hosts/:id and a machine replaced by
+  // POST /api/hosts `replaces` both go through it)
+  if (!/try \{ exitProxy\.onMachineUnpaired\(h\.id\); \} catch \{ \}\s*\n\s*hosts\.remove\(h\.id\);/.test(T.exitRoutes) || !/app\.delete\('\/api\/hosts\/:id'[^\n]*\n[^\n]*\n\s*await removeHost\(hosts\.get\(req\.params\.id\)\);/.test(T.exitRoutes)) v.push('exit-routes.js DELETE /api/hosts/:id (removeHost) does not call exitProxy.onMachineUnpaired before hosts.remove');
   return v;
 }
 const sessionFileList = () => {
