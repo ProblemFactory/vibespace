@@ -23,6 +23,9 @@
 //      find whoever started it), the two sub-app lists reads, the five Private Verification Token verbs classed like the
 //      Trust Token pair; Storage.getRelatedWebsiteSets, which 156 dropped, keeps its row marked `until`; the step's two
 //      parameter changes move no class;
+//   ⑩ the METHOD-CLASS SNAPSHOT (lane chrome-157, 2026-11-13): every row's class equals scripts/fixtures/cdp-census-classes.json, written by
+//      `cdp-protocol-fetch.mjs --write-classes` (byte for byte); a moved row is named; CONTROLS — Network.getAllCookies read → refused (the
+//      reviewers' planted change) and Input.dispatchKeyEvent input → read (the dangerous direction: its key forwarded while the person drives);
 //   ④d the 157 step (lane chrome-157, 2026-11-12 — one .397 prep-mirror shard ran on Chrome 157): CSS.forcePositionTryOption
 //      page-mutation and Page.setInputVisualization view, each carrying its measurement; Page.getSpellCheckCustomDictionary
 //      read ON THE VENDOR'S DESCRIPTION, its row saying it was not measured (r2); the step's reflag / parameter / event
@@ -44,7 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { diffListings } from './cdp-protocol-fetch.mjs';
+import { diffListings, classSnapshotText, classesMoved, CLASS_SNAPSHOT } from './cdp-protocol-fetch.mjs';
 import { extract, knownNames, versionBeside } from './agent-browser-cdp-census.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -263,6 +266,31 @@ console.log('— ⑨ the CDP methods agent-browser sends (names only, read from 
     ok(r.methods.join() === ABF.methods.join() && r.events.join() === ABF.events.join() && r.unmatched.every((n) => Object.prototype.hasOwnProperty.call(ABF.notCdp, n)),
       `⑨ re-extracted from ${path.basename(bin)} ${TV} (read as bytes): the same ${r.methods.length} methods and ${r.events.length} events, every unmatched name already judged`, JSON.stringify({ methods: r.methods.length, events: r.events.length, newUnmatched: r.unmatched.filter((n) => !(n in ABF.notCdp)) }));
   } else console.log(`  · ⑨ no agent-browser ${TV} binary here (VS_AGENT_BROWSER_BIN unset, ${path.relative(REPO, bin)} absent) — the checked-in fixture is the evidence; scripts/agent-browser-cdp-census.mjs <binary> --write re-reads it`);
+}
+
+// ═══ ⑩ the method-class snapshot (lane chrome-157 — 主开发's ruling 2026-11-13 11:08Z) ═══
+console.log('— ⑩ every row\'s class equals the committed snapshot the census tool wrote (scripts/fixtures/cdp-census-classes.json) — a class change is two files in one commit');
+{
+  const snapFile = path.join(FIX, CLASS_SNAPSHOT);
+  const text = fs.readFileSync(snapFile, 'utf8'), snap = JSON.parse(text);
+  const moved = classesMoved(C, snap);
+  ok(moved.length === 0 && snap.rows === C.rows().length, `⑩ the census table equals the snapshot: ${C.rows().length} rows, 0 moved`, moved.map((x) => `${x.method}: ${x.was} → ${x.now}`).join('; ') + ' — re-run `node scripts/cdp-protocol-fetch.mjs --write-classes` in the SAME commit as the table change, and say why in it');
+  ok(text === classSnapshotText(C), '⑩ the snapshot is the census tool\'s own text of this table, byte for byte (written by `cdp-protocol-fetch.mjs --write-classes`, never by hand)');
+  // RED CONTROLS (census copies): the reviewers' planted change, and one in the DANGEROUS direction — a class loosened while a person drives
+  const MUTS = mutantCopies('cdp-census-snapshot', REPO);
+  const csrc = fs.readFileSync(path.join(REPO, 'src/cdp-census.js'), 'utf8'), msrc = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
+  const a1 = "getAllCookies: 'read',", a2 = "dispatchKeyEvent: ['input', '2026-09-21'],";
+  ok(csrc.split(a1).length === 2 && csrc.split(a2).length === 2, '⑩ control setup: the two rows are spelled once in src/cdp-census.js');
+  const c1 = require(MUTS.write('src/cdp-census.js', csrc.replace(a1, "getAllCookies: 'refused',"), 'getallcookies-refused'));
+  const m1 = classesMoved(c1, snap);
+  ok(m1.length === 1 && m1[0].method === 'Network.getAllCookies' && m1[0].was === 'read' && m1[0].now === 'refused', '⑩ CONTROL (the reviewers\' planted change): Network.getAllCookies read → refused in a census copy — the leg is RED and names that row', JSON.stringify(m1));
+  const p2 = MUTS.write('src/cdp-census.js', csrc.replace(a2, "dispatchKeyEvent: ['read', '2026-09-21'],"), 'dispatchkey-read');
+  const c2 = require(p2);
+  const m2 = classesMoved(c2, snap);
+  const M2 = MUTS.load('src/browser-mediation.js', msrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(p2)})`), 'dispatchkey-read');
+  ok(m2.length === 1 && m2[0].method === 'Input.dispatchKeyEvent' && m2[0].was === 'input' && m2[0].now === 'read' && verdict(M2, 'Input.dispatchKeyEvent', { paused: true }) === 'forward' && verdict(M, 'Input.dispatchKeyEvent', { paused: true }) === 'browser_interrupted:input',
+    '⑩ CONTROL (the dangerous direction): Input.dispatchKeyEvent input → read in a census copy — the copy\'s judge FORWARDS the agent\'s key while the person drives, and only this leg names it (red)', JSON.stringify(m2));
+  for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: 2, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
 }
 
 // ═══ CONTROLS ═══════════════════════════════════════════════════════════════

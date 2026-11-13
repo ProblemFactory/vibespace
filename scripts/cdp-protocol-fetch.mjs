@@ -11,6 +11,7 @@
 // prints every method the table lacks. NOT a test-*.mjs (no tier).
 //   node scripts/cdp-protocol-fetch.mjs [--chrome /usr/bin/google-chrome] [--out scripts/fixtures] [--scratch-name cdp-protocol]
 //   node scripts/cdp-protocol-fetch.mjs --diff <older version> <newer version>   (two fixtures under --out; prints the diff)
+//   node scripts/cdp-protocol-fetch.mjs --write-classes   (THE METHOD-CLASS SNAPSHOT: scripts/fixtures/cdp-census-classes.json from src/cdp-census.js — no Chrome)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -103,9 +104,35 @@ export async function fetchLiveProtocol({ chrome = CHROME, root = scratch('cdp-p
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
+/**
+ * THE METHOD-CLASS SNAPSHOT (lane chrome-157, 主开发's ruling 2026-11-13 11:08Z): every census row's class, WRITTEN BY THIS TOOL
+ * from src/cdp-census.js — never by hand. test-cdp-census ⑩ holds the file equal to this text of the table and prints each moved
+ * row on red, so a class change is always two files in one commit and a line a reviewer reads (a read or refused row loosened
+ * while a person drives was green everywhere: only the rows a Chrome step ADDED were pinned). Deterministic: sorted, no date.
+ */
+export const CLASS_SNAPSHOT = 'cdp-census-classes.json';
+export function classSnapshotText(census) {
+  const rows = census.rows().map((r) => [r.domain + '.' + r.method, r.cls]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return JSON.stringify({ about: 'every CDP census row\'s class — WRITTEN by `node scripts/cdp-protocol-fetch.mjs --write-classes` from src/cdp-census.js, never by hand; test-cdp-census ⑩ holds the table equal to it (a class change = this file and the table in one commit)', rows: rows.length, classes: Object.fromEntries(rows) }, null, 1) + '\n';
+}
+/** The rows whose class differs between a census and a snapshot: [{method, was, now}] (was/now null = a row added / gone). */
+export function classesMoved(census, snapshot) {
+  const now = Object.fromEntries(census.rows().map((r) => [r.domain + '.' + r.method, r.cls])), was = (snapshot && snapshot.classes) || {};
+  return [...new Set([...Object.keys(was), ...Object.keys(now)])].sort().filter((m) => was[m] !== now[m]).map((m) => ({ method: m, was: was[m] || null, now: now[m] || null }));
+}
 export function chromeVersionOf(version) { const m = /Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(String(version && version.Browser || '')); return m ? m[1] : null; }
 const fixtureOf = (v) => JSON.parse(fs.readFileSync(path.join(OUT, `cdp-protocol-${v}`, 'protocol.json'), 'utf8'));
 if (import.meta.url === `file://${process.argv[1]}`) {
+  if (process.argv.includes('--write-classes')) {
+    const { createRequire } = await import('node:module');
+    const census = createRequire(import.meta.url)(path.join(REPO, 'src/cdp-census.js'));
+    const file = path.join(OUT, CLASS_SNAPSHOT), text = classSnapshotText(census);
+    let before = null; try { before = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* the first write */ }
+    fs.writeFileSync(file, text);
+    const moved = before ? classesMoved(census, before) : [];
+    console.log(`${path.relative(REPO, file)}: ${census.rows().length} rows${moved.length ? ` — moved: ${moved.map((x) => `${x.method} ${x.was} → ${x.now}`).join('; ')}` : ''}`);
+    process.exit(0);
+  }
   const di = process.argv.indexOf('--diff');
   if (di > 0) {
     const [a, b] = process.argv.slice(di + 1, di + 3);
