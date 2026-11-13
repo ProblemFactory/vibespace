@@ -101,6 +101,34 @@ ok(!!rp && PLAIN_P.length >= 3 && PLAIN_P.every((p) => rp[p] === PARAMS[p]), `${
     'the record names EVERY write-only parameter field in `secretParams` — the page draws them from it (it keeps no copy of the rule)', JSON.stringify(a.cfg.secretParams));
   ok(a.needRaw === true && a.needCells === false,
     'revealNeeded: a raw rclone record shows sealed PLAIN parameters (the vault\'s reveal is asked); a record of cells only shows nothing sealed — no reveal, no audit', JSON.stringify({ needRaw: a.needRaw, needCells: a.needCells })); }
+// THE ONE TABLE, DENY BY DEFAULT (主开发's closure 2026-11-13: the rule was still a guess by name). Every rclone option a provider of
+// this tree writes — read from the PROVIDERS (P('X'), RCLONE_CONFIG_VS_X, a *_KEYS set), never from the table — has its row, plain
+// or secret; a name with no row is a secret whatever its value or its ending
+{ const T = MountManager.RCLONE_PARAMS, SP = MountManager.SECRET_PARAM;
+  const known = [...new Set(['src/mounts.js', ...PROVIDER_FILES].flatMap((f) => { const s = read(f); return [...[...s.matchAll(/\bP\('([A-Z0-9_]+)'\)/g)].map((m) => m[1]),
+    ...[...s.matchAll(/RCLONE_CONFIG_VS_([A-Z0-9_]+)/g)].map((m) => m[1]), ...[...s.matchAll(/_KEYS = new Set\(\[([^\]]*)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([a-z0-9_]+)'/g)].map((x) => x[1]))].map((x) => x.toLowerCase()); }))].sort();
+  const missing = T ? known.filter((k) => !Object.prototype.hasOwnProperty.call(T, k)) : known;
+  ok(!!T && Object.isFrozen(T) && known.length >= 20 && missing.length === 0 && Object.values(T).every((v) => v === 'plain' || v === 'secret'),
+    `THE ONE TABLE: every rclone option the tree's providers write has its row, plain or secret (${known.length} options; with no row: ${missing.join(', ') || 'none'})`);
+  const unknown = [['mystery_url', 'https://kept.example.test/x'], ['unlisted_flag', 'true'], ['service_creds_id', 'abc'], ['some_path', '/x/y']];
+  ok(unknown.every(([n, v]) => SP(n, v) === true), 'deny by default: a name with no row is a SECRET whatever its value or its ending (a boolean, an _url / _id / _path name)', JSON.stringify(unknown.map(([n, v]) => [n, SP(n, v)]))); }
+// A CREDENTIAL URL is a secret whatever its row (the closure's verifier: url / endpoint / api_url with userinfo and a signed
+// storage_url came back in clear) — the verdicts written here; then through the answer, inside the window and out
+{ const SP = MountManager.SECRET_PARAM;
+  const cases = [['url', 'https://someone:wo-u-1@files.example.test/dav', true], ['endpoint', 'https://ak:wo-u-2@s3.example.test', true], ['api_url', 'http://user@sia.example.test:9980', true],
+    ['storage_url', 'https://acct.blob.example.test/c?sv=2024-01-01&sig=wo-u-4', true], ['url', 'https://files.example.test/dav?token=wo-u-5', true],
+    ['url', 'https://files.example.test/dav', false], ['endpoint', 'https://s3.example.test', false], ['token_url', 'https://kept.example.test/token', false], ['region', 'eu-west', false]];
+  const got = cases.map(([n, v]) => SP(n, v));
+  ok(cases.every(([, , want], i) => got[i] === want), 'a value that parses as a URL with userinfo or a signed query is a SECRET whatever its name; a bare URL keeps its plain row', JSON.stringify(cases.map(([n, v], i) => [n, v.slice(0, 36), got[i]])));
+  const dir = path.join(ROOT, 'curl'); fs.mkdirSync(dir, { recursive: true }); const mm = new MountManager({ dataDir: dir });
+  const CP = { url: 'https://someone:wo-u-1@files.example.test/dav', endpoint: 'https://ak:wo-u-2@s3.example.test', api_url: 'http://user:wo-u-3@sia.example.test:9980', storage_url: 'https://acct.blob.example.test/c?sv=2024-01-01&sig=wo-u-4' };
+  mm._state.mounts.push({ id: 'mnt-curl', name: 'curl', type: raw.id, origin: 'manual', mode: 'rw', createdAt: 0, paramsEnc: Object.fromEntries(Object.entries(CP).map(([k, v]) => [k, mm._enc(v)])) });
+  mm._state.mounts.push({ id: 'mnt-curl2', name: 'curl2', type: raw.id, origin: 'manual', mode: 'rw', createdAt: 0, paramsEnc: { url: mm._enc(CP.url), region: mm._enc('eu') } });
+  const inside = mm.config('mnt-curl'), outside = mm.config('mnt-curl', { masked: true }), rn = (id) => (typeof mm.revealNeeded === 'function' ? mm.revealNeeded(id) : 'none');
+  const leaks = ['wo-u-1', 'wo-u-2', 'wo-u-3', 'wo-u-4'].filter((x) => JSON.stringify(inside).includes(x) || JSON.stringify(outside).includes(x));
+  ok(leaks.length === 0 && Object.keys(CP).every((k) => (inside.params || {})[k] === '' && (outside.params || {})[k] === '') && rn('mnt-curl') === false && rn('mnt-curl2') === true,
+    'a raw record planted with credential URLs (url / endpoint / api_url userinfo, a signed storage_url) answers none of their bytes inside the window or out — blank, never the mask of a plain field; no reveal asked for a record with no plain parameter',
+    JSON.stringify({ leaks, inside: inside.params, outside: outside.params, reveal: [rn('mnt-curl'), rn('mnt-curl2')] })); }
 
 // ── ③ INTEGRATIONS ────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('③ INTEGRATIONS — every registry row\'s every secret field (a company preset): at most its declared tail');
@@ -224,6 +252,22 @@ ok(!!FIELD && CELLS.every((c) => FIELD.test(c)), `SECRET_CELL names every sealed
     'heldFields (evaluated): a parameter the server named secret is write-only — a held one «已保存» + «替换…» + «删除», an unset one an empty password box; a plain parameter keeps its value; a held CELL has no «删除»', JSON.stringify(fields.map((f) => [f[0], f[3], (f[4] && f[4].html || '').slice(0, 80)]))); }
 ok(/if \(box\.dataset\.remove === '1'\) params\[k\.slice\(6\)\] = '';/.test(meth) && /box\.dataset\.remove = '1';/.test(SM),
   'a held parameter\'s «删除» sends the empty value the server deletes on (the dialog\'s «clear a parameter\'s value to remove it» stays true)');
+// «撤销» (the closure's minor: a «删除» mark had no road back but closing the dialog) — wireHeld EVALUATED on a fake form: «删除»
+// marks the box and shows «撤销»; «撤销» takes the mark back — «已保存» and both doors again, nothing sent
+{ const at = SM.indexOf('function wireHeld('), wsrc = at < 0 ? '' : SM.slice(at, SM.indexOf('\n}\n', at) + 3);
+  const lab = {}; const mk = (cls) => ({ cls, hidden: false, dataset: {}, textContent: '', value: '', focus() {}, closest(sel) { return sel === 'label' ? lab : sel === '.' + this.cls ? this : null; } });
+  const remove = mk('mounts-held-remove'), replace = mk('mounts-held-replace'), undo = mk('mounts-held-undo'), state = mk('mounts-held-state'), box = mk('box');
+  undo.hidden = true; box.hidden = true; state.textContent = 'Saved';
+  lab.querySelector = (sel) => ({ '[name]': box, '.mounts-held-state': state, '.mounts-held-undo': undo })[sel] || null;
+  lab.querySelectorAll = (sel) => (sel === '.mounts-held-replace, .mounts-held-remove' ? [replace, remove] : []);
+  let handler = null; try { new Function('tr', `${wsrc}; return wireHeld;`)((x) => x)({ addEventListener: (t, f) => { handler = f; } }); } catch { /* none ⇒ red */ }
+  const press = (el) => { if (handler) handler({ target: { closest: (sel) => el.closest(sel) }, preventDefault() {} }); };
+  press(remove); const marked = { remove: box.dataset.remove, state: state.textContent, doors: [replace.hidden, remove.hidden], undoShown: !undo.hidden };
+  press(undo); const back = { remove: box.dataset.remove, state: state.textContent, doors: [replace.hidden, remove.hidden], undoShown: !undo.hidden };
+  const hf2 = SM.slice(SM.indexOf('const SECRET_CELL = '), SM.indexOf('function wireHeld('));
+  ok(!!handler && marked.remove === '1' && marked.state === 'Removed when you save' && marked.undoShown && back.remove === undefined && back.state === 'Saved' && back.doors.every((h) => h === false) && !back.undoShown
+    && /class="mounts-btn mounts-held-undo" hidden>\$\{escHtml\(tr\('Undo'\)\)\}/.test(hf2),
+    'a held parameter\'s «删除» shows «撤销», and «撤销» takes the mark back before Save — «已保存», «替换…» and «删除» again, nothing sent (wireHeld evaluated)', JSON.stringify({ marked, back })); }
 ok(CELLS.every((c) => !new RegExp(`\\bcfg\\.${c}\\b`).test(SM)), 'no line of src/lib/sidebar-mounts.js reads cfg.<a secret cell>');
 const MD = read('src/lib/mounts-dialog.js');
 ok(/const heldRow = f\.held && el\.tagName === 'INPUT' \? heldSecretRow\(el\) : null;/.test(MD) && /function heldSecretRow\(input\)[\s\S]{0,400}input\.value = ''; input\.hidden = true;/.test(MD) && /tr\('Saved'\)/.test(MD) && /tr\('Replace…'\)/.test(MD), 'the shared field renderer draws a `held` field as «已保存» + «替换…» over an EMPTY, hidden box');
