@@ -162,5 +162,35 @@ console.log('④ THE DOORS DO THEIR ACT (lane ui-needs-a-button pick 1 — the w
     'sidebar-sessions-4: «create it?» always carries its create on the line — a missing parent too (made with it at use: /api/mkdir is mkdir -p)');
 }
 
+console.log('⑤ THE SETTINGS AND INTEGRATION DOORS (lane ui-needs-a-button pick 2)');
+{
+  const { pathToFileURL } = await import('node:url');
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const NLS = src('src/lib/need-line.js');
+  ok(/section && row\.category \? \(\) => app\._settingsUI\.open\(\{ category: String\(row\.category\) \}\)/.test(NLS) && /typeof app\.openIntegration !== 'function'\) return null;/.test(NLS) && /app\.openIntegration\(id \|\| null\)/.test(NLS),
+    'need-line: settingsDoor { section } opens the row\'s whole Settings section (the Spending limits together); integrationDoor with no id opens the window');
+  // browser-profiles-4: the browser list's needs said ONCE, each with its door's target — the chosen cloud browser's own card
+  const BM = await import(pathToFileURL(path.join(REPO, 'src/lib/browser-new-profile-model.js')).href);
+  const rows = [{ id: 'chromium', control: { ok: true } }, { id: 'cloud:browserbase', control: { ok: true } }, { id: 'cloud:kernel', control: { ok: true } }, { id: 'local-window', control: { ok: false, code: 'provider_needs_consent' } }];
+  const ch = typeof BM.providerChoices === 'function' ? BM.providerChoices({ providers: rows }) : [];
+  const needs = typeof BM.providerNeedsOf === 'function' ? BM.providerNeedsOf(ch, { chosen: 'cloud:kernel' }) : [];
+  const none = typeof BM.providerNeedsOf === 'function' ? BM.providerNeedsOf(BM.providerChoices({ providers: rows.slice(0, 1) })) : null;
+  ok(needs.length === 2 && needs[0].need === 'key' && needs[0].integration === 'cloud:kernel' && needs[1].setting === 'window.realDesktopTargets'
+    && ch.filter((c) => c.need === 'key').every((c) => !/⚙|→|Integrations/.test(c.note)) && Array.isArray(none) && none.length === 0,
+    'browser-profiles-4: the cloud rows no longer say «(⚙ → Integrations)» each — ONE line under the list, its door the chosen cloud browser\'s card; the desktop window\'s consent its switch; nothing when nothing needs it', { needs, notes: ch.map((c) => c.note) });
+  // settings-13: a non-live row changed in this page says «Takes effect after a reload» with «Reload now» on its row
+  const SU = src('src/lib/settings-ui.js');
+  ok(/if \(!schema\.liveApply\) \{[\s\S]{0,400}LOADED_VALUES\.set\(path, now\(\)\)[\s\S]{0,300}needLine\(\{ words: t\('Takes effect after a reload'\)[\s\S]{0,120}doors: \[reloadDoor\(\)\]/.test(SU) && /now\(\) !== LOADED_VALUES\.get\(path\)/.test(SU),
+    'settings-13: a row that takes effect at the next load, once ITS value moved in this page, carries «Reload now» on its line (the badge stays the fact)');
+  // plugins-integrations-13: the https why carries its door wherever the Connect block is drawn (the voice sheet AND the Integrations card)
+  const OC = src('src/lib/oauth-connect-row.js'), VT = src('src/lib/voice-teach-ui.js'), IW = src('src/lib/integrations-window.js'), PU = src('src/lib/plugins-ui.js');
+  ok(/'self-hosted': \(app\) => settingsDoor\(app, 'server\.https'/.test(OC) && /renderConnectRow\(box, DROPLINE_CONNECT, st, rerender, \{ app \}\)/.test(VT) && /renderConnectRow\(box, v\.connect, st, \(\) => refresh\(v\.id\), \{ app \}\)/.test(IW)
+    && /renderVoiceSheet\([\s\S]{0,120}app: this \}\)/.test(PU) && !/t\('[^']*Services › Integrations/.test(VT + PU),
+    'plugins-integrations-13: «Connecting needs an https address» carries «Turn on HTTPS…» on both surfaces; the key link and the chip\'s title no longer name a wrong menu path');
+  // usage-16: on with no key ⇒ the chip is the door to the key's card (the Dropline chip's verb rule)
+  ok(/t\('Add the API key…'\)/.test(PU) && /if \(p\.enabled && !p\.configured && !stopW\) onChip = \(\) => this\.openIntegration\?\.\(p\.integration \|\| 'llm'\)/.test(PU),
+    'usage-16: the LLM plugin on with no key — its chip says «Add the API key…» and opens the key\'s card');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

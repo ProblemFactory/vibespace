@@ -7,6 +7,7 @@
 // button — never dead: without a way to sign in here it says why, in the sentence the SERVER picked (connectWhy).
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { needDoorButton, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (plugins-integrations-13): a why with its door
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const call = (url, body) => fetchJson(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -15,7 +16,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** `box` gets the row (+ its words line); `st` = the answer of `decl.status`; `rerender()` after a sign-in / Disconnect.
  *  Returns what was drawn: 'connected' | 'key' | 'vault-locked' | 'connect'. */
-export function renderConnectRow(box, decl, st, rerender) {
+// lane ui-needs-a-button (plugins-integrations-13): a server-picked why that a person here can cure carries ITS door on the line
+// (`self-hosted` = this instance has no https address and its owner is the person: the https row); the others have none
+const WHY_DOORS = Object.freeze({ 'self-hosted': (app) => settingsDoor(app, 'server.https', { label: t('Turn on HTTPS…'), kind: 'secondary' }) });
+export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
   const row = el('div', 'plugin-cfg-row oauth-connect');
@@ -47,7 +51,13 @@ export function renderConnectRow(box, decl, st, rerender) {
   if (a.state === 'reconnect') { words.classList.add('plugin-cfg-warn'); words.textContent = t(W.expired); }
   const whys = decl.whys || {};
   const why = () => t(whys[st && st.connectWhy] || Object.values(whys)[0] || '');
-  if (!(st && st.connectVia)) { words.classList.add('plugin-cfg-warn'); words.textContent = why(); }
+  const sayWhy = () => {
+    words.textContent = why();
+    const k = st && whys[st.connectWhy] ? st.connectWhy : Object.keys(whys)[0];
+    const d = WHY_DOORS[k] ? WHY_DOORS[k](app) : null;
+    if (d) words.append(' ', needDoorButton(d));
+  };
+  if (!(st && st.connectVia)) { words.classList.add('plugin-cfg-warn'); sayWhy(); }
   go.onclick = async () => {
     const tab = window.open('about:blank', '_blank');  // opened in the press itself (a later open is a blocked pop-up)
     go.disabled = true;
@@ -64,7 +74,7 @@ export function renderConnectRow(box, decl, st, rerender) {
     } catch (e) {
       try { if (tab) tab.close(); } catch { }
       words.className = 'plugin-detail plugin-cfg-warn oauth-connect-words';
-      words.textContent = e.code === 'needs-https' ? why() : e.message;
+      if (e.code === 'needs-https') sayWhy(); else words.textContent = e.message;
       go.disabled = false;
     }
   };

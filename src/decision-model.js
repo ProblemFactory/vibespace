@@ -1050,7 +1050,7 @@ function decisionTodayLine(usage, capUsd, { on = true, t = fillWords, monthUsd =
   const mo = monthUsd === null || monthUsd === undefined ? null : Math.max(num0(monthUsd), spentUsd);
   return {
     on: true, calls, hits, spentUsd, capUsd: cap, warn, money, cap: capText, spend, title,
-    short: t('Today {spent} / {cap} · judged {n} · hits {m}', { spent: money, cap: capText, n: calls, m: hits }),
+    short: t('Today {spent} (limit {cap}) · judged {n} · {m} needed you', { spent: money, cap: capText, n: calls, m: hits }),
     text: t('Today: judged {n} · {m} needed you', { n: calls, m: hits }) + ' · ' + spend,
     month: t('LLM · today {spent} / {cap} · this month {month}', { spent: money, cap: capText, month: mo === null ? '—' : moneyText(mo, moved || mo > 0) }),
   };

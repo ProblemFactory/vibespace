@@ -11,13 +11,14 @@
 //
 // The arithmetic is PURE (src/lib/browser-new-profile-model.js); the words are the device's t().
 import { t } from './i18n.js';
+import { needLine, integrationDoor, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (browser-profiles-4): the list's needs, once, with doors
 import { fetchJson, showToast, createModalShell, copyText } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
 import { pickerRows, draftWho, EVERYONE_KEY, allAgentsSentence } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
-import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
+import { providerNeedsOf, providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
 import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
@@ -70,6 +71,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
     provWrap.appendChild(el('div', 'bnew-section-head', t('Browser')));
     const provList = el('div', 'bwho-answers bnew-providers'); provList.setAttribute('role', 'radiogroup'); provList.setAttribute('aria-label', t('Browser'));
     provWrap.appendChild(provList);
+    provWrap.appendChild(el('div', 'bnew-provider-needs'));   // lane ui-needs-a-button: the list's needs under it, each with its door
     provWrap.appendChild(portRow);
     machWrap.appendChild(el('div', 'bnew-section-head', t('Runs on')));
     const machList = el('div', 'bwho-answers bnew-machines'); machList.setAttribute('role', 'radiogroup'); machList.setAttribute('aria-label', t('Runs on'));
@@ -192,6 +194,8 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       order.push(row);
     }
     list.replaceChildren(...order);
+    const needsBox = provWrap.querySelector('.bnew-provider-needs');
+    if (needsBox) needsBox.replaceChildren(...providerNeedsOf(choices, { chosen: st.provider, t }).map((n) => needLine({ words: n.words, tone: 'need', doors: [n.integration ? integrationDoor(app, n.integration, { label: t('Open Integrations…'), kind: 'secondary' }) : settingsDoor(app, n.setting, { label: t('Turn on…'), kind: 'secondary' })] })));
     portRow.style.display = st.provider === 'cdp' ? '' : 'none';
   }
   function drawMachines() {

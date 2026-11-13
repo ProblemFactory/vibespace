@@ -4638,6 +4638,9 @@ label.cfg-row {
 .need-line > .need-doors > .need-door { padding: 3px 10px; font-size: 12px; line-height: 1.35; border-radius: var(--radius-sm); }
 .need-line[data-tone="fail"] > .need-words { color: var(--red, #e55); }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .need-door { min-height: 36px; } } /* a finger's target (every phone target ≥ 36 px) */
+/* lane ui-needs-a-button pick 2: a need line INSIDE a heading's state slot (the Apps dialog's real-desktop switch) stays on the heading's line */
+.desktop-launch-desk-state > .need-line { display: inline-flex; margin-left: 8px; font-weight: 400; vertical-align: middle; }
+.desktop-launch-desk-state > .need-line > .need-words { flex: 0 1 auto; }
 /* ui-needs-a-button: move mode says what it is and how it ends */
 .move-mode-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100000; pointer-events: none; padding: 6px 12px; border-radius: var(--radius); background: var(--bg-dialog); color: var(--text); border: 1px solid var(--accent); font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
 .mounts-errline-details { margin: 2px 0 0; font-size: 11px; color: var(--text-dim); }

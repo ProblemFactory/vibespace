@@ -35,6 +35,7 @@ import { fetchJson, showToast, createModalShell, showContextMenu } from './utils
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (channels-policy-10)
 import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
 import * as P from '../channel-policy.js';
@@ -1120,7 +1121,7 @@ export async function showNotifyDialog(app, target) {
   let base = drawn();
   dirtyNow = () => drawn() !== base;
   addB.onclick = () => { addRow(null); };
-  body.append(addB, exPicker.el, unexcept, total, noteEl(t('Pacing only — the account budget is the money bound.')));
+  body.append(addB, exPicker.el, unexcept, total, needLine({ words: t('This is only a rate limit — spending is capped by the account budget.'), tone: 'info', cls: 'chan-flow-note', doors: [settingsDoor(app, 'spend.unattendedPerIdentityDay', { label: t('Set the budget…'), kind: 'secondary', section: true })] }));
   const actions = el('div', 'chan-flow-actions');
   const grant = btn(t('Grant access…'), () => { close(); showGrantAccessDialog(app, target); });
   actions.append(grant, el('span', 'chan-sp'));

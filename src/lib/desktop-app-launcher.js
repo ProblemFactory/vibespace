@@ -97,7 +97,7 @@ import { OFFICE_MODULES, installSpecFor, FONTS_ID } from '../office-open.js'; //
 import { splitWords, joinWords, commandLine } from '../argv-words.js'; // lane app-register-ui: a variant's / a recipe's ONE line ↔ its words (PURE, shared with the server)
 import { installPlace } from '../app-witness.js'; // lane apps-launcher-witness: THE install-place words (PURE, shared with the engine's outcome)
 import { SHOW_SYSTEM_KEY } from '../app-witness.js'; // lane apps-dialog-fast: the person's "Show them" (user state)
-import { needLine } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button: a need sentence carries its door on its line
 import { appPlanBlock, appSummaryBlock, appRefusalText, appDialogTitle, appGoLabel, appPlanNote, appDoneText, renderAppsSection, openDebInstall, openAppSearch, openAgentHelp, appsBannerModel } from './app-install-dialog.js'; // Layer 0 apps: THE install dialog shows an app's plan too
 import { enterSubmits } from './chat-enter-keys.js';
 import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» where a refusal says the machine's agent is too old
@@ -1404,8 +1404,11 @@ export async function showLaunchDialog(app, opts = {}) {
     const d = await fetchJson('/api/window/desktop');
     if (!deskEl || !deskEl.isConnected) return;
     deskEl.innerHTML = '';
-    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Desktop apps'))}</div>`; return; }
-    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Desktop apps'); // design 009 §B3: said ONCE (the heading's line), never again below it
+    // lane ui-needs-a-button (desktop-apps-5): the switch's state with ITS door on the line — never «turn it on in Settings → …»
+    // (the heading names the subject: its line says «turned off» + the door; with no answer the block says the whole sentence)
+    const deskOff = (words) => needLine({ words, tone: 'off', cls: 'desktop-launch-desk-off', doors: [settingsDoor(app, (d && d.setting) || 'window.realDesktopTargets', { label: t('Turn on…') })] });
+    if (!d || d.error) { deskState.textContent = ''; if (d && d.error) deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(d.error)}</div>`; else deskEl.replaceChildren(deskOff(t('Agents on your real desktop: off'))); return; }
+    deskState.replaceChildren(...(d.enabled ? [] : [deskOff(t('turned off'))])); // design 009 §B3: said ONCE (the heading's line), never again below it
     const leases = d.enabled ? (d.leases || []) : [];
     if (!leases.length) { if (d.enabled) deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No agent holds a window on your desktop'))}</div>`; return; }
     for (const l of leases) {

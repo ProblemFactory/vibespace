@@ -202,9 +202,11 @@ export function installPluginsUI(App) {
           const d = p.decision || {};
           const L = decisionLineOf(p);   // ONE PURE line (decision-model decisionTodayLine): the money is drawn, not hidden in a title
           const stopW = p.enabled && d.stop && DECISION_STOP_WORDS[d.stop.why] ? DECISION_STOP_WORDS[d.stop.why](d.stop) : null;   // [chip, title]
-          chip = !p.enabled ? t('turned off') : stopW ? stopW[0] : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('on — no provider key yet');
-          tone = stopW ? 'warn' : p.enabled && p.configured ? 'ok' : p.enabled ? 'warn' : '';
-          chipTitle = L.text + (stopW ? ' · ' + stopW[1] : '');
+          chip = !p.enabled ? t('turned off') : stopW ? stopW[0] : p.configured ? t('on · {provider}', { provider: d.providerLabel || '' }) : t('Add the API key…');
+          tone = stopW ? 'warn' : p.enabled && p.configured ? 'ok' : p.enabled ? 'primary' : '';
+          chipTitle = (p.enabled && !p.configured && !stopW ? t('On — no API key yet') + ' · ' : '') + L.text + (stopW ? ' · ' + stopW[1] : '');
+          // lane ui-needs-a-button (usage-16): on with no key ⇒ the chip opens the key's card (door: 'decision-key')
+          if (p.enabled && !p.configured && !stopW) onChip = () => this.openIntegration?.(p.integration || 'llm'); // door: 'decision-key'
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
           fact = Object.assign(document.createElement('div'), { className: 'plugin-row-fact' }); fact.dataset.decisionToday = '1';
           liveDecisionLine(fact, (x) => paintDecisionLine(fact, x, 'short'), { first: p });   // patched in place every 60 s while drawn
@@ -216,7 +218,7 @@ export function installPluginsUI(App) {
           // lane vault-e2e-password-fix-r2: a sign-in the LOCKED vault keeps closed — the vault's door, never "connect"
           chip = p.vaultLocked ? t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)') : !p.configured ? t('Connect with Fish Audio') : waiting ? t('{n} waiting', { n: waiting }) : p.enabled ? t('on') : t('turned off');
           tone = p.vaultLocked ? 'warn' : !p.configured ? 'primary' : waiting ? 'warn' : p.running ? 'ok' : '';
-          if (!p.configured && !p.vaultLocked) chipTitle = t('or paste a Dropline key in Services › Integrations');
+          if (!p.configured && !p.vaultLocked) chipTitle = t('or paste a Dropline key in Integrations');
           onChip = p.vaultLocked ? () => window.dispatchEvent(new CustomEvent('vs-vault-door')) : () => this._voiceSheet(p, render);
           swDisabled = !p.configured;
           onSwitch = (on) => act(() => api('enabled', { body: JSON.stringify({ enabled: on }) }));
@@ -432,7 +434,7 @@ export function installPluginsUI(App) {
     if (raised) return;   // raised: the same subject's form, as it was // (the person's: re-opened by its own Connect flow once the sign-in tab answers — in front, lane dialog-yield r2)
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
     // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only
-    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus });
+    renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus, app: this });
   },
   /** the Tailscale row's 「Log in…」 chip: the guided sign-in (the server captures the auth URL; we poll until Running) */
   async _tailscaleLogin(p, api, rerender) {

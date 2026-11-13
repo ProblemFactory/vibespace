@@ -7,6 +7,7 @@ import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (task-groups-15): a need + its door on one line
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
@@ -754,9 +755,8 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       mgrSec.appendChild(lbl);
       const hint = document.createElement('div');
       hint.className = 'empty-hint';
-      hint.textContent = app.settings?.get('agents.allowGroupManagement')
-        ? t('Globally enabled — a designated session can list/create/configure/bind EVERY group and act on any of them with --group (audited in each group\'s activity log). The agent is told about these powers on its next turn.')
-        : t('Also requires Settings → Integration → "Allow agents to manage Task Groups" (currently off).');
+      if (app.settings?.get('agents.allowGroupManagement')) hint.textContent = t('Globally enabled — a designated session can list/create/configure/bind EVERY group and act on any of them with --group (audited in each group\'s activity log). The agent is told about these powers on its next turn.');
+      else hint.appendChild(needLine({ words: t('Also needs “Allow agents to manage Task Groups” — it is off.'), tone: 'off', doors: [settingsDoor(app, 'agents.allowGroupManagement', { label: t('Turn on…') })] }));
       mgrSec.appendChild(hint);
     }
 

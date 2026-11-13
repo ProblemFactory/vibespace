@@ -22,6 +22,7 @@
 // them reaches every open window through the vault's ONE notify (`vault-contents`), patched in place.
 import { t } from './i18n.js';
 import { dateOf as pageDateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (vault-grants-4)
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, pickToRow, principalOfEntry } from './principal-picker-model.js';
@@ -225,7 +226,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       else if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));
-    if (u.policy) host.append(el('div', 'vw-ak-used vw-use-policy', u.judge === 'on' ? t('Policy for the judge: «{text}»', { text: u.policy.text }) : t('Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)', { text: u.policy.text })));
+    if (u.policy) host.append(el('div', 'vw-ak-used vw-use-policy', u.judge === 'on' ? t('Policy for the judge: «{text}»', { text: u.policy.text }) : t('Policy for the judge: «{text}» — the judge is off', { text: u.policy.text })));
     if (u.approved && u.approved.n) {
       const line = el('div', 'vw-ak-used vw-use-approved');
       const at = (() => { try { return new Date(u.approved.lastAt).toTimeString().slice(0, 5); } catch { return ''; } })();
@@ -313,7 +314,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   polIn.rows = 2; polIn.spellcheck = false; polIn.maxLength = 600;
   polIn.placeholder = t('e.g. only 192.168.1.1, read-only status calls to read the WAN status');
   polIn.value = (u.policy && u.policy.text) || '';
-  body.append(polIn, el('div', 'vw-ak-hint', u.judge === 'on' ? t('The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.') : t('The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.')));
+  body.append(polIn, u.judge === 'on' ? el('div', 'vw-ak-hint', t('The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.'))
+    : needLine({ words: t('The policy judge is off — these words are kept for when you turn it on.'), tone: 'off', cls: 'vw-ak-hint', doors: [settingsDoor(app, 'vault.policyJudge', { label: t('Turn on…'), kind: 'secondary' })] }));
   // lane vault-standing-request: the commands a member may run are kept as they are (a card's «Always (this command)» or an
   // agent's standing request wrote them); ✕ on its chip takes the member back
   const withCmds = members.filter((m) => Array.isArray(m.commands) && m.commands.length);

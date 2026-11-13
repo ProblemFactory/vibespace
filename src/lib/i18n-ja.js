@@ -2375,7 +2375,6 @@ export default {
   "Group management path roots": "グループ管理のパスルート",
   "Comma-separated absolute path prefixes a manager agent may use for a group's context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.": "管理者エージェントがグループの共有コンテキスト/自動インクルードフォルダに使える絶対パス接頭辞（カンマ区切り、~ = ホーム）。任意のパスへのコンテキスト注入を防ぎます。",
   "Agent permissions": "エージェント権限",
-  "Also requires Settings → Integration → \"Allow agents to manage Task Groups\" (currently off).": "設定 → 連携 → 「エージェントによるタスクグループ管理を許可」も必要です（現在オフ）。",
   "OAuth client": "OAuth クライアント",
   "Built-in client (rclone shared — being retired by Google)": "内蔵クライアント（rclone 共有——Google が廃止予定）",
   "Custom (own client id/secret)": "カスタム（自分の client id/secret）",
@@ -4538,7 +4537,6 @@ export default {
   "Group · {name}": "グループ · {name}",
   "A group wakes one of its live sessions in turn (round-robin).": "グループはその稼働中セッションのひとつを順番に起こします(ラウンドロビン)。",
   "Rule kind": "ルールの種類",
-  "Pacing only — the account budget is the money bound.": "ペース配分のみ — 費用の上限はアカウントの予算です。",
   "Cannot be decrypted": "復号できません",
   // a4 r4 (2026-09-21): the filter validator's refusal codes and the channels engine's inbox items, worded here
   "the rule \"{kind}\" needs a value": "ルール「{kind}」には値が必要です",
@@ -4827,7 +4825,6 @@ export default {
   "More…": "その他…",
   "The package sources of {machine} have no “{q}”": "{machine}のパッケージソースに「{q}」はありません",
   "Let an agent find it": "エージェントに探してもらう",
-  "Off — turn it on in Settings → Desktop apps": "オフ — 設定 → デスクトップアプリ でオンにします",
   "No agent holds a window on your desktop": "デスクトップ上のウィンドウを保持しているエージェントはありません",
   "Pause agent": "エージェントを一時停止",
   "Resume agent": "エージェントを再開",
@@ -5353,7 +5350,6 @@ export default {
   "Helper: {name}": "ヘルパー：{name}",
   "How long after a turn ends the conversation's own browser (and its helpers' browsers) keep running before they are released. The tab stays in the Agent browser window and the next command starts the browser again. Never while you are driving it or watching it in a live view. Chat sessions only: a terminal session's browser keeps running until its idle timeout. 0 = never release; anything under 30 s is raised to 30 s.": "ターンが終わってから、会話自身のブラウザ（とそのヘルパーのブラウザ）が解放されるまで動き続ける時間。タブは Agent ブラウザのウィンドウに残り、次のコマンドでブラウザが再び起動します。あなたが操作中またはライブビューで見ている間は解放しません。チャットセッションのみ：ターミナルセッションのブラウザはアイドルタイムアウトまで動き続けます。0 = 解放しない。30 秒未満は 30 秒になります。",
   "How many browsers this conversation (with its helpers) may run at once; the machine keeps its own ceiling": "この会話（とそのヘルパー）が同時に動かせるブラウザ数。マシンには別に上限があります",
-  "Limit for this conversation": "この会話の上限",
   "Machine ceiling reached": "マシンの上限に達しました",
   "Machine ceiling reached — no browser can start until one stops, anywhere on this machine": "マシンの上限に達しました — このマシンのどこかで 1 つ止まるまで、ブラウザは起動できません",
   "{n} more browser(s) of this conversation": "この会話のブラウザがあと {n} 個",
@@ -7256,10 +7252,8 @@ export default {
   "Created {label}": "{label} を作成しました",
   "A window on your desktop is shared with an agent from the window itself — it is not a profile.": "デスクトップのウィンドウはウィンドウ自体からエージェントと共有します。プロファイルではありません。",
   "Runs only on the computer VibeSpace runs on — pick This computer to use it.": "VibeSpace が動いているコンピュータでしか使えません。「このコンピュータ」を選んでください。",
-  "Off until you allow agents to use windows on your desktop (Settings → Desktop apps).": "エージェントにデスクトップのウィンドウを使わせると許可するまでオフです（設定 → デスクトップアプリ）。",
   "Can't be used in this version of VibeSpace.": "このバージョンの VibeSpace では使えません。",
   "Connects to a browser that is already running with a debugging port — enter its port.": "デバッグポートを開いて起動済みのブラウザに接続します。ポート番号を入力してください。",
-  "Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.": "サービス提供元で動きます。初回起動の前にキーが必要です（⚙ → 連携とキー）。",
   "This computer": "このコンピュータ",
   "Not connected right now.": "現在接続されていません。",
   "Its VibeSpace agent is too old to run a browser — update the agent on it.": "そのコンピュータの VibeSpace エージェントが古く、ブラウザを動かせません。エージェントを更新してください。",
@@ -7602,7 +7596,6 @@ export default {
   "You took over the agent’s window of this browser — the agent is paused until you hand back; other conversations keep working in their own windows": "このブラウザのエージェントのウィンドウを引き継ぎました — 戻すまでエージェントは一時停止します。ほかの会話はそれぞれのウィンドウで作業を続けます",
   "Browsers running at once on this machine": "このマシンで同時に動かせるブラウザ数",
   "The most agent browsers (desktop apps counted with them) that may run on this machine at the same time: 6 by default, 1 to 32. Several conversations on one profile share its one browser, each in its own window, so they count once. At the ceiling a new browser is refused by name — the agent is told which of its own run and how many others do — and nothing starts until one idles out or you stop one. A change applies to the next browser that starts; nothing running is stopped. The resource guard still only reports a browser that uses too much memory or CPU.": "このマシンで同時に動かせるエージェントブラウザの最大数（デスクトップアプリも一緒に数えます）: 既定は 6、1〜32。1 つのプロファイルを使う複数の会話はその 1 つのブラウザを共有し、それぞれ自分のウィンドウを持つので 1 つと数えます。上限に達すると新しいブラウザは名前を挙げて拒否され — エージェントには自分のどれが動いているかと、ほかにいくつ動いているかが伝わります — どれかがアイドルで止まるか、あなたが止めるまで起動しません。変更は次に起動するブラウザから適用され、動いているものは止まりません。リソースガードは、メモリや CPU を使いすぎるブラウザを報告するだけです。",
-  "This machine: {used} of {cap} browsers running (Settings → Agent browser → Browsers running at once on this machine)": "このマシン: {cap} 個中 {used} 個のブラウザが実行中（設定 → エージェントブラウザ → このマシンで同時に動かせるブラウザ数）",
   "The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling (Browsers running at once on this machine, six by default), shared with desktop apps.": "1 つの会話（とそのヘルパー）が既定で同時に動かせるブラウザ数。各会話は Agent ブラウザのウィンドウのカウント、またはセッションのプロパティで自分の値を変更でき、タスクグループは自分の新しい会話に別の既定値を設定できます（会話は開始時のグループ既定値を保ちます）。マシンにはデスクトップアプリと共有する独自の上限（このマシンで同時に動かせるブラウザ数、既定 6）があります。",
   "Threads: seconds between two checks of a chat for new threads": "スレッド：チャットに新しいスレッドがないか確認する間隔（秒）",
   "Where thread replies are not listed with the conversation (Lark), a message read before anyone replied to it in a thread is found again by re-reading the newest page of each chat active in the last 14 days this often — one request per chat. Pressing Refresh in a chat checks it at once.": "スレッドの返信が会話と一緒に一覧されない場所（Lark）では、誰かがスレッドで返信する前に読み込んだメッセージを、過去 14 日間に動きのあった各チャットの最新ページをこの間隔で読み直して見つけ直します — チャットごとに 1 リクエスト。チャットで「更新」を押すとすぐに確認します。",
@@ -9003,7 +8996,6 @@ export default {
   "Wakes per hour for this path": "このパスの 1 時間あたりの起動回数",
   "Each wake is a billed agent turn; past this the path waits for the next hour.": "起動 1 回ごとに課金されるエージェントのターンです。上限を超えると次の 1 時間まで待ちます。",
   "Only from these addresses": "これらのアドレスからのみ",
-  "Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops.": "空欄 = すべてのアドレス。接続元アドレスで判定します。リバースプロキシの背後では webhook.trustProxyHops を設定してください。",
   "Create path": "パスを作成",
   "Path not created: {why}": "パスは作成されませんでした：{why}",
   "Path created, but its policy was not saved: {why}": "パスは作成されましたが、ポリシーは保存されませんでした：{why}",
@@ -9202,8 +9194,6 @@ export default {
   "Your Dropline sign-in has expired — connect again": "Dropline のサインインが期限切れです——もう一度接続してください",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "接続には https のアドレスが必要です：Tailscale HTTPS をオンにするか、Dropline のキーを貼り付けてください",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "このインスタンスには https のアドレスがありません — 運用している人に VIBESPACE_PUBLIC_URL（https のアドレス）を設定してもらうか、Dropline のキーを貼り付けてください",
-  "Have a key instead? Paste it in Services › Integrations › Dropline": "キーをお持ちですか？「サービス › 連携 › Dropline」に貼り付けてください",
-  "or paste a Dropline key in Services › Integrations": "または「サービス › 連携」で Dropline のキーを貼り付け",
   "Finish the sign-in in the new tab (Fish Audio mails you a code)…": "新しいタブでサインインを完了してください（Fish Audio からコードがメールで届きます）…",
   "Dropline connected": "Dropline に接続しました",
   "Teach Dropline": "Dropline に教える",
@@ -9290,7 +9280,6 @@ export default {
   "Channels home": "チャンネルのホーム",
   "Notification rules": "通知ルール",
   "on · {provider}": "オン · {provider}",
-  "on — no provider key yet": "オン — プロバイダーのキーがまだありません",
   "openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider. With openrouter, “Draft from my verdicts” also sends the short digests the judge saw and your block to POST /api/v1/chat/completions (zero-data-retention endpoints only).": "openai（POST /v1/decisions）または openrouter（POST /api/alpha/decisions）。判定されるテキストはこのプロバイダーに送られます。openrouter の場合、「判定から下書き」は判定で使った短い要約とあなたの欄も POST /api/v1/chat/completions に送ります（ゼロデータ保持のエンドポイントのみ）。",
   "Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.": "OpenAI のキー（platform.openai.com → API keys）または OpenRouter のキー（openrouter.ai → Keys）。上のプロバイダーにだけ送られ、二度と表示されません。",
   "How to use it": "使い方",
@@ -9455,7 +9444,6 @@ export default {
   "An app with its own file-dialog portal (see above) also gets a notifications service on its own display: what it announces shows inside its window, and in For you when it is urgent or the window is not in front. Off: those notifications are dropped, as before. Applies to apps started after the change.": "自分のファイルダイアログ用ポータルを持つアプリ（上の項目）は、自分のディスプレイに通知サービスも持ちます。通知はそのウィンドウ内に表示され、緊急のときやウィンドウが前面にないときは「あなた宛て」にも入ります。オフ：これまでどおり通知は捨てられます。変更後に起動したアプリに適用されます。",
   "Today: judged {n} · {m} needed you": "今日：{n} 件判定 · {m} 件が該当",
   "{spent} spent (limit {cap})": "{spent} 使用（上限 {cap}）",
-  "Today {spent} / {cap} · judged {n} · hits {m}": "今日 {spent} / {cap} · 判定 {n} · 該当 {m}",
   "The LLM plugin is off — it spends nothing": "LLM プラグインはオフです — 費用はかかりません",
   "LLM · today {spent} / {cap} · this month {month}": "LLM · 今日 {spent} / {cap} · 今月 {month}",
   "Needs attention": "要対応",
@@ -9474,7 +9462,6 @@ export default {
   "Open settings": "設定を開く",
   "Show in Integrations": "連携で表示",
   "Open the Plugins list": "プラグイン一覧を開く",
-  "Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.": "語の提案はオフです — 「すべての設定 › プラグイン › Voice input · Dropline」でオンにしてください。",
   "Dictation language": "音声入力の言語",
   "The language Dropline listens for when you click the microphone in the chat box. “Any language” lets it decide per recording.": "チャット欄のマイクを押したとき Dropline が聞き取る言語。「任意の言語」なら録音ごとに判断します。",
   "Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice input row in the Plugins list shows how many words are waiting until you add or ignore the batch. Only what you confirm is sent.": "例：「LarkClient」とよく言うと、辞書への追加が提案されます。一括で追加するか無視するまで、プラグイン一覧の「音声入力」の行に待っている語の数が表示されます。送信されるのは確認したものだけです。",
@@ -12177,14 +12164,12 @@ export default {
   "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話は 8 時間だけそのホスト向けのコマンドで使え、再度は尋ねられません。他のホスト向けのコマンドは引き続きカードを表示し、宛先を読み取れない新しい種類のコマンド（シェル、インタープリター、未知のプログラム）も引き続きカードを表示し、ホストを指定しなかった依頼では毎コマンドでカードを表示します。保管庫をロックすると付与は終了し、項目自身の「エージェントの実行で使用可」スイッチは変わりません。オフ：貼り付けても何も付与されません——エージェントの受領メッセージが秘密の請求を促し、あなたが保管庫ウィンドウで項目を開きます。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants
-  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "判定用ポリシー：「{text}」——ポリシー判定はオフです（設定 ▸ 連携）", // lane vault-use-grants
   "Approved by the policy judge {n}× · last {time}": "ポリシー判定が {n} 回承認 · 最終 {time}", // lane vault-use-grants
   "The commands the judge approved ask you again next time": "判定が承認したコマンドは次回また確認します", // lane vault-use-grants
   "Revoked — those commands ask you again": "取り消しました——それらのコマンドはまた確認します", // lane vault-use-grants
   "Policy for the judge (optional)": "判定用のポリシー（任意）", // lane vault-use-grants
   "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例：192.168.1.1 のみ、WAN の状態を読む読み取り専用の呼び出し", // lane vault-use-grants
   "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "ポリシー判定はオンです：許可でカバーされない実行は decision API がこの文で判定し、承認なら実行（「あなた宛て」に記録）、それ以外はカードを表示します。値は決して見えません。", // lane vault-use-grants
-  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "ポリシー判定はオフです（設定 ▸ 連携 ▸「ポリシー判定に保管庫の使用を承認させる」）——オンにしたときのために保存しておきます。", // lane vault-use-grants
   "{who}: a command with a stored secret was approved by the policy judge": "{who}：保存された秘密を使うコマンドがポリシー判定で承認されました", // lane vault-use-grants
   "Approved by the policy judge · {time} · inside your policy ({p})": "ポリシー判定が承認 · {time} · ポリシーの範囲内（{p}）", // lane vault-use-grants
   "Your policy: {policy}": "あなたのポリシー：{policy}", // lane vault-use-grants
@@ -13770,4 +13755,29 @@ export default {
   "Copy the public key to add": "追加する公開鍵をコピー",
   "No key of this machine to show": "このマシンに表示できる鍵がありません",
   "Copied — add it to ~/.ssh/authorized_keys of {target}": "コピーしました — {target} の ~/.ssh/authorized_keys に追加してください",
+  // lane ui-needs-a-button (pick 2): the settings and integration doors
+  "Suggesting words is off.": "単語の提案はオフです。",
+  "This machine: {used} of {cap} browsers running": "このマシン：{cap} 個中 {used} 個のブラウザが実行中",
+  "Change the limit…": "上限を変更…",
+  "Limit for this conversation:": "この会話の上限：",
+  "Agents on your real desktop: off": "エージェントによる実デスクトップの操作：オフ",
+  "Turn on…": "オンにする…",
+  "Also needs “Allow agents to manage Task Groups” — it is off.": "「エージェントによるタスクグループ管理を許可」もオンにする必要があります（今はオフ）。",
+  "Policy for the judge: «{text}» — the judge is off": "判定用ポリシー：「{text}」——ポリシー判定はオフです",
+  "The policy judge is off — these words are kept for when you turn it on.": "ポリシー判定はオフです——この文はオンにしたときのために保存しておきます。",
+  "Blank accepts any address. Behind a reverse proxy, set the proxy first — until then every call comes from its address.": "空欄ならどのアドレスも受け付けます。リバースプロキシの後ろにある場合は先にプロキシを設定してください——それまではすべての呼び出しがプロキシのアドレスから来たことになります。",
+  "Proxy setting…": "プロキシの設定…",
+  "This is only a rate limit — spending is capped by the account budget.": "これは頻度の上限だけです——費用の上限はアカウントの予算です。",
+  "Set the budget…": "予算を設定…",
+  "Takes effect after a reload": "リロード後に有効になります",
+  "Turn on HTTPS…": "HTTPS をオンにする…",
+  "Have a Dropline key? Paste it in Integrations": "Dropline のキーがある場合は「連携」に貼り付けます",
+  "or paste a Dropline key in Integrations": "または「連携」で Dropline のキーを貼り付けます",
+  "Add the API key…": "API キーを追加…",
+  "On — no API key yet": "オン — API キーがまだありません",
+  "Today {spent} (limit {cap}) · judged {n} · {m} needed you": "今日 {spent}（上限 {cap}）· 判定 {n} 回 · 要確認 {m} 件",
+  "Off until you allow agents to use windows on your desktop.": "エージェントにデスクトップのウィンドウを使わせると許可するまでオフです。",
+  "Runs at the vendor, with your key.": "サービス提供元で、あなたのキーを使って動きます。",
+  "A cloud browser needs your key from its vendor before its first start.": "クラウドのブラウザは初回起動の前にサービス提供元のキーが必要です。",
+  "Agents may not use windows on your desktop yet.": "エージェントはまだデスクトップのウィンドウを使えません。",
 };

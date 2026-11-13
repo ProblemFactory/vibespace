@@ -336,7 +336,7 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
 {
   const MUT = mutantCopies('badm-newprof', REPO);
   const src = read('src/lib/browser-new-profile-model.js');
-  const hide = src.replace("    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer });", "    if (PICKABLE.includes(state)) out.push({ id, name, blurb, state, pickable: true, note, offer });");
+  const hide = src.replace("    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer, need });", "    if (PICKABLE.includes(state)) out.push({ id, name, blurb, state, pickable: true, note, offer, need });");
   ok(hide !== src, 'control (a): the patch (a model that HIDES the rows it cannot pick) applies');
   const Mh = await import(MUT.write('src/lib/browser-new-profile-model.js', hide, 'hide'));
   ok(judgeProviders(Mh).length > 0, 'control (a): …and ① goes red on it (rows hidden)', judgeProviders(Mh));

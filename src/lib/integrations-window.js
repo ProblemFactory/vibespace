@@ -199,7 +199,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
     card.appendChild(box);
     fetchJson(v.connect.status).then((st) => {
       if (!st || st.error) { box.appendChild(el('div', 'plugin-detail plugin-cfg-warn', (st && st.error) || t('Server unreachable — nothing was changed'))); return; }
-      renderConnectRow(box, v.connect, st, () => refresh(v.id));
+      renderConnectRow(box, v.connect, st, () => refresh(v.id), { app });
     });
     // lane oauth-setup-instructions: a row whose client the product registers itself (Dropline) — the setup card says
     // there is nothing to create or register, and names the address it registers (this instance's https one)

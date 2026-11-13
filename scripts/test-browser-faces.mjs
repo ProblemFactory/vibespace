@@ -55,7 +55,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   const dl = read('src/lib/desktop-app-launcher.js');
   ok(/you drive with your mouse and keyboard — agents cannot see it unless you share it\./.test(dl), "Apps dialog intro says who operates it: you, with mouse and keyboard; agents cannot see it unless you share it (desktop lane E, D1)");
   ok(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
-  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Off — turn it on in Settings → Desktop apps')").length - 1 === 2, "Apps dialog's desktop-consent pointer names Settings → Desktop apps (two sites — the consent row moved there in 2.369.203: the footer line, said ONCE since design 009 §B3, and the read-error fallback)");
+  ok(!/Settings → Browser'/.test(dl) && dl.split("t('Agents on your real desktop: off')").length - 1 === 1 && /settingsDoor\(app, \(d && d\.setting\) \|\| 'window\.realDesktopTargets'/.test(dl), "Apps dialog's desktop-consent line says the switch's state with ITS door («Turn on…» = the Desktop apps row) — one sentence, drawn on the footer line (said ONCE since design 009 §B3) and as the read-error fallback (lane ui-needs-a-button: never a menu path)");
   const tv = read('src/lib/browser-trace-view.js');
   ok(tv.split("t('action trace is off (Settings → Agent browser)')").length - 1 === 2 && /Settings → Agent browser → Action trace/.test(tv) && /\(Agent browser\)'\)/.test(tv), "the trace pointers name Settings → Agent browser / the Agent browser window");
   const lw = read('src/lib/browser-live-window.js');
@@ -81,7 +81,7 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
     'Show Web view button': ['显示网页视图按钮', 'ウェブビューボタンを表示'],
     'Web view button': ['网页视图按钮', 'ウェブビューボタン'],
     'Open this URL in a web view': ['在网页视图里打开这个网址', 'このURLをウェブビューで開く'],
-    'Off — turn it on in Settings → Desktop apps': null,
+    'Agents on your real desktop: off': null,
     'Agent browser profile…': null,
     'Agent browser — live view': null,
     'Hand the agent browser back': null,

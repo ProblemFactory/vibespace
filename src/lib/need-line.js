@@ -10,10 +10,10 @@
 //   A door = { label, run, kind: 'primary' | 'secondary' | 'danger', title?, door? } (the house button, .mounts-btn); the first is
 //   the act the sentence asks for. The doors wrap under the words on a narrow screen; the words are never cut.
 // THE DOOR MAKERS — each over the opener the tree already has, never a copy:
-//   settingsDoor(app, path, { label })  → Settings searched for that schema row's own words (src/lib/settings-ui.js open({search}):
+//   settingsDoor(app, path, { label, section }) → Settings searched for that schema row's own words ({section}: its whole section) (src/lib/settings-ui.js open({search}):
 //                                         a searched row is drawn even when it is advanced or its `when` hides it — then with its
 //                                         «not in use here: …» chip, which names the switch that gates it)
-//   integrationDoor(app, id, { label }) → the Integrations window at that card (app.openIntegration)
+//   integrationDoor(app, id, { label }) → the Integrations window at that card (app.openIntegration; no id = the window)
 //   reloadDoor({ label })               → the page reloaded (a setting that takes effect on the next load)
 // THE CENSUS (scripts/test-needs-doors.mjs over src/ui-needs.js): a need sentence the net catches is a row; a row whose door is
 // present is drawn through this file on every surface that states it.
@@ -76,15 +76,17 @@ export function bindNeedDoors(root, acts = {}) {
 }
 
 /** A door to ONE setting: Settings opened and searched for the row's own words (its label) — never a menu path in a sentence. */
-export function settingsDoor(app, path, { label = '', kind = 'primary' } = {}) {
+export function settingsDoor(app, path, { label = '', kind = 'primary', section = false } = {}) {
   const row = SETTINGS_SCHEMA[path];
   if (!row || !app || !app._settingsUI) return null;
-  return { label: label || t('Open in Settings…'), kind, door: 'settings:' + path, title: String(row.label || ''), run: () => app._settingsUI.open({ search: String(row.label || path) }) };
+  // `section` — the row's whole Settings section (a need several rows answer together, e.g. the Spending limits)
+  const run = section && row.category ? () => app._settingsUI.open({ category: String(row.category) }) : () => app._settingsUI.open({ search: String(row.label || path) });
+  return { label: label || t('Open in Settings…'), kind, door: 'settings:' + path, title: String(row.label || ''), run };
 }
 /** A door to ONE card of the Integrations window (a key, a sign-in, a relay). */
 export function integrationDoor(app, id, { label = '', kind = 'primary' } = {}) {
-  if (!app || typeof app.openIntegration !== 'function' || !id) return null;
-  return { label: label || t('Open Integrations…'), kind, door: 'integration:' + id, run: () => app.openIntegration(id) };
+  if (!app || typeof app.openIntegration !== 'function') return null;   // no id ⇒ the window, nothing highlighted
+  return { label: label || t('Open Integrations…'), kind, door: 'integration:' + (id || '*'), run: () => app.openIntegration(id || null) };
 }
 /** The page reloaded — a setting that takes effect on the next load. */
 export function reloadDoor({ label = '', kind = 'primary' } = {}) {

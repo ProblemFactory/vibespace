@@ -375,9 +375,9 @@ console.log('the ONE scrub on the QUESTIONS (lane decision-vendor-hygiene, B-d37
   console.log('\ndecisionTodayLine (lane decision-spend-readout)');
   const L = (u, cap, o) => M.decisionTodayLine(u, cap, o);
   const zero = L({ byUse: {} }, 1);
-  ok(zero.on && zero.money === '$0' && zero.short === 'Today $0 / $1.00 · judged 0 · hits 0' && !zero.warn, 'zero: nothing moved ⇒ $0 (no red)', zero);
+  ok(zero.on && zero.money === '$0' && zero.short === 'Today $0 (limit $1.00) · judged 0 · 0 needed you' && !zero.warn, 'zero: nothing moved ⇒ $0 (no red)', zero);
   const sub = L({ byUse: { attention: { calls: 60, usd: 0.009, hits: 1 }, inbox: { calls: 3, usd: 0.001 } } }, 1);
-  ok(sub.money === '< $0.01' && sub.short === 'Today < $0.01 / $1.00 · judged 63 · hits 1' && sub.text === 'Today: judged 63 · 1 needed you · < $0.01 spent (limit $1.00)', 'sub-cent: 63 calls under a cent ⇒ 「< $0.01」, never $0.00', sub);
+  ok(sub.money === '< $0.01' && sub.short === 'Today < $0.01 (limit $1.00) · judged 63 · 1 needed you' && sub.text === 'Today: judged 63 · 1 needed you · < $0.01 spent (limit $1.00)', 'sub-cent: 63 calls under a cent ⇒ 「< $0.01」, never $0.00', sub);
   ok(sub.title === 'Needs attention $0.009 · For-you tray $0.001 · Rules $0', 'the by-use breakdown (the title) keeps a tenth of a cent', sub.title);
   const free = L({ byUse: { attention: { calls: 2, usd: 0 } } }, 1);
   ok(free.money === '< $0.01', 'calls > 0 at a recorded $0 still says money moved (「< $0.01」)', free.money);
@@ -387,8 +387,8 @@ console.log('the ONE scrub on the QUESTIONS (lane decision-vendor-hygiene, B-d37
   ok(near.warn && at.warn && !under.warn, 'red from 90 % of the cap (0.90 of 1.00 red, 0.899 not, at the cap red)', [near.warn, under.warn, at.warn]);
   const off = L({ byUse: { attention: { calls: 5, usd: 0.3 } } }, 1, { on: false });
   ok(!off.on && off.short === 'The LLM plugin is off — it spends nothing' && off.text === off.short && off.month === off.short && !/\$/.test(off.short + off.month), 'off: every string says so instead of a number', off);
-  const zh = L({ byUse: { attention: { calls: 1, usd: 0.002 } } }, 1, { t: (s, v = {}) => ({ 'Today {spent} / {cap} · judged {n} · hits {m}': '今天 {spent} / {cap} · 判断 {n} · 命中 {m}' }[s] || s).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) });
-  ok(zh.short === '今天 < $0.01 / $1.00 · 判断 1 · 命中 0', 'the words go through the caller\'s t (device words)', zh.short);
+  const zh = L({ byUse: { attention: { calls: 1, usd: 0.002 } } }, 1, { t: (s, v = {}) => ({ 'Today {spent} (limit {cap}) · judged {n} · {m} needed you': '今天 {spent}（上限 {cap}）· 判断 {n} 次 · {m} 条需要你' }[s] || s).replace(/\{(\w+)\}/g, (m, k) => (k in v ? String(v[k]) : m)) });
+  ok(zh.short === '今天 < $0.01（上限 $1.00）· 判断 1 次 · 0 条需要你', 'the words go through the caller\'s t (device words)', zh.short);
   const mo = M.monthSpend([{ at: Date.UTC(2026, 9, 1, 5), usd: 0.2, outcome: 'ok' }, { at: Date.UTC(2026, 8, 30, 5), usd: 9, outcome: 'ok' }, { at: Date.UTC(2026, 9, 13), outcome: 'refused' }, null, 'x', { at: Date.UTC(2026, 9, 12), usd: 0.05, outcome: 'ok' }], '2026-10');
   ok(mo.usd === 0.25 && mo.calls === 2 && mo.days === 2, 'monthSpend: Σ usd of this month\'s rows (last month, refusals and junk skipped)', mo);
   // RED CONTROL: the old two-decimal money (toFixed(2)) draws 63 calls as $0.00 — the owner's "can't see the money"

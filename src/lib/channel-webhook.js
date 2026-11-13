@@ -9,6 +9,7 @@
 // showPairCodeOnce alone; a pasted code lives in the join box alone (no module state; closing empties it).
 import { fetchJson, showToast, createModalShell, freshKey, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button (channels-groups-outbox-10)
 import { icon, el, btn } from './channel-chrome.js';
 import { routeErrorText } from './channel-words.js';
 import * as V from './webhook-view.js';
@@ -106,7 +107,7 @@ export function showNewPathDialog(app, { adapterId = 'webhook' } = {}) {
     el('div', 'chan-q', t('Limits')),
     field(t('Calls per minute, per caller'), rate),
     field(t('Wakes per hour for this path'), wakes, whNote(t('Each wake is a billed agent turn; past this the path waits for the next hour.'))),
-    field(t('Only from these addresses'), ipAllow, whNote(t('Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops.'))),
+    field(t('Only from these addresses'), ipAllow, needLine({ words: t('Blank accepts any address. Behind a reverse proxy, set the proxy first — until then every call comes from its address.'), tone: 'info', cls: 'chan-flow-note', doors: [settingsDoor(app, 'webhook.trustProxyHops', { label: t('Proxy setting…'), kind: 'secondary' })] })),
     field(t('Sending policy'), policy),
   );
   const create = btn(t('Create path'), null, 'mounts-btn-primary');

@@ -2374,7 +2374,6 @@ export default {
   "Group management path roots": "组管理路径根目录",
   "Comma-separated absolute path prefixes a manager agent may use for a group's context folder / auto-include folders (~ = your home). Keeps agents from pointing context injection at arbitrary paths.": "组管理员 agent 可用于组的共享上下文目录/自动包含文件夹的绝对路径前缀（逗号分隔，~ = 你的主目录）。防止 agent 把上下文注入指向任意路径。",
   "Agent permissions": "Agent 权限",
-  "Also requires Settings → Integration → \"Allow agents to manage Task Groups\" (currently off).": "还需要 设置 → 集成 → “允许 agent 管理任务组”（当前关闭）。",
   "OAuth client": "OAuth 客户端",
   "Built-in client (rclone shared — being retired by Google)": "内置客户端（rclone 共享——Google 正在退役）",
   "Custom (own client id/secret)": "自定义（自己的 client id/secret）",
@@ -4145,7 +4144,7 @@ export default {
   "name or id": "名字或 id",
   "one digest per window": "每个窗口一份摘要",
   "only the newest {n} records were read; older ones exist unread": "只读了最新的 {n} 条记录; 更早的还没读",
-  "only {d} days of history are stored — the rate is over that span": "只存了 {d} 天历史 —— 速率按这一段算",
+  "only {d} days of history are stored — the rate is over that span": "只有最近 {d} 天的记录，速率按这段时间估算",
   "sender is one of": "发送者是其中之一",
   "subject contains": "主题包含",
   "text": "文本",
@@ -4539,7 +4538,6 @@ export default {
   "Group · {name}": "组 · {name}",
   "A group wakes one of its live sessions in turn (round-robin).": "一个组会轮流唤醒它的活跃会话之一（轮询）。",
   "Rule kind": "规则类型",
-  "Pacing only — the account budget is the money bound.": "只是节奏限制——账号预算才是花钱的上限。",
   "Cannot be decrypted": "无法解密",
   // a4 r4 (2026-09-21): the filter validator's refusal codes and the channels engine's inbox items, worded here
   "the rule \"{kind}\" needs a value": "规则“{kind}”需要一个值",
@@ -4828,7 +4826,6 @@ export default {
   "More…": "更多…",
   "The package sources of {machine} have no “{q}”": "{machine}的软件源里没有“{q}”",
   "Let an agent find it": "让 agent 找找",
-  "Off — turn it on in Settings → Desktop apps": "已关闭 — 在 设置 → 桌面应用 中开启",
   "No agent holds a window on your desktop": "没有 agent 持有你桌面上的窗口",
   "Pause agent": "暂停 agent",
   "Resume agent": "恢复 agent",
@@ -5354,7 +5351,6 @@ export default {
   "Helper: {name}": "帮手：{name}",
   "How long after a turn ends the conversation's own browser (and its helpers' browsers) keep running before they are released. The tab stays in the Agent browser window and the next command starts the browser again. Never while you are driving it or watching it in a live view. Chat sessions only: a terminal session's browser keeps running until its idle timeout. 0 = never release; anything under 30 s is raised to 30 s.": "一轮结束后，会话自己的浏览器（及其帮手的浏览器）继续运行多久才被释放。标签仍留在 Agent 浏览器窗口里，下一条命令会重新启动浏览器。你正在操作或在实时视图中观看时永不释放。仅对聊天会话生效：终端会话的浏览器会一直运行到它的空闲超时。0 = 永不释放；低于 30 秒按 30 秒计。",
   "How many browsers this conversation (with its helpers) may run at once; the machine keeps its own ceiling": "本会话（连同它的帮手）可同时运行多少个浏览器；机器另有自己的上限",
-  "Limit for this conversation": "本会话的上限",
   "Machine ceiling reached": "机器上限已满",
   "Machine ceiling reached — no browser can start until one stops, anywhere on this machine": "机器上限已满 — 本机任何地方有一个停掉之前，都不能再启动浏览器",
   "{n} more browser(s) of this conversation": "本会话还有 {n} 个浏览器",
@@ -5690,7 +5686,7 @@ export default {
   "Access saved: {list} \u2014 this re-activated {n} wake(s) (a billed turn each time one fires)": "访问权限已保存：{list} — 这次重新启用了 {n} 个唤醒（每次触发都是一次计费回合）",
   "Access removed": "访问权限已移除",
   "Remove this notification": "移除这个通知",
-  "Authority comes from its access: {authority}": "权限来自它的访问权限：{authority}",
+  "Authority comes from its access: {authority}": "它能做什么由访问权限决定：{authority}",
   "Grant access first — use \"Grant access…\". Only an agent or group with access here can be notified.": "先授权访问 — 用「授权访问…」。只有在这里有访问权限的 agent 或组才能被通知。",
   "Grant access…": "授权访问…",
   "Who is woken when new messages arrive here, and on what. Only the agents and groups with access are listed; nobody listed = nobody is woken.": "这里有新消息时唤醒谁、按什么条件唤醒。只列出有访问权限的 agent 和组；一个都不列 = 不唤醒任何人。",
@@ -7257,10 +7253,8 @@ export default {
   "Created {label}": "已创建 {label}",
   "A window on your desktop is shared with an agent from the window itself — it is not a profile.": "桌面上的窗口要从窗口本身共享给 agent——它不是一个配置。",
   "Runs only on the computer VibeSpace runs on — pick This computer to use it.": "只能在运行 VibeSpace 的电脑上使用——选择“本机”才能用它。",
-  "Off until you allow agents to use windows on your desktop (Settings → Desktop apps).": "在你允许 agent 使用桌面窗口之前保持关闭（设置 → 桌面应用）。",
   "Can't be used in this version of VibeSpace.": "这个版本的 VibeSpace 还不能使用它。",
   "Connects to a browser that is already running with a debugging port — enter its port.": "连接到一个已开启调试端口、正在运行的浏览器——请填写它的端口。",
-  "Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.": "在服务商那里运行；首次启动前需要你的密钥（⚙ → 集成与密钥）。",
   "This computer": "本机",
   "Not connected right now.": "当前未连接。",
   "Its VibeSpace agent is too old to run a browser — update the agent on it.": "它上面的 VibeSpace 代理太旧，无法运行浏览器——请更新那台机器上的代理。",
@@ -7603,7 +7597,6 @@ export default {
   "You took over the agent’s window of this browser — the agent is paused until you hand back; other conversations keep working in their own windows": "你已接管 agent 在这个浏览器里的窗口 — 在你交还之前 agent 处于暂停；其他会话在各自的窗口里继续工作",
   "Browsers running at once on this machine": "这台机器上同时运行的浏览器数",
   "The most agent browsers (desktop apps counted with them) that may run on this machine at the same time: 6 by default, 1 to 32. Several conversations on one profile share its one browser, each in its own window, so they count once. At the ceiling a new browser is refused by name — the agent is told which of its own run and how many others do — and nothing starts until one idles out or you stop one. A change applies to the next browser that starts; nothing running is stopped. The resource guard still only reports a browser that uses too much memory or CPU.": "这台机器上最多可同时运行的 Agent 浏览器数（桌面应用一并计入）：默认 6 个，范围 1 到 32。多个会话使用同一个配置文件时共用它的那一个浏览器，各占一个窗口，所以只算一个。到达上限时，新的浏览器会被点名拒绝 — agent 会知道自己有哪些在运行、另有多少个 — 在有一个闲置退出或被你停掉之前不会启动新的。修改对下一个启动的浏览器生效；正在运行的不会被停掉。资源守护仍然只报告占用过多内存或 CPU 的浏览器。",
-  "This machine: {used} of {cap} browsers running (Settings → Agent browser → Browsers running at once on this machine)": "这台机器：{used}/{cap} 个浏览器在运行（设置 → Agent 浏览器 → 这台机器上同时运行的浏览器数）",
   "The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling (Browsers running at once on this machine, six by default), shared with desktop apps.": "一个会话（连同它的帮手）默认可同时运行的浏览器数。每个会话都可以在它的 Agent 浏览器窗口里的计数上或在会话属性里改自己的，任务组也可以给自己的新会话另设默认值（会话保留它开始时的组默认值）。机器另有自己的上限（这台机器上同时运行的浏览器数，默认 6 个），与桌面应用共用。",
   "Threads: seconds between two checks of a chat for new threads": "话题：两次检查一个群是否有新话题之间的秒数",
   "Where thread replies are not listed with the conversation (Lark), a message read before anyone replied to it in a thread is found again by re-reading the newest page of each chat active in the last 14 days this often — one request per chat. Pressing Refresh in a chat checks it at once.": "话题回复不随对话一起列出的地方（Lark），在有人用话题回复之前就已读到的消息，会按这个间隔重新读取最近 14 天活跃的每个群的最新一页来再次发现 — 每个群一次请求。在群里按“刷新”会立即检查。",
@@ -9004,7 +8997,6 @@ export default {
   "Wakes per hour for this path": "此路径每小时的叫醒次数",
   "Each wake is a billed agent turn; past this the path waits for the next hour.": "每次叫醒都是一个计费的 agent 回合；超过后此路径等到下一个小时。",
   "Only from these addresses": "只接受这些地址",
-  "Blank = any address. Judged on the connecting address; behind a reverse proxy set webhook.trustProxyHops.": "留空 = 任何地址。按连接地址判断；在反向代理后面请设置 webhook.trustProxyHops。",
   "Create path": "创建路径",
   "Path not created: {why}": "路径未创建：{why}",
   "Path created, but its policy was not saved: {why}": "路径已创建，但策略未保存：{why}",
@@ -9203,8 +9195,6 @@ export default {
   "Your Dropline sign-in has expired — connect again": "Dropline 登录已过期，重新连接",
   "Connecting needs an https address: turn on Tailscale HTTPS, or paste a Dropline key": "连接需要 https 地址：开启 Tailscale HTTPS，或直接粘贴 Dropline key",
   "This instance has no https address — ask the person who runs it to set VIBESPACE_PUBLIC_URL (an https address), or paste a Dropline key": "这个实例没有 https 地址——请运行它的人设置 VIBESPACE_PUBLIC_URL（一个 https 地址），或直接粘贴 Dropline key",
-  "Have a key instead? Paste it in Services › Integrations › Dropline": "已经有 key？粘贴到「服务 › 集成 › Dropline」",
-  "or paste a Dropline key in Services › Integrations": "或在「服务 › 集成」里粘贴 Dropline key",
   "Finish the sign-in in the new tab (Fish Audio mails you a code)…": "在新标签页里完成登录（Fish Audio 会给你发一封带验证码的邮件）…",
   "Dropline connected": "Dropline 已连接",
   "Teach Dropline": "教 Dropline",
@@ -9291,7 +9281,6 @@ export default {
   "Channels home": "频道首页",
   "Notification rules": "通知规则",
   "on · {provider}": "已打开 · {provider}",
-  "on — no provider key yet": "已打开 — 还没有提供方钥匙",
   "openai (POST /v1/decisions) or openrouter (POST /api/alpha/decisions). The text that is judged is sent to this provider. With openrouter, “Draft from my verdicts” also sends the short digests the judge saw and your block to POST /api/v1/chat/completions (zero-data-retention endpoints only).": "openai（POST /v1/decisions）或 openrouter（POST /api/alpha/decisions）。被判断的文本会发给这个提供方。用 openrouter 时，「从我的判定起草」还会把判官见过的简短摘要和你的那一段发到 POST /api/v1/chat/completions（只走零数据保留端点）。",
   "Your OpenAI key (platform.openai.com → API keys) or OpenRouter key (openrouter.ai → Keys). It is sent only to the provider above, and never shown again.": "你的 OpenAI 钥匙（platform.openai.com → API keys）或 OpenRouter 钥匙（openrouter.ai → Keys）。它只发给上面的提供方，保存后不再显示。",
   "How to use it": "怎么用",
@@ -9456,7 +9445,6 @@ export default {
   "An app with its own file-dialog portal (see above) also gets a notifications service on its own display: what it announces shows inside its window, and in For you when it is urgent or the window is not in front. Off: those notifications are dropped, as before. Applies to apps started after the change.": "有自己文件对话框门户的应用（见上一项）也会在自己的显示上得到一个通知服务：它发出的通知显示在它的窗口里；紧急的、或窗口不在前面时，也会进入「待你处理」。关闭：这些通知像以前一样被丢弃。对更改后启动的应用生效。",
   "Today: judged {n} · {m} needed you": "今天：判断了 {n} 条 · 命中 {m} 条",
   "{spent} spent (limit {cap})": "已花 {spent}（上限 {cap}）",
-  "Today {spent} / {cap} · judged {n} · hits {m}": "今天 {spent} / {cap} · 判断 {n} · 命中 {m}",
   "The LLM plugin is off — it spends nothing": "LLM 插件已关闭——不花钱",
   "LLM · today {spent} / {cap} · this month {month}": "LLM · 今天 {spent} / {cap} · 本月 {month}",
   "Needs attention": "需关注",
@@ -9475,7 +9463,6 @@ export default {
   "Open settings": "打开设置",
   "Show in Integrations": "在集成里查看",
   "Open the Plugins list": "打开插件列表",
-  "Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.": "建议词语已关闭 —— 在「全部设置 › 插件 › Voice input · Dropline」里打开。",
   "Dictation language": "听写语言",
   "The language Dropline listens for when you click the microphone in the chat box. “Any language” lets it decide per recording.": "在聊天框点麦克风时 Dropline 按哪种语言听。「任意语言」= 每次录音由它自己判断。",
   "Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice input row in the Plugins list shows how many words are waiting until you add or ignore the batch. Only what you confirm is sent.": "例如：你经常说「LarkClient」——它会被建议加入你的词典；插件列表里「语音输入」那一行会显示有多少个词在等你，直到你添加或忽略这一批。只有你确认的才会发送。",
@@ -12178,14 +12165,12 @@ export default {
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, a new kind of command whose destination cannot be read (a shell, an interpreter, an unknown program) still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——不再逐次询问。向其他任何主机的命令仍会给你看卡片；无法读出目的地的新类型命令（shell、解释器、未知程序）也仍会给你看卡片；若请求未写明主机，则每条命令都给你看卡片。锁定保险库即结束授权，条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
-  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "裁决策略：「{text}」——策略裁决已关闭（设置 ▸ 集成）", // lane vault-use-grants
   "Approved by the policy judge {n}× · last {time}": "策略裁决已批准 {n} 次 · 最近 {time}", // lane vault-use-grants
   "The commands the judge approved ask you again next time": "裁决批准过的命令下次会重新询问你", // lane vault-use-grants
   "Revoked — those commands ask you again": "已撤销——这些命令会重新询问你", // lane vault-use-grants
   "Policy for the judge (optional)": "给裁决的策略（可选）", // lane vault-use-grants
   "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例如：只用于 192.168.1.1，只读的状态查询，用来读取 WAN 状态", // lane vault-use-grants
   "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "策略裁决已开启：授权未覆盖的运行会由 decision API 按这段话裁决；通过就运行（记录在「待你处理」里），其余情况都会给你弹卡片。它永远看不到值。", // lane vault-use-grants
-  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "策略裁决已关闭（设置 ▸ 集成 ▸「让策略裁决批准保险库使用」）——这段话会保留，等你开启时使用。", // lane vault-use-grants
   "{who}: a command with a stored secret was approved by the policy judge": "{who}：一条使用存储秘密的命令已由策略裁决批准", // lane vault-use-grants
   "Approved by the policy judge · {time} · inside your policy ({p})": "由策略裁决批准 · {time} · 在你的策略范围内（{p}）", // lane vault-use-grants
   "Your policy: {policy}": "你的策略：{policy}", // lane vault-use-grants
@@ -13771,4 +13756,29 @@ export default {
   "Copy the public key to add": "复制要添加的公钥",
   "No key of this machine to show": "这台机器没有可显示的公钥",
   "Copied — add it to ~/.ssh/authorized_keys of {target}": "已复制——把它加到 {target} 的 ~/.ssh/authorized_keys",
+  // lane ui-needs-a-button (pick 2): the settings and integration doors
+  "Suggesting words is off.": "词语建议已关闭。",
+  "This machine: {used} of {cap} browsers running": "这台机器：{used}/{cap} 个浏览器在运行",
+  "Change the limit…": "更改上限…",
+  "Limit for this conversation:": "本会话的上限：",
+  "Agents on your real desktop: off": "agent 操作你的真实桌面：已关闭",
+  "Turn on…": "开启…",
+  "Also needs “Allow agents to manage Task Groups” — it is off.": "还需要打开「允许 agent 管理任务组」，它现在是关闭的。",
+  "Policy for the judge: «{text}» — the judge is off": "裁决策略：「{text}」——策略裁决已关闭",
+  "The policy judge is off — these words are kept for when you turn it on.": "策略裁决没开，这段话先存着，开启后使用。",
+  "Blank accepts any address. Behind a reverse proxy, set the proxy first — until then every call comes from its address.": "留空表示接受任何地址。VibeSpace 在反向代理后面时，请先设置代理——否则所有调用都显示为代理的地址。",
+  "Proxy setting…": "代理设置…",
+  "This is only a rate limit — spending is capped by the account budget.": "这只是频率上限——花费上限由账号预算决定。",
+  "Set the budget…": "设置预算…",
+  "Takes effect after a reload": "刷新页面后生效",
+  "Turn on HTTPS…": "开启 HTTPS…",
+  "Have a Dropline key? Paste it in Integrations": "已有 Dropline 密钥？到「集成」里粘贴",
+  "or paste a Dropline key in Integrations": "或在「集成」里粘贴 Dropline 密钥",
+  "Add the API key…": "填写 API 密钥…",
+  "On — no API key yet": "已打开——还没填 API 密钥",
+  "Today {spent} (limit {cap}) · judged {n} · {m} needed you": "今天 {spent}（上限 {cap}）· 判断 {n} 次 · {m} 条需要你",
+  "Off until you allow agents to use windows on your desktop.": "在你允许 agent 使用桌面上的窗口之前保持关闭。",
+  "Runs at the vendor, with your key.": "在服务商那里运行，用你的密钥。",
+  "A cloud browser needs your key from its vendor before its first start.": "云端浏览器首次启动前需要服务商的密钥。",
+  "Agents may not use windows on your desktop yet.": "agent 还不能使用你桌面上的窗口。",
 };

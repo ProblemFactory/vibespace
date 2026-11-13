@@ -6,6 +6,7 @@
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { needLine } from './need-line.js'; // lane ui-needs-a-button: a state + its door on one line
 import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: one Connect block, two doors
 import { rowById } from '../integration-registry.js';
 
@@ -18,10 +19,10 @@ const DROPLINE_CONNECT = rowById('dropline').connect; // the row's declared OAut
 /** the account row (lane dropline-connect-door: THE Connect block of the `dropline` row — the same block the Integrations
  *  card draws, src/lib/oauth-connect-row.js) + while nobody is signed in, the ONE line to the other door: the key, pasted
  *  on the row's Integrations card (`pasteKey` = the caller's way to open it focused; the sheet gets it from plugins-ui) */
-export function renderAccountRow(box, st, rerender, { pasteKey = null } = {}) {
-  if (renderConnectRow(box, DROPLINE_CONNECT, st, rerender) !== 'connect' || typeof pasteKey !== 'function') return;
+export function renderAccountRow(box, st, rerender, { pasteKey = null, app = null } = {}) {
+  if (renderConnectRow(box, DROPLINE_CONNECT, st, rerender, { app }) !== 'connect' || typeof pasteKey !== 'function') return;
   const line = el('div', 'plugin-detail oauth-connect-key-line');
-  const a = el('a', 'oauth-connect-key', t('Have a key instead? Paste it in Services › Integrations › Dropline'));
+  const a = el('a', 'oauth-connect-key', t('Have a Dropline key? Paste it in Integrations'));
   a.href = '#';
   a.onclick = (ev) => { ev.preventDefault(); pasteKey(); };
   line.appendChild(a);
@@ -83,7 +84,7 @@ export async function mountSuggestionList(box) {
 /** the teach section (shown once connected): switches + sentence, proposals, projects, journal. `focus` (lane
  *  foryou-plugin-notices — the For-you reminder's door, `{proposal, terms}`): that proposal's card is marked and scrolled to,
  *  its chips start as the reminder's words, so ONE press of 加入所选 adds them; a proposal already handled says so */
-export async function renderTeachSection(box, rerender, { focus = null } = {}) {
+export async function renderTeachSection(box, rerender, { focus = null, app = null } = {}) {
   const sec = el('div', 'voice-teach');
   box.appendChild(sec);
   let v;
@@ -93,7 +94,9 @@ export async function renderTeachSection(box, rerender, { focus = null } = {}) {
     el('div', 'voice-teach-head', t('Teach Dropline')),
     el('div', 'plugin-detail voice-teach-why', t('Sends the names, terms and file names in the current conversation to Dropline (Fish Audio) — only what you confirm. Credentials, attachments and other conversations are never sent.')),
   );
-  if (!v.settings.teach) sec.appendChild(el('div', 'plugin-detail plugin-cfg-hint voice-teach-off', t('Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.')));
+  // lane ui-needs-a-button (pick 2): the switch's state with ITS door (the plugin's own settings section), never a menu path
+  if (!v.settings.teach) sec.appendChild(needLine({ words: t('Suggesting words is off.'), tone: 'off', cls: 'plugin-detail plugin-cfg-hint voice-teach-off',
+    doors: [app && typeof app._openPluginSettings === 'function' ? { label: t('Turn on…'), kind: 'secondary', door: 'plugin-settings', run: () => app._openPluginSettings('voice-input') } : null] }));
   const want = focus && typeof focus.proposal === 'string' ? focus : null;
   if (want && !v.proposals.some((p) => p.id === want.proposal)) sec.appendChild(el('div', 'plugin-detail plugin-cfg-hint voice-proposal-gone', t('That suggestion was already added or ignored. Nothing waits for it.')));
   for (const p of v.proposals) {

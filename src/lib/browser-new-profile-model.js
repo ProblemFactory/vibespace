@@ -35,12 +35,12 @@ export function providerChoices({ providers = [], host = null, t = (s) => s } = 
     if (!r || !r.id) continue;
     const id = String(r.id);
     const v = host ? (r.onHost || r.control || {}) : (r.control || {});
-    let state = 'ready', note = null, offer = null;
+    let state = 'ready', note = null, offer = null, need = null;
     if (r.leaseKind === 'window-target') { state = 'not-a-profile'; note = t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.')); }
     else if (v.ok === false && (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only')) { state = 'other-machine'; note = t(i18nKey('Runs only on the computer VibeSpace runs on — pick This computer to use it.')); }
-    else if (v.ok === false) { state = 'unavailable'; note = v.code === 'provider_needs_consent' ? t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
+    else if (v.ok === false) { state = 'unavailable'; need = v.code === 'provider_needs_consent' ? 'desktop-consent' : null; note = need ? t(i18nKey('Off until you allow agents to use windows on your desktop.')) : t(i18nKey("Can't be used in this version of VibeSpace.")); }
     else if (id === 'cdp') { state = 'needs-port'; note = t(i18nKey('Connects to a browser that is already running with a debugging port — enter its port.')); }
-    else if (isCloud(id)) { state = 'needs-key'; note = t(i18nKey('Runs at the vendor; it needs your key (⚙ → Integrations) before its first start.')); }
+    else if (isCloud(id)) { state = 'needs-key'; need = 'key'; note = t(i18nKey('Runs at the vendor, with your key.')); }
     // the switch dialog's names and blurbs speak of SWITCHING ("…so it can't be switched from here"); a row here names what
     // a new profile would BE — its own head for the two that are not a browser VibeSpace starts, the blurb only where it
     // describes the browser itself (Chromium); the note says the rest
@@ -48,8 +48,20 @@ export function providerChoices({ providers = [], host = null, t = (s) => s } = 
     // browser VibeSpace starts on a directory of its own (`ownsDir` — the others' blurbs speak of switching)
     const name = r.words && r.words.newProfileName ? t(r.words.newProfileName) : backendName(id, t);
     const blurb = r.ownsDir ? blurbOf(id, t) : null;
-    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer });
+    out.push({ id, name, blurb, state, pickable: PICKABLE.includes(state), note, offer, need });
   }
+  return out;
+}
+
+/** lane ui-needs-a-button (browser-profiles-4): the needs the browser list states ONCE, under it, each with its door — never
+ *  «(⚙ → Integrations)» on every row. `key`: a cloud browser runs with the vendor's key (the door = that browser's card: the
+ *  chosen one when it is a cloud browser, else the first); `desktop-consent`: the desktop-window row waits for the switch.
+ *  → [{ need, words, integration? , setting? }] */
+export function providerNeedsOf(choices = [], { chosen = null, t = (s) => s } = {}) {
+  const out = [];
+  const cloud = choices.filter((c) => c && c.need === 'key');
+  if (cloud.length) out.push({ need: 'key', words: t(i18nKey('A cloud browser needs your key from its vendor before its first start.')), integration: (cloud.find((c) => c.id === chosen) || cloud[0]).id });
+  if (choices.some((c) => c && c.need === 'desktop-consent')) out.push({ need: 'desktop-consent', words: t(i18nKey('Agents may not use windows on your desktop yet.')), setting: 'window.realDesktopTargets' });
   return out;
 }
 
@@ -155,7 +167,7 @@ export function createRefusalWords(r, t = (s) => s) {
     case 'unsupported-host': return t(i18nKey('That machine is not paired with this VibeSpace any more — pick another.'));
     case 'provider_needs_local_key': case 'provider_local_only': return t(i18nKey('This browser runs only on the computer VibeSpace runs on.'));
     case 'provider_unavailable': case 'provider_unknown': return t(i18nKey("This browser can't be used in this version of VibeSpace."));
-    case 'provider_needs_consent': return t(i18nKey('Off until you allow agents to use windows on your desktop (Settings → Desktop apps).'));
+    case 'provider_needs_consent': return t(i18nKey('Off until you allow agents to use windows on your desktop.'));   // its door: the list's need line
     case 'tier3_is_a_window_target': return t(i18nKey('A window on your desktop is shared with an agent from the window itself — it is not a profile.'));
     case 'sharing_refused': return t(i18nKey("Separate tabs can't be used here."));
     case 'dir_unwritable': return t(i18nKey("VibeSpace couldn't create the profile's folder on this computer."));

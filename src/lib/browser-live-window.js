@@ -124,6 +124,7 @@
 import { t, tc, resolveLang } from './i18n.js';
 import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a blocked-site code VibeSpace's hint asks for, in words
+import { needLine, settingsDoor } from './need-line.js'; // lane ui-needs-a-button: the need line (a state + its door)
 import { LIVE_START } from './desktop-app-placement.js'; // lane agent-window-no-pop: the live view's push shape for the ONE placement verdict
 import { pinChipText } from '../desktop-pin.js'; // lane launch-picture-size: a FIXED picture size's chip = the pin's own words
 import { pinSizeItems } from './pin-size-ui.js'; // lane launch-picture-size: Pin size… — the ONE size table's rows + Custom… + Auto
@@ -1886,7 +1887,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     pop.appendChild(head);
     if (chip.machineFull) { const m = document.createElement('div'); m.className = 'browser-live-cap-machine'; m.textContent = t('Machine ceiling reached — no browser can start until one stops, anywhere on this machine'); pop.appendChild(m); }
     // lane browser-windows (U4): the machine's count against its ceiling — a SETTING now (Settings → Agent browser)
-    { const mc = st.status && st.status.cap && st.status.cap.machine; if (mc && Number.isFinite(Number(mc.cap))) { const m = document.createElement('div'); m.className = 'browser-live-cap-machine-count'; m.textContent = t('This machine: {used} of {cap} browsers running (Settings → Agent browser → Browsers running at once on this machine)', { used: Number(mc.used) || 0, cap: Number(mc.cap) }); pop.appendChild(m); } }
+    { const mc = st.status && st.status.cap && st.status.cap.machine; if (mc && Number.isFinite(Number(mc.cap))) { pop.appendChild(needLine({ words: t('This machine: {used} of {cap} browsers running', { used: Number(mc.used) || 0, cap: Number(mc.cap) }), tone: 'info', cls: 'browser-live-cap-machine-count', doors: [settingsDoor(app, 'browser.maxRunning', { label: t('Change the limit…'), kind: 'secondary' })] })); } } // lane ui-needs-a-button (browser-live-8): the door, never the path
     const list = stoppableRows(st.rows, { browsing: ((app._browserProfiles && app._browserProfiles.leases) || []).filter((l) => l && l.human).map((l) => l.profileId) }); // verify r2: a profile the user browses himself is never stopped from here
     if (!list.length) { const n = document.createElement('div'); n.className = 'browser-live-cap-empty'; n.textContent = t('None of them is running right now'); pop.appendChild(n); }
     for (const x of list) {
@@ -1910,7 +1911,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     }
     // the limit: a stepper 1..6 (+ back to the default)
     const capRow = document.createElement('div'); capRow.className = 'browser-live-cap-limit';
-    const lbl = document.createElement('span'); lbl.textContent = t('Limit for this conversation') + ': ';
+    const lbl = document.createElement('span'); lbl.textContent = t('Limit for this conversation:') + ' ';
     const minus = document.createElement('button'); minus.className = 'file-tool-btn browser-live-cap-minus'; minus.textContent = '−'; minus.title = t('Fewer');
     const val = document.createElement('span'); val.className = 'browser-live-cap-value'; val.textContent = String(chip.cap);
     const plus = document.createElement('button'); plus.className = 'file-tool-btn browser-live-cap-plus'; plus.textContent = '+'; plus.title = t('More');
