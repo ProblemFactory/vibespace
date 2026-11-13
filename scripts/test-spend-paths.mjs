@@ -2272,10 +2272,10 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   const J = JSON.stringify;
   const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
   const ID = { key: 'slot-F', name: 'F' };
-  const world = (hourCap, dayCap = 200, { files = {}, ut = null } = {}) => {
+  const world = (hourCap, dayCap = 200, { files = {}, ut = null, log = () => { } } = {}) => {
     let vclock = 1_800_000_000_000; const dataDir = tmpdir('vs-spend-b0a33-');
     const settings = { 'spend.unattendedPerIdentityHour': hourCap, 'spend.unattendedPerIdentityDay': dayCap, 'spend.unattendedPerInstanceDay': 10000 };
-    const g = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => ut, log: () => { } });
+    const g = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => ut, log });
     const mkQ = (readFile = (fl) => { if (!(fl in files)) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }); return files[fl]; }) => QWf.create({ dataDir, now: () => vclock, writer: { dirty: (file, o) => { files[file] = o.produce(); } }, readFile,
       noteSpend: (rec) => g.note({ ...rec, now: vclock }), releaseSpend: (rec) => g.release({ ...rec, now: vclock }), reservationState: (rid) => g.reservationState(rid), waitingReservations: () => g.waitingReservations(), stashHas: () => false, log: () => { } });
     const W = { g, files, clock: () => vclock, adv: (ms) => { vclock += ms; }, q: null, mkQ,
@@ -2469,6 +2469,39 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       !v.ok && v.why === 'hour-cap' && first === 1 && adds[0].key === 'antigravity:cid-1' && n.sessionName === 'Spending' && /They wait behind «alpha-chat», «beta-chat», «gamma-chat» and 1 more conversations\./.test(n.text)
         && !!behindLine && behindLine.params.names === '«alpha-chat», «beta-chat», «gamma-chat»' && behindLine.params.n === 1 && words.includes('Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.') && n.i18n.door === 'waiting',
       J({ first, key: adds[0] && adds[0].key, text: n && n.text, words }));
+    // THE SEAM WITH LAWS 2 + 3 (shape C, 主开发 15:30Z item 8): while a «messages waiting» item stands for the conversation the
+    // frames wait behind, IT speaks — the spending notice is not filed; once that item is gone, the notice is filed as before
+    {
+      const adds2 = [], standing = [{ id: 'mw1', sessionKey: 'antigravity:cid-1', itemKey: 'messages-waiting:cid-1:1', status: 'open' }];
+      const ut2 = { add: (key, it) => { if (it && it.i18n) adds2.push({ key, it }); return { id: 'n' + adds2.length }; }, snapshot: () => ({ open: standing.slice(), resolved: [] }) };
+      const W2 = world(4, 200, { ut: ut2 });
+      for (const [key, name] of convs) { const e = W2.send(key.split(':')[1], 'x', { key, name }); W2.q.answer(e.id, { mode: 'queued' }); }
+      W2.adv(MIN); const v1 = W2.g.authorize({ reason: 'job-notification', identity: ID, now: W2.clock() });
+      const held = adds2.length;
+      standing.length = 0;
+      W2.adv(MIN); const v2 = W2.g.authorize({ reason: 'job-notification', identity: ID, now: W2.clock() });
+      ok('§5f THE SEAM WITH SHAPE C: while a «messages waiting» item stands for the conversation the frames wait behind, the refusal files NO spending notice for it (that item speaks for the turn); once it is gone, the notice is filed under its key',
+        !v1.ok && held === 0 && !v2.ok && adds2.length === 1 && adds2[0].key === 'antigravity:cid-1', J({ held, after: adds2.map((x) => x.key) }));
+    }
+    // ITS JOURNAL LINE KEEPS THE NOTICE'S CADENCE (主开发 17:45Z): a refusal every ten minutes for twelve hours while the item
+    // stands ⇒ ONE line per six hours (its own stamp), 0 notices; the item gone ⇒ the notice is filed AT ONCE (the held line
+    // never moved the notice's own stamp)
+    {
+      const adds3 = [], lines = [], standing = [{ id: 'mw1', sessionKey: 'antigravity:cid-1', itemKey: 'messages-waiting:cid-1:1', status: 'open' }];
+      const ut3 = { add: (key, it) => { if (it && it.i18n) adds3.push({ key, it }); return { id: 'n' + adds3.length }; }, snapshot: () => ({ open: standing.slice(), resolved: [] }) };
+      const W3 = world(4, 200, { ut: ut3, log: (l) => { if (/is not filed — its «messages waiting» item stands/.test(l)) lines.push({ l, at: W3.clock() }); } });
+      for (const [key, name] of convs) { const e = W3.send(key.split(':')[1], 'x', { key, name }); W3.q.answer(e.id, { mode: 'queued' }); }
+      const base3 = W3.clock(); let refused = 0;
+      for (let k = 0; k < 36; k++) { W3.adv(10 * MIN); if (!W3.g.authorize({ reason: 'job-notification', identity: ID, now: W3.clock() }).ok) refused++; }
+      const inWindow = lines.length, noticesHeld = adds3.length;
+      for (let k = 0; k < 36; k++) { W3.adv(10 * MIN); if (!W3.g.authorize({ reason: 'job-notification', identity: ID, now: W3.clock() }).ok) refused++; }
+      const at = lines.map((x) => Math.round((x.at - base3) / MIN));
+      standing.length = 0;
+      W3.adv(MIN); const v3 = W3.g.authorize({ reason: 'job-notification', identity: ID, now: W3.clock() });
+      ok('§5f THE SEAM\'S JOURNAL LINE KEEPS THE NOTICE\'S CADENCE: 36 refusals in six hours while the item stands ⇒ ONE line, 0 notices; 72 in twelve hours ⇒ two lines (at 10 min and 6 h 20), never one per refusal; the item gone ⇒ the notice is filed at once under its key',
+        refused === 72 && inWindow === 1 && noticesHeld === 0 && J(at) === J([10, 380]) && lines.every((x) => /the spending notice at antigravity:cid-1 is not filed/.test(x.l)) && !v3.ok && adds3.length === 1 && adds3[0].key === 'antigravity:cid-1' && lines.length === 2,
+        J({ refused, inWindow, noticesHeld, at, after: adds3.map((x) => x.key) }));
+    }
     // THE NOTICE DOES NOT GO SILENT WHILE THE WAIT STILL REFUSES (主开发 08:35Z): a 13-hour wait, a refusal every 61 minutes ⇒
     // notices at 0 h, after 6 h, after 12 h — and at no instant two open (each expires at its own 6-hour mark)
     {
