@@ -75,6 +75,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   const publicOf = (e) => ({ id: e.id, cid: e.cid, at: e.at, kind: e.kind, state: e.state, since: e.since, mark: e.mark || null, peerName: e.peerName || null, reserved: !!e.reserved });
 
   // ── boot: what the previous process held ────────────────────────────────
+  let unread = false;   // B-0a33 follow-up: the file was there and could not be read — the reconcile holds off
   try {
     const raw = typeof readFile === 'function' ? readFile(file) : require('fs').readFileSync(file, 'utf8');
     const j = JSON.parse(raw);
@@ -83,7 +84,11 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
         .filter((e) => { const old = isOld(e, now()); if (old) droppedAtLoad.push(e); return !old; })   // by age (rounds 3–4) — said
         .map((e) => ({ ...e, bind: Array.isArray(e.bind) ? e.bind.filter((x) => typeof x === 'string') : [], startsAt: 0, endsAt: 0, rebooted: true }));
     }
-  } catch { /* none, or unreadable: the guard's stamps stand (counted) — never free */ }
+  } catch (err) {
+    // none (ENOENT), or UNREADABLE: the guard's stamps stand (counted) — never free. B-0a33 follow-up: the two are told apart —
+    // an unreadable or unparsable file holds frames this process cannot see, so the reconcile holds off for its life
+    if (!(err && err.code === 'ENOENT')) { unread = true; log('[queued] msg-queued.json could not be read — its waiting reservations stand (counted, never given up by this process): ' + (err && err.message)); }
+  }
 
   function persist() {
     try {
@@ -116,9 +121,10 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   /** B-0a33 round 1: A WAITING STAMP NOBODY HOLDS IS LET GO, AND SAID TRULY. The guard's waiting reservations are this ladder's
    *  frames; one that no live entry holds (the release's unknown hand-backs read at the update, a crash between a carry and
    *  the guard's write, msg-queued.json lost) can no longer run through this hub's books: it ends as «given up» NOW, once —
-   *  counted where the hub stopped waiting, never returned, and no longer said to wait. At load and at each sweep. */
+   *  counted where the hub stopped waiting, never returned, and no longer said to wait. At load and at each sweep — never in a
+   *  process whose msg-queued.json could not be READ (unread ≠ empty: it may hold the very frames those stamps pay for). */
   function reconcile() {
-    if (typeof waitingReservations !== 'function' || !noteSpend) return 0;
+    if (unread || typeof waitingReservations !== 'function' || !noteSpend) return 0;   // a ledger this process could not read is no proof a frame is gone
     let rids = [];
     try { rids = waitingReservations() || []; } catch { return 0; }
     if (!rids.length) return 0;

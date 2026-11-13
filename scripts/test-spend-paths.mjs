@@ -2276,7 +2276,7 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     let t = 1_800_000_000_000; const dataDir = tmpdir('vs-spend-b0a33-');
     const settings = { 'spend.unattendedPerIdentityHour': hourCap, 'spend.unattendedPerIdentityDay': dayCap, 'spend.unattendedPerInstanceDay': 10000 };
     const g = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => ut, log: () => { } });
-    const mkQ = () => QWf.create({ dataDir, now: () => t, writer: { dirty: (file, o) => { files[file] = o.produce(); } }, readFile: (fl) => { if (!(fl in files)) throw new Error('none'); return files[fl]; },
+    const mkQ = (readFile = (fl) => { if (!(fl in files)) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }); return files[fl]; }) => QWf.create({ dataDir, now: () => t, writer: { dirty: (file, o) => { files[file] = o.produce(); } }, readFile,
       noteSpend: (rec) => g.note({ ...rec, now: t }), releaseSpend: (rec) => g.release({ ...rec, now: t }), reservationState: (rid) => g.reservationState(rid), waitingReservations: () => g.waitingReservations(), stashHas: () => false, log: () => { } });
     const W = { g, files, t: () => t, adv: (ms) => { t += ms; }, q: null, mkQ,
       send: (cid, text, behind = null) => { const v = g.authorize({ reason: 'peer-message', identity: ID, cid, now: t }); if (!v.ok) return null; return W.q.noteWritten(cid, { charged: { reason: 'peer-message', identity: ID, hold: v.hold }, text, holder: 4242, ...(behind ? { waitKey: behind.key, peerName: behind.name } : {}) }); },
@@ -2417,6 +2417,18 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     const held = W2.counts().promisedHour;
     W2.g.note({ reason: 'peer-message', identity: ID, reservation: 'crash-1', now: W2.t() });   // a stamp whose entry is gone
     W2.q.ageOut();   // the sweep
+    {
+      const W3 = world(5); W3.q = null;
+      for (let i = 0; i < 5; i++) W3.g.note({ reason: 'peer-message', identity: ID, reservation: 'unread-' + i, now: W3.t() });
+      W3.q = W3.mkQ(() => { throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); });   // the file is there and cannot be read
+      W3.q.ageOut();
+      const eio = W3.counts().promisedHour;
+      const W4 = world(5); W4.q = null;
+      for (let i = 0; i < 5; i++) W4.g.note({ reason: 'peer-message', identity: ID, reservation: 'bad-' + i, now: W4.t() });
+      W4.q = W4.mkQ(() => '{ "v": 2, "entries": [');   // torn on disk: unparsable
+      const torn = W4.counts().promisedHour;
+      ok('§5f an UNREADABLE msg-queued.json is not an empty one: a read error (EIO) or a torn file at load ⇒ the reconcile holds off (at load and at the sweep) — the five waiting stamps stand, counted, never freed by a read that failed', eio === 5 && torn === 5, J({ eio, torn }));
+    }
     ok('§5f at each SWEEP: a stamp its live entry holds stays waiting (1 after a restart); one no entry holds (a crash between a carry and the guard\'s write) is given up at the sweep', held === 1 && W2.counts().promisedHour === 1 && W2.g.reservationState(k.id) === 'reserved', J({ held, after: W2.counts() }));
   }
   // (6) THE REFUSAL SAYS WHAT WAITS AND WHERE (MUST 3): the conversations named (at most three, then «and N more»), the door
@@ -2429,8 +2441,6 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
     for (const [key, name] of convs) { const e = W.send(key.split(':')[1], 'x', { key, name }); W.q.answer(e.id, { mode: 'queued' }); }
     W.adv(MIN); const v = W.g.authorize({ reason: 'job-notification', identity: ID, now: W.t() });
     const first = adds.length;
-    W.adv(7 * HOUR); W.g.authorize({ reason: 'job-notification', identity: ID, now: W.t() });
-    const sameWait = adds.length;
     const n = adds[0] && adds[0].it;
     const words = n && n.i18n ? n.i18n.detail.map((d) => d.key) : [];
     const behindLine = n && n.i18n ? n.i18n.detail.find((d) => d.key === 'They wait behind {names} and {n} more conversations.') : null;
@@ -2438,7 +2448,21 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       !v.ok && v.why === 'hour-cap' && first === 1 && adds[0].key === 'antigravity:cid-1' && n.sessionName === 'alpha-chat' && /They wait behind «alpha-chat», «beta-chat», «gamma-chat» and 1 more conversations\./.test(n.text)
         && !!behindLine && behindLine.params.names === '«alpha-chat», «beta-chat», «gamma-chat»' && behindLine.params.n === 1 && words.includes('Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.') && n.i18n.door === 'waiting',
       J({ first, key: adds[0] && adds[0].key, text: n && n.text, words }));
-    ok('§5f ONE notice per WAIT: seven hours later, the same frames still waiting, the refusal files nothing new (the release re-filed every 6 h)', sameWait === 1, J({ sameWait }));
+    // THE NOTICE DOES NOT GO SILENT WHILE THE WAIT STILL REFUSES (主开发 08:35Z): a 13-hour wait, a refusal every 61 minutes ⇒
+    // notices at 0 h, after 6 h, after 12 h — and at no instant two open (each expires at its own 6-hour mark)
+    {
+      const notes = [];
+      const ut2 = { add: (key, it) => { if (it && it.i18n) notes.push({ key, at: W2t(), exp: it.expiresAt }); return { id: 'm' + notes.length }; } };
+      let W2t = () => 0;
+      const W2 = world(1, 200, { ut: ut2 }); W2t = W2.t;
+      const e = W2.send('cid-9', 'x', { key: 'antigravity:cid-9', name: 'one-chat' }); W2.q.answer(e.id, { mode: 'queued' });
+      const t0 = W2.t();
+      for (let k = 0; k * 61 * MIN <= 13 * HOUR; k++) { W2.g.authorize({ reason: 'job-notification', identity: ID, now: W2.t() }); W2.adv(61 * MIN); }
+      const at = notes.map((x) => Math.round((x.at - t0) / MIN));
+      const overlap = notes.some((x, k) => k > 0 && x.at < notes[k - 1].exp);
+      ok('§5f ONE OPEN NOTICE PER WAIT, NEVER SILENT: a 13-hour wait refused every 61 minutes files its notice at 0 h, 6 h 06 and 12 h 12 — each filed only after the previous one expired, never two open at once, all under the conversation\'s key',
+        J(at) === J([0, 366, 732]) && !overlap && notes.every((x) => x.key === 'antigravity:cid-9' && x.exp - x.at === 6 * HOUR), J({ at, overlap }));
+    }
     const dz = read('src/lib/i18n-zh.js'), dj = read('src/lib/i18n-ja.js');
     const keys = ['They wait behind {names}.', 'They wait behind {names} and {n} more conversations.', 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.', 'Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.'];
     ok('§5f …every new line is in both dictionaries', keys.every((k) => dz.includes(J(k) + ':') && dj.includes(J(k) + ':')), J(keys.filter((k) => !dz.includes(J(k) + ':') || !dj.includes(J(k) + ':'))));
