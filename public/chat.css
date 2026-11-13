@@ -1370,12 +1370,27 @@
   display: flex; align-items: center; justify-content: center; cursor: zoom-out;
 }
 .chat-img-overlay img { max-width: calc(90vw / var(--ui-scale, 1)); max-height: calc(90vh / var(--ui-scale, 1)); object-fit: contain; border-radius: var(--radius); }
+/* lane think-tools-phone (the owner 2026-11-07, from a phone: «这个换行和复制按钮挡住了字，并且隐藏不掉。» — measured at 360 px:
+   every kind's toolbar lay over its first lines, 2–16 words under the buttons; on a desktop's hover 7 of 9 kinds too):
+   A CONTROL NEVER COVERS THE WORDS IT SERVES. The toolbar is the block's OWN ROW above it — in the flow, right-aligned,
+   outside the block's scroller (an overlay on a scroller covers whatever line scrolls under it, so none is kept) — and
+   the row is reserved whether it shows or not: faded in on a desktop's hover, always there on a touch screen. */
 .chat-pre-wrap { position: relative; }
 .chat-code-toolbar {
-  position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; align-items: center;
+  position: relative; display: flex; justify-content: flex-end; gap: 4px; align-items: center; margin-top: 4px;
   opacity: 0; transition: opacity var(--transition); z-index: 2;
+  user-select: none; -webkit-user-select: none; /* in the flow now: a selection across the block never picks up «Copy Wrap» */
 }
+.chat-pre-wrap > .chat-code-toolbar + :is(pre, .chat-code-block, .chat-diff-body) { margin-top: 2px; }
 .chat-pre-wrap:hover .chat-code-toolbar { opacity: 1; }
+/* keyboard focus shows the row (:focus-visible); a MOUSE click's focus never does — a :focus-within here kept a clicked
+   Copy's row shown after the mouse left (round 2, acceptance T2: the base's hover fade changed). An open language list's
+   search field is :focus-visible by its kind, so the row stays while the list is open. */
+.chat-code-toolbar:has(:focus-visible) { opacity: 1; }
+/* a Thinking block is prose: ONE Copy door in its summary row, beside the label, while it is open */
+.chat-thinking-copy { margin-left: 8px; vertical-align: middle; opacity: 0; transition: opacity var(--transition); user-select: none; -webkit-user-select: none; }
+.chat-thinking:hover > summary .chat-thinking-copy, .chat-thinking-copy:focus-visible { opacity: 1; }
+.chat-thinking:not([open]) .chat-thinking-copy { display: none; }
 .chat-wrap-toggle, .chat-lang-btn {
   min-height: 24px; min-width: 24px; box-sizing: border-box; /* the 24 px mouse target (lane desktop-small P2-6 — Copy / Wrap were 33×14) */
   font-size: 9px; padding: 1px 5px; border-radius: var(--radius-sm); cursor: pointer;
@@ -1716,7 +1731,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 /* Hover-revealed controls are unreachable without a pointer that hovers —
    keep them visible on touch devices */
 @media (hover: none) {
-  .chat-attach-remove, .chat-pre-wrap .chat-code-toolbar { opacity: 1; }
+  .chat-attach-remove, .chat-pre-wrap .chat-code-toolbar, .chat-thinking-copy { opacity: 1; }
   .chat-msg > .chat-open-editor-btn { opacity: 0.7; }
   /* Tap on a link shows our Open/Copy menu — suppress the competing iOS
      long-press link callout */
@@ -1753,6 +1768,9 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
      message text at 390 px (measured: 18 of 18 intersected). The long-press
      message menu carries the same verbs there (design-mobile-gaps #5). */
   .chat-msg > .chat-open-editor-btn { display: none; }
+  /* lane think-tools-phone: a finger's targets — 44 px with 14-px words (the For-you floor: chrome a person reads to act) beside the 16-px prose (a 9-px word in a 24-px
+     box is a mouse target, lane desktop-small P2-6) */
+  .chat-code-toolbar .chat-wrap-toggle, .chat-code-toolbar .chat-lang-btn, .chat-thinking-copy { min-height: 44px; min-width: 44px; font-size: 14px; padding: 0 12px; }
 }
 
 /* Model auto-fallback warning: the harness is serving a different model than
