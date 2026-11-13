@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AF = require(path.join(repo, 'src/artifacts.js'));
@@ -339,10 +339,11 @@ try {
       await sleep(300);
       const rr = await evalJs(`(() => { const r = [...${PANEL}.querySelectorAll('.chat-artifact-row')].find((x) => x._afRow && x._afRow.path === ${JSON.stringify(BRIEF)}); if (!r) return null; const q = r.getBoundingClientRect(); return { x: Math.round(q.left + q.width * 0.35), y: Math.round(q.top + q.height / 2), before: [...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(BRIEF)} || String(w.title || '').includes('BRIEF.md')).length }; })()`);
       if (rr) {
+        // THE STILL DOOR (scripts/scratch.mjs stillPresser — test-still-press ⑤): the tap only on a row that is the element at
+        // its point, the same rect on two looks, nothing moving it (the sheet's own slide-in, the list's scroll); the pointerdown
+        // must land on the row (no click owed — the row opens on its tap and the sheet closes)
         await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-        await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: rr.x, y: rr.y }] });
-        await sleep(60);
-        await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        rr.pressed = await stillPresser({ evalJs, cdp, sleep })(`JS:[...${PANEL}.querySelectorAll('.chat-artifact-row')].find((x) => x._afRow && x._afRow.path === ${JSON.stringify(BRIEF)})`, { touch: true, click: false });
         await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
       }
       const opened = rr && await waitFor(`[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(BRIEF)} || String(w.title || '').includes('BRIEF.md')).length > ${rr.before} && !${PANEL}`, 8000);
