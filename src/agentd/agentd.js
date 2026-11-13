@@ -2519,7 +2519,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       // a machine that is no Mac has no such source: not_mac
       if (msg.op === 'settings-open') {
         const sc = streamScreenOf();
-        if (!sc || typeof sc.openSettings !== 'function') { mux.control({ op: 'settings-open-result', id: msg.id, result: { ok: false, code: 'not_mac', error: 'System Settings is a Mac\'s' } }); return; }
+        if (!sc || typeof sc.openSettings !== 'function') { mux.control({ op: 'settings-open-result', id: msg.id, result: { ok: false, code: 'not_mac', error: 'System Settings is a Mac\'s' } }); return; } // lane machine-needs-at-pairing pick 2: a Windows screen source opens its Settings pages too
         sc.openSettings(String(msg.pane || '')).then((r) => mux.control({ op: 'settings-open-result', id: msg.id, result: r }), (e) => mux.control({ op: 'settings-open-result', id: msg.id, error: String((e && e.message) || e) }));
         return;
       }

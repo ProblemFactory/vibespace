@@ -42,8 +42,10 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { endingVerdict, NEVER_SILENT } from '../stream-model.js'; // lane stream-fallback-never-silent: a played stream never falls to the VNC picture by itself
 import { createHandover } from './machine-desktop-handover.js'; // lane desktop-handover: 「交给 agent」 — the stream to ONE agent conversation
 import { createMicToggle, createMicCard, createSoundToggle, createSoundCard } from './stream-mic-strip.js'; // lane stream-mic-road: 「麦克风」 — the viewer's voice to the machine's apps; lane speaker-passthrough-v1: 「声音」 — the machine's sound here
+import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 on the line that states the need
 import { micDefaultDoors, micRoadWords } from '../mic-model.js'; // lane stream-mic-road: the Machines card's microphone row
 import { HDR_DECODE_QUERY, DYNAMIC_RANGE_QUERY, hdrViewerVerdict, hdrMachineVerdict, HDR_KEY, hdrRemembered, rememberHdr } from '../hdr-viewer.js'; // lane stream-hdr-passthrough: 「HDR 直通」
+import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
 /** THE INSTALL DOOR of the machine's one-time setups (lane machine-needs-at-pairing — the owner 2026-11-13: «设置一次：在 dev-… 上安装
  *  TightVNC Server» and no button): the launcher's install dialog, loaded when pressed (the strip's microphone door's way, below) —
@@ -496,10 +498,22 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   const PANE_WORDS = { screen: () => t('Screen & System Audio Recording'), accessibility: () => t('Accessibility') };
   tccCopy.onclick = async () => {
     const r = tccPane ? await post('/api/desktop/machine-desktop/settings-open', { host: m.hostId, pane: tccPane }).catch(() => null) : null;
-    if (r && r.ok) { showToast(t('Opened System Settings › {pane} on {machine}', { pane: PANE_WORDS[tccPane](), machine })); return; }
+    if (r && r.ok) { showToast(tccPane === 'clt' ? t('Opened {pane} on {machine}', { pane: t('the Command Line Tools installer'), machine }) : t('Opened System Settings › {pane} on {machine}', { pane: PANE_WORDS[tccPane](), machine })); return; }
+    if (tccPane === 'clt') { showToast(t('On {machine}, run: xcode-select --install', { machine }), { type: 'error' }); return; } // lane machine-needs-at-pairing pick 2: no link to copy for a program
     if (tccLink) copyText(tccLink).then(() => showToast(t('Copied — on {machine}, paste it into Safari’s address bar: it opens that Settings pane', { machine })));
   };
   tccEl.append(tccText, tccCopy);
+  // lane machine-needs-at-pairing pick 2: THE FFMPEG NEED ON THE STRIP — the stream (no_ffmpeg / no_encoder) or the sound (no_ffmpeg)
+  // said this Windows machine has no ffmpeg that passes: the words and 「取得 FFmpeg …」 on the same line (the Mac switch's pill shape)
+  const ffEl = el('span'); ffEl.className = 'desktop-strip-tcc desktop-strip-ffmpeg'; ffEl.hidden = true;
+  let ffShown = null;
+  const showFf = (code, info) => {
+    if (m.setup !== 'win32' || !ffmpegNeedCode(code) || ffShown === code) return;
+    ffShown = code;
+    const ffText = el('span', null, streamWords(code, info));
+    ffEl.replaceChildren(ffText, ffmpegDoor(m.hostId, { cls: 'file-tool-btn desktop-strip-tcc-open', say: (text) => { ffText.textContent = text; } }));
+    ffEl.hidden = false;
+  };
   const MAC_PANES = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
   // commit 2 — the Accessibility banner goes when the machine takes input again (a view's injected count passes the count at
   // the refusal, no newer refusal) or a start's facts say granted; a new refusal shows it again (inputWords)
@@ -512,15 +526,17 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   };
   const showTcc = (code, at = 0) => {
     if (code === 'accessibility_permission') { tccAt = at || 0; tccBase.clear(); for (const v of tccViews()) tccBase.set(v, ((v.agent() || {}).input || {}).n || 0); }
-    const pane = code === 'accessibility_permission' ? 'accessibility' : 'screen';
-    tccLink = MAC_PANES[pane]; tccPane = pane;
+    const pane = code === 'accessibility_permission' ? 'accessibility' : code === 'no_helper' ? 'clt' : 'screen'; // lane machine-needs-at-pairing pick 2: the helper's own door (M5)
+    tccLink = MAC_PANES[pane] || null; tccPane = pane;
+    tccCopy.textContent = pane === 'clt' ? t('Install the Command Line Tools…') : t('Open System Settings');
     tccText.textContent = code === 'helper_changed_regrant' ? t('The Mac’s screen helper was updated: turn vibespace-screen off and on again under Screen & System Audio Recording')
       : code === 'helper_signed_regrant' ? t('The Mac’s signed screen helper is in place: turn vibespace-screen off and on under Screen & System Audio Recording — the last time, a signed helper keeps the permission across updates') // lane apple-signing
+      : pane === 'clt' ? t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace')
       : pane === 'accessibility' ? t('The Mac takes no keys or clicks until Accessibility is on for vibespace-screen')
         : t('The Mac shows no picture until Screen Recording is on for vibespace-screen');
     tccEl.title = tccLink; tccEl.hidden = false;
   };
-  strip.append(fwEl, tccEl, noteEl);
+  strip.append(fwEl, tccEl, ffEl, noteEl);
   // lane stream-stats-popup: TRUE FULL SCREEN — 「全屏」 shows the picture alone and this strip floats over it as a movable pill
   // (src/lib/stream-pill.js): the summary, 「退出全屏」 and ⋯ = the details · the displays · 「捕获快捷键」
   const pill = createStreamPill({ host: c, bar: strip, fullBtn, hostId: m.hostId, menu: () => {
@@ -594,7 +610,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   winInfo._micToggle = micToggle;
   // lane speaker-passthrough-v1 (src/lib/stream-mic-strip.js): 「声音」 — every stream asks for the machine's sound track, the first that
   // carries it plays it here; ON is remembered per machine, a RESTORED window (a reload, a layout replay: syncId) says 「点一下开声音」
-  const soundToggle = createSoundToggle({ hostId: m.hostId, platform: m.setup || null, strip, before: chip, restored: !!syncId });
+  const soundToggle = createSoundToggle({ hostId: m.hostId, platform: m.setup || null, strip, before: chip, restored: !!syncId, onNeed: (code) => { if (code === 'screen_permission') showTcc(code); else showFf(code); } }); // lane machine-needs-at-pairing pick 2: its no_ffmpeg has the strip's door
   winInfo._soundToggle = soundToggle;
   // A CROWDED STRIP (a narrow window + a notice — test-desktop-webrtc-chrome ⑦: the firewall notice's copy button stays inside the
   // strip at 900 px) drops the words of 「麦克风」 / 「声音」 — their icons and titles stay; a roomy strip keeps them. Measured, not guessed:
@@ -657,7 +673,8 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     for (const [did, x] of [...many]) { many.delete(did); x.dispose(); }
     panes.dispose(); held = null;
     refusedWhy = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
-    if (code === 'screen_permission' || code === 'helper_changed_regrant' || code === 'helper_signed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac (lane apple-signing: the signed helper's last one)
+    if (code === 'screen_permission' || code === 'helper_changed_regrant' || code === 'helper_signed_regrant' || (code === 'no_helper' && m.setup === 'darwin')) showTcc(code); // lane stream-p3m-build: which switch on the Mac (lane apple-signing: the signed helper's last one)
+    showFf(code, info); // lane machine-needs-at-pairing pick 2: no ffmpeg that passes ⇒ its door on the strip
     if (taken && !pressed) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code, info) }), why || code);
     chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
     if (syncId && !taken && !pressed) { askVnc(t('Not streamed: {why}', { why: refusedWhy })); return; }
@@ -667,6 +684,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
    *  'ask' (the two buttons: the VNC picture only on 「显示 VNC 画面」). */
   const interrupted = (act, src, code, why, info) => {
     const words = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code);
+    showFf(code, info); // lane machine-needs-at-pairing pick 2
     chip.title = [scope, t('Stream interrupted: {why}', { why: words })].join('\n');
     handover.playing(false);
     if (act === 'retry') { note(t('Stream interrupted: {why} — reconnecting…', { why: words }), why || code, 8000); clearTimeout(retryTimer); retryTimer = setTimeout(() => { retryTimer = null; if (!closed && !stream) startStream(src); }, NEVER_SILENT.retryMs); return; }
@@ -929,7 +947,22 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
   // lane stream-mic-road: the machine's virtual microphone — its state and its doors (install, the default pair, remove)
   const mic = m.setup === 'win32' || m.setup === 'darwin' ? createMicCard({ hostId: m.hostId, machine, install: (what) => installDoor(m, { what, onDone: () => mic.refresh({ force: true }) }) }) : null;
   const sound = m.setup === 'win32' || m.setup === 'darwin' ? createSoundCard({ platform: m.setup }) : null; // lane speaker-passthrough-v1: the sound's consent, said
-  body.append(state, acts, ...(mic ? [mic.el] : []), ...(sound ? [sound.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
+  // lane machine-needs-at-pairing pick 2: THE FFMPEG NEED IN THE DIALOG — read when the dialog opens and at Check again (never on a
+  // timer): a Windows machine whose agent finds no ffmpeg that passes gets the line and 「取得 FFmpeg …」 on it; none is shown while one
+  // passes (主开发's Q6 — a machine's own ffmpeg that works is kept, nothing is fetched)
+  const ffLine = el('p', 'margin:4px 0;display:none;flex-wrap:wrap;gap:6px;align-items:center'); ffLine.className = 'machine-ffmpeg-need';
+  const readFfmpeg = async () => {
+    if (m.setup !== 'win32' || m.code === 'offline') { ffLine.style.display = 'none'; return; }
+    const r = await fetchJson(`/api/desktop/machine-desktop/stream/facts?host=${encodeURIComponent(m.hostId)}&machine=1`);
+    if (!live()) return;
+    const f = r && r.machine;
+    if (!f || f.ok === false || f.ffmpegPasses !== false) { ffLine.style.display = 'none'; return; }
+    const words = el('span', 'color:var(--warning, #d9822b)', t('Streaming needs ffmpeg 7 or newer with ddagrab and an H.264 encoder — {machine} has none that does', { machine }));
+    words.title = f.ffmpegWhy || '';
+    ffLine.replaceChildren(words, ffmpegDoor(m.hostId, { say: (text) => { words.textContent = text; }, onDone: () => readFfmpeg() }));
+    ffLine.style.display = 'flex';
+  };
+  body.append(state, acts, ffLine, ...(mic ? [mic.el] : []), ...(sound ? [sound.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
   let signin = null; // lane desktop-vnc-remember: the hub's word on this machine's remembered sign-in (GET …/signins)
   const readSignin = async () => { const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`); if (!live()) return; signin = r && !r.error ? r.signin : null; render(); };
@@ -947,6 +980,7 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
   const check = async () => {
     const listed = listApps(true);
     if (recheck) { const next = await recheck(m.hostId); if (next && live()) { m = next; render(); } }
+    readFfmpeg(); // lane machine-needs-at-pairing pick 2: Check again reads the machine's ffmpeg again too
     await listed;
   };
   function render() {
@@ -960,6 +994,7 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
     // lane stream-p2w-build: ONE application window of a Windows machine as its own window (its agent captures that window only) — beside the desktop: the two ways to look at the machine; a Mac's too (lane stream-p3m-build's window source — int304's one door)
     if ((m.setup === 'win32' || m.setup === 'darwin') && m.code !== 'offline') { const ws = btn('file-tool-btn machine-window-stream-open', t('Stream one window…'), () => openWindowPicker(app, m, { openDesktop: () => openMachineDesktop(app, m), onOpen: toWindow })); ws.title = t('Show one application window of {machine} as its own window — only that window is sent', { machine }); acts.append(ws); }
     if (m.code === 'no_vnc' && m.setup === 'win32') acts.append(btn('btn-create', t('Install TightVNC Server…'), () => installDoor(m, { what: 'tightvnc', onDone: () => check() })));
+    if (m.code === 'no_vnc' && m.setup === 'darwin') acts.append(settingsDoor(m.hostId, machine, 'sharing', { cls: 'btn-create' })); // lane machine-needs-at-pairing pick 2: Screen Sharing's own pane on the Mac (M1 / M2)
     if (m.code !== 'offline' && recheck) acts.append(btn('file-tool-btn', t('Check again'), () => check()));
     if (m.setup === 'win32') { const rs = btn('file-tool-btn machine-remoteapp-settings', t('RemoteApp settings…'), () => openRemoteappSettings(app, m)); rs.title = t('Set up RemoteApp once for this Windows machine: its sign-in and its certificate'); acts.append(rs); } // lane remoteapp-r1b: never greyed — offline, the card says so
     // lane desktop-vnc-remember: 「忘掉登录」 — only while a sign-in is remembered (the next desktop asks again)
@@ -1011,6 +1046,7 @@ export function showMachineDesktopDialog(app, m0, { recheck = null, closeOpener 
   ready.then((s) => { if (s) listApps(false); });   // lane dialog-yield r5: QUEUED behind another machine's ask, it lists when it opens (§103: a loader the body calls is work after the open)
   readSignin();
   if (mic && m.code !== 'offline') mic.refresh();
+  readFfmpeg(); // lane machine-needs-at-pairing pick 2
   // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —
   // a newer list is read again (from the hub's store: nothing is asked of the machine)
   const offListed = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((msg) => {

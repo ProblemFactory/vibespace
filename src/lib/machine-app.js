@@ -34,6 +34,8 @@ import { createStreamStats } from './stream-stats.js'; // lane stream-window-fix
 import { machineDesktopId } from '../machine-desktop-model.js';
 import { cropLayout, paneToMachine, clampToBox } from '../machine-window.js';
 import { windowViewSize, windowHeldDoor } from '../stream-window.js';
+import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 on the window's own line
+import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
 const nameOf = (m) => String((m && (m.label || m.hostId)) || ''); // peer-controlled text: textContent only
 const el = (tag, css, text) => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (text != null) e.textContent = text; return e; };
@@ -298,11 +300,16 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     sized = key;
     app.wm.resizeWindowTo(winInfo.id, { w: (size.w + chrome.w) / s, h: (size.h + chrome.h) / s });
   };
-  function showSay(text, { again = false } = {}) {
+  function showSay(text, { again = false, need = null } = {}) {
     say.style.display = text ? 'flex' : 'none';
     sayText.textContent = text || '';
     sayActs.replaceChildren();
     if (!text) return;
+    // lane machine-needs-at-pairing pick 2: no ffmpeg that passes on this Windows machine ⇒ 「取得 FFmpeg …」 first on the same line
+    if (need && ffmpegNeedCode(need) && m.setup === 'win32') sayActs.append(ffmpegDoor(m.hostId, { say: (x) => { sayText.textContent = x; }, onDone: () => connect() }));
+    // the Mac's switch or its helper (M3 / M5): the right pane — or the Command Line Tools' installer — on the same line
+    const macPane = m.setup !== 'darwin' ? null : need === 'no_helper' ? 'clt' : need === 'accessibility_permission' ? 'accessibility' : (need === 'screen_permission' || need === 'helper_changed_regrant' || need === 'helper_signed_regrant') ? 'screen' : null;
+    if (macPane) sayActs.append(settingsDoor(m.hostId, machine, macPane, { cls: 'btn-create' }));
     if (again) sayActs.append(btn('btn-create', t('Stream again'), () => connect()));
     if (openDesktop) sayActs.append(btn('file-tool-btn', t('Open its whole desktop'), () => openDesktop()));
     sayActs.append(btn(again ? 'file-tool-btn' : 'btn-create', t('Pick a window…'), () => { app.wm.closeWindow(winInfo.id); openWindowPicker(app, m, { fp16, openDesktop }); }));
@@ -334,7 +341,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
       // picture — lane stream-p3m-build; Windows holds it): its own words
       onFallback: (code, why) => {
         view = null; ended = true; held = null; stats.ended(); drawStrip(); drawStats(); host.append(say);
-        showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why }), { again: code !== 'window_gone' });
+        showSay(code === 'window_minimized' ? t('the window is minimized — restore it to stream') : windowStreamText(code, { title, machine, why }), { again: code !== 'window_gone', need: code });
       },
     });
     host.append(say);

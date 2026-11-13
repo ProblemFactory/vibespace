@@ -248,9 +248,9 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   // the same four stubs for src/lib/machine-app.js (machine-app-crop's "Run as its own window…" module the dialog imports — the real
   // utils.js wires document-level tooltips at load)
   const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/machine-desktop.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
-    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view|machine-desktop-handover|desktop-app-launcher)\.js$/ }, (a) => (/(machine-(desktop|app|displays)|desktop-picker|remoteapp-card|stream-stats|stream-pill|corner-float|stream-mic-strip)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|window-types|vnc-view|picture-shell|stream-view|machine-desktop-handover|desktop-app-launcher)\.js$/ }, (a) => (/(machine-(desktop|app|displays)|desktop-picker|remoteapp-card|stream-stats|stream-pill|corner-float|stream-mic-strip|ffmpeg-door|machine-settings-door)\.js$/.test(a.importer) ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
   class N {
-    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.style = { cssText: '' }; this.attrs = {}; this.className = ''; this._text = ''; this.hidden = false; this.disabled = false; this.value = ''; this.title = '';
+    constructor(tag) { this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.style = { cssText: '' }; this.attrs = {}; this.dataset = {}; this.className = ''; this._text = ''; this.hidden = false; this.disabled = false; this.value = ''; this.title = '';
       this.classList = { toggle: (c, on) => { const s = new Set(this.className.split(/\s+/).filter(Boolean)); if (on === undefined ? !s.has(c) : on) s.add(c); else s.delete(c); this.className = [...s].join(' '); }, contains: (c) => this.className.split(/\s+/).includes(c) }; }
     append(...xs) { for (const x of xs) { if (x == null) continue; const n = typeof x === 'string' ? Object.assign(new N('#text'), { _text: x }) : x; if (n.parent) n.parent.children.splice(n.parent.children.indexOf(n), 1); n.parent = this; this.children.push(n); } }
     appendChild(x) { this.append(x); return x; }
@@ -312,7 +312,8 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const acts = body.find('desktop-install-actions')[0];
   ok(acts && J(acts.children.map((b) => b.textContent)) === J(['Stream one window…', 'Install TightVNC Server…', 'Check again', 'RemoteApp settings…']), 'the action row: (a Windows machine, lane stream-p2w-build) Stream one window…, Install…, Check again and (lane remoteapp-r1b) RemoteApp settings… — the CSS rule below keeps each whole');
   await checkBtn.onclick(); await tick();
-  ok(asked[asked.length - 1] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1, 'Check again re-reads the machine row AND lists its apps again (fresh)');
+  const sinceCheck = asked.slice(asked.lastIndexOf('/api/desktop/machine-desktop/apps?host=win-a&fresh=1'));
+  ok(sinceCheck[0] === '/api/desktop/machine-desktop/apps?host=win-a&fresh=1' && rechecks === 1 && sinceCheck.includes('/api/desktop/machine-desktop/stream/facts?host=win-a&machine=1'), 'Check again re-reads the machine row AND lists its apps again (fresh) — and (lane machine-needs-at-pairing pick 2) reads its ffmpeg again', sinceCheck);
   ok(J(rowsNow().map((b) => b.firstChild.textContent)) === J(['Blender', '7-Zip', 'JASP']) && rowsNow()[2] === jaspNode, 'a re-list moves the existing row nodes (keyed by the launch line), never rebuilds them');
   answer = { hostId: 'win-a', platform: 'win32', rows: [ZR], total: 1, truncated: false, listedAt: 2, code: 'host_needs_daemon', error: 'x' };
   await checkBtn.onclick(); await tick();
@@ -347,6 +348,28 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
     const tv = row && row.children.find((x) => x.textContent === 'Install TightVNC Server…'), mi = b.find('machine-mic-install')[0];
     if (tv) await tv.onclick(); if (mi) await mi.onclick(); await tick(); await tick();
     ok(tv && mi && J(globalThis.__installs) === J([{ host: 'win-a', what: 'tightvnc' }, { host: 'win-a', what: 'virtual-mic' }]), `opened as ${o.file} opens it: the TightVNC line has «Install TightVNC Server…» and the microphone card «Install a virtual microphone…», each opening the launcher's install dialog`, { tv: !!tv, mi: !!mi, installs: globalThis.__installs, row: row && row.children.map((x) => x.textContent) });
+  }
+
+  // lane machine-needs-at-pairing pick 2: THE DIALOG'S FFMPEG LINE (read when it opens) — the door only when no ffmpeg passes (主开发's
+  // Q6: a machine whose own ffmpeg passes keeps it, nothing is offered); a Mac's Screen Sharing line has its pane's door (M1 / M2)
+  for (const passes of [false, true]) {
+    answer = (u) => (/\/stream\/facts\?/.test(u) ? { sessions: [], machine: { ok: true, platform: 'win32', ffmpeg: passes ? { path: 'C:\\f\\ffmpeg.exe', version: '8.0' } : null, ffmpegPasses: passes, ...(passes ? {} : { ffmpegWhy: 'this machine needs ffmpeg 7 or newer …' }) } }
+      : /\/mic\?/.test(u) ? { state: { state: 'absent' } } : { hostId: 'win-a', platform: 'win32', rows: [], total: 0, truncated: false, listedAt: 6 });
+    showMachineDesktopDialog({}, { ...m }, { recheck: async () => m });
+    const bf = ROOT.children[ROOT.children.length - 1];
+    await tick(); await tick(); await tick();
+    const line = bf.find('machine-ffmpeg-need')[0], get = line && line.find('machine-ffmpeg-get')[0];
+    if (passes) ok(line && line.style.display === 'none' && !get, 'Q6: a machine whose own ffmpeg passes gets NO ffmpeg line — nothing offered, nothing fetched', line && line.style.display);
+    else ok(line && line.style.display === 'flex' && get && get.textContent === 'Get FFmpeg 9.0.2 (gyan.dev, 115 MB)' && /no publisher signs ffmpeg/i.test(get.title || '') && /none that does/.test(line.textContent), 'no ffmpeg that passes ⇒ the dialog says so, with «Get FFmpeg 9.0.2 (gyan.dev, 115 MB)» on the same line (its title: no publisher signs it; two fixed SHA-256)', line && { d: line.style.display, t: line.textContent });
+  }
+  {
+    const mac = { hostId: 'mac-a', label: 'Mac-mini', code: 'no_vnc', setup: 'darwin', desktop: 'vnc-native', selectable: true };
+    answer = () => ({ hostId: 'mac-a', platform: 'darwin', rows: [], total: 0, truncated: false, listedAt: 7 });
+    showMachineDesktopDialog({}, mac, { recheck: async () => mac });
+    const bm = ROOT.children[ROOT.children.length - 1];
+    await tick(); await tick();
+    const sharing = bm.find('machine-settings-open').find((x) => x.dataset.pane === 'sharing');
+    ok(sharing && sharing.textContent === 'Open System Settings' && /General › Sharing/.test(sharing.title), 'a Mac\'s «Set up once … turn on Screen Sharing» line has «Open System Settings» (General › Sharing) on its action row', bm.find('desktop-install-actions')[0] && bm.find('desktop-install-actions')[0].children.map((x) => x.textContent));
   }
 
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');

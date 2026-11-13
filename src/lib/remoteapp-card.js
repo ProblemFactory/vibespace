@@ -16,6 +16,7 @@ import { t } from './i18n.js';
 import { createModalShell, fetchJson, showToast, copyText } from './utils.js';
 import { ALLOWLIST_COMMAND, GPU_COMMAND } from '../remoteapp.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const btn = (cls, text, onclick) => { const b = el('button', cls, text); b.type = 'button'; b.onclick = onclick; return b; };
@@ -103,6 +104,7 @@ export function openRemoteappSettings(app, m) {
       const text = el('div', 'ra-fact-text');
       text.append(el('div', 'ra-fact-label', w.label), el('div', 'ra-fact-state', w.state));
       if (w.copy && row.command) text.append(btn('file-tool-btn ra-copy', w.copy, () => copyAndSay(row.command)));
+      if (row.key === 'rdp' && !row.met) text.append(settingsDoor(m.hostId, machine, 'remotedesktop')); // lane machine-needs-at-pairing pick 2: Windows' Remote Desktop page on that machine (W7)
       r.append(icon, text);
       factsBox.append(r);
     }

@@ -309,6 +309,11 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
    *  Lane stream-mac-ax-respawn: the Accessibility pane's door is told to the helper's listeners, and once `open` answers the
    *  facts are re-read (forced) — THE injector replaces an input child born before the door when that read returns. */
   function openSettings(pane) {
+    // lane machine-needs-at-pairing pick 2: a DOOR that is a program (the Command Line Tools' own installer, SP.MAC_DOORS) — by name
+    if (Object.prototype.hasOwnProperty.call(SP.MAC_DOORS, pane)) {
+      const [file, ...args] = SP.MAC_DOORS[pane];
+      return H.run(file, args, 10000).then((r) => (!r.err || /already installed/i.test(r.stderr || r.stdout) ? { ok: true, pane, already: !!r.err } : named('open_failed', `${file} did not show its installer (${String(r.stderr || r.err.message || r.err.code).trim().slice(0, 120)})`))); // the helper's ONE run
+    }
     const url = Object.prototype.hasOwnProperty.call(SP.MAC_SETTINGS, pane) ? SP.MAC_SETTINGS[pane] : null;
     if (!url) return Promise.resolve(named('bad_pane', `no Settings pane named ${JSON.stringify(String(pane).slice(0, 20))}`));
     H.sawDoor(pane);

@@ -21,6 +21,8 @@ import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { micStep, micAskCode, micRoadWords, micDefaultDoors, MIC_CONSTRAINTS } from '../mic-model.js';
 import { soundStep, SOUND_KEY, soundRemembered, rememberSound, soundRefusalKey, soundConsentKeys } from '../sound-model.js';
+import { ffmpegDoor, ffmpegNeedCode } from './ffmpeg-door.js'; // lane machine-needs-at-pairing pick 2: 「取得 FFmpeg …」 where the voice / the sound needs it
+import { settingsDoor } from './machine-settings-door.js'; // lane machine-needs-at-pairing pick 2: the settings page's door on the line that states the need
 
 const MIC_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5V14.5M5.5 14.5h5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 /** The refusal words by the toggle's code (micAskCode / the m-line's absence). */
@@ -47,7 +49,9 @@ export function createMicToggle({ hostId, strip, before = null, install = null, 
   const wordsText = document.createElement('span');
   const door = document.createElement('button'); door.type = 'button'; door.className = 'desktop-strip-mic-install'; door.textContent = t('Install a virtual microphone…'); door.hidden = true;
   door.onclick = () => { try { install?.(); } catch { /* the shell's */ } };
-  words.append(wordsText, door);
+  // lane machine-needs-at-pairing pick 2: the machine's receiver has no ffmpeg to play the voice ⇒ 「取得 FFmpeg …」 on the same words
+  const ffDoor = ffmpegDoor(hostId, { cls: 'desktop-strip-mic-install', say: (text) => { wordsText.textContent = text; } }); ffDoor.hidden = true;
+  words.append(wordsText, door, ffDoor);
   strip.insertBefore(b, before && before.parentNode === strip ? before : null);
   strip.insertBefore(words, before && before.parentNode === strip ? before : null);
   const ask = getUserMedia || ((c) => navigator.mediaDevices.getUserMedia(c));
@@ -69,9 +73,10 @@ export function createMicToggle({ hostId, strip, before = null, install = null, 
     if (on && r) {
       wordsText.textContent = t(r.key, r.params) + (r.note ? ` · ${t(r.note.key, r.note.params)}` : '');
       door.hidden = !(r.road === 'speakers' && install);
+      ffDoor.hidden = r.refused !== 'no_ffmpeg';
       words.hidden = false;
       words.dataset.road = r.road || '';
-    } else { words.hidden = true; door.hidden = true; }
+    } else { words.hidden = true; door.hidden = true; ffDoor.hidden = true; }
     b.title = on ? t('Microphone on — press to turn it off') + (r ? `\n${t(r.key, r.params)}` : '')
       : st.state === 'refused' || st.state === 'unavailable' ? micRefusalText(st.code)
         : t('Speak to this machine’s apps — off until you press it; it stops when you close the window, lock or hide this page, or press again');
@@ -157,6 +162,7 @@ export function createMicCard({ hostId, machine, install = null } = {}) {
     if (st.state === 'installed' || st.state === 'reboot_owed') line.textContent = (st.micIsDefault ? t('Virtual microphone: «{name}» (the default microphone)', { name }) : t('Virtual microphone: «{name}»', { name })) + (w.note ? ` · ${t(w.note.key, w.note.params)}` : '');
     else if (st.state === 'absent') line.textContent = t('No virtual microphone — your voice plays on its speakers');
     else if (st.state === 'inactive') line.textContent = t('VB-CABLE is installed, but its devices are turned off in Windows’ sound settings');
+    if (st.state === 'inactive') acts.append(settingsDoor(hostId, machine, 'sound')); // lane machine-needs-at-pairing pick 2: Windows' Sound page on that machine (W6)
     else { line.textContent = st.error || t('This machine did not say where your voice would go'); line.classList.toggle('is-bad', true); }
     if (st.state === 'absent' && install) acts.append(mk('btn-create machine-mic-install', t('Install a virtual microphone…'), () => install('virtual-mic')));
     if (doors.make) acts.append(mk('file-tool-btn machine-mic-default', t('Make it the default microphone'), () => setDefault('virtual')));
@@ -180,7 +186,7 @@ const soundMemory = (store) => { try { return store ? store.getItem(SOUND_KEY) :
 /** `platform` = the machine's (its title names a Mac's permission); `restored` = this window came back by itself (a reload, a
  *  layout replay); `activated()` = the page has had a person's gesture (the browser lets it unmute).
  *  → { el, ready(view, ok), ended(view), dispose(), get state() } */
-export function createSoundToggle({ hostId, platform = null, strip, before = null, restored = false, activated = () => (typeof navigator === 'undefined' || !navigator.userActivation ? true : !!navigator.userActivation.hasBeenActive), store = typeof localStorage !== 'undefined' ? localStorage : null } = {}) {
+export function createSoundToggle({ hostId, platform = null, strip, before = null, restored = false, onNeed = null, activated = () => (typeof navigator === 'undefined' || !navigator.userActivation ? true : !!navigator.userActivation.hasBeenActive), store = typeof localStorage !== 'undefined' ? localStorage : null } = {}) {
   let st = { state: 'unavailable', code: null }, view = null, disposed = false, pressed = false, said = '', seq = 0;
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'desktop-strip-btn desktop-strip-sound'; b.hidden = true; b.setAttribute('aria-pressed', 'false');
@@ -204,6 +210,7 @@ export function createSoundToggle({ hostId, platform = null, strip, before = nul
         : st.state === 'tap' ? t('This window came back by itself — tap to turn its sound on (the browser waits for your press)')
           : t('Play this machine’s sound here — off until you press it; nothing is recorded or stored') + more;
     tap.title = b.title;
+    if (st.state === 'refused' && ffmpegNeedCode(st.code)) { try { onNeed?.(st.code); } catch { /* the window's */ } } // lane machine-needs-at-pairing pick 2: the strip's 「取得 FFmpeg …」
   }
   function run(r) {
     st = { state: r.state, code: r.code || null };
