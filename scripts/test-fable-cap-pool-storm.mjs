@@ -3915,6 +3915,12 @@ console.log('\n§ask the model facts: a pick moves the ask; the CLI reports what
     const ci = (src) => { const a = src.indexOf("const r = sendUserInput(data.sessionId, data.text"); return a < 0 ? null : src.slice(a, src.indexOf('break;', a)); };
     const masterCI = (t) => !!t && /^const r = sendUserInput\(data\.sessionId, data\.text, \{ msgId: data\.msgId, origin: 'ws', steer: data\.steer === true \}\);\n\s+if \(!r\.ok && \(r\.code === 'input_rejected' \|\| r\.code === 'too_large'\)\) \{/.test(t) && !/model-ask|typed/i.test(t);
     const srcAll = ['src/ws-handler.js', 'src/server/stdout/claude-stream-json.js', 'src/server/session-brain.js', 'src/server/usage-pool-engine.js', 'src/server/session-stdout.js', 'server.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
+    // a cut name is model-ask's road only through model-ask: the release (law 1, 813d72939) gave conversation-deliver its OWN
+    // `noteProcessGone` (the queued hand-back at a process's end), called from ws-handler.js and session-stdout.js — not this road
+    const CUT = 'noteTypedModel|noteQueueRecord|noteForwarded|noteAcrossReconnect|noteRemoteState|noteProcessGone|noteControlResponse|useConfigWriter|sbPreGate';
+    const CUT_VIA_MA = new RegExp(`(?:\\bMA|require\\([^)]*model-ask[^)]*\\))\\s*\\.\\s*(?:${CUT})\\b`);
+    const CUT_IN_MA = new RegExp(`\\b(?:${CUT})\\b`);
+    const maSrc = fs.readFileSync(path.join(REPO, 'src/server/model-ask.js'), 'utf8');
     const s = sess({ sockName: 'cw-typed15', _modelLocked: true, _lockedModel: 'claude-opus-5-5' }); MA.noteCliModel(s, 'claude-opus-5-5', io); MA.noteServed(s, 'claude-opus-5-5', io);
     const metaBefore = JSON.stringify(metas['cw-typed15']), pickBefore = s._pickedModel, lockBefore = s._lockedModel;
     MA.noteCliModel(s, 'claude-opus-5-5', io);                        // «/model sonnet»'s own init (the OLD model)
@@ -3923,7 +3929,7 @@ console.log('\n§ask the model facts: a pick moves the ask; the CLI reports what
     const u = sess({ sockName: 'cw-typed15u', _spawnModel: 'opus' }); MA.noteCliModel(u, 'claude-opus-5-5', io); MA.noteServed(u, 'claude-opus-5-5', io);
     MA.noteCliModel(u, 'claude-sonnet-5-5', io);                      // unlocked: the CLI moved by a road the hub did not order
     ok('§ask CUT 2 (round 15): a typed /model WRITES NOTHING — chat-input is master\'s text, no typed road is left (no arm, no config writer, no queue / mark / reconnect reader); the CLI\'s next init reports what it took: no pick and no lock change on the server (a lock\'s repin answers it, master\'s), and the unlocked want follows the CLI\'s newer report (claude-sonnet-5-5 over the spawn\'s opus — what master\'s live init names)',
-      masterCI(ci(wsSrc)) && !/noteTypedModel|noteQueueRecord|noteForwarded|noteAcrossReconnect|noteRemoteState|noteProcessGone|noteControlResponse|useConfigWriter|sbPreGate|input_forwarded|model_across_reconnect/.test(srcAll)
+      masterCI(ci(wsSrc)) && !/noteTypedModel|noteQueueRecord|noteForwarded|noteAcrossReconnect|noteRemoteState|noteControlResponse|useConfigWriter|sbPreGate|input_forwarded|model_across_reconnect/.test(srcAll) && !CUT_VIA_MA.test(srcAll) && !CUT_IN_MA.test(maSrc)
         && s._pickedModel === pickBefore && s._lockedModel === lockBefore && f.cliModel === 'claude-sonnet-5-5' && metaAfter.cliModel === 'claude-sonnet-5-5' && !('pickedModel' in metaAfter && metaAfter.pickedModel) && MA.modelFacts(u).want === 'claude-sonnet-5-5',
       JSON.stringify({ metaBefore, metaAfter, f, u: MA.modelFacts(u) }));
   }
