@@ -37,13 +37,36 @@
 //      one; the conversation:// link pinned as today (lane agy-subagent-cards);
 //      CONTROL the base (the two steps off on the live renderer): the anchor has
 //      no href and a click does nothing — what the owner saw
+//   ⑧ lane file-preview-mount (userW inc-mvq7sdky-j0ed, 2.369.358: «窗口内打开 HTML 的时候，默认不展示 preview，总是
+//      展示这个 raw，应该展示 preview»): a REAL Cmd+click on an .html path in an assistant message (the REAL chat
+//      link-open: the file probe, app.openFile) opens the code editor's VIEW door — the PREVIEW shown (the frame host's
+//      opaque frame: sandbox="allow-scripts", the host's address, the page handed in — never a srcdoc), the source
+//      hidden, the toggle saying «Source»; a REAL press on «Source» shows the source; closed and opened again from the
+//      link it opens as Source (the last mode chosen for the file); «Preview» pressed, it opens as the preview again;
+//      the Edit door (app.openEditor) opens the source. RED on 6428c67e: the link opened the source.
+//   ⑨ lane file-preview-mount (userW inc-mvq4hn9x, 2.369.358: «command 加点击打开 Excel 的时候会报错»): a REAL Cmd+click on
+//      an .xlsx path draws the sheet viewer (both tabs, the cells — the route's rows now come from the SafeFs pool); a
+//      refusal the hub SAYS (storage_sync_refused, the answer's shape pinned in test-file-preview-mount) reaches the
+//      viewer in the reader's words — the storage's name, the release, the way on — never the `error` text kept for
+//      agents. RED on 6428c67e: the viewer printed the `error` text (what userW saw, raw).
+//      r2: a 60-sheet workbook's viewer SAYS the cuts the server made (the first 50 of 60 sheets, a long cell's first
+//      2000 characters; another sheet: its first 256 columns) — RED on 19e1f74c: no word of a cut
+//   ⑧ r2 (DECIDED by 主开发: an .html the agent wrote opens running, in the sandbox the Preview press used; the sandbox,
+//      not a press, is the fence): pinned — sandbox="allow-scripts", no srcdoc, the folder door = the file's OWN folder
+//   ⑩ r2 the line rule holds for an OPEN window too: page.html open as its preview in the chat's chain, a REAL Cmd+click
+//      on `page.html:120` from the same chat shows the source in THAT window, line 120 the active line, the toggle
+//      «Preview»; reopened from the plain link it opens as Source (the act kept the mode, as a press would). RED on
+//      19e1f74c: the hidden editor moved, the preview stayed
+//   ⑪ r2 the code editor says a refusal in the reader's words: a load the hub refused (storage_sync_refused) shows
+//      fsErrorText's sentence, never the `error` kept for agents (RED on 19e1f74c: the raw `error`); a save the guard
+//      refused keeps the write route's own words
 // Requires google-chrome (SKIP without). Run: node scripts/test-page-link-ui.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -165,6 +188,8 @@ try {
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0; // the hosted runner's shape (with FONTCONFIG_FILE = scratch.mjs runnerFontEnv)
+  if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (the page's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
   await cdp('Page.navigate', { url: `${ORIGIN}/` });
   await waitApp();
   await sleep(800);
@@ -363,6 +388,163 @@ try {
   await sleep(1200);
   const n7 = await evalJs('({ copied: window.__copied.length, probes: window.__probes.length, of: window.__of.length })');
   check('…a REAL click and a REAL Cmd+click on it do nothing — nothing copied, nothing asked, nothing opened («点不了»)', n7.copied === 0 && n7.probes === 0 && n7.of === 0, n7);
+
+  console.log('⑧ an HTML page opened from a chat path link shows its PREVIEW first (lane file-preview-mount, userW inc-mvq7sdky-j0ed)');
+  const HTML = path.join(CWD, 'report', '季度看板.html');
+  fs.mkdirSync(path.dirname(HTML), { recursive: true });
+  fs.writeFileSync(HTML, '<!doctype html><html><body><h1 id="fpm-mark">看板 preview</h1><script>document.body.dataset.ran = "1"</script></body></html>\n');
+  await evalJs(`(() => { delete app.openFile; document.getElementById('global-toasts')?.remove(); const v = ${VIEW};
+    const div = document.createElement('div'); div.className = 'chat-msg chat-msg-assistant vs-fpm'; div.innerHTML = v._renderers.renderMarkdown(${JSON.stringify(`看板已生成：${HTML}`)}); v._messageList.appendChild(div); return true; })()`);
+  const RC = realClicker({ evalJs, cdp });
+  const HWIN = `[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(HTML)}).pop()`;
+  const htmlView = () => evalJs(`(() => { const w = ${HWIN}; if (!w) return null; const R = w.content || w.element; R.dataset.fpm = '1';
+    const pb = R.querySelector('.markdown-preview'), eb = R.querySelector('.cm-editor')?.closest('.editor-body'), f = pb?.querySelector('iframe'), b = R.querySelector('.editor-preview-toggle') || [...R.querySelectorAll('button')].find((x) => ['Preview', 'Edit', 'Source'].includes(x.textContent));
+    const shown = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+    return { type: w.type, action: w._openSpec?.action || null, preview: shown(pb), editor: shown(eb), cm: !!R.querySelector('.cm-content'), btn: b ? b.textContent : null,
+      frame: f ? { sandbox: f.getAttribute('sandbox'), src: f.getAttribute('src'), srcdoc: f.hasAttribute('srcdoc'), doc: typeof f.__frameDoc === 'string' && f.__frameDoc.includes('fpm-mark') } : null }; })()`);
+  const closeHtml = () => evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(HTML)}) app.wm.closeWindow(w.id); return true; })()`);
+  const openFromLink = async () => {
+    await closeHtml(); await sleep(400);
+    const a8 = await aim(`(${VIEW})._messageList.querySelector('.vs-fpm .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(HTML)}) + ']')`);
+    if (!a8?.own) return { aimed: a8 };
+    await click(a8.x, a8.y, 4);
+    await waitFor(`(() => { const w = ${HWIN}; return !!(w && (w.content || w.element).querySelector('.cm-content')); })()`, 15000);
+    await sleep(800);
+    return htmlView();
+  };
+  const v1 = await openFromLink();
+  check('a REAL Cmd+click on the .html path opens it (the real chat link-open + app.openFile) — and it shows the PREVIEW, the source hidden, the toggle saying «Source»',
+    v1 && v1.type === 'editor' && v1.action === 'openFile' && v1.preview === true && v1.editor === false && v1.btn === 'Source', v1);
+  check('…the preview is the frame host\'s opaque frame: sandbox="allow-scripts", the host\'s preview address, the page handed in — never a srcdoc',
+    v1?.frame?.sandbox === 'allow-scripts' && /^\/frame-host\?kind=preview&base=/.test(v1.frame.src || '') && v1.frame.srcdoc === false && v1.frame.doc === true, v1?.frame);
+  const base1 = v1?.frame?.src ? new URLSearchParams(v1.frame.src.split('?')[1] || '').get('base') : null;
+  check('…its folder door is the page\'s OWN folder, never a parent — the sandbox, not a press, is the fence (DECIDED, r2)', base1 === path.dirname(HTML), { base1, want: path.dirname(HTML) });
+  const pressed1 = await RC('[data-fpm="1"] .editor-preview-toggle');
+  await sleep(500);
+  const v2 = await htmlView();
+  check('a REAL press on «Source» shows the source (the preview hidden, the toggle saying «Preview»)', pressed1 && v2?.editor === true && v2.preview === false && v2.btn === 'Preview', { pressed1, miss: RC.lastMiss, v2 });
+  const v3 = await openFromLink();
+  check('closed and opened again from the link: it opens as SOURCE — the last mode chosen for the file', v3?.editor === true && v3.preview === false && v3.btn === 'Preview', v3);
+  const pressed3 = await RC('[data-fpm="1"] .editor-preview-toggle');
+  await sleep(500);
+  const v4 = await openFromLink();
+  check('«Preview» pressed, then opened again: the preview again', pressed3 && v4?.preview === true && v4.editor === false && v4.btn === 'Source', { pressed3, v4 });
+  await closeHtml(); await sleep(300);
+  await evalJs(`(() => { app.openEditor(${JSON.stringify(HTML)}, '季度看板.html'); return true; })()`);
+  await waitFor(`(() => { const w = ${HWIN}; return !!(w && (w.content || w.element).querySelector('.cm-content')); })()`, 15000);
+  await sleep(600);
+  const v5 = await htmlView();
+  check('the Edit door (app.openEditor) opens the SOURCE, its toggle «Preview»', v5?.editor === true && v5.preview === false && v5.btn === 'Preview' && v5.action === 'openEditor', v5);
+  await closeHtml();
+
+  console.log('⑨ an .xlsx opened from a chat path link draws its sheets; a refusal reaches the viewer SAID (lane file-preview-mount, userW inc-mvq4hn9x)');
+  const XLSX = require('xlsx');
+  const BOOK = path.join(CWD, 'report', '季度报表.xlsx');
+  const wb9 = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb9, XLSX.utils.aoa_to_sheet([['项目', 'Q1', 'Q2'], ['收入', 120, 135.5]]), '汇总');
+  XLSX.utils.book_append_sheet(wb9, XLSX.utils.aoa_to_sheet([['id', 'name'], [2, 'ベータ']]), 'Rows');
+  fs.writeFileSync(BOOK, XLSX.write(wb9, { type: 'buffer', bookType: 'xlsx' }));
+  await evalJs(`(() => { const v = ${VIEW}; const div = document.createElement('div'); div.className = 'chat-msg chat-msg-assistant vs-fpm9'; div.innerHTML = v._renderers.renderMarkdown(${JSON.stringify(`报表：${BOOK}`)}); v._messageList.appendChild(div); return true; })()`);
+  const XWIN = `[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(BOOK)}).pop()`;
+  const openBook = async () => {
+    await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(BOOK)}) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+    const a9 = await aim(`(${VIEW})._messageList.querySelector('.vs-fpm9 .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(BOOK)}) + ']')`);
+    if (!a9?.own) return { aimed: a9 };
+    await click(a9.x, a9.y, 4);
+    await waitFor(`(() => { const w = ${XWIN}; return !!(w && (w.content || w.element).querySelector('.sheet-viewer, .empty-hint')); })()`, 15000);
+    return evalJs(`(() => { const w = ${XWIN}; if (!w) return null; const R = w.content || w.element; return { type: w.type, tabs: [...R.querySelectorAll('.sheet-tab')].map((e) => e.textContent), cells: [...R.querySelectorAll('.file-viewer-table tr')].map((tr) => [...tr.children].map((c) => c.textContent)), hint: R.querySelector('.empty-hint')?.textContent || null }; })()`);
+  };
+  const x1 = await openBook();
+  check('a REAL Cmd+click on the .xlsx path draws the sheet viewer — both tabs, the first sheet\'s cells', x1?.type === 'viewer' && JSON.stringify(x1.tabs) === JSON.stringify(['汇总', 'Rows']) && JSON.stringify(x1.cells) === JSON.stringify([['项目', 'Q1', 'Q2'], ['收入', '120', '135.5']]) && !x1.hint, x1);
+  await evalJs(`(() => { window.__fetch0 = window.fetch; window.fetch = (u, o) => String(u).startsWith('/api/file/excel') ? Promise.resolve(new Response(JSON.stringify({ error: 'the hub’s English for agents', code: 'storage_sync_refused', params: { mount: 'NAS', release: '2.369.360' } }), { status: 400, headers: { 'content-type': 'application/json' } })) : window.__fetch0(u, o); return true; })()`);
+  const x2 = await openBook();
+  await evalJs('(() => { window.fetch = window.__fetch0; return true; })()');
+  check('a refusal the hub SAID (storage_sync_refused) reaches the viewer in the reader\'s words — «NAS», the release, the way on — never the `error` kept for agents',
+    x2?.hint === 'Error: this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder', x2);
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(BOOK)}) app.wm.closeWindow(w.id); return true; })()`);
+  const BOOK60 = path.join(CWD, 'report', '六十张.xlsx');
+  const wb60 = XLSX.utils.book_new();
+  for (let i = 0; i < 60; i++) XLSX.utils.book_append_sheet(wb60, XLSX.utils.aoa_to_sheet(i === 0 ? [['k', 'v'], ['long', 'x'.repeat(2500)]] : i === 1 ? [Array.from({ length: 300 }, (_, c) => c)] : [['n'], [i]]), 'S' + i);
+  fs.writeFileSync(BOOK60, XLSX.write(wb60, { type: 'buffer', bookType: 'xlsx' }));
+  await evalJs(`(() => { const v = ${VIEW}; const div = document.createElement('div'); div.className = 'chat-msg chat-msg-assistant vs-fpm9b'; div.innerHTML = v._renderers.renderMarkdown(${JSON.stringify(`六十张：${BOOK60}`)}); v._messageList.appendChild(div); return true; })()`);
+  const X60 = `[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(BOOK60)}).pop()`;
+  const cutView = () => evalJs(`(() => { const w = ${X60}; if (!w) return null; const R = w.content || w.element; R.dataset.fpm9b = '1'; const n = R.querySelector('.sheet-cut');
+    return { tabs: R.querySelectorAll('.sheet-tab').length, active: R.querySelector('.sheet-tab.active')?.textContent || null, note: n && getComputedStyle(n).display !== 'none' ? n.textContent : null, cols: R.querySelector('.file-viewer-table tr')?.children.length || 0 }; })()`);
+  const a9b = await aim(`(${VIEW})._messageList.querySelector('.vs-fpm9b .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(BOOK60)}) + ']')`);
+  if (a9b?.own) await click(a9b.x, a9b.y, 4);
+  await waitFor(`(() => { const w = ${X60}; return !!(w && (w.content || w.element).querySelector('.sheet-viewer, .empty-hint')); })()`, 15000);
+  const k60a = await cutView();
+  check('r2: a 60-sheet workbook\'s viewer SAYS the cuts the server made — the first 50 of 60 sheets, a long cell\'s first 2000 characters',
+    k60a?.tabs === 50 && k60a.note === 'Showing part of this workbook: the first 50 of 60 sheets · the first 2000 characters of a long cell', { aimed: a9b, k60a });
+  const pressed9b = await RC('[data-fpm9b="1"] .sheet-tab:nth-child(2)');
+  await sleep(400);
+  const k60b = await cutView();
+  check('…a REAL press on the second sheet\'s tab: its own cut said — the first 256 columns (of 300)',
+    pressed9b && k60b?.active === 'S1' && k60b.cols === 256 && k60b.note === 'Showing part of this workbook: the first 256 columns · the first 50 of 60 sheets', { pressed9b, miss: RC.lastMiss, k60b });
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(BOOK60)}) app.wm.closeWindow(w.id); return true; })()`);
+
+  console.log('⑩ a path:line link to a page OPEN as its preview leaves the preview, then jumps (r2 — the line rule holds for an open window too)');
+  const LONG = path.join(CWD, 'report', '长页.html');
+  fs.writeFileSync(LONG, '<!doctype html><html><body>\n' + Array.from({ length: 200 }, (_, i) => `<p>line ${i + 2}</p>`).join('\n') + '\n</body></html>\n');
+  await evalJs(`(() => { const v = ${VIEW}; const div = document.createElement('div'); div.className = 'chat-msg chat-msg-assistant vs-fpm10'; div.innerHTML = v._renderers.renderMarkdown(${JSON.stringify(`长页：${LONG}
+
+第 120 行：${LONG}:120`)}); v._messageList.appendChild(div); return true; })()`);
+  const LWINS = `[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(LONG)})`;
+  const longView = () => evalJs(`(() => { const ws = ${LWINS}; const w = ws[ws.length - 1]; if (!w) return null; const R = w.content || w.element;
+    const pb = R.querySelector('.markdown-preview'), eb = R.querySelector('.cm-editor')?.closest('.editor-body'), b = R.querySelector('.editor-preview-toggle');
+    const shown = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+    return { n: ws.length, id: w.id, preview: shown(pb), editor: shown(eb), btn: b ? b.textContent : null, gutter: R.querySelector('.cm-activeLineGutter')?.textContent || null, line: R.querySelector('.cm-activeLine')?.textContent || null }; })()`);
+  const closeLong = () => evalJs(`(() => { for (const w of ${LWINS}) app.wm.closeWindow(w.id); return true; })()`);
+  const linkTo = async (dp) => {
+    const a = await aim(`(${VIEW})._messageList.querySelector('.vs-fpm10 .chat-link-path[data-path=' + JSON.stringify(${JSON.stringify(dp)}) + ']')`);
+    if (!a?.own) return a;
+    await click(a.x, a.y, 4);
+    return true;
+  };
+  const l0 = await linkTo(LONG);
+  await waitFor(`(() => { const w = ${LWINS}.pop(); return !!(w && (w.content || w.element).querySelector('.cm-content')); })()`, 15000);
+  await sleep(800);
+  const L1 = await longView();
+  check('the page opened from its plain link shows its PREVIEW (the view door)', l0 === true && L1?.n === 1 && L1.preview === true && L1.editor === false && L1.btn === 'Source', { l0, L1 });
+  const l1 = await linkTo(`${LONG}:120`);
+  await waitFor(`(() => { const w = ${LWINS}.pop(); const R = w && (w.content || w.element); return !!R && R.querySelector('.cm-activeLineGutter')?.textContent === '120' && getComputedStyle(R.querySelector('.cm-editor').closest('.editor-body')).display !== 'none'; })()`, 6000);
+  await sleep(300);
+  const L2 = await longView();
+  check('a REAL Cmd+click on `长页.html:120` from the same chat shows the SOURCE in that same window — line 120 the active line, the preview hidden, the toggle «Preview»',
+    l1 === true && L2?.n === 1 && L2.id === L1?.id && L2.editor === true && L2.preview === false && L2.btn === 'Preview' && L2.gutter === '120' && L2.line === '<p>line 120</p>', { l1, L2 });
+  await closeLong(); await sleep(400);
+  const l2 = await linkTo(LONG);
+  await waitFor(`(() => { const w = ${LWINS}.pop(); return !!(w && (w.content || w.element).querySelector('.cm-content')); })()`, 15000);
+  await sleep(800);
+  const L3 = await longView();
+  check('…closed and opened again from the plain link: it opens as SOURCE — the jump kept the mode for the file, as a press would', l2 === true && L3?.editor === true && L3.preview === false && L3.btn === 'Preview', { l2, L3 });
+  await closeLong();
+
+  console.log('⑪ the code editor says a refusal in the reader\'s words — a load refused (storage_sync_refused); a save keeps the write route\'s own words (r2)');
+  const TXT = path.join(CWD, 'report', 'notes.txt');
+  fs.writeFileSync(TXT, 'hello\n');
+  const TWIN = `[...app.wm.windows.values()].filter((w) => w._filePath === ${JSON.stringify(TXT)}).pop()`;
+  const closeTxt = () => evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w._filePath === ${JSON.stringify(TXT)}) app.wm.closeWindow(w.id); return true; })()`);
+  const stub = (prefix, body) => evalJs(`(() => { window.__fetch1 = window.__fetch1 || window.fetch; window.fetch = (u, o) => String(u).startsWith(${JSON.stringify(prefix)}) ? Promise.resolve(new Response(JSON.stringify(${JSON.stringify(body)}), { status: 400, headers: { 'content-type': 'application/json' } })) : window.__fetch1(u, o); return true; })()`);
+  const unstub = () => evalJs('(() => { if (window.__fetch1) window.fetch = window.__fetch1; delete window.__fetch1; return true; })()');
+  await stub('/api/file/content', { error: 'the hub’s English for agents', code: 'storage_sync_refused', params: { mount: 'NAS', release: '2.369.360' } });
+  await evalJs(`(() => { app.openEditor(${JSON.stringify(TXT)}, 'notes.txt'); return true; })()`);
+  await waitFor(`(() => { const w = ${TWIN}; return !!(w && (w.content || w.element).querySelector('.empty-hint, .cm-content')); })()`, 15000);
+  const e1 = await evalJs(`(() => { const w = ${TWIN}; const R = w && (w.content || w.element); return R ? { hint: R.querySelector('.empty-hint')?.textContent || null, cm: !!R.querySelector('.cm-content') } : null; })()`);
+  await unstub();
+  check('a load the hub refused (storage_sync_refused) says fsErrorText\'s sentence — «NAS», the release, the way on — never the `error` kept for agents',
+    e1?.hint === 'this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder' && !e1.cm, e1);
+  await closeTxt(); await sleep(300);
+  await evalJs(`(() => { app.openEditor(${JSON.stringify(TXT)}, 'notes.txt'); return true; })()`);
+  await waitFor(`(() => { const w = ${TWIN}; const R = w && (w.content || w.element); if (R) R.dataset.fpm11 = '1'; return !!(R && R.querySelector('.cm-content')); })()`, 15000);
+  await sleep(400);
+  await stub('/api/file/write', { error: 'refused: a synchronous fs call on a storage mount from the main thread' });
+  const pressed11 = await RC('[data-fpm11="1"] button[title="Save (Ctrl+S)"]');
+  await waitFor(`(() => { const w = ${TWIN}; return /✕/.test((w.content || w.element).querySelector('.save-indicator')?.textContent || ''); })()`, 5000);
+  const e2 = await evalJs(`(() => { const w = ${TWIN}; return (w.content || w.element).querySelector('.save-indicator')?.textContent || null; })()`);
+  await unstub();
+  check('a REAL press on Save the guard refused: the write route\'s own words, never the preview\'s sentence', pressed11 && e2 === '✕ refused: a synchronous fs call on a storage mount from the main thread', { pressed11, miss: RC.lastMiss, e2 });
+  await closeTxt();
   check('no page errors', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('  ✗ the leg threw: ' + (e.stack || e.message));

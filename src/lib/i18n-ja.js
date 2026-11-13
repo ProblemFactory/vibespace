@@ -12295,4 +12295,13 @@ export default {
   "Claude Code {cli} is not in this VibeSpace’s records yet — re-login {name}, or a VibeSpace update places it": "Claude Code {cli} はまだこの VibeSpace の記録にありません — {name} に再ログインするか、⚙ →「VibeSpace を更新…」で更新してください",
   "That limit is under 5 % — its next reading could show no reset, so it cannot be marked as reset": "この上限の使用量は 5% 未満です — 次の読み取りでリセットを確認できない可能性があるため、リセット済みにできません",
   "{name} was not refreshed: {why}": "{name} は更新されませんでした：{why}",
+  "this file is on the storage mount «{mount}»; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder": "このファイルはストレージマウント「{mount}」上にあります。VibeSpace が止まらないよう、ここではマウントを直接読みません——プレビューの経路は修正中です（{release}）。「ファイル」ウィンドウから開くか、ローカルフォルダーにコピーしてください",
+  "this file is on a storage mount; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder": "このファイルはストレージマウント上にあります。VibeSpace が止まらないよう、ここではマウントを直接読みません——プレビューの経路は修正中です（{release}）。「ファイル」ウィンドウから開くか、ローカルフォルダーにコピーしてください",
+  "another document is being parsed — try again in a moment": "別のドキュメントを解析中です——しばらくしてからもう一度お試しください",
+  "Showing part of this workbook: {list}": "このブックの一部だけを表示しています：{list}",
+  "the first {n} rows": "先頭の {n} 行",
+  "the first {n} columns": "先頭の {n} 列",
+  "the first {n} of {total} sheets": "先頭の {n} シート（全 {total} シート）",
+  "the first {n} characters of a long cell": "長いセルの先頭 {n} 文字",
+  "editor::Source": "ソース",
 };

@@ -49,6 +49,34 @@ function splitCsvLine(line, sep) {
   return out;
 }
 
+// lane file-preview-mount (userW inc-mvq4hn9x): a document preview's WHOLE file, bounded — a regular file over `capBytes`
+// is refused by name (status 413, its size) before a byte is read. r2: the READ is the bound, not the stat — a FIFO, a
+// special file or a file that grows reads at most cap + 1 bytes, and the (cap + 1)th byte says «too big» (its size
+// unknown: «over N MB»). The read runs on this worker's thread: on the main thread the mount guard refuses a sync read of
+// a storage mount (src/server/sync-fs-witness.js) and an async one waits in the shared pool.
+function readCapped(p, capBytes) {
+  const capMb = Math.round(capBytes / 1048576);
+  const tooBig = (size) => Object.assign(new Error(size != null ? `file too large to preview (${(size / 1048576).toFixed(1)} MB > ${capMb} MB)` : `file too large to preview (over ${capMb} MB)`), { status: 413, size });
+  const fd = fs.openSync(p, 'r');
+  try {
+    const st = fs.fstatSync(fd);
+    if (capBytes && st.isFile() && st.size > capBytes) throw tooBig(st.size);
+    const want = capBytes ? capBytes + 1 : Infinity;
+    const chunks = [];
+    let got = 0;
+    while (got < want) {
+      const room = Math.min(want - got, 1 << 20);
+      const b = Buffer.allocUnsafe(room);
+      const n = fs.readSync(fd, b, 0, room, null);
+      if (!n) break;
+      chunks.push(n === room ? b : b.subarray(0, n));
+      got += n;
+    }
+    if (capBytes && got > capBytes) throw tooBig(undefined);
+    return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, got);
+  } finally { fs.closeSync(fd); }
+}
+
 // ── Op implementations. Each returns { result } and optionally { transfer }
 // (a list of ArrayBuffers to hand off zero-copy). All paths are ALREADY resolved
 // by the main process (path.resolve/safePath) — the worker never re-derives or
@@ -283,6 +311,65 @@ const OPS = {
     const slice = buf.subarray(0, bytesRead);
     const ab = slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength);
     return { result: { buffer: ab, bytesRead, size }, transfer: [ab] };
+  },
+
+  // GET /api/file/docx (lane file-preview-mount): the whole file up to capBytes (readCapped) → a transferred ArrayBuffer;
+  // the route parses the BUFFER (mammoth's {buffer}), never a path
+  readFile({ path: p, capBytes }) {
+    const buf = readCapped(p, capBytes);
+    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return { result: { buffer: ab, size: buf.length }, transfer: [ab] };
+  },
+
+  // GET /api/file/excel (lane file-preview-mount, userW inc-mvq4hn9x): the workbook read (readCapped) AND parsed here —
+  // the lib's XLSX.readFile(path) did its own readFileSync on the main thread (refused on a storage mount) and the parse
+  // of a 20 MB workbook is seconds of CPU. SafeFs runs this op in its PARSE lane (src/safe-fs.js LANES), never in the IO
+  // pool. r2: the parse is bounded in every dimension — the lib parses only the first maxRows + 1 rows (sheetRows: the
+  // row past the cap says «cut») and the first maxSheets sheets; the answer keeps maxCols columns and maxCell characters
+  // of a cell's text. Every cut is NAMED: `truncated {rows, sheets, cols, cells}`, each sheet's own `cut`, the `limits`
+  // the viewer says. r3: a cut is a fact about the cells PARSED, never the extent the file declares (`<dimension>` /
+  // `!fullref`, and an unclipped `!ref` IS the declared one — a 3-row sheet may declare A1:C1048576, three columns
+  // A1:AMJ3): the table ends at the last NON-EMPTY parsed cell within the caps; `cut.rows` = the non-empty rows the parse
+  // met past the cap (it reads ONE row past it — the memory bound — so 1 = «the rows go on»; how far is never read),
+  // `cut.cols` = the non-empty columns past maxCols among the rows shown, `cut.cells` = the texts shortened. A declared
+  // extent past the shown one rides as `declared {rows, cols}` — information, never a cut.
+  // The lib loads on this worker's first workbook (lazy), never in a worker that previews none.
+  xlsxSheets({ path: p, capBytes, maxRows = 5000, maxSheets = 50, maxCols = 256, maxCell = 2000 }) {
+    const XLSX = require('xlsx');
+    const wb = XLSX.read(readCapped(p, capBytes), { type: 'buffer', sheetRows: maxRows + 1, sheets: Array.from({ length: maxSheets }, (_, i) => i) });
+    const truncated = { rows: 0, sheets: Math.max(0, wb.SheetNames.length - maxSheets), cols: 0, cells: 0 };
+    const sheets = wb.SheetNames.slice(0, maxSheets).map((name) => {
+      const ws = wb.Sheets[name], cut = { rows: 0, cols: 0, cells: 0 };
+      let data = [], declared;
+      if (ws && ws['!ref']) {
+        const s = XLSX.utils.decode_range(ws['!ref']).s, D = XLSX.utils.decode_range(ws['!fullref'] || ws['!ref']);
+        const capR = maxRows - 1, capC = s.c + maxCols - 1;   // sheetRows counts from the sheet's own row 1
+        const far = { rows: new Set(), cols: new Set() };
+        let er = -1, ec = -1;
+        for (const k of Object.keys(ws)) {
+          if (k[0] === '!' || ws[k] == null || ws[k].v == null || ws[k].v === '') continue;
+          const a = XLSX.utils.decode_cell(k);
+          if (a.r < s.r || a.c < s.c) continue;
+          if (a.r > capR) { far.rows.add(a.r); continue; }
+          if (a.r > er) er = a.r;
+          if (a.c > capC) far.cols.add(a.c);
+          else if (a.c > ec) ec = a.c;
+        }
+        cut.rows = far.rows.size;
+        cut.cols = far.cols.size;
+        const e = { r: er, c: Math.max(ec, s.c) };
+        if (er >= s.r) data = XLSX.utils.sheet_to_json(ws, { header: 1, range: { s, e } }).map((row) => row.map((v) => {
+          if (typeof v !== 'string' || v.length <= maxCell) return v;
+          cut.cells++;
+          return v.slice(0, maxCell) + '…';
+        }));
+        const shown = { rows: data.length ? e.r - s.r + 1 : 0, cols: data.length ? e.c - s.c + 1 : 0 };
+        if (D.e.r - D.s.r + 1 > shown.rows || D.e.c - D.s.c + 1 > shown.cols) declared = { rows: D.e.r - D.s.r + 1, cols: D.e.c - D.s.c + 1 };
+      }
+      truncated.rows += cut.rows; truncated.cols += cut.cols; truncated.cells += cut.cells;
+      return declared ? { name, data, cut, declared } : { name, data, cut };
+    });
+    return { result: { sheets, truncated, limits: { rows: maxRows, sheets: maxSheets, cols: maxCols, cell: maxCell } } };
   },
 
   writeFile({ path: p, content }) {

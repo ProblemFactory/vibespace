@@ -1655,7 +1655,7 @@ class LayoutManager {
         const winInfo = this.app.openFileExplorer(ws.explorerPath, { host: ws.explorerHost });
         applyPosition(winInfo, ws);
       } else if (ws.type === 'editor' && ws.filePath) {
-        const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host });
+        const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host, view: ws.openSpec?.action === 'openFile' }); // lane file-preview-mount: a view-door window restores as one
         if (edWin) applyPosition(edWin, ws);
       } else if ((ws.type === 'viewer' || ws.type === 'hex-viewer') && ws.filePath) {
         // openFile is async (FileViewer.open), so we need to wait for the window to appear
@@ -2187,7 +2187,7 @@ class LayoutManager {
           matchedWinIds.add(existing.winId);
           applyPosition(existing.win, ws);
         } else {
-          const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host });
+          const edWin = this.app.openEditor(ws.filePath, ws.fileName || ws.filePath.split('/').pop(), { host: ws.openSpec?.host, view: ws.openSpec?.action === 'openFile' }); // lane file-preview-mount: a view-door window restores as one
           if (edWin) {
             matchedWinIds.add(edWin.id);
             applyPosition(edWin, ws);

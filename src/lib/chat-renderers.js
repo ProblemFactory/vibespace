@@ -20,6 +20,7 @@ import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabe
 import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
+import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount: a refusal the hub sent as a CODE (storage_sync_refused …) in the reader's words
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, isTrailing, fileUrlPath, hrefPath, CJK_PUNCT, SEG, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
@@ -3152,9 +3153,10 @@ class ChatRenderers {
         .then(r => r.json())
         .then(info => {
           if (info.error) {
-            // ENOENT says "no such file"; anything else (a refused read, an unreachable host) says the server's words
+            // ENOENT says "no such file"; anything else (a refused read, an unreachable host) says the server's words — a
+            // coded refusal (the mount guard's storage_sync_refused, lane file-preview-mount) in the reader's language
             const missing = /ENOENT|no such file|not found|does not exist/i.test(String(info.error));
-            this._linkMissing(link, { kind: 'path', target: fp, path: cleanPath, host, why: missing ? 'not-found' : 'error', err: missing ? '' : String(info.error) });
+            this._linkMissing(link, { kind: 'path', target: fp, path: cleanPath, host, why: missing ? 'not-found' : 'error', err: missing ? '' : fsErrorText(info) });
           } else if (info.isDirectory) {
             this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId() });
             this._linkOp('path', 'directory', fp, host);

@@ -180,6 +180,7 @@
   "test-fallback-policy": 70,
   "test-feed-miss-ui": 17907,
   "test-feedback-ui": 18445,
+  "test-file-preview-mount": 15000,
   "test-fold-ux": 141053,
   "test-fork-groups": 13873,
   "test-fork-restore": 69123,

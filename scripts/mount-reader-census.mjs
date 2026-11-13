@@ -80,11 +80,11 @@ export const ROWS = [
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
   ['src/routes/channels.js', 'own-tree', 5, null, DATA],
-  ['src/routes/files.js', 'user-path', 43, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
+  ['src/routes/files.js', 'user-path', 44, "mounts\\.pathBlocked\\(p\\)[\\s\\S]*sfs\\(req\\)\\.call\\('xlsxSheets'[\\s\\S]*sfs\\(req\\)\\.call\\('readFile'", 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door; lane file-preview-mount +1: the document previews read through SafeFs too — the workbook read AND parsed in the pool (xlsxSheets), the Word bytes through it (readFile, mammoth over the buffer); a lib call that reads by PATH is red (LIB_BY_PATH)'],
   ['src/routes/persistence.js', 'own-tree', 16, null, `${DATA}; lane layout-stopped-window r3 +1: a rollback point read for a tile's slot (fs.promises.readFile of data/layout-history/<point> — namedPointFor, off the loop)`],
   ['src/routes/sessions.js', 'user-path', 27, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
-  ['src/safe-fs-worker.js', 'exempt', 43, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked); lane hub-fuse-sync-guard +4: the Task Group context table\'s walk + text read of a row on a storage mount (contextFiles / textHead)'],
+  ['src/safe-fs-worker.js', 'exempt', 44, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked); lane hub-fuse-sync-guard +4: the Task Group context table\'s walk + text read of a row on a storage mount (contextFiles / textHead); lane file-preview-mount +1: a document preview\'s capped whole-file read (readCapped: ONE fd opened — r2: the stat and a read of at most cap + 1 bytes on it, for readFile / xlsxSheets)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/job-logs-sweep-worker.js', 'own-tree', 15, null, 'lane job-logs-sweep: THE JOB-LOGS REMOVER\'s CHILD (a child process since round 2; never the hub\'s process) — r4 +1: a listed record-store NOTE (<dataDir>/<store>.corrupt-unread, ≤ 4 KB, lstat first) read for its {at, error}; r3 §5: /proc and its <pid>/cmdline (the kernel\'s — which process names a run dir; no clock), /proc/stat no more; r2 note 1 +2: the data dir\'s listing and reads of an orphaned remover\'s count files (jobs-remover-orphan-*.json); r2 +1: /proc/stat btime, the kernel\'s boot instant (a stamp written before it names no live process) — lstat / readdir of <dataDir>/job-logs/<jb-…>/<runTs>/ (workerData.logsDir), a run\'s own pid.json, the catch-up\'s record <dataDir>/jobs-logs-sweep.json (the state op), <dataDir>/jobs-archive.json when the hub has not loaded it, <dataDir>/jobs.json when its load failed with no set-aside, and r2 the data dir\'s own listing for set-aside record stores — all the instance\'s own data dir'],
   ['src/store-writer-worker.js', 'own-tree', 3, null, 'lane hub-loop-stalls commit 2: THE STORE WRITER\'s thread — a temp beside a store file of the data dir, then the rename (never the main thread); round 2: the act journal\'s append (opened \'a\', truncated back on a failure) and the temp sweep\'s readdir of the store\'s own dir; the writer\'s main-thread path (the bounded exit flush) runs this same writeJob, so src/store-writer.js keeps no reader of its own'],
@@ -231,6 +231,18 @@ export const ROWS = [
   ['src/ws-handler.js', 'own-tree', 8, null, CLI],
 ];
 // SafeFs: the pool's door is asked before a worker is picked (a blocked path is never queued)
+// lane file-preview-mount (userW inc-mvq4hn9x): a LIBRARY that reads by PATH does its own fs on the main thread — the
+// xlsx lib's readFile is a readFileSync (the mount guard refused it on a storage mount), mammoth's {path} an async read in
+// the shared pool. A route hands such a lib the BUFFER SafeFs read (XLSX.read(buf), convertToHtml({ buffer })).
+export const LIB_BY_PATH = /\bXLSX\.readFile\(|\breadFile\(\s*\{\s*path\b|\bmammoth\.\w+\(\s*\{\s*path\b/;
+export function libByPath(files) {
+  const out = [];
+  for (const [f, src] of files) {
+    if (!f.startsWith('src/routes/')) continue;
+    String(src).split('\n').forEach((line, i) => { if (!COMMENT.test(line) && LIB_BY_PATH.test(line)) out.push(`${f}:${i + 1} ${line.trim().slice(0, 120)}`); });
+  }
+  return out;
+}
 export const DOOR_PIN = { file: 'src/safe-fs.js', door: 'const mp = this._blocked(payload);', before: 'const rec = this._pick();' };
 
 export function sitesOf(src) {

@@ -12296,4 +12296,13 @@ export default {
   "Claude Code {cli} is not in this VibeSpace’s records yet — re-login {name}, or a VibeSpace update places it": "Claude Code {cli} 还不在这个 VibeSpace 的记录里——重新登录 {name}，或用 ⚙ →「更新 VibeSpace…」更新后即可使用",
   "That limit is under 5 % — its next reading could show no reset, so it cannot be marked as reset": "这项用量读数低于 5%——下一次读数可能显示不出重置，所以不能标记为已重置",
   "{name} was not refreshed: {why}": "{name} 没有刷新：{why}",
+  "this file is on the storage mount «{mount}»; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder": "此文件在存储挂载「{mount}」上；为免 VibeSpace 卡住，这里不直接读取挂载盘——预览通道正在修复（{release}）；请从「文件」窗口打开，或复制到本地文件夹",
+  "this file is on a storage mount; VibeSpace does not read mounts from its main thread — the preview road is being fixed ({release}); open the file from the Files window or copy it to a local folder": "此文件在存储挂载上；为免 VibeSpace 卡住，这里不直接读取挂载盘——预览通道正在修复（{release}）；请从「文件」窗口打开，或复制到本地文件夹",
+  "another document is being parsed — try again in a moment": "另一个文档正在解析——请稍后再试",
+  "Showing part of this workbook: {list}": "只显示了这个工作簿的一部分：{list}",
+  "the first {n} rows": "前 {n} 行",
+  "the first {n} columns": "前 {n} 列",
+  "the first {n} of {total} sheets": "前 {n} 张工作表（共 {total} 张）",
+  "the first {n} characters of a long cell": "长单元格的前 {n} 个字符",
+  "editor::Source": "源码",
 };

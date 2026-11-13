@@ -4966,6 +4966,19 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     ['a row whose reader is gone', C.judgeCensus([[af, 'module.exports = 1;\n'], ['src/y.js', '']]).dead.length > 0, true],
   ];
   ok(r86.every(([, got, want]) => got === want), `§86 CONTROLS: ${r86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
+  // lane file-preview-mount (userW inc-mvq4hn9x): a route never hands a LIBRARY a path to read — the xlsx lib's readFile
+  // is its own readFileSync on the main thread (refused on a storage mount); the previews read through SafeFs (the row's door)
+  const lib86 = C.libByPath(files86);
+  ok(lib86.length === 0, `§86 no route hands a library a PATH to read — the BUFFER SafeFs read only${lib86.length ? ' — RED: ' + lib86.join(' | ') : ''}`);
+  const [ff86, ft86] = files86.find(([f]) => f === 'src/routes/files.js');
+  const l86 = [
+    ["the base's XLSX.readFile(filePath)", C.libByPath([[ff86, ft86 + '\n    const workbook = XLSX.readFile(filePath);\n']]).length > 0, true],
+    ['mammoth.convertToHtml({ path: filePath })', C.libByPath([[ff86, 'mammoth.convertToHtml({ path: filePath }).then((r) => r);\n']]).length > 0, true],
+    ['the buffer forms', C.libByPath([[ff86, "XLSX.read(buf, { type: 'buffer' }); mammoth.convertToHtml({ buffer: b });\n"]]).length > 0, false],
+    ['a comment naming XLSX.readFile(', C.libByPath([[ff86, '// XLSX.readFile(path) did its own readFileSync\n']]).length > 0, false],
+    ["the workbook's SafeFs road taken out of files.js", red86([[ff86, ft86.replace("sfs(req).call('xlsxSheets'", "sfs(req).call('stat'")]]), true],
+  ];
+  ok(l86.every(([, got, want]) => got === want), `§86 LIB_BY_PATH CONTROLS: ${l86.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }
 // §87 A VFS CACHE IS NEVER REMOVED OR COPIED ON THE LOOP OR THE THREADPOOL (B-4997, lane vfs-cache-local, 2026-10-09).
 // The owner's OneDrive cache held 164 788 files on fuse.bindfs over NFS; remove() ran fs.rm over it on the libuv threadpool

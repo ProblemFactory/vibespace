@@ -13,7 +13,7 @@ import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
 import { escHtml, showConfirmDialog } from './utils.js';
 import { lineDelta } from '../artifacts.js'; // lane artifacts-model: the save's "+a −b lines"
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: the preview's diagrams
 import * as prettier from 'prettier/standalone';
@@ -27,6 +27,7 @@ import prettierYaml from 'prettier/plugins/yaml';
 import prettierGraphql from 'prettier/plugins/graphql';
 import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
 import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the HTML preview's frame
+import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
 
@@ -47,6 +48,13 @@ const EXT_TO_PARSER = {
   scss: 'scss', less: 'less', yaml: 'yaml', yml: 'yaml',
   graphql: 'graphql', gql: 'graphql', vue: 'vue', svelte: 'html',
 };
+
+// lane file-preview-mount (userW inc-mvq7sdky-j0ed: «窗口内打开 HTML 的时候，默认不展示 preview，总是展示这个 raw»): an HTML
+// page opened to be LOOKED AT (the view door: a chat link, a Files double-click / Open — opts.view) shows its preview
+// first; the editor door (Edit, the code-editor door) its source. The mode a person last chose for a file is kept for the
+// page's life — reopened, the file opens as they left it.
+const HTML_MODE = new Map();   // `${host}|${path}` → 'preview' | 'source' (the oldest goes past 200)
+const htmlModeKey = (host, p) => `${host || ''}|${p}`;
 
 const LANGUAGES = [
   { id: 'auto', label: 'Auto' },
@@ -155,6 +163,7 @@ class CodeEditor {
     this.onSaveAndClose = opts.onSaveAndClose || null;
     this._gotoLine = opts.line || null;
     this._isReadOnly = opts._tempFile || false;
+    this._viewDoor = !!opts.view; // lane file-preview-mount: opened to be looked at — an HTML page starts as its preview
     this.modified = false;
     this._diskMtime = 0; // on-disk mtime of the loaded copy (freshness watch)
     this._reloading = false;
@@ -190,23 +199,12 @@ class CodeEditor {
     this.langSelect.onchange = () => this._changeLang(this.langSelect.value);
 
     // Preview toggle (markdown/html)
-    this._btnPreview = this._btn('Preview');
+    this._btnPreview = this._btn(t('Preview'));
+    this._btnPreview.classList.add('editor-preview-toggle');
     this._btnPreview.style.display = 'none';
     this._previewing = false;
     this._previewType = null;
-    this._btnPreview.onclick = () => {
-      this._previewing = !this._previewing;
-      this._btnPreview.textContent = this._previewing ? 'Edit' : 'Preview';
-      this._btnPreview.classList.toggle('active', this._previewing);
-      if (this._previewing) {
-        this.editorBody.style.display = 'none';
-        this._renderPreviewNow();
-        this._previewBody.style.display = 'block';
-      } else {
-        this._previewBody.style.display = 'none';
-        this.editorBody.style.display = '';
-      }
-    };
+    this._btnPreview.onclick = () => { this._setPreviewing(!this._previewing); this._keepHtmlMode(); };
 
     const sep = () => { const s = document.createElement('span'); s.className = 'editor-toolbar-sep'; return s; };
 
@@ -325,7 +323,7 @@ class CodeEditor {
         const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
         const data = await res.json();
         if (data.error) {
-          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(data.error)}</div>`;
+          this.editorBody.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(fsErrorText(data))}</div>`;
           this._themeObserver?.disconnect(); // load failed — editor never constructed, observer would leak
           return;
         }
@@ -368,12 +366,17 @@ class CodeEditor {
     });
 
     this._updatePreviewSupport(detectedLang);
+    // the view door (lane file-preview-mount): an .html / .htm opens as its preview unless the person last left it as source
+    if (this._viewDoor && this._previewType === 'html' && /\.html?$/i.test(this.filePath) && HTML_MODE.get(htmlModeKey(this._host, this.filePath)) !== 'source') this._setPreviewing(true);
 
     // Jump to line if requested — and keep the verb on the window: a `path:line`
     // link opened again from the same chat shows THIS tab (app._focusOpenInChain,
     // split tabs v2 F2) and moves it to the new line
     const gotoLine = (n) => {
       if (!this.editorView || !(Number(n) > 0)) return;
+      // lane file-preview-mount r2: the line rule holds for an OPEN window too — a page shown as its preview leaves the
+      // preview first (the mode kept for the file, as a press would), then jumps
+      if (this._previewing) { this._setPreviewing(false); this._keepHtmlMode(); }
       const line = Math.min(Math.trunc(Number(n)), this.editorView.state.doc.lines);
       const lineInfo = this.editorView.state.doc.line(line);
       this.editorView.dispatch({
@@ -448,7 +451,7 @@ class CodeEditor {
     try {
       const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) throw new Error(fsErrorText(data));
       const content = data.content || '';
       const view = this.editorView;
       const prevScroll = view.scrollDOM.scrollTop;
@@ -472,6 +475,30 @@ class CodeEditor {
     const actualId = langId === 'auto' ? detectLang(this.filePath) : langId;
     this.editorView.dispatch({ effects: this._langCompartment.reconfigure(getLangExtension(actualId)) });
     this._updatePreviewSupport(actualId);
+  }
+
+  /** The person's choice for an HTML page — the mode it shows now — kept for the page's life (lane file-preview-mount). */
+  _keepHtmlMode() {
+    if (this._previewType !== 'html') return;
+    const k = htmlModeKey(this._host, this.filePath);
+    HTML_MODE.delete(k); HTML_MODE.set(k, this._previewing ? 'preview' : 'source');
+    if (HTML_MODE.size > 200) HTML_MODE.delete(HTML_MODE.keys().next().value);
+  }
+
+  /** Preview ⇄ the source (the toggle and the view door). The button names where a press goes: «Preview», or back —
+   *  «Source» on an HTML page, «Edit» on markdown. */
+  _setPreviewing(on) {
+    this._previewing = !!on;
+    this._btnPreview.textContent = this._previewing ? (this._previewType === 'html' ? tc('editor', 'Source') : t('Edit')) : t('Preview');
+    this._btnPreview.classList.toggle('active', this._previewing);
+    if (this._previewing) {
+      this.editorBody.style.display = 'none';
+      this._renderPreviewNow();
+      this._previewBody.style.display = 'block';
+    } else {
+      this._previewBody.style.display = 'none';
+      this.editorBody.style.display = '';
+    }
   }
 
   /** (Re)render the preview pane from the CURRENT document. Shared by the
@@ -523,7 +550,7 @@ class CodeEditor {
     this._previewType = hasPreview ? langId : null;
     if (!hasPreview && this._previewing) {
       this._previewing = false;
-      this._btnPreview.textContent = 'Preview';
+      this._btnPreview.textContent = t('Preview');
       this._btnPreview.classList.remove('active');
       this._previewBody.style.display = 'none';
       this.editorBody.style.display = '';
@@ -538,7 +565,7 @@ class CodeEditor {
       // show "✓ Saved" while silently dropping the edits
       const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       this.modified = false; this.saveIndicator.textContent = '✓ Saved'; this.saveIndicator.style.color = 'var(--green)';
       this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);

@@ -70,11 +70,13 @@ class FileViewer {
       if (!ok) return;
     }
 
-    // HTML: open in CodeEditor with preview toggle (same as markdown)
+    // HTML: the CodeEditor through its VIEW door (lane file-preview-mount, userW inc-mvq7sdky-j0ed) — a page opened to be
+    // looked at shows its preview first (the frame host's sandboxed frame), one press to its source; a `path:line` link
+    // means the source at that line. Edit / the code-editor door (app.openEditor) opens the source.
     if (viewerType === 'html-editor') {
       const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
-      new CodeEditor(winInfo, filePath, fileName, app, { host });
+      new CodeEditor(winInfo, filePath, fileName, app, { host, line: opts.line, view: !opts.line });
       return;
     }
 
@@ -213,7 +215,21 @@ class FileViewer {
         // Sheet tabs + table viewer
         const viewer = document.createElement('div'); viewer.className = 'sheet-viewer';
         const tableWrap = document.createElement('div'); tableWrap.className = 'sheet-table-wrap';
+        // lane file-preview-mount r2: a cut the server made (src/safe-fs-worker.js xlsxSheets — rows, columns, a long cell's
+        // text a sheet; sheets a workbook) is SAID above the table, in the reader's language
+        const lim = data.limits || {}, cutNote = document.createElement('div'); cutNote.className = 'csv-status sheet-cut';
+        const sayCut = (sheet) => {
+          const c = sheet.cut || {}, parts = [];
+          if (c.rows) parts.push(t('the first {n} rows', { n: lim.rows }));
+          if (c.cols) parts.push(t('the first {n} columns', { n: lim.cols }));
+          if (data.truncated?.sheets) parts.push(t('the first {n} of {total} sheets', { n: data.sheets.length, total: data.sheets.length + data.truncated.sheets }));
+          if (c.cells) parts.push(t('the first {n} characters of a long cell', { n: lim.cell }));
+          cutNote.textContent = parts.length ? t('Showing part of this workbook: {list}', { list: parts.join(' · ') }) : '';
+          cutNote.style.display = parts.length ? '' : 'none';
+        };
+        viewer.appendChild(cutNote);
         const renderSheet = (sheet) => {
+          sayCut(sheet);
           tableWrap.innerHTML = '';
           const table = document.createElement('table'); table.className = 'file-viewer-table';
           const tbody = document.createElement('tbody');

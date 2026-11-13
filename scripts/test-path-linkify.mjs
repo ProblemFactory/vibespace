@@ -228,7 +228,7 @@ globalThis.fetch = async (u) => {
   if (q.pathname === '/api/file/locate') return { ok: true, json: async () => (q.searchParams.get('host') ? { hits: [], unsupported: 'remote' } : { hits: HITS }) };
   const p = q.searchParams.get('path');
   const e = FS[p];
-  return { ok: true, json: async () => (e === 'dir' ? { path: p, isDirectory: true } : e === 'file' ? { path: p, size: 3, isDirectory: false } : e ? { error: e } : { error: `ENOENT: no such file or directory, stat '${p}'` }) };
+  return { ok: true, json: async () => (e === 'dir' ? { path: p, isDirectory: true } : e === 'file' ? { path: p, size: 3, isDirectory: false } : e && typeof e === 'object' ? e : e ? { error: e } : { error: `ENOENT: no such file or directory, stat '${p}'` }) };
 };
 const toasts = () => { const st = DOC.getElementById('global-toasts'); return st ? st.children : []; };
 const toastOf = (el) => el && ({ cls: el.className, body: el.children.find((c) => c._c.has('global-toast-body'))?.textContent, acts: el.children.filter((c) => c._c.has('global-toast-action')).map((c) => c.textContent) });
@@ -281,6 +281,13 @@ eq(ROWS.map((r) => r.outcome), ['error'], '…row outcome error');
 reset(); FS = { [ABS]: 'EACCES: permission denied, open' };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
 ok(/Could not open \/home\/userW\/x\/out\/report\.md on this machine: EACCES: permission denied/.test(toastOf(toasts()[0])?.body || ''), "a refusal that is not ENOENT says the server's words, never \"no such file\"");
+// lane file-preview-mount (userW inc-mvq4hn9x): the mount guard's refusal arrives as a CODE — the toast says it in the
+// reader's words (fsErrorText: the storage by name, the release, the way on), never the `error` the hub keeps for agents
+reset(); FS = { [ABS]: { error: 'the hub’s English for agents', code: 'storage_sync_refused', params: { mount: 'NAS', release: '2.369.360' } } };
+await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);
+T = toastOf(toasts()[0]);
+ok((T?.body || '').startsWith('Could not open /home/userW/x/out/report.md on this machine: this file is on the storage mount «NAS»; VibeSpace does not read mounts from its main thread — the preview road is being fixed (2.369.360); open the file from the Files window or copy it to a local folder')
+  && !(T?.body || '').includes('the hub’s English') && /global-toast-error/.test(T?.cls), `a storage_sync_refused answer ⇒ the toast in the reader's words, never the raw text (${T?.body})`);
 
 reset(); FS = {}; CTX = { cwd: '/w/proj', host: 'h1' };
 await R._openLinkTarget(mkLink({ path: ABS }), null, ABS);

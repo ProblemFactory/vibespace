@@ -173,10 +173,8 @@ const HELPERS = `window.__fh = {
     return true;
   },
   async preview(p, name) {
-    await this.openFile(p, name, (el) => [...el.querySelectorAll('button')].some((b) => b.textContent === 'Preview' && b.style.display !== 'none') && !!el.querySelector('.cm-content'));
-    [...this.el().querySelectorAll('button')].find((b) => b.textContent === 'Preview').click();
-    const t0 = Date.now();
-    while (Date.now() - t0 < 10000 && !this.el().querySelector('.markdown-preview iframe')) await new Promise((r) => setTimeout(r, 50));
+    // lane file-preview-mount: an .html opened to be LOOKED AT (app.openFile — the view door) shows its preview first
+    await this.openFile(p, name, (el) => !!el.querySelector('.cm-content') && !!el.querySelector('.markdown-preview iframe'));
     const f = this.el().querySelector('.markdown-preview iframe');
     return f ? { sandbox: f.getAttribute('sandbox'), src: f.getAttribute('src'), srcdoc: f.hasAttribute('srcdoc'), kept: typeof f.__frameDoc === 'string' && f.__frameDoc.length } : null;
   },

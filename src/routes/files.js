@@ -70,6 +70,37 @@ function sfs(req) {
   };
 }
 
+// A mount-guard refusal SAID (lane file-preview-mount, userW inc-mvq4hn9x: «Error: refused: a synchronous fs call on a
+// storage mount from the main thread» on opening a workbook from chat). src/server/sync-fs-witness.js refuses a SYNC fs
+// call on a storage mount from the main thread (EVSMOUNTSYNC) — right, and its journal line names the call site. An
+// answer of a PREVIEW read route (PREVIEW_READS — r2: never a write, rename, mkdir…, which keep their own words,
+// err.message + roMountHint) that still carries the refusal is re-said: the storage by name, why, the way on — code
+// storage_sync_refused (the client's fsErrorText words it in the reader's language; `error` = the English for agents).
+const GUARD_REFUSAL = require('../server/sync-fs-witness').REFUSAL;
+const SP = require('../storage-path');
+const RELEASE = (() => { try { return require('../../package.json').version; } catch { return ''; } })();
+function syncRefusedBody(req) {
+  let row = null;
+  for (const raw of [req.query.path, req.query.dir, req.body?.path, req.body?.src, req.body?.dest, req.body?.destDir]) {
+    if (row || typeof raw !== 'string' || !raw) continue;
+    try { row = SP.storageRootOf(safePath(raw)); } catch { }
+  }
+  const mount = row ? (row.name || path.basename(row.root)) : '';
+  const on = mount ? `this file is on the storage mount «${mount}»` : 'this file is on a storage mount';
+  return { error: `${on}; VibeSpace does not read mounts from its main thread — the preview road is being fixed (${RELEASE}); open the file from the Files window or copy it to a local folder`,
+    code: 'storage_sync_refused', params: { mount, release: RELEASE } };
+}
+const PREVIEW_READS = new Set(['/api/file/info', '/api/file/content', '/api/file/binary', '/api/file/csv', '/api/file/excel', '/api/file/docx']);
+router.use((req, res, next) => {
+  if (req.method !== 'GET' || !PREVIEW_READS.has(req.path.replace(/\/+$/, ''))) return next();
+  const json = res.json;
+  res.json = function (body) {
+    if (body && typeof body.error === 'string' && !body.code && body.error.includes(GUARD_REFUSAL)) body = syncRefusedBody(req);
+    return json.call(this, body);
+  };
+  next();
+});
+
 // Hung-mount circuit breaker (2.108.4): while a mount is CONNECTING (IO-probe
 // window) or was detected hanging, every file op under its root fails fast —
 // an open explorer window pointed at a dead mountpoint used to stuff the
@@ -401,23 +432,23 @@ router.get('/api/file/excel', async (req, res) => {
   try { filePath = R ? await remoteToLocalTmp(R, remotePath(req.query.path), 20 * 1024 * 1024) : safePath(req.query.path); }
   catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    // Size guard (like /api/file/content's 10MB cap): XLSX.readFile parses the
-    // whole workbook synchronously — a huge file blocks the entire server. The
-    // stat runs in the SafeFs pool; the XLSX.readFile lib parse stays in-main
-    // (size-capped at 20MB), fronted by this fail-fast size guard.
-    const stat = await sfs(req).call('stat', { path: filePath });
-    if (stat.size > 20 * 1024 * 1024) {
-      return res.status(413).json({ error: `Excel file too large to preview (${(stat.size / 1048576).toFixed(1)} MB > 20 MB)` });
-    }
-    const XLSX = require('xlsx');
-    const workbook = XLSX.readFile(filePath);
-    // Client renders at most 5000 rows per sheet — don't serialize more
-    const sheets = workbook.SheetNames.map(name => ({
-      name,
-      data: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1 }).slice(0, 5000),
-    }));
-    res.json({ sheets });
-  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+    // lane file-preview-mount (userW inc-mvq4hn9x, 2.369.358): the workbook is read AND parsed by SafeFs (xlsxSheets, in
+    // its PARSE lane — r2: never an IO worker) — XLSX.readFile(path) did the lib's own readFileSync on the main thread
+    // (the mount guard refused it on a storage mount) and parsed up to 20 MB in-main. Over the 20 MB cap: refused by name.
+    // The parse is bounded (5000 rows, 50 sheets, 256 columns, 2000 characters a cell) and every cut is named
+    // (`truncated`, `limits` — the viewer says them); a parse that waited out its turn says so (parse_busy). r3: a request
+    // whose client went (the window closed, another workbook clicked) leaves the lane's queue — never parsed ahead of the
+    // one on screen (the response closed before its answer ⇒ the signal; src/safe-fs.js _wait).
+    const left = new AbortController();
+    res.on('close', () => { if (!res.writableFinished) left.abort(); });
+    const r = await sfs(req).call('xlsxSheets', { path: filePath, capBytes: 20 * 1024 * 1024, maxRows: 5000 }, { signal: left.signal });
+    res.json({ sheets: r.sheets, truncated: r.truncated, limits: r.limits });
+  } catch (err) {
+    if (err.code === 'request_gone') return;   // nobody is left to answer
+    if (err.status === 413) return res.status(413).json({ error: `Excel file too large to preview (${err.size != null ? (err.size / 1048576).toFixed(1) + ' MB > 20 MB' : 'over 20 MB'})` });
+    if (err.code === 'parse_busy') return res.status(503).json({ error: err.message, code: 'parse_busy' });
+    res.status(err.status || 400).json({ error: err.message });
+  }
 });
 
 // Preview Word files
@@ -427,11 +458,13 @@ router.get('/api/file/docx', async (req, res) => {
   try { filePath = R ? await remoteToLocalTmp(R, remotePath(req.query.path), 20 * 1024 * 1024) : safePath(req.query.path); }
   catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const mammoth = require('mammoth');
-    mammoth.convertToHtml({ path: filePath }).then(result => {
-      res.json({ html: result.value });
-    }).catch(err => res.status(400).json({ error: err.message }));
-  } catch (err) { res.status(400).json({ error: err.message }); }
+    // lane file-preview-mount: the bytes through the SafeFs pool (readFile, the remote road's 20 MB cap), mammoth parses
+    // the BUFFER — its {path} form read the file with the main process's own fs. The conversion stays in-main, bounded by
+    // the cap (mammoth is promise-chained; kb-file-structure files.js).
+    const r = await sfs(req).call('readFile', { path: filePath, capBytes: 20 * 1024 * 1024 });
+    const result = await require('mammoth').convertToHtml({ buffer: Buffer.from(r.buffer) });
+    res.json({ html: result.value });
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
 });
 
 // A write failing inside a READ-ONLY mount should SAY so — the bare

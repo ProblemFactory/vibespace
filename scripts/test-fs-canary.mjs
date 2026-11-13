@@ -451,6 +451,7 @@ console.log('§9 A VIEW IS CLASSED BY WHAT IT SHOWS (lane mount-class-by-source)
     ['src/server/browser-env.js', 'a project\'s agent-browser.json', path.join(PROJ, 'agent-browser.json')],
     ['src/desktop-serve.js', 'execHere — an app\'s program path', path.join(PROJ, 'bin', 'app')],
     ['src/ws-handler.js', 'a pending editor\'s file', path.join(PROJ, 'edit.md')],
+    ['src/routes/files.js', 'syncRefusedBody — the storage a refused preview read names (lane file-preview-mount; only after the guard refused it)', path.join(PROJ, 'report.xlsx')],
   ];
   for (const [file, what, p] of CALLERS) ok(SP.storageRootOf(p) === null, `${file} ${what}: ${p.slice(S.length)} → not a storage path after the move (as before it)`);
   const callers = [];

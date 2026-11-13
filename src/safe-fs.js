@@ -41,10 +41,26 @@ const DEFAULT_TIMEOUTS = {
   default: 15000,
   stat: 15000, exists: 15000, access: 15000, listDir: 15000, readdirNames: 15000, fileInfo: 15000, folderCensus: 15000, dirSlice: 15000, dirIndex: 15000,
   readText: 20000, readChunk: 20000, csvRange: 30000,
+  readFile: 30000, xlsxSheets: 60000, // lane file-preview-mount: a preview's ≤ 20 MB read; a workbook's read + parse (a deadline also ends a runaway parse)
   writeFile: 30000, mkdir: 15000, rename: 15000, remove: 20000, unlink: 20000,
   copy: 120000, move: 120000,
   __sleep: 30000,
 };
+
+// lane file-preview-mount r2: a document PARSE is CPU, the pool is IO. A workbook's parse held an IO worker for up to its
+// 60 s, `_pick` balanced the explorer's stats onto it by in-flight count, and a sibling op's missed deadline TERMINATED
+// the worker (read as a wedged mount) with the parse in it. A parse runs in its OWN lane — a SafeFs of one worker beside
+// this pool (`lane(name)`, spawned at its first op), one op at a time: the next waits HERE, in main, bounded by its own
+// deadline, and is refused by name (`busy`) if its turn never came — never queued into the worker, where its deadline
+// would kill the parse ahead of it. A lane never falls back in-main: with its worker respawning (a deadline kill) the op
+// waits for the new one. The IO pool never holds a parse; a parse never dies of a stat, nor runs on the main thread.
+// r3: a waiting op has two clocks (the WAIT, then its own deadline from the SEND), is asked the blocked-mount door again
+// when it is sent, and leaves the queue when its request is gone (opts.signal) — see _wait.
+const LANES = {
+  parse: { poolSize: 1, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
+};
+const OP_LANE = { xlsxSheets: 'parse' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
+const gone = () => Object.assign(new Error('the request was closed before its turn'), { status: 499, code: 'request_gone' });
 
 class SafeFs {
   constructor(opts = {}) {
@@ -56,6 +72,10 @@ class SafeFs {
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
     this.poolSize = Math.max(1, opts.poolSize || 4);
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...(opts.timeouts || {}) };
+    this._opts = opts;
+    this._lanes = new Map();            // lane name → its SafeFs (LANES)
+    this._serial = opts.serial || null; // a lane's own row: one op at a time, the rest wait in _waiting
+    this._waiting = [];
     this._seq = 1;
     this._restarts = 0;
     this._timeouts = 0;
@@ -92,6 +112,7 @@ class SafeFs {
       w.on('error', (e) => this._onWorkerDown(rec, e));
       w.on('exit', (code) => this._onWorkerDown(rec, new Error('worker exited (' + code + ')')));
       w.unref(); // never hold the process open
+      if (this._serial) this._drain(); // a lane's respawned worker takes the op that waited
     };
     if (backoff > 0) { const t = setTimeout(start, backoff); t.unref?.(); }
     else start();
@@ -164,22 +185,87 @@ class SafeFs {
     return false;
   }
 
+  /** The lane `name` (LANES) — a SafeFs of its own beside this pool, the same worker script / door / deadlines. */
+  lane(name) {
+    let l = this._lanes.get(name);
+    if (!l) {
+      const L = LANES[name];
+      if (!L) throw new Error('unknown safeFs lane: ' + name);
+      l = new SafeFs({ ...this._opts, name: `${this.name}-${name}`, poolSize: L.poolSize, serial: L, timeouts: this.timeouts });
+      this._lanes.set(name, l);
+    }
+    return l;
+  }
+
   call(op, payload = {}, opts = {}) {
     if (this._closed) return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 }));
+    const lane = !this._serial && (opts.lane || OP_LANE[op]);
+    if (lane) return this.lane(lane).call(op, payload, { timeoutMs: opts.timeoutMs, waitMs: opts.waitMs, signal: opts.signal });
     // B-afc4 (lane mount-readers-blocked): a path under a BLOCKED mount is refused at the pool's door, in ms — never
     // queued into a worker that would hang inside a dead FUSE (a hung worker is not killable either).
     const mp = this._blocked(payload);
     if (mp) return Promise.reject(DOOR.refusal(mp));
     const timeoutMs = opts.timeoutMs || this.timeouts[op] || this.timeouts.default;
     const rec = this._pick();
+    if (this._serial && opts.signal?.aborted) return Promise.reject(gone());
+    if (this._serial && (!rec || rec.inflight.size || this._waiting.length)) return this._wait(op, payload, timeoutMs, opts);
     if (!rec) {
       // No live worker at all — run inline in the main thread as a last resort
       // (no isolation, but keeps file browsing alive if the pool can't start).
       try { return Promise.resolve(this._inlineRun(op, payload)).then(r => r.result); }
       catch (e) { return Promise.reject(e); }
     }
-    const id = this._seq++;
+    return this._send(rec, op, payload, timeoutMs);
+  }
+
+  // A lane's op while one runs (or while its worker respawns): it waits in main (never in the worker). r3: TWO clocks —
+  // the WAIT (opts.waitMs, else its deadline): a turn that never came is refused by the lane's own words (status 503, its
+  // code) — or, with nothing ahead of it (the worker never came back), as a storage that is not responding — never sent;
+  // the RUN: its deadline, counted from the SEND (r2 sent the leftover of the wait: a parse that waited 950 ms of 1500 ran
+  // 550 ms and was killed as a wedged storage, the worker respawned). A job whose request is gone (opts.signal aborted —
+  // the route's response closed before its answer) leaves the queue, never sent; a RUNNING one finishes (one worker).
+  _wait(op, payload, timeoutMs, opts = {}) {
     return new Promise((resolve, reject) => {
+      const job = { op, payload, timeoutMs, resolve, reject, signal: opts.signal || null };
+      const leave = (e) => {
+        const i = this._waiting.indexOf(job);
+        if (i < 0) return;
+        this._waiting.splice(i, 1);
+        this._unwait(job);
+        reject(e);
+      };
+      job.timer = setTimeout(() => leave(this._workers.some((r) => r.inflight.size)
+        ? Object.assign(new Error(this._serial.busy.message), { status: 503, code: this._serial.busy.code })
+        : Object.assign(new Error('Storage not responding (operation timed out).'), { status: 503, safeFsTimeout: true })), opts.waitMs || timeoutMs);
+      job.timer.unref?.();
+      if (job.signal) { job.onAbort = () => leave(gone()); job.signal.addEventListener('abort', job.onAbort, { once: true }); }
+      this._waiting.push(job);
+    });
+  }
+
+  _unwait(job) {
+    clearTimeout(job.timer);
+    if (job.onAbort) job.signal.removeEventListener('abort', job.onAbort);
+  }
+
+  _drain() {
+    while (this._waiting.length) {
+      const rec = this._workers.find((r) => r.alive && r.worker && r.inflight.size === 0);
+      if (!rec) return; // busy, or respawning — the next settle / spawn drains
+      const job = this._waiting.shift();
+      this._unwait(job);
+      if (job.signal?.aborted) { job.reject(gone()); continue; }
+      // B-afc4 asked again at the SEND (r3): a mount marked blocked while the job waited is refused in ms, never sent into
+      // a worker that would hang inside it
+      const mp = this._blocked(job.payload);
+      if (mp) { job.reject(DOOR.refusal(mp)); continue; }
+      this._send(rec, job.op, job.payload, job.timeoutMs).then(job.resolve, job.reject);
+    }
+  }
+
+  _send(rec, op, payload, timeoutMs) {
+    const id = this._seq++;
+    const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => this._onTimeout(rec, id), timeoutMs);
       timer.unref?.();
       rec.inflight.set(id, { resolve, reject, timer, op });
@@ -196,6 +282,8 @@ class SafeFs {
         reject(Object.assign(new Error('storage dispatch failed: ' + e.message), { status: 503 }));
       }
     });
+    if (this._serial) { const next = () => this._drain(); p.then(next, next); }
+    return p;
   }
 
   // Deadline hit — the worker is presumed wedged on a stuck syscall. Reject this
@@ -236,6 +324,8 @@ class SafeFs {
   close() {
     this._closed = true;
     clearInterval(this._gauge);
+    for (const job of this._waiting.splice(0)) { this._unwait(job); job.reject(Object.assign(new Error('safeFs closed'), { status: 503 })); }
+    for (const l of this._lanes.values()) l.close();
     for (const rec of this._workers) {
       this._rejectInflight(rec, 'safeFs closed');
       try { rec.worker?.removeAllListeners(); rec.worker?.terminate?.(); } catch {}

@@ -2562,7 +2562,8 @@ class App {
     // best value, then re-title once _ensureHostNames resolves.
     const hostPfx = (h) => opts.host ? (h(opts.host) || opts.host) + ': ' : '';
     const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx((id) => this.hostName(id)) + frontTruncate(filePath);
-    const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
+    // a window the VIEW door opened (lane file-preview-mount: an HTML page's preview, restored by the layout) keeps its door
+    const openSpec = opts._tempFile ? undefined : { action: opts.view ? 'openFile' : 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
     const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain, quiet: !!opts.quiet });
     if (opts.host && !opts._tempFile) this._ensureHostNames().then(() => { try { this.wm.setTitle(winInfo.id, this.hostName(opts.host) + ': ' + frontTruncate(filePath)); } catch {} });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
