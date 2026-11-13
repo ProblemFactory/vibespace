@@ -823,10 +823,12 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
     const q = m.add('claude:s', { origin: 'agent', text: 'Q'.repeat(600), detail: 'short' });
     const both = m.add('claude:s', { origin: 'agent', text: 'B'.repeat(501), detail: 'F'.repeat(8001) });
     const re = m.add('claude:s', { origin: 'agent', text: 'long', detail: 'G'.repeat(9000) }); // a re-file of `long` with another long detail
+    const exact = m.add('claude:s', { origin: 'agent', text: 'X'.repeat(500) }); // lane artifacts-by-intent r6: a question of exactly the cap
     const out = {
       long: { stored: m.get(long.id).detail.length, cut: long.detailCut, storedCut: m.get(long.id).detailCut, textCut: long.textCut },
       fit: { stored: m.get(fit.id).detail.length, cut: fit.detailCut }, q: { stored: m.get(q.id).text.length, cut: q.textCut, detailCut: q.detailCut },
       both: { textCut: both.textCut, detailCut: both.detailCut }, re: { existing: re.existing, cut: re.detailCut, stored: m.get(re.id).detail.length },
+      ends: { q: m.get(q.id).text.slice(-2), d: m.get(re.id).detail.slice(-2), exact: m.get(exact.id).text === 'X'.repeat(500) },
     };
     m.stop();
     return out;
@@ -836,11 +838,103 @@ console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-yo
   ok(c.fit.stored === 7999 && c.fit.cut === undefined, 'a 7 999-char detail is whole, nothing named', c.fit);
   ok(c.q.stored === 500 && c.q.cut === 500 && c.q.detailCut === undefined, 'a 600-char question is kept to 500 and says textCut: 500', c.q);
   ok(c.both.textCut === 500 && c.both.detailCut === 8000, 'both caps hit ⇒ both named', c.both);
+  ok(c.ends.q === 'Q…' && c.ends.d === 'G…' && c.ends.exact === true, 'the kept words END in the cut mark (src/inbox-reply-text.js clip — lane artifacts-by-intent r6: a token the cut went through is no link to any reader); a question of exactly 500 is kept whole, unmarked', c.ends);
   ok(c.re.existing === true && c.re.cut === 8000 && c.re.stored === 8000, 'a re-file (existing: true) names the cut too', c.re);
   const cOld = capLeg(mutant('src/user-todos.js', [['const DETAIL_MAX = 8000;', 'const DETAIL_MAX = 2000;']]));
   ok(cOld.fit.stored === 2000 && cOld.fit.cut === 2000, 'CONTROL: a copy with the old 2 000 cap cuts the 7 999-char detail (the fit leg fails on it)', cOld.fit);
   const cSilent = capLeg(mutant('src/user-todos.js', [['    const cut = (o) => (textCut || detailCut ?', '    const cut = (o) => (false ?']]));
   ok(cSilent.long.stored === 8000 && cSilent.long.cut === undefined, 'CONTROL: a copy that never names the cut keeps 8 000 silently — the measured pre-fix behaviour (the naming leg fails on it)', cSilent.long);
+  // ── lane artifacts-by-intent r7: WHOSE ASK IS THIS (src/inbox-origin.js) — the ask route's items carry `via: 'ask'`; a store an
+  // older tree wrote takes the mark at load by the route's shape (legacyAsk), never a producer's record; the mark is the route's
+  // alone. THE SAME WORDS ACROSS THE UPGRADE (T3) — a detail an older tree kept as a plain 8 000-char slice, re-asked in the same
+  // words, is a re-ask (counted, its verdict kept), never an edit. ONE CUT (T4) — the facts' strings and the words cut by one
+  // surrogate-safe clip. Controls: ONE copy of the store as r6 had it (no rung, a byte-equal re-ask)
+  {
+    const vm = await import('node:vm'), LAY = await import(path.join(ROOT, 'src/lib/user-todos-layout.js')); // LAY.originOf: the tray's legacy rung
+    const MA = require(path.join(ROOT, 'src/main-ask.js')), HA = require(path.join(ROOT, 'src/helper-ask.js')), AG = require(path.join(ROOT, 'src/ask-grant.js'));
+    const D9 = 'L'.repeat(9000), T6 = 'T'.repeat(600), K = 'claude:s', U = 'https://vs.example.com:3456/p/';
+    const olderTree = () => { // a store file an older tree wrote: its asks unmarked, a detail and a question kept as plain slices with the judge's verdict
+      const d = tmpdir(), it = (id, o) => ({ id, sessionKey: K, detail: null, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', sessionName: null, jobId: null, i18n: null, action: null, expiresAt: null, options: null, reply: null, origin: 'agent', createdAt: 1, resolvedAt: null, resolvedBy: null, ...o });
+      const items = [it('ut-00000000a1', { text: 'long detail', detail: D9.slice(0, 8000), judged: { needs: 'you', at: 2 } }), it('ut-00000000a2', { text: T6.slice(0, 500), judged: { needs: 'you', at: 2 } }),
+        it('ut-00000000a3', { text: 'Use the Work browser?', ...AG.grantItemFields({ id: 'bp-1', label: 'Work' }) }),
+        it('ut-00000000a4', { ...MA.inboxItemFor(MA.mainAskOf({ requestId: 'rq1', toolName: 'WebFetch', input: { url: U + 'pg1111111111', prompt: 'read' } }, {}), { name: 'S', sessionId: 's1' }), urgency: 'high' }),
+        it('ut-00000000a5', { ...HA.inboxItemFor({ requestId: 'rq2', toolName: 'Bash', input: { command: 'curl -s ' + U + 'pg2222222222' } }, { label: 'Fetcher', sessionId: 's1' }), urgency: 'high' }),
+        it('ut-00000000a6', { text: 'S exited unexpectedly', detail: 'Exit record: /p/pg3333333333', i18n: { text: { key: '"{name}" exited unexpectedly at {time}; restarting it did not work — resume it if you need it', params: { name: 'S', time: '08:01' } } } }),
+        // r8 (X2): filed before the origin field (≤ 2.369.168): a route ask, the spend guard's notice, a job's copy — no origin at all
+        ...[['ut-00000000a7', { text: 'Please review the page /p/pg4444444444', sessionName: 'Reporter' }], ['ut-00000000a8', { text: 'Unattended turns: 80% of today', sessionName: 'Spending' }], ['ut-00000000a9', { text: 'Task nightly: done (ok)', jobId: 'jb-1', sessionName: 'S' }],
+          // r9 (Y3): the BROWSER's three .168 records under the conversation's key — no origin, no i18n, no action, the conversation's
+          // own name; the sentences exactly as src/browser-takeover.js idleInboxItem, src/server/browser-handback.js noteConfirmation
+          // and src/routes/browser.js fileProposal wrote them from 2.369.134 to .168
+          ['ut-00000000b0', { text: "Your takeover of the agent's browser (Reporter) lapsed after 2 min without input — the agent is driving again", detail: 'Page you left it on: https://vs.example.com:3456/p/pg5555555555. Nothing was sent to the agent (browser.announceIdleHandback is off); it learns of the handback when its next browser command succeeds, or with your next message.', urgency: 'low', sessionName: 'Reporter' }],
+          ['ut-00000000b1', { text: 'The agent\'s browser (Work) is waiting for you to confirm "submit the form" [payment]', detail: 'Open the live view (Browser (live)) and press Confirm or Deny. The browser auto-denies after 60 s; the agent sees the outcome as the command\'s result. Confirmation id c-1.', sessionName: 'Reporter' }],
+          ['ut-00000000b2', { text: 'Browser backend: switch to CloakBrowser', detail: 'The agent proposes to switch to CloakBrowser. Another conversation holds the browser.', sessionName: 'Reporter' }]].map(([id, o]) => { const x = it(id, o); delete x.origin; return x; })];
+      fs.writeFileSync(path.join(d, 'user-todos.json'), JSON.stringify({ items }));
+      return d;
+    };
+    const upgradeLeg = (Mod) => {
+      const m = new Mod.UserTodoManager({ dataDir: olderTree(), expirySweepMs: 0 });
+      const marks = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'b0', 'b1', 'b2'].map((x) => m.get('ut-00000000' + x).via || '-').join();
+      const tray = ['a7', 'a8', 'a9', 'b0'].map((x) => LAY.originOf(m.get('ut-00000000' + x))).join();
+      const r = m.add(K, { origin: 'agent', text: 'long detail', detail: D9 }), it = m.get('ut-00000000a1');
+      const t1 = m.add(K, { origin: 'agent', text: T6 }), t2 = m.add(K, { origin: 'agent', text: T6 });
+      const out = { marks, tray, detail: { same: r.id === it.id, reasks: it.reasks || 0, judged: !!it.judged, marked: it.detail.length === 8000 && it.detail.endsWith('…') }, text: { anew: t1.id !== 'ut-00000000a2', once: t2.id === t1.id && (m.get(t1.id).reasks || 0) === 1 } };
+      m.stop();
+      return out;
+    };
+    const up = upgradeLeg(UT);
+    ok(up.marks === 'ask,ask,ask,-,-,-,ask,-,-,-,-,-' && up.tray === 'agent,spend,agent,agent', 'r7 (T1) an older tree\'s store at this tree\'s load: its asks — a question, a --grant ask whose action is the grant — take the ask route\'s mark (`via: \'ask\'`, the route\'s shape: legacyAsk); a parked permission (main-asks), a helper\'s approval (helper-asks), an unexpected exit — producers\' records, origin `agent` too — never do; r8 (X2): one filed before the origin field (≤ 2.369.168, no origin) is the agent\'s exactly as the tray\'s legacy rung reads it (originOf ⇒ agent), never the spend guard\'s notice (originOf ⇒ spend) nor a job\'s copy; r9 (Y3): nor the browser\'s three .168 records (a lapsed takeover naming the page it left, a pending confirmation, a backend switch proposal) — the tray files them under Agents, they are no ask', { marks: up.marks, tray: up.tray });
+    ok(up.detail.same && up.detail.reasks === 1 && up.detail.judged && up.detail.marked, 'r7 (T3) a byte-identical re-ask of an item whose 9 000-char detail an older tree kept as a plain 8 000-char slice ⇒ a RE-ASK (counted), the judge\'s verdict KEPT (no second decision call), the stored copy now the marked cut', up.detail);
+    ok(up.text.anew && up.text.once, 'r7 (T3, stated) the same 600-char question an older tree kept as a plain 500-char slice ⇒ ONE new item, once — the next re-ask of it is that item\'s re-ask (the text is the item\'s identity; its words are unchanged)', up.text);
+    const R6E = [['      if (legacyAsk(it, (type) => (ROW_OF[type] || {}).producer)) it.via = ASK_VIA;\n', ''], ['(!detail || sameWords(detail, existing.detail, DETAIL_MAX))', '(!detail || detail === existing.detail)'], [' && sameWords(detail, existing.detail, DETAIL_MAX)) { existing.detail = detail; changed = true; }', ' && false) { existing.detail = detail; changed = true; }']];
+    const utSrc7 = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8'), R6 = R6E.every(([n]) => utSrc7.includes(n)) ? mutant('src/user-todos.js', R6E) : null;
+    ok(R6, 'CONTROL needles present: the load rung, the re-ask\'s same words (r7) — a tree without them has nothing to patch');
+    const up6 = R6 ? upgradeLeg(R6) : null;
+    if (up6) ok(up6.marks === '-,-,-,-,-,-,-,-,-,-,-,-' && up6.detail.reasks === 0 && !up6.detail.judged, 'CONTROL the store as r6 had it (no load rung; a re-ask judged by the bytes) ⇒ the older tree\'s asks unmarked (no witness at the rebuild), the same words an EDIT: not counted, the verdict dropped — RED', up6);
+    const ioSrc = fs.readFileSync(path.join(ROOT, 'src/inbox-origin.js'), 'utf8'), AGENTS = "i.origin === 'agent' || (i.origin == null && !LEGACY_PRODUCER_LABELS.includes(i.sessionName) && i.jobId == null && !LEGACY_BROWSER_TEXTS.some((re) => re.test(String(i.text || ''))))", BROWSER = " && !LEGACY_BROWSER_TEXTS.some((re) => re.test(String(i.text || '')))";
+    // the rung is the PURE inbox-origin legacyAsk the load applies to every record (the leg above, on the real store): its
+    // older readings are judged over the SAME .168 records through a patched copy of that file alone (no second store copy)
+    const ROW_OF = require(path.join(ROOT, 'src/foryou-actions.js')).ROW_OF, producerOf = (type) => (ROW_OF[type] || {}).producer;
+    const olderRecs = JSON.parse(fs.readFileSync(path.join(olderTree(), 'user-todos.json'), 'utf8')).items;
+    const rungMarks = (IOm) => ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'a9', 'b0', 'b1', 'b2'].map((x) => (IOm.legacyAsk(olderRecs.find((r) => r.id === 'ut-00000000' + x), producerOf) ? 'ask' : '-')).join();
+    const IO7 = ioSrc.includes(AGENTS) ? M.load('src/inbox-origin.js', ioSrc.replace(AGENTS, "i.origin === 'agent'"), 'r7-origin') : null;
+    ok(IO7, 'CONTROL needle present: the ask rung reads an origin-less item as the tray does (r8) — a tree without it has nothing to patch');
+    if (IO7) ok(rungMarks(IO7) === 'ask,ask,ask,-,-,-,-,-,-,-,-,-', 'CONTROL r7\'s rung (origin `agent` only) ⇒ the pre-.169 ask stays unmarked — its page reads «Made here» while the store keeps it — RED', rungMarks(IO7));
+    const IO8 = ioSrc.includes(BROWSER) ? M.load('src/inbox-origin.js', ioSrc.replace(BROWSER, ''), 'r8-origin') : null;
+    ok(IO8, 'CONTROL needle present: the ask rung tells the browser\'s .168 records apart (r9) — a tree without it has nothing to patch');
+    if (IO8) ok(rungMarks(IO8) === 'ask,ask,ask,-,-,-,ask,-,-,ask,ask,ask', 'CONTROL r8\'s rung (every origin-less item the tray files under Agents) ⇒ the browser\'s three .168 records marked as asks — the lapsed takeover\'s page a phantom «for you» — RED', rungMarks(IO8));
+    // the mark is the ask route's alone: a product file other than src/agent-routes/status.js is refused by name
+    const m = mk(), viaFrom = (rel) => { try { return vm.runInThisContext('(S) => S.add("claude:v", { text: "a filing from ' + rel + '", origin: "agent", via: "ask" })', { filename: path.join(ROOT, rel) })(m).via; } catch (e) { return String(e && e.message); } };
+    const w = { route: viaFrom('src/agent-routes/status.js'), producer: viaFrom('src/server/main-asks.js'), server: (() => { try { m.add('claude:v', { text: 'x', origin: 'server', via: 'ask' }); return 'filed'; } catch (e) { return 'refused'; } })() };
+    m.stop();
+    ok(w.route === 'ask' && /^via 'ask' is the ask route's mark — filed only by src\/agent-routes\/status\.js, not src\/server\/main-asks\.js$/.test(w.producer) && w.server === 'refused', 'r7 (T1) the mark is the ask route\'s: src/agent-routes/status.js files it; another product file (main-asks.js) is refused by name; an origin other than `agent` carries none', w);
+    // ONE surrogate-safe cut (T4): an emoji at cap − 1 / cap − 2 of a question; the facts' strings cut by the same clip
+    const sm = mk(), E = '\u{1F600}';
+    const q1 = sm.get(sm.add(K, { origin: 'agent', text: 'x'.repeat(498) + E + ' tail' }).id).text, q2 = sm.get(sm.add(K, { origin: 'agent', text: 'y'.repeat(497) + E + ' tail' }).id).text;
+    sm.stop();
+    const lone = (t) => /[\ud800-\udbff](?![\udc00-\udfff])/.test(t);
+    ok(q1 === 'x'.repeat(498) + '…' && q2 === 'y'.repeat(497) + E + '…' && !lone(q1) && !lone(q2), 'r7 (T4) an emoji across the 500 cut (at cap − 1) ⇒ dropped whole, «…» after the 498 chars; one at cap − 2 ⇒ kept whole before «…» — never a lone surrogate', { q1: q1.slice(-3), q2: q2.slice(-3) });
+    const utSrc = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8');
+    ok(!/\bclipText\b/.test(utSrc) && /return clip\(v, RUN_CMD_BODY_MAX\); \}/.test(utSrc), 'census (T4): the facts\' strings are cut by THE clip (src/inbox-reply-text.js) — the store keeps no second cut rule');
+    // r10 (U3): THE CENSUS ENUMERATES EVERY CUT SITE OF A FOR-YOU TEXT — every .slice( / .substring( / .substr( / clip*( call in
+    // src/user-todos.js whose subject names an item's words (text · rawText · detail · rawDetail · raw — redrawItem's detail —,
+    // a `.text` / `.detail`) — and each is THE clip at its cap: `clip(<words>, TEXT_MAX | DETAIL_MAX)` (the grammar's one cut,
+    // the mark where the cut is made). Three sites are no kept words, each named by its line: the snapshot's PREVIEW of a
+    // resolved item (previewOf — flagged `detailTruncated`; the client restores or fetches the whole, and restoreDetails reads
+    // the preview as a PREFIX of the whole, so it carries no mark), an i18n detail's LINE list (an array — whole lines kept),
+    // the person's own reply (`item.reply`, drawn escaped, never linked). A planted unmarked cut anywhere is RED by its line.
+    const CUT_CALL = /\.(?:slice|substring|substr)\(|\bclip\w*\(/g, WORDS = /(?:^|[^\w$.])(?:raw|rawText|rawDetail|text|detail)(?![\w$])|\.(?:text|detail)(?![\w$])/;
+    const NOT_KEPT = ['return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true,', 'out.detail = x.detail.slice(0, 12).map(', "item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };"];
+    const subjectOf = (src, at, len) => {
+      let d = 0;
+      if (src[at] !== '.') { let k = at + len; for (; k < src.length; k++) { const c = src[k]; if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { if (!d) break; d--; } else if (c === ',' && !d) break; } return src.slice(at + len, k); } // clip*(<subject>, …)
+      let j = at; for (; j > 0; j--) { const c = src[j - 1]; if (')]'.includes(c)) d++; else if ('(['.includes(c)) { if (!d) break; d--; } else if (!d && !/[\w$.?]/.test(c)) break; } return src.slice(j, at); // <subject>.slice(…)
+    };
+    const cutCensus = (src) => { const sites = [], lines = src.split('\n'); let ln = 1, from = 0; for (const m of src.matchAll(CUT_CALL)) { const subj = subjectOf(src, m.index, m[0].length); if (!WORDS.test(subj)) continue; for (let k = src.indexOf('\n', from); k >= 0 && k < m.index; k = src.indexOf('\n', k + 1)) { ln++; from = k + 1; } const line = lines[ln - 1]; const tail = src.slice(m.index, m.index + 200); const theClip = m[0] === 'clip(' && new RegExp('^clip\\(' + subj.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ', (?:TEXT_MAX|DETAIL_MAX)\\)').test(tail); sites.push({ ln, subj, ok: theClip || NOT_KEPT.some((x) => line.includes(x)), clip: theClip, line: line.trim().slice(0, 110) }); } return { sites, bad: sites.filter((s) => !s.ok).map((s) => `:${s.ln} ${s.line}`), clips: sites.filter((s) => s.clip).map((s) => s.subj), named: NOT_KEPT.filter((x) => src.indexOf(x) >= 0 && src.indexOf(x) === src.lastIndexOf(x)).length }; };
+    const cc = cutCensus(utSrc);
+    ok(!cc.bad.length && ['raw', 'rawText', 'rawDetail'].every((x) => cc.clips.includes(x)) && cc.named === NOT_KEPT.length && /^const \{[^}]*\bclip\b[^}]*\} = require\('\.\/inbox-reply-text\.js'\);/m.test(utSrc), `r10 (U3) census: every cut site of a For-you text in src/user-todos.js (${cc.sites.length}) is THE clip at its cap — redrawItem's detail, add()'s text and detail — or one of the ${NOT_KEPT.length} named sites that keep no words (the snapshot's preview, an i18n detail's line list, the person's reply)`, cc.bad.length ? cc.bad : cc.sites.map((s) => ':' + s.ln + (s.clip ? ' clip(' + s.subj + ')' : ' named')));
+    const planted = { redraw: cutCensus(utSrc.replace('it.detail = raw ? clip(raw, DETAIL_MAX) : null;', 'it.detail = raw ? raw.slice(0, DETAIL_MAX) : null;')).bad, substring: cutCensus(utSrc.replace('detail = rawDetail ? clip(rawDetail, DETAIL_MAX) : null;', 'detail = rawDetail ? rawDetail.substring(0, DETAIL_MAX) : null;')).bad, cap: cutCensus(utSrc.replace('text = clip(rawText, TEXT_MAX);', 'text = clip(rawText, 400);')).bad, pacedWake: cutCensus(utSrc.replace('    it.detail = raw ? clip(raw, DETAIL_MAX) : null;\n', '    it.detail = raw ? clip(raw, DETAIL_MAX) : null;\n    if (typeof text === \'string\' && text.trim()) it.text = clipText(text.trim(), TEXT_MAX);\n')).bad };
+    ok(Object.values(planted).every((b) => b.length === 1), 'CONTROL a planted unmarked cut ⇒ the census RED by its line: redrawItem\'s detail back to the base\'s plain slice · add()\'s detail by substring · the text clipped at another cap · paced-wake\'s redrawItem text line as its lane wrote it (clipText)', planted);
+  }
   // ── the snapshot: an OPEN item whole, a RESOLVED one previewed; the ledger whole ──
   const shapeLeg = (Mod) => {
     const m = mk(Mod);

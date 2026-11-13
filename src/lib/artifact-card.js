@@ -7,11 +7,11 @@
 import { t, resolveLang } from './i18n.js';
 import { getFileIcon } from './file-types.js';
 import { agoText } from './user-todos-row.js';
-import { cardFacts, kindWord } from '../artifacts.js';
+import { cardFacts, kindWord, intentWord } from '../artifacts.js';
 import { UI_ICONS } from './icons.js';
 import { absUrl, showContextMenu, copyText } from './utils.js';
 import { replayOpenSpec } from './window-types.js'; // lane artifacts-services-url: "Show in Ports" = the Ports window's own open action
-import { listPlan, rowsOfView, rowWords, countLine, markOf, viewFrom, GROUPS, SORTS } from './artifacts-list-model.js'; // lane artifacts-list-scale: the list's PURE model (the popover and the window share it)
+import { listPlan, rowsOfView, rowWords, metaLine, countLine, markOf, viewFrom, queryOf, foldToggle, GROUPS, SORTS } from './artifacts-list-model.js'; // lane artifacts-list-scale: the list's PURE model (the popover and the window share it)
 
 const lang = () => { try { const l = resolveLang(); return l === 'zh' || l === 'ja' ? l : 'en'; } catch { return 'en'; } }; // the house language (i18n.js) — <html lang> is never set (the real-Opus zh run read "Document")
 const div = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
@@ -117,15 +117,26 @@ export function patchArtifactCard(el0, msg) {
 // the collapsible group heads (code collapsed by default). Every row is KEYED and PATCHED IN PLACE — a filter keystroke,
 // a group switch or a live refresh moves / inserts / removes row nodes, never rebuilds one. The ⤢ opens the Artifacts
 // WINDOW (src/lib/artifacts-window.js) — the same PURE model (src/lib/artifacts-list-model.js) at full size.
+// LANE ARTIFACTS-BY-INTENT (owner 2026-11-06, a phone shot: 「根本找不到想找的东西」): the default grouping is the INTENT —
+// 给你看的 · 做出来的 · 顺带改的 (folded behind its count) — the kinds / helpers / days stay in the ▾; every row names its
+// FOLDER first on its meta line (a row from elsewhere — a helper's folder — leads with WHO and WHERE: «referee · …/out»)
+// and a name that collides wears its distinguishing path suffix; a section over 8 rows sub-groups by folder (collapsible
+// heads with counts; inside one a row shows its bare name, no folder); the 最近 band holds only what no open section
+// shows; while filtering a folded head still opens on a tap (a kind word's prefix never unfolds it). On a finger
+// device (< 1024 px) the panel is a full-height sheet (chat.css): the search pinned at its top beside a close, the
+// auto-open switch inside the ⋯ menu, 44 px targets, the names and the field at 16 px.
 const VIEW_KEY = 'vs-artifacts-view';
 export function loadArtifactsView() { try { return viewFrom(JSON.parse(localStorage.getItem(VIEW_KEY) || 'null')); } catch { return viewFrom(null); } }
 export function saveArtifactsView(v) { try { localStorage.setItem(VIEW_KEY, JSON.stringify(viewFrom(v))); } catch { } }
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const GROUP_WORDS = { kind: 'By kind', helper: 'By helper', day: 'By day' };
+const GROUP_WORDS = { intent: 'For you first', kind: 'By kind', helper: 'By helper', day: 'By day' }; // lane artifacts-by-intent: the intent first (the default)
 const SORT_WORDS = { changed: 'Recently changed', name: 'Name', edits: 'Times changed' };
 export const artifactRowIcon = (b) => (b.kind === 'service' ? UI_ICONS.globe : getFileIcon(b.name || '')) || '';
-/** The row's words through the model (E6): {kind, helper, edits, ago}. */
-export const artifactRowWords = (b) => rowWords(b, { t, kindWord: (k) => kindWord(k, lang()), ago: (ts) => agoText(ts, t) });
+/** The row's words through the model (E6): {folder, kind, helper, edits, ago}; `ctx` = the list's (listCtx: cwd, host,
+ *  the told-apart folders, the hub's word). */
+export const artifactRowWords = (b, ctx = null) => rowWords(b, { t, kindWord: (k) => kindWord(k, lang()), ago: (ts) => agoText(ts, t), cwd: (ctx && ctx.cwd) || '', host: (ctx && ctx.host) || '', hubWord: (ctx && ctx.hubWord) || t('Local'), hostNames: (ctx && ctx.hostNames) || null, folders: (ctx && ctx.folders) || null });
+/** The kind's word in the house language (the filter matches it). */
+export const artifactKindWord = (k) => kindWord(k, lang());
 /** The name with the filter's match in ONE <mark> — text nodes only (a name is the agent's; never markup). */
 export function setArtifactName(el, name, q) {
   const m = markOf(name, q), key = m ? m.join(':') : '';
@@ -135,6 +146,13 @@ export function setArtifactName(el, name, q) {
   el.textContent = '';
   const mk = document.createElement('mark'); mk.textContent = name.slice(m[0], m[1]);
   el.append(document.createTextNode(name.slice(0, m[0])), mk, document.createTextNode(name.slice(m[1])));
+}
+/** lane artifacts-by-intent: the name a row SHOWS — a name that collides wears its distinguishing path suffix (the list's
+ *  `names`); such a name ellipsizes from its START (rtl + an LRM, the path rule) so the file's own name stays in view. */
+export function paintArtifactName(el, b, ctx, q) {
+  const shown = (ctx && ctx.names && ctx.names.get(b.key)) || b.name || '', pathy = shown !== (b.name || '') && shown.includes('/');
+  if (el.classList.contains('af-name-path') !== pathy) el.classList.toggle('af-name-path', pathy);
+  setArtifactName(el, pathy ? '\u200e' + shown : shown, q);
 }
 /** Open a helper conversation by its id (a hand-over's `from.cid`): live ⇒ attach, else the read-only view. */
 function openConversation(app, cid, name) {
@@ -174,17 +192,17 @@ function artifactRow(b, opts) {
   it.addEventListener('click', (ev) => { ev.stopPropagation(); if (opts.close) opts.close(); if (opts.onOpen) opts.onOpen(it._afRow); });
   return it;
 }
-export function patchArtifactRow(it, b, q) {
+export function patchArtifactRow(it, b, q, ctx = null) {
   it._afRow = b;
   if (it.dataset.key !== b.key) it.dataset.key = b.key;
   if (it.dataset.kind !== b.kind) it.dataset.kind = b.kind;
   if (b.kind === 'service') { const s = b.state || 'running'; if (it.dataset.state !== s) it.dataset.state = s; } else if (it.dataset.state) delete it.dataset.state;
   const ic = it.querySelector('.chat-artifact-ic');
   if (ic && ic.dataset.name !== b.name) { ic.innerHTML = artifactRowIcon(b); ic.dataset.name = b.name || ''; } // the icon table's own SVG (trusted), keyed by name
-  setArtifactName(it.querySelector('.chat-artifact-name'), b.name || '', q);
-  const w = artifactRowWords(b);
+  paintArtifactName(it.querySelector('.chat-artifact-name'), b, ctx, q); // lane artifacts-by-intent: a name that collides wears its distinguishing suffix
+  const w = artifactRowWords(b, ctx);
   const set = (sel, v) => { const n = it.querySelector(sel); if (n && n.textContent !== v) n.textContent = v; };
-  set('.chat-artifact-meta', [w.kind, w.helper, w.edits].filter(Boolean).join(' · '));
+  set('.chat-artifact-meta', metaLine(w, { inFolder: !!(ctx && ctx.inFolder) })); // the folder FIRST — from elsewhere WHO and WHERE; never the whole path
   set('.af-ago', w.ago);
   const title = [b.kind === 'service' ? serviceHref(b) : '\u200e' + (b.path || ''), w.helper].filter(Boolean).join('\n'); // the path whole (the meta line ellipsizes a long helper)
   if (it.title !== title) it.title = title;
@@ -200,13 +218,15 @@ const dayWords = (d) => {
   const at = (n) => { const x = new Date(); x.setDate(x.getDate() - n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
   return !d ? t('No date') : d === at(0) ? t('Today') : d === at(1) ? t('Yesterday') : d;
 };
-/** A group head's words: the kind's word · the helper (the main conversation) · the day. */
-export const artifactHeadWords = (h) => (h.group === 'recent' ? t('Recent') : h.group === 'kind' ? kindWord(h.label, lang()) : h.group === 'helper' ? (h.label || t('Main conversation')) : dayWords(h.label));
+/** A group head's words: the band · the kind's word · the helper (the main conversation) · the day · the folder. */
+export const artifactHeadWords = (h) => (h.group === 'recent' ? t('Recent') : h.group === 'intent' ? intentWord(h.label, lang()) : h.group === 'kind' ? kindWord(h.label, lang()) : h.group === 'helper' ? (h.label || t('Main conversation')) : h.group === 'folder' ? (h.label || '/') : dayWords(h.label));
+/** A head's whole line: "<words> · <count>"; the touched band says what it holds ("顺带改了 41 个代码文件"). */
+export const artifactHeadLine = (h) => (h.group === 'intent' && h.label === 'touched' ? (h.count === 1 ? (h.code ? t('Touched 1 code file') : t('Touched 1 file')) : h.code === h.count ? t('Touched {n} code files', { n: h.count }) : t('Touched {n} files', { n: h.count })) : `${artifactHeadWords(h)} · ${h.count}`);
 
 /** THE POPOVER (`renderArtifactList(box, v, {onOpen, close, app, onExpand})` keeps its signature): mounts the bounded
  *  list into `box` and returns its controller {update(v)} (also `box._afList` — the chip's live refresh patches it). */
 export function renderArtifactList(box, v, { onOpen = null, close = null, app = null, onExpand = null } = {}) {
-  const st = { v, q: '', view: loadArtifactsView() };
+  const st = { v, q: '', view: loadArtifactsView(), peek: new Map() }; // peek: a head tapped while filtering — this popover's own, never stored (r3)
   const opts = { onOpen, close, app };
   box.classList.add('chat-artifacts-panel');
   const top = div('af-top');
@@ -216,6 +236,18 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
   const key = span('af-key'); key.textContent = '/';
   search.append(sic, input, key);
   if (onExpand) { const ex = button('af-expand', t('Open in a window')); ex.innerHTML = UI_ICONS.expand || ''; ex.addEventListener('click', (e) => { e.stopPropagation(); if (close) close(); onExpand(); }); search.appendChild(ex); }
+  // lane artifacts-by-intent: the phone sheet's own doors (chat.css shows them on a finger device only) — the ⋯ holds the
+  // auto-open switch (the list header keeps the rows' room), the ✕ closes the full-height sheet
+  if (app && app.settings) {
+    const menuBtn = button('af-menu', t('More')); menuBtn.innerHTML = UI_ICONS.more || '';
+    menuBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const on = (app.settings.get('artifacts.autoOpenDocs') ?? true) !== false, r = e.currentTarget.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom, [{ labelHtml: `<span class="chan-menu-check${on ? ' chan-menu-check-on' : ''}">${on ? UI_ICONS.check || '' : ''}</span>${esc(t('Open new documents automatically'))}`, label: t('Open new documents automatically'), action: () => { app.settings.set('artifacts.autoOpenDocs', !on); draw(); } }]);
+    });
+    search.appendChild(menuBtn);
+  }
+  if (close) { const x = button('af-close', t('Close')); x.innerHTML = UI_ICONS.close || ''; x.addEventListener('click', (e) => { e.stopPropagation(); close(); }); search.appendChild(x); }
   const ctl = div('af-ctl');
   const gBtn = button('af-pick af-group', t('Group by')), sBtn = button('af-pick af-sort', t('Sort by'));
   const count = span('af-count chat-status-dim');
@@ -242,37 +274,45 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
   notes.full.textContent = t('The list keeps the newest {n} files.', { n: 500 });
   const pickLabel = (b, word) => { const want = `${t(word)}\u0001`; if (b._afWord === want) return; b._afWord = want; b.textContent = ''; const s = span('af-pick-word'); s.textContent = t(word); const c = span('af-pick-ic'); c.setAttribute('aria-hidden', 'true'); c.innerHTML = UI_ICONS.chevronDown || ''; b.append(s, c); };
   const save = () => saveArtifactsView(st.view);
-  const toggle = (k) => { const c = st.view.collapsed[st.view.group]; const i = c.indexOf(k); if (i >= 0) c.splice(i, 1); else c.push(k); save(); draw(); };
+  const toggle = (k) => { st.view.collapsed[st.view.group] = foldToggle(st.view.collapsed[st.view.group], k); save(); draw(); }; // a fold to the FRONT: the cap keeps the newest (r4)
+  const peek = (k, open) => { st.peek.set(k, open); draw(); }; // while filtering a tap is a PEEK: the saved folds change only with no filter typed
+  const query = (q) => { st.q = q; if (!queryOf(q)) st.peek.clear(); draw(); }; // the filter cleared ⇒ the saved folds again
   const headEl = (s) => {
     let h = headEls.get(s.key);
     if (!h) {
-      h = div('chat-artifact-head chat-status-dim' + (s.key === 'recent' ? ' af-head-recent' : ''));
+      const folder = s.head.group === 'folder', band = s.head.group === 'intent'; // lane artifacts-by-intent: a band's head · a folder's head inside a band
+      h = div('chat-artifact-head chat-status-dim' + (s.key === 'recent' ? ' af-head-recent' : '') + (folder ? ' af-head-folder' : '') + (band ? ' af-head-band' : ''));
       h.dataset.group = s.key; h.setAttribute('role', 'button'); h.tabIndex = -1;
-      const ic = span('af-head-ic'); ic.setAttribute('aria-hidden', 'true'); if (s.key === 'recent') ic.innerHTML = UI_ICONS.clock || '';
+      if (band) h.dataset.band = s.head.label;
+      const ic = span('af-head-ic'); ic.setAttribute('aria-hidden', 'true'); if (s.key === 'recent') ic.innerHTML = UI_ICONS.clock || ''; else if (folder) ic.innerHTML = UI_ICONS.folder || '';
       h.append(ic, span('af-head-word'), span('af-head-chev'));
-      h.addEventListener('click', (e) => { e.stopPropagation(); if (!st.q) toggle(s.key); });
+      h.addEventListener('click', (e) => { e.stopPropagation(); if (queryOf(st.q)) peek(s.key, h.dataset.fold === 'shut'); else toggle(s.key); }); // while filtering: a peek either way (a head a kind word's prefix left folded opens), never saved
       headEls.set(s.key, h);
     }
-    const words = `${artifactHeadWords(s.head)} · ${s.head.count}`;
+    const words = artifactHeadLine(s.head);
     const w = h.querySelector('.af-head-word'); if (w.textContent !== words) w.textContent = words;
     const chev = s.open ? 'open' : 'shut';
     if (h.dataset.fold !== chev) { h.dataset.fold = chev; h.setAttribute('aria-expanded', String(s.open)); h.querySelector('.af-head-chev').innerHTML = (s.open ? UI_ICONS.chevronDown : UI_ICONS.chevronRight) || ''; }
     return h;
   };
-  const rowEl = (section, b, q) => {
+  const rowEl = (section, b, q, ctx) => {
     const k = section + '\u0001' + b.key;
     let it = rowEls.get(k);
     if (!it) { it = artifactRow(b, opts); rowEls.set(k, it); }
-    patchArtifactRow(it, b, q);
+    patchArtifactRow(it, b, q, ctx);
     return it;
   };
   function draw() {
-    const plan = listPlan(st.v, { q: st.q, group: st.view.group, sort: st.view.sort, collapsed: st.view.collapsed[st.view.group] });
+    const plan = listPlan(st.v, { q: st.q, group: st.view.group, sort: st.view.sort, collapsed: st.view.collapsed[st.view.group], kindWord: artifactKindWord, peek: st.peek, hubWord: t('Local') });
     const want = [];
     if (!st.q && !(st.v && Array.isArray(st.v.items) && st.v.items.length)) want.push(notes.none);
     for (const s of plan.sections) {
       want.push(headEl(s));
-      if (s.open) for (const b of s.rows) want.push(rowEl(s.key === 'recent' ? 'r' : 'g', b, plan.q));
+      if (!s.open) continue;
+      const sec = s.key === 'recent' ? 'r' : 'g';
+      const put = (b, f) => { const inFolder = !!f; const it = rowEl(sec, b, plan.q, inFolder ? f.ctx : plan.ctx); if (it.classList.contains('af-in-folder') !== inFolder) it.classList.toggle('af-in-folder', inFolder); want.push(it); }; // in a folder: the bare name, no folder (the head says it)
+      if (!s.folders) { for (const b of s.rows) put(b, null); continue; }
+      for (const f of s.folders) { if (f.bare) { for (const b of f.rows) put(b, null); continue; } want.push(headEl(f)); if (f.open) for (const b of f.rows) put(b, f); } // every row in exactly one folder (a row with none at the band's own level) — never a «show more»
     }
     if (plan.empty) want.push(notes.empty);
     if (st.v && st.v.full) want.push(notes.full); // the eviction note stays LAST
@@ -285,9 +325,9 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
   }
   gBtn.addEventListener('click', (e) => pickMenu(e, GROUP_WORDS, st.view.group, (g) => { if (GROUPS.includes(g)) { st.view.group = g; save(); draw(); } }));
   sBtn.addEventListener('click', (e) => pickMenu(e, SORT_WORDS, st.view.sort, (s) => { if (SORTS.includes(s)) { st.view.sort = s; save(); draw(); } }));
-  input.addEventListener('input', () => { st.q = input.value; draw(); list.scrollTop = 0; });
+  input.addEventListener('input', () => { query(input.value); list.scrollTop = 0; });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !e.isComposing && input.value) { e.stopPropagation(); input.value = ''; st.q = ''; draw(); } // Esc clears; the next Esc closes (the data-popover protocol)
+    if (e.key === 'Escape' && !e.isComposing && input.value) { e.stopPropagation(); input.value = ''; query(''); } // Esc clears; the next Esc closes (the data-popover protocol)
     else if (e.key === 'ArrowDown') { e.preventDefault(); const r = list.querySelector('.chat-artifact-row'); if (r) r.focus(); }
   });
   box.addEventListener('keydown', (e) => {

@@ -373,7 +373,7 @@ function feedArtifactCard(session, block) {
 }
 /** The rebuild's / history read's derivation: the harness hook over every record, folded AFTER the record (the hook
  *  has no afterRecord — the PREVIOUS record folds before the next one), its cards placed/patched silently. */
-function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null }) {
+function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, quoted = undefined }) {
   let rows = {};
   let prev = null;
   const hstate = { runs: new Map(), seen: new Set() }; // lane artifacts-handover: the helper door's state for THIS derivation
@@ -382,8 +382,9 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null }
     try { ops = artifactsOf(raw) || []; } catch { ops = []; }
     if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
     if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource({ backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId }, raw, hstate) || []); } catch { } }
+    ops = AF.quotedOps(ops, quoted); // r10: a tray answer's quote is the agent's only when it quotes the conversation's ask (no source: nobody's)
     for (const o of ops) {
-      const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: 'agent' });
+      const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: AF.opAuthor(o) }); // the person's own page link stays theirs (lane artifacts-by-intent)
       if (r.skipped || !r.row) continue;
       rows = r.rows;
       if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
@@ -403,6 +404,14 @@ function setArtifactServiceSource(fn) { artifactServiceSource = typeof fn === 'f
 // that ends a Task / workflow agent brings the helper transcript's writes as this conversation's rows (via: subagent)
 let artifactHelperSource = null;
 function setArtifactHelperSource(fn) { artifactHelperSource = typeof fn === 'function' ? fn : null; }
+// lane artifacts-by-intent r6: THE REBUILD'S STAMP PERSISTED (src/server/artifact-registry.js persistSoon, set by its
+// configure) — a merge that stamped a row `shown` the persisted rows lacked writes the rows at once, like any op would
+let artifactPersistSink = null;
+function setArtifactPersistSink(fn) { artifactPersistSink = typeof fn === 'function' ? fn : null; }
+// lane artifacts-by-intent r10: WHOSE ITEM A TRAY ANSWER QUOTES (src/server/artifact-registry.js askIdOf, set by its
+// configure) — `(session, sessionId) → (itemId) → bool`: the rebuild keeps a quote's links only when it quotes an ask
+let artifactQuoteSource = null;
+function setArtifactQuoteSource(fn) { artifactQuoteSource = typeof fn === 'function' ? fn : null; }
 function artifactServiceRows(session) { if (!artifactServiceSource) return {}; try { return artifactServiceSource(session) || {}; } catch { return {}; } }
 function artifactStoreRows(session, sessionId) {
   if (!artifactStoreSource) return {};
@@ -635,7 +644,7 @@ function artifactDeriveOpts({ backend, cwd, host, sessionId = null } = {}) {
   try { of = harnessReg.harnessOf(backend || 'claude').artifactsOf; } catch { of = null; }
   return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '', helper: { backend: backend || 'claude', sessionId } } : null;
 }
-const artifactsOptsOf = (session) => artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null });
+const artifactsOptsOf = (session, sessionId) => { const o = artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null }); return o && artifactQuoteSource ? { ...o, quoted: artifactQuoteSource(session, sessionId || session.sockName) } : o; }; // r10: + whose item a tray answer quotes
 function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
@@ -655,10 +664,11 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
     try {
       // 2026-09-27: the browser-session cards, read from the trace markers NOW and placed by time between the records
       // lane group-report-card: + the group messages this conversation was handed with a turn (the ring's report cards)
-      await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { artifacts: artifactsOptsOf(session), ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      await convertWithCards(mm, records, [...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)], { artifacts: artifactsOptsOf(session, sessionId), ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // lane artifacts-model: the re-derived deliverable rows ∪ the persisted ones (the user's saves) — every card says the merge
       // lane artifacts-registries: ∪ the pages / designs rows from their own stores (a page published twice = one row)
-      try { session._artifacts = AF.merge(AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}), artifactStoreRows(session, sessionId)); settleArtifactCards(mm, session._artifacts); settleArtifactCards(mm, artifactServiceRows(session)); } catch (err) { console.error('[normalizer] deliverable rows not merged:', err.message); }
+      // lane artifacts-by-intent r6: ∪ the asks the For-you store keeps (the same store-rows seam); a stamp the merge gained is persisted
+      try { const was = session._artifacts || {}; session._artifacts = AF.merge(AF.merge(mm.derivedArtifacts || {}, session._artifacts || {}), artifactStoreRows(session, sessionId)); if (artifactPersistSink && AF.stampsGained(was, session._artifacts)) artifactPersistSink(session); settleArtifactCards(mm, session._artifacts); settleArtifactCards(mm, artifactServiceRows(session)); } catch (err) { console.error('[normalizer] deliverable rows not merged:', err.message); }
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
@@ -699,5 +709,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
 module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, addAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
   setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard,
   setProposalCardSource, placeProposalCard, patchProposalCard, feedProposalCard, setWritesLostSource,
-  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, setArtifactHelperSource, artifactStoreRows, setArtifactServiceSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
+  placeArtifactCard, patchArtifactCard, feedArtifactCard, artifactCardId, artifactDeriveOpts, setArtifactStoreSource, setArtifactHelperSource, artifactStoreRows, setArtifactServiceSource, setArtifactPersistSink, setArtifactQuoteSource, // lane artifacts-model: the deliverable card // lane browser-propose: the proposal card
   setGroupCardPersist, feedGroupCard, placeGroupCard, upgradeWakeCards, redactGroupCards };

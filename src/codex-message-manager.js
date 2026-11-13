@@ -114,6 +114,9 @@ const SERVER_PEER_FRAME_RE = /^\s*(?:Message from session "[^"]+" \(via vibespac
 // rollout alone rendered as an anonymous "You" bubble).
 const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js');
 const startsWithNoticeHead = (text) => String(text || '').trimStart().startsWith(VIBESPACE_NOTICE_HEAD);
+/** A server-posted delivery told by its frame alone (the two anchored shapes above) — the artifacts readers ask it of a
+ *  user-role message whose origin stamp is gone (src/harnesses/artifacts-of.js, lane artifacts-by-intent r3). */
+const opensWithServerFrame = (text) => SERVER_PEER_FRAME_RE.test(String(text || '')) || startsWithNoticeHead(text);
 
 // Peer-record detection for a codex user item (design-harness-plugins §1 P1).
 // Two carriers, in precedence:
@@ -2534,4 +2537,4 @@ CodexMessageManager.SKIPPED_RESPONSE_ITEM_TYPES = SKIPPED_RESPONSE_ITEM_TYPES;
 CodexMessageManager.SKIPPED_EVENT_TYPES = SKIPPED_EVENT_TYPES;
 CodexMessageManager.ITEM_COMPLETED_SKIPPED_TYPES = ITEM_COMPLETED_SKIPPED_TYPES;
 
-module.exports = { CodexMessageManager, userItemOf };
+module.exports = { CodexMessageManager, userItemOf, opensWithServerFrame };

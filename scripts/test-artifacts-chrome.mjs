@@ -300,8 +300,8 @@ try {
   await evalJs(`document.querySelector('.chat-status-artifacts')?.click(); true`);
   await waitFor(`!!document.querySelector('.chat-artifact-head')`, 5000);
   const list6 = await evalJs(`[...document.querySelectorAll('.chat-artifact-head, .chat-artifact-row')].filter((e) => !e.closest('.chat-artifact-code')).map((e) => e.classList.contains('chat-artifact-head') ? 'HEAD:' + e.textContent : e.dataset.kind)`);
-  const hi = list6.findIndex((k) => /^HEAD:Service · 1$/.test(k)); // lane artifacts-list-scale: every kind has its head ("Document · 4" … "Service · 1")
-  check('the chip lists Services under their own head, after the documents and before the page / design / upload', hi > 0 && list6[hi + 1] === 'service' && list6.slice(0, hi).every((k) => k === 'doc' || /^HEAD:Document · \d+$/.test(k)) && list6.slice(hi + 2).every((k) => k !== 'doc'), { list6, api: await fetch(`http://127.0.0.1:${PORT}/api/artifacts?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json()).then((v) => v.items.map((b) => b.kind)).catch((e) => e.message) });
+  const fyI = list6.findIndex((k) => /^HEAD:For you · \d+$/.test(k)), mdI = list6.findIndex((k) => /^HEAD:Made here · \d+$/.test(k)); // lane artifacts-by-intent: the bands are the default heads
+  check('the chip\'s list opens on «For you»: the running service with the published page and the opened design — then «Made here» (the documents, the upload)', fyI === 0 && mdI > fyI && ['service', 'page', 'design'].every((k) => list6.slice(fyI + 1, mdI).includes(k)) && list6.slice(mdI + 1).filter((k) => !k.startsWith('HEAD:')).every((k) => k === 'doc' || k === 'upload'), { list6, api: await fetch(`http://127.0.0.1:${PORT}/api/artifacts?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json()).then((v) => v.items.map((b) => b.kind)).catch((e) => e.message) });
 
   // ── lane artifacts-list-scale: THE LIST AT SCALE over the owner's 217 rows (43 + 174) — bounded at 1280, a filter, a
   //    group switch, 代码 opened, the ⤢ window + a column sort, the window replayed after a reload (ja); the review
@@ -343,7 +343,7 @@ try {
   await afType('');
   const g1 = await afMenu('.af-group', 'By helper');
   const heads1 = await evalJs(`[...${AF_PANEL}.querySelectorAll('.chat-artifact-head')].map((h) => h.dataset.group)`);
-  check('group switched to "By helper" through the ▾ menu: every head below the band is a helper', g1 && heads1.length > 2 && heads1.slice(1).every((k) => k.startsWith('h:')), heads1);
+  check('group switched to "By helper" through the ▾ menu: every head is a helper (or, past 8 rows, a folder head inside one)', g1 && heads1.length > 2 && heads1.filter((k) => k !== 'recent').every((k) => k.startsWith('h:') || k.startsWith('f:h:')), heads1);
   await afShot('A-1280-dark-en-by-helper');
   await afMenu('.af-group', 'By kind');
   await evalJs(`${AF_PANEL}.querySelector('.chat-artifact-head[data-group="k:code"]').click(); true`);
@@ -387,7 +387,7 @@ try {
   await evalJs(`document.documentElement.setAttribute('data-theme', 'light'); true`);
   await afOpen();
   const p1 = await afRect();
-  check('phone 390 (zh): the Artifacts popover is a bottom SHEET — full width, at the bottom, ≤ 82 vh — and scrolls; the words are Chinese', p1 && p1.left === 0 && p1.width === p1.w && Math.abs(p1.bottom - p1.h) <= 2 && p1.bottom - p1.top <= Math.ceil(p1.h * 0.82) + 2 && p1.scrolls && /43 项产出/.test(p1.count), p1);
+  check('phone 390 (zh): the Artifacts popover is a FULL-HEIGHT sheet (lane artifacts-by-intent) — full width, from under the phone\'s top bar to the bottom — and scrolls; the words are Chinese', p1 && p1.left === 0 && p1.width === p1.w && Math.abs(p1.bottom - p1.h) <= 2 && p1.top <= 64 && p1.scrolls && /43 项产出/.test(p1.count), p1);
   await afShot('A-390-light-zh');
   await evalJs(`document.documentElement.setAttribute('data-theme', 'dark'); true`); await sleep(150); await afShot('A-390-dark-zh');
   await evalJs(afStubFetch); await evalJs(`${AF_PANEL}.querySelector('.af-expand').click(); true`);

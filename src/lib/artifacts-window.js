@@ -10,23 +10,32 @@
 //   · LIVE: the conversation's chat views hand every Artifacts refresh to `onArtifacts` (src/lib/artifact-card.js — the
 //     chip's path: a card's birth / patch, an attach), so a new file / a service stopping lands here as it happens.
 //   · phone: the normal phone window; the rail folds into a row of chips above the table (chat.css).
+//   · lane artifacts-by-intent (owner 2026-11-06): the rail opens with the three BANDS (给你看的 · 做出来的 · 顺带改的 —
+//     the server's `intentOf` on every block), then the kinds and helpers; before a column is clicked the table reads
+//     band by band, newest first, a thin head row per band (the rail's words); the path column is the row's FOLDER (from
+//     the conversation's cwd) and sorts by it; a name that collides wears its distinguishing suffix — the popover's
+//     words. The rail's All or a band puts the bands' order back (one gesture after a column sort).
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 import { showContextMenu } from './utils.js';
-import { rowsOfView, filterRows, sortRows, railOf, railRows, countLine } from './artifacts-list-model.js';
-import { artifactRowIcon, artifactRowWords, setArtifactName, artifactRowMenu, artifactHeadWords, onArtifacts } from './artifact-card.js';
+import { rowsOfView, filterRows, sortRows, railOf, railRows, countLine, listCtx, pathWord, bandOf, INTENT_ORDER } from './artifacts-list-model.js';
+import { artifactRowIcon, artifactRowWords, paintArtifactName, artifactRowMenu, artifactHeadWords, artifactKindWord, onArtifacts } from './artifact-card.js';
 
 const div = (cls) => { const n = document.createElement('div'); n.className = cls; return n; };
 const span = (cls) => { const n = document.createElement('span'); n.className = cls; return n; };
 const COLS = [['name', 'Name'], ['kind', 'Kind'], ['helper', 'Helper'], ['edits', 'Edits'], ['changed', 'Last change'], ['path', 'Path']];
-const tail = (p) => String(p || '').replace(/\/+$/, '').split('/').filter(Boolean).slice(-2).join('/');
 const stamp = (ts) => { try { return ts ? new Date(ts).toLocaleString() : ''; } catch { return ''; } };
 
-/** The rows the table draws: the rail's choice → the filter → the column sort — ALL through the shared model. */
-export function windowRows(v, { rail = 'all', q = '', col = 'changed', dir = '' } = {}) {
-  const f = filterRows(railRows(rowsOfView(v), rail), q);
-  return { rows: sortRows(f.rows, { col, dir }), filtered: f.q ? f : null };
+/** The rows the table draws: the rail's choice → the filter → the column sort — ALL through the shared model (no
+ *  column clicked ⇒ 'intent': the bands, newest first, `bands` = [{band, rows}] for the table's band heads; `ctx` = the
+ *  popover's words context, listCtx — the told-apart folders and names over every row). */
+export function windowRows(v, { rail = 'all', q = '', col = 'intent', dir = '', kindWord = null, hubWord = 'Local' } = {}) {
+  const ctx = listCtx(v, { hubWord });
+  const f = filterRows(railRows(rowsOfView(v), rail), q, { ...ctx, kindWord });
+  const rows = sortRows(f.rows, { col: col || 'intent', dir, ...ctx });
+  const bands = (col || 'intent') === 'intent' ? INTENT_ORDER.map((band) => ({ band, rows: rows.filter((r) => bandOf(r) === band) })).filter((b) => b.rows.length) : null;
+  return { rows, filtered: f.q ? f : null, bands, ctx };
 }
 /** THE ONE ARTIFACT OPEN DOOR: a row opens through the conversation's chat view when this client shows it (its one door),
  *  else by its kind. Exported for the For-you chips (lane foryou-attachments: an ask's --artifact rows — a page by its
@@ -43,7 +52,7 @@ export function openArtifactRow(app, sessionId, b) {
 
 /** The window's content over `root`; returns {draw, update(v), state}. `fetchView()` → the server's view(rows). */
 export function mountArtifactsWindow(root, { app = null, sessionId = '', signal = null, fetchView = null } = {}) {
-  const st = { v: null, rail: 'all', q: '', col: 'changed', dir: '' };
+  const st = { v: null, rail: 'all', q: '', col: 'intent', dir: '' }; // lane artifacts-by-intent: no column clicked ⇒ the bands
   const rail = div('af-win-rail'); rail.setAttribute('role', 'listbox'); rail.setAttribute('aria-label', t('Group by'));
   const main = div('af-win-main');
   const top = div('af-top');
@@ -74,8 +83,8 @@ export function mountArtifactsWindow(root, { app = null, sessionId = '', signal 
     if (!it) {
       it = div('af-rail-item' + (cls ? ' ' + cls : '')); it.dataset.rail = key; it.setAttribute('role', 'option'); it.tabIndex = 0;
       it.append(span('af-rail-word'), span('af-rail-n'));
-      it.addEventListener('click', () => { st.rail = key; draw(); });
-      it.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); st.rail = key; draw(); } });
+      it.addEventListener('click', () => pickRail(key));
+      it.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickRail(key); } });
       railEls.set(key, it);
     }
     const w = it.querySelector('.af-rail-word'); if (w.textContent !== words) w.textContent = words;
@@ -83,8 +92,11 @@ export function mountArtifactsWindow(root, { app = null, sessionId = '', signal 
     const on = st.rail === key; if (it.classList.contains('active') !== on) { it.classList.toggle('active', on); it.setAttribute('aria-selected', String(on)); }
     return it;
   };
+  const pickRail = (key) => { st.rail = key; if (key === 'all' || key.startsWith('i:')) { st.col = 'intent'; st.dir = ''; } else if (key === 'recent') { st.col = 'changed'; st.dir = ''; } draw(); }; // All / a band ⇒ the bands' order again; «Recent» ⇒ newest first, no bands (r4: as the base read it)
+  const bandEls = new Map();
+  const bandHead = (band, n) => { let h = bandEls.get(band); if (!h) { h = div('af-tband chat-status-dim'); h.dataset.band = band; h.setAttribute('role', 'row'); bandEls.set(band, h); } const words = `${artifactHeadWords({ group: 'intent', label: band })} · ${n}`; if (h.textContent !== words) h.textContent = words; return h; };
   const railHead = (key, words) => { let h = railEls.get(key); if (!h) { h = div('af-rail-head chat-status-dim'); railEls.set(key, h); } if (h.textContent !== words) h.textContent = words; return h; };
-  const rowEl = (b) => {
+  const rowEl = (b, ctx) => {
     let r = rowEls.get(b.key);
     if (!r) {
       r = div('af-trow'); r.setAttribute('role', 'row'); r.tabIndex = -1;
@@ -101,14 +113,14 @@ export function mountArtifactsWindow(root, { app = null, sessionId = '', signal 
     r.dataset.key = b.key; r.dataset.kind = b.kind;
     if (b.kind === 'service') r.dataset.state = b.state || 'running'; else if (r.dataset.state) delete r.dataset.state;
     const ic = r.querySelector('.chat-artifact-ic'); if (ic.dataset.name !== b.name) { ic.innerHTML = artifactRowIcon(b); ic.dataset.name = b.name || ''; }
-    setArtifactName(r.querySelector('.chat-artifact-name'), b.name || '', st.q);
-    const w = artifactRowWords(b);
+    paintArtifactName(r.querySelector('.chat-artifact-name'), b, ctx, st.q);
+    const w = artifactRowWords(b, ctx);
     const set = (sel, v, title) => { const n = r.querySelector(sel); if (n.textContent !== v) n.textContent = v; if (title != null && n.title !== title) n.title = title; };
     set('.af-c-kind', b.kind === 'service' ? `${w.kind} · ${w.edits}` : w.kind);
     set('.af-c-helper', w.helper || '—', w.helper);
     set('.af-c-edits', b.kind === 'service' ? '—' : String(Math.max(0, (b.writes || 0) - 1) + (b.edits || 0) || '—'));
     set('.af-c-changed', w.ago, stamp(b.kind === 'service' ? (b.since || b.lastAt) : b.lastAt));
-    set('.af-c-path', b.kind === 'service' ? (b.url || '') : '\u200e' + tail(b.path), b.path || '');
+    set('.af-c-path', (b.kind === 'service' ? '' : '\u200e') + pathWord(b, ctx), b.path || ''); // the folder the popover names — what the column sorts by (the whole path on hover)
     return r;
   };
   const reconcile = (box, want) => {
@@ -119,14 +131,16 @@ export function mountArtifactsWindow(root, { app = null, sessionId = '', signal 
   function draw() {
     const all = rowsOfView(st.v);
     const R = railOf(all);
-    if (!['all', 'recent', ...R.kinds.map((k) => k.key), ...R.helpers.map((h) => h.key)].includes(st.rail)) st.rail = 'all'; // a choice whose rows are gone falls back to all
+    if (!['all', 'recent', ...R.intents.map((k) => k.key), ...R.kinds.map((k) => k.key), ...R.helpers.map((h) => h.key)].includes(st.rail)) st.rail = 'all'; // a choice whose rows are gone falls back to all
     const wantRail = [railItem('all', t('All'), R.total)];
+    for (const b of R.intents) wantRail.push(railItem(b.key, artifactHeadWords({ group: 'intent', label: b.label }), b.count, 'af-rail-band')); // lane artifacts-by-intent: the bands first
+    wantRail.push(railHead('kinds-head', t('Kinds')));
     for (const k of R.kinds) wantRail.push(railItem(k.key, artifactHeadWords({ group: 'kind', label: k.label }), k.count));
     if (R.helpers.length) { wantRail.push(railHead('helpers-head', t('Helpers'))); for (const h of R.helpers) wantRail.push(railItem(h.key, h.label, h.count, 'af-rail-helper')); }
     wantRail.push(railItem('recent', t('Recent'), null, 'af-rail-recent'));
     reconcile(rail, wantRail);
-    const { rows, filtered } = windowRows(st.v, st);
-    const want = rows.map(rowEl);
+    const { rows, filtered, bands, ctx } = windowRows(st.v, { ...st, kindWord: artifactKindWord, hubWord: t('Local') });
+    const want = bands && bands.length > 1 ? bands.flatMap((b) => [bandHead(b.band, b.rows.length), ...b.rows.map((r) => rowEl(r, ctx))]) : rows.map((b) => rowEl(b, ctx)); // where «for you» ends
     if (filtered && !rows.length) want.push(empty);
     reconcile(tbody, want);
     const items = Array.isArray(st.v && st.v.items) ? st.v.items.length : 0, code = Array.isArray(st.v && st.v.code) ? st.v.code.length : 0;

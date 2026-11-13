@@ -96,6 +96,33 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   ok(HT.claude({ type: 'user', message: { content: 'hello' } }, {}).length === 0 && HT.claude(null).length === 0 && HT.claude(TASK[0], {}).length === 0, 'the helper door answers [] for a record that ends nothing');
 }
 
+{ // lane artifacts-by-intent r3 (z1): a helper's transcript is an AGENT's — a page link in its Task prompt (the parent's
+  // words, read through the helper door) puts the page in front of the person; it is never the person's own paste
+  const PG = '/p/pgreferee001';
+  agent(SUB, 'a04', { agentType: 'general-purpose', description: 'Check the report', toolUseId: 'toolu_T4' }, [
+    { type: 'user', uuid: 'h1', timestamp: T(40), cwd: CWD, sessionId: SID, isSidechain: true, agentId: 'a04', message: { role: 'user', content: `Check the report at ${PG} and list what is missing` } },
+    { type: 'assistant', uuid: 'h2', timestamp: T(41), cwd: CWD, sessionId: SID, isSidechain: true, agentId: 'a04', message: { id: 'mh2', role: 'assistant', content: [{ type: 'text', text: 'Two tables are missing.' }] } }]);
+  const T4 = [use('toolu_T4', 'Agent', { description: 'Check the report', prompt: `Check the report at ${PG}`, subagent_type: 'general-purpose' }, 39), res('toolu_T4', 42, 'reviewed', { toolUseResult: { status: 'completed', agentId: 'a04' } })];
+  const hp = mk('L6');
+  REG.configure({ activeSessions: () => new Map([['L6', hp]]), log: quiet });
+  for (const r of T4) REG.observe(hp, r);
+  const lr = (hp._artifacts || {})[':' + PG];
+  ok(lr && lr.presented && lr.by === 'agent' && lr.shown === true && AF.intentOf(lr) === 'foryou' && lr.via && lr.via.kind === 'subagent', 'a page link in a helper\'s Task prompt (its transcript\'s first user record) ⇒ by the agent, shown — «for you», never the person\'s', lr);
+  const rb6 = mk('R6', { _normalizer: null, _artifacts: null });
+  await N.rebuildHistory(rb6, 'R6', T4);
+  const rr = (rb6._artifacts || {})[':' + PG];
+  ok(rr && rr.by === 'agent' && AF.intentOf(rr) === 'foryou', 'the rebuild (the same helper door) says the same', rr);
+  const hsrc = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
+  const STRIP = "        const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)\n        out.push({ ...op, id, via, cwd: rec.cwd || session.cwd || '' });";
+  const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', hsrc.replace(STRIP, "        out.push({ ...o, id, via, cwd: rec.cwd || session.cwd || '' });"), 'helperby') : null;
+  const hm = mk('M6');
+  if (ok(MH, 'CONTROL needle present: the helper door\'s strip of the reader\'s tag (r3) — a tree without it has nothing to patch')) { // r4: a control that cannot find its anchor says so by name, never «null»
+    MH.configure({ activeSessions: () => new Map([['M6', hm]]), log: quiet }); for (const r of T4) MH.observe(hm, r); REG.configure({ activeSessions: () => new Map([['L6', hp]]), log: quiet });
+    const mr = (hm._artifacts || {})[':' + PG];
+    ok(mr && mr.by === 'user' && AF.intentOf(mr) === 'made', 'CONTROL the helper door keeping the reader\'s person tag (r2: the record\'s TYPE) ⇒ the helper\'s page reads «made here» — RED', mr);
+  }
+}
+
 console.log('② the hand-over over the REAL registry + the REAL msg-acl');
 const CH = 'c0000001-0000-4000-8000-00000000000h', CR = 'c0000001-0000-4000-8000-00000000000r', CS = 'c0000001-0000-4000-8000-00000000000s', CX = 'c0000001-0000-4000-8000-00000000000x';
 const GROUPS = { [CH]: ['g-lanes'], [CR]: ['g-lanes'], [CS]: ['g-other'], [CX]: ['g-lanes'] };

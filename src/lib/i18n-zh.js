@@ -8296,6 +8296,13 @@ export default {
   "the regex is refused: two repeated pieces side by side can match the same text ({piece}) and take very long": "正则表达式被拒绝：相邻的两个重复片段能匹配同样的文字（{piece}），可能耗时极长",
   "the regex is refused: the repeated piece {piece} can re-read where a match starts and take very long — begin with a fixed word or ^": "正则表达式被拒绝：重复片段 {piece} 会把每个匹配起点重读一遍，可能耗时极长——请以固定的词或 ^ 开头",
   "the regex is refused: it matches an empty message, so it would match everything": "正则表达式被拒绝：它能匹配空消息，等于匹配一切",
+  // lane artifacts-by-intent: the list by intent — the bands, the picker's first choice, the window's rail head
+  "Touched {n} code files": "顺带改了 {n} 个代码文件",
+  "Touched {n} files": "顺带改了 {n} 个文件",
+  "Touched 1 code file": "顺带改了 1 个代码文件",
+  "Touched 1 file": "顺带改了 1 个文件",
+  "For you first": "给你看的优先",
+  "Kinds": "类型",
   // lane artifacts-list-scale: the Artifacts list at scale (filter / group / sort) + the Artifacts window
   "Filter: name / path / helper…": "筛选：名称 / 路径 / 帮手…",
   "Open in a window": "在窗口中打开",

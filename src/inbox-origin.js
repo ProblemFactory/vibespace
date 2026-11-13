@@ -103,4 +103,30 @@ function normalizeOrigin(x) {
   return x;
 }
 
-module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ORIGIN_LABELS, normalizeOrigin };
+// WHOSE ASK IS THIS (lane artifacts-by-intent r7 — the r6 Artifacts rebuild read every origin-`agent` item as an ask). An
+// ASK is what the agent asked the person to LOOK AT: the item the ask route (vibespace-ask, ASK_FILER) filed, marked
+// `via: 'ask'` — the store refuses the mark from any other product file, by name. Never a producer's record of a tool call
+// filed under the same conversation key with origin `agent`: src/server/main-asks.js (a parked permission — «WebFetch:
+// <url>»), src/server/helper-asks.js (a helper's approval), src/server/unexpected-exit.js. An item filed before the mark
+// existed is the route's by the shape the route wrote on every older tree (legacyAsk — read by the store's load, never by
+// a reader): the agent's own words (no i18n: every producer words its item as structure) and no action but one the For-you
+// action registry declares the route produces (`producerOf` = src/foryou-actions.js ROW_OF[type].producer — `--grant`'s;
+// a producer's action names its own file). r8: an item filed before the origin field (≤ 2.369.168, B-328d) names no origin
+// — the tray's legacy rung (src/lib/user-todos-layout.js originOf) reads it as the AGENT's unless its group label names a
+// producer ('Spending', 'Channels'); the ask's rung reads it the same (test-user-todos-layout ⑫ holds the two side by
+// side), never a job copy (a jobId — only Background Work files one). r9: nor the BROWSER's records — from 2.369.134 to
+// .168 it filed three under the conversation's key with no origin, no i18n, no action and the conversation's own name,
+// told apart only by the sentence each was filed with (unchanged across those releases; from .169 they name origin
+// 'browser'): a lapsed takeover (src/browser-takeover.js idleInboxItem — its detail names the page left open), a pending
+// confirmation (src/server/browser-handback.js noteConfirmation), a backend switch proposal (src/routes/browser.js
+// fileProposal). test-user-todos-layout ⑫ pins the .168 filers' shapes. The KEY half of the same question is the
+// route's too (src/agent-routes/status.js askKey; asksOf answers both for every reader).
+const ASK_VIA = 'ask';
+const ASK_FILER = 'src/agent-routes/status.js';
+const LEGACY_PRODUCER_LABELS = Object.freeze(['Spending', 'Channels']);
+const LEGACY_BROWSER_TEXTS = Object.freeze([/^Your takeover of .* lapsed after .* without input/, /^The agent's browser.* is waiting for you to confirm "/, /^Browser backend: /]);
+const agentsBefore = (i) => i.origin === 'agent' || (i.origin == null && !LEGACY_PRODUCER_LABELS.includes(i.sessionName) && i.jobId == null && !LEGACY_BROWSER_TEXTS.some((re) => re.test(String(i.text || ''))));
+const isAsk = (i) => !!i && i.via === ASK_VIA; // the mark is written with origin `agent` (the route) or by the load (an item the tray reads as the agent's)
+const legacyAsk = (i, producerOf = () => null) => !!i && agentsBefore(i) && i.via == null && i.i18n == null && (i.action == null || producerOf(i.action.type) === ASK_FILER);
+
+module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ORIGIN_LABELS, normalizeOrigin, ASK_VIA, ASK_FILER, isAsk, legacyAsk };

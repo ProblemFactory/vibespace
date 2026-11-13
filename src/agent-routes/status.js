@@ -11,7 +11,27 @@ const { sameToken } = require('../pairing-token.js'); // B-8dda: every vsst_ loo
 const { liveForkPending } = require('../claude-lock-capture.js');
 const OF = require('../server/owner-facts.js'); // lane agent-context-owner-facts (B-7960 b): the tray's label + current place, for the add answer
 const CN = require('../foryou-actions.js'); // PURE (lane chat-needs-you-card): THE For-you action registry — the agent's ONE line after a filing (the card in its chat + the tray)
+const IO = require('../inbox-origin.js'); // PURE: WHO filed an item — `via: 'ask'` marks the route's own (lane artifacts-by-intent r7)
 const cliText = require('../agent-cli-text.js'); // lane cli-one-text-arg (PURE): the stored question / detail, counted for the echo of the CLI (sent: N characters)
+
+// WHOSE ASK IS THIS (lane artifacts-by-intent r7) — ONE answer, the route's own, for the route and for every reader of a
+// conversation's asks (the Artifacts rebuild: server.js hands asksOf to src/server/artifact-registry.js): the KEY the route
+// files and lists under, and the ITEM the route filed (IO.isAsk — `via: 'ask'`, never a producer's record of a tool call
+// filed under the same key: a parked permission, a helper's approval, an unexpected exit).
+function askKey(s, id, sessionStatusKey) {
+  // verify r5 (channel-withdraw): a BORROWED id (a pending fork) is not a key an item may be filed under — the item
+  // stayed under the PARENT's key for good (nothing re-keys `claude:<parent>` to the fork's own id later) and the
+  // owner's reply was typed into the parent. The placeholder key migrates to the fork's OWN key at its next ask.
+  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);
+  return key;
+}
+/** Every ask this conversation filed that the store keeps — open or answered — under its key or the placeholder
+ *  `webui:<id>` an early ask (and a pending fork's) waits under; a store without the read answers none. */
+function asksOf(store, s, id, sessionStatusKey) {
+  if (!store || typeof store.idsWhere !== 'function' || typeof store.get !== 'function') return [];
+  const keys = new Set([askKey(s, id, sessionStatusKey), `webui:${id}`]);
+  return store.idsWhere((i) => IO.isAsk(i) && keys.has(i.sessionKey)).map((x) => store.get(x)).filter(Boolean);
+}
 
 function register(app, c) {
 const { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems } = c;
@@ -20,10 +40,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
   if (!hit) return;
   if (!toolOn('Ask')) return toolDisabled(res, 'vibespace-ask');
   const [s, id] = hit;
-  // verify r5 (channel-withdraw): a BORROWED id (a pending fork) is not a key an item may be filed under — the item
-  // stayed under the PARENT's key for good (nothing re-keys `claude:<parent>` to the fork's own id later) and the
-  // owner's reply was typed into the parent. The placeholder key migrates to the fork's OWN key at its next ask.
-  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);
+  const key = askKey(s, id, sessionStatusKey); // the ONE key rule (a pending fork files under its placeholder) — asksOf reads by it
   if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
   const { add, list, resolve, show, clear } = req.body || {};
   try {
@@ -66,8 +83,8 @@ app.post('/api/agent/user-todo', async (req, res) => {
         if (!tg.ok) return res.status(tg.code === 'grant-not-found' ? 404 : 409).json({ error: tg.error, code: tg.code });
         grantFields = AG.grantItemFields(tg.profile);
       }
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null, ...(grantFields || {}) });
-      if (artifacts) require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id }); // the conversation's Artifacts list shows them (the one writer) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', via: IO.ASK_VIA, sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null, ...(grantFields || {}) });
+      require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id, said: [item.text, item.detail] }); // the conversation's Artifacts list shows them (the one writer) — and every /p/ link the ask's words carry (lane artifacts-by-intent r4: a page an ask names is put in front of the person) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       bookkept(s);
       return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()), ...(item.existing ? {} : { filed: CN.filedLine(item, item.id, OF.tray()) }) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
     }
@@ -135,4 +152,4 @@ app.get('/api/session-status/history', (req, res) => {
 });
 }
 
-module.exports = { register };
+module.exports = { register, askKey, asksOf };

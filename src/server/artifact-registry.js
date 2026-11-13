@@ -15,9 +15,11 @@
  *   · handover({from, to, items, reach}) — `vibespace-msg send <agent> "…" --artifact <path>…`: the helper's OWN rows
  *     land as the receiver's rows with `via: {kind:'handover', from}`; a design re-registers under the receiver and
  *     opens its Design window; the helper's row keeps `handedTo`.
- *   · presentAsk(session, artifacts, {id}) — `vibespace-ask … --artifact <path|/p/id>…` (lane foryou-attachments): each
+ *   · presentAsk(session, artifacts, {id, said}) — `vibespace-ask … --artifact <path|/p/id>…` (lane foryou-attachments): each
  *     attachment the ask carries is a `present` op (AF.askOp) on the asking conversation's rows — its Artifacts list shows
- *     what it asked the owner to look at; `judgeAsk` (the route's submit check) proved each one OPENS before anything is filed
+ *     what it asked the owner to look at; `judgeAsk` (the route's submit check) proved each one OPENS before anything is filed;
+ *     a /p/ link in the ask's text or detail (`said`) is a `present` op too (lane artifacts-by-intent r4) — AF.askOps, the ONE
+ *     reader of an ask (r6: the rebuild reads the For-you store's asks through it — `asksOf`; a token a cap cut is no link)
  *   · touch({sessionId, host, path, summary}) — the user's own save in an editor window linked to the chat
  *     (ws `artifact-touch`): the row gets `by: user, edits+1` and the conversation hears ONE next-turn note.
  * THE REGISTRIES (lane artifacts-registries) — the three stores' ONE notification points hand their records here; the
@@ -33,9 +35,13 @@
  *   · presented pages (lane pages-chip-groups) — a /p/<id> link in a TEXT record (the hook's `present` ops, live AND
  *     rebuild) is a `page` row with `presented: true`; `listFor` resolves it against the pages store at every read
  *     (AF.resolvePresented), a birth or a page's later publish / unpublish tells the conversation's clients
- *     (`artifacts-changed` → they re-read GET /api/artifacts — the one feed)
+ *     (`artifacts-changed` → they re-read GET /api/artifacts — the one feed); so does ANY row's birth or move between
+ *     bands (noteOp — lane artifacts-by-intent r5: an ask naming a pasted page or attaching a code file moves it)
  *   At every rebuild the pages + designs rows come back from THEIR stores (`storeRowsOf`, normalizers' store-rows seam);
- *   the uploads live in the persisted rows (the composer's attachment record IS this registry).
+ *   the uploads live in the persisted rows (the composer's attachment record IS this registry). r6: so do the ASKS — every
+ *   ask this conversation filed that the For-you store keeps (`deps.asks` — r7: the ask route's own answer to «whose ask
+ *   is this?», src/agent-routes/status.js asksOf), open or answered, folds the ops it folded live; a rebuild whose merge
+ *   stamped a row `shown` the persisted rows lacked persists at once (normalizers' persist seam → persistSoon).
  * THE CONTRACT TOWARD doc-window (spelled in src/artifacts.js's header + kb-file-structure):
  *   ownerOf({host, path}) → {sessionId, row} | null     noteEdit({sessionId, conversationId?, host, path, summary}) → boolean
  */
@@ -43,7 +49,7 @@ const AF = require('../artifacts.js');
 const { toAgentText: agentText } = require('../peer-text.js');
 const DOC_EDIT_FROM = 'Doc edit'; // the stash's `doc-edit` source (lane doc-window): drained as "the user edited a document:" + the re-read hint
 
-let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, jobs: () => null, ports: () => null, instanceUrl: null, toSession: null, log: console };
+let deps = { activeSessions: () => new Map(), deliver: null, sessionMeta: null, pages: () => null, designs: () => null, jobs: () => null, ports: () => null, instanceUrl: null, toSession: null, hosts: () => null, asks: () => [], log: console };
 /** server.js's ONE line: the live sessions, the delivery ladder (stashFor), the session-meta store and the two stores
  *  a rebuild reads its pages / designs rows from. */
 function configure(d = {}) {
@@ -51,6 +57,8 @@ function configure(d = {}) {
   try { normalizers().setArtifactStoreSource(storeRowsOf); } catch (e) { deps.log.warn?.(`[artifacts] store-rows seam not set: ${e.message}`); }
   try { normalizers().setArtifactServiceSource(servicesOf); } catch (e) { deps.log.warn?.(`[artifacts] service-rows seam not set: ${e.message}`); }
   try { normalizers().setArtifactHelperSource(helperOps); } catch (e) { deps.log.warn?.(`[artifacts] helper seam not set: ${e.message}`); }
+  try { normalizers().setArtifactPersistSink((s) => persistSoon(s, 0)); } catch (e) { deps.log.warn?.(`[artifacts] persist seam not set: ${e.message}`); }
+  try { normalizers().setArtifactQuoteSource(askIdOf); } catch (e) { deps.log.warn?.(`[artifacts] quote seam not set: ${e.message}`); }
   return api;
 }
 const sessions = () => { try { const m = deps.activeSessions(); return m && typeof m.entries === 'function' ? m : new Map(); } catch { return new Map(); } };
@@ -61,20 +69,21 @@ function hookOf(session) {
   try { const h = require('../harnesses').harnessOf((session && session.backend) || 'claude'); return h && typeof h.artifactsOf === 'function' ? h.artifactsOf : null; } catch { return null; }
 }
 
-function persistSoon(session) {
+function persistSoon(session, ms = 1500) {
   const store = deps.sessionMeta && deps.sessionMeta();
   if (!store || !session.sockName) return;
   clearTimeout(session._artifactsTimer);
   session._artifactsTimer = setTimeout(() => {
     try { store.writeSessionMeta(session.sockName, { ...(store.readSessionMeta(session.sockName) || {}), artifacts: session._artifacts || {} }); }
     catch (e) { deps.log.warn?.(`[artifacts] ${session.sockName}: rows not persisted: ${e.message}`); }
-  }, 1500);
+  }, ms);
   if (session._artifactsTimer && session._artifactsTimer.unref) session._artifactsTimer.unref();
 }
 
 /** Fold ONE op into the session's rows; a deliverable's card is fed (born or patched in place). */
 function noteOp(session, op) {
-  const r = AF.apply(session._artifacts || {}, { host: session.host || '', cwd: session.cwd || '', ...op, at: Number(op.at) || Date.now() });
+  const before = session._artifacts || {};
+  const r = AF.apply(before, { host: session.host || '', cwd: session.cwd || '', ...op, at: Number(op.at) || Date.now() });
   if (r.skipped || !r.row) return r;
   session._artifacts = r.rows;
   if (r.evicted.length) deps.log.log?.(`[artifacts] ${session.sockName || '?'}: ${r.evicted.length} row(s) evicted past ${AF.MAX_ROWS} (oldest code first): ${r.evicted.slice(0, 3).join(', ')}`);
@@ -84,7 +93,8 @@ function noteOp(session, op) {
     try { normalizers().feedArtifactCard(session, block); } catch (e) { deps.log.warn?.(`[artifacts] card not fed: ${e.message}`); }
   }
   persistSoon(session);
-  if (r.row.presented) { if (r.born) tellChanged(session); return r; } // lane pages-chip-groups: a page shown here — no file to index
+  if (r.born || AF.intentOf(before[r.row.key]) !== AF.intentOf(r.row)) tellChanged(session); // THE ONE RULE (lane artifacts-by-intent r5): a row born or moved between bands — a pasted page an ask names, a code file it attaches — tells every client; an op that moves nothing tells nothing
+  if (r.row.presented) return r; // lane pages-chip-groups: a page shown here — no file to index
   require('./search-index.js').noteArtifact({ sessionId: session.sockName || null, host: r.row.host || session.host || '', path: r.row.path }); // lane global-search: every new / edited row's file is (re)indexed
   return r;
 }
@@ -100,8 +110,9 @@ function observe(session, record) {
   // the helper door: the descriptor's hook names what ENDS a helper (claude: a user record; antigravity: a finished `subagent` card)
   if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set() };
   ops = ops.concat(helperOps(session, record, session._helperArtifacts));
+  ops = AF.quotedOps(ops, askIdOf(session, session.sockName)); // r10: a tray answer's quote is the agent's only when it quotes this conversation's ask
   let n = 0;
-  for (const o of ops) { try { if (!noteOp(session, { ...o, by: 'agent' }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] op skipped: ${e.message}`); } }
+  for (const o of ops) { try { if (!noteOp(session, { ...o, by: AF.opAuthor(o) }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] op skipped: ${e.message}`); } }
   return n;
 }
 
@@ -126,7 +137,8 @@ function helperOps(session, record, state = { runs: new Map(), seen: new Set() }
       for (const o of ops) {
         const id = o.id ? 'sub:' + o.id : null;
         if (id && state.seen) { if (state.seen.has(id)) continue; state.seen.add(id); }
-        out.push({ ...o, id, via, cwd: rec.cwd || session.cwd || '' });
+        const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)
+        out.push({ ...op, id, via, cwd: rec.cwd || session.cwd || '' });
       }
     }
   }
@@ -238,15 +250,15 @@ async function judgeAsk({ session = null, items = [], fsCall = null, remote = nu
   }
   return { artifacts, bad };
 }
-/** A filed ask's attachments → the asking conversation's rows (ONE `present` op each through noteOp — the one writer). */
-function presentAsk(session, artifacts, { id = '', at = Date.now() } = {}) {
-  if (!session || !Array.isArray(artifacts)) return 0;
+/** A filed ask → the asking conversation's rows (ONE `present` op each through noteOp — the one writer): its attachments,
+ *  and (lane artifacts-by-intent r4) every /p/ link in its words (`said` = the ask's text + its WHOLE detail) — the agent
+ *  putting a page in front of the person, «for you» from the ask on (the tray answer's quote of it is the agent's too). */
+function presentAsk(session, artifacts, { id = '', at = Date.now(), said = [] } = {}) {
+  if (!session) return 0;
   let n = 0;
-  artifacts.forEach((a, k) => {
-    const op = AF.askOp(a, { at, id: id ? `ask:${id}:${k}` : '' });
-    if (!op) return;
-    try { if (!noteOp(session, { ...op, by: 'agent' }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] ask attachment not shown: ${e.message}`); }
-  });
+  for (const op of AF.askOps({ artifacts, id, at, said })) {
+    try { if (!noteOp(session, op).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] ask attachment not shown: ${e.message}`); }
+  }
   return n;
 }
 
@@ -273,12 +285,25 @@ function noteUploads({ sessionId, host = '', files = [] } = {}) {
   for (const f of files || []) { const op = AF.uploadOp(f, { host: host || session.host || '' }); if (op && !noteOp(session, op).skipped) n++; }
   return n;
 }
-/** The rebuild's third input (normalizers' store-rows seam): this conversation's pages + designs, from their stores. */
+/** The rebuild's third input (normalizers' store-rows seam): this conversation's pages + designs, from their stores, and
+ *  (r6) its asks from the For-you store. */
 function storeRowsOf(session, sessionId) {
   const id = sessionId || (session && session.sockName);
   if (!id) return {};
   const ask = (store) => { try { const s = store && store(); return s && typeof s.list === 'function' ? s.list({ sessionId: id }) || [] : []; } catch { return []; } };
-  return AF.storeRows({ pages: ask(deps.pages), designs: ask(deps.designs) });
+  return AF.storeRows({ pages: ask(deps.pages), designs: ask(deps.designs), asks: asksOf(session, id) });
+}
+/** THE ASK STORE'S ONE READ (r6): every ask this conversation filed the For-you store keeps — open or answered. r7: WHOSE
+ *  ask it is, the ask route answers (`deps.asks` = src/agent-routes/status.js asksOf over the store — the route's key, a
+ *  pending fork's placeholder, the route's own items only); a hub that has not wired it reads as none. */
+function asksOf(session, id) {
+  try { const out = deps.asks && deps.asks(session, id); return Array.isArray(out) ? out : []; } catch { return []; }
+}
+/** WHOSE ITEM A TRAY ANSWER QUOTES (r10): `(itemId) → is it one of this conversation's asks` — asksOf's items, read once,
+ *  only when a quote asks (the live consumer per record; the rebuild's derivation through normalizers' quote seam). */
+function askIdOf(session, id) {
+  let ids = null;
+  return (itemId) => (ids || (ids = new Set(asksOf(session, id).map((it) => String((it && it.id) || ''))))).has(String(itemId));
 }
 
 // ── THE SERVICES (lane artifacts-services) — the jobs door: a job this conversation OWNS that listens on a port ──
@@ -380,7 +405,19 @@ function presentedResolved(s, sessionId, rows) {
 function listFor(sessionId) {
   const s = sessions().get(String(sessionId || ''));
   const v = AF.view({ ...(s ? presentedResolved(s, String(sessionId), s._artifacts || {}) : {}), ...(s ? servicesOf(s) : {}) }); // + the derived service rows; the presented pages resolved (lane pages-chip-groups)
-  return { ok: true, items: v.items.map(AF.cardBlock), code: v.code.map(AF.cardBlock), count: v.count, codeCount: v.codeCount, full: v.full };
+  const host = s && s.host && s.host !== 'local' ? String(s.host) : '';
+  return { ok: true, items: v.items.map(AF.cardBlock), code: v.code.map(AF.cardBlock), count: v.count, codeCount: v.codeCount, full: v.full,
+    cwd: String((s && s.cwd) || ''), host, hostNames: hostNamesOf([host, ...v.items.map((r) => r.host), ...v.code.map((r) => r.host)]) }; // lane artifacts-by-intent: the folder a row names is read against the conversation's cwd
+}
+/** id → the machine's name as the host pickers show it (deps.hosts = server.js's HostManager — its record's `name`; an
+ *  id it no longer knows: none), for the machines a view names (lane artifacts-by-intent r4: a folder on another
+ *  machine says «gpu1:», never its id; r5: the hosts registry itself is the dep — test-artifacts pins the wiring). */
+function hostNamesOf(ids) {
+  const out = {};
+  const hosts = (() => { try { return deps.hosts && deps.hosts(); } catch { return null; } })();
+  if (!hosts || typeof hosts.get !== 'function') return out;
+  for (const id of new Set(ids.map((x) => String(x || '')).filter((x) => x && x !== 'local'))) { let n = ''; try { n = String((hosts.get(id) || {}).name || ''); } catch { n = ''; } if (n) out[id] = n; }
+  return out;
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 

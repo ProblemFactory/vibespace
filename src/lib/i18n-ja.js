@@ -8295,6 +8295,13 @@ export default {
   "the regex is refused: two repeated pieces side by side can match the same text ({piece}) and take very long": "正規表現は拒否されました: 隣り合う 2 つの繰り返し（{piece}）が同じ文字に一致でき、非常に時間がかかることがあります",
   "the regex is refused: the repeated piece {piece} can re-read where a match starts and take very long — begin with a fixed word or ^": "正規表現は拒否されました: 繰り返し {piece} は一致の開始位置ごとに読み直すため非常に時間がかかることがあります — 固定の語か ^ で始めてください",
   "the regex is refused: it matches an empty message, so it would match everything": "正規表現は拒否されました: 空のメッセージに一致するため、すべてに一致してしまいます",
+  // lane artifacts-by-intent: the list by intent — the bands, the picker's first choice, the window's rail head
+  "Touched {n} code files": "ついでに変えたコードファイル {n} 件",
+  "Touched {n} files": "ついでに変えたファイル {n} 件",
+  "Touched 1 code file": "ついでに変えたコードファイル 1 件",
+  "Touched 1 file": "ついでに変えたファイル 1 件",
+  "For you first": "あなた向けを先に",
+  "Kinds": "種類",
   // lane artifacts-list-scale: the Artifacts list at scale (filter / group / sort) + the Artifacts window
   "Filter: name / path / helper…": "絞り込み：名前 / パス / ヘルパー…",
   "Open in a window": "ウィンドウで開く",

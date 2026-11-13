@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const F = await import(path.join(REPO, 'src/lib/foryou-links.js'));
+const fileImports = (src, dir = 'src/lib') => src.replace(/(\b(?:from|import)\s+')(\.\.?\/[^']+)(')/g, (x, a, p, z) => a + 'file://' + path.join(REPO, dir, p) + z); // r10 (F2): every relative import → the file it names
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + JSON.stringify(e).slice(0, 600) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -45,6 +46,58 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const s = 'a `docs/x.md` b /p/pgabcdefghij https://q.test/a?b=1&c=2), c ~/n.md: d (docs/y.md) ops@x.io';
   ok(F.segmentText(s).map((g) => g.s).join('') === s, 'the segments join back to the words EXACTLY (nothing added, nothing dropped)');
   ok(/data-ref="https:\/\/q\.test\/a\?b=1&amp;c=2"/.test(F.linkedHtml(s)), 'a link\'s ref rides its attribute escaped');
+}
+
+// lane artifacts-by-intent r7 (T6): A CUT TOKEN IS NO LINK IN THE TRAY EITHER — the store keeps an ask's words to 500 / 8 000
+// through ONE cut whose kept words end in «…» (src/inbox-reply-text.js clip); the segmenter reads the runs the cut went through
+// (cutRuns — the rule every reader of a cut text reads) and draws a link over one as its words
+{
+  const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
+  const clipT = typeof RT.clip === 'function' ? RT.clip : (x, cap) => x.slice(0, cap); // an older tree: the store's plain slice
+  const P10 = 'pg' + '7'.repeat(10), keptQ = clipT('x'.repeat(483) + ' /p/' + P10 + '7 more', 500), keptD = clipT('y'.repeat(7983) + ' /p/' + P10 + '7 more', 8000), keptU = clipT('z'.repeat(460) + ' https://vs.example.com/p/' + P10 + '7 more', 500), whole = 'x'.repeat(484) + ' /p/pg' + '8'.repeat(10);
+  const seen = { q: links(keptQ), d: links(keptD), u: links(keptU), whole: links(whole), words: F.segmentText(keptQ).map((g) => g.s).join('') === keptQ };
+  ok(keptQ.endsWith('/p/' + P10 + '…') && !seen.q.length && !seen.d.length && !seen.u.length && J(seen.whole) === J(['page:/p/pg8888888888']) && seen.words,
+    'a page token the store\'s cut went through (pg + 10 kept, the mark after it — the question at 500, the detail at 8 000, a URL form) ⇒ no link, drawn as its words; a whole link ending at the cap ⇒ a link', seen);
+  const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src));';
+  // r10 (F2): A CONTROL COPY RESOLVES EVERY RELATIVE IMPORT OF THE MODULE IT COPIES — a data: URL copy resolves no relative
+  // specifier, and a sibling lane adds imports (mask-value-shape r4: a second '../path-linkify.js' import + '../secret-shapes.js'):
+  // every static `from '<./ or ../>…'` / `import '<…>'` is rewritten to the file it names, never only the ones this suite knew
+  const planted = "import { pathRe as pathRe2 } from '../path-linkify.js';\nimport * as shapes from '../secret-shapes.js';\n" + FY1, asData = (src) => import('data:text/javascript,' + encodeURIComponent(src));
+  const gen = { left: (fileImports(planted).match(/\b(?:from|import)\s+'\.\.?\//g) || []).length };
+  const r9imp = await asData(planted.replace("from '../path-linkify.js';", `from 'file://${path.join(REPO, 'src/path-linkify.js')}';`).replace("from '../inbox-reply-text.js';", `from 'file://${path.join(REPO, 'src/inbox-reply-text.js')}';`)).then(() => 'loaded', (e) => e.code || e.message);
+  ok(r9imp !== 'loaded', 'CONTROL r9\'s rewrite (the first path-linkify import and inbox-reply-text only) of the same copy ⇒ the import fails at the sibling\'s specifier — RED', r9imp);
+  const r6seg = FY1.includes(ONE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(planted).replace(ONE, '  return segmentWords(src);')))).segmentText : null;
+  ok(gen.left === 0 && typeof r6seg === 'function', 'r10 (F2) the control copies resolve EVERY relative import of the copied module — a copy that gains a sibling\'s imports (a second path-linkify import, secret-shapes) loads, no relative specifier left', { ...gen, loaded: typeof r6seg });
+  ok(r6seg, 'CONTROL needle present: the segmenter reads the cut runs (r7) — a tree without it has nothing to patch');
+  if (r6seg) ok(J(r6seg(keptQ).filter((g) => g.t === 'link').map((g) => g.kind + ':' + g.ref)) === J(['page:/p/' + P10]), 'CONTROL r6\'s segmenter (the cut runs unread) ⇒ the tray links «page:/p/' + P10 + '» before the «…» — RED');
+  // r8 (X1): THE WHOLE LINK TOKEN, NEVER ITS WORD FRAGMENT — a URL or a path runs on across '.', '/', '?', '=', ':' where a
+  // page id stops: the store's cut at EVERY position through a URL, an absolute path, a relative path, a home path, a mail
+  // address ⇒ the token drawn as words, never a link to a truncated target or another host; the uncut link earlier in the
+  // same words stays a link; a whole link a CJK mark or a space ends before the cut stays a link
+  const TOKS = ['https://docs.example.com/guide/install.html?lang=en', '/home/u/proj/src/app/main.py', 'docs/guide/plan.md', '~/notes/today.md', 'mailto:a.b@example.com', 'a.b@example.com', '/home/u/proj/src/app/main.py:120:4']; // r9 (Y2): a path's :line:col suffix
+  const sweep = (seg, toks = TOKS) => { const out = { through: [], first: 0, n: 0 }; for (const tok of toks) for (let k = 1; k <= tok.length; k++) { const raw = 'ok https://ok.example.org/a first. ' + 'x'.repeat(10) + ' ' + tok + ' tail words', at = raw.indexOf(tok); const kept = clipT(raw, at + k + 1), L = seg(kept).filter((g) => g.t === 'link'); out.n++; if (L.length && L[0].ref === 'https://ok.example.org/a') out.first++; if (L.length > 1) out.through.push(kept.slice(at) + ' ⇒ ' + L.slice(1).map((g) => g.ref).join()); } return out; };
+  const sw8 = sweep(F.segmentText), cjk = [links('请审阅 /p/pgaaaaaaaaaa，以及更多说明文字…'), links('请看/p/pgaaaaaaaaaa以及说明…'), links('see /home/u/a.md and then more…')];
+  ok(sw8.n === 184 && sw8.through.length === 0 && sw8.first === sw8.n && J(cjk) === J([['page:/p/pgaaaaaaaaaa'], ['page:/p/pgaaaaaaaaaa'], ['path:/home/u/a.md']]),
+    'r8 (X1) + r9 (Y2) the store\'s cut at every one of 184 positions through a URL (query and all), an absolute path, a relative path, a home path, a mailto:, a mail address and a path with its :line:col suffix (a cut right after either \':\' too) ⇒ never a link over the cut token (no other host, no truncated target); the uncut link before it a link at every position; a whole link a CJK mark, CJK words or a space ends before the cut stays a link', { through: sw8.through.slice(0, 6), first: sw8.first, n: sw8.n, cjk });
+  const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs) {')) + 2);
+  const r7seg = FY1.includes(ONE) && R7CUT.length > 40 ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(R7CUT, "function uncutLinks(src, segs) {\n  const runs = cutRuns(src).filter(([b, e]) => e > b);\n  if (!runs.length) return segs;\n  let at = 0;\n  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && runs.some(([b, e]) => b < at && e > a) ? { t: 'text', s: g.s } : g; });\n}")))).segmentText : null;
+  ok(r7seg, 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
+  const PROBE = "t.slice(0, e) + '0' + t.slice(e + 1)";
+  const r8seg = FY1.includes(PROBE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(PROBE, "t.slice(0, e) + 'x' + t.slice(e + 1)")))).segmentText : null;
+  ok(r8seg, 'CONTROL needle present: the segmenter\'s digit probe (r9) — a tree without it has nothing to patch');
+  if (r8seg) { const s8 = sweep(r8seg, TOKS.slice(6)); ok(s8.through.length === 2 && s8.through.every((x) => /main\.py:(120:)?… ⇒ /.test(x)), 'CONTROL r8\'s probe (a letter) ⇒ the two cuts right after a \':\' of main.py:120:4 still a link to the file, its line or its column dropped — RED', s8.through); }
+  // r10 (n5): a RELATIVE path's `:line` — the relative grammar never takes it (path-linkify: an uncut «plan.md:42» is no link),
+  // so a cut right after its ':' still read the file: the digit probe's text reads no link there at all. A link only the cut made
+  // (the continued words read none at its place, no space before the mark) is the cut token too
+  const RELT = ['docs/guide/plan.md:42', 'src/app/main.py:120:4'], s10 = sweep(F.segmentText, RELT);
+  ok(s10.n === 42 && !s10.through.length && s10.first === s10.n && !links('see docs/guide/plan.md:42 now').length && J(links('see docs/guide/plan.md and more…')) === J(['rel:docs/guide/plan.md']),
+    'r10 (n5) the store\'s cut at every one of 42 positions through a RELATIVE path with its :line / :line:col (a cut right after a \':\' too) ⇒ never a link; the uncut link before it a link at every position; a whole relative path a space ends before the cut stays a link (an uncut «plan.md:42» is no link — the relative grammar\'s own rule, unchanged)', s10);
+  const CUTMADE = ' || cutMade(a, at)';
+  const r9seg = FY1.includes(CUTMADE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CUTMADE, '')))).segmentText : null;
+  ok(r9seg, 'CONTROL needle present: a link only the cut made (r10) — a tree without it has nothing to patch');
+  if (r9seg) { const s9 = sweep(r9seg, RELT); ok(s9.through.length === 2 && s9.through.every((x) => /(plan\.md|main\.py):… ⇒ (docs\/guide\/plan\.md|src\/app\/main\.py)$/.test(x)), 'CONTROL r9\'s rule (the probe\'s links only) ⇒ «docs/guide/plan.md:…» and «src/app/main.py:…» still link the file, the line dropped — RED', s9.through); }
+  const R7N = 18; // r7's word run over the first six tokens' 150 positions
+  if (r7seg) { const sw7 = sweep(r7seg, TOKS.slice(0, 6)); ok(sw7.through.length === R7N && sw7.through.some((x) => /⇒ https:\/\/docs\.example$/.test(x)), 'CONTROL r7\'s rule (the page id\'s word run before the mark) ⇒ ' + R7N + ' of 150 cut positions still a link — «https://docs.example.…» a link to ANOTHER host, «…/guide/» a parent — RED', { n: sw7.through.length, first: sw7.through.slice(0, 4) }); }
 }
 
 console.log('§2 RESOLUTION — against the ASKING conversation\'s cwd + home on ITS host');
@@ -109,7 +162,7 @@ const S = await serve(path.join(REPO, 'src/agent-routes/status.js'));
   ok(it.cwd === REPOX && !it.hostId, 'the store stamps the asker\'s cwd (and no host: this box)');
   const rows = sessL._artifacts;
   ok(rows[':' + path.join(REPOX, 'report.md')] && rows[':' + path.join(REPOX, 'report.md')].lastOp === 'present' && rows[':' + path.join(REPOX, 'design-dir')].kind === 'design' && rows[':/p/pgaaaaaaaaaa'] && rows[':/p/pgaaaaaaaaaa'].presented, 'THE ONE WRITER: the registry folded a `present` op per attachment — the conversation\'s Artifacts list shows them', Object.keys(rows));
-  ok(!/_artifacts/.test(read('src/agent-routes/status.js')) && /presentAsk\(s, item\.artifacts, \{ id: item\.id \}\)/.test(read('src/agent-routes/status.js')), 'the route never writes the rows itself — presentAsk (artifact-registry.js) does');
+  ok(!/_artifacts/.test(read('src/agent-routes/status.js')) && /presentAsk\(s, item\.artifacts, \{ id: item\.id, said: \[item\.text, item\.detail\] \}\)/.test(read('src/agent-routes/status.js')), 'the route never writes the rows itself — presentAsk (artifact-registry.js) does');
   const n0 = S.count();
   const cases = [
     ['a missing file', [path.join(REPOX, 'missing.md')], 'missing', /no such file on this machine — check the path/],
@@ -192,7 +245,7 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   ok(/function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
     'the For-you window: its words drawn by THE tray\'s renderer (wordsHtml — one renderer over both doors, never markdown: lane foryou-honest), a command\'s verbatim <pre> linked as text nodes, its chips as nodes');
   ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr) })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
-  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(FY.replace("import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';", `import { pathRe, cleanPath, looksRelPath, relCandidates } from 'file://${path.join(REPO, 'src/path-linkify.js')}';`).replace("import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js';", `import { CJK_PUNCT, SEG, isTrailing } from 'file://${path.join(REPO, 'src/path-linkify.js')}';`).replace("import { maskedLink } from '../secret-shapes.js';", `import { maskedLink } from 'file://${path.join(REPO, 'src/secret-shapes.js')}';`).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g) } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g) } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
+  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g) } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g) } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
   ok(/<img/.test(rawHtml), 'CONTROL: a linkedHtml without its escape lets <img onerror> through — the §1 XSS leg is RED on it');
   // the one artifact door: a chip opens through openArtifactRow (artifacts-window.js) — never its own opener
   const ACT = read('src/lib/user-todos-actions.js');

@@ -62,6 +62,30 @@ process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recur
 const tmpdir = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-inbox-reply-')); cleanup.push(d); return d; };
 
 const R = require(path.join(REPO, 'src/inbox-reply.js'));
+// §5b's two `vibespace-ask` processes (each its own node) START HERE against a recording route running the store's own rule,
+// and run beside the in-process sections; §5b reads what they did (lane artifacts-by-intent r6: the suite's wall by measure)
+let spawned5b = null;
+const CLI5B = (async () => {
+  const http = require('node:http');
+  const { execFile } = require('node:child_process');
+  const bodies = [];
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
+      const body = JSON.parse(b || '{}'); bodies.push(body);
+      try { const options = R.normalizeOptions(body.add && body.add.options); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ success: true, item: { id: 'ut-x', text: body.add.text, urgency: 'normal', options } })); }
+      catch (e) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  srv.unref(); // the children keep the process alive while they run; nothing else waits on this route
+  const run = (args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin/vibespace-ask'), ...args], { env: { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 10000 }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout, stderr })));
+  const runs = Promise.all([run(['decide', '--options', ' Run now | Wait ']), run(['decide', '--options', 'Run now||Wait'])]);
+  spawned5b();
+  const [good, bad] = await runs;
+  srv.close();
+  return { good, bad, bodies };
+})();
+await new Promise((r) => { spawned5b = r; }); // both children spawned (the route bound first) before the in-process sections start
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 
 // ── §1 PURE compose / parse ────────────────────────────────────────────────
@@ -87,6 +111,33 @@ console.log('§1 composeReply / parseReply');
   ok(short.includes('> detail:\n> short detail\n') && !short.includes('cut at'), 'a detail under the cap is quoted whole with NO cut line');
   const exact = R.composeReply({ ...base, detail: 'z'.repeat(1500) }, 'ok', { now });
   ok(!exact.includes('cut at'), 'a detail of exactly 1500 chars is not "cut"');
+  const cutOpts = R.parseReply(R.composeReply({ ...base, detail: long, options: ['run now', 'wait'] }, 'ok', { now }));
+  const forged = typeof R.cutLine === 'function' ? R.parseReply(R.composeReply({ ...base, detail: 'abc\n' + R.cutLine(1500, 2000, 'ut-0000000000') }, 'ok', { now })) : { cutAt: 'no cutLine' };
+  ok(p.cutAt === p.quote.indexOf('\n… (detail cut') && p.quote.slice(0, p.cutAt).endsWith('\n' + 'y'.repeat(99)) && cutOpts.cutAt === cutOpts.quote.indexOf('\n… (detail cut') && R.parseReply(short).cutAt === -1 && R.parseReply(exact).cutAt === -1 && forged.cutAt === -1 && R.parseReply(plain).cutAt === -1,
+    'parseReply reads the cut back (`cutAt` = where the cut detail ends — before an options line too); a whole detail, one of exactly the cap, or a cut line naming another item ⇒ -1 (lane artifacts-by-intent r5: the reader drops the token the cap cut)', { p: p.cutAt, cutOpts: cutOpts.cutAt, forged: forged.cutAt });
+  // r6 (lane artifacts-by-intent U1): THE CUT MARK — ONE marker for every cap that may split a token: the store's `clip`
+  // keeps cap − 1 chars + CUT_MARK (the kept length the cap), the reply's cut line opens with it; `uncut` drops the word run
+  // each cut went through — before a mark that ends a line or the text, and at parseReply's `cutAt`
+  const RT = require(path.join(REPO, 'src/inbox-reply-text.js'));
+  const hasMark = typeof RT.clip === 'function' && typeof RT.uncut === 'function', L6 = 'a /p/pgabcdefghij';
+  ok(hasMark && RT.CUT_MARK === '…' && RT.clip('x'.repeat(501), 500) === 'x'.repeat(499) + '…' && RT.clip('x'.repeat(500), 500) === 'x'.repeat(500) && R.cutLine(1500, 2000, 'ut-0000000000').startsWith(RT.CUT_MARK + ' ('),
+    'clip: past the cap ⇒ cap − 1 chars + the mark (the kept length IS the cap); at the cap ⇒ whole, unmarked; the reply\'s cut line opens with the same mark');
+  ok(hasMark && RT.uncut(L6 + '…') === 'a /p/…' && RT.uncut(L6 + '…\nnext') === 'a /p/…\nnext' && RT.uncut(L6 + '… more') === L6 + '… more' && RT.uncut(L6) === L6 && RT.uncut('x\n' + L6 + '\n> … (cut)', 2 + L6.length) === 'x\na /p/\n> … (cut)' && RT.uncut(null) === '',
+    'uncut: the word run before a mark that ENDS the text or a line is dropped (a link cut there is no link); a mark inside a line drops nothing; `cutAt` drops the run before it; no cut ⇒ the text as it is');
+  // r7 (T4): ONE surrogate-safe cut — an emoji at cap − 1 is dropped whole (never a lone high surrogate before the mark), one at
+  // cap − 2 kept whole; r7 (T3): the same words across the upgrade (an older tree's plain slice vs the marked cut); r7 (T6): the
+  // runs a cut went through are ONE rule (cutRuns) — uncut drops them, the tray's links read them
+  const E = '\u{1F600}', r6clip = (x, cap) => (x.length > cap ? x.slice(0, cap - 1) + '…' : x), clipT = hasMark ? RT.clip : (x, cap) => x.slice(0, cap), loneHi = (t) => /[\ud800-\udbff](?![\udc00-\udfff])/.test(t);
+  const at1 = 'x'.repeat(498) + E + 'tail', at2 = 'x'.repeat(497) + E + 'tail';
+  ok(hasMark && RT.clip(at1, 500) === 'x'.repeat(498) + '…' && RT.clip(at2, 500) === 'x'.repeat(497) + E + '…' && !loneHi(RT.clip(at1, 500)) && !loneHi(RT.clip(at2, 500)),
+    'r7 (T4) clip is surrogate-safe: an emoji at cap − 1 ⇒ dropped whole, the mark after 498 chars; at cap − 2 ⇒ kept whole before the mark');
+  ok(loneHi(r6clip(at1, 500)), 'CONTROL r6\'s clip (cap − 1 units, no pair guard) ⇒ «x\\ud83d…», a lone high surrogate before the mark — RED');
+  const sw = typeof RT.sameWords === 'function' ? RT.sameWords : (a, b) => a === b, D9 = 'L'.repeat(8999) + E;
+  ok(sw(clipT(D9, 8000), D9.slice(0, 8000), 8000) && sw(clipT('q'.repeat(9000), 8000), r6clip('q'.repeat(9000), 8000), 8000) && sw('same', 'same', 8000) && !sw(clipT('q'.repeat(9000), 8000), 'r'.repeat(8000), 8000) && !sw('Hello…', 'Hello' + 'q'.repeat(7995), 8000) && !sw(clipT('q'.repeat(9000), 8000), 'q'.repeat(7999), 8000),
+    'r7 (T3) sameWords: the marked cut and an older tree\'s plain cap-unit slice of the same words are the same words (an r6 cut too); other words, a short text of its own ending in «…», a stored copy shorter than the cap — not');
+  const runs = typeof RT.cutRuns === 'function' ? RT.cutRuns : () => [];
+  ok(JSON.stringify(runs(L6 + '…\nx /p/pgab… more\nend…')) === JSON.stringify([[5, 17], [35, 38]]) && hasMark && RT.uncut(L6 + '…\nend…') === 'a /p/…\n…' && JSON.stringify(runs('ab', 1)) === JSON.stringify([[0, 1]]),
+    'r7 (T6) cutRuns: the [start, end) runs every reader of a cut text drops — before a mark that ends a line or the text, and at `cutAt`; uncut is the text without them');
 
   const withOpts = R.composeReply({ ...base, detail: 'd', options: ['run now', 'wait for backup'] }, 'wait for backup', { now });
   ok(withOpts.includes('\n> options: run now | wait for backup\n\nwait for backup'), 'options ⇒ one `> options: A | B` line, the last quote line');
@@ -395,24 +446,11 @@ console.log('§5 turn facts + wiring');
 // the store refuses the same string by name — two producers, one string, two answers.
 console.log('§5b vibespace-ask --options: the CLI passes the labels as typed, the store names a bad one');
 {
-  const http = require('node:http');
-  const { execFile } = require('node:child_process');
-  const bodies = [];
-  const srv = http.createServer((req, res) => {
-    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
-      const body = JSON.parse(b || '{}'); bodies.push(body);
-      try { const options = R.normalizeOptions(body.add && body.add.options); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ success: true, item: { id: 'ut-x', text: body.add.text, urgency: 'normal', options } })); }
-      catch (e) { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
-    });
-  });
-  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-  const run = (args) => new Promise((resolve) => execFile(process.execPath, [path.join(REPO, 'data/bin/vibespace-ask'), ...args], { env: { ...process.env, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 10000 }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout, stderr })));
-  const good = await run(['decide', '--options', ' Run now | Wait ']);
-  ok(good.code === 0 && JSON.stringify(bodies[0]?.add?.options) === '["Run now","Wait"]' && /options: Run now \| Wait/.test(good.stdout), '"A|B" ⇒ two labels, trimmed, echoed', { good, body: bodies[0] });
-  const bad = await run(['decide', '--options', 'Run now||Wait']);
-  ok(JSON.stringify(bodies[1]?.add?.options) === '["Run now","","Wait"]', '"A||B" reaches the route AS TYPED (the empty label is not silently dropped)', bodies[1]);
+  const { good, bad, bodies } = await CLI5B; // started at the top (the two CLI processes ran beside the in-process sections)
+  const bodyOf = (o) => bodies.find((b) => JSON.stringify(b?.add?.options) === o);
+  ok(good.code === 0 && bodies.length === 2 && bodyOf('["Run now","Wait"]') && /options: Run now \| Wait/.test(good.stdout), '"A|B" ⇒ two labels, trimmed, echoed', { good, bodies });
+  ok(bodyOf('["Run now","","Wait"]'), '"A||B" reaches the route AS TYPED (the empty label is not silently dropped)', bodies);
   ok(bad.code === 1 && /options\[1\] is empty/.test(bad.stderr), '…and the CLI exits 1 printing the store\'s refusal BY NAME', bad);
-  srv.close();
 }
 
 // ── §4b (lane S1 verify r2, M1) the route: a helper-ask item is refused by name — nothing written, nothing resolved ──
@@ -742,7 +780,7 @@ console.log('§8c the ORCH reopener over a recording create');
   const T = mk({ answer: 'throw' });
   const rt = await T.R2.reopen({ sessionKey: 'claude:c-5' });
   ok(!rt.ok && /did not start: boom/.test(rt.why), 'a create that THROWS ⇒ said with its message', rt);
-  const S = mk({ delay: 30 });
+  const S = mk({ delay: 1 }); // the create held in flight (reopen() sets its in-flight entry synchronously — the two presses share it whatever the hold; lane artifacts-by-intent r6: 30 ms → 1 ms of the suite's wall)
   const [p1, p2] = await Promise.all([S.R2.reopen({ sessionKey: 'claude:c-6' }), S.R2.reopen({ sessionKey: 'claude:c-6' })]);
   ok(S.creates.length === 1 && p1.ok && p2.ok && p1.sessionId === p2.sessionId && S.R2.inflightCount() === 0, 'two replies at once (a double press, a second device) ⇒ ONE create, both answered with the same session', { creates: S.creates.length });
   const W2 = mk();
