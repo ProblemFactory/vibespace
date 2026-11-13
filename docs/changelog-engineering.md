@@ -141,6 +141,14 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The server half of lastRaw:** test-roster-per-pass pins the group view carrying it (the reader's M5a is red).
 - **Census §1b drives the one formatter in-process:** the DST pair, the page-zone «today», page-time's exports.
 
+### ui-language on 2.369.399 — meeting the released code
+- **The resume dialog (chat-cards-2):** 2.369.399 fixed it first (connection-notice-once addendum 1: one plain sentence, pinned by test-connection-notice ⑫). That version stands; pick 1's split lines and their two rows left in the rebase.
+- **The census meets the release:**
+  - ① 480 → **477**: 2.369.399 worded code-editor's «Edit» / «Preview».
+  - connection-notice's `clockWords` is a PURE module's fallback (the chat hands in the owner's clock, chat-view `timeOn`). It says so with `// page-time:`.
+- **The «in {span}» row** left the dictionaries: its only reader, page-time `until()`, was deleted in the closure round (§78 dead text).
+- **The reader's mutant battery, re-run:** two holes it showed now have pins. M4a: a stored default name returned unchanged from the Rename dialog keeps the store (test-desktop-switch). M4c: an unknown value shows as itself, never blank (test-ui-language).
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

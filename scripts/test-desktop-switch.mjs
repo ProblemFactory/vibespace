@@ -395,6 +395,17 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
       seen.ret = await make(startRenameSrc, 'async _startRename() { return true; }', { t: t1, showToast: sink, showInputDialog: dlg }).call(self, { id: 'd2', name: 'Desk B' });
       return seen;
     };
+    // the mutant battery (M4a, the reader's): a STORED default name («Desktop 2») is shown worded in the Rename dialog, and the
+    // worded name coming back unchanged keeps the store as it was — never writes the reader's words into the stored name
+    {
+      const mk = (x, p) => '‹' + tr(x, p) + '›', renamed = [];
+      const selfD = { _desktops: [{ id: 'd1', name: 'Desktop 1' }, { id: 'd2', name: 'Desktop 2' }], renameDesktop: (id, n) => { renamed.push(id + '=' + n); }, nameOf, _doorParams: doorParams };
+      selfD._doorRefused = make(doorRefusedSrc, '_doorRefused() { return false; }', { t: mk });
+      let shownValue = null;
+      const ret = await make(startRenameSrc, 'async _startRename() { return true; }', { t: mk, showInputDialog: async (o) => { shownValue = o.value; return o.value; } }).call(selfD, { id: 'd2', name: 'Desktop 2' });
+      ok(shownValue === '‹Desktop {n}›'.replace('{n}', '2') && ret === false && renamed.length === 0,
+        'a stored default name is SHOWN worded in the Rename dialog, and the worded name returned unchanged keeps the store (no rename written)', { shownValue, ret, renamed });
+    }
     const m1 = await runRename({ mark: true });
     const d1 = m1.dialog || {};
     ok(m1.ret === true && JSON.stringify(m1.renamed) === JSON.stringify(['d2=Taxes']) && d1.title === '‹Rename Desktop›' && d1.label === '‹Desktop name›' && d1.confirmText === '‹Rename›' && d1.value === 'Desk B',

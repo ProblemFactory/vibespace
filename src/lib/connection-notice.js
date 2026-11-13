@@ -52,6 +52,7 @@ function durationWords(ms, t) {
   return m < 60 ? t('{n} min', { n: m }) : t('{n} h', { n: Math.round(m / 60) });
 }
 
+// page-time: a PURE module's fallback for its own tests — the chat hands in the owner's clock (chat-view: timeOn, the page's zone)
 const clockWords = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** The row's one line — it says what is true NOW: a second drop that has not come back never reads «已重连». */
