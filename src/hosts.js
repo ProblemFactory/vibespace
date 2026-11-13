@@ -545,7 +545,8 @@ class HostManager {
     // Name collision is checked BEFORE any file write — the old order wrote
     // data/ssh/<id>.key and THEN threw, orphaning a key file no record ever
     // referenced again.
-    if (this._state.hosts.some(h => h.name === rec.name)) throw new Error('A host with that name exists');
+    // the refusal carries a CODE (exit-routes sends it; the page words it — lane ui-language, the walk's machines-12)
+    if (this._state.hosts.some(h => h.name === rec.name)) throw Object.assign(new Error('A host with that name exists'), { code: 'host-name-taken' });
     // Pasted/uploaded private key → stored per-host under data/ssh, 0600.
     // add() stays SYNCHRONOUS (setDialToken calls it and immediately does
     // findByDeviceId on the result), so it cannot run the ssh-keygen unlock —
@@ -2927,9 +2928,10 @@ ${cliIdentityShellFns()}
 // progress events (step start/ok/fail) plus the raw log stream — the UI shows
 // a step list with an expandable live log. Idempotent: every step checks
 // before installing.
+const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs) — the page words each step through t()
 const BOOTSTRAP_STEPS = [
-  { key: 'connect', label: 'Connect' },
-  { key: 'dtach', label: 'dtach (session persistence)' },
+  { key: 'connect', label: i18nKey('Connect') },
+  { key: 'dtach', label: i18nKey('dtach (keeps sessions alive)') },
   { key: 'node', label: 'Node.js' },
   { key: 'claude', label: 'Claude Code CLI' },
 ];

@@ -88,7 +88,7 @@ const PLUGIN_SETTINGS = {
         description: t('The language Dropline listens for when you click the microphone in the chat box. “Any language” lets it decide per recording.') },
       { key: 'teach', type: 'boolean', default: false, apply: 'server',
         label: t('Suggest words for my Dropline dictionary (I confirm each batch)'),
-        description: t('Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice row in the Plugins list shows “{n} waiting” until you add or ignore the batch. Only what you confirm is sent.') },
+        description: t('Example: you keep saying “LarkClient” — it is proposed for your dictionary; the Voice input row in the Plugins list shows how many words are waiting until you add or ignore the batch. Only what you confirm is sent.') }, // lane ui-language (the walk's settings-7): no raw «{n}» — the count is the Plugins row's own
       // lane voice-dictionary-nag (a fleet user 2026-10-21: 「一天到晚有这个 Dropline 让我发信息的消息, 站在我的 inbox 里」):
       // 「词典建议」 (ON by default — `teach` still decides whether Dropline is taught at all): off ⇒ nothing is proposed; its
       // row lists every word suggested now with 加入 / 忽略 (settings-ui → voice-teach-ui mountSuggestionList); and WHERE
@@ -133,7 +133,7 @@ const PLUGIN_SETTINGS = {
       { key: 'reachBrowsers', type: 'boolean', default: true, apply: 'server',
         label: t('Reach tailnet hosts from browsers'), description: t('On: while Tailscale runs, the browsers here open a tailnet machine by its name (https://nas:8006/) — only tailnet hosts go through Tailscale, everything else goes direct, and this machine\'s DNS is never changed. A browser with a proxy of its own keeps it. Kernel mode: a change takes effect at once for running browsers. Userspace: a running browser follows at its next start. A browser started while this was off reaches tailnet hosts from its next start; the in-page browser always follows at once.') },
       { key: 'upFlags', type: 'string', default: '', apply: 'server', migrate: { from: 'upFlags' },
-        label: t('tailscale up flags'), description: t('Extra `tailscale up` flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.') },
+        label: t('tailscale up flags'), description: t('Extra “tailscale up” flags — applied on the next Log in / mode change. Reachability flags we manage (--socket/--tun/--accept-routes/--accept-dns/proxy) are ignored.') },
     ],
   },
 };

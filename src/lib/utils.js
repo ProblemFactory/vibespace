@@ -474,8 +474,11 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
     const p = document.createElement('p');
     p.className = 'dialog-hint';
     p.style.fontSize = '12px';
-    p.textContent = message;
-    if (message || !list.length) body.appendChild(p);
+    // lane ui-language: `message` may be a list of sentences — one line each, as TEXT (a key never carries <br> / <b>)
+    const lines = Array.isArray(message) ? message.filter((x) => x != null && x !== '').map(String) : null;
+    const paras = lines && lines.length ? lines.map((x, i) => { const q = i ? p.cloneNode(false) : p; q.textContent = x; if (i) q.style.marginTop = '6px'; return q; }) : [p];
+    if (!lines) p.textContent = message;
+    if ((lines ? lines.length : message) || !list.length) for (const q of paras) body.appendChild(q);
     if (list.length) {
       const ul = document.createElement('ul');
       ul.className = 'dialog-list';

@@ -1,0 +1,775 @@
+{
+ "note": "lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}) and ⑤ zh/ja rows left in English. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.",
+ "visible": {
+  "src/lib/chat-view.js": [
+   "data-thread-id=\""
+  ],
+  "src/decision-model.js": [
+   "Hi Sam, can you approve the Q3 budget by Friday? Finance is waiting on you.",
+   "FYI the office plants were watered today.",
+   "The checkout service is down for every customer — this is the third complaint today.",
+   "Following up again: I still need the signed contract from you before I can ship.",
+   "Not:",
+   "The agent cannot go on without the reader's answer and is waiting now.",
+   "The reader must act by a named date or time.",
+   "The agent continued on a default, finished, or only needs the reader's eventual word: a notice, a report, a question with no clock."
+  ],
+  "src/lib/session-card.js": [
+   "var(--text-dim)",
+   "e.g. claude-opus-4-6"
+  ],
+  "src/lib/vault-window.js": [
+   "Vault"
+  ],
+  "src/integration-registry.js": [
+   "us-east-1",
+   "github.com"
+  ],
+  "src/lib/usage-window.js": [
+   "Usage"
+  ],
+  "src/model-providers.js": [
+   "Default"
+  ],
+  "src/office-open.js": [
+   "LibreOffice Writer",
+   "LibreOffice Calc",
+   "LibreOffice Impress",
+   "LibreOffice Writer",
+   "LibreOffice Calc",
+   "LibreOffice Impress",
+   "Carlito / Caladea fonts"
+  ],
+  "src/lib/incident-recorder.js": [
+   "no answer"
+  ],
+  "src/lib/workflow-detail.js": [
+   "Workflow",
+   "Workflow agent",
+   "Workflow"
+  ],
+  "src/desktop-backends.js": [
+   "WebRTC stream"
+  ],
+  "src/exit-shell.js": [
+   "the shell line is empty",
+   "cmd.exe runs one line — the command has",
+   "lines; join them with & or && (or run them one at a time)",
+   "cmd.exe takes at most",
+   "characters on one line — the command has"
+  ],
+  "src/lib/artifacts-window.js": [
+   "Artifacts"
+  ],
+  "src/design-viewer-entry.js": [
+   "This design has no artboards.",
+   "Double-click an artboard to open it",
+   "This design could not be shown:"
+  ],
+  "src/lib/toolbar-fold.js": [
+   "Terminal",
+   "Desktop",
+   "Saved presets"
+  ],
+  "src/channels/gmail/manifest.js": [
+   "…apps.googleusercontent.com"
+  ],
+  "src/lib/manage-agents.js": [
+   "style=\"color:var(--red,#e55)\"",
+   "data-blocked=\"1\"",
+   "sk-ant-oat01-…",
+   "var(--text-secondary)",
+   "var(--text-secondary)",
+   "data-usage-src=\"codex\" data-usage-key=\"__global_codex__\"",
+   "data-blocked=\"1\"",
+   "data-pooled=\"1\"",
+   "data-usage-src=\"codex\" data-usage-key=\"",
+   "data-usage-src=\"codex\" data-usage-key=\"",
+   "you@example.com",
+   "Claude Code",
+   "data-usage-src=\"global\" data-usage-key=\"__global__\"",
+   "data-usage-src=\"host-own\" data-usage-key=\"",
+   "data-blocked=\"1\"",
+   "data-hostsub=\"1\"",
+   "data-linked=\"1\"",
+   "data-pooled=\"1\"",
+   "sk-ant-…",
+   "you@example.com"
+  ],
+  "src/lib/desktop-app-launcher.js": [
+   "Apps…",
+   "-fa Monospace -fs 12"
+  ],
+  "src/browser-stuck.js": [
+   "the page is still loading",
+   "— the site has not answered yet (the network, not a hung page or a dialog)",
+   "the navigation to",
+   "never committed: after",
+   "s the tab still shows the old page (",
+   ") — the page is holding it and no dialog is known",
+   "the command ran into the",
+   "It was the browser's only tab, so a blank one was opened in its place.",
+   "Note:",
+   "Agent browser \"",
+   "\" has not answered since",
+   "UTC — Restart it",
+   "Its DevTools endpoint has not answered for",
+   "min while its process is alive: it is hung, not busy, and every conversation using it is refused. Restart (here, or on its row in the Browser panel) stops it an",
+   "several files allowed",
+   "one file",
+   "Sign in"
+  ],
+  "src/lib/sidebar-rail.js": [
+   "System",
+   "Ports",
+   "style=\"padding-left:"
+  ],
+  "src/lib/setup-flows.js": [
+   "body{font:13px/1.5 system-ui;max-width:880px;margin:24px auto;padding:0 16px;color:#24292f}\n      h2{margin:18px 0 6px} table{border-collapse:collapse;min-width"
+  ],
+  "src/browser-passkey.js": [
+   "A page in the agent's browser is waiting for a passkey ( )",
+   "A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is re",
+   "The agent browser's saved passkeys are sealed under this key: until it is back, a sign-in goes on without them and a new passkey is not kept.",
+   "The passkey VibeSpace lent to the tab « » could not be taken back — close that tab",
+   "VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time it is still on that tab, so that tab may still sig"
+  ],
+  "src/consent-road.js": [
+   "body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}",
+   "data-chain=\""
+  ],
+  "src/lib/form-window.js": [
+   "Form"
+  ],
+  "src/lib/browser-replay-window.js": [
+   "Browser replay"
+  ],
+  "src/lib/session-palette.js": [
+   "Jump to a session… (type a /path for a new one)",
+   "Jump to a session…"
+  ],
+  "src/lib/subagent-card.js": [
+   "data-sub-since=\"",
+   "data-sub-id=\""
+  ],
+  "src/lib/browser-live-window.js": [
+   "Agent browser (live)"
+  ],
+  "src/lib/session-lifecycle.js": [
+   "Terminal",
+   "Chat"
+  ],
+  "src/lib/utils.js": [
+   "Dismiss"
+  ],
+  "src/lib/doc-window-ui.js": [
+   "img/figure.png"
+  ],
+  "src/lib/path-field.js": [
+   "Enter",
+   "Tab",
+   "Esc",
+   "data-file=\""
+  ],
+  "src/lib/sidebar-workbench.js": [
+   "Show sessions from this machine or a remote host",
+   "New session here on",
+   "style=\"display:none\"",
+   "style=\"display:none\"",
+   "Clear",
+   "Done",
+   "Unarchive this project (folder + all its sessions)",
+   "Archive this project (",
+   "+ future sessions here)",
+   "Archive project",
+   "Archive all",
+   "? New sessions in this folder will start archived too (nothing is deleted; find them under the Archived filter).",
+   "Archive all",
+   "New session here",
+   "Show more ("
+  ],
+  "src/vault-inventory.js": [
+   "Accounts",
+   "Integrations",
+   "Channels",
+   "Storage",
+   "App logins",
+   "Passkeys",
+   "Automation keys",
+   "Hub secrets",
+   "Machine link token ·",
+   "Relay token",
+   "Sealed file key ·",
+   "Agent minted · never shown to the agent",
+   "Agent stored · the agent saw the plaintext",
+   "Agent secret ·"
+  ],
+  "src/lib/design-window.js": [
+   "Design"
+  ],
+  "src/lib/code-editor.js": [
+   "Auto",
+   "Plain Text",
+   "Edit",
+   "Preview",
+   "Toggle word wrap",
+   "Format document (Shift+Alt+F)",
+   "Decrease font size",
+   "Increase font size",
+   "Preview",
+   "Error"
+  ],
+  "src/plugin-settings.js": [
+   "Voice input · Dropline",
+   "Public URLs (frp)"
+  ],
+  "src/browser-picture.js": [
+   "Open this browser's display in Desktop to act on Chrome's own window"
+  ],
+  "src/machine-desktop-model.js": [
+   "Blender",
+   "Blender",
+   "TightVNC Server 2.8.85"
+  ],
+  "src/channel-facts.js": [
+   "Bcc",
+   "Reply-To",
+   "Sent by",
+   "Mailing list",
+   "Delivered to",
+   "Subject",
+   "Importance",
+   "Automated",
+   "Via",
+   "Forwarded from",
+   "Edited",
+   "Recalled",
+   "Event",
+   "Fields"
+  ],
+  "src/workflow-disk.js": [
+   "Other",
+   "Agents"
+  ],
+  "src/backlog-select.js": [
+   "` for finished ones, `backlog-drop"
+  ],
+  "src/memory-census.js": [
+   "Server memory"
+  ],
+  "src/browser-profiles.js": [
+   "(cloud, key required)",
+   "Agent browser",
+   "could not be started — VibeSpace stopped trying after",
+   "failed attempts in",
+   "Its browser closed, and VibeSpace asked for it again",
+   "times in",
+   "; every ask failed and no browser started — the browser program missing or being reinstalled, its profile folder unreadable, or a full disk. VibeSpace no longer",
+   "in ⚙ → Tools → Agent browser… (that resets it); the next command then starts it fresh.",
+   "Agent browser",
+   "keeps closing — VibeSpace stopped starting it again after",
+   "restarts in",
+   "Its browser was started again",
+   "times in",
+   "and closed each time — a page that crashes it, its window being closed, or too little memory. VibeSpace no longer restarts it by itself, and an agent's browser ",
+   "in ⚙ → Tools → Agent browser… (that resets it); the next command then starts it fresh.",
+   "child (own ephemeral browser)",
+   "(or export VIBESPACE_BROWSER=",
+   "; no default is set (`vibespace-browser pin  ` sets one)"
+  ],
+  "src/lib/browser-trace-view.js": [
+   "Agent browser"
+  ],
+  "src/job-model.js": [
+   "full history:",
+   "vibespace-job list"
+  ],
+  "src/browser-takeover.js": [
+   "Your takeover of",
+   "lapsed after",
+   "without input — the agent is driving again",
+   "Nothing was sent to the agent (browser.announceIdleHandback is off); it learns of the handback when its next",
+   "command succeeds, or with your next message. Take over again from the live view if you were not done.",
+   "Page you left it on:",
+   "Interrupted when you took over — the agent is told to re-run:"
+  ],
+  "src/lib/inbox-window.js": [
+   "For you"
+  ],
+  "src/automation-keys.js": [
+   "Put a conversation in a task group",
+   "Invite a conversation into a group",
+   "Look up a conversation's ids",
+   "Mark an agent's feedback handled",
+   "Read the agents' open feedback",
+   "Conversations",
+   "Agent groups",
+   "Feedback",
+   "Other"
+  ],
+  "src/dial-facts.js": [
+   "closed without an error",
+   "HTTP 401 with no reason (a server older than this device)",
+   "upgrade refused",
+   "unknown failure"
+  ],
+  "src/lib/file-viewer.js": [
+   "(no subject)",
+   "From",
+   "Date",
+   "(empty body)",
+   "Text",
+   "Text",
+   "File viewer",
+   "Hex viewer"
+  ],
+  "src/harness-settings.js": [
+   "Concise",
+   "Explanatory",
+   "Learning",
+   "Proactive",
+   "gemini-4-carbon-medium",
+   "gemini-4-carbon-high",
+   "gemini-4-carbon-low",
+   "gemini-4-argon-high",
+   "gemini-4-argon-medium",
+   "gemini-3.8-flash-high",
+   "gemini-3.8-flash-medium"
+  ],
+  "src/permission-rules.js": [
+   "user settings",
+   "shared project settings",
+   "project local settings",
+   "command line arguments",
+   "enterprise managed settings",
+   "packaged defaults",
+   "system config",
+   "enterprise-managed layer",
+   "user config (profile “",
+   "user config",
+   "project config",
+   "this session’s own -c flags",
+   "legacy managed_config.toml",
+   "legacy managed_config.toml (MDM)",
+   "unknown layer “",
+   "unknown layer",
+   "(drop-in)",
+   "permissions block is empty",
+   "no permissions block",
+   "codex built-in defaults",
+   "no config layer sets these — they are codex’s own defaults",
+   "unknown source",
+   "the answer was capped before the origin map travelled — which layer set these is unknown",
+   "OpenCode config (resolved)",
+   "no permission block — OpenCode asks for everything its defaults ask for",
+   "OpenCode reports the resolved config only — it does not say which file a value came from"
+  ],
+  "src/lib/chat-run-summary.js": [
+   "VibeSpace passed a note to the assistant"
+  ],
+  "src/lib/machine-app.js": [
+   "Machine app"
+  ],
+  "src/desktop-switch.js": [
+   "Switch desktop —",
+   "Rename…",
+   "Rename Desktop",
+   "Desktop name",
+   "Delete",
+   "Move up",
+   "Move down",
+   "New desktop"
+  ],
+  "src/browser-takeover-request.js": [
+   "An assistant needs you in its browser"
+  ],
+  "src/lib/command-mode.js": [
+   "Toggle command mode",
+   "Snap window left",
+   "Snap window right",
+   "Snap window top",
+   "Snap window bottom",
+   "Toggle maximize",
+   "Close window",
+   "Cycle windows",
+   "Freeform layout",
+   "Custom grid…",
+   "Custom Grid",
+   "Apply",
+   "New session",
+   "Toggle sidebar",
+   "Open a web view",
+   "Open file explorer",
+   "Next desktop",
+   "Previous desktop",
+   "Move window to next desktop",
+   "Move window to previous desktop",
+   "Toggle side by side",
+   "Swap left and right",
+   "Unsplit",
+   "Move tab left",
+   "Move tab right",
+   "Show side by side with…"
+  ],
+  "src/lib/toolbar-fold-model.js": [
+   "New Session",
+   "Terminal",
+   "Files",
+   "Web view",
+   "Apps",
+   "Desktop",
+   "Presets"
+  ],
+  "src/browser-backends/cdp.js": [
+   "An existing browser over CDP (yours, or one on a paired machine)"
+  ],
+  "src/lib/desktop-app-window.js": [
+   "Desktop app"
+  ],
+  "src/lib/session-props.js": [
+   "class=\"rc-cleared\"",
+   "var(--text-dim)"
+  ],
+  "src/lib/mobile-nav.js": [
+   "Window"
+  ],
+  "src/lib/chain-layout.js": [
+   "Unbind",
+   "Snap beside"
+  ],
+  "src/lib/theme-editor.js": [
+   "--bg-root",
+   "--bg-sidebar",
+   "--bg-toolbar",
+   "--accent-hover",
+   "--bg-window",
+   "--bg-titlebar",
+   "--bg-titlebar-active + --border-active",
+   "--text-secondary",
+   "--text-dim",
+   "--bg-dialog",
+   "--bg-input",
+   "--bg-hover",
+   "--bg-taskbar",
+   "--terminal-fg",
+   "--terminal-cursor"
+  ],
+  "src/lib/browser-panel-model.js": [
+   "vibespace-browser passkey register"
+  ],
+  "src/channels/slack-manifest.js": [
+   "Reads and sends your Slack messages through your own VibeSpace"
+  ],
+  "src/lib/external-editor.js": [
+   "Editor:",
+   "Wrap: On",
+   "Wrap: Off",
+   "Dark",
+   "Light",
+   "Save failed",
+   "Failed to load",
+   "Close editor"
+  ],
+  "src/local-oracles.js": [
+   "Login status",
+   "Which ChatGPT/OpenAI login this account’s isolated config dir holds, straight from the CLI.",
+   "prints \"Not logged in\" on stderr, exit 1",
+   "prints \"Logged in using ChatGPT\"; the token file’s md5 was unchanged afterwards — it does not refresh",
+   "Configured MCP servers",
+   "The MCP servers this account’s config declares — read from its own config dir, no server is started.",
+   "Feature flags",
+   "Which Codex features are on for this account — stage and effective state, from config only.",
+   "prints the feature table",
+   "claude auth status",
+   "claude agents --json",
+   "codex doctor --json",
+   "codex app-server (config/read)"
+  ],
+  "src/agent-cli-text.js": [
+   "— a long --detail in --detail-file"
+  ],
+  "src/lib/browser-window.js": [
+   "Proxy mode (bypass X-Frame-Options)",
+   "Proxy: On",
+   "Proxy: Off",
+   "Open in new tab",
+   "Web view"
+  ],
+  "src/browser-backends/desktop-app.js": [
+   "A real desktop browser the agent opens beside its chat (tier 3: the window tools, no CDP, no egress policy)"
+  ],
+  "src/browser-backends/local-window.js": [
+   "A window on your own desktop (tier 3: the accessibility tree + pixels, no CDP)"
+  ],
+  "src/lib/app.js": [
+   "File Explorer",
+   "Editor"
+  ],
+  "src/lib/chat-input.js": [
+   "data-queue-id=\""
+  ],
+  "src/lib/machine-desktop.js": [
+   "Machine desktop"
+  ],
+  "src/lib/usage-meter.js": [
+   "data-cap-name=\""
+  ],
+  "src/lib/terminal.js": [
+   "System Default",
+   "System Default",
+   "Scroll to bottom",
+   "Esc",
+   "Tab",
+   "Shift+Tab — cycle permission modes",
+   "Ctrl",
+   "Sticky Ctrl: next letter becomes Ctrl+letter",
+   "Paste (text or image)",
+   "Ctrl+G — open editor",
+   "Ctrl+R — history search",
+   "Ctrl+\\ — command mode",
+   "Terminal settings",
+   "Theme",
+   "Font Size",
+   "Font",
+   "Resume here",
+   "Taken over by a larger client (",
+   "— this window fits",
+   "— limited by a smaller client",
+   "Another attached client's window fits only",
+   "; this window fits",
+   "Use my size",
+   "Size override active (",
+   "This window's size overrides the min-of-all-clients policy; smaller clients are blocked. Release to return to automatic sizing.",
+   "Release"
+  ],
+  "src/lib/jobs-panel.js": [
+   "Background Work",
+   "Job input"
+  ],
+  "src/helper-ask.js": [
+   "This request was already settled (",
+   "). Nothing was sent."
+  ],
+  "src/mic-model.js": [
+   "VB-CABLE Virtual Audio Device",
+   "VibeSpace Microphone"
+  ],
+  "src/vault-kinds.js": [
+   "An agent's own secret (mint / put)",
+   "An account's API key or long-lived token",
+   "An integration's per-machine key",
+   "An integration's key",
+   "A channel account's sign-in",
+   "A storage mount's secret",
+   "A desktop app's stored login",
+   "A browser passkey",
+   "A VibeSpace automation key",
+   "A machine's link token",
+   "The relay token",
+   "A website login",
+   "A two-step code (TOTP)",
+   "A key or password no card holds",
+   "A sealed file's key"
+  ],
+  "src/lib/sidebar-mounts.js": [
+   "Loading…",
+   "Failed to load",
+   "One-time setup needed  Connecting storage needs a small helper tool. Install it here — no terminal required.",
+   "Install rclone",
+   "Downloading…",
+   "Install failed",
+   "Share revoked",
+   "Failed",
+   "Create a link that lets another VibeSpace open a folder from this computer.",
+   "Token revoked",
+   "Failed",
+   "Mounted",
+   "Failed",
+   "Failed",
+   "Failed",
+   "not set up yet — click Set up",
+   "$t = Get-ScheduledTask -TaskName 'VibeSpaceDevice-*' | Select-Object -First 1\n$p = New-ScheduledTaskPrincipal -UserId $t.Principal.UserId -LogonType $t.Principa",
+   "Only the registry entry goes away — nothing on the remote machine is touched.",
+   "Remove",
+   "Failed",
+   "vibespace-share:v1:…",
+   "Failed",
+   "Failed",
+   "Failed"
+  ],
+  "src/channel-filter.js": [
+   "hand it to",
+   "none of the options fits",
+   "a text message"
+  ],
+  "src/lib/stage-manager.js": [
+   "Stage"
+  ],
+  "src/lib/agent-meta.js": [
+   "Ultracode",
+   "xhigh effort + standing dynamic-workflow orchestration",
+   "Terminal",
+   "Unknown",
+   "Primary",
+   "Subagent",
+   "Review",
+   "Unknown",
+   "Chat",
+   "Terminal"
+  ],
+  "src/lib/taskbar.js": [
+   "— click for window list"
+  ],
+  "src/lib/task-detail.js": [
+   "Task Group"
+  ],
+  "src/browser-fit.js": [
+   "the picture size is pinned at",
+   "— the user drives this browser and their pane rules its size, your",
+   "did not apply",
+   "did not run (the size was pinned when you asked and is not any more: run it again)",
+   "— you asked",
+   "; the size the page took is not known",
+   ") — the page did not take that size"
+  ],
+  "src/lib/app-install-dialog.js": [
+   "no session"
+  ],
+  "src/voice-model.js": [
+   "This page is not https, so the browser gives it no microphone — open it over https, or on this computer at",
+   "The browser refused the microphone — allow it in the site permissions in the address bar",
+   "No microphone was found on this device",
+   "Connect your Dropline first",
+   "The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)",
+   "Voice input is turned off — turn it on in Plugins",
+   "Your Dropline sign-in has expired — connect it again",
+   "Dropline is rate limiting — try again in   s",
+   "A recording can be at most 180 seconds and 8 MB",
+   "Stopped at 170 seconds — a recording can be at most 180 seconds",
+   "The recording could not be read — try again",
+   "Recognition failed this time — try again",
+   "It was not sent — the recording is kept, press again to resend",
+   "Inserted",
+   "Inserted as spoken (Dropline did not rewrite it)",
+   "Listening…",
+   "Recognizing…"
+  ],
+  "src/channel-api-card.js": [
+   "— expires 24 h after it was asked"
+  ],
+  "src/app-kinds/registered.js": [
+   "Open",
+   "Open"
+  ],
+  "src/runaway-guard.js": [
+   ", recorded only)"
+  ],
+  "src/lib/desktop-window.js": [
+   "Desktop"
+  ],
+  "src/lib/channels-panel.js": [
+   "Channels"
+  ],
+  "src/lib/settings-schema.js": [
+   "Tmux"
+  ],
+  "src/browser-switch.js": [
+   "seat limit unknown — it becomes known the first time this key actually launches a browser",
+   "seat limit unknown — the last reading (",
+   ") is from",
+   "ago and no longer constrains; it is re-read at the next launch",
+   "total (tier read from a launch",
+   "after this switch (",
+   "used on this instance /",
+   "use my own key",
+   "use my own key",
+   "check the key",
+   "The agent says",
+   "refused its browser — no switch can be offered here",
+   "The agent proposes clearing",
+   "'s stored login in \"",
+   "open Integrations",
+   "open Integrations"
+  ],
+  "src/lib/settings-ui.js": [
+   "e.g. claude-opus-4-6-20250414",
+   "Settings"
+  ],
+  "src/lib/mounts-dialog.js": [
+   "Failed",
+   "Advanced options"
+  ],
+  "src/lib/user-todos-layout.js": [
+   "All"
+  ],
+  "src/lib/search-window.js": [
+   "Search",
+   "Search everything…"
+  ],
+  "src/lib/trailing-bar.js": [
+   "Task Groups",
+   "Files",
+   "Channels",
+   "Agent browser",
+   "Background Work"
+  ],
+  "src/lib/doc-window.js": [
+   "Doc"
+  ],
+  "src/browser-backends/chromium.js": [
+   "Chromium (a browser VibeSpace starts)"
+  ]
+ },
+ "english": [
+  "zh: Yolo",
+  "zh: Find",
+  "zh: Tmux",
+  "zh: API key — {name}",
+  "zh: {n} tokens",
+  "zh: Bucket",
+  "zh: Access key",
+  "zh: Secret key",
+  "zh: {shown} of {total}",
+  "zh: Git worktree",
+  "zh: Agent · {name}",
+  "zh: App ID",
+  "zh: App Secret",
+  "zh: Agent: {name}",
+  "zh: VibeSpace · {what}",
+  "zh: {used} of {size}",
+  "zh: {n} of {total}",
+  "zh: RemoteApp…",
+  "zh: Client ID",
+  "zh: Client Secret",
+  "zh: Webhooks",
+  "zh: {ms} ms · {fps} fps · {kbps} kbps",
+  "zh: {fps} fps · {kbps} kbps",
+  "zh: Client secret",
+  "zh: {when} · VibeSpace",
+  "zh: OpenRouter",
+  "zh: git worktree",
+  "ja: Yolo",
+  "ja: Find",
+  "ja: Tmux",
+  "ja: Hex: {name}",
+  "ja: {shown} of {total}",
+  "ja: Git worktree",
+  "ja: App ID",
+  "ja: App Secret",
+  "ja: VibeSpace · {what}",
+  "ja: {used} of {size}",
+  "ja: Bcc",
+  "ja: cc {names}",
+  "ja: {n} of {total}",
+  "ja: RemoteApp…",
+  "ja: Client ID",
+  "ja: Client Secret",
+  "ja: Webhooks",
+  "ja: {ms} ms · {fps} fps · {kbps} kbps",
+  "ja: {fps} fps · {kbps} kbps",
+  "ja: {when} · VibeSpace",
+  "ja: OpenAI · Responses API",
+  "ja: OpenRouter",
+  "ja: git worktree"
+ ]
+}

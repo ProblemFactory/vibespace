@@ -36,7 +36,7 @@ import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «W
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 import { noteHubClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
-import { isPointer, clockWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
+import { isPointer, clockWords, headWordOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -99,7 +99,8 @@ export function inboxModel(app) {
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
-    return (s && displayName(s)) || (spoken && t(spoken.i18n.source.key)) || items.find((i) => i.sessionName)?.sessionName
+    // lane ui-language: a system producer's filed head (`Manage Agents`, `Vault` …) is worded HERE, never in the store
+    return (s && displayName(s)) || (spoken && t(spoken.i18n.source.key)) || headWordOf(items.find((i) => i.sessionName)?.sessionName, t)
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
   /** THE ONE LANDING of a For-you door (lane needs-card-tail R5 — the owner 2026-10-28: «inbox点消息跳转会对话的时候，可以考虑

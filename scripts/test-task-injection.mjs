@@ -90,7 +90,7 @@ console.log('§2 THE tray words (src/tray-words.js)');
   const tableWord = (f) => { const m = /^ {2}"For you": "([^"]+)",/m.exec(read(f)); return m && m[1]; };
   ok(TW.LABELS.zh === tableWord('src/lib/i18n-zh.js') && TW.LABELS.ja === tableWord('src/lib/i18n-ja.js') && /title: t\('For you'\)/.test(read('src/lib/inbox-window.js')) && /'usage-section-title ut-title', t\('For you'\)/.test(read('src/lib/user-todos-panel.js')),
     'LABELS = the page\'s own \'For you\' words (the popup\'s and the window\'s title) in i18n-zh / -ja', TW.LABELS);
-  const row = /\{ id: '([\w-]+)',\s+label: 'For-you inbox',[^}]*defaultZone: '([\w-]+)' \}/.exec(read('src/lib/customize-mode.js'));
+  const row = /\{ id: '([\w-]+)',\s+label: (?:tr\()?'For-you inbox'\)?,[^}]*defaultZone: '([\w-]+)' \}/.exec(read('src/lib/customize-mode.js'));
   ok(row && row[1] === TW.TRAY_ELEMENT && row[2] === TW.TRAY_DEFAULT_ZONE, 'the element id and its default zone = Customize mode\'s CHROME_ELEMENTS row', row && row.slice(1));
   const schema = read('src/lib/settings-schema.js');
   ok(TW.TRAY_SETTING_KEYS.every((k) => schema.includes(`  '${k}': {`)), 'every setting the place reads is a schema row (a renamed key ⇒ RED)', TW.TRAY_SETTING_KEYS);
