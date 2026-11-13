@@ -20,7 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, storedShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
 const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
 const { probeEligibility, probeRecordOf } = require('./auto-cli-model.js'); // PURE: may the quota panel probe PROVE this row; its last failed probe, bounded (lane auto-cli-oat-unprobeable)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
@@ -77,7 +77,7 @@ function localFacetOf(caps, now = Date.now()) {
 }
 
 class AccountManager {
-  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null }) {
+  constructor({ dataDir, onChange, onSessionLinks, platform = process.platform, oatFixture = null, mintFixture = null }) {
     this.dataDir = dataDir;
     this._file = path.join(dataDir, 'accounts.json');
     this._keyFile = path.join(dataDir, '.accounts-key');
@@ -110,6 +110,8 @@ class AccountManager {
     this._cliNoteHook = null;  // …which is told synchronously at every version note (it decides checking / pass from its ledger)
     this._cliRecheck = null;   // the version clock's tick (oat-file-sync registers it; the 60 s binary-identity check asks it)
     this._oatFixturePath = oatFixture || path.join(__dirname, '..', 'scripts', 'fixtures', 'oat-in-file.json');
+    // the scopes each measured CLI version's mint asks for (lane oat-add-door: way ② of the guided door — cli-caps mintScopesOf)
+    this._mintFixturePath = mintFixture || path.join(__dirname, '..', 'scripts', 'fixtures', 'oat-mint-scopes.json');
     this._oatFileFacts = new Map(); // id → the last verdict (the row's door)
     this._oatChain = Promise.resolve(); // THE ONE QUEUE of the oat's acts on member credential files (verify r1 F13 / F7)
     this._oatSweeps = new Set();       // sweeps in flight (oatFileSettled waits for them too)
@@ -381,6 +383,12 @@ class AccountManager {
           // last failed probe's reason
           if (row.oat) {
             row.oatScopes = a.oatShape && Array.isArray(a.oatShape.scopes) ? a.oatShape.scopes.filter((x) => typeof x === 'string').slice(0, 20) : [];
+            // THE SHAPE'S PROVENANCE (lane oat-add-door): whose word the row's subscription type is — a sign-in's or the person's
+            // (typeless = «先不选») — and a choice a sign-in replaced (its words for 7 days); no secret in any of it
+            const sh = storedShapeOf(a.oatShape);
+            if (sh) row.oatShape = { source: a.oatShapeSource === 'person' ? 'person' : 'login', at: Number(a.oatShapeAt) || null, type: sh.subscriptionType || null, tier: sh.rateLimitTier || null, typeless: !!sh.typeless };
+            const rp = a.oatShapeReplaced;
+            if (rp && Number(rp.at) > Date.now() - 7 * 86400e3) row.oatShapeReplaced = { at: Number(rp.at), type: (rp.was && rp.was.subscriptionType) || null, tier: (rp.was && rp.was.rateLimitTier) || null, typeless: !!(rp.was && rp.was.typeless) };
             const caps = this.oatFileCaps();
             row.oatCli = { cli: caps.cli, measured: !!caps.ok };
           }
@@ -634,7 +642,7 @@ class AccountManager {
       // passphrase blob; re-encrypted under the TARGET's key on import) — an
       // oat-ONLY account would otherwise import as a dead record (B-211a)
       if (a.oatEnc) { try { rec.oat = this._dec(a.oatEnc); rec.oatMintedAt = a.oatMintedAt || null; } catch { } }
-      if (a.oatEnc && a.oatShape) rec.oatShape = a.oatShape; // the subscription SHAPE the target re-derives our file with (no secret in it)
+      if (a.oatEnc && a.oatShape) { rec.oatShape = a.oatShape; rec.oatShapeSource = a.oatShapeSource === 'person' ? 'person' : 'login'; if (a.oatShapeAt) rec.oatShapeAt = a.oatShapeAt; } // the subscription SHAPE the target re-derives our file with (no secret in it) + whose word it is (lane oat-add-door)
       if (type === 'subscription') {
         // macOS secure storage is Keychain-primary. The local fallback is a
         // same-machine compatibility shadow for launchd and can diverge after
@@ -681,7 +689,7 @@ class AccountManager {
       else if (rec.tail) a.tail = rec.tail;
       // an imported token is CHECKED like a saved one (lane oat-identity-fix-r3, verify r3 L-R2): its post-check armed with
       // its generation (the mint instant spawns carry), this instance's first-token instant = the import
-      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { this._oatSaveIdentity(a, Date.now()); a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); const sh = oatShapeOf(rec.oatShape); if (sh) a.oatShape = sh; a.oatCheck = { state: 'pending', since: Date.now(), gen: a.oatMintedAt }; }
+      if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { this._oatSaveIdentity(a, Date.now()); a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); const sh = storedShapeOf(rec.oatShape); if (sh) { a.oatShape = sh; a.oatShapeSource = rec.oatShapeSource === 'person' ? 'person' : 'login'; if (Number(rec.oatShapeAt)) a.oatShapeAt = Number(rec.oatShapeAt); } a.oatCheck = { state: 'pending', since: Date.now(), gen: a.oatMintedAt }; }
       if (rec.files && typeof rec.files === 'object' && a.type === 'subscription') {
         const dir = this._acctDir(be, a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -784,7 +792,7 @@ class AccountManager {
     // verify r3 L-R1): its post-check armed with the token's generation, the survivor's first-token instant kept; the folded
     // row's check goes with the row, what it filed resolved (below, once saved)
     const foldedCheck = from.oatCheck || null;
-    if (!into.oatEnc && from.oatEnc) { this._oatSaveIdentity(into, Date.now()); into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; if (!into.oatShape && from.oatShape) into.oatShape = from.oatShape; into.oatCheck = { state: 'pending', since: Date.now(), gen: into.oatMintedAt }; }
+    if (!into.oatEnc && from.oatEnc) { this._oatSaveIdentity(into, Date.now()); into.oatEnc = from.oatEnc; into.oatMintedAt = from.oatMintedAt; if (!into.oatShape && from.oatShape) { into.oatShape = from.oatShape; if (from.oatShapeSource) into.oatShapeSource = from.oatShapeSource; if (from.oatShapeAt) into.oatShapeAt = from.oatShapeAt; } into.oatCheck = { state: 'pending', since: Date.now(), gen: into.oatMintedAt }; }
     if (!into.note && from.note) into.note = from.note;
     if (this._state.defaultAccountId === fromId) this._state.defaultAccountId = intoId;
     this._state.accounts = this._state.accounts.filter((x) => x.id !== fromId);
@@ -1355,7 +1363,7 @@ class AccountManager {
     const prevA = a.oatCheck || null, prevB = b.oatCheck || null;
     this._oatSaveIdentity(b, Date.now());
     b.oatEnc = a.oatEnc; b.oatMintedAt = a.oatMintedAt || Date.now();
-    delete b.oatShape;
+    delete b.oatShape; delete b.oatShapeSource; delete b.oatShapeAt; delete b.oatShapeReplaced;
     b.oatCheck = { state: 'pending', since: Date.now(), gen: b.oatMintedAt };
     delete a.oatEnc; delete a.oatMintedAt; delete a.oatCheck; delete a.oatAnchor;
     this._save();
@@ -1442,11 +1450,44 @@ class AccountManager {
   recheckCli() { try { return this._cliRecheck ? Promise.resolve(this._cliRecheck()) : Promise.resolve(null); } catch { return Promise.resolve(null); } }
   /** the binary the version clock last read: {path, cmd, sha256, identity} or null */
   cliBinary() { return this._oatCliBin ? { ...this._oatCliBin } : null; }
-  _oatFixture() {
-    if (this._oatFixtureMemo === undefined) {
-      try { this._oatFixtureMemo = JSON.parse(fs.readFileSync(this._oatFixturePath, 'utf-8')); } catch { this._oatFixtureMemo = null; }
+  _oatFixture(which = 'oat') {
+    const memo = which === 'mint' ? '_mintFixtureMemo' : '_oatFixtureMemo';
+    if (this[memo] === undefined) {
+      try { this[memo] = JSON.parse(fs.readFileSync(which === 'mint' ? this._mintFixturePath : this._oatFixturePath, 'utf-8')); } catch { this[memo] = null; }
     }
-    return this._oatFixtureMemo;
+    return this[memo];
+  }
+  /** THE MINT'S OWN SCOPES for the hub's CLI (lane oat-add-door) → {ok, cli, scopes, from: 'fixture'|'hub'} — the release road's
+   *  record of exactly this version (scripts/fixtures/oat-mint-scopes.json), else the hub's own check of exactly these bytes
+   *  (cli-self-measure's view: `mintScopes`); ok = the scopes are known AND the file road is this hub's (oatFileCaps' platform
+   *  rule). Not ok ⇒ way ② of the guided door is not offered — the door says «sign in once». */
+  oatMintCaps() {
+    const cli = cliCaps.cliVersionOf(this._oatCli);
+    const platformOk = this._platform !== 'darwin' && this._platform !== 'win32';
+    const fx = cliCaps.mintScopesOf(this._oatCli, this._oatFixture('mint'));
+    const bin = this._oatCliBin, lm = this._cliMeasured;
+    const own = !fx && lm && cli && lm.cli === cli && bin && lm.sha256 === bin.sha256 ? cliCaps.scopesOk(lm.mintScopes) : null;
+    const scopes = fx || own || null;
+    return { ok: platformOk && !!scopes, cli: cli || null, scopes, ...(scopes ? { from: fx ? 'fixture' : 'hub' } : {}) };
+  }
+  /** THE PERSON'S STATEMENT of a row's subscription shape (lane oat-add-door — the guided door's way ②, a person's door only:
+   *  the route refuses an agent's bearer). `shape` = src/plan-names.js choiceShape's (the mint's scopes + the chosen type and
+   *  tier, or typeless «先不选»). Refused by code: no token on the row (`no_token`), a shape a SIGN-IN stated (`from_login` —
+   *  the vendor's word is not overwritten by hand; a sign-in again states it), a shape the grammar refuses (`bad_shape`). The
+   *  file follows through the one queue. → a promise of the sync's result. */
+  setOatShapeByPerson(id, shape, { now = Date.now() } = {}) {
+    const a = this.get(id);
+    const no = (msg, code) => Object.assign(new Error(msg), { code });
+    if (!a) throw no('unknown account: ' + id, 'unknown');
+    if (!this._credsOf(this._acctBackend(a))?.longLivedToken || this._acctType(a) !== 'subscription' || a.pooled) throw no('the subscription type applies to Claude subscription accounts only', 'not_subscription');
+    if (!a.oatEnc) throw no('this account holds no long-lived token', 'no_token');
+    if (a.oatShape && (a.oatShapeSource || 'login') === 'login') throw no('a sign-in stated this account’s subscription type — sign in again to change it', 'from_login');
+    const sh = storedShapeOf(shape);
+    if (!sh) throw no('that is not a subscription type this Claude Code offers', 'bad_shape');
+    a.oatShape = sh; a.oatShapeSource = 'person'; a.oatShapeAt = now; delete a.oatShapeReplaced;
+    this._save();
+    this._notify();
+    return this.syncOatFile(id, { now });
   }
   /** { ok, known, cli, measured } — ok = cliCaps.oatInFile(the hub's CLI, the fixture) on a platform whose CLI reads
    *  the FILE (the measurement is Linux; macOS keys its keychain by the env string — the pool's own platform rule).
@@ -1502,10 +1543,18 @@ class AccountManager {
     const seen = await material.readCredentialFile(dir);
     const ours = oatFileOurs(seen.file, id);
     const fileShape = ours ? null : oatShapeOf(seen.file);
-    if (fileShape && (mint || !a.oatShape)) { a.oatShape = fileShape; this._save(); } // the shape outlives the file it came from
+    // the shape outlives the file it came from. A SIGN-IN'S SHAPE REPLACES THE PERSON'S CHOICE (lane oat-add-door): the vendor's
+    // word over a hand's, said once — a journal line and the row's `oatShapeReplaced` (its words for 7 days); a row stored before
+    // provenance existed (no oatShapeSource) holds a sign-in's
+    const personal = !!a.oatShape && a.oatShapeSource === 'person';
+    if (fileShape && (mint || !a.oatShape || personal)) {
+      if (personal && JSON.stringify(a.oatShape) !== JSON.stringify(fileShape)) { a.oatShapeReplaced = { at: now, was: a.oatShape }; console.log(`[oat-file] ${a.name || id}: a sign-in stated the subscription type (${fileShape.subscriptionType}) — it replaces the one chosen by hand (${a.oatShape.subscriptionType || 'none chosen'})`); }
+      a.oatShape = fileShape; a.oatShapeSource = 'login'; a.oatShapeAt = now;
+      this._save();
+    }
     let keyNo = null; // THE KEY FILE as why the token does not read (O1) — the failing call's own refusal
     const token = a.oatEnc ? (() => { try { return this._dec(a.oatEnc); } catch (e) { if (isKeyRefusal(e)) keyNo = e; return null; } })() : null;
-    const shape = (a.oatShape && Array.isArray(a.oatShape.scopes) ? a.oatShape : null) || fileShape;
+    const shape = storedShapeOf(a.oatShape) || fileShape;
     const body = token && shape ? oatFileBody(token, { expiresAt: (Number(a.oatMintedAt) || 0) + this.OAT_TTL_MS, shape, mintedAt: a.oatMintedAt, account: id }) : null;
     const current = ours && !!body && oatFileCurrent(seen.file, body);
     const caps = this.oatFileCaps();

@@ -45,7 +45,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
-const { OAT_VARIANTS, OAT_IN_FILE_GATE, cliVersionOf } = require('./cli-caps.js');
+const { OAT_VARIANTS, OAT_IN_FILE_GATE, MINT_VARIANT, cliVersionOf, mintScopesIn } = require('./cli-caps.js');
 
 // the measurement's own version: a change to what it measures bumps it, and a hub re-runs a FAIL once (a PASS stays)
 const PROBE_VERSION = 2; // 2 (the incident of 2026-11-11): the hub's run lives outside every guarded root — a cannot-run measured by 1 runs again
@@ -59,9 +59,14 @@ const GUARDED = Object.freeze([
 // G3: THE CHILD'S ENV IS THIS LIST (the spawn-env census row names it); nothing else ever reaches the CLI
 const ENV_ALLOW = Object.freeze(['PATH', 'HOME', 'TMPDIR', 'USER', 'LANG', 'TERM', 'ANTHROPIC_BASE_URL', 'USE_LOCAL_OAUTH', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE',
   'CLAUDE_CODE_ENABLE_TELEMETRY', 'OTEL_METRICS_EXPORTER', 'OTEL_LOGS_EXPORTER', 'OTEL_EXPORTER_OTLP_PROTOCOL', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'OTEL_LOGS_EXPORT_INTERVAL', 'CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS',
-  'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN']);
+  'DISABLE_AUTOUPDATER', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'NO_PROXY', 'no_proxy', 'CLAUDE_SECURESTORAGE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN',
+  'BROWSER']); // BROWSER (lane oat-add-door): the mint variant's only — the `false` binary (assertEnv), so `setup-token` never runs the box's opener
+
 const BASE_KEYS = ['ANTHROPIC_BASE_URL', 'CLAUDE_LOCAL_OAUTH_API_BASE', 'CLAUDE_LOCAL_OAUTH_APPS_BASE', 'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE'];
 const PROXY_KEYS = ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy'];
+// the opener `setup-token` runs with the authorize URL (measured, 2.1.321: «Opening browser to sign in…», then the URL is printed
+// when it fails): the `false` binary, which opens nothing — never xdg-open, never a person's browser
+const NO_BROWSER = '/bin/false'; // a box without it: the opener fails to start — it opens nothing either way
 // FAKE tokens, built at runtime: no token-shaped literal sits in the tree
 const OAT_PFX = ['sk', 'ant', 'oat01'].join('-');
 const ORT_PFX = ['sk', 'ant', 'ort01'].join('-');
@@ -171,6 +176,7 @@ function assertEnv(env, { base, root, oat, proxied }) {
   for (const k of ['HOME', 'TMPDIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR']) if (env[k] !== undefined && !inside(env[k], root)) bad(k, 'outside the scratch');
   if (env.CLAUDE_CODE_OAUTH_TOKEN !== undefined && env.CLAUDE_CODE_OAUTH_TOKEN !== oat) bad('CLAUDE_CODE_OAUTH_TOKEN', 'not this run\'s fake');
   if (env.DISABLE_AUTOUPDATER !== '1') bad('DISABLE_AUTOUPDATER', 'the CLI may update itself');
+  if (env.BROWSER !== undefined && env.BROWSER !== NO_BROWSER) bad('BROWSER', 'an opener that could open the URL');
   if (env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC !== '1') bad('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'the CLI\'s optional traffic is on');
 }
 
@@ -398,7 +404,7 @@ function sha256Of(file) {
     fs.createReadStream(file, { highWaterMark: 1 << 20 }).on('data', (b) => { size += b.length; h.update(b); }).on('error', () => resolve({ sha256: null, size: null })).on('end', () => resolve({ sha256: h.digest('hex'), size }));
   });
 }
-const orderOf = (list) => { const oat = list.filter((v) => OAT_VARIANTS.includes(v)).sort((a, b) => RUN_ORDER.indexOf(a) - RUN_ORDER.indexOf(b)); return [...oat, ...list.filter((v) => !OAT_VARIANTS.includes(v))]; };
+const orderOf = (list) => { const oat = list.filter((v) => OAT_VARIANTS.includes(v)).sort((a, b) => RUN_ORDER.indexOf(a) - RUN_ORDER.indexOf(b)); return [...oat, ...list.filter((v) => !OAT_VARIANTS.includes(v) && v !== MINT_VARIANT), ...(list.includes(MINT_VARIANT) ? [MINT_VARIANT] : [])]; }; // the mint last (lane oat-add-door): the gate and the record complete before it
 /** the gate's verdict: PASS only when the three are PASS, nothing escaped and nothing voided the run */
 function gateOf(results, { cli, binary, aborted, ms, void: runVoid = undefined }) {
   const gate = {}; for (const g of OAT_IN_FILE_GATE) { const r = results.find((x) => x.variant === g); gate[g] = r ? { verdict: r.verdict, note: r.note } : { verdict: 'MISSING', note: '' }; }
@@ -650,9 +656,9 @@ async function measure(o = {}) {
   // only this process holds), kept whole in memory as it arrives and read live by the belt (an escape SIGKILLs the tracer's
   // group while its handle lives — the kernel ends every tracee with it, law C) ──
   const ESCAPED = [];
-  function launch({ args, env, cwd, variant, errFile, onEscape = () => { } }) {
+  function launch({ args, env, cwd, variant, errFile, onEscape = () => { }, pty = false }) {
     assertEnv(env, { base: BASE, root: ROOT, oat: OAT, proxied: !NETNS || env.HTTPS_PROXY !== undefined }); // law 3 G3: the allowlist, or no spawn
-    const child = spawn('setpriv', ['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', '--always-show-pid', '-f', '-tt', '-q', '-y', '-s', '256', '-e', `trace=${TRACE_SET}`, '-e', 'inject=io_uring_setup:error=ENOSYS', '-e', `inject=${DENIED_DOORS.join(',')}:error=EPERM`, process.execPath, '--no-warnings', TRAMP, errFile, CLAUDE, ...args],
+    const child = spawn('setpriv', ['--pdeathsig', 'KILL', '--', STRACE, '--kill-on-exit', '--always-show-pid', '-f', '-tt', '-q', '-y', '-s', '256', '-e', `trace=${TRACE_SET}`, '-e', 'inject=io_uring_setup:error=ENOSYS', '-e', `inject=${DENIED_DOORS.join(',')}:error=EPERM`, process.execPath, '--no-warnings', TRAMP, errFile, ...(pty ? ['--pty'] : []), CLAUDE, ...args],
     { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     LIVE.add(child); child.on('exit', () => LIVE.delete(child));
     const rec = { text: '', ended: false, killed: false, oversize: false };
@@ -920,9 +926,7 @@ async function measure(o = {}) {
     const after = { A: snap(credA), O: snap(credO) };
     const lines = cli.record();
     const ops = credOpsOf(lines);
-    const outs = lines.map((s) => outbound(s.line)).filter(Boolean);
-    NETLINK += outs.filter((x) => x.netlink).length; // once per call (acceptance r2 (c))
-    const outb = outs.filter((x) => !x.netlink).map((x) => `${x.addr}:${x.port} = ${x.result}`);
+    const outb = afterPass(lines);
     const r = {
       variant: name, version,
       steps: steps.map((s) => ({ step: s.step, change: s.change, result: s.result, requests: s.reqs.map((q) => `${q.path.replace('/v1/messages', 'msg')} ${q.acct || '-'}:${q.status} ${q.scheme}${q.stream ? '' : ' (ns)'} ${q.model || ''}`.trim()), oauth: s.oauth.map((o) => `${o.kind}:${o.acct || '-'}${o.refreshToken ? ' rt=' + o.refreshToken : ''}`), other: [...new Set(s.other.map((o) => `${o.method} ${o.path.split('?')[0]} ${o.acct || '-'}/${o.scheme}`))], escapes: s.escapes.map((e) => `${e.via} ${e.what}`) })),
@@ -945,6 +949,79 @@ async function measure(o = {}) {
     // the verdict line says what was seen: every event the run survived, by where + code
     if (r.events.length) { const n = {}; for (const e of r.events) { const k = `${e.where} ${e.code || '?'}`; n[k] = (n[k] || 0) + 1; } r.note += ` · ${r.events.length} event${r.events.length === 1 ? '' : 's'} survived (${Object.entries(n).map(([k, c]) => `${k} ×${c}`).join(', ')})`; }
     RESULTS[name] = { r, steps };
+    return r;
+  }
+
+  // THE AFTER-PASS (acceptance r2 (c)): a variant's record, judged once its run ended — the netlink lines counted ONCE per call
+  // (the belt counts none), the off-loopback connects in words. ONE implementation: the oat variants and the mint (lane oat-add-door)
+  const afterPass = (lines) => {
+    const outs = lines.map((x) => outbound(x.line)).filter(Boolean);
+    NETLINK += outs.filter((x) => x.netlink).length;
+    return outs.filter((x) => !x.netlink).map((x) => `${x.addr}:${x.port} = ${x.result}`);
+  };
+  // ── THE MINT'S OWN SCOPES (lane oat-add-door, 2.369.399): what `claude setup-token` asks for when it mints, read off the
+  // authorize URL it PRINTS (its `scope=`) — nothing is pasted, nothing minted, no request is needed: the mock's log must stay
+  // empty of OAuth calls. The CLI prints nothing on a pipe (measured, 2.1.321), so it runs in a pty: util-linux script(1)
+  // (the trampoline's --pty: `script -qfec '<binary>' 'setup-token' /dev/null`) through THE ONE LAUNCHER — traced, belted, the env the allowlist, every
+  // fence as every variant. THE RUN ENDS BY THE TRACER'S KILL, BY DESIGN: setup-token waits for a code for ever (measured on
+  // 2.1.321 — Ctrl-C twice, Esc and EOF through the pty leave it waiting; a pasted code ends at «OAuth error … Press Enter to
+  // retry»), so once the URL is read (or SCOPE_WAIT_MS passes) the tracer's group is SIGKILLed and the kernel ends every tracee
+  // with it (law C). Its record is judged up to that instant by every fence that names a call — a guarded read, a door, a
+  // foreign token, an escape VOID the run as anywhere; a line the grammar cannot read or an oversize record is this variant's
+  // FAIL — and only the «ended by itself» rule (recordGap's killed / death-line / dangling / cut, which the kill makes true by
+  // construction) is not asked of it. A mechanical miss (no script(1), no URL, a scope the grammar refuses) is this variant's
+  // FAIL — no scopes recorded, way ② of the guided door not offered — and never voids the gate ──
+  const SCOPE_WAIT_MS = Number(o.scopeWaitMs) > 0 ? Number(o.scopeWaitMs) : 45e3;
+  async function runMint() {
+    const name = MINT_VARIANT;
+    VARIANT = name;
+    const dir = path.join(ROOT, name);
+    fs.rmSync(dir, { recursive: true, force: true });
+    const home = path.join(dir, 'home');
+    for (const d of [home, path.join(dir, 'cwd'), path.join(dir, 'tmp')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    homeConfig(home);
+    resetMock();
+    const r = { variant: name, version, verdict: 'FAIL', note: '', scopes: null, events: [] };
+    const env = { ...cliEnv(home), ...PROXY_ENV, TERM: 'xterm-256color', BROWSER: NO_BROWSER };
+    const errFile = path.join(dir, 'cli.stderr');
+    const h = launch({ pty: true, args: ['setup-token'], env, errFile, cwd: path.join(dir, 'cwd'), variant: name }); // the trampoline's --pty: util-linux script(1) around the binary
+    const { child } = h;
+    let out = '';
+    const seen = new Promise((resolve) => {
+      const cap = setTimeout(() => resolve(null), SCOPE_WAIT_MS);
+      child.stdout.on('data', (d) => { out += d; if (out.length > 1 << 20) out = out.slice(-(1 << 19)); const m = mintScopesIn(out); if (m) { clearTimeout(cap); resolve(m); } });
+      child.on('exit', () => { clearTimeout(cap); resolve(mintScopesIn(out)); });
+    });
+    child.stdin.on('error', (e) => event('mint stdin', e));
+    child.stdout.on('error', (e) => event('mint stdout', e));
+    child.on('error', (e) => event('mint process', e));
+    const found = await seen;
+    await sleep(1000); // the trace stream catches up to the instant the URL was read
+    const endedBySelf = !isLive(child);
+    if (isLive(child)) { h.rec.killed = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { } } // the tracer's group, this process's own child (law C)
+    await Promise.race([h.ended, sleep(3000)]);
+    const lines = recordOf(h);
+    r.outboundConnects = afterPass(lines);
+    r.oauthCalls = M.oauth.length; r.otherCalls = M.other.length;
+    // what it printed, the terminal's escapes removed (evidence: setup-token prints a URL — no token is minted here)
+    r.printed = out.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, ' ').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b[78=>]/g, '').replace(/\s+/g, ' ').trim().slice(-600);
+    r.execs = lines.filter((x) => /\bexecve\(/.test(x.line) && x.line.includes(JSON.stringify(CLAUDE))).length;
+    r.foreignTokens = M.foreign.length;
+    r.guardedReads = guardedReadsOf(lines, [...(o.guarded || GUARDED).map((g) => g.path), ...(o.forbid || [])], { deny: DENY, allow: ALLOW });
+    r.events = eventsOf(name, []);
+    if (r.foreignTokens || r.guardedReads.length) { r.void = r.foreignTokens ? 'foreign-token' : 'guarded-read'; r.note = `VOID: ${r.foreignTokens ? `${r.foreignTokens} request(s) carried a token this run did not make` : `it read ${r.guardedReads.join(', ')}`}`; }
+    else { const doors = doorsOpenedOf(lines); if (doors.length) { r.void = 'door'; r.doors = doors; r.note = `VOID: a door the trace cannot see through opened (${doors.join(', ')})`; } }
+    if (r.void) { RESULTS[name] = { r, steps: [] }; return r; }
+    const why = [];
+    if (!r.execs) why.push('the binary never ran under the tracer (util-linux script — the pty — missing or refused)');
+    if (!found) why.push(`no authorize URL with a readable scope in ${Math.round(SCOPE_WAIT_MS / 1000)} s`);
+    if (h.rec.oversize) why.push(`the record grew past ${MAX_RECORD / 1048576} MiB`);
+    if (lines.unparsed.length) why.push(`a line the fence cannot read (${String(lines.unparsed[0]).slice(0, 120)})`);
+    if (endedBySelf && lines.gap) why.push(`the record: ${lines.gap.why}`); // a run that ended by itself is judged whole
+    if (r.oauthCalls || r.outboundConnects.length) why.push(`it called out (${r.oauthCalls} OAuth calls, ${r.outboundConnects.length} non-loopback connects) — the mint must only print`);
+    if (!why.length) { r.verdict = 'PASS'; r.scopes = found.scopes; r.note = `setup-token asks scope=${found.scopes.join(' ')} (read off the authorize URL it printed, ${found.origin === BASE ? 'the mock\'s' : found.origin + ' — printed, never fetched'}; nothing requested; ${endedBySelf ? 'the CLI ended by itself' : 'the run ended by the tracer\'s kill (setup-token waits for a code)'})`; }
+    else r.note = `no scopes recorded: ${why.join('; ')}`;
+    RESULTS[name] = { r, steps: [] };
     return r;
   }
 
@@ -1036,6 +1113,13 @@ async function measure(o = {}) {
       results.push(r);
       log(`[oat] ${name}: ${r.verdict} — ${r.note}\n`);
       if (!gateSaid && OAT_IN_FILE_GATE.every((g) => results.some((x) => x.variant === g))) { gateSaid = true; if (typeof o.onGate === 'function') { try { o.onGate(gateOf(results, { cli: cliVersionOf(version), binary: BINARY, aborted: ESCAPED.length > 0, ms: Date.now() - T0, void: VERSION_RUN.void })); } catch { } } }
+      continue;
+    }
+    if (name === MINT_VARIANT) {
+      const r = await runMint();
+      VARIANT = null;
+      results.push(r);
+      log(`[mint] ${name}: ${r.verdict} — ${r.note}\n`);
       continue;
     }
     const r = await runVariant(name);

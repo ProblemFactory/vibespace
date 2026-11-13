@@ -164,10 +164,22 @@ function oatShapeOf(creds) {
   if (!scopes.length || !subscriptionType) return null;
   return { scopes, subscriptionType, ...(typeof o.rateLimitTier === 'string' && o.rateLimitTier ? { rateLimitTier: o.rateLimitTier } : {}) };
 }
-/** The file we write: the measured shape + our mark (naming the row). Never a refreshToken. */
+/** A STORED shape — the row's `oatShape`: a sign-in's (oatShapeOf over its file), or THE PERSON'S CHOICE (lane oat-add-door,
+ *  2.369.399: src/plan-names.js choiceShape — the scopes the CLI's own mint asks for, plus the chosen type and tier) → the
+ *  shape, or null. `{scopes, typeless: true}` is the person's «不确定 — 先不选»: the measured scopes and NO type (measured on
+ *  2.1.321: such a file runs, the CLI's default model for a typeless login is Sonnet). */
+function storedShapeOf(sh) {
+  if (sh && typeof sh === 'object' && !Array.isArray(sh) && sh.typeless === true) {
+    const scopes = Array.isArray(sh.scopes) ? sh.scopes.filter((x) => typeof x === 'string' && x) : [];
+    return scopes.length ? { scopes, typeless: true } : null;
+  }
+  return oatShapeOf(sh);
+}
+const shapeKnown = (sh) => !!sh && Array.isArray(sh.scopes) && sh.scopes.length > 0 && (!!sh.subscriptionType || sh.typeless === true);
+/** The file we write: the measured shape + our mark (naming the row). Never a refreshToken. A typeless shape writes no type. */
 function oatFileBody(token, { expiresAt, shape, mintedAt = null, account = null } = {}) {
   return {
-    claudeAiOauth: { accessToken: String(token), expiresAt: Number(expiresAt), scopes: shape.scopes.slice(), subscriptionType: shape.subscriptionType, ...(shape.rateLimitTier ? { rateLimitTier: shape.rateLimitTier } : {}) },
+    claudeAiOauth: { accessToken: String(token), expiresAt: Number(expiresAt), scopes: shape.scopes.slice(), ...(shape.subscriptionType ? { subscriptionType: shape.subscriptionType } : {}), ...(shape.subscriptionType && shape.rateLimitTier ? { rateLimitTier: shape.rateLimitTier } : {}) },
     [OAT_FILE_MARK]: { v: 1, mintedAt: Number(mintedAt) || null, ...(account ? { account: String(account) } : {}) },
   };
 }
@@ -467,7 +479,8 @@ function reviewWarnings(info, entry, now = Date.now(), opts = {}) {
  *                   pool still places nothing new on it — accounts._placeable — and names it unplaceable WITH its
  *                   reason). A STALE ours (an older token of this row) is still replaced in place while a link names
  *                   it or the version is unknown: the window stops writes, never the swap of our own token
- *   no-scopes       no subscription shape known (the CLI would read "Not logged in"): refused; cleanup ours
+ *   no-scopes       no subscription shape known (the CLI would read "Not logged in"): refused; cleanup ours. The row says
+ *                   «sign in once, or choose it» (lane oat-add-door) — a person's choice, typeless «先不选» too, IS a shape
  *   written         our file already holds exactly this: nothing to do
  *   materialize     write it (the CLI's other keys kept); `archive` = rename the login there first (dead / wiped /
  *                   foreign / unreadable bytes — never lost); a file with no login in it is merged, not archived
@@ -484,7 +497,7 @@ function materializeVerdict(member, now = Date.now()) {
   const o = oauthOf(f);
   if (!ours && o && typeof o.refreshToken === 'string' && o.refreshToken && loginUsable(loginFileState(f, now))) return { verdict: 'keep-login', archive: false, cleanup: false };
   const sh = m.shape;
-  const shaped = !!sh && Array.isArray(sh.scopes) && sh.scopes.length > 0 && !!sh.subscriptionType;
+  const shaped = shapeKnown(sh); // a sign-in's shape, or the person's choice — a typeless one included (lane oat-add-door)
   if (!(m.caps && m.caps.ok === true)) {
     const known = !!(m.caps && m.caps.known);
     if (ours && !m.current && shaped && !(known && !m.linked)) return { verdict: 'materialize', archive: false, cleanup: false };
@@ -498,7 +511,7 @@ function materializeVerdict(member, now = Date.now()) {
 }
 
 module.exports = {
-  OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
+  OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, storedShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,

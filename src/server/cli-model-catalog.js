@@ -24,11 +24,17 @@
 const fs = require('fs');
 const path = require('path');
 const CMC = require('../claude-model-catalog.js');
+const CPC = require('../claude-plan-catalog.js');
 
 const LEDGER = 'cli-model-catalog.json';
 const KEEP = 20;
 const CHUNK = 8 << 20, OVERLAP = 4096;
 const READ_TIMEOUT_MS = 60e3;   // law D: one read never blocks the next tick's for longer than this
+// THE PLAN VALUES RIDE THE SAME READ (lane oat-add-door): the scan goes on past the catalog until the CLI's subscription map is
+// found, at most PLAN_SCAN_MAX bytes past the point the catalog's parts were found (2.1.321: the map sits 3.2 MB past the catalog
+// anchor; every tier string before it) — never the catalog's verdict: a map not found is `plans.anchor: false` (way ② of the
+// guided door is then not offered), the models stay read
+const PLAN_SCAN_MAX = 64 << 20;
 // law E: what a read's refusal MEANS. A content verdict (the bytes are what they are) is stored for good; anything else is
 // an I/O moment (EACCES before a chmod, a swapped file, a timeout) and is tried again at a later tick — the key does not change.
 const CONTENT_CODES = new Set(['no-anchor', 'no-literal', 'not-a-literal', 'forbidden-key', 'too-deep', 'string-long', 'array-long', 'literal-long',
@@ -70,11 +76,17 @@ const isModelRow = (m) => !!m && typeof m === 'object' && !Array.isArray(m) && i
   && isStr(m.family, 24) && isStr(m.label, 60) && (m.firstParty === null || isStr(m.firstParty, 128)) && isIntOrNull(m.window)
   && (m.oneM === null || m.oneM === 'native' || m.oneM === 'beta') && isIntOrNull(m.maxOutput) && (m.tier === null || isStr(m.tier, 64)) && isPrice(m.price);
 const isIdMap = (o, ids) => !!o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).every((k) => k !== '__proto__' && isStr(o[k], 128) && ids.has(o[k]));
+// the plan values as planCatalogOf produces them — re-derived from their own lists, so a hand-edited ledger cannot add a value
+const isPlans = (p) => !!p && typeof p === 'object' && !Array.isArray(p) && Array.isArray(p.types) && Array.isArray(p.tiers) && Array.isArray(p.withheld)
+  && p.types.every((x) => isStr(x, 40) && /^[a-z0-9_]{1,40}$/.test(x)) && [...p.tiers, ...p.withheld].every((x) => isStr(x, 60) && /^default_claude_[a-z0-9_]{1,40}$/.test(x))
+  && !!p.orgTypes && typeof p.orgTypes === 'object' && !Array.isArray(p.orgTypes) && Object.keys(p.orgTypes).every((k) => p.types.includes(k) && isStr(p.orgTypes[k], 60))
+  && p.anchor === (p.types.length > 0) && p.tiers.every((x) => !CPC.WITHHELD_TIERS.includes(x)) && p.withheld.every((x) => CPC.WITHHELD_TIERS.includes(x));
 const isEntry = (e) => {
   if (!e || typeof e !== 'object' || Array.isArray(e) || (e.state !== 'read' && e.state !== 'unreadable') || !Array.isArray(e.models) || !Array.isArray(e.refused || [])) return false;
   if (!e.models.every(isModelRow)) return false;
   const ids = new Set(e.models.map((m) => m.id));
   if (e.state === 'read' && (!e.models.length || !isIdMap(e.aliases || {}, ids) || !isIdMap(e.latestPerFamily || {}, ids))) return false;
+  if (e.plans !== undefined && e.plans !== null && !isPlans(e.plans)) return false;
   return (e.refused || []).every((r) => !!r && typeof r === 'object' && !Array.isArray(r) && typeof r.code === 'string');
 };
 
@@ -130,7 +142,7 @@ function once(name, detail, tag) {
  *  file, and the whole read races READ_TIMEOUT_MS — past it the entry says `timeout` and a later tick tries again. */
 async function readBinary(file, { version = null, expect = null, timeoutMs = READ_TIMEOUT_MS, open = null } = {}) {
   const t0 = Date.now();
-  const entry = { cli: version || null, builtAt: null, size: null, readAt: new Date().toISOString(), reader: CMC.READER_VERSION, state: 'unreadable', models: [], aliases: {}, latestPerFamily: {}, best: null, refused: [], evidence: { road: 'strings' } };
+  const entry = { cli: version || null, builtAt: null, size: null, readAt: new Date().toISOString(), reader: CMC.READER_VERSION, state: 'unreadable', models: [], aliases: {}, latestPerFamily: {}, best: null, refused: [], plans: null, evidence: { road: 'strings' } };
   let timer = null, fh = null, abandoned = false;
   const work = (async () => {
     try {
@@ -141,18 +153,23 @@ async function readBinary(file, { version = null, expect = null, timeoutMs = REA
       if (expect && (fst.dev !== expect.dev || fst.ino !== expect.ino)) { entry.reason = { code: 'changed', at: 0 }; return entry; }
       const size = fst.size; entry.size = size;
       const buf = Buffer.alloc(CHUNK + OVERLAP);
-      let pos = 0, carry = 0, anchorAt = -1, ident = null;
-      while (pos < size && (anchorAt < 0 || !ident) && !abandoned) {
+      let pos = 0, carry = 0, anchorAt = -1, ident = null, partsAt = -1;
+      const plans = CPC.createPlanScanner();
+      const planOpen = () => !plans.found() && (partsAt < 0 || pos - partsAt < PLAN_SCAN_MAX);
+      while (pos < size && (anchorAt < 0 || !ident || planOpen()) && !abandoned) {
         const { bytesRead } = await fh.read(buf, carry, CHUNK, pos);
         if (!bytesRead) break;
         const view = buf.subarray(0, carry + bytesRead), base = pos - carry;
+        plans.feed(buf.subarray(carry, carry + bytesRead).toString('latin1'));
         if (anchorAt < 0) { const i = view.indexOf(CMC.ANCHOR, 0, 'latin1'); if (i >= 0) anchorAt = base + i; }
         if (!ident) {
           const b = view.indexOf('BUILD_TIME:"', 0, 'latin1');
           if (b >= 0) ident = CMC.identityIn(view.subarray(Math.max(0, b - 800), b + 48).toString('latin1'));
         }
         carry = Math.min(OVERLAP, view.length); view.copy(buf, 0, view.length - carry); pos += bytesRead;
+        if (partsAt < 0 && anchorAt >= 0 && ident) partsAt = pos;
       }
+      entry.plans = plans.result();
       if (ident) { entry.builtAt = ident.builtAt; entry.evidence.versionString = ident.version; entry.evidence.versionAgrees = !version || ident.version === version; if (!entry.cli) entry.cli = ident.version; }
       if (anchorAt < 0) { entry.reason = { code: 'no-anchor', at: 0 }; return entry; }
       const from = Math.max(0, anchorAt - 4096);
@@ -293,6 +310,12 @@ function onView(fn) {
   return () => { st.subs = st.subs.filter((f) => f !== fn); };
 }
 function view() { const l = st.ledger; return l && l.current ? viewOf(l.binaries[l.current]) : null; }
+/** THE CLI'S OWN SUBSCRIPTION VALUES (lane oat-add-door): the binary in use's plan values as its bytes state them →
+ *  {cli, types, orgTypes, tiers, withheld, anchor} or null (no binary read yet, or one read before the reader knew them) */
+function plans() {
+  const l = st.ledger, e = l && l.current ? l.binaries[l.current] : null;
+  return e && e.plans && typeof e.plans === 'object' ? { cli: e.cli || null, ...e.plans } : null;
+}
 function status() {
   const l = st.ledger, cur = l && l.current ? l.binaries[l.current] : null;
   return cur ? { cli: cur.cli, builtAt: cur.builtAt, state: cur.state, models: cur.models.length, refused: cur.refused.length, reason: cur.reason || null, ms: cur.evidence && cur.evidence.ms } : null;
@@ -303,4 +326,4 @@ function _reset() { st.dataDir = null; st.ledger = null; st.key = null; st.readi
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }
 function _saveNow() { saveLedger(); }
-module.exports = { boot, noteBinary, readBinary, onView, view, status, apply, LEDGER, READ_TIMEOUT_MS, _reset, _load, _saveNow };
+module.exports = { boot, noteBinary, readBinary, onView, view, plans, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, _reset, _load, _saveNow };

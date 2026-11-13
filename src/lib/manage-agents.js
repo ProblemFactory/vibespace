@@ -29,6 +29,7 @@ import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-vi
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { openAccountModelsDialog } from './account-models.js'; // lane provider-record (q-053 §3): ⋯ → 模型… — the account's provider and the models it may use
+import { openOatShapeDialog } from './oat-shape-dialog.js'; // lane oat-add-door: the guided door — sign in once, or choose the subscription type
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
 // The oracle registry + its measured PROOFS and the measured-and-REJECTED
 // candidates are PURE and shared with the server (CJS pulled into the bundle
@@ -168,7 +169,7 @@ const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefin
  *  what to do, in words; '' when there is no refusal to name. */
 function oatFileRefusedText(reason, code = '') {
   if (reason === 'cli-unmeasured') return t('this Claude Code version is not cleared on this machine yet'); // lane cli-self-measure: never «not measured»
-  if (reason === 'no-scopes') return t('mint again to record the subscription type');
+  if (reason === 'no-scopes') return t('the subscription type is missing — sign in once, or choose it'); // lane oat-add-door: never «re-login» — the guided door (both ways)
   if (reason === 'write-failed') return code === 'symlink' ? t('the credential file is a symlink — nothing written') : t('could not write it to the account folder');
   // pool-oat-materialize verify r1: a READ that failed (F2), a symlinked folder (F8), a token that no longer decrypts (F4)
   if (reason === 'read-failed') return t('could not read the account folder ({code})', { code: escHtml(code || '?') });
@@ -229,6 +230,10 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
       // icon 或者放到别处。»): a token in the folder, verified, not in its last day, not held, asks nothing of the person — the
       // chip is its clock alone (its noun is the screen reader's name, its sentence the hover, its door the same), and the note
       // behind it gets the line. Words stay where they are news: the last day, HELD, a pool member's name (below)
+      // THE PERSON'S «先不选» (lane oat-add-door): a token written with the mint's scopes and NO type runs on the CLI's default
+      // model for a typeless login (Sonnet, measured on 2.1.321) — news the row says, with the guided door (choose, or sign in)
+      const typeless = !ls.worstId && !held && !!(a.oatShape && a.oatShape.typeless);
+      if (typeless && !near) return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" data-oat-shape="${escHtml(a.id)}" title="${escHtml(t('No subscription type was chosen for this long-lived token, so Claude Code uses its default model (Sonnet) when no model is picked. Choose the type, or sign in once and the sign-in states it.'))}${tail}">${ROSTER_ICONS.CLOCK}${escHtml(t('no subscription type — Sonnet by default'))}</span>`;
       const quiet = !near && !held;
       const titleOk = held ? title
         : t('Written to this account’s folder; CLI {cli} verified. No usable OAuth login here, so pooled sessions run on this long-lived token too (valid until {date}). It never refreshes; only the quota refresh (⟳) needs you to sign in.', { date, cli });
@@ -245,7 +250,10 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
     // run on the token, only ⟳ needs a sign-in, which its hover says; its last day and a refusal keep their words
     if (!near && !refused) return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat acct-login-quiet" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" aria-label="${escHtml(label)}" title="${title}${tail}">${ROSTER_ICONS.CLOCK}</span>`;
     const endTail = near && oatCountdownCase(a) ? ' · ' + oatCountdownTitle(a) : '';   // the countdown tag's hover, said once (r2)
-    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}" title="${title}${tail}${endTail}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
+    // lane oat-add-door: a token the CLI cannot be handed for want of its subscription type opens the GUIDED DOOR (sign in once, or
+    // choose it) — never the re-login alone
+    const shapeDoor = a.oatFile && a.oatFile.state === 'refused' && a.oatFile.reason === 'no-scopes' ? ` data-oat-shape="${escHtml(a.id)}"` : '';
+    return ` <span class="acct-blocked-hint acct-login-chip acct-login-oat" role="button" tabindex="0" data-relogin="${escHtml(a.id)}"${shapeDoor} title="${title}${tail}${endTail}">${ROSTER_ICONS.CLOCK}${label}${refused ? ' · ' + refused : ''}</span>`;
   }
   const dead = ls.state === 'expired' || ls.state === 'logged-out';
   if (!dead && !(local && ls.state === 'expiring')) return '';
@@ -1185,6 +1193,8 @@ export function installManageAgents(App, ctx = {}) {
       try {
         const r = await fetchJson(`/api/accounts/${enc}/oat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tok }) });
         if (!r?.success) { showToast(r?.error || t('Save failed'), { type: 'error' }); return false; }
+        // a token that states no subscription type is NOT usable yet (lane oat-add-door): never «now usable» — the guided door
+        if (r.oatFile === 'no-scopes') { shut(); refresh?.(); openOatShapeDialog({ id, name, fresh: true, onSignIn: () => this._reloginSubscription(id, a || { id, name }, refresh), refresh }); return true; }
         showToast(t('Long-lived token stored — “{name}” is now usable on any machine.', { name }));
         shut(); refresh?.();
         return true;
@@ -3655,6 +3665,8 @@ export function installManageAgents(App, ctx = {}) {
       if (chip) {
         const target = chip.dataset.relogin || id;
         const targetAcct = (accts.accounts || []).find((x) => x.id === target) || a;
+        // the token that wants its subscription type (lane oat-add-door): the guided door — its way ① is this same sign-in
+        if (chip.dataset.oatShape) { openOatShapeDialog({ id: chip.dataset.oatShape, name: targetAcct?.name || '', onSignIn: () => this._reloginSubscription(target, targetAcct, refresh), refresh }); return; }
         this._reloginSubscription(target, targetAcct, refresh);
         return;
       }
@@ -3700,6 +3712,7 @@ export function installManageAgents(App, ctx = {}) {
         if (isSub && !a?.pooled && !selectedHost) {
           items.splice(1, 0, { label: a?.loggedIn ? t('Re-login on this machine…') : t('Log in on this machine…'), action: () => this._reloginSubscription(id, a, refresh) });
         }
+        if (isSub && !a?.pooled && a?.oat) items.push({ label: t('Subscription type…'), title: t('Which subscription this long-lived token belongs to — stated by a sign-in, or chosen here'), action: () => openOatShapeDialog({ id, name: a?.name || '', onSignIn: () => this._reloginSubscription(id, a, refresh), refresh }) }); // lane oat-add-door
         if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
         // lane account-reset-door: «I reset this account on Anthropic's site» — the whole account (each lane's own act is where
         // the lane is drawn: the usage popup); a claim, never a reading — its next reading confirms or corrects it

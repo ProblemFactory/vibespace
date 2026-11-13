@@ -1,0 +1,17 @@
+{
+ "versions": {
+  "2.1.321": {
+   "cliVersion": "2.1.321",
+   "measuredAt": "2026-11-13",
+   "script": "scripts/measure-claude-cred-read.mjs",
+   "netns": false,
+   "rung": "loopback-real",
+   "proxy": "loopback-mock",
+   "verdict": "PASS",
+   "scopes": [
+    "user:inference"
+   ],
+   "note": "setup-token asks scope=user:inference (read off the authorize URL it printed, https://claude.com — printed, never fetched; nothing requested; the run ended by the tracer's kill (setup-token waits for a code))"
+  }
+ }
+}

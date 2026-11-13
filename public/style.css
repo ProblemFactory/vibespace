@@ -6137,6 +6137,12 @@ button.am-cap { cursor: pointer; }
 
 /* Long-lived token dialog (B-211a) */
 .oat-row { margin: 8px 0; }
+/* the guided door (lane oat-add-door): way ① then way ②, each its own block; a choice per line */
+.oat-shape-way { margin: 10px 0; padding-top: 6px; border-top: 1px solid var(--border); }
+.oat-shape-way:first-of-type { border-top: none; padding-top: 0; }
+.oat-shape-head { font-weight: 600; margin-bottom: 4px; }
+.oat-shape-choice { display: block; margin: 4px 0; cursor: pointer; }
+.oat-shape-choice .usage-note { display: inline; }
 /* lane oat-mint-flow: the mint's phases inside the dialog (it stays open) */
 .oat-mint { margin: 10px 0; display: flex; flex-direction: column; gap: 6px; }
 .oat-link-row, .oat-code-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

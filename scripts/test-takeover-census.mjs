@@ -171,6 +171,7 @@ export const CENSUS = [
   ['mounts-dialog.js', 'input', 'text+control', 'a mount\'s fields; a read-only key / link'],
   ['mounts-dialog.js', 'textarea', 'text', 'a multi-line field'],
   ['mounts-dialog.js', 'select', 'choice', 'a choice field'],
+  ['oat-shape-dialog.js', 'input', 'control', 'the guided door\'s subscription-type radios (lane oat-add-door)'],
   ['oauth-setup-card.js', 'details', 'control', 'the Connect dialog\'s setup fold BEFORE the first attempt: the client to create, the exact redirect addresses, the console (lane oauth-setup-instructions)'],
   ['open-with.js', 'tabindex', 'widget', '"Open with" menu rows'],
   ['picture-shell.js', 'textarea', 'text+helper', 'the paste box (a real box) · copyViaSelection\'s scratch (read-only, the live view\'s own copy)'],

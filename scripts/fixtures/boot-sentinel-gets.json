@@ -28,6 +28,7 @@
   "/api/accounts/:id/oat/mint",
   "/api/accounts/:id/oat/mint/:mid",
   "/api/accounts/:id/oat/mint/:mid/screen",
+  "/api/accounts/:id/oat-shape",
   "/api/accounts/:id/reset-credit",
   "/api/accounts/:id/signin",
   "/api/accounts/:id/signin/screen",
