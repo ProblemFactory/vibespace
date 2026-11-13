@@ -1112,6 +1112,8 @@ Also:
 
 **Not closed here (laws 2 and 3, the same lane):** the wait bound (30 min, the sender's one notice); the owner's one For-you item; «nothing from <name> for M minutes»; agy's store-proven close.
 
+**Follow-up (2026-11-13, the .398 merged-tip read, driven on the real agy wrapper).** `bindNew` bound a queued entry to the NEWEST queue id unseen at its write, whatever it was: a person's line or a second peer's frame listed first took it — the peer's record said «read» while its frame waited; after a kill the unit was returned and the words re-stashed (sent twice), or a carried one was lost while marked read. Now an entry binds only an item that CAN be its frame — the listing's own `kind` ('peer') and `from` (its sender), where the wrapper states them — and the EARLIEST such in queue order (the wrapper queues in write order); nothing that can be it ⇒ unbound (the turn-order fallback). K9: a group's delivery clause says a live member's DROPPED copy apart («dropped before a turn read it — send it again»), never «not delivered (ended)». Pins: test-queued-wake ㉑ (scenes A–D; A, B, C red on ccb6bb974), test-msg-cli-groups K9 (red on ccb6bb974).
+
 ## A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (the data-move rehearsal, 2026-11-12; lane job-logs-sweep, 2.369.398)
 
 **Symptom.** The owner's hub held 123 523 entries under `data/job-logs` (543 MB), its largest store by entry count. Every walk of data/ paid for them: a backup, the data move, the hub's own sweeps.

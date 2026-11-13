@@ -646,6 +646,43 @@ console.log('⑳ THE FOUR STATES A BOOT CAN FIND (round 4, moderate 3) — the e
   ok('⑳ (named) the stamp LOST — a kill inside the guard\'s 500 ms debounce, the loss the release has for every spend: the words once, marked; the drain adds nothing (hour 0) — bounded by the spends of that one window', R('entry held, stamp lost (the kill window)').hour === 0 && JSON.stringify(R('entry held, stamp lost (the kill window)').stash) === '["marked"]' && R('entry held, stamp lost (the kill window)').hourAfterDrain === 0, JSON.stringify(R('entry held, stamp lost (the kill window)')));
 }
 
+console.log('㉑ AN ENTRY BINDS ITS OWN FRAME (follow-up 2026-11-13: a person\'s line or another peer\'s frame listed first is not it)');
+{
+  const QW = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const S = JSON.stringify;
+  const mk = () => { const dir = fs.mkdtempSync(path.join(ROOT, 'qw-bind-')); const spend = []; const q = QW.create({ dataDir: dir, writer: { dirty() { } }, noteSpend: (r) => spend.push(['note', r.carried ? 'carried' : 'reserve']), releaseSpend: () => spend.push(['release']), log: () => { } }); const ev = []; q.onCarried((cid, e, x) => ev.push(['carried', e.id, x.how])); q.onHandedBack((cid, e, x) => ev.push(['back', e.id])); return { q, ev, spend }; };   // the public entry carries its id, never its words
+  const CID = 'conv-bind', PID = '4242';
+  const start = () => { const w = mk(); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [], PID, { fresh: true }); return w; };
+  const state = (w) => w.q.entriesFor(CID).map((e) => e.state);
+  // A — the person's line queued in the same round trip (codex / agy state its kind): the peer frame binds the PEER item
+  { const w = start(); const e = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P', fromName: 'alpha', holder: PID });
+    w.q.noteQueue(CID, [{ id: 'p', kind: 'peer', from: 'alpha' }, { id: 'h', kind: 'user' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
+    w.q.noteTurnEnded(CID); w.q.noteQueue(CID, [{ id: 'p', kind: 'peer', from: 'alpha' }], PID, { fresh: true }); w.q.noteTurnStarted(CID);   // the person's ⚡: h ran, p still queued
+    ok('㉑ A: the person\'s line h listed beside the peer frame p, h run first (⚡): the entry is STILL QUEUED — never «read» while its frame waits', S(state(w)) === S(['queued']) && !w.ev.some((x) => x[0] === 'carried'), JSON.stringify({ st: state(w), ev: w.ev })); }
+  // B — no kind stated (an older listing), FIFO: p written first, h after; p runs, h still queued, then a kill
+  { const w = start(); const e = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P', holder: PID });
+    w.q.noteQueue(CID, [{ id: 'p' }, { id: 'h' }], PID, { fresh: true }); w.q.answer(e.id, { mode: 'queued' });
+    w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'h' }], PID, { fresh: true });
+    const stash = []; w.q.handBackGone(CID, (pe, x) => stash.push(x.text), 'the conversation was terminated');
+    ok('㉑ B: no kind in the listing — the EARLIEST unseen item is the frame (queue order = write order): p ran ⇒ carried; the kill hands NOTHING back (never sent twice)', w.ev.some((x) => x[0] === 'carried' && x[1] === e.id) && stash.length === 0, JSON.stringify({ ev: w.ev, stash })); }
+  // C — two frames of ONE sender in one round trip: FIFO, p1 runs; then a kill
+  { const w = start(); const e1 = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P1', fromName: 'alpha', holder: PID }); const e2 = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'P2', fromName: 'alpha', holder: PID });
+    w.q.answer(e1.id, { mode: 'queued' }); w.q.answer(e2.id, { mode: 'queued' });
+    w.q.noteQueue(CID, [{ id: 'p1', kind: 'peer', from: 'alpha' }, { id: 'p2', kind: 'peer', from: 'alpha' }], PID, { fresh: true });
+    w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'p2', kind: 'peer', from: 'alpha' }], PID, { fresh: true });
+    const carried = w.ev.filter((x) => x[0] === 'carried').map((x) => x[1]);
+    const stash = []; w.q.handBackGone(CID, (pe, x) => stash.push(x.text), 'the conversation was terminated');
+    ok('㉑ C: two frames of one sender — p1 ran ⇒ P1 carried (read), P2 still waits; the kill hands back P2 ONLY (P1 never re-sent, P2 never lost while marked read)', S(carried) === S([e1.id]) && S(stash) === S(['P2']), JSON.stringify({ carried, stash })); }
+  // D — two SENDERS: beta's frame listed before alpha's — each entry binds its own sender's item
+  { const w = start(); const ea = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'A1', fromName: 'alpha', holder: PID }); const eb = w.q.noteWritten(CID, { charged: { reason: 'peer-message' }, text: 'B1', fromName: 'beta', holder: PID });
+    w.q.answer(ea.id, { mode: 'queued' }); w.q.answer(eb.id, { mode: 'queued' });
+    w.q.noteQueue(CID, [{ id: 'qb', kind: 'peer', from: 'beta' }, { id: 'qa', kind: 'peer', from: 'alpha' }], PID, { fresh: true });
+    w.q.noteTurnEnded(CID); w.q.noteTurnStarted(CID); w.q.noteQueue(CID, [{ id: 'qa', kind: 'peer', from: 'alpha' }], PID, { fresh: true });   // beta's ran first
+    const carried = w.ev.filter((x) => x[0] === 'carried').map((x) => x[1]);
+    ok('㉑ D: two senders, beta\'s frame listed (and run) first — B1 is carried, A1 still waits: each entry is bound by its sender, never by «newest»', S(carried) === S([eb.id]) && S(w.q.entriesFor(CID).map((x) => [x.id, x.state])) === S([[ea.id, 'queued']]), JSON.stringify({ carried, st: state(w) })); }
+  ok('㉑ the module binds by what the listing says an item IS, and takes the earliest (never `fresh[fresh.length - 1]`)', /e\.bind = \[fresh\[0\]\];/.test(read('src/server/queued-wakes.js')) && !/fresh\[fresh\.length - 1\]/.test(read('src/server/queued-wakes.js')) && /it\.kind && it\.kind !== 'peer'/.test(read('src/server/queued-wakes.js')));
+}
+
 console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its leg goes red');
 {
   const MUT = mutantCopies('queued-wake', REPO);

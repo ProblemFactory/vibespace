@@ -202,16 +202,22 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   }
 
   // ── the wrapper's records (src/server/stdout/acp-events.js, codex-events.js) ──
+  /** A RECORD'S STATE IS WHAT ITS ADDRESSEE DID WITH THAT FRAME (law 1; follow-up 2026-11-13): an entry binds only an item
+   *  that CAN be its frame — the listing says a peer frame (its kind), from its sender (its `from`), where the listing states
+   *  them — and the EARLIEST such in queue order (the wrapper queues in write order). Never «the newest unseen id»: a person's
+   *  line or another peer's frame listed first is not this frame. Nothing that can be it ⇒ unbound (the turn-order fallback). */
   function bindNew(cid) {
     const m = mirrorOf(cid);
     if (!m.ids) return;
+    const meta = m.meta || new Map();
+    const canBe = (id, e) => { const it = meta.get(id); if (!it) return true; if (it.kind && it.kind !== 'peer') return false; return !(it.from && e.fromName && it.from !== e.fromName); };
     const taken = new Set(entries.filter((x) => x.cid === cid).flatMap((x) => x.bind));
     for (const e of entries) {
       if (e.cid !== cid || e.state !== 'queued' || e.bind.length) continue;
       const before = new Set(e.idsAtWrite || []);
-      const fresh = [...m.ids].filter((id) => !before.has(id) && !taken.has(id));
+      const fresh = [...m.ids].filter((id) => !before.has(id) && !taken.has(id) && canBe(id, e));
       if (!fresh.length) break;   // oldest first: a later entry never takes an earlier one's item
-      e.bind = [fresh[fresh.length - 1]];
+      e.bind = [fresh[0]];
       taken.add(e.bind[0]);
     }
   }
@@ -234,6 +240,9 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
   function noteQueue(cid, items, holder = undefined, { fresh = false } = {}) {
     const m = mirrorOf(cid);
     m.ids = new Set(idsOf(items)); m.fresh = true; m.idsSeq = ++m.seq; m.idsFresh = fresh === true; m.idsBy = holder || null;
+    // what each listed item IS, as the wrapper states it (agy / codex: kind 'peer' | 'user' | 'system', `from` = a peer's name) —
+    // what bindNew matches a frame by (follow-up 2026-11-13: never «the newest», whatever it is)
+    m.meta = new Map((Array.isArray(items) ? items : []).filter((it) => it && typeof it === 'object' && typeof it.id === 'string' && it.id).map((it) => [it.id, { kind: typeof it.kind === 'string' ? it.kind : null, from: typeof it.from === 'string' && it.from ? it.from : null }]));
     bindNew(cid); sweep(cid);
     m.fresh = false;
   }

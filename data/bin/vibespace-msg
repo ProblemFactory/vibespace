@@ -202,7 +202,12 @@ const deliveryClause = (rows) => {
   const names = (s) => rows.filter((x) => x.state === s).map((x) => x.name);
   const parts = [];
   const named = (s) => rows.filter((x) => x.state === s).map((x) => x.name + (s === 'handed' ? hhmm(x.at) : ''));
-  for (const [s, label] of [['waiting', 'waiting'], ['queued', 'waiting for a current turn'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left'], ['undeliverable', 'not delivered (ended)']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
+  for (const [s, label] of [['waiting', 'waiting'], ['queued', 'waiting for a current turn'], ['handed', 'read'], ['muted', 'muted'], ['left', 'left']]) if (names(s).length) parts.push(`${label}: ${named(s).join(', ')}`);
+  // K9 (follow-up 2026-11-13): a copy DROPPED before a turn read it is not an ended conversation — said apart, with its door
+  const und = rows.filter((x) => x.state === 'undeliverable');
+  const dropped = und.filter((x) => x.why === 'dropped'), ended = und.filter((x) => x.why !== 'dropped');
+  if (dropped.length) parts.push(`not delivered (dropped before a turn read it — send it again): ${dropped.map((x) => x.name).join(', ')}`);
+  if (ended.length) parts.push(`not delivered (ended): ${ended.map((x) => x.name).join(', ')}`);
   return parts.length ? ' — ' + parts.join(' · ') : '';
 };
 

@@ -897,6 +897,13 @@ function AR_intro() {
   const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-msg'), 'utf-8');
   ok(cliSrc.includes("a === '--await'") && cliSrc.includes('if (flags.await) body.await = true;') && cliSrc.includes("'  --await: will wake you once on the first reply (one billed turn, within 2 h)'"), 'CLI: send --await sends `await: true` and echoes the one billed turn it may cost');
   ok(cliSrc.includes("${g.closed ? ' (closed)' : g.archived ? ' [archived]' : ''}") && cliSrc.includes("ended: 'nothing was sent — that conversation ended"), 'CLI: group list shows (closed); the `ended` refusal has its hint');
+  { // K9 (lane queued-is-not-woke follow-up 2026-11-13): in a GROUP clause a copy dropped before a turn read it is not an ended
+    // conversation — said apart, with its door; the CLI's own clause function, evaluated from its source
+    const cli = fs.readFileSync(CLI, 'utf8'); const i0 = cli.indexOf('const deliveryClause = '), j0 = cli.indexOf('\n};\n', i0);
+    const clause = (0, eval)('(' + cli.slice(i0 + 'const deliveryClause = '.length, j0 + 2) + ')');
+    const words = clause([{ name: 'beta', state: 'handed', at: Date.parse('2026-11-13T01:00:00Z') }, { name: 'gamma', state: 'undeliverable', why: 'dropped' }, { name: 'delta', state: 'undeliverable', why: 'archived', at: Date.parse('2026-11-12T10:00:00Z') }]);
+    ok(/not delivered \(dropped before a turn read it — send it again\): gamma/.test(words) && /not delivered \(ended\): delta/.test(words) && !/\(ended\): [^·]*gamma/.test(words), 'K9: a group\'s clause says a live member\'s DROPPED copy apart («dropped before a turn read it — send it again»), never «not delivered (ended)»; an archived member stays «ended»', words);
+  }
   ok(["`not delivered — ${x.name}'s conversation ${x.why === 'gone' ? 'is gone' : 'was archived' + day(x.at)}`", "`${x.name} is stopped — delivered when it resumes`", "' (awaiting reply)'", "` (woke you ${hm(a.at)})`", "' (await expired)'"].every((n) => cliSrc.includes(n)), 'CLI: read\'s trailing clauses — not delivered (ended) / stopped / awaiting reply / woke you / await expired');
 }
 
