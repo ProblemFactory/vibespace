@@ -110,6 +110,9 @@ async function sheetPage(lang, name, { bundleText = null, css = null } = {}) {
   if (css) { await P.evalJs(swapStyleJs(css)); await sleep(150); }
   await openRemote(P);
   const label = lang === 'zh' ? /配对设备/ : /Pair a device/;
+  // the Remote panel draws its actions after its hosts answer — wait for the button (realClick answers null at once when it is not there yet;
+  // 92c6aecc4's claim: «no Pair a device button» on both pages, 9.7 s)
+  await P.waitFor(`!!([...document.querySelectorAll('.mounts-action')].find((b) => ${label}.test(b.textContent)))`, 20000);
   const opened = await P.realClick(`([...document.querySelectorAll('.mounts-action')].find((b) => ${label}.test(b.textContent)) || null)`);
   if (!opened) return { P, err: 'no Pair a device button' };
   await P.waitFor(`!!document.querySelector('#device-pair-dialog .dap-row input:checked')`, 10000);
