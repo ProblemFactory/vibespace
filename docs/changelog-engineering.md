@@ -67,6 +67,24 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Not here:** the dates of these surfaces (pick 4). The glyph-only buttons, the ● mark and the scopes fold are lane L3's.
 - **The baseline:** ① 508 → **482**.
 
+### ui-language pick 4 — ONE formatter of a time a person reads (src/lib/page-time.js)
+- **The shape (主开发's ruling):** zh / ja «2026/11/12 19:27», today «19:27», this year «11/12 19:27»; en = the device's own. The zone is said once when the page's zone (owner-facts pageZone, handed in at boot by app.js `setPageZone`) is not the device's. src/when-words.js stays the agents' clock, untouched.
+- **The API:** `stampAt` (imported as `when` — the export is named apart because test-bundle-globals reads every export name as a symbol and «when()» is a word in a log line), `dateOf`, `clockOf`, `span`, `ago`, `until`, `num`.
+- **The moves:**
+  - ~90 browser display sites moved: every `toLocale*String` / `Intl.DateTimeFormat` / hand-built «M/D/Y» and «MM-DD hh:mm».
+  - The English duration helpers: utils `agoText` (12 importers), jobs-panel `hum`, usage-meter `fmtDur`, the diagnostics and message-detail `dur`.
+  - The PURE usage-source module stays import-free: app.js hands it the formatter (`setStampFormatter`).
+- **Census ⑦:**
+  - ZERO tolerance outside page-time.js for a formatter call or a hand-built month.
+  - A machine format (`en-…`, `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says `// page-time: <why>`: collab-row, foryou-actions, stash-summary, usage-source's node fallback, cli-registration-words' default, the three day keys.
+  - English unit templates: a shrink-only `units` baseline seeded at **65**. They sit in PURE word modules shared with agent-facing text: reset-credit, browser-stuck, browser-surfaces, dial-facts, chat-status-bar's chips.
+- **Also:**
+  - usage-source `readingSource` words `statusline`.
+  - The layout history's Restore is `tc('layout','Restore')` (恢复, as its title).
+  - The eml viewer parses its Date header.
+- **The baseline:** ① **482** (no English literal moved in this pick).
+- **Found by this pick's own AFTER pictures:** a function-scope `when` shadowed the imported one in usage-meter's reset formatter (`let when; … when(d)`) and in jobs-panel's job detail (a later `const when`, a TDZ). The taskbar meter and the job detail did not draw. Both now call `stampAt`. Census ⑦ names any page-time import shadowed by a local where it is called.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

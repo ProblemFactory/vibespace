@@ -9,13 +9,14 @@
 // — no new scroll path); a file hit opens through app.openFile.
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { num, stampAt as when } from './page-time.js';
 import { registerWindowType } from './window-types.js';
 import { registerCommand, registerKeybinding, registerMenuItem } from './contributions.js';
 import { enterSubmits } from './chat-enter-keys.js';
 
 const SCOPES = [['all', 'All'], ['chats', 'Conversations'], ['artifacts', 'Files']];
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const fmtTime = (ts) => { const d = new Date(Number(ts) || 0); if (!ts) return ''; const same = new Date().toDateString() === d.toDateString(); return same ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString(); };
+const fmtTime = (ts) => (ts ? when(Number(ts)) : '');
 const fmtMb = (b) => `${(Number(b || 0) / 1048576).toFixed(1)} MB`;
 
 /** A snippet → a node whose marks come from offsets (textContent only). */
@@ -33,9 +34,9 @@ export function snippetNode({ text = '', ranges = [], head, tail } = {}) {
 export function indexStateText(st) {
   const b = st && st.backfill, ix = st && st.index;
   if (st && st.state === 'disabled') return t('Search is off: {why}', { why: st.reason || '' });
-  if (b && b.running && b.total) return t('Indexing {done} of {total} conversations…', { done: b.done.toLocaleString(), total: b.total.toLocaleString() });
+  if (b && b.running && b.total) return t('Indexing {done} of {total} conversations…', { done: num(b.done), total: num(b.total) });
   // counts only once a backfill has finished (`lastBuild`): a file the live door indexed first is not a built index
-  if (ix && ix.lastBuild) return t('{rows} messages and {files} files indexed', { rows: Number(ix.rows || 0).toLocaleString(), files: Number(ix.artifacts || 0).toLocaleString() });
+  if (ix && ix.lastBuild) return t('{rows} messages and {files} files indexed', { rows: num(ix.rows || 0), files: num(ix.artifacts || 0) });
   return t('The index starts a minute after the server');
 }
 /** Until a backfill has finished, the empty state keeps asking /status (and patches its one line). */
@@ -110,7 +111,7 @@ export function openSearchWindow(app, opts = {}) {
     rows = []; sel = -1;
     const groups = new Map(), drawn = [];
     for (const h of r.hits || []) { const k = (h.host || '') + '|' + (h.kind === 'artifact' ? h.sessionId : h.sid); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(h); }
-    status.textContent = r.total ? t('{n} matches · {ms} ms', { n: r.total.toLocaleString(), ms: r.took }) : t('No matches');
+    status.textContent = r.total ? t('{n} matches · {ms} ms', { n: num(r.total), ms: r.took }) : t('No matches');
     for (const [, hits] of groups) {
       const first = hits[0];
       const s = first.kind === 'message' ? sessionFor(app, first.sid, first.host) : null;

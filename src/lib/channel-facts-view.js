@@ -12,6 +12,7 @@
  * small "Details" button: its click asks the server ONCE (`ask(rec)` → the facts, or null after a refusal it showed).
  */
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { el, icon } from './channel-chrome.js';
 import * as CF from '../channel-facts.js';
 
@@ -27,7 +28,7 @@ export function factsChips(facts) {
     const x = el('span', 'chanmsg-fact-chip', c.text);
     x.dataset.k = c.k;
     if (c.title && c.title !== c.text) x.title = c.title;
-    if (c.time) x.title = `${c.text} · ${new Date(c.time).toLocaleString(deviceLocale())}`;   // lane message-facts-lark: a TIME chip ("edited") tells its instant
+    if (c.time) x.title = `${c.text} · ${when(c.time)}`;   // lane message-facts-lark: a TIME chip ("edited") tells its instant
     box.appendChild(x);
   }
   return box;
@@ -48,7 +49,7 @@ function detailsList(vid, facts, folds, from = null) {
     const vals = foldGet(folds, fk) ? row.values : row.values.slice(0, row.shown);
     vals.forEach((v, i) => {
       if (i) dd.appendChild(document.createTextNode(', '));
-      const s = el('span', 'chanmsg-fact-party', v.time ? new Date(v.time).toLocaleString(deviceLocale()) : v.text);
+      const s = el('span', 'chanmsg-fact-party', v.time ? when(v.time) : v.text);
       if (v.title) s.title = v.title;
       dd.appendChild(s);
     });

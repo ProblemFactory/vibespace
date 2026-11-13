@@ -21,6 +21,7 @@ import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversatio
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount: a refusal the hub sent as a CODE (storage_sync_refused …) in the reader's words
+import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { pathRe as sharedPathRe, cleanPath as sharedCleanPath, isTrailing, fileUrlPath, hrefPath, CJK_PUNCT, SEG, looksRelPath, relCandidates } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10); a file: URL / an anchor's href as a path (lane agy-links-file-url)
@@ -1930,7 +1931,7 @@ class ChatRenderers {
       el.className = `chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-harness-info-${lv}${lv === 'warning' ? ' chat-harness-notice-high' : ''}`;
       // `say` = a notice in OUR words (2.1.288 instruction_size_warning carries numbers only); else the CLI's own text
       const p = b.params || {};
-      const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: Number(p.chars).toLocaleString(), limit: p.limit == null ? '?' : Number(p.limit).toLocaleString() })) : null;
+      const ours = b.say === 'instruction-size' ? escHtml(t('The CLI warns the instructions are large: {chars} characters (limit {limit})', { chars: num(p.chars), limit: p.limit == null ? '?' : num(p.limit) })) : null;
       const auto = b.say === 'bypass-auto-allow' ? bypassLineWords(p) : b.say === 'attachments-missing' ? attachmentsMissingWords(p) : b.say === 'writes-lost' ? writesLostWords(p) : null; // lane bypass-no-prompts · lane record-oracle-2-1-296 · lane cli-2-1-319-records
       el.innerHTML = `<span class="chat-system-text" title="${escHtml(auto ? auto.title : t('Harness message · {level}', { level: lv }))}">${lv === 'warning' ? UI_ICONS.alert : UI_ICONS.info || ''} ${ours ?? (auto ? escHtml(auto.text) : escHtml(b.text || ''))}</span>`;
       return { el, sideEffect: null };

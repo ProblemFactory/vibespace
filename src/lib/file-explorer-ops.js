@@ -1,5 +1,6 @@
 import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
+import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { startFileDownload } from './file-download.js';
 import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
 
@@ -552,8 +553,8 @@ export function installExplorerOps(FileExplorer) {
       if (!d || d.error) { cells.Type.textContent = t('Could not read properties') + (d?.code ? ` — ${fsErrorText(d)}` : ''); return; }
       cells.Type.textContent = d.isDirectory ? t('Folder ({n} items)', { n: d.entryCount ?? '?' }) : t('File');
       cells.Size.textContent = d.isDirectory ? t('calculating…') : formatSize(d.size);
-      cells.Modified.textContent = d.modified ? new Date(d.modified).toLocaleString() : '-';
-      cells.Created.textContent = d.created ? new Date(d.created).toLocaleString() : '-';
+      cells.Modified.textContent = d.modified ? when(d.modified, { seconds: true, full: true }) : '-';
+      cells.Created.textContent = d.created ? when(d.created, { seconds: true, full: true }) : '-';
       cells.Permissions.textContent = d.mode || '-';
       // …then the slow recursive size streams in for folders when it's done
       if (d.isDirectory) {
@@ -563,7 +564,7 @@ export function installExplorerOps(FileExplorer) {
           // drift: the remote du ran, shipped, and was dropped as 'unknown')
           const du = d2?.duSize ?? d2?.du;
           // verify-r2: a walk the device stopped at its bound SAYS so — the size is a floor, never the folder's whole size
-          cells.Size.textContent = du == null ? t('unknown') : d2.duPartial ? t('at least {size} (stopped counting after {n} entries)', { size: formatSize(du), n: Number(d2.duPartial).toLocaleString() }) : t('{size} (recursive)', { size: formatSize(du) });
+          cells.Size.textContent = du == null ? t('unknown') : d2.duPartial ? t('at least {size} (stopped counting after {n} entries)', { size: formatSize(du), n: num(d2.duPartial) }) : t('{size} (recursive)', { size: formatSize(du) });
         }).catch(() => { if (overlay.isConnected) cells.Size.textContent = t('unknown'); });
       }
     }).catch(() => { cells.Type.textContent = t('Could not read properties'); });

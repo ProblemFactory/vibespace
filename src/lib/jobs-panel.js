@@ -6,6 +6,7 @@ import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, sho
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { t } from './i18n.js';
+import { stampAt as when, clockOf, span, ago, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a job's state / access / end / start in words (the walk's jobs-2 / jobs-6)
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
@@ -21,7 +22,6 @@ const KIND_ICON = {
   task: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5l10 7-10 7z"/></svg>',
   cron: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
 };
-const hum = (ms) => { const m = Math.round(Math.abs(ms) / 60000); return m < 1 ? '<1m' : m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
 
 // expanded-card state survives the jobs-updated full re-render (2.357.0
 // sidebar unification — the rail panel is THE surface now, so it must not
@@ -123,10 +123,10 @@ export function focusJobsPanel(app, jobId) {
 function stateLine(j) {
   const run = j.run || {};
   const bits = [valueWord('job-state', j.state, t)];
-  if (run.startedAt && !run.endedAt) bits.push(hum(Date.now() - run.startedAt));
-  else if (run.endedAt) bits.push(hum(Date.now() - run.endedAt) + ' ' + t('ago'));
+  if (run.startedAt && !run.endedAt) bits.push(span(Date.now() - run.startedAt));
+  else if (run.endedAt) bits.push(ago(run.endedAt));
   if (run.exit !== null && run.exit !== undefined) bits.push(t('exit code {n}', { n: run.exit }));
-  if (j.nextFireAt) bits.push(t('next') + ' ~' + hum(j.nextFireAt - Date.now()));
+  if (j.nextFireAt) bits.push(t('next') + ' ~' + span(j.nextFireAt - Date.now()));
   const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
   if (memEnd) bits.push(memEnd);
   const left = runLeftWords(run, t); // round 5: what the job left running — stopped (a task's), kept (a service's)
@@ -230,7 +230,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
     sh.appendChild(ssp);
     const seenBtn = seenAllButton(sess.ackable, refresh, { compact });
     if (seenBtn) sh.appendChild(seenBtn);
-    const sage = document.createElement('span'); sage.className = 'jobs-group-age'; sage.textContent = sess.latestAt ? hum(Date.now() - sess.latestAt) + ' ' + t('ago') : '';
+    const sage = document.createElement('span'); sage.className = 'jobs-group-age'; sage.textContent = sess.latestAt ? ago(sess.latestAt) : '';
     sh.appendChild(sage);
     sh.onclick = () => { setFold(sess, layout); refresh?.(); };
     root.appendChild(sh);
@@ -251,7 +251,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
       if (g.failedUnacked) chip('jobs-group-bad', `${g.failedUnacked} ${t('failed')}`);
       if (g.failedAcked) chip('jobs-group-seen', `${g.failedAcked} ${t('seen')}`);
       const sp = document.createElement('span'); sp.style.flex = '1';
-      const age = document.createElement('span'); age.className = 'jobs-group-age'; age.textContent = g.latestAt ? hum(Date.now() - g.latestAt) + ' ' + t('ago') : '';
+      const age = document.createElement('span'); age.className = 'jobs-group-age'; age.textContent = g.latestAt ? ago(g.latestAt) : '';
       btn.append(sp, age);
       btn.onclick = () => { setFold(g, layout); refresh?.(); };
       root.appendChild(btn);
@@ -354,7 +354,7 @@ async function expandDetail(app, el, j, refresh) {
     renderPanelBlocks(app, fw, job.id, job.interaction.pending, { onAnswered: refresh });
   }
   const meta = document.createElement('div'); meta.className = 'jobs-meta';
-  meta.textContent = `${job.id} · ${t('created')} ${new Date(job.createdAt).toLocaleString()} · ${(job.owner?.groups || []).join(', ') || t('no group')}`;
+  meta.textContent = `${job.id} · ${t('created')} ${stampAt(job.createdAt)} · ${(job.owner?.groups || []).join(', ') || t('no group')}`;
   d.appendChild(meta);
   if (job.context?.payload) { const c = document.createElement('pre'); c.className = 'jobs-payload'; c.textContent = job.context.payload; d.appendChild(c); }
   const acc = document.createElement('div'); acc.className = 'jobs-access';
@@ -406,8 +406,8 @@ async function expandDetail(app, el, j, refresh) {
     const nr = document.createElement('div'); nr.className = 'jobs-meta';
     const ln = job.lastNotify;
     const lastTxt = !ln ? t('nothing sent yet')
-      : (ln.lane === 'message' || ln.lane === 'channel') && ln.ok ? t('messaged the owner conversation {ago}', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
-      : ln.lane === 'stash' ? t('queued for the owner conversation’s next resume ({ago})', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
+      : (ln.lane === 'message' || ln.lane === 'channel') && ln.ok ? t('messaged the owner conversation {ago}', { ago: ago(ln.ts) })
+      : ln.lane === 'stash' ? t('queued for the owner conversation’s next resume ({ago})', { ago: ago(ln.ts) })
       : ln.lane === 'off' ? t('skipped — auto-notify is off ({source})', { source: ln.source || 'global' })
       : ln.lane === 'suppressed' ? t('suppressed by the rate floor')
       : t('nothing sent yet');
@@ -446,16 +446,16 @@ async function expandDetail(app, el, j, refresh) {
       const row = document.createElement('div'); row.className = 'jobs-run';
       // lane notify-retry: a PARKED attempt (the agent did not accept it at once — retried at its turn end and on a
       // schedule) and a delivery that came after retries say so in words, never as raw fields
-      const retryWords = e.parked ? ' · ' + (e.retries ? t('retrying ({n} so far, {phase}, {busy})', { n: e.retries, phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') }) : t('parked for retry ({phase}, {busy})', { phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') })) + (e.nextAt || e.retryAt ? ' · ' + t('next attempt {at}', { at: new Date(e.nextAt || e.retryAt).toLocaleTimeString() }) : '')
+      const retryWords = e.parked ? ' · ' + (e.retries ? t('retrying ({n} so far, {phase}, {busy})', { n: e.retries, phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') }) : t('parked for retry ({phase}, {busy})', { phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') })) + (e.nextAt || e.retryAt ? ' · ' + t('next attempt {at}', { at: clockOf(e.nextAt || e.retryAt) }) : '')
         : e.ok && e.retries ? ' · ' + t('after {n} retries', { n: e.retries }) + (e.via && e.via !== 'message' ? ' · ' + (e.via === 'prompt' ? t('rode the next prompt') : t('handed over')) : '') : '';
-      row.textContent = `${new Date(e.ts).toLocaleTimeString()} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}${retryWords}`;
+      row.textContent = `${clockOf(e.ts, { seconds: true })} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}${retryWords}`;
       d.appendChild(row);
     }
   }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
     const left = runLeftWords(run, t); // round 5: what it left running
-    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
+    rr.textContent = `${stampAt(run.startedAt)} · ${run.endedAt ? span(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }

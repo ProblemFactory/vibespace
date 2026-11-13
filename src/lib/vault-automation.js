@@ -29,6 +29,7 @@
 // filter past eight, ended conversations dim with ONE 清理已结束的授权 — remembered per key for this page); the limits are ONE
 // line of words where an unrestricted set says 任何 and more than three picks say 「N 种」 (the names in its title).
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: an owner's act (key.mint …) in words (the walk's vault-grants-1)
 import { fetchJson, showToast, showConfirmDialog, createModalShell, createPopover } from './utils.js';
 import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder, EVERYONE_SUBJECT } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
@@ -41,7 +42,7 @@ import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automa
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const verbWord = (verb) => { const s = SCOPES.find((x) => x.verb === verb); return s ? t(s.label) : verb; };
-const whenText = (ms) => (ms ? new Date(ms).toLocaleString() : '');
+const whenText = (ms) => when(ms, { seconds: true });
 const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const OPEN_VERB = 'conversations.open';

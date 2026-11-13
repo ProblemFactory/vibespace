@@ -28,6 +28,7 @@
 //     a bottom sheet of artboards (tap = focused).
 import { showToast, fetchJson, createModalShell, freshKey, showContextMenu, copyText, absUrl, uiScale, COUNTER_ZOOM } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 import { createBarFold } from './bar-fold.js';
@@ -330,7 +331,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
         else { status.textContent = t('No artboards yet — the agent writes them into {dir}', { dir: d }); status.style.display = ''; }
         lastAt = new Date();
         drawStamp(lastAt);
-        stamp.title = (liveOff ? t('This window is not watching its folder: {why}. Press Reload to re-read it.', { why: liveOff }) + '\n' : '') + t('Last read from {dir} at {time}', { dir: d, time: lastAt.toLocaleString(deviceLocale()) }) + (r.warnings.length ? '\n' + r.warnings.map((w) => w.why || w.code).join('\n') : '');
+        stamp.title = (liveOff ? t('This window is not watching its folder: {why}. Press Reload to re-read it.', { why: liveOff }) + '\n' : '') + t('Last read from {dir} at {time}', { dir: d, time: when(lastAt) }) + (r.warnings.length ? '\n' + r.warnings.map((w) => w.why || w.code).join('\n') : '');
       } while (again && !signal.aborted);
     })().finally(() => { loading = null; });
     return loading;
@@ -349,7 +350,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
   // ── live: the hub's watch + the file-changed relay ──
   let liveOff = null; // the hub's refusal of the watch, in its words (watch_limit: 16 designs per window set, 32 per server; not_registered)
   const drawStamp = (at) => {
-    const time = at.toLocaleTimeString(deviceLocale());
+    const time = clockOf(at, { seconds: true });
     stamp.textContent = liveOff ? t('Live repaint off · read {time}', { time }) : t('Read {time}', { time });
     stamp.classList.toggle('design-stamp-off', !!liveOff);
   };

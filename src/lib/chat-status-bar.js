@@ -9,6 +9,7 @@ import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, modelLabelFor, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
+import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
 import { valueWord, modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
@@ -993,7 +994,7 @@ export class ChatStatusBar {
     // it turns loud (amber, with the time) once a wait is actually armed.
     if (autoResumeCapsFor(this._backend).supported && this._autoResume) {
       const a = this._autoResume;
-      const when = a.armed && a.resetsAt ? new Date(a.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const when = a.armed && a.resetsAt ? clockOf(a.resetsAt) : '';
       // A WATCH (the reset is past the 26h ceiling) promises no TIME — only
       // that a reading saying the quota is back will continue the session. The
       // chip must not print a clock it cannot keep.
@@ -1009,7 +1010,7 @@ export class ChatStatusBar {
       // The server sends the STRUCTURE (statusFor().cause); the words are ours.
       const c = a.armed && !a.watch && a.cause && a.cause.scope === 'pool' && a.cause.soonest && a.cause.soonest.name ? a.cause : null;
       if (c) {
-        const clock = (ms) => new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const clock = (ms) => when(ms);
         const s = c.soonest, sb = s.bucket && s.bucket.label ? s.bucket : null, r = c.rejector;
         const lines = [];
         if (r && r.name && r.ownWall && r.ownWall.unknownWindow && r.id !== s.id) lines.push(t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name }));

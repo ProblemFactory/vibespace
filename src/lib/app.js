@@ -21,6 +21,7 @@ import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
+import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
 import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
@@ -48,7 +49,9 @@ import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { agentWindowPlacement } from './desktop-app-placement.js';
 import { displayedPanes } from './chain-layout.js'; // lane agent-window-no-pop: the panes a split frame shows (the person looks at both)
-import { setHubZone } from './owner-facts.js'; // B-7960 a: the zone the hub resolved for the owner — the board prints in it
+import { setHubZone, pageZone } from './owner-facts.js'; // B-7960 a: the zone the hub resolved for the owner — the board prints in it
+import { setPageZone } from './page-time.js'; // lane ui-language: the ONE formatter prints in the page's zone
+import { setStampFormatter } from './usage-source.js'; // lane ui-language: …and the PURE usage-source module renders through it
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
 import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
@@ -555,6 +558,7 @@ class App {
       document.getElementById('input-cwd').placeholder = d.home;
       this._localHome = d.home; // restored as the cwd hint when host → Local (B-0d70)
       setHubZone(d.zone);
+      setPageZone(pageZone(this)); setStampFormatter(when);   // lane ui-language: every time a surface prints, in the page's zone
       this._authEnabled = !!d.authEnabled;
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed
@@ -822,7 +826,7 @@ class App {
   // survives restarts and auto-expires; the strip is a normal flex child of
   // #main-wrapper, so the workspace reflows proportionally under it.
   _initMaintenanceBanner() {
-    const fmtT = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const fmtT = (ts) => clockOf(ts);
     const render = (m) => {
       let el = document.getElementById('maintenance-banner');
       if (!m?.active) { el?.remove(); document.getElementById('mb-timeline')?.remove(); clearTimeout(this._maintTimer); return; }
@@ -1072,7 +1076,7 @@ class App {
       body.innerHTML = '';
       const head = document.createElement('p');
       head.className = 'agents-note';
-      head.textContent = t('Exported {date} — each selected section REPLACES the current data.', { date: file.exportedAt ? new Date(file.exportedAt).toLocaleString() : t('(unknown date)') });
+      head.textContent = t('Exported {date} — each selected section REPLACES the current data.', { date: file.exportedAt ? when(file.exportedAt, { full: true }) : t('(unknown date)') });
       const secWrap = document.createElement('div');
       secWrap.className = 'cfg-rows';
       for (const [id, data] of Object.entries(file.sections || {})) {
@@ -1502,7 +1506,7 @@ class App {
 
       const info = document.createElement('div'); info.className = 'layout-card-info';
       info.innerHTML = `<div class="layout-card-name">${isCurrent ? '● ' : ''}${escHtml(name)}</div>
-        <div class="layout-card-meta">${t('{n} windows', { n: preset.windows?.length || 0 })} · ${escHtml(themeWord(preset.theme || 'dark', t))} · ${preset.updatedAt ? new Date(preset.updatedAt).toLocaleString() : ''}</div>`;
+        <div class="layout-card-meta">${t('{n} windows', { n: preset.windows?.length || 0 })} · ${escHtml(themeWord(preset.theme || 'dark', t))} · ${preset.updatedAt ? when(preset.updatedAt) : ''}</div>`;
       info.onclick = () => {
         this.layoutManager.loadPreset(name).then(() => this.hideDialogs());
       };

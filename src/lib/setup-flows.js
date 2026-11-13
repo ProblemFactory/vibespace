@@ -1,7 +1,8 @@
 import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
 import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the tour ends ⇒ the second password (while not set up)
 import { TerminalSession } from './terminal.js';
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
+import { stampAt as when, clockOf, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
@@ -502,11 +503,11 @@ export function installSetupFlows(App) {
         // inc-mun7qjmw-iksh); a point from before the field existed has none
         const change = Array.isArray(e.change) && e.change.length
           ? e.change.map(([n, a, b]) => `${n || t('Desktop')} ${a} → ${b}`).join(' · ') : '';
-        return `<div class="lh-row"><div class="lh-main"><b>${escHtml(new Date(e.at).toLocaleString())}</b>
+        return `<div class="lh-row"><div class="lh-main"><b>${escHtml(when(e.at))}</b>
             <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div>${change ? `
             <div class="lh-sub lh-change">${escHtml(t('Then: {changes}', { changes: change }))}</div>` : ''}${desks ? `
             <div class="lh-desks">${desks}</div>` : ''}</div>
-          <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(t('Restore'))}</button></div>`;
+          <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(tc('layout', 'Restore'))}</button></div>`;
       }).join('')}</div>`;
     // THE PRESS SAYS IT RUNS (lane phone-dock-restore — measured: from the confirm's OK to the toast the dialog stood as it was,
     // the hub's whole restore long): the pressed button's busy words at once, the list held (one restore at a time); a refusal
@@ -539,7 +540,7 @@ export function installSetupFlows(App) {
         if (!(await showConfirmDialog({
           title: t('Restore a previous layout'),
           message: t('Restore this layout? Your current one becomes a rollback point too, so this is undoable.'),
-          confirmText: t('Restore'),
+          confirmText: tc('layout', 'Restore'),
         }))) return;
         const end = busy(b, t('Layout restored — reloading…'));
         const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rid: end.rid }) }).catch(() => null);
@@ -576,7 +577,7 @@ export function installSetupFlows(App) {
       no_inspector: t('The profile did not start: this server’s Node has no inspector.') }[r && r.error];
     if (why) { showToast(why, { type: 'error' }); return; }
     if (!r || r.error || !r.ok) { showToast(t('Could not start the profile: {why}', { why: (r && r.error) || t('no answer') }), { type: 'error' }); return; }
-    showToast(t('Profiling the server until {time} — then open ⚙ System → Diagnostics report…', { time: new Date(r.until).toLocaleTimeString() }));
+    showToast(t('Profiling the server until {time} — then open ⚙ System → Diagnostics report…', { time: clockOf(r.until) }));
   },
 
   /** lane hub-loop-stalls commit 3: ONE 20 s CPU capture of the server's main thread (POST /api/loop-holds/capture answers
@@ -612,7 +613,7 @@ export function installSetupFlows(App) {
     const kv = (obj) => Object.entries(obj || {}).map(([k, v]) =>
       `<tr><td>${esc(k)}</td><td class="n">${v}</td></tr>`).join('') || `<tr><td colspan="2" class="dim">${esc(t('No data'))}</td></tr>`;
     const errs = (d.errors || []).map((e) =>
-      `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${new Date(e.lastTs).toLocaleString()}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
+      `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${when(e.lastTs)}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
       || `<p class="dim">${esc(t('No errors recorded — nothing crashed in this window.'))}</p>`;
     const days = Object.entries(d.byDay || {}).sort();
     const maxDay = Math.max(1, ...days.map(([, v]) => v));
@@ -700,10 +701,10 @@ export function installSetupFlows(App) {
       <p>${esc(t('The loop was busy {a} % of the last 10 s, {b} % of the last minute, {c} % since start.', { a: p(lh.elu.last10s), b: p(lh.elu.lastMinute), c: p(lh.elu.sinceStart) }))}${lh.heap ? ' ' + esc(t('Heap {used} of {limit} GB, external {ext} GB.', { used: g(lh.heap.heapUsed), limit: g(lh.heap.heapLimit), ext: g(lh.heap.external) })) : ''}</p>
       ${state ? `<p class="dim">${esc(state)}</p>` : ''}
       ${rows ? `<table><tr><td class="n dim">${esc(t('total held'))}</td><td class="n dim">${esc(t('times'))}</td><td class="n dim">${esc(t('worst'))}</td><td class="dim">${esc(t('what held it'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of a second or more since this server started.'))}</p>`}
-      ${(lh.holds || []).length ? `<details><summary>${esc(t('The latest holds ({n})', { n: lh.holds.length }))}</summary><pre>${(lh.holds || []).slice(0, 20).map((h) => esc(new Date(h.at).toLocaleString() + ' · ' + h.line)).join('\n')}</pre></details>` : ''}
+      ${(lh.holds || []).length ? `<details><summary>${esc(t('The latest holds ({n})', { n: lh.holds.length }))}</summary><pre>${(lh.holds || []).slice(0, 20).map((h) => esc(when(h.at, { seconds: true }) + ' · ' + h.line)).join('\n')}</pre></details>` : ''}
       ${(() => {
         const pf = lh.profile || {};
-        if (pf.running) return `<p><b>${esc(t('A profile is running until {time}.', { time: new Date(pf.running.until).toLocaleTimeString() }))}</b></p>`;
+        if (pf.running) return `<p><b>${esc(t('A profile is running until {time}.', { time: clockOf(pf.running.until) }))}</b></p>`;
         const l = pf.last;
         if (!l) return `<p class="dim">${esc(t('⚙ System → Profile the server for 10 minutes: where the main thread’s time goes, by function.'))}</p>`;
         if (l.refused) return `<p class="dim">${esc(t(l.refusedWords || 'The last profile did not run.'))}</p>`;   // round 4: the table's sentence, never the raw token
@@ -711,7 +712,7 @@ export function installSetupFlows(App) {
         // (src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED — the journal line says the same; zh / ja by i18n-check's key
         // tables); a cause the server did not word draws the neutral sentence, never another cause's
         const top = (l.top || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.frame)}</td></tr>`).join('');
-        return `<h3>${esc(t('Profile — {n} samples, {time}', { n: l.samples, time: new Date(l.endedAt).toLocaleString() }))}</h3>
+        return `<h3>${esc(t('Profile — {n} samples, {time}', { n: l.samples, time: when(l.endedAt) }))}</h3>
         <p>${esc(t('Idle {idle} %, between JavaScript frames (promise jobs) {between} %, no JavaScript frame {nojs} %, not sampled {ns} %, JavaScript {js} %.', { idle: l.idlePct, between: l.betweenPct ?? 0, nojs: l.noJsPct, ns: l.notSampledPct ?? 0, js: l.jsPct }))}</p>
         ${l.notSampledPct ? `<p class="dim">${esc(t(l.notSampledWords || 'Some samples were not taken: the sampler stood down.'))}</p>` : ''}
         ${l.stopped ? `<p class="dim">${esc(t(l.stoppedWords || 'It stopped early.'))}</p>` : ''}
@@ -726,12 +727,12 @@ export function installSetupFlows(App) {
         const cp = lh.capture || {};
         const files = Array.isArray(cp.files) ? cp.files : [];
         const dl = files.length ? `<p class="dim">${esc(t('Kept profiles (open them in a browser’s developer tools):'))} ${files.map((f) => `<a href="/api/loop-holds/cpu-profiles/${encodeURIComponent(f)}" download="${esc(f)}">${esc(f)}</a>`).join(' · ')}</p>` : '';
-        if (cp.running) return `<p><b>${esc(t('A CPU profile is running until {time}.', { time: new Date(cp.running.until).toLocaleTimeString() }))}</b></p>${dl}`;
+        if (cp.running) return `<p><b>${esc(t('A CPU profile is running until {time}.', { time: clockOf(cp.running.until) }))}</b></p>${dl}`;
         const l = cp.last;
         if (!l) return `<p class="dim">${esc(t('⚙ System → Capture a CPU profile (20 s): which of VibeSpace’s own code is using the processor. One is also taken by itself when the server is slow.'))}</p>${dl}`;
         const sp = l.split || {};
         const rows = (l.rows || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.fn)} <span class="dim">· ${esc(x.loc || '')}${x.via ? ` — ${esc(t('{pct} % through {fn}', { pct: x.viaPct, fn: x.via }))}` : ''}</span></td></tr>`).join('');
-        return `<h3>${esc(t('CPU profile — {n} samples over {s} s, {time}', { n: l.samples, s: (l.windowMs / 1000).toFixed(1), time: new Date(l.endedAt).toLocaleString() }))}</h3>
+        return `<h3>${esc(t('CPU profile — {n} samples over {s} s, {time}', { n: l.samples, s: (l.windowMs / 1000).toFixed(1), time: when(l.endedAt) }))}</h3>
         <p class="dim">${esc(l.auto ? t('Taken by itself: the server was slow.') : t('Taken on request.'))}</p>
         <p>${esc(t('JavaScript {js} %, on the processor outside JavaScript {native} %, idle {idle} %.', { js: sp.js ?? 0, native: sp.native ?? 0, idle: sp.idle ?? 0 }))} ${l.gc && l.gc.pct != null ? esc(t('Garbage collection {gc} % of the window.', { gc: l.gc.pct })) : esc(t('Garbage collection not split.'))}</p>
         ${l.stopped ? `<p class="dim">${esc(t('It stopped early.'))}</p>` : ''}
@@ -741,7 +742,7 @@ export function installSetupFlows(App) {
       })()}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
-    ${diagnosticsSection(reg, { t, esc })}
+    ${diagnosticsSection(reg, { t, esc, when })}
     ${(() => {
       // HARNESS DRIFT (design-unknown-records §3): unknown record types and
       // known types that grew a field, one row per (breadcrumb, detail) with
@@ -749,7 +750,7 @@ export function installSetupFlows(App) {
       // build rides the detail (`· cli 2.1.274`). Absent when nothing drifted.
       const rows = Array.isArray(d.drift) ? d.drift : [];
       if (!rows.length) return '';
-      const tr = rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.detail || '')}</td><td class="n">${r.count}</td><td class="dim">${new Date(r.firstTs).toLocaleString()}</td><td class="dim">${new Date(r.lastTs).toLocaleString()}</td><td class="dim">${esc((r.versions || []).join(', '))}</td></tr>`).join('');
+      const tr = rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.detail || '')}</td><td class="n">${r.count}</td><td class="dim">${when(r.firstTs)}</td><td class="dim">${when(r.lastTs)}</td><td class="dim">${esc((r.versions || []).join(', '))}</td></tr>`).join('');
       return `<h2>${esc(t('Harness drift'))}</h2>
       <p class="dim">${esc(t('Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.'))}</p>
       <table><tr><td class="dim">${esc(t('breadcrumb'))}</td><td class="dim">${esc(t('detail'))}</td><td class="n dim">n</td><td class="dim">${esc(t('first seen'))}</td><td class="dim">${esc(t('last seen'))}</td><td class="dim">${esc(t('versions'))}</td></tr>${tr}</table>`;
@@ -777,12 +778,12 @@ export function installSetupFlows(App) {
       // deployment that never pushes — no runs, no section.
       const runs = (ci && ci.runs) || [], running = (ci && ci.running) || [];
       if (!runs.length && !running.length) return '';
-      const dur = (ms) => (ms >= 60000 ? `${Math.floor(ms / 60000)}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s` : `${Math.round(ms / 1000)}s`);
+      const dur = (ms) => span(ms);
       const rows = [
         // GREEN / RED / RUNNING stay untranslated: they are the gate's own
         // vocabulary (the marker files are literally <sha>.green / .red) and
         // `npm run ci:status` prints the same words at the terminal.
-        ...running.map((r) => `<tr><td>${esc(r.sha.slice(0, 8))}</td><td>RUNNING</td><td class="n">—</td><td class="dim">${new Date(r.startedAt).toLocaleString()}</td><td class="dim">pid ${r.pid}</td></tr>`),
+        ...running.map((r) => `<tr><td>${esc(r.sha.slice(0, 8))}</td><td>RUNNING</td><td class="n">—</td><td class="dim">${when(r.startedAt)}</td><td class="dim">pid ${r.pid}</td></tr>`),
         // A suite that failed and passed on the retry does not block a push,
         // but it DID fail — the row says so rather than laundering it green.
         // SKIP is neither: the tier never ran (it never got the machine lock),
@@ -793,7 +794,7 @@ export function installSetupFlows(App) {
         // sha never contained (round 6) — those were not run and not judged, so
         // the green row says how many of its `suites` they were instead of
         // printing a total the record itself contradicts.
-        ...runs.map((r) => `<tr><td>${esc(r.sha.slice(0, 8))}</td><td><b>${r.result === 'green' ? 'GREEN' : r.result === 'skipped' ? 'SKIP' : 'RED'}</b></td><td class="n">${esc(dur(r.ms))}</td><td class="dim">${new Date(r.endedAt).toLocaleString()}</td><td class="dim">${r.result === 'skipped' ? esc(t('no verdict')) + (r.reason ? ' — ' + esc(r.reason) : '') : r.result === 'green' ? esc(t('{n} suites', { n: r.suites })) : esc(r.failed.join(', '))}${r.absent ? ` <span class="dim">· ${esc(t('{n} not present at that commit', { n: r.absent }))}</span>` : ''}${(r.flaky || []).length ? ` <span class="dim">· ${esc(t('flaky'))}: ${esc(r.flaky.join(', '))}</span>` : ''}${r.unlocked ? ` <span class="dim">· ${esc(t('ran without the machine lock'))}</span>` : ''}${r.scope === 'affected' ? ` <span class="dim">· ${esc(t('affected scope: {n} suites selected by that push', { n: r.selected }))}</span>` : ''}</td></tr>`),
+        ...runs.map((r) => `<tr><td>${esc(r.sha.slice(0, 8))}</td><td><b>${r.result === 'green' ? 'GREEN' : r.result === 'skipped' ? 'SKIP' : 'RED'}</b></td><td class="n">${esc(dur(r.ms))}</td><td class="dim">${when(r.endedAt)}</td><td class="dim">${r.result === 'skipped' ? esc(t('no verdict')) + (r.reason ? ' — ' + esc(r.reason) : '') : r.result === 'green' ? esc(t('{n} suites', { n: r.suites })) : esc(r.failed.join(', '))}${r.absent ? ` <span class="dim">· ${esc(t('{n} not present at that commit', { n: r.absent }))}</span>` : ''}${(r.flaky || []).length ? ` <span class="dim">· ${esc(t('flaky'))}: ${esc(r.flaky.join(', '))}</span>` : ''}${r.unlocked ? ` <span class="dim">· ${esc(t('ran without the machine lock'))}</span>` : ''}${r.scope === 'affected' ? ` <span class="dim">· ${esc(t('affected scope: {n} suites selected by that push', { n: r.selected }))}</span>` : ''}</td></tr>`),
       ].join('');
       return `<h2>${esc(t('Release gate — heavy tier'))}</h2>
       <p class="dim">${esc(t('Suites too slow for the pre-push gate (headless chrome, real servers, real CLIs). A RED run blocks the next push until a newer green run clears it — run npm run ci:status for the ancestry verdict.'))}</p>
@@ -803,9 +804,9 @@ export function installSetupFlows(App) {
       // Fleet section: only on a collector instance that has received batches.
       if (!c || !c.collector || !Object.keys(c.instances || {}).length) return '';
       const rows = Object.entries(c.instances).map(([id, g]) =>
-        `<tr><td>${esc(id)}</td><td class="n">${g.total}</td><td class="n">${g.errors}</td><td>${esc(Object.keys(g.versions || {}).join(', '))}</td><td class="dim">${new Date(g.lastTs).toLocaleString()}</td></tr>`).join('');
+        `<tr><td>${esc(id)}</td><td class="n">${g.total}</td><td class="n">${g.errors}</td><td>${esc(Object.keys(g.versions || {}).join(', '))}</td><td class="dim">${when(g.lastTs)}</td></tr>`).join('');
       const ferrs = (c.errors || []).map((e) =>
-        `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${esc(Object.keys(e.instances || {}).join(', '))} · ${new Date(e.lastTs).toLocaleString()}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
+        `<details><summary><b>${esc(e.name || '?')}</b> ×${e.count} <span class="dim">— ${esc(Object.keys(e.instances || {}).join(', '))} · ${when(e.lastTs)}${e.version ? ' · v' + esc(e.version) : ''}</span></summary><pre>${esc(e.stack || e.detail || t('(no stack)'))}</pre></details>`).join('')
         || `<p class="dim">${esc(t('No errors recorded — nothing crashed in this window.'))}</p>`;
       return `<h2>${esc(t('Fleet (central collector)'))}</h2>
       <p class="dim">${esc(t('Batches forwarded by other instances. Total events: {n}.', { n: c.total }))}</p>

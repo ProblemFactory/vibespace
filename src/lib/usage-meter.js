@@ -2,6 +2,7 @@
 import { UI_ICONS } from './icons.js'; // the credits chip's money glyph (2.369.189)
 import { createBackendIconHtml, billingRow, getBackendMeta } from './agent-meta.js';
 import { t, tc, deviceLocale } from './i18n.js';
+import { stampAt as when, clockOf, span, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, onOutsidePress, showConfirmDialog, showToast } from './utils.js';
 import { backendFeatureCaps } from './agent-meta.js';
 // PURE reading-provenance rules (2026-09-07 readings-by-slot): who produced the
@@ -228,7 +229,7 @@ export function installUsageMeter(App, ctx = {}) {
     const fallback = setTimeout(() => this.refreshUsage?.(), 2500);
     const r = await fetchJson('/api/usage/codex-refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, sessionId: live ? live.webuiId : null }) });
     if (btn) btn.classList.remove('spin');
-    const fmt = (sec) => { const d = new Date(Number(sec) * 1000); try { return d.toLocaleString(deviceLocale(), { dateStyle: 'medium', timeStyle: 'short' }); } catch { return d.toLocaleString(); } };
+    const fmt = (sec) => when(Number(sec) * 1000, { full: true });
     const toast = codexRefreshToast(r, { t, fmtTime: fmt });
     showToast(toast.text, toast.error ? { type: 'error' } : undefined);
     if (r) { clearTimeout(fallback); this.refreshUsage?.(); } // the round trip landed: repaint now (popup + roster ride _renderUsage)
@@ -530,11 +531,7 @@ export function installUsageMeter(App, ctx = {}) {
     };
     // Countdown suffix "· in 1d10h50m" (2.268.6, user request) — rides the ONE
     // shared reset formatter so every Resets stat gains it with zero new UI.
-    const fmtDur = (sec) => {
-      sec = Math.max(0, Math.round(sec));
-      const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
-      return (dd ? `${dd}d` : '') + ((dd || hh) ? `${hh}h` : '') + `${mm}m`;
-    };
+    const fmtDur = (sec) => span(Math.max(0, Math.round(sec)) * 1000);   // the reader's units (the walk's usage-10: «2d23h59m»)
     const fmtReset = (ts, util, est) => {
       // a bucket at 0% has no running window yet — Anthropic reports no reset
       // time until the first request lands (owner report 2.369.32: a freshly
@@ -542,13 +539,13 @@ export function installUsageMeter(App, ctx = {}) {
       if (!ts) return (util === 0 || util === '0') ? `<span title="${escHtml(t('No window running yet — a reset time appears after the first request'))}">${escHtml(t('not started'))}</span>` : '?';
       const estMark = est ? `<span title="${escHtml(t('Estimated: weekly windows repeat every 7 days, projected from the last observed reset'))}">≈ </span>` : '';
       const d = new Date(ts * 1000), now = new Date();
-      const time = d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+      const time = clockOf(d);   // the ONE formatter (lane ui-language, the walk's usage-10: «10:00 PM»)
       let when;
       if (d.toDateString() === now.toDateString()) when = t('Today {time}', { time });
       else {
         const tmr = new Date(now); tmr.setDate(tmr.getDate() + 1);
         when = d.toDateString() === tmr.toDateString() ? t('Tomorrow {time}', { time })
-          : d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
+          : stampAt(d);   // the import by its own name: `when` is this function's local
       }
       const left = ts - now.getTime() / 1000;
       return estMark + (left > 45 ? `${when} · ${t('in {dur}', { dur: fmtDur(left) })}` : when);

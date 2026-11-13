@@ -34,6 +34,7 @@
 import { fetchJson, showToast, createModalShell, showContextMenu } from './utils.js';
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
 import * as P from '../channel-policy.js';
@@ -1008,7 +1009,7 @@ function rulePreview(st, rule, row) {
     const list = el('ul', 'chan-rule-preview-list');
     for (const h of r.hits) {
       const li = el('li', 'chan-rule-preview-hit');
-      const who = [h.author, st.kind === 'conversation' ? null : h.title, h.at ? new Date(h.at).toLocaleString() : null].filter(Boolean).join(' · ');
+      const who = [h.author, st.kind === 'conversation' ? null : h.title, h.at ? when(h.at) : null].filter(Boolean).join(' · ');
       li.appendChild(el('div', 'chan-rule-preview-who', who));
       const line = el('div', 'chan-rule-preview-line');
       const mark = document.createElement('mark');

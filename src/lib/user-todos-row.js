@@ -31,6 +31,7 @@
 //          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml } from './utils.js';
 import { tc, t as tr } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
@@ -47,7 +48,7 @@ export function agoText(ts, t) {
   if (m < 1) return t('just now');
   if (m < 60) return t('{m}min ago', { m });
   const h = Math.round(m / 60);
-  return h < 24 ? t('{h}h ago', { h }) : new Date(ts).toLocaleDateString();
+  return h < 24 ? t('{h}h ago', { h }) : dateOf(ts);
 }
 /** 2.369.152: a notice about a WINDOW carries the window's end (`expiresAt`). */
 export function expiresText(ts, t) {

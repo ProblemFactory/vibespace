@@ -13,6 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { stampAt as when, num, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
@@ -2229,11 +2230,11 @@ class ChatView {
     const meta = msg.meta || {};
     const u = meta.usage || {};
     const cc = u.cache_creation || {};
-    const fmt = (n) => (typeof n === 'number' ? n.toLocaleString() : null);
+    const fmt = (n) => (typeof n === 'number' ? num(n) : null);
     const rows = [];
     const add = (label, val, copyable) => { if (val != null && val !== '') rows.push({ label, val: String(val), copyable }); };
     add(t('Role'), msg.role === 'tool' ? `${valueWord('msg-role', 'tool', t)} (${msg.toolName || '?'})` : valueWord('msg-role', msg.role, t));
-    add(t('Time'), msg.ts ? new Date(msg.ts).toLocaleString() : null);
+    add(t('Time'), msg.ts ? when(msg.ts, { seconds: true, full: true }) : null);
     add(t('Model'), meta.model);
     if (u.input_tokens != null || u.output_tokens != null) {
       add(t('Input tokens'), fmt(u.input_tokens));
@@ -2258,7 +2259,7 @@ class ChatView {
     // 2026-09-21): "Turn: 3m18s · 66 messages [· budget n/limit]".
     if (meta.turn && (meta.turn.durationMs != null || meta.turn.messageCount != null)) {
       const tt = meta.turn;
-      const dur = (ms) => (ms == null ? null : ms >= 60000 ? `${Math.floor(ms / 60000)}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s` : `${Math.round(ms / 1000)}s`);
+      const dur = (ms) => (ms == null ? null : span(ms));
       const parts = [dur(tt.durationMs), tt.messageCount != null ? t('{n} messages', { n: tt.messageCount }) : null, tt.budgetLimit != null ? t('budget {used}/{limit}', { used: fmt(tt.budgetTokens ?? 0), limit: fmt(tt.budgetLimit) }) : null].filter(Boolean);
       add(t('Turn'), parts.join(' · '));
     }

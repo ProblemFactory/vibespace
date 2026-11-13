@@ -29,6 +29,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The browser limit chip says it counts browsers, and the theme names in layouts and settings are in your language.
 - The code editor's unsaved and saved marks, tooltips and messages, and an email's From, To and Date labels, are in your language.
 - The sidebar's «more» button and its manage bar's Clear and Done are in your language.
+- Dates and times follow your language everywhere: in Chinese and Japanese «2026/11/12 19:27», today just «19:27», this year «11/12 19:27».
+- Durations and «… ago» are written in your language's units instead of «1h59m» or «3m ago».
+- Counts and costs are written the way your device's language writes numbers.
+- The usage popup's reset times and countdowns, a message's time, job runs, file times and the vault's key history all use this format.
+- When VibeSpace's time zone is not this device's, a time says which zone it is in.
+- An email's date is shown in your format, and the layout history's Restore button matches its title.
 
 ## 2.369.402 — 2026-11-14
 

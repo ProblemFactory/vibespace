@@ -12804,4 +12804,8 @@ export default {
   "not present": "文件不存在",
   "no permissions block": "没有权限设置",
   "permissions block is empty": "权限设置是空的",
+  "{span} ago": "{span}前",
+  "in {span}": "还有 {span}",
+  "expires {date}": "{date} 到期",
+  "layout::Restore": "恢复",
 };

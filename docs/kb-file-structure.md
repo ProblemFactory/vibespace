@@ -29,6 +29,7 @@ scripts/test-oat-add-door.mjs (NEW, fast — lane oat-add-door) — the plan val
 src/claude-oat-probe.js — + the MINT variant (lane oat-add-door): `setup-token` in a pty (util-linux script) through the one launcher, its printed authorize URL's scope=; ends by the tracer's kill by design; never in the gate; BROWSER pinned /bin/false ⇒ kb-file-structure.md
 src/cli-caps.js — + MINT_VARIANT, mintScopesIn (the printed URL), mintScopesOf (per exact version, scripts/fixtures/oat-mint-scopes.json), scopesOk (the one scope grammar) ⇒ kb-file-structure.md
 src/accounts.js — + the shape's PROVENANCE (oatShapeSource login|person, oatShapeAt, oatShapeReplaced), oatMintCaps, setOatShapeByPerson; a sign-in's shape replaces a person's, said once ⇒ kb-file-structure.md
+src/lib/page-time.js (NEW — lane ui-language pick 4) — THE ONE formatter of a time / number a person reads: stampAt (as `when`) / dateOf / clockOf / span / ago / num in the device's language and the page's zone ⇒ kb-file-structure.md
 src/lib/value-words.js (NEW, PURE — lane ui-language pick 2) — THE ONE DOOR from a stored value to a word: valueWord(set, value, t) at display, the value itself when unknown; job-state / perm-mode read their own tables ⇒ kb-file-structure.md
 scripts/test-ui-language.mjs (NEW, fast PURE — lane ui-language) — every sentence through t() with zh + ja rows: ① visible English (shrink-only baseline) ② rows ③ params ④ markup ⑤ rows left English ⑥ stored values worded ⇒ kb-file-structure.md
 src/foryou-actions.js FORYOU_HEADS / headWordOf (lane ui-language) — a system producer's filed For-you head («Manage Agents», «Vault» …) worded at display, never in the store ⇒ kb-file-structure.md
@@ -13174,6 +13175,23 @@ PURE (imports nothing; CJS — required by the claude adapter, bundled into the 
 - **`CODEX_NOTE`** — why codex gets nothing: its only per-command allow is an execpolicy `.rules` file under CODEX_HOME (no per-spawn flag in 0.154.0 — a write into the user's own config), and its default workspace-write sandbox with network on already runs these tools without asking.
 
 Consumers: src/adapters/claude-code.js (the spawn's `--settings permissions.allow` + — in a mode that asks anyway, r3 — `permissions.ask`, row `claude.allowAgentTools`), src/lib/chat-renderers.js (plain words, the browser face, the widened / narrowed / withheld Always Allow). Gates: scripts/test-agent-tool-rules.mjs (fast, 134) + scripts/test-new-session-dialog.mjs (heavy, 58); the upload refusal: test-browser-verbs.
+
+### src/lib/page-time.js — THE ONE FORMATTER OF A TIME A PERSON READS (lane ui-language pick 4)
+
+**The shape (主开发 2026-11-13):** zh / ja «2026/11/12 19:27», today «19:27», this year «11/12 19:27» (`full` keeps the year); en = the device's own Intl rendering. The zone is the page's: `setPageZone(pageZone(app))` at boot, from the instance setting, else the hub's zone, else this browser's. A stamp printed in a zone that is not the device's says the zone once, by its when-words short name. src/when-words.js stays the AGENTS' clock.
+
+**The API:**
+- `stampAt` — imported as `when`. The export is named apart: test-bundle-globals reads export names as symbols, and «when()» is a word in a log line.
+- `dateOf`, `clockOf`.
+- `span` — the two largest non-zero units through the `{n} days` / `{n} h` / `{n} min` / `{n} s` keys.
+- `ago`, `until`, `num`.
+
+**PURE modules stay import-free.** usage-source gets the formatter from app.js (`setStampFormatter`); cli-registration-words gets `when` from its caller.
+
+**Census:** test-ui-language ⑦.
+- No formatter call or hand-built month in the browser bundle outside this file: zero tolerance.
+- A legitimate one says `// page-time: <why>`.
+- English unit templates sit behind a shrink-only baseline.
 
 ### src/lib/value-words.js — THE ONE DOOR FROM A STORED VALUE TO A WORD (PURE, lane ui-language pick 2)
 

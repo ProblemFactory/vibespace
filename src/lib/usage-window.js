@@ -3,6 +3,7 @@
 // (subscription vs API — never mixed), account, model, project, mode, cache
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
+import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { renderDashboard, PRESETS, destroyCharts, panelPivots, ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
@@ -65,7 +66,7 @@ const fmtNum = (n) => {
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return String(Math.round(n));
 };
-const fmtCost = (n) => '$' + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtCost = (n) => '$' + num(n || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
 export function openUsageWindow(app, opts = {}) {

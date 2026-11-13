@@ -244,7 +244,9 @@ function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefine
   const z = timeZone ? { timeZone } : {};
   try {
     const dayKey = (x) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...z }).format(x);
+    // page-time: a PURE shared module — the caller injects its locale and zone (user-todos-layout passes the device's)
     const clock = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', ...z }).format(d);
+    // page-time: (the same PURE module's weekday half — the caller's locale and zone)
     return dayKey(d) === dayKey(new Date(Number(now) || 0)) ? clock : `${new Intl.DateTimeFormat(locale, { weekday: 'short', ...z }).format(d)} ${clock}`;
   } catch { return d.toISOString().slice(11, 16) + ' UTC'; }
 }

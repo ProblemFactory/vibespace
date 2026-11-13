@@ -9,6 +9,7 @@
 // Confirm; a refusal is shown BY NAME with the button disabled, never a silent
 // no-op; a failed POST reaches the user as a toast.
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, fetchJson, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { dialogModel, refusalLine } from '../reset-credit.js';
@@ -17,7 +18,7 @@ import { getBackendMeta } from './agent-meta.js';
 /** An instant in the device's own words (the dialog names WHEN, never UTC). */
 export function fmtInstant(sec) {
   const d = new Date(Number(sec) * 1000);
-  try { return d.toLocaleString(deviceLocale(), { dateStyle: 'medium', timeStyle: 'short' }); } catch { return d.toLocaleString(); }
+  return when(d, { full: true });
 }
 const words = (l) => t(l.key, l.params || {});
 

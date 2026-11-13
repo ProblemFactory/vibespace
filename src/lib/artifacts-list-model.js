@@ -228,6 +228,7 @@ export function filterRows(rows, q, { cwd = '', host = '', hubWord = 'Local', ho
 }
 const two = (n) => (n < 10 ? '0' : '') + n;
 /** The local calendar day of an instant, "YYYY-MM-DD" ('' = no instant). */
+// page-time: a machine day key (YYYY-MM-DD) for grouping, never shown
 export const dayOf = (ts) => { const n = Number(ts) || 0; if (!n) return ''; const d = new Date(n); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`; };
 /** THE ORDER (E3/E4): groups of the chosen kind, the chosen sort inside each; heads keyed (k: / h: / d:) and counted. */
 export function orderRows(rows, { group = 'intent', sort = 'changed' } = {}) {

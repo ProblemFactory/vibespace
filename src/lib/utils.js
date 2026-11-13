@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { ago as pageAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { menuPlace } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
@@ -1669,14 +1670,9 @@ export function hostStateChip(state, { text = '', age = 0, title = '' } = {}) {
   return el;
 }
 
-/** "3m ago" / "2h ago" for staleness labels (shared by the chip + callers). */
-export function agoText(ts) {
-  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
-}
+/** «3 分钟前» / «2 hours ago» for staleness labels (shared by the chip + callers) — the reader's units, through page-time
+ *  (lane ui-language: it printed English «3m ago» in every language). */
+export function agoText(ts) { return pageAgo(ts); }
 
 /** Clipboard copy with execCommand fallback for non-HTTPS */
 

@@ -763,5 +763,108 @@
   "src/lib/workflow-detail.js": [
    ".status"
   ]
+ },
+ "units": {
+  "src/lib/chat-view.js": [
+   "${…}s",
+   "${…}m",
+   "${…}s",
+   "${…}s sid="
+  ],
+  "src/lib/incident-recorder.js": [
+   "${…}s ("
+  ],
+  "src/collab-row.js": [
+   "${…}s"
+  ],
+  "src/lib/manage-agents.js": [
+   "${…}d",
+   "${…}h",
+   "${…}h",
+   "${…}m",
+   "${…}m"
+  ],
+  "src/browser-stuck.js": [
+   "${…}s",
+   "${…}m ",
+   "${…}s",
+   "${…}h ",
+   "${…}m"
+  ],
+  "src/reset-credit.js": [
+   "${…}d ",
+   "${…}h",
+   "${…}d",
+   "${…}h ",
+   "${…}m",
+   "${…}h",
+   "${…}m"
+  ],
+  "src/browser-surfaces.js": [
+   "${…}s",
+   "${…}m ",
+   "${…}s",
+   "${…}h ",
+   "${…}m"
+  ],
+  "src/app-witness.js": [
+   "${…}d."
+  ],
+  "src/backlog-select.js": [
+   "${…}d"
+  ],
+  "src/lib/chat-status-bar.js": [
+   "+ 'm'",
+   "${…}s",
+   "${…}m",
+   "${…}s",
+   "${…}h",
+   "${…}m"
+  ],
+  "src/dial-facts.js": [
+   "${…}s",
+   "${…}m",
+   "${…}h",
+   "${…}m",
+   "${…}d",
+   "${…}h"
+  ],
+  "src/client.js": [
+   "${…}s"
+  ],
+  "src/lib/telemetry-client.js": [
+   "${…}s (rAF",
+   "${…}s (rAF",
+   "${…}s of s",
+   "${…}s (tim"
+  ],
+  "src/lib/usage-eta.js": [
+   "${…}m",
+   "${…}h",
+   "${…}d",
+   "${…}d",
+   "${…}h",
+   "${…}m",
+   "${…}h",
+   "${…}m",
+   "${…}m"
+  ],
+  "src/lib/workflow-detail.js": [
+   "${…}s",
+   "${…}m ",
+   "${…}s"
+  ],
+  "src/quota-model.js": [
+   "${…}s and "
+  ],
+  "src/channel-caps.js": [
+   "${…}s",
+   "${…}m",
+   "${…}h",
+   "${…}d"
+  ],
+  "src/lib/usage-window.js": [
+   "+ 'h'"
+  ]
  }
 }

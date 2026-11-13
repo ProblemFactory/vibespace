@@ -45,6 +45,7 @@
 // the component (textContent) or `el()` here; nothing below writes innerHTML.
 import { fetchJson, showToast, showConfirmDialog, createModalShell } from './utils.js';
 import { t as tr, deviceLocale } from './i18n.js';
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
@@ -780,7 +781,7 @@ function authFactText(a) {
   const bits = [];
   bits.push(auth.state === 'connected' ? tr('Signed in') : auth.state === 'expired' ? tr('The sign-in expired or was revoked') : auth.state === 'needs-credentials' ? tr('No usable OAuth client') : tr('Not signed in'));
   if (auth.user && !auth.self) bits.push(String(auth.user));
-  if (auth.expiresAt && Number.isFinite(Number(auth.expiresAt))) bits.push(tr('sign-in valid until {date}', { date: new Date(Number(auth.expiresAt)).toLocaleDateString(deviceLocale()) }));
+  if (auth.expiresAt && Number.isFinite(Number(auth.expiresAt))) bits.push(tr('sign-in valid until {date}', { date: dateOf(Number(auth.expiresAt), { full: true }) }));
   if (Array.isArray(auth.scopes) && auth.scopes.length) bits.push(tr('scopes {list}', { list: auth.scopes.join(', ') }));
   return bits.join(' · ');
 }

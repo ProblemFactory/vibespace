@@ -5,6 +5,7 @@
 // write / edit rewrites its keyed children's text. One click = open the file in its kind's viewer BESIDE the chat
 // (`from`: the same door a Cmd+click on a path takes — no Cmd needed).
 import { t, resolveLang } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { getFileIcon } from './file-types.js';
 import { agoText } from './user-todos-row.js';
 import { cardFacts, kindWord, intentWord } from '../artifacts.js';
@@ -39,7 +40,7 @@ export function showInPorts(app, forwardId) {
   };
   find();
 }
-const stamp = (ts) => { try { return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+const stamp = (ts) => when(ts);
 export function artifactMetaText(b) {
   const f = cardFacts(b);
   if (f.kind === 'service') return f.state === 'stopped' ? t('Stopped at {time}', { time: stamp(f.stoppedAt) }) : `${t('Running')} · ${t('since {ago}', { ago: agoText(f.since || f.lastAt, t) })}`;
@@ -215,6 +216,7 @@ function pickMenu(e, words, cur, pick) {
   showContextMenu(r.left, r.bottom, Object.keys(words).map((k) => ({ labelHtml: `<span class="chan-menu-check${k === cur ? ' chan-menu-check-on' : ''}">${k === cur ? UI_ICONS.check || '' : ''}</span>${esc(t(words[k]))}`, label: t(words[k]), action: () => pick(k) })));
 }
 const dayWords = (d) => {
+  // page-time: a machine day key (YYYY-MM-DD) for grouping, never shown
   const at = (n) => { const x = new Date(); x.setDate(x.getDate() - n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
   return !d ? t('No date') : d === at(0) ? t('Today') : d === at(1) ? t('Yesterday') : d;
 };

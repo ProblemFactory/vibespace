@@ -12,6 +12,7 @@
 //     (`design.defaultSystem`) preselected, "No design system" first.
 import { fetchJson, showToast, showContextMenu, showConfirmDialog, copyText, absUrl } from './utils.js';
 import { t } from './i18n.js';
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerMenuItem } from './contributions.js';
 import { UI_ICONS } from './icons.js';
 import { nameHelpers } from './browser-who-dialog.js';
@@ -47,7 +48,7 @@ export function openedWords(ms, now = Date.now()) {
   if (s < 3600) return t('{n} min ago', { n: Math.floor(s / 60) });
   if (s < 86400) return t('{n} h ago', { n: Math.floor(s / 3600) });
   if (s < 7 * 86400) return t('{n} d ago', { n: Math.floor(s / 86400) });
-  return new Date(ms).toLocaleDateString();
+  return dateOf(ms);
 }
 const folderTail = (dir) => { const p = String(dir).split('/').filter(Boolean); return p.length > 3 ? '…/' + p.slice(-3).join('/') : String(dir); };
 

@@ -37,6 +37,13 @@
 //      has zh + ja rows — a new enum value without words is RED. (c) A code-named field (.state .status .role .urgency
 //      .stopReason .verb .trigger .cause .tier .theme .permissionMode .effort …) put straight into a visible sink, never
 //      through a words function, is RED unless held by its own shrink-only baseline (`raw`).
+//   ⑦ ONE FORMATTER OF A TIME (src/lib/page-time.js — pick 4; 主开发's shape: zh / ja «2026/11/12 19:27», today «19:27», this
+//      year «11/12 19:27», en the device's own): outside page-time.js no toLocaleString / toLocaleDateString / toLocaleTimeString,
+//      no Intl.DateTimeFormat / RelativeTimeFormat, no hand-built `getMonth() + 1` date in the browser bundle — ZERO tolerance;
+//      an English unit template (`${n}m`, `${h}h ago`) is red past its own shrink-only baseline (`units`: the PURE word
+//      modules shared with agent-facing text keep theirs until each moves). A machine format (an explicit `en-…` locale, a zone read
+//      `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says
+//      `// page-time: <why>` on its line or the line above.
 //
 // Every leg runs its NEGATIVE CONTROL first on a planted source / dictionary: it must go red; the same plant worded through
 // t() must stay green. Run: node scripts/test-ui-language.mjs [--lower] [--print]
@@ -151,7 +158,11 @@ const MARKUP = /<\/?(?:b|br|i|em|strong|code)\b[^>]*>|\*\*[^*]+\*\*|`[^`]+`/;
 const TEXT_SINK = (sink) => !!sink && !HTML_PROPS.has(sink.replace(/^prop:/, '')) && sink !== 'html' && sink !== 'call:insertAdjacentHTML';
 /** One file → { visible: [{line, sink, text}], markup: [{line, sink, key}], params: [{line, key, missing}] } */
 export function scanFile(file, src, ast = parse(src)) {
-  const visible = [], markup = [], params = [], raw = [];
+  const visible = [], markup = [], params = [], raw = [], time = [];
+  const ptEx = new Set(); src.split('\n').forEach((ln, i) => { if (/\/\/\s*page-time:\s*\S.{2,}/.test(ln)) { ptEx.add(i + 1); ptEx.add(i + 2); } });
+  const isPageTime = /(^|\/)src\/lib\/page-time\.js$/.test(file);
+  const timeHit = (node, what, kind = 'fmt') => { const line = at(node); if (!isPageTime && !ptEx.has(line)) time.push({ line, text: what, kind }); };
+  const enLocale = (arg) => !!arg && arg.type === 'Literal' && typeof arg.value === 'string' && /^en-/.test(arg.value);
   const ex = exemptLines(src);
   const at = (node) => lineAt(src, node.start);
   const hit = (node, sink, text) => { const line = at(node); if (!ex.has(line)) visible.push({ line, sink, text }); };
@@ -182,6 +193,8 @@ export function scanFile(file, src, ast = parse(src)) {
         const c = node.callee;
         if (c.type === 'Identifier' && T_FNS.has(c.name)) return tCall(node, sink);
         const name = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed ? c.property.name : null;
+        if (name && /^toLocale(Date|Time)?String$/.test(name) && !enLocale(node.arguments[0])) timeHit(node, name + '()');
+        if (c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'Intl' && /^(DateTimeFormat|RelativeTimeFormat)$/.test(name || '') && !enLocale(node.arguments[0]) && !/^\s*\.\s*resolvedOptions/.test(src.slice(node.end, node.end + 24))) timeHit(node, 'Intl.' + name);
         const obj = c.type === 'MemberExpression' && c.object.type === 'Identifier' ? c.object.name : null;
         if ((obj && QUIET_OBJ.has(obj)) || (name && NOT_SINK_CALLS.has(name))) return;
         if (name === 'setAttribute' && node.arguments[0] && node.arguments[0].type === 'Literal' && SINK_ATTRS.has(node.arguments[0].value)) return walk(node.arguments[1], 'attr:' + node.arguments[0].value);
@@ -191,9 +204,16 @@ export function scanFile(file, src, ast = parse(src)) {
         for (const a of node.arguments) walk(a, null);
         return;
       }
-      case 'NewExpression': if (node.callee.type === 'Identifier' && /Error$/.test(node.callee.name)) return; break;
+      case 'NewExpression':
+        if (node.callee.type === 'Identifier' && /Error$/.test(node.callee.name)) return;
+        if (node.callee.type === 'MemberExpression' && node.callee.object.type === 'Identifier' && node.callee.object.name === 'Intl' && /^(DateTimeFormat|RelativeTimeFormat)$/.test(node.callee.property.name || '') && !enLocale(node.arguments[0]) && !/^\s*\.\s*resolvedOptions/.test(src.slice(node.end, node.end + 24))) timeHit(node, 'new Intl.' + node.callee.property.name);
+        break;
       case 'ThrowStatement': case 'ImportDeclaration': case 'ExportAllDeclaration': return;
-      case 'BinaryExpression': if (/^[!=]==?$|^in$|^instanceof$/.test(node.operator)) return; break;
+      case 'BinaryExpression':
+        if (/^[!=]==?$|^in$|^instanceof$/.test(node.operator)) return;
+        if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === 1 && node.left.type === 'CallExpression' && node.left.callee.type === 'MemberExpression' && node.left.callee.property.name === 'getMonth') timeHit(node, 'getMonth() + 1');
+        if (node.operator === '+' && node.right.type === 'Literal' && typeof node.right.value === 'string' && /^(m|h|d)( ago)?$/.test(node.right.value)) timeHit(node, `+ '${node.right.value}'`, 'unit');
+        break;
       case 'SwitchCase': for (const s of node.consequent) walk(s, sink); return;
       // a condition's TEST and the left of `&&` decide what is drawn — they are not drawn themselves
       case 'ConditionalExpression': walk(node.test, null); walk(node.consequent, sink); walk(node.alternate, sink); return;
@@ -224,6 +244,7 @@ export function scanFile(file, src, ast = parse(src)) {
         return;
       case 'TemplateLiteral': {
         const html = node.quasis.some((q) => /<[a-z][\w-]*[\s>/]|<\/[a-z]/.test(q.value.cooked || ''));
+        node.quasis.forEach((q, qi) => { if (qi > 0 && /^(m|h|d|s)( ago)?(?![A-Za-z0-9])/.test(q.value.cooked || '')) timeHit(q, '${…}' + (q.value.cooked || '').slice(0, 6), 'unit'); });
         for (const q of node.quasis) {
           const s = q.value.cooked || '';
           if (html) {
@@ -246,7 +267,8 @@ export function scanFile(file, src, ast = parse(src)) {
     }
   };
   walk(ast, null);
-  return { visible, markup, params, raw };
+  for (const sh of shadowFindings(ast)) timeHit({ start: sh.start }, `${sh.name}() where a local «${sh.name}» shadows the page-time import`);
+  return { visible, markup, params, raw, time };
 }
 
 // ── ②④⑤ the dictionaries ──
@@ -271,6 +293,31 @@ export function dictFindings(keys, dicts) {
       if (markupOf(r.value) > markupOf(r.key)) out.addedMarkup.push(`${lang}: ${r.key.slice(0, 90)}`);
     }
   }
+  return out;
+}
+
+/** ⑦ (the bug pick 4's pictures caught): a function that DECLARES a name a page-time import binds (`when`, `span`, `num` …) and
+ *  CALLS it — the call reaches the local (a TDZ ReferenceError, or a string called), never the formatter. */
+export function shadowFindings(ast) {
+  const names = new Set();
+  for (const n of ast.body || []) if (n.type === 'ImportDeclaration' && /(^|\/)page-time\.js$/.test(n.source.value)) for (const sp of n.specifiers) names.add(sp.local.name);
+  if (!names.size) return [];
+  const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']), out = [];
+  const visit = (n) => {
+    if (!n || typeof n.type !== 'string') return;
+    if (FN.has(n.type)) {
+      const declared = new Set(), calls = [];
+      for (const p of n.params || []) if (p.type === 'Identifier') declared.add(p.name);
+      const scan = (x) => { if (!x || typeof x.type !== 'string' || (x !== n.body && FN.has(x.type))) return;
+        if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier') declared.add(x.id.name);
+        if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && names.has(x.callee.name)) calls.push(x);
+        for (const k in x) { const v = x[k]; if (Array.isArray(v)) v.forEach(scan); else if (v && typeof v.type === 'string') scan(v); } };
+      scan(n.body);
+      for (const c of calls) if (declared.has(c.callee.name)) out.push({ name: c.callee.name, start: c.start });
+    }
+    for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v.type === 'string') visit(v); }
+  };
+  visit(ast);
   return out;
 }
 
@@ -341,18 +388,19 @@ export async function census(repo = REPO) {
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
     dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [], raw = {};
+  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {};
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
     if (r.raw.length) raw[r.file] = r.raw;
+    for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
     for (const x of r.reached) if (!inUni.has(x) && !Object.values(DICTS).includes(x)) missed.push(`${r.file} → ${x}`);
   }
   const rowsOf = (d) => new Set(d.map((x) => x.key));
   const sets = { findings: setFindings(vsets.lists, vsets.sets, vsets.delegated, { zh: rowsOf(zh), ja: rowsOf(ja) }), lists: Object.values(vsets.lists).reduce((a, l) => a + l.length, 0) };
-  return { files: files.length, visible, raw, sets, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, visible, raw, time, units, sets, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -384,6 +432,11 @@ if (isMain) {
     ok(rf.raw.length === 2 && rf.raw.map((x) => x.text).join() === '.state,.urgency', '⑥(c) a code-named field drawn raw is named (a textContent, a template title); the same field through a words function, or compared, is not', JSON.stringify(rf.raw));
     const sf = setFindings({ urgency: ['low', 'brand-new'] }, { urgency: { low: 'low' } }, { 'job-state': { up: 'running', zz: 'never translated' } }, { zh: new Set(['running']) });
     ok(sf.length === 2 && /brand-new/.test(sf[0]) && /never translated/.test(sf[1]), '⑥(b) a listed value with no words, and a delegated word with no row, are named', JSON.stringify(sf));
+    const tp = scanFile('src/lib/tp.js', `a.textContent = new Date(x).toLocaleString(); b = n.toLocaleString('en-US'); c = \`\${m}m ago\`; d = (d.getMonth() + 1) + '/' + d.getDate(); e = new Intl.DateTimeFormat(undefined, {}).format(x); f = Intl.DateTimeFormat().resolvedOptions().timeZone;\n// page-time: a machine day key in the planted control\ng = d.getMonth() + 1;`);
+    ok(tp.time.length === 4 && tp.time.map((x) => x.text.split(' ')[0]).join() === 'toLocaleString(),${…}m,getMonth(),new' && tp.time[1].kind === 'unit', '⑦ a bare toLocaleString, an English unit template, a hand-built month and an Intl formatter are named; an en-US machine format, a zone read and a `// page-time:` line are not', JSON.stringify(tp.time));
+    ok(scanFile('src/lib/page-time.js', 'x = new Date(1).toLocaleString();').time.length === 0, '⑦ …and page-time.js itself is the one place a time is formatted');
+    const sh = scanFile('src/lib/sh.js', "import { stampAt as when } from './page-time.js';\nfunction f(d) { let when; when = d ? when(d) : ''; return when; }\nfunction g(d) { return when(d); }");
+    ok(sh.time.length === 1 && /shadows/.test(sh.time[0].text), '⑦ a page-time import shadowed by a local where it is called is named (the usage meter\'s and the job detail\'s bug); a plain call is not', JSON.stringify(sh.time));
     const h = headFindings(["src/x.js:3:  by: 'agent', sessionName: 'Storage',", "src/y.js:9:  sessionName: 'Brand new head',", "src/z.js:1:  sessionName: 'a flag reason', // ui-words: not a head"], { Storage: 'Storage' });
     ok(h.length === 1 && /Brand new head/.test(h[0]), '⑥ a literal For-you head the table does not hold is named; a held one and a `// ui-words:` line are not', JSON.stringify(h));
   }
@@ -393,6 +446,7 @@ if (isMain) {
   const v = multisetDiff(Object.fromEntries(Object.entries(now.visible).map(([f, hs]) => [f, hs])), base.visible || {});
   const e = multisetDiff({ dict: now.dict.english }, { dict: base.english || [] });
   const rw = multisetDiff(now.raw, base.raw || {});
+  const un = multisetDiff(now.units, base.units || {});
   if (process.argv.includes('--lower')) {
     // min(baseline, now): stale rows leave, a NEW hit is never written in
     const keep = (nowMap, baseMap) => Object.fromEntries(Object.entries(baseMap).map(([f, list]) => {
@@ -405,10 +459,11 @@ if (isMain) {
       ? { note: 'lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}), ⑤ zh/ja rows left in English, ⑥(c) code-named fields drawn raw. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.', visible: Object.fromEntries(Object.entries(now.visible).map(([f, hs]) => [f, hs.map((h) => h.text)])), english: now.dict.english, raw: Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])) }
       : { note: base.note, visible: keep(now.visible, base.visible || {}), english: (keep({ dict: now.dict.english }, { dict: base.english || [] }).dict) || [],
           // a leg's section is SEEDED once, by the lane that adds the leg; after that it only shrinks
-          raw: base.raw ? keep(now.raw, base.raw) : Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])) };
+          raw: base.raw ? keep(now.raw, base.raw) : Object.fromEntries(Object.entries(now.raw).map(([f, hs]) => [f, hs.map((h) => h.text)])),
+          units: base.units ? keep(now.units, base.units) : Object.fromEntries(Object.entries(now.units).map(([f, hs]) => [f, hs.map((h) => h.text)])) };
     fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
     fs.writeFileSync(BASELINE, JSON.stringify(next, null, 1) + '\n');
-    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length} · ⑥(c) ${count(next.raw || {})}`);
+    console.log(`baseline ${seed ? 'SEEDED' : 'lowered'}: ① ${count(next.visible)} · ⑤ ${next.english.length} · ⑥(c) ${count(next.raw || {})} · ⑦ units ${count(next.units || {})}`);
     process.exit(0);
   }
   if (process.argv.includes('--print')) { for (const [f, hs] of Object.entries(now.visible)) for (const h of hs) console.log(`${f}:${h.line} [${h.sink}] ${h.text}`); }
@@ -417,6 +472,9 @@ if (isMain) {
   ok(now.missed.length === 0 && now.files > 300, `the import walk holds every file a PARSED import reaches (${now.files} files)`, now.missed);
   ok(v.fresh.length === 0, `① no NEW visible English literal outside t() (${count(now.visible)} today = the baseline's ${count(base.visible || {})} rows)`, v.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}  — word it through t() (+ zh / ja rows), or mark \`// ui-words: <why>\``));
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
+  ok(now.time.length === 0, `⑦ every time and number a person reads goes through src/lib/page-time.js (zero tolerance)`, now.time);
+  ok(un.fresh.length === 0, `⑦ no NEW English unit template (${count(now.units)} today = the baseline's ${count(base.units || {})}) — say a duration with page-time's span / ago`, un.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
+  ok(un.stale.length === 0, `⑦ no unit-template baseline row the tree no longer holds (lower it)`, un.stale.map((h) => `${h.file}: ${h.text}`));
   console.log('§2 the dictionaries');
   ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);
   ok(rw.fresh.length === 0, `⑥ no NEW code-named field drawn raw in a visible sink (${count(now.raw)} today = the baseline's ${count(base.raw || {})}) — word it through src/lib/value-words.js`, rw.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}`));

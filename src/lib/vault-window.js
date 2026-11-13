@@ -23,6 +23,7 @@
 // Entry points: ⚙ System ▸ Vault…, the sidebar's System panel line, the vault's door (`vs-vault-door`) while unlocked, a
 // 「需要你」 item's door in For you (focus = its row).
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { fetchJson, showToast, showConfirmDialog, copyText, createModalShell, showContextMenu } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -68,8 +69,8 @@ function glyph(name, size = 12) {
 const btnEl = (label, cls, { icon = null, title = null } = {}) => { const b = vwEl('button', `vw-btn ${cls || ''}`.trim()); b.type = 'button'; if (icon) b.append(glyph(icon)); b.append(document.createTextNode(label)); if (title) b.title = title; return b; };
 const SIZE_WORDS = { short: () => t('short'), medium: () => t('medium'), long: () => t('long'), 'very long': () => t('very long'), unknown: () => t('unknown length') };
 const kindWord = (k) => t(KIND_WORDS[k] || 'Secret');
-const whenText = (ms) => (ms ? new Date(ms).toLocaleString() : '');
-const whenShort = (ms) => (ms ? new Date(ms).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '');
+const whenText = (ms) => when(ms);
+const whenShort = (ms) => when(ms);
 /** A row's name in the page's words: an integration's / a hub secret's label is an English key (` · <machine>` after it). */
 const WORDED = new Set(['integrations', 'secrets']);
 const labelWord = (row) => (WORDED.has(row.store) ? String(row.label).split(' · ').map((p, i) => (i ? p : t(p))).join(' · ') : row.label);
