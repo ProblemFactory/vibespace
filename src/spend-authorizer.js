@@ -224,15 +224,17 @@ function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {
 // member — and the migration is implicit: a bare number written by an older
 // build reads as `{at, reason: null}` everywhere (prune, counts, producers).
 const stampAt = (t) => (typeof t === 'number' ? t : Number(t && t.at) || 0);
-// THE HOUR A RESERVATION IS COUNTED IN IS THE HOUR ITS TURN RUNS (B-0a33, 2026-11-13): a frame still waiting behind a running
-// turn may run at any moment — its stamp is in the hour of every authorize (`now`) until it ends; carried, it is in the hour it
-// ran (`ran`); given up by the hub without knowing whether it ran (`end`), in the hour the hub stopped waiting. The DAY axis
-// reads `at` (unchanged). No window then holds more billed unattended turns than its cap, whenever a queued frame runs.
+// A RESERVATION IS COUNTED WHERE ITS TURN RUNS (B-0a33, 2026-11-13; round 1: the DAY says what the HOUR says): a frame still
+// waiting behind a running turn may run at any moment — its stamp is in EVERY window of every authorize (`now`: the hour, the
+// day, the instance's day) until it ends; carried, it is counted where it ran (`ran`); given up by the hub without knowing
+// whether it ran (`end`), where the hub stopped waiting. No window — no hour, no day — then holds more billed unattended turns
+// than its cap, whenever a queued frame runs.
 const waitingStamp = (t) => !!(t && typeof t === 'object' && t.rid && !t.conv && !t.end);
-const hourStampAt = (t, now) => (waitingStamp(t) ? now : (t && typeof t === 'object' && (Number(t.ran) || Number(t.end))) || stampAt(t));
+const countAt = (t, now) => (waitingStamp(t) ? now : (t && typeof t === 'object' && (Number(t.ran) || Number(t.end))) || stampAt(t));
 const lastStampAt = (t) => Math.max(stampAt(t), (t && typeof t === 'object' && Math.max(Number(t.ran) || 0, Number(t.end) || 0)) || 0);
-// how long a WAITING reservation is kept past the day horizon: as long as queued-wakes keeps its live entry (LIVE_MAX_AGE_MS,
-// 7 days — then the entry ages out «not delivered» and its stamp leaves with it; pinned equal in test-spend-paths §5f)
+// how long a WAITING reservation may hold a window: as long as queued-wakes may keep its live entry (LIVE_MAX_AGE_MS, 7 days;
+// pinned equal in test-spend-paths §5f) — read INSIDE the count (spendCounts), so it is true with no prune running; queued-wakes
+// ends a waiting stamp no live entry holds at once (its reconcile, at load and at each sweep)
 const RESERVATION_WAIT_MAX_MS = 7 * DAY_MS;
 const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.reason) : null);
 /** PURE. How many stamps in `list` each producer wrote ({reason → n}; a
@@ -255,8 +257,8 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
   const cut = now - DAY_MS;
   const cap = stampCap(limits);
-  // B-0a33: a stamp is kept a day past its LAST instant (its run, its end), and a WAITING reservation for as long as its frame
-  // may still run (RESERVATION_WAIT_MAX_MS) — the day COUNT still reads `at` (spendCounts), so no day window moves
+  // B-0a33: a stamp is kept a day past its LAST instant (its run, its end — the windows count it there), and a WAITING
+  // reservation for as long as its frame may still run (RESERVATION_WAIT_MAX_MS)
   const keep = (list) => (Array.isArray(list) ? list.filter((t) => lastStampAt(t) > cut || (waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS)).slice(-cap) : []);
   const identities = {};
   for (const [k, v] of Object.entries(s.identities || {})) {
@@ -275,19 +277,23 @@ function spendCounts(state, identityKey, now = Date.now()) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
   const mine = Array.isArray(s.identities?.[identityKey]) ? s.identities[identityKey] : [];
   const inst = Array.isArray(s.instance) ? s.instance : [];
-  const since = (list, ms) => list.filter((t) => stampAt(t) > now - ms);
-  const hour = mine.filter((t) => hourStampAt(t, now) > now - HOUR_MS);   // B-0a33: the hour its turn runs in (a waiting one: now)
+  // B-0a33: every window counts a stamp at its COUNT INSTANT (a waiting one: now — in every window it may run in; a carried
+  // one: where it ran; a given-up one: where the hub stopped waiting); a waiting stamp past RESERVATION_WAIT_MAX_MS holds none
+  const live = (t) => !(waitingStamp(t) && stampAt(t) <= now - RESERVATION_WAIT_MAX_MS);
+  const since = (list, ms) => list.filter((t) => live(t) && countAt(t, now) > now - ms);
+  const hour = since(mine, HOUR_MS);
   const day = since(mine, DAY_MS);
   const instanceDay = since(inst, DAY_MS);
+  const settledOldest = (list) => { const at = list.filter((t) => !waitingStamp(t)).map((t) => countAt(t, now)); return at.length ? Math.min(...at) : 0; };
   const promised = (list) => list.filter(waitingStamp).length;   // lane queued-is-not-woke: reserved, waiting behind running turns (B-0a33: one the hub gave up is not waiting)
   return {
     hour: hour.length, day: day.length, instanceDay: instanceDay.length,
     promisedHour: promised(hour), promisedDay: promised(day), promisedInstanceDay: promised(instanceDay),
     // when the window frees a slot again — the honest retryAfter, not a guess
     // B-0a33: a WAITING reservation frees its slot when its frame runs or is given back, never at a window's edge — no promise
-    hourOldest: (() => { const settled = hour.filter((t) => !waitingStamp(t)).map((t) => hourStampAt(t, now)); return settled.length ? Math.min(...settled) : 0; })(),
-    dayOldest: day.length ? Math.min(...day.map(stampAt)) : 0,
-    instanceOldest: instanceDay.length ? Math.min(...instanceDay.map(stampAt)) : 0,
+    hourOldest: settledOldest(hour),
+    dayOldest: settledOldest(day),
+    instanceOldest: settledOldest(instanceDay),
     // WHO spent each window (5b ③): the refusal and the 80 % notice name them
     producers: { hour: producerCounts(hour), day: producerCounts(day), instanceDay: producerCounts(instanceDay) },
   };
@@ -611,7 +617,7 @@ function authorizeUnattendedSpend({
  *  not consume budget). Returns the new state plus, when this spend crossed the
  *  notice threshold on some axis, ONE warn object — the 80% line the owner
  *  asked for, emitted at the crossing and never again inside that window. */
-function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false } = {}) {
+function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false, behind = null } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   // A PRUNE NEVER FORGIVES (lane queued-is-not-woke round 4): it keeps what the LARGEST caps the settings accept could count —
@@ -626,9 +632,8 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   // a carry with no identity still finds its reservation (round 4, small): the stamp is looked for under every identity
   const ridKeyOwner = ridKey ? (key && (s.identities[key] || []).some((t) => t && t.rid === ridKey) ? key : Object.keys(s.identities).find((k) => (s.identities[k] || []).some((t) => t && t.rid === ridKey)) || null) : null;
   if (ridKey && ridKeyOwner) {
-    // B-0a33: the carry is counted in the hour it RAN (`ran`); a live carry of a stamp older than a day is counted in the day it
-    // runs (`at` moved to the run) — what the aged-out stamp's re-stamp at the carry counted before (a drain adds no day)
-    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) { if (waitingStamp(t)) { t.ran = at; if (!drain && stampAt(t) <= at - DAY_MS) t.at = at; } t.conv = true; } return { state: s, warn: null, converted: true }; }
+    // B-0a33: the carry is counted where it RAN (`ran`) — in the hour and the day (a stash drain too: the turn it rode ran then)
+    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) { if (waitingStamp(t)) t.ran = at; t.conv = true; } return { state: s, warn: null, converted: true }; }
     // B-0a33: ENDED — the hub stopped waiting for the frame and cannot tell whether it ran: the unit stays counted (never
     // returned by this), in the hour the hub stopped; it no longer holds the hour of every later authorize
     if (ended) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey && waitingStamp(t)) t.end = at; return { state: s, warn: null, ended: true }; }
@@ -642,7 +647,8 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   if (!key) return { state: s, warn: null };
   const cap = stampCap(LOAD_RETENTION);   // round 4: the retention, never the live caps (a lowered cap must not cut a stamp a raise needs)
   // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
-  const stamp = { at, reason: reason && reason in SPEND_REASONS ? reason : null, ...(ridKey ? { rid: ridKey } : {}), ...(ridKey && carried ? { conv: true } : {}) };   // a carry whose reservation was never stamped: its ONE unit now, converted
+  const wb = ridKey && !carried && behind && behind.key ? { key: String(behind.key).slice(0, 200), name: String(behind.name || '').slice(0, 120) } : null;   // B-0a33 round 1: the conversation a reservation waits behind (the refusal names it)
+  const stamp = { at, reason: reason && reason in SPEND_REASONS ? reason : null, ...(ridKey ? { rid: ridKey } : {}), ...(ridKey && carried ? { conv: true } : {}), ...(wb ? { wb } : {}) };   // a carry whose reservation was never stamped: its ONE unit now, converted
   s.identities[key] = [...(s.identities[key] || []), stamp].slice(-cap);
   s.instance = [...(s.instance || []), stamp].slice(-cap);
   const c = spendCounts(s, key, at);
@@ -690,6 +696,26 @@ function returnReservation(state, { rid = null, now = Date.now(), limits = null 
 const spentWord = (promised) => (promised > 0 ? 'spent or promised' : 'spent');
 const promisedTail = (promised) => (promised > 0 ? `, ${promised} of them waiting behind running turns` : '');
 
+/** PURE (B-0a33 round 1). Every WAITING reservation id in the ledger — queued-wakes ends the ones no live entry holds. */
+function waitingRids(state) {
+  const out = new Set();
+  for (const list of Object.values((state && state.identities) || {})) for (const t of list || []) if (waitingStamp(t)) out.add(String(t.rid));
+  return [...out];
+}
+/** PURE (B-0a33 round 1). The conversations an identity's WAITING reservations wait behind, the oldest wait first:
+ *  [{key, name, n, since, rid}] (`rid` = its oldest frame — the wait's identity). */
+function waitingBehind(state, identityKey, now = Date.now()) {
+  const mine = (state && state.identities && state.identities[identityKey]) || [];
+  const by = new Map();
+  for (const t of mine) {
+    if (!waitingStamp(t) || stampAt(t) <= now - RESERVATION_WAIT_MAX_MS) continue;
+    const k = (t.wb && t.wb.key) || '?';
+    const g = by.get(k) || { key: t.wb && t.wb.key ? t.wb.key : null, name: (t.wb && t.wb.name) || '', n: 0, since: Infinity, rid: null };
+    g.n++; if (stampAt(t) < g.since) { g.since = stampAt(t); g.rid = String(t.rid); }
+    by.set(k, g);
+  }
+  return [...by.values()].sort((a, b) => a.since - b.since);
+}
 /** PURE. Where a reservation stands: 'converted' (a turn carried it), 'reserved' (waiting), null (never stamped / aged out). */
 function reservationState(state, rid) {
   if (!rid) return null;
@@ -700,7 +726,7 @@ function reservationState(state, rid) {
 
 /** PURE. The sentence a refusal says — journal, telemetry detail and the "For
  *  you" inbox item share it, so the user reads the same words the log has. */
-function refusalText(v, { sessionName = null } = {}) {
+function refusalText(v, { sessionName = null, behind = null } = {}) {
   if (!v || v.ok) return null;
   const who = v.identity && (v.identity.name || v.identity.key) ? (v.identity.name || v.identity.key) : 'this account';
   const what = SPEND_REASONS[v.reason]?.what || v.reason;
@@ -712,7 +738,9 @@ function refusalText(v, { sessionName = null } = {}) {
   const spentBy = producersText(v.producers);
   const promisedHere = v.counts ? (v.why === 'hour-cap' ? v.counts.promisedHour : v.why === 'day-cap' ? v.counts.promisedDay : v.why === 'instance-cap' ? v.counts.promisedInstanceDay : 0) : 0;   // lane queued-is-not-woke: reserved stamps are promised
   const spent = spentBy ? ` ${promisedHere > 0 ? 'Spent or promised' : 'Spent'} by: ${spentBy}.` : '';
-  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}`;
+  // B-0a33 round 1: when waiting frames hold the cap, the line names the conversations they wait behind (at most three)
+  const wb = promisedHere > 0 && Array.isArray(behind) && behind.length ? ` They wait behind ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more conversations` : ''}.` : '';
+  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}`;
 }
 
 /** PURE. THE REFUSAL AS STRUCTURE (lane owner-press-attended; r2: «a notice never loses a fact it carried» — r1 filed one
@@ -752,7 +780,9 @@ const LINE_WORDS = Object.freeze({
   counts: 'Turns nobody typed: {hour} of {hourCap} this hour, {day} of {dayCap} in 24 hours; this instance {instance} of {instanceCap} in 24 hours.',
   countsInstance: 'Turns nobody typed on this instance: {instance} of {instanceCap} in 24 hours.',   // r3: the account unknown — the instance's count still said
   inFlight: 'Also in flight: {n} started and not yet answered — they count against the cap until they settle.',   // r3: «(+N in flight)»
-  promised: 'Of these, {n} are messages waiting behind running turns — counted now, given back if they never run.',   // lane queued-is-not-woke round 4: reserved stamps are promised, not spent
+  promised: 'Of these, {n} are messages waiting behind running turns — counted while they wait, given back only if they are known not to have run.',   // lane queued-is-not-woke round 4 (B-0a33: said truly — a frame given up unknown stays counted)
+  behind: 'They wait behind {names}.',   // B-0a33 round 1: the conversations they wait behind (at most three)
+  behindMore: 'They wait behind {names} and {n} more conversations.',
   overageSeen: 'Paid overage was last reported at {time}.',   // r3: «(last reported N min ago)», as the instant
   spentBy: 'Spent by {producer}: {n}',
   more: 'And {n} more producers.',
@@ -763,6 +793,7 @@ const DOOR_WORDS = Object.freeze({
   overage: 'Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage».',
   usage: 'Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.',
   vendor: 'The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.',
+  waiting: 'Open the conversation they wait behind: they run when its turn ends, or when you stop that turn there. Raising the limits in Settings → Spending would let more turns run meanwhile.',   // B-0a33 round 1
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
 const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'unknown-reason': 'wiring', other: 'wiring' });
@@ -776,7 +807,7 @@ function refusalRow(v) {
   if (capOf) return Number((v.limits || {})[capOf[0]]) === 0 ? (v.why === 'instance-cap' ? 'switched-off-instance' : 'switched-off') : v.why;
   return v && REFUSAL_WORDS[v.why] ? v.why : 'other';
 }
-function refusalI18n(v, { sessionName = null } = {}) {
+function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   if (!v || v.ok) return null;
   const account = (v.identity && (v.identity.name || v.identity.key)) || '';
   const L = v.limits || {};
@@ -803,13 +834,16 @@ function refusalI18n(v, { sessionName = null } = {}) {
   if (flying > 0) detail.push({ key: LINE_WORDS.inFlight, params: { n: flying } });
   const promisedHere = capOf ? Number(v.why === 'hour-cap' ? c.promisedHour : v.why === 'day-cap' ? c.promisedDay : c.promisedInstanceDay) || 0 : 0;
   if (promisedHere > 0) detail.push({ key: LINE_WORDS.promised, params: { n: promisedHere } });   // round 4: «Spent by» rows count promised turns too — said
+  // B-0a33 round 1: WHERE they wait — the conversations (at most three, then «and N more»), and the door that opens the first
+  const waits = promisedHere > 0 && Array.isArray(behind) && behind.length ? behind : null;
+  if (waits) { const names = waits.slice(0, 3).map((b) => `«${String(b.name || '?').slice(0, 80)}»`).join(', '); detail.push(waits.length > 3 ? { key: LINE_WORDS.behindMore, params: { names, n: waits.length - 3 } } : { key: LINE_WORDS.behind, params: { names } }); }
   if (row === 'overage-in-use' && Number(v.overageSeenAt) > 0) detail.push({ key: LINE_WORDS.overageSeen, params: { time: { at: Number(v.overageSeenAt) } } });
   const by = Object.entries(v.producers || (c.producers && c.producers.hour) || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
   const spentRow = ([r, n]) => ({ key: LINE_WORDS.spentBy, params: { producer: producerWords(r), n } });
   for (const x of by.slice(0, SPENT_ROWS)) detail.push(spentRow(x));
   // r3: the fold is for the EYE, not the record — «And N more» carries the folded rows (`more`); Copy says every producer
   if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS }, more: by.slice(SPENT_ROWS).map(spentRow) });
-  const door = ROW_DOOR[row];
+  const door = waits ? 'waiting' : ROW_DOOR[row];
   detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : { key: DOOR_WORDS[door] });
   return { text, detail, door };
 }
@@ -828,7 +862,7 @@ function noticeText(warn) {
 module.exports = {
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
-  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, hourStampAt, waitingStamp, stampReason, producerCounts, producersText,
+  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,

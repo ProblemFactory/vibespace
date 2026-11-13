@@ -1108,7 +1108,7 @@ const deliver = require('./src/server/conversation-deliver.js').create({
   peerMsg: require('./src/peer-messaging.js'),
   getHosts: () => hosts,
   getConvIndex: () => hosts && hosts.convIndex,
-  serverSetting, activeSessions, onStashChange: () => { try { stashView.changed(); } catch { } }, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), reservationState: (rid) => spendGuard.reservationState(rid), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
+  serverSetting, activeSessions, onStashChange: () => { try { stashView.changed(); } catch { } }, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), reservationState: (rid) => spendGuard.reservationState(rid), waitingReservations: () => spendGuard.waitingReservations(), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
   // 2.363.0: render the peer card at delivery time — server-posted injections
   // are body-less at the CLI, only the delivery site can show them live.
   emitPeerCard: (cid, card) => {
