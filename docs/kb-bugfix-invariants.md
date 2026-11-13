@@ -6,6 +6,7 @@
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- (2026-11-07) THE CHAT'S COPY AND WRAP COVERED THE WORDS THEY SERVE (owner, on a phone; think-tools-phone) — 不变量 = a control never covers the words it serves: a block's tools are its own reserved row; prose carries no Wrap; a phone gets finger targets (kb-bugfix-invariants)
 - (2026-11-11) BATCH ARCHIVE KEPT ROLLING BACK (inc-mwbn2xp8-ks0b: a 44 s-late echo replaced the page's sets; the next click pushed the rolled-back list whole) — 不变量 = page = server's newest + own unconfirmed; acts carry their age; the later act wins ⇒ kb-bugfix-invariants
 - (2026-11-11) EVERY USER-STATE WRITE SWEPT THE ENDED GROUPS, AND AN END THAT CHANGED NOTHING REWROTE groups.json AND BROADCAST THE FULL LIST (groups-sweep-on-change) — 不变量 = a sweep acts only on a change (or after 10 min); a no-op writes and says nothing ⇒ kb-bugfix-invariants
 - (2026-11-11) THE GROUPS LIST REBUILT THE LIVE ROSTER PER MEMBER, 1 448 TIMES; EACH ARCHIVE WALKED THE CODEX TREE PER ID (roster-per-pass) — 不变量 = a pass builds the roster once, valid only while what it read holds; a sweep reads each tree once, off the loop ⇒ kb-bugfix-invariants
@@ -1411,6 +1412,20 @@ The five removers that did exist deleted whole directories synchronously on the 
 9. **.399 (K7 + K10):** the words that lift a hold say what the lift lets the clean-up remove; what a notice says inside its sentence is said in the reader's language (an instant on the reader's clock, a cause in words).
 
 **Pins.** scripts/test-job-logs-sweep.mjs (fast, PURE) and scripts/test-job-logs-sweep-heavy.mjs (real processes), red by name on b19f0ecdb. Numbers and the measured catch-up are in changelog-engineering 2.369.398.
+
+## THE CHAT'S COPY AND WRAP COVERED THE WORDS THEY SERVE (the owner 2026-11-07 17:56 PT, from a phone; lane think-tools-phone, .399)
+
+**Symptom.** «这个换行和复制按钮挡住了字，并且隐藏不掉。» A phone, a Thinking block in a run: «复制» and «换行» sat over the end of its first lines («spawn 队列卡…»), and nothing put them away.
+
+**Cause.** Every block the chat draws (`pre`, a diff, a file) got the same toolbar — Copy + Wrap (+ picker, + Preview) — laid `position: absolute` at the block's top-right, faded in on hover; `@media (hover: none)` showed it always. Nothing reserved its place, so on a touch screen it covered words permanently, and under a desktop's hover too (measured at 360 px: 2–16 words per kind; on the desktop 7 of 9 kinds). An overlay on a scroller can never be proven clear: what scrolls under it is covered. The toolbar was also the same for prose: a Thinking block is drawn pre-wrap, so «Wrap» there did nothing visible, and on a block born wrapped it UNWRAPPED it while still saying «Wrap». The buttons were mouse targets (30 × 24 px, 9-px words) on the phone.
+
+**Fix.** chat-renderers.js `preToolsOf(block)` is the ONE per-kind table (PROSE_PRE = the blocks chat.css draws pre-wrap ⇒ Copy only; a Thinking block ⇒ ONE Copy in its summary beside the label; code / diff / file keep their tools), and `addWrapToggles` puts the toolbar as the wrapper's FIRST child — a row above the block, outside its scroller, reserved on every device (the desktop keeps its hover fade). The shared phone block gives the buttons 44 px and 14-px words.
+
+**不变量.** A control never covers the words it serves: its place is RESERVED (a row of its own, in the flow), never an overlay on content that can scroll. A tool is offered only where it changes something a person can see (no Wrap on prose). A finger device gets finger targets, beside words of a matching size.
+
+**Pins.** test-chat-pre-tools (fast: the per-kind census through the real renderer, the row before its block, the CSS law; RED on the base, 22 checks by name) · test-mobile-select ⑩ (chrome: at 360 px and under a desktop mouse no shown tool covers a word at rest or scrolled sideways, the thinking's one door, 44 px; RED on the base, 7 checks by name).
+
+**Round 2 (the acceptance).** A desktop row shows on KEYBOARD focus only (`:has(:focus-visible)`): r1's `:focus-within` kept a mouse-clicked Copy's row shown after the mouse left. The tap leg's red was the suite, not the product: the suite's other pages opened the same session, the hub's window sync hid and showed the phone's chat for 4 ms and armed its resume, and an input-less `scrollIntoView` inside that window is displacement — re-tailed under the synthetic tap. A finger drag is positioning and is never re-tailed (measured). **不变量 (suites).** A chrome leg that positions the chat input-lessly waits for its target to SETTLE (rect stable, no scroll for 300 ms) — or scrolls with a finger — and asserts the target did not move between the touchstart and the click.
 
 ## BATCH ARCHIVE KEPT ROLLING BACK (the owner's incident inc-mwbn2xp8-ks0b, 2026-11-11 04:49Z: «我的批量操作一直在回滚»; lane sidebar-echo-order, .397)
 

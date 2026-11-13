@@ -158,6 +158,24 @@ export { mcpParts };
 // Escaped HTML for a tool-card header: curated display name, or for MCP
 // tools the SHORT tool name (underscores → spaces) + a dim server chip.
 // The raw identifier always rides the card's title tooltip.
+/** lane think-tools-phone (the owner 2026-11-07, from a phone: «这个换行和复制按钮挡住了字，并且隐藏不掉。»): WHICH TOOLS A BLOCK
+ *  THE CHAT DREW CARRIES, AND WHERE THEY SIT — the one table addWrapToggles reads (test-chat-pre-tools censuses it per kind).
+ *  A PROSE block is one chat.css draws WRAPPED (white-space: pre-wrap): a Wrap there toggles nothing a person can see, so it
+ *  carries Copy only; a Thinking block is prose whose Copy is ONE door in its own summary row («Thinking  Copy» — no row of
+ *  its own over the words); a code block (a fence, a tool's input / output / error, a diff, a file) keeps Copy + Wrap, a
+ *  file its language picker, an html / xml file its Preview. Every tool row is RESERVED above its block (chat.css). */
+export const PROSE_PRE = ['.chat-thinking pre', '.chat-system-notification pre', 'pre.chat-pre-wrapped', 'pre.chat-tool-stopped-text', 'pre.chat-permission-cmd', 'pre.chat-helper-ask-cmd'];
+export function preToolsOf(block) {
+  if (block.closest('.chat-thinking')) return { kind: 'thinking', tools: ['copy'], at: 'summary' };
+  if (block.classList.contains('chat-code-block')) {
+    const lang = block.dataset.lang;
+    return { kind: 'file', tools: ['lang', ...(lang === 'html' || lang === 'xml' ? ['preview'] : []), 'copy', 'wrap'], at: 'row' };
+  }
+  if (block.classList.contains('chat-diff-body')) return { kind: 'diff', tools: ['copy', 'wrap'], at: 'row' };
+  if (PROSE_PRE.some((sel) => block.matches(sel))) return { kind: 'prose', tools: ['copy'], at: 'row' };
+  return { kind: 'code', tools: ['copy', 'wrap'], at: 'row' };
+}
+
 export function toolHeaderHtml(name) {
   const mcp = mcpParts(name);
   if (mcp) return `${escHtml(mcp.tool.replace(/_/g, ' '))} <span class="chat-tool-chip" title="MCP server">${escHtml(mcp.server)}</span>`;
@@ -1494,7 +1512,7 @@ class ChatRenderers {
       // chat.hideEmptyThinking (default on) hides it via a body class, and so
       // _updateRuns treats it as transparent for run-collapse adjacency.
       if (!thinkTxt.trim()) el.classList.add('chat-empty-thinking');
-      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary>${t('Thinking')}</summary><pre>${escHtml(thinkTxt)}</pre></details>`;
+      html = `<details class="chat-thinking"${msg.status === 'streaming' ? ' open' : ''}><summary><span class="chat-thinking-label">${t('Thinking')}</span></summary><pre>${escHtml(thinkTxt)}</pre></details>`;
     } else if (block.type === 'text') {
       html = `<div class="chat-text">${this.renderMarkdown(stripAnsi(block.text || ''))}</div>`;
     } else {
@@ -2171,8 +2189,9 @@ class ChatRenderers {
       el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook';
       // Full hook output, NEVER truncated — collapsed <details> + the CSS
       // scroll cap handle size. The <pre> starts pre-wrapped (hook payloads
-      // are prose-ish) and the STANDARD addWrapToggles toolbar (Wrap/Copy)
-      // picks it up like any other pre; an editor button opens the full text.
+      // are prose-ish) and the STANDARD addWrapToggles toolbar picks it up as
+      // PROSE (Copy, no Wrap — lane think-tools-phone, preToolsOf); an editor
+      // button opens the full text.
       const output = h.output ? escHtml(h.output) : '';
       el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(text)}${h.output ? `<button class="chat-wrap-toggle chat-hook-edit" title="${t('Open in editor')}">${t('Editor')}</button>` : ''}</summary>${output ? `<pre class="chat-hook-output chat-pre-wrapped">${output}</pre>` : ''}</details>`;
       const editBtn = el.querySelector('.chat-hook-edit');
@@ -3498,7 +3517,7 @@ class ChatRenderers {
     }).filter(Boolean).join('\n\n');
   }
 
-  /** Add wrap toggle button to all <pre> blocks inside an element */
+  /** The tools of every block the chat drew (<pre>, a diff, a file) — per kind, preToolsOf's table */
   addWrapToggles(el) {
     // Memoized — this ran (registry + sort) for every message create/edit
     if (!ChatRenderers._LANGS) ChatRenderers._LANGS = ['plain', ...getHljsLanguages().sort()];
@@ -3508,11 +3527,15 @@ class ChatRenderers {
     for (const block of el.querySelectorAll('pre, .chat-diff-body, .chat-code-block')) {
       if (block.parentNode?.classList?.contains('chat-pre-wrap')) continue;
       if (block.closest('.chat-diagram')) continue; // a diagram card's source has the card's own toolbar
+      const { kind, tools, at } = preToolsOf(block); // lane think-tools-phone: the per-kind table (prose: no Wrap)
+      if (at === 'summary') { this._addSummaryCopy(block); continue; }
       const wrapper = document.createElement('div');
       wrapper.className = 'chat-pre-wrap';
+      wrapper.dataset.preKind = kind;
       block.parentNode.insertBefore(wrapper, block);
       wrapper.appendChild(block);
 
+      // the toolbar is the wrapper's FIRST child — its own row ABOVE the block, outside the block's scroller (chat.css)
       const toolbar = document.createElement('div');
       toolbar.className = 'chat-code-toolbar';
 
@@ -3531,7 +3554,7 @@ class ChatRenderers {
       }
 
       // Language picker for code blocks — searchable dropdown
-      if (block.classList.contains('chat-code-block')) {
+      if (tools.includes('lang')) {
         const langPicker = document.createElement('div');
         langPicker.className = 'chat-lang-picker';
         const langBtn = document.createElement('button');
@@ -3587,7 +3610,7 @@ class ChatRenderers {
       // inside scrollable code blocks is impractical.
       // Agent replied with an ```html block → one-click render in the embedded
       // browser (blob URL, sandboxed by the iframe; transient — not persisted).
-      if (block.classList.contains('chat-code-block') && (block.dataset.lang === 'html' || block.dataset.lang === 'xml')) {
+      if (tools.includes('preview')) {
         const prevBtn = document.createElement('button');
         prevBtn.className = 'chat-wrap-toggle';
         prevBtn.textContent = t('Preview');
@@ -3625,18 +3648,40 @@ class ChatRenderers {
       };
       toolbar.appendChild(copyBtn);
 
-      const btn = document.createElement('button');
-      btn.className = 'chat-wrap-toggle';
-      btn.textContent = t('Wrap');
-      btn.title = t('Toggle word wrap');
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const on = block.classList.toggle('chat-pre-wrapped');
-        btn.textContent = on ? t('No Wrap') : t('Wrap');
-      };
-      toolbar.appendChild(btn);
-      wrapper.appendChild(toolbar);
+      if (tools.includes('wrap')) {
+        const btn = document.createElement('button');
+        btn.className = 'chat-wrap-toggle';
+        btn.textContent = t('Wrap');
+        btn.title = t('Toggle word wrap');
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const on = block.classList.toggle('chat-pre-wrapped');
+          btn.textContent = on ? t('No Wrap') : t('Wrap');
+        };
+        toolbar.appendChild(btn);
+      }
+      wrapper.insertBefore(toolbar, block);
     }
+  }
+
+  /** lane think-tools-phone: a Thinking block's ONE door — Copy in its own summary row, beside the label (never a row
+   *  over its words); shown while the block is open (chat.css). A press copies and never folds the block. */
+  _addSummaryCopy(block) {
+    const sum = block.closest('.chat-thinking')?.querySelector('summary');
+    if (!sum || sum.querySelector('.chat-thinking-copy')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chat-wrap-toggle chat-thinking-copy';
+    b.textContent = t('Copy');
+    b.title = t('Copy to clipboard');
+    b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation(); // a press inside <summary> copies; the block stays as it is
+      copyText(block.textContent.replace(/\n$/, '')).then(() => {
+        b.textContent = t('Copied');
+        setTimeout(() => { b.textContent = t('Copy'); }, 1200);
+      });
+    };
+    sum.appendChild(b);
   }
 
 }

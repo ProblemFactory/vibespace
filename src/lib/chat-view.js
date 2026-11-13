@@ -4977,7 +4977,7 @@ class ChatView {
       textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text));
       this._renderers.addDiagrams(textDiv); // lane chat-mermaid: a fence closed mid-stream draws (from the cache on every later frame)
     } else if (msg.content[0]?.type === 'thinking') {
-      const summaryEl = oldEl.querySelector('.chat-thinking summary');
+      const summaryEl = oldEl.querySelector('.chat-thinking-label') || oldEl.querySelector('.chat-thinking summary'); // the label alone: the summary also holds the Copy door (lane think-tools-phone)
       const preEl = oldEl.querySelector('.chat-thinking pre');
       const detailsEl = oldEl.querySelector('.chat-thinking');
       if (detailsEl) detailsEl.open = true;

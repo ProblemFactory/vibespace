@@ -27,13 +27,25 @@
 //      menu; a right-click on the strip opens Message details
 //   ⑨ a touch TABLET (1024×768, hover none / pointer coarse, not ≤ 768 px): the hover buttons are hidden, the … is the
 //      element under its centre and a tap on it opens the menu (verify r1 F3: an invisible "Open in editor" sat over it)
+//   ⑩ A CONTROL NEVER COVERS THE WORDS IT SERVES (lane think-tools-phone, the owner 2026-11-07 from a phone: «这个换行和复制按钮
+//      挡住了字，并且隐藏不掉。»): at 360 px (touch) the Thinking block (the owner's zh words) and every code fence — no shown tool's rect
+//      covers a word of its block (\S+ ranges clipped to the block's box), at rest AND scrolled sideways to the end; the
+//      Thinking block carries ONE Copy, in its summary (no Wrap); every tool a finger's target (≥ 44 px, words ≥ 12 px);
+//      its Copy tapped = the whole thinking on the clipboard, the block still open; then the 1280-px desktop page, the
+//      mouse over each block in turn: no word under a shown tool, the thinking's one door, the 24 px mouse target kept.
+//      ROUND 2 (the acceptance: the tap leg red 7 of 8): this suite's ⑧ / ⑨ pages open the same session, the hub's window
+//      sync hides + shows this chat for 4 ms during ⑩ and arms its RESUME (2.8 s in which an input-less scroll goes back
+//      to the tail) — the tap now waits for the door to SETTLE and the door's rect must not move between touchstart and
+//      click; a PERSON inside an armed resume (a finger drag, then the tap) copies, the door unmoved past both re-tail
+//      rungs; a tap on the summary's label folds the block, one on its door never; and on the desktop a mouse click on
+//      Copy leaves its row to FADE when the mouse leaves while a keyboard Tab shows it (:focus-visible, not :focus-within)
 // Requires google-chrome (SKIP without). Run: node scripts/test-mobile-select.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratchDir, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratchDir, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, stillPresser } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -58,6 +70,8 @@ const ANSWER = (k) => `Answer ${k}: the quick brown fox jumps over the lazy dog,
 // verify r1: a message whose FIRST block is a code block (its toolbar sat over the …) and one whose first block is a table
 const CODE_FIRST = '```js\nconst x = 0; // a code block as the FIRST block of the message\n```\nthen a closing line.';
 const TABLE_FIRST = '| col a | col b |\n|---|---|\n| 1 | 2 |\n\na line after the table.';
+// ⑩: the owner's Thinking block, word for word the shape of the owner's shot (a zh line long enough to run under a top-right tool)
+const THINK = 'W46N43 的炮塔能量只剩 150–210，原因大概是 spawn 队列卡了：队首的 harvester 要求要 3640 能量，但能量上限只有 600，又排在最高优先级，把后面的加能量单位全堵住了。我接下来查清并疏通。';
 const textOf = (k) => (k === 0 ? CODE_FIRST : k === 1 ? TABLE_FIRST : ANSWER(k));
 {
   const lines = []; let ts0 = Date.now() - 3600e3, n = 0;
@@ -66,7 +80,7 @@ const textOf = (k) => (k === 0 ? CODE_FIRST : k === 1 ? TABLE_FIRST : ANSWER(k))
     // k = 0 is a two-letter question: in bubble mode a message shorter than the button is the one whose words fell
     // UNDER it (verify r1 F2 — the longer questions still wrapped beside the float, so only this row catches a revert)
     lines.push(JSON.stringify({ type: 'user', message: { role: 'user', content: k === 0 ? 'hi' : `question ${k} about the deployment plan` }, uuid: `u-${n++}`, timestamp: ts(), cwd: CWD, sessionId: SID }));
-    if (k === 1) lines.push(JSON.stringify({ type: 'assistant', message: { id: `msg_t${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'thinking', thinking: 'Let me check the plan before answering.', signature: 'sig' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `t-${n++}`, timestamp: ts(), cwd: CWD, sessionId: SID }));
+    if (k === 1) lines.push(JSON.stringify({ type: 'assistant', message: { id: `msg_t${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'thinking', thinking: THINK, signature: 'sig' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `t-${n++}`, timestamp: ts(), cwd: CWD, sessionId: SID }));
     lines.push(JSON.stringify({ type: 'assistant', message: { id: `msg_${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: textOf(k) }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `a-${n++}`, timestamp: ts(), cwd: CWD, sessionId: SID }));
   }
   const proj = path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'));
@@ -152,13 +166,18 @@ const androidPress = async (pt, holdMs = 900) => {
   await sleep(350);
   await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: false });
 };
-/** iOS-SHAPED long press / a tap: raw touch events (no native gesture in headless — our timer is the only menu) */
-const touchPress = async (pt, holdMs = 700) => {
+/** iOS-SHAPED long press / a tap: raw touch events (no native gesture in headless — our timer is the only menu). `path`
+ *  (⑩'s finger drag): the finger moves through those points (~8 ms apart) and rests 150 ms before it lifts (no fling) — the
+ *  suite's ONE touch-press site carries the drag too (test-still-press ⑤ counts sites; a drag presses no target) */
+const touchPress = async (pt, holdMs = 700, { path = null, afterMs = 250 } = {}) => {
   await phone.front();
   await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pt.x, y: pt.y }] });
-  await sleep(holdMs);
+  if (path) {
+    for (const q of path) { await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: q.x, y: q.y }] }); await sleep(8); }
+    await sleep(150); const end = path.at(-1) || pt; await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: end.x, y: end.y }] }); await sleep(30);
+  } else await sleep(holdMs);
   await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await sleep(250);
+  await sleep(afterMs);
 };
 const tapAt = (pt) => touchPress(pt, 60);
 const centerOf = (sel, nth = -1) => evalJs(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(sel)})].at(${nth}); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -374,6 +393,140 @@ try {
   const t9 = await tab.evalJs(`({ items: [...document.querySelectorAll('.context-menu.chat-msg-menu .context-menu-item')].map((el) => el.textContent.trim()), windows: document.querySelectorAll('.window').length })`);
   check(`a tap on the … opens the message menu on the tablet (${t9.items.join(' / ')}) and opens no editor window (before the fix: an invisible "Open in editor" took the tap)`, t9.items.includes('Copy text') && t9.windows === tp.windows, t9);
   await tab.shot('09-tablet.png');
+  // ── ⑩ lane think-tools-phone: a control never covers the words it serves ──
+  console.log('⑩ the code toolbar and the Thinking door never cover the words (360 px touch, then a desktop hover)');
+  const TT10 = `window.__tt10 = (() => {
+    const blocks = () => [...document.querySelectorAll('.chat-view .chat-thinking pre, .chat-view .chat-text pre')].filter((b) => b.getClientRects().length);
+    const opacityOf = (x) => { let op = 1; for (let e = x; e && e !== document.body; e = e.parentElement) op *= Number(getComputedStyle(e).opacity); return op; };
+    const toolsOf = (b) => { const wrap = b.parentElement.classList.contains('chat-pre-wrap') ? b.parentElement : null; return [...(wrap ? wrap.querySelectorAll(':scope > .chat-code-toolbar button') : []), ...(b.closest('.chat-thinking')?.querySelectorAll(':scope > summary button') || [])]; };
+    const measure = (i) => { const b = blocks()[i]; const br = b.getBoundingClientRect();
+      const tools = toolsOf(b).map((x) => { const r = x.getBoundingClientRect(); const cs = getComputedStyle(x); return { label: x.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height), font: parseFloat(cs.fontSize), shown: opacityOf(x) > 0.05 && cs.visibility !== 'hidden' && r.width > 0, inSummary: !!x.closest('summary'), r: [r.left, r.top, r.right, r.bottom] }; });
+      const words = []; const tw = document.createTreeWalker(b, NodeFilter.SHOW_TEXT); let n;
+      while ((n = tw.nextNode())) for (const m of n.data.matchAll(/\\S+/g)) { const rg = document.createRange(); rg.setStart(n, m.index); rg.setEnd(n, m.index + m[0].length);
+        for (const q of rg.getClientRects()) { const L = Math.max(q.left, br.left), R = Math.min(q.right, br.right), T = Math.max(q.top, br.top), B = Math.min(q.bottom, br.bottom); if (R - L > 0.5 && B - T > 0.5) words.push([m[0].slice(0, 20), L, T, R, B]); } }
+      const hits = []; for (const t of tools) if (t.shown) for (const w of words) if (w[3] > t.r[0] + 0.5 && w[1] < t.r[2] - 0.5 && w[4] > t.r[1] + 0.5 && w[2] < t.r[3] - 0.5) hits.push(t.label + ' over ' + w[0]);
+      return { kind: b.closest('.chat-thinking') ? 'thinking' : 'code', tools: tools.map(({ r, ...t }) => t), hits, words: words.length };
+    };
+    return { n: () => blocks().length, measure,
+      at: (i) => { const b = blocks()[i]; b.scrollIntoView({ block: 'center' }); const r = b.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(10, r.height / 2) }; },
+      side: (i, end) => { const b = blocks()[i]; b.scrollLeft = end ? b.scrollWidth : 0; return b.scrollLeft; } };
+  })(); true`;
+  /** every block: its tools + the words a shown tool covers, at rest and scrolled sideways to its end (`hover` moves the mouse there first) */
+  const census10 = async (pg, hover) => {
+    await pg.evalJs(`document.querySelectorAll('.chat-view .chat-thinking').forEach((d) => { d.open = true; }); ${TT10}`); await sleep(300);
+    const n = await pg.evalJs('__tt10.n()'); const rows = [];
+    for (let i = 0; i < n; i++) {
+      const at = await pg.evalJs(`__tt10.at(${i})`); await sleep(150);
+      if (hover) { await pg.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y }); await sleep(300); }
+      const rest = await pg.evalJs(`__tt10.measure(${i})`);
+      const moved = await pg.evalJs(`__tt10.side(${i}, true)`); await sleep(120);
+      const side = await pg.evalJs(`__tt10.measure(${i})`); await pg.evalJs(`__tt10.side(${i}, false)`);
+      rows.push({ ...rest, moved, sideHits: side.hits });
+    }
+    return rows;
+  };
+  await phone.front();
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 780, deviceScaleFactor: 3, mobile: true });
+  await sleep(600);
+  const p10 = await census10(phone, false);
+  const th10 = p10.filter((r) => r.kind === 'thinking'), code10 = p10.filter((r) => r.kind === 'code');
+  check(`360 px: the Thinking block and ${code10.length} code fences drawn (${await evalJs('innerWidth')} px), each with its tools shown`, th10.length === 1 && code10.length >= 5 && p10.every((r) => r.tools.some((t) => t.shown)), p10.map((r) => ({ kind: r.kind, tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
+  check('…no shown tool covers a word of its block — at rest (the owner\'s shot: «复制» / «换行» over «spawn 队列卡…»)', p10.every((r) => r.hits.length === 0), p10.filter((r) => r.hits.length).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 6) })));
+  check(`…nor scrolled sideways to its end (${code10.filter((r) => r.moved > 0).length} fences scroll; an overlay would cover whatever slid under it)`, code10.some((r) => r.moved > 0) && p10.every((r) => r.sideHits.length === 0), p10.filter((r) => r.sideHits.length).map((r) => ({ kind: r.kind, hits: r.sideHits.slice(0, 6) })));
+  check(`the Thinking block carries ONE door — Copy, in its summary — and no Wrap (it is prose, already wrapped): ${th10[0] ? th10[0].tools.map((t) => t.label + (t.inSummary ? ' (summary)' : ' (row)')).join(', ') : 'none'}`, th10.length === 1 && th10[0].tools.length === 1 && th10[0].tools[0].label === 'Copy' && th10[0].tools[0].inSummary, th10[0]);
+  const small10 = p10.flatMap((r) => r.tools.filter((t) => t.shown && (t.w < 44 || t.h < 44 || t.font < 12)).map((t) => `${r.kind} ${t.label} ${t.w}×${t.h} ${t.font}px`));
+  check(`every shown tool is a finger's target — ≥ 44×44 px, words ≥ 12 px (${p10.flatMap((r) => r.tools).slice(0, 2).map((t) => `${t.label} ${t.w}×${t.h} ${t.font}px`).join(', ')})`, small10.length === 0, small10.slice(0, 6));
+  // THE TAP (round 2 — the acceptance found this leg red 7 of 8 there; measured, r2 probe): the suite's own ⑧ desktop and
+  // ⑨ tablet pages open this session on the same hub, and the hub's window sync reaches THIS page during ⑩ —
+  // _createRemoteWindow focuses the remote window, then ours: on the narrow layout a 4-ms hide/show of this chat
+  // (setHidden 'mobile' on → off), which arms the view's RESUME (re-tail rungs at 1.24 / 2 s; for 2.8 s an INPUT-LESS
+  // scroll away from the tail is displacement — unpinSkipResume — and goes back to the tail). r1's scrollIntoView is
+  // input-less and landed ~2 s into it: the list returned to its tail within a frame (the door 267 → −300 px) under the
+  // synthetic tap, whose click hit the pre. A finger is never moved: touchmove is positioning, the view drops its re-tail.
+  // (a) scroll, then WAIT FOR THE DOOR TO SETTLE (its rect equal over 2 frames and 300 ms without a scroll; scrolled again
+  //     if a re-tail took it off screen) and the door's rect must not move between the touchstart and the click;
+  // (b) a PERSON inside an armed resume — the view's own hider door flipped as the sync flips it; the control: an
+  //     input-less scroll there IS re-tailed (r1's miss, on purpose) — a finger drag, then a tap as soon as the list
+  //     stops ⇒ copied, the door unmoved from the touchstart to the click and past both rungs.
+  const DOOR10 = `[...document.querySelectorAll('.chat-view .chat-thinking-copy')].find((x) => x.getClientRects().length)`;
+  const settle10 = () => evalJs(`new Promise((res) => { const door = ${DOOR10}; if (!door) return res(null); const list = door.closest('.chat-message-list');
+    let lastScroll = performance.now(); const onS = () => { lastScroll = performance.now(); }; list.addEventListener('scroll', onS, { passive: true });
+    const t0 = performance.now(); let tries = 1, lastTry = t0, last = null, same = 0; door.scrollIntoView({ block: 'center' });
+    (function f() { const r = door.getBoundingClientRect(); const k = Math.round(r.left) + ',' + Math.round(r.top); const now = performance.now();
+      if (r.bottom < 0 || r.top > innerHeight) { if (now - lastTry >= 250) { tries++; lastTry = now; door.scrollIntoView({ block: 'center' }); } last = null; same = 0; }
+      else { same = k === last ? same + 1 : 0; last = k; }
+      const ok = same >= 2 && now - lastScroll >= 300;
+      if (ok || now - t0 > 6000) { list.removeEventListener('scroll', onS); res({ settled: ok, ms: Math.round(now - t0), tries, x: r.left + r.width / 2, y: r.top + r.height / 2, top: Math.round(r.top) }); }
+      else requestAnimationFrame(f); })(); })`);
+  /** the door's rect at the touchstart and at the click (window capture, once each) */
+  const armTap10 = () => evalJs(`(() => { const door = ${DOOR10}; window.__tap10 = []; const gen = window.__tapGen = (window.__tapGen || 0) + 1; for (const ty of ['touchstart', 'click']) addEventListener(ty, (e) => { if (window.__tapGen !== gen) return; const r = door.getBoundingClientRect(); window.__tap10.push({ ty, onDoor: e.target === door || door.contains(e.target), at: Math.round(r.left) + ',' + Math.round(r.top) }); }, { capture: true, once: true }); return 1; })()`); // a generation: a listener left by a tap that never clicked records nothing later
+  const tapped10 = () => evalJs(`(async () => ({ clip: await navigator.clipboard.readText().catch((e) => 'ERR ' + e.message), open: !!(${DOOR10})?.closest('details')?.open, tap: window.__tap10, log: window.__log.map((r) => r.type + ':' + r.target) }))()`);
+  const unmoved10 = (c) => c.tap.length === 2 && c.tap.every((x) => x.onDoor) && c.tap[0].at === c.tap[1].at;
+  const frames10 = (ms) => evalJs(`new Promise((res) => { const door = ${DOOR10}; const t0 = performance.now(); const seen = []; (function f() { const top = Math.round(door.getBoundingClientRect().top); if (seen.at(-1) !== top) seen.push(top); if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else res(seen); })(); })`);
+  /** a FINGER: touchStart, touchMove in 45-px steps every ~8 ms, held still 150 ms (no fling), touchEnd — the compositor
+   *  scrolls the list under it */
+  const fingerDrag = (dy) => { const x = 180, y0 = 300, n = Math.max(6, Math.ceil(dy / 45));
+    return touchPress({ x, y: y0 }, 0, { path: Array.from({ length: n }, (_, k) => ({ x, y: y0 + (dy * (k + 1)) / n })), afterMs: 0 }); };
+  /** the door once the list stopped under the lifted finger (its rect equal over 3 frames) — where a person's eye finds it */
+  const stillDoor = () => evalJs(`new Promise((res) => { const door = ${DOOR10}; let last = null, same = 0; const t0 = performance.now(); (function f() { const r = door.getBoundingClientRect(); const k = Math.round(r.top); same = k === last ? same + 1 : 0; last = k; if (same >= 3 || performance.now() - t0 > 2000) res({ x: r.left + r.width / 2, y: r.top + r.height / 2, top: k }); else requestAnimationFrame(f); })(); })`);
+  await evalJs(`navigator.clipboard.writeText('').catch(() => {}); true`);
+  const s10 = await settle10();
+  await resetLog(); await armTap10();
+  if (s10) await tapAt(s10);
+  await sleep(300);
+  const c10 = await tapped10();
+  check(`a tap on the Thinking's Copy — once the view settled (${s10 && s10.ms} ms, ${s10 && s10.tries} scroll(s)) — puts the whole thinking on the clipboard (${c10.clip.length} chars), the block stays open, and the door never moved under the finger (${(c10.tap || []).map((x) => x.ty + ' ' + x.at).join(' / ')})`,
+    !!s10 && s10.settled && c10.clip === THINK && c10.open && unmoved10(c10), { s10, ...c10, clip: c10.clip.slice(0, 40) });
+  // (b) THE PERSON inside an armed resume
+  await evalJs(`navigator.clipboard.writeText('').catch(() => {}); (() => { const l = (${DOOR10}).closest('.chat-message-list'); l.scrollTop = l.scrollHeight; return 1; })()`); await sleep(700);
+  const arm10 = await evalJs(`(() => { const door = ${DOOR10}; const v = [...app.sessions.values()].find((x) => typeof x.setHidden === 'function' && x._container && x._container.contains(door)); if (!v) return null; v.setHidden('mobile', true); v.setHidden('mobile', false); return { pinned: v._pinned, at: Date.now() }; })()`);
+  const t10 = Date.now();
+  const ctl10 = await evalJs(`(() => { (${DOOR10}).scrollIntoView({ block: 'center' }); return 1; })()`) && await frames10(250);
+  const atTail10 = await evalJs(`Math.round((${DOOR10}).getBoundingClientRect().top)`);
+  await fingerDrag(Math.min(420, Math.max(0, 390 - atTail10))); if ((await evalJs(`(${DOOR10}).getBoundingClientRect().top`)) < 60) await fingerDrag(300);
+  const f10 = await stillDoor();
+  const tapAfter10 = Date.now() - t10;
+  await resetLog(); await armTap10(); await tapAt(f10); await sleep(200);
+  const p10c = await tapped10();
+  const rest10 = await frames10(Math.max(0, 2400 - (Date.now() - t10)));
+  check(`a PERSON inside an armed resume (the sync's own hide/show; an input-less scroll there is re-tailed: the door ${ctl10 ? ctl10.join(' → ') : '?'}) — a finger drag brings the door to ${f10.top} px, a tap as the list stops (+${tapAfter10} ms) copies the whole thinking (${p10c.clip.length} chars), the door unmoved from the touchstart to the click and past both re-tail rungs (${rest10.join(' → ')})`,
+    !!arm10 && arm10.pinned && !!ctl10 && ctl10.at(-1) < 0 && f10.top > 0 && p10c.clip === THINK && p10c.open && unmoved10(p10c) && rest10.length === 1 && rest10[0] === f10.top, { arm10, ctl10, f10, tapAfter10, ...p10c, clip: p10c.clip.slice(0, 40), rest10 });
+  // THE SUMMARY: the door sits INSIDE <summary> — a tap on the summary's LABEL folds the block (the toggle is live), a tap on the
+  // door never does (its press is preventDefault + stopPropagation — test-chat-pre-tools ③ pins the handler; Chrome's own
+  // activation target is the button, measured: a door without them stays open here too, so this pins the behaviour)
+  const lab10 = await evalJs(`(() => { const d = (${DOOR10}).closest('details'); const r = d.querySelector('summary .chat-thinking-label').getBoundingClientRect(); return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2 }; })()`);
+  await tapAt(lab10); await sleep(250);
+  const folded10 = await evalJs(`!([...document.querySelectorAll('.chat-view .chat-thinking')].find((d) => d.getClientRects().length)?.open)`);
+  await evalJs(`[...document.querySelectorAll('.chat-view .chat-thinking')].forEach((d) => { d.open = true; }); true`); await sleep(200);
+  check(`the door sits inside the Thinking's <summary>: a tap on the label folds the block (${folded10 ? 'folded' : 'still open'}), the taps on the door above left it open`, folded10 && c10.open && p10c.open && await evalJs(`!!(${DOOR10}).closest('summary')`));
+  await evalJs(`__tt10.at(0)`); await sleep(200);
+  await phone.shot('10-phone-thinking.png');
+  await evalJs(`(() => { const b = [...document.querySelectorAll('.chat-view .chat-text .chat-pre-wrap')][0]; b.scrollIntoView({ block: 'center' }); return 1; })()`); await sleep(200);
+  await phone.shot('10-phone-code.png');
+  await desk.front();
+  const d10 = await census10(desk, true);
+  check(`desktop, the mouse over each block (${d10.length}): no shown tool covers a word — at rest or scrolled sideways`, d10.length >= 6 && d10.every((r) => r.hits.length === 0 && r.sideHits.length === 0) && d10.every((r) => r.tools.some((t) => t.shown)), d10.filter((r) => r.hits.length || r.sideHits.length || !r.tools.some((t) => t.shown)).map((r) => ({ kind: r.kind, hits: r.hits.slice(0, 4), side: r.sideHits.slice(0, 4), tools: r.tools.map((t) => t.label + (t.shown ? '' : '(hidden)')) })));
+  const dth = d10.find((r) => r.kind === 'thinking');
+  check(`desktop: the Thinking block's one door (Copy, in its summary), every tool still a 24 px mouse target (${d10.flatMap((r) => r.tools).slice(0, 2).map((t) => `${t.w}×${t.h}`).join(', ')})`, !!dth && dth.tools.length === 1 && dth.tools[0].label === 'Copy' && dth.tools[0].inSummary && d10.every((r) => r.tools.every((t) => t.w >= 24 && t.h >= 24)), { dth, small: d10.flatMap((r) => r.tools.filter((t) => t.w < 24 || t.h < 24)) });
+  await desk.shot('10-desk-hover.png');
+  // T2 (round 2): a MOUSE click on a code block's Copy focuses the button — the row FADES once the mouse leaves (the base's
+  // hover fade; r1's :focus-within kept it shown); a keyboard Tab inside the row (:focus-visible) shows it with the mouse away
+  // HEADLESS reports (hover: none) on this mouse page (measured; Emulation.setEmulatedMedia does not lift it), so chat.css's
+  // touch block shows every row at rest — the leg turns THAT block off for its clicks (a mouse desktop's sheet) and back
+  const hov10 = await desk.evalJs(`(() => { window.__hoverNone = []; if (!matchMedia('(hover: none)').matches) return 0;
+    for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch { continue; } for (const r of rules) if (r instanceof CSSMediaRule && r.media.mediaText === '(hover: none)' && /chat-code-toolbar/.test(r.cssText)) { r.media.mediaText = 'not all'; window.__hoverNone.push(r); } }
+    return window.__hoverNone.length; })()`);
+  const kb = await desk.evalJs(`(() => { const w = [...document.querySelectorAll('.chat-view .chat-text .chat-pre-wrap')].find((x) => x.getClientRects().length); w.scrollIntoView({ block: 'center' }); const b = [...w.querySelectorAll(':scope > .chat-code-toolbar button')][0]; window.__kbBtn = b; window.__kbRow = w.querySelector(':scope > .chat-code-toolbar'); return { label: b.textContent.trim() }; })()`);
+  await sleep(150);
+  kb.pressed = await stillPresser({ evalJs: desk.evalJs, cdp: desk.cdp })('JS:window.__kbBtn'); // a mouse click, through THE still door (test-still-press ⑤)
+  await desk.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 }); await sleep(450);
+  const k1 = await desk.evalJs(`({ focused: !!__kbRow.contains(document.activeElement), op: getComputedStyle(__kbRow).opacity, fv: !!document.activeElement?.matches(':focus-visible') })`);
+  await desk.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  await desk.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await sleep(450);
+  const k2 = await desk.evalJs(`({ focused: !!__kbRow.contains(document.activeElement), op: getComputedStyle(__kbRow).opacity, fv: !!document.activeElement?.matches(':focus-visible'), on: document.activeElement?.textContent?.trim() })`);
+  check(`desktop: a mouse click on «${kb.label}» focuses it, and its row FADES once the mouse leaves (opacity ${k1.op}); a keyboard Tab inside the row shows it (${k2.on}: opacity ${k2.op}, :focus-visible)`,
+    kb.pressed && k1.focused && !k1.fv && Number(k1.op) === 0 && k2.focused && k2.fv && Number(k2.op) === 1, { hoverNoneBlocksOff: hov10, pressed: kb.pressed, k1, k2 });
+  await desk.evalJs(`document.activeElement?.blur(); for (const r of window.__hoverNone || []) r.media.mediaText = '(hover: none)'; true`);
   check('no page errors on any page', phone.pageErrors.length === 0 && desk.pageErrors.length === 0 && tab.pageErrors.length === 0, [...phone.pageErrors, ...desk.pageErrors, ...tab.pageErrors].slice(0, 3));
 } catch (e) {
   failed++;
