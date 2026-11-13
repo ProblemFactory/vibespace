@@ -2,6 +2,7 @@ import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDi
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: the board's state / urgency words live in the ONE door
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
@@ -28,17 +29,17 @@ const ICON_DETAIL = '<svg style="width:10px;height:10px" viewBox="0 0 16 16" fil
 // values are relayed to the agent on the next message (server-side).
 const _si = (d) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 export const SESSION_STATE_META = {
-  working: { label: tr('working'), color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
-  'needs-input': { label: tr('needs input'), color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
-  blocked: { label: tr('blocked'), color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
-  review: { label: tr('review'), color: 'var(--blue, #61afef)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
-  done: { label: tr('done'), color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
+  working: { label: valueWord('session-state', 'working', tr), color: 'var(--green)', icon: _si('<path d="M1.5 8h3l1.5-4 2 8 1.5-4h3.5"/>') },
+  'needs-input': { label: valueWord('session-state', 'needs-input', tr), color: 'var(--yellow, #e5c07b)', icon: _si('<path d="M6 6a2 2 0 113 1.7c-.6.5-1 .9-1 1.8"/><circle cx="8" cy="12" r=".7" fill="currentColor" stroke="none"/>') },
+  blocked: { label: valueWord('session-state', 'blocked', tr), color: 'var(--red, #e55)', icon: _si('<circle cx="8" cy="8" r="6"/><path d="M4 4l8 8"/>') },
+  review: { label: valueWord('session-state', 'review', tr), color: 'var(--blue, #61afef)', icon: _si('<path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4-6.5-4-6.5-4z"/><circle cx="8" cy="8" r="1.7"/>') },
+  done: { label: valueWord('session-state', 'done', tr), color: 'var(--text-dim)', icon: _si('<path d="M2.5 8.5l3.5 3.5 7.5-9"/>') },
 };
 export const SESSION_URGENCY_META = {
-  low: { label: tr('low'), mark: '', color: 'var(--text-dim)' },
-  normal: { label: tr('normal'), mark: '', color: 'var(--blue, #61afef)' },
-  high: { label: tr('high'), mark: '!', color: 'var(--yellow, #e5c07b)' },
-  urgent: { label: tr('urgent'), mark: '!!', color: 'var(--red, #e55)' },
+  low: { label: valueWord('urgency', 'low', tr), mark: '', color: 'var(--text-dim)' },
+  normal: { label: valueWord('urgency', 'normal', tr), mark: '', color: 'var(--blue, #61afef)' },
+  high: { label: valueWord('urgency', 'high', tr), mark: '!', color: 'var(--yellow, #e5c07b)' },
+  urgent: { label: valueWord('urgency', 'urgent', tr), mark: '!!', color: 'var(--red, #e55)' },
 };
 
 export function installSidebarTasks(SidebarClass) {

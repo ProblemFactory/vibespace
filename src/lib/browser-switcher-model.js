@@ -45,11 +45,17 @@ export function blurbOf(id, t) {
   return said(wordsOf(id), 'blurb', t);
 }
 /** The agent's claim: WHO said it (your agent), the site, its own words quoted as data; the evidence behind a fold. */
-export function claimWords(claim, t) {
+/** `claimWord` (injected by the DOM half — this file imports nothing): src/lib/value-words.js's words for a code VibeSpace's own
+ *  hint asked the agent for (lane ui-language, the walk's browser-profiles-18: «sign-in-refused» stood raw). */
+export function claimWords(claim, t, claimWord = null) {
   const c = claim || {};
   const host = String(c.host || '');
   const why = String(c.why || '').trim();
-  const text = why ? t(i18nKey('Your agent reports {host} blocked it: “{why}”.'), { host, why }) : t(i18nKey('Your agent reports {host} blocked it.'), { host });
+  // a code VibeSpace's own hint asked the agent for is worded; free text the agent wrote stays quoted as written
+  const worded = why && typeof claimWord === 'function' ? claimWord(why) : why;
+  const text = !why ? t(i18nKey('Your agent reports {host} blocked it.'), { host })
+    : worded !== why ? t(i18nKey('Your agent reports {host}: {why}.'), { host, why: worded })
+      : t(i18nKey('Your agent reports {host} blocked it: “{why}”.'), { host, why });
   const ev = String(c.evidence || '').trim();
   return { text, detail: ev ? ev.slice(0, 400) : null };
 }
@@ -165,14 +171,14 @@ export function noticeWords(state, facts, name, label, t) {
  * `pending` = the local overlay a click sets before the POST answers ({state:'switching', to});
  * `sessionOf(browserKey)` → a webui id (the driver's live view); `hostNameOf(hostId)` → the machine's name.
  */
-export function switcherModel(view, { t, preselect = null, pending = null, sessionOf = () => null, hostNameOf = (id) => id, credentialWhy = null } = {}) {
+export function switcherModel(view, { t, preselect = null, pending = null, sessionOf = () => null, hostNameOf = (id) => id, credentialWhy = null, claimWord = null } = {}) {
   const v = view || {};
   learnBackendRows(v.rows);
   const p = v.profile || {};
   const label = String(p.label || p.id || '');
   const hostName = p.host ? String((typeof hostNameOf === 'function' && hostNameOf(p.host)) || p.host) : null;
   const switching = !!(v.switching || (pending && pending.state === 'switching'));
-  const claims = (Array.isArray(v.blocked) ? v.blocked : []).map((b) => ({ key: 'claim:' + String(b.id), id: String(b.id), ...claimWords(b, t) }));
+  const claims = (Array.isArray(v.blocked) ? v.blocked : []).map((b) => ({ key: 'claim:' + String(b.id), id: String(b.id), ...claimWords(b, t, claimWord) }));
   const now = { key: 'now', ...nowWords(v, { t, pending }) };
   const out = { title: t(i18nKey('Browser for “{label}”'), { label }), switching, claims, now, notice: null, targets: [], empty: null, hostName };
   if (switching) return out;

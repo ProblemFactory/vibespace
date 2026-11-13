@@ -39,7 +39,7 @@ const AUTO = { value: '', label: 'Auto (model default)' };
 const rows = am.effortOptions('claude', LEVELS, DECLARED, { head: AUTO });
 ok(vals(rows) === ',low,medium,high,xhigh,max,ultracode', 'order: Auto, the parsed levels, then the declared extras', vals(rows));
 ok(rows.find((r) => r.value === 'ultracode')?.label === 'Ultracode — xhigh effort + standing dynamic-workflow orchestration', 'the capitalized label carries the hint the way codex\'s ultra does', rows.at(-1));
-ok(am.effortOptions('claude', LEVELS, DECLARED, { capitalize: false }).find((r) => r.value === 'ultracode')?.label.startsWith('ultracode — '), 'the status-bar (lowercase) row carries it too');
+ok(am.effortOptions('claude', LEVELS, DECLARED, { capitalize: false }).find((r) => r.value === 'ultracode')?.label.startsWith('Ultracode — '), 'the status-bar row carries it too (the level\'s word either way — lane ui-language)');
 ok(vals(am.effortOptions('claude', [...LEVELS, 'ultracode'], DECLARED)) === 'low,medium,high,xhigh,max,ultracode', 'a CLI that one day parses ultracode itself does not double the row');
 ok(vals(am.effortOptions('claude', LEVELS, [])) === LEVELS.join(','), 'no extras ⇒ just the levels');
 ok(vals(am.effortOptions('codex', ['high', 'ultra'], undefined)) === 'high,ultra' && am.effortLabel('codex', 'ultra', { capitalize: true }).startsWith('Ultra — delegates'), 'codex unchanged (no extras, its ultra hint intact)');

@@ -122,6 +122,7 @@
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
 import { t, tc, resolveLang } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: a blocked-site code VibeSpace's hint asks for, in words
 import { LIVE_START } from './desktop-app-placement.js'; // lane agent-window-no-pop: the live view's push shape for the ONE placement verdict
 import { pinChipText } from '../desktop-pin.js'; // lane launch-picture-size: a FIXED picture size's chip = the pin's own words
 import { pinSizeItems } from './pin-size-ui.js'; // lane launch-picture-size: Pin size… — the ONE size table's rows + Custom… + Auto
@@ -1963,7 +1964,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     blockedBar.replaceChildren();
     for (const id of [...st.claimOpen]) if (!claims.some((b) => b.id === id)) st.claimOpen.delete(id);
     for (const b of claims) {
-      const w = claimWords(b, t);
+      const w = claimWords(b, t, (v) => valueWord('browser-claim', v, t));
       const row = document.createElement('div'); row.className = 'browser-live-blocked-row'; row.dataset.claim = String(b.id || '');
       const text = document.createElement('span'); text.className = 'browser-live-blocked-text';
       // no other browser to switch to: the banner says what the person CAN do (the naive-user verifier, 2026-09-28 — the

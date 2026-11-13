@@ -31,6 +31,7 @@
 // server string goes through textContent; the one innerHTML is the icon
 // library's own static SVG.
 import { t, tc } from './i18n.js';
+import { valueWord } from './value-words.js'; // lane ui-language: a blocked-site code VibeSpace's hint asks for, in words
 import { fetchJson, showToast, createModalShell, showConfirmDialog } from './utils.js';
 import { btn, el } from './channel-chrome.js';
 import { UI_ICONS } from './icons.js';
@@ -200,7 +201,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
       setText(h3, t('Browser'));
       entries.push({ key: 'error', kind: 'error', text: st.error || viewErrorWords(null, t) });
     } else {
-      const m = switcherModel(st.view, { t, preselect, pending: st.pending, sessionOf, hostNameOf, credentialWhy: R.credentialWhyText });
+      const m = switcherModel(st.view, { t, preselect, pending: st.pending, sessionOf, hostNameOf, credentialWhy: R.credentialWhyText, claimWord: (v) => valueWord('browser-claim', v, t) });
       setText(h3, m.title);
       if (m.claims.length) entries.push({ key: 'claims', kind: 'claims', claims: m.claims });
       entries.push({ kind: 'now', ...m.now });
