@@ -902,7 +902,7 @@ function create(engineCtx) {
   async function reauthorize(adapterId, input = {}) {
     const rec = recordOrThrow(adapterId);
     const mod = connectableFor(rec.kind);
-    const choice = clientChoice(mod, input, { allowDefault: false });
+    const choice = ownCustomChoice(rec, input) || clientChoice(mod, input, { allowDefault: false });
     const origin = typeof input.origin === 'string' ? input.origin : null;
     const road = askedRoad(input.road);   // lane pod-oauth-callback: the person's last resort (lane gmail-connect-wall: or a preset's fixed address)
     if (!choice && !rec.credentialKey && !(rowOf(mod) && rowOf(mod).signin === 'paste')) {   // design 018: a key-less Slack account IS the paste rung — never stamped with a preset
@@ -1224,6 +1224,13 @@ function create(engineCtx) {
     notify([]);
     return { ok: true, label: v };
   }
+  /** THE WRITE-ONLY LAW's other half: the page never holds this account's custom secret, so the SAME client id with an EMPTY
+   *  secret names the account's own sealed client — re-used as it is (a new id still needs its own secret). */
+  function ownCustomChoice(rec, b) {
+    if (!b || typeof b !== 'object' || (b.clientPreset !== CUSTOM_KEY && b.credentialKey !== CUSTOM_KEY) || (b.clientSecret != null && String(b.clientSecret) !== '')) return null;
+    if (rec.credentialKey !== CUSTOM_KEY || !rec.credential || !rec.credential.appSecretEnc || String(rec.credential.appId || '') !== String(b.clientId || '')) return null;
+    return { credentialKey: CUSTOM_KEY, credential: rec.credential };
+  }
   async function setCustomSecret(adapterId, credential) {
     const rec = recordOrThrow(adapterId);
     const mod = connectableFor(rec.kind);
@@ -1233,18 +1240,17 @@ function create(engineCtx) {
     notify([]);
     return { ok: true, customClient: customClientView(rec) };
   }
-  /** THE OWNER-ONLY CONFIG (D3, the mounts' `GET /api/mounts/:id/config`
-   *  rule — the Edit dialog prefills every parameter, the custom secret
-   *  included): served to the owner's UI only, never broadcast, never
-   *  logged, never an agent route. */
+  /** THE OWNER-ONLY CONFIG (D3): the Edit dialog's prefill, served to the owner's UI only, never broadcast, never logged,
+   *  never an agent route — and, by THE WRITE-ONLY LAW (lane ui-controls-and-bugs, 主开发's ruling 2026-11-13), never the
+   *  custom secret: `client.secretSet` says it is held; the dialog draws «已保存» + «替换…» and sends a new one only when typed. */
   function adapterConfig(adapterId) {
     const rec = recordOrThrow(adapterId);
     const mod = connectableFor(rec.kind);
     let client = null;
     if (rec.credential && typeof rec.credential === 'object') {
-      let appSecret = null, undecryptable = false;
-      if (rec.credential.appSecretEnc) { try { appSecret = box.dec(rec.credential.appSecretEnc); } catch { undecryptable = true; } }
-      client = { appId: String(rec.credential.appId || ''), appSecret, undecryptable };
+      let undecryptable = false;
+      if (rec.credential.appSecretEnc) { try { box.dec(rec.credential.appSecretEnc); } catch { undecryptable = true; } }   // a fact about the key, never the bytes
+      client = { appId: String(rec.credential.appId || ''), secretSet: !!rec.credential.appSecretEnc, undecryptable };
     }
     return {
       id: rec.id, kind: rec.kind, label: rec.label, credentialKey: rec.credentialKey || null,

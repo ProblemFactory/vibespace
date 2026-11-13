@@ -382,9 +382,8 @@ router.post('/api/channels/adapters/:id/duplicate', async (req, res) => {
 router.delete('/api/channels/adapters/:id', async (req, res) => {
   try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().remove(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
 });
-/** THE OWNER'S CONFIG (D3 — the storage `GET /api/mounts/:id/config` rule):
- *  every parameter the Edit dialog prefills, the custom client's secret in
- *  the clear. Cookie-auth only, never broadcast, never logged, never an
+/** THE OWNER'S CONFIG (D3): every parameter the Edit dialog prefills — never the custom client's secret (THE WRITE-ONLY
+ *  LAW, lane ui-controls-and-bugs: `client.secretSet` says it is held). Cookie-auth only, never broadcast, never logged, never an
  *  agent route (the agent surface is /api/agent/channels/* and does not
  *  reach this); verify r2: a self-identifying agent bearer is refused
  *  `403 agent-forbidden` here too (sign-in off: the named courtesy). */

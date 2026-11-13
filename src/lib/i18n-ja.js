@@ -4790,7 +4790,6 @@ export default {
   "Not signed in": "未サインイン",
   "scopes {list}": "スコープ {list}",
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "このアカウントのトークンはこのクライアントで発行されました。クライアントを切り替えるとサインインし直しになります — 保存すると「再認可」が開きます。",
-  "Prefilled with the real current value, the secret included — the storage edit dialog’s rule; only what you change is saved.": "ストレージの編集ダイアログと同じルール：現在の実際の値（シークレットを含む）を入力済み。変更した項目だけが保存されます。",
   "Sign-in": "サインイン",
   // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
   "This session’s billing account": "このセッションの課金アカウント",
@@ -4818,6 +4817,7 @@ export default {
   "Replace…": "置き換え…",
   "Type the new value": "新しい値を入力",
   "Paste the new token JSON": "新しいトークン JSON を貼り付け",
+  "Secrets are never shown again after saving — only replaced.": "シークレットは保存後に表示されず、置き換えのみできます。",
   "Sender line": "送信者の説明行",
   "Instance default": "インスタンスの既定",
   "Applied on save — the account re-reads with the new settings; switching the client opens Re-authorize first.": "保存すると適用 — アカウントは新しい設定で読み直します。クライアントを切り替えると先に再認可が開きます。",

@@ -723,6 +723,7 @@ const ENV_ALLOW = new Map([
   ['src/server/integration-store.js', 'THE resolver (both forms)'],
   ['src/integration-registry.js', 'DECLARES the names a row is served under (never reads them)'],
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
+  ['scripts/test-write-only-secrets.mjs', 'lane ui-controls-and-bugs (THE WRITE-ONLY LAW): plants every Integrations card\'s secret field as a company preset in the store\'s env HANDLE (never process.env — it only deletes inherited names) and asserts no answer carries more than the declared tail'],
   ['scripts/test-integrations-ui.mjs', 'the heavy leg injects the env into a worktree server'],
   ['scripts/test-consent-road.mjs', 'lane pod-oauth-callback: the engine legs hand the store a Lark preset that names its brand in the JSON env form — the store\'s env HANDLE, never process.env'],
   ['scripts/test-feed-miss-ui.mjs', 'lane lark-search-miss: the heavy leg injects the fake row\'s cluster key into its worktree server (a signed-in account is what draws the feed line)'],
