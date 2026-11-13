@@ -44,10 +44,14 @@
  *                  setting no lease can scope to its own tabs: a mock camera in the SHARED device list, the browser-wide
  *                  Global Privacy Control signal; and — the owner's law of 2026-11-13, lane chrome-157 — the acts on a
  *                  person's WHOLE profile: its cookie jar, cache, certificate checks, installed apps, site state, rows
- *                  marked law 'whole-profile') — refused on every lease, paused or not (method_refused). Two more marks:
- *                  'whole-profile-own-context' (answered only for a browser context the lease made) and
- *                  'whole-profile-window' (Browser.setDownloadBehavior: forwarded, the profile put back when the
- *                  download ends — src/server/cdp-mediator.js)
+ *                  marked law 'whole-profile') — refused on every lease, paused or not (method_refused). The .401 read
+ *                  (主开发 2026-11-13): every refused row that acts on the WHOLE browser, and the two that carry a call
+ *                  past the verdict (sendMessageToTarget, exposeDevToolsProtocol), is marked too — so the ONE verdict
+ *                  refuses it on the scope road as well (Input.setIgnoreInputEvents and Page.crash act on the lease's
+ *                  own tab: outside the law, said in kb-features). Three more marks: 'whole-profile-own-context'
+ *                  (answered only for a browser context the lease made), 'whole-profile-own-download'
+ *                  (Browser.cancelDownload: only a download the lease's own tab began) and 'whole-profile-window'
+ *                  (Browser.setDownloadBehavior, any wire shape: THE WINDOW — browser-mediation.js windowStep)
  *
  * TAB SCOPING — the rule per class is LEASE-WIDE for every class (decided r4, said here so it is not re-litigated one
  * method at a time): (1) the mediator cannot tell a tab from a frame under the driven tab — an out-of-process iframe's
@@ -134,18 +138,22 @@ const ROWS = Object.freeze({
   },
   Browser: {
     setPermission: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, grantPermissions: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, resetPermissions: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-context' }, setDownloadBehavior: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-window' },
-    cancelDownload: 'page-mutation', close: ['refused', '2026-09-21'], crash: ['refused', '2026-09-21'], crashGpuProcess: ['refused', '2026-09-21'],
+    cancelDownload: { cls: 'page-mutation', since: '2026-11-13', law: 'whole-profile-own-download', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) cancels a download by its id — answered only for a download a tab of this lease began while its download folder was lent (src/server/cdp-mediator.js); the person's downloads and another conversation's are theirs: leave them" },
+    close: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) closes the person's WHOLE browser — every tab of every conversation and the person's own; close only your own tabs (`vibespace-browser close`)" },
+    crash: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) crashes the person's WHOLE browser; if a page of yours hangs, close your tab and open it again" },
+    crashGpuProcess: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) crashes the WHOLE browser's GPU process (every tab's picture); if a page of yours draws wrong, reload it" },
     getVersion: 'read', getBrowserCommandLine: 'read', getHistograms: 'read', getHistogram: 'read', getWindowBounds: 'read', getWindowForTarget: 'read',
-    setWindowBounds: 'view', setContentsSize: 'view', setDockTile: 'harmless', executeBrowserCommand: 'refused',
+    setWindowBounds: 'view', setContentsSize: 'view', setDockTile: 'harmless',
+    executeBrowserCommand: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) runs a command of the person's browser window itself (its tab search, its menus); ask the person" },
     addPrivacySandboxEnrollmentOverride: 'page-mutation',
     // Chrome 154 (lane-cdp-154, 2026-09-28). The two setters MEASURED on 154.0.8037.57 (a scratch headless Chrome, two
     // browser contexts = two leases' worth of tabs, a loopback page server): neither takes a browserContextId, both reach
     // EVERY context, both last only while the setting DevTools connection is open, neither is written to the profile.
     // A lease owns its tabs, never the whole browser ⇒ `refused` (the stricter class; an agent that needs either uses a
     // browser of its own — only an instance-shared browser is mediated).
-    addMockCamera: { cls: 'refused', since: '2026-09-28', chrome: C154, why: "adds a camera to the WHOLE browser's shared device list — measured on Chrome 154.0.8037.57: every tab of every browser context (another lease's, the user's own) lists it and getUserMedia there receives its frames — so it is refused on every lease" },
+    addMockCamera: { cls: 'refused', since: '2026-09-28', chrome: C154, law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) adds a camera to the WHOLE browser's shared device list — measured on Chrome 154.0.8037.57: every tab of every browser context (another lease's, the user's own) lists it and getUserMedia there receives its frames — so it is refused on every lease; to test with a fake camera, use your conversation's own browser" },
     getGlobalPrivacyControl: { cls: 'read', since: '2026-09-28', chrome: C154, why: "reads the browser's Global Privacy Control flag (a stock 154.0.8037.57 answers -32000 'Global Privacy Control is disabled.')" },
-    setGlobalPrivacyControl: { cls: 'refused', since: '2026-09-28', chrome: C154, why: "changes the Global Privacy Control signal of the WHOLE browser — measured on Chrome 154.0.8037.57 (the feature on): every tab of every browser context (another lease's, the user's own) then reports navigator.globalPrivacyControl and sends Sec-GPC with it — so it is refused on every lease" },
+    setGlobalPrivacyControl: { cls: 'refused', since: '2026-09-28', chrome: C154, law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) changes the Global Privacy Control signal of the WHOLE browser — measured on Chrome 154.0.8037.57 (the feature on): every tab of every browser context (another lease's, the user's own) then reports navigator.globalPrivacyControl and sends Sec-GPC with it — so it is refused on every lease; to test the signal, use your conversation's own browser" },
   },
   CSS: {
     addRule: 'page-mutation', collectClassNames: 'read', createStyleSheet: 'page-mutation', disable: 'harmless', enable: 'harmless',
@@ -165,7 +173,8 @@ const ROWS = Object.freeze({
     deleteCache: 'page-mutation', deleteEntry: 'page-mutation', requestCacheNames: 'read', requestCachedResponse: 'read', requestEntries: 'read',
   },
   Cast: {
-    enable: 'harmless', disable: 'harmless', setSinkToUse: 'page-mutation', startDesktopMirroring: 'refused', startTabMirroring: 'view',
+    enable: 'harmless', disable: 'harmless', setSinkToUse: 'page-mutation', startTabMirroring: 'view',
+    startDesktopMirroring: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) mirrors the person's WHOLE desktop to a cast device; ask the person" },
     stopCasting: 'view',
   },
   CrashReportContext: {
@@ -233,7 +242,9 @@ const ROWS = Object.freeze({
     setInstrumentationBreakpoint: 'view', removeInstrumentationBreakpoint: 'harmless', disable: 'harmless',
   },
   Extensions: {
-    triggerAction: 'view', loadUnpacked: 'refused', getExtensions: 'read', uninstall: 'refused', getStorageItems: 'read',
+    triggerAction: 'view', getExtensions: 'read', getStorageItems: 'read',
+    loadUnpacked: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) installs an extension into the person's WHOLE profile; ask the person" },
+    uninstall: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) removes one of the person's extensions from the profile; ask the person" },
     removeStorageItems: 'page-mutation', clearStorageItems: 'page-mutation', setStorageItems: 'page-mutation',
   },
   FedCm: {
@@ -396,13 +407,17 @@ const ROWS = Object.freeze({
   },
   Target: {
     activateTarget: ['view', '2026-09-21'], attachToTarget: 'session', attachToBrowserTarget: 'session', closeTarget: ['view', '2026-09-21'],
-    exposeDevToolsProtocol: ['refused', '2026-09-21'], createBrowserContext: 'session', getBrowserContexts: 'session',
+    exposeDevToolsProtocol: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) hands a page a raw DevTools connection VibeSpace never sees — a road past this law and every other; drive the page through your own url" },
+    createBrowserContext: 'session', getBrowserContexts: 'session',
     createTarget: ['view', '2026-09-21'], detachFromTarget: 'session', disposeBrowserContext: 'session', getTargetInfo: 'session',
-    getTargets: 'session', sendMessageToTarget: ['refused', '2026-09-21'], setAutoAttach: 'session', autoAttachRelated: 'session',
-    setDiscoverTargets: 'session', setRemoteLocations: ['refused', '2026-09-21'], getDevToolsTarget: 'read', openDevTools: 'view',
+    getTargets: 'session', setAutoAttach: 'session', autoAttachRelated: 'session',
+    sendMessageToTarget: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) carries a call inside it that VibeSpace never judges (the old non-flattened sessions) — a road past this law; attach with `flatten: true` and send the call on that session" },
+    setDiscoverTargets: 'session', getDevToolsTarget: 'read', openDevTools: 'view',
+    setRemoteLocations: { cls: 'refused', since: '2026-09-21', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) changes where the WHOLE browser looks for remote targets; no task needs it — drive your own tabs" },
   },
   Tethering: {
-    bind: 'refused', unbind: 'refused',
+    bind: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) opens a port of the WHOLE browser on this machine; ask the person" },
+    unbind: { cls: 'refused', law: 'whole-profile', why: "(lane chrome-157, the owner's law 2026-11-13: on a profile a person shares with agents, a lease never acts on the WHOLE profile) closes a port the WHOLE browser opened on this machine; ask the person" },
   },
   Tracing: {
     end: 'harmless', getCategories: 'read', getTrackEventDescriptor: 'read', recordClockSyncMarker: 'harmless', requestMemoryDump: 'harmless',

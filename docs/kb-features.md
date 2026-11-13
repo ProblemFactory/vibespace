@@ -2328,31 +2328,55 @@ version's Chrome for Testing build, run `scripts/cdp-protocol-fetch.mjs
 (fast), test-browser-mediation ⑥, test-browser-mediation-chrome ⑥ (heavy).
 
 **THE WHOLE-PROFILE LAW (the owner's, 2026-11-13; lane chrome-157 — measured with the real agent-browser 0.38.2 on Chrome
-154.0.8037.57 and Chrome for Testing 157.0.8103.50).** On a profile a person shares with agents, an agent's lease never performs
-an act on the WHOLE profile. One verdict (src/browser-mediation.js `wholeProfileVerdict`, the census rows marked `law`), called
-by `judge` (mediated) AND `judgeScope` (scope); nothing else of the census moves onto the scope road.
+154.0.8037.57 and Chrome for Testing 157.0.8103.50; the .401 read's list, 主开发 2026-11-13).** On a profile a person shares with
+agents, an agent's lease never performs an act on the WHOLE profile or the whole browser. One verdict (src/browser-mediation.js
+`wholeProfileVerdict`, the census rows marked `law`), called by `judge` (mediated) AND `judgeScope` (scope), whatever the wire
+shape (no session, a browser-target session, the lease's own page session); no CLASS of the census moves onto the scope road.
 
 | Method | Rule | The real driver's verb (measured) |
 |---|---|---|
 | Security.setIgnoreCertificateErrors | refused | `--ignore-https-errors`: sends nothing through a lease (it applies only to a browser the driver launches) |
 | Network.clearBrowserCookies | refused | `cookies clear`: refused on both roads — the words point at `site-reset --host` / the conversation's own browser |
 | Network.clearBrowserCache, Storage.runBounceTrackingMitigations, PWA.install / uninstall / changeAppUserSettings | refused | the driver sends none of them |
+| Browser.close / crash / crashGpuProcess / executeBrowserCommand / addMockCamera / setGlobalPrivacyControl, Cast.startDesktopMirroring, Extensions.loadUnpacked / uninstall, Target.setRemoteLocations, Tethering.bind / unbind | refused — the whole BROWSER's acts the census itself measured or named (the .401 read: on the scope road they were forwarded) | `close --all` sends Browser.close — refused, and the driver answers ok (measured on the mediated road: another lease's page survives) |
+| Target.sendMessageToTarget, Target.exposeDevToolsProtocol | refused — each carries a call past this verdict (an old non-flattened session; a raw binding in the page) | the driver sends neither |
 | Page.setDownloadBehavior | refused | measured NOT scoped to its page (tab A's call sent tab B's download into A's folder, on 154 and 157) |
-| Browser.setDownloadBehavior | THE WINDOW: forwarded; the profile put back (`behavior: 'default'`, measured to restore the profile's own place) when the lease's download ends, at a takeover, at the lease's end, and when a hub start adopts the profile | `download` works; the driver never names a context, so (c) would have broken it |
-| Browser.grantPermissions / setPermission / resetPermissions, Storage.clearCookies | answered only for a browser context the lease created (`scope.contexts`), else refused | NOT measured with the real driver — no local verb sends them (`set geo` is emulation only) |
+| Browser.setDownloadBehavior | THE WINDOW (below): forwarded; `deny` refused; a browser context of the lease's own forwarded as it is, another's refused | `download` sends it ON ITS PAGE SESSION, `{behavior:'allowAndName', downloadPath, eventsEnabled:true}` — measured: that moves the WHOLE profile's folder too |
+| Browser.cancelDownload | answered only for a download a tab of the lease began (measured: a cancel by guid DID cancel the person's download) | the driver sends none |
+| Browser.grantPermissions / setPermission / resetPermissions, Storage.clearCookies | answered only for a browser context the lease created | NOT measured with the real driver (it never sends them) |
 
-The one thing that stays true: while an agent's download is in flight, a file the person starts in that profile lands in the
-agent's folder (narrower than before, where the changed folder lasted for the lease's whole life and beyond). Kept as they are:
-the origin-scoped cookie writes (Network.setCookies / deleteCookies, Storage.setCookies) and Storage.clearDataForOrigin — that
-they take ANY origin is a grant question (backlog B-771e), not this law. Nothing about connecting changes: the driver sends no
-whole-profile call when it connects (measured on both roads).
+Outside the law, said here so the table is true: Input.setIgnoreInputEvents and Page.crash (class refused on the mediated road)
+act on the lease's OWN tab — the scope road forwards them. VibeSpace's own `vibespace-browser permission <kind> allow|deny
+[origin]` is another door (src/server/browser-dialogs.js `setPermission`, the hub's own connection): it sets ONE origin's
+permission in every browser context the watch decided — the person's own profile included on a shared profile — and, for
+geolocation, a position on every watched tab; an origin act (the B-771e question), said in the agent manual; whether it becomes a
+proposal on a shared profile (as site-reset is) is 主开发's to rule. Kept as they are: the origin-scoped cookie writes
+(Network.setCookies / deleteCookies, Storage.setCookies) and Storage.clearDataForOrigin — that they take ANY origin is a grant
+question (backlog B-771e). Nothing about connecting changes: the driver sends no whole-profile call when it connects.
 
-ENFORCED ON: mediated (Separate tabs) — yes · scope (a profile shared through «Who can use it» on this machine) — yes · a paired
-machine's profile, or a hub with no mediating proxy — NO: the raw endpoint, nothing in between (no fence is built there and none
-is promised — the «Who can use it» sentence says so, keyed by the same road verdict). A conversation's OWN temporary browser: the
-raw endpoint by design — untouched by all of this. Gates: test-browser-mediation ⑥c (both roads, the window over a fake browser,
-two mutant controls), test-cdp-census (the class snapshot), test-everyone-principal (the dialog's sentence by road),
-test-browser-mediation-chrome (the real driver, heavy).
+THE WINDOW (W1–W6): ONE state per PROFILE, a PURE transition (src/browser-mediation.js `windowStep`), executed by the mediator;
+pinned by a GENERATED table (scripts/download-window-cells.mjs — 7 states × 19 acts, 122 cells, 11 culls). The one true sentence:
+**an agent's download set lends it the profile's download folder until that download ends — at most 15 s if no download of its
+tab begins — and a takeover, the lease's end or its last connection closing takes it back at once; while it is lent, a file the
+person starts in that profile lands in the agent's folder.** Only one window per profile (another lease's set is refused by name
+while one stands); only the lease's OWN downloads count (by the frame they began in — measured) and only those are told to it, and
+only if it asked (`eventsEnabled`); nothing more once its window has closed; a download its tab begins after the bound is canceled
+(it would land in the person's own folder); the put-back goes on the lease's own connection when it stands (ordered before its
+next set — `{behavior:'default', eventsEnabled:true}`, measured to put the place back and keep the mediator seeing) else on one of
+its own; a takeover tells the lease (its card and its handback); a browser restart drops the window (its setting died with it); a
+hub stop puts it back best-effort; a HUB START's adoption puts it back before the profile's first grant, tried again (3 tries) and
+said when it could not be.
+
+ENFORCED ON: mediated (Separate tabs) — yes · scope (a profile shared through «Who can use it» on this machine) — yes, and it fails
+CLOSED: a url of its own that cannot be made refuses the attach `scope_unavailable` by name, never the raw endpoint · a paired
+machine's profile, or a hub with no mediating proxy — NO: the raw endpoint, nothing in between (no fence is built there and none is
+promised — the «Who can use it» sentence says so, keyed by the same road verdict; a Separate-tabs profile on a hub with no proxy is
+worded UNAVAILABLE — every agent lease there is refused `mediation_unavailable`). A conversation's OWN temporary browser: the raw
+endpoint by design — untouched by all of this. Gates: test-cdp-census ⑫ (FAST: the exact law lists, every refusal's recipe on
+both roads, the own-context / own-download / window verdicts, the window table against windowStep), test-browser-mediation ⑥c/⑥e
+(every window cell over the real proxy, both roads, both set forms; two leases; two downloads; the person's download; the
+adoption door; behavioural mutant controls) and ④ (a hub start's adoption and the no-proxy / fail-closed words, through real
+keepers), test-everyone-principal (the dialog's sentence by road), test-browser-mediation-chrome (the real driver, heavy).
 
 ### Agent browser v2 — P7: window binding — one group, two panes side by side (2026-09-21; design §4.6 / §3.7, D19 / D24, the §10 P7 row)
 

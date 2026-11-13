@@ -180,7 +180,9 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   const gt = M.admitReply({ id: 38, result: { targetInfos: [{ targetId: 'T-N', type: 'page' }, { targetId: 'T-ELSE', type: 'page' }, { targetId: 'T-POP2', type: 'page', openerId: 'T-N' }] } }, { method: 'Target.getTargets', params: {} }, sc2);
   ok(gt.reply.result.targetInfos.map((t) => t.targetId).sort().join() === 'T-N,T-POP2' && sc2.targets.has('T-POP2'), 'getTargets lists only the scope — and a tab opened by a scoped page seen there for the first time joins');
   // events gated by session; browser-level events pass
-  ok(M.filterEvent({ method: 'Page.frameNavigated', sessionId: 'S-N', params: {} }, sc2) !== null && M.filterEvent({ method: 'Page.frameNavigated', sessionId: 'S-ELSE', params: {} }, sc2) === null && M.filterEvent({ method: 'Browser.downloadProgress', params: {} }, sc2) !== null, 'a session event reaches the lease only on its own session; a browser-level event passes');
+  ok(M.filterEvent({ method: 'Page.frameNavigated', sessionId: 'S-N', params: { frame: { id: 'F-N1' } } }, sc2) !== null && sc2.frames.has('F-N1') && M.filterEvent({ method: 'Page.frameNavigated', sessionId: 'S-ELSE', params: { frame: { id: 'F-ELSE' } } }, sc2) === null && !sc2.frames.has('F-ELSE') && M.filterEvent({ method: 'Storage.cacheStorageListUpdated', params: {} }, sc2) !== null
+    && M.filterEvent({ method: 'Browser.downloadProgress', params: { guid: 'g-x' } }, sc2) === null && M.filterEvent({ method: 'Browser.downloadWillBegin', sessionId: 'S-N', params: { guid: 'g-x', frameId: 'F-N1' } }, sc2) === null && (sc2.downloads.add('g-x'), M.filterEvent({ method: 'Browser.downloadProgress', params: { guid: 'g-x' } }, sc2) !== null),
+    'a session event reaches the lease only on its own session (and its frames become the lease\'s); a browser-level event passes — but a download event only for a download the mediator admitted as the lease\'s own (lane chrome-157, W2)');
   // shrinkage
   ok(M.filterEvent({ method: 'Target.targetDestroyed', params: { targetId: 'T-ELSE' } }, sc2) === null, 'another tab\'s destruction is not announced');
   ok(M.filterEvent({ method: 'Target.targetDestroyed', params: { targetId: 'T-N' } }, sc2) !== null && !sc2.targets.has('T-N') && !sc2.sessions.has('S-N'), 'the lease\'s own tab destroyed: announced, target AND its session leave the scope');
@@ -304,7 +306,7 @@ console.log('— ⑥ the CDP census: every method of the pinned protocol has a r
     const onA = verdict(M, m, 'S-A', { paused: true }), onB = verdict(M, m, 'S-B', { paused: true }), free = verdict(M, m, 'S-A', {}), sw = verdict(M, m, 'S-A', { paused: true, fenceScripts: false }), swFree = verdict(M, m, 'S-A', { fenceScripts: true });
     let want;
     const ownCtx = paramsFor(m).browserContextId && sc.contexts.has(String(paramsFor(m).browserContextId));
-    if (r.law === 'whole-profile' || (r.law === 'whole-profile-own-context' && !ownCtx)) want = Array(5).fill('method_refused:whole-profile');   // (lane chrome-157: the law, not the class — ⑥c)
+    if (r.law === 'whole-profile' || (r.law === 'whole-profile-own-context' && !ownCtx) || r.law === 'whole-profile-own-download') want = Array(5).fill('method_refused:whole-profile');   // (the own-download row names no download of the lease's here)   // (lane chrome-157: the law, not the class — ⑥c)
     else if (r.cls === 'refused') want = ['method_refused:refused', 'method_refused:refused', 'method_refused:refused', 'method_refused:refused', 'method_refused:refused'];
     else if ((r.cls === 'input' || r.cls === 'view' || r.cls === 'page-mutation') && r.fence === 'mediator') want = [`browser_interrupted:${r.cls}`, `browser_interrupted:${r.cls}`, 'forward', `browser_interrupted:${r.cls}`, 'forward'];
     else want = ['forward', 'forward', 'forward', 'forward', 'forward'];
@@ -458,10 +460,9 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   const REPO = path.resolve(new URL('..', import.meta.url).pathname);
   const LAW = C.rows().filter((r) => r.law);
   const REF = LAW.filter((r) => r.law === 'whole-profile').map((r) => r.domain + '.' + r.method), OWN = LAW.filter((r) => r.law === 'whole-profile-own-context').map((r) => r.domain + '.' + r.method);
-  ok(REF.sort().join() === ['Network.clearBrowserCache', 'Network.clearBrowserCookies', 'PWA.changeAppUserSettings', 'PWA.install', 'PWA.uninstall', 'Page.setDownloadBehavior', 'Security.setIgnoreCertificateErrors', 'Storage.runBounceTrackingMitigations'].join()
-    && OWN.sort().join() === ['Browser.grantPermissions', 'Browser.resetPermissions', 'Browser.setPermission', 'Storage.clearCookies'].join()
-    && LAW.filter((r) => r.law === 'whole-profile-window').map((r) => r.domain + '.' + r.method).join() === 'Browser.setDownloadBehavior'
-    && REF.every((m) => C.classOf(m) === 'refused') && OWN.every((m) => C.classOf(m) === 'page-mutation'), '⑥c the census marks the law: 8 rows refused (whole-profile), 4 answered only for the lease\'s own context, Browser.setDownloadBehavior the window', JSON.stringify({ REF, OWN }));
+  ok(REF.length === 22 && OWN.sort().join() === ['Browser.grantPermissions', 'Browser.resetPermissions', 'Browser.setPermission', 'Storage.clearCookies'].join()
+    && LAW.filter((r) => r.law === 'whole-profile-window').map((r) => r.domain + '.' + r.method).join() === 'Browser.setDownloadBehavior' && LAW.filter((r) => r.law === 'whole-profile-own-download').map((r) => r.domain + '.' + r.method).join() === 'Browser.cancelDownload'
+    && REF.every((m) => C.classOf(m) === 'refused') && OWN.every((m) => C.classOf(m) === 'page-mutation'), '⑥c the census marks the law: 22 rows refused (whole-profile — the profile\'s acts, the whole browser\'s, the two that carry a call past the verdict), 4 answered only for the lease\'s own context, cancelDownload only for its own download, setDownloadBehavior the window (the exact lists and every recipe: test-cdp-census ⑫, the fast pin)', JSON.stringify({ REF, OWN }));
   const sc = M.newScope({ targets: ['T-A'] });
   const both = (m, params = {}) => [M.judge({ id: 1, method: m, params }, sc, {}), M.judge({ id: 2, method: m, params }, sc, { paused: true }), M.judgeScope({ id: 3, method: m, params }, sc)];
   ok(REF.every((m) => both(m).every((v) => v.kind === 'refuse' && M.refusalCodeOf(v.reply) === 'method_refused' && /WHOLE/.test(v.reply.error.message))),
@@ -474,59 +475,78 @@ console.log('— ⑥c on a profile a person shares with agents a lease never act
   ok(OWN.every((m) => classFence(both(m, { browserContextId: 'CTX-MINE', permissions: [] })) && both(m, { permissions: [] }).every((v) => v.kind === 'refuse' && /names no browser context/.test(v.reply.error.message)) && both(m, { browserContextId: 'CTX-OTHER' }).every((v) => v.kind === 'refuse' && /did not create/.test(v.reply.error.message))),
     '⑥c the 4 own-context rows: answered with a browserContextId the lease made (the class fence still holds while the person drives), refused with none or another\'s — on both roads');
   ok(classFence(both('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/x' })) && both('Page.navigate', { url: 'about:blank' }).slice(2).every((v) => v.kind === 'forward') && M.judgeScope({ id: 7, method: 'Zzz.unknown', params: {} }, sc).kind === 'forward',
-    '⑥c Browser.setDownloadBehavior is FORWARDED (the window); the scope road forwards everything else as written (an unknown method too — nothing else of the census moves onto it)');
-  // THE WINDOW through the real proxy over the fake: forwarded with eventsEnabled; put back at the download's end, a takeover, the lease's end
-  const fakeW = await fakeBrowser();
-  const logsW = [];
-  const medW = MED.create({ log: { log: (l) => logsW.push(String(l)), warn: (l) => logsW.push('W ' + String(l)) } });
-  const putBacks = () => fakeW.seen.filter((x) => x.method === 'Browser.setDownloadBehavior' && x.params && x.params.behavior === 'default').length;
-  const waitFor = async (f, ms = 3000) => { for (let i = 0; i < ms / 50 && !f(); i++) await new Promise((r) => setTimeout(r, 50)); return f(); };
-  for (const [road, mode] of [['mediated', M.MEDIATED_MODE], ['scope', M.SCOPE_MODE]]) {
-    const gW = await medW.grantFor({ profileId: 'bp-0000000w', browserKey: 'bk-0000000w', upstream: fakeW.url, targetIds: ['T-A'], paused: () => false, mode });
-    const cW = cdpClient(gW.url); await cW.open;
-    const b0 = putBacks();
-    await cW.call('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/tmp/agent-dl' });
-    const sent = fakeW.seen.filter((x) => x.method === 'Browser.setDownloadBehavior' && x.params && x.params.behavior === 'allow').pop();
-    const open1 = medW.downloadWindowOf('bp-0000000w');
-    fakeW.emit({ method: 'Browser.downloadWillBegin', params: { guid: 'g-' + road, url: 'http://x/f', suggestedFilename: 'f.txt' } });
-    fakeW.emit({ method: 'Browser.downloadProgress', params: { guid: 'g-' + road, state: 'completed' } });
-    const back1 = await waitFor(() => putBacks() === b0 + 1);
-    ok(sent && sent.params.eventsEnabled === true && open1 && back1 && !medW.downloadWindowOf('bp-0000000w') && logsW.some((l) => /download folder put back — its download ended/.test(l)),
-      `⑥c the WINDOW (${road} road): the lease's download behaviour is forwarded (eventsEnabled so its end is seen), and when its download completes the profile is PUT BACK (behavior default)`, JSON.stringify({ sent: sent && sent.params, open1, back1, puts: putBacks() }));
-    await cW.call('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/tmp/agent-dl' });
-    medW.interrupt({ profileId: 'bp-0000000w', browserKey: 'bk-0000000w' });
-    const back2 = await waitFor(() => putBacks() === b0 + 2);
-    await cW.call('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/tmp/agent-dl' });
-    medW.revoke({ profileId: 'bp-0000000w', browserKey: 'bk-0000000w' });
-    const back3 = await waitFor(() => putBacks() === b0 + 3);
-    ok(back2 && back3 && logsW.some((l) => /put back — the person took over/.test(l)) && logsW.some((l) => /put back — the lease ended/.test(l)),
-      `⑥c the WINDOW (${road} road): a takeover puts the profile back, and so does the lease's end`, JSON.stringify({ back2, back3 }));
-    try { cW.ws.close(); } catch { /* gone */ }
+    '⑥c Browser.setDownloadBehavior is FORWARDED (THE WINDOW decides); the scope road forwards everything else as written (an unknown method too — no class of the census moves onto it, only the law)');
+  // ═══ ⑥e THE WINDOW over the REAL proxy and a fake browser that models Chrome's download state as measured (154 + 157): every cell
+  //     of the generated table (scripts/download-window-cells.mjs — the laws W1–W6, the culls named), both roads, the set on the
+  //     lease's own page session (the real driver's shape) — and with no session on the mediated road
+  const T = await import('./download-window-cells.mjs');
+  const redOf = (out) => out.results.filter((x) => !x.pass);
+  const say = (xs) => xs.slice(0, 4).map((x) => `${x.road} ${x.state}×${x.act}: want ${JSON.stringify(x.want)} got ${JSON.stringify(x.got)}${x.note ? ' (' + x.note + ')' : ''}`).join(' | ');
+  const sess = await T.driveAll(REPO, { roads: ['mediated', 'scope'] });
+  ok(sess.results.length === 2 * sess.cells && redOf(sess).length === 0, `⑥e THE WINDOW, every cell over the real proxy: ${sess.cells} cells × 2 roads (${sess.culls.length} culls) as the laws say — the set on the lease's page session, as the real driver sends it`, say(redOf(sess)));
+  process.env.VS_WINDOW_FORM = 'browser';
+  const brw = await T.driveAll(REPO, { roads: ['mediated'] });
+  delete process.env.VS_WINDOW_FORM;
+  ok(brw.results.length === brw.cells && redOf(brw).length === 0, `⑥e …and the same ${brw.cells} cells with the set sent with no session (the browser form) — W4: every wire shape of the act is the act`, say(redOf(brw)));
+  const cellOf = (out, st, act, road = 'mediated') => out.results.find((x) => x.road === road && x.state === st && x.act === act) || { pass: false, note: 'no such cell' };
+  ok(['armed', 'flight'].every((st) => cellOf(sess, st, 'setM').pass && cellOf(sess, st, 'leaseEndM').pass && cellOf(sess, st, 'connGoneM').pass),
+    '⑥e TWO LEASES on one profile (named — the read\'s surviving mutant): while A\'s window stands B\'s set is refused by name, and B\'s end or its connection never closes A\'s window');
+  ok(cellOf(sess, 'flight2', 'endAdmitted').pass && cellOf(sess, 'flight', 'endAdmitted').pass, '⑥e TWO DOWNLOADS in one window (named): the first to end keeps it open; the last puts the profile back');
+  ok(['armed', 'flight'].every((st) => cellOf(sess, st, 'beginOther').pass && cellOf(sess, st, 'endOther').pass) && cellOf(sess, 'armed', 'beginOwn').pass,
+    '⑥e THE PERSON\'S DOWNLOAD (named — the lane\'s own finding, measured): never told to the lease, never counted by its window; the lease\'s own is');
+  // the keeper's door at the mediator: a grant waits for the adoption's put-back; a browser that drops the first answer is asked again; one that never answers is said
+  {
+    const require = createRequire(import.meta.url);
+    const WSm = require('ws');
+    const fA = await T.fakeChrome(WSm);
+    const logsA = [];
+    const medA = MED.create({ log: { log: (l) => logsA.push(String(l)), warn: (l) => logsA.push('W ' + String(l)) } });
+    fA.st.holdDefault = true;
+    const adopting = medA.adopt('bp-00000ad1', fA.url, { tries: 2, gapMs: 40 });
+    let granted = false; const gP = medA.grantFor({ profileId: 'bp-00000ad1', browserKey: 'bk-00000ad1', upstream: fA.url, targetIds: [] }).then(() => { granted = true; });
+    await new Promise((r) => setTimeout(r, 150));
+    const waited = !granted && fA.putBacks() === 1;
+    fA.st.holdDefault = false; fA.release();
+    const ad = await adopting; await gP;
+    ok(waited && granted && ad.ok && ad.tries === 1 && logsA.some((l) => /adopted at the hub's start — its download folder put back/.test(l)),
+      '⑥e W6 the hub start\'s door (the mediator\'s adopt): the profile\'s first grant WAITS for the put-back, then is handed out; the journal says it', JSON.stringify({ waited, granted, ad }));
+    const fB = await T.fakeChrome(WSm); fB.st.holdDefault = true;
+    const tB = medA.adopt('bp-00000ad2', fB.url, { tries: 3, gapMs: 30 });
+    await new Promise((r) => setTimeout(r, 4400)); fB.st.holdDefault = false; fB.release();   // the first try's answer never came (its 4 s bound passed)
+    const adB = await tB;
+    ok(adB.ok && adB.tries === 2 && logsA.some((l) => /bp-00000ad2: adopted at the hub's start — its download folder put back to the profile's own \(try 2\)/.test(l)), '⑥e W6 …a browser that did not answer is asked AGAIN (the second try put it back, said)', JSON.stringify(adB));
+    const fC = await T.fakeChrome(WSm); fC.st.holdDefault = true;
+    const adC = await medA.adopt('bp-00000ad3', fC.url, { tries: 2, gapMs: 20 });
+    ok(!adC.ok && adC.tries === 2 && logsA.some((l) => /^W .*bp-00000ad3: adopted at the hub's start — its download folder could NOT be put back \(2 tries/.test(l)), '⑥e W6 …and one that never answers is SAID (a warning naming the profile and the tries), never silent', JSON.stringify(adC));
+    medA.shutdown(); fA.close(); fB.close(); fC.close();
   }
-  ok(await medW.putBackDownloads(fakeW.url) === true && putBacks() >= 7, '⑥c putBackDownloads (the door the keeper uses when a hub start adopts the profile) answers over its own connection');
-  // the keeper's adoption door, pinned in its source: a shared profile adopted at boot is put back — only where our mediator sits
-  const keeperSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const adoptA = "if (v.state === 'ready' && p && rec.cdpUrl && agentRoadOf(p).mode && mediator && typeof mediator.putBackDownloads === 'function') {";
-  ok(keeperSrc.split(adoptA).length === 2 && /mediator\.putBackDownloads\(rec\.cdpUrl\)/.test(keeperSrc.slice(keeperSrc.indexOf(adoptA), keeperSrc.indexOf(adoptA) + 600)) && keeperSrc.indexOf(adoptA) < keeperSrc.indexOf("if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now();"),
-    '⑥c the boot\'s adoption puts a shared profile\'s download folder back (src/server/browser-keeper.js — a source pin: the keeper\'s boot is heavy-suite ground; agentRoadOf(p).mode = only where our mediator sits)');
-  medW.shutdown(); fakeW.close();
-  // CONTROLS (mutant copies): the window's end-reset removed ⇒ the profile stays the agent's; judgeScope without the verdict ⇒ the scope road clears the cookies
+  // CONTROLS (mutant copies, each red by a BEHAVIOURAL leg — the read: «the first-completion mutant red by a behavioural leg, not a text control»)
   const MUTW = mutantCopies('whole-profile', REPO);
-  const medSrcW = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8'), bmSrcW = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8');
-  const endA = "if ([...w.began].every((x) => w.ended.has(x))) closeWindow(g.profileId, 'its download ended');", scopeA = "  { const wp = wholeProfileVerdict(msg, scope, { road: SCOPE_MODE }); if (wp) return wp; }";
-  ok(medSrcW.split(endA).length === 2 && bmSrcW.split(scopeA).length === 2, '⑥c control setup: the window\'s end and the scope road\'s call are each spelled once');
-  const Mb = MUTW.load('src/browser-mediation.js', bmSrcW.replace(scopeA, '  /* MUTANT: the scope road without the verdict */').replace(/require\('\.\/([\w-]+\.js)'\)/g, (_, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`), 'scope-no-verdict');
-  ok(Mb.judgeScope({ id: 8, method: 'Network.clearBrowserCookies', params: {} }, sc).kind === 'forward', '⑥c CONTROL: judgeScope without the one verdict FORWARDS Network.clearBrowserCookies — the scope road would empty the person\'s jar');
-  const fakeM = await fakeBrowser();
-  const MEDm = MUTW.load('src/server/cdp-mediator.js', medSrcW.replace(endA, '/* MUTANT: the window never closes at its end */').replace("require('../browser-mediation.js')", `require(${JSON.stringify(path.join(REPO, 'src/browser-mediation.js'))})`), 'window-no-end');
-  const medM = MEDm.create({ log: { log: () => {}, warn: () => {} } });
-  const gM = await medM.grantFor({ profileId: 'bp-0000000m', browserKey: 'bk-0000000m', upstream: fakeM.url, targetIds: ['T-A'], paused: () => false });
-  const cM = cdpClient(gM.url); await cM.open;
-  await cM.call('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: '/tmp/agent-dl' });
-  fakeM.emit({ method: 'Browser.downloadWillBegin', params: { guid: 'gm' } }); fakeM.emit({ method: 'Browser.downloadProgress', params: { guid: 'gm', state: 'completed' } });
-  await new Promise((r) => setTimeout(r, 600));
-  ok(!fakeM.seen.some((x) => x.method === 'Browser.setDownloadBehavior' && x.params && x.params.behavior === 'default') && !!medM.downloadWindowOf('bp-0000000m'), '⑥c CONTROL: without the end-reset the profile STAYS the agent\'s after its download (no put-back) — the leg above is red on it');
-  try { cM.ws.close(); } catch { /* gone */ } medM.shutdown(); fakeM.close();
+  const bmSrcW = fs.readFileSync(path.join(REPO, 'src/browser-mediation.js'), 'utf8'), medSrcW = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+  const realReq = (src) => src.replace(/require\('\.\/([\w-]+\.js)'\)/g, (_, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
+  const firstA = "      if (left.length) return { ...out, state: { ...st, began: left } };";
+  const leaseA = "      if (st && st.owner === a.key && st.phase === 'open') return close('the lease ended');";
+  const deliverA = "        const deliver = !!(conn.downloadEvents && guid && g.scope.downloads.has(guid));   // only the lease's own download, only when it asked";
+  const admitA = "        if (msg.method === 'Browser.downloadWillBegin') { if (mine && guid) stepWindow(g.profileId, { kind: 'begin', own: M.isLeaseFrame(g.scope, p0.frameId), guid }, { g, conn }); }";
+  const scopeA = "  { const wp = wholeProfileVerdict(msg, scope, { road: SCOPE_MODE }); if (wp) return wp; }";
+  ok([firstA, leaseA, scopeA].every((a) => bmSrcW.split(a).length === 2) && [admitA, deliverA].every((a) => medSrcW.split(a).length === 2), '⑥e control setup: each mutated line is spelled once');
+  const withM = (bmText, tag, medText = medSrcW) => {
+    const bmPath = MUTW.write('src/browser-mediation.js', realReq(bmText), tag);
+    const Mx = createRequire(import.meta.url)(bmPath);
+    const MEDx = MUTW.load('src/server/cdp-mediator.js', medText.replace("require('../browser-mediation.js')", `require(${JSON.stringify(bmPath)})`), tag);
+    return { M: Mx, MED: MEDx };
+  };
+  const only = (pairs) => (r) => pairs.some(([st, act]) => r.state === st && r.act === act);
+  const c1 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW.replace(firstA, "      if (false && left.length) return { ...out, state: { ...st, began: left } };   /* MUTANT: the window closes at the FIRST completion */"), 'first-completion'), only: only([['flight2', 'endAdmitted']]) });
+  ok(redOf(c1).length === 1, '⑥e CONTROL: the window closing at the FIRST completion turns «two downloads in one window» RED (behavioural — the cell flight2 × endAdmitted)', say(c1.results));
+  const c2 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW.replace(leaseA, "      if (st && st.phase === 'open') return close('the lease ended');   /* MUTANT: any lease's end closes the window */"), 'any-lease-end'), only: only([['armed', 'leaseEndM'], ['flight', 'leaseEndM']]) });
+  ok(redOf(c2).length === 2, '⑥e CONTROL: a revoke closing ANY lease\'s window turns the two-lease cells RED (armed / flight × another lease\'s end)', say(c2.results));
+  process.env.VS_WINDOW_FORM = 'browser';   // (the leak needs the browser form: measured, the session form's events are that page's own)
+  const c3 = await T.driveAll(REPO, { roads: ['mediated'], mods: withM(bmSrcW, 'events-unfiltered', medSrcW.replace(deliverA, "        const deliver = true;   /* MUTANT: every download event reaches the lease */")), only: only([['flight', 'beginOther'], ['armed', 'endOther']]) });
+  delete process.env.VS_WINDOW_FORM;
+  ok(redOf(c3).length === 2, '⑥e CONTROL: download events not filtered by the lease turn «the person\'s download» RED (with the browser-form set it would be told to the lease)', say(c3.results));
+  const Mb = MUTW.load('src/browser-mediation.js', realReq(bmSrcW.replace(scopeA, '  /* MUTANT: the scope road without the verdict */')), 'scope-no-verdict');
+  ok(Mb.judgeScope({ id: 8, method: 'Network.clearBrowserCookies', params: {} }, sc).kind === 'forward' && Mb.judgeScope({ id: 9, method: 'Browser.close', params: {} }, sc).kind === 'forward', '⑥c CONTROL: judgeScope without the one verdict FORWARDS Network.clearBrowserCookies and Browser.close — the scope road would empty the person\'s jar and close their browser');
   for (const r of copiesCensus(MUTW.files, MUTW.dir, REPO, { minCopies: 2, label: '⑥c ' })) ok(r.pass, r.name, r.detail);
 }
 
@@ -934,6 +954,39 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   ok(!refused && keeper.profile(solo.id).sharing === 'instance', 'owner ruling A: a profile that is somebody\'s pin MAY become separate-tabs (mediated) — the pin is an attachment default, so there is no directory to protect', refused && refused.message);
   keeper.updateProfile(solo.id, { sharing: 'owner' });
   keeper.setPin(KEY_C, null);
+  // ─ lane chrome-157 (the .401 read, W6 — «the fourth door is DRIVEN, not spelled»): a HUB START adopts the running browser of the
+  //   mediated profile — a second keeper over a copy of this one's data dir, with a NEW mediator (a new hub holds no window): its boot
+  //   puts the profile's download folder back over a connection of its own, and says so
+  {
+    const DATA3 = path.join(ROOT, 'data3'); fs.rmSync(DATA3, { recursive: true, force: true }); fs.cpSync(DATA, DATA3, { recursive: true });
+    const logs2 = [];
+    const med2 = MED.create({ log: { log: (l) => logs2.push(String(l)), warn: (l) => logs2.push('W ' + String(l)) } });
+    const keeper2 = mkKeeper(DATA3, med2);
+    const defaults = () => fake.seen.filter((x) => x.method === 'Browser.setDownloadBehavior' && !x.sessionId && x.params && x.params.behavior === 'default').length;
+    const d0 = defaults();
+    await keeper2.boot();
+    await until(() => logs2.some((l) => /adopted at the hub's start/.test(l)), 6000);
+    const adopted = logs2.filter((l) => /adopted at the hub's start — its download folder put back to the profile's own/.test(l));
+    ok(defaults() === d0 + adopted.length && adopted.some((l) => l.includes(`${team.id}:`)) && adopted.some((l) => l.includes(`${solo.id}:`)),
+      '④ W6 a HUB START (a second keeper over this one\'s data, a new mediator) adopts the running browsers an agent road reaches — the mediated Team and the scope road\'s Solo — and puts each one\'s download folder back (one put-back each) — driven, not a source pin; the journal says it', JSON.stringify({ before: d0, after: defaults(), journal: logs2.filter((l) => /adopt/.test(l)) }));
+    keeper2.shutdown();
+    // the .401 read (L2b): where no mediator stands there is no fence, and the product SAYS so — (1) a hub with no proxy words the
+    // mediated profile UNAVAILABLE (every agent lease there is refused mediation_unavailable), never «own tab»; (2) the scope road
+    // whose url cannot be made refuses the attach BY NAME (scope_unavailable) — it never hands the raw endpoint
+    const DATA4 = path.join(ROOT, 'data4'); fs.rmSync(DATA4, { recursive: true, force: true }); fs.cpSync(DATA, DATA4, { recursive: true });
+    const keeper3 = mkKeeper(DATA4, null);
+    ok(keeper3.list().profiles.find((x) => x.id === team.id).agentRoad === 'unavailable' && keeper3.agentRoadFor(team.id).why === 'unavailable' && keeper.list().profiles.find((x) => x.id === team.id).agentRoad === 'mediated',
+      '④ L2b a hub with NO proxy words the mediated profile «unavailable» (its row, /use) — the same profile on a hub with the proxy says «mediated»');
+    keeper3.shutdown();
+    const DATA5 = path.join(ROOT, 'data5'); fs.rmSync(DATA5, { recursive: true, force: true }); fs.cpSync(DATA, DATA5, { recursive: true });
+    const med5 = MED.create({ log: { log() { }, warn() { } } });
+    const failing = { ...med5, grantFor: async (o) => { if (o && o.mode === M.SCOPE_MODE) throw new Error('the proxy could not mint a url'); return med5.grantFor(o); } };
+    const keeper5 = mkKeeper(DATA5, failing);
+    let refused5 = null, at5 = null; try { at5 = await keeper5.attach({ profileId: solo.id, browserKey: KEY_C, sessionId: 'sess-c' }); } catch (e) { refused5 = e; }   // (C holds Solo; in this copied world its scope grant cannot be made)
+    ok(!at5 && refused5 && refused5.code === 'scope_unavailable' && /never handed out/.test(refused5.message) && !String(refused5.message).includes(fake.url),
+      '④ L2b the SCOPE road fails CLOSED: a url of its own that cannot be made refuses the attach by name (scope_unavailable) — never the raw endpoint, where no fence and no window stand', refused5 ? refused5.code + ': ' + refused5.message : JSON.stringify(at5 && at5.env));
+    keeper5.shutdown(); med5.shutdown();
+  }
   // ─ detach revokes: A's connection closes 1008 and A's tab is closed in the browser
   keeper.detach({ profileId: team.id, browserKey: KEY_A });
   const cl = await cA.closed;
@@ -1093,7 +1146,8 @@ console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操�
 console.log('— ⑧ the scope road: a cooperative agent lease discovers only its own tabs, every call passes; the road verdict; the keeper hands it (and its own calls in that session) ONE scoped url; CONTROL = the raw url / the mediated judge');
 {
   const sc = M.newScope({ targets: ['T-A'] });
-  ok(M.judgeScope({ id: 1, method: 'Browser.close' }).kind === 'forward' && M.judgeScope({ id: 2, method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }).kind === 'forward' && M.judgeScope({ id: 3, method: 'Runtime.evaluate', params: {}, sessionId: 'S-x' }).kind === 'forward' && M.judgeScope({ method: 'X' }).kind === 'drop' && M.judgeScope({ id: 4 }).kind === 'refuse', '⑧ PURE judgeScope: every CDP call passes as written (a whole-browser act, an attach out of scope, a call on any session — the cooperative trust); no id = dropped, no method = refused');
+  ok(M.judgeScope({ id: 1, method: 'Input.setIgnoreInputEvents', params: { ignore: false } }).kind === 'forward' && M.judgeScope({ id: 2, method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }).kind === 'forward' && M.judgeScope({ id: 3, method: 'Runtime.evaluate', params: {}, sessionId: 'S-x' }).kind === 'forward' && M.judgeScope({ method: 'X' }).kind === 'drop' && M.judgeScope({ id: 4 }).kind === 'refuse'
+    && M.judgeScope({ id: 5, method: 'Browser.close' }).kind === 'refuse', '⑧ PURE judgeScope: every CDP call passes as written (a refused-class page act, an attach out of scope, a call on any session — the cooperative trust) BUT the whole-profile law (Browser.close — lane chrome-157, the .401 read); no id = dropped, no method = refused');
   ok(M.judge({ id: 1, method: 'Browser.close' }, sc).kind === 'refuse' && M.judge({ id: 2, method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc).kind === 'refuse', '⑧ CONTROL: the mediated judge refuses those same two calls (the road the scope road is not)');
   M.admitReply({ id: 2, result: { sessionId: 'S-9' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc, { explicit: true });
   const sc2 = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 2, result: { sessionId: 'S-9' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-Z' } }, sc2);
@@ -1121,8 +1175,9 @@ console.log('— ⑧ the scope road: a cooperative agent lease discovers only it
   ok(at.result && at.result.sessionId && !at.error && lt2.result.targetInfos.some((t) => t.targetId === made.result.targetId), '⑧ an attach BY ID through the scope url passes (no target_out_of_scope) and admits that tab');
   const c2 = await cS.call('Target.createTarget', { url: 'about:mine' }); await sleep(80);
   ok(c2.result && cS.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === c2.result.targetId) && fake.seen.filter((x) => x.method === 'Target.createTarget').pop().params.newWindow !== true, '⑧ a tab the lease creates is announced to it and is its own — sent as written (no window rewrite: the keeper\'s own windows rule that road)');
-  const cl = await cS.call('Browser.close');
-  ok(cl.result && !cl.error, '⑧ no census refusal on the scope road (Browser.close is answered by the browser, not refused by the proxy) — that road was never fenced');
+  const cl = await cS.call('Browser.close'), ig = await cS.call('Input.setIgnoreInputEvents', { ignore: false });
+  ok(M.refusalCodeOf(cl) === 'method_refused' && /WHOLE browser/.test(cl.error.message) && !fake.seen.some((x) => x.method === 'Browser.close') && ig.result && !ig.error,
+    '⑧ the scope road keeps the whole law and nothing else of the census: Browser.close is refused by name and never reaches the browser (lane chrome-157, the .401 read — before, it closed the person\'s browser); a refused-class page act is answered by the browser');
   const held = cS.call('Runtime.evaluate', { expression: '1', __hold: true }); await sleep(60);
   const ia = med.interrupt({ profileId: 'bp-0000000e', browserKey: 'bk-000000e1' });
   fake.release(); const hr = await held;

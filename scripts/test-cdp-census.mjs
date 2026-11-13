@@ -120,7 +120,7 @@ for (const [m, cls] of Object.entries(NEW)) {
 for (const m of ['Browser.addMockCamera', 'Browser.setGlobalPrivacyControl']) {
   const free = M.judge({ id: 20, method: m, params: m === 'Browser.addMockCamera' ? { deviceId: 'x' } : { gpc: true } }, scope(), {});
   const msg = free.reply && free.reply.error && free.reply.error.message;
-  ok(free.kind === 'refuse' && M.refusalCodeOf(free.reply) === 'method_refused' && verdict(M, m, { paused: true }) === 'method_refused:refused' && M.ALWAYS_REFUSED.has(m) && /WHOLE browser/.test(msg) && /every browser context/.test(msg) && /154\.0\.8037\.57/.test(msg) && /refused on every lease/.test(msg), `④ ${m}: method_refused on EVERY lease, the agent driving or the user — the words say it reaches every browser context and name the Chrome it was measured on`, msg);
+  ok(free.kind === 'refuse' && M.refusalCodeOf(free.reply) === 'method_refused' && verdict(M, m, { paused: true }) === 'method_refused:whole-profile' && M.judgeScope({ id: 21, method: m, params: {} }, scope()).kind === 'refuse' && M.ALWAYS_REFUSED.has(m) && /WHOLE browser/.test(msg) && /every browser context/.test(msg) && /154\.0\.8037\.57/.test(msg) && /refused on every lease/.test(msg), `④ ${m}: method_refused on EVERY lease, the agent driving or the user, AND on the scope road (lane chrome-157, the .401 read: marked law 'whole-profile' — the one verdict) — the words say it reaches every browser context and name the Chrome it was measured on`, msg);
 }
 ok(/shared device list/.test(C.rowOf('Browser.addMockCamera').why) && /getUserMedia/.test(C.rowOf('Browser.addMockCamera').why) && /Sec-GPC/.test(C.rowOf('Browser.setGlobalPrivacyControl').why) && /navigator\.globalPrivacyControl/.test(C.rowOf('Browser.setGlobalPrivacyControl').why), '④ each refusal names what was measured (the mock camera in the shared device list reaching getUserMedia; the GPC signal in navigator.globalPrivacyControl + Sec-GPC)');
 for (const m of ['Ads.getAdScripts', 'Browser.getGlobalPrivacyControl']) ok(verdict(M, m, { paused: true }) === 'forward' && verdict(M, m, {}) === 'forward', `④ ${m}: a read — forwarded while the user drives and while the agent does`);
@@ -329,7 +329,7 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   const Ca = require(noRow);
   const a = Ca.compare(fixtures[C154], { chrome: C154 });
   const Ma = MUT.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(noRow)})`), 'no-mock-camera-row');
-  ok(!a.sameSet && a.unclassified.join() === 'Browser.addMockCamera' && verdict(Ma, 'Browser.addMockCamera', {}) === 'method_unclassified:unclassified' && verdict(M, 'Browser.addMockCamera', {}) === 'method_refused:refused', `CONTROL (a) Browser.addMockCamera's row removed: Chrome ${C154} is no longer covered (unclassified: ${a.unclassified.join()}) and a free lease's mock camera is refused only as UNCLASSIFIED (lane chrome-157: before, FORWARDED into the shared device list) — its row is what names it a whole-browser act — the row is what refuses it on every lease`);
+  ok(!a.sameSet && a.unclassified.join() === 'Browser.addMockCamera' && verdict(Ma, 'Browser.addMockCamera', {}) === 'method_unclassified:unclassified' && verdict(M, 'Browser.addMockCamera', {}) === 'method_refused:whole-profile', `CONTROL (a) Browser.addMockCamera's row removed: Chrome ${C154} is no longer covered (unclassified: ${a.unclassified.join()}) and a free lease's mock camera is refused only as UNCLASSIFIED (lane chrome-157: before, FORWARDED into the shared device list) — its row is what names it a whole-browser act — the row is what refuses it on every lease`);
   // (b) a removed row's until mark dropped
   const b = require(MUT.write('src/cdp-census.js', src.replace(untilA, "setSharedStorageTracking: 'harmless',"), 'no-until')).compare(fixtures[C154], { chrome: C154 });
   ok(!b.sameSet && b.stale.join() === 'Storage.setSharedStorageTracking' && b.unclassified.length === 0, `CONTROL (b) Storage.setSharedStorageTracking's until mark dropped: Chrome ${C154} reports it STALE (the table claims a method it no longer ships)`);
@@ -357,6 +357,66 @@ console.log('— CONTROLS: patched census copies — a new row removed, an until
   ok(require(findRead).compare(fixtures[C156], { chrome: C156 }).sameSet && verdict(Mg, 'FindInPage.findFirst', { paused: true }) === 'forward' && verdict(M, 'FindInPage.findFirst', { paused: true }) === 'browser_interrupted:view', `CONTROL (g) FindInPage.findFirst classed read: Chrome ${C156} is still "covered", yet a paused lease's find is FORWARDED — measured, it scrolls the page under the user's hands and blurs their field; the class is what refuses it`);
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 5, label: 'CONTROL ' })) ok(r.pass, r.name, r.detail);
 }
+
+// ═══ ⑫ THE WHOLE-PROFILE LAW IN THE FAST TIER (lane chrome-157 — the .401 read, 主开发 2026-11-13, L3: «the law in the FAST tier: the
+//     pure verdict over the law rows on both roads»; the class snapshot holds the class, never the `law` mark, so an unmarked row whose
+//     class stays refused was invisible here) — the exact lists, every row's refusal with ITS recipe on both roads, the own-context,
+//     own-download and window verdicts, and THE WINDOW's generated table against the PURE windowStep ════════════════════════════════
+console.log('— ⑫ the whole-profile law, fast: the marks, a recipe for every refusal on both roads, the own context / download / window verdicts, the window table');
+{
+  const LAWS = { 'whole-profile': [], 'whole-profile-own-context': [], 'whole-profile-own-download': [], 'whole-profile-window': [] };
+  for (const r of C.rows().filter((x) => x.law)) (LAWS[r.law] = LAWS[r.law] || []).push(r.domain + '.' + r.method);
+  const WANT = {
+    'whole-profile': ['Browser.addMockCamera', 'Browser.close', 'Browser.crash', 'Browser.crashGpuProcess', 'Browser.executeBrowserCommand', 'Browser.setGlobalPrivacyControl', 'Cast.startDesktopMirroring', 'Extensions.loadUnpacked', 'Extensions.uninstall', 'Network.clearBrowserCache', 'Network.clearBrowserCookies', 'PWA.changeAppUserSettings', 'PWA.install', 'PWA.uninstall', 'Page.setDownloadBehavior', 'Security.setIgnoreCertificateErrors', 'Storage.runBounceTrackingMitigations', 'Target.exposeDevToolsProtocol', 'Target.sendMessageToTarget', 'Target.setRemoteLocations', 'Tethering.bind', 'Tethering.unbind'],
+    'whole-profile-own-context': ['Browser.grantPermissions', 'Browser.resetPermissions', 'Browser.setPermission', 'Storage.clearCookies'],
+    'whole-profile-own-download': ['Browser.cancelDownload'],
+    'whole-profile-window': ['Browser.setDownloadBehavior'],
+  };
+  const same = Object.keys(WANT).every((k) => (LAWS[k] || []).slice().sort().join() === WANT[k].join()) && Object.keys(LAWS).every((k) => WANT[k]);
+  ok(same && WANT['whole-profile'].every((m) => C.classOf(m) === 'refused'), '⑫ the census marks the law, exactly: 22 whole-profile (class refused — the profile\'s acts, the whole browser\'s, and the two that carry a call past the verdict), 4 own-context, 1 own-download, 1 window — an unmark is red here', JSON.stringify(LAWS));
+  // every refusal names the WHOLE profile / browser AND says what to do instead — its OWN recipe (12 of 12 was the read's ask; 22 of 22 now)
+  const RECIPE = {
+    'Browser.close': /close only your own tabs \(`vibespace-browser close`\)/, 'Browser.crash': /close your tab and open it again/, 'Browser.crashGpuProcess': /reload it$/,
+    'Browser.executeBrowserCommand': /ask the person$/, 'Browser.addMockCamera': /to test with a fake camera, use your conversation's own browser$/, 'Browser.setGlobalPrivacyControl': /to test the signal, use your conversation's own browser$/,
+    'Cast.startDesktopMirroring': /ask the person$/, 'Extensions.loadUnpacked': /ask the person$/, 'Extensions.uninstall': /ask the person$/,
+    'Network.clearBrowserCache': /reload the page, or use your conversation's own browser$/, 'Network.clearBrowserCookies': /`vibespace-browser site-reset --host <host>`.*or use your conversation's own browser for a throwaway session$/,
+    'PWA.install': /ask the person to install it$/, 'PWA.uninstall': /ask the person$/, 'PWA.changeAppUserSettings': /ask the person$/,
+    'Page.setDownloadBehavior': /downloads work through Browser\.setDownloadBehavior, which the mediator forwards and puts back when your download ends$/,
+    'Security.setIgnoreCertificateErrors': /open it in your conversation's own browser$/, 'Storage.runBounceTrackingMitigations': /clear one site's data with `vibespace-browser site-reset --host <host>`$/,
+    'Target.exposeDevToolsProtocol': /drive the page through your own url$/, 'Target.sendMessageToTarget': /attach with `flatten: true` and send the call on that session$/,
+    'Target.setRemoteLocations': /drive your own tabs$/, 'Tethering.bind': /ask the person$/, 'Tethering.unbind': /ask the person$/,
+  };
+  const sc = scope();
+  const roads = (m, params = {}, sid = undefined) => [M.judge({ id: 1, method: m, params, sessionId: sid }, sc, {}), M.judge({ id: 2, method: m, params, sessionId: sid }, sc, { paused: true }), M.judgeScope({ id: 3, method: m, params, sessionId: sid }, sc)];
+  const wordsOf = (v) => (v && v.reply && v.reply.error ? String(v.reply.error.message) : '');
+  const noRecipe = WANT['whole-profile'].filter((m) => !RECIPE[m] || !roads(m).every((v) => v.kind === 'refuse' && M.refusalCodeOf(v.reply) === 'method_refused' && v.why === 'whole-profile' && /WHOLE/.test(wordsOf(v)) && RECIPE[m].test(wordsOf(v))));
+  ok(Object.keys(RECIPE).length === 22 && noRecipe.length === 0, '⑫ every one of the 22 is refused method_refused on BOTH roads (the agent driving, the person driving, the scope road), its words naming the WHOLE profile or browser AND its own recipe — what to do instead', noRecipe.join(', '));
+  // own context: answered for a context THIS lease made, refused for none / another — the refusal ends «for the person's own profile, ask the person»
+  M.admitReply({ id: 9, result: { browserContextId: 'CTX-MINE' } }, { method: 'Target.createBrowserContext', params: {} }, sc);
+  const ownBad = WANT['whole-profile-own-context'].filter((m) => !(M.judge({ id: 4, method: m, params: { browserContextId: 'CTX-MINE', permissions: [] } }, sc, {}).kind === 'forward' && M.judgeScope({ id: 5, method: m, params: { browserContextId: 'CTX-MINE' } }, sc).kind === 'forward'
+    && [{}, { browserContextId: 'CTX-OTHER' }, { browserContextId: '' }].every((pr) => roads(m, pr).every((v) => v.kind === 'refuse' && /for the person's own profile, ask the person$/.test(wordsOf(v))))));
+  ok(ownBad.length === 0, '⑫ the 4 own-context rows: answered for a browser context the lease made, on both roads; refused with none, an empty one or another\'s — the words end «for the person\'s own profile, ask the person»', ownBad.join(', '));
+  // own download: Browser.cancelDownload only for a download a tab of this lease began (scope.downloads — the mediator admits it)
+  sc.downloads.add('g-mine');
+  const cOwn = M.judge({ id: 6, method: 'Browser.cancelDownload', params: { guid: 'g-mine' } }, sc, {}), cScope = M.judgeScope({ id: 7, method: 'Browser.cancelDownload', params: { guid: 'g-mine' } }, sc);
+  ok(cOwn.kind === 'forward' && cScope.kind === 'forward' && [{ guid: 'g-person' }, {}].every((pr) => roads('Browser.cancelDownload', pr).every((v) => v.kind === 'refuse' && /the person's downloads and another conversation's are theirs: cancel only a download your own tab began$/.test(wordsOf(v)))),
+    '⑫ Browser.cancelDownload: answered for a download this lease\'s own tab began, on both roads; the person\'s (or none named) refused — measured on 154 + 157: the agent\'s cancel by guid DID cancel the person\'s download');
+  // THE WINDOW's verdict, whatever the wire shape (no session, a browser-target session, the lease's own page session)
+  M.admitReply({ id: 10, result: { sessionId: 'S-BR' } }, { method: 'Target.attachToBrowserTarget', params: {} }, sc);
+  const shapes = [undefined, 'S-BR', 'S-A'];
+  const w = (params, sid) => [M.judge({ id: 11, method: 'Browser.setDownloadBehavior', params, sessionId: sid }, sc, {}), M.judgeScope({ id: 12, method: 'Browser.setDownloadBehavior', params, sessionId: sid }, sc)];
+  ok(shapes.every((sid) => w({ behavior: 'allowAndName', downloadPath: '/x', eventsEnabled: true }, sid).every((v) => v.kind === 'forward') && w({ behavior: 'default' }, sid).every((v) => v.kind === 'forward')
+    && w({ behavior: 'deny' }, sid).every((v) => v.kind === 'refuse' && /'deny' would refuse every download of the person's WHOLE profile/.test(wordsOf(v)))
+    && w({ behavior: 'allow', downloadPath: '/x', browserContextId: 'CTX-OTHER' }, sid).every((v) => v.kind === 'refuse' && /a browser context this lease did not create/.test(wordsOf(v)))
+    && w({ behavior: 'allow', downloadPath: '/x', browserContextId: 'CTX-MINE' }, sid).every((v) => v.kind === 'forward')),
+    '⑫ Browser.setDownloadBehavior — the same verdict on every wire shape (no session, a browser-target session, the lease\'s page session) and both roads: a folder or «default» forwarded (THE WINDOW decides), «deny» refused, another\'s context refused, its own context forwarded');
+  // THE WINDOW: the generated table (scripts/download-window-cells.mjs — every state × act from the laws) against the PURE windowStep
+  const T = await import('./download-window-cells.mjs');
+  const cells = T.pureCells(M.windowStep), red = cells.filter((x) => !x.pass), all = T.table();
+  ok(cells.length === 122 && all.filter((x) => x.cull).length === 11 && all.every((x) => x.cell || x.cull) && red.length === 0,
+    `⑫ THE WINDOW's table: ${cells.length} cells and ${all.filter((x) => x.cull).length} culls (${STATES_ACTS(T)}), every cell decided by a law, the PURE windowStep agreeing with every one`, red.slice(0, 3).map((x) => `${x.state}×${x.act}: want ${JSON.stringify(x.want)} got ${JSON.stringify(x.got)}`).join(' | '));
+}
+function STATES_ACTS(T) { return `${T.STATES.length} states × ${T.ACTS.length} acts`; }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

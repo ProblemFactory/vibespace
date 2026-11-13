@@ -30,6 +30,8 @@ export const EVERYONE_KEY = 'everyone:*';
  *  tab; 'no-proxy' | 'remote' | anything else ⇒ the raw endpoint, every conversation sees and drives every tab). Never a second
  *  «is there a proxy» test here. */
 export function allAgentsSentence(road, t = (s) => s) {
+  // lane chrome-157 (the .401 read, L2b): a mediated profile on a hub with no proxy — every agent lease there is refused by name
+  if (road === 'unavailable') return t("Agents cannot use this browser on this computer right now — it is shared with separate tabs, and VibeSpace's browser proxy is not running here.");
   return road === 'mediated' || road === 'shared'
     ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
     : t('Any of your conversations can use this browser and its logins — they all share it: each can see and drive every tab in it.');

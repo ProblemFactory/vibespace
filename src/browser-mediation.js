@@ -130,7 +130,10 @@ function newScope({ targets = [], contexts = [] } = {}) {
   // reply admits it and REPLAYS that announcement (measured on agent-browser
   // 0.32.0 + Chrome 153: without the replay the daemon's target registry
   // never learns its own tab and `open` hangs forever)
-  return { targets: new Set((targets || []).filter(Boolean).map(String)), sessions: new Map(), contexts: new Set((contexts || []).filter(Boolean).map(String)), recent: new Map() };
+  // lane chrome-157 (the .401 read, W2): `frames` = the frame ids seen under this lease's own sessions (Page.frameAttached /
+  // frameNavigated — a download's frameId names where it began); `downloads` = the guids this lease's own tabs began while its
+  // download folder was lent (admitted by the mediator) — the only downloads it is told of and may cancel
+  return { targets: new Set((targets || []).filter(Boolean).map(String)), sessions: new Map(), contexts: new Set((contexts || []).filter(Boolean).map(String)), recent: new Map(), frames: new Set(), downloads: new Set() };
 }
 function remember(scope, info) {
   if (!scope || !scope.recent || !info || !info.targetId) return;
@@ -206,22 +209,125 @@ function isPausedMethod(method) { return pausedVerdict(method).refuse; }
 /**
  * THE WHOLE-PROFILE LAW (the owner's, 2026-11-13; lane chrome-157, measured with the real driver on Chrome 154 + 157): on a profile a
  * person shares with agents, an agent's lease never performs an act on the WHOLE profile. ONE verdict, the census's own list (rows
- * marked `law`), called by judge (the mediated road) AND judgeScope (the scope road) — never a second list:
- *   · law 'whole-profile' (class refused): method_refused, the row's words saying what to do instead;
+ * marked `law`), called by judge (the mediated road) AND judgeScope (the scope road) — never a second list, whatever the wire shape
+ * (no session, a browser-target session, the lease's own page session — the verdict reads the method, never the session):
+ *   · law 'whole-profile' (class refused): method_refused, the row's words saying what to do instead — the profile's acts AND the
+ *     whole browser's (close / crash, a mock camera, the privacy signal, extensions, tethering) AND the two that carry a call past
+ *     this verdict (Target.sendMessageToTarget, exposeDevToolsProtocol) — the .401 read: so the scope road keeps the whole law;
  *   · law 'whole-profile-own-context': answered only when the call names a browser context THIS lease created (scope.contexts);
- *   · law 'whole-profile-window' (Browser.setDownloadBehavior): forwarded — src/server/cdp-mediator.js puts the profile back.
+ *   · law 'whole-profile-own-download' (Browser.cancelDownload): only a download this lease's own tab began (scope.downloads);
+ *   · law 'whole-profile-window' (Browser.setDownloadBehavior): a context of the lease's own ⇒ forwarded as it is; another's ⇒
+ *     refused; 'deny' ⇒ refused (it blocks every download of the person's); otherwise THE WINDOW decides (windowStep, below).
  */
 const LAW_OF = new Map(CENSUS.rows().filter((r) => r.law).map((r) => [r.domain + '.' + r.method, r]));
+const LAW_HEAD = "on a profile a person shares with agents it would act on the WHOLE profile (lane chrome-157, the owner's law)";
 function wholeProfileVerdict(msg, scope, { road = MEDIATED_MODE } = {}) {
   const method = msg && typeof msg.method === 'string' ? msg.method : '';
   const row = LAW_OF.get(method);
-  if (!row || row.law === 'whole-profile-window') return null;
+  if (!row) return null;
   const sid = msg.sessionId == null ? null : String(msg.sessionId);
-  if (row.law === 'whole-profile') return { kind: 'refuse', why: 'whole-profile', reply: refusal(msg.id, 'method_refused', `${method} ${row.why || 'acts on the whole profile a person shares with agents'}`, sid) };
+  const refuse = (words) => ({ kind: 'refuse', why: 'whole-profile', reply: refusal(msg.id, 'method_refused', `${method} ${words}`, sid) });
+  if (row.law === 'whole-profile') return refuse(row.why || 'acts on the whole profile a person shares with agents');
   const params = msg.params && typeof msg.params === 'object' ? msg.params : {};
   const c = params.browserContextId == null ? '' : String(params.browserContextId);
-  if (c && scope && scope.contexts && scope.contexts.has(c)) return null;
-  return { kind: 'refuse', why: 'whole-profile', reply: refusal(msg.id, 'method_refused', `${method} ${c ? 'names a browser context this lease did not create' : 'names no browser context'} — on a profile a person shares with agents it would change the WHOLE profile (lane chrome-157, the owner's law); it is answered for a browser context this lease made itself (Target.createBrowserContext) — for the person's own profile, ask the person`, sid) };
+  const own = !!(c && scope && scope.contexts && scope.contexts.has(c));
+  if (row.law === 'whole-profile-window') {
+    if (c) return own ? null : refuse(`names a browser context this lease did not create — ${LAW_HEAD}; set the download folder with no context (VibeSpace lends you the profile's folder while your download is in flight) or for a browser context of your own`);
+    if (params.behavior === 'deny') return refuse(`with behavior 'deny' would refuse every download of the person's WHOLE profile — ${LAW_HEAD}; to keep a page from downloading, do not click its download`);
+    return null;
+  }
+  if (row.law === 'whole-profile-own-download') {
+    const guid = params.guid == null ? '' : String(params.guid);
+    if (guid && scope && scope.downloads && scope.downloads.has(guid)) return null;
+    return refuse(`${guid ? 'names a download no tab of this lease began' : 'names no download'} — ${LAW_HEAD}; the person's downloads and another conversation's are theirs: cancel only a download your own tab began`);
+  }
+  if (own) return null;
+  return refuse(`${c ? 'names a browser context this lease did not create' : 'names no browser context'} — on a profile a person shares with agents it would change the WHOLE profile (lane chrome-157, the owner's law); it is answered for a browser context this lease made itself (Target.createBrowserContext) — for the person's own profile, ask the person`);
+}
+
+/**
+ * THE WINDOW (the .401 read, 主开发 2026-11-13 — W1–W6; measured on Chrome 154 + 157: Browser.setDownloadBehavior, sent with no
+ * session OR on a page session — the real driver's `download` sends {behavior:'allowAndName', downloadPath, eventsEnabled:true} on
+ * its page session — moves the WHOLE profile's download folder; a {behavior:'default'} from any connection puts it back). The
+ * profile's folder is an agent's only while THAT agent's download is in flight. ONE small state per PROFILE and this PURE
+ * transition function; src/server/cdp-mediator.js only executes its effects. Pinned by a GENERATED table (test-browser-mediation
+ * ⑥d: every state × act, the expected cell from the laws, the culls named).
+ *   state: null — no window · {phase:'open', owner, n, began:[guid…], deadline} — lent to `owner` (began empty = armed: its bound runs)
+ *          · {phase:'closing', owner, n, ordered, then} — the put-back is on its way (`ordered`: on the owner's own connection, so
+ *          the owner's next set follows it) · {phase:'lapsed', owner, n} — the bound passed: a download its tab begins now is cancelled
+ *   act:   {kind:'set', by, behavior, now, paused, boundMs} · {kind:'begin', own, guid} (own = a frame of the window's lease) · {kind:'end', guid}
+ *          · {kind:'bound', now} · {kind:'takeover'} · {kind:'leaseEnd', key} · {kind:'connGone', key} (the lease's LAST connection)
+ *          · {kind:'putBackDone', n} · {kind:'repoint'} · {kind:'hubStop'} · {kind:'adopt'} (a hub start; a new hub holds no window)
+ *   →      {state, forward, refuse:{code, words}|null, putBack: why|null, admit: guid|null, cancel: guid|null, forget, told}
+ *          (`forget` = the lease learns nothing more of its downloads; `told` = the lease is told its folder was put back)
+ */
+const WINDOW_BOUND_MS = 15000;
+const FRAMES_MAX = 4096;
+/** Is `frameId` one of this lease's own (a tab it holds, or a frame seen under one of its sessions)? */
+function isLeaseFrame(scope, frameId) { const f = frameId == null ? '' : String(frameId); return !!(f && scope && ((scope.targets && scope.targets.has(f)) || (scope.frames && scope.frames.has(f)))); }
+const WINDOW_BUSY_TEXT = "another conversation's download is in progress in this profile — try again in a moment (lane chrome-157: one download window per profile)";
+const WINDOW_CLOSING_TEXT = "this profile's download folder is being put back — try again in a moment";
+function windowStep(state, act) {
+  const st = state || null;
+  const out = { state: st, forward: false, refuse: null, putBack: null, admit: null, cancel: null, forget: false, told: false };
+  const a = act || {};
+  const close = (why, { ordered = false, then = null, told = false } = {}) => ({ ...out, state: { phase: 'closing', owner: st.owner, n: st.n, ordered: !!ordered, then }, putBack: why, forget: true, told });
+  switch (a.kind) {
+    case 'set': {
+      if (a.behavior === 'default') {
+        if (!st || st.phase === 'lapsed') return { ...out, state: null, forward: true };
+        if (st.owner === a.by) return { ...out, state: null, forward: true, forget: true };
+        return { ...out, refuse: { code: 'method_refused', words: WINDOW_BUSY_TEXT } };
+      }
+      if (a.paused) return { ...out, refuse: { code: 'browser_interrupted', words: 'interrupted' } };
+      const n = (st && st.n || 0) + 1;
+      const bound = Number(a.boundMs) > 0 ? Number(a.boundMs) : WINDOW_BOUND_MS;
+      const open = () => ({ ...out, state: { phase: 'open', owner: a.by, n, began: [], bound, deadline: (Number(a.now) || 0) + bound }, forward: true });
+      if (!st || st.phase === 'lapsed') return open();
+      if (st.owner !== a.by) return { ...out, refuse: { code: 'method_refused', words: WINDOW_BUSY_TEXT } };
+      if (st.phase === 'closing') return st.ordered ? open() : { ...out, refuse: { code: 'method_refused', words: WINDOW_CLOSING_TEXT } };
+      if (!st.began.length) return { ...out, state: { ...st, deadline: (Number(a.now) || 0) + (Number(st.bound) || WINDOW_BOUND_MS) }, forward: true };
+      return { ...out, forward: true };
+    }
+    case 'begin': {
+      if (!st || !a.own || !a.guid) return out;
+      if (st.phase === 'open') return st.began.includes(a.guid) ? out : { ...out, state: { ...st, began: [...st.began, a.guid] }, admit: a.guid };
+      if (st.phase === 'lapsed') return { ...out, cancel: a.guid };
+      return out;
+    }
+    case 'end': {
+      if (!st || st.phase !== 'open' || !st.began.includes(a.guid)) return out;
+      const left = st.began.filter((g) => g !== a.guid);
+      if (left.length) return { ...out, state: { ...st, began: left } };
+      return close('its download ended', { ordered: !!a.ordered });
+    }
+    case 'bound':
+      if (st && st.phase === 'open' && !st.began.length && Number(a.now) >= Number(st.deadline)) return close(`no download began within ${Math.round((Number(st.bound) || WINDOW_BOUND_MS) / 100) / 10} s of the set`, { ordered: !!a.ordered, then: 'lapsed', told: true });
+      return out;
+    case 'takeover':
+      if (st && st.phase === 'open') return close('the person took over', { ordered: !!a.ordered, told: true });
+      if (st && st.phase === 'lapsed') return { ...out, state: null };
+      return out;
+    case 'leaseEnd':
+      if (st && st.owner === a.key && st.phase === 'open') return close('the lease ended');
+      if (st && st.owner === a.key && st.phase === 'lapsed') return { ...out, state: null };
+      return out;
+    case 'connGone':
+      if (st && st.owner === a.key && st.phase === 'open') return close('its connection ended');
+      return out;
+    case 'putBackDone':
+      if (st && st.phase === 'closing' && st.n === a.n) return { ...out, state: st.then === 'lapsed' ? { phase: 'lapsed', owner: st.owner, n: st.n } : null };
+      return out;
+    case 'repoint':
+      return { ...out, state: null, forget: !!st };
+    case 'hubStop':
+      if (st && st.phase === 'open') return { ...out, state: null, putBack: 'the hub stopped', forget: true };
+      return { ...out, state: null };
+    case 'adopt':
+      return st ? out : { ...out, putBack: 'a hub start adopted the profile' };
+    default:
+      return out;
+  }
 }
 const UNCLASSIFIED_CODE = 'method_unclassified';
 /**
@@ -556,11 +662,26 @@ function filterEvent(ev, scope) {
     }
     case 'Target.receivedMessageFromTarget':
       return p.sessionId && scope.sessions.has(String(p.sessionId)) ? ev : null;
+    case 'Browser.downloadWillBegin':
+    case 'Browser.downloadProgress':
+      // lane chrome-157 (the .401 read, W2 — MEASURED on 154 + 157: with the browser form of Browser.setDownloadBehavior +
+      // eventsEnabled, the PERSON's download in another tab reached the agent's connection, its url and its file name): a
+      // download event reaches a lease ONLY for a download its own tab began while its folder was lent (scope.downloads —
+      // admitted by the mediator, src/server/cdp-mediator.js), whatever session it came on; everything else is dropped
+      return p.guid != null && scope.downloads && scope.downloads.has(String(p.guid)) ? ev : null;
+    case 'Page.frameAttached':
+    case 'Page.frameNavigated': {
+      // the frames under this lease's own sessions are its own (a download names the frame it began in); no sessionId = a page
+      // connection of the lease's own tab (/devtools/page/<its targetId>) — passed as before
+      if (evSid && !scope.sessions.has(evSid)) return null;
+      const fid = ev.method === 'Page.frameAttached' ? p.frameId : (p.frame && p.frame.id);
+      if (fid != null && scope.frames && scope.frames.size < FRAMES_MAX) scope.frames.add(String(fid));
+      return ev;
+    }
     default:
       // a session-scoped event (Page.*, Runtime.*, Network.* … on a sessionId)
       // reaches the lease only on a session the proxy handed it; a browser-
-      // level event with no sessionId (Browser.downloadProgress …) is not a
-      // target's and passes
+      // level event with no sessionId is not a target's and passes
       return evSid ? (scope.sessions.has(evSid) ? ev : null) : ev;
   }
 }
@@ -611,7 +732,7 @@ module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
-  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, // lane browser-shared-profile-freeze: the scope road (a cooperative lease shown only its own targets)

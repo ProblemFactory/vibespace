@@ -189,10 +189,11 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
 // the version rules on a real browser (e.g. an extracted older .deb); the default is the installed one
 const chromeArg = (() => { const i = process.argv.indexOf('--chrome'); return i > 0 ? process.argv[i + 1] : null; })();
 const CHROME = chromeArg || [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME — a Chrome for Testing build the runner has — as the pairing-ui harness reads it)
+const CHROME_HOME = path.join(ROOT, 'chrome-home'); fs.mkdirSync(path.join(CHROME_HOME, 'Downloads'), { recursive: true });
 async function launchChrome() {
   const port = await freePort();
   const dir = path.join(ROOT, 'chrome'); fs.mkdirSync(dir, { recursive: true });
-  const c = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, '--window-size=1024,768', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+  const c = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, '--window-size=1024,768', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true, env: { ...process.env, HOME: CHROME_HOME } });   // (lane chrome-157: a scratch HOME — the person's download place is ITS Downloads, never the runner's)
   procs.add(c);
   let err = ''; c.stderr.on('data', (d) => { if (err.length < 4000) err += d; });
   let ver = null;
@@ -497,6 +498,37 @@ else if (AB) {
         let landed = false; for (let i = 0; i < 40 && !landed; i++) { landed = fs.existsSync(path.join(dlDir, 'wp-' + road + '.txt')); if (!landed) await new Promise((r) => setTimeout(r, 150)); }
         let back = false; for (let i = 0; i < 40 && !back; i++) { back = !med.downloadWindowOf('bp-000000w' + k); if (!back) await new Promise((r) => setTimeout(r, 150)); }
         ok(dl.ok && landed && back, `the real driver (${road} road): \`download\` WORKS (the file landed) and the profile's download folder is put back when it ends (the window closed)`, JSON.stringify({ dl: dl.ok ? 'ok' : String(dl.err || dl.out).slice(0, 200), landed, back }));
+        // THE PERSON'S DOWNLOAD (the .401 read — the lane's own probe, now a leg): a stand-in person's tab (the raw endpoint) downloads
+        //   (1) once the lease's window has CLOSED (the real driver's download ended): the file lands in the PERSON's own place;
+        //   (2) while a window of the lease's stands (a CDP client through the lease's own url, the set on its page session as the
+        //       real driver sends it — and again with no session): the person's download is NEVER told to the lease
+        const personTab = async (tag) => {
+          const t = (await raw.call('Target.createTarget', { url: 'data:text/html,<title>person</title><a id=p href="data:text/plain,person" download="person-' + tag + '.txt">p</a>' })).result.targetId;
+          const ps = (await raw.call('Target.attachToTarget', { targetId: t, flatten: true })).result.sessionId; await sleep(300);
+          await raw.call('Runtime.evaluate', { expression: 'document.getElementById("p").click(), 1' }, ps);
+          return t;
+        };
+        const landsIn = async (f) => { for (let i = 0; i < 40; i++) { if (fs.existsSync(f)) return true; await sleep(150); } return false; };
+        const p1 = await personTab(road + '-after');
+        ok(await landsIn(path.join(CHROME_HOME, 'Downloads', 'person-' + road + '-after.txt')) && !fs.existsSync(path.join(dlDir, 'person-' + road + '-after.txt')),
+          `the real driver (${road} road): once its download ended, a download the PERSON starts lands in the person's own place — the folder was put back`);
+        try { await raw.call('Target.closeTarget', { targetId: p1 }); } catch { /* gone */ }
+        for (const form of ['session', 'browser']) {
+          const gx = await med.grantFor({ profileId: 'bp-000000w' + k, browserKey: 'bk-000000x' + k + form[0], upstream: ver.webSocketDebuggerUrl, mode, paused: () => false });
+          const cx = cdpClient(gx.url); await cx.open;
+          const tx = (await cx.call('Target.createTarget', { url: 'about:blank' })).result.targetId;
+          const sx = (await cx.call('Target.attachToTarget', { targetId: tx, flatten: true })).result.sessionId;
+          const set = await cx.call('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: dlDir, eventsEnabled: true }, form === 'session' ? sx : undefined);
+          const p2 = await personTab(road + '-' + form);
+          await sleep(1200);
+          const told = cx.events.filter((e) => /^Browser\.download|^Page\.download/.test(e.method || '')).map((e) => e.method);
+          ok(!set.error && told.length === 0 && !!med.downloadWindowOf('bp-000000w' + k),
+            `the real chrome (${road} road, the set ${form === 'session' ? 'on the lease\'s page session — the real driver\'s shape' : 'with no session'}): while the lease's window stands, the PERSON's download is never told to the lease`, JSON.stringify({ set: set.error || 'ok', told }));
+          await cx.call('Browser.setDownloadBehavior', { behavior: 'default' }, form === 'session' ? sx : undefined);
+          try { await raw.call('Target.closeTarget', { targetId: p2 }); } catch { /* gone */ }
+          try { cx.ws.close(); } catch { /* gone */ }
+          med.revoke({ profileId: 'bp-000000w' + k, browserKey: 'bk-000000x' + k + form[0] });
+        }
         med.revoke({ profileId: 'bp-000000w' + k, browserKey: 'bk-000000w' + k });
       }
     }
