@@ -490,10 +490,14 @@ const XPRA_KEY_URL = 'https://xpra.org/xpra.asc';
  *  is not it is refused before any apt source names it; a machine without gpg checks the file's SHA-256, pinned beside it. */
 const XPRA_KEY_FINGERPRINT = 'B4993B57323148E37977E5D873254CAD17978FAF';
 const XPRA_KEY_SHA256 = '4df3209ea4b759f0b5838b60baedb6893ec62df7abad9046462176a6e6a7ed7d';
-/** The key check, ONE root shell line in a subshell (PURE text): gpg names the downloaded key's fingerprint from a throwaway home
- *  (root's keyring is never touched), else sha256sum checks the file; a mismatch removes the download, says so and stops (exit 3)
- *  with nothing changed — the apt source is written only after it. */
-const XPRA_KEY_CHECK = `(K=/usr/share/keyrings/xpra.asc.new; G=$(mktemp -d) && { if command -v gpg >/dev/null 2>&1; then gpg --homedir "$G" --batch --show-keys --with-colons "$K" 2>/dev/null | grep -qx 'fpr:::::::::${XPRA_KEY_FINGERPRINT}:'; else echo '${XPRA_KEY_SHA256}  '"$K" | sha256sum -c --status; fi; r=$?; rm -rf "$G"; [ $r -eq 0 ]; } || { rm -f "$K"; echo "the key at ${XPRA_KEY_URL} is not xpra.org's pinned key (fingerprint ${XPRA_KEY_FINGERPRINT}) - nothing was changed" >&2; exit 3; })`;
+/** The key check, ONE root shell line in a subshell (PURE text — machine-needs pick 3d, the reader's MUST): the downloaded FILE's
+ *  SHA-256 must be the pinned one — always, gpg or not. So what enters the keyring (and Signed-By) is EXACTLY the measured file
+ *  with its one key: a file with the pinned key plus another key, a truncated file and a key the publisher changed are all
+ *  refused, the download removed and the reason said; exit 3 with nothing changed — the apt source is written only after it.
+ *  (The fingerprint alone was not enough: `gpg --show-keys | grep fpr` passes a file that also carries any other key.) */
+const XPRA_KEY_CHECK = `(K=/usr/share/keyrings/xpra.asc.new; echo '${XPRA_KEY_SHA256}  '"$K" | sha256sum -c --status || { rm -f "$K"; echo "the key file at ${XPRA_KEY_URL} is not the pinned one (SHA-256 ${XPRA_KEY_SHA256}, xpra.org's key ${XPRA_KEY_FINGERPRINT} alone) - a key the publisher changed is refused too - nothing was changed" >&2; exit 3; })`;
+/** The key fetch: curl, else wget; a fetch that fails leaves nothing in the keyring folder (wget creates its -O file first). */
+const XPRA_KEY_FETCH = `{ (command -v curl >/dev/null && curl -fsSL ${XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new) || wget -qO /usr/share/keyrings/xpra.asc.new ${XPRA_KEY_URL}; } || { rm -f /usr/share/keyrings/xpra.asc.new; echo "the key at ${XPRA_KEY_URL} could not be fetched - nothing was changed" >&2; exit 3; }`;
 /** What the rung installs beside xpra: the default registry's first row, the fit/enumeration tools, the X cookie
  *  tool and the X server the xpra recipe starts (measured on the paired test box, 2026-09-25: noble's xpra 6.5.3
  *  from xpra.org + these five made the ladder resolve the xpra rung). */
@@ -521,7 +525,7 @@ const majorOf = (v) => { const m = /^(?:\d+:)?(\d+)\./.exec(String(v || '')); re
 function xpraRepoSteps(cn) {
   return [
     'install -d -m 0755 /usr/share/keyrings',
-    `(command -v curl >/dev/null && curl -fsSL ${XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new) || wget -qO /usr/share/keyrings/xpra.asc.new ${XPRA_KEY_URL}`,
+    XPRA_KEY_FETCH, // pick 3d: a failed fetch leaves no .new behind
     XPRA_KEY_CHECK, // lane machine-needs-at-pairing pick 3: the pinned key or nothing
     'mv -f /usr/share/keyrings/xpra.asc.new /usr/share/keyrings/xpra.asc',
     `printf '%s\\n' 'Types: deb' 'URIs: ${XPRA_REPO_URL}' 'Suites: ${cn}' 'Components: main' 'Signed-By: /usr/share/keyrings/xpra.asc' > /etc/apt/sources.list.d/xpra.sources`,
@@ -838,7 +842,7 @@ module.exports = {
   CHROMIUM_FRAME_MARKER, chromiumFramePrefs, // lane D (a) item C
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, profileRetireVerdict, PERSON_ENDINGS, adoptVerdict, streamTargetOf, newRecord,
-  HOST_OFFLINE_STATE, XPRA_APT_MIN_MAJOR, XPRA_PIN_MAJOR, XPRA_REPO_URL, XPRA_KEY_URL, XPRA_KEY_FINGERPRINT, XPRA_KEY_SHA256, XPRA_KEY_CHECK, XPRA_APT_PACKAGES, XPRA_ORG_EXTRA, xpraRepoSteps, xpraInstallPlan, installArgv, machinePickRow, // lane C2
+  HOST_OFFLINE_STATE, XPRA_APT_MIN_MAJOR, XPRA_PIN_MAJOR, XPRA_REPO_URL, XPRA_KEY_URL, XPRA_KEY_FINGERPRINT, XPRA_KEY_SHA256, XPRA_KEY_CHECK, XPRA_KEY_FETCH, XPRA_APT_PACKAGES, XPRA_ORG_EXTRA, xpraRepoSteps, xpraInstallPlan, installArgv, machinePickRow, // lane C2
   XPRA_INSTALL, TIGHTVNC_INSTALL, // lane dc-apps-rows: the two installables src/installs.js registers (TIGHTVNC_INSTALL lives in src/machine-desktop-model.js beside its plan)
   // the package slot's names, re-exported from src/install-slot.js (their home since lane dc-apps-rows) for the suites
   planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan,

@@ -615,11 +615,13 @@ if [ -n "${SETUP:-}" ]; then
   esac
   case ",$SETUP," in *,xpra,*)
     if [ "$(uname -s)" = Linux ]; then
-      PRC=0; PLAN=$(env VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --setup-plan xpra 2>&1) || PRC=$? # set -e: the code is read, never fatal
-      if [ "$PRC" -eq 5 ]; then LINE="✓ xpra: already installed — nothing changed"
-      elif [ "$PRC" -ne 0 ]; then LINE="✗ xpra: $(printf '%s' "$PLAN" | head -1 | sed 's/^✗ //') — the Apps dialog says what to do"
+      # the text sudo runs is the plan's STDOUT only — the agent's stderr (a Node warning, a notice) is kept apart, for the ✗ line
+      PERR=$(mktemp); PRC=0; PLAN=$(env VIBESPACE_DEVICE_ROOT="$ROOT" VIBESPACE_AGENTD_ROOT="$ROOT" "$NODE_BIN" "$ROOT/current/vibespace-device.js" --setup-plan xpra 2>"$PERR") || PRC=$? # set -e: the code is read, never fatal
+      PWHY=$(head -1 "$PERR" 2>/dev/null | sed 's/^✗ //'); rm -f "$PERR"
+      if [ "$PRC" -eq 5 ]; then LINE="✓ xpra: already installed with everything it needs — nothing changed"
+      elif [ "$PRC" -ne 0 ]; then LINE="✗ xpra: ${PWHY:-its plan could not be read} — the Apps dialog says what to do"
       else
-        echo "→ xpra 6.x for desktop apps (xpra.org's key checked against its pinned fingerprint): sudo asks for your password once"
+        echo "→ xpra 6.x for desktop apps (xpra.org's key file checked against its pinned SHA-256): sudo asks for your password once"
         if sudo sh -c "$PLAN" < /dev/tty; then LINE="✓ xpra: installed"
         else LINE="✗ xpra: not installed (sudo was declined, or the install failed — the log above says why); the Apps dialog has «Install xpra on …»"; fi
       fi
