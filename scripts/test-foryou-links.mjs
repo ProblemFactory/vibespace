@@ -82,8 +82,8 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs) {')) + 2);
   const r7seg = FY1.includes(ONE) && R7CUT.length > 40 ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(R7CUT, "function uncutLinks(src, segs) {\n  const runs = cutRuns(src).filter(([b, e]) => e > b);\n  if (!runs.length) return segs;\n  let at = 0;\n  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && runs.some(([b, e]) => b < at && e > a) ? { t: 'text', s: g.s } : g; });\n}")))).segmentText : null;
   ok(r7seg, 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
-  const PROBE = "t.slice(0, e) + '0' + t.slice(e + 1)";
-  const r8seg = FY1.includes(PROBE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(PROBE, "t.slice(0, e) + 'x' + t.slice(e + 1)")))).segmentText : null;
+  const PROBE = "return '0' + open.reverse().join('');"; // r9's digit — since the .399 follow-up, the continuation's head (the closers follow it)
+  const r8seg = FY1.includes(PROBE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(PROBE, "return 'x' + open.reverse().join('');")))).segmentText : null;
   ok(r8seg, 'CONTROL needle present: the segmenter\'s digit probe (r9) — a tree without it has nothing to patch');
   if (r8seg) { const s8 = sweep(r8seg, TOKS.slice(6)); ok(s8.through.length === 2 && s8.through.every((x) => /main\.py:(120:)?… ⇒ /.test(x)), 'CONTROL r8\'s probe (a letter) ⇒ the two cuts right after a \':\' of main.py:120:4 still a link to the file, its line or its column dropped — RED', s8.through); }
   // r10 (n5): a RELATIVE path's `:line` — the relative grammar never takes it (path-linkify: an uncut «plan.md:42» is no link),
@@ -96,6 +96,20 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const r9seg = FY1.includes(CUTMADE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CUTMADE, '')))).segmentText : null;
   ok(r9seg, 'CONTROL needle present: a link only the cut made (r10) — a tree without it has nothing to patch');
   if (r9seg) { const s9 = sweep(r9seg, RELT); ok(s9.through.length === 2 && s9.through.every((x) => /(plan\.md|main\.py):… ⇒ (docs\/guide\/plan\.md|src\/app\/main\.py)$/.test(x)), 'CONTROL r9\'s rule (the probe\'s links only) ⇒ «docs/guide/plan.md:…» and «src/app/main.py:…» still link the file, the line dropped — RED', s9.through); }
+  // .399 follow-up (the acceptance of 93c6e9132): THE MERGED GRAMMAR'S OWN TOKENS — a URL through each full-width pair
+  // (FW_PAIRS: a balanced pair rides inside a URL) and a path through a [vault:…] mark (a whole mark rides inside a path):
+  // the store's cut at every position from the pair's / the mark's opening on ⇒ every link the cut text draws is one the
+  // WHOLE text reads at the same offset with the same kind and ref; the uncut link before it a link at every position
+  const GTOKS = [...(F.FW_PAIRS || []).map((pr) => [`https://ja.wikipedia.org/wiki/${pr[0]}東京${pr[1]}`, 30]), ['/srv/app/[vault:secrets/db/pw]/conf.yml', 9]];
+  const linkAt = (segs) => { const m = new Map(); let p = 0; for (const g of segs) { if (g.t === 'link') m.set(p, g.kind + ':' + g.ref); p += g.s.length; } return m; };
+  const sweep11 = (seg, pres = ['ok https://ok.example.org/a first. ']) => { const out = { created: [], n: 0, first: 0 }; for (const [tok, from] of GTOKS) for (const pre of pres) { const whole = pre + tok + ' tail words', at = pre.length, wl = linkAt(F.segmentText(whole)); for (let k = from; k <= tok.length; k++) { const kept = clipT(whole, at + k + 1); out.n++; const got = linkAt(seg(kept)); if ([...got.values()][0] === 'url:https://ok.example.org/a') out.first++; for (const [p, l] of got) if (wl.get(p) !== l) out.created.push(kept.slice(at) + ' ⇒ ' + l); } } return out; };
+  const s11 = sweep11(F.segmentText), s11cjk = sweep11(F.segmentText, ['请先看 https://ok.example.org/a 。然后是 ']);
+  ok((F.FW_PAIRS || []).length === 6 && s11.n === 61 && !s11.created.length && s11.first === s11.n && !s11cjk.created.length && s11cjk.first === s11cjk.n,
+    '.399 follow-up: the store\'s cut at every one of 61 positions through a URL inside each of the six full-width pairs and a path through a [vault:…] mark (ASCII and CJK words around) ⇒ every link the cut text draws is one the whole text reads at the same offset with the same kind and ref; the uncut link before it a link at every position', { n: s11.n, created: [...s11.created, ...s11cjk.created].slice(0, 6) });
+  const CONT = 'const c = continuation(src, e);', MASKED = "if (g.t !== 'link' && g.t !== 'masked') continue;";
+  const r10cont = FY1.includes(CONT) && FY1.includes(MASKED) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(CONT, "const c = '0';").replace(MASKED, "if (g.t !== 'link') continue;")))).segmentText : null;
+  ok(r10cont, 'CONTROL needle present: the continuation closes what the cut left open (.399 follow-up) — a tree without it has nothing to patch');
+  if (r10cont) { const c11 = sweep11(r10cont); ok(c11.created.some((x) => /⇒ url:https:\/\/ja\.wikipedia\.org\/wiki\/$/.test(x)) && c11.created.some((x) => /⇒ path:\/srv\/app\/\[vault$/.test(x)), 'CONTROL r10\'s probe (a digit only, a masked segment not counted) ⇒ the cut makes a link to the parent page «…/wiki/» and to «/srv/app/[vault» — RED', c11.created.slice(0, 4)); }
   const R7N = 18; // r7's word run over the first six tokens' 150 positions
   if (r7seg) { const sw7 = sweep(r7seg, TOKS.slice(0, 6)); ok(sw7.through.length === R7N && sw7.through.some((x) => /⇒ https:\/\/docs\.example$/.test(x)), 'CONTROL r7\'s rule (the page id\'s word run before the mark) ⇒ ' + R7N + ' of 150 cut positions still a link — «https://docs.example.…» a link to ANOTHER host, «…/guide/» a parent — RED', { n: sw7.through.length, first: sw7.through.slice(0, 4) }); }
 }
