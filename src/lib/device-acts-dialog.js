@@ -6,12 +6,13 @@
 // `device-audit` broadcast (the ONE audit writer notifies — the exit list's rule); a filter by who asked re-reads. Every
 // string of a line is textContent (judged again by the PURE row rule) — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, showToast } from './utils.js';
 import { rowOf, kindOf, BY_KINDS } from '../device-acts.js';
 
 const LIMIT = 50;
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
-const whenText = (at) => { try { return new Date(Number(at) || 0).toLocaleString(deviceLocale(), { hour12: false }); } catch { return new Date(Number(at) || 0).toISOString(); } };
+const whenText = (at) => when(Number(at) || 0, { seconds: true });
 const durationText = (ms) => { if (ms == null) return ''; const s = (Math.max(0, Number(ms) || 0) / 1000).toFixed(1); return Number(s) === 0 ? '<0.1 s' : `${s} s`; };
 /** WHO asked, in the device's words: the kind's name + the subject's own id. */
 export function whoText(by) {

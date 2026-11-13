@@ -5,6 +5,7 @@ import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when, stampAt as whenAt } from './page-time.js';
 import { valueWord } from './value-words.js'; // lane ui-language: an unknown board state is shown through the door too
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
@@ -160,7 +161,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         li.className = 'session-history-item' + (isCleared(h) ? ' rc-row-cleared' : '');
         li.dataset.idx = String(hist.indexOf(h));
         const when = new Date(h.at);
-        const tm = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ') + when.toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' });
+        const tm = whenAt(when);
         // A NON-STATUS event row (design-unknown-records): the git fact the
         // agent reported — "push · fix/x" — drawn in the same timeline.
         if (h.event === 'vcs') {
@@ -251,7 +252,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     row(idSec, t('Mode'), escHtml(s.webuiMode || s.mode || 'terminal'));
     if (s.hostName) row(idSec, t('Machine'), escHtml(s.hostName));
     row(idSec, t('CWD'), escHtml((s.cwd || '').replace(/^\/home\/[^/]+/, '~')), { copy: s.cwd || '' });
-    if (s.startedAt) row(idSec, t('Started'), escHtml(new Date(s.startedAt).toLocaleString()));
+    if (s.startedAt) row(idSec, t('Started'), escHtml(when(s.startedAt, { full: true })));
     const connLabel = { live: t('LIVE (VibeSpace-managed)'), tmux: t('Running in tmux'), external: t('Running externally'), stopped: t('Stopped') }[s.status] || s.status;
     row(idSec, t('Connection'), escHtml(connLabel) + (s.pid ? ` <span style="color:var(--text-dim)">PID ${escHtml(String(s.pid))}</span>` : ''));
 

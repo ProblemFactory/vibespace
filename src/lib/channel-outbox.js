@@ -87,6 +87,7 @@
 import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils.js';
 import { urlViewerKind } from './file-types.js';
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
 import { icon, el, btn, convAvatar } from './channel-chrome.js';
@@ -343,7 +344,7 @@ const armedOnly = (card, fn) => (ev) => (cardArmed(card, ev) ? fn(ev) : undefine
 const stamp = (ms) => {
   if (!ms) return '';
   const d = new Date(Number(ms));
-  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return when(d);   // the ONE formatter (lane ui-language) — was a hand-built «MM-DD hh:mm»
 };
 
 /** lane outbox-session-chip: what a card says BY NAME beside its state — «edited by you» (the owner edited its text: `edited`)

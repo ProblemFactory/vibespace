@@ -31,6 +31,7 @@ export function readingSource(source, { corroborated = undefined, t = (s) => s }
     case 'control':
       return { key: 'control', label: t('own session'), tip: t("A live session on this account's credentials answered a usage request.") };
     case 'passive':
+    case 'statusline': // lane ui-language (the walk's usage-10): the status line's own stamp printed raw («来自 statusline»)
       return { key: 'session', label: t('own session'), tip: t("The status line of a terminal session running on this account's credential slot.") };
     case 'remote-statusline':
       return { key: 'remote', label: t('session on another machine'), tip: t('Harvested from a remote host that ran this account.') };
@@ -88,8 +89,15 @@ export function staleSince(login, fetchedAt, { t = (s) => s, now = Date.now() } 
 
 /** Absolute day+time for a "stale since" stamp — a relative "5 days ago" is
  *  the wrong unit for something that will never move again. */
+// THE PAGE'S FORMATTER, handed in by app.js at boot (src/lib/page-time.js `when` — lane ui-language: this module imports nothing,
+// so the page gives it the ONE formatter instead of each call site choosing a locale). A node suite that sets none keeps the
+// injected-locale rendering below.
+let PAGE_WHEN = null;
+export function setStampFormatter(fn) { PAGE_WHEN = typeof fn === 'function' ? fn : null; }
 export function stampText(ts, { locale = undefined } = {}) {
   if (!ts) return '—';
+  if (PAGE_WHEN) return PAGE_WHEN(ts);
+  // page-time: the injected-locale rendering a node suite pins (the page hands in page-time's `when` above)
   try { return new Date(ts).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return new Date(ts).toISOString(); }
 }
 
@@ -236,7 +244,10 @@ export function bucketView(model, reading, est, nowMs, { readAt = null } = {}) {
 export function resetInstantText(ms, nowMs = Date.now(), { locale = undefined } = {}) {
   const d = new Date(Number(ms)), n = new Date(Number(nowMs));
   if (!Number.isFinite(d.getTime())) return '';
+  if (PAGE_WHEN) return PAGE_WHEN(Number(ms), { now: Number(nowMs) });
+  // page-time: the injected-locale rendering a node suite pins (the page hands in page-time's `when` — setStampFormatter)
   const time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  // page-time: (the same fallback's date half)
   return d.toDateString() === n.toDateString() ? time : `${d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })} ${time}`;
 }
 

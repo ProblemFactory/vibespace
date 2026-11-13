@@ -21,6 +21,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
   return `<div class="agents-cli-config">${lines.map((l) => `<div class="${cls(l.tone)}">${escHtml(l.text)}</div>`).join('')}</div>`;
 }
 import { t } from './i18n.js';
+import { dateOf, stampAt as when } from './page-time.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
@@ -165,7 +166,7 @@ const loginLeftText = (ms) => {
 // Short date + short time (no seconds): the chip sits on the row's one extras
 // line, and a second-precision timestamp is noise for a deadline the user acts
 // on in hours. Locale-formatted — the device decides, like every other time here.
-const loginWhenText = (ms) => { try { return new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }); } catch { try { return new Date(ms).toLocaleString(); } catch { return ''; } } };
+const loginWhenText = (ms) => when(ms, { full: true });
 /** Why a member's long-lived token is NOT in its folder (lane pool-oat-materialize) —
  *  what to do, in words; '' when there is no refusal to name. */
 function oatFileRefusedText(reason, code = '', { choose = true } = {}) {
@@ -656,7 +657,7 @@ export function resetChipHtml(offer, { key = '', disabledWhy = '' } = {}) {
   if (!offer) return '';
   const label = offer.count === 1 ? t('1 reset credit') : t('{n} reset credits', { n: offer.count });
   let until = '';
-  if (offer.useBySec) { try { until = ' · ' + t('use by {date}', { date: new Date(offer.useBySec * 1000).toLocaleDateString() }); } catch { until = ''; } }
+  if (offer.useBySec) { try { until = ' · ' + t('use by {date}', { date: dateOf(offer.useBySec * 1000) }); } catch { until = ''; } }
   const tip = offer.canUse
     ? t('Stored rate-limit reset credits on this account — “Use…” spends one now, after a confirmation')
     : (disabledWhy || t('This agent offers no reset-credit interface VibeSpace can use.'));
@@ -1326,7 +1327,7 @@ export function installManageAgents(App, ctx = {}) {
   // "everything now" act lives on the #1 row there ("Move every conversation here now",
   // POST …/gather — never greyed, addendum 4). `_poolGather` is that act.
   async _poolGather(poolId, memberId, memberName, poolName, hot) {
-    const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+    const fmtTime = (ms) => when(ms);
     if (!hot) {
       // ONE confirm that names HOW MANY conversations restart (verify r1) — counted from the live
       // list; none to restart ⇒ nothing to confirm (the default alone moves)
@@ -1477,7 +1478,7 @@ export function installManageAgents(App, ctx = {}) {
     const st0 = JSON.stringify(st);
     const nowSec = () => Date.now() / 1000;
     const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
-    const fmtTime = (ms) => { try { return new Date(ms).toLocaleString(deviceLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return new Date(ms).toISOString(); } };
+    const fmtTime = (ms) => when(ms);
     const draw = () => {
       const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf });
       body.innerHTML = `

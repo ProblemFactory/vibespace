@@ -686,7 +686,8 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     ok(lw.endsWith('设备上的命令已过期，请重新生成') && lw !== words, 'CONTROL (l): the pre-fix words send the user to "请重新生成" right after a Generate — the N-refused cell goes red', lw);
     ok(/^\d\d:\d\d$/.test(hm(now)) && !/[AP]M/.test(words), 'L-time: the zh words print the time the zh way ("17:09"), never the browser\'s "05:09 PM"', words);
     // CONTROL (m): the pre-fix clock — the browser's own locale ([]) — prints "PM" inside the zh sentence under an en-US node
-    const msrc = psrc.replace('const loc = deviceLocale();', "const loc = 'en-US';");
+    // (lane ui-language: the clock is page-time's now — the mutant swaps the one line that hands it over for an en-US clock)
+    const msrc = psrc.replace('const hhmm = (ms) => when(ms);', "const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });");
     ok(msrc !== psrc, '(m) the patch applies');
     const PM = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', msrc, 'browserclock')).href);
     const mw = PM.dialStateText({ state: 'refused', at: new Date().setHours(17, 9, 0, 0), n: 1, reason: 'token-mismatch', host: '', mintedAt: new Date().setHours(17, 8, 0, 0) });

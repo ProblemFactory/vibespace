@@ -35,6 +35,7 @@
 // SVG icons only. A frame is a SECRET of a logged-in page (§6.4): the dialog
 // says how long it is kept, and nothing here caches a byte.
 import { t, tc, deviceLocale } from './i18n.js';
+import { clockOf, dateOf } from './page-time.js';
 import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog, showContextMenu, escHtml, attachPopoverClose } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
@@ -603,7 +604,7 @@ export function stateText(state) {
 }
 /** `3 d ago` / `5 h ago` / `12 min ago` / `just now`; '' for unknown. */
 /** lane browser-profile-clone: a day in the device's locale ("copied from X on 8 Oct 2026" / "2026年10月8日"). */
-function cloneDateText(ms) { try { return new Date(ms).toLocaleDateString(deviceLocale(), { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return new Date(ms).toISOString().slice(0, 10); } }
+function cloneDateText(ms) { return dateOf(ms, { full: true }); }
 export function agoText(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return '';
   const s = Math.max(0, Math.round(Number(ms) / 1000));
@@ -878,7 +879,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     // lane browser-admin 2a: WHICH CHROME BUILD — the choice and, while it runs, the build the browser itself reports (the fold)
     const buildLine = cardBuildLine({ buildChoice: r.buildChoice, choice: r.browser, running: runningBuildOf(r.id), missing: r.buildMissing, live: !!r.live }, t);
     // lane browser-unresponsive: the keeper's verdict, in the viewer's clock ("Not answering since 16:34")
-    const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, cause: r.unresponsive.cause || null, label: String(r.label || r.id), clock: new Date(r.unresponsive.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }, t) : null;
+    const uw = r.unresponsive && Number.isFinite(r.unresponsive.since) ? unresponsiveWords({ since: r.unresponsive.since, cause: r.unresponsive.cause || null, label: String(r.label || r.id), clock: clockOf(r.unresponsive.since) }, t) : null;
     const x = { unresponsive: uw, w: WORDS, chip: app.browserChipFor ? app.browserChipFor(r.id) : null, mine: app._browserProfiles && app._browserProfiles.machine ? String(app._browserProfiles.machine.host || '') : '', stuck: psw, autoDialogs: !!autoText, autoText, buildLine, limits: v?.limits || null, now: Date.now() };
     const L = rowLine(r, x);
     const isOpen = openFolds.has(r.id);

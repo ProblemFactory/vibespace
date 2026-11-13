@@ -21,6 +21,7 @@
 // The grant's facts ride the Vault window's own list (row.run.use — src/server/vault-run-door.js rowFacts): every change of
 // them reaches every open window through the vault's ONE notify (`vault-contents`), patched in place.
 import { t } from './i18n.js';
+import { dateOf as pageDateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, pickToRow, principalOfEntry } from './principal-picker-model.js';
@@ -31,7 +32,7 @@ const EVERYONE_KEY = 'everyone:*';
 const ENTRY_HOSTS = '@entry';
 const ENDS = [['keep', 0], ['none', null], ['8h', 8 * 3600e3], ['30d', 30 * 86400e3], ['90d', 90 * 86400e3]];
 const endWord = (id) => ({ keep: t('As each has it now'), none: t('No end'), '8h': t('8 hours'), '30d': t('30 days'), '90d': t('90 days') })[id];
-const dateOf = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
+const dateOf = (ms) => pageDateOf(ms);
 // round 3 (item 5): a WILDCARD host is said in words — and a multi-tenant base (where unrelated parties share the domain) warns
 const MULTI_TENANT = /^(?:amazonaws\.com|googleapis\.com|github\.io|gitlab\.io|herokuapp\.com|cloudfront\.net|blob\.core\.windows\.net|azurewebsites\.net|web\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app|appspot\.com|firebaseapp\.com)$/i;
 const oneHostWord = (h, entryHosts, tool = null, legacy = false) => {

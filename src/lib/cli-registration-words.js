@@ -33,6 +33,7 @@ export function hubRegistrationRow(status, { t }) {
 }
 
 /** ⚙ Diagnostics: '' while every claude build seen is registered; else ONE section, a row per unregistered build */
+// page-time: a PURE module (imports nothing) — its caller hands in page-time's `when` (setup-flows.js); this default is a test's
 export function diagnosticsSection(status, { t, esc, when = (ms) => new Date(ms).toLocaleString() }) {
   const rows = status && Array.isArray(status.unregistered) ? status.unregistered.filter((u) => u && u.version) : [];
   if (!rows.length) return '';

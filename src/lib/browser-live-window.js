@@ -122,6 +122,7 @@
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
 import { t, tc, resolveLang } from './i18n.js';
+import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a blocked-site code VibeSpace's hint asks for, in words
 import { LIVE_START } from './desktop-app-placement.js'; // lane agent-window-no-pop: the live view's push shape for the ONE placement verdict
 import { pinChipText } from '../desktop-pin.js'; // lane launch-picture-size: a FIXED picture size's chip = the pin's own words
@@ -1225,7 +1226,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       acts.append(hint);
       dialogBar.append(acts);
     } else if (stuck) {
-      const w = stuckWords(stuck.why === 'browser' && Number.isFinite(stuck.since) ? { ...stuck, clock: new Date(stuck.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } : stuck, t); // lane browser-unresponsive: the viewer's clock
+      const w = stuckWords(stuck.why === 'browser' && Number.isFinite(stuck.since) ? { ...stuck, clock: clockOf(stuck.since) } : stuck, t); // lane browser-unresponsive: the viewer's clock
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body'; line.textContent = w.line;
       const re = textBtn(w.action, () => restartBrowser(), 'browser-live-dialog-restart'); re.title = w.tooltip || '';
       re.disabled = !!st.restarting;
@@ -1929,7 +1930,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const refused = pid && d.recordingRefused ? d.recordingRefused[pid] : null;
     recEl.classList.toggle('on', !!rec);
     // lane live-input: three states in words a person can act on (the owner read "recording refused" + a raw command)
-    const w = recordingChipWords({ recording: rec, refused, hasProfile: !!pid, since: rec ? new Date(Number(rec.since) || 0).toLocaleTimeString() : '' }, { t });
+    const w = recordingChipWords({ recording: rec, refused, hasProfile: !!pid, since: rec ? clockOf(Number(rec.since) || 0) : '' }, { t });
     recEl.textContent = w.text; recEl.title = w.title; recEl.dataset.state = w.state; recEl.classList.toggle('refused', w.state === 'refused');
   };
   recEl.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : null; if (app.openBrowserProfiles) app.openBrowserProfiles({ focus: pid }); else showToast(t('Agent browser is not available'), { type: 'warn' }); };

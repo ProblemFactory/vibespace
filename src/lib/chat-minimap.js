@@ -7,6 +7,7 @@
 import { createPopover, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { noteSentence } from './chat-run-summary.js';
 import { movedIndex } from '../queue-chips.js'; // PURE (lane midturn-order r2 F3): where an index lands when one card moved
 
@@ -347,8 +348,7 @@ export class ChatMinimap {
       const d = new Date(turn.ts);
       const now = new Date();
       const isToday = d.toDateString() === now.toDateString();
-      const date = isToday ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ';
-      const time = date + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const time = when(d);   // the ONE formatter: today drops the date (lane ui-language)
       const preview = turnText(turn);
       // Two-line card: dim time on top, message preview below (textContent —
       // previews are raw user text)
@@ -473,7 +473,7 @@ export class ChatMinimap {
         const d = new Date(turn.ts);
         const time = document.createElement('span');
         time.className = 'chat-minimap-toc-time';
-        time.textContent = turn.ts ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        time.textContent = turn.ts ? when(d) : '';
         const text = document.createElement('span');
         text.className = 'chat-minimap-toc-text';
         text.textContent = preview || t('(empty)');

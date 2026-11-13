@@ -5,6 +5,7 @@
 // PREVIEW dialog the microphone opens after the first dictation of a conversation (发送 / 不发).
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: one Connect block, two doors
 import { rowById } from '../integration-registry.js';
 
@@ -27,7 +28,7 @@ export function renderAccountRow(box, st, rerender, { pasteKey = null } = {}) {
   box.appendChild(line);
 }
 
-const fmtTime = (at) => { const d = new Date(at); return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; };
+const fmtTime = (at) => when(at);
 // a chip's title: why this word is here (proposalCandidates' why + counts)
 const whyWords = (w) => (!w ? '' : w.byPerson > 1 ? t('You wrote this {n} times', { n: w.byPerson }) : w.byPerson === 1 ? t('You wrote this once')
   : w.why === 'file' ? t('A file name') : t('Seen {n} times here', { n: w.seen }));

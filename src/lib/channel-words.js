@@ -13,6 +13,7 @@
 // DOM-free; `t` is the real translator so every literal below is a key the
 // build's i18n scan finds.
 import { t, tc } from './i18n.js';
+import { dateOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 /** The device's translator — R3's tag words take an injected `t` (the
  *  freshnessText pattern) so the width census can word them in every language
  *  from one process; the literals stay `t('…')` for the extractor. */
@@ -413,7 +414,7 @@ export function deliveryRowText(row, { t = tDevice, time = hhmmLocal } = {}) {
     case 'waiting': return row.stopped ? t('{name} is stopped — delivered when it resumes', { name }) : t('Waiting for {name}\'s next turn', { name });
     // lane queued-is-not-woke (law 1): its wake waits in the addressee's queue behind a RUNNING turn — never «read» before a turn carries it
     case 'queued': return Number.isFinite(row.since) ? t('Waiting for {name}\'s current turn (running since {time})', { name, time: time(row.since) }) : t('Waiting for {name}\'s current turn', { name });
-    case 'undeliverable': return row.why === 'dropped' ? t('Not delivered — the copy for {name} was dropped before a turn read it; send it again', { name }) : row.why === 'gone' ? t('Not delivered — {name}\'s conversation is gone', { name }) : Number.isFinite(row.at) ? t('Not delivered — {name}\'s conversation was archived {when}', { name, when: new Date(row.at).toLocaleDateString() }) : t('Not delivered — {name}\'s conversation was archived', { name });
+    case 'undeliverable': return row.why === 'dropped' ? t('Not delivered — the copy for {name} was dropped before a turn read it; send it again', { name }) : row.why === 'gone' ? t('Not delivered — {name}\'s conversation is gone', { name }) : Number.isFinite(row.at) ? t('Not delivered — {name}\'s conversation was archived {when}', { name, when: dateOf(row.at) }) : t('Not delivered — {name}\'s conversation was archived', { name });
     case 'handed': return Number.isFinite(row.at) ? t('Read by {name} · {time}', { name, time: time(row.at) }) : t('Read by {name}', { name });
     case 'muted': return t('{name} is muted and will not read it', { name });
     case 'left': return t('{name} left', { name });

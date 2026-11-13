@@ -7,6 +7,7 @@
 // the same key is re-worded without being re-created (an open expander stays open), the list keeps 50. Every string
 // of a run (the command, the output, a conversation's name) is textContent — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { createModalShell, showToast, copyText } from './utils.js';
 import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS, fmtBytes } from '../exit-reach.js';
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand row reads as its script
@@ -48,7 +49,7 @@ export const runKeyOf = (r) => (r.id ? `id:${r.id}` : `${Number(r.at) || 0}:${r.
 export function copyCommand(cmd) {
   return Promise.resolve(copyText(String(cmd || ''))).then(() => { showToast(t('Command copied')); });
 }
-const whenText = (at) => { try { return new Date(Number(at) || 0).toLocaleString(deviceLocale(), { hour12: false }); } catch { return new Date(Number(at) || 0).toISOString(); } };
+const whenText = (at) => when(Number(at) || 0, { seconds: true });
 
 /** The ONE row painter (keyed; `patchRow` re-words an existing node in place). */
 export function paintRow(node, r) {

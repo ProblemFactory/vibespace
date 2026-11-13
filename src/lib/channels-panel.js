@@ -44,6 +44,7 @@
 // pinned legacy row list.
 import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when, clockOf, dateOf } from './page-time.js';
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
 import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
@@ -418,7 +419,7 @@ function accountLines(app, a, kinds) {
     // lane lark-search-poll: THE CHANGE FEED's line (its state, the measurement, a park by name) + the catch-up's count
     if (a.feed) {
       // lane lark-p2p: a back-off names its END on this device's clock face ("until 03:28")
-      const clock = (ms) => { try { return new Date(ms).toLocaleTimeString(deviceLocale(), { hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+      const clock = (ms) => clockOf(ms);
       const fl = chanCaps.feedText(a.feed, { t, vendor: vendorW, now: Date.now(), clock });
       if (fl) {
         // lane lark-search-miss (owner 2026-10-11): the measurement's state is ONE QUIET line — a demotion is no warning (the
@@ -1001,7 +1002,7 @@ function dotTitle(a) {
   const bits = [laneNote(a.lane)];
   if (a.identityObserved) {
     const o = a.identityObserved;
-    let s = t('Last real send was attributed by the platform to {who} ({when})', { who: o.senderType === 'user' ? t('the user') : t('an app / bot'), when: new Date(o.at).toLocaleString(deviceLocale()) });
+    let s = t('Last real send was attributed by the platform to {who} ({when})', { who: o.senderType === 'user' ? t('the user') : t('an app / bot'), when: when(o.at) });
     if (o.declared === 'unknown') s += ' — ' + t('this channel\'s identity declaration is still unverified in code; this measurement is what settles it');
     bits.push(s);
   }
@@ -1257,9 +1258,9 @@ function setFold(part, folded) {
 function rowTime(ms, now = Date.now()) {
   if (!ms) return '';
   const d = new Date(ms), n = new Date(now);
-  if (d.toDateString() === n.toDateString()) return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (d.toDateString() === n.toDateString()) return clockOf(ms);
   if (d.toDateString() === new Date(now - 86400e3).toDateString()) return t('Yesterday');
-  try { return d.toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' }); } catch { return ''; }
+  return dateOf(ms, { now });
 }
 
 /** THE GROUP ROW's menu (a group, not a channel conversation — its verbs are
@@ -1929,7 +1930,7 @@ export function renderChannelsPanel(app, c) {
     const at = document.createElement('span');
     at.className = 'chan-grow-at';
     at.textContent = rowTime(r.lastAt);
-    if (r.lastAt) at.title = new Date(r.lastAt).toLocaleString(deviceLocale());
+    if (r.lastAt) at.title = when(r.lastAt, { full: true });
     line.appendChild(at);
     el.appendChild(line);
     const sub = document.createElement('div');
@@ -2290,7 +2291,7 @@ export function renderChannelsPanel(app, c) {
     const fresh = chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown');
     title.title = `${conv.title || conv.id} — ${fresh}`;
     line.appendChild(title);
-    if (m.at) { const at = chanEl('span', 'chan-row-at', rowTime(m.at)); at.title = new Date(m.at).toLocaleString(deviceLocale()); line.appendChild(at); }
+    if (m.at) { const at = chanEl('span', 'chan-row-at', rowTime(m.at)); at.title = when(m.at, { full: true }); line.appendChild(at); }
     el.appendChild(line);
     // line 2: the last message ("who: text") + the ONE freshness pill (the honesty contract — every row is fetched,
     // 2026-09-26, so every row has its claim; whole or folded to its glyph, never cut) + the needs-you badges (right)

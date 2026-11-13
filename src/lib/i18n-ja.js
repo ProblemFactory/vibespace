@@ -12803,4 +12803,8 @@ export default {
   "not present": "ファイルがありません",
   "no permissions block": "権限の設定がありません",
   "permissions block is empty": "権限の設定が空です",
+  "{span} ago": "{span}前",
+  "in {span}": "あと {span}",
+  "expires {date}": "{date} に期限切れ",
+  "layout::Restore": "復元",
 };

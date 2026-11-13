@@ -10,13 +10,14 @@ import { registerMenuItem } from './contributions.js';
 import { createModalShell, getStateSync, showToast } from './utils.js';
 import { SHEET_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t, deviceLocale } from './i18n.js';
+import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { MAINTAINER_BY } from '../feedback-model.js';   // PURE — lane fleet-feedback-marks: a mark the instance's maintainer key made
 
 const STORE = 'feedback';
 const ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/><path d="M8 5.5v2.2M8 9.2v.1"/></svg>';
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 const newest = (a, b) => (Number(b.lastAt) || 0) - (Number(a.lastAt) || 0) || (Number(b.at) || 0) - (Number(a.at) || 0);
-const whenText = (at) => { try { return new Date(Number(at) || 0).toLocaleString(deviceLocale(), { hour12: false, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return new Date(Number(at) || 0).toISOString(); } };
+const whenText = (at) => when(Number(at) || 0);
 
 /** the reports this window knows (id → row): the store's copy, plus an answer applied before its echo arrives */
 const view = new Map();
