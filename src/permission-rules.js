@@ -51,12 +51,13 @@ const RULE_KINDS = Object.freeze(['allow', 'deny', 'ask', 'value']);
  *  `flagSettings` (a `--settings` file/JSON on the command line) is REAL but
  *  is not a fixed path, so it is only ever reported when the caller knows the
  *  session was spawned with one. */
+const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): renderRuleTree words these through its `t`
 const CLAUDE_LAYERS = Object.freeze([
-  Object.freeze({ id: 'userSettings', label: 'user settings', short: 'User', scope: 'user', rel: '.claude/settings.json', base: 'config' }),
-  Object.freeze({ id: 'projectSettings', label: 'shared project settings', short: 'Project', scope: 'project', rel: '.claude/settings.json', base: 'cwd' }),
-  Object.freeze({ id: 'localSettings', label: 'project local settings', short: 'Local', scope: 'project, gitignored', rel: '.claude/settings.local.json', base: 'cwd' }),
-  Object.freeze({ id: 'flagSettings', label: 'command line arguments', short: 'Flag', scope: 'cli flag', rel: null, base: 'flag' }),
-  Object.freeze({ id: 'policySettings', label: 'enterprise managed settings', short: 'Managed', scope: 'managed', rel: 'managed-settings.json', base: 'managed' }),
+  Object.freeze({ id: 'userSettings', label: i18nKey('user settings'), short: 'User', scope: i18nKey('user'), rel: '.claude/settings.json', base: 'config' }),
+  Object.freeze({ id: 'projectSettings', label: i18nKey('shared project settings'), short: 'Project', scope: i18nKey('project'), rel: '.claude/settings.json', base: 'cwd' }),
+  Object.freeze({ id: 'localSettings', label: i18nKey('project local settings'), short: 'Local', scope: i18nKey('project, gitignored'), rel: '.claude/settings.local.json', base: 'cwd' }),
+  Object.freeze({ id: 'flagSettings', label: i18nKey('command line arguments'), short: 'Flag', scope: i18nKey('cli flag'), rel: null, base: 'flag' }),
+  Object.freeze({ id: 'policySettings', label: i18nKey('enterprise managed settings'), short: 'Managed', scope: i18nKey('managed'), rel: 'managed-settings.json', base: 'managed' }),
 ]);
 
 /** Where claude looks for the MANAGED layer, per platform. Read out of the
@@ -91,15 +92,15 @@ const CODEX_PERMISSION_KEYS = Object.freeze([
 function codexLayerLabel(name) {
   const type = name && typeof name === 'object' ? String(name.type || '') : String(name || '');
   switch (type) {
-    case 'packagedDefaults': return { label: 'packaged defaults', file: name.file || null };
+    case 'packagedDefaults': return { label: i18nKey('packaged defaults'), file: name.file || null };
     case 'mdm': return { label: `managed preferences (MDM ${name.domain || ''}${name.key ? ' / ' + name.key : ''})`.trim(), file: null };
-    case 'system': return { label: 'system config', file: name.file || null };
+    case 'system': return { label: i18nKey('system config'), file: name.file || null };
     case 'enterpriseManaged': return { label: `enterprise-managed layer${name.name ? ' “' + name.name + '”' : ''}`, file: null };
     case 'user': return { label: name.profile ? `user config (profile “${name.profile}”)` : 'user config', file: name.file || null };
-    case 'project': return { label: 'project config', file: name.dotCodexFolder || null };
-    case 'sessionFlags': return { label: 'this session’s own -c flags', file: null };
-    case 'legacyManagedConfigTomlFromFile': return { label: 'legacy managed_config.toml', file: name.file || null };
-    case 'legacyManagedConfigTomlFromMdm': return { label: 'legacy managed_config.toml (MDM)', file: null };
+    case 'project': return { label: i18nKey('project config'), file: name.dotCodexFolder || null };
+    case 'sessionFlags': return { label: i18nKey('this session’s own -c flags'), file: null };
+    case 'legacyManagedConfigTomlFromFile': return { label: i18nKey('legacy managed_config.toml'), file: name.file || null };
+    case 'legacyManagedConfigTomlFromMdm': return { label: i18nKey('legacy managed_config.toml (MDM)'), file: null };
     default: return { label: type ? `unknown layer “${type}”` : 'unknown layer', file: (name && name.file) || null };
   }
 }
@@ -195,12 +196,12 @@ function claudeRulesRecord(reads, { cwd = null, host = null, scope = 'session', 
     const meta = CLAUDE_LAYERS.find((l) => l.id === r.layer) || { id: r.layer, label: r.layer, short: r.layer, scope: '' };
     const base = { id: meta.id, label: meta.label, short: meta.short, scope: meta.scope, file: r.file || null, present: !!r.present, note: null, rules: [] };
     if (r.error) { base.note = r.error; layers.push(base); continue; }
-    if (!r.present) { base.note = 'not present'; layers.push(base); continue; }
+    if (!r.present) { base.note = i18nKey('not present'); layers.push(base); continue; }
     const got = claudeRulesFromSettings(r.settings, { maxRules });
     truncated = truncated || got.truncated;
     base.rules = got.rules;
-    if (!got.hasPermissions) base.note = 'no permissions block';
-    else if (!got.rules.length) base.note = 'permissions block is empty';
+    if (!got.hasPermissions) base.note = i18nKey('no permissions block');
+    else if (!got.rules.length) base.note = i18nKey('permissions block is empty');
     // drop-in files (managed-settings.d/) are their OWN sources: each keeps its path
     for (const d of asArray(r.dropIns)) {
       const g = claudeRulesFromSettings(d.settings, { maxRules });
@@ -507,8 +508,10 @@ function renderRuleTree(record, { esc, t, icons = {} } = {}) {
     const rules = asArray(l.rules);
     const head = [
       `<div class="perm-layer-head">`,
-      `<span class="perm-layer-name">${e(l.label || l.id || '')}</span>`,
-      l.scope ? `<span class="perm-layer-scope">${e(l.scope)}</span>` : '',
+      // the layer's words in the reader's language (lane ui-language, the walk's agents-accounts-26: «user settings user»,
+      // «not present» stood English); a label this file builds with a name in it (MDM, a profile) is shown as built
+      `<span class="perm-layer-name">${e(tr(l.label || l.id || ''))}</span>`,
+      l.scope ? `<span class="perm-layer-scope">${e(tr(l.scope))}</span>` : '',
       `<span class="perm-layer-count">${e(rules.length ? tr('{n} rule(s)', { n: rules.length }) : tr('no rules'))}</span>`,
       `</div>`,
     ].join('');
@@ -519,7 +522,7 @@ function renderRuleTree(record, { esc, t, icons = {} } = {}) {
     const path = l.file
       ? `<button type="button" class="perm-layer-path" data-copy="${e(l.file)}" title="${e(tr('Copy path'))}">${icons.copy || ''}<span>${e(l.file)}</span></button>`
       : `<div class="perm-layer-path perm-layer-path-none">${e(l.fileNote || tr('no file — this layer is not stored on disk'))}</div>`;
-    const note = l.note ? `<div class="perm-layer-note">${e(l.note)}</div>` : '';
+    const note = l.note ? `<div class="perm-layer-note">${e(tr(l.note))}</div>` : '';
     const body = rules.length
       ? `<ul class="perm-rule-list">${rules.map((r) => renderRule(r, e, tr)).join('')}</ul>`
       : '';

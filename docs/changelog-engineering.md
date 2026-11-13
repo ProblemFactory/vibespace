@@ -54,6 +54,19 @@ This file is the engineers' record of every release: the lanes, the verification
   - A task keeps its started name: message-manager no longer overwrites it with the CLI's `task_progress` activity line («Running …»).
 - **Left for pick 4:** the dates and durations of these surfaces (message details, jobs, the session card, the vault audit).
 
+### ui-language pick 3 — the remaining stored values and English blocks, through the same doors
+- **value-words.js grows:**
+  - `push-claim` and `pushClaimOptions(t)`. The account dialog and the channel options kept two copies of the English; the option no longer leads with the raw value.
+  - `theme` and `themeWord`, for the theme select and a layout preset's row.
+  - `storedNameWords(kind, name, t)`: «Desktop N» and the registered default variant «Open» are worded at DISPLAY; a person's own name is shown as written. A rename that comes back with the worded default unchanged leaves the stored name as it was.
+- **Census ⑥(b) holds two more lists:** channel-caps PUSH_CLAIMS and themes.js THEMES.
+- **A group's system line in the Channels list:** groups-engine keeps `lastRaw` (kind, the resolved names, from / archived) beside the agent-facing `lastText`. channel-words.js `groupSysWords` is now the ONE table: the group window's `groupSysText` and the panel's preview both read it.
+- **The app search's refusal has its own code,** `bad_search` (400); `appRefusalText` words it.
+- **permission-rules.js:** the layers' labels, scopes and notes are `i18nKey` and are worded by `renderRuleTree`'s own `t`. A label built around a name (MDM, a profile) is shown as built.
+- **Worded through t():** command-mode's strip; the session palette's prompt and command title; the workbench's «{n} more…», mark chips and Clear / Done (`tc('select','Done')`); code-editor's marks, tooltips and messages (the dirty mark is `Unsaved` — `t('Modified')` is the file list's column); the eml viewer's labels; the browser cap chip («Browsers {own}/{cap}», «at the limit»).
+- **Not here:** the dates of these surfaces (pick 4). The glyph-only buttons, the ● mark and the scopes fold are lane L3's.
+- **The baseline:** ① 508 → **482**.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

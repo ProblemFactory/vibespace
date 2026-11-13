@@ -8,7 +8,7 @@
 //   HISTORY — everything older; collapsed and SEARCH-FIRST (typing in the
 //             main filter searches it; expanding renders capped pages).
 // Starred sessions float to the top of their zone.
-import { t as tr } from './i18n.js'; // sidebar cluster convention
+import { t as tr, tc } from './i18n.js'; // sidebar cluster convention
 import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';
 import { passesAgentKindFilter } from './agent-meta.js';
 
@@ -443,7 +443,7 @@ export function installSidebarWorkbench(Sidebar) {
         if (list.length > shown.length) {
           const more = document.createElement('button');
           more.className = 'wb-more';
-          more.textContent = `${list.length - shown.length} more…`;
+          more.textContent = tr('{n} more…', { n: list.length - shown.length });
           more.onclick = () => {
             (this._wbProjExpanded = this._wbProjExpanded || new Set()).add(key);
             this._render();
@@ -520,8 +520,8 @@ export function installSidebarWorkbench(Sidebar) {
         // icon + number chips — compact, fixed footprint (no text wrap)
         const TERM = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
         const ARCH = '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M3 4v8a1 1 0 001 1h8a1 1 0 001-1V4"/><path d="M6.5 8h3"/></svg>';
-        label.innerHTML = `<span class="wb-mark-chip wb-mark-term" title="${nTerm} to terminate"${nTerm ? '' : ' style="display:none"'}>${TERM}<b>${nTerm}</b></span>`
-          + `<span class="wb-mark-chip wb-mark-arch" title="${nArch} to archive"${nArch ? '' : ' style="display:none"'}>${ARCH}<b>${nArch}</b></span>`;
+        label.innerHTML = `<span class="wb-mark-chip wb-mark-term" title="${escHtml(tr('{n} to terminate', { n: nTerm }))}"${nTerm ? '' : ' style="display:none"'}>${TERM}<b>${nTerm}</b></span>`
+          + `<span class="wb-mark-chip wb-mark-arch" title="${escHtml(tr('{n} to archive', { n: nArch }))}"${nArch ? '' : ' style="display:none"'}>${ARCH}<b>${nArch}</b></span>`;
       }
       const actions = document.createElement('div');
       actions.className = 'wb-manage-actions';
@@ -534,7 +534,7 @@ export function installSidebarWorkbench(Sidebar) {
       applyBtn.onclick = () => this._applyManageMarks();
       const clearBtn = document.createElement('button');
       clearBtn.className = 'wb-manage-clear';
-      clearBtn.textContent = marks.size ? 'Clear' : 'Done';
+      clearBtn.textContent = marks.size ? tr('Clear') : tc('select', 'Done');   // «Done» the button, not the status word (lane ui-language)
       clearBtn.onclick = () => {
         if (marks.size) { this._manageMarks = new Map(); this._render(); }
         else { this._manageMode = false; this.el.classList.remove('manage-mode'); document.getElementById('manage-toggle')?.classList.remove('active'); this._render(); }
@@ -789,7 +789,7 @@ export function installSidebarWorkbench(Sidebar) {
         if (list.length > shown.length) {
           const more = document.createElement('button');
           more.className = 'wb-more';
-          more.textContent = `${list.length - shown.length} more…`;
+          more.textContent = tr('{n} more…', { n: list.length - shown.length });
           more.onclick = () => {
             (this._wbProjExpanded = this._wbProjExpanded || new Set()).add(cwd);
             this._render();

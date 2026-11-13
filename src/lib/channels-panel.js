@@ -44,6 +44,7 @@
 // pinned legacy row list.
 import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
 import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
@@ -82,7 +83,7 @@ import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } fr
 import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
 import { offersPaths, accountSectionOrder } from './webhook-view.js';   // lane webhook-l2-ui: an inbound door's account (its capability row)
 import { showNewPathDialog, showJoinDialog } from './channel-webhook.js';
-import { grainSummaryText } from './channel-words.js';
+import { grainSummaryText, groupSysWords } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog, showAccountReachDialog } from './channel-reach-editor.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
@@ -879,11 +880,8 @@ function showPushDialog(app, a) {
   wrap.appendChild(chanLine('chan-opt-label', t('Exclusivity declaration')));
   const sel = document.createElement('select');
   sel.className = 'chan-opt-input';
-  for (const [v, label] of [
-    ['unknown', t('unknown — declare nothing: push only kicks the cursor (default)')],
-    ['shared', t('shared — other clients use this app: push only kicks the cursor')],
-    ['exclusive', t('exclusive — this instance is the only client: push carries messages, the poll reconciles every 15 min')],
-  ]) { const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o); }
+  // the ONE option list (src/lib/value-words.js — the account dialog reads it too)
+  for (const [v, label] of pushClaimOptions(t)) { const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o); }
   const current = chanCaps.PUSH_CLAIMS.includes(p.claimedExclusive) ? p.claimedExclusive : 'unknown';
   sel.value = current;
   wrap.appendChild(sel);
@@ -1903,7 +1901,7 @@ export function renderChannelsPanel(app, c) {
   function groupRow(r, now = Date.now()) {
     const st = r.kind === 'conv' ? (statusTag(r, now, attnPolicy()) || statusTag(r, now)) : null;   // lane attention-policy: the tag that listed it, else its fact
     const tag = statusTagParts(st, { now });
-    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, r.conv && r.conv.atYouText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, r.lastRaw, r.conv && r.conv.atYouText, !!(r.group && r.group.lastCleared), r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag, r.account, isInternal(r)]);   // r.group.lastCleared: the last line drawn as the cleared sentence ("Clear content…", the merge onto master's signature census)
     return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
   }
   function groupRowBuild(r, now, cur, st, tag) {
@@ -1960,7 +1958,8 @@ export function renderChannelsPanel(app, c) {
     }
     const last = document.createElement('span');
     last.className = 'chan-grow-last';
-    last.textContent = r.lastText || '';
+    // a system line in the reader's words (its structure rides as lastRaw — lane ui-language); a message as written
+    last.textContent = (r.lastRaw && groupSysWords(r.lastRaw, r.lastRaw.by, r.lastRaw.member)) || r.lastText || '';
     // lane attention-rule-at-you: a row listed for an @ of the owner quotes the mentioning message
     if (st && st.code === 'at-you' && r.conv && r.conv.atYouText) last.textContent = (r.conv.atYouWho ? r.conv.atYouWho + ': ' : '') + r.conv.atYouText;
     // "Clear content…": the newest line was cleared — the sentence in this device's words, dimmed

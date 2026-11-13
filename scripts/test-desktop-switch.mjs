@@ -65,6 +65,8 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const M = require(path.join(REPO, 'src/desktop-switch.js'));
+// the Rename door shows a stored default name («Desktop N») in the reader's words (lane ui-language pick 3): its source reads storedNameWords
+const VW = await import('file://' + path.join(REPO, 'src/lib/value-words.js'));
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
@@ -242,7 +244,7 @@ console.log('⑨ THE SURFACE CENSUS — every surface draws the table');
   const tr = (x, p) => String(x).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? p[k] : m));
   const toasts = [];
   // a method's own text, its module-level names handed in (the page's translator, escHtml, the toast — recorded)
-  const make = (src, fallback, deps = {}) => { const d = { desktopDoors: M.desktopDoors, doorItems: M.doorItems, t: tr, escHtml: esc, showToast: (m) => { toasts.push(m); }, ...deps }; const body = src || fallback; return new Function(...Object.keys(d), `return ${/^async /.test(body) ? 'async function ' + body.slice(6) : 'function ' + body}`)(...Object.values(d)); }; // eslint-disable-line no-new-func — the methods' own text
+  const make = (src, fallback, deps = {}) => { const d = { desktopDoors: M.desktopDoors, doorItems: M.doorItems, storedNameWords: VW.storedNameWords, t: tr, escHtml: esc, showToast: (m) => { toasts.push(m); }, ...deps }; const body = src || fallback; return new Function(...Object.keys(d), `return ${/^async /.test(body) ? 'async function ' + body.slice(6) : 'function ' + body}`)(...Object.values(d)); }; // eslint-disable-line no-new-func — the methods' own text
   const deskItems = make(deskItemsSrc, '_deskItems() { return []; }'), doorLabel = make(doorLabelSrc, "_doorLabel() { return ''; }"), doorRefused = make(doorRefusedSrc, '_doorRefused() { return false; }');
   const world = (desktops, renamed = true) => {
     const calls = [];

@@ -106,7 +106,8 @@ const domFree = (s) => {
 };
 const wbDomFree = (s) => {
   const reps = [
-    ["import { t as tr } from './i18n.js'; // sidebar cluster convention", "const tr = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));"],
+    // lane ui-language: the workbench imports `tc` beside `tr` (a button's «Done» is tc('select', 'Done'))
+    ["import { t as tr, tc } from './i18n.js'; // sidebar cluster convention", "const tr = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m)), tc = (c, s, p) => tr(s, p);"],
     ["import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';", 'const agoText = () => "", escHtml = (x) => String(x), hostStateChip = () => "", showConfirmDialog = async () => true, showToast = () => {}, stripCwdHostLabel = (x) => x, sessionMatchesFilter = () => true;'],
     ["import { passesAgentKindFilter } from './agent-meta.js';", 'const passesAgentKindFilter = () => true;'],
   ];

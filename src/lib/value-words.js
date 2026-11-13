@@ -58,6 +58,13 @@ export const VALUE_SETS = Object.freeze({
   }),
   // the codes VibeSpace's own hints ask an agent to use when a site blocks a browser (src/browser-switch.js)
   'browser-claim': Object.freeze({ 'sign-in-refused': i18nKey('it refused to sign in in this browser') }),
+  // a channel account's push declaration (src/channel-caps.js PUSH_CLAIMS) — the option says what it does, never the raw value
+  'push-claim': Object.freeze({
+    unknown: i18nKey('Not declared (default) — a push only starts a check'), shared: i18nKey('Shared — other clients use this app: a push only starts a check'),
+    exclusive: i18nKey('Only this VibeSpace — a push carries the messages; a check every 15 min reconciles'),
+  }),
+  // a built-in theme's name (src/lib/themes.js BUILTIN_THEMES); a custom theme keeps its own name
+  theme: Object.freeze({ dark: i18nKey('Dark'), light: i18nKey('Light'), dracula: i18nKey('Dracula'), nord: i18nKey('Nord'), solarized: i18nKey('Solarized'), monokai: i18nKey('Monokai') }),
   // the note a model alias carries in the server's list («fable (latest, 200k)» — src/server/cli-env.js CLAUDE_MODEL_ALIASES)
   'model-note': Object.freeze({ latest: i18nKey('latest'), 'latest, 200k': i18nKey('latest, 200k context'), 'latest, 1M context': i18nKey('latest, 1M context') }),
 });
@@ -88,4 +95,24 @@ export function modelLabelWords(m, t) {
   const label = String(m.label || m.id);
   const x = /^(.*\S) \(([^()]+)\)$/.exec(label);
   return x && hasWord('model-note', x[2]) ? `${x[1]} (${valueWord('model-note', x[2], t)})` : label;
+}
+
+/** The push declaration's options, in the order a person reads them: [[value, words]…] (both the account dialog and the
+ *  channel options read THIS — they kept two copies of the English before). */
+export function pushClaimOptions(t) { return ['unknown', 'shared', 'exclusive'].map((v) => [v, valueWord('push-claim', v, t)]); }
+
+/** A theme key → its name: a built-in's words, a custom theme's own name (`custom-<name>`), else the key. */
+export function themeWord(key, t) {
+  const k = String(key || '');
+  if (k.startsWith('custom-')) return k.slice(7);
+  return hasWord('theme', k) ? valueWord('theme', k, t) : k;
+}
+
+/** A STORED default name, worded at display (never in storage — kb §16): a desktop minted as «Desktop 3», the default
+ *  launch variant registered as «Open». Any other name is the person's own and is shown as written. */
+export function storedNameWords(kind, name, t) {
+  const n = String(name == null ? '' : name);
+  if (kind === 'desktop') { const m = /^Desktop (\d+)$/.exec(n); return m ? t('Desktop {n}', { n: Number(m[1]) }) : n; }
+  if (kind === 'variant') return n === 'Open' ? t('Open') : n;
+  return n;
 }

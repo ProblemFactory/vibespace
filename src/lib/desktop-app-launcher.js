@@ -77,6 +77,7 @@
 // ONE sentence in the device's language plus its way out ("Let an agent find another way"). Layer 1's banner (an
 // interrupted install → Repair) is a slot at the top, fed by the apps section's state (PURE appsBannerModel).
 import { t, resolveLang } from './i18n.js';
+import { storedNameWords } from './value-words.js'; // lane ui-language: the registered default variant «Open» worded at display
 import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
@@ -254,7 +255,7 @@ export function cardMenuModel(row) {
   return { head, tail };
 }
 export function cardMenuRowLabel(m) {
-  if (m.kind === 'variant') return m.isDefault ? m.label : t('Open · {variant}', { variant: m.label }); // the default reads as itself ("Open", never "Open · Open")
+  if (m.kind === 'variant') return m.isDefault ? storedNameWords('variant', m.label, t) : t('Open · {variant}', { variant: m.label }); // the default reads as itself («Open» in the reader's words), never «Open · Open»; a named variant keeps its own name
   return m.kind === 'adopt' ? t('Add to VibeSpace…') : m.kind === 'remove' ? t('Remove…') : m.kind === 'forget' ? t('Forget') : t('Show command');
 }
 /** The command a recipe / a variant runs, as ONE line read back to the same words (never hidden, never re-quoted twice). */

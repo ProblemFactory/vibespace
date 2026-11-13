@@ -33,7 +33,7 @@
 //      literal sessionName head a producer in src/ files is a row of src/foryou-actions.js FORYOU_HEADS (the walk's
 //      chat-cards-3: «Manage Agents» stood English on a Chinese card). (b) THE DOOR, src/lib/value-words.js: every value the
 //      tree LISTS for a set it words is in its table (session-status STATES / URGENCIES, backend-caps response styles,
-//      automation-engine's key.* acts, jobs.js's run causes and triggers) and every delegated word (job-model STATE_WORDS)
+//      automation-engine's key.* acts, jobs.js's run causes and triggers, channel-caps PUSH_CLAIMS, themes.js THEMES) and every delegated word (job-model STATE_WORDS)
 //      has zh + ja rows — a new enum value without words is RED. (c) A code-named field (.state .status .role .urgency
 //      .stopReason .verb .trigger .cause .tier .theme .permissionMode .effort …) put straight into a visible sink, never
 //      through a words function, is RED unless held by its own shrink-only baseline (`raw`).
@@ -129,7 +129,7 @@ const SINK_ATTRS = new Set(['title', 'placeholder', 'aria-label', 'alt', 'data-t
 const SINK_FNS = new Set(['showToast', 'showConfirmDialog', 'showInputDialog', 'alert', 'confirm', 'prompt']);
 const SINK_KEYS = new Set(['label', 'title', 'text', 'placeholder', 'hint', 'tip', 'tooltip', 'desc', 'description', 'message', 'note', 'empty', 'okLabel', 'cancelLabel', 'confirmLabel', 'confirmText', 'body', 'heading', 'subtitle', 'caption', 'help', 'sub', 'detail', 'words', 'say', 'line']);
 // a lone word that is a name, not a sentence: brands, products, protocols, units
-export const NAMES = new Set(['VibeSpace', 'Claude', 'Codex', 'OpenCode', 'Antigravity', 'Gemini', 'ChatGPT', 'GitHub', 'GitLab', 'Gmail', 'Google', 'Lark', 'Feishu', 'Slack', 'Chrome', 'Chromium', 'Firefox', 'Safari', 'Linux', 'Windows', 'Ubuntu', 'Debian', 'Docker', 'Tailscale', 'TightVNC', 'Xpra', 'Node', 'Python', 'Markdown', 'JSON', 'YAML', 'HTML', 'CSS', 'SSH', 'MCP', 'OAuth', 'Anthropic', 'OpenAI', 'Fable', 'Opus', 'Sonnet', 'Haiku', 'Dropline', 'LibreOffice', 'Excel', 'Word', 'PowerPoint', 'Mermaid', 'CodeMirror', 'Monaco']);
+export const NAMES = new Set(['VibeSpace', 'Claude', 'Codex', 'OpenCode', 'Antigravity', 'Gemini', 'ChatGPT', 'GitHub', 'GitLab', 'Gmail', 'Google', 'Lark', 'Feishu', 'Slack', 'Chrome', 'Chromium', 'Firefox', 'Safari', 'Linux', 'Windows', 'Ubuntu', 'Debian', 'Docker', 'Tailscale', 'TightVNC', 'Xpra', 'Node', 'Python', 'Markdown', 'JSON', 'YAML', 'HTML', 'CSS', 'SSH', 'MCP', 'OAuth', 'Anthropic', 'OpenAI', 'Fable', 'Opus', 'Sonnet', 'Haiku', 'Dropline', 'LibreOffice', 'Excel', 'Word', 'PowerPoint', 'Mermaid', 'CodeMirror', 'Monaco', 'Dracula', 'Nord', 'Solarized', 'Monokai']);
 export function englishOf(s) {
   const x = String(s).replace(/\$\{[^}]*\}/g, ' ').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;|&#\d+;/g, ' ').replace(/\{\w+\}/g, ' ').trim();
   if (!x) return null;
@@ -291,7 +291,11 @@ async function setsOf(repo) {
   const jobs = fs.readFileSync(path.join(repo, 'src', 'jobs.js'), 'utf8');
   const causes = new Set([...jobs.matchAll(/'(ok\(until-output\)|interrupted|ok|timeout|error|update_window|wrapper-mismatch)'/g)].map((m) => m[1]).concat(jm.MEMORY_CAUSES || []));
   const triggers = new Set([...jobs.matchAll(/_(?:spawn|startAfter)\(job, '([a-z-]+)'/g)].map((m) => m[1]).concat([...jobs.matchAll(/'(vault-approved|vault-unlocked)'/g)].map((m) => m[1])));
-  const lists = { 'session-state': ss.STATES || [], urgency: ss.URGENCIES || [], 'response-style': [...styles], 'vault-act': [...new Set([...ae.matchAll(/verb: '(key\.[a-z]+)'/g)].map((m) => m[1]))], 'job-cause': [...causes], 'job-trigger': [...triggers] };
+  const cc = req(path.join(repo, 'src', 'channel-caps.js'));
+  const th = fs.readFileSync(path.join(repo, 'src', 'lib', 'themes.js'), 'utf8');
+  const themeBody = th.slice(th.indexOf('const THEMES = {'), th.indexOf('const BUILTIN_THEMES'));
+  const themes = [...themeBody.matchAll(/^  ([a-z][a-z0-9-]*): \{/gm)].map((m) => m[1]);
+  const lists = { 'push-claim': cc.PUSH_CLAIMS || [], theme: themes, 'session-state': ss.STATES || [], urgency: ss.URGENCIES || [], 'response-style': [...styles], 'vault-act': [...new Set([...ae.matchAll(/verb: '(key\.[a-z]+)'/g)].map((m) => m[1]))], 'job-cause': [...causes], 'job-trigger': [...triggers] };
   const vw = await import(pathToFileURL(path.join(repo, 'src', 'lib', 'value-words.js')).href);
   return { lists, sets: vw.VALUE_SETS, delegated: { 'job-state': jm.STATE_WORDS || {} } };
 }

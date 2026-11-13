@@ -21,6 +21,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A conversation's card shows its board mark apart from its run status, in your language, and its resume settings say Default in your language.
 - The vault's automation key history says in words what you did with a key.
 - When a site blocks the agent's browser for a known reason, the reason is shown in your language.
+- A group's latest line in the Channels list says what happened in your language.
+- A channel account's push declaration says what each choice does, in your language, without the raw value.
+- An app's default launch entry, the app search's warning and the default desktop names are shown in your language.
+- Command mode's key hints and the session palette's prompt are in your language.
+- The permission rules list names each settings layer and its state in your language.
+- The browser limit chip says it counts browsers, and the theme names in layouts and settings are in your language.
+- The code editor's unsaved and saved marks, tooltips and messages, and an email's From, To and Date labels, are in your language.
+- The sidebar's «more» button and its manage bar's Clear and Done are in your language.
 
 ## 2.369.402 — 2026-11-14
 

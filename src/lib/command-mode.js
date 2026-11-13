@@ -239,7 +239,8 @@ export class CommandMode {
     clearTimeout(this._cmdDigitTimer);
     this._cmdIndicator.classList.add('active');
     // Show the available keys while armed — command mode was undiscoverable
-    this._cmdIndicator.textContent = '[CMD] ←↑↓→ snap · m max · w close · Tab cycle · v split · {} move tab · f free · g grid · n new · s sidebar';
+    // lane ui-language (the walk's desktops-and-tabs-5): the keys' words in the reader's language — the key glyphs stay
+    this._cmdIndicator.textContent = t('[CMD] ←↑↓→ snap · m max · w close · Tab cycle · v split · {} move tab · f free · g grid · n new · s sidebar');
     this._resetTimer();
   }
 

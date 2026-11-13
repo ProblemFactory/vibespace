@@ -64,7 +64,7 @@ export function installSessionPalette(app) {
     overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
     overlay.innerHTML = `<div class="palette">
-      <input class="palette-input" placeholder="Jump to a session… (type a /path for a new one)" autocomplete="off">
+      <input class="palette-input" placeholder="${escHtml(t('Jump to a session… (type a /path for a new one)'))}" autocomplete="off">
       <div class="palette-list"></div>
     </div>`;
     document.body.appendChild(overlay);
@@ -188,7 +188,7 @@ export function installSessionPalette(app) {
   // it would silently drop Ctrl+Shift+K / Ctrl+Alt+K and reorder listeners —
   // the key dispatch is left byte-identical and only the action is
   // registry-routed.
-  registerCommand({ id: 'session.palette', title: 'Jump to a session…', run: () => open() });
+  registerCommand({ id: 'session.palette', title: () => t('Jump to a session…'), run: () => open() });
   // lane doc-link-bubble (2.369.261): a text editor that claims the chord ([data-own-mod-k] — the Doc window's rich text, where
   // Ctrl/Cmd+K = Link as in every editor) keeps it, like a terminal; everywhere else the palette, unchanged
   document.addEventListener('keydown', (e) => {

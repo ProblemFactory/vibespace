@@ -217,12 +217,12 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   }
   async function search(host, query, { kind = null } = {}) {
     if (kind === 'flatpak') { // lane app-register-model: the flatpak door's ids — `flatpak search --user` on that machine (≤ 5 s)
-      if (!A.searchWords(query)) throw named('bad-request', 'search for plain words (letters, digits, + . -)');
+      if (!A.searchWords(query)) throw named('bad_search', 'search for plain words (letters, digits, + . -)');
       const r = await access.call(host, 'app-plan', { kind: 'search', query, flatpak: true });
       return { host: host || 'local', results: [], flatpaks: r.flatpaks || [], code: r.code || null, recipes: [] };
     }
     const recipes = R.searchRecipes(query).map(R.publicRow); // design 009: "微信" finds WeChat — the apt search takes plain words only
-    if (!A.searchWords(query)) { if (recipes.length) return { host: host || 'local', results: [], code: null, recipes }; throw named('bad-request', 'search for plain words (letters, digits, + . -) or an app\'s name'); }
+    if (!A.searchWords(query)) { if (recipes.length) return { host: host || 'local', results: [], code: null, recipes }; throw named('bad_search', 'search for plain words (letters, digits, + . -) or an app\'s name'); }
     const r = await access.call(host, 'app-plan', { kind: 'search', query });
     return { host: host || 'local', results: r.results || [], code: r.code || null, recipes };
   }
