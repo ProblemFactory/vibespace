@@ -44,11 +44,21 @@ const fs = require('fs');
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const path = require('path');
 const { wrapperCaps } = require('./wrapper-files.js');
+const { capsOf, sendDoors, doorCapsOf } = require('../backend-caps.js');
 const { requestInFlight, noteTurnFlight, noteRequestSent } = require('../turn-state.js'); // PURE: a request's send instant — the prompt cache's in-flight fact (lane cache-warmth-tiles r4)
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
 function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
-  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null, steer = false } = {}) {
+  /** THE CONVERSATION'S OWN ENTER DOOR (lane reply-door-follows-enter — the owner, 2026-11-13: a For-you reply sat «queued»
+   *  while a message typed after it was already steered in): what plain Enter does to this conversation's running turn —
+   *  its harness row ∩ its RUNNING wrapper's verbs (the sidecar), the page composer's decision (backend-caps sendDoors). */
+  function enterSteers(sessionId, session) {
+    let wc = null; try { wc = wrapperCaps(BUFFERS_DIR, sessionId, session.socketPath); } catch { wc = null; }
+    if (!wc || !wc.inputQueue) return false;   // the wrapper serves no queue at all: a plain send, as the page's NO_QUEUE_CAPS
+    let row = null; try { row = capsOf(session.backend || 'claude').inputModes; } catch { row = null; }
+    return sendDoors(doorCapsOf(row, wc.queueVerbs)).enterDoor === 'steer';
+  }
+  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null, steer = false, door = null } = {}) {
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
@@ -57,6 +67,10 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     else session._machineInputAt = Date.now();      // a machine turn: the next-turn group reports ride it under the echo guard's words
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter) return { ok: false, code: 'send_failed', error: `no adapter for backend "${session.backend}"` };
+    // A PERSON'S WORDS REACH A RUNNING TURN THE SAME WAY WHATEVER DOOR THEY CAME THROUGH: `steer` = the composer's own
+    // decision (the page asked the same table, a held message included); `door: 'enter'` = a door with no keys of its own
+    // (the For-you reply, a design comment, a doc comment) — it follows the conversation's Enter door
+    if (door === 'enter' && human) steer = enterSteers(sessionId, session);
     // New input means prior interrupt succeeded (or user proceeded) —
     // cancel any pending SIGINT fallback to avoid killing mid-stream.
     if (session._interruptTimer) {

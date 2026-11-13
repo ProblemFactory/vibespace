@@ -47,7 +47,7 @@ const mirror = AM.getBackendMeta('claude').caps.inputModes;
 ok(S(mirror) === S(cl), 'the client mirror carries the SAME row (enterDoor included — test-harness-contract deep-compares the rest)', { mirror, cl });
 // the live intersection chat-view's _queueCaps() builds: the harness row ∧ the verbs the RUNNING wrapper named
 const live = (row, served) => { const verbs = (row.queueVerbs || []).filter((v) => !served || served.includes(v)); return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) }; };
-ok(/\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/lib/chat-view.js')) && /caps\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}/.test(read('src/lib/chat-input.js')), 'chat-view\'s _queueCaps() and ChatInput.setQueue carry the row\'s door (the intersection above is theirs)');
+ok((/\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/lib/chat-view.js')) || (/const caps = doorCapsOf\(row, served\);/.test(read('src/lib/chat-view.js')) && /\.\.\.\(row\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}\)/.test(read('src/backend-caps.js')))) && /caps\.enterDoor === 'steer' \? \{ enterDoor: 'steer' \} : \{\}/.test(read('src/lib/chat-input.js')), 'chat-view\'s _queueCaps() and ChatInput.setQueue carry the row\'s door (the intersection above is theirs)');
 const m = (row, served, o) => AM.composerSendModes(live(row, served), o);
 const NEW = ['remove', 'steer', 'steer-all', 'reorder', 'edit'], W354 = ['remove', 'reorder', 'edit'];
 const cNew = m(cl, NEW);

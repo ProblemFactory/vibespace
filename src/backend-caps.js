@@ -840,7 +840,40 @@ function toolAllowlistArgs({ backend, pick } = {}) {
   return out;
 }
 
-module.exports = { BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
+/** THE SEND-DOOR TABLE (lane claude-steer-inject — the owner's ruling «A», 2026-10-27: «Enter 立即送入，Alt+Enter 排队»):
+ *  ONE row per default — which door PLAIN ENTER opens while a turn runs, and which the SECOND key opens. A harness row picks
+ *  its default with `inputModes.enterDoor` (absent = 'queue'): 'queue' — Enter holds the message until the turn ends, the
+ *  second key injects it now (codex); 'steer' — Enter hands it to the running turn at once (the Claude CLI's own default),
+ *  the second key holds it (claude). Moved here from src/lib/agent-meta.js (lane reply-door-follows-enter) so the page's
+ *  composer and the server's doors read ONE table. */
+const SEND_DOOR_TABLE = Object.freeze({
+  queue: Object.freeze({ enter: 'queue', alt: 'steer' }),
+  steer: Object.freeze({ enter: 'steer', alt: 'queue' }),
+});
+/** PURE — the doors a conversation offers while a turn runs, from caps = its harness row intersected with the RUNNING
+ *  wrapper's verbs (doorCapsOf). A door exists only where the running wrapper backs it: steer ⇔ `steer`, queue ⇔ `queue` ∧
+ *  `queueOps`. → { enterDoor, altDoor } ('queue' | 'steer' | null) — the composer's (agent-meta composerSendModes) and
+ *  every server door that carries a PERSON's words (src/server/user-input.js `door: 'enter'`). */
+function sendDoors(caps) {
+  const queueDoor = !!(caps && caps.queue && caps.queueOps);
+  const steerDoor = !!(caps && caps.steer);
+  const row = SEND_DOOR_TABLE[caps && caps.enterDoor === 'steer' ? 'steer' : 'queue'];
+  const served = (door) => (door === 'steer' ? steerDoor : queueDoor);
+  const enterDoor = served(row.enter) ? row.enter : (served(row.alt) && row.alt === 'queue' ? 'queue' : null);
+  const altDoor = enterDoor === row.enter && served(row.alt) ? row.alt : null;
+  return { enterDoor, altDoor };
+}
+/** PURE — the caps a conversation's doors read: the harness row's `inputModes` ∩ the verbs its RUNNING wrapper serves
+ *  (`servedVerbs`: the attach payload's / the sidecar's queueVerbs; not an array = every verb the row names). The page's
+ *  chat-view `_queueCaps` and the server's typing path compute it the same way — the wrapper's own `inputQueue` gate first
+ *  (no queue at all ⇒ no door). */
+function doorCapsOf(inputModes, servedVerbs) {
+  const row = inputModes || {};
+  const verbs = (row.queueVerbs || []).filter((v) => !Array.isArray(servedVerbs) || servedVerbs.includes(v));
+  return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
+}
+
+module.exports = { SEND_DOOR_TABLE, sendDoors, doorCapsOf, BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
   NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
   toolAllowlistCaps, toolAllowlistArgs };

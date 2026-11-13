@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 // against the server row) and never a hand-copied boolean that disagrees with
 // the list next to it.
 import { statusBarOf } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the status-bar facts row
-import { deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf, subagentView as serverSubagentView, toolAllowlistArgs } from '../backend-caps.js';
+import { SEND_DOOR_TABLE as SHARED_SEND_DOOR_TABLE, sendDoors, deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf, subagentView as serverSubagentView, toolAllowlistArgs } from '../backend-caps.js';
 
 export const BACKEND_META = {
   claude: {
@@ -329,10 +329,7 @@ export function styleAppliesLive(caps, wrapperLive) {
  *    'queue' — Enter holds the message until the turn ends (editable); the second key injects it now (codex);
  *    'steer' — Enter hands it to the running turn at once (the agent reads it at its next tool call — the Claude CLI's
  *              own default); the second key holds it until the turn ends (claude). */
-export const SEND_DOOR_TABLE = Object.freeze({
-  queue: Object.freeze({ enter: 'queue', alt: 'steer' }),
-  steer: Object.freeze({ enter: 'steer', alt: 'queue' }),
-});
+export const SEND_DOOR_TABLE = SHARED_SEND_DOOR_TABLE;   // ONE table — src/backend-caps.js (lane reply-door-follows-enter: the server's doors read it too)
 
 /** PURE (DOM-free, suite-tested): what the COMPOSER may do while a turn is
  *  running, from ONE `inputModes` row. The caller passes the caps it has
@@ -364,12 +361,7 @@ export const SEND_DOOR_TABLE = Object.freeze({
  *  hint is the desktop face and the button beside Send is the ≤768px one
  *  (chat.css, same shape as `.chat-attach-btn`). */
 export function composerSendModes(caps, { enterSends = true } = {}) {
-  const queueDoor = !!(caps && caps.queue && caps.queueOps);
-  const steerDoor = !!(caps && caps.steer);
-  const row = SEND_DOOR_TABLE[caps && caps.enterDoor === 'steer' ? 'steer' : 'queue'];
-  const served = (door) => (door === 'steer' ? steerDoor : queueDoor);
-  const enterDoor = served(row.enter) ? row.enter : (served(row.alt) && row.alt === 'queue' ? 'queue' : null);
-  const altDoor = enterDoor === row.enter && served(row.alt) ? row.alt : null;
+  const { enterDoor, altDoor } = sendDoors(caps);   // THE ONE decision (src/backend-caps.js) — the server's doors read it too
   const queueSegment = enterDoor === 'queue' || altDoor === 'queue';
   const steerSegment = enterDoor === 'steer' || altDoor === 'steer';
   // chat.enterSends off (lane chat-enter-ime): Enter is a newline, so the line must say which key sends — Enter's own

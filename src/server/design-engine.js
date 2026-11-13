@@ -644,7 +644,7 @@ function create({
    *  conversation that asked — the answers). → {ok, delivered:'sent'|'stashed', …}. */
   function userLine(windowSessionId, host, dir, line, prefer = null) {
     const sessionId = liveSessionFor(windowSessionId, host, dir, prefer);
-    const r = typeof sendUserInput === 'function' ? sendUserInput(sessionId, line, { msgId: now() + '-design', origin: 'design-comment' }) : { ok: false, code: 'no_session' };
+    const r = typeof sendUserInput === 'function' ? sendUserInput(sessionId, line, { msgId: now() + '-design', origin: 'design-comment', door: 'enter' }) : { ok: false, code: 'no_session' };
     if (r && r.ok) return { ok: true, delivered: 'sent', msgId: r.msgId, text: line };
     if (!r || (r.code !== 'no_session' && r.code !== 'not_chat')) return fail((r && r.code) || 'send_failed', (r && r.error) || 'the comment was not sent');
     const cid = conversationFor(sessionId, host, dir, prefer);

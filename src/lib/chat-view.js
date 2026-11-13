@@ -22,7 +22,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 // the SAME array the server maps a verb-less sidecar onto (src/server/
 // wrapper-files.js). Imported, never re-typed: the two ends disagreeing about
 // "no list" is the bug this constant now prevents.
-import { LEGACY_QUEUE_VERBS, worktreeLatchWrite, capsOf } from '../backend-caps.js';
+import { LEGACY_QUEUE_VERBS, worktreeLatchWrite, capsOf, doorCapsOf } from '../backend-caps.js'; // doorCapsOf: the doors' caps — ONE derivation with the server's typing path (lane reply-door-follows-enter)
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode, machineCardOf, machineRunPart, splitRuns, machineCompact, commandHeadWords } from './chat-run-summary.js';
 import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { conversationKeys } from '../outbox-chip.js'; // PURE (lane outbox-session-chip): the ids this conversation drafts under — the filter's keys
@@ -1656,7 +1656,7 @@ class ChatView {
     // steer/queueOps view is recomputed FROM it — never carried over from the
     // harness row, or a control could survive its own gate.
     const served = this._queueVerbsServed;
-    const verbs = (row.queueVerbs || []).filter((v) => !served || served.includes(v));
+    const caps = doorCapsOf(row, served);   // ONE derivation (src/backend-caps.js) — the server's doors read the same
     // ④ THE OLD-WRAPPER SKEW (B-d963): the harness steers notifications (its
     // caps row's DERIVED lane — never a backend id) but THIS process said it
     // cannot, so a queued notification is a billed turn waiting to happen and
@@ -1664,7 +1664,7 @@ class ChatView {
     const notifSteerMissing = this._queueNotifSteer === false && notificationDeliveryFor(backend) === 'steer';
     // ⑤ the row's DECLARED default door (lane claude-steer-inject) rides along; composerSendModes draws it only where
     // the verbs above back it
-    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
+    return { ...caps, notifSteerMissing };
   }
 
   /** This view's harness id — the ONE resolution order (live session record,

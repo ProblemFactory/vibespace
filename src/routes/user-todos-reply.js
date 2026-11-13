@@ -82,7 +82,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
     // agent tokens refused above), exactly the turn the composer would send after a hand Resume; the resume itself
     // sends nothing. So it rides THE typing path (no authorizer, no ladder — src/server/user-input.js says why) and
     // the spend census excuses it with this file's typed-send row (scripts/test-spend-paths.mjs).
-    const r = sendUserInput(o.sessionId, composeReply(item, text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply' });
+    const r = sendUserInput(o.sessionId, composeReply(item, text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply', door: 'enter' });   // the conversation's own Enter door (lane reply-door-follows-enter)
     if (!r || !r.ok) return res.status(STATUS[(r && r.code) || 'send_failed'] || 500).json({ error: (r && r.error) || 'the reply was not sent', code: (r && r.code) || 'send_failed', reopened: true, sessionId: o.sessionId, conversation: o.conversation || null });
     const updated = userTodos.resolveByReply(item.id, text);
     res.json({ ok: true, reopened: true, sessionId: o.sessionId, conversation: o.conversation || null, msgId: r.msgId, item: updated });
@@ -99,7 +99,7 @@ function registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserI
       const v = replyVerdict({ item, session: s ? { live: true, mode: s.mode || 'terminal', remoteState: (s._remoteState && s._remoteState.state !== 'connected') ? s._remoteState.state : null } : null });
       if (!v.ok && v.code === 'no_live_session' && typeof reopen === 'function') return reopenAndSend(req, res, item, t.text);
       if (!v.ok) return fail(res, v.code, v.why);
-      const r = sendUserInput(hit[0], composeReply(item, t.text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply' });
+      const r = sendUserInput(hit[0], composeReply(item, t.text, { now: now() }), { msgId: Date.now() + '-reply', origin: 'inbox-reply', door: 'enter' });   // the conversation's own Enter door (lane reply-door-follows-enter)
       if (!r || !r.ok) {
         const code = r && r.code === 'no_session' ? 'no_live_session' : (r && r.code) || 'send_failed';
         return fail(res, code, (r && r.error) || 'the reply was not sent');

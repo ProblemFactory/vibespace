@@ -645,7 +645,7 @@ function trackedServerSource() {
       const dsrc = read('src/server/design-engine.js');
       ok('§2 LANE DESIGN-CHROME: the design comment opens no turn nobody typed — design-engine.js holds no ladder call, no authorizer, no spend reason and no frame formatter; its comment goes to the typing sender (sendUserInput, origin design-comment) or the stash (stashFor, source design-comment), and the census finds no producer site in it but that typing sender (its typed-send row is an ALLOW: the owner\'s own click — lane worker-dispatch\'s census, composed at the 2.369.202 integration)',
         !/deliverToConversation|authorizeSpend|spendReason|formatChatInput|peerPost|postToInbox/.test(dsrc)
-          && /sendUserInput\(sessionId, line, \{ msgId: now\(\) \+ '-design', origin: 'design-comment' \}\)/.test(dsrc)
+          && /sendUserInput\(sessionId, line, \{ msgId: now\(\) \+ '-design', origin: 'design-comment', door: 'enter' \}\)/.test(dsrc)   // + the conversation's own Enter door (lane reply-door-follows-enter) — still the typing sender, the owner's words
           && /deliver\.stashFor\(cid, \{ source: 'design-comment', kind: 'peer', fromName: DESIGN_COMMENT_FROM, text: line \}\)/.test(dsrc)
           && hits.filter((h) => h.file === 'src/server/design-engine.js' || h.file === 'src/routes/design.js').every((h) => h.file === 'src/server/design-engine.js' && h.prim === 'typed-send' && ALLOW.some((a) => a.file === h.file && a.prim === h.prim)),
         JSON.stringify(hits.filter((h) => /design/.test(h.file))));
