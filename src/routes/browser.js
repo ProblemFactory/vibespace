@@ -264,7 +264,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
   login_fill_withdrawn: 409, login_retired: 409, login_no_form: 409, login_in_frame: 409, login_form_changed: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
-  login_bad_origin: 400, login_bad_user: 400, login_bad_field: 400, bad_request: 400, login_fill_live: 409, login_fence_unavailable: 409, login_channel_unmediated: 409, login_not_pending: 409, login_pending_exists: 409, login_no_previous: 409, login_no_otp: 409, code_paced: 429, target_not_found: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
+  login_bad_origin: 400, login_bad_user: 400, login_bad_field: 400, bad_request: 400, login_fill_live: 409, login_fence_unavailable: 409, login_channel_unmediated: 409, login_check_failed: 409, login_not_pending: 409, login_pending_exists: 409, login_no_previous: 409, login_no_otp: 409, code_paced: 429, target_not_found: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
   browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
@@ -2086,7 +2086,14 @@ async function liveFillRefusal(res, k, f, profileId, req, verb) {
     try { D.noteActiveTab(t, targetId); } catch { /* optional */ }
   }
   if (typeof D.recheckPostLiftFor === 'function') {
-    try { await D.recheckPostLiftFor(t, { verb, argv, batchVerbs, targetId }); } catch { /* optional */ }
+    let rc = null;
+    try { rc = await D.recheckPostLiftFor(t, { verb, argv, batchVerbs, targetId }); } catch { rc = null; }
+    if (rc && rc.checkFailed) {
+      const BL = require('../browser-login.js'), PT = require('../peer-text.js');
+      const code = rc.code || 'login_check_failed';
+      res.status(STATUS[code] || 409).json({ error: PT.toAgentText(BL.loginText({ ok: false, code, error: rc.error || 'VibeSpace could not check this tab — try again' }), { max: BL.TEXT_MAX }), code, ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) });
+      return true;
+    }
   }
   const lv = D.liveFillVerdictFor(t, { verb, argv, batchVerbs, targetId });
   if (lv && !lv.ok) {
@@ -2248,7 +2255,7 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
   if (!elemTarget || !spec) return res.status(400).json({ error: '`fill --vault` takes <@ref|selector> and --vault [new:]<entry>/<field>', code: 'bad-request' });
   try {
     const s = f.session || {};
-    const cid = require('../claude-lock-capture.js').addressableId(s);
+    const cid = require('../claude-lock-capture.js').addressableId(s) || (f.job && f.job.cid ? String(f.job.cid) : null);
     const facts = { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable };
     const conv = cid ? String(cid) : f.sessionId;
     const actor = String(s.webuiName || s.name || '').slice(0, 80) || null;
@@ -2296,7 +2303,7 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
     if (!t0.ok) {
       if (typeof D.precheckVaultFill === 'function' && (!body.profile || t0.code === 'not-found')) {
         const pre0 = D.precheckVaultFill({ target: elemTarget, spec, generate: body.generate === true, user: word(body.user, 200), facts, conv, actor, owners, profileId: '', ...chanOpts });
-        if (pre0 && !pre0.ok && pre0.code === 'login_channel_unmediated') {
+        if (pre0 && !pre0.ok && (pre0.code === 'login_channel_unmediated' || pre0.code === 'job_no_profile')) {
           return res.status(STATUS[pre0.code] || 409).json({ error: beltLogin(pre0), code: pre0.code });
         }
       }
@@ -2342,6 +2349,9 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
       ...chanOpts,
     });
     const text = beltLogin(r);
+    if (!r.ok && r.code === 'code_paced') {
+      return res.status(429).json({ ok: false, code: 'code_paced', error: text, retryInMs: Math.max(1, Number(r.retryInMs) || 1000), secondsLeft: Math.max(1, Number(r.secondsLeft) || 1) });
+    }
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'fill-vault', dialog: { type: 'fill-vault', message: `${r.origin || ''} (${r.field || ''})` } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
     res.json({
@@ -2497,7 +2507,13 @@ router.post('/api/agent/browser/direct', async (req, res) => {
     }
     if (typeof D.liveFillVerdictFor === 'function') {
       if (typeof D.recheckPostLiftFor === 'function') {
-        try { await D.recheckPostLiftFor(t, { verb: 'screenshot' }); } catch { /* optional */ }
+        let rc = null;
+        try { rc = await D.recheckPostLiftFor(t, { verb: 'screenshot' }); } catch { rc = null; }
+        if (rc && rc.checkFailed) {
+          const BL = require('../browser-login.js'), PT = require('../peer-text.js');
+          const code = rc.code || 'login_check_failed';
+          return res.status(STATUS[code] || 409).json({ error: PT.toAgentText(BL.loginText({ ok: false, code, error: rc.error || 'VibeSpace could not check this tab — try again' }), { max: BL.TEXT_MAX }), code });
+        }
       }
       const lv = D.liveFillVerdictFor(t, { verb: 'screenshot' });
       if (lv && !lv.ok) { const BL = require('../browser-login.js'), PT = require('../peer-text.js'); return res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code }); }

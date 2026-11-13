@@ -17,11 +17,13 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startFakeKernel } from './fixtures/fake-kernel.mjs';
 import { runR28LoginNails } from './fixtures/r28-login-nails.mjs';
 import { runR29LoginNails } from './fixtures/r29-login-nails.mjs';
+import { runR30LoginNails } from './fixtures/r30-login-nails.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const express = require(path.join(REPO, 'node_modules/express'));
 const BL = require(path.join(REPO, 'src/browser-login.js'));
+const BM = require(path.join(REPO, 'src/browser-mediation.js'));
 const BV = require(path.join(REPO, 'src/browser-verbs.js'));
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));
@@ -40,6 +42,56 @@ const ok = (c, label, detail) => {
 };
 const eq = (a, b, label) => ok(JSON.stringify(a) === JSON.stringify(b), label, { got: a, want: b });
 const quiet = { log() {}, warn() {}, error() {} };
+const stubLoginChannel = ({ mediated = false, proxy = true, ephemeral = false, remote = false, external = false, remoteSession = false, hasCdp = true, label = 'ShopProfile', action = 'fill' } = {}) =>
+  BM.loginFillChannelVerdict(
+    BM.leaseRoadVerdict({ mediated, proxy, ephemeral: Boolean(ephemeral), remote: Boolean(remote || external || remoteSession), agent: true }),
+    { proxy, external, remote, remoteSession: Boolean(remoteSession), hasCdp, usableProfiles: proxy ? [label] : [], profileLabel: label, action },
+  );
+
+function spawnNailChild(scriptRel) {
+  return new Promise((resolve) => {
+    const ch = spawn(process.execPath, [path.join(REPO, scriptRel), `--repo=${REPO}`], {
+      cwd: REPO,
+      env: process.env,
+    });
+    let out = '';
+    ch.stdout.on('data', (d) => { out += d; });
+    ch.stderr.on('data', (d) => { out += d; });
+    const tm = setTimeout(() => { try { ch.kill('SIGKILL'); } catch {} }, 30_000);
+    ch.on('close', (status) => {
+      clearTimeout(tm);
+      resolve({ scriptRel, status, out });
+    });
+  });
+}
+
+function replayNailChild(res, fallbackFn) {
+  void fallbackFn;
+  let seen = 0;
+  for (const line of String(res.out || '').split('\n')) {
+    if (line.startsWith('⑨ ') || line.startsWith('⑩ ')) {
+      console.log(line);
+      continue;
+    }
+    if (line.startsWith('[PASS] ')) {
+      seen++;
+      ok(true, line.slice('[PASS] '.length));
+    } else if (line.startsWith('[FAIL] ')) {
+      seen++;
+      const rest = line.slice('[FAIL] '.length);
+      const arrow = rest.indexOf(' -> ');
+      if (arrow >= 0) ok(false, rest.slice(0, arrow), rest.slice(arrow + 4));
+      else ok(false, rest);
+    }
+  }
+  if (seen === 0 || (res.status !== 0 && fail === 0)) {
+    ok(false, `${res.scriptRel} exited cleanly with checks`, { status: res.status, seen, tail: String(res.out || '').slice(-1500) });
+  }
+}
+
+// Overlap independent Round 29 & Round 30 nail legs in isolated child processes (no shared LF target map).
+const r29ChildPromise = spawnNailChild('scripts/fixtures/r29-login-nails.mjs');
+const r30ChildPromise = spawnNailChild('scripts/fixtures/r30-login-nails.mjs');
 
 const secretNeedles = (v) => {
   if (!v) return [];
@@ -418,6 +470,7 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
     onLease: () => () => {},
     saveLoginFenceState: (id, st) => keeper.saveLoginFenceState(id, st),
     loginFenceStateOf: (id) => keeper.loginFenceStateOf(id),
+    loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fk.wsUrl), label: prof.label, action }),
   };
 
   const watch = Dm.create({
@@ -1049,6 +1102,7 @@ if (typeof LF?.resolveSnapshotRef === 'function' && Dm.SCAN_LIMITS) {
       onLease: () => () => {},
       saveLoginFenceState() {},
       loginFenceStateOf: () => null,
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkStd.wsUrl), action }),
     };
     const wEvents = [];
     const wB = Dm.create({
@@ -1427,6 +1481,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         onLease: () => () => {},
         saveLoginFenceState() {},
         loginFenceStateOf: () => null,
+        loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkM.wsUrl), action }),
       };
       // Run M6 (L3)
       const w6 = BD_M6 ? BD_M6.create({ keeper: sk, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-m', sessionId: 's-m' }], leaseCountOf: () => 1, logins: logM, takeoverOf: () => true }) : null;
@@ -1632,6 +1687,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         onLease: () => () => {},
         saveLoginFenceState() {},
         loginFenceStateOf: () => null,
+        loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), action }),
       };
       const tidR24 = fkR24.targets()[0].targetId;
 
@@ -1767,6 +1823,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           onLease: () => () => {},
           saveLoginFenceState() {},
           loginFenceStateOf: () => null,
+          loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M16', action }),
         };
         const w16 = Dm.create({ keeper: k16, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-000016aa', sessionId: 's-m16' }], leaseCountOf: () => 1, logins: logR24 });
         const tok16 = 'vsst_' + crypto.randomBytes(12).toString('hex');
@@ -1981,6 +2038,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
                 audit() {},
                 saveLoginFenceState: (_pid, st) => { persistedState = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
                 loginFenceStateOf: () => JSON.parse(JSON.stringify(persistedState)),
+                loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkA1.wsUrl), label: 'A1', action }),
               };
               const tidMain = fkA1.targets()[0].targetId;
               const tidLock = fkA1.addTarget('https://shop.example.test/lock-tab');
@@ -2135,6 +2193,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             audit() {},
             saveLoginFenceState: (_p, s) => { st19 = JSON.parse(JSON.stringify(s || { fences: [], scrubs: [] })); return true; },
             loginFenceStateOf: () => JSON.parse(JSON.stringify(st19)),
+            loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M19', action }),
           };
           fkR24.setDom(tidR24, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
           const w19a = BD_M19.create({ keeper: k19, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24 });
@@ -2191,6 +2250,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             onLease: () => () => {},
             saveLoginFenceState() {},
             loginFenceStateOf: () => null,
+            loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M20', action }),
           };
           const tok20 = 'vsst_' + crypto.randomBytes(12).toString('hex');
           const sess20 = { agentToken: tok20, _browserKey: 'bk-000020aa', _browserVariant: 'D', name: 'M20 Agent', cwd: dirM10, backendSessionId: 'conv-mr24' };
@@ -3286,6 +3346,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             onLease: () => () => {},
             saveLoginFenceState() {},
             loginFenceStateOf: () => null,
+            loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M2', action }),
           };
           const wM2 = Dm.create({ keeper: kM2, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-000028cc', sessionId: 's-m2' }], leaseCountOf: () => 1, logins: logOtp });
           await wM2.arm(profM2.id);
@@ -3386,6 +3447,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
               onLease: () => () => {},
               saveLoginFenceState() {},
               loginFenceStateOf: () => null,
+              loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M29', action }),
             };
             const w = Dm.create({ keeper: k, log: quiet, enableTimeoutMs: 400, holdersOf: () => [{ browserKey: 'bk-m29', sessionId: 's-m29' }], leaseCountOf: () => 1, logins: logR24 });
             await w.arm(prof.id);
@@ -3661,7 +3723,9 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   }
 
   await runR28LoginNails({ repoDir: REPO, ok, MUT });
-  await runR29LoginNails({ repoDir: REPO, ok });
+  const [r29Child, r30Child] = await Promise.all([r29ChildPromise, r30ChildPromise]);
+  replayNailChild(r29Child, runR29LoginNails);
+  replayNailChild(r30Child, runR30LoginNails);
 
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 35 })) {
     ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);

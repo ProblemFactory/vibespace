@@ -769,6 +769,7 @@ try {
   });
   const pf5 = keeper5.createProfile({ label: 'KFL5' }, { owner: { kind: 'user', id: 'owner' } });
   const fk5 = await startFakeKernel({ firstUrl: 'https://vault.example.test/settings/password' });
+  const BM5 = require(path.join(REPO, 'src/browser-mediation.js'));
   const mkWatch5 = (Dmod, rk) => Dmod.create({
     keeper: {
       cdpEndpointFor: async () => ({ ok: true, url: fk5.wsUrl }),
@@ -776,6 +777,10 @@ try {
       onLease: () => () => {},
       saveLoginFenceState: (id, st) => rk.saveLoginFenceState(id, st),
       loginFenceStateOf: (id) => rk.loginFenceStateOf(id),
+      loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => BM5.loginFillChannelVerdict(
+        BM5.leaseRoadVerdict({ mediated: false, proxy: true, ephemeral: Boolean(ephemeral), remote: Boolean(remoteSession), agent: true }),
+        { proxy: true, external: false, remote: false, remoteSession: Boolean(remoteSession), hasCdp: Boolean(fk5.wsUrl), usableProfiles: [pf5.label], profileLabel: pf5.label, action },
+      ),
     },
     log: quiet, enableTimeoutMs: 300,
     holdersOf: () => [{ browserKey: 'bk-kfl5', sessionId: 'sess-kfl5', ephemeral: false }],
