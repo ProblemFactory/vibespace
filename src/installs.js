@@ -7,7 +7,7 @@
  *     the agent's `stream-mic` facts — lane stream-mic-road),
  *     plan(facts) | spec (a closed apt spec → the slot's packageInstallPlan), default? (the install a request that names
  *     none means), humanOnly? (an agent token is refused at the route), local?: {code, error} (refused BY NAME on this
- *     machine), done: 'display' | 'catalog' | 'vnc' | 'mic' | 'mic-removed' (what the route re-checks after the run) }
+ *     machine), done: 'display' | 'catalog' | 'vnc' | 'mic' | 'mic-removed' | 'ffmpeg' (what the route re-checks after the run) }
  * The access layer (src/server/desktop-access.js installPlan / installPackage), the routes (src/routes/desktop-apps.js
  * GET install-plan, POST install) and the plan lookup ask the ROW; none of them names an installable. A new installable
  * = its row in its owner module + one line below (its words in the install dialog aside).
@@ -16,12 +16,14 @@ const M = require('./desktop-apps');
 const O = require('./office-open');
 const S = require('./install-slot');
 const MI = require('./mic-install'); // lane stream-mic-road: 「安装虚拟麦克风」 + its uninstall door
+const FF = require('./ffmpeg-install'); // lane machine-needs-at-pairing: 「取得 FFmpeg」 — a paired Windows machine's ffmpeg, pinned
 
 const INSTALLS = Object.freeze([
   M.XPRA_INSTALL, // the display rung (src/desktop-apps.js)
   ...O.INSTALL_ROWS, // §7.9 the LibreOffice set (src/office-open.js)
   M.TIGHTVNC_INSTALL, // design 014 D1 the Windows one-time setup (src/machine-desktop-model.js, re-exported by src/desktop-apps.js)
   MI.VIRTUAL_MIC_INSTALL, MI.VIRTUAL_MIC_REMOVE, // lane stream-mic-road: the virtual microphone of a Windows / macOS machine (src/mic-install.js)
+  FF.FFMPEG_INSTALL, // lane machine-needs-at-pairing: the stream's / the sound's / the microphone's ffmpeg of a Windows machine (src/ffmpeg-install.js)
 ]);
 const BY_ID = new Map(INSTALLS.map((r) => [r.id, r]));
 /** The install a request that names none means (the one row declaring `default`). */

@@ -185,6 +185,7 @@
 const RG = require('../app-kinds/registered.js'); // PURE — lane app-register-model: the owner's Adopt prefill
 const express = require('express');
 const { capsOf, scaleChoiceVerdict, relaunchLeaseVerdict, TIGHTVNC, machineDesktopId } = require('../desktop-apps');
+const SPL = require('../stream-plan'); // lane machine-needs-at-pairing: 「取得 FFmpeg」 is done when ffmpegPasses says so
 const { INSTALL_WHATS, DEFAULT_INSTALL, installRow } = require('../installs'); // THE INSTALLABLES — the routes ask the row (lane dc-apps-rows)
 /** design 014 D1: the whole-desktop refusals' statuses (by name, like every code below). */
 const D014_STATUS = Object.freeze({ human_only: 403, no_vnc: 409, not_desktop_machine: 409, not_windows: 409, no_admin: 409, run_failed: 409, empty: 400, too_long: 400, multi_line: 400, hidden_chars: 400,
@@ -410,7 +411,14 @@ const xpraDone = (r) => {
   return out;
 };
 /** What the route re-checks after an install, by the row's declared `done` (src/installs.js) — never by its name. */
-const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone, mic: () => micDone(true), 'mic-removed': () => micDone(false) };
+/** lane machine-needs-at-pairing: 「取得 FFmpeg」 is done when the machine's stream facts, read again, name an ffmpeg that PASSES
+ *  (src/stream-plan.js ffmpegPasses — the same verdict the stream asks); otherwise `still_absent` by name with what it found. */
+const ffmpegDone = (r) => {
+  const ff = r.after && r.after.ok !== false ? r.after.ffmpeg : null;
+  if (!ff || !SPL.ffmpegPasses(ff)) { const e = new Error(`the fetch finished on ${r.hostId}, but its agent finds no ffmpeg that passes (${ff ? `${ff.path}: ${SPL.ffmpegVerdict(ff).error || 'no H.264 encoder'}` : (r.after && r.after.error) || 'none found'}) — check again`); e.code = 'still_absent'; throw e; }
+  return { done: true, what: 'ffmpeg', label: r.plan.label, source: r.plan.source, hostId: r.hostId, ffmpeg: { path: ff.path, where: ff.where || null, version: ff.version || null } };
+};
+const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone, mic: () => micDone(true), 'mic-removed': () => micDone(false), ffmpeg: () => ffmpegDone };
 // verify-r6 I1: the press names the plan it was SHOWN (`planDigest` from GET install-plan) — a plan that changed since
 // is refused plan_changed with the new one, nothing run
 const shownDigest = (req) => (req.body && typeof req.body.planDigest === 'string' && req.body.planDigest ? req.body.planDigest.slice(0, 64) : null);
@@ -631,7 +639,7 @@ router.post('/api/desktop/machine-desktop/settings-open', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access || typeof ctx.access.settingsOpen !== 'function') return noAccess(res);
   const pane = String((req.body && req.body.pane) || '');
-  if (pane !== 'screen' && pane !== 'accessibility') { res.status(400).json({ error: 'pane is screen or accessibility', code: 'bad-request' }); return; }
+  if (!SPL.SETTINGS_PANES.includes(pane)) { res.status(400).json({ error: `pane is one of ${SPL.SETTINGS_PANES.join(', ')}`, code: 'bad-request' }); return; } // lane machine-needs-at-pairing pick 2: the PURE tables name every pane
   try { res.json(await ctx.access.settingsOpen(host, pane, { by: actByOfReq(req) })); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/machine-desktop/stream/answer', async (req, res) => {
@@ -684,6 +692,8 @@ router.get('/api/desktop/machine-desktop/stream/facts', async (req, res) => {
   if (!req.query.machine) { res.json({ sessions: wr.facts(host) }); return; }
   let machine;
   try { machine = await ctx.access.streamFacts(host, { force: !!req.query.force }); } catch (e) { machine = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
+  // lane machine-needs-at-pairing pick 2: the page asks whether a door is owed — the same verdict the stream asks (no page copy of it)
+  if (machine && machine.ok !== false && machine.platform === 'win32') { machine.ffmpegPasses = SPL.ffmpegPasses(machine.ffmpeg); if (!machine.ffmpegPasses) machine.ffmpegWhy = SPL.ffmpegVerdict(machine.ffmpeg).error || 'no H.264 encoder (NVENC, AMF, Quick Sync or x264)'; }
   res.json({ sessions: wr.facts(host), machine });
 });
 // lane desktop-handover: THE HAND-OVER — the owner gives the window's live stream of this machine to ONE agent conversation

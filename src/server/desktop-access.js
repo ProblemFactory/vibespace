@@ -439,6 +439,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let held = null;
     try {
       const { plan, facts } = await installPlan(hostId, what, planOpts);
+      if (plan && plan.stream) return await runStreamInstall(hostId, plan, { onData, expectDigest, by }); // lane machine-needs-at-pairing: 「取得 FFmpeg」 — unelevated, no slot shell
       if (plan && (plan.uac || plan.adminDialog)) { // design 014 D1: Windows asks on its own screen (lane stream-mic-road: a Mac's password dialog too)
         const done = await runUacInstall(hostId, plan, { onData, expectDigest, by });
         if (plan.after === 'mic') done.after = (await micFacts(hostId, { force: true, by })).facts; // lane stream-mic-road: the machine's microphone facts, read again
@@ -640,6 +641,23 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  argv asks Windows for elevation ON THAT MACHINE'S SCREEN and waits: someone there clicks Yes and types the VNC
    *  password into the administrator window — VibeSpace never carries it. Declined / nobody there ⇒ `no_admin` by name
    *  with the plan (its commands = the same script for an administrator PowerShell). Done = the 5900 probe, after. */
+  /** lane machine-needs-at-pairing (「取得 FFmpeg」): a plan the machine's agent runs UNELEVATED and streams (`plan.stream` — a
+   *  PowerShell on Windows, where the install slot's shell does not exist): no prompt on that machine, exit 0 = done. Then the
+   *  machine's stream facts are read again (forced) — the route judges them (src/routes/desktop-apps.js DONE.ffmpeg). */
+  async function runStreamInstall(hostId, plan, { onData = () => { }, expectDigest = null, by = 'system:desktop-access' } = {}) {
+    if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
+    if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran`); e.plan = plan; throw e; }
+    const dm = await deviceOf(hostId);
+    if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
+    log.log?.(`[desktop] fetching ${plan.label} on ${hostId} from ${plan.source} (unelevated, into ${plan.folder || 'its folder'})`);
+    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by });
+    const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
+    if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the fetch on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
+    if (r.code !== 0) throw fail('install_failed', `the fetch exited ${r.code} on ${hostId} — the log above says why; nothing was changed there`);
+    let after = null;
+    try { after = await streamFacts(hostId, { force: true }); } catch (e) { after = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
+    return { ok: true, what: plan.what, hostId, plan, before: null, after, facts: null, reattached: false };
+  }
   async function runUacInstall(hostId, plan, { onData = () => { }, expectDigest = null, by = 'system:desktop-access' } = {}) {
     if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
     if (expectDigest != null && planDigest(plan) !== String(expectDigest)) { const e = named('plan_changed', `what would run on ${hostId} changed after it was shown — nothing ran; read the new commands, then press Install again`); e.plan = plan; e.digest = planDigest(plan); throw e; }
@@ -818,7 +836,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (isLocal(hostId)) throw named('not_desktop_machine', 'this machine\'s own Settings are its own');
     const dm = await deviceOf(hostId);
     const platform = platformOfHandle(dm);
-    if (platform !== 'darwin') return { ok: false, code: 'not_mac', platform, error: `${hostName(hostId)} is not a Mac` };
+    if (platform !== 'darwin' && platform !== 'win32') return { ok: false, code: 'not_mac', platform, error: `${hostName(hostId)} is neither a Mac nor a Windows machine` }; // lane machine-needs-at-pairing pick 2: a Windows machine's Settings pages too
     const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot open its Settings — it needs version ${AGENT_VERSION} or later` });
     if (typeof dm.settingsOpen !== 'function') return tooOld(null);
     try { return await dm.settingsOpen(pane, { by }); }

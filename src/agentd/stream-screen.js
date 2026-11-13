@@ -43,6 +43,7 @@
  */
 const path = require('path');
 const SP = require('../stream-plan.js');
+const FF = require('../ffmpeg-install.js'); // lane machine-needs-at-pairing pick 2: the fetched copy's stamp + the pinned fingerprints (PURE)
 const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's IVF → temporal units
 
 const FACTS_MS = 30000;      // a facts answer is reused this long (a refused offer re-reads them: `force`)
@@ -121,6 +122,19 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     qos.sent = false;
     qosScript([process.pid], true);
   }
+  const hashed = new Map(); // path → { size, mtimeMs, sha256 } — a stamped copy is hashed once per agent life while it stays the same file
+  /** null = no stamp beside it (or the copy matches its stamp); else the words of why the fetched copy is not run. */
+  async function fetchedCopyChanged(file, st) {
+    let stamp = null;
+    try { stamp = FF.stampOf(fs.readFileSync(path.join(path.dirname(file), FF.FFMPEG_STAMP), 'utf8')); } catch { return null; }
+    if (!stamp) return null;
+    let h = hashed.get(file);
+    if (!h || h.size !== st.size || h.mtimeMs !== st.mtimeMs) {
+      const sha256 = await new Promise((resolve) => { const hash = require('crypto').createHash('sha256'); const rs = fs.createReadStream(file); rs.on('data', (d) => hash.update(d)); rs.on('error', () => resolve(null)); rs.on('end', () => resolve(hash.digest('hex'))); });
+      h = { size: st.size, mtimeMs: st.mtimeMs, sha256 }; hashed.set(file, h);
+    }
+    return FF.stampedCopyOk(stamp, h.sha256) ? null : `it is not the copy VibeSpace fetched (${stamp.label || 'ffmpeg'}): its SHA-256 changed since`;
+  }
   async function findFfmpeg() {
     // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
     // ~/.local/bin); the folders from this process's environment
@@ -131,6 +145,10 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     return SP.firstPassingFfmpeg(candidates, async (c) => {
       let st = null; try { st = fs.statSync(c.path); } catch { return null; }
       if (!st.isFile()) return null;
+      // lane machine-needs-at-pairing pick 2 (主开发 Q5): a copy VibeSpace FETCHED (its stamp beside it) is checked against the stamp
+      // before it runs — bytes that changed since are never run, and the refusal names it; an unstamped copy is judged as before
+      const changed = await fetchedCopyChanged(c.path, st);
+      if (changed) return { path: c.path, where: c.where, version: null, major: null, ddagrab: false, encoders: [], changed };
       const [v, fl, en] = [await run(c.path, ['-hide_banner', '-version']), await run(c.path, ['-hide_banner', '-filters']), await run(c.path, ['-hide_banner', '-encoders'])];
       if (v.err && !v.stdout) return null;
       return { path: c.path, where: c.where, ...SP.parseFfmpegFacts(v.stdout, fl.stdout, en.stdout) };
@@ -440,7 +458,17 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     };
   }
 
-  return { facts, source };
+  /** lane machine-needs-at-pairing pick 2: 「打开 Windows 设置」 — a Settings page ON this machine (SP.WIN_SETTINGS, by name): a hidden
+   *  PowerShell's Start-Process opens its ms-settings: link in the signed-in person's session (no grant; the page shows, the console
+   *  never does — this module's ONE run, windowsHide). → { ok, pane } | { ok:false, code } */
+  async function openSettings(pane) {
+    if (platform !== 'win32') return named('not_windows', 'Windows Settings are a Windows machine\'s');
+    const uri = Object.prototype.hasOwnProperty.call(SP.WIN_SETTINGS, pane) ? SP.WIN_SETTINGS[pane] : null;
+    if (!uri) return named('bad_pane', `no Settings page named ${JSON.stringify(String(pane).slice(0, 20))}`);
+    const r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `Start-Process '${uri}'`]);
+    return r.err ? named('open_failed', `Windows did not open ${uri} (${String(r.stderr || r.err.message || r.err.code).trim().slice(0, 120)})`) : { ok: true, pane };
+  }
+  return { facts, source, openSettings };
 }
 
 /** THE MAPPER WORKER's body (agentd.js runs it in its `stream-map` worker branch): the table once, then frames. */

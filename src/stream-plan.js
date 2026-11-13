@@ -275,6 +275,7 @@ function ffmpegVerdict(ff) {
   // lane machine-needs-at-pairing: the need as the ladder takes it (any rung — NVENC is only the first; was «and NVENC»)
   const need = `this machine needs ffmpeg ${FFMPEG_MIN_MAJOR} or newer with ddagrab and an H.264 encoder — NVENC, AMF, Quick Sync or x264 (looked in ${LOOKED})`;
   if (!ff || !ff.path) return { ok: false, code: 'no_ffmpeg', error: need };
+  if (ff.changed) return { ok: false, code: 'no_ffmpeg', error: `${need}; ${ff.path}: ${ff.changed} — fetch it again` }; // lane machine-needs-at-pairing pick 2: a fetched copy that changed is never run
   if (!(ff.major >= FFMPEG_MIN_MAJOR)) return { ok: false, code: 'no_ffmpeg', error: `${need}; ${ff.path} is ${ff.version || 'an unknown version'}` };
   if (!ff.ddagrab) return { ok: false, code: 'no_ffmpeg', error: `${need}; ${ff.path} has no ddagrab` };
   return { ok: true };
@@ -813,9 +814,18 @@ function flvReader() {
 // (a background agent cannot: tccd "does not allow prompting"); a refusal names the Settings pane (MAC_SETTINGS).
 const MAC_HELPER = Object.freeze({ name: 'vibespace-screen', dir: Object.freeze(['.vibespace', 'helpers']), target: 'macos15.0', archs: Object.freeze(['arm64', 'x86_64']) });
 const MAC_SETTINGS = Object.freeze({
+  sharing: 'x-apple.systempreferences:com.apple.Sharing-Settings.extension', // lane machine-needs-at-pairing pick 2: Screen Sharing (macOS 13+; General › Sharing)
   screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
   accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
 });
+/** lane machine-needs-at-pairing pick 2 (主开发's law 2 — kind (c) and (b)'s doors on the line that states the need): a Mac door that is
+ *  a program, not a pane — `xcode-select --install` shows macOS's own Command Line Tools installer in the person's session (the
+ *  screen helper is then built there); and a Windows machine's Settings pages, opened by their ms-settings: name. BY NAME only —
+ *  no text from the hub reaches an argv. */
+const MAC_DOORS = Object.freeze({ clt: Object.freeze(['/usr/bin/xcode-select', '--install']) });
+const WIN_SETTINGS = Object.freeze({ remotedesktop: 'ms-settings:remotedesktop', sound: 'ms-settings:sound' });
+/** Every pane / door name the route lets through (the agent judges it against its own platform's table). */
+const SETTINGS_PANES = Object.freeze([...new Set([...Object.keys(MAC_SETTINGS), ...Object.keys(MAC_DOORS), ...Object.keys(WIN_SETTINGS)])]);
 // the size ladder (measured on an M4 Pro, low-latency rate control, real frames): 4K60 is out of reach (37 fps real, serial
 // 17–29 ms a frame); 1440p (SCK scales on the GPU) holds 57 fps at 11.9 ms, 4K at 30 fps 18.7 ms. A display or window that
 // fits 2560×1600 streams native at 60; a larger one is scaled to 2560×1440 at 60, or (`quality: 'full'`) native at 30.
@@ -1057,7 +1067,7 @@ module.exports = {
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, ffmpegPasses, firstPassingFfmpeg, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
-  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
+  MAC_HELPER, MAC_SETTINGS, MAC_DOORS, WIN_SETTINGS, SETTINGS_PANES, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint,
   WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
 };
