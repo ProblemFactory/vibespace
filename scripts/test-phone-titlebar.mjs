@@ -354,7 +354,7 @@ console.log('§5 the wiring');
     'the For-you chip carries its ONE-badge form beside the five — a .mnav-one, never a .ut-count (the badge\'s readers count those)');
   const css = read('public/style.css');
   ok(css.includes('html[data-vc="compact"] #mobile-nav-files { display: none; }') && css.includes('html[data-vc="compact"] #mobile-nav > .bar-folded { display: none !important; }')
-    && /html\[data-vc="compact"\] #mobile-nav > :is\(#mobile-nav-menu, [^)]*#mobile-nav-overflow\) \{ min-width: 44px; min-height: 44px; \}/.test(css) && css.includes('html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .ut-count { display: none; }')
+    && /html\[data-vc="compact"\] #mobile-nav > :is\(#mobile-nav-menu, [^)]*#mobile-nav-overflow\) \{ min-width: 44px; min-height: 44px; \}/.test(css) && css.includes('html[data-vc="compact"] #mobile-nav-todos .ut-count { display: none; }') /* the compact class: ONE number ALWAYS (主开发's ruling 2026-11-13 — the recovery of phone-six); was gated on [data-badges="one"] */
     && css.includes('.mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px;'), 'style.css: the compact bar — no folder icon, 44 px targets, a folded chip leaves the row, the one-badge form, the ⋯ rows 44 px / 16 px');
   // NO RULE RE-SHOWS THE COMPACT BAR'S FOLDER ICON (the r1 acceptance's gap M6b): a rule that names #mobile-nav-files itself and sets a
   // display other than none is the regular class's, or plain (lower than the compact rule), never !important

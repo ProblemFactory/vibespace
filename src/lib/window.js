@@ -19,6 +19,7 @@ import { stageRefusalWords, stageWindowKind } from './stage-rules.js'; // inc-mu
 import { STAGE_ID } from './stage-manager.js';
 import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { headName } from '../phone-head.js'; // lane phone-six r2: a phone head's name (a path → its last segment)
 
 /** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
 function setChipMode(chip, mode) {
@@ -116,7 +117,7 @@ class WindowManager {
     const iconSpan = document.createElement('span'); iconSpan.className = 'window-type-icon'; iconSpan.innerHTML = windowTypeIcon(type);
     iconWrap.append(backendIconSlot, agentKindSlot, iconSpan);
     const titleSpan = document.createElement('span'); titleSpan.className = 'window-title'; titleSpan.textContent = title;
-    titleSpan.dataset.name = String(title || '').split(' — ')[0]; // the regular class's head shows the name alone (style.css)
+    titleSpan.dataset.name = headName(title); // the regular class's head shows the name alone (style.css) — a path's last segment (lane phone-six r2)
     const controls = document.createElement('div'); controls.className = 'window-controls';
     // the four titlebar tooltips are human-visible chrome (a3 i18n: they were the last untranslated words on every window)
     controls.innerHTML = `<button class="win-btn win-overlap-btn no-overlap" title="${escHtml(t('Overlapping windows'))}">□</button><button class="win-btn win-minimize" title="${escHtml(t('Minimize'))}">─</button><button class="win-btn win-maximize" title="${escHtml(t('Maximize'))}">□</button><button class="win-btn win-close" title="${escHtml(t('Close'))}">✕</button>`;
@@ -398,7 +399,7 @@ class WindowManager {
     // the split button is a button, never a drag handle (split UX R1); nor a tab, the icon stack, the controls — nor the
     // two chips that act on a click, the mini-inbox badge and the billing chip (2.369.200 integration: the pointerdown door
     // CAPTURES the pointer, which retargets the click to the title bar — neither chip's click fired)
-    const notADragHandle = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge')));
+    const notADragHandle = (e) => !!(e.target && typeof e.target.closest === 'function' && (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.target.closest('.win-inbox-badge') || e.target.closest('.win-auth-badge') || e.target.closest('.phone-pane-close')));
     // THE DOOR (lane-drag-release): the press is a POINTER event and the title bar CAPTURES the pointer — the drag is
     // fed from the title bar from here on whatever the cursor crosses (an iframe, a canvas, another window, the page's
     // edge). The compat mousedown stays (the window's own focus listener reads it) and is cancelled only to stop the
@@ -1728,7 +1729,7 @@ class WindowManager {
       desktop: !!top._hiddenByDesktop,
       stage: !!top._hiddenByStage,
       mobile,
-      active: !!top.element?.classList?.contains('window-active'),
+      active: !!(top.element?.classList?.contains('window-active') || top.element?.classList?.contains('phone-pane')), // lane phone-six: a split's other pane is drawn too
       tabHidden: !!w.content?.classList?.contains('tab-hidden') || narrowHidden,
       minimized: !!top.isMinimized,
     });
@@ -2006,7 +2007,7 @@ class WindowManager {
   setTitle(id, t) {
     const win = this.windows.get(id); if (!win) return;
     if (win.title === t) return; // no-op guard: called per 5s identity sync for every window
-    win.title = t; win.titleSpan.textContent = t; if (win.titleSpan.dataset) win.titleSpan.dataset.name = String(t || '').split(' — ')[0];
+    win.title = t; win.titleSpan.textContent = t; if (win.titleSpan.dataset) win.titleSpan.dataset.name = headName(t);
     // Update tab label if in a chain
     if (win._tabChain) {
       const host = this.windows.get(win._tabChain.tabs[0]);

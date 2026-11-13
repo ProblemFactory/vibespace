@@ -867,6 +867,7 @@ const STORAGE = {
   'src/lib/sidebar.js|localStorage|\'hostFilter\'': ['ids', 'host filter (host ids)'],
   'src/lib/sidebar.js|sessionStorage|AGENT_KIND_FILTER_KEY': ['pref', 'the agent-kind filter (this tab)'],
   'src/lib/mobile-nav.js|sessionStorage|SHOWN_KEY': ['ids', 'the phone\'s window on show per desktop id (this tab — §6b guard 10)'],
+  'src/lib/phone-split-view.js|sessionStorage|SPLIT_KEY': ['ids', 'the phone\'s side by side per desktop id — the two window ids, left and right (this tab — lane phone-six, beside SHOWN_KEY)'],
   'src/lib/sidebar.js|sessionStorage|LIST_HIDDEN_KEY': ['pref', 'lane desktop-switch-phone: the regular class\'s landscape list column hidden or not — \'1\' / \'0\', this tab only; no words of any record'],
   'src/lib/user-todos-panel.js|sessionStorage|HOME_ON_KEY': ['marker', 'was the phone\'s first-screen page on show when this tab last ran (\'1\' / \'0\'; this tab — a reload keeps the window on show, lane foryou-honest)'],
   'src/lib/telemetry-client.js|localStorage|PENDING_KEY': ['telemetry', 'unsent telemetry events: names / stacks / versions, never content (the module\'s privacy rule)'],

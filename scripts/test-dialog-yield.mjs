@@ -493,7 +493,10 @@ console.log('⑪ r20 (lane needs-card-tail, the r19 acceptance) — the REAL for
   fs.writeFileSync(path.join(tmp, 'st-pal.mjs'), 'export const installSessionPalette = () => {};\n');
   const swap = (text, map) => { let t = text; for (const [x, y] of map) { if (!t.includes(x)) return null; t = t.split(x).join(y); } return t; };
   const fwCopy = swap(read('src/lib/form-window.js'), [["from './window-types.js'", "from './st-wt.mjs'"], ["from './utils.js'", "from './st-utils.mjs'"], ["from './form-yield.js'", `from ${J(FY_URL)}`], ["from '../viewport-class.js'", `from ${J(VC_URL)}`]]);
-  const vsCopy = swap(read('src/lib/viewport-switch.js'), [["from '../viewport-class.js'", `from ${J(VC_URL)}`], ["from './mobile-nav.js'", "from './st-nav.mjs'"], ["from './mobile-back.js'", "from './st-back.mjs'"], ["from './session-palette.js'", "from './st-pal.mjs'"]]);
+  // lane phone-six (the recovery port onto .397): viewport-switch.js reads a rotation through PURE src/phone-split.js — its copy
+  // imports the real one by URL, as it does viewport-class.js (optional: a tree before it has no such import)
+  const PS_URL = pathToFileURL(path.join(repo, 'src/phone-split.js')).href;
+  const vsCopy = swap(read('src/lib/viewport-switch.js').split("from '../phone-split.js'").join(`from ${J(PS_URL)}`), [["from '../viewport-class.js'", `from ${J(VC_URL)}`], ["from './mobile-nav.js'", "from './st-nav.mjs'"], ["from './mobile-back.js'", "from './st-back.mjs'"], ["from './session-palette.js'", "from './st-pal.mjs'"]]);
   // the child: a fake DOM enough for installFormHost + installViewportSwitch, a fake clock, ONE scenario → JSON
   const HARNESS = String.raw`
 const [, , FW, VS, SCEN0] = process.argv;

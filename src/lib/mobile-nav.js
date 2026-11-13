@@ -2,7 +2,7 @@ import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './tit
 import { navBarFold, navTitleMinText, navMoreRows, navMoreLoud } from './title-chips.js'; // lane phone-titlebar-title: THE TITLE OWNS THE BAR — the chips beside it yield by measure
 import { FOLDED } from './bar-fold.js';
 import { t } from './i18n.js';
-import { escHtml, onOutsidePress, showContextMenu, uiScale } from './utils.js';
+import { escHtml, onOutsidePress, showContextMenu, showToast, uiScale } from './utils.js';
 import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
@@ -14,6 +14,9 @@ import { openDesktopSheet, untilGone, patchDesktopSheet, doorWaiting } from './d
 import { doorState, followDesktops, windowWaits } from '../desktop-switch.js';
 import { paintSwitcherRow } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): a switcher row's prompt-cache band
 import { windowListMark } from './agent-meta.js'; // lane phone-take-photo: a row wears its conversation's harness mark
+import { installPhoneSplit } from './phone-split-view.js'; // lane phone-six: side by side — two windows, left and right
+import { headName, nameFits, YIELD_LADDER } from '../phone-head.js'; // lane phone-six r2: the head's name keeps its width
+import { windowTypeIcon } from './window-types.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -113,12 +116,19 @@ export class MobileNav {
     // person with many desktops could reach none but the one the page booted on); in its landscape the conversation's
     // head is the window's own title bar, so a tap on it opens the same switcher
     this._titleEl.onclick = () => this._showWindowSwitcher();
+    // a split's pane that was NOT the one on show when the finger came down: that tap only makes it the one on show (lane
+    // phone-six r2 — the press focuses it before the click, and the click then opened the switcher too: one tap, two acts)
+    let pressedAside = false;
+    document.getElementById('workspace')?.addEventListener('pointerdown', (e) => { const w = e.target.closest?.('.window.phone-pane'); pressedAside = !!w && !w.classList.contains('window-active'); }, true);
     document.getElementById('workspace')?.addEventListener('click', (e) => {
       if (app.viewportClass?.() !== 'regular' || getComputedStyle(document.getElementById('mobile-nav')).flexDirection !== 'column') return;
       const head = e.target.closest?.('.window.window-active > .window-titlebar');
-      if (head && !e.target.closest('button, input, textarea, select, .window-controls')) this._showWindowSwitcher(head);
+      if (pressedAside) { pressedAside = false; return; }
+      if (head && !e.target.closest('button, input, textarea, select, .window-controls, .tab-bar-tabs')) this._showWindowSwitcher(head); // a tab in the head is its own (lane phone-six)
     });
     this._setupGestures();
+    this.split = installPhoneSplit(app); // lane phone-six: the switcher's «Split» — two windows side by side where they fit
+    try { new ResizeObserver(() => this._paintHead()).observe(document.getElementById('mobile-nav')); } catch { } // the column's width moved (☰, a fold): the name re-fits
     this.desktopsBtn = this._buildDesktopsDoor();
     this.bar = installTrailingBar(app); // the regular class's buttons (shown by the stylesheet there only)
     // the regular class's landscape: the list column's ☰ at the conversation's head (the owner 2026-10-25, 与原文不同 —
@@ -392,6 +402,10 @@ export class MobileNav {
    *  re-render the taskbar's switcher — desktop-manager.js _renderSwitcher calls this) and every window change. */
   updateDesktopsDoor() {
     const b = this.desktopsBtn, dm = this.app.desktopManager;
+    // lane phone-six: EVERY desktop change comes through here (desktop-manager.js _renderSwitcher) — the title follows it the
+    // same instant, whichever road switched (the door, a switch queued behind another, a jump to another desktop's window)
+    const desk = dm?.activeDesktopId || '';
+    if (this._titleDesk !== desk) { this._titleDesk = desk; this.updateTitle(); return; }
     if (!b) return;
     // a desktop's name through THE door (dm.nameOf — «Desktop 1» in the reader's words), read once where the list is read
     const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: dm.nameOf ? dm.nameOf(d) : d.name, active: d.id === dm.activeDesktopId })));
@@ -469,7 +483,9 @@ export class MobileNav {
     const here = (w) => !!w && w._desktopId === desk && !w._hiddenByDesktop && !w._hiddenByStage;
     let tries = 0;
     const look = () => {
-      if (dm.activeDesktopId !== desk) return; // another switch since
+      // another switch since — or this one queued behind a switch still settling (desktop-manager.js: a switch inside the
+      // last one's second waits its turn, then lands with nobody showing its window: lane phone-six)
+      if (dm.activeDesktopId !== desk) { if (dm._pendingSwitch === desk && ++tries < 16) setTimeout(look, 250); return; }
       const want = wantId && wm.windows.get(wantId);
       if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); if (show && wantId === show) this._seen(show); else if (seeing && windowWaits(want)) this._seen(wantId); this.updateTitle(); return; } // r2 (主开发 ②): a landing on a waiting conversation is seeing it
       if (!here(wm.windows.get(wm.activeWindowId))) wm._focusMostRecent();
@@ -584,18 +600,70 @@ export class MobileNav {
     this._noteShown();
     if (!this._titleEl) return;
     const wm = this.app.wm;
-    const win = wm.windows.get(wm.activeWindowId);
+    const win = this._titleWin();
     const count = [...wm.windows.values()].filter(w => !w._hiddenByDesktop && !minimizedOf(wm, w)).length;
     // lane phone-first-screen: the attention page covers the window area — the bar names the page, never a window it hides
     // (a tap on the title still lists the windows; the ✕ that closes the active one is hidden meanwhile — style.css)
     // the regular class (lane duo-build-1): the conversation's NAME (never its folder, never a window count — its list is beside it)
-    this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you')
-      : this.app.viewportClass?.() === 'regular' ? String(win?.title || 'VibeSpace').split(' — ')[0]
-      : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
+    // lane phone-six (userW 2026-10-26: 「session 标题有时是空白；每次切完桌面就会变成空白，必须切一次 session 才显示」): the title
+    // NAMES the window on show of the active desktop, never the window a switch just hid; in the regular class its NAME
+    // («No window» on a desktop with none — never empty; style.css keeps it a width), the compact class its title + the count
+    // as the base drew them (lane phone-titlebar-title's fold gives the title the room there)
+    // lane phone-six r2: a PATH-shaped name (a files window's folder) is its last segment, the whole title in the title attribute
+    this._head = { win, count };
+    this._paintHead();
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
     this.bar?.update?.();
     this.updateDesktopsDoor();
+    this.split?.apply(); // lane phone-six: the side by side follows every window change (a pane gone, another window shown)
     this._scheduleFit?.();
+  }
+
+  /** THE HEAD'S NAME, drawn (lane phone-six r2 — the integrator's pass at 669 px: «/tm…», three glyphs of a files window's
+   *  path). The name is PURE src/phone-head.js headName; in the regular class's portrait bar it keeps ≥ 8 em (or its whole
+   *  width): the bar's buttons yield before it, a step of YIELD_LADDER at a time, each tried in the real layout — the
+   *  window's own extras leave first (the switcher row's ✕ closes, the chat's status bar holds Artifacts, ⋯ the live view),
+   *  then ⚙ folds into ⋯ (trailing-bar.js), then the head shows the window's type icon + the count and the name lives in
+   *  the switcher. Never a fragment under four glyphs. */
+  _paintHead() {
+    const el = this._titleEl, h = this._head;
+    if (!el || !h) return;
+    const { win, count } = h, regular = this.app.viewportClass?.() === 'regular', home = !!this.app.phoneHome?.shown?.();
+    const full = win ? (String(win.title || '').split(' — ')[0].trim() || t('Window')) : t('No window');
+    const name = win ? (headName(win.title) || t('Window')) : t('No window');
+    // the COMPACT class keeps the base's words (the recovery port onto .397: its bar is THE TITLE OWNS THE BAR's — lane
+    // phone-titlebar-title folds every chip beside it by measure, so the window's own title + the count stay as they were)
+    this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you')
+      : regular ? name
+      : win ? (win.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '') : t('No window');
+    if (regular) el.title = !home && full !== name ? full : t('Switch window');
+    el.removeAttribute('aria-label');
+    const nav = document.getElementById('mobile-nav');
+    if (!nav) return;
+    const row = regular && !home && !!win && getComputedStyle(nav).flexDirection !== 'column';
+    if (!row) { delete nav.dataset.yield; return; }
+    const em = parseFloat(getComputedStyle(el).fontSize) || 14;
+    // the release's readable minimum (lane phone-titlebar-title's navTitleMinText), measured in the head's own font
+    const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit';
+    probe.textContent = navTitleMinText(name); el.appendChild(probe); const minPx = probe.getBoundingClientRect().width; probe.remove();
+    for (const step of YIELD_LADDER.slice(0, -1)) {
+      if (step) nav.dataset.yield = step; else delete nav.dataset.yield;
+      if (nameFits(el.getBoundingClientRect().width, el.scrollWidth, em, minPx)) return;
+    }
+    nav.dataset.yield = YIELD_LADDER[YIELD_LADDER.length - 1];
+    el.innerHTML = `<span class="mnav-title-icon" aria-hidden="true">${windowTypeIcon(win.type) || ''}</span><span class="mnav-title-count">${Number(count) || 1}</span>`;
+    el.setAttribute('aria-label', full);
+  }
+
+  /** The window the title names (lane phone-six): the active one while the active desktop shows it, else the window this
+   *  tab shows there (a switch's in-between: the old desktop's window is still the active one), else none. */
+  _titleWin() {
+    const wm = this.app.wm, desk = this.app.desktopManager?.activeDesktopId || '';
+    const here = (w) => !!w && !w._hiddenByDesktop && !(desk && w._desktopId && w._desktopId !== desk);
+    const a = wm.windows.get(wm.activeWindowId);
+    if (here(a)) return a;
+    const s = this._shown[desk] && wm.windows.get(this._shown[desk]);
+    return here(s) ? s : null;
   }
 
   _showWindowSwitcher(anchor = this._titleEl) {
@@ -793,6 +861,23 @@ export class MobileNav {
       };
     }
 
+    // lane phone-six: «Split» — this window beside the one on show (side by side, left and right). Where two panes do not
+    // fit the row KEEPS the door and says why («Rotate to split» on a portrait phone) — a press says it again; never greyed
+    const sv = this.split?.offer(win.id);
+    let splitBtn = null;
+    if (sv) {
+      splitBtn = document.createElement('button');
+      splitBtn.type = 'button';
+      splitBtn.className = 'mobile-win-split' + (sv.ok ? '' : ' refused');
+      splitBtn.dataset.why = sv.why;
+      splitBtn.textContent = t(sv.words);
+      // THE ROW'S CENTRE IS ITS NAME (主开发's ruling 09:33Z, measured: the refused door's 106 px of words pushed the billing chip
+      // under the row's centre — a thumb on the row opened the chip): the refused door is a 44 px icon at the row's end, its
+      // words its name, its tip and what its press says
+      if (!sv.ok) { splitBtn.innerHTML = UI_ICONS.columns; splitBtn.setAttribute('aria-label', t(sv.words)); splitBtn.title = t(sv.words); }
+      splitBtn.onclick = (e) => { e.stopPropagation(); if (!sv.ok) { showToast(t(sv.words)); return; } close(); this.split.open(win.id); }; // the switcher's own close (the row builder's — .397)
+    }
+
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
@@ -812,8 +897,7 @@ export class MobileNav {
     moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More')); moreBtn.setAttribute('aria-haspopup', 'menu');
     moreBtn.onclick = (e) => { e.stopPropagation(); const r = moreBtn.getBoundingClientRect(); showWindowContextMenu(this.app, win.id, r.left, r.bottom + 2, { onAction: () => setTimeout(() => rerender?.(), 50) }); };
 
-    if (billChip) item.append(icon, label, billChip, moreBtn, closeBtn);
-    else item.append(icon, label, moreBtn, closeBtn);
+    item.append(...[icon, label, billChip, splitBtn, moreBtn, closeBtn].filter(Boolean));
     paintSwitcherRow(this.app, item, win); // lane cache-warmth-band: the row's warmth band + «N min left» (one row per tab)
     if (billChip) requestAnimationFrame(() => fitRowPill(label, billChip));
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });

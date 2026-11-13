@@ -14,6 +14,7 @@
 // Then every window's view re-measures. Nothing here writes the layout record or sessionStorage (SPEC-v3 §7: a fold's
 // transitional sizes persist nothing); the next class's own writers take over from there.
 import { viewportClassOf, isPhoneClass, switchVerdict, VC_WATCH_QUERIES, VC_SETTLE_MS } from '../viewport-class.js';
+import { turnOf, listOnTurn } from '../phone-split.js'; // lane phone-six: a rotation keeps the list as the person left it
 import { MobileNav } from './mobile-nav.js';
 import { installMobileBack } from './mobile-back.js';
 import { installSessionPalette } from './session-palette.js';
@@ -92,23 +93,50 @@ export function applyViewportClass(app, next) {
   return v;
 }
 
+/** The viewport and the screen now (PURE phone-split.js turnOf tells a rotation from a fold by them). */
+const facts = () => ({ w: window.innerWidth, h: window.innerHeight, sw: window.screen?.width || 0, sh: window.screen?.height || 0 });
+/** Is the conversation list on screen? — the compact drawer open, the regular class's column shown; null on a desktop. */
+function listShownNow(app) {
+  if (app._vc === 'regular') return !app.sidebar?._listHidden;
+  if (app._vc === 'compact') return !!app.sidebar?.isOpen;
+  return null;
+}
+/** Put the list on screen or away in the class now (the regular class's column, the compact drawer). */
+function setListShown(app, shown) {
+  const sb = app.sidebar;
+  if (!sb) return;
+  if (app._vc === 'regular') { if (!sb._listHidden !== shown) sb.setListHidden(!shown); }
+  else if (app._vc === 'compact' && !!sb.isOpen !== shown) sb.toggle(shown);
+}
+
 /** Watch the class: every media query that may move it, and resize (a crossing settles VC_SETTLE_MS before it acts). */
 export function installViewportSwitch(app) {
   let timer = null;
   let portrait = null;
+  let last = facts();
   const settle = (now = false) => {
     timer = null;
     const next = readViewportClass(app._vc);
+    // lane phone-six (userW 2026-10-26: 「每次旋转完屏幕之后都会把侧边栏默认打开」): a ROTATION inside the phone tier keeps the
+    // conversation list as the person left it — closed stays closed, open stays open (the compact drawer ⇔ the regular
+    // class's column); only a fold (another screen) or a tier change starts it as a fresh load would. Read BEFORE the switch
+    // (reads only: a pass the press below defers re-reads on its retry; `last` moves only on the pass that switches)
+    const prevVc = app._vc, wasShown = listShownNow(app), cur = facts();
     // r20 (lane needs-card-tail, the r19 acceptance — the form host's press guard): a TIER crossing waits for a press in flight
     // (form-window's app.crossingWait: the bounded press) as ONE unit — enterPhone's first rule (the forms become sheets) still
     // runs first when it goes; settleNow (a form opening reads the class fresh) never waits
     const wait = !now && switchVerdict(app._vc, next).act === 'tier' && typeof app.crossingWait === 'function' ? app.crossingWait() : 0;
     if (wait > 0) { timer = setTimeout(settle, wait); return; }
     applyViewportClass(app, next);
+    const turn = turnOf(last, cur);
+    last = cur;
     // a rotation starts the list as that orientation does: portrait shows it (a hidden list there is a view of one
-    // orientation, SPEC-v3 §4 / §7), landscape takes this tab's own choice back (lane desktop-switch-phone)
+    // orientation, SPEC-v3 §4 / §7), landscape takes this tab's own choice back (lane desktop-switch-phone) — now a FOLD
+    // only (lane phone-six: a rotation keeps the person's list)
     let p = null; try { p = window.matchMedia('(orientation: portrait)').matches; } catch { }
-    if (portrait !== null && p !== portrait) app.sidebar?.restoreListHidden?.();
+    const keep = listOnTurn({ turn, prevPhone: isPhoneClass(prevVc), nextPhone: isPhoneClass(app._vc), wasShown });
+    if (keep !== null) setListShown(app, keep);
+    else if (portrait !== null && p !== portrait) app.sidebar?.restoreListHidden?.();
     portrait = p;
   };
   const kick = () => { clearTimeout(timer); timer = setTimeout(settle, VC_SETTLE_MS); };

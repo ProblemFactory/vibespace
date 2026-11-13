@@ -221,6 +221,7 @@ const CLI_PRESENCE = {
   'test-sidebar-rail.mjs': { doors: ['rail'], whyNot: `the rail panel: reads that it renders, the roster head's + and the account rows' ⋯ (acct-key-row) — ${NO_ROW}` },
   'test-agents-overview.mjs': { doors: ['renderer', 'rail', 'usage'], whyNot: `the rail panel and the usage popup's Full overview: reads the machine sections, the tabs, the account rows (acct-key-row) and their refresh errors — ${NO_ROW}` },
   'test-resume-account-chrome.mjs': { doors: ['renderer', 'relogin'], whyNot: `the resume bar's 「重新登录」: reads that Manage agents opened (the rail tab or the modal) and the spied re-login of ITS account — ${NO_ROW}` },
+  'test-phone-six-chrome.mjs': { doors: ['gear'], whyNot: `① opens «⚙ Manage agents…» as one phone door's surface among all of them and measures each focusable field's font size (≥ 16 px) — ${NO_ROW}` }, // lane phone-six (ported onto .397)
   'test-gear-menu.mjs': { doors: ['gear'], whyNot: `reads the gear menu's «Manage agents…» row — its place, its words, the arrow keys over it; never presses it — ${NO_ROW}` },
   'test-inbox-reply-ui.mjs': { doors: ['todos'], whyNot: `seeds For-you items keyed «accounts» (spend / login notices) and reads the For-you rows — ${NO_ROW}` },
   'test-inbox-window-ui.mjs': { doors: ['todos'], whyNot: `seeds For-you items keyed «accounts» (spend notices) and reads the For-you window's rows — ${NO_ROW}` },
