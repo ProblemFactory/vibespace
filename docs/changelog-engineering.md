@@ -112,6 +112,13 @@ This file is the engineers' record of every release: the lanes, the verification
   - Each control is red under its own mutant (lane battery).
   - test-fs-canary restated 6.7 → 6.95 s (§9's three 120 ms holds), proportionally: against the 2.369.397 copy on one box, three alternating runs, 14.90 s → 15.45 s (×1.037). The .397 stated fast sum is 1065.85 of 1066 s.
 
+### hub-sync-holds (for .398) — the Plugins modal's close ends its broadcast listener at once (the .397 dialog seam's product answer)
+- **What lingered.** Rank 13's Plugins panel listener («the rows follow the broadcast») checked `body.isConnected` at the next socket frame. A closed panel's handler sat in `app.ws.globalHandlers` until one came. test-dialog-yield-chrome ㉞ read that as one handler fewer when a frame landed inside its window (the .397 seam f639acb12 settles every count).
+- **The change (src/lib/plugins-ui.js).** `offWs` and the redraw timer are declared BEFORE the shell — the set-up dialog's pattern, since a close can run before the handler registers. The modal's `onClose` clears the timer and ends the listener.
+- **The rail stays lazy, said in the comment with why.** Its shell's close is a no-op, and the next render replaces the body, so there the listener ends at the first frame after its body left.
+- **What never happened, checked.** No lingering listener redraws a gone panel: it returns before anything once its body is off the page, and the 150 ms redraw re-checks. The form is single-subject, so a second open raises it and it is never queued (the «queued body opens deaf» class cannot reach it).
+- **The pin.** test-dialog-yield-chrome ㊴ (the phone tier, where openPluginsDialog is the modal) opens and closes it by its ✕ in ONE synchronous task, so no socket frame is dispatched between the readings. The RAW count is back at once; on 2.369.397 it read +1 until the next frame.
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 
