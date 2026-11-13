@@ -105,7 +105,7 @@ const ROWS = Object.freeze([
   // opening where a record states it, a «waiting for you» card open. Its ONLY door opens the conversation. Its two ends: the
   // turn ended, or they were handed.
   // BAND 2 «Someone is waiting»: its senders are waiting (its arrival toasts once; a redraw keeps its id).
-  { type: 'messages-waiting', identity: 'sessionId', producer: 'src/server/wait-watch.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: false, owner: 'src/lib/chat-view.js — the conversation itself: the item only opens it (no window line, no Stop from the hub)', kind: 'check', scope: 'conversation',
+  { type: 'messages-waiting', identity: 'sessionId', producer: 'src/server/wait-watch.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: false, on: 'the running turn in this conversation', owner: 'src/lib/chat-view.js — the conversation itself: the item only opens it (no window line, no Stop from the hub)', kind: 'check', scope: 'conversation',
     // THE ROW'S OWN BUTTONS (buttonsOf — drawn and run by every surface from these fields): `door` 'jump' = the item's conversation
     buttons: Object.freeze([
       Object.freeze({ answer: 'open', label: i18nKey('Open the conversation'), title: i18nKey('Open the conversation'), door: 'jump' }),
