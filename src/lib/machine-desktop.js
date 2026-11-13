@@ -611,16 +611,18 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   // named — the chip says how many play; its title has the sum's sentence (the numbers' place since lane stream-stats-popup) and
   // each display's own numbers
   const drawMany = () => {
-    const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing', paused: !!v.paused, fps: p && p.fps, kbps: p && p.kbps }; });
+    const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing' && !v.paused, paused: v.paused || null, fps: p && p.fps, kbps: p && p.kbps }; }); // lane mac-locked-capture (recovery .400): a view stays 'playing' while its capture waits — a PAUSED display is not playing
     const sum = sumStats(rows), vs = [...many.values()];
     const lead = vs.find((v) => v.state === 'playing') || vs[0];
     stats.draw(lead); // the firewall notice + the details: any playing display's (one machine, one path)
     const rd = roadOf(lead), road = roadWord(rd), why = whyOf(rd); // lane stream-udp-leg-fallback R4: one machine, one road
+    const lockedNow = (rows.find((r) => r.paused) || {}).paused; // lane mac-locked-capture (recovery .400): THE LOCK wins over the road and the numbers in the all-displays window too — one machine, one lock (the one-display path's rule)
+    if (lockedNow) { chip.textContent = t('Stream · locked'); chip.title = [scope, lockedText(lockedNow), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.paused ? t('Stream · locked') : r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; })].join('\n'); return; }
     sayRoad(lead, why);
     const slow = sum.slowest ? rowOf(sum.slowest.id) : null;
     const words = sum.playing ? t('{n} displays · {fps} fps · {kbps} kbps', { n: sum.playing, fps: sum.fps, kbps: sum.kbps }) + (slow ? ' · ' + t('slowest: {display} at {fps} fps', { display: `${slow.n} · ${displayName(slow)}`, fps: sum.slowest.fps }) : '') : '';
-    chip.textContent = sum.playing ? (road ? t('Stream · {road} · {n} displays · {fps} fps', { road, n: sum.playing, fps: sum.fps }) : t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps })) : rows.some((r) => r.paused) ? t('Stream · locked') : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…');
-    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : r.paused ? t('Stream · locked') : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
+    chip.textContent = sum.playing ? (road ? t('Stream · {road} · {n} displays · {fps} fps', { road, n: sum.playing, fps: sum.fps }) : t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…'); // a locked display returned above
+    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
   };
   const inputWords = (ref) => {
     const code = ref && ref.code;
