@@ -1729,7 +1729,7 @@ export default {
   "Up to date": "最新です",
   "Click to copy, Ctrl+Click to locate & open": "クリックでコピー、Ctrl+クリックで特定して開く",
   "Render this HTML in the embedded browser": "この HTML を内蔵ブラウザで表示",
-  "{n}h": "{n}h",
+  "{n}h": "{n}時間",
   "Preview": "プレビュー",
   "uuid": "uuid",
   "Per-turn tool reminder for agents": "エージェントへの毎ターンツールリマインダー",

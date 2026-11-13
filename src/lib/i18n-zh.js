@@ -1729,7 +1729,7 @@ export default {
   "Up to date": "已是最新",
   "Click to copy, Ctrl+Click to locate & open": "点击复制，Ctrl+点击定位并打开",
   "Render this HTML in the embedded browser": "在内嵌浏览器中渲染这段 HTML",
-  "{n}h": "{n}h",
+  "{n}h": "{n}小时",
   "Preview": "预览",
   "uuid": "uuid",
   "Per-turn tool reminder for agents": "每轮给 Agent 的工具提醒",

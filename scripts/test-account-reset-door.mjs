@@ -930,6 +930,10 @@ const LEGS = {
       text: `a claimed lane's ring: «${claimed}»; a rolled one: «${rolled}»; zh / ja carry the claimed words ${zh.includes(JSON.stringify(KEY) + ':') && ja.includes(JSON.stringify(KEY) + ':')}` });
     const asked = []; const age = AW.staleLaneAge(NOW - 5 * H, NOW, NOW, { t: (k, p) => { asked.push(k); return tt('«' + k + '»', p); } });
     rows.push({ ok: age === '«5h»' && asked.includes('{n}h'), text: `a lane 5 h older than its siblings: «${age}» (through the interface's «{n}h»)` });
+    // …and the interface's «{n}h» IS the interface's (主开发, .398 merged-tip read): minutes and days were translated, hours stayed «5h前读取»
+    const unit = (src, k) => { const m = new RegExp(JSON.stringify(k).replace(/[{}]/g, '\\$&') + ': ("[^"]*")').exec(src); return m ? JSON.parse(m[1]) : null; };
+    const U = ['{n}m', '{n}h', '{n}d'].map((k) => [unit(zh, k), unit(ja, k)]);
+    rows.push({ ok: U[1][0] === '{n}小时' && U[1][1] === '{n}時間' && U.every(([z, j]) => z && j && !/^\{n\}[mhd]$/.test(z) && !/^\{n\}[mhd]$/.test(j)), text: `the age mark's units in zh / ja: ${U.map(([z, j]) => `${z} / ${j}`).join(' · ')} — none left as the English letter` });
     const css = fs.readFileSync(path.join(T, 'public/style.css'), 'utf8').split('\n').filter((l) => /\.usage-claim-btn \{|\.usage-stat-stale \{|\.usage-age-badge, \.acct-donut-age \{/.test(l));
     const literal = css.filter((l) => /#[0-9a-fA-F]{3,6}\b|border-radius: \d/.test(l));
     rows.push({ ok: css.length === 3 && !literal.length, text: `the door's CSS: ${css.length} rules, ${literal.length} with a literal colour or radius` });
