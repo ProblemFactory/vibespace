@@ -62,7 +62,7 @@ const c = controls(helpersSrc(now) + listSrc(now));
 ok(c.inputs === 1 && c.checkbox === 1 && !c.password && !c.integrationCard, `② ONE input in the list's code — the switch's checkbox (role=switch): ${JSON.stringify(c)}`);
 ok(/cb\.setAttribute\('role', 'switch'\)/.test(now), '② the toggle is a role=switch');
 const rowFn = now.slice(now.indexOf('function pluginRow('), now.indexOf('\n}\n', now.indexOf('function pluginRow(')));
-ok(/row\.append\(dot, main, c, sw\);\s*\n\s*if \(install\) row\.appendChild\(install\);\s*\n\s*row\.appendChild\(gear\);/.test(rowFn), '② a row appends exactly dot · name+description · chip · switch · [install] · ⚙');
+ok(/row\.append\(dot, main, c\);\s*\n\s*if \(sw\) row\.appendChild\(sw\);[^\n]*\n\s*if \(install\) row\.appendChild\(install\);\s*\n\s*row\.appendChild\(gear\);/.test(rowFn), '② a row appends exactly dot · name+description · chip · [switch — none when it cannot be used, lane ui-controls-and-bugs] · [install] · ⚙');
 ok((listSrc(now).match(/pluginRow\(\{/g) || []).length === 2, '② built-in AND manifest plugins draw through the same row');
 // lane decision-spend-readout: the ONE extra line a row may carry is a READOUT under the description (the LLM plugin's
 // money today) — a div inside the name+description block, painted from the PURE line, never a control

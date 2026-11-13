@@ -18,6 +18,7 @@ import { folderTail } from './principal-picker-model.js';
 import { pickerRows, draftWho, EVERYONE_KEY } from './browser-who-model.js';
 import { nameHelpers } from './browser-who-dialog.js';
 import { providerChoices, machineChoices, createBody, createRefusalWords, adoptFormOf, cloneSourceChoices, cloneMachineVerdict } from './browser-new-profile-model.js';
+import { providerRowsShown } from './browser-new-profile-model.js'; // lane ui-controls-and-bugs: a row nobody can pick here is not drawn
 import { buildRows, choiceOfRow, installHint, buildRefusalWords } from './browser-build-model.js'; // lane browser-admin 2a: the build section
 import { downloadRow, mountDownloadPicker } from './browser-build-dialog.js'; // lane chrome-builds-download: "Download another build…"
 import { enterSubmits } from './chat-enter-keys.js';
@@ -143,12 +144,16 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   // ── drawing the two lists (keyed by id: a re-draw after a broadcast patches the rows, the choice stays) ──
   function providerRowsNow() {
     const rows = st.host ? (st.hostRows || st.providers) : st.providers;
-    return providerChoices({ providers: rows, host: st.host, t });
+    return providerRowsShown(providerChoices({ providers: rows, host: st.host, t }), rows, { host: st.host });
   }
   function drawProviders() {
     if (adopt === 'keep') return;
     const list = provWrap.querySelector('.bnew-providers');
-    const choices = providerRowsNow();
+    const { rows: choices, windowLeftOut } = providerRowsNow();
+    // the one line after the list (the walk: «你桌面上的一个窗口» greyed among the browsers): where a desktop window is handed over
+    let leftLine = provWrap.querySelector('.bnew-provider-left');
+    if (windowLeftOut && !leftLine) { leftLine = el('div', 'bnew-provider-left bwho-answer-sub', t('To hand a window on your desktop to an agent, choose «Share with agent…» in that window’s menu.')); list.after(leftLine); }
+    else if (!windowLeftOut && leftLine) leftLine.remove();
     if (!choices.some((c) => c.id === st.provider && c.pickable)) st.provider = (choices.find((c) => c.pickable) || { id: 'chromium' }).id;
     const keep = new Map([...list.children].map((n) => [n.dataset.provider, n]));
     const order = [];

@@ -4798,6 +4798,9 @@ export default {
   "This session’s billing account": "このセッションの課金アカウント",
   "it connects to the vendor’s servers (measured)": "ベンダーのサーバーに接続します（実測）",
   "Change the scale for every app in Settings…": "すべてのアプリのスケールを設定で変更…",
+  "Pick an answer first": "先に回答を選んでください",
+  "{n} question(s) still unanswered": "未回答の質問が {n} 件あります",
+  "To hand a window on your desktop to an agent, choose «Share with agent…» in that window’s menu.": "デスクトップのウィンドウを agent に渡すには、そのウィンドウのメニューで「agent と共有…」を選びます。",
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} に自動で続行",
   "Auto-continue: off": "自動続行：オフ",
@@ -9123,7 +9126,6 @@ export default {
   "The LLM plugin stopped: the model refused the request shape (HTTP 400). Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys.": "LLM プラグインを停止しました：モデルがこのリクエスト形式を拒否しました（HTTP 400）。設定 › プラグイン › LLM で判定モデルを、または ⚙ → システム → 連携とキー でキーを変えてください。",
   "Turn {name} on or off": "{name} をオン/オフ",
   "Open settings": "設定を開く",
-  "{name} has nothing to configure": "{name} には設定項目がありません",
   "Show in Integrations": "連携で表示",
   "Open the Plugins list": "プラグイン一覧を開く",
   "Suggesting words is off — turn it on in All Settings › Plugins › Voice input · Dropline.": "語の提案はオフです — 「すべての設定 › プラグイン › Voice input · Dropline」でオンにしてください。",

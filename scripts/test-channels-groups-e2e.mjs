@@ -209,7 +209,7 @@ const dlg = await p1.evaljs(`(async () => {
   const d = document.getElementById('chan-group-new-dialog');
   if (!d) return { fail: 'no dialog' };
   const rows = [...d.querySelectorAll('.chan-gpick .pp-row')];
-  const out = { names: [...d.querySelectorAll('.chan-gpick .pp-row .pp-name')].map((n) => n.textContent), secs: [...d.querySelectorAll('.chan-gpick .pp-sec')].map((n) => n.textContent), preChecked: rows.filter((b) => b.getAttribute('aria-selected') === 'true').length, wakeOn: d.querySelector('.chan-group-wake input').checked, disabledBefore: d.querySelector('[data-group-submit]').disabled };
+  const out = { names: [...d.querySelectorAll('.chan-gpick .pp-row .pp-name')].map((n) => n.textContent), secs: [...d.querySelectorAll('.chan-gpick .pp-sec')].map((n) => n.textContent), preChecked: rows.filter((b) => b.getAttribute('aria-selected') === 'true').length, wakeOn: d.querySelector('.chan-group-wake input').checked, disabledBefore: d.querySelector('[data-group-submit]').disabled, saidBefore: (d.querySelector('[data-group-submit]').click(), (d.querySelector('.chan-flow-status') || {}).textContent || ''), openAfterEarlyPress: !!d.isConnected };   // lane ui-controls-and-bugs: «Create» stays live and says why
   const name = d.querySelector('.chan-group-name'); name.value = ${JSON.stringify(HOSTILE)}; name.dispatchEvent(new Event('input'));
   for (const b of rows) b.click();
   out.chips = [...d.querySelectorAll('.chan-gpick .pp-chip-name')].map((n) => n.textContent);
@@ -221,7 +221,7 @@ const dlg = await p1.evaljs(`(async () => {
   out.toast = [...document.querySelectorAll('.global-toast')].map((t) => t.textContent).pop() || null;
   return out;
 })()`);
-ok(dlg.names && dlg.names.slice().sort().join(',') === 'alpha,beta' && dlg.preChecked === 0 && dlg.disabledBefore === true, 'the New group dialog lists the live sessions, NOTHING pre-selected, Create disabled until two are picked', JSON.stringify(dlg));
+ok(dlg.names && dlg.names.slice().sort().join(',') === 'alpha,beta' && dlg.preChecked === 0 && dlg.disabledBefore === false && dlg.saidBefore === 'Pick at least two agents' && dlg.openAfterEarlyPress, 'the New group dialog lists the live sessions, NOTHING pre-selected; «Create» stays live and, pressed before two are picked, says «Pick at least two agents» above the buttons and creates nothing', JSON.stringify(dlg));
 ok(dlg.wakeOn === true && /will wake 2 agent\(s\) \(2 billed turn\(s\)\)/.test(dlg.echo || '') && dlg.disabledAfter === false, `"Wake now" is ON by default and the echo states the cost BEFORE the click ("${dlg.echo}")`);
 ok(dlg.win && dlg.win.spec.action === 'openChannel' && /^g-[0-9a-f]{8}$/.test(dlg.win.spec.convId), 'Create opens the group\'s window at once (the same window type, openSpec adapterId = the group namespace)', JSON.stringify(dlg.win));
 ok(dlg.toast && /woke 2 agent\(s\) = 2 billed turn\(s\)/.test(dlg.toast), 'the toast says what the SERVER did — woke 2 agents = 2 billed turns', String(dlg.toast));

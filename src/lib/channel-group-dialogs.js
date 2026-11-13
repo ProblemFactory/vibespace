@@ -15,7 +15,7 @@
 // `channel-groups-updated`; a dialog never waits for that echo (the select
 // already shows the new mode, the toast already says the wake count), and an
 // open detail dialog repaints IN PLACE from the broadcast's list.
-import { fetchJson, showToast, createModalShell, showConfirmDialog, showInputDialog } from './utils.js';
+import { fetchJson, showToast, createModalShell, showConfirmDialog, showInputDialog, pressSays } from './utils.js';
 import { t } from './i18n.js';
 import { icon, el, btn, noteLine } from './channel-chrome.js';
 import { groupErrorText, notifyModeText, wakeEchoText, groupTitle } from './channel-words.js';
@@ -112,18 +112,20 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   const go = btn(invite ? t('Invite') : t('Create'), null, 'mounts-btn-primary');
   go.dataset.groupSubmit = '1';
   actions.append(btn(t('Cancel'), close), go);
-  body.append(actions, status);
+  body.append(status, actions);   // lane ui-controls-and-bugs (the walk: «创建» greyed, its reason in the corner under it): the reason above the buttons
   const need = invite ? 1 : 2;
+  const nameOk = () => invite || (nameInput && nameInput.value.trim().length > 0);
+  // what is still missing, in words — said above the buttons; a press of a live «Create» while it holds does nothing but say it
+  const whyNot = () => (picker.selected().length < need ? (invite ? t('Pick at least one agent') : t('Pick at least two agents')) : !nameOk() ? t('Give the group a name') : null);
   const refresh = () => {
     const n = picker.selected().length;
     echo.textContent = wake.checked
       ? t('will wake {n} agent(s) ({n} billed turn(s))', { n })
       : t('nobody is woken — they read it on their next turn');
-    const nameOk = invite || (nameInput && nameInput.value.trim().length > 0);
-    go.disabled = n < need || !nameOk;
     status.className = 'chan-flow-status';
-    status.textContent = n < need ? (invite ? t('Pick at least one agent') : t('Pick at least two agents')) : (!nameOk ? t('Give the group a name') : '');
+    status.textContent = whyNot() || '';
   };
+  pressSays(go, whyNot, { line: status });
   picker.onChange(refresh);
   wake.onchange = refresh;
   if (nameInput) nameInput.oninput = refresh;
@@ -136,7 +138,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
     const r = invite
       ? await groupPost(gpath(group.id, 'invite'), payload)
       : await groupPost('/api/channel-groups', { ...payload, name: nameInput.value });
-    if (!r) { refresh(); return; }
+    if (!r) { go.disabled = false; refresh(); return; }   // the in-flight guard ends with the answer
     close();
     const nm = (r.group && r.group.name) || (group && group.name) || '';
     showToast(`${invite ? t('Invited to "{name}"', { name: nm }) : t('Created "{name}"', { name: nm })} — ${wakeEchoText(r)}`);

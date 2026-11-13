@@ -1112,14 +1112,6 @@ export function attachPopoverClose(popover, ...excludeEls) {
   return dispose;
 }
 
-/**
- * Create a positioned popover, removing any existing one with the same class. Returns the popover element for the
- * caller to populate. When the one removed hung off the SAME anchor (the anchor pressed while its popover is open) the
- * press TOGGLES: nothing opens and the element returned is DETACHED (`_closedByAnchor`), filled unseen.
- * @param {HTMLElement} anchor - element to position below (the toggle's key)
- * @param {string} className - CSS class (also used to remove duplicates)
- * @param {object} [opts] - { parent, position: 'below'|'cursor', x, y, toggle: false (a programmatic rebuild) }
- */
 /** ONE LATEST RENDER of an async panel (lane ui-controls-and-bugs — the walk found the Ports panel drawn TWICE: its render cleared,
  *  awaited, then appended, so two overlapping calls each appended a copy). `build(out)` fills a DETACHED element; when it ends, a
  *  newer call has not started since and the container is still in the page, ONE replaceChildren lands it — else it is dropped.
@@ -1136,6 +1128,48 @@ export function latestRender(container, build) {
     return true;
   };
 }
+/** A BUTTON THAT SAYS WHY (lane ui-controls-and-bugs — kb §17: no greyed control with a hint). The button stays LIVE; pressed
+ *  while `why()` answers (a reason in words), it does nothing and says that reason on its own line just above the buttons'
+ *  row — never a toast, never a greyed button with the reason in a corner. `line` = the caller's own status element to say it
+ *  in (else one is made). A capture listener on the button: it runs before the button's own onclick and stops it.
+ *  → `{ refresh() }` — call it when the inputs change: a line that was said and no longer holds is cleared.
+ *  (scripts/test-control-says-why.mjs ② pins the rule and keeps a ledger of the state-derived `.disabled =` left.) */
+export function pressSays(btn, why, { line = null } = {}) {
+  let say = line;
+  const ensure = () => {
+    if (say) return say;
+    say = document.createElement('div');
+    say.className = 'press-says';
+    say.setAttribute('role', 'status');
+    const row = btn.parentElement;
+    if (row && row.parentElement) row.parentElement.insertBefore(say, row); else if (row) row.prepend(say);
+    return say;
+  };
+  btn.addEventListener('click', (e) => {
+    const w = why();
+    if (!w) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const l = ensure();
+    l.textContent = w;
+    l.classList.remove('press-says-again'); void l.offsetWidth; l.classList.add('press-says-again');   // a second press is seen too
+  }, { capture: true });
+  return {
+    refresh() {
+      if (!say) return;
+      const w = why();
+      if (!w) { if (line) say.textContent = ''; else { say.remove(); say = null; } }
+      else if (say.textContent) say.textContent = w;   // still said: the reason as it stands now
+    },
+  };
+}
+/**
+ * Create a positioned popover, removing any existing one with the same class. Returns the popover element for the
+ * caller to populate. When the one removed hung off the SAME anchor (the anchor pressed while its popover is open) the
+ * press TOGGLES: nothing opens and the element returned is DETACHED (`_closedByAnchor`), filled unseen.
+ * @param {HTMLElement} anchor - element to position below (the toggle's key)
+ * @param {string} className - CSS class (also used to remove duplicates)
+ * @param {object} [opts] - { parent, position: 'below'|'cursor', x, y, toggle: false (a programmatic rebuild) }
+ */
 export function createPopover(anchor, className, opts = {}) {
   // THE ANCHOR TOGGLES (lane menu-close-residue, B-5bd5 ②): the dedup already knows the open popover of this class —
   // when it hangs off THIS anchor, this call is the anchor pressed again (the anchor is exempt from the closer, so the
