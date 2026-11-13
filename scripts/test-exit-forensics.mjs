@@ -1359,6 +1359,8 @@ console.log('— §6c every kill door is declared: an actor marked before the ki
     'src/desktop-sound.js': [1, "device: the sound road's own children (the vibespace-mic helper's `loopback` + the encoder ffmpeg — our spawn handles, lane speaker-passthrough-v1), stdin closed when the sound is turned off or its stream ends and SIGTERMed only if still alive a second later; never a conversation"],
     // lane runtime-floor — the product's own-Node provisioner's bounded child
     'src/node-runtime.js': [1, "not a conversation: the provisioner's node download / verify / `--version` child (lane runtime-floor), SIGKILLed by its watchdog timer at the timeout — a bounded one-shot; its exit is the provision's answer, never a session's"],
+    // lane job-logs-sweep (.398) — the job-logs remover's OWN child
+    'src/job-logs-sweep.js': [3, "not a conversation: the job-logs remover's OWN child (src/job-logs-sweep-worker.js, forked per batch; it throws without its IPC channel) — SIGKILLed past its batch timeout, at the end of its 1 s idle linger, and at the hub's stop; its exit is the batch's answer (a count, or the batch's failure said once), never a session's exit to judge"],
     'src/store-exit-keeper.js': [1, "not a conversation: the hub's OWN process (lane hub-loop-stalls commit 2, the store writer's exit keeper thread) — SIGKILL only after a CRASH with no stop asked, ONE full grace after the crash, its one line on fd 2 first (so who ended the hub is in the journal); after a stop it ends nothing (the service manager's kill is the one coming)"],
   };
   // the actor pins: the mark is set BEFORE the kill it names (the teardown reads it; the kill case deletes the session late)
