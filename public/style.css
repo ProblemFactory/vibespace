@@ -2922,13 +2922,27 @@ html[data-vc="compact"] #mobile-nav-overflow.on { display: inline-flex; align-it
 html[data-vc="compact"] #mobile-nav-overflow svg { width: 20px; height: 20px; }
 /* r3: the ⋯ that stands in for a folded ⚙ wears ⚙'s lock while the vault is locked (vault-locked-loud; mobile-nav.js _fitBar) */
 html[data-vc="compact"] #mobile-nav-overflow.vault-locked { position: relative; color: var(--red); }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] { padding: 0 4px; }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .ut-count { display: none; }
-html[data-vc="compact"] #mobile-nav-todos[data-badges="one"] .mnav-one { display: inline-block; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px; font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; background: var(--accent); color: var(--accent-fg); }
+/* lane phone-six ③ (userW: 「非常多的数字围绕在周围」; 主开发's ruling 2026-11-13): on the COMPACT class the For-you button carries exactly
+   ONE number, always — the honest count in the worst urgency's colour — whatever room the bar has (the fold's one-badge form, now
+   the only form); its digit at the 14 px floor of chrome a person reads to act */
+html[data-vc="compact"] #mobile-nav-todos { padding: 0 4px; }
+html[data-vc="compact"] #mobile-nav-todos .ut-count { display: none; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 14px; font-weight: 700; line-height: 18px; text-align: center; background: var(--accent); color: var(--accent-fg); }
 html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }
 html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }
-html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 12px; }
-html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 12px; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 16px; }
+html[data-vc="compact"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 16px; }
+/* lane phone-six ③ (userW 2026-10-26: 「inbox 按钮看着比较花里胡哨，非常多的数字围绕在周围」), the recovery port onto .398: the ONE
+   badge above is the compact fold's form; the REGULAR class keeps its five (lane phone-titlebar-title, pinned) — and in its
+   portrait bar beside the list they took the window's name down to its icon (669 px). So they yield like the bar's other
+   buttons, BY MEASURE: mobile-nav.js _paintHead's YIELD_LADDER step 'badges' (and every later step) shows the same .mnav-one
+   (title-chips.js navOneBadge — the honest count in the worst urgency's colour) — only when the name needs the room. */
+html[data-vc="regular"] #mobile-nav:is([data-yield="badges"], [data-yield="gear"], [data-yield="icon"]) #mobile-nav-todos .ut-count { display: none; }
+html[data-vc="regular"] #mobile-nav:is([data-yield="badges"], [data-yield="gear"], [data-yield="icon"]) #mobile-nav-todos .mnav-one { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 14px; font-weight: 700; line-height: 18px; text-align: center; background: var(--accent); color: var(--accent-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="urgent"] { background: var(--red); color: var(--red-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="high"] { background: var(--yellow); color: var(--yellow-fg); }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="quiet"] { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 16px; }
+html[data-vc="regular"] #mobile-nav-todos .mnav-one[data-seg="notice"] { background: none; color: var(--text-dim); border: 1px solid var(--border); line-height: 16px; }
 /* the ⋯ menu: the folded chips, each a 44 px row of ≥ 16 px words with its live value at the end */
 .mobile-sheet.mnav-more-menu .context-menu-item { min-height: 44px; font-size: 16px; display: flex; align-items: center; }
 /* r4: ONE glyph column — the widest glyph's (the ring's and the cog's 20 px; the desktops and lock glyphs draw 16), each centred in
@@ -3097,14 +3111,26 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 /* the conversation's head: its name + its state word (src/lib/trailing-bar.js writes data-state) */
 @media (orientation: landscape) {
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { font-size: 0 !important; overflow: hidden; }
-  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); font-size: 15px; font-weight: 600; color: var(--text); }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; color: var(--text); } /* lane phone-six (the recovery's reader): a cut name ends in a VISIBLE ellipsis — the ::before is the box */
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::after { content: attr(data-state); margin-left: 10px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); }
   html[data-vc="regular"] .window.window-active > .window-titlebar > :not(.window-title) { display: none !important; }
 }
 .mnav-state { display: none; }
 @media (orientation: portrait) {
-  html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 0; text-align: left; padding-left: 4px; }
-  html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 auto; min-width: max-content; padding: 0 6px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+  /* lane phone-six (userW: the title blank): the state word yielded nothing (min-width: max-content) and the title gave all
+     its width — 4 px at 669 beside the list column, an empty bar; now the state word yields first (to nothing) and the name
+     keeps 3.5em — the six 44 px buttons of a 348 px column leave it ~58 px, so none of them leaves the screen */
+  html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 3.5em; text-align: left; padding-left: 4px; }
+  html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 0 0 0 4px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+  /* round 2 (the integrator's pass: «/tm…» — three glyphs of a path): the name keeps ≥ 8 em or its whole width, the bar's
+     buttons yield first (mobile-nav.js _paintHead over PURE src/phone-head.js YIELD_LADDER, each step tried in the layout):
+     'win' — the window's own extras leave the bar (the switcher row's ✕ closes, the chat's status bar holds Artifacts, ⋯
+     the live view); 'gear' — ⚙ folds into ⋯ (trailing-bar.js: its row «Global settings»), never with the locked vault's
+     mark; 'icon' — the head is the window's type icon + the count, the name lives in the switcher */
+  html[data-vc="regular"] #mobile-nav[data-yield] :is(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live) { display: none !important; }
+  html[data-vc="regular"] #mobile-nav:is([data-yield="gear"], [data-yield="icon"]) #mobile-nav-gear:not(.vault-locked) { display: none !important; }
+  html[data-vc="regular"] #mobile-nav[data-yield="icon"] #mobile-nav-title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+  html[data-vc="regular"] #mobile-nav[data-yield="icon"] .mnav-state { display: none; }
 }
 
 /* Mobile terminal key toolbar (hidden on desktop) */
@@ -3135,6 +3161,17 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
   .global-settings-popover .font-size-ctrl button { width: 32px; height: 32px; }
   /* Suppress the iOS long-press callout on surfaces that have our own context menus */
   .mobile-folder-card, .session-item-card, .file-item, .folder-header { -webkit-touch-callout: none; }
+}
+/* ── EVERY FIELD AT 16 PX ON A FINGER (lane phone-six — userW 2026-10-26: 「在任意 session 的地方点击输入框，就会让整个屏幕放大一点。
+   输完东西回来找不到发送键，每次都要双指缩放。」). iOS zooms the page to a focused field whose text is under 16 px and never
+   zooms back — the composer's send button then sits off the screen. The ONE fix is the size: never `maximum-scale=1` /
+   `user-scalable=no` in the viewport meta (iOS ignores it, and it takes the person's own zoom away). Every focusable field
+   of every surface on a touch screen (the chat composer was 13 px, the channel composer 13, the session search 14, the
+   fork dialog 12): ≥ 16 px, inline sizes included. Gate: test-phone-six-chrome ① (the census over every phone door's
+   surface — RED on the base). ── */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"], [type="hidden"]),
+  textarea, select, [contenteditable]:not([contenteditable="false"]) { font-size: max(16px, 1em) !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
@@ -8518,6 +8555,24 @@ label.chan-cap-row { cursor: default; }
   .tab-item.tab-pane:not(.active) { background: transparent; box-shadow: none; color: var(--text-dim); }
   .tab-item.tab-pane:not(.active):not(.waiting)::after { content: none; }
 }
+/* ── THE TAB STRIP ON A PHONE (lane phone-six — userW 2026-10-26: 「竖屏时窗口上的 tab 会展示出来，横屏之后 tab 就不见了」).
+   The strip is the window's own door to its other tabs: a SPLIT group showed it in portrait (27 px tabs) and the regular
+   class's landscape head hid it (its `> :not(.window-title)` rule below the name), a plain group showed none at all. Now
+   every group shows ONE strip in both orientations — 44 px tabs, the names ellipsised, no 16 px ✕ inside a tab (a window
+   closes from the switcher / the bar) — and in landscape the strip IS the conversation's head (the ☰ keeps its 52 px).
+   Gate: test-phone-six-chrome ⑤ (RED on the base: no strip at 844 × 390). ── */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar { display: flex !important; height: 44px; min-height: 44px; align-items: stretch; }
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar > :not(.tab-bar-tabs):not(.phone-pane-close) { display: none !important; }
+  :is(.window.window-active, .window.phone-pane):has(> .window-titlebar .tab-item) > .window-titlebar > .tab-bar-tabs { display: flex !important; flex: 1 1 auto; min-width: 0; height: 44px; align-items: stretch; overflow-x: auto; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item { height: 44px; min-height: 44px; min-width: 44px; max-width: 45vw; margin-top: 0; flex: 0 0 auto; font-size: 14px; padding: 0 12px; }
+  /* the recovery's reader (2026-11-13): six tabs drew six icons and no name — every tab keeps its NAME at a readable floor (4 em =
+     four CJK or six Latin glyphs); when they cannot all keep it the strip SCROLLS (overflow-x above); a chip beside the name
+     (the plan / owner pill, a badge) yields to it first */
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > .tab-label { flex: 0 1 auto; min-width: 4em; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item > :not(.tab-icon-wrap):not(.tab-label):not(.tab-close) { flex-shrink: 1000; min-width: 0; overflow: hidden; }
+  :is(.window.window-active, .window.phone-pane) > .window-titlebar .tab-item .tab-close { display: none; }
+}
 /* backlog priority chip (Task Group log → Backlog): high = accent, low = muted, normal = none */
 .bl-prio { flex-shrink: 0; font-size: 9px; line-height: 14px; padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid transparent; }
 .bl-prio-high { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
@@ -9664,4 +9719,38 @@ button.vw-chip { cursor: pointer; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.vault-pw, .vt-set) { min-height: 44px; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .vault-paste-dialog, .cn-card, .ut-mini-popover) .ut-secret-totp-ask :is(.ut-act, .vt-way, .vt-reveal, .vt-preview-b, .vt-unlock, .ut-secret-state button) { min-height: 44px; height: auto; font-size: 16px; }
   :is(#user-todos-popup, #phone-home, .cn-card, .ut-mini-popover) .ut-secret-totp-ask { font-size: 16px !important; }
+}
+
+/* ── SIDE BY SIDE ON A PHONE (lane phone-six, 2026-10-26 — userW's wish, the owner: 「不是窗口，只能支持左右分屏」): two windows
+   of the active desktop as the LEFT and RIGHT panes of the window area (src/lib/phone-split-view.js marks them
+   .phone-pane[data-pane]), a fixed 8 px divider — no drag; each pane's head names its window (or is its tab strip) with
+   its ✕ (the split ends, the other pane stays). Only where each pane keeps MIN_PANE (350 px, PURE src/phone-split.js). ── */
+#phone-split-divider, .phone-pane-close { display: none; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  html.vs-split .window.phone-pane[data-pane] { display: flex !important; position: absolute !important; top: 0 !important; height: 100% !important; width: calc(50% - 4px) !important; }
+  html.vs-split .window.phone-pane[data-pane="left"] { left: 0 !important; }
+  html.vs-split .window.phone-pane[data-pane="right"] { left: calc(50% + 4px) !important; }
+  html.vs-split #phone-split-divider { display: block; position: absolute; top: 0; bottom: 0; left: calc(50% - 4px); width: 8px; background: var(--border); pointer-events: none; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar { display: flex !important; height: 44px; min-height: 44px; align-items: center; gap: 4px; padding: 0 0 0 12px; touch-action: auto; background: var(--bg-titlebar); }
+  html.vs-split .window.phone-pane[data-pane].window-active > .window-titlebar { background: var(--bg-titlebar-active); box-shadow: inset 0 -2px 0 var(--accent); }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > :not(.window-title):not(.tab-bar-tabs):not(.phone-pane-close) { display: none !important; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .window-title { display: block !important; flex: 1 1 auto; min-width: 0; font-size: 0 !important; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .window-title::before { content: attr(data-name); display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; color: var(--text); } /* the box that cuts is the ::before (its parent is 0 px): the ellipsis is drawn at 15 px */
+  html.vs-split .window.phone-pane[data-pane]:not(.window-active) > .window-titlebar > .window-title::before { color: var(--text-secondary); font-weight: 500; }
+  html.vs-split .window.phone-pane[data-pane] > .window-titlebar > .phone-pane-close {
+    display: inline-flex !important; flex: 0 0 44px; width: 44px; height: 44px; align-items: center; justify-content: center;
+    background: none; border: none; padding: 0; color: var(--text-dim); font-size: 16px; cursor: pointer;
+  }
+  /* the window switcher's door: «Split» (or why not) beside a window */
+  .mobile-win-split {
+    flex-shrink: 0; min-height: 44px; min-width: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: none; color: var(--accent); font-size: 14px; white-space: nowrap; cursor: pointer;
+  }
+  .mobile-win-split.refused { color: var(--text-secondary); border-style: dashed; }
+  .mobile-win-split.refused { width: 44px; min-width: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; } /* an icon at the row's end: the row's centre stays its name (主开发 09:33Z) */
+  .mobile-win-split.refused svg { width: 18px; height: 18px; }
+}
+@media (orientation: landscape) {
+  /* the list column's ☰ stands over the left pane's head (as over the single head): its 52 px */
+  html.vs-split[data-vc="regular"] .window.phone-pane[data-pane="left"] > .window-titlebar { padding-left: 52px; }
 }

@@ -7,13 +7,34 @@
 // (html.vs-kb-nobar) — and --composer-h, the composer's height the lowered bar sits on.
 import { laptopYield } from '../fold-posture.js';
 
+/** THE SEND BUTTON ON SCREEN (lane phone-six): the active window's composer send button whole inside the visual viewport,
+ *  else scrolled there — the smallest move that shows it (the visual viewport pans; a phone class only: a desktop's window
+ *  may stand past the screen's edge by the person's own choice). → 'in' | 'moved' | 'none' (no phone, no composer). */
+export function sendIntoView(vv = window.visualViewport) {
+  const vc = document.documentElement.dataset.vc;
+  if (!vv || (vc !== 'compact' && vc !== 'regular')) return 'none';
+  const b = document.querySelector('.window.window-active .chat-send-btn');
+  if (!b || !b.getClientRects().length) return 'none';
+  const r = b.getBoundingClientRect(); // layout-viewport coordinates, as vv.offsetLeft / offsetTop are
+  const inside = r.left >= vv.offsetLeft - 1 && r.top >= vv.offsetTop - 1 && r.right <= vv.offsetLeft + vv.width + 1 && r.bottom <= vv.offsetTop + vv.height + 1;
+  if (inside) return 'in';
+  b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  return 'moved';
+}
+
 export function installKeyboardInset() {
   const vv = window.visualViewport;
   const root = document.documentElement;
   if (!vv) return null;
   let raf = 0;
+  let lastH = vv.height;
   const update = () => {
     raf = 0;
+    // lane phone-six (userW: 「输完东西回来找不到发送键」): the keyboard folded — the visual viewport grew back by more than a
+    // sliver — and the composer's send button is off the screen (iOS left the page zoomed or scrolled to the field): back
+    const grew = vv.height - lastH > 80;
+    lastH = vv.height;
+    if (grew) sendIntoView(vv);
     const lost = window.innerHeight - vv.height;
     const open = lost > 120 && vv.scale <= 1.2;
     const inset = open ? Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop))) : 0;

@@ -12882,4 +12882,10 @@ export default {
   "Resuming {i} of {n}…": "正在恢复第 {i} 个会话，共 {n} 个…",
   "Resuming {i} of {n} — {f} could not be resumed": "正在恢复第 {i} 个会话，共 {n} 个——{f} 个无法恢复",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 个会话中有 {f} 个无法恢复：{list}",
+  "No window": "无窗口",
+  "Split": "分屏",
+  "Rotate to split": "横屏后可分屏",
+  "Too narrow to split": "屏幕太窄，无法分屏",
+  "Close the split": "关闭分屏",
+  "The split ended: one of its windows was minimized, closed or moved to another desktop": "分屏已结束：其中一个窗口已最小化、关闭或移到了别的桌面",
 };

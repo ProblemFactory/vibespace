@@ -412,7 +412,10 @@ try {
     const p = await evalJs(ARRANGE);
     await shot('regular-portrait-669x867.png');
     check('④ 669×867: the list column 0–320 | the conversation 321–669, the bar lying over the conversation (44 high)', p.list.l === 0 && p.list.w === 320 && p.win.l === 321 && p.win.w === 348 && p.nav.l === 321 && p.nav.w === 348 && p.nav.h === 44 && p.dir === 'row', p);
-    check('④ …its head: ☰ · the name · its state word · Artifacts · ⋯ · ⚙', ['mobile-nav-menu', 'mobile-nav-artifacts', 'mobile-nav-more', 'mobile-nav-gear'].every((k) => p.btns.some((x) => x.id === k)) && !!p.navTitle && !/—/.test(p.navTitle) && !!p.navState, { btns: p.btns.map((x) => x.id), title: p.navTitle, state: p.navState });
+    // lane phone-six r2 (the acceptance: the name keeps ≥ 8 em or its whole width — «Ses…» was drawn here): when the name and
+    // every button do not fit, the window's own extras yield first (#mobile-nav[data-yield]; the chat's status bar keeps Artifacts)
+    const hy = await evalJs(`(() => { const e = document.getElementById('mobile-nav-title'), nav = document.getElementById('mobile-nav'), pr = document.createElement('span'); pr.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:' + getComputedStyle(e).font; pr.textContent = e.textContent; document.body.appendChild(pr); const whole = pr.getBoundingClientRect().width; pr.remove(); return { yield: nav.dataset.yield || '', w: Math.round(e.getBoundingClientRect().width), whole: Math.round(whole), em: parseFloat(getComputedStyle(e).fontSize) }; })()`);
+    check('④ …its head: ☰ · the name · its state word · Artifacts · ⋯ · ⚙ — Artifacts yields to the name when both do not fit (the name drawn whole or ≥ 8 em)', ['mobile-nav-menu', 'mobile-nav-more', 'mobile-nav-gear'].every((k) => p.btns.some((x) => x.id === k)) && (p.btns.some((x) => x.id === 'mobile-nav-artifacts') || hy.yield === 'win') && hy.w + 1 >= Math.min(hy.whole, 8 * hy.em) && !!p.navTitle && !/—/.test(p.navTitle) && !!p.navState, { btns: p.btns.map((x) => x.id), title: p.navTitle, state: p.navState, hy });
     await tap('#mobile-nav-menu');
     const ph = await evalJs(ARRANGE);
     check('④ ☰ hides the list (no overlay, no scrim): the conversation takes 0–669', ph.listHidden && ph.win.l === 0 && ph.win.w === 669, ph);
