@@ -74,6 +74,8 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree'],
     ['src/server/browser-builds-keeper.js', 'create > treeOf', 'walk', 1, DEBT, 'per second while a build downloads — the builds picker reads its facts every second during a download (each build\'s size, up to 20 000 entries, an lstat each) — and per act (a picker read, an unpacked download\'s file count)'],
     ['src/usage-routes.js', 'setupUsage > listRecentCodexJsonlFiles', 'walk', 1, DEBT, 'per GET /api/usage — the usage snapshot\'s refresh (about every 30 s while a page shows it), pruned to 14 days of date dirs'],
+    // lane job-logs-sweep (.398): the job-logs remover's CHILD — never the hub's process, never its loop
+    ['src/job-logs-sweep-worker.js', 'scan', 'walk', 1, OFF, 'the job-logs remover\'s CHILD process (src/job-logs-sweep.js createRemover forks it since round 2; the file throws without its IPC channel, so it never runs in the hub\'s process): scan walks ONE run dir under data/job-logs (lstat only, a link never followed) to age it — bounded by the batch timeout (120 s, then the child is SIGKILLed and the hub starts no second one beside it) and by the pass (at most 500 run dirs)'],
   ];
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
@@ -91,9 +93,9 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   ok('every off-loop / fallback row says WHY it never holds the loop; every debt row says HOW OFTEN it runs (timer / boot / per …) — the conversion order is checkable', ROWS.every((x) => [OFF, FALLBACK, DEBT].includes(x[4]) && (x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20)), ROWS.filter((x) => !(x[4] === DEBT ? /^(?:timer|boot|per )/.test(x[5]) : x[5].length >= 20)));
   // round 2: a class is not free text — OFF only where the code runs OUTSIDE the hub's process (the device agent, its CLI, the
   // forked measurement), a FALLBACK names the guard that keeps it off the hub's road. A DEBT row moved to OFF in a hub file is red.
-  const OFF_HOMES = /^(?:src\/agentd\/|src\/claude-oat-probe\.js$)/;
+  const OFF_HOMES = /^(?:src\/agentd\/|src\/claude-oat-probe\.js$|src\/job-logs-sweep-worker\.js$)/;   // lane job-logs-sweep: the remover's child (forked; throws without IPC)
   const badOff = ROWS.filter((x) => x[4] === OFF && !OFF_HOMES.test(x[0])), badFallback = ROWS.filter((x) => x[4] === FALLBACK && !/\/proc|macOS|BSD|darwin/.test(x[5]));
-  ok('every OFF-LOOP row lives in a file that runs outside the hub\'s process (the device agent, its CLI, the forked measurement); every FALLBACK row names its guard (/proc, macOS / BSD)', !badOff.length && !badFallback.length, { badOff: badOff.map((x) => x[0] + '|' + x[1]), badFallback: badFallback.map((x) => x[0] + '|' + x[1]) });
+  ok('every OFF-LOOP row lives in a file that runs outside the hub\'s process (the device agent, its CLI, the forked measurement, the job-logs remover\'s child); every FALLBACK row names its guard (/proc, macOS / BSD)', !badOff.length && !badFallback.length, { badOff: badOff.map((x) => x[0] + '|' + x[1]), badFallback: badFallback.map((x) => x[0] + '|' + x[1]) });
   const debt = ROWS.filter((x) => x[4] === DEBT).length;
   ok(`THE RATCHET: ${debt} debt rows — exactly DEBT_MAX (${DEBT_MAX}); a conversion deletes its row and lowers it, a new hold raises it (which a reviewer refuses)`, debt === DEBT_MAX, { debt, DEBT_MAX });
   // CONTROLS — the same census over planted text (a scratch copy of one file's source; nothing written)
