@@ -280,18 +280,25 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     const doc = {
       readyState: 'complete',
       activeElement: null,
-      documentElement: { _isDocRoot: true, _fid: fid },
-      body: { _isDocRoot: true, _fid: fid },
+      documentElement: { _isDocRoot: true, _fid: fid, appendChild(c) { return parentBox.appendChild(c); } },
+      body: { _isDocRoot: true, _fid: fid, appendChild(c) { return parentBox.appendChild(c); } },
       createElement(tag) {
         const tg = String(tag || 'input').toLowerCase();
         const bid = 90000 + (++objSeq);
-        const mkAttrs = new Map([['type', 'text']]);
+        let mkId = `dyn-${bid}`;
+        const mkAttrs = new Map([['type', 'text'], ['id', mkId]]);
         let mkType = 'text';
         const n2 = {
           nodeType: 1,
           backendNodeId: bid,
-          id: `dyn-${bid}`,
-          _selector: `#dyn-${bid}`,
+          get id() { return mkId; },
+          set id(v) {
+            mkId = String(v == null ? '' : v);
+            if (mkId) { mkAttrs.set('id', mkId); n2._selector = `#${mkId}`; }
+            else { mkAttrs.delete('id'); n2._selector = tg; }
+            notifyMo(n2, { type: 'attributes', target: n2, attributeName: 'id' });
+          },
+          _selector: `#${mkId}`,
           _tag: tg,
           _role: tg === 'button' ? 'button' : 'textbox',
           _axName: '',
@@ -315,8 +322,28 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
           style: { getPropertyValue: () => '', getPropertyPriority: () => '', setProperty() {}, removeProperty() {} },
           getAttribute: (k) => (mkAttrs.has(k) ? mkAttrs.get(k) : null),
           hasAttribute: (k) => mkAttrs.has(k),
-          setAttribute: (k, v) => { mkAttrs.set(String(k), String(v)); notifyMo(n2, { type: 'attributes', target: n2, attributeName: String(k) }); },
-          removeAttribute: (k) => { mkAttrs.delete(String(k)); notifyMo(n2, { type: 'attributes', target: n2, attributeName: String(k) }); },
+          setAttribute: (k, v) => {
+            const ks = String(k), vs = String(v);
+            if (ks === 'id') { n2.id = vs; return; }
+            if (ks === 'type') { n2.type = vs; return; }
+            mkAttrs.set(ks, vs);
+            notifyMo(n2, { type: 'attributes', target: n2, attributeName: ks });
+          },
+          removeAttribute: (k) => {
+            const ks = String(k);
+            if (ks === 'id') { n2.id = ''; return; }
+            mkAttrs.delete(ks);
+            notifyMo(n2, { type: 'attributes', target: n2, attributeName: ks });
+          },
+          remove() {
+            n2.isConnected = false;
+            n2.parentNode = null;
+            n2.parentElement = null;
+            const idx = nodes.indexOf(n2);
+            if (idx >= 0) nodes.splice(idx, 1);
+            t.domNodes.delete(bid);
+            notifyMo(parentBox, { type: 'childList', target: parentBox });
+          },
           closest: () => null,
           getBoundingClientRect: () => ({ width: 200, height: 32 }),
           scrollIntoView() {},

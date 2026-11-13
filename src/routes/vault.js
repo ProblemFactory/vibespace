@@ -34,7 +34,7 @@ const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-r
 // this file's words (test-vault-routes ⑮: the census + the wire)
 const STATUS = Object.freeze({
   ...UGC.STATUS,
-  wrong_password: 403, corrupt: 500, paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
+  wrong_password: 403, corrupt: 500, paced: 429, code_paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
   reveal_needs_password: 403, not_found: 404, unreadable: 500, // lane vault-contents-window
@@ -62,6 +62,7 @@ const WORDS = Object.freeze({
   wrong_password: 'that is not the second password',
   corrupt: 'the vault record (data/vault.json) is damaged — nothing can be opened; restore it from a backup',
   paced: 'too many wrong passwords — wait a minute, then try again',
+  code_paced: 'too many two-step codes requested in the last minute — wait a moment, then try again',
   vault_not_set_up: 'the vault is not set up yet — set the second password first',
   already_set_up: 'the vault is already set up',
   busy: 'the vault is being set up — try again in a moment',
@@ -160,7 +161,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: WORDS[code] || code });
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || WORDS[code] || code });
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {
@@ -250,6 +251,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       try { caller = token.startsWith('vsst_') ? callerOf(token) : null; } catch { caller = null; }
       if (!caller) return answer(res, { ok: false, code: 'unauthorized' });
       const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live, run: runOfToken(token), scope: caller.scope, conv: caller.conv }, req.params.name, { ip: ipOf(req) });
+      if (!r.ok && r.code === 'code_paced') return res.status(429).json({ ok: false, code: 'code_paced', error: r.error, retryInMs: r.retryInMs, secondsLeft: r.secondsLeft });
       return r.ok ? res.json({ ok: true, name: r.name, code: r.code, secondsLeft: r.secondsLeft, period: r.period }) : answer(res, r);
     });
     // lane vault-agent-own: AN AGENT adds a seed it holds itself (`vibespace-vault totp add <name> --from-file | --stdin`) — the

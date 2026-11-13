@@ -312,12 +312,12 @@ const TOTP_CHECKS = [
     const b = await H.go('/api/vault/totp/github-owner/grants', { method: 'POST', body: { subjects: ['external'] } });
     return a.status === 409 && a.json.code === 'not_running' && b.status === 400 && b.json.code === 'bad_args';
   }],
-  ['the AGENT pace: 20 answers a minute per conversation ⇒ 429 paced', async (H) => {
+  ['the AGENT pace: 20 answers a minute per conversation ⇒ 429 code_paced (with secondsLeft + retryInMs)', async (H) => {
     H.step(61e3);
     let last = null;
     for (let i = 0; i < 21; i++) last = await H.agent(H.sessions.get('s1').agentToken);
     H.step(61e3);
-    return last.status === 429 && last.json.code === 'paced' && (await H.agent(H.sessions.get('s1').agentToken)).status === 200;
+    return last.status === 429 && last.json.code === 'code_paced' && Number.isInteger(last.json.secondsLeft) && last.json.secondsLeft >= 1 && last.json.retryInMs >= 1 && /too many two-step codes requested in the last minute/.test(last.json.error || '') && (await H.agent(H.sessions.get('s1').agentToken)).status === 200;
   }],
   ['LOCKED ⇒ the agent door and 看码 answer 423 vault_locked; unlocked ⇒ answered again', async (H) => {
     H.vault.lock('test');

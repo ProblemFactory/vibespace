@@ -199,26 +199,36 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       wss.handleUpgrade(req, socket, head, (ws) => wire(g, p, ws, up));
     });
   }
-  function epochFor(profileId, tid, scope) {
-    if (!loginFence || typeof loginFence.fillEpochOf !== 'function') return 0;
-    if (tid) return Number(loginFence.fillEpochOf(profileId, tid)) || 0;
-    if (scope && scope.targets && scope.targets.size) {
-      let sum = 0;
-      for (const st of scope.targets) sum += Number(loginFence.fillEpochOf(profileId, st)) || 0;
-      return sum;
-    }
-    return Number(loginFence.fillEpochOf(profileId, null)) || 0;
+  function epochFor(profileId, tid) {
+    if (!tid || !loginFence || typeof loginFence.fillEpochOf !== 'function') return 0;
+    return Number(loginFence.fillEpochOf(profileId, tid)) || 0;
   }
-  function liveFillFor(profileId, tid, scope) {
-    if (!loginFence || typeof loginFence.liveFillTarget !== 'function') return null;
-    if (tid) return loginFence.liveFillTarget(profileId, tid) || null;
-    if (scope && scope.targets) {
-      for (const st of scope.targets) {
-        const lf = loginFence.liveFillTarget(profileId, st);
-        if (lf) return lf;
+  function liveFillFor(profileId, tid) {
+    if (!tid || !loginFence || typeof loginFence.liveFillTarget !== 'function') return null;
+    return loginFence.liveFillTarget(profileId, tid) || null;
+  }
+  function resolveCallTarget(p, g, msg, sid) {
+    if (p.kind === 'page') return { tid: p.targetId || null, unknownSession: false, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
+    if (msg.method === 'Target.sendMessageToTarget') {
+      const innerSid = msg.params && typeof msg.params.sessionId === 'string' && msg.params.sessionId ? msg.params.sessionId : null;
+      const mappedTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : null;
+      const paramTid = !innerSid && msg.params && typeof msg.params.targetId === 'string' && msg.params.targetId ? msg.params.targetId : null;
+      const tid = mappedTid || (paramTid && (!g.scope || !g.scope.targets || g.scope.targets.has(paramTid)) ? paramTid : null);
+      let inner = null;
+      if (msg.params && typeof msg.params.message === 'string') {
+        try { inner = JSON.parse(msg.params.message); } catch { inner = null; }
       }
+      const badInner = !inner || typeof inner !== 'object' || typeof inner.method !== 'string' || inner.method === 'Target.sendMessageToTarget';
+      const innerParams = !badInner && inner.params && typeof inner.params === 'object' ? inner.params : null;
+      const innerParamTid = innerParams && typeof innerParams.targetId === 'string' && innerParams.targetId ? innerParams.targetId : null;
+      return { tid, unknownSession: !tid || badInner, wrapped: true, innerMethod: badInner ? null : inner.method, innerParams, innerParamTid };
     }
-    return null;
+    if (sid) {
+      const tid = g.scope ? g.scope.sessions.get(sid) || null : null;
+      return { tid, unknownSession: !tid, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
+    }
+    const tid = msg.params && typeof msg.params.targetId === 'string' && msg.params.targetId ? msg.params.targetId : null;
+    return { tid, unknownSession: false, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
   }
   function wire(g, p, ws, up) {
     const conn = { ws, up, kind: p.kind, targetId: p.targetId, pending: new Map(), openedAt: now(), browser: null, tracingActive: false, traceTainted: false, taintedStreams: null };
@@ -276,7 +286,9 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       }
       if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
       const sid = msg.sessionId == null || msg.sessionId === '' ? null : String(msg.sessionId);
-      const tid = p.kind === 'page' ? p.targetId : (sid ? g.scope.sessions.get(sid) || null : null);
+      const ct = resolveCallTarget(p, g, msg, sid);
+      const tid = ct.tid;
+      const checkTid = tid || ct.innerParamTid;
       const forwardAfterFence = () => {
         if (loginFence && !credit) {
           if (msg.method === 'Network.getRequestPostData' || msg.method === 'Fetch.getRequestPostData' || msg.method === 'Network.replayXHR') {
@@ -304,15 +316,15 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
               try { loginFence.noteActiveTarget(g.profileId, g.browserKey, actTid); } catch { /* optional */ }
             }
           }
-          const lf = liveFillFor(g.profileId, tid, g.scope);
+          const lf = liveFillFor(g.profileId, tid) || (ct.innerParamTid ? liveFillFor(g.profileId, ct.innerParamTid) : null);
           const profileFenced = !lf && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId);
-          if (msg.method === 'Target.sendMessageToTarget' && (lf || profileFenced)) {
+          if (ct.wrapped && (lf || (profileFenced && ct.unknownSession))) {
             g.refusals = (g.refusals || 0) + 1;
-            try { ws.send(JSON.stringify(M.refusal(msg.id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', sid))); } catch { /* gone */ }
+            try { ws.send(JSON.stringify(M.refusal(msg.id, M.LIVE_FILL_CODE, 'Target.sendMessageToTarget is refused while a vault login fill is in progress or unsubmitted in this tab', sid))); } catch { /* gone */ }
             return;
           }
-          if (lf) {
-            const allowVerb = typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
+          if (lf || (!ct.wrapped && ct.unknownSession && profileFenced)) {
+            const allowVerb = lf && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
             const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
@@ -334,9 +346,13 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           credit.timer = setTimeout(() => { if (conn.credits && conn.credits.get(msg.id) === credit) conn.credits.delete(msg.id); settleCredit(credit, M.creditExpiryReceipt(credit)); }, SPENT_CREDIT_REPLY_MS);
           if (credit.timer.unref) credit.timer.unref();
         }
-        v.pending.targetId = tid;
+        v.pending.targetId = checkTid;
+        v.pending.unknownSession = ct.unknownSession;
+        v.pending.wrapped = ct.wrapped;
+        v.pending.innerMethod = ct.innerMethod;
+        v.pending.innerParams = ct.innerParams;
         v.pending.hadCredit = Boolean(credit);
-        v.pending.fillEpoch = loginFence && !credit ? epochFor(g.profileId, tid, g.scope) : 0;
+        v.pending.fillEpoch = loginFence && !credit ? epochFor(g.profileId, checkTid) : 0;
         if (msg.method === 'Browser.setDownloadBehavior') {   // (lane chrome-157: THE WINDOW — the act, whatever its wire shape: no session, a browser-target session, a page session)
           const prm = msg.params && typeof msg.params === 'object' ? msg.params : {};
           // the closure list S3 / S4: what THIS lease asked on THIS channel (a page session, or the connection itself) — the events the
@@ -359,12 +375,22 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
         try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
       };
-      if (loginFence && !credit && typeof loginFence.hasPostLiftGuard === 'function' && loginFence.hasPostLiftGuard(g.profileId, tid, g.scope)
-        && M.liveFillCdpVerdict(msg.method, { allowVerb: null, params: msg.params || null }).refuse) {
+      const checkMethod = ct.wrapped ? (ct.innerMethod || msg.method) : msg.method;
+      const checkParams = ct.wrapped ? ct.innerParams : (msg.params || null);
+      if (loginFence && !credit && checkTid && typeof loginFence.hasPostLiftGuard === 'function' && loginFence.hasPostLiftGuard(g.profileId, checkTid)
+        && (ct.wrapped || M.liveFillCdpVerdict(checkMethod, { allowVerb: null, params: checkParams }).refuse)) {
         conn.postLiftChain = Promise.resolve(conn.postLiftChain)
-          .then(() => loginFence.recheckPostLift(g.profileId, tid, g.scope))
-          .catch(() => {})
-          .then(() => { if (ws.readyState === WebSocket.OPEN) forwardAfterFence(); });
+          .then(() => loginFence.recheckPostLift(g.profileId, checkTid))
+          .catch(() => null)
+          .then((rc) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            if (rc && rc.checkFailed) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { ws.send(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
+              return;
+            }
+            forwardAfterFence();
+          });
         return;
       }
       forwardAfterFence();
@@ -418,12 +444,18 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         // record counts it as `landed` so the agent is told "cut short — but this reached the page" rather than a plain "cut"
         if (pend.aborted) { const rec = g.lastInterrupt && pend.interruptAt === g.lastInterrupt.at ? g.lastInterrupt : null; if (rec && !msg.error) { rec.landed = (rec.landed || 0) + 1; if (!rec.landedMethods.includes(pend.method)) rec.landedMethods.push(pend.method); } return; }
         if (loginFence && !pend.hadCredit) {
-          const rTid = pend.targetId || (conn.kind === 'page' ? conn.targetId : (pend.sessionId && g.scope ? g.scope.sessions.get(String(pend.sessionId)) || null : null));
-          const curEpoch = epochFor(g.profileId, rTid, g.scope);
+          const rTid = pend.targetId || (conn.kind === 'page' ? conn.targetId : (!pend.wrapped && pend.sessionId && g.scope ? g.scope.sessions.get(String(pend.sessionId)) || null : null));
+          const curEpoch = epochFor(g.profileId, rTid);
           const epochMoved = pend.fillEpoch !== undefined && curEpoch !== pend.fillEpoch;
-          const lfNow = liveFillFor(g.profileId, rTid, g.scope);
-          if (lfNow || epochMoved) {
-            const allowVerb = !epochMoved && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
+          const lfNow = liveFillFor(g.profileId, rTid);
+          const unknownWhileFenced = Boolean(pend.unknownSession && !lfNow && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
+          if (pend.wrapped && (lfNow || epochMoved || unknownWhileFenced)) {
+            g.refusals = (g.refusals || 0) + 1;
+            try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', pend.sessionId))); } catch { /* gone */ }
+            return;
+          }
+          if (lfNow || epochMoved || unknownWhileFenced) {
+            const allowVerb = !epochMoved && lfNow && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
             const lfv = M.liveFillCdpVerdict(pend.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: pend.params || null });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
@@ -452,17 +484,19 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       if (loginFence) {
         const evSid = ev.sessionId == null ? null : String(ev.sessionId);
         const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
-        if (M.LIVE_FILL_DROPPED_EVENTS.has(ev.method) && liveFillFor(g.profileId, evTid, g.scope)) {
+        const evUnknownFenced = Boolean(evSid && !evTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
+        if (M.LIVE_FILL_DROPPED_EVENTS.has(ev.method) && (liveFillFor(g.profileId, evTid) || evUnknownFenced)) {
           g.dropped = (g.dropped || 0) + 1;
           return;
         }
         if (ev.method === 'Target.receivedMessageFromTarget' && ev.params && typeof ev.params.message === 'string') {
           const innerSid = ev.params.sessionId ? String(ev.params.sessionId) : null;
-          const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : null;
-          if (liveFillFor(g.profileId, innerTid, g.scope)) {
+          const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : (ev.params.targetId ? String(ev.params.targetId) : null);
+          const innerUnknownFenced = Boolean(!innerTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
+          if (liveFillFor(g.profileId, innerTid) || innerUnknownFenced) {
             let inner = null;
             try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
-            if (!inner || M.LIVE_FILL_DROPPED_EVENTS.has(inner.method)) { g.dropped = (g.dropped || 0) + 1; return; }
+            if (!inner || inner.id != null || M.LIVE_FILL_DROPPED_EVENTS.has(inner.method)) { g.dropped = (g.dropped || 0) + 1; return; }
           }
         }
         if (ev.method === 'Tracing.dataCollected') {
@@ -583,8 +617,16 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         }
         for (const [id, p] of conn.pending) {
           if (!p || p.aborted || p.hadCredit || id === undefined || id === null) continue;
-          const pTid = p.targetId || (conn.kind === 'page' ? conn.targetId : (p.sessionId && g.scope ? g.scope.sessions.get(String(p.sessionId)) || null : null));
-          if (wantTid && pTid && pTid !== wantTid) continue;
+          const pTid = p.targetId || (conn.kind === 'page' ? conn.targetId : (!p.wrapped && p.sessionId && g.scope ? g.scope.sessions.get(String(p.sessionId)) || null : null));
+          if (wantTid && !p.unknownSession && pTid !== wantTid) continue;
+          if (p.wrapped) {
+            p.aborted = true;
+            p.fillAborted = true;
+            g.refusals = (g.refusals || 0) + 1;
+            try { conn.ws.send(JSON.stringify(M.refusal(id, M.CDP_REFUSAL_CODE, M.ALWAYS_REFUSED_WHY['Target.sendMessageToTarget'] || 'Target.sendMessageToTarget is refused — use flat sessions', p.sessionId))); } catch { /* gone */ }
+            out.aborted.push({ method: p.method, sessionId: p.sessionId || null, browserKey: g.browserKey });
+            continue;
+          }
           const lfv = M.liveFillCdpVerdict(p.method, { allowVerb: null, params: p.params || null });
           if (!lfv.refuse) continue;
           p.aborted = true;

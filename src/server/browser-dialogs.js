@@ -2784,8 +2784,28 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!pid || !keeper || typeof keeper.saveLoginFenceState !== 'function') return;
     const w = watches.get(pid);
     let fences = [];
+    let guards = [];
     if (w && w.state === 'open') {
       for (const e of w.targets.values()) {
+        if (Array.isArray(e.postLiftGuards) && e.postLiftGuards.length) {
+          for (const g of e.postLiftGuards) {
+            if (!g || !g.lfSnap || !g.lfSnap.origin) continue;
+            guards.push({
+              targetId: e.targetId,
+              urlAtFill: String(g.lfSnap.urlAtFill || tabLoginUrlOf(e)),
+              origin: String(g.lfSnap.origin || ''),
+              at: Number(g.lfSnap.at) || now(),
+              loginId: g.lfSnap.loginId || null,
+              mode: String(g.lfSnap.mode || 'login'),
+              browserKey: g.lfSnap.browserKey || null,
+              ...(BL().TYPED_SLOTS.includes(g.lfSnap.typedSlot) ? { typedSlot: g.lfSnap.typedSlot } : {}),
+              ...(Number.isInteger(g.lfSnap.rev) && g.lfSnap.rev >= 1 ? { rev: g.lfSnap.rev } : {}),
+              ...(typeof g.lfSnap.entryGen === 'string' && BL().ENTRY_GEN_RE.test(g.lfSnap.entryGen) ? { entryGen: g.lfSnap.entryGen } : {}),
+              ...(g.lfSnap.typedPrevious ? { typedPrevious: true } : {}),
+              ...(Array.isArray(g.lfSnap.also) && g.lfSnap.also.length ? { also: g.lfSnap.also } : {}),
+            });
+          }
+        }
         if (!e.liveFill) continue;
         fences.push({
           targetId: e.targetId,
@@ -2800,15 +2820,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           ...(typeof e.liveFill.entryGen === 'string' && BL().ENTRY_GEN_RE.test(e.liveFill.entryGen) ? { entryGen: e.liveFill.entryGen } : {}),
           ...(e.liveFill.typedPrevious ? { typedPrevious: true } : {}),
           ...(e.liveFill.unknownTyped ? { unknownTyped: true } : {}),
+          ...(e.liveFill.postLiftHeld ? { postLiftHeld: true } : {}),
           ...(Array.isArray(e.liveFill.also) && e.liveFill.also.length ? { also: e.liveFill.also } : {}),
           ...(e.liveFill.holdReason ? { holdReason: String(e.liveFill.holdReason) } : {}),
         });
       }
     } else if (typeof keeper.loginFenceStateOf === 'function') {
-      try { fences = keeper.loginFenceStateOf(pid).fences || []; } catch { fences = []; }
+      try {
+        const st = keeper.loginFenceStateOf(pid) || {};
+        fences = st.fences || [];
+        guards = st.guards || [];
+      } catch { fences = []; guards = []; }
     }
     const scrubs = [...(scrubNamesByProfile.get(pid) || [])];
-    try { keeper.saveLoginFenceState(pid, { fences, scrubs }); } catch { /* optional */ }
+    try { keeper.saveLoginFenceState(pid, { fences, scrubs, guards }); } catch { /* optional */ }
   }
   function recordProfileCredSigs(profileId, sigs) {
     const pid = String(profileId || '');
@@ -3488,21 +3513,69 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     call(w, 'Fetch.continueRequest', { requestId: reqId }, sid);
   }
 
-  function clearPostLiftOnTab(e) {
+  function clearPostLiftOnTab(e, w = null) {
     if (!e) return;
+    const had = Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0;
     if (e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }
     e.postLiftGuards = null;
+    if (had && w && w.profileId) syncPersistedLoginFences(w.profileId);
+  }
+
+  function tabNeedsPostLiftRecheck(e) {
+    return Boolean(e && (!e.liveFill || e.liveFill.postLiftHeld) && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0);
   }
 
   async function recheckPostLiftOnTab(w, e) {
-    if (!w || w.state !== 'open' || !e || !e.sid || e.liveFill || !Array.isArray(e.postLiftGuards) || !e.postLiftGuards.length) return false;
+    if (!w || w.state !== 'open' || !e || !e.sid || !tabNeedsPostLiftRecheck(e)) return { ok: true, refilled: false };
     if (e.postLiftChecking) return e.postLiftChecking;
     const p = (async () => {
       try {
         const guards = Array.isArray(e.postLiftGuards) ? [...e.postLiftGuards] : [];
+        let anyRefilled = false;
+        let lastSnap = null;
+        let anyTooMuch = false;
+        let anyNotEmpty = false;
         for (const g of guards) {
-          if (!g || !g.prebuiltTargets || !w || w.state !== 'open' || !e.sid || e.liveFill) break;
-          if (stripHash(tabLoginUrlOf(e)) !== stripHash(g.lfSnap.urlAtFill)) continue;
+          if (!g || !g.lfSnap || !w || w.state !== 'open' || !e.sid) break;
+          if (e.liveFill && !e.liveFill.postLiftHeld) return { ok: true, refilled: false };
+          if (stripHash(tabLoginUrlOf(e)) !== stripHash(g.lfSnap.urlAtFill)) {
+            clearPostLiftOnTab(e, w);
+            if (e.liveFill && e.liveFill.postLiftHeld) clearLiveFillOnTab(w, e, 'url-changed', { audit: false, persist: true });
+            return { ok: true, refilled: false };
+          }
+          if (!g.prebuiltTargets || !Array.isArray(g.prebuiltTargets.targets) || !g.prebuiltTargets.targets.length) {
+            const hyd = hydrateTabFenceSecrets(e.targetId, g.lfSnap.loginId, {
+              typedSlot: g.lfSnap.typedSlot || null,
+              typedPrevious: Boolean(g.lfSnap.typedPrevious),
+              rev: g.lfSnap.rev ?? null,
+              entryGen: g.lfSnap.entryGen || null,
+              mode: g.lfSnap.mode || 'login',
+              at: g.lfSnap.at || null,
+              also: Array.isArray(g.lfSnap.also) ? g.lfSnap.also : null,
+            });
+            const svs = [...new Set([...scrubValuesForLogin(w.profileId, g.lfSnap.loginId, g.lfSnap.also), ...(hyd.values || [])])];
+            const otpVals = [...new Set([...(hyd.otpValues || [])])];
+            if (hyd.locked && svs.length === 0 && otpVals.length === 0) {
+              return { ok: false, checkFailed: true, code: 'vault_locked', error: BL().LOCKED };
+            }
+            if (hyd.movedOn && svs.length === 0 && otpVals.length === 0) {
+              return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };
+            }
+            if (hyd.values && hyd.values.length) {
+              if (Array.isArray(hyd.byLogin) && hyd.byLogin.length) {
+                for (const bl of hyd.byLogin) for (const sv of bl.values) recordScrubSecret(w.profileId, bl.loginId, sv, { persist: false });
+              } else {
+                for (const sv of hyd.values) recordScrubSecret(w.profileId, g.lfSnap.loginId, sv, { persist: false });
+              }
+            }
+            if (Array.isArray(hyd.sigs) && hyd.sigs.length) g.lfSnap.credSigs = [...hyd.sigs];
+            try {
+              g.prebuiltTargets = LF().buildFilledTargets(svs, { wholeOnlyValues: otpVals.length ? otpVals : null });
+            } catch { g.prebuiltTargets = null; }
+            if (!g.prebuiltTargets || !Array.isArray(g.prebuiltTargets.targets) || !g.prebuiltTargets.targets.length) {
+              return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };
+            }
+          }
           const wr = await LF().wipeTabTypedInputs({
             call: (m, prm) => call(w, m, prm, e.sid, 1200),
             oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
@@ -3512,20 +3585,31 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             allowTypedHeuristic: false,
             maxScanPositions: wipeMaxScanPositions,
           }).catch(() => null);
-          const refilled = Boolean(wr && (!wr.ok || Number(wr.wiped) > 0 || !wr.verifiedEmpty || wr.tooMuchText));
-          if (refilled && !e.liveFill && stripHash(tabLoginUrlOf(e)) === stripHash(g.lfSnap.urlAtFill)) {
-            clearPostLiftOnTab(e);
-            armLiveFillOnTab(w, e, {
-              ...g.lfSnap,
-              holdReason: wr && wr.tooMuchText ? BL().HOLD_TOO_MUCH_TEXT : '',
-              postLiftHeld: true,
-            }, { persist: true, noTimer: true });
-            await syncTabFetchMode(w, e);
-            if (e.liveFill) fileCeilingWipeNotice(w, e, e.liveFill);
-            return true;
+          if (!wr || !wr.ok) {
+            return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };
+          }
+          if (Number(wr.wiped) > 0 || !wr.verifiedEmpty || wr.tooMuchText) {
+            anyRefilled = true;
+            lastSnap = g.lfSnap;
+            if (wr.tooMuchText) anyTooMuch = true;
+            if (!wr.verifiedEmpty) anyNotEmpty = true;
           }
         }
-        return false;
+        if (anyRefilled && lastSnap && stripHash(tabLoginUrlOf(e)) === stripHash(lastSnap.urlAtFill)) {
+          armLiveFillOnTab(w, e, {
+            ...lastSnap,
+            at: now(),
+            holdReason: anyTooMuch ? BL().HOLD_TOO_MUCH_TEXT : '',
+            postLiftHeld: true,
+          }, { persist: true, noTimer: anyTooMuch });
+          await syncTabFetchMode(w, e);
+          if (e.liveFill && (anyTooMuch || anyNotEmpty)) fileCeilingWipeNotice(w, e, e.liveFill);
+          return { ok: true, refilled: true };
+        }
+        if (!anyRefilled && e.liveFill && e.liveFill.postLiftHeld) {
+          clearLiveFillOnTab(w, e, 'post-lift-verified-empty', { audit: false, persist: true });
+        }
+        return { ok: true, refilled: false };
       } finally {
         if (e) e.postLiftChecking = null;
       }
@@ -3538,7 +3622,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!e) return;
     e.credPreArming = false;
     if (!e.liveFill) {
-      if (why === 'navigated' || why === 'tab-closed' || why === 'url-changed') clearPostLiftOnTab(e);
+      if (why === 'navigated' || why === 'tab-closed' || why === 'url-changed') clearPostLiftOnTab(e, w);
       syncTabCredIntercept(w, e);
       return;
     }
@@ -3553,7 +3637,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
     if (lf.ceilingNoticeId) { try { forYou?.resolve?.(lf.ceilingNoticeId); } catch { /* */ } }
     if (e.inflightCredReqs) e.inflightCredReqs.clear();
-    if ((why === 'submitted' || why === 'same-doc-nav' || why === 'ceiling') && prebuiltTargets && Array.isArray(prebuiltTargets.targets) && prebuiltTargets.targets.length > 0) {
+    if ((why === 'submitted' || why === 'same-doc-nav' || why === 'ceiling') && prebuiltTargets && Array.isArray(prebuiltTargets.targets) && prebuiltTargets.targets.length > 0 && !lf.postLiftHeld) {
       const lfSnap = {
         urlAtFill: lf.urlAtFill,
         origin: lf.origin,
@@ -3580,7 +3664,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (pt.unref) pt.unref();
       e.postLiftTimer = pt;
     } else if (why === 'navigated' || why === 'tab-closed' || why === 'url-changed') {
-      clearPostLiftOnTab(e);
+      clearPostLiftOnTab(e, w);
     }
     if (audit) recordFenceAudit(w.profileId, lf, why);
     if (persist) syncPersistedLoginFences(w.profileId);
@@ -3652,7 +3736,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   function expireLiveFillCeiling(w, e) {
     const lf = e && e.liveFill;
-    if (!lf || lf.wiping || lf.postLiftHeld) return;
+    if (!lf || lf.wiping) return;
     if (lf.unknownTyped || lf.holdReason === BL().HOLD_UNKNOWN_TYPED) {
       if (e.liveFillTimer) { clearTimeout(e.liveFillTimer); e.liveFillTimer = null; }
       lf.unknownTyped = true;
@@ -3668,26 +3752,28 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       let wipedEmpty = false, wipeTooMuch = false, wipeLockedHold = false, wipeUnknownHold = false, preTargets = null;
       try {
         if (w.state === 'open' && e.sid) {
+          const guardPreTargets = lf.postLiftHeld && Array.isArray(e.postLiftGuards)
+            ? (e.postLiftGuards.find((g) => g && g.prebuiltTargets && Array.isArray(g.prebuiltTargets.targets) && g.prebuiltTargets.targets.length)?.prebuiltTargets || null)
+            : null;
           const inMemVals = (LF().valuesForTarget?.(e.targetId, lf.isoContextId || 0) || []).filter((x) => typeof x === 'string' && x);
           const hasInMemOtpOnly = lf.typedSlot === 'otp' && Array.isArray(lf.stepOtpValues) && lf.stepOtpValues.length > 0 && (!Array.isArray(lf.also) || lf.also.length === 0);
-          const slotHydrated = (inMemVals.length === 0 && !hasInMemOtpOnly)
+          const slotHydrated = (inMemVals.length === 0 && !hasInMemOtpOnly && !guardPreTargets)
             ? hydrateTabFenceSecrets(e.targetId, lf.loginId, { typedSlot: lf.typedSlot || null, typedPrevious: Boolean(lf.typedPrevious), rev: lf.rev ?? null, entryGen: lf.entryGen || null, mode: lf.mode || 'login', at: lf.at || null, also: Array.isArray(lf.also) ? lf.also : null })
             : { values: inMemVals, otpValues: [], sigs: lf.credSigs || [], locked: false, movedOn: false };
-          if (slotHydrated.movedOn) {
+          if (slotHydrated.movedOn && !guardPreTargets) {
             wipeUnknownHold = true;
           } else {
             const svs = [...new Set([...scrubValuesForLogin(w.profileId, lf.loginId, lf.also), ...(slotHydrated.values || [])])];
             const otpVals = [...new Set([...(Array.isArray(lf.stepOtpValues) ? lf.stepOtpValues : []), ...(slotHydrated.otpValues || [])])];
-            const lockedDrop = fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId, otpVals);
+            const lockedDrop = !guardPreTargets && fenceLacksSecretsWhileLocked(e.targetId, lf.isoContextId || 0, lf.credSigs, svs, lf.loginId, otpVals);
             if (lockedDrop && !lf.holdReason) lf.holdReason = BL().HOLD_VAULT_LOCKED;
-            try { preTargets = LF().targetsForTab(e.targetId, lf.isoContextId || 0, svs, e.sid, { wholeOnlyValues: otpVals.length ? otpVals : null }); } catch { preTargets = null; }
-            const wr = (!lockedDrop || svs.length > 0) ? await LF().wipeTabTypedInputs({
+            try { preTargets = guardPreTargets || LF().targetsForTab(e.targetId, lf.isoContextId || 0, svs, e.sid, { wholeOnlyValues: otpVals.length ? otpVals : null }); } catch { preTargets = guardPreTargets; }
+            const wr = (!lockedDrop || svs.length > 0 || Boolean(guardPreTargets)) ? await LF().wipeTabTypedInputs({
               call: (m, p) => call(w, m, p, e.sid, 1500),
               oopFrames: (ids, fn) => inspectOopIframes(w, ids, fn),
               targetId: e.targetId,
               contextId: lf.isoContextId || 0,
-              secretValues: svs,
-              wholeOnlyValues: otpVals.length ? otpVals : null,
+              ...(svs.length === 0 && otpVals.length === 0 && guardPreTargets ? { prebuiltTargets: guardPreTargets } : { secretValues: svs, wholeOnlyValues: otpVals.length ? otpVals : null }),
               maxScanPositions: wipeMaxScanPositions,
             }).catch(() => null) : null;
             wipedEmpty = !lockedDrop && Boolean(wr && wr.ok === true && wr.verifiedEmpty === true);
@@ -3771,7 +3857,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     };
     e.liveFill = lf;
     bumpFillEpoch(w.profileId, e.targetId);
-    if (!noTimer && !lf.postLiftHeld && !lf.unknownTyped && lf.holdReason !== BL().HOLD_VAULT_LOCKED && lf.holdReason !== BL().HOLD_UNKNOWN_TYPED) {
+    if (!noTimer && !lf.unknownTyped && lf.holdReason !== BL().HOLD_VAULT_LOCKED && lf.holdReason !== BL().HOLD_UNKNOWN_TYPED) {
       const left = retryMs != null ? Math.max(0, Number(retryMs) || 0) : Math.max(0, liveFillMaxMs - (now() - lf.at));
       const timer = setTimeout(() => { if (e.liveFill === lf) expireLiveFillCeiling(w, e); }, left);
       if (timer.unref) timer.unref();
@@ -3839,7 +3925,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
 
   async function rearmLoginFences(w) {
     if (!w || !keeper || typeof keeper.loginFenceStateOf !== 'function') return;
-    let st = { fences: [], scrubs: [] };
+    let st = { fences: [], scrubs: [], guards: [] };
     try { st = keeper.loginFenceStateOf(w.profileId) || st; } catch { return; }
     if (Array.isArray(st.scrubs) && st.scrubs.length) {
       let names = scrubNamesByProfile.get(w.profileId);
@@ -3850,7 +3936,40 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       hydratePersistedScrubs(w.profileId);
     }
+    const restoreGuards = () => {
+      if (!Array.isArray(st.guards) || !st.guards.length) return;
+      for (const g of st.guards) {
+        if (!g || !g.targetId || !g.origin) continue;
+        const tid = resolveKnownTargetId(w, g.targetId);
+        const e = tid ? w.targets.get(tid) : null;
+        if (!e) continue;
+        if (stripHash(tabLoginUrlOf(e)) !== stripHash(g.urlAtFill)) continue;
+        if (e.liveFill && !e.liveFill.postLiftHeld) continue;
+        const parsedG = g.loginId ? BL().parseName(g.loginId) : null;
+        const lfSnap = {
+          urlAtFill: g.urlAtFill || tabLoginUrlOf(e),
+          origin: g.origin,
+          user: (parsedG && parsedG.user) || '',
+          loginId: g.loginId || null,
+          browserKey: g.browserKey || null,
+          mode: g.mode || 'login',
+          at: Number(g.at) || now(),
+          isoContextId: 0,
+          credSigs: [],
+          typedSlot: g.typedSlot || null,
+          rev: g.rev ?? null,
+          entryGen: g.entryGen || null,
+          typedPrevious: Boolean(g.typedPrevious),
+          unknownTyped: false,
+          also: Array.isArray(g.also) ? g.also.map((a) => ({ ...a })) : [],
+          holdReason: '',
+        };
+        e.postLiftGuards = [...(Array.isArray(e.postLiftGuards) ? e.postLiftGuards : []), { lfSnap, prebuiltTargets: null }].slice(-4);
+        if (g.browserKey && !activeTabOfProfile(w.profileId, g.browserKey)) noteActiveTarget(w.profileId, g.browserKey, e.targetId);
+      }
+    };
     if (!Array.isArray(st.fences) || !st.fences.length) {
+      restoreGuards();
       syncPersistedLoginFences(w.profileId);
       return;
     }
@@ -3975,6 +4094,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       await syncTabFetchMode(w, e);
       if (f.browserKey && !activeTabOfProfile(w.profileId, f.browserKey)) noteActiveTarget(w.profileId, f.browserKey, e.targetId);
     }
+    restoreGuards();
     syncPersistedLoginFences(w.profileId);
   }
 
@@ -4008,7 +4128,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     credSigsByProfile.delete(pid);
     credRequestIdsByProfile.delete(pid);
     if (keeper && typeof keeper.saveLoginFenceState === 'function') {
-      try { keeper.saveLoginFenceState(pid, { fences: [], scrubs: [] }); } catch { /* optional */ }
+      try { keeper.saveLoginFenceState(pid, { fences: [], scrubs: [], guards: [] }); } catch { /* optional */ }
     }
   }
 
@@ -4083,7 +4203,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const t = now();
     for (const e of cands) {
       if (!e) continue;
-      if (e.liveFill && t - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed && !e.liveFill.postLiftHeld) expireLiveFillCeiling(w, e);
+      if (e.liveFill && t - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed) expireLiveFillCeiling(w, e);
       const lf = effectiveLiveFillOf(e);
       if (lf) return BL().liveFillVerdict({ verb, argv, batchVerbs, origin: lf.origin, holdReason: lf.holdReason || '' });
     }
@@ -4109,7 +4229,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     }
     const check = (e) => {
       if (!e) return null;
-      if (e.liveFill && now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed && !e.liveFill.postLiftHeld) expireLiveFillCeiling(w, e);
+      if (e.liveFill && now() - (Number(e.liveFill.at) || 0) >= liveFillMaxMs && !e.liveFill.wiping && !e.liveFill.ceilingNoticed) expireLiveFillCeiling(w, e);
       return effectiveLiveFillOf(e);
     };
     if (targetId) {
@@ -4126,53 +4246,74 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (targetId) {
       const tid = resolveKnownTargetId(w, targetId);
       const e = tid ? w.targets.get(tid) : null;
-      return Boolean(e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0);
+      return tabNeedsPostLiftRecheck(e);
     }
     for (const e of w.targets.values()) {
-      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) return true;
+      if (tabNeedsPostLiftRecheck(e)) return true;
     }
     return false;
   }
 
   async function recheckPostLift(profileId, targetId = null) {
     const w = watches.get(String(profileId || ''));
-    if (!w || w.state !== 'open') return false;
+    if (!w || w.state !== 'open') return { ok: true, refilled: false };
     if (targetId) {
       const tid = resolveKnownTargetId(w, targetId);
       const e = tid ? w.targets.get(tid) : null;
-      return e ? recheckPostLiftOnTab(w, e) : false;
+      return e ? recheckPostLiftOnTab(w, e) : { ok: true, refilled: false };
     }
-    let any = false;
+    let anyRefilled = false;
     for (const e of [...w.targets.values()]) {
-      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) {
-        if (await recheckPostLiftOnTab(w, e)) any = true;
+      if (tabNeedsPostLiftRecheck(e)) {
+        const r = await recheckPostLiftOnTab(w, e);
+        if (r && r.checkFailed) return r;
+        if (r && r.refilled) anyRefilled = true;
       }
     }
-    return any;
+    return { ok: true, refilled: anyRefilled };
   }
 
   async function recheckPostLiftFor(target, { verb = '', argv = null, batchVerbs = null, targetId = null } = {}) {
     const pid = String((target && target.profileId) || '');
     const w = watches.get(pid);
-    if (!w || w.state !== 'open') return false;
-    if (BL().liveFillVerdict({ verb, argv, batchVerbs, origin: 'https://x.test' }).ok) return false;
+    if (!w || w.state !== 'open') return { ok: true, refilled: false };
+    if (BL().liveFillVerdict({ verb, argv, batchVerbs, origin: 'https://x.test' }).ok) return { ok: true, refilled: false };
     const explicitTarget = targetId || extractArgvTab(argv);
+    const batchSwitchesTab = verb === 'batch' && Array.isArray(batchVerbs) && batchVerbs.some((v) => String(v || '').trim().split(/\s+/)[0] === 'tab');
     const scope = scopeFor(target);
+    let maxGuardAt = 0, anyGuard = false;
+    for (const e of w.targets.values()) {
+      if (!tabNeedsPostLiftRecheck(e)) continue;
+      anyGuard = true;
+      if (inScope(scope, e.targetId)) {
+        for (const g of (e.postLiftGuards || [])) {
+          if (g && g.lfSnap && (g.lfSnap.at || 0) > maxGuardAt) maxGuardAt = g.lfSnap.at || 0;
+        }
+      }
+    }
+    if (!anyGuard) return { ok: true, refilled: false };
     let cands = null;
     if (explicitTarget) {
       const tid = resolveKnownTargetId(w, explicitTarget);
       const e = tid ? w.targets.get(tid) : null;
       cands = e && inScope(scope, e.targetId) ? [e] : [];
-    } else {
-      cands = [...w.targets.values()].filter((e) => e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0 && inScope(scope, e.targetId));
-    }
-    let any = false;
-    for (const e of cands) {
-      if (e && !e.liveFill && Array.isArray(e.postLiftGuards) && e.postLiftGuards.length > 0) {
-        if (await recheckPostLiftOnTab(w, e)) any = true;
+    } else if (!batchSwitchesTab) {
+      const actEntry = activeTabEntryOfProfile(pid, target && target.browserKey);
+      const actE = actEntry && actEntry.tid ? w.targets.get(actEntry.tid) : null;
+      if (actE && inScope(scope, actE.targetId) && (tabNeedsPostLiftRecheck(actE) || (actEntry.at || 0) >= maxGuardAt)) {
+        cands = [actE];
       }
     }
-    return any;
+    if (!cands) cands = [...w.targets.values()].filter((e) => tabNeedsPostLiftRecheck(e) && inScope(scope, e.targetId));
+    let anyRefilled = false;
+    for (const e of cands) {
+      if (tabNeedsPostLiftRecheck(e)) {
+        const r = await recheckPostLiftOnTab(w, e);
+        if (r && r.checkFailed) return r;
+        if (r && r.refilled) anyRefilled = true;
+      }
+    }
+    return { ok: true, refilled: anyRefilled };
   }
 
   async function inspectOopIframes(w, treeFrameIds, visit) {
@@ -4241,7 +4382,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return { ok: true, targetId: e.targetId, count: specs.size };
   }
 
-  /** R29 Law 1: THE ONE channel judgment asked by both `precheckVaultFill` and `fillVaultField`. */
+  /** R29 Law 1 + R30 #3: THE ONE channel judgment (`keeper.loginChannelFor`); a keeper without it refuses closed by name. */
   function checkLoginChannelFor({
     profileId = '',
     ephemeral = false,
@@ -4266,49 +4407,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         action,
       });
     }
-    let pid = String(profileId || '').trim();
-    let isChild = Boolean(handle && /^\w*bk-[\w-]+\.\d+$/.test(String(handle)));
-    if (!pid && browserKey && keeper && typeof keeper.resolveFor === 'function') {
-      let rv = null;
-      try { rv = keeper.resolveFor({ browserKey, handle: handle || '', subagent: Boolean(subagent) }); } catch { rv = null; }
-      if (rv && rv.ok) {
-        if (rv.kind === 'child') isChild = true;
-        else if (rv.attachment && rv.attachment.profileId) pid = String(rv.attachment.profileId);
-        else if (rv.profileId) pid = String(rv.profileId);
-      }
-    }
-    let p = null;
-    if (pid && !pid.startsWith('eph-') && keeper) {
-      try {
-        if (typeof keeper.profile === 'function') p = keeper.profile(pid) || null;
-        else if (typeof keeper.list === 'function') p = ((keeper.list() && keeper.list().profiles) || []).find((x) => x && x.id === pid) || null;
-      } catch { p = null; }
-    }
-    const isEph = Boolean(ephemeral) || isChild || !pid || pid.startsWith('eph-') || Boolean(p && p.ephemeral);
-    const isExt = Boolean(p && (p.provider === 'cdp' || p.external));
-    const isRem = Boolean(p && (p.host || p.hostId));
-    const hasMed = typeof keeper?.mediator === 'function' ? Boolean(keeper.mediator()) : true;
-    const bRec = !isEph && typeof keeper?.browserOf === 'function' ? keeper.browserOf(pid) : null;
-    const hasCdp = isEph ? true : Boolean(!isRem && (!bRec || bRec.wsEndpoint || bRec.cdpPort));
-    const isMed = Boolean(!isEph && p && (p.sharing === 'instance' || p.mediated === true) && !p.legacy);
-    const road = BM().leaseRoadVerdict({
-      mediated: isMed,
-      proxy: hasMed,
-      ephemeral: isEph,
-      remote: isRem || isExt || Boolean(remoteSession),
-      agent: true,
-    });
-    return BM().loginFillChannelVerdict(road, {
-      proxy: hasMed,
-      external: isExt,
-      remote: isRem,
-      remoteSession: Boolean(remoteSession),
-      hasCdp,
-      usableProfiles: [],
-      restrictedCount: 0,
-      profileLabel: (p && p.label) || pid || '',
-      action,
-    });
+    return BM().loginFillChannelVerdict({ mode: null, why: 'unmediated' }, { action });
   }
 
   /** Pre-CDP gate check (M1 + R29 Law 1: channel -> vault lock -> spec/entry/grant/slot BEFORE opening or touching the browser). */
@@ -4759,7 +4858,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (!res?.attemptedInsert && myActiveFill && myActiveFill.crossNav) {
         return { ok: false, code: 'login_phishing', error: `the tab started navigating to ${myActiveFill.crossNav}, not ${pre.origin} — nothing was filled` };
       }
-      return { ok: false, code: (res && res.code) || 'login_form_changed', error: (res && res.error) || 'vault fill failed' };
+      return {
+        ok: false,
+        code: (res && res.code) || 'login_form_changed',
+        error: (res && res.error) || 'vault fill failed',
+        ...(res && res.retryInMs != null ? { retryInMs: res.retryInMs } : {}),
+        ...(res && res.secondsLeft != null ? { secondsLeft: res.secondsLeft } : {}),
+      };
     }
 
     const u = resolved && typeof resolved.noteFillUse === 'function' ? resolved.noteFillUse() : null;
@@ -4953,7 +5058,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
             return f;
           });
           if (changed) {
-            try { keeper.saveLoginFenceState(pid, { fences: nextFences, scrubs: st.scrubs || [] }); } catch { /* */ }
+            try { keeper.saveLoginFenceState(pid, { fences: nextFences, scrubs: st.scrubs || [], guards: st.guards || [] }); } catch { /* */ }
           }
         }
       }
