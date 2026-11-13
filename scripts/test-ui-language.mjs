@@ -42,7 +42,7 @@
 //      a value's (a worded sentence's, a brand's) says `// ui-words: <why>` on the line above.
 //   ⑦ ONE FORMATTER OF A TIME (src/lib/page-time.js — pick 4; 主开发's shape: zh / ja «2026/11/12 19:27», today «19:27», this
 //      year «11/12 19:27», en the device's own): outside page-time.js no toLocaleString / toLocaleDateString / toLocaleTimeString,
-//      no Intl.DateTimeFormat / RelativeTimeFormat, no hand-built `getMonth() + 1` date in the browser bundle — ZERO tolerance;
+//      no Intl.DateTimeFormat / RelativeTimeFormat in the browser bundle — ZERO tolerance; a hand-built `getMonth() + 1` date or hh:mm is red past the shrink-only `clocks` list (debt, said);
 //      an English unit template (`${n}m`, `${h}h ago`) is red past its own shrink-only baseline (`units`: the PURE word
 //      modules shared with agent-facing text keep theirs until each moves). A machine format (an explicit `en-…` locale, a zone read
 //      `.resolvedOptions()`, a YYYY-MM-DD key) or a PURE shared module that takes its caller's locale says
@@ -176,6 +176,10 @@ function exemptLines(src) {
   return set;
 }
 const CAPS_RE = /\.charAt\(0\)\.to(?:Locale)?UpperCase\(\)|\[0\]\.to(?:Locale)?UpperCase\(\)|\.replace\(\s*\/(?:\^|\\b)(?:\.|\\w|\\S|\[a-z\])\/[gimsuy]*\s*,[^;]*?\.to(?:Locale)?UpperCase\(\)/;   // ⑥(d) — also `.replace(/^./, (c) => c.toUpperCase())` (the reader's M2c)
+/** ⑥(d) the AST form of a hand capitalisation: `<first piece>.to(Locale)UpperCase()` + `<value>.slice(1)` (or substring / substr) —
+ *  the first piece spelled any way (charAt(0), [0], slice(0, 1), substring(0, 1), substr(0, 1), at(0)). */
+const UPPER_FIRST = (e) => !!e && e.type === 'CallExpression' && e.callee.type === 'MemberExpression' && !e.callee.computed && /^to(Locale)?UpperCase$/.test(e.callee.property.name || '');
+const REST_OF = (e) => !!e && e.type === 'CallExpression' && e.callee.type === 'MemberExpression' && !e.callee.computed && /^(slice|substring|substr)$/.test(e.callee.property.name || '') && e.arguments.length === 1 && e.arguments[0].type === 'Literal' && e.arguments[0].value === 1;
 /** ⑦ a clock part read off a Date by hand (`d.getHours()`, `String(d.getMinutes()).padStart(2, '0')` …). */
 const CLOCK_PART = (e) => { let hit = false; const v = (x) => { if (hit || !x || typeof x.type !== 'string') return; if (x.type === 'CallExpression' && x.callee.type === 'MemberExpression' && !x.callee.computed && /^get(UTC)?(Hours|Minutes)$/.test(x.callee.property.name || '')) { hit = true; return; } for (const k in x) { const y = x[k]; if (Array.isArray(y)) y.forEach(v); else if (y && typeof y.type === 'string') v(y); } }; v(e); return hit; };
 const MARKUP = /<\/?(?:b|br|i|em|strong|code)\b[^>]*>|\*\*[^*]+\*\*|`[^`]+`/;
@@ -198,6 +202,9 @@ export function scanFile(file, src, ast = parse(src)) {
     const name = n.callee.name;
     const ki = name === 'tc' ? 1 : 0;
     const k = n.arguments[ki];
+    // ⑥(c) a code-named field handed to t() as its KEY (`t(st.state)`): a stored value treated as a dictionary key — no extractor
+    // sees it, no row is promised (the closure round, 主开发 20:39Z) — it is drawn raw by another road; word it through value-words
+    if (name !== 'i18nKey' && k && k.type === 'MemberExpression' && !k.computed && k.property.type === 'Identifier' && CODE_FIELDS.has(k.property.name) && !ex.has(at(n))) raw.push({ line: at(n), sink: 'key:' + name, text: '.' + k.property.name });
     if (name !== 'i18nKey' && k && k.type === 'Literal' && typeof k.value === 'string') {
       const ps = [...k.value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
       const p = n.arguments[ki + 1];
@@ -241,8 +248,9 @@ export function scanFile(file, src, ast = parse(src)) {
       case 'ThrowStatement': case 'ImportDeclaration': case 'ExportAllDeclaration': return;
       case 'BinaryExpression':
         if (/^[!=]==?$|^in$|^instanceof$/.test(node.operator)) return;
+        if (node.operator === '+' && UPPER_FIRST(node.left) && REST_OF(node.right) && !ex.has(at(node)) && !caps.some((c) => c.line === at(node))) caps.push({ line: at(node), text: src.split('\n')[at(node) - 1].trim().slice(0, 140) });
         if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === ':' && CLOCK_PART(node.left)) timeHit(node, 'hh:mm built by hand (getHours / getMinutes)', 'clock');
-        if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === 1 && node.left.type === 'CallExpression' && node.left.callee.type === 'MemberExpression' && node.left.callee.property.name === 'getMonth') timeHit(node, 'getMonth() + 1');
+        if (node.operator === '+' && node.right.type === 'Literal' && node.right.value === 1 && node.left.type === 'CallExpression' && node.left.callee.type === 'MemberExpression' && node.left.callee.property.name === 'getMonth') timeHit(node, 'getMonth() + 1', 'clock');
         if (node.operator === '+' && node.right.type === 'Literal' && typeof node.right.value === 'string' && /^(m|h|d)( ago)?$/.test(node.right.value)) timeHit(node, `+ '${node.right.value}'`, 'unit');
         break;
       case 'SwitchCase': for (const s of node.consequent) walk(s, sink); return;
@@ -517,6 +525,11 @@ if (isMain) {
     ok(cp.caps.length === 2 && cp.caps.map((x) => x.line).join() === '1,3', '⑥(d) a value capitalised by hand is named (charAt(0) and [0]); the same value through themeWord, and a `// ui-words:` first letter, are not', JSON.stringify(cp.caps));
     const pf = pluginFindings([{ id: 'a', label: 'OpenCode background service', description: 'Runs it' }, { id: 'b', label: 'Tailscale' }, { id: 'c', label: 'Public URLs (frp)' }], { zh: new Set(['Runs it', 'Public URLs (frp)']), ja: new Set(['Runs it', 'Public URLs (frp)']) });
     ok(pf.length === 2 && pf.every((x) => /^a\.label: no (zh|ja) row/.test(x)), '⑥(e) a built-in plugin label with no zh / ja row is named (the reader\'s «OpenCode background service»); a name and a held row are not', JSON.stringify(pf));
+    // the closure round (主开发 20:39Z): a stored value handed to t() as its key, and the slice / substring spellings of a capitalisation
+    const nk = scanFile('src/lib/nk.js', "a.textContent = t(st.state);\nb.textContent = valueWord('job-state', st.state, t);\nc.textContent = t(p.label);");
+    ok(nk.raw.length === 1 && nk.raw[0].line === 1 && /key:t/.test(nk.raw[0].sink), '⑥(c) a code-named field handed to t() as its KEY (t(st.state)) is named; the door, and a non-stored dynamic key, are not', JSON.stringify(nk.raw));
+    const sc2 = scanFile('src/lib/sc2.js', "a.textContent = n.slice(0, 1).toUpperCase() + n.slice(1);\nb.title = n.substring(0, 1).toLocaleUpperCase() + n.substring(1);\nc.textContent = n.at(0).toUpperCase() + n.substr(1);\nd.textContent = n.toUpperCase() + m.slice(2);");
+    ok(sc2.caps.length === 3 && sc2.caps.map((x) => x.line).join() === '1,2,3', '⑥(d) a capitalisation spelled with slice / substring / at(0) is named (the AST form: an upper-cased first piece + the rest); a whole upper-case is not', JSON.stringify(sc2.caps));
     // the reader's round (13:41Z): its four green mutants, planted — each shape is RED here
     const m1c = scanFile('src/lib/m1c.js', "function sysLine(by) { return '{by} created the group'.replace('{by}', by); }\nfunction ok2(by) { return t('{by} created the group', { by }); }\nconst path = '/api/{id}/x'.replace('{id}', id);");
     ok(m1c.visible.length === 1 && m1c.visible[0].line === 1 && m1c.visible[0].sink === 'hand-filled', '① M1c: a {param} sentence filled by hand (`.replace(\'{by}\', by)`) is named wherever it stands; the same key through t(), and a path template, are not', JSON.stringify(m1c.visible));

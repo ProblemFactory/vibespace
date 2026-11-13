@@ -874,7 +874,8 @@
    "hh:mm built by hand (getHours / getMinutes)"
   ],
   "src/foryou-actions.js": [
-   "hh:mm built by hand (getHours / getMinutes)"
+   "hh:mm built by hand (getHours / getMinutes)",
+   "getMonth() + 1"
   ],
   "src/hub-act-policy.js": [
    "hh:mm built by hand (getHours / getMinutes)"

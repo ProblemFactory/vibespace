@@ -149,6 +149,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The «in {span}» row** left the dictionaries: its only reader, page-time `until()`, was deleted in the closure round (§78 dead text).
 - **The reader's mutant battery, re-run:** two holes it showed now have pins. M4a: a stored default name returned unchanged from the Rename dialog keeps the store (test-desktop-switch). M4c: an unknown value shows as itself, never blank (test-ui-language).
 
+### ui-language — the closure verifier's four smalls (主开发 20:39Z, accepted on content)
+- **⑥(c) a stored value handed to t() as its KEY** (`t(st.state)`) is named: no extractor sees it and no row is promised. No such site today; a planted control.
+- **foryou-actions clockWords' date half** (`getMonth() + 1`) is no longer waived. A hand-built month is a hand clock: the shrink-only `clocks` list holds it as debt (19). A new one is red.
+- **⑥(d) the AST form:** an upper-cased first piece + the rest (`slice(0, 1)` / `substring` / `substr` / `at(0)`). A planted control.
+- **value-words:** valueWord's doc comment is back above it.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)
