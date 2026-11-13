@@ -13828,4 +13828,6 @@ export default {
   "“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.": "「{name}」はこのマシンのみで実行されます。{host} で使うには CLI ログインの行で「ホスト上でログイン…」を使うか、「サブスクリプションのログインをリモートホストへ配布」をオンにしてください。",
   "② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and set it as the relay page.": "② または自分で置く（1 ページですべてのサービスに使えます）：docs/slack-relay の静的ファイル 2 つを任意の https ホストに置き、data-allow を自分のドメインにします — そのアドレスを登録し、中継ページに設定してください。",
   "② Your own copy of the relay page (its address is this account type’s relay page setting).": "② 自分で置いた中継ページ（アドレスはこのアカウント種別の中継ページ設定）。",
+  // lane ui-needs-a-button (pick 6)
+  "Approve, edit or reject each message there": "そこで各メッセージを承認・編集・却下できます",
 };

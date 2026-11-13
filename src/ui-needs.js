@@ -11,7 +11,7 @@
  *                    company preset of that kind exists (cluster-presets)
  *         listed     the walk's own «needed / failed / off with no button» sentences, each its row
  *   door  { present: { marker, surfaces } } — every file that states the sentence carries the door's marker (a PURE model's words
- *         count for the surface that draws them: `via`) · { none: why } (pick 5: no row is deferred — every sentence the net catches is a door, a none with its reason, or a non-need)
+ *         count for the surface that draws them: `via` — one file, or every surface that draws them) · { none: why } (pick 5: no row is deferred — every sentence the net catches is a door, a none with its reason, or a non-need)
  * THE ROW SHAPE IS lane machine-needs-at-pairing's (src/machine-needs.js); ONE suite reads both tables (scripts/test-needs-doors.mjs).
  * A sentence the MACHINE table claims (a machine's need) is its; this table claims the rest. PURE (no imports).
  */
@@ -256,8 +256,9 @@ const NEEDS = Object.freeze([
     match: /^\{plugin\} · no program set \(its Program file setting\)$|^That browser engine plugin is not running on this computer\.$/, door: { present: { marker: /engineFactDoor\(r\)[\s\S]{0,200}pluginDoor\(this\.app, fd\.plugin/, surfaces: ['src/lib/settings-ui.js'] }, via: { 'src/lib/browser-build-model.js': 'src/lib/settings-ui.js' } } },
   { id: 'pool-serve-lapsed', need: 'a pooled subscription that stopped serving — filed under For you\'s «accounts» bucket, whose door is Manage Agents (its row\'s Re-check / setting chip)',
     match: /'s subscription is no longer active \(since \{since\}\): the pool skips it/, door: { present: { marker: /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog/, surfaces: ['src/lib/user-todos-actions.js'] }, via: { 'src/server/usage-pool-engine.js': 'src/lib/user-todos-actions.js' } } },
-  { id: 'outbox-pointer', need: 'new messages awaiting approval on an account — the For-you pointer names the Outbox',
-    match: /^Open the Outbox to approve, edit or reject\.$/, door: { none: 'its For-you item carries no action yet: a door to the Outbox needs a new For-you action type with its registry row (src/foryou-actions.js + test-foryou-actions-census) — named in pick 5\'s report for 主开发; the Outbox badge on the rail still shows it' } },
+  // ── pick 6: the Outbox pointer's door (主开发's ruling on pick 5's report: a new For-you action type, open-outbox) ──
+  { id: 'outbox-pointer', need: 'new messages awaiting approval on an account — «Open the Outbox» on the For-you item\'s line (the tray row and the For-you window), the door its registry row declares',
+    match: /^Open the Outbox to approve, edit or reject\.$/, door: { present: { marker: { 'src/lib/user-todos-row.js': /const doorHtml = \(i, t\) => \{ const d = doorOf\(i\); return d \? `<div class="ut-exit-answer ut-door-answer"><button type="button" class="mounts-btn mounts-btn-primary need-door ut-door"[\s\S]*reconnectHtml\(i, t\) \+ doorHtml\(i, t\)/, 'src/lib/inbox-window.js': /door: \(it\) => \{ const d = doorOf\(it\)[\s\S]*door: doorOf\(it\),[\s\S]*if \(a === 'door'\) \{ model\.jump\(it\.sessionKey, it\); return; \}/ }, surfaces: ['src/lib/user-todos-row.js', 'src/lib/inbox-window.js'] }, via: { 'src/server/channels-outbound.js': ['src/lib/user-todos-row.js', 'src/lib/inbox-window.js'] } } },
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([

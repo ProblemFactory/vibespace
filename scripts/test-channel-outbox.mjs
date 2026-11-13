@@ -3722,6 +3722,7 @@ async function chatReadLegs(ENGmod, name) {
             ['src/lib/channels-panel.js', '() => app.openChannelOutbox()', 'outside', 'the rail panel\'s Outbox button'],
             ['src/lib/channel-outbox.js', "dw.onclick = (ev) => { ev.stopPropagation(); app.openChannelOutbox({ filter: f }); };", 'inside', 'an Outbox row\'s drafter name: only that agent\'s drafts (lane ui-needs-a-button pick 5, channels-groups-outbox-4)'],
             ['src/lib/channel-account-dialogs.js', "door: 'outbox', run: open(() => app.openChannelOutbox())", 'outside', 'an account dialog\'s «Open Outbox» (an outbox reference\'s door — lane ui-needs-a-button)'],
+            ['src/lib/user-todos-actions.js', 'const ROW_DOORS = { outbox: () => app.openChannelOutbox?.() };', 'outside', 'the For-you Outbox pointer\'s «Open the Outbox» — the door its registry row declares (lane ui-needs-a-button pick 6)'],
           ];
           const files = [...new Set(DOORS.map((d) => d[0]))];
           const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []));
@@ -3741,7 +3742,7 @@ async function chatReadLegs(ENGmod, name) {
           }
           for (const d of DOORS) if (!fs.readFileSync(path.join(REPO, d[0]), 'utf-8').includes(d[1])) bad.push({ gone: d[3] });
           const insideRows = DOORS.filter((d) => d[2] === 'inside').every((d) => /inside: true|filter:/.test(d[1]));
-          return [!bad.length && insideRows && DOORS.length === 13, bad];   // lane bl-msg B-9b9c: + «Show it» (another reply to the same message); lane ui-needs-a-button pick 5: + an Outbox row's drafter name
+          return [!bad.length && insideRows && DOORS.length === 14, bad];   // lane bl-msg B-9b9c: + «Show it» (another reply to the same message); lane ui-needs-a-button pick 5: + an Outbox row's drafter name; pick 6: + the For-you Outbox pointer's «Open the Outbox»
         });
         await legOSC('OCD the filter bar stays on screen: sticky over an opaque background; EVERYTHING the window scrolls to clears it — one selector list, one variable for the bar\'s height, no bar no margin (the geometry: chrome ㉕)', () => {
           const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf-8');

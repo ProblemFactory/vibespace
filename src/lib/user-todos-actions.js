@@ -44,7 +44,7 @@ import { postSecretAnswer, answerJobSecrets } from './vault-paste-box.js'; // la
 import { refusalText as pictureRefusalText } from './image-attach.js'; // B-51dd: a picture the route refused — the picture door's own words
 import { dropSentPictures } from './reply-pictures.js'; // B-51dd: a sent reply removes exactly the pictures it carried, and every box showing the item redraws
 import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
-import { isPointer, clockWords, headWordOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
+import { isPointer, clockWords, headWordOf, doorOf, arrivalWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words; lane ui-needs-a-button pick 6: the door a row declares
 import { PROPOSABLE, isSettingChange } from '../ask-setting.js';
 import { clockOf } from './page-time.js'; // lane ui-language: THE one formatter of a time a person reads — the agent's reply says the owner's clock through it (lane setting-doors pick 2) // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
@@ -144,6 +144,11 @@ export function inboxModel(app) {
     };
     setTimeout(tryLand, 50);
   };
+  // lane ui-needs-a-button pick 6: THE OPENERS a registry row's `door` names (src/foryou-actions.js doorOf — a pointer whose
+  // question lives in a window of its own: the account's composed messages awaiting approval live in the Outbox). A registry
+  // read, never a type-literal branch (§78); a door with no opener here is no door (no button, no jump)
+  const ROW_DOORS = { outbox: () => app.openChannelOutbox?.() };
+  const rowDoorOf = (item) => { const d = doorOf(item); return d && typeof ROW_DOORS[d.opens] === 'function' ? d : null; };
   /** Go to where an item is answered. `close` = the calling surface's own
    *  "I am leaving" (the popup hides itself; the window stays). */
   const jump = (key, item, { close = () => {} } = {}) => {
@@ -166,6 +171,10 @@ export function inboxModel(app) {
     // B-c127: an item ABOUT a channel conversation (an approval pointer, a reach request, an unknown outcome) opens
     // THAT conversation — its 'channels' group is no session, and the click used to end in "Session not found"
     if (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId) { close(); app.openChannel?.(item.action.adapterId, item.action.convId); return; }
+    // lane ui-needs-a-button pick 6: a pointer whose row declares its DOOR («Open the Outbox») opens THERE — the account's composed
+    // messages have no conversation, and its 'channels' group is no session (the click ended in «Session not found»)
+    const rd = rowDoorOf(item);
+    if (rd) { close(); ROW_DOORS[rd.opens](item); return; }
     // lane vault-relock-door: the restart notice's door opens the unlock dialog (its key 'vault' is no session; the body click used to end in "Session not found")
     if (item?.action?.type === 'vault-unlock') { close(); try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } return; }
     // lane vault-window-v2: a failed use / a rotate suggestion lands on ITS row in the Vault window (the window's 「需要你」 draws the same item)
@@ -248,11 +257,11 @@ export function inboxModel(app) {
     if (!r || !r.success) { showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' }); return false; }
     return true;
   };
-  /** Does `jump` open the item's own DOOR (a job's form, a plugin's sheet, Manage Agents, a channel, the vault) rather than its
+  /** Does `jump` open the item's own DOOR (a job's form, a plugin's sheet, Manage Agents, a channel, the Outbox, the vault) rather than its
    *  conversation? (jump's own early returns, in its order) — a tray row's body tap still opens a door; only a jump to the
    *  conversation became «open the row in place» (lane foryou-honest P3-8). */
   const isDoor = (key, item) => !!(item?.jobId || item?.open?.kind === 'plugin-settings' || key === 'jobs' || key === 'accounts' || key === 'machines'
-    || (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId)
+    || (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId) || !!rowDoorOf(item)
     || ['vault-unlock', 'vault-use-failed', 'vault-rotate', 'vault-policy-approved', 'vault-store-refused', 'vault-grant-stale'].includes(item?.action?.type));
   /** ✓ / ✕ ON AN ITEM (lane foryou-honest, the stress evaluation's P3-2: one press decided it — no toast, the ↺ two screens
    *  away): the status POST, then ONE toast with Undo for 6 s — the ↺ road (status open) on the same item. */

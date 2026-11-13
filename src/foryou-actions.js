@@ -47,6 +47,10 @@
  *             (src/user-todos.js: 'dismissed', resolvedBy 'hidden' — «hidden — nothing was decided») and the question it
  *             points at stays open where it lives (an rq- request comes back to the tray at the next boot reconcile, or
  *             when the agent asks again); absent = the generic closers (✓ / ✕ while open, ↺ once resolved)
+ *   door      {opens, verb, title} = the DOOR its item draws as a button with words on its line (lane ui-needs-a-button pick 6 —
+ *             a pointer whose question lives in a window of its own: the Outbox): `opens` names the client's opener
+ *             (src/lib/user-todos-actions.js ROW_DOORS), `verb` the button's words, `title` its hover; the tray row and the For-you
+ *             window draw it and the jump opens it off this row (doorOf) — never a branch per type; absent = no such button
  * Every older table is DERIVED here (ACTION_IDENTITY · WAIT_ACTIONS · CARD_ACTION_TYPES · ANSWER_ACTION_TYPES);
  * scripts/test-foryou-actions-census.mjs fails on a type a producer files with no row, a row nobody files, a `handled` row
  * with no branch, a `card: 'row'` row the row does not draw, a `chat` row the card does not draw.
@@ -81,6 +85,7 @@
  *   isDecisionRow(item) · offersClosers(item) · DECISION_ENDS → a decision row has two verbs and no generic closer
  *   closersOf(item, resolved)    → the closer verbs a surface draws: ['done', 'dismiss'] / ['reopen'] (any item) ·
  *                                  ['hide'] / [] (a POINTER — isPointer, `closer: 'hide'`) · [] (a decision row) — isHidden(item)
+ *   doorOf(item | type)          → the `door` its row declares ({opens, verb, title}) — null = none (an item with no action)
  *   expiryWords(item, {t, now})  → «expires in 7 d» for an OPEN decision row (a wake ask's lifetime) — null otherwise
  *   decisionCard(item, {role})   → {state, buttons, stamp, waiting} — the PURE card model: filed / approved / denied /
  *                                  expired / waiting-owner (a viewer who may not decide: the words, no buttons)
@@ -175,6 +180,9 @@ const ROWS = Object.freeze([
   { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person', ends: ['allowed', 'denied', 'expired', 'agent'], showsExpiry: true },   // lane bl-msg B-ae13: + 'agent' — the asker withdrew it («withdrawn by the agent»)
   { type: 'channel-held-digest', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group', decide: 'person', ends: ['delivered', 'discarded', 'expired'], stamp: 'deliver', showsExpiry: true, verbs: Object.freeze({ approve: i18nKey('Deliver'), reject: i18nKey('Discard'), title: i18nKey('Sends them now, as one block — a billed turn') }) },   // lane wake-approve-card r6: hits a boot found held longer than their window × 24 — Deliver (a billed turn) / Discard, never sent by themselves
   { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person', closer: 'hide' },
+  // lane ui-needs-a-button pick 6: an ACCOUNT's pointer to its COMPOSED messages awaiting approval («New messages awaiting approval
+  // on …» — a composed message has no conversation to open): one item per account (its adapterId); its door is THE Outbox
+  { type: 'open-outbox', identity: 'adapterId', producer: 'src/server/channels-outbound.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', scope: 'group', door: Object.freeze({ opens: 'outbox', verb: i18nKey('Open the Outbox'), title: i18nKey('Approve, edit or reject each message there') }) },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
   { type: 'channel-reauth', identity: null, producer: 'src/server/channels-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group' },
   // B-8edd: a sign-in landed and nobody pressed Connect — its ONE button opens the Connect dialog on its type (`door`
@@ -608,6 +616,14 @@ function closersOf(item, resolved = !!(item && item.status && item.status !== 'o
   if (isDecisionRow(item)) return [];
   if (isPointer(item)) return resolved ? [] : ['hide'];
   return resolved ? ['reopen'] : ['done', 'dismiss'];
+}
+/** THE DOOR `item`'s row declares (lane ui-needs-a-button pick 6 — the header's `door`: {opens, verb, title}), or a type's; null =
+ *  none. The tray row and the For-you window draw its button; the client's jump opens it. An item filed before its row declared
+ *  one carries no action — no door, no button, until its producer files it again. */
+function doorOf(item) {
+  const type = typeof item === 'string' ? item : item && item.action && typeof item.action.type === 'string' ? item.action.type : '';
+  const r = type ? ROW_OF[type] : null;
+  return r && r.door ? r.door : null;
 }
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A WAKE ASK HAS A LIFETIME (acceptance round 3): an OPEN decision row's `expiresAt` in words — «expires in 7 d» (whole
@@ -1224,4 +1240,5 @@ function headWordOf(name, t) { return typeof name === 'string' && Object.prototy
 
 module.exports = {
   arrivalWords,
-  PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf, doorOf
+};

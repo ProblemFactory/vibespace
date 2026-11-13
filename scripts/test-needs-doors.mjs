@@ -6,7 +6,8 @@
 //      scripts/i18n-extract.mjs) that a table's net catches is claimed by a row of that table or by a non-need with its reason. A
 //      sentence the MACHINE table claims is its (a machine's need); the UI table claims the rest
 //   ② A DOOR ON EVERY SURFACE THAT STATES IT: a row whose door is present — every file that states one of its sentences (a PURE
-//      model's words count for the surface that draws them: `via`) carries the door's marker in its source
+//      model's words count for the surface that draws them: `via` — one file, or every surface that draws them) carries the
+//      door's marker in its source
 //   ③ CONTROLS: a new sentence a net catches that no row claims is RED by name; a surface stating a present-door need without its
 //      door is RED by name
 // The machine table is read when it exists (it lands on its own lane's pick); the ui table always.
@@ -38,7 +39,7 @@ function census(ws) {
     for (const c of out) {
       if (!c.T.inNet(s)) continue;
       const r = c.T.needOf(s);
-      if (r) { const e = c.rows.get(r.id); e.sentences.push(s); for (const f of files) e.files.add((r.door.via && r.door.via[f]) || f); taken = true; break; }
+      if (r) { const e = c.rows.get(r.id); e.sentences.push(s); for (const f of files) for (const g of [].concat((r.door.via && r.door.via[f]) || f)) e.files.add(g); taken = true; break; }
       const n = c.T.notNeedOf(s);
       if (n) { c.non.push({ s, why: n.why }); taken = true; break; }
     }
@@ -898,6 +899,57 @@ console.log('⑧ THE LAST SETTINGS PATHS, THE OUTBOX DRAFTER, THE PULL DIALOG (l
     'storage-5 (pull): «Mount a folder from …» on an offline machine says so first, with its pairing door (as the push dialog)');
 }
 
+console.log('⑨ THE OUTBOX POINTER\'S DOOR (lane ui-needs-a-button pick 6 — 主开发\'s ruling on pick 5\'s report: a new For-you action type)');
+{
+  const os = await import('node:os');
+  const { pathToFileURL } = await import('node:url');
+  const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  const doorOf = typeof FA.doorOf === 'function' ? FA.doorOf : () => null;   // (the release has none: its legs red by name, never a crash)
+  const row = (FA.ROW_OF || {})['open-outbox'] || null;
+  const item = (o = {}) => ({ id: 'ut-ob00000001', status: 'open', kind: 'action', origin: 'channels', by: 'agent', sessionKey: 'channels', createdAt: 1, text: 'New messages awaiting approval on R4 mail', action: { type: 'open-outbox', adapterId: 'mail-1' }, ...o });
+  const d = doorOf(item());
+  ok(!!row && row.handled === true && row.card === 'none' && row.identity === 'adapterId' && row.producer === 'src/server/channels-outbound.js' && !row.closer && !row.decide && !!d && d.opens === 'outbox' && d.verb === 'Open the Outbox' && doorOf('open-outbox') === d,
+    'the registry: open-outbox is a row — one pointer per ACCOUNT (identity adapterId), filed by the channels engine — that DECLARES its door: «Open the Outbox», which opens the Outbox', row);
+  ok(doorOf(item({ action: undefined })) === null && doorOf({ id: 'x', status: 'open', action: { type: 'open-channel', adapterId: 'a', convId: 'c', key: 'k' } }) === null && JSON.stringify(FA.closersOf(item())) === '["done","dismiss"]',
+    'a pointer filed before this change (no action) has no door — no button until it is filed again; a conversation\'s pointer keeps its own door; the item keeps its closers (✓ ✕)', FA.closersOf(item()));
+  // THE WINDOW'S VIEW (PURE itemView — the caller hands it the registry's door, as it hands the closers): «Open the Outbox» FIRST
+  const LAY = await import(pathToFileURL(path.join(REPO, 'src/lib/inbox-window-layout.js')).href);
+  const view = (it) => LAY.itemView(it, { t: (k) => k, door: doorOf(it), closers: FA.closersOf(it) });
+  const v = view(item()), vOld = view(item({ action: undefined })), vDone = view(item({ status: 'done', resolvedAt: 2 }));
+  ok(v.actions[0] === 'door' && !!v.door && v.door.verb === 'Open the Outbox' && v.door.opens === 'outbox' && v.actions.includes('done') && v.actions.includes('dismiss') && !vOld.actions.includes('door') && !vDone.actions.includes('door'),
+    'the For-you window\'s view: an open pointer draws «Open the Outbox» first, its ✓ ✕ beside it; one with no action draws none; a resolved one none', { open: v.actions, old: vOld.actions, done: vDone.actions });
+  // THE STORE: one pointer per account — two accounts under the same label are two items; a re-file of one account is its item
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-needs-ob-'));
+  let u = null;
+  try {
+    u = new UserTodoManager({ dataDir: dir, onChange: () => {}, expirySweepMs: 0 });
+    const file = (adapterId) => u.add('channels', { origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels', text: 'New messages awaiting approval on Mail', action: { type: 'open-outbox', adapterId } });
+    const a = file('mail-1'), b = file('mail-2'), c = file('mail-1');
+    ok(a.id !== b.id && c.id === a.id && u.get(b.id).action.adapterId === 'mail-2' && !!doorOf(u.get(a.id)), 'the store: two accounts under one label are TWO pointers, each with its door; a re-file of one account is its item', { a: a.id, b: b.id, c: c.id });
+  } finally { try { if (u) u.stop(); } catch { } fs.rmSync(dir, { recursive: true, force: true }); }
+  // THE ACT — source pins: src/lib/user-todos-actions.js imports need-line.js (unimportable unbuilt); the row renderer draws off doorOf
+  const ACT = src('src/lib/user-todos-actions.js');
+  ok(/const ROW_DOORS = \{ outbox: \(\) => app\.openChannelOutbox\?\.\(\) \};/.test(ACT) && /const rd = rowDoorOf\(item\);\s*\n\s*if \(rd\) \{ close\(\); ROW_DOORS\[rd\.opens\]\(item\); return; \}/.test(ACT) && /\|\| !!rowDoorOf\(item\)\n/.test(ACT),
+    'the act: the jump opens THE Outbox (app.openChannelOutbox, no filter — its census opens on what waits) for an item whose row declares the door; isDoor says so (a tap on the row\'s body opens it too)');
+  ok(/if \(e\.target\.closest\('\.ut-door'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(src('src/lib/user-todos-panel.js')),
+    'the tray: a press on «Open the Outbox» is THE door (model.jump) — the popup, the mini inbox, the phone sheet and the chat card share rowClick');
+  const OB = src('src/server/channels-outbound.js'), at = OB.indexOf('async function composePointerSync(');
+  ok(at > 0 && /userTodos\.add\(INBOX_KEY, \{\s*\n[^\n]*\n\s*action: \{ type: 'open-outbox', adapterId \},/.test(OB.slice(at, at + 2400)),
+    'the producer: the account\'s pointer is filed with its action { type: \'open-outbox\', adapterId }');
+  // CONTROL: the census over both surfaces (`via` names two) — the row's door taken out is RED by name
+  const ob = ui && ui.rows.get('outbox-pointer');
+  const noDoor = (f) => (f === 'src/lib/user-todos-row.js' ? (sources.get(f) || '').replace(' + doorHtml(i, t)', '') : sources.get(f) || '');
+  ok(!!ob && !!ob.row.door.present && [...ob.files].sort().join() === 'src/lib/inbox-window.js,src/lib/user-todos-row.js' && JSON.stringify(doorless(ob, noDoor)) === JSON.stringify(['src/lib/user-todos-row.js']),
+    'CONTROL: the pointer\'s sentence is stated by the tray row AND the For-you window (`via`); the row without its door is RED by name', ob && { files: [...ob.files], red: doorless(ob, noDoor) });
+}
+
+{ // pick 6, the 390 px picture: a touch row folds to its sentence + ONE trailing door — a pointer's declared door is that door
+  const UTR = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8');
+  ok(/const rowDoor = doorOf\(i\);/.test(UTR) && /\(notice \|\| entry\.band\) && rowDoor \? `<button type="button" class="ut-go ut-go-door"[^`]*data-label="\$\{escHtml\(t\(rowDoor\.verb\)\)\}"/.test(UTR),
+    'pick 6: on a touch row the trailing door of a pointer with a declared door says ITS verb («Open the Outbox»), not «Chat»');
+}
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

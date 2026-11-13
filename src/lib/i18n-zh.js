@@ -13829,4 +13829,6 @@ export default {
   "“{name}” runs on this machine only. For {host}, use “Log in on host…” on the CLI-login row, or turn on “Ship subscription logins to remote hosts”.": "“{name}”只在本机运行。要用于 {host}，请在 CLI 登录行用“在主机上登录…”，或开启“将订阅登录下发到远程主机”。",
   "② Or host your own copy (one page serves every provider): the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and set it as the relay page.": "② 或者自己部署一份（这一个页面对所有服务商通用）：把 docs/slack-relay 里的两个静态文件放到任意 https 主机上，data-allow 设为你的域名——登记它的地址，并把它设为中转页。",
   "② Your own copy of the relay page (its address is this account type’s relay page setting).": "② 你自己部署的中转页（地址填在这个账号类型的中转页设置里）。",
+  // lane ui-needs-a-button (pick 6)
+  "Approve, edit or reject each message there": "在那里逐条批准、编辑或拒绝",
 };

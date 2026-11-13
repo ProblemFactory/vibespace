@@ -34,7 +34,7 @@ import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store 
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock, settingCardOf, settingCardEls, patchSettingVolatile } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW, isParkedAsk } from '../foryou-actions.js';
+import { closersOf, doorOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords, CHECK_AGAIN_TYPES, ROW_OF as FY_ROW, isParkedAsk } from '../foryou-actions.js';
 import { needLine } from './need-line.js'; // lane ui-needs-a-button: a sentence that says something is needed carries its door on its line // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { fyLinkMenu } from './internal-link-door.js'; // lane login-request-card piece 1: a link of the scheme in an item's words — «Go» · «Copy link»
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -361,6 +361,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     reopen: () => actBtn('reopen', UI_ICONS.refresh, t('Reopen'), t('Reopen')),
     copy: () => actBtn('copy', UI_ICONS.copy, t('Copy'), t('Copy the whole item')),
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
+    // lane ui-needs-a-button pick 6: a pointer's DOOR its registry row declares («Open the Outbox») — the model's jump opens it
+    door: (it) => { const d = doorOf(it) || { verb: '', title: '' }; return actBtn('door', UI_ICONS.external, t(d.verb), t(d.title || d.verb), 'iw-act-primary'); },
     // "Clear content…" (verify r2: the verb had no visible door, only a right-click) — THE model's verb, the one dialog
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
     'channel-reauth': (it) => (it && it.action && it.action.signin === 'expired'   // lane channel-reauth-visible: a dead sign-in's verb is Reconnect (the same dialog)
@@ -412,7 +414,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     settingAsk: (() => { const sc = settingCardOf(it, t); return sc ? { press: !!sc.button } : null; })(),   // lane setting-doors pick 2: the press only while THE verdict against the value NOW allows it
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
+    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), door: doorOf(it), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */
@@ -786,6 +788,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.recordOf ? model.recordOf(cur) : model.detailOf(cur) }).copy); showToast(t('Copied')); return;   // r3 (lane owner-press-attended): the RECORD — a fold said whole
     }
     if (a === 'producer') { model.runAction(it); return; }
+    if (a === 'door') { model.jump(it.sessionKey, it); return; } // lane ui-needs-a-button pick 6: the door its row declares (the Outbox)
     if (a === 'app-install' || a === 'app-retry') {
       // design 009: a card's Install runs on this click — a pane shown a moment ago is not a press on what the user read
       if (it.card && a === 'app-install') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Install moved under the pointer just now — read it, then press it again')); return; } }

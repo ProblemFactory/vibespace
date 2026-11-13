@@ -1031,6 +1031,7 @@ function create(engineCtx) {
       try {
         const item = userTodos.add(INBOX_KEY, {
           origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels',
+          action: { type: 'open-outbox', adapterId },   // lane ui-needs-a-button pick 6: its door opens THE Outbox (src/foryou-actions.js) — one pointer per account
           text: `New messages awaiting approval on ${label}`,
           detail: `${awaiting.length} new message(s) awaiting your approval on ${label}.\nLatest${who ? ` (${who})` : ''}: to ${to} — "${subject}"\n\nOpen the Outbox to approve, edit or reject.`,
           i18n: {

@@ -1026,6 +1026,8 @@ export function installUserTodos(app) {
     const id = item.dataset.id;
     // lane foryou-honest: a folded row's trailing door — its conversation in ONE tap (the phone's first screen keeps decision 5's jump)
     if (e.target.closest('.ut-go')) { const rec = byId(id); if (rec) jump(rec.sessionKey, rec); return; }
+    // lane ui-needs-a-button pick 6: a pointer's DOOR its registry row declares («Open the Outbox») — THE door (model.jump)
+    if (e.target.closest('.ut-door')) { const rec = byId(id); if (rec) jump(rec.sessionKey, rec); return; }
     // the reply box is a place to type, never a jump
     const sendBtn = e.target.closest('.ut-reply-send');
     if (sendBtn) { if (!sendBtn.disabled) { const ta = item.querySelector(':scope > .ut-body > .ut-reply textarea'); sendReply(item, ta ? ta.value : ''); } return; }

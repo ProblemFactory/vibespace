@@ -41,7 +41,7 @@ import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
-import { decidedStamp, PERSON_DECIDES, closersOf, isParkedAsk, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { decidedStamp, PERSON_DECIDES, closersOf, doorOf, isParkedAsk, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isAsk } from '../inbox-origin.js'; // PURE: the AGENT's own ask (via 'ask', vibespace-ask) — batch 47's cure: only its fields are its whole words
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 import { pressVerdict as settingPressVerdict, isProposable, isSettingChange, holdIsLive, PROPOSABLE } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): an ask that PROPOSES one change of one setting — THE verdict the card draws (the hub judges it again)
@@ -159,6 +159,10 @@ const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-rea
   ? `<button class="ut-act ut-action-reset ut-action-reauth" aria-label="${escHtml(t('Re-authorize'))}" data-label="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
 const reconnectHtml = (i, t) => (signinItem(i)
   ? `<div class="ut-reconnect-row"><button type="button" class="ut-action-reset ut-action-reauth ut-reconnect" title="${escHtml(t('Open the account\'s Re-authorize'))}">${escHtml(t('Reconnect'))}</button></div>` : '');
+// lane ui-needs-a-button pick 6: A POINTER'S DOOR its registry row declares (foryou-actions doorOf — never a branch per type):
+// ONE button with words on its own line under the sentence — «Open the Outbox» — the item's own door (the model's jump, as the
+// row's body); its closers stay where they are. The house button (need-line's classes), in the answers' container
+const doorHtml = (i, t) => { const d = doorOf(i); return d ? `<div class="ut-exit-answer ut-door-answer"><button type="button" class="mounts-btn mounts-btn-primary need-door ut-door" data-door="${escHtml(d.opens)}" title="${escHtml(t(d.title || d.verb))}">${escHtml(t(d.verb))}</button></div>` : ''; };
 // lane browser-takeover-queue: an assistant needs the person in its browser — its live view (the same producer-action click)
 const takeoverBtnHtml = (i, t) => (i && i.action && i.action.type === 'browser-takeover' && i.action.requestId
   ? `<button class="ut-act ut-action-reset ut-action-takeover" title="${escHtml(t('Open its live view — take over there'))}" data-label="${escHtml(t('Take over'))}">${UI_ICONS.browserLive || ''}</button>` : '');
@@ -662,10 +666,14 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   // lane ui-needs-a-button (reader follow-up #10): a PARKED ASK's door is this one — it is answered on the conversation's card, and the
   // door says so on the tray and the phone sheet as it does in the For-you window
+  // lane ui-needs-a-button pick 6 (the 390 px picture): a pointer's DECLARED door is its trailing door on a touch row too — its verb
+  // («Open the Outbox») and the same jump; the conversation door stays for every other row
   const parkedGo = isParkedAsk(i) ? t('Open the conversation and answer') : '';
-  const go = notice || entry.band ? `<button type="button" class="ut-go${parkedGo ? ' ut-go-answer' : ''}" title="${escHtml(parkedGo || t('Go to this session'))}" aria-label="${escHtml(parkedGo || t('Go to this session'))}" data-label="${escHtml(parkedGo || tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
+  const rowDoor = doorOf(i);
+  const go = (notice || entry.band) && rowDoor ? `<button type="button" class="ut-go ut-go-door" title="${escHtml(t(rowDoor.title || rowDoor.verb))}" aria-label="${escHtml(t(rowDoor.verb))}" data-label="${escHtml(t(rowDoor.verb))}">${UI_ICONS.external}</button>`
+    : notice || entry.band ? `<button type="button" class="ut-go${parkedGo ? ' ut-go-answer' : ''}" title="${escHtml(parkedGo || t('Go to this session'))}" aria-label="${escHtml(parkedGo || t('Go to this session'))}" data-label="${escHtml(parkedGo || tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) + doorHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
