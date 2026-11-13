@@ -10,6 +10,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A limit's age mark now uses the interface's units, and in Chinese and Japanese a note that waits on a Claude Code check names ⚙ → Update VibeSpace….
 - If a limit you mark as reset cannot be written to disk yet, VibeSpace now says so beside the mark.
 - When VibeSpace runs from this computer's own disk, projects in a folder that shows a network folder or this disk are no longer refused without a word.
+- A scheduled background job no longer keeps the files of every run it ever made: runs its list no longer shows are deleted 14 days after they ended.
+- A VibeSpace that kept years of such files clears them by itself, a little at a time, and cleaning up job logs never pauses VibeSpace on slow storage.
+- Settings › Background Work › Clean up old job logs turns that clean-up off; if job records could not be read, it waits and For you says why.
 
 ### Maintenance
 - Test and release tooling only; nothing changes for you.

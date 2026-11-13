@@ -119,6 +119,113 @@ This file is the engineers' record of every release: the lanes, the verification
 - **What never happened, checked.** No lingering listener redraws a gone panel: it returns before anything once its body is off the page, and the 150 ms redraw re-checks. The form is single-subject, so a second open raises it and it is never queued (the «queued body opens deaf» class cannot reach it).
 - **The pin.** test-dialog-yield-chrome ㊴ (the phone tier, where openPluginsDialog is the modal) opens and closes it by its ✕ in ONE synchronous task, so no socket frame is dispatched between the readings. The RAW count is back at once; on 2.369.397 it read +1 until the next frame.
 
+### job-logs-sweep — A RUN THE HUB FORGOT STILL OWNED A DIRECTORY FOR EVER (found by the data-move rehearsal: int359/data-move/rev3/runbook.md §12, follow-up F11)
+- **The finding.** A job's record keeps its last 20 runs (src/jobs.js `_spawn`: `job.runs.splice(0, len − 20)`). The directory of a run it drops, `data/job-logs/<id>/<runTs>/` (pid.json, current.log, exit.json, bound.json, stopping.json, answers.jsonl), stayed for ever.
+  - The 14-day gc ages a TASK by its LAST run, and a scheduled job fires ONE child task for ever (2.343.3), so a cron child never ages out.
+  - `rm` of a live record removes no directory at all.
+  - **The owner's hub** (its local copy, 2026-11-12, counts only — lane work/census.mjs): 123 523 entries under job-logs, the largest store by entry count. That is 2 152 job dirs and 26 104 run dirs:
+    - 1 242 listed by a record;
+    - 23 367 dropped by a live record, 15 309 of them older than 14 days (15 105 cron children, 189 services);
+    - 1 422 job dirs that no record names (removed jobs, 1 495 runs).
+  - **10 run dirs started more than 14 days ago but wrote within 14 days**: a run's age is its NEWEST file, not its start.
+- **The law** (src/job-logs-sweep.js):
+  1. A run dir that no record lists (the store's or the archive's) is removed once its newest entry is 14 days old, whether its task lives on or not. A job dir that no record names goes once emptied.
+  2. **Never removed:**
+     - a run whose wrapper lives (pid.json judged against /proc by proc-identity: pid + starttime + boot id, not a zombie). A stamp that cannot be read KEEPS its run;
+     - a listed run;
+     - a run held for an unfinished scope reap (`_reapLater`);
+     - a skeleton record's dir (corrupt-store recovery's `runs: []` is not «lists nothing»).
+  3. **Paced:** B = 500 run dirs a pass, and G = 30 s between passes while a catch-up is open. **Said twice:** at the start with the count, and when done with the total. The catch-up's record, data/jobs-logs-sweep.json, goes through the store writer (paced; a TS.STORES row `jobs-logs-sweep.write`; a ② pin in test-store-write-census).
+  4. **NOTHING under job-logs is removed on the main thread.** There is ONE remover (`createRemover`):
+     - a queue, and one worker_threads thread at a time, which lingers idle 1 s and then goes;
+     - a batch timeout of 120 s (480 s for the counting pass); a batch that times out is queued again once;
+     - **HELD:** a terminated thread that has not ENDED 2 s later is wedged in a syscall the storage never answers. No second thread is started beside it, every batch answers `held`, and this is said once until the thread ends.
+- **ONE REMOVER (the coordinator's ruling 1).** The five whole-dir removals keep their verdicts; their syscalls move to the worker:
+  - `_gc` leg (a), a done task past 14 days;
+  - `_gc` leg (b), an archived record past 14 days;
+  - the archive cap;
+  - the ✕ (`rmArchived`);
+  - the boot collapse of pre-2.343.3 children.
+
+  How each case ends:
+  - **A run whose wrapper lives:** a whole-dir removal never takes it. The law's pass removes that dir once the run has ended and aged (no record names it any more).
+  - **The ✕'s routes** (jobs-wiring, agent-routes) answer after `logsGone(id)`, bounded at 10 s; the loop never waits. Past the bound the answer carries `logsPending: true`. The panel then toasts «Removed. Its log files are still being deleted in the background.» (zh + ja), and the CLI prints «removed — its log files are still being deleted in the background».
+  - **A whole-dir batch the storage did not take** (held or failed) is OWED: it is kept in memory (≤ 5 000 ids) and re-sent before the next pass. A restart forgets it, and the law's pass takes those dirs 14 days after their newest file.
+- **The pass.**
+  - **When it runs:**
+    - hourly from `_gc`, unless a catch-up's own timer is armed (the catch-up keeps its own pace; a stalled one is picked up here);
+    - ONE pass 2 min after each boot, because a hub that restarts more often than hourly never reached its hourly gc;
+    - every G while a catch-up is open; a failed or held pass inside it re-arms a retry after 5 min, so a catch-up never stalls.
+  - **The keep set** is built on the main thread from memory: the store, and the archive when it is loaded. Otherwise the WORKER reads jobs-archive.json — never `_loadArchive`'s synchronous read, which held the owner's loop in hub-loop-stalls' capture. An unreadable archive removes nothing.
+  - **The worker walks** each job dir's runs oldest first:
+    - listed / held / skeleton is decided by name;
+    - a run that STARTED after the cutoff is young by name (no stat);
+    - otherwise its age is the newest lstat mtime (an empty dir is aged by its start);
+    - then its pid.json goes to proc-identity.
+  - **After a boot,** the first pass reads the catch-up record in the worker. A restart therefore resumes with no second start line, and the done line counts across it.
+- **NUMBERS (ruling 3).**
+  - **The owner's copy at 14:26Z, with the REAL verdict as a dry run** (removal syscalls stubbed to throw, max 0, count): 16 707 run dirs and 66 726 entries to catch up. It kept 1 242 listed and 8 155 young runs; the walk took 371 ms on local disk.
+  - **The kit's rule** (every run dir STARTED more than 14 days ago that jobs.json does not list) gave 16 702 at 14:06Z: 15 297 dropped by a live record, 1 389 with no record, and 16 archived records' runs. The coordinator's 16 696 is the same rule a few minutes earlier; about one run a minute crosses the line.
+  - **What B and G give:** B = 500 ⇒ 34 passes, and G = 30 s ⇒ about 17 min. That is about 2 000 entries a pass, roughly 1 s of NAS unlinks at the runbook's 2 800 entries/s. The first, counting pass walks every candidate (about 30 s on the NAS; its timeout is 480 s).
+  - **On a synthetic tree of the owner's shape** (26 748 run dirs, local NVMe, G shortened; lane work/shape-probe.mjs): 34 passes; the counting pass took 524 ms and the others 40 ms median. **THE MAIN LOOP's worst delay over the whole catch-up was 19.1 ms (p99 3.1 ms):** the main thread only builds the keep set and posts one message per pass.
+- **Pins:** scripts/test-job-logs-sweep.mjs (fast). It drives the real JobManager, the real cron fire road and the real job wrapper in a scratch dir, plus seeded trees of 5 000 dropped runs through a slow-storage stand-in around the real worker (0.2 ms a removal). Red by name on b19f0ecdb (23 legs). The pins:
+  - **P1** a cron fired 30 times: 10 dropped ⇒ gone past the retention, 20 listed stay, the job's page still serves its last log.
+  - **P2** a dropped run alive past the retention stays; an unreadable stamp stays; the run goes once its process ended.
+  - **P3** a job `rm --orphan`'d with a run alive: kept while alive; once it ended, its run dir AND the job dir go.
+  - **P4** the catch-up: paced at 500 a pass with each pass after the gap; the main loop's worst delay < 60 ms while a pass is ≥ 100 ms of removals (control: one pass of the same removals on the main thread ≥ 60 ms); said twice with the exact count.
+  - **P5** a restart mid catch-up: no second start line, and the done line counts the whole. A failed pass inside an open catch-up re-arms its retry, and with no timer armed the hourly gc picks it up.
+  - **The rules:** newest-file age, an empty dir by its start, reap-held, another name never touched, the hourly road on a service's dropped run, an unloaded archive read in the worker, an unreadable archive removes nothing.
+  - **The removers:** the ✕ returns with its dir still there and `logsGone` resolves after the worker; the gc's leg (a) keeps a live run, which the law's pass removes later; a HELD ✕ is owed and re-sent; the wedged thread (a FIFO's open) ⇒ HELD with no second thread, said once, going on after it ends.
+  - **Static:** no rmSync in jobs.js; four whole-dir verdict sites; both routes; the words; `_logsPass` never calls `_loadArchive`; the worker uses lstat only.
+  - **The PURE verdict** + 4 mutant copies (alive ignored, age by the start, listed ignored, unproven removed).
+- **ROUND 2 (6908eef73 not accepted; two adversarial readers, int359/acc-398/jls).** The verdict itself held in every scene they drove, but one road round it did not. Each group is its own commit on top:
+  - **GROUP 2 — the guards pinned.** 13 mutants were each driven and are KILLED by name. The stamp judge never throws, and whole() unlinks a link under a job's name, as the release did.
+  - **GROUP 1 — THE HELD FACT.** On the hourly road, the gc's own leg (b) loaded a torn archive, the product set it aside and continued with [], and the law's pass in the same gc removed runs the set-aside records list. After a restart, a torn store's skeletons were gone and the boot pass removed a live service's listed run. Now:
+    - the set-aside file itself is the fact the worker checks at every pass;
+    - a non-list is set aside;
+    - a failed read with no set-aside holds the process until the worker reads the file;
+    - one item per cause, its «said» kept durably.
+  - Pins §H, one per road: the gc; a list then a pass; a pass then the gc; a torn store, a restart and its boot pass; a non-list through the load and through the worker; an EIO with a refused rename; a store read that failed at boot.
+  - **GROUP 3 — THE PACE FOLLOWS THE STORAGE, AND A PERSON CAN STOP IT.**
+    - **The rest:** max(30 s, 10 × the pass's own time). A cut sweep batch is never re-queued; a cut pass rests max(5 min, 10 × its timeout) and keeps its partial count.
+    - **The count:** the counting pass counts by name (readdirs only) inside the normal timeout, and its done line reconciles: start N = removed + kept + what crossed the line meanwhile.
+    - **The pause:** the setting `jobs.logsSweep` (default on). Off, nothing is removed by the clean-up, which is said once; removing a job still removes its logs.
+    - **The setting's other touch points:** docs/settings.md, regenerated by scripts/gen-settings-reference.mjs (test-architecture 44d); the config export, which carries the settings file whole («carried by the schema»); test-settings-view's advanced-tier cap, 96 → 97.
+  - **GROUP 4 — THE SMALLER LAWS.**
+    - **The exit never waits:** the remover is a CHILD PROCESS now (a process exit joins its threads, never its children). Pinned: a process whose remover child is blocked in a FIFO's open exits at once.
+    - **The verdict at removal time:** an id a live record names again by then keeps its runs (`filterWhole` at dequeue).
+    - **The ✕'s promise:** it is true or not made — `logsKept: running | unjudgeable` (panel + CLI words). What is owed lives in the record durably, re-sent after a restart; past 5 000 the overflow is said once.
+    - **Kept until evidence:** a stamp written before this machine's boot names no live process.
+    - **The catch-up record:** on disk at the open; an odd shape adopts nothing; the pass reads the record first, and a failed read waits.
+    - **«resumes»** is said across a restart (`heldNow`).
+    - **The static census** of jobs.js: its exact seven removal calls, no alias, the record written by the store writer alone.
+  - **GROUP 5 — THE CHILD'S LIFE (three notes on group 4).**
+    - **No remover outlives its hub:** the child checks its hub (`process.ppid`) between two run dirs. On its death it leaves its batch's count in a file, which the next engine counts once (name kept durably before the forget), and exits. Pinned with real processes: a hub SIGKILLed mid-batch, its child stopped within one run dir, the next engine's done line said all 60. A catch-up pass's count is durable before the next.
+    - **The evidence's margin** is a day (the store's clock is not this machine's; containers keep).
+    - **The child's cost:** 25 ms to its first answer, 48 MB resident. §94 lists it as «literal (built)»; an idle child ends.
+- **ROUND 3 (49d128a94 not accepted; readers wf_2dc56f21 in int359/acc-398/jls2).** Every round-1 scene was cured; five roads that round 2 opened were not. Nine commits on top — one per item (items 1 and 6 share one), a docs commit — and a tests commit:
+  - **§2 349f547bd** — read first, then ask (the set-aside listing after every read).
+  - **§3 cb61ef33b** — a record whose runs is not a list keeps its job whole, never throws, the gc completes.
+  - **§4 883201dfb** — the hub hands its child its pid; a gone hub's batch is never started.
+  - **§7 c4417afdd** — a person's removal is not paused.
+  - **§8 4099c607c** — the small things.
+  - **§1 + §6 f366c5290** — a failed read's fact on disk (set-aside, copy, or ONE note per store), lifted only by a person; items that say what is true, names only, «said» after the For-you store wrote the item.
+  - **§5 c296772c4** — evidence with no clock (no process's argv names the run dir; a stamp of this boot never; /proc unreadable ⇒ kept).
+  - **§9 d95b3fcaa** — the real-process legs a HEAVY suite (12–13 s), the pure half fast (0.1 s).
+  - Mutants: 27, each run alone and killed by a named leg — §2 1, §3 3, §4 2, §7 1, §8 8, §1 + §6 8, §5 4.
+- **ROUND 4 (eaa865fb7 not accepted; readers wf_b4d68433: «close», ONE thing stopped it).**
+  - **§1 + §2 — «this process holds» holds; one note per store.** When even the note could not be written, round 3 only had the child re-read the store (round 2's design): after the hub's own write the pass removed runs the unread records listed — on the archive road at the FIRST boot pass, the boot archive sweep's write being inside init. Now a failed read with nothing set aside holds this process's pass at once (before the owed re-send and the walk) until its note is on disk. The note is the remover child's: an O_EXCL write of the fixed `<store>.corrupt-unread`, asked at the load, before every pass (paused or not) and by the exit itself; EEXIST = a note already stands, nothing filed. No listing on the note road: a data dir that could not be listed made a note and an item per boot.
+  - **§3 — the smalls, one commit:** the note known by its exact name; `records-unread` says when and what a person can see; the failed load on the main thread = the release's calls; a read-only engine writes nothing; a stop on the real exit and a kill after the start line keep their counts; «queued again» only when it is; an unreadable catch-up record says its cause and files one item; the two surviving mutants pinned (the paused owed re-send across a restart; the start check for every op); docs.
+  - Mutants: 21, each alone, the fast suite then the heavy — 21 killed (§1 6, §2 2, §3 12, the not-asked waiter 1), the readers' two survivors (the paused owed re-send across a restart; the start check for every op) among them. The four the fast suite's static pins caught first were re-run against the heavy suite alone.
+  - **The acceptance's one small thing:** a pass on an engine whose init FAILED ran with an empty store (the readers' driver removed two run dirs); nothing in the product calls it then, and now `sweepLogs` refuses on an engine that is not ready (pinned: a failed init, a direct pass and the hourly gc; red without the guard).
+  - Census rows: test-sync-fs-census src/jobs.js 44 → 42 and the worker 24 → 26; test-store-write-census JobManager._logsHeldFile 3 → 2, JobManager._logsNoteAtExit 1 (durable), the worker 3 → 4 (DEBT stays 518); test-job-model's copy list names sweep-record-unread.
+- **Census rows:**
+  - test-sync-fs-census: src/jobs.js 46 → 41, and src/job-logs-sweep-worker.js «*» 12 via-safefs + its launcher.
+  - mount-reader-census: the worker, own-tree 8.
+  - test-memory-census: the remover's `new Worker(` site + its script (tracked; answers the memory ask).
+  - test-store-write-census ②: the catch-up record through the writer.
+  - test-jobs-triage: the cap leg awaits `logsSettled()` (its removal runs in the worker).
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 
