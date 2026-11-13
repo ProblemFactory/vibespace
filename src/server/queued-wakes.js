@@ -105,6 +105,13 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     return old.length;
   }
 
+  /** B-0a33: THE HUB STOPS WAITING for this frame (its process gone or replaced, its conversation archived, its entry aged out)
+   *  and cannot tell whether it ran: the unit stays counted — never returned — in the hour the hub stopped waiting, and no
+   *  longer holds the hour of every later authorize (a frame that can no longer run there is no turn that may run now). */
+  function endUnit(e) {
+    if (!e.reserved || !noteSpend) return;
+    try { noteSpend({ reason: e.reason || 'peer-message', identity: e.identity || null, hold: null, reservation: e.id, ended: true }); } catch (err) { log('[queued] settling the reservation failed:', err.message); }
+  }
   function returnUnit(e) {
     if (!e.reserved) return;
     e.reserved = false;
@@ -144,6 +151,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
    *  possible repeat. Carried (read) when that stash entry drains. */
   function unknownBack(e, reason, stash) {
     if (ranPerGuard(e)) { carry(e, 'converted'); return; }
+    endUnit(e);   // B-0a33: it may have run, it will not run there now — counted in this hour, no longer in every later one
     try { if (typeof stash === 'function' && e.text) stash(publicOf(e), { text: REPEAT_HEAD + e.text, fromName: e.fromName, kind: e.kind, ref: REF + e.id }); } catch (err) { log('[queued] the hand-back stash failed:', err.message); }
     if (e.mark) { e.state = 'restashed'; e.repeat = true; e.backAt = now(); e.backWhy = String(reason || '').slice(0, 200); }
     else { e.reserved = false; remove(e); }   // nothing to mark: the unit stays in the guard (counted), the words ride the stash
@@ -296,6 +304,7 @@ function create({ dataDir, noteSpend = null, releaseSpend = null, reservationSta
     for (const e of mine) {
       // its unit is returned only when KNOWN not run (the last queue its process published held it); else it stays counted
       if (live(e) && knownNotRun(e)) returnUnit(e);
+      else if (live(e)) endUnit(e);   // B-0a33: unknown — counted, placed in this hour
       remove(e); emit('dropped', e, { why });
     }
     if (mine.length) { log(`[queued] ${cid}: ${mine.length} held entr${mine.length === 1 ? 'y' : 'ies'} dropped — the conversation was ${why} (its units stay counted; they age out)`); persist(); }

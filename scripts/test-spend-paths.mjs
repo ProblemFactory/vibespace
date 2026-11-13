@@ -2260,6 +2260,147 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
 // the AUTHORIZED account is debited nothing, so its ceiling never binds and it
 // can be spent past indefinitely; and an account nobody asked is debited, so it
 // starts refusing its own legitimate unattended turns.
+// ── §5f B-0a33 (主开发 2026-11-13; the reader's d2-money F2 on 2.369.398): A RESERVATION IS COUNTED IN THE HOUR ITS TURN RUNS ──
+// The hour cap was passed by queueing: a queued frame's unit sat in the hour it was SENT, so a long-held turn's queue ran later
+// inside an hour that had already spent its cap (10 billed unattended turns in one hour at a cap of 5). LAW: no window of the
+// ceiling holds more billed unattended turns than its cap, whenever the turn a reservation pays for runs; the day axis and
+// «given back once» unchanged.
+console.log('\n§5f B-0a33: a reservation is counted in the hour its turn runs (a waiting one: every hour it waits through)');
+{
+  const QWf = require(path.join(REPO, 'src/server/queued-wakes.js'));
+  const J = JSON.stringify;
+  const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
+  const ID = { key: 'slot-F', name: 'F' };
+  const world = (hourCap, dayCap = 200) => {
+    let t = 1_800_000_000_000; const dataDir = tmpdir('vs-spend-b0a33-');
+    const settings = { 'spend.unattendedPerIdentityHour': hourCap, 'spend.unattendedPerIdentityDay': dayCap, 'spend.unattendedPerInstanceDay': 10000 };
+    const g = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => null, log: () => { } });
+    const files = {};
+    const q = QWf.create({ dataDir, now: () => t, writer: { dirty: (file, o) => { files[file] = o.produce(); } }, readFile: (fl) => { if (!(fl in files)) throw new Error('none'); return files[fl]; },
+      noteSpend: (rec) => g.note({ ...rec, now: t }), releaseSpend: (rec) => g.release({ ...rec, now: t }), reservationState: (rid) => g.reservationState(rid), stashHas: () => false, log: () => { } });
+    const W = { g, q, t: () => t, adv: (ms) => { t += ms; },
+      send: (cid, text) => { const v = g.authorize({ reason: 'peer-message', identity: ID, cid, now: t }); if (!v.ok) return null; return q.noteWritten(cid, { charged: { reason: 'peer-message', identity: ID, hold: v.hold }, text, holder: 4242 }); },
+      spend: () => { const v = g.authorize({ reason: 'peer-message', identity: ID, now: t }); if (v.ok) g.note({ reason: 'peer-message', identity: ID, hold: v.hold, now: t }); return v; },
+      counts: () => g.authorize({ reason: 'peer-message', identity: ID, hold: false, now: t }).counts };
+    return W;
+  };
+  // (1) THE READER'S SCENE, through the REAL guard and the REAL queued-wakes on one clock (int359/acc-399/l23b/drivers/d2-money.cjs F2)
+  {
+    const W = world(5); const ids = [];
+    for (let i = 0; i < 5; i++) { const e = W.send('c-f2', 'm' + i); ids.push(e.id); W.q.answer(e.id, { mode: 'queued' }); W.q.noteQueue('c-f2', ids.map((_, j) => ({ id: 'it-' + j })), 4242, { fresh: true }); }
+    W.adv(3 * HOUR); let spent = 0, refused = null;
+    for (let i = 0; i < 5; i++) { const v = W.spend(); if (v.ok) spent++; else refused = refused || v; }
+    const runs = [];
+    for (let i = 0; i < 5; i++) { W.adv(2 * MIN); W.q.noteTurnEnded('c-f2'); W.q.noteTurnStarted('c-f2'); W.q.noteQueue('c-f2', ids.slice(i + 1).map((_, j) => ({ id: 'it-' + (i + 1 + j) })), 4242, { fresh: true }); runs.push(W.g.reservationState(ids[i])); }
+    const c = W.counts();
+    ok('§5f F2 (the reader\'s scene, real guard + queued-wakes): cap 5/h, 5 frames queued behind a hung turn; 3 h later NO unattended turn is spent — the 5 still waiting hold this hour («spent or promised 5 …, 5 of them waiting behind running turns»); the turn ends and its 5 run ⇒ the hour holds 5, never 10 (the release: 5 spent, then 10)',
+      spent === 0 && !!refused && refused.why === 'hour-cap' && /spent or promised 5 unattended turns this hour, 5 of them waiting behind running turns/.test(refused.detail) && J(runs) === J(['converted', 'converted', 'converted', 'converted', 'converted']) && c.hour === 5 && c.day === 5,
+      J({ spent, detail: refused && refused.detail, runs, hour: c.hour, day: c.day }));
+  }
+  // (2) THE LAW as a property: seeded timelines on the PURE authorizer — frames queued behind running turns, unattended turns now,
+  //     queues that run, Stops that hand back, the hub giving up unknown (that frame may have run at ANY moment it waited), hangs of
+  //     a day and more. Every billed turn is placed where it ran; no hour window holds more than the cap. The day count at every
+  //     authorize is its own model: a unit's send, a carry a day or more after its send counted at the carry, a give-back gone.
+  const law = (Am, seed, { hourCap = 4, dayCap = 60, days = 4 } = {}) => {
+    let st = Am.emptyBudget(), t = 1_800_000_000_000, r = seed >>> 0;
+    const rnd = () => ((r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 4294967296);
+    const L = { perIdentityHour: hourCap, perIdentityDay: dayCap, perInstanceDay: 10000, noticePct: 0 };
+    const waiting = [], runs = [], units = []; let n = 0, dayBad = null;
+    const verdict = () => Am.authorizeUnattendedSpend({ reason: 'peer-message', identity: ID, state: st, limits: L, now: t });
+    const dayModel = () => units.filter((u) => !u.back && (u.dayAt > t - DAY)).length;
+    const end = t + days * DAY;
+    while (t < end) {
+      t += rnd() < 0.02 ? Math.floor((20 + rnd() * 10) * HOUR) : Math.floor(rnd() * 40 * MIN) + MIN;
+      const v = verdict();
+      if (dayBad === null && v.counts.day !== dayModel()) dayBad = { t, day: v.counts.day, model: dayModel() };
+      const x = rnd();
+      if (x < 0.30) { if (v.ok) { const u = { rid: 'r' + (++n), at: t, dayAt: t }; st = Am.noteUnattendedSpend(st, { identity: ID, at: t, limits: L, reason: 'peer-message', rid: u.rid }).state; waiting.push(u); units.push(u); } }
+      else if (x < 0.48) { if (v.ok) { st = Am.noteUnattendedSpend(st, { identity: ID, at: t, limits: L, reason: 'peer-message' }).state; runs.push(t); units.push({ at: t, dayAt: t }); } }
+      else if (x < 0.68) { for (const u of waiting.splice(0, Math.floor(rnd() * 3))) { st = Am.noteUnattendedSpend(st, { identity: ID, at: t, limits: L, reason: 'peer-message', rid: u.rid, carried: true }).state; runs.push(t); if (t - u.at >= DAY) u.dayAt = t; } }
+      else if (x < 0.78) { const u = waiting.shift(); if (u) { st = Am.returnReservation(st, { rid: u.rid, now: t }).state; u.back = true; } }
+      else if (x < 0.86) { const u = waiting.shift(); if (u) { st = Am.noteUnattendedSpend(st, { identity: ID, at: t, limits: L, reason: 'peer-message', rid: u.rid, ended: true }).state; runs.push(u.at + Math.floor(rnd() * (t - u.at + 1))); } }
+    }
+    runs.sort((a, b) => a - b);
+    let worst = 0; for (let i = 0, j = 0; i < runs.length; i++) { while (runs[j] <= runs[i] - HOUR) j++; worst = Math.max(worst, i - j + 1); }
+    return { worst, runs: runs.length, dayBad };
+  };
+  const SEEDS = Array.from({ length: 40 }, (_, i) => 7919 * (i + 1));
+  const tip = SEEDS.map((sd) => ({ sd, ...law(A, sd) }));
+  ok('§5f THE LAW over 40 seeded timelines (4 days each, cap 4/h, hangs of 20–30 h): no hour window holds more billed unattended turns than the cap, wherever each queued frame ran — and the day count at every authorize equals its model (the day axis unchanged)',
+    tip.every((x) => x.worst <= 4 && x.dayBad === null) && tip.reduce((a, x) => a + x.runs, 0) > 1000 && tip.some((x) => x.worst === 4),
+    J({ worst: Math.max(...tip.map((x) => x.worst)), runs: tip.reduce((a, x) => a + x.runs, 0), dayBad: tip.filter((x) => x.dayBad).slice(0, 2) }));
+  // (3) the unit legs, on the pure authorizer
+  const L5 = { perIdentityHour: 5, perIdentityDay: 200, perInstanceDay: 10000, noticePct: 0 };
+  const cnt = (Am, st, t) => Am.authorizeUnattendedSpend({ reason: 'peer-message', identity: ID, state: st, limits: L5, now: t });
+  const leg = (Am) => {
+    const t0 = 1_800_000_000_000, o = {};
+    // a: sent at t0, carried at t0+2h — counted in the hour it RAN
+    let a = Am.noteUnattendedSpend(Am.emptyBudget(), { identity: ID, at: t0, limits: L5, reason: 'peer-message', rid: 'a' }).state;
+    o.aWait = cnt(Am, a, t0 + 90 * MIN).counts.hour;
+    a = Am.noteUnattendedSpend(a, { identity: ID, at: t0 + 2 * HOUR, limits: L5, reason: 'peer-message', rid: 'a', carried: true }).state;
+    o.aRan = cnt(Am, a, t0 + 2 * HOUR + 10 * MIN).counts.hour; o.aGone = cnt(Am, a, t0 + 3 * HOUR + 5 * MIN).counts.hour; o.aDay = cnt(Am, a, t0 + 2 * HOUR + 10 * MIN).counts.day;
+    // b: still waiting 30 h later — in this hour, not in this day; carried then — the hour and the day it ran; never carried — let go at 7 days
+    let b = Am.noteUnattendedSpend(Am.emptyBudget(), { identity: ID, at: t0, limits: L5, reason: 'peer-message', rid: 'b' }).state;
+    b = Am.pruneBudget(b, t0 + 30 * HOUR, Am.LOAD_RETENTION);
+    const b30 = cnt(Am, b, t0 + 30 * HOUR).counts; o.b30 = [b30.hour, b30.day, Am.reservationState(b, 'b')];
+    const bc = Am.noteUnattendedSpend(b, { identity: ID, at: t0 + 30 * HOUR, limits: L5, reason: 'peer-message', rid: 'b', carried: true }).state;
+    const bcc = cnt(Am, bc, t0 + 30 * HOUR + MIN).counts; o.bRan = [bcc.hour, bcc.day];
+    o.b8d = cnt(Am, Am.pruneBudget(b, t0 + 7 * DAY + HOUR, Am.LOAD_RETENTION), t0 + 7 * DAY + HOUR).counts.hour;
+    // c: the hub gave up at t0+2h, not knowing whether it ran — counted in THAT hour, then no longer; the day keeps its send; nothing returned by it
+    let c = Am.noteUnattendedSpend(Am.emptyBudget(), { identity: ID, at: t0, limits: L5, reason: 'peer-message', rid: 'c' }).state;
+    c = Am.noteUnattendedSpend(c, { identity: ID, at: t0 + 2 * HOUR, limits: L5, reason: 'peer-message', rid: 'c', ended: true }).state;
+    o.cEnd = [cnt(Am, c, t0 + 2 * HOUR + MIN).counts.hour, cnt(Am, c, t0 + 3 * HOUR + 2 * MIN).counts.hour, cnt(Am, c, t0 + 3 * HOUR + 2 * MIN).counts.day, Am.reservationState(c, 'c')];
+    // d: an hour full of WAITING reservations promises no instant; with one spent turn among them, that turn's edge
+    let d = Am.emptyBudget(); for (let i = 0; i < 5; i++) d = Am.noteUnattendedSpend(d, { identity: ID, at: t0 + i * MIN, limits: L5, reason: 'peer-message', rid: 'd' + i }).state;
+    o.dAll = cnt(Am, d, t0 + 2 * HOUR).retryAfter;
+    let d2 = Am.emptyBudget(); for (let i = 0; i < 4; i++) d2 = Am.noteUnattendedSpend(d2, { identity: ID, at: t0 + i * MIN, limits: L5, reason: 'peer-message', rid: 'e' + i }).state;
+    d2 = Am.noteUnattendedSpend(d2, { identity: ID, at: t0 + 30 * MIN, limits: L5, reason: 'peer-message' }).state;
+    o.dOne = cnt(Am, d2, t0 + 40 * MIN).retryAfter - (t0 + 30 * MIN + HOUR);
+    return o;
+  };
+  const u = leg(A);
+  ok('§5f a reservation sent at t0 and carried at t0+2h is in the hour it RAN (1 at +2h10, 0 at +3h05) — while it waited it held every hour (1 at +1h30); its day is its send',
+    u.aWait === 1 && u.aRan === 1 && u.aGone === 0 && u.aDay === 1, J(u));
+  ok('§5f a frame still waiting 30 h after its send holds THIS hour (1) but not this day (0), still «reserved»; carried then, it is in the hour AND the day it ran (1, 1 — what the aged-out stamp\'s re-stamp counted on the release); never carried, it is let go at 7 days (queued-wakes\' own bound)',
+    J(u.b30) === J([1, 0, 'reserved']) && J(u.bRan) === J([1, 1]) && u.b8d === 0, J(u));
+  ok('§5f the hub gives up a waiting frame unknown (process gone, conversation archived, entry aged out): counted in the hour it stopped waiting (1), an hour later no more (0); its day stays its send (1); still a unit, never returned by it',
+    J(u.cEnd) === J([1, 0, 1, 'reserved']), J(u));
+  ok('§5f an hour full of WAITING reservations promises no instant (retryAfter 0 — they free a slot when they run or are given back); with one spent turn among them, the edge of THAT turn',
+    u.dAll === 0 && u.dOne === 0, J(u));
+  ok('§5f the waiting bound IS queued-wakes\' own: RESERVATION_WAIT_MAX_MS = LIVE_MAX_AGE_MS = 7 days',
+    A.RESERVATION_WAIT_MAX_MS === 7 * DAY && /const LIVE_MAX_AGE_MS = 7 \* 24 \* 3600 \* 1000;/.test(read('src/server/queued-wakes.js')));
+  // (4) queued-wakes settles where the hub stops waiting — through the REAL guard
+  {
+    const W = world(30); const e1 = W.send('c-ar', 'x'); W.q.answer(e1.id, { mode: 'queued' }); W.adv(2 * HOUR);
+    W.q.dropConversation('c-ar', 'archived');
+    const now1 = W.counts().hour; W.adv(HOUR + MIN); const later1 = W.counts().hour;
+    const W2 = world(30); const e2 = W2.send('c-gone', 'y'); W2.q.answer(e2.id, { mode: 'queued' }); W2.adv(2 * HOUR);
+    W2.q.handBackGone('c-gone', () => { }, 'its process is gone');
+    const now2 = W2.counts().hour; W2.adv(HOUR + MIN); const later2 = W2.counts().hour;
+    const W3 = world(30); const e3 = W3.send('c-age', 'z'); W3.q.answer(e3.id, { mode: 'queued' }); W3.adv(7 * DAY - HOUR);
+    const before3 = W3.counts().hour; W3.adv(HOUR + MIN); const aged3 = W3.q.ageOut(); W3.spend(); const after3 = W3.counts().hour;
+    ok('§5f queued-wakes settles a frame it stops waiting for unknown — archived (1 → 0 an hour later), its process gone (1 → 0); a frame still waiting at 7 days less an hour (1), aged out at 7 days with its stamp (then only the turn just spent: 1): the unit counted where the hub stopped, never a slot held for ever, never returned',
+      now1 === 1 && later1 === 0 && now2 === 1 && later2 === 0 && before3 === 1 && aged3 === 1 && after3 === 1 && W.g.reservationState(e1.id) === 'reserved' && W2.g.reservationState(e2.id) === 'reserved',
+      J({ now1, later1, now2, later2, before3, aged3, after3 }));
+  }
+  // (5) RED CONTROLS — patched copies of the real authorizer, each B-0a33 rule taken out
+  const MA = (edits) => mutantModule('src/spend-authorizer.js', edits);
+  const mHourAtSend = MA([['  const hour = mine.filter((t) => hourStampAt(t, now) > now - HOUR_MS);', '  const hour = since(mine, HOUR_MS);']]);
+  const mNoRan = MA([['if (waitingStamp(t)) { t.ran = at; if (', 'if (waitingStamp(t)) { if (']]);
+  const mDayPrune = MA([['list.filter((t) => lastStampAt(t) > cut || (waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS))', 'list.filter((t) => lastStampAt(t) > cut)']]);
+  const mNoEnd = MA([['for (const t of list) if (t && t.rid === ridKey && waitingStamp(t)) t.end = at; return', 'for (const t of list) if (false) t.end = at; return']]);
+  const mNoRebase = MA([['if (!drain && stampAt(t) <= at - DAY_MS) t.at = at; ', '']]);
+  const redSeed = (m) => SEEDS.find((sd) => law(m.mod, sd).worst > 4);   // the first seed whose timeline breaks the law (a control stops there)
+  const dayBadOf = (m) => SEEDS.some((sd) => law(m.mod, sd).dayBad !== null);
+  ok('§5f CONTROL: every patched copy was really built (an unapplied patch is a green control)',
+    [mHourAtSend, mNoRan, mDayPrune, mNoEnd, mNoRebase].every((m) => m.mod && m.hits === 1), J([mHourAtSend, mNoRan, mDayPrune, mNoEnd, mNoRebase].map((m) => m.err || m.hits)));
+  ok('§5f CONTROL: a waiting reservation counted in the hour it was SENT (the release) ⇒ THE LAW is RED (an hour holds more than its cap)', mHourAtSend.mod && redSeed(mHourAtSend) !== undefined, mHourAtSend.mod ? 'no seed broke it' : mHourAtSend.err);
+  ok('§5f CONTROL: a carry that keeps its send\'s hour ⇒ THE LAW is RED, and the run-hour leg too', mNoRan.mod && leg(mNoRan.mod).aRan === 0 && redSeed(mNoRan) !== undefined, mNoRan.mod ? J({ aRan: leg(mNoRan.mod).aRan }) : mNoRan.err);
+  ok('§5f CONTROL: a waiting stamp that ages out at a day ⇒ the 30-hour leg is RED (it holds no hour while its frame may still run)', mDayPrune.mod && leg(mDayPrune.mod).b30[0] === 0, mDayPrune.mod ? J(leg(mDayPrune.mod).b30) : mDayPrune.err);
+  ok('§5f CONTROL: «ended» ignored ⇒ a frame the hub gave up holds every later hour (the give-up leg RED)', mNoEnd.mod && leg(mNoEnd.mod).cEnd[1] === 1, mNoEnd.mod ? J(leg(mNoEnd.mod).cEnd) : mNoEnd.err);
+  ok('§5f CONTROL: a carry a day after its send NOT counted in the day it runs ⇒ the day model is RED (the day axis would have moved)', mNoRebase.mod && (dayBadOf(mNoRebase) || J(leg(mNoRebase.mod).bRan) !== J([1, 1])), mNoRebase.mod ? J({ bRan: leg(mNoRebase.mod).bRan, dayBad: dayBadOf(mNoRebase) }) : mNoRebase.err);
+}
+
 console.log('\n§5c the charge is debited to the identity the authorization resolved');
 {
   // A patched copy of the REAL ladder, as a SIBLING of the original (its
@@ -3436,7 +3577,7 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
   // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
   const gsrc = read('src/server/spend-guard.js');
-  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2)
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason, rid: reservation, carried: !!carried, drain: !!drain, ended: !!ended \}\)/.test(gsrc));   // + the reservation's id (lane queued-is-not-woke round 2)
   {
     const dir = tmpdir('vs-spend-reason-');
     const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });

@@ -224,6 +224,16 @@ function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {
 // member — and the migration is implicit: a bare number written by an older
 // build reads as `{at, reason: null}` everywhere (prune, counts, producers).
 const stampAt = (t) => (typeof t === 'number' ? t : Number(t && t.at) || 0);
+// THE HOUR A RESERVATION IS COUNTED IN IS THE HOUR ITS TURN RUNS (B-0a33, 2026-11-13): a frame still waiting behind a running
+// turn may run at any moment — its stamp is in the hour of every authorize (`now`) until it ends; carried, it is in the hour it
+// ran (`ran`); given up by the hub without knowing whether it ran (`end`), in the hour the hub stopped waiting. The DAY axis
+// reads `at` (unchanged). No window then holds more billed unattended turns than its cap, whenever a queued frame runs.
+const waitingStamp = (t) => !!(t && typeof t === 'object' && t.rid && !t.conv && !t.end);
+const hourStampAt = (t, now) => (waitingStamp(t) ? now : (t && typeof t === 'object' && (Number(t.ran) || Number(t.end))) || stampAt(t));
+const lastStampAt = (t) => Math.max(stampAt(t), (t && typeof t === 'object' && Math.max(Number(t.ran) || 0, Number(t.end) || 0)) || 0);
+// how long a WAITING reservation is kept past the day horizon: as long as queued-wakes keeps its live entry (LIVE_MAX_AGE_MS,
+// 7 days — then the entry ages out «not delivered» and its stamp leaves with it; pinned equal in test-spend-paths §5f)
+const RESERVATION_WAIT_MAX_MS = 7 * DAY_MS;
 const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.reason) : null);
 /** PURE. How many stamps in `list` each producer wrote ({reason → n}; a
  *  reason-less legacy stamp counts under 'unknown'). */
@@ -245,7 +255,9 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
   const cut = now - DAY_MS;
   const cap = stampCap(limits);
-  const keep = (list) => (Array.isArray(list) ? list.filter((t) => stampAt(t) > cut).slice(-cap) : []);
+  // B-0a33: a stamp is kept a day past its LAST instant (its run, its end), and a WAITING reservation for as long as its frame
+  // may still run (RESERVATION_WAIT_MAX_MS) — the day COUNT still reads `at` (spendCounts), so no day window moves
+  const keep = (list) => (Array.isArray(list) ? list.filter((t) => lastStampAt(t) > cut || (waitingStamp(t) && stampAt(t) > now - RESERVATION_WAIT_MAX_MS)).slice(-cap) : []);
   const identities = {};
   for (const [k, v] of Object.entries(s.identities || {})) {
     const l = keep(v);
@@ -264,15 +276,16 @@ function spendCounts(state, identityKey, now = Date.now()) {
   const mine = Array.isArray(s.identities?.[identityKey]) ? s.identities[identityKey] : [];
   const inst = Array.isArray(s.instance) ? s.instance : [];
   const since = (list, ms) => list.filter((t) => stampAt(t) > now - ms);
-  const hour = since(mine, HOUR_MS);
+  const hour = mine.filter((t) => hourStampAt(t, now) > now - HOUR_MS);   // B-0a33: the hour its turn runs in (a waiting one: now)
   const day = since(mine, DAY_MS);
   const instanceDay = since(inst, DAY_MS);
-  const promised = (list) => list.filter((t) => t && t.rid && !t.conv).length;   // lane queued-is-not-woke: reserved, waiting behind running turns
+  const promised = (list) => list.filter(waitingStamp).length;   // lane queued-is-not-woke: reserved, waiting behind running turns (B-0a33: one the hub gave up is not waiting)
   return {
     hour: hour.length, day: day.length, instanceDay: instanceDay.length,
     promisedHour: promised(hour), promisedDay: promised(day), promisedInstanceDay: promised(instanceDay),
     // when the window frees a slot again — the honest retryAfter, not a guess
-    hourOldest: hour.length ? Math.min(...hour.map(stampAt)) : 0,
+    // B-0a33: a WAITING reservation frees its slot when its frame runs or is given back, never at a window's edge — no promise
+    hourOldest: (() => { const settled = hour.filter((t) => !waitingStamp(t)).map((t) => hourStampAt(t, now)); return settled.length ? Math.min(...settled) : 0; })(),
     dayOldest: day.length ? Math.min(...day.map(stampAt)) : 0,
     instanceOldest: instanceDay.length ? Math.min(...instanceDay.map(stampAt)) : 0,
     // WHO spent each window (5b ③): the refusal and the 80 % notice name them
@@ -598,7 +611,7 @@ function authorizeUnattendedSpend({
  *  not consume budget). Returns the new state plus, when this spend crossed the
  *  notice threshold on some axis, ONE warn object — the 80% line the owner
  *  asked for, emitted at the crossing and never again inside that window. */
-function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false } = {}) {
+function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null, rid = null, carried = false, drain = false, ended = false } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   // A PRUNE NEVER FORGIVES (lane queued-is-not-woke round 4): it keeps what the LARGEST caps the settings accept could count —
@@ -613,9 +626,15 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   // a carry with no identity still finds its reservation (round 4, small): the stamp is looked for under every identity
   const ridKeyOwner = ridKey ? (key && (s.identities[key] || []).some((t) => t && t.rid === ridKey) ? key : Object.keys(s.identities).find((k) => (s.identities[k] || []).some((t) => t && t.rid === ridKey)) || null) : null;
   if (ridKey && ridKeyOwner) {
-    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) t.conv = true; return { state: s, warn: null, converted: true }; }
+    // B-0a33: the carry is counted in the hour it RAN (`ran`); a live carry of a stamp older than a day is counted in the day it
+    // runs (`at` moved to the run) — what the aged-out stamp's re-stamp at the carry counted before (a drain adds no day)
+    if (carried) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey) { if (waitingStamp(t)) { t.ran = at; if (!drain && stampAt(t) <= at - DAY_MS) t.at = at; } t.conv = true; } return { state: s, warn: null, converted: true }; }
+    // B-0a33: ENDED — the hub stopped waiting for the frame and cannot tell whether it ran: the unit stays counted (never
+    // returned by this), in the hour the hub stopped; it no longer holds the hour of every later authorize
+    if (ended) { for (const list of [s.identities[ridKeyOwner], s.instance || []]) for (const t of list) if (t && t.rid === ridKey && waitingStamp(t)) t.end = at; return { state: s, warn: null, ended: true }; }
     return { state: s, warn: null };
   }
+  if (ridKey && ended) return { state: s, warn: null };   // B-0a33: nothing waiting under that id (aged out, returned, never stamped): nothing to settle
   // A STASH DRAIN NEVER STAMPS (round 4): it rides somebody else's turn — it converts a stamp still there, adds nothing if gone
   if (ridKey && drain) return { state: s, warn: null };
   // ATTENDED: no stamp — the press joins the tally only (it never fills a window, never crosses the 80 % line)
@@ -808,8 +827,8 @@ function noticeText(warn) {
 
 module.exports = {
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
-  LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP,
-  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
+  LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
+  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, hourStampAt, waitingStamp, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
   authorizeUnattendedSpend, noteUnattendedSpend, returnReservation, reservationState, refusalText, refusalI18n, refusalRow, noticeText,
