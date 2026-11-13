@@ -226,6 +226,55 @@ This file is the engineers' record of every release: the lanes, the verification
   - test-store-write-census ②: the catch-up record through the writer.
   - test-jobs-triage: the cap leg awaits `logsSettled()` (its removal runs in the worker).
 
+### queued-is-not-woke — A QUEUED MESSAGE IS NOT A WAKE (law 1 of 4; row B-580f, 主开发's brief and the 2026-11-11 incident)
+- **The census first (law 4, measured on master b6d980014, probe/census.mjs over the REAL groups-engine + delivery ladder).**
+  - 60 cells: 5 harness rows × {wake, next turn, notification} × {idle, in a turn, in a turn with no life, ended}.
+  - Lying: every rpc-queue cell in a turn, every live lane behind a dead turn, and claude's in-turn charge.
+  - Honest: every idle cell, stash-only, next turn, ended.
+- **Law 1.** A frame an rpc-queue wrapper QUEUES behind a running turn is said waiting («waiting (not billed yet): <name>'s current turn (running since HH:MMZ)»). Its group row is `queued`, never «read», and its charge is OWED.
+  - Authorized at the send. The hold goes back at the 'queued' answer, because guard holds live 3 min.
+  - Charged ONCE when a turn carries it: its queue item left and a turn started. Released when handed back.
+  - Persisted across a hub restart (msg-queued.json through the store writer).
+  - The marker moves at the queue, so no report re-sends it; exactly one road carries it.
+- **Ruled by 主开发 2026-11-12.**
+  - claude cli-inbox into a running turn keeps master's charge; only its words change («handed into <name>'s running turn», `intoTurn`).
+  - codex's free notification steer is left as it is and rowed for the owner.
+- **Restated pins.**
+  - test-spend-paths §5b: «a human peer message mid-turn is charged» ⇒ owed, then charged once at its turn.
+  - test-peer-delivery agy-peer-wake ②③: the busy notification is queued and owed; Stop's hand-back is never charged.
+  - test-channel-groups: the closed set gains `queued`.
+- **New.**
+  - test-queued-wake (fast, 46). ⑦ replays the incident on the REAL agy wrapper over the fake agy's new `stuck` mode, through the REAL acp-events consumer.
+  - test-harness-contract «a frame queued behind a turn», per harness from its declared lane.
+- **Round 2 (主开发's panel: «an owed charge slips past the owner's money gate»).**
+  - THE RESERVATION:
+    - the unit is taken at the send as a guard stamp named by the frame's id, counted like a spent turn — the ceiling holds (cap 3: sends 4 and on refused at the send);
+    - the carrying turn is that unit (idempotent by id: a kill between a carry and its persist charges once);
+    - a hand-back returns it.
+  - The moderates:
+    - the hub ASKS a holding wrapper for its queue at every attach and at boot;
+    - a gone or replaced wrapper's frames are handed back BY THE HUB (stash with a ref; read at its drain; «waiting — <name> is stopped» before the queue);
+    - the bounds refuse at the send (`queued-full`) and never drop;
+    - an answer that beats markQueued is kept.
+  - The readers: the owner's toast, vibespace-msg's hand-in echo, the worker dispatch, channel receipts.
+  - Pins: test-queued-wake 63; test-spend-paths §5c (the reservation arithmetic + the ceiling with the real guard); test-channel-groups (the queued row, stopped before the queue); test-dispatch-model (a queued brief).
+- **Round 3 (主开发's panel: «two ways money is still forgiven»).**
+  - A give-back returns only its own unconverted stamp (one Stop no longer forgives 637 spent turns). Its prune used the live limits here; round 4 replaced that with LOAD_RETENTION.
+  - A carried reservation is CONVERTED in the guard, on disk before the carry's record.
+  - The hub hands back only on knowledge: the wrapper's answer, or a seen end with the frame in that process's last queue (the ws kill road at the act).
+  - «Gone» is the holder pid's death, never «not attached yet»; unknown keeps the unit and hands the words once, marked as a possible repeat.
+  - Live-only bound; eviction, archive and age exits; orphan rows settle at the next turn start; «spent or promised» refusals.
+  - Pins: test-spend-paths §5d (the 100-after-a-Stop row, the census, the converted mark across a reload, boot tags, both bounds, the words); test-queued-wake 70 (⑬b the boot roads (a) / (b) / (c) with the real guard, ⑬c kill and archive).
+- **Round 4 (主开发's panel: «the roads hold; two ways a spent turn is still forgiven»).**
+  - ONE predicate (`knownNotRun`) for every unit-returning exit: a fresh listing, from the holder, newer than every turn start. Codex's cached re-publish at the turn start and an old wrapper's listing are no evidence (unknown: kept, marked).
+  - Every prune keeps LOAD_RETENTION (d3b: the caps lowered and raised the same day forgive nothing; the census reads every tracked file and catches null and an alias).
+  - No write inside the send or the carry: the guard's own debounce, with the kill-window bound named and the four boot states pinned.
+  - A drain never stamps; a live carry of a never-stamped frame stamps once; the converted mark is on both lists.
+  - An evicted or aged-out entry's row says «not delivered — … send it again» (a handed-back entry whose words still wait in the stash stays).
+  - Smalls: the guard asked before a marked copy; a 38-character repeat mark; live entries age; an identity-less carry finds its stamp; «Spent or promised by»; the 80 % notice on the carried path.
+  - Pins: test-queued-wake 105 (⑯ the predicate through the three exits, the record census knowing `fresh`, U3 / U3c / U3k, the person's turn; ⑰ U10; ⑱ U12 / M7f / a reservation never recorded; ⑲ evict 30 + 10, U14, the age; ⑳ the four states); test-spend-paths 457 (§5d the census; §5e d3b ×2, the burst, M7f / M7g, the smalls).
+- **Laws 2 and 3 are not in this commit:** the wait bound, the owner's item, the life witness and agy's store-proven close.
+
 ### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
 

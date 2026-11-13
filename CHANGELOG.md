@@ -13,6 +13,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A scheduled background job no longer keeps the files of every run it ever made: runs its list no longer shows are deleted 14 days after they ended.
 - A VibeSpace that kept years of such files clears them by itself, a little at a time, and cleaning up job logs never pauses VibeSpace on slow storage.
 - Settings › Background Work › Clean up old job logs turns that clean-up off; if job records could not be read, it waits and For you says why.
+- A message sent with --wake to a busy conversation now says it waits for that turn; it shows as read only once a turn reads it.
+- Such a message counts against your spend limit from the send and is given back if it never runs; a dropped copy says «not delivered».
 
 ### Maintenance
 - Test and release tooling only; nothing changes for you.
