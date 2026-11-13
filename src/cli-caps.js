@@ -221,13 +221,16 @@ function scopesOk(list) {
   return [...new Set(list)];
 }
 /** THE READER of what `setup-token` prints (the probe feeds it the pty's bytes as they come): the first authorize URL, its
- *  `scope=` → {scopes, origin} or null (no URL yet, or a scope the grammar refuses — a URL cut by the screen's wrap is read
- *  whole: the terminal's escapes and every whitespace are removed first; the URL holds none). */
+ *  `scope=` → {scopes, origin} or null. ONLY FROM AN ADDRESS WHOSE QUERY VISIBLY ENDED (acceptance r1: a pty read can end inside
+ *  the value — «user:infer» was read as a scope): the terminal's escapes are removed, a screen wrap (ONE line break) is joined, and
+ *  the URL must be followed by a space or a blank line the screen printed AFTER it — a buffer that ends inside the address yields
+ *  null (the probe keeps reading); the query is then split whole, never up to a guessed end. A scope the grammar refuses ⇒ null. */
 function mintScopesIn(text) {
-  const plain = String(text == null ? '' : text).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\s+/g, '');
-  const m = /(https?:\/\/[A-Za-z0-9.:[\]-]{1,100})(?:\/[A-Za-z0-9._~-]{1,40}){0,4}\/oauth\/authorize\?([A-Za-z0-9%&=_.~+:-]{1,4000})/.exec(plain); // 2.1.321 prints https://claude.com/cai/oauth/authorize?… (the vendor's page — printed, never fetched here)
+  const plain = String(text == null ? '' : text).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/(?:\r*\n){2,}/g, ' ').replace(/\r*\n/g, '').replace(/\r/g, '');   // a blank line ends a paragraph (a space); a single break is the screen's wrap (joined)
+  const m = /(https?:\/\/[A-Za-z0-9.:[\]-]{1,100})(?:\/[A-Za-z0-9._~-]{1,40}){0,4}\/oauth\/authorize\?([A-Za-z0-9%&=_.~+:-]{1,4000})(?=[ \t])/.exec(plain); // 2.1.321 prints https://claude.com/cai/oauth/authorize?… (the vendor's page — printed, never fetched here)
   if (!m) return null;
-  const q = /(?:^|&)scope=([^&]*)&/.exec(m[2] + '&'); // a scope that is NOT the last parameter (2.1.321: code_challenge follows) — a last one is read up to its end
+  const q = m[2].split('&').map((kv) => /^scope=(.*)$/.exec(kv)).find(Boolean);
   if (!q) return null;
   let raw; try { raw = decodeURIComponent(q[1].replace(/\+/g, ' ')); } catch { return null; }
   const scopes = scopesOk(raw.split(' ').filter(Boolean));

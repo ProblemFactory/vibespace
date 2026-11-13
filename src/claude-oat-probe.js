@@ -992,9 +992,10 @@ async function measure(o = {}) {
       child.stdout.on('data', (d) => { out += d; if (out.length > 1 << 20) out = out.slice(-(1 << 19)); const m = mintScopesIn(out); if (m) { clearTimeout(cap); resolve(m); } });
       child.on('exit', () => { clearTimeout(cap); resolve(mintScopesIn(out)); });
     });
-    child.stdin.on('error', (e) => event('mint stdin', e));
-    child.stdout.on('error', (e) => event('mint stdout', e));
-    child.on('error', (e) => event('mint process', e));
+    const mc = child;   // the mint's own launch — its error paths are named apart (test-oat-measure-fake's census: each path once)
+    mc.stdin.on('error', (e) => event('mint stdin', e));
+    mc.stdout.on('error', (e) => event('mint stdout', e));
+    mc.on('error', (e) => event('mint process', e));
     const found = await seen;
     await sleep(1000); // the trace stream catches up to the instant the URL was read
     const endedBySelf = !isLive(child);
@@ -1172,4 +1173,4 @@ async function runChild() {
 }
 if (require.main === module) runChild();
 
-module.exports = { measure, preflight, resolveClaude, assertEnv, guardedReadsOf, unquoted, isLive, MAX_RECORD, parseTrace, recordGap, doorsOpenedOf, outboundOf, sockaddrOf, sockaddrsOf, straceVersionOf, TRACE_SET, DENIED_DOORS, DOOR_CALLS, OPEN_CALLS, credentialRoots, REAL_HOME, sha256Of, killAll, refusal, gateOf, PROBE_VERSION, RUN_ORDER, GUARDED, ENV_ALLOW, isLoopbackAddr, nameserversOf };
+module.exports = { NO_BROWSER, measure, preflight, resolveClaude, assertEnv, guardedReadsOf, unquoted, isLive, MAX_RECORD, parseTrace, recordGap, doorsOpenedOf, outboundOf, sockaddrOf, sockaddrsOf, straceVersionOf, TRACE_SET, DENIED_DOORS, DOOR_CALLS, OPEN_CALLS, credentialRoots, REAL_HOME, sha256Of, killAll, refusal, gateOf, PROBE_VERSION, RUN_ORDER, GUARDED, ENV_ALLOW, isLoopbackAddr, nameserversOf };

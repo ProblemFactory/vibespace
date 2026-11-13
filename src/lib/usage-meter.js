@@ -22,6 +22,7 @@ import { overageState, spendControlState } from '../spend-authorizer.js';
 import * as quotaModel from '../quota-model.js';
 import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge, markT, claimAnsweredWords, notOnDiskWords } from './account-wall-words.js'; // PURE (lane account-reset-door)
 import { showUnlock } from './vault-unlock.js'; // a vault wall's door: Unlock… in the toast itself
+import { openOatShapeDialog } from './oat-shape-dialog.js'; // lane oat-add-door: a token with no subscription type — the guided door, never a re-login
 
 export function installUsageMeter(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -138,9 +139,11 @@ export function installUsageMeter(App, ctx = {}) {
   },
 
   // ── lane account-reset-door ────────────────────────────────────────────────
-  /** A wall's door as a toast action: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents (its re-login doors) */
-  _wallDoorAction(door) {
+  /** A wall's door as a toast action: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents (its re-login doors), 'oat-shape'
+   *  = the guided door of the account `key` names (sign in once, or choose the type — lane oat-add-door), else Manage agents */
+  _wallDoorAction(door, key = null) {
     if (door === 'unlock') return { label: t('Unlock…'), run: () => { try { showUnlock(); } catch { } } };
+    if (door === 'oat-shape') return { label: t('Sign in or choose the type…'), run: () => { try { if (key && key !== '__global__') openOatShapeDialog({ id: key, name: this._usageKeyName(key), onSignIn: () => this._openUsageOverview(), refresh: async () => { const data = await fetchJson('/api/usage'); if (data) { this._applyUsage(data); this._renderUsage(); } } }); else this._openUsageOverview(); } catch { } } };
     if (door === 'relogin') return { label: t('Manage agents…'), run: () => { try { this._openUsageOverview(); } catch { } } };
     return undefined;
   },
@@ -160,11 +163,11 @@ export function installUsageMeter(App, ctx = {}) {
     if (!r || !r.ok) { showToast(r?.code === 'no-reading' ? t('{name} has no reading yet — nothing to mark as reset', { name }) : r?.code === 'too-low' ? t('That limit is under 5 % — its next reading could show no reset, so it cannot be marked as reset') : (r?.error || t('Could not mark it as reset')), { type: 'error' }); return; }   // r5: «too low» in every language
     const what = lane ? laneWords(lane, { t, capName }) : t('every limit of {name}', { name });
     const said = claimAnsweredWords(r, { t, what, name });   // K2: marked — and, when it did not reach the disk, that too
-    showToast(said.text, { ...(said.type ? { type: said.type } : {}), duration: said.duration, ...(said.door ? { action: this._wallDoorAction(said.door) } : {}) });
+    showToast(said.text, { ...(said.type ? { type: said.type } : {}), duration: said.duration, ...(said.door ? { action: this._wallDoorAction(said.door, key) } : {}) });
     if (said.disk) showToast(said.disk, { type: 'error', duration: 12000 });   // …and not on disk yet (the store writer's own sentence)
     if (r.refresh) {   // the refresh the dialog promised: what it answered is said (r4), never dropped
       let rr = null; try { rr = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: key }) }); } catch (e) { rr = { error: String((e && e.message) || e) }; }
-      if (rr && rr.error) { if (rr.wall) { const w = wallWords(rr.wall, { t, name }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door) }); } else showToast(t('{name} was not refreshed: {why}', { name, why: String(rr.error).slice(0, 300) }), { type: 'error', duration: 9000 }); }   // r5: the refresh's own reason, said
+      if (rr && rr.error) { if (rr.wall) { const w = wallWords(rr.wall, { t, name }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door, key) }); } else showToast(t('{name} was not refreshed: {why}', { name, why: String(rr.error).slice(0, 300) }), { type: 'error', duration: 9000 }); }   // r5: the refresh's own reason, said
     }
     const data = await fetchJson('/api/usage');
     if (data) { this._applyUsage(data); this._renderUsage(); }
@@ -250,7 +253,7 @@ export function installUsageMeter(App, ctx = {}) {
     if (btn) btn.classList.add('usage-refresh-spin');
     const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
     // the pool's own cause, in this person's words, with its door (lane account-reset-door) — never the server's English
-    if (r?.error && !silent && r.wall) { const w = wallWords(r.wall, { t, name: this._usageKeyName(target) }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door) }); }
+    if (r?.error && !silent && r.wall) { const w = wallWords(r.wall, { t, name: this._usageKeyName(target) }); showToast(w.text, { type: 'error', duration: 9000, action: this._wallDoorAction(w.door, target) }); }
     else if (r?.error && !silent) showToast(r.loginNeeded ? t('Needs re-login to refresh usage') : r.error, { type: 'error' });
     // B-855a: the answer names the RUNG (own /usage panel vs a live session)
     // and whether the reading's identity was verified — an unverified one is

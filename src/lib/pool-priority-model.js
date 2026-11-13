@@ -23,6 +23,9 @@ const i18nKey = (s) => s;
  *  Order: not signed in › login expired › subscription inactive › out of quota › usable
  *  (a quota reading about a member that cannot serve is beside the point). */
 export function memberState({ loggedIn = true, loginState = null, usage = null, serve = null, nowSec = Date.now() / 1000 } = {}) {
+  // NO TYPE YET (lane oat-add-door, acceptance r1 MUST 1): a pasted token the CLI cannot be handed for want of its subscription
+  // type never signed in — the guided door's words before any login word (`oatChoose`: way ② offered on this hub)
+  if (loginState && typeof loginState === 'object' && loginState.oatNoType && !loginState.oatFile) return { code: 'oat-no-type', key: loginState.oatChoose === false ? i18nKey('no subscription type yet — sign in once') : i18nKey('no subscription type yet — sign in once, or choose the type'), params: {} };
   if (!loggedIn) return { code: 'signed-out', key: i18nKey('not signed in'), params: {} };
   const st = loginState && typeof loginState === 'object' ? loginState.state : null;
   // 'oat-only' is the ROW's verdict (its own sessions run on the long-lived token); a POOLED

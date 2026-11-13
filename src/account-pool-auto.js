@@ -1262,7 +1262,10 @@ function unplaceableText(why) {
     // (acceptance r2) the LOCKED vault is the wall, never the login: the token is kept and written once it opens — the
     // deploy of this very fix restarts the hub (the vault locks), and «re-login» sent the owner to six needless logins
     case 'vault-locked': return 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)';
-    case 'oat-not-in-folder': return w.reason === 'pending'
+    // NO TYPE YET (lane oat-add-door, acceptance r1 MUST 1 — the owner's law): the row never signed in; its sentence names the
+    // guided door — sign in once, or choose the type where this hub offers it (`choose`) — never «re-login»
+    case 'oat-not-in-folder': if (w.reason === 'no-scopes') return w.choose ? 'its long-lived token has no subscription type yet — sign in once, or choose the type' : 'its long-lived token has no subscription type yet — sign in once';
+      return w.reason === 'pending'
       ? 'long-lived token kept, not written to its folder yet — the hub writes it within a minute of starting'
       : `long-lived token only, not written to its folder${typeof w.reason === 'string' && /^[a-z-]{1,40}$/.test(w.reason) ? ` (${w.reason})` : ''} — re-login`;
     case 'auth-failed': return `refused by the vendor${Number.isFinite(w.agoMin) ? ` ${w.agoMin} min ago` : ''} — retried after 10 min`;
@@ -1278,13 +1281,14 @@ function unplaceableText(why) {
   }
 }
 /** THE DOOR A WALL'S CAUSE OPENS (lane account-reset-door r2): 'unlock' = the vault's Unlock…, 'relogin' = a re-login (or a
- *  re-mint), null = nothing to press (it ends by itself). The ⟳ answer's `loginNeeded` is true ONLY for a 'relogin' cause, and
+ *  re-mint), 'oat-shape' = the guided door of a long-lived token with no subscription type yet (lane oat-add-door: sign in once,
+ *  or choose it), null = nothing to press (it ends by itself). The ⟳ answer's `loginNeeded` is true ONLY for a 'relogin' cause, and
  *  the client's words (src/lib/account-wall-words.js wallWords) name the same door — test-account-reset-door pins the two. */
 function wallDoor(why) {
   const w = why && typeof why === 'object' ? why : { code: String(why || '') };
   switch (w.code) {
     case 'vault-locked': return 'unlock';
-    case 'oat-not-in-folder': return w.reason === 'pending' ? null : 'relogin';
+    case 'oat-not-in-folder': return w.reason === 'pending' ? null : w.reason === 'no-scopes' ? 'oat-shape' : 'relogin';   // 'oat-shape' = the guided door (lane oat-add-door): never a re-login's
     case 'cli-unmeasured': return w.local && typeof w.local === 'object' && w.local.state === 'checking' ? null : 'relogin';   // its own sentence: «re-login it to use it now» unless the check is running (r3)
     case 'auth-failed': case 'lapsed': case 'held-out': case 'unreadable': return null;
     default: return 'relogin';
@@ -1308,7 +1312,7 @@ const namesOf = (list, fmt = (m) => m.name || m.id) => {
 };
 /** the members the pool cannot place, one clause per reason: «acct-13: signed out …» / «6 accounts: <reason> (a, b, c and 3 more)» */
 // ONE REASON SAID FOR MANY (acceptance r3: «14 accounts: … in ITS folder»): the grouped clause speaks of THEIR folders
-const PLURAL = [['it rejoins the pool', 'they rejoin the pool'], ['re-login it to use it now', 're-login one to use it now'], ['a VibeSpace update places it', 'a VibeSpace update places them'], ['its long-lived token is kept and written to its folder', 'their long-lived tokens are kept and written to their folders'],
+const PLURAL = [['its long-lived token has no subscription type yet', 'their long-lived tokens have no subscription type yet'], ['it rejoins the pool', 'they rejoin the pool'], ['re-login it to use it now', 're-login one to use it now'], ['a VibeSpace update places it', 'a VibeSpace update places them'], ['its long-lived token is kept and written to its folder', 'their long-lived tokens are kept and written to their folders'],
   ['long-lived token kept, not written to its folder', 'long-lived tokens kept, not written to their folders'], ['long-lived token only', 'long-lived tokens only'],
   ['in its folder', 'in their folders'], ['to its folder', 'to their folders'], ['its login was wiped', 'their logins were wiped'],
   ['its subscription is inactive — it rejoins once it answers', 'their subscriptions are inactive — each rejoins once it answers'],

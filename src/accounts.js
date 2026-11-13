@@ -39,6 +39,9 @@ function keyRefusal(reason, file) {
   return Object.assign(new Error(`${file}: ${words}`), { code: String(reason) });
 }
 const isKeyRefusal = (e) => !!e && /^key-(missing|unreadable(:.*)?)$/.test(String(e.code || ''));
+// two shapes say the same plan to a person: the same TYPE and TIER (a sign-in's wider scopes are no change of plan — acceptance r1)
+const sameWordOf = (x, y) => !!x && !!y && (x.subscriptionType || null) === (y.subscriptionType || null) && (x.rateLimitTier || null) === (y.rateLimitTier || null);
+const planNames = require('./plan-names.js'); // PURE (lane oat-add-door): the guided door's choices
 // "no claim" — the shape every non-declaring harness / non-subscription record
 // answers with. Never 'ok': an unreadable deadline is ignorance, not health.
 const LOGIN_UNKNOWN = () => ({ state: 'unknown', refreshExpiresAt: null, accessExpiresAt: null, msLeft: null });
@@ -203,6 +206,7 @@ class AccountManager {
         const f = this._oatFileFacts.get(m.id);
         const why = f && (f.reason || f.verdict);
         if (why && OAT_FILE_REFUSALS.includes(why)) st.oatFileRefused = why;
+        if (why === 'no-scopes') st.oatChoose = this.oatShapeOffer().choices.length > 0;   // lane oat-add-door: the guided door's way ② — offered here or not
       }
       out.members.push({ id: m.id, name: m.name, state: st.state, refreshExpiresAt: st.refreshExpiresAt, msLeft: st.msLeft });
       if (!worst || loginRank(st) > loginRank(worst.st) || (loginRank(st) === loginRank(worst.st) && (st.msLeft ?? Infinity) < (worst.st.msLeft ?? Infinity))) worst = { m, st };
@@ -341,6 +345,7 @@ class AccountManager {
   // Sanitized — NEVER includes key material. Subscription accounts add a
   // read-only identity probe (email/plan/loggedIn) from their creds dir.
   list() {
+    let offerOnce = null;   // the guided door's offer, read once per roster (lane oat-add-door: oatShapeOffer)
     return {
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._state.accounts.map((a) => {
@@ -374,7 +379,7 @@ class AccountManager {
           // loginState (2026-09-07): the LOGIN SESSION's own deadline, so every
           // surface can warn BEFORE the refresh fails instead of after a dead
           // turn. 'unknown' where the harness declares no reader.
-          const row = { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
+          const row = { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.rateLimitTier ? { rateLimitTier: info.rateLimitTier } : {}), loginState: this.loginStateOf(a.id), ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
           if (row.oat) { const door = this._oatFileDoor(a, row.loginState); if (door) row.oatFile = door; }
           // THE QUOTA PROBE (lane auto-cli-oat-unprobeable): the SAME verdict the auto-cli loop and the probe door read, off
           // the row's own facts — an oat-only row is probed through the token in its folder when the token carries
@@ -387,6 +392,9 @@ class AccountManager {
             // (typeless = «先不选») — and a choice a sign-in replaced (its words for 7 days); no secret in any of it
             const sh = storedShapeOf(a.oatShape);
             if (sh) row.oatShape = { source: a.oatShapeSource === 'person' ? 'person' : 'login', at: Number(a.oatShapeAt) || null, type: sh.subscriptionType || null, tier: sh.rateLimitTier || null, typeless: !!sh.typeless };
+            // NO TYPE YET (acceptance r1 MUST 1): the roster's words name the guided door — `oatChoose`: way ② offered on this hub
+            const nf = this._oatFileFacts.get(a.id);
+            if (nf && (nf.reason || nf.verdict) === 'no-scopes') { if (offerOnce === null) offerOnce = this.oatShapeOffer().choices.length > 0; row.oatChoose = offerOnce; row.loginState = { ...(row.loginState || {}), oatNoType: true, oatChoose: offerOnce }; }
             const rp = a.oatShapeReplaced;
             if (rp && Number(rp.at) > Date.now() - 7 * 86400e3) row.oatShapeReplaced = { at: Number(rp.at), type: (rp.was && rp.was.subscriptionType) || null, tier: (rp.was && rp.was.rateLimitTier) || null, typeless: !!(rp.was && rp.was.typeless) };
             const caps = this.oatFileCaps();
@@ -1470,6 +1478,21 @@ class AccountManager {
     const scopes = fx || own || null;
     return { ok: platformOk && !!scopes, cli: cli || null, scopes, ...(scopes ? { from: fx ? 'fixture' : 'hub' } : {}) };
   }
+  /** The binary in use's plan values (src/server/oat-shape-routes.js hands its reader in when the hub mounts the door — the
+   *  catalog reader's `plans()`; suites hand their own). */
+  setPlansReader(fn) { this._plansReader = typeof fn === 'function' ? fn : null; }
+  /** WAY ② OF THE GUIDED DOOR, ONCE (acceptance r1: the walls, ⟳, the roster and the routes read the SAME offer — never «or choose
+   *  it» where the door cannot) → {mint, plans, choices, why}: src/plan-names.js planChoices over this CLI's own values and its
+   *  mint's scopes; none ⇒ `why` ∈ mint-unmeasured · platform · plans-unread · version-mismatch · no-types. */
+  oatShapeOffer() {
+    const mint = this.oatMintCaps();
+    let plans = null; try { plans = this._plansReader ? this._plansReader() : null; } catch { plans = null; }
+    const agree = !!plans && (!plans.cli || !mint.cli || plans.cli === mint.cli);
+    const choices = mint.ok && agree ? planNames.planChoices(plans, { scopes: mint.scopes }) : [];
+    // a binary whose map was never found (anchor false) is UNREAD — «could not read the types» — never «names no type» (heavy r1)
+    const why = choices.length ? null : !mint.scopes ? 'mint-unmeasured' : !mint.ok ? 'platform' : (!plans || plans.anchor === false) ? 'plans-unread' : !agree ? 'version-mismatch' : 'no-types';
+    return { mint, plans: agree ? plans : null, choices, ...(why ? { why } : {}) };
+  }
   /** THE PERSON'S STATEMENT of a row's subscription shape (lane oat-add-door — the guided door's way ②, a person's door only:
    *  the route refuses an agent's bearer). `shape` = src/plan-names.js choiceShape's (the mint's scopes + the chosen type and
    *  tier, or typeless «先不选»). Refused by code: no token on the row (`no_token`), a shape a SIGN-IN stated (`from_login` —
@@ -1482,6 +1505,9 @@ class AccountManager {
     if (!this._credsOf(this._acctBackend(a))?.longLivedToken || this._acctType(a) !== 'subscription' || a.pooled) throw no('the subscription type applies to Claude subscription accounts only', 'not_subscription');
     if (!a.oatEnc) throw no('this account holds no long-lived token', 'no_token');
     if (a.oatShape && (a.oatShapeSource || 'login') === 'login') throw no('a sign-in stated this account’s subscription type — sign in again to change it', 'from_login');
+    // A LOCKED VAULT ANSWERS AS THE VAULT DOES (acceptance r1, MUST 2): the token must open before anything is recorded — the
+    // shape of a token that cannot be written is never «saved»; the vault's own refusal goes out by name (its door: Unlock…)
+    try { this._dec(a.oatEnc); } catch (e) { if (isKeyRefusal(e)) { const locked = /vault_locked/.test(String(e.code)); throw Object.assign(new Error(String((e && (e.message || e.code)) || 'key')), { code: locked ? 'vault_locked' : 'key_unreadable', door: locked ? 'unlock' : null }); } throw e; }
     const sh = storedShapeOf(shape);
     if (!sh) throw no('that is not a subscription type this Claude Code offers', 'bad_shape');
     a.oatShape = sh; a.oatShapeSource = 'person'; a.oatShapeAt = now; delete a.oatShapeReplaced;
@@ -1548,7 +1574,8 @@ class AccountManager {
     // provenance existed (no oatShapeSource) holds a sign-in's
     const personal = !!a.oatShape && a.oatShapeSource === 'person';
     if (fileShape && (mint || !a.oatShape || personal)) {
-      if (personal && JSON.stringify(a.oatShape) !== JSON.stringify(fileShape)) { a.oatShapeReplaced = { at: now, was: a.oatShape }; console.log(`[oat-file] ${a.name || id}: a sign-in stated the subscription type (${fileShape.subscriptionType}) — it replaces the one chosen by hand (${a.oatShape.subscriptionType || 'none chosen'})`); }
+      if (personal && sameWordOf(a.oatShape, fileShape)) delete a.oatShapeReplaced;   // the same plan said again is no replacement (acceptance r1)
+      else if (personal) { a.oatShapeReplaced = { at: now, was: a.oatShape }; console.log(`[oat-file] ${a.name || id}: a sign-in stated the subscription type (${fileShape.subscriptionType}) — it replaces the one chosen by hand (${a.oatShape.subscriptionType || 'none chosen'})`); }
       a.oatShape = fileShape; a.oatShapeSource = 'login'; a.oatShapeAt = now;
       this._save();
     }
@@ -1908,7 +1935,10 @@ class AccountManager {
       // vault opens) — and before this process's first sweep there is no refusal yet to name (never «re-login»)
       if (f && f.code === 'vault_locked') return { code: 'vault-locked' };
       if (!f) return { code: 'oat-not-in-folder', reason: 'pending' };
-      return { code: 'oat-not-in-folder', ...(f.reason || f.verdict ? { reason: String(f.reason || f.verdict) } : {}) };
+      const reason = f.reason || f.verdict ? String(f.reason || f.verdict) : null;
+      // NO TYPE YET (lane oat-add-door, acceptance r1 MUST 1): the row never signed in — its wall names the guided door, and
+      // whether way ② (choose the type) is offered on this hub (`choose`): never «re-login», never «or choose it» where it cannot
+      return { code: 'oat-not-in-folder', ...(reason ? { reason } : {}), ...(reason === 'no-scopes' ? { choose: this.oatShapeOffer().choices.length > 0 } : {}) };
     }
     if (fact) return { code: 'oat-expired' };
     const ls = this.loginStateOf(id, Date.now(), { slot: true });

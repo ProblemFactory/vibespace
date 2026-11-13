@@ -171,7 +171,8 @@ function oatShapeOf(creds) {
 function storedShapeOf(sh) {
   if (sh && typeof sh === 'object' && !Array.isArray(sh) && sh.typeless === true) {
     const scopes = Array.isArray(sh.scopes) ? sh.scopes.filter((x) => typeof x === 'string' && x) : [];
-    return scopes.length ? { scopes, typeless: true } : null;
+    const tier = typeof sh.rateLimitTier === 'string' && /^default_claude_[a-z0-9_]{1,40}$/.test(sh.rateLimitTier) ? sh.rateLimitTier : null;   // a tier by its own id (acceptance r1)
+    return scopes.length ? { scopes, typeless: true, ...(tier ? { rateLimitTier: tier } : {}) } : null;
   }
   return oatShapeOf(sh);
 }
@@ -179,7 +180,7 @@ const shapeKnown = (sh) => !!sh && Array.isArray(sh.scopes) && sh.scopes.length 
 /** The file we write: the measured shape + our mark (naming the row). Never a refreshToken. A typeless shape writes no type. */
 function oatFileBody(token, { expiresAt, shape, mintedAt = null, account = null } = {}) {
   return {
-    claudeAiOauth: { accessToken: String(token), expiresAt: Number(expiresAt), scopes: shape.scopes.slice(), ...(shape.subscriptionType ? { subscriptionType: shape.subscriptionType } : {}), ...(shape.subscriptionType && shape.rateLimitTier ? { rateLimitTier: shape.rateLimitTier } : {}) },
+    claudeAiOauth: { accessToken: String(token), expiresAt: Number(expiresAt), scopes: shape.scopes.slice(), ...(shape.subscriptionType ? { subscriptionType: shape.subscriptionType } : {}), ...(shape.rateLimitTier ? { rateLimitTier: shape.rateLimitTier } : {}) },
     [OAT_FILE_MARK]: { v: 1, mintedAt: Number(mintedAt) || null, ...(account ? { account: String(account) } : {}) },
   };
 }

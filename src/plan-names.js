@@ -26,12 +26,18 @@ const { scopesOk } = require('./cli-caps.js');
 
 const UNSURE = 'unsure';
 const TYPE_ID = /^type:([a-z0-9_]{1,40})$/;
+const TIER_ID = /^tier:(default_claude_[a-z0-9_]{1,40})$/;
+// NEVER OFFERED (acceptance r1): a free plan is no subscription a long-lived token serves — whatever the CLI's map carries
+const NEVER_TYPES = Object.freeze(['free']);
 
 const strings = (xs) => (Array.isArray(xs) ? xs.filter((x) => typeof x === 'string' && x) : []);
 
-/** The way-② choices for this CLI, in the order the person reads them → [{choice, type, tier, name, formerly}] — the table's rows
- *  the CLI carries, then the CLI's other types by their ids, then «先不选» LAST. [] (way ② not offered — «登录一次» alone) when
- *  the CLI's mint scopes were not measured or its bytes carry no type. `catalog` = claude-plan-catalog's result. */
+/** The way-② choices for this CLI, in the order the person reads them → [{choice, type, tier, name, formerly, own}] — the table's
+ *  rows the CLI carries, then the CLI's OTHER types by their own ids, then its OTHER tiers by their own ids (acceptance r1: a tier
+ *  the table has no row for is shown and pickable — never dropped, never paired with a type by a guess: it writes the tier
+ *  alone), then «先不选» LAST. `own: true` = a value shown by the CLI's own id (the page says so beside it). Free is never
+ *  offered. [] (way ② not offered — «登录一次» alone) when the CLI's mint scopes were not measured or its bytes carry no type.
+ *  `catalog` = claude-plan-catalog's result. */
 function planChoices(catalog, { scopes = null, now = Date.now() } = {}) {
   const c = catalog && typeof catalog === 'object' ? catalog : {};
   const types = strings(c.types), tiers = strings(c.tiers);
@@ -43,7 +49,9 @@ function planChoices(catalog, { scopes = null, now = Date.now() } = {}) {
     out.push({ choice: r.id, type: r.type, tier: r.tier, name: r.name, formerly: former ? r.formerly : null });
   }
   const named = new Set(PLAN_ROWS.map((r) => r.type));
-  for (const t of types) if (!named.has(t)) out.push({ choice: 'type:' + t, type: t, tier: null, name: t, formerly: null });
+  for (const t of types) if (!named.has(t) && !NEVER_TYPES.includes(t)) out.push({ choice: 'type:' + t, type: t, tier: null, name: t, formerly: null, own: true });
+  const pairedTiers = new Set(PLAN_ROWS.map((r) => r.tier).filter(Boolean));
+  for (const tr of tiers) if (!pairedTiers.has(tr) && /^default_claude_[a-z0-9_]{1,40}$/.test(tr) && !/(?:^|_)free(?:_|$)/.test(tr)) out.push({ choice: 'tier:' + tr, type: null, tier: tr, name: tr, formerly: null, own: true });
   if (!out.length) return [];
   out.push({ choice: UNSURE, type: null, tier: null, name: null, formerly: null });
   return out;
@@ -57,13 +65,28 @@ function choiceShape(choice, catalog, { scopes = null, now = Date.now() } = {}) 
   const pick = planChoices(catalog, { scopes: sc, now }).find((x) => x.choice === String(choice || ''));
   if (!pick) return null;
   if (pick.choice === UNSURE) return { scopes: sc, typeless: true };
+  if (!pick.type) return { scopes: sc, typeless: true, rateLimitTier: pick.tier };   // a tier by its own id: the tier alone
   return { scopes: sc, subscriptionType: pick.type, ...(pick.tier ? { rateLimitTier: pick.tier } : {}) };
+}
+
+/** THE ROW'S WORDS FOR A SHAPE (acceptance r1: «Ultra reads max — now the name of the OTHER plan»): the table's CURRENT name of
+ *  a stored shape → {name, formerly} (formerly until FORMER_NAMES_UNTIL), or {name: <the CLI's own id>, own: true} for a value no
+ *  row names, or null (typeless, no tier). Never a guess: a type the table pairs with tiers (max) and no tier reads by its id. */
+function shapeName(shape, { now = Date.now() } = {}) {
+  if (!shape || typeof shape !== 'object') return null;
+  const type = typeof shape.subscriptionType === 'string' && shape.subscriptionType ? shape.subscriptionType : (typeof shape.type === 'string' && shape.type ? shape.type : null);
+  const tier = typeof shape.rateLimitTier === 'string' && shape.rateLimitTier ? shape.rateLimitTier : (typeof shape.tier === 'string' && shape.tier ? shape.tier : null);
+  const r = type && PLAN_ROWS.find((x) => x.type === type && (x.tier || null) === tier);
+  if (r) return { name: r.name, formerly: Number(now) < FORMER_NAMES_UNTIL ? r.formerly : null };
+  if (type) return { name: type, formerly: null, own: true };
+  if (tier) return { name: tier, formerly: null, own: true };
+  return null;
 }
 
 /** A choice id is well-formed (the route's first check; offered-ness is choiceShape's) */
 function choiceIdOk(choice) {
   const s = String(choice == null ? '' : choice);
-  return s === UNSURE || PLAN_ROWS.some((r) => r.id === s) || TYPE_ID.test(s);
+  return s === UNSURE || PLAN_ROWS.some((r) => r.id === s) || TYPE_ID.test(s) || TIER_ID.test(s);
 }
 
-module.exports = { PLAN_NAMES_AT, FORMER_NAMES_UNTIL, PLAN_ROWS, UNSURE, planChoices, choiceShape, choiceIdOk };
+module.exports = { PLAN_NAMES_AT, FORMER_NAMES_UNTIL, PLAN_ROWS, UNSURE, NEVER_TYPES, planChoices, choiceShape, choiceIdOk, shapeName };
