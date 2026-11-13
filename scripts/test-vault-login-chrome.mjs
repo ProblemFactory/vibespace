@@ -36,6 +36,7 @@ const HEADLESS_SETTING = (k) => (k === 'browser.noDisplayMode' ? 'headless' : un
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const express = require('express');
+const CM = require('../src/server/cdp-mediator.js');
 const Kk = require('../src/server/browser-keeper.js');
 const Ff = require('../src/browser-facts.js');
 const D = require('../src/server/browser-dialogs.js');
@@ -216,12 +217,19 @@ async function world(tag) {
   const KEY = 'bk-0000f1a1';
   const live = new Set([KEY]);
   const logs = [], traced = [], audited = [];
+  const med = CM.create({ log: { log: (l) => logs.push(String(l)), warn: (l) => logs.push(String(l)) } });
+  await med.listen();
+  const fencesByDialogs = new WeakMap();
+  let lastFence = null;
+  const origSetLoginFence = med.setLoginFence.bind(med);
+  med.setLoginFence = (f) => { lastFence = f; return origSetLoginFence(f); };
   const kk = Kk.create({
     dataDir: KD, homeDir: KH, env: () => kenv, serverSetting: HEADLESS_SETTING, liveKeys: () => live,
     runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }),
     log: { log: (l) => logs.push(String(l)), warn: (l) => logs.push(String(l)), error: (l) => logs.push(String(l)) },
-    install: false, tickMs: 3600e3,
+    install: false, tickMs: 3600e3, mediator: med,
   });
+  const subWatchKeeper = { ...kk, mediator: () => null };
   const prof = kk.createProfile({ label: 'Login ' + tag }, { owner: { kind: 'instance', id: null } });
   const eng = VE.create({ dataDir: VD, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false });
   const VPW = ['vault', crypto.randomBytes(4).toString('hex'), 'pass'].join('-');
@@ -249,12 +257,16 @@ async function world(tag) {
     logins,
     conversationOf: () => ({ cid: 'conv-1', name: 'Chat ' + tag }),
   });
+  if (lastFence) fencesByDialogs.set(dialogs, lastFence);
   dialogs.onChange((ev) => watchEvents.push(ev));
   kk.setStuckSource((bk) => dialogs.stuckForKey(bk));
   const origAudit = kk.audit.bind(kk);
   kk.audit = (row) => { audited.push(row); return origAudit(row); };
   const R = require('../src/routes/browser.js');
   const swapDialogs = (nextDialogs) => {
+    if (!fencesByDialogs.has(nextDialogs) && lastFence) fencesByDialogs.set(nextDialogs, lastFence);
+    const f = fencesByDialogs.get(nextDialogs);
+    if (f) origSetLoginFence(f);
     kk.setStuckSource((bk) => nextDialogs.stuckForKey(bk));
     R.setup({ keeper: kk, activeSessions: sessions, dialogs: nextDialogs, logins, tasksForSession: () => ['tg-1'], traceDialogAct: (act) => traced.push(act) });
   };
@@ -276,8 +288,8 @@ async function world(tag) {
     c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err }); });
   });
   const vaultAuditRaw = () => { try { return fs.readFileSync(path.join(VD, VE.AUDIT_FILE), 'utf8'); } catch { return ''; } };
-  const close = async () => { dialogs.shutdown(); kk.shutdown(); eng.close(); await new Promise((r) => { srv.close(() => r()); srv.closeAllConnections(); }); };
-  return { W, VD, KD, VPW, apiUrl, token: TOKEN, kk, prof, eng, grants, totp, logins, fy, dialogs, swapDialogs, holdersRef, watchEvents, cli, logs, traced, audited, cdpSent, cdpRecv, vaultAuditRaw, close };
+  const close = async () => { dialogs.shutdown(); kk.shutdown(); await med.shutdown(); eng.close(); await new Promise((r) => { srv.close(() => r()); srv.closeAllConnections(); }); };
+  return { W, VD, KD, VPW, apiUrl, token: TOKEN, kk, subWatchKeeper, prof, eng, grants, totp, logins, fy, dialogs, swapDialogs, holdersRef, watchEvents, cli, logs, traced, audited, cdpSent, cdpRecv, vaultAuditRaw, close };
 }
 
 try {
@@ -651,7 +663,7 @@ try {
       {
         const ovEvs = [];
         const dOv = D.create({
-          keeper: w.kk,
+          keeper: w.subWatchKeeper,
           log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list,
           leaseCountOf: () => 1,
@@ -682,7 +694,7 @@ try {
         let n1Holders = [{ browserKey: 'bk-0000f1a1', sessionId: 'sess-main' }];
         const n1Fy = [];
         const dN1 = D.create({
-          keeper: w.kk,
+          keeper: w.subWatchKeeper,
           log: { warn: (l) => w.logs.push(String(l)), log: (l) => w.logs.push(String(l)) },
           holdersOf: () => n1Holders,
           leaseCountOf: () => n1Holders.filter((h) => !h.human).length,
@@ -752,7 +764,7 @@ try {
           log: () => {},
         });
         const dRestart = D.create({
-          keeper: w.kk, log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, log: { warn() {}, log() {} },
           holdersOf: () => n1Holders, leaseCountOf: () => 1, logins: loginsRestart,
           forYou: { add: (pid, it) => { fyRestart.push({ pid, it }); return 'fyr-' + fyRestart.length; }, resolve() {} },
           wipeMaxScanPositions: 1024,
@@ -1216,7 +1228,7 @@ try {
         await run(['open', exUrl]);
         w.dialogs.disarm(w.prof.id, 'mut-exfil-allow');
         const dAllow = BD_M_EXFIL_ALLOW.create({
-          keeper: w.kk, log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list, leaseCountOf: () => 1, logins: w.logins,
         });
         await dAllow.arm(w.prof.id);
@@ -1243,7 +1255,7 @@ try {
         await run(['open', hlUrl]);
         w.dialogs.disarm(w.prof.id, 'mut-n1-hold');
         const dM10 = BD_M_N1_HOLD.create({
-          keeper: w.kk, log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list, leaseCountOf: () => 1, logins: w.logins, wipeMaxScanPositions: 1024,
         });
         await dM10.arm(w.prof.id);
@@ -1273,7 +1285,7 @@ try {
         w.dialogs.disarm(w.prof.id, 'mut-n2-ax');
         const m12Sent = [], m12Evs = [];
         const dM12 = BD_M_N2_AX.create({
-          keeper: w.kk, WebSocketImpl: countingWS(m12Sent), log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, WebSocketImpl: countingWS(m12Sent), log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list, leaseCountOf: () => 1, logins: w.logins,
         });
         dM12.onChange((ev) => m12Evs.push(ev));
@@ -1336,7 +1348,7 @@ try {
         await run(['open', focusJumpUrl]);
         w.dialogs.disarm(w.prof.id, 'mut12-real');
         const dReal12 = D.create({
-          keeper: w.kk, WebSocketImpl: delayInsertWS(), log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, WebSocketImpl: delayInsertWS(), log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list, leaseCountOf: () => 1, logins: logM12,
         });
         await dReal12.arm(w.prof.id);
@@ -1356,7 +1368,7 @@ try {
         await run(['open', `${SITE}/plain`]);
         await run(['open', focusJumpUrl]);
         const dMut12 = BD_M12.create({
-          keeper: w.kk, WebSocketImpl: delayInsertWS(), log: { warn() {}, log() {} },
+          keeper: w.subWatchKeeper, WebSocketImpl: delayInsertWS(), log: { warn() {}, log() {} },
           holdersOf: () => w.holdersRef.list, leaseCountOf: () => 1, logins: logM12,
         });
         await dMut12.arm(w.prof.id);
