@@ -4719,12 +4719,23 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   const owedNow82 = (d) => { const b = fx82.blocks.find((x) => x.name === d.block), ls = (homes.get(d.block) || {}).lines || [], vb = new Set(b ? b.rows.map((r) => r.split(':')[1]) : []); return ls.some((l) => h82(l) === d.h && [...l].length > 300 && !vb.has(h82(l))); };
   const paid82 = debt82.rows.filter((d) => !owedNow82(d));
   ok(debt82.rows.length <= DEBT82_MAX && paid82.length === 0, `§82 ③ seam D: the frozen over-300 debt only falls — ${debt82.rows.length} ≤ ${DEBT82_MAX} lines edited after the move, each still owed${paid82.length ? ' — PAID BUT STILL LISTED (remove them): ' + paid82.map((d) => `${d.h} «${d.head.slice(0, 40)}»`).join(' | ') : ''}`);
-  const mid = bl.findIndex((l, i) => i > bl.length / 2 && l.startsWith('- '));
-  const midRow = bug.rows.findIndex((r) => r.startsWith(h82([...(bl[mid] || '')].slice(0, fx82.keyChars).join('')) + ':'));
+  // THE CONTROL'S LINE comes from what the FIXTURE knows, never from the live tree's length (the .401 train's cure, found by lane
+  // stream-recovery): the fixture's MIDDLE ROW and the region line whose head hashes to it. «The first `- ` past half the region»
+  // sat ON the fixture's last row at 2.369.400 (region 934, mid 468 = row 459), so two INDEX lines added at the tail moved it onto
+  // a line newer than the move — no row, `bug.rows[-1]`, and the build THREW here instead of judging. A middle row the tree no
+  // longer has (retired, lost — the census above says so) yields to the next row it still has.
+  const lineOfRow82 = (lines, k) => lines.findIndex((l) => l.startsWith('- ') && bug.rows[k].startsWith(h82([...l].slice(0, fx82.keyChars).join('')) + ':'));
+  let midRow = Math.floor(bug.rows.length / 2), mid = lineOfRow82(bl, midRow);
+  while (mid < 0 && midRow + 1 < bug.rows.length) mid = lineOfRow82(bl, ++midRow);
+  const more82 = [...bl, ...Array.from({ length: 20 }, (_, i) => `- (2026-11-13) a planted INDEX line newer than the move, number ${i + 1} (kb-bugfix-invariants)`)];
   const ret82 = { ...bug, retired: [{ head: bug.rows[midRow].split(':')[0], why: 'a §82 control: this line was removed', at: '2026-10-08' }] };
   const drop = bl.filter((_, i) => i !== mid), head = bl.map((l, i) => (i === mid ? 'X' + l.slice(1) : l)), tail = bl.map((l, i) => (i === mid ? l + ' (edited)' : l));
   const r82 = [
     ['a copy missing one incident line', census82(bug, drop).lost === 1, true],
+    // THE LAW the control's line keeps (the .401 cure): twenty INDEX lines newer than the move change neither the line it picks nor
+    // its bite — the same frozen row, and a copy of THAT tree missing it is lost 1
+    ['twenty new INDEX lines move the control\'s line', lineOfRow82(more82, midRow) !== mid, false],
+    ['with twenty new INDEX lines, a copy missing the control\'s line', census82(bug, more82.filter((_, i) => i !== mid)).lost === 1, true],
     ['a file line\'s head reworded', census82(fsb, fl.map((l) => (l.startsWith('src/exit-shell.js — ') ? 'src/exit-shel1.js — ' + l.slice(20) : l))).lost === 1, true],
     ['a reworded head', census82(bug, head).lost === 1, true],
     ['a tail edit (edited, never lost)', census82(bug, tail).lost > 0 || census82(bug, tail).edited !== 1, false],
