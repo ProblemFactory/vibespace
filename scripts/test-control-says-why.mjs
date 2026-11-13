@@ -152,6 +152,16 @@ const PM = read('src/lib/utils.js');
 ok(/const mo = new MutationObserver\(/.test(PM) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; pinTail\(\); \}/.test(PM),
   'placeMenu places a menu again when its rows change, and a capped menu keeps its closing rows in view');
 
+// ── ⑦b a panel keeps its natural width and slides ──
+{ const mp = read('src/lib/menu-place.js'); const at = mp.indexOf('export function panelPlace(');
+  const pp = at < 0 ? null : new Function(`${mp.slice(at, mp.indexOf('\n}\n', at) + 3).replace('export function', 'function')}; return panelPlace;`)();
+  const a = pp && pp({ wantLeft: 250, containerW: 320, natW: 300, minW: 130, maxW: Infinity, pad: 8 }), b = pp && pp({ wantLeft: 40, containerW: 320, natW: 150, minW: 130 }), c = pp && pp({ wantLeft: 250, containerW: 320, natW: 900, minW: 130, maxW: 440 });
+  ok(!!pp && a.left === 12 && a.maxW >= 300 && b.left === 40 && c.left === 0 && c.maxW === 312,
+    'panelPlace: a 300 px panel opened at x 250 of a 320 px window slides to x 12 at its width (never a 130 px strip); one that fits stays at its chip; one wider than the window takes the window', JSON.stringify({ a, b, c }));
+  const CSB = read('src/lib/chat-status-bar.js'), sd = CSB.slice(CSB.indexOf('const showDropdown = (anchor,'), CSB.indexOf('\n    };', CSB.indexOf('const showDropdown = (anchor,')));
+  ok(/const at = panelPlace\(\{ wantLeft, containerW, natW: dropdown\.offsetWidth, minW, maxW: maxWidth, pad: DROPDOWN_EDGE_PAD \}\);/.test(sd) && /queueMicrotask\(settle\);/.test(sd) && /mo\.observe\(dropdown, \{ childList: true, subtree: true, characterData: true \}\);/.test(sd),
+    'the status bar\'s one showDropdown places a panel AFTER the caller filled it, and again when its content changes'); }
+
 // ── ③ a menu opens: (x, y, items) ──
 const EVENT_NAMES = new Set(['e', 'ev', 'evt', 'event']);
 function badMenuCalls(src, file) {
