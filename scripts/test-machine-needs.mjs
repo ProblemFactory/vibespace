@@ -69,5 +69,13 @@ const ff = C.rows.get('ffmpeg');
 const stripped = (f) => (f === 'src/lib/machine-app.js' ? (sources.get(f) || '').replace(/ffmpegDoor\(|ffmpegNeedCode\(/g, 'gone(') : sources.get(f) || '');
 ok(ff && JSON.stringify(doorless(ff, stripped)) === JSON.stringify(['src/lib/machine-app.js']), 'CONTROL: the app window stating «needs ffmpeg» with its door taken out is RED by name', ff && doorless(ff, stripped));
 
+console.log('④ WHAT IT IS — a net, and what it cannot see (the reader\'s item 8)');
+{
+  const head = fs.readFileSync(path.join(REPO, 'src/machine-needs.js'), 'utf8').split('*/')[0];
+  const kb = fs.readFileSync(path.join(REPO, 'docs/kb-features.md'), 'utf8');
+  ok(/A NET, NOT A PROOF/.test(head) && /a MACHINE word AND a NEED word/.test(head) && /IT CANNOT SEE/.test(head) && /A DEVICE'S OWN REFUSAL STRINGS/.test(head), 'the census\'s header says what it is (a net over sentences carrying a machine word and a need word) and what it cannot see (a need worded past them, a device\'s own refusal strings, a log line)');
+  ok(/It is a NET, not a proof/.test(kb) && /a device's own refusal strings/.test(kb), 'the kb says the same where a person reads about the census');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

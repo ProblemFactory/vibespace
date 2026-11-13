@@ -162,8 +162,10 @@ export function createMicCard({ hostId, machine, install = null } = {}) {
     if (st.state === 'installed' || st.state === 'reboot_owed') line.textContent = (st.micIsDefault ? t('Virtual microphone: «{name}» (the default microphone)', { name }) : t('Virtual microphone: «{name}»', { name })) + (w.note ? ` · ${t(w.note.key, w.note.params)}` : '');
     else if (st.state === 'absent') line.textContent = t('No virtual microphone — your voice plays on its speakers');
     else if (st.state === 'inactive') line.textContent = t('VB-CABLE is installed, but its devices are turned off in Windows’ sound settings');
-    if (st.state === 'inactive') acts.append(settingsDoor(hostId, machine, 'sound')); // lane machine-needs-at-pairing pick 2: Windows' Sound page on that machine (W6)
     else { line.textContent = st.error || t('This machine did not say where your voice would go'); line.classList.toggle('is-bad', true); }
+    // lane machine-needs-at-pairing pick 2 (reader's MUST 1): the Sound page's door AFTER the words' chain — inside it, it took the
+    // chain's last `else`, and every other state read «did not say» in red
+    if (st.state === 'inactive') acts.append(settingsDoor(hostId, machine, 'sound'));
     if (st.state === 'absent' && install) acts.append(mk('btn-create machine-mic-install', t('Install a virtual microphone…'), () => install('virtual-mic')));
     if (doors.make) acts.append(mk('file-tool-btn machine-mic-default', t('Make it the default microphone'), () => setDefault('virtual')));
     if (doors.restore) acts.append(mk('file-tool-btn machine-mic-restore', t('Change it back'), () => setDefault('restore')));

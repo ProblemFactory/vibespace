@@ -306,7 +306,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
     sayActs.replaceChildren();
     if (!text) return;
     // lane machine-needs-at-pairing pick 2: no ffmpeg that passes on this Windows machine ⇒ 「取得 FFmpeg …」 first on the same line
-    if (need && ffmpegNeedCode(need) && m.setup === 'win32') sayActs.append(ffmpegDoor(m.hostId, { say: (x) => { sayText.textContent = x; }, onDone: () => connect() }));
+    if (need && ffmpegNeedCode(need) && m.setup === 'win32') sayActs.append(ffmpegDoor(m.hostId, { machine: nameOf(m), say: (x) => { sayText.textContent = x; }, onDone: () => connect() }));
     // the Mac's switch or its helper (M3 / M5): the right pane — or the Command Line Tools' installer — on the same line
     const macPane = m.setup !== 'darwin' ? null : need === 'no_helper' ? 'clt' : need === 'accessibility_permission' ? 'accessibility' : (need === 'screen_permission' || need === 'helper_changed_regrant' || need === 'helper_signed_regrant') ? 'screen' : null;
     if (macPane) sayActs.append(settingsDoor(m.hostId, machine, macPane, { cls: 'btn-create' }));

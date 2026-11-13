@@ -745,7 +745,7 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
   const mutant = (name, from, to) => {
     if (ssText.split(from).length !== 2) return null; // the anchor moved: the mutant is not made (and its row is RED)
     const f = path.join(copyDir, `mut-${name}`, 'stream-screen.js'); fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, ssText.replace(from, to).replace("require('../stream-plan.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-plan.js'))})`).replace("require('../stream-av1.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-av1.js'))})`).replace("require('./stream-mac.js')", `require(${JSON.stringify(path.join(REPO, 'src/agentd/stream-mac.js'))})`));
+    fs.writeFileSync(f, ssText.replace(from, to).replace("require('../stream-plan.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-plan.js'))})`).replace("require('../stream-av1.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-av1.js'))})`).replace("require('../ffmpeg-install.js')", `require(${JSON.stringify(path.join(REPO, 'src/ffmpeg-install.js'))})`) /* lane machine-needs-at-pairing pick 2: the stamp's PURE row */.replace("require('./stream-mac.js')", `require(${JSON.stringify(path.join(REPO, 'src/agentd/stream-mac.js'))})`));
     return require(f);
   };
   const m1 = mutant('no-give-back', '    qosScript([process.pid], true);\n', '\n');

@@ -183,7 +183,10 @@ function createMic({ platform = process.platform, spawn, execFile, env, lookupEn
 
   // ── THE RECEIVER ──
   async function ffmpegPath() {
-    if (typeof ffmpeg === 'function') { try { const p = await ffmpeg(); if (p) return p; } catch { /* the PATH below */ } }
+    // lane machine-needs-at-pairing pick 2 (reader 2): given the agent's accessor (the ffmpeg this agent may run), ITS answer is the
+    // answer — never a PATH scan of our own around it (that scan would run a fetched copy whose bytes changed)
+    if (typeof ffmpeg === 'function') { try { return (await ffmpeg()) || null; } catch { return null; } }
+    if (platform === 'win32') return null; // a Windows machine runs only what its agent's accessor allows (the stamp check) — never a lookup of our own
     for (const c of SP.ffmpegCandidates({ platform: platform === 'win32' ? 'win32' : 'linux', env: { PATH: lookupEnv.PATH || lookupEnv.Path || '', LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: platform === 'win32' ? ';' : ':', sep: platform === 'win32' ? '\\' : '/' })) if (await isFile(c.path)) return c.path;
     return null;
   }

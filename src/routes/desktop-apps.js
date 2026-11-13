@@ -416,7 +416,8 @@ const xpraDone = (r) => {
 const ffmpegDone = (r) => {
   const ff = r.after && r.after.ok !== false ? r.after.ffmpeg : null;
   if (!ff || !SPL.ffmpegPasses(ff)) { const e = new Error(`the fetch finished on ${r.hostId}, but its agent finds no ffmpeg that passes (${ff ? `${ff.path}: ${SPL.ffmpegVerdict(ff).error || 'no H.264 encoder'}` : (r.after && r.after.error) || 'none found'}) — check again`); e.code = 'still_absent'; throw e; }
-  return { done: true, what: 'ffmpeg', label: r.plan.label, source: r.plan.source, hostId: r.hostId, ffmpeg: { path: ff.path, where: ff.where || null, version: ff.version || null } };
+  // reader 3: the build that WAS fetched — its stamp's label through the facts (after a fallback that is the 2nd row, never the 1st's)
+  return { done: true, what: 'ffmpeg', label: ff.fetched || (ff.where === 'PATH' ? `the ffmpeg on its PATH (${ff.version || '?'})` : r.plan.label), source: r.plan.source, hostId: r.hostId, ffmpeg: { path: ff.path, where: ff.where || null, version: ff.version || null, fetched: ff.fetched || null } };
 };
 const DONE = { display: () => xpraDone, catalog: (host, what) => officeDone(host, what), vnc: () => tightvncDone, mic: () => micDone(true), 'mic-removed': () => micDone(false), ffmpeg: () => ffmpegDone };
 // verify-r6 I1: the press names the plan it was SHOWN (`planDigest` from GET install-plan) — a plan that changed since

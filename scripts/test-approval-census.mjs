@@ -379,10 +379,10 @@ const ROWS = [
   { id: 'install', surface: 'the desktop install dialog — "Install" (xpra / LibreOffice, as root) + 「取得 FFmpeg …」 on the line that states the need (lane machine-needs-at-pairing: the machine\'s own folder, no rights)',
     doors: [['C', 'src/lib/desktop-app-launcher.js', /^\/api\/desktop\/(install-plan|install-xpra)/], ['C', 'src/lib/ffmpeg-door.js', /^\/api\/desktop\/install(-plan)?/], ['S', 'src/routes/desktop-apps.js', /^\/api\/desktop\/install(-xpra)?$/]],
     a: [pin('src/server/desktop-access.js', /function planDigest\(plan\)/, 'the digest of the plan shown rides GET install-plan'), pin('src/lib/desktop-app-launcher.js', /planDigest: shownDigest/, 'the press names it'), pin('src/lib/ffmpeg-door.js', /planDigest: shown\.digest \|\| null/, 'the fetch names the plan it read')],
-    b: [pin('src/server/desktop-access.js', /named\('plan_changed'/, 'a recomputed plan that differs ⇒ plan_changed, nothing runs (I1)')],
+    b: [pin('src/server/desktop-access.js', /named\('plan_changed'/, 'a recomputed plan that differs ⇒ plan_changed, nothing runs (I1)'), pin('src/server/desktop-access.js', /\.\.\.\(plan\.stream \? \{ argv: plan\.argv \} : \{\}\)/, 'a STREAMED plan\'s digest covers the bytes it runs — its encoded argv (lane machine-needs-at-pairing pick 2, the reader\'s item 5; §3c holds those bytes)'), pin('src/server/desktop-access.js', /async function runStreamInstall[\s\S]{0,1400}if \(expectDigest != null && planDigest\(plan\) !== String\(expectDigest\)\)/, 'the streamed fetch judges the shown digest too (test-ffmpeg-install ⑨ drives it)')],
     c: [decl('the machine\'s facts can move between the two reads — that is what (b) judges')],
-    d: [decl('the commands come from closed PURE templates (desktop-apps installPlanFor), drawn as textContent in a <pre>')],
-    gate: [['scripts/test-office-open.mjs', 'CONTROL (i1)']] },
+    d: [decl('the commands come from closed PURE templates (desktop-apps installPlanFor; src/ffmpeg-install.js for 「取得 FFmpeg」 — §3c holds its bytes), drawn as textContent in a <pre> / the fetch sheet')],
+    gate: [['scripts/test-office-open.mjs', 'CONTROL (i1)'], ['scripts/test-ffmpeg-install.mjs', 'PLAN_CHANGED (M10)']] },
   { id: 'apps', surface: 'the apps install dialog — "Install" (an app / a .deb / a package source / a removal, as root) + an agent\'s proposal: Install… / Not now',
     doors: [['C', 'src/lib/desktop-app-launcher.js', /^\/api\/apps\/install$/], ['C', 'src/lib/app-install-dialog.js', /^\/api\/apps\/proposals\/.*\/reject$/], ['C', 'src/lib/user-todos-actions.js', /^\/api\/apps\/proposals\/.*\/(reject|approve)$/],
       ['S', 'src/routes/apps.js', /^\/api\/apps\/(install|proposals\/:id\/(reject|approve))$/], ['A', 'src/server/apps-engine.js', /^app-install$/]],
@@ -776,6 +776,21 @@ function failClosed(mod) {
   try { delete globalThis.window; out.noWindow = run(); globalThis.window = HALF_WINDOW(); out.halfDom = run(); }
   finally { if (saved) Object.defineProperty(globalThis, 'window', saved); else delete globalThis.window; }
   return out;
+}
+console.log('§3c THE INSTALL ROW HOLDS WHAT RUNS — 「取得 FFmpeg」\'s BYTES (lane machine-needs-at-pairing pick 2, the reader\'s item 5)');
+{
+  // The press names the digest of the plan it was shown; a STREAMED plan's digest covers its encoded argv (the pin in the row
+  // above). THIS census holds the fingerprint of those bytes: an edit to a build's address, either SHA-256, the member or a line
+  // of the script is red HERE until the census moves with it — a release moves the rows (measured, ffmpeg-builds), and this
+  // digest moves in that same commit.
+  const FFI = REQ(path.join(REPO, 'src/ffmpeg-install.js'));
+  const plan = FFI.ffmpegInstallPlan({ platform: 'win32' });
+  const FFMPEG_PLAN_ARGV_SHA256 = '90ab87be42fedff95ef4401fe084dd79e05baecf9fba3c52e94cf54e27b3cba7';
+  const got = REQ('node:crypto').createHash('sha256').update(JSON.stringify(plan.argv)).digest('hex');
+  ok(got === FFMPEG_PLAN_ARGV_SHA256, 'the ffmpeg plan\'s BYTES (its encoded argv — what PowerShell runs) are the ones this census holds', { got, held: FFMPEG_PLAN_ARGV_SHA256 });
+  const moved = FFI.FFMPEG_BUILDS.map((b) => ({ ...b, sha256: b.sha256.replace(/^./, (c) => (c === '7' ? '8' : '7')) }));
+  const script = (rows) => rows.map((b) => `${b.url}|${b.sha256}|${b.member}|${b.memberSha256}`).join('\n');
+  ok(script(moved) !== script(FFI.FFMPEG_BUILDS) && plan.commands.join('\n').includes(FFI.FFMPEG.sha256.toUpperCase()) && plan.commands.join('\n').includes(FFI.FFMPEG.url) && plan.commands.join('\n').includes(FFI.FFMPEG.member), 'CONTROL: the script carries each build\'s address, its SHA-256 and its member — one hex character moved moves the bytes the census holds');
 }
 const SRC_FILES = tracked('src').filter((f) => /\.(m?js|cjs)$/.test(f) && !/\/i18n-[a-z]+\.js$/.test(f));
 const CSS_CLASSES = [...new Set(tracked('public').filter((f) => f.endsWith('.css')).flatMap((f) => [...readRepo(f).replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, '').matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1])))];

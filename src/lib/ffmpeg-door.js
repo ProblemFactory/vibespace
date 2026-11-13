@@ -5,8 +5,8 @@
 // the machine fetches it from the publisher (a fixed address, two pinned SHA-256s) into its own folder — the hub carries no bytes.
 // Shown only when NO candidate passes (主开发's Q6: a machine whose own ffmpeg passes keeps it; nothing is fetched).
 import { t } from './i18n.js';
-import { fetchJson } from './utils.js';
-import { FFMPEG, FFMPEG_FOLDER } from '../ffmpeg-install.js';
+import { fetchJson, createModalShell } from './utils.js';
+import { FFMPEG, FFMPEG_BUILDS, FFMPEG_FOLDER } from '../ffmpeg-install.js';
 
 const MB = (n) => Math.round(n / 1e6);
 /** The button's words: the build, its publisher, its size. */
@@ -49,16 +49,43 @@ export async function getFfmpeg(hostId, say = () => { }) {
   return end;
 }
 
-/** The button for `hostId`: one press = the fetch; `say` = the line's words; `onDone(end)` once the machine has one that passes. */
-export function ffmpegDoor(hostId, { say = () => { }, onDone = null, cls = 'btn-create' } = {}) {
+/** WHERE the bytes come from, as a person reads it (the release's address without its scheme). */
+const whereOf = (b) => String(b.url).replace(/^https:\/\//, '');
+/** THE SHEET (the reader's item 3): what is fetched, from whom and from WHERE, the licence, where it lands, that no administrator
+ *  right is asked, that VibeSpace did not build it and checks two fingerprints, and the second build tried — read BEFORE the
+ *  press, in the product's own small sheet, with ONE button. → its body's lines (PURE words, for the sheet and its pins) */
+export function ffmpegSheetLines() {
+  const a = FFMPEG_BUILDS[0], b2 = FFMPEG_BUILDS[1];
+  return [
+    t('What: {app}, built by {publisher} — {mb} MB to download, one program (ffmpeg.exe, {exe} MB).', { app: a.label, publisher: a.publisher, mb: MB(a.bytes), exe: MB(a.memberBytes) }),
+    t('From where: its release on GitHub — {where}', { where: whereOf(a) }),
+    t('Licence: {licence}. VibeSpace did not build it, and no publisher signs ffmpeg — so that machine checks two fixed SHA-256 fingerprints, the download\'s and ffmpeg.exe\'s, before anything is placed.', { licence: a.licence }),
+    t('Where it lands: {folder} on that machine. No administrator rights are asked, and it listens on nothing.', { folder: FFMPEG_FOLDER }),
+    ...(b2 ? [t('If that build cannot be had, the second named build is tried: {app} by {publisher} ({mb} MB, {where}).', { app: b2.label, publisher: b2.publisher, mb: MB(b2.bytes), where: whereOf(b2) })] : []),
+  ];
+}
+/** The button for `hostId`: a press opens THE SHEET; its ONE button runs the fetch (the line's `say` and the sheet's own status
+ *  follow it); `onDone(end)` once the machine has one that passes. */
+export function ffmpegDoor(hostId, { say = () => { }, onDone = null, cls = 'btn-create', machine = null } = {}) {
   const b = document.createElement('button');
   b.type = 'button'; b.className = `${cls} machine-ffmpeg-get`; b.textContent = ffmpegDoorLabel(); b.title = ffmpegDoorTitle();
-  b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    let end = null;
-    try { end = await getFfmpeg(hostId, say); } finally { b.disabled = false; }
-    if (end && end.done) { b.hidden = true; try { onDone?.(end); } catch { /* the surface is gone */ } }
+  b.onclick = () => {
+    const sh = createModalShell({ id: 'ffmpeg-get-sheet', key: hostId, title: machine ? t('Get {app} for {machine}', { app: FFMPEG.label, machine }) : t('Get {app}', { app: FFMPEG.label }), dialogClass: 'ffmpeg-get-sheet', escapeToClose: true, kind: 'form' });
+    if (!sh || sh.raised) return;
+    const body = sh.body;
+    for (const line of ffmpegSheetLines()) { const p = document.createElement('p'); p.className = 'ffmpeg-get-fact'; p.textContent = line; body.appendChild(p); }
+    const status = document.createElement('p'); status.className = 'ffmpeg-get-status'; status.style.display = 'none';
+    const go = document.createElement('button'); go.type = 'button'; go.className = 'btn-create ffmpeg-get-go'; go.textContent = t('Get it');
+    const acts = document.createElement('div'); acts.className = 'dialog-actions'; acts.appendChild(go);
+    body.append(status, acts);
+    go.onclick = async () => {
+      if (go.disabled) return;
+      go.disabled = true; status.style.display = '';
+      const tell = (text, bad) => { status.textContent = text; status.classList.toggle('is-bad', !!bad); try { say(text, bad); } catch { /* the line is gone */ } };
+      let end = null;
+      try { end = await getFfmpeg(hostId, tell); } finally { go.disabled = false; }
+      if (end && end.done) { go.style.display = 'none'; b.hidden = true; try { onDone?.(end); } catch { /* the surface is gone */ } }
+    };
   };
   return b;
 }

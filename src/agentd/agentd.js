@@ -1594,13 +1594,13 @@ const macWindowLook = { facts: () => streamScreenOf().look(), displays: () => st
 // first use; a Windows machine decodes with the stream's own ffmpeg (the screen facts). VIBESPACE_MIC_HELPER names a fake (the suites')
 let micRoad = null;
 const micOf = () => micRoad || (micRoad = require('./../desktop-mic.js').createMic({ platform: process.platform, spawn: require('child_process').spawn, execFile: require('child_process').execFile, env: spawnEnv(), lookupEnv: process.env, fs, home: os.homedir(), log, helperPath: process.env.VIBESPACE_MIC_HELPER || null,
-  ffmpeg: async () => { if (process.platform !== 'win32') return null; const f = await streamScreenOf().facts(); return (f && f.ffmpeg && f.ffmpeg.path) || null; } }));
+  ffmpeg: process.platform === 'win32' ? () => streamScreenOf().runnable({ road: 'voice' }) : null })); // lane machine-needs-at-pairing pick 2 (reader 2): on Windows THE accessor (SP.runnableFfmpeg — a changed fetched copy is never run); elsewhere the mic's own lookup (no fetched copy exists there — the suites' road)
 // lane speaker-passthrough-v1 (B-aec9): THE MACHINE'S SOUND to the viewer — Windows' road (src/desktop-sound.js, SHARED: the
 // microphone helper's `loopback` verb → the stream's ffmpeg → Opus RTP → the session's track); a Mac's rides its screen source's
 // own SCStream (src/agentd/stream-mac.js source.audio). Made at first use; VIBESPACE_MIC_HELPER's fake stands in for the helper,
 // VIBESPACE_SOUND_FFMPEG for the encoder (the suites' — a box without ffmpeg: scripts/fixtures/stream/sound-fakes.mjs)
 let soundRoad = null;
-const soundOf = () => soundRoad || (soundRoad = require('./../desktop-sound.js').createSound({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), log, helper: () => micOf().helper(), ffmpegPath: () => (process.env.VIBESPACE_SOUND_FFMPEG ? Promise.resolve(process.env.VIBESPACE_SOUND_FFMPEG) : micOf().ffmpegPath()), fake: !!process.env.VIBESPACE_MIC_HELPER }));
+const soundOf = () => soundRoad || (soundRoad = require('./../desktop-sound.js').createSound({ platform: process.platform, spawn: require('child_process').spawn, env: spawnEnv(), log, helper: () => micOf().helper(), ffmpegPath: () => (process.platform === 'win32' ? streamScreenOf().runnable({ road: 'sound' }) : process.env.VIBESPACE_SOUND_FFMPEG ? Promise.resolve(process.env.VIBESPACE_SOUND_FFMPEG) : micOf().ffmpegPath()), /* lane machine-needs-at-pairing pick 2 (reader 2): Windows runs only THE accessor's ffmpeg — the suites' VIBESPACE_SOUND_FFMPEG stands in off Windows only */ fake: !!process.env.VIBESPACE_MIC_HELPER }));
 const streamHostOf = () => streamHost || (streamHost = require('./stream-host.js').createStreamHost({ injector: injectorOf(), log, screen: (msg, o) => streamScreenOf().source(msg, o), window: (msg, o) => windowsOf().source(msg, o), legHosts: dialHostOf, program: process.platform === 'win32' ? process.execPath : null, mic: micOf, sound: soundOf }));
 function unpinWindow(rec) {
   rec.pinned = false;

@@ -283,6 +283,20 @@ function ffmpegVerdict(ff) {
 /** Does this ffmpeg PASS — the verdict, and a rung of the encoder ladder? (lane machine-needs-at-pairing) */
 const ffmpegPasses = (ff) => ffmpegVerdict(ff).ok && pickEncoder(ff && ff.encoders).ok;
 /**
+ * THE FFMPEG THIS AGENT MAY RUN (lane machine-needs-at-pairing pick 2, the reader's item 2 — ONE accessor, every road): `ff` = the
+ * screen facts' ffmpeg; → its path only when it is NOT a fetched copy whose bytes changed (`changed` — never run, on any road) and
+ * it passes THIS road's own verdict: 'screen' = ffmpegPasses (ddagrab + a rung of the ladder), 'window' = a rung of the ladder
+ * (one window comes through its own helper, not ddagrab), 'voice' / 'sound' = a program found (the receiver's decoder and the
+ * sound's encoder ask no ladder). Else null. Every agent spawn of ffmpeg takes its path from here (test-ffmpeg-install's census).
+ */
+function runnableFfmpeg(ff, road = 'screen') {
+  if (!ff || !ff.path || ff.changed) return null;
+  if (road === 'screen') return ffmpegPasses(ff) ? ff.path : null;
+  if (road === 'window') return pickEncoder(ff.encoders).ok ? ff.path : null;
+  if (road === 'voice' || road === 'sound') return ff.path;
+  return null;
+}
+/**
  * THE LOOKUP (lane machine-needs-at-pairing, pick 1 — the owner 2026-11-13: an old ffmpeg on PATH shadowed a good one).
  * `candidates` IN ffmpegCandidates' ORDER (PATH, then the folder, then the probe folder — the order stays); `probe(c)` → that
  * file's facts ({ path, where, version, major, ddagrab, encoders }) or null (no file there, or it did not answer). The FIRST
@@ -531,7 +545,7 @@ function planScreen(facts, opts = {}) {
   const can = hdrFactsOf(d, f.ffmpeg); // lane stream-hdr-passthrough: the offer's word on the HDR road, asked or not
   const plan = { ok: true, mode: hdr ? 'mapped' : 'direct', display: { id: d.id, output: mapped.output }, origin: { x: d.x, y: d.y }, w, h, srcW: d.w, srcH: d.h, step,
     scaled: step > 1 ? { share: Math.round(Number(share)), step, w, h, from: { w: d.w, h: d.h } } : null,
-    fps: r, kbps: rate, floor: kbpsFloor({ w, h, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: f.ffmpeg.path,
+    fps: r, kbps: rate, floor: kbpsFloor({ w, h, fps: r, cap: rate }), gop: r * SCREEN_DEFAULTS.gopSeconds, white: hdr ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder, note: pe.note, ffmpeg: runnableFfmpeg(f.ffmpeg, 'screen'),
     hdr: { can: can.can, on: false, why: can.why } };
   if (wantHdr !== true || !can.can) return plan;
   // THE HDR ROAD: the mapped road's capture and size, THE PQ MAPPING, the AV1 rung — `sdr` = the mapped plan the session falls
@@ -1032,6 +1046,7 @@ function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 80
   if (f.platform !== 'win32') return { ok: false, code: 'not_windows', error: `the window source captures a Windows window (this machine runs ${f.platform || 'an unknown system'})` };
   if (!f.helper || !f.helper.ok || !f.helper.exe) return { ok: false, code: 'helper_missing', error: (f.helper && f.helper.error) || `the window helper is not built on this machine; the recipe: ${WGC_RECIPE}` };
   if (!f.ffmpeg || !f.ffmpeg.path) return { ok: false, code: 'no_ffmpeg', error: `this machine needs ffmpeg with an H.264 encoder (looked in ${LOOKED})` };
+  if (f.ffmpeg.changed) return { ok: false, code: 'no_ffmpeg', error: `this machine needs ffmpeg with an H.264 encoder; ${f.ffmpeg.path}: ${f.ffmpeg.changed} — fetch it again` }; // lane machine-needs-at-pairing pick 2 (reader 2): a changed fetched copy is never run, here either
   const w = window && window.bounds ? window : null;
   if (!w) return { ok: false, code: 'window_gone', error: 'that window is not on the machine any more' };
   const pe = pickEncoder(f.ffmpeg.encoders);
@@ -1046,7 +1061,7 @@ function planWindow(facts, { window = null, fps = WINDOW_DEFAULTS.fps, kbps = 80
     origin: { x: 0, y: 0 }, relative: true, w: w.bounds.w & ~1, h: w.bounds.h & ~1, fps: r, interval: windowIntervalMs(r),
     kbps: rate, floor: kbpsFloor({ w: w.bounds.w, h: w.bounds.h, fps: r, cap: rate }), refresh: Object.hasOwn(WINDOW_REFRESH, pe.encoder.id), gop: r * SCREEN_DEFAULTS.gopSeconds,
     white: f16 ? d.white : null, tone: { knee: tone.knee, peak: tone.peak }, encoder: pe.encoder,
-    note: pe.note || (fp16 && !f16 ? 'fp16_sdr_display' : null), ffmpeg: f.ffmpeg.path, helper: f.helper.exe,
+    note: pe.note || (fp16 && !f16 ? 'fp16_sdr_display' : null), ffmpeg: runnableFfmpeg(f.ffmpeg, 'window'), helper: f.helper.exe,
   };
 }
 /** The helper's capture argv for a plan. */
@@ -1064,7 +1079,7 @@ function windowEncodeArgv(plan, { w = plan.w, h = plan.h, kbps = plan.kbps } = {
 module.exports = {
   halfToFloat, srgbOetf, TONE_DEFAULT, toneCurve, mapLinear, srgb8OfHalf, buildLut, nv12FromHalf, nv12Bytes, CALIBRATION,
   PQ, SCRGB_NITS, BT709_TO_BT2020, BT2020, HDR_VUI, pqOetf, pqCodeOfNits, buildPqTables, pqOfHalf, p010FromHalf, p010Bytes, HDR_LADDER, hdrFactsOf, hdrEncodeArgv, KBPS_FLOOR_HDR,
-  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, ffmpegPasses, firstPassingFfmpeg, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
+  ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, ffmpegPasses, runnableFfmpeg, firstPassingFfmpeg, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
   MAC_HELPER, MAC_SETTINGS, MAC_DOORS, WIN_SETTINGS, SETTINGS_PANES, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,

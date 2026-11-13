@@ -334,7 +334,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     if (!sys) return null;
     // an app plan also binds its CLOSURE (every package + version apt would install — `closureKey`): the same commands
     // over a moved archive are another plan; an xpra / LibreOffice plan carries none, so its digest is unchanged
-    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [], ...(plan.closureKey != null ? { closure: String(plan.closureKey) } : {}), ...sys })).digest('hex').slice(0, 32);
+    return crypto.createHash('sha256').update(JSON.stringify({ commands: plan.commands || [], source: plan.source || null, packages: plan.packages || [], ...(plan.stream ? { argv: plan.argv } : {}), ...(plan.closureKey != null ? { closure: String(plan.closureKey) } : {}), ...sys }) /* lane machine-needs-at-pairing pick 2 (reader 5): a stream plan's digest binds the very argv it runs */).digest('hex').slice(0, 32);
   }
   const machineKey = (hostId) => (isLocal(hostId) ? 'local' : String(hostId));
   const machineName = (hostId) => (isLocal(hostId) ? 'this machine' : String(hostId));
@@ -389,6 +389,24 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  gone: the facts op's `installState` (the pidfile's pid + starttime, nothing probed) is asked every pollMs; unreachable = still held;
    *  at most holdMs. The line that frees it names the EVIDENCE (verify r2 F3: a lost link used to free the slot at
    *  once, and a timed-out install that lost its link freed it saying "ended" — neither had seen it end). */
+  /** lane machine-needs-at-pairing pick 2 (reader 6): after a timeout or a lost link a FETCH may still run on the machine — the slot
+   *  stays held until the machine's stream facts say none runs (the plan's own marker, read by the agent), bounded by twice the
+   *  install bound. (The agent's run-stream child OUTLIVES a lost link — its output goes on into a log, agentd.js orphanRunStream —
+   *  so a second press then would start a second PowerShell beside the first.) Asked every pollMs. */
+  function holdWhileFetching(hostId, key, slot) {
+    const t0 = Date.now();
+    const who = hostId && !isLocal(hostId) ? hostId : 'this machine';
+    const free = (why) => { if (installs.get(key) !== slot) return; installs.delete(key); log.log?.(`[desktop] the install slot on ${who} is free again — ${why}`); };
+    const tick = async () => {
+      if (installs.get(key) !== slot) return;
+      let f = null; try { f = await streamFacts(hostId, { force: true }); } catch { f = null; }
+      if (installs.get(key) !== slot) return;
+      if (f && f.ok && !f.fetching) { free('the machine says no fetch runs'); return; }
+      if (Date.now() - t0 > installMs * 2) { free(`no word from the machine for ${spell(installMs * 2)}`); return; }
+      setTimeout(tick, pollMs).unref?.();
+    };
+    setTimeout(tick, pollMs).unref?.();
+  }
   function holdUntilGone(hostId, key, slot, cause) {
     const t0 = Date.now();
     let timer = null, unreachable = false;
@@ -439,7 +457,10 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     let held = null;
     try {
       const { plan, facts } = await installPlan(hostId, what, planOpts);
-      if (plan && plan.stream) return await runStreamInstall(hostId, plan, { onData, expectDigest, by }); // lane machine-needs-at-pairing: 「取得 FFmpeg」 — unelevated, no slot shell
+      if (plan && plan.stream) { // lane machine-needs-at-pairing: 「取得 FFmpeg」 — unelevated, no slot shell
+        try { return await runStreamInstall(hostId, plan, { onData, expectDigest, by }); }
+        catch (e) { if (e && (e.code === 'install_timeout' || e.code === 'install_link_lost')) held = 'fetch'; throw e; } // reader 6: the slot stays held while the machine says the fetch runs
+      }
       if (plan && (plan.uac || plan.adminDialog)) { // design 014 D1: Windows asks on its own screen (lane stream-mic-road: a Mac's password dialog too)
         const done = await runUacInstall(hostId, plan, { onData, expectDigest, by });
         if (plan.after === 'mic') done.after = (await micFacts(hostId, { force: true, by })).facts; // lane stream-mic-road: the machine's microphone facts, read again
@@ -472,6 +493,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       return { ok: true, what, hostId: isLocal(hostId) ? 'local' : hostId, plan, before: facts, after: after.install || null, facts: after.facts || null, reattached: !!running };
     } finally {
       if (!held) installs.delete(key);
+      else if (held === 'fetch') holdWhileFetching(hostId, key, slot);
       else holdUntilGone(hostId, key, slot, held);
     }
   }
@@ -650,10 +672,14 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const dm = await deviceOf(hostId);
     if (typeof dm.runStream !== 'function') throw named('host_needs_daemon', `${hostId}: its agent cannot stream a command`);
     log.log?.(`[desktop] fetching ${plan.label} on ${hostId} from ${plan.source} (unelevated, into ${plan.folder || 'its folder'})`);
-    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData, timeoutMs: installMs, by });
+    // reader 4: the run's LAST line is its reason (the plan names each build's — «not the pinned file» apart from «no network»):
+    // a surface with one line says it, never «the log above»
+    let tail = '', last = '';
+    const seen = (d) => { tail = (tail + (Buffer.isBuffer(d) ? d.toString('utf8') : String(d))).slice(-4000); const ls = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean); if (ls.length) last = ls[ls.length - 1]; };
+    const r = await dm.runStream(plan.argv[0], plan.argv.slice(1), { onData: (d) => { seen(d); onData(d); }, timeoutMs: installMs, by });
     const fail = (code, msg) => { const e = named(code, msg); e.plan = plan; return e; };
     if (!r || r.code == null) throw fail(r && r.timedOut ? 'install_timeout' : 'install_link_lost', `the fetch on ${hostId} reported no exit (${(r && r.error) || (r && r.timedOut ? 'past its deadline' : 'the link dropped')}) — check again`);
-    if (r.code !== 0) throw fail('install_failed', `the fetch exited ${r.code} on ${hostId} — the log above says why; nothing was changed there`);
+    if (r.code !== 0) throw fail('install_failed', last ? `${hostId}: ${last.slice(0, 600)}` : `the fetch exited ${r.code} on ${hostId} and said nothing — nothing was changed there`);
     let after = null;
     try { after = await streamFacts(hostId, { force: true }); } catch (e) { after = { ok: false, code: (e && e.code) || 'facts_failed', error: String((e && e.message) || e) }; }
     return { ok: true, what: plan.what, hostId, plan, before: null, after, facts: null, reattached: false };
@@ -840,7 +866,11 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     const tooOld = (have) => ({ ok: false, code: 'agent_too_old', platform, have: have || null, need: AGENT_VERSION, error: `${hostName(hostId)}'s agent ${have ? `(${have}) ` : ''}cannot open its Settings — it needs version ${AGENT_VERSION} or later` });
     if (typeof dm.settingsOpen !== 'function') return tooOld(null);
     try { return await dm.settingsOpen(pane, { by }); }
-    catch (e) { if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion); throw named('host_unavailable', `${hostId}: ${e && e.message}`); }
+    catch (e) {
+      if (e && e.code === 'host_needs_daemon') return tooOld(e.daemonVersion);
+      if (e && e.stage === 'gate') return { ok: false, code: e.code || 'refused', platform, error: String(e.message || e.code) }; // lane machine-needs-at-pairing pick 2 (reader 7): the hub's own refusal at the send point is SAID as a refusal — never «not connected»
+      throw named('host_unavailable', `${hostId}: ${e && e.message}`);
+    }
   }
   // ── design q-024 r1 §1.3–§1.4 (lane remoteapp-r1b): THE REMOTEAPP SETTINGS CARD'S DOORS — the owner's (the routes refuse an agent token) ──
   /** The machine's Remote Desktop facts through its agent (the `remoteapp-facts` op, read-only) → `{ ok, platform, facts, rows,

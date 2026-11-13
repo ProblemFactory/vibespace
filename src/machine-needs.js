@@ -14,6 +14,11 @@
  * door that exists, a session's own login) — each with its reason. scripts/test-machine-needs.mjs derives the sentences from the
  * tree (every t() key in the dictionary, through the net — never a hand list), PRINTS the census, and is RED on a sentence no row
  * and no non-need claims, and on a surface that states a present-door need without its door. PURE (no imports).
+ * WHAT IT IS — A NET, NOT A PROOF (the reader's item 8, measured by a plant: int359 acc-399 mn2 plant-census): it reads the words a
+ * person reads (t() / tr() / i18nKey() literals) that carry a MACHINE word AND a NEED word (NET below). IT CANNOT SEE a need worded
+ * past those words («the Frobnicator is missing on {machine}», «get it onto that PC first»), nor A DEVICE'S OWN REFUSAL STRINGS — an
+ * agent's English error shown as it came (never a t() literal), nor a need said only in a log line. Those reach a person through
+ * the refusal's own words; a lane that adds such a need adds its row by hand.
  */
 const DEFERRED = 'machine-needs · B-bd27';
 const NEEDS = Object.freeze([
@@ -43,7 +48,7 @@ const NEEDS = Object.freeze([
   { id: 'sudo-apt', need: 'passwordless sudo / apt-get for an unattended install', platforms: ['linux'], kind: 'b',
     match: /passwordless sudo|apt-get/, door: { none: 'the commands are shown to run by hand: they need the person\'s own password; VibeSpace drives apt only' } },
   { id: 'pairing-curl', need: 'curl or wget, to pair a Linux machine', platforms: ['linux'], kind: 'b',
-    match: /needs curl/, door: { none: 'said before pairing — the machine is not paired yet, so nothing can open a door on it' } },
+    match: /needs curl/i, door: { none: 'said before pairing — the machine is not paired yet, so nothing can open a door on it' } },
   { id: 'posix-shell', need: 'a POSIX shell for some file operations on Windows', platforms: ['win32'], kind: '-',
     match: /POSIX shell/, door: { none: 'a product gap — not offered on Windows yet' } },
   { id: 'node-runtime', need: 'Node at or above the advisory floor (the agent\'s runtime)', platforms: ['win32', 'darwin', 'linux'], kind: 'b',
@@ -61,7 +66,7 @@ const NOT_NEEDS = Object.freeze([
   { why: 'the hub\'s own record of usage (its data, not a machine\'s need)', match: /usage-history/ },
   { why: 'a door\'s own label or outcome (the need\'s row owns the sentence that states it)', match: /^(Install (xpra|LibreOffice|the Calibri|TightVNC)|\{app\} is not installed on \{machine\}$|Not installed — this machine could not start it|This machine has no virtual microphone to remove)/ },
   { why: 'a platform fact with its alternative said (desktop apps are Linux\'s; a Mac / Windows machine has its whole desktop)', match: /no X11 server/ },
-  { why: 'a file or a pairing fact, not a need', match: /no absolute path on its machine|Where to put it on this computer|The machine VibeSpace itself runs on/ },
+  { why: 'a file or a pairing fact, not a need', match: /no absolute path on its machine|Where to put it on this computer|The machine VibeSpace itself runs on|Put it on the device in three steps/ }, // + pair-dialog-polish's step heading (61d795562 — the seam ruled 主开发 11-13)
 ]);
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
 const notNeedOf = (sentence) => NOT_NEEDS.find((r) => r.match.test(String(sentence))) || null;
