@@ -124,6 +124,16 @@ try {
     const say = (txt, w) => String(rowOf(txt, w.key) || w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params && w.params[k]; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? say(txt, v) : '11-12 14:03') : String(v); });
     const zh = ['records-unread', 'records-unread-unnoted'].flatMap((k) => [say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: 1794500000000 }).words), say(zhT, M.forYouCopy(null, k, { store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'see the note', when: null }).words)]);
     ok(zh.every((x) => !/\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)), 'K10: said in zh, those notices hold no English word — only the file names and the code in its words\' parentheses', zh.filter((x) => /\b(?:earlier|UTC|unknown|error|note|could|read|the)\b/i.test(x)));
+    // K7's cure (主开发 09:05Z): an item a 2.369.398 hub FILED keeps the old template as its key (filed once — heldSaid); each old key
+    // keeps its zh / ja row, so that open item never turns English after the update. The items as the release built them (params strings)
+    const LEG = M.FOR_YOU_WORDS_LEGACY || {};
+    const relParams = { file: 'jobs.json.corrupt-1', store: 'jobs.json', note: 'jobs.json.corrupt-unread', error: 'EIO', when: '2026-11-12 14:03 UTC' };
+    const sentence = /\b[A-Za-z]{2,}(?: [A-Za-z]{2,}){3,}\b/;   // four English words in a row = an English sentence on a zh / ja page
+    const legacy = ['store-corrupt', 'records-held', 'records-unread', 'set-aside-other'].map((k) => {
+      const w = LEG[k] ? { key: LEG[k].key, params: relParams } : null;
+      return { k, rows: !!(w && rowOf(zhT, w.key) && rowOf(jaT, w.key)), zh: w ? say(zhT, w) : '', ja: w ? say(jaT, w) : '', reworded: !!(w && w.key !== M.FOR_YOU_WORDS[k]) };
+    });
+    ok(legacy.every((x) => x.rows && x.reworded && x.zh && x.ja && !sentence.test(x.zh) && !sentence.test(x.ja)), 'K7\'s cure: each of the four templates K7 reworded stays a NAMED legacy key (the release it left in) with its zh and ja rows — an item a 2.369.398 hub filed renders in zh and ja with no English sentence after the update', legacy.filter((x) => !(x.rows && x.reworded && !sentence.test(x.zh) && !sentence.test(x.ja))).map((x) => ({ k: x.k, rows: x.rows, zh: x.zh.slice(0, 60) })));
     const { fillWords } = require(path.join(ROOT, 'src/user-todos.js'));
     ok(typeof fillWords === 'function' && fillWords({ key: 'read ({when}: {error})', params: { when: { at: Date.UTC(2026, 10, 12, 14, 3) }, error: { key: 'an error ({code})', params: { code: 'EX' } } } }) === 'read (2026-11-12 14:03 UTC: an error (EX))', 'K10: the store\'s English text says an INSTANT as a UTC stamp (it said «undefined») and fills a WORDS param\'s own params');
   }

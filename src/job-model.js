@@ -752,6 +752,16 @@ const FOR_YOU_WORDS = Object.freeze({
 // `mintedFor(c)` answers that job — `undefined` for anything forYouCopy did not mint
 const MINTED = new WeakMap();
 function mintedFor(c) { return c && typeof c === 'object' ? MINTED.get(c) : undefined; }
+// .399 K7 (主开发's merged-tip read, 2026-11-13): a REWORDED template never strands an item already filed under the old one — the
+// For-you store keeps an open item's key, and a 2.369.398 hub filed these notices once («said»: heldSaid), so after the update the open
+// item still says the OLD English template. Each stays a dictionary key with its zh / ja words for as long as such an item can be open:
+// named here, with the release it left in, so the dictionary census sees every legacy row referenced.
+const FOR_YOU_WORDS_LEGACY = Object.freeze({
+  'store-corrupt': Object.freeze({ left: '2.369.399', key: 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel. Its bytes were kept in {file}; old job logs are not cleaned up until that file is moved or deleted.' }),
+  'records-held': Object.freeze({ left: '2.369.399', key: 'Job records in {file} could not be read. Old job logs are not cleaned up until that file is moved or deleted — move it once you have what you need from it; the clean-up then resumes by itself.' }),
+  'records-unread': Object.freeze({ left: '2.369.399', key: 'Job records in {store} could not be read ({when}: {error}). Old job logs are not cleaned up until {note} is moved or deleted. Before you move it, check that {store} reads as it should — and if the Jobs panel lists fewer jobs than before, the file may already have been written over: keep the note until it is restored.' }),
+  'set-aside-other': Object.freeze({ left: '2.369.399', key: '{file} in the data folder is named like a set-aside job record file, so old job logs are not cleaned up while it is there — move it away if you do not need it.' }),
+});
 // lane job-logs-sweep (.399, K10): what the held-records notices put INSIDE their sentence is said in the reader's language —
 // the failure's moment an INSTANT (`{at}`: the device's clock and zone, src/lib/user-todos-layout.js saidLine), an unknown
 // moment and every cause WORDS (`{key}`, each a dictionary row) — never an English fragment («earlier», a UTC stamp, a bare
@@ -1064,7 +1074,7 @@ function ownedJobsView(jobs, cid) {
     .sort((a, b) => ((ORDER[a.state] ?? 9) - (ORDER[b.state] ?? 9)) || a.name.localeCompare(b.name));
 }
 
-module.exports = { RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
+module.exports = { FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
