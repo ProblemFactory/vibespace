@@ -192,7 +192,7 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
   // row's menu, built from their own source; pressing every button and every menu row records the acts — the same set
   const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
   const made = (() => { try { return new Function('t', 'jobAction', 'document', 'clearRecords', 'isCleared', 'clearedText', `${src('rowVerbs')}\n${src('actionButtons')}\n${src('rowMenuItems')}; return { rowVerbs, actionButtons, rowMenuItems };`); } catch { return null; } })();
-  const run = (j) => { const did = []; const doc = { createElement: () => ({ className: '', textContent: '', onclick: null }) };
+  const run = (j) => { const did = []; const doc = { createElement: () => ({ className: '', textContent: '', onclick: null, title: '', setAttribute(k, v) { this['@' + k] = v; } }) };
     const m = made((x) => x, (app, jj, act) => { did.push(act); }, doc, () => Promise.resolve({ ok: true }), () => false, () => '');
     const b = m.actionButtons({}, j, () => {}, { compact: false }).map((x) => { did.length = 0; x.onclick({ stopPropagation() {} }); return did[0]; });
     const items = m.rowMenuItems({}, j, () => {}, {}); const mm = items.filter((x) => !x.separator && x.label !== 'Clear content…').map((x) => { did.length = 0; x.action(); return did[0]; });
@@ -200,6 +200,20 @@ console.log('⑨ THE SINGLE DEFECTS of pick 5 — each pinned where it lives');
   let r = null; try { r = made ? [{ state: 'up' }, { state: 'failed' }, { state: 'done' }, { state: 'up', pendingPanel: true }].map(run) : null; } catch (e) { r = String(e.message); }
   ok(Array.isArray(r) && r.every((x) => x.buttons === x.verbs && x.menu === x.verbs && x.last === 'Clear content…') && r[0].verbs === 'stop' && r[1].verbs === 'start,rm',
     'jobs (evaluated): the row\'s buttons and its menu draw the SAME acts — one table (rowVerbs), the menu ending in «Clear content…»', JSON.stringify(r)); }
+{ // the start verb's WORD (the UI walk's jobs-5, L3 → L5)
+  const JP = read('src/lib/jobs-panel.js'); const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
+  const made = (() => { try { return new Function('t', 'jobAction', 'document', 'clearRecords', 'isCleared', 'clearedText', `${src('rowVerbs')}; return { rowVerbs };`); } catch { return null; } })();   // what it does to THIS row — the same act 'start'
+  let w = null; try { const m = made((x) => x, () => {}, null, null, null, null); w = [{ kind: 'task', state: 'failed' }, { kind: 'task', state: 'missed' }, { kind: 'service', state: 'down' }, { kind: 'service', state: 'failed' }, { kind: 'cron', state: 'scheduled', desiredUp: false }, { kind: 'cron', state: 'missed', desiredUp: true }]
+    .map((j) => m.rowVerbs(j).filter((v) => v.act === 'start').map((v) => v.label).join('')); } catch (e) { w = String(e.message); }
+  ok(Array.isArray(w) && w.join('|') === 'Run again|Run again|Start|Start|Resume|Start',
+    'jobs (evaluated): the start verb says what it does to the row — a task that ran «Run again», a service «Start», a cron that is off «Resume» (never «Start» on all three)', JSON.stringify(w)); }
+{ // …and a GLYPH face says its word (the rail's compact row drew a bare ▸; the window's ✕) — actionButtons EVALUATED
+  const JP = read('src/lib/jobs-panel.js'); const src = (name) => { const at = JP.search(new RegExp(`\\n(?:export )?function ${name}\\(`)); return at < 0 ? '' : JP.slice(at + 1, JP.indexOf('\n}\n', at + 1) + 3).replace('export function', 'function'); };
+  let g = null; try { const m = new Function('t', 'jobAction', 'document', `${src('rowVerbs')}\n${src('actionButtons')}; return { actionButtons };`)((x) => x, () => {}, { createElement: () => ({ className: '', textContent: '', onclick: null, title: '', setAttribute(k, v) { this['@' + k] = v; } }) });
+    g = [true, false].flatMap((compact) => [{ kind: 'task', state: 'failed' }, { kind: 'service', state: 'up' }].flatMap((j) => m.actionButtons({}, j, () => {}, { compact })))
+      .filter((b) => !/[\p{L}]{2,}/u.test(b.textContent)).map((b) => `${b.textContent}=${b['@aria-label'] || ''}/${b.title || ''}`); } catch (e) { g = String(e.message); }
+  ok(Array.isArray(g) && g.length >= 3 && g.every((x) => /=[^/]+\/[^/]+$/.test(x)),
+    'jobs (evaluated): every glyph-faced row button (the rail\'s ▸ / ■, the window\'s ✕) carries its verb\'s word as its name and title', JSON.stringify(g)); }
 { const BB = read('src/lib/browser-build-dialog.js');
   ok(/const btn = el\('button', 'mounts-btn bbuild-download-btn'\);/.test(BB) && !/bwho-answer bbuild-row bbuild-download/.test(BB), '«下载其他版本…» is a button (its source line a hint under it), never a radio row\'s head'); }
 { const MD = read('src/lib/mounts-dialog.js'), CA = read('src/lib/channel-account-dialogs.js');
