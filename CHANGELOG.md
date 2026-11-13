@@ -7,14 +7,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - The Agents list no longer shows a limit as read hours ago right after a refresh read it.
 - A limit you marked as reset now says when you marked it, and that the next refresh confirms or corrects it.
-- A limit's age mark now uses the interface's units, and in Chinese and Japanese a note that waits on a Claude Code check names ⚙ → Update VibeSpace….
+- A limit's age mark shows minutes and days in the interface's units; in Chinese and Japanese a note waiting on a Claude Code check names ⚙ → Update VibeSpace….
 - If a limit you mark as reset cannot be written to disk yet, VibeSpace now says so beside the mark.
-- When VibeSpace runs from this computer's own disk, projects in a folder that shows a network folder or this disk are no longer refused without a word.
+- When VibeSpace runs from this computer's own disk, a project in a folder that shows a network folder or this disk now simply works; it is no longer refused.
 - A scheduled background job no longer keeps the files of every run it ever made: runs its list no longer shows are deleted 14 days after they ended.
 - A VibeSpace that kept years of such files clears them by itself, a little at a time, and cleaning up job logs never pauses VibeSpace on slow storage.
-- Settings › Background Work › Clean up old job logs turns that clean-up off; if job records could not be read, it waits and For you says why.
+- With Show advanced settings on, Settings › Background Work › Clean up old job logs turns it off; if job records cannot be read, it waits and For you says why.
 - A message sent with --wake to a busy conversation now says it waits for that turn; it shows as read only once a turn reads it.
-- Such a message counts against your spend limit from the send and is given back if it never runs; a dropped copy says «not delivered».
+- Such a message counts against your spend limit from the send; it is given back once VibeSpace knows it never ran, else it stays counted up to a day.
+- A dropped copy of such a message says «not delivered».
 - A reply sent from For you now reaches a running agent the way a typed message does, instead of waiting behind the turn while later messages went first.
 
 ### Maintenance

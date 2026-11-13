@@ -292,8 +292,58 @@ This file is the engineers' record of every release: the lanes, the verification
   - RED: the release fd4acdc61 (a COUNTED skip without it) and this tree with the reply's door removed — the reply HELD.
 - **test-queue-steer's pin** on chat-view's intersection now reads the one derivation in src/backend-caps.js `doorCapsOf`.
 
-### Known in 2.369.398 — named by the .397 merged-tip read (2026-11-12 12:18Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
+### Known in 2.369.398 — named by the merged-tip reads of .397 (2026-11-12 12:18Z) and of .398 (2026-11-13 03:35Z) and still open; each a pick of a later train (K1 was cured in .397; K2 and K3 in this release)
 - **K4 (minor).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it, as in 2.369.396. A plugin status child in flight at a stop outlives the hub.
+- **K5 (law 1, driven on the real agy wrapper).** A wake queued behind a turn can be bound to the queue item of a message written just after it. Its record can then say «read» while it still waits, and after a kill it can be sent twice, or lost while marked read. 2.369.397 said «woke / read» for every such message, so this release is better in each case.
+- **K6.** Laws 2 and 3 of queued-is-not-woke are not in this release: a message behind a turn that never ends waits with no bound and no For-you item.
+- **K7 (job-logs-sweep meeting the release's torn-store recovery, driven).** After a restart, moving the set-aside jobs store away as the For-you item says lets the next pass remove the logs older than 14 days of the jobs that were in the torn file. Nothing lists them any more, and the item's words do not say so.
+- **K8 (K3).** The age mark's hours are still «h» in Chinese and Japanese; only its minutes and days follow the interface's units (the user line says so).
+- **K9 (law 1).** For a group with several members, vibespace-msg calls a dropped copy «not delivered (ended)» though the conversation is alive.
+- **K10 (job-logs-sweep).** The For-you notices about an unreadable job store can carry English fragments in Chinese and Japanese.
+- **K11 (the hosted runners' Claude Code 2.1.323).** With Claude Code 2.1.323 on the hosted runners, the suite of the hold door and of Stop (test-claude-steer-chrome) is red on about half its tries on 2.369.397 as well: a held message's bubble across a hub restart, and a request that reaches the model just before or after a Stop settles. On this box, with 2.1.322, it is 8 of 8 green on every tree. Whether 2.1.323 moved the CLI's Stop window is being measured (a lane has it); nothing in this release touches it.
+
+### int398 — the .398 train's own notes (lane int361; on fd4acdc61 = 2.369.397)
+- **Eight units, 33 picked commits, in pick order. Each pick's changed lines, outside the changelogs, are its lane's byte for byte.** One docs exception: docs/kb-bugfix-invariants.md, where law 1 and job-logs-sweep both append, and the kb resolver kept both.
+  - test-cache-bounds §30 (B-a77d): the fold's soft cap sits where neither verdict follows the collector's pace. The .397 cut's named red is cured.
+  - account-reset-door K2, K3 and K2 round 2 (the merged-tip read of .397):
+    - the claims store goes through the store writer;
+    - a claim that did not reach the disk is said;
+    - the roster's read-at, one sentence for what confirms a claim, and the interface's units.
+  - mount-class-by-source: a view of a mount is classed by what it shows, and storage below its source is refused through it. It is a prerequisite of the data move.
+  - hub-sync-holds' Plugins modal close: the broadcast listener and the redraw timer end with the modal.
+  - job-logs-sweep, rounds 1–4 and two test-only tails. A run folder no job record lists leaves data/job-logs 14 days after its newest file, removed by a child process. The tails came after the window, each on the coordinator's word:
+    - e5dd7d210 rows the remover child's scan walk in test-loop-child-census (found by the train's rehearsal);
+    - 066bba027 declares its three kills of its own child in test-exit-forensics' kill doors (found by the lane's own heavy claim).
+  - queued-is-not-woke law 1: a message written into a running turn is said waiting, not woken, and its charge follows what the addressee did.
+  - The sidebar's echo seam 97880faf6 (test-only): test-user-state-echo-chrome reads «each once» off the hub's own record of each act. It cures master's red on fd4acdc61: pace, not a defect.
+  - reply-door-follows-enter, joined at the close, last: a reply from For you, a design comment or a doc comment reaches a running turn through the conversation's own Enter door.
+- **The fast tier's sum cap 1066 → 1068 s, by arithmetic, written once after the last pick.** .397 states 1065.600 s over 569 rows. On top of that:
+  - mount-class-by-source +0.250 (test-fs-canary 6.7 → 6.95 s, by its own measurement);
+  - job-logs-sweep +0.100 (test-job-logs-sweep);
+  - law 1 +1.300 (test-queued-wake 1.2; test-spend-paths 4.4 → 4.5);
+  - reply-door-follows-enter +0.500 (test-reply-door).
+  
+  That totals 1067.750 s over 572 rows. The other units add no row; nothing was restated to fit.
+- **The rehearsal before the close (new at .398).** The whole pick order was picked into a scratch worktree 40 minutes before the close, and every census on its tip was run. test-loop-child-census was red on job-logs-sweep's own tip. The affected model names no suite for a NEW source file that a tree-wide census lists. So the lanes' fast gate gained THE TREE-WIDE READERS (the coordinator, 00:52Z): work/treewide-readers.mjs prints them at a lane's tip, 69 fast suites at .397. The same gap held a heavy census, test-exit-forensics' kill doors: the second tail.
+- **The prep, before the bump.**
+  - The merged whole fast tier, one suite at a time after one build, under the train lock: 571 of 571 green on 892e2f9c0. That is the train tip less the second tail's two lines in a heavy suite's file; it carries. test-architecture ran alone on the train tip f49b8edf9 with the build standing: 935.
+  - The prep mirror on f49b8edf9 (ci 43346561375, seven shards), read job by job. Attempt 1 had three reds:
+    - test-claude-steer-chrome, red on both tries: ⑧, the held bubble across a restart; then §A ② and ③, a request after Stop.
+    - test-channel-window-render: master's own pace leg at :1318, the access dialog not yet open.
+    - test-browser-mediation-chrome ⑥: three Chrome 157 methods without a census row, red on master on the same image. WAIVED by name; its cure is chrome-157 C in .399.
+    Attempt 2: every shard green. Shard 6 ran on the older image, so mediation's green there is not a cure. Flaky, ✗ then ✓: test-tailnet-reach-chrome, test-agentd-dial, test-chat-enter-ime-chrome (the 50 ms burst leg, seen once).
+  - test-claude-steer-chrome is a NAMED FLAKE ON THE CONTROL. Master fd4acdc61's own shard 4, re-run, was red on both tries at the same legs (⑧, §A ③), with claude 2.1.323. The rates:
+    - hosted, by job (red = both tries): master 1 of 3, the train 1 of 2;
+    - hosted, by try: master 2 of 4, the train 2 of 3; every red try ran 2.1.323;
+    - the box, one claim, the suite alone, claude 2.1.322: the control, reply-door alone, law 1 alone and the train, each twice — 8 of 8 green, §A and §B run in each.
+    The code facts: §A runs bytes identical to master's (the wrapper, its three src modules, the suite), and reply-door's page door function equals the removed one over 5 389 cases.
+  - The merged-tip read: the mechanical lens found every file equal to its picks (80 single-owner files byte-identical, 12 multi-owner files equal by three-way merge). The interplay lens (four readers): SHIP WITH KNOWN LINES, no blocker. Its four user lines that promised more than the code are rewritten in all three languages, and K5–K10 are named under «Known in 2.369.398».
+- **The self-hosted classes (the coordinator's word, 01:50Z).** The train reaches 60 self-hosted heavies, all through a data/bin program (law 1's wrappers and vibespace-msg, job-logs-sweep's vibespace-job): a spawned program. With data/bin and server.js set aside, what a pick's own code reaches:
+  - BEFORE, on the merged tip, in three fair-queue claims: 16 suites (a pick's own module, K3's drawn code, the readers of the changed docs, law 1's fixture) + test-loop-hold-live — 16 green and one SKIP by name, no red.
+  - test-agy-cli-probe is a SKIP by name (it needs the real CLI; never run here). Beside it, on the merged tier, test-queued-wake spawns the real agy wrapper over law 1's stand-in (105), with test-agy-harness 177 and test-peer-delivery 116; on the prep mirror, test-antigravity-session 31, test-agy-attach-chrome 9 and test-agy-subagent-chrome 25.
+  - AFTER the push, named: 44. That is the 30 that only load src/backend-caps.js through the import graph, the 13 that compare pixels (K3's style.css rules) and test-browser-stderr-pipe-real. Out by name: test-desktop-xpra-window-close (B-baa5).
+  - The lanes' own heavy claims on their tips count in the before class: law 1 7 of 7; job-logs-sweep claims 1–3 and its test-exit-forensics re-run; mount-class 7 of 7; the modal claims 1–2; reply-door 3 of 3.
+- **Not in this release:** hub-loop-stalls' product commit (b) (round 5); queued-is-not-woke laws 2 + 3 (round 3); chrome-157 C; window-close-stall's float row with the F3 fix. Each rides .399 on its own line.
 
 ## 2.369.397 — 2026-11-12
 
