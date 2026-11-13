@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.400 — 2026-11-13
+
+### Fixed
+- A question's reply options are shown whole at every window size, wrapping onto more lines instead of being cut off; «Reply:» is said once before them.
+- Pressing a question in the strip above the message box opens it right there, with its details and every option; «Show it in the conversation» goes to it.
+
 ## 2.369.399 — 2026-11-13
 
 ### Changed

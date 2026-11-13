@@ -4,6 +4,71 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.400 — 2026-11-13
+
+### ui-phone-and-fit pick 0 — THE OWNER'S CASE: a For-you row's options are whole at every width, and the strip's row opens in place (the owner 2026-11-13; 主开发's law, both halves)
+- **What the owner saw:** a ~500 px chat window, zh. The strip «等你操作 · 9 个问题» drew the question cut, «52 分钟前», four icon buttons, then «回复：保留 ag», cut by the window's edge. «这样我都看不到推荐回复选项…考虑不同窗口尺寸了吗？». A minute later: «这个下面没法展开看详情，每次都要点击跳回对话位置才能看».
+- **Causes (on 935960b7e):**
+  - The base `.ut-opt` and `.iw-opt` were `nowrap` + ellipsis.
+  - The strip's options were ONE line that scrolled sideways (`flex-wrap: nowrap; overflow-x: auto`), with pills capped at 24 em with an ellipsis.
+  - The phone's pills were clamped to two lines.
+  - On the desktop, the strip's question press only landed in the conversation; its detail fold was hidden in the strip.
+- **THE OPTIONS LAW** (style.css + chat.css): every rule that styles an option or an options row draws the option WHOLE.
+  - The pill wraps inside itself: `white-space: normal`, `overflow-wrap: break-word`, no ellipsis, no clamp.
+  - The strip's options take a line of their own (`flex 1 1 100%`) and wrap. The question then gets two lines.
+  - «Reply:» is said ONCE: `.ut-opts-label` / `.iw-opts-label`. Each pill is its own words, and its accessible name and tip keep «Reply: …» (lane controls-that-lie). The agent's first option, its recommendation, stays first.
+- **THE ROW OPENS IN PLACE** (chat-needs-card.js):
+  - The question's press toggles `cad-open` on every class.
+  - The open strip floats over the transcript (`_dockOver`). A `.cad-spacer` of its closed height keeps its place, so the transcript's size and scrollTop never move. It stands on the same bottom edge, at most half the view, scrolling inside. It is taken out of the flow FIRST and then measured — measured while it still stood under the spacer, it came out a strip too high and the observer moved it down a frame later, after the open had armed its Allow (the first claim's test-phone-dock-chrome ㉓ r2: an Allow pressed at 821 ms answered nothing). Its place is read again whenever the view, or what sits below the spacer, resizes (a ResizeObserver: a window resized, a message box grown, a keyboard up). On the phone its 45 % bound is also bounded by half the view (`min(45dvh, --cad-max)`), so a keyboard that shrinks the view never pushes it past the view's top.
+  - The whole question, the detail fold open (THE tray's renderer, links live), every option on a line of its own.
+  - The landing is a worded door, `.cad-jump` «Show it in the conversation»; the meta's press still lands.
+  - Law 7: while open, the item stays the strip's item (`_dockPass` keeps it). A newer ask or a count change redraws around it.
+- **ONE ORDER wherever an item opens (主开发 13:34Z, the third claim's two product reds):**
+  - the question, its OPTIONS, then the detail, in the row (user-todos-row.js: the tray, the mini inbox, the phone sheet, the strip, the card — whose detail stays folded), in the For-you window's pane, and in the opened strip (the options order 6, the detail 7);
+  - opened, every option is in view at the strip's top and the detail scrolls below; six long options at 360 scroll as one, the first at the top.
+- **The reader's list (2026-11-13 13:41Z), fixed in place:**
+  - the CLOSED strip is bounded: `max-height: 50%`, scrolling inside, so options that wrap never push the message box out. Pin: a 360 × 500 tile with six long options;
+  - the OPENED strip stands above the ↓ (z 10) and the minimap (z 15) at z 16. Pin: opened in history, every option's right end is the option;
+  - Esc closes it;
+  - the census reaches an option through any selector (`.ut-opts > button`), and every base pill rule breaks a long unbroken word;
+  - order-aware pins for the measure order and the open state, each turned red by the reader's own mutants (planted in a copy);
+  - the suite's fixtures: a 120-character URL option, six options.
+- **Doors:**
+  - The tray, the mini inbox and the phone sheet already read the detail in place (their row's «detail» fold; on touch, the row opens). Their options were the ones cut.
+  - The For-you window shows the detail at full width.
+  - The desktop strip could not, and the phone strip opened without its detail.
+  - Today, the expand icon ⤢ on that row opens the For-you window ON the item (it never opened it in place).
+- **The width ladder:** `scripts/lib/fit-ladder.mjs` — 280 / 320 / 360 / 420 / 500 / 640 / 800 / 1100 / 1440 on the surface's own container. `fitVerdictSource`: every control inside its container and row, no cut words, no sideways scroll. Plus `scripts/lib/css-rules.mjs` (the rule reader). ONE helper for every UI lane.
+- **Pins moved by the law** (each with its reason in place):
+  - test-user-todos-layout: the chips read by their accessible name, plus «Reply:» once.
+  - test-chat-needs-strip-chrome r10 ⑰: six chips whole inside the strip, no sideways scroll. It was «six chips on ONE line».
+  - The three question-press landings now press `.cad-jump`.
+  - test-phone-dock-chrome ㉓: a newer item keeps the open item open (law 7).
+  - test-conversation-needs: the strip's options rule.
+  - test-chat-needs-strip-chrome r10: the OPENED phone strip floats over the chat (on the message box); a 422-character question takes ≤ 2 lines, cut at its clamp (was: one line).
+  - test-chat-needs-card-chrome ⑥c's RED CONTROL: its second press goes to the verb the reveal moved onto the pointer's row (the label now holds the old point).
+  - test-chat-trim-guard r8: the dock's landings are two (its meta / question keys, and the worded door). test-user-todos-honest: a chip pin reads the accessible name.
+  - test-inbox-reply-ui, test-inbox-window-ui, test-foryou-honest-chrome, test-duo-layout and test-chat-needs-card-chrome read the chips by their accessible name.
+- **Gates:**
+  - test-foryou-fit (fast, 29): the census over every option rule (a state INSIDE a selector reaches the option; the base .ut-opts / .iw-opts rows must wrap), the release's five rules and the readers' mutants caught by name.
+- **The .400 merged-tip read (docs and tests only, no byte under src/ or public/):** kb-features' attention dock now says what the strip does (whole options, «Reply:» once, the item opens in place). Two census holes are closed, each with its planted control: «.ut-opt:not(:disabled)» and a base row without its wrap.
+- **The .400 hosted red (test-chat-needs-card-chrome ⑥b, «6c» — four of four hosted tries, green on the box):** the runner's default sans is DejaVu, wider than this box's Noto Sans. Pick 0's whole options make the newest card a line taller there, and it pushed the folded row above it until that row's text line began above the list's top. The leg's premise «seen» was false; the product held (the font repro: the line 0.1 / 0 px, the card open, the pin followed). The leg now makes the row it presses wholly in view by its own geometry: the window grows by the measured shortfall, never a scroll or a count, and «seen» stays a precondition. Its message prints every conjunct. It runs a second time with the chat drawn in DejaVu Sans, so the box sees the runner's wrap.
+  - test-foryou-fit-chrome (heavy): five doors × the ladder × 1/3/5 options × zh/en; the strip at 500 opened in place. RED on the release by name.
+
+### Known in 2.369.400 — still open from 2.369.399, and the named lines of the .400 merged-tip read (2026-11-13); each a pick of a later train
+- **K1 (minor, from .399 K1).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it. A plugin status child in flight at a stop outlives the hub.
+- **K2 (from .399 K2).** Laws 2 and 3 of queued-is-not-woke are not in this release: a message behind a turn that never ends waits with no bound and no For-you item.
+- **K3 (from .399 K3, the hosted runners' Claude Code 2.1.323).** The suite of the hold door and of Stop (test-claude-steer-chrome) is red on about half its tries on the hosted runners, on released trees as well; on this box, with 2.1.322, it is green on every tree. Nothing in this release touches it.
+- **K4 (file preview on a mount).** A healthy workbook queued behind one on a hung mount is told «Storage not responding».
+- **K5 (the pairing sheet).** One Windows machine has three names along its pairing path: device, PC, machine.
+- **K6 (the pairing sheet).** On one allow row of the sheet, «sessions» is explained as «conversations».
+- **K7 (law 1).** A queued entry the release had already bound wrongly keeps that binding through the update, and is marked carried at its first listing.
+- **K8 (connection-notice B, by design).** A reader that trickles while under 4 MiB of backlog is never cut: its memory is bounded per socket.
+- **K9 (the owner's case).** The For-you window's «Reply:» label carries an option's tooltip.
+- **K10 (the owner's case).** The open strip's place is not read again when a bar appears under it after it opened.
+- **K11 (chrome-157; its docs and test cure rides 2.369.401).** The method-name shape check is pinned only by the heavy mediation suite; a fast pin rides .401. docs/kb-features.md still says a rowless method is refused «while the user drives», and its census list stops at Chrome 156. docs/kb-api.md's refusal-code list lacks method_unclassified; the code and the agent's manual are right. test-cdp-census's ci row still states 117 ms; the suite has grown since, and the row is restated in .401.
+- **K12 (older than this train).** An ask's attached file chip is not drawn in the strip, also when the item is opened in place.
+
 ## 2.369.399 — 2026-11-13
 
 ### connection-notice-once (the notice pick) — a connection state is ONE live notice, never a log line per event (the owner 2026-11-06, on a phone: «以后别拿这个刷屏了吧»)
