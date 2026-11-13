@@ -438,7 +438,7 @@ const ROWS = [
     a: [decl('the app id and the viewer id captured by the window; nothing displayed is executed')], b: [decl('the keeper judges the lease')], c: [decl('—')], d: [decl('—')], gate: [] },
   { id: 'plugins', surface: 'plugins — Install / Stop / Uninstall',
     doors: [['C', 'src/lib/plugins-ui.js', /^\/api\/plugins\/install$/], ['S', 'src/server/plugin-loader.js', /^\/api\/plugins\/install$/], ['S', 'src/server/mounts-plugins-wiring.js', /^\/api\/plugins\/:id\/install$/]],
-    a: [pin('src/lib/plugins-ui.js', /title: t\('Stop \{name\}\?', \{ name: p\.label \}\),/, 'the Stop confirm names what it stops (D1)')],
+    a: [pin('src/lib/plugins-ui.js', /title: t\('Stop \{name\}\?', \{ name: t\(p\.label\) \}\),/, 'the Stop confirm names what it stops, in the reader\'s words (D1; lane ui-language)')],
     b: [decl('held LOW F8: plugin trust is hashed from the manifest at the click, not the capabilities the dialog showed (an owner-side re-scan only)')],
     c: [decl('the owner\'s own files / another owner client')], d: [decl('names escaped')], gate: [['scripts/test-approval-census.mjs', 'CONTROL (d1)']] },
   { id: 'own-installs', surface: 'VibeSpace\'s own installs — the browser, the browser CLI, agent tools / hooks on a host, rclone',
@@ -672,7 +672,7 @@ console.log('controls (patched copies)');
   // CONTROL (d1): the pre-fix plugins-ui Stop confirm — two positional strings
   {
     const prel = 'src/lib/plugins-ui.js', psrc = readRepo(prel);
-    const pmut = psrc.replace(/const ok = await showConfirmDialog\(\{\n\s*title: t\('Stop \{name\}\?', \{ name: p\.label \}\),\n\s*message: isRelay/, "const ok = await showConfirmDialog(t('Stop {name}?', { name: p.label }), isRelay");
+    const pmut = psrc.replace(/const ok = await showConfirmDialog\(\{\n\s*title: t\('Stop \{name\}\?', \{ name: t\(p\.label\) \}\),\n\s*message: isRelay/, "const ok = await showConfirmDialog(t('Stop {name}?', { name: t(p.label) }), isRelay");
     ok(pmut !== psrc, 'CONTROL (d1): the patch applies');
     const pcopy = M.write(prel, pmut, 'd1');
     const c1 = confirmShapeCensus((f) => (f === prel ? fs.readFileSync(pcopy, 'utf8') : readRepo(f)), LIB);

@@ -129,6 +129,18 @@ This file is the engineers' record of every release: the lanes, the verification
   - Three zh / ja rows.
   - The Machines caption (`.mounts-sec-sub { text-transform: none }`, pinned in the census).
 
+### ui-language — the closure round (主开发 15:15Z: the verifier's must-fix + the smalls, one commit)
+- **MUST:** the F5 door left two dead receiver rows (`desktop-manager.js|now`, `|live`) in test-record-clear-census. Dropped: the rename «meanwhile» toast reads names through nameOf. test-approval-census's Stop-confirm anchor follows `{ name: t(p.label) }`.
+- **The desktop button's aria-label** goes through nameOf. The F5 sink census in test-desktop-switch reads `setAttribute('aria-label' | 'title' | …)` too.
+- **foryou-actions clockWords** (a person's clock) loses the waiver the round moved onto it. It is a row of the shrink-only `clocks` baseline (18), said as debt.
+- **page-time:**
+  - A wall clock the zone lives twice (the US fall-back 01:30) says its offset («GMT-7» / «GMT-8»).
+  - `until()` had no caller and is deleted. The census reds a page-time export with no reader in the bundle.
+  - browser-session-words whenText decides «today» in the zone it prints in.
+- **The generic one-word keys this lane added live under a context:** value-words `set::word` (theme, service-tier, msg-role), worded by `wordOf`, which drops the context when no row has it; `tc('diagnostics' | 'theme-color' | 'eml', …)` at their sites; «Base» dropped (no reader).
+- **The server half of lastRaw:** test-roster-per-pass pins the group view carrying it (the reader's M5a is red).
+- **Census §1b drives the one formatter in-process:** the DST pair, the page-zone «today», page-time's exports.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

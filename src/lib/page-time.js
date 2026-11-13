@@ -10,7 +10,7 @@
 //   dateOf(ms, { full, now })         the date only, the same near rule
 //   clockOf(ms, { seconds })          the time only
 //   span(ms)                          a duration in the reader's units: «2 天 23 小时», «1 小时 59 分钟», «4 分钟», «12 秒»
-//   ago(ms, { now }) / until(ms, …)   «4 分钟前» / «还有 1 小时 59 分钟»
+//   ago(ms, { now })                  «4 分钟前»
 //   num(n, opts)                      a number in the device's locale (Intl.NumberFormat options)
 //
 // The zone: the page's own (owner-facts pageZone — the instance setting, else the hub's zone, else this browser's), handed in
@@ -50,8 +50,15 @@ function dayParts(ms) {
   return { y: p.year, m: p.month, d: p.day };
 }
 const valid = (ms) => { const n = Number(ms instanceof Date ? ms.getTime() : ms); return Number.isFinite(n) && n > 0 ? n : null; };
-/** The zone's words, once, when the page prints in a zone that is not this device's. */
-const zoneTail = (ms) => (zoneOpt().timeZone ? ' ' + shortName(PAGE_ZONE, ms) : '');
+/** The wall clock to the minute in the printing zone — two instants an hour apart that read the same are the repeated hour of
+ *  a fall-back (US 2026-11-01 01:30 PDT and 01:30 PST). */
+const wall = (ms) => fmt({ year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).format(new Date(ms));
+const repeated = (ms) => { const w = wall(ms); return w === wall(ms - 3600e3) || w === wall(ms + 3600e3); };
+/** The zone's words, once: when the page prints in a zone that is not this device's, or when the clock names an hour the zone
+ *  lives twice (the closure round: the two US-DST 01:30 instants printed the same). */
+const offsetOf = (ms) => { try { return (fmt({ hour: 'numeric', timeZoneName: 'shortOffset' }).formatToParts(new Date(ms)).find((x) => x.type === 'timeZoneName') || {}).value || ''; } catch { return ''; } };
+// the repeated hour is told apart by its OFFSET («GMT-7» / «GMT-8» — a zone's short name is the same for both halves)
+const zoneTail = (ms) => { const rep = repeated(ms); return zoneOpt().timeZone ? ' ' + shortName(PAGE_ZONE, ms) + (rep ? ` (${offsetOf(ms)})` : '') : rep ? ' ' + offsetOf(ms) : ''; };
 
 const TIME = (seconds) => ({ hour: cjk() ? '2-digit' : 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) });
 
@@ -109,12 +116,6 @@ export function ago(ms, { now = Date.now() } = {}) {
   const mins = Math.round(d / 60000), hours = Math.round(d / 3600000);
   const one = mins < 60 ? t('{n} min', { n: Math.max(1, mins) }) : hours < 24 ? t('{n} h', { n: hours }) : dayWords(Math.round(d / 86400000));
   return t('{span} ago', { span: one });
-}
-/** «还有 1 小时 59 分钟» — what is left until `ms`; an instant already past says when it was («4 分钟前»), never «in 0 sec». */
-export function until(ms, { now = Date.now() } = {}) {
-  const n = valid(ms);
-  if (n == null) return '';
-  return n <= now ? ago(n, { now }) : t('in {span}', { span: span(n - now) });
 }
 /** A number in the device's locale. */
 export function num(n, opts = undefined) {

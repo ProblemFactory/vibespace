@@ -11,7 +11,7 @@ import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
 import { viewerVerdict, refusalText } from './docx-viewer-model.js';
 import { openWithVerdict } from '../office-open.js'; // §7.9: the viewer's "Open in LibreOffice" — the ONE open-with verdict names the app
 import { init as initPptx } from 'pptx-preview';
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { num, stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, registerOpenAction, svgIcon16 } from './window-types.js';
 import { fsErrorText } from './file-explorer-ops.js'; // verify-r2: a Files refusal in the reader's language
@@ -590,7 +590,7 @@ class FileViewer {
           ${h.from ? `<div><span class="eml-k">${esc(t('From'))}</span>${esc(h.from)}</div>` : ''}
           ${h.to ? `<div><span class="eml-k">${esc(t('To'))}</span>${esc(h.to)}</div>` : ''}
           ${h.cc ? `<div><span class="eml-k">${esc(t('Cc'))}</span>${esc(h.cc)}</div>` : ''}
-          ${h.date ? `<div><span class="eml-k">${esc(t('Date'))}</span>${esc(Number.isFinite(Date.parse(h.date)) ? when(Date.parse(h.date), { full: true }) : h.date)}</div>` : ''}
+          ${h.date ? `<div><span class="eml-k">${esc(tc('eml', 'Date'))}</span>${esc(Number.isFinite(Date.parse(h.date)) ? when(Date.parse(h.date), { full: true }) : h.date)}</div>` : ''}
         </div>
       </div>
       <div class="eml-tools"></div>

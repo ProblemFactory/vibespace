@@ -16,7 +16,7 @@ const i18nKey = (s) => s;
 
 export const VALUE_SETS = Object.freeze({
   // a message's author (the Messages API's roles + the normalizer's tool rows)
-  'msg-role': Object.freeze({ user: i18nKey('You'), assistant: i18nKey('Assistant'), system: i18nKey('System'), tool: i18nKey('Tool') }),
+  'msg-role': Object.freeze({ user: i18nKey('You'), assistant: i18nKey('msg-role::Assistant'), system: i18nKey('System'), tool: i18nKey('msg-role::Tool') }),
   // why a model turn ended (the Messages API's stop_reason)
   'stop-reason': Object.freeze({
     end_turn: i18nKey('Finished normally'), tool_use: i18nKey('Paused to use a tool'), max_tokens: i18nKey('Reached the output limit'),
@@ -24,7 +24,7 @@ export const VALUE_SETS = Object.freeze({
     model_context_window_exceeded: i18nKey('Context window full'),
   }),
   // the usage's service tier
-  'service-tier': Object.freeze({ standard: i18nKey('Standard'), priority: i18nKey('Priority tier'), batch: i18nKey('Batch'), flex: i18nKey('Flex') }),
+  'service-tier': Object.freeze({ standard: i18nKey('service-tier::Standard'), priority: i18nKey('Priority tier'), batch: i18nKey('service-tier::Batch'), flex: i18nKey('service-tier::Flex') }),
   // a reasoning-effort level (claude --effort, codex reasoning effort, the ultra / ultracode extras)
   effort: Object.freeze({
     minimal: i18nKey('Minimal'), low: i18nKey('Low'), medium: i18nKey('Medium'), high: i18nKey('High'), xhigh: i18nKey('XHigh'),
@@ -64,19 +64,27 @@ export const VALUE_SETS = Object.freeze({
     exclusive: i18nKey('Only this VibeSpace — a push carries the messages; a check every 15 min reconciles'),
   }),
   // a built-in theme's name (src/lib/themes.js BUILTIN_THEMES); a custom theme keeps its own name
-  theme: Object.freeze({ dark: i18nKey('Dark'), light: i18nKey('Light'), dracula: i18nKey('Dracula'), nord: i18nKey('Nord'), solarized: i18nKey('Solarized'), monokai: i18nKey('Monokai') }),
+  theme: Object.freeze({ dark: i18nKey('theme::Dark'), light: i18nKey('theme::Light'), dracula: i18nKey('Dracula'), nord: i18nKey('Nord'), solarized: i18nKey('Solarized'), monokai: i18nKey('Monokai') }),
   // the note a model alias carries in the server's list («fable (latest, 200k)» — src/server/cli-env.js CLAUDE_MODEL_ALIASES)
   'model-note': Object.freeze({ latest: i18nKey('latest'), 'latest, 200k': i18nKey('latest, 200k context'), 'latest, 1M context': i18nKey('latest, 1M context') }),
 });
 
 /** The words of `value` in set `set` — the reader's language through `t`, else the value itself (never hidden). */
+/** A table's key through the page's `t`. A one-word key that another surface may spell with another meaning carries its set
+ *  as a CONTEXT (`theme::Light`, `msg-role::Assistant` — the closure round's collision finding); with no row for it (English,
+ *  a stub translator) the word is the key without its context. */
+function wordOf(k, t) {
+  const w = t(k);
+  const i = typeof k === 'string' ? k.indexOf('::') : -1;
+  return w === k && i > 0 ? k.slice(i + 2) : w;
+}
 export function valueWord(set, value, t, { backend = null } = {}) {
   const v = value == null ? '' : String(value);
   if (set === 'job-state') return Object.prototype.hasOwnProperty.call(JOB_STATE_WORDS, v) ? t(JOB_STATE_WORDS[v]) : v;
   if (set === 'perm-mode') return permissionModeShort(backend, v, t) || v;
   if (set === 'browser-claim' && /^http-\d{3}$/.test(v)) return t('it answered HTTP {code}', { code: v.slice(5) });
   const table = VALUE_SETS[set];
-  return table && Object.prototype.hasOwnProperty.call(table, v) ? t(table[v]) : v;
+  return table && Object.prototype.hasOwnProperty.call(table, v) ? wordOf(table[v], t) : v;
 }
 
 /** True when the set holds a word for `value` (a caller that adds the raw value as a hint only when it was worded). */

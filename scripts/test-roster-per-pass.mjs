@@ -579,6 +579,14 @@ async function equality() {
   };
   await step('seeded (list, listFor, liveRoster, reach, liveness, groupsOfSession, membersNow)', (x) => readAll(x));
   await step('the boot sweep: its result + the store after it', async (x) => ({ out: await x.w.groups.noteUserState(), store: storeOf(x), read: readAll(x) }));
+  // the closure round (主开发 15:15Z): the SERVER half of the Channels list's system line — the group VIEW carries lastRaw (a
+  // system line's structure beside its English lastText; the panel words it). The reader's M5a (the view drops it) is RED here.
+  {
+    const view = readAll(xs[1]).list || [];
+    const raw = view.filter((g) => g && g.lastRaw && typeof g.lastRaw === 'object');
+    ok(raw.length > 0 && raw.every((g) => typeof g.lastRaw.kind === 'string' && g.lastRaw.kind !== 'message') && view.every((g) => 'lastRaw' in g),
+      'the group VIEW carries lastRaw after the sweep closed a group (a system line\'s structure — the Channels list words it in the reader\'s language)', view.slice(0, 2).map((g) => ({ id: g.id, lastText: g.lastText, lastRaw: g.lastRaw })));
+  }
   await step('a rename BETWEEN passes (no broadcast)', async (x) => { await tick(); x.sessions.get('w-L3').name = 'gamma renamed'; await tick(); return readAll(x); });
   await step('a Task Group bind changed between passes', async (x) => { await tick(); x.tasks.bind('T-b', `claude:${C.L5}`); await tick(); return readAll(x); });
   await step('a folder rule changed between passes', async (x) => { await tick(); x.tasks.update('T-b', { ctx: [{ path: W_OTHER, tags: ['discover'] }] }); await tick(); return readAll(x); });
