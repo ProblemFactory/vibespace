@@ -81,6 +81,29 @@ const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
 
 /** lane vault-contents-window r2: what a sealed field answers outside the page's reveal window (never a character of it). */
 const VAULT_MASK = '••••••••';
+/** THE WRITE-ONLY LAW (lane ui-controls-and-bugs; 主开发's ruling 2026-11-13 — the walk found the storage Edit dialog showing a
+ *  Drive record's OAuth token in an edit box): a storage record's SECRET bytes never travel to the page — not to the owner's
+ *  cookie, inside the vault's reveal window or out of it. A secret is what the record SEALS: every `<cell>Enc` (the OAuth token,
+ *  a client secret, an S3 secret key / session token, a WebDAV / SFTP password, a bearer token, a Ceph secret); a raw rclone
+ *  record seals EVERY parameter, so there a parameter is a secret by its NAME (SECRET_PARAM — a token / secret / password / key /
+ *  credentials; an id, a file or a path is not). config() drops them and names the ones the record HOLDS in `held`; the dialog
+ *  says «已保存» with an empty «替换…» (the OAuth token: «已授权» beside its Re-authorize door). Everything else stays readable. */
+const SECRET_PARAM = (name) => /(^|_)(token|secret|pass(word)?\d*|key|sas_url|credentials|pem)(_|$)/i.test(String(name)) && !/(_id|_file|_path)$/i.test(String(name));
+function writeOnly(out, m) {
+  const held = [];
+  for (const [k, v] of Object.entries(m)) {
+    if (!/Enc$/.test(k) || typeof v !== 'string') continue;   // a sealed CELL (the bags below are objects)
+    const name = k.slice(0, -3);
+    delete out[name];
+    if (v) held.push(name);
+  }
+  for (const [bag, pre] of [['params', 'param:'], ['extraParams', 'extraParams:']]) {
+    const b = out[bag];
+    if (b && typeof b === 'object') for (const p of Object.keys(b)) if (SECRET_PARAM(p)) { if (b[p]) held.push(pre + p); b[p] = ''; }   // the key stays (its field), never its value
+  }
+  if (held.length) out.held = held;
+  return out;
+}
 class MountManager {
   constructor({ dataDir, broadcast, getSetting }) {
     // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
@@ -275,6 +298,7 @@ class MountManager {
   // OneDrive rejects 1.65.2's download path with "unauthenticated" on EVERY
   // file read while listings/uploads/token-refresh all work — A/B against the
   // live account: 1.65.2 fails, 1.69.3 and 1.75.0 both download fine.
+  static SECRET_PARAM = SECRET_PARAM;   // the census (scripts/test-mount-write-only.mjs) reads the law from here
   static RCLONE_PIN = 'v1.69.3';
 
   rcloneBin() {
@@ -780,11 +804,10 @@ class MountManager {
   }
 
   /**
-   * Full DECRYPTED connection config for the edit dialog (user directive:
-   * prefill the REAL current values — tokens and keys included — instead of
-   * "blank = keep" placeholders). Served only on the cookie-authed config
-   * route; single-user instance model. Env-provisioned records return no
-   * secrets (their connection is deployment-owned and not editable anyway).
+   * The DECRYPTED connection config for the edit dialog (user directive: prefill the REAL current values instead of
+   * "blank = keep" placeholders) — EXCEPT every SECRET (THE WRITE-ONLY LAW above: named in `held`, never sent).
+   * Served only on the cookie-authed config route. Env-provisioned records return no secrets (their connection is
+   * deployment-owned and not editable anyway).
    */
   config(id, { masked = false } = {}) {
     const m = this._get(id);
@@ -797,7 +820,7 @@ class MountManager {
         if (!/Enc$/.test(k) || !v) continue;
         const name = k.slice(0, -3);
         if (typeof v === 'string' && out[name] !== undefined) { out[name] = VAULT_MASK; names.push(name); }
-        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name]) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
+        else if (typeof v === 'object' && !Array.isArray(v) && out[name] && typeof out[name] === 'object') for (const p of Object.keys(v)) if (p in out[name] && !SECRET_PARAM(p)) { out[name][p] = VAULT_MASK; names.push(`${name === 'params' ? 'param' : name}:${p}`); }
       }
       return { ...out, masked: names };
     }
@@ -819,7 +842,7 @@ class MountManager {
     const out = { ...base, type: m.type || 's3' };
     rowFor(this, m).config?.(m, out, dec, this);
     if (m.extraParamsEnc) out.extraParams = Object.fromEntries(Object.entries(m.extraParamsEnc).map(([k, v]) => [k, this._dec(v)]));
-    return out;
+    return writeOnly(out, m);
   }
 
   // ── CRUD ──

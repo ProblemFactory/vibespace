@@ -159,9 +159,10 @@ async function judge(t) {
   const keyYes = await t.hit('/api/accounts/e-a/key', { method: 'GET', headers: t.page(t.cookieA, { 'x-vault-page': String(PAGE) }) });
   if (!(keyYes.status === 200 && keyYes.json.key === PLANT.a && plantsIn(keyYes.raw) === 1)) red.push('GET /api/accounts/:id/key inside the window ⇒ ' + keyYes.status + ' ' + keyYes.raw.slice(0, 80));
   const mNo = await t.hit('/api/mounts/mnt1/config', { method: 'GET' });
-  if (!(mNo.status === 200 && mNo.json.secretKey === '••••••••' && (mNo.json.masked || []).includes('secretKey')) || plantsIn(mNo.raw)) red.push('GET /api/mounts/:id/config without the window ⇒ not masked ' + mNo.raw.slice(0, 120));
+  // lane ui-controls-and-bugs (THE WRITE-ONLY LAW, 主开发's ruling 2026-11-13): a storage secret is HELD — named, never sent — for the owner's cookie too
+  if (!(mNo.status === 200 && !('secretKey' in mNo.json) && (mNo.json.held || []).includes('secretKey')) || plantsIn(mNo.raw)) red.push('GET /api/mounts/:id/config without the window ⇒ not held ' + mNo.raw.slice(0, 120));
   const mYes = await t.hit('/api/mounts/mnt1/config', { method: 'GET', headers: t.page(t.cookieA, { 'x-vault-page': String(PAGE) }) });
-  if (!(mYes.status === 200 && mYes.json.secretKey === PLANT_MOUNT && !mYes.json.masked)) red.push('GET /api/mounts/:id/config inside the window ⇒ ' + mYes.raw.slice(0, 120));
+  if (!(mYes.status === 200 && !('secretKey' in mYes.json) && (mYes.json.held || []).includes('secretKey') && !mYes.json.masked) || plantsIn(mYes.raw)) red.push('GET /api/mounts/:id/config inside the window ⇒ the secret travelled ' + mYes.raw.slice(0, 120));
   const mTab2 = await t.hit('/api/mounts/mnt1/config', { method: 'GET', headers: t.page(t.cookieB, { 'x-vault-page': String(PAGE) }) });
   if (plantsIn(mTab2.raw)) red.push('GET /api/mounts/:id/config from another sign-in carried the secret');
   // the window is fixed: activity (reveals) never extends it

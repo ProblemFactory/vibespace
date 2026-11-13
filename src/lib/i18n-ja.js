@@ -4812,6 +4812,12 @@ export default {
   "Turn auto-continue off": "自動続行を取り消す",
   "Every subscription is in the pool, including ones you add later": "すべてのサブスクリプションがプールに入っています（今後追加するものも含む）",
   "Every ChatGPT account is in the pool, including ones you add later": "すべての ChatGPT アカウントがプールに入っています（今後追加するものも含む）",
+  // lane ui-controls-and-bugs — THE WRITE-ONLY LAW (the storage Edit dialog: a secret is saved, never shown again, only replaced)
+  "Authorized · {provider}": "認証済み · {provider}",
+  "Not authorized · {provider}": "未認証 · {provider}",
+  "Replace…": "置き換え…",
+  "Type the new value": "新しい値を入力",
+  "Paste the new token JSON": "新しいトークン JSON を貼り付け",
   "Sender line": "送信者の説明行",
   "Instance default": "インスタンスの既定",
   "Applied on save — the account re-reads with the new settings; switching the client opens Re-authorize first.": "保存すると適用 — アカウントは新しい設定で読み直します。クライアントを切り替えると先に再認可が開きます。",

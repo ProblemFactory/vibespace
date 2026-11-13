@@ -294,15 +294,17 @@ const rr0 = vc.revealRecord('me', null, 'mounts', 'mnt1');
 const w4 = await vc.startReveal('me', PW);
 const rr1 = vc.revealRecord('me', w4.page, 'mounts', 'mnt1');
 ok(rr0.code === 'reveal_needs_password' && rr1.ok && vc.revealRecord('me', w4.page, 'zz', 'mnt1').code === 'not_found', 'revealRecord (a store\'s whole record, the mount edit dialog): the same door — no window ⇒ refused; inside it ⇒ ok');
-console.log('③b THE MOUNT EDIT DIALOG\'S RECORD — masked outside the window');
+console.log('③b THE MOUNT EDIT DIALOG\'S RECORD — a secret is HELD, never sent (lane ui-controls-and-bugs, the write-only law); the rest masked outside the window');
 {
   const mk = mm.config('mnt1', { masked: true });
   const real = mm.config('mnt1');
-  ok(mk.secretKey === '••••••••' && JSON.stringify(mk.masked) === '["secretKey"]' && mk.bucket === 'b' && mk.accessKey === 'AK', 'masked: every sealed field the dialog shows answers the mask and is named (an s3 record: secretKey); the rest of the record is real', mk);
-  ok(real.secretKey === PL.mSecret && real.masked === undefined, 'inside the window: the real values (the dialog\'s prefill, as before)');
+  ok(!('secretKey' in mk) && JSON.stringify(mk.held) === '["secretKey"]' && !(mk.masked || []).includes('secretKey') && mk.bucket === 'b' && mk.accessKey === 'AK', 'outside the window: the secret key is HELD (named, never sent — not even masked); the rest of the record is real', mk);
+  ok(!('secretKey' in real) && JSON.stringify(real.held) === '["secretKey"]' && !JSON.stringify(real).includes(PL.mSecret), 'inside the window: still held, never sent (the write-only law — the dialog says «已保存» + «替换…»)', real);
   mm._state.mounts.push({ id: 'rc1', name: 'Custom rclone', type: 'rclone', rcloneType: 'drive', remotePath: '', paramsEnc: { client_secret: mm._enc(PL.mParam), team_drive: mm._enc('0ATeamDrive') }, createdAt: clock });
   const rk = mm.config('rc1', { masked: true }), rr = mm.config('rc1');
-  ok(rk.params.client_secret === '••••••••' && rk.params.team_drive === '••••••••' && rk.masked.includes('param:client_secret') && rk.driveMode === 'shared-drive' && rr.params.client_secret === PL.mParam, 'an rclone record: every sealed param masked as param:<key> (the dialog\'s own field names); what is derived from them (driveMode) stays right', rk);
+  // lane ui-controls-and-bugs (THE WRITE-ONLY LAW): an rclone `client_secret` / `token` parameter is an OAuth credential — HELD
+  // (its key stays, its value '' in AND out of the window, named in `held`); every other sealed parameter keeps the vault's mask
+  ok(rk.params.client_secret === '' && rk.params.team_drive === '••••••••' && rk.held.includes('param:client_secret') && !rk.masked.includes('param:client_secret') && rk.masked.includes('param:team_drive') && rk.driveMode === 'shared-drive' && rr.params.client_secret === '' && rr.params.team_drive === '0ATeamDrive' && rr.held.includes('param:client_secret') && !JSON.stringify(rr).includes(PL.mParam), 'an rclone record: its OAuth client_secret HELD (never sent, even in the window), every other sealed param masked as param:<key> (the dialog\'s own field names); what is derived from them (driveMode) stays right', rk);
   mm._state.mounts.pop();
   ok(!JSON.stringify(mk).includes(PL.mSecret) && !JSON.stringify(mk).includes(PL.mParam), 'the masked record carries no planted value');
 }

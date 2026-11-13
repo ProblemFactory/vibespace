@@ -80,7 +80,9 @@ async function drive(MM, tag) {
     const id = mm.add({ type: 'acme', name: 'Acme ' + tag, acmeHost: 'h1.example', acmeKey: 'k-1', clientId: 'acme-client.apps.googleusercontent.com', clientSecret: 's-1' });
     const row = () => mm.list().find((r) => r.id === id);
     out.listed = row() && row().type === 'acme' && row().source === 'ACME h1.example';
-    out.config = JSON.stringify(mm.config(id)).includes('"acmeKey":"k-1"');
+    // lane ui-controls-and-bugs (THE WRITE-ONLY LAW): its config hook is reached (acmeHost answers) and its SEALED key — a new row's
+    // secret, covered with no row of its own — is named in `held`, never sent
+    out.config = ((c) => c.acmeHost === 'h1.example' && !JSON.stringify(c).includes('k-1') && (c.held || []).includes('acmeKey'))(mm.config(id));
     await mm.update(id, { acmeHost: 'h2.example', acmeKey: 'k-2' });
     const { env, remote } = mm._rcloneFor(mm._get(id));
     out.env = env.RCLONE_CONFIG_VS_TYPE === 'acme' && env.RCLONE_CONFIG_VS_HOST === 'h2.example' && env.RCLONE_CONFIG_VS_KEY === 'k-2' && remote === 'VS:';
@@ -187,6 +189,17 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const lifted = before.filter((b, i) => childDelta(b, after[i]) !== b).length;
     ok(lifted > 0, `③ the child-resolver delta is real: ${lifted} OAuth rows' children now read OAuth-backed (their parent's row)`);
     before = before.map((b, i) => childDelta(b, after[i]));
+    // lane ui-controls-and-bugs (THE WRITE-ONLY LAW, src/mounts.js writeOnly; 主开发's ruling 2026-11-13): config() answers no SECRET —
+    // every cell the record seals (the scenario's own `rec` names them: `<k>Enc`) and a secret-named rclone parameter — and names them in
+    // `held`: the named delta, applied to the base's answer from the record beside it (and proven real)
+    const LAW = (f) => { const c = JSON.parse(JSON.stringify(f.config)), held = [];
+      for (const [k, v] of Object.entries(f.rec || {})) if (/Enc$/.test(k) && typeof v === 'string') { delete c[k.slice(0, -3)]; if (v !== 'dec:') held.push(k.slice(0, -3)); }
+      for (const [bag, pre] of [['params', 'param:'], ['extraParams', 'extraParams:']]) if (c[bag] && typeof c[bag] === 'object') for (const q of Object.keys(c[bag])) if (MountManager.SECRET_PARAM(q)) { if (c[bag][q]) held.push(pre + q); c[bag][q] = ''; }
+      if (held.length) c.held = held; return { ...f, config: c }; };
+    const lawed = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'rec' in v && v.config && typeof v.config === 'object' && 'type' in v.config ? LAW(v) : v)));
+    const lawedN = before.filter((b) => JSON.stringify(lawed(b)) !== JSON.stringify(b)).length;
+    ok(lawedN > 0, `③ the write-only delta is real: ${lawedN} scenarios' base config() answered a secret the tree now only names in \`held\``);
+    before = before.map(lawed);
     // lane vfs-cache-local: every list row gains ONE cell, `cache` (where its VFS cache lives) — the named delta, dropped
     // from the tree's answer before comparing (and proven present)
     const CELL = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'cache' in v) ? (({ cache, ...r }) => r)(v) : v));

@@ -106,6 +106,39 @@ function maskVaultFields(fields, cfg) {
   for (const f of fields) if (keys.includes(f[0])) { f[2] = '••••••••'; f[3] = ''; }
   return keys;
 }
+/** lane ui-controls-and-bugs — THE WRITE-ONLY LAW's page half (src/mounts.js writeOnly; 主开发's ruling 2026-11-13): a storage
+ *  record's secrets come back only NAMED in `cfg.held`, never as bytes. A held secret is «已保存» with «替换…», which opens an EMPTY
+ *  box sent only when typed (the Integrations page's shape); an unset one is an empty password box; the OAuth token is ONE line
+ *  «已授权 · Google Drive»; its Re-authorize door stays in the footer, as the channel Edit's (`door`: the row has one — a row
+ *  without one gets «替换…» to paste a new token). SECRET_FIELD = the cells the server seals (+ a raw rclone parameter by the server's own name rule). */
+const SECRET_FIELD = (k) => /^(token|clientSecret|secretKey|sessionToken|pass|bearerToken|cephSecret)$/.test(k)
+  || (/^(param|extraParams):/.test(k) && /(^|_)(token|secret|pass(word)?\d*|key|sas_url|credentials|pem)(_|$)/i.test(k.split(':')[1]) && !/(_id|_file|_path)$/i.test(k));
+function heldFields(fields, cfg, provider, door) {
+  const held = new Set(Array.isArray(cfg && cfg.held) ? cfg.held : []);
+  const replaceBtn = `<button type="button" class="mounts-btn mounts-held-replace">${escHtml(tr('Replace…'))}</button>`;
+  for (const f of fields) {
+    const k = f[0];
+    if (k === 'token') {
+      const on = held.has('token');
+      const state = `<span class="mounts-signin-state ${on ? 'on' : 'off'}">${escHtml(on ? tr('Authorized · {provider}', { provider }) : tr('Not authorized · {provider}', { provider }))}</span>`;
+      const paste = door ? '' : `<textarea name="token" hidden placeholder="${escHtml(tr('Paste the new token JSON'))}" style="min-height:60px;font-size:11px"></textarea>`;
+      f[4] = { html: `<label>${escHtml(tr('Sign-in'))}<span class="mounts-signin">${state}${door ? '' : replaceBtn}</span>${paste}</label>` };
+      f[3] = '';
+    } else if (SECRET_FIELD(k)) {
+      const box = `<input type="password" name="${escHtml(k)}" value="" placeholder="${escHtml(tr('Type the new value'))}" autocomplete="new-password"${held.has(k) ? ' hidden' : ''}>`;
+      f[4] = { html: held.has(k) ? `<label>${escHtml(f[1])}<span class="mounts-held"><span class="mounts-held-state">${escHtml(tr('Saved'))}</span>${replaceBtn}</span>${box}</label>` : `<label>${escHtml(f[1])}${box}</label>` };
+      f[3] = '';
+    }
+  }
+}
+/** «替换…» opens its field's empty box (one delegated listener per form). */
+function wireHeld(form) {
+  form.addEventListener('click', (e) => {
+    const b = e.target.closest('.mounts-held-replace'); if (!b) return;
+    e.preventDefault(); const box = b.closest('label').querySelector('[name]');
+    if (box) { box.hidden = false; box.focus(); } b.hidden = true;
+  });
+}
 /** …and the dialog says so: Show = the second password (验证是你), then `reopen` (the dialog again, with them). */
 function vaultMaskedNote(form, keys, reopen) {
   if (!keys.length) return;
@@ -665,7 +698,7 @@ export function installSidebarMounts(Sidebar) {
       const type = cfg.type;
       const fallback = presets.length === 1 ? presets[0].key : (presets.find((p) => p.key === 'default')?.key || '');
       const of = (r) => {
-        const custom = sw.identity === 'id' ? (r.clientId || '') : (r.clientId && r.clientSecret ? r.clientId : '');
+        const custom = sw.identity === 'id' ? (r.clientId || '') : (r.clientId && (r.clientSecret || (r.held || []).includes('clientSecret')) ? r.clientId : '');   // a held secret counts (never sent)
         return custom ? `custom:${custom}` : `preset:${r.clientPreset || fallback}`;
       };
       const next = { ...cfg, ...cur };
@@ -2493,15 +2526,13 @@ export function installSidebarMounts(Sidebar) {
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
     // ── Edit / derive (2.107.0, user request: FishR2-class mounts needed a
     // bucket/path fix with no edit UI; one credential → many mounts) ──
-    // Fields are PREFILLED with the real current connection settings — secrets
-    // (access/secret keys, OAuth tokens, passwords, bearer tokens, rclone
-    // params) included — fetched decrypted from GET /api/mounts/:id/config, so
-    // the user reads and edits every value directly (single-user instance).
+    // Fields are PREFILLED with the real current connection settings, fetched from GET /api/mounts/:id/config — EXCEPT every
+    // secret (THE WRITE-ONLY LAW, lane ui-controls-and-bugs, 主开发's ruling 2026-11-13): the route names the secrets a record
+    // holds (`held`) and never sends one; heldFields() draws them as «已保存» + «替换…» / the OAuth sign-in line.
 
     _mountEditFields(cfg, presets = []) {
-      // [key, label, placeholder, currentValue] per type. `cfg` is the DECRYPTED
-      // config from /api/mounts/:id/config, so every value below is the real,
-      // current setting (prefilled), secrets included.
+      // [key, label, placeholder, currentValue] per type. `cfg` is the config from /api/mounts/:id/config: every value below
+      // is the real, current setting (prefilled) — a secret is absent (named in cfg.held; heldFields() draws it).
       // Env-provisioned storage: connection is deployment-owned — only the
       // mount point (and name) are editable, both added by the caller.
       if (cfg.envLocked || cfg.origin === 'my-storage') return [];
@@ -2517,8 +2548,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     async _showEditMountDialog(m) {
-      // Fetch the fully DECRYPTED connection first so every field (secrets
-      // included) can be prefilled with its real current value.
+      // the connection's current settings (its secrets only NAMED — the write-only law)
       let cfg;
       try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
@@ -2534,11 +2564,13 @@ export function installSidebarMounts(Sidebar) {
       if (!(await ready) || !live()) return null;   // r4: queued behind another mount's open Edit (its ask) — its fields land when it opens; null: kept / closed
       const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg, editPresets)];
       const maskedKeys = maskVaultFields(fields, cfg);   // lane vault-contents-window r2
+      heldFields(fields, cfg, this._oauthProviderNames(cfg).product, this._isDriveBacked(cfg) && !cfg.parentId);
       // Mount point: empty = default location — m.path shows the current/default
       // spot as a placeholder (prefilling the computed default would freeze it).
       fields.push(['customPath', tr('Mount point'), m.path || '/absolute/path', cfg.customPath || '']);
       const isRclone = (this._providerRow(cfg.type).edit || []).some((f) => f.params) && !cfg.parentId && !cfg.envLocked && cfg.origin !== 'my-storage';
       form.innerHTML = fields.map(([k, label, ph, val, opts]) => {
+        if (opts?.html) return opts.html;
         if (opts?.type === 'select') {
           return `<label>${escHtml(label)}<select name="${k}">${(opts.options || []).map(([v, l]) =>
             `<option value="${escHtml(v)}"${v === val ? ' selected' : ''}>${escHtml(l)}</option>`).join('')}</select></label>`;
@@ -2552,13 +2584,9 @@ export function installSidebarMounts(Sidebar) {
         + (isRclone ? `<div class="mounts-note">${tr("Clear a parameter's value to remove it.")}</div>` : '')
         + `<div class="cfg-err"></div>
            <div class="dialog-actions"><button type="submit" class="btn-create">${tr('Save')}</button></div>`;
-      body.appendChild(form);
+      body.appendChild(form); wireHeld(form);
       vaultMaskedNote(form, maskedKeys, () => { close(); this._showEditMountDialog(m); });
-      // Drive records: driveMode is a real SELECT (the raw text input demanded
-      // magic strings — user report "can't change shared drive params"), and
-      // teamDriveId gets the same "List shared drives" picker as the add
-      // dialog (id-based: the record's stored credentials resolve server-side,
-      // children through their parent).
+      // Drive: teamDriveId gets the add dialog's «List shared drives» picker (resolved server-side by the record's id)
       if (this._hasWidget(cfg.type, 'shared-drives')) {
         const tdInput = form.querySelector('[name="teamDriveId"]');
         if (tdInput) {
@@ -2591,8 +2619,7 @@ export function installSidebarMounts(Sidebar) {
         const li = form.querySelector('[name="labelIds"]');
         if (li) this._wireGmailLabelsPicker({ inputs: { labelIds: li } }, m.id);
       }
-      // Drive-backed records get the guided re-auth right in the edit dialog
-      // (the error-line button only shows once a mount has FAILED).
+      // the guided re-auth in the footer, as the channel Edit's (test-oauth-field-parity §7; the error line's button shows only once a mount FAILED)
       if (this._isDriveBacked(cfg) && !cfg.envLocked && cfg.origin !== 'my-storage' && !cfg.parentId) {
         const rb = document.createElement('button');
         rb.type = 'button';
@@ -2623,13 +2650,14 @@ export function installSidebarMounts(Sidebar) {
       const err = form.querySelector('.cfg-err');
       form.onsubmit = async (e) => {
         e.preventDefault(); err.textContent = '';
-        // Fields are prefilled with their real values, so send only what CHANGED
-        // (an unchanged secret isn't re-encrypted; a cleared field is a change).
+        // send only what CHANGED (a cleared field is a change; a secret's box starts empty, so an untouched one sends nothing)
         const patch = {};
         const params = {};
         let newKey = '', newVal = '';
         for (const [k, , , orig] of fields) {
-          const v = form.querySelector(`[name="${k}"]`).value;
+          const box = form.querySelector(`[name="${k}"]`);
+          if (!box) continue;   // the sign-in line (a held token): no box, nothing to send
+          const v = box.value;
           if (k.startsWith('param:')) {
             // prefilled with the current value; clearing it removes the
             // parameter (server deletes on empty), any other change updates it.
