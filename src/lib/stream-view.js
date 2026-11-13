@@ -10,6 +10,11 @@
 //   • THE STALL (lane stream-leg-flap — the owner's black «串流 · 2 个显示器 · 0 fps»): a PLAYING picture that decodes nothing for
 //     STREAM_LIMITS.stallMs while the machine says it sends (src/stream-model.js stallStep) ends `stalled` — the window says so
 //     and offers the stream again (its NEVER SILENT ladder), never «0 fps» for ever while ICE still says connected
+//   • THE LOCK (lane mac-locked-capture): the long poll's `paused` ({ why: 'locked', since } — a Mac whose screen is locked: its
+//     capture waits, the session goes on) ⇒ `onPaused(p)` at each change (the shell says it — never a black pane with a spinner);
+//     while paused the connect budget waits (a picture cannot come) and THE STALL judges nothing (its watch starts again from the
+//     first tick after the unlock — the machine's count may move before this page decodes the capture's first frame), and the
+//     unlock's picture plays in this same view (`get paused`)
 //   • input (P1b): the pointer, the wheel and the keys go down the data channel (src/lib/stream-input.js — the primary
 //     modifier moved by THE table; physical keys); Ctrl/⌘+V sends this computer's clipboard text first, then the V; a
 //     shown frame is acknowledged (≤ 4 a second) so the agent can time the picture's way
@@ -44,7 +49,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BASE = '/api/desktop/machine-desktop/stream';
 
 /** `opts` = { hostId, hostPlatform?, source?, fp16?, hdr?, onStatus(state, code), onStats(page, agent), onFallback(code, why, taken, info),
- *  onInput(refused), onSource(source), onHdrFailed() } → { connect(), dispose(why?), focus(), get state, get played, stats(), agent(), source(), video } —
+ *  onInput(refused), onSource(source), onHdrFailed(), onPaused(p) } → { connect(), dispose(why?), focus(), get state, get played, get paused, stats(), agent(), source(), video } —
  *  dispose(why) names the end for the hub and the machine's log ('closed' = the window's ×; 'stopped' = the person's 停止串流 —
  *  lane stream-window-fixes); `info` = a refusal's numbers (`too_many_streams`: the machine's live / cap / displays — lane
  *  desktop-display-modes) | null */
@@ -67,6 +72,7 @@ export function createStreamView(host, opts = {}) {
   let refusal = null; // lane desktop-display-modes: a refused start's numbers (the per-machine cap's count)
   let hdrWatch = null, hdrFailed = false; // lane stream-hdr-passthrough: the decode watch of an HDR picture (hdrStallStep)
   let stall = null; // lane stream-leg-flap: THE STALL's watch (stallStep)
+  let paused = null; // lane mac-locked-capture: THE LOCK — the machine's capture waits ({ why, since }) | null
   let micOffered = false, micTr = null; // lane stream-mic-road: the machine offered the microphone's m-line · its transceiver here
   let audioOffered = false, soundTr = null, strayAudio = null; // lane speaker-passthrough-v1: the machine offered its sound's track · the transceiver · a track that came before the picture's
 
@@ -91,7 +97,17 @@ export function createStreamView(host, opts = {}) {
   }
   function armConnectTimer() {
     clearTimeout(connectTimer);
-    connectTimer = setTimeout(() => { if (st.state === 'connecting' || st.state === 'restarting' || st.state === 'offered') step('timeout'); }, STREAM_LIMITS.connectMs);
+    connectTimer = setTimeout(() => { if (paused) { armConnectTimer(); return; } if (st.state === 'connecting' || st.state === 'restarting' || st.state === 'offered') step('timeout'); }, STREAM_LIMITS.connectMs); // THE LOCK: no picture can come while paused
+  }
+  /** THE LOCK: the machine said its capture waits / goes on — the shell is told at each change; the unlock gets a fresh budget
+   *  and THE STALL a fresh baseline (round 2: a lock ≥ stallMs, then the machine's count first ⇒ a spurious `stalled`). */
+  function pausedNow(p) {
+    const was = paused;
+    paused = p && typeof p === 'object' ? { why: String(p.why || ''), since: Number.isFinite(p.since) ? p.since : null } : null;
+    if (!!was === !!paused) return;
+    stall = null; // THE STALL's watch starts again from the next tick's counters (stallStep holds none while paused)
+    if (!paused && (st.state === 'connecting' || st.state === 'restarting')) armConnectTimer();
+    try { opts.onPaused?.(paused); } catch { /* the shell's */ }
   }
   /** lane stream-hdr-passthrough: the answer lists AV1 first (the machine offered it first; some browsers answer in their own order). */
   function preferAv1() {
@@ -184,6 +200,7 @@ export function createStreamView(host, opts = {}) {
       if (r.relay !== undefined) hubRelay = r.relay;
       const lf = legFallStep(fallsSeen, hubRelay, st.state); fallsSeen = lf.seen;
       if (lf.restart) step('failed', 'leg_fell'); // lane stream-udp-leg-fallback R1: the hub left a leg that carried nothing before a picture — fresh checks now
+      if (r.paused !== undefined && !r.ended) pausedNow(r.paused); // lane mac-locked-capture: THE LOCK
       try { opts.onHandover?.(r.handover || null); } catch { /* the shell's */ } // lane desktop-handover: the lease's facts
       if (r.ended) { why = null; step('ended', r.ended === 'not_found' ? 'stream_ended' : r.ended); break; }
     }
@@ -212,7 +229,7 @@ export function createStreamView(host, opts = {}) {
     if (v.sick && (st.state === 'playing' || st.state === 'connecting')) step(v.event, v.event === 'failed' ? 'ice_failed' : 'ice_disconnected');
     // lane stream-leg-flap: THE STALL — the frames stopped while ICE still says connected (no rule above acts on it) ⇒ ended
     // `stalled`: the hub's record says so, the window says so and offers the stream again
-    const sv = stallStep(stall, { playing: st.state === 'playing', visible: typeof document === 'undefined' || document.visibilityState !== 'hidden', pageFrames: page.frames, agentFrames: agent && agent.frames, now: performance.now() });
+    const sv = stallStep(stall, { playing: st.state === 'playing', visible: typeof document === 'undefined' || document.visibilityState !== 'hidden', paused: !!paused, pageFrames: page.frames, agentFrames: agent && agent.frames, now: performance.now() });
     stall = sv.w;
     if (sv.stalled && st.state === 'playing') { why = null; step('ended', 'stalled'); }
   }
@@ -292,6 +309,7 @@ export function createStreamView(host, opts = {}) {
     video,
     get state() { return st.state; },
     get played() { return played; }, // lane stream-fallback-never-silent: did a picture of this stream ever play
+    get paused() { return paused; }, // lane mac-locked-capture: THE LOCK — { why, since } while the machine's capture waits
     get key() { return key; }, // lane desktop-handover: the session a hand-over names
     get hdr() { return !!opts.hdr; }, // lane stream-hdr-passthrough: this view asked for the HDR road
     get micReady() { return !!micTr; }, // lane stream-mic-road: the machine's microphone m-line is here

@@ -25,7 +25,8 @@
  *   fallbackVerdict(facts)           when a sick connection becomes a fallback to the VNC picture (after the restart budget)
  *   endingVerdict(facts)             NEVER SILENT (lane stream-fallback-never-silent): the window's answer to its stream's end —
  *                                    before any picture played, the VNC picture (the old rule); once one played, never by itself:
- *                                    the same source again, the main display (it was gone), then the person's choice
+ *                                    the same source again, the main display (it was gone), then the person's choice; a Mac
+ *                                    that stayed LOCKED past its bound (`locked` — lane mac-locked-capture) ⇒ the choice at once
  *   videoToSource(pt, box, video, origin)   a point on the <video> element → the source's pixel (letterbox aware) + origin
  *   INPUT_KINDS / inputEventOf(raw)  the data channel's event table, validated (what the daemon accepts; anything else is
  *                                    refused by name, never guessed) · wheelUnitsOf(deltaY, deltaMode)
@@ -280,9 +281,12 @@ function fallbackVerdict({ pc = 'new', since = 0, now = 0, graceMs = STREAM_LIMI
  *  the VNC picture by itself: 'retry' the same source once (NEVER_SILENT.retryMs on), then — the display gone (`gone`) and
  *  the stream named one (`named`) — 'main' (the machine's main display) once, then 'ask' (「串流中断：…」 with 「重试」 and
  *  「显示 VNC 画面」 — the VNC picture only on that press). An ending NEVER_SILENT.windowMs after the last retry starts the
- *  ladder again. `step` / `at` = the ladder so far (the verdict's own, carried by the window). → { act, step, at } */
+ *  ladder again. `step` / `at` = the ladder so far (the verdict's own, carried by the window). `locked` (lane mac-locked-capture)
+ *  = the stream ended screen_locked — the Mac stayed locked past the source's bound: 'ask' at once, played or not (a retry would
+ *  wait out another bound on a locked screen; the VNC picture only on the press). → { act, step, at } */
 const NEVER_SILENT = Object.freeze({ retryMs: 1000, windowMs: 60000 });
-function endingVerdict({ played = false, step = 0, at = 0, now = 0, gone = false, named = false } = {}) {
+function endingVerdict({ played = false, step = 0, at = 0, now = 0, gone = false, named = false, locked = false } = {}) {
+  if (locked) return { act: 'ask', step: 3, at: now };
   if (!played) return { act: 'fallback', step, at };
   if (!step || now - at >= NEVER_SILENT.windowMs) return { act: 'retry', step: 1, at: now };
   if (step === 1 && gone && named) return { act: 'main', step: 2, at };
@@ -654,9 +658,12 @@ function streamRoadOf(page, relay) {
  *  machine's sent frames when the page's last advanced); `facts` = { playing, visible, pageFrames, agentFrames, now }.
  *  STALLED = playing, visible, no frame decoded for stallMs AND the machine's sent count moved meanwhile (pictures were sent,
  *  none arrived) — a still screen that sends nothing never stalls (a Mac repeats its picture every 0.5 s anyway); a hidden
- *  page re-arms (a background tab is not judged). → { w, stalled, ms } */
-function stallStep(w, { playing = false, visible = true, pageFrames = null, agentFrames = null, now = 0 } = {}, { stallMs = STREAM_LIMITS.stallMs } = {}) {
+ *  page re-arms (a background tab is not judged). `paused` (lane mac-locked-capture — THE LOCK: the machine's capture waits,
+ *  no picture is owed) = no watch at all: the first tick after the unlock starts it again from that tick's counters (the
+ *  machine's count moving before the page's first frame is the capture coming back, never a stall). → { w, stalled, ms } */
+function stallStep(w, { playing = false, visible = true, paused = false, pageFrames = null, agentFrames = null, now = 0 } = {}, { stallMs = STREAM_LIMITS.stallMs } = {}) {
   const pf = Number.isFinite(pageFrames) ? pageFrames : null, af = Number.isFinite(agentFrames) ? agentFrames : null;
+  if (paused) return { w: null, stalled: false, ms: 0 };
   if (!playing || !visible || pf == null || !w || pf > w.pf || (w.af == null && af != null)) return { w: playing && pf != null ? { pf, af, at: now } : null, stalled: false, ms: 0 };
   const ms = Math.max(0, now - w.at);
   return { w, stalled: ms >= stallMs && af != null && af > w.af, ms };

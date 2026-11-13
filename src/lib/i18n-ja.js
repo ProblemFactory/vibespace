@@ -9448,6 +9448,12 @@ export default {
   "the machine’s screen capture kept being interrupted": "マシンの画面キャプチャが何度も中断されました", // lane stream-fallback-never-silent
   "Stream interrupted: {why}": "ストリームが中断されました：{why}", // lane stream-fallback-never-silent
   "Stream interrupted: {why} — reconnecting…": "ストリームが中断されました：{why} — 再接続しています…", // lane stream-fallback-never-silent
+  "The Mac is locked (since {time}) — the picture comes back by itself once it is unlocked": "Mac はロック中です（{time} から）— ロックを解除すると自動で続きます", // lane mac-locked-capture
+  "The Mac is locked — the picture comes back by itself once it is unlocked": "Mac はロック中です — ロックを解除すると自動で続きます", // lane mac-locked-capture
+  "Stream · locked": "ストリーム · ロック中", // lane mac-locked-capture
+  "the Mac stayed locked too long — unlock it, then try again": "Mac のロックが長く続きました — ロックを解除してからもう一度試してください", // lane mac-locked-capture
+  "the Mac’s screen capture did not start in time": "Mac の画面キャプチャが時間内に始まりませんでした", // lane mac-locked-capture
+  "the Mac did not list its screens in time": "Mac が時間内に画面の一覧を返しませんでした", // lane mac-locked-capture
   "the machine’s video encoder stopped": "マシンのビデオエンコーダーが止まりました",
   "Open System Settings": "システム設定を開く",
   "Opened System Settings › {pane} on {machine}": "{machine} でシステム設定 › {pane} を開きました",

@@ -39,7 +39,8 @@
 //   §14c THE DAEMON'S HYSTERESIS (lane stream-leg-flap): a lossy leg (every third PONG lost, a socket error) stays UP for a
 //       minute while it carries the picture — RED CONTROL: one miss = DOWN (the .330 daemon: missMax 1) goes DOWN ≥ 3 times
 //   §14d THE STALL (lane stream-leg-flap): stallStep — a playing picture that decodes nothing for stallMs while the machine
-//       sends ⇒ stalled; a still screen (the machine sends nothing), a hidden page, a picture still decoding ⇒ never
+//       sends ⇒ stalled; a still screen (the machine sends nothing), a hidden page, a picture still decoding ⇒ never; a
+//       PAUSED stream (lane mac-locked-capture — a locked Mac) holds no watch, the unlock's first tick is a fresh baseline
 //   §14e THE LEG'S HEALTH, PURE (lane stream-udp-leg-fallback — 2026-10-26 the owner's Mac: «leg up» at the offer, 45 s black):
 //       the PROBE / ECHO padded to the largest datagram the leg carries (r2: legProbeBytes ≥ the leg DATA of the packetizers'
 //       largest payload in werift's own RTP packet, sealed by werift's SRTP; no probe literal — round 1's 1200 was the payload alone) and the
@@ -622,6 +623,9 @@ console.log('§14d legElect (PURE) · THE STALL (lane stream-leg-flap): stallSte
   const hid = SM.stallStep(s0.w, { playing: true, visible: false, pageFrames: 10, agentFrames: 460, now: T * 2 }), off = SM.stallStep(s0.w, { playing: false, pageFrames: 10, agentFrames: 460, now: T * 2 });
   const noAgent = SM.stallStep(SM.stallStep(null, { playing: true, pageFrames: 10, agentFrames: null, now: 0 }).w, { playing: true, pageFrames: 10, agentFrames: null, now: T * 2 });
   ok(!hid.stalled && hid.w.at === T * 2 && !off.stalled && off.w === null && !noAgent.stalled, 'a hidden page re-arms (a background tab is not judged); not playing = no watch; no machine numbers yet = never stalled');
+  const lk = SM.stallStep(s0.w, { playing: true, paused: true, pageFrames: 10, agentFrames: 460, now: T * 2 }), un = SM.stallStep(lk.w, { playing: true, pageFrames: 10, agentFrames: 490, now: T * 2 + 1000 });
+  ok(!lk.stalled && lk.w === null && !un.stalled && un.w && un.w.at === T * 2 + 1000 && un.w.af === 490 && SM.stallStep(un.w, { playing: true, pageFrames: 10, agentFrames: 850, now: T * 3 + 1000 }).stalled,
+    'lane mac-locked-capture: a PAUSED stream (a locked Mac — no picture is owed) holds no watch; the first tick after the unlock is a fresh baseline (the machine\'s count moving first is no stall); a real stall after it still ends at stallMs');
 }
 
 console.log('§4b NEVER SILENT (lane stream-fallback-never-silent — incident inc-mvf7z2a3-9sxi): endingVerdict');

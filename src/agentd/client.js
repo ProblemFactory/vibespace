@@ -1309,7 +1309,7 @@ class DeviceManager {
     this._request({ op: 'stream-stats', sid, watch: true, timeoutMs: 10000 }).then((r) => {
       const f = this._streamWatches?.get(sid);
       const res = r && r.result;
-      if (res && res.ok) { try { f?.({ op: 'stream-stats', sid, stats: res.stats, state: res.state, rearmed: true }); } catch { } return; }
+      if (res && res.ok) { try { f?.({ op: 'stream-stats', sid, stats: res.stats, state: res.state, ...(res.paused !== undefined ? { paused: res.paused } : {}), rearmed: true }); } catch { } return; } // lane mac-locked-capture: a paused capture stays said
       this._streamWatches?.delete(sid);
       try { f?.({ op: 'stream-stats', sid, state: 'closed', ended: 'link_lost' }); } catch { }
     }, () => { });

@@ -9449,6 +9449,12 @@ export default {
   "the machine’s screen capture kept being interrupted": "机器的屏幕采集一再中断", // lane stream-fallback-never-silent
   "Stream interrupted: {why}": "串流中断：{why}", // lane stream-fallback-never-silent
   "Stream interrupted: {why} — reconnecting…": "串流中断：{why}——正在重新连接…", // lane stream-fallback-never-silent
+  "The Mac is locked (since {time}) — the picture comes back by itself once it is unlocked": "Mac 已锁屏（{time} 起）— 解锁后自动继续", // lane mac-locked-capture
+  "The Mac is locked — the picture comes back by itself once it is unlocked": "Mac 已锁屏 — 解锁后自动继续", // lane mac-locked-capture
+  "Stream · locked": "串流 · 锁屏中", // lane mac-locked-capture
+  "the Mac stayed locked too long — unlock it, then try again": "Mac 锁屏太久——解锁后再试一次", // lane mac-locked-capture
+  "the Mac’s screen capture did not start in time": "Mac 的屏幕采集没能及时开始", // lane mac-locked-capture
+  "the Mac did not list its screens in time": "Mac 没能及时列出它的屏幕", // lane mac-locked-capture
   "the machine’s video encoder stopped": "机器的视频编码器停了",
   "Open System Settings": "打开系统设置",
   "Opened System Settings › {pane} on {machine}": "已在 {machine} 上打开系统设置 › {pane}",

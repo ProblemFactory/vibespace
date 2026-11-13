@@ -55,6 +55,11 @@
 //      SDR picture plays, the switch is off; CONTROL — the 8-bit AV1 stream through the same road decodes (· HDR on the summary);
 //      the details' codec AV1 + 「HDR」 row; an SDR screen ⇒ SDR, back ⇒ HDR; remembered per machine (a new window starts in HDR)
 //                                                                              hdr-switch.png, hdr-fallback.png, hdr-details.png
+//   ㉑ THE LOCK (lane mac-locked-capture — a Mac whose screen is locked: its capture waits, the session goes on): the hub's long
+//      poll says paused {why: locked, since} (the page's fetch wrapped — the agent and hub halves are test-stream-locked's, a REAL
+//      Mac-shaped daemon over the fake helper's lock file) ⇒ the picture's pane says Mac 已锁屏（HH:MM 起）— 解锁后自动继续 and the
+//      chip 串流 · 锁屏中 (its title the same words); paused null (the unlock) ⇒ the words go by themselves, 串流 · N ms · N fps in
+//      the same window — RED CONTROL: the page without THE LOCK's door (/prelock) says nothing                     locked.png
 // PNGs when `--shots <dir>`.
 //   ⑫ a Mac's strip (lane stream-mac-stall): over a STREAM the switcher lists the Mac's displays (its offer's rows, left to right,
 //      the streamed one pressed, no 全部); a pick restarts the stream ON that display; 「打开系统设置」 opens the pane ON the Mac
@@ -296,6 +301,10 @@ await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }
 const SLOW_SAID = "        if (state === 'restarting' && code === 'timeout' && v === stream) { slowSaid = true; note(slowWords(v)); } // lane stream-udp-leg-fallback R4: «reconnecting…» only when no road answered\n";
 const preSilent = { name: 'pre-silent', setup(b) { b.onLoad({ filter: /machine-desktop\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(SLOW_SAID)) throw new Error('the connect-budget words\' line moved'); return { contents: src.replace(SLOW_SAID, ''), loader: 'js' }; }); } };
 await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-presilent.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preSilent] });
+// ㉑'s RED control (lane mac-locked-capture): the view that never hears the hub's `paused` (the base: a black pane, no words)
+const LOCK_DOOR = '      if (r.paused !== undefined && !r.ended) pausedNow(r.paused); // lane mac-locked-capture: THE LOCK\n';
+const preLock = { name: 'pre-lock', setup(b) { b.onLoad({ filter: /stream-view\.js$/ }, (a) => { const src = fs.readFileSync(a.path, 'utf8'); if (!src.includes(LOCK_DOOR)) throw new Error('THE LOCK\'s door line moved'); return { contents: src.replace(LOCK_DOOR, ''), loader: 'js' }; }); } };
+await esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(root, 'page-prelock.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [preLock] });
 const app = express(); app.use(express.json());
 app.use(R.router);
 const CSS = ['style', 'viewers', 'chat', 'fonts'].filter((n) => fs.existsSync(path.join(REPO, `public/${n}.css`)));
@@ -318,6 +327,8 @@ app.get('/presilent', (q, s) => s.type('text/html').send(HTML.replace('/page.js'
 app.get('/micleak', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-micleak.js')));
 app.get('/page-soundrestore.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-soundrestore.js')))); // ⑳'s RED control
 app.get('/soundrestore', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-soundrestore.js')));
+app.get('/page-prelock.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page-prelock.js')))); // ㉑'s RED control
+app.get('/prelock', (q, s) => s.type('text/html').send(HTML.replace('/page.js', '/page-prelock.js')));
 const PORT = await freePort();
 srv = http.createServer(app);
 srv.on('upgrade', (req, socket, head) => bridge.handleUpgrade(req, socket, head, bridge.upgradeId(new URL(req.url, 'http://x').pathname)));
@@ -1507,6 +1518,34 @@ console.log('⑳ THE SOUND 「声音」 (lane speaker-passthrough-v1): the machi
   await ph.shot('phone-sound.png', `${WIN} .desktop-strip`);
   await ph.ev(`localStorage.removeItem('vibespace.streamSound'); true`);
   await ph.close();
+}
+console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locked — the window SAYS it, and plays on at the unlock');
+{
+  // the page's fetch wrapped: the hub's long poll answers paused {why: locked, since} while window.__locked holds a time
+  const LOCKWRAP = `(() => { const real = window.fetch.bind(window);
+    window.fetch = async (u, o) => { const res = await real(u, o); if (!/\\/stream\\/watch\\?/.test(String(u))) return res;
+      const j = await res.json(); if (!j.ended) j.paused = window.__locked ? { why: 'locked', since: window.__locked } : null;
+      return new Response(JSON.stringify(j), { headers: { 'Content-Type': 'application/json' } }); }; return true; })()`;
+  const MM = { ...M, label: 'Macbook', setup: 'darwin' };
+  const SAY = `((document.querySelector('${WIN} .desktop-display-say') || {}).textContent || '')`, CHIP = `(document.querySelector('${WIN} .desktop-strip-status') || {})`;
+  const WORDS = '/^Mac 已锁屏（[^）]*\\d{1,2}:\\d{2}[^）]* 起）— 解锁后自动继续$/';
+  for (const at of ['/', '/prelock']) {
+    const p = await page(1280, 800, DESK, { at });
+    await p.ev(LOCKWRAP);
+    await p.ev(`window.__open(${JSON.stringify(MM)})`);
+    const up = await playing(p);
+    await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    const said = await p.until(`${WORDS}.test(${SAY}) && /串流 · 锁屏中/.test(${CHIP}.textContent || '')`, at === '/' ? 8000 : 4000);
+    const r1 = await p.ev(`({ say: ${SAY}, chip: ${CHIP}.textContent || '', title: ${CHIP}.title || '' })`);
+    if (at === '/prelock') { ok(up && !said && r1.say === '' && !/锁屏/.test(r1.chip), '㉑ RED CONTROL: the page without THE LOCK\'s door says nothing while the hub says paused (the base: 串流 · N ms · 0 fps over a black pane)', r1); await p.close(); continue; }
+    ok(up && said && r1.title.includes(r1.say), '㉑ paused {why: locked}: the pane says Mac 已锁屏（HH:MM 起）— 解锁后自动继续, the chip 串流 · 锁屏中 (its title the same words) — never a spinner\'s 连接中…', r1);
+    await p.shot('locked.png', WIN);
+    await p.ev('window.__locked = 0; true');
+    const gone = await p.until(`${SAY} === '' && /^串流 · \\d+ ms · \\d+ fps/.test(${CHIP}.textContent || '')`, 8000);
+    const b1 = await p.ev('window.__band()'); await sleep(600); const b2 = await p.ev('window.__band()');
+    ok(gone && b1 !== null && b2 !== null && b2 !== b1, '㉑ the unlock (paused null): the words go BY THEMSELVES and the picture plays on in the same window — no click', { gone, b1, b2 });
+    await p.close();
+  }
 }
 ok((await sessions()).length === 0, 'every window closed ⇒ no stream session left on the hub');
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

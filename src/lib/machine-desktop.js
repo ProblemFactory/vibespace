@@ -34,7 +34,7 @@ import { desktopRunPlan, desktopRunPresets, rememberRun, machineDesktopId } from
 import { namesGuiApp } from '../machine-window.js';
 import { remoteappProgramOf } from '../remoteapp.js'; // lane remoteapp-r1a: the typed line → the program a RemoteApp starts
 import { openRemoteappSettings } from './remoteapp-card.js'; // lane remoteapp-r1b: the machine's RemoteApp settings card
-import { openMachineApp, openWindowPicker } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window; lane stream-p2w-build: one of its windows as a stream
+import { openMachineApp, openWindowPicker, lockedText } from './machine-app.js'; // lane machine-app-crop: one app of the machine as its own window; lane stream-p2w-build: one of its windows as a stream
 import { screenMap, hdrShown, carryPick } from '../desktop-screens.js'; // lane desktop-v2-entry: the OS table + the RFB table → the displays in fb pixels
 import { openDesktopPicker, rememberDesktop, rememberDisplays, readRecent } from './desktop-picker.js';
 import { createDisplayPanes, rememberedMode, rememberMode, deviceTag, isPhone, modeOf, displayRows, displayName, displayLabel, sumStats, stillOf, MODE_WORDS, MODE_ICONS, modeRowHtml } from './machine-displays.js'; // lane desktop-display-modes: a machine's several displays — the three modes
@@ -566,6 +566,9 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     helper_signed_regrant: () => t('the Mac’s signed screen helper replaced the old one and needs its Screen Recording switch one last time'), helper_unsigned: () => t('the screen helper the hub offered the Mac was refused: it is not signed by the VibeSpace release team'), // lane apple-signing
     window_minimized: () => t('the window is minimized — restore it to stream'), window_gone: () => t('the window it showed is gone'),
     encoder_failed: () => t('the machine’s video encoder stopped'), no_window_source: () => t('the machine’s agent cannot stream one window yet'),
+    // lane mac-locked-capture: THE LOCK's bound and the helper's bounded waits (src/agentd/stream-mac.js)
+    screen_locked: () => t('the Mac stayed locked too long — unlock it, then try again'),
+    start_timeout: () => t('the Mac’s screen capture did not start in time'), enumeration_timeout: () => t('the Mac did not list its screens in time'),
   };
   const streamWords = (code, info) => (STREAM_WHY[code] ? STREAM_WHY[code](info) : t('the machine ended it ({code})', { code: code || '?' }));
   // lane stream-udp-leg-fallback R4: THE ROAD on the chip (src/stream-model.js streamRoadOf through the view — a relayed picture names
@@ -593,7 +596,9 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     if (!stream && many.size) { drawMany(); return; }
     const { playing, page: p, agent: a, words } = stats.draw(stream); // the firewall notice + the details' series (src/lib/stream-stats.js)
     const rd = roadOf(stream), road = roadWord(rd), why = whyOf(rd); // lane stream-udp-leg-fallback R4
-    chip.textContent = (playing ? (road ? t('Stream · {road} · {ms} ms · {fps} fps', { road, ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…')) + (a && a.screen && a.screen.hdr ? ' · HDR' : ''); // lane stream-hdr-passthrough
+    const lockedNow = stream && stream.paused; // lane mac-locked-capture: THE LOCK — 「锁屏中」, never 「连接中…」; it wins over the road (a capture that waits carries no picture on any road)
+    chip.textContent = (lockedNow ? t('Stream · locked') : playing ? (road ? t('Stream · {road} · {ms} ms · {fps} fps', { road, ms: ms(p && p.rttMs), fps: ms(p && p.fps) }) : t('Stream · {ms} ms · {fps} fps', { ms: ms(p && p.rttMs), fps: ms(p && p.fps) })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…')) + (a && a.screen && a.screen.hdr ? ' · HDR' : ''); // lane stream-hdr-passthrough
+    if (lockedNow) { chip.title = [scope, lockedText(lockedNow)].join('\n'); return; }
     sayRoad(stream, why);
     if (!p) { if (why) chip.title = [scope, why].join('\n'); return; }
     const sc = a && a.screen; // lane stream-p1b-screen: the machine's own screen — its encoder and what encoding costs there
@@ -606,7 +611,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
   // named — the chip says how many play; its title has the sum's sentence (the numbers' place since lane stream-stats-popup) and
   // each display's own numbers
   const drawMany = () => {
-    const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing', fps: p && p.fps, kbps: p && p.kbps }; });
+    const rows = [...many].map(([did, v]) => { const p = v.stats(), r = rowOf(did); return { id: did, n: r ? r.n : 0, playing: v.state === 'playing', paused: !!v.paused, fps: p && p.fps, kbps: p && p.kbps }; });
     const sum = sumStats(rows), vs = [...many.values()];
     const lead = vs.find((v) => v.state === 'playing') || vs[0];
     stats.draw(lead); // the firewall notice + the details: any playing display's (one machine, one path)
@@ -614,8 +619,8 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     sayRoad(lead, why);
     const slow = sum.slowest ? rowOf(sum.slowest.id) : null;
     const words = sum.playing ? t('{n} displays · {fps} fps · {kbps} kbps', { n: sum.playing, fps: sum.fps, kbps: sum.kbps }) + (slow ? ' · ' + t('slowest: {display} at {fps} fps', { display: `${slow.n} · ${displayName(slow)}`, fps: sum.slowest.fps }) : '') : '';
-    chip.textContent = sum.playing ? (road ? t('Stream · {road} · {n} displays · {fps} fps', { road, n: sum.playing, fps: sum.fps }) : t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps })) : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…');
-    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
+    chip.textContent = sum.playing ? (road ? t('Stream · {road} · {n} displays · {fps} fps', { road, n: sum.playing, fps: sum.fps }) : t('Stream · {n} displays · {fps} fps', { n: sum.playing, fps: sum.fps })) : rows.some((r) => r.paused) ? t('Stream · locked') : road ? t('Stream · {road} · connecting…', { road }) : t('Stream · connecting…');
+    chip.title = [scope, ...(words ? [words] : []), ...(why ? [why] : []), ...rows.map((r) => { const d = rowOf(r.id); return `${d ? displayLabel(d) : r.id}: ${r.playing ? t('{fps} fps · {kbps} kbps', { fps: ms(r.fps), kbps: ms(r.kbps) }) : r.paused ? t('Stream · locked') : t('Stream · connecting…')}`; }), t('Pointer: yours — the machine draws none into the picture')].join('\n');
   };
   const inputWords = (ref) => {
     const code = ref && ref.code;
@@ -660,7 +665,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     many.delete(did);
     const words = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code);
     const lad = paneLadder.get(did) || { step: 0, at: 0 };
-    const nv = endingVerdict({ played: v.played, step: lad.step, at: lad.at, now: Date.now() });
+    const nv = endingVerdict({ played: v.played, step: lad.step, at: lad.at, now: Date.now(), locked: code === 'screen_locked' });
     if (v.played) paneLadder.set(did, { step: nv.step, at: nv.at });
     if (nv.act === 'retry') {
       panes.say(did, t('Stream interrupted: {why} — reconnecting…', { why: words }));
@@ -678,6 +683,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
       mic: true, onMicReady: (ok) => micToggle.ready(v, ok), // lane stream-mic-road
       audio: true, onSoundReady: (ok) => soundToggle.ready(v, ok), // lane speaker-passthrough-v1
       onStatus: (state, code) => { if (state === 'fallback' || state === 'stopped') { micToggle.ended(v); soundToggle.ended(v); } if (state === 'playing' && still) { still.remove(); still = null; } if (state === 'restarting' && code === 'timeout') { said = true; panes.say(did, t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); } if (state === 'playing' && said) { said = false; panes.say(did, ''); } drawChip(); }, onStats: () => drawChip(), onInput: inputWords, // lane stream-leg-flap: the re-offer's words stay until its picture plays (lane werift-lite-multihomed: and a connect that ran out of time is said)
+      onPaused: (p) => { if (many.get(did) === v) { panes.say(did, p ? lockedText(p) : ''); drawChip(); } }, // lane mac-locked-capture: THE LOCK, in its pane
       onFallback: (code, why, taken, info) => { if (still) { still.remove(); still = null; } paneEnd(v, code, why, info); } });
     v._share = share;
     many.set(did, v);
@@ -797,6 +803,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (state === 'fallback' && v === stream && v.played && !held) held = stillOf(v, panes.pane('')); // its last picture stays through the ladder
         if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
+      onPaused: (p) => { if (v === stream) { panes.say('', p ? lockedText(p) : ''); drawChip(); } }, // lane mac-locked-capture: THE LOCK — said over the last picture, gone at the unlock
       onInput: inputWords,
       onFallback: (code, why, taken, info) => {
         if (still) { still.remove(); still = null; }
@@ -804,7 +811,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (v !== stream) return; // replaced by a switch
         stream = null;
         if (!taken && pickedFromMemory && source && DISPLAY_GONE.includes(code)) { pickedFromMemory = false; streamDisplay = null; remember({ display: null }); startStream(null); return; }
-        const nv = endingVerdict({ ...ladder, now: Date.now(), gone: DISPLAY_GONE.includes(code), named: !!(source && source.id != null) }); // NEVER SILENT
+        const nv = endingVerdict({ ...ladder, now: Date.now(), gone: DISPLAY_GONE.includes(code), named: !!(source && source.id != null), locked: code === 'screen_locked' }); // NEVER SILENT (+ THE LOCK's bound: the choice at once)
         if (nv.act !== 'fallback') { ladder.step = nv.step; ladder.at = nv.at; interrupted(nv.act, source, code, why, info); return; }
         toVnc(code, why, taken, info);
       },

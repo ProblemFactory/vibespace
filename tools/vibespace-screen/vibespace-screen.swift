@@ -16,7 +16,13 @@
 //        stdin: `key` (the NEXT picture is an IDR — kVTEncodeFrameOptionKey_ForceKeyFrame), `bps <n>` (AverageBitRate, set
 //        from the submitting thread, NEVER the output callback: that deadlocks the session); JSON lines on stderr: started,
 //        frame (a window moved), stats (once a second), end {code} (window_minimized, window_gone, display_gone,
-//        screen_permission, capture_failed, encoder_failed)
+//        screen_permission, capture_failed, encoder_failed, locked, enumeration_timeout, start_timeout)
+//        THE LOCK (lane mac-locked-capture — measured 2026-10-26 on macOS 27.0.1: on a LOCKED screen ScreenCaptureKit's enumeration
+//        never answers, a capture parked there for good, nothing healed it at unlock): every ScreenCaptureKit wait is BOUNDED
+//        (the enumeration ENUM_S, startCapture START_S); a bound that fires ends `locked` when the screen is locked at that
+//        moment, else `enumeration_timeout` / `start_timeout`; a screen locked when the capture starts ends `locked` at once,
+//        before any ScreenCaptureKit call (CGSessionCopyCurrentDictionary — CoreGraphics answers through the lock). The agent
+//        waits for the unlock and starts the capture again itself (src/agentd/stream-mac.js THE LOCK)
 //        THE SOUND (lane speaker-passthrough-v1, backlog B-aec9 — lane stream-audio-probe legs 2a–2d): `audio on` / `audio off` on
 //        stdin = the SAME SCStream's capturesAudio (updateConfiguration — no second stream, no new TCC class: it rides Screen
 //        Recording, 「屏幕与系统录音」); `--audio` = on from the start (the agent's way back when a live switch is refused). SCK's
@@ -84,9 +90,22 @@ var A = Array(CommandLine.arguments.dropFirst())
 if A.first == "--disclaim" { relaunchDisclaimed(Array(A.dropFirst())) }
 func opt(_ k: String) -> String? { if let i = A.firstIndex(of: "--" + k), i + 1 < A.count { return A[i + 1] }; return nil }
 let disclaimed: Any = ProcessInfo.processInfo.environment["VS_SCREEN_DISCLAIMED"].map { $0 == "1" } ?? NSNull()
-func wait<T>(_ f: (@escaping (T) -> Void) -> Void) -> T { let s = DispatchSemaphore(value: 0); var r: T!; f { r = $0; s.signal() }; s.wait(); return r }
+/// ONE ScreenCaptureKit answer, `bound` seconds at most (lane mac-locked-capture): nil = the bound fired. A late answer lands under
+/// the lock (the helper is ending by then)
+func wait<T>(_ bound: Double, _ f: (@escaping (T) -> Void) -> Void) -> T? {
+  let s = DispatchSemaphore(value: 0), l = NSLock(); var r: T? = nil
+  f { v in l.lock(); r = v; l.unlock(); s.signal() }
+  if s.wait(timeout: .now() + bound) == .timedOut { return nil }
+  l.lock(); defer { l.unlock() }; return r
+}
+let ENUM_S = 5.0, START_S = 10.0 // the enumeration answers in < 0.1 s unlocked (measured), startCapture in < 1 s
 func tccState() -> [String: String] { ["screen": CGPreflightScreenCaptureAccess() ? "granted" : "denied", "accessibility": AXIsProcessTrusted() ? "granted" : "denied"] }
 func locked() -> Bool { ((CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool) ?? false }
+/// a bound that fired: the lock BY NAME when the screen is locked now, else the wait's own name — never a silent park
+func boundFired(_ what: String, _ code: String, _ bound: Double) -> Never {
+  if locked() { endWith("locked", "the screen is locked — ScreenCaptureKit did not answer \(what) within \(Int(bound)) s") }
+  endWith(code, "ScreenCaptureKit did not answer \(what) within \(Int(bound)) s")
+}
 func num(_ v: CGFloat) -> Double { (Double(v) * 100).rounded() / 100 }
 
 // ── facts ──
@@ -372,11 +391,13 @@ func even(_ v: Double) -> Int { max(2, Int(v.rounded()) & ~1) }
 func capture() -> Never {
   _ = NSApplication.shared // a window filter in a CLI asserts CGS_REQUIRE_INIT without it (measured)
   let fps = max(1, min(120, Int(opt("fps") ?? "60") ?? 60)), kbps = max(300, Int(opt("kbps") ?? "8000") ?? 8000)
+  if locked() { endWith("locked", "the screen is locked — the capture starts once it is unlocked") } // lane mac-locked-capture: before any ScreenCaptureKit call
   if !CGPreflightScreenCaptureAccess() {
-    if A.contains("--register-row") { let _: (SCShareableContent?, Error?) = wait { k in SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { k(($0, $1)) } } } // adds the (off) row in Settings, so the owner only toggles it
+    if A.contains("--register-row") { let _: (SCShareableContent?, Error?)? = wait(ENUM_S) { k in SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { k(($0, $1)) } } } // adds the (off) row in Settings, so the owner only toggles it
     endWith("screen_permission", "Screen Recording is off for vibespace-screen")
   }
-  let r: (SCShareableContent?, Error?) = wait { k in SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { k(($0, $1)) } }
+  let got: (SCShareableContent?, Error?)? = wait(ENUM_S) { k in SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { k(($0, $1)) } }
+  guard let r = got else { boundFired("the shareable content", "enumeration_timeout", ENUM_S) }
   guard let content = r.0 else { let e = r.1 as NSError?; if e?.code == -3801 { endWith("screen_permission", "Screen Recording is off for vibespace-screen") }; endWith("capture_failed", "the shareable content could not be read: \(e?.localizedDescription ?? "?")") }
   let filter: SCContentFilter, window: SCWindow?
   if let d = opt("display") {
@@ -403,7 +424,8 @@ func capture() -> Never {
   do { try s.addStreamOutput(cap, type: .screen, sampleHandlerQueue: DispatchQueue(label: "vs.sck", qos: .userInteractive)) } catch { endWith("capture_failed", "addStreamOutput: \(error.localizedDescription)") }
   if cap.audioOn { do { try s.addStreamOutput(cap, type: .audio, sampleHandlerQueue: cap.audioQueue); cap.audioAdded = true } catch { cap.audioOn = false; say(["t": "audio", "on": false, "error": "addStreamOutput(.audio): \(error.localizedDescription)"]) } }
   cap.stream = s
-  let startErr: Error? = wait { k in s.startCapture { k($0) } }
+  let startGot: Error?? = wait(START_S) { k in s.startCapture { k($0) } }
+  guard let startErr = startGot else { boundFired("startCapture", "start_timeout", START_S) }
   if let e = startErr { let ne = e as NSError; endWith(ne.code == -3801 ? "screen_permission" : "capture_failed", "startCapture: \(ne.localizedDescription) (\(ne.code))") }
   // where the picture sits on the Mac (global points) — the input's target; a window's frame is re-read while it streams
   var frame = window?.frame ?? rect

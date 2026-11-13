@@ -31,7 +31,10 @@
  *                 (backlog B-aec9): the strip's 「声音」 — `on` starts THE capture of the machine's sound for this session (a Mac's:
  *                 the screen source's own SCStream, `source.audio`; Windows: src/desktop-sound.js), off ends it; refused by name
  *                 (no_audio: the session was offered without the sound's track)
- *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, ended?} once a second and at every change
+ *   pushes        stream-ice {sid, candidate} · stream-stats {sid, stats, state, paused, ended?} once a second and at every change —
+ *                 `paused` (lane mac-locked-capture) = the source's capture waits, the session goes on: { why: 'locked', since,
+ *                 checks } while a Mac's screen is locked (src/agentd/stream-mac.js THE LOCK — the picture comes back by itself at
+ *                 the unlock), else null; a source without `paused()` is never paused
  * A session's owner is the link that asked; when that link dies the session is an ORPHAN for STREAM_LIMITS.orphanMs (the
  * media path does not ride the link — a re-armed hub finds it playing) and then stops.
  *
@@ -42,8 +45,9 @@
  * temporal units (`{ tu, key, ts90k }`, packetized by src/stream-av1.js), anything else ⇒ its SDR plan. Not asked, or a source
  * that cannot: the offer is the H.264 one, unchanged.
  * THE SOURCE INTERFACE: `{ kind, origin: {x, y}, start(onAccessUnit, onEnd?), stop(), requestKeyframe(), setTargetKbps(kbps),
- * stats?() }` where `onAccessUnit({ nalus: Buffer[], key, ts90k })` is called once per encoded picture, in order
- * (src/stream-h264.js splits Annex-B) and `onEnd(code)` = the source died — the session ends by that name. Here: the FAKE
+ * stats?(), paused?() }` where `onAccessUnit({ nalus: Buffer[], key, ts90k })` is called once per encoded picture, in order
+ * (src/stream-h264.js splits Annex-B) and `onEnd(code)` = the source died — the session ends by that name; start's third hook
+ * `onPaused()` = its `paused()` changed (lane mac-locked-capture: pushed at once). Here: the FAKE
  * source — a pre-encoded Annex-B file looped at its frame rate (scripts/fixtures/stream/); 'screen' = the agent's `screen`
  * factory (lane stream-p1b-screen: src/agentd/stream-screen.js — the machine's own desktop, ffmpeg + the HDR mapping),
  * refused by name where none is given. stats() lands in the session's numbers as `screen` (+ its `encodeMs`). 'window' = ONE
@@ -422,7 +426,8 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     const c = s.sound; s.sound = null;
     if (c) { try { c.stop(why); } catch { /* gone */ } }
   }
-  function pushStats(s) { pushTo(s, { op: 'stream-stats', sid: s.sid, stats: statsOf(s), state: stateOf(s) }); }
+  const pausedOf = (s) => { try { return s.source && typeof s.source.paused === 'function' ? s.source.paused() || null : null; } catch { return null; } }; // lane mac-locked-capture
+  function pushStats(s) { pushTo(s, { op: 'stream-stats', sid: s.sid, stats: statsOf(s), state: stateOf(s), paused: pausedOf(s) }); }
 
   function stop(sid, why = 'stopped') {
     const s = sessions.get(sid);
@@ -709,7 +714,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
           s.codec = typeof source.useCodec === 'function' ? source.useCodec(mime) : 'H264';
           log(`[stream] ${sid} the browser took ${mime || 'no codec'} — ${s.codec === 'AV1' ? 'HDR (AV1, PQ 10-bit)' : 'the SDR picture (H.264)'}`);
         }
-        if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit, (why) => stop(sid, why || 'source_ended')); } // the picture starts at a KEY frame the moment the browser can take it; a source that dies ends the session by its name
+        if (st === 'connected' && !s.sending) { s.sending = true; source.requestKeyframe(); source.start(sendAccessUnit, (why) => stop(sid, why || 'source_ended'), () => { if (sessions.get(sid) === s) pushStats(s); }); } // the picture starts at a KEY frame the moment the browser can take it; a source that dies ends the session by its name
         pushStats(s);
         clearTimeout(s.failTimer);
         if (st === 'failed') { s.failTimer = setTimeout(() => stop(sid, 'ice_failed'), L.orphanMs); s.failTimer.unref?.(); }
@@ -797,7 +802,7 @@ function createStreamHost({ injector = null, log = () => { }, now = Date.now, lo
     const s = sessions.get(String(msg.sid || ''));
     if (!s) return named('not_found', 'that stream session ended');
     if (msg.watch) { s.owner = owner; clearTimeout(s.orphanTimer); s.orphanTimer = null; }
-    return { ok: true, sid: s.sid, state: stateOf(s), stats: statsOf(s), startedAt: s.startedAt };
+    return { ok: true, sid: s.sid, state: stateOf(s), stats: statsOf(s), paused: pausedOf(s), startedAt: s.startedAt };
   }
   /** A link died: its sessions become orphans (the media keeps flowing) until a re-arm or orphanMs. */
   function linkDead(owner) {

@@ -54,6 +54,9 @@
  *   GONE MEANS GONE      (lane stream-fallback-never-silent) a capture that died is judged by the facts: display_gone only
  *                        when two reads that succeeded lack it, 1 s apart (judgeGone); else the source captures again in
  *                        place, twice a minute at most (captureRestart), then ends capture_interrupted
+ *   THE LOCK             (lane mac-locked-capture) a LOCKED Mac's screen is a STATE of the session, never its end: no helper runs
+ *                        while its facts say locked, they are read every LOCK_RULE.everyMs and the capture starts again in place
+ *                        at the unlock (lockStep); past LOCK_RULE.maxMs the session ends screen_locked
  *   flvReader            the encoder's output: FLV (length-framed — an Annex-B pipe only shows a picture's end when the NEXT
  *                        one starts, a frame of latency) → access units { nalus, key, tsMs }, SPS/PPS put in front of every
  *                        key frame (a browser that joins at a key frame needs them; FLV carries them once)
@@ -716,6 +719,21 @@ async function judgeGone(read, want, wait) {
   return b === 'absent' ? 'gone' : b;
 }
 function captureRestart(times, now) { return (times || []).filter((t) => now - t < GONE_RULE.windowMs).length < GONE_RULE.restarts; }
+/** THE LOCK (lane mac-locked-capture — measured 2026-10-26 with the owner at the Mac, macOS 27.0.1, helper vs-5d0cce28e54e: a capture
+ *  started while the screen was LOCKED waited in ScreenCaptureKit's enumeration for good — the callback never came, 0 % CPU, still
+ *  there 4 min after the unlock; a running one was interrupted 34 s after a display-on lock, and its capture started again waited
+ *  the same way; the window stayed black until it was closed). The lock is a STATE of the session: no helper is spawned onto a
+ *  locked screen; the source reads the facts (CoreGraphics — they answer through the lock: 43–90 ms) every everyMs and captures
+ *  again IN PLACE at the unlock; past maxMs it ends `screen_locked`, its own name (the window asks — it never retries that by
+ *  itself). startMs = the agent's own bound on a helper that never said `started` (one without the helper's bounds — 5 s for the
+ *  enumeration, 10 s for startCapture — or a lock that came between the facts and the spawn).
+ *  lockStep({ since, now, locked }) → 'resume' (a read said unlocked) | 'end' (maxMs since the lock) | 'watch'; `locked` = the last
+ *  read's: true | false | null (a read that failed is no unlock). */
+const LOCK_RULE = Object.freeze({ everyMs: 3000, maxMs: 30 * 60000, startMs: 20000 });
+function lockStep({ since = 0, now = 0, locked = null } = {}, rule = LOCK_RULE) {
+  if (locked === false) return 'resume';
+  return now - since >= rule.maxMs ? 'end' : 'watch';
+}
 /** THE ESTIMATE (lane stream-mac-rate, measured with a real Chrome viewer): werift 0.25's send-side estimate counts ~ONE packet a
  *  picture. It notes a sent packet after `await dtlsTransport.sendRtp` under the transport's CURRENT number — by then the number of
  *  the burst's LAST packet — so a picture's packets leave one record (loopback: 14 093 packets sent, 979 records; 974 of the 14 579
@@ -1081,7 +1099,7 @@ module.exports = {
   PQ, SCRGB_NITS, BT709_TO_BT2020, BT2020, HDR_VUI, pqOetf, pqCodeOfNits, buildPqTables, pqOfHalf, p010FromHalf, p010Bytes, HDR_LADDER, hdrFactsOf, hdrEncodeArgv, KBPS_FLOOR_HDR,
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, ffmpegPasses, runnableFfmpeg, firstPassingFfmpeg, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
-  KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
+  KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart, LOCK_RULE, lockStep,
   MAC_HELPER, MAC_SETTINGS, MAC_DOORS, WIN_SETTINGS, SETTINGS_PANES, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint,
   WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
