@@ -1,5 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
+import { namedModel } from '../model-providers.js'; // THE model door (lane fable-52-cli-321 r6) — the hub refuses what it refuses
 import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
@@ -111,7 +112,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       resumeSpawnPick({ explicit, instanceDefault, resume: continuesConversation, hasSource: false });
     const modelPick = pickHere(model, defaults.model);
     const effortPick = pickHere(effort, defaults.effort);
-    const sessionModel = modelPick.value;
+    // THE DOOR, client side (lane fable-52-cli-321 r6): a saved model the hub's door would refuse (an older build saved a refused
+    // Custom… pick as the resume model) is not sent — the spawn takes its default instead of the create being refused
+    const sessionModel = (modelPick.value && !namedModel(modelPick.value)) ? undefined : modelPick.value;
+    if (modelPick.value && !sessionModel) showToast(t('The saved model «{model}» is not a model id — this conversation starts on its default model.', { model: String(modelPick.value).slice(0, 60) }));   // said, in one line (r7)
     const sessionPermission = permission !== undefined ? permission : defaults.permission;
     const sessionEffort = effortPick.value;
     const sessionExtraArgs = extraArgs !== undefined ? extraArgs : defaults.extraArgs;
@@ -195,7 +199,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       tools: tools && typeof tools === 'object' ? tools : undefined, // lane new-session-form: the 「可用工具」 pick (each adapter judges it)
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
-      lockModel: lockModel || undefined, // explicit lock TARGET (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
+      lockModel: (lockModel && namedModel(lockModel)) || undefined, // explicit lock TARGET (r6: through the same door) (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
       // THE CONVERSATION'S POOL PIN (2026-09-28): a RESUME carries the conversation's own pin (the
       // server honours it only for a member of the pool this spawn bills, and never on a fork)
       poolPin: (!fork && poolPin && typeof poolPin.memberId === 'string') ? { memberId: poolPin.memberId, at: poolPin.at || null, ...(poolPin.poolId ? { poolId: poolPin.poolId } : {}) } : undefined,

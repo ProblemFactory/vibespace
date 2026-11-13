@@ -1,0 +1,1804 @@
+{
+ "sha": "e74fabc6bf8ea5c3e2282ee155cf2daad190da3b",
+ "doors": [
+  "reattach",
+  "pick",
+  "pick-reply",
+  "locked-pick",
+  "live-init",
+  "view-only-attach",
+  "transcript-route",
+  "withstatus-fetch",
+  "cost-op",
+  "stopped-pick",
+  "stopped-lock",
+  "stopped-unlock",
+  "live-lock",
+  "lost-answer",
+  "resume-2m@first-paint",
+  "resume-2m@attach",
+  "resume-2m@init",
+  "resume-2m@reply",
+  "resume-helper@first-paint",
+  "resume-helper@attach",
+  "resume-helper@init",
+  "resume-helper@reply",
+  "fresh-init@attach",
+  "fresh-init@init",
+  "ended-pick",
+  "ended-lock",
+  "ended-unlock",
+  "ended-pick-lock",
+  "ended-after-pick",
+  "gap-lock",
+  "locked-above",
+  "ended-fallback",
+  "ended-fallback-locked",
+  "wall@fallback",
+  "wall@reply",
+  "ended-pending-pick",
+  "ended-pending-lock",
+  "locked-refused-pick",
+  "second-device-pick",
+  "second-device-lock",
+  "stale-frame"
+ ],
+ "rows": {
+  "claude": {
+   "modelFacts": null,
+   "cells": {
+    "reattach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick-reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "locked-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback"
+    },
+    "live-init": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "view-only-attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "transcript-route": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "withstatus-fetch": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "cost-op": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "stopped-pick": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-gamma"
+     }
+    },
+    "stopped-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stopped-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "live-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "lost-answer": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "ended-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "ended-after-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick-lock": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "model": "model-beta",
+      "modelLock": true,
+      "lockModel": "model-beta"
+     }
+    },
+    "gap-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     },
+     "server": {
+      "locked": true,
+      "target": "model-alpha"
+     }
+    },
+    "locked-above": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": true,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "resume-2m@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@init": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@first-paint": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@attach": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@init": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "fresh-init@attach": {
+     "label": "model: ?",
+     "amber": false,
+     "locked": false,
+     "title": "Model not reported by the CLI yet — click to set",
+     "lockTip": ""
+    },
+    "fresh-init@init": {
+     "label": "resolved-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": false,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": ""
+    },
+    "ended-fallback-locked": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": true,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "wall@fallback": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": false,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": ""
+    },
+    "wall@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pending-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-pending-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "locked-refused-pick": {
+     "label": "opus 5",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries opus 5 after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "opus 5",
+      "model": "opus 5"
+     }
+    },
+    "second-device-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "second-device-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stale-frame": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    }
+   }
+  },
+  "codex": {
+   "modelFacts": null,
+   "cells": {
+    "reattach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick-reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "locked-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback"
+    },
+    "live-init": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "view-only-attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "transcript-route": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "withstatus-fetch": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "cost-op": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "stopped-pick": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-gamma"
+     }
+    },
+    "stopped-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "stopped-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "live-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "lost-answer": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "ended-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "ended-after-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick-lock": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "gap-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {},
+     "server": {
+      "locked": false,
+      "target": null
+     }
+    },
+    "locked-above": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "resume-2m@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@init": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@init": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "fresh-init@attach": {
+     "label": "model: ?",
+     "amber": false,
+     "locked": false,
+     "title": "Model not reported by the CLI yet — click to set",
+     "lockTip": ""
+    },
+    "fresh-init@init": {
+     "label": "resolved-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback-locked": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "wall@fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "wall@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pending-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-pending-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "locked-refused-pick": {
+     "label": "opus 5",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {
+      "model": "opus 5"
+     }
+    },
+    "second-device-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "second-device-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "stale-frame": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    }
+   }
+  },
+  "shell": {
+   "modelFacts": null,
+   "cells": {
+    "reattach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick-reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "locked-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback"
+    },
+    "live-init": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "view-only-attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "transcript-route": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "withstatus-fetch": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "cost-op": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "stopped-pick": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-gamma"
+     }
+    },
+    "stopped-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "stopped-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "live-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "lost-answer": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "ended-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "ended-after-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick-lock": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "gap-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {},
+     "server": {
+      "locked": false,
+      "target": null
+     }
+    },
+    "locked-above": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "resume-2m@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@init": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@init": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "fresh-init@attach": {
+     "label": "model: ?",
+     "amber": false,
+     "locked": false,
+     "title": "Model not reported by the CLI yet — click to set",
+     "lockTip": ""
+    },
+    "fresh-init@init": {
+     "label": "resolved-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback-locked": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "wall@fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "wall@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pending-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-pending-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "locked-refused-pick": {
+     "label": "opus 5",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {
+      "model": "opus 5"
+     }
+    },
+    "second-device-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "second-device-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": false,
+     "cfg": {}
+    },
+    "stale-frame": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    }
+   }
+  },
+  "opencode": {
+   "modelFacts": null,
+   "cells": {
+    "reattach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick-reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "locked-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback"
+    },
+    "live-init": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "view-only-attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "transcript-route": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "withstatus-fetch": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "cost-op": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "stopped-pick": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-gamma"
+     }
+    },
+    "stopped-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stopped-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "live-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "lost-answer": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "ended-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "ended-after-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick-lock": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "model": "model-beta",
+      "modelLock": true,
+      "lockModel": "model-beta"
+     }
+    },
+    "gap-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     },
+     "server": {
+      "locked": true,
+      "target": "model-alpha"
+     }
+    },
+    "locked-above": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "resume-2m@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@init": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@init": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "fresh-init@attach": {
+     "label": "model: ?",
+     "amber": false,
+     "locked": false,
+     "title": "Model not reported by the CLI yet — click to set",
+     "lockTip": ""
+    },
+    "fresh-init@init": {
+     "label": "resolved-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback-locked": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "wall@fallback": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "wall@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pending-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-pending-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "locked-refused-pick": {
+     "label": "opus 5",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries opus 5 after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "opus 5",
+      "model": "opus 5"
+     }
+    },
+    "second-device-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "second-device-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stale-frame": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    }
+   }
+  },
+  "antigravity": {
+   "modelFacts": null,
+   "cells": {
+    "reattach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "pick-reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "locked-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback"
+    },
+    "live-init": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "view-only-attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "transcript-route": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "withstatus-fetch": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "cost-op": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "stopped-pick": {
+     "label": "model-gamma",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-gamma"
+     }
+    },
+    "stopped-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stopped-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "live-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "lost-answer": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "ended-unlock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": false
+     }
+    },
+    "ended-after-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pick-lock": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-beta after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "model": "model-beta",
+      "modelLock": true,
+      "lockModel": "model-beta"
+     }
+    },
+    "gap-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     },
+     "server": {
+      "locked": true,
+      "target": "model-alpha"
+     }
+    },
+    "locked-above": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": true,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "resume-2m@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@init": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-2m@reply": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@first-paint": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@attach": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@init": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "resume-helper@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "fresh-init@attach": {
+     "label": "model: ?",
+     "amber": false,
+     "locked": false,
+     "title": "Model not reported by the CLI yet — click to set",
+     "lockTip": ""
+    },
+    "fresh-init@init": {
+     "label": "resolved-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-fallback": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": false,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": ""
+    },
+    "ended-fallback-locked": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": true,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": "LOCKED — retries model-alpha after any fallback"
+    },
+    "wall@fallback": {
+     "label": "⚠ model-gamma",
+     "amber": true,
+     "locked": false,
+     "title": "Auto-fallback: the harness is serving model-gamma instead of model-alpha (capacity/overload). Click to re-pick.",
+     "lockTip": ""
+    },
+    "wall@reply": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    },
+    "ended-pending-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "ended-pending-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "locked-refused-pick": {
+     "label": "opus 5",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries opus 5 after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "opus 5",
+      "model": "opus 5"
+     }
+    },
+    "second-device-pick": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "",
+     "cfg": {
+      "model": "model-beta"
+     }
+    },
+    "second-device-lock": {
+     "label": "model-alpha",
+     "amber": false,
+     "locked": true,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": "LOCKED — retries model-alpha after any fallback",
+     "lockRow": true,
+     "cfg": {
+      "modelLock": true,
+      "lockModel": "model-alpha",
+      "model": "model-alpha"
+     }
+    },
+    "stale-frame": {
+     "label": "model-beta",
+     "amber": false,
+     "locked": false,
+     "title": "Model (as last reported by the CLI) — click to change",
+     "lockTip": ""
+    }
+   }
+  }
+ }
+}

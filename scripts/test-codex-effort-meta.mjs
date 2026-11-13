@@ -1185,9 +1185,10 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   ok(/const continuesConversation = !!resumeId;/.test(sl)
     && /const modelPick = pickHere\(model, defaults\.model\);/.test(sl)
     && /const effortPick = pickHere\(effort, defaults\.effort\);/.test(sl)
-    && /const sessionModel = modelPick\.value;/.test(sl) && /const sessionEffort = effortPick\.value;/.test(sl)
+    // the model twin then passes THE DOOR (lane fable-52-cli-321 r6): a saved value that is no model id is not sent — the spawn takes its default
+    && /const sessionModel = \(modelPick\.value && !namedModel\(modelPick\.value\)\) \? undefined : modelPick\.value;/.test(sl) && /const sessionEffort = effortPick\.value;/.test(sl)
     && /resume: continuesConversation, hasSource: false/.test(sl),
-    'createSession: BOTH twins go through it, and the client declares it cannot read the conversation (hasSource:false)');
+    'createSession: BOTH twins go through it (the model twin then through the door), and the client declares it cannot read the conversation (hasSource:false)');
   // r3: the client keeps the whole pick — its ORIGIN is the fact the wire
   // could not otherwise carry (leg ⑬ measures it end to end).
   ok(/spawnOriginHint: \{ model: modelPick\.origin, effort: effortPick\.origin \},/.test(sl),

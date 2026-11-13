@@ -150,9 +150,9 @@ fs.writeFileSync(path.join(wt, 'data', 'user-todos.json'), JSON.stringify({ item
 // CLI — and the magnifier is gated to live windows like Ctrl+F itself.
 const LIVE_SID = 'f01d0000-0000-4000-8000-0000000ab1fe';
 const stubPath = `${wt}-claude-stub`;
-// lane fable-52-cli-321 (F1, the owner's locked chip): a create asked for `fable[1m]` gets the SCENE conversation instead — the
-// CLI's own stream-json shape, an init + an assistant record + a result per turn: `PRE n` = n turns of the pre-update CLI (served
-// claude-fable-5-1), `POST n` = n turns of 2.1.321 (claude-fable-5-2). Every other spawn: as before (an init, then it waits).
+// lane fable-52-cli-321 r4 (the 5-1 scene): a create asked for `fable[1m]` gets the SCENE conversation instead — the CLI's own
+// stream-json shape, an init + an assistant record per turn: `PRE n` = n turns of the pre-update CLI (init + served
+// claude-fable-5-1), `POST n` = n turns of 2.1.321 (claude-fable-5-2), anything else one turn at 5-2. Every other spawn: as before.
 const SCENE_SID = '5c5e0051-0000-4000-8000-0000000f5251';
 fs.writeFileSync(stubPath, `#!${process.execPath}
 const args = process.argv.slice(2);
@@ -162,8 +162,12 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const mi = args.indexOf('--model'), scene = mi >= 0 && args[mi + 1] === 'fable[1m]';
 const SID = scene ? ${JSON.stringify(SCENE_SID)} : ${JSON.stringify(LIVE_SID)};
 const init = (model) => out({ type: 'system', subtype: 'init', session_id: SID, model, cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: scene ? (model === 'claude-fable-5-1' ? '2.1.319' : '2.1.321') : '2.1.274' });
-init(scene ? 'claude-fable-5-1' : 'claude-fable-5');
-let n = 0, buf = '';
+init(scene ? 'claude-fable-5-2' : 'claude-fable-5');
+let n = 0, buf = '', cur = 'claude-fable-5-2';
+const RES = { opus: 'claude-opus-5-5', 'opus[1m]': 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', fable: 'claude-fable-5-2', 'fable[1m]': 'claude-fable-5-2' };
+const LABEL = { opus: 'Opus 5.5', 'opus[1m]': 'Opus 5.5 (1M context)', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', 'fable[1m]': 'Fable 5.2 (1M context)' };
+const done = (model) => out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 50, num_turns: 1, result: 'ok', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 5, output_tokens: 3 }, modelUsage: { [model]: { inputTokens: 5, outputTokens: 3, contextWindow: 1000000 } } });
+const said = (model, k, text) => out({ type: 'assistant', session_id: SID, uuid: 'scene-a-' + k, message: { id: 'msg_scene_' + k, type: 'message', role: 'assistant', model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 3 } } });
 const turn = (model, what) => { const k = ++n; init(model);
   out({ type: 'assistant', session_id: SID, uuid: 'scene-a-' + k, message: { id: 'msg_scene_' + k, type: 'message', role: 'assistant', model, content: [{ type: 'text', text: what + ' turn ' + k + ' served by ' + model }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 3 } } });
   out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 50, num_turns: 1, result: 'ok', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 5, output_tokens: 3 }, modelUsage: { [model]: { inputTokens: 5, outputTokens: 3, contextWindow: 1000000 } } }); };
@@ -172,13 +176,29 @@ process.stdin.on('data', (d) => {
   buf += d; let i;
   while ((i = buf.indexOf('\\n')) >= 0) {
     const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch { continue; }
-    if (m && m.type === 'control_request') { out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response: {} } }); continue; }
+    // a set_model is ECHOED as 2.1.321 echoes it (measured, probe/typed-model-v321.jsonl): «Set model to <alias (id)>», the user record the
+    // hub reads live as the CLI's report (lane fable-52-cli-321 rounds 14–15), then its control_response
+    if (m && m.type === 'control_request') { if (m.request && m.request.subtype === 'set_model' && m.request.model) { const asked = m.request.model, id = RES[asked], BQ = String.fromCharCode(96); cur = id || asked; out({ type: 'user', isReplay: true, parent_tool_use_id: null, session_id: SID, message: { role: 'user', content: '<local-command-stdout>Set ' + 'model to ' + BQ + (id && id !== asked ? asked + ' (' + id + ')' : asked) + BQ + '</local-command-stdout>' } }); } out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response: {} } }); continue; }
     if (!m || m.type !== 'user') continue;
     const c = m.message && m.message.content; const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => b.text || '').join('') : '';
     const pre = /^PRE (\\d+)/.exec(text), post = /^POST (\\d+)/.exec(text);
     if (pre) { for (let j = 0; j < +pre[1]; j++) turn('claude-fable-5-1', 'old'); continue; }
     if (post) { for (let j = 0; j < +post[1]; j++) turn('claude-fable-5-2', 'new'); continue; }
-    turn('claude-fable-5-2', 'live');
+    // a typed /model (the wrapper hands it over between turns), in the shape 2.1.321 writes — MEASURED (lane fable-52-cli-321
+    // round 8, probe/typed-model-v321*.jsonl: the real CLI on a loopback mock): an init naming the OLD model, an assistant record
+    // of model <synthetic> with the answer, a result with num_turns 0. A model this CLI knows: «Set model to <its name> for this
+    // session only», and it becomes the model; one its check refuses: «Model '<id>' not found», and the CLI keeps its model.
+    // The hub judges none of it (round 15: a typed /model writes nothing) — the chip learns the model from the CLI's next init.
+    const typed = /^\\/model\\s+(\\S+)\\s*$/.exec(text.trim());
+    if (typed) { const k = ++n, BT = String.fromCharCode(96); init(cur);
+      const ans = RES[typed[1]] ? 'Set ' + 'model to ' + BT + (LABEL[typed[1]] || typed[1]) + BT + ' for this session only' : "Model '" + typed[1] + "' not found";
+      if (RES[typed[1]]) cur = RES[typed[1]];
+      out({ type: 'assistant', session_id: SID, uuid: 'scene-ack-' + k, message: { id: 'msg_scene_ack_' + k, type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: ans }], stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 } } });
+      out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 0, result: ans, session_id: SID, uuid: 'scene-ack-result-' + k, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 } });
+      continue; }
+    // SLOW: a turn still running for 3 s — one record now, one more (the same model) and its result at the end
+    if (text.trim() === 'SLOW') { const k = ++n, m = cur; init(m); said(m, k, 'slow turn ' + k + ' (1/2) served by ' + m); setTimeout(() => { said(m, k + 'b', 'slow turn ' + k + ' (2/2) served by ' + m); done(m); }, 3000); continue; }
+    turn(cur, 'live');
   }
 });
 process.stdin.on('end', () => process.exit(0));
@@ -664,14 +684,14 @@ try {
     try { liveWs.close(); } catch {}
   }
 
-  // ── THE OWNER'S LOCKED CHIP (lane fable-52-cli-321, F1; 2.369.390) ──
-  // The owner's phone read an amber «🔒⚠ claude-fable-5-2» on a conversation locked to fable[1m] and served by Fable 5.2: its
-  // OLDER turns (before the CLI update) ran claude-fable-5-1, each turn's init names the model it ran, and a drawn init set the
-  // model the bar held the served one against — the virtual scroll draws the older history AFTER the newest. Here: the same
-  // conversation live (the stub above, the real wrapper) — 40 turns of the old CLI, locked fable[1m], the phone attaches (no
-  // served model yet), 40 turns of 2.1.321 arrive live, then the older history loads (the view's own jumpToIndex(0) — what the
-  // minimap / a scroll up runs) and the reader comes back down. Locked ⇒ held against the LOCK TARGET, named by the served model.
-  console.log('the locked model chip on a long conversation whose older turns were served by 5-1 (F1)');
+  // ── THE MODEL CHIP NAMES WHAT THE SERVER SAYS (lane fable-52-cli-321 r4, law A; 主开发's scene, 2026-11-10) ──
+  // The owner's phone read «🔒 claude-fable-5-1» on the coordinator conversation: locked on fable[1m], its newest turns served by
+  // claude-fable-5-2, its OLDER ones (before the CLI update) by claude-fable-5-1 — no 5-1 in the server's facts. The base drew it
+  // from an OLD init record (each turn's init names the model it ran; a drawn init set the bar's model) once the virtual scroll
+  // loaded the older history AFTER the newest. Here: the same conversation live (the stub above, the real wrapper), 40 turns of
+  // the old CLI then 40 of 2.1.321, locked fable[1m], one turn after the lock; the phone attaches (the tail first), then the older
+  // history loads (the view's own jumpToIndex(0) — what the minimap / a scroll up runs) and the reader comes back down.
+  console.log('the model chip on a long conversation whose older records were served by 5-1 (law A)');
   {
     const sWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
     await new Promise((r) => sWs.on('open', r));
@@ -683,30 +703,70 @@ try {
     check('the scene conversation is created live through the real spawn path (stub CLI, model fable[1m])', !!sid, frames.slice(-3).map((f) => JSON.stringify(f).slice(0, 200)).join('\n'));
     if (sid) {
       const say = async (text, ms) => { sWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text })); await sleep(ms); };
-      await say('PRE 40', 4000);
+      await say('PRE 40', 4000); await say('POST 40', 4000);
       sWs.send(JSON.stringify({ type: 'set-model', sessionId: sid, lock: true, lockModel: 'fable[1m]' })); await sleep(1000);
+      await say('after the lock', 2500);
       await evalJs(`app.attachSession(${JSON.stringify(sid)}, 'scene 5-1', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'claude' }); true`);
       const VIEW = `[...(app.sessions?.values?.() || [])].find((v) => v && v._statusBar && v._statusBar._sessionId === ${JSON.stringify(sid)})`;
-      check('the scene window attaches on the phone', await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-1/.test((${VIEW})._messageList.textContent)`, 20000));
+      check('the scene window attaches on the phone', await waitFor(`!!(${VIEW}) && !!(${VIEW})._statusBar.element.querySelector('[data-chip="model"]') && /served by claude-fable-5-2/.test((${VIEW})._messageList.textContent)`, 20000));
       const look = `(() => { const v = ${VIEW}; const el = v._statusBar.element.querySelector('[data-chip="model"]'); const txt = v._messageList.textContent;
         return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), locked: !!v._statusBar._modelLocked,
           old: (txt.match(/old turn \\d+ served by claude-fable-5-1/g) || []).length, neu: (txt.match(/new turn \\d+ served by claude-fable-5-2/g) || []).length }; })()`;
-      await sleep(600);
-      const attached = await evalJs(look);
-      check(`at attach, no served model yet: the chip names the LOCK TARGET, «${attached.text}» — locked, plain (never an init's model)`, attached.locked && !attached.amber && attached.text === 'fable[1m]', attached);
-      await say('POST 40', 4000);
       const tail = await evalJs(look);
-      check(`2.1.321's turns arrive live (served claude-fable-5-2): the chip names what serves, «${tail.text}» — locked, plain`, tail.locked && !tail.amber && tail.text === 'claude-fable-5-2' && tail.neu > 0, tail);
+      // (round 14: WHILE A LOCK STANDS the chip is master's code — a page that attached after the served change names the lock's target)
+      check(`at the tail (the newest records drawn first): the locked chip is master's — the lock's target for a page that never saw a served change, «${tail.text}» — plain, never an older record's 5-1`, tail.locked && !tail.amber && (tail.text.includes('fable[1m]') || /claude-fable-5-2/.test(tail.text)) && !/5-1/.test(tail.text), tail);
       await evalJs(`(async () => { await (${VIEW}).jumpToIndex(0); return true; })()`);
       const drewOld = await waitFor(`/old turn 1 served by claude-fable-5-1/.test((${VIEW})._messageList.textContent)`, 15000);
       await sleep(600);
       const older = await evalJs(look);
       await shot('model-chip-older-history.png');
       check(`…the older history loaded AFTER the newest (the pre-update turns drawn: ${older.old} served by claude-fable-5-1, their inits with them)`, drewOld && older.old > 0, older);
-      check(`…and the locked chip is unchanged, «${older.text}», plain — never held against an older record's model (before: amber «🔒⚠ claude-fable-5-2»)`, older.text === tail.text && !older.amber && older.locked, { tail, older });
+      check(`…and the chip still names what the server says, «${older.text}» — never an older record's model (the base read «🔒 claude-fable-5-1»)`, older.text === tail.text && !older.amber && !/5-1/.test(older.text), { tail, older });
       await evalJs(`(async () => { await (${VIEW}).jumpToBottom({ user: true }); return true; })()`); await sleep(800);
       const down = await evalJs(look);
       check(`…and back down at the tail: «${down.text}», unchanged`, down.text === tail.text && !down.amber, down);
+
+      // ── THE LOCK PRESS AND THE TYPED /model, by real taps on this phone (lane fable-52-cli-321 r5, MUST 1 + 2) ──
+      // client A = this test's own socket (what another device's bar sends: a pick frame, the person's chat-input); client B =
+      // the phone page, its Lock row tapped for real. The frames the phone's bar sends are recorded at its socket.
+      const B = `(${VIEW})._statusBar`;
+      await evalJs(`(() => { const b = ${B}; const send = b._ws.send.bind(b._ws); window.__f52sent = []; b._ws.send = (f) => { window.__f52sent.push(JSON.parse(JSON.stringify(f))); return send(f); }; return true; })()`);
+      const facts = () => evalJs(`(() => { const b = ${B}; const el = b.element.querySelector('[data-chip="model"]'); return { text: el.textContent.trim(), amber: /chat-status-model-fallback/.test(el.className), ask: b._statusModel, locked: !!b._modelLocked, lockedModel: b._lockedModel, askSeq: b._askSeq, servedSeq: b._servedSeq, served: b._servedModel }; })()`);
+      const tapLock = async () => {
+        await evalJs(`(() => { document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); return true; })()`);
+        await tap('.window-active .chat-view .chat-status-model'); await sleep(300);
+        await tap('.chat-status-dropdown .chat-status-dropdown-lock'); await sleep(900);
+      };
+      const lockFrames = async () => (await evalJs('window.__f52sent')).filter((f) => f && f.type === 'set-model');
+      let mi = 0;
+      const typeIn = async (text, ms = 2500) => { sWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text, msgId: 'f52-' + (++mi) })); await sleep(ms); };
+      await tapLock();                                                     // unlock (the scene was locked on fable[1m])
+      const u0 = await facts();
+      await typeIn('/model opus', 1500); await typeIn('a turn after /model opus');
+      const t1 = await facts();
+      check(`MUST 2 (between turns — round 15: the server writes nothing): /model opus typed, then a turn served by opus ⇒ the chip names what the CLI reported (its next init), plain «${t1.text}»`, !u0.locked && t1.ask === 'claude-opus-5-5' && !t1.amber && t1.text === 'claude-opus-5-5', { u0, t1 });
+      await tapLock(); const l1 = await facts(); const f1 = (await lockFrames()).slice(-1)[0];
+      await typeIn('a turn after the lock'); const l1t = await facts();
+      check(`MUST 1 (round 13, master's Lock): the Lock tapped on the phone sends master's frame — no model to switch to, its lockModel what the chip shows (${JSON.stringify(f1)}) — and the hub locks THAT: claude-opus-5-5, the model the CLI reported; the next turn stays plain «${l1t.text}»`, !!f1 && f1.lock === true && !('model' in f1) && f1.lockModel === 'claude-opus-5-5' && l1.locked && l1.lockedModel === 'claude-opus-5-5' && l1t.lockedModel === 'claude-opus-5-5' && !l1t.amber && l1t.text.includes('claude-opus-5-5'), { f1, l1, l1t });
+      await tapLock();                                                     // unlock
+      sWs.send(JSON.stringify({ type: 'set-model', sessionId: sid, model: 'sonnet' })); await sleep(1200);   // a pick on client A
+      await tapLock(); const l2 = await facts(); const f2 = (await lockFrames()).slice(-1)[0];               // the Lock on client B
+      await typeIn('a turn after the pick and the lock'); const l2t = await facts();
+      check(`MUST 1 across two clients: a pick of sonnet on A, its LIVE echo, then Lock tapped on B (master's frame: what B's chip shows — the CLI's report of A's pick, as master's echo road showed it) ⇒ locked claude-sonnet-5-5, the chip plain «${l2t.text}»`, !!f2 && !('model' in f2) && f2.lockModel === 'claude-sonnet-5-5' && l2.lockedModel === 'claude-sonnet-5-5' && l2t.lockedModel === 'claude-sonnet-5-5' && !l2t.amber && l2t.text.includes('claude-sonnet-5-5'), { f2, l2, l2t });
+      // MUST 2 mid-turn: /model typed while a turn runs is held by the REAL wrapper until the turn ends; the running turn's own
+      // old-model record does not drop it
+      await tapLock();                                                     // unlock
+      await typeIn('SLOW', 600); await typeIn('/model opus', 4500); await typeIn('a turn after the mid-turn /model opus');
+      const m1 = await facts();
+      check(`MUST 2 (mid-turn, unlocked — round 15): /model opus typed while a turn runs — the CLI takes it after that turn, its next init reports it, plain «${m1.text}» (r4: amber «Auto-fallback» for ever)`, m1.ask === 'claude-opus-5-5' && !m1.amber && m1.text === 'claude-opus-5-5' && !m1.locked, m1);
+      await tapLock();                                                     // lock (on opus)
+      await typeIn('SLOW', 600); await typeIn('/model sonnet', 4500); await typeIn('a turn after the mid-turn /model sonnet');
+      const m2 = await facts();
+      check(`MUST 2 (mid-turn, locked — round 14, master's way): /model sonnet is taken but the LOCK STANDS on claude-opus-5-5 (r5's «the lock follows the person» retracted: master's repin re-asks it) — «${m2.text}»`, m2.locked && m2.lockedModel === 'claude-opus-5-5', m2);
+      await typeIn('SLOW', 600); await typeIn('/model nope-model', 4500); await typeIn('a turn after the refused /model');
+      const m3 = await facts();
+      check(`MUST 2 (mid-turn, a model the CLI refuses): dropped — the lock still claude-opus-5-5, the refused id never named «${m3.text}»`, m3.locked && m3.lockedModel === 'claude-opus-5-5' && !/nope/.test(m3.text + m3.ask), m3);
+      await shot('model-chip-lock-and-typed.png');
     }
     try { sWs.close(); } catch {}
   }

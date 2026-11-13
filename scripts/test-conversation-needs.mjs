@@ -901,7 +901,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     // re-tail in flight); a stale page's total is not applied; the accordion's slot moves only for a show that lands; a stale
     // landing's held ops replayed once each and its failure said by nobody (the acceptance's two mutants)
     console.log('⑩d THE TAIL r4 — the proof travels with the landing and is the filing\'s; a road that fails moves nothing; the law both ways; a stale page\'s total is not applied; the slot moves only for a show that lands');
-    const REAL4 = { _fetchMessagePage: method('  async _fetchMessagePage(', '  // ── History-load transition'), _onOp: method('  _onOp(op) {', '  // Create a new normalized message') };
+    const REAL4 = { _fetchMessagePage: method('  async _fetchMessagePage(', '  // ── History-load transition'), _onOp: method('  _onOp(op) {', '  _liveInitModel(msg) {') };   // int393 seam: fable (2.369.393) put _liveInitModel between _onOp and «// Create a new normalized message»; the slice ends at it (its doc comment, caught inside the parentheses, still compiles)
     // THE LAW this pin holds (.388, the train's seam — first made on the .387 train — test-only): a live create the view places INSIDE its drawn window is
     // inserted in place (midturn-order: the agent's delivery order — a create carrying {before, at} goes before that card); ONLY a
     // create OUTSIDE the drawn window, while the view is teleported or off the tail, is deferred: counted (`_total++`), not drawn.
@@ -1007,7 +1007,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       const fetch0 = globalThis.fetch;
       globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (gate) await gate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
       const draw = v._onCreateMessage, applied = [];
-      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0,
+      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _liveInitModel() { }, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0,
         _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; applied.push(m.id); return; } draw(m); } }); // the real deferral (pinned above)
       const total0 = v._total;
       try {
@@ -1118,7 +1118,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       const fetch0 = globalThis.fetch;
       globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (gate) await gate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
       const draw = v._onCreateMessage, deferredIds = [];
-      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
+      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _liveInitModel() { }, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
         _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; deferredIds.push(m.id); return; } draw(m); } }); // the real deferral
       try {
         const sent = v.jumpToBottom(sendArgs);
@@ -1193,7 +1193,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
         const fetch0 = globalThis.fetch;
         globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (tailGate) await tailGate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
         const draw = v._onCreateMessage, deferredIds = [];
-        Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
+        Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _liveInitModel() { }, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
           _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; deferredIds.push(m.id); return; } draw(m); }, // the real deferral
           _scrollElStable: REAL5._scrollElStable, _lastJumpAt: 0, _canPaginate: true,
           _pendingAsks: [{ requestId: 'rq-c200', msgIndex: 200 }], _askElement: (a) => (a ? v._elements.get('c200') || null : null), jumpToPendingAsk: R6.jumpToPendingAsk,

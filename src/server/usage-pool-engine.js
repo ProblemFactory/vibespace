@@ -37,6 +37,8 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // lane reset-path: the helper's codex command — default the one src/codex-thread-read.js is configured
   // with (server.js / cli-env, re-resolved with the CLI); a SUITE hands a stub app-server here
   resetCreditHelper = null}) {
+  // the model facts' broadcaster (lane fable-52-cli-321): a verdict reached on either feed (a refusal) is told at once
+  try { const MA = require('./model-ask.js'); MA.useBroadcast((s) => MA.broadcastFacts(s, s._webuiId, broadcastToSession)); } catch { }
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
   const accounts = mk(getAccounts);
@@ -895,7 +897,7 @@ function persistFallbackStamp(session) {
 }
 
 /** A main-thread assistant record named the model that ANSWERED. */
-function noteServedModel(session, model) {
+function noteServedModel(session, model, rec = null, feed = 'parse') {
   if (!session || !model) return;
   session._servedModel = model;
   session._servedModelAt = Date.now();
@@ -906,6 +908,12 @@ function noteServedModel(session, model) {
   // the fallback target, a recovered turn).
   const fb = session._servedViaFallback;
   if (fb && fb.to && !modelsMatch(model, fb.to)) { session._servedViaFallback = null; persistFallbackStamp(session); }
+  // THE SERVED FACT, numbered in the server's own order (lane fable-52-cli-321 r4) — here, at both feeds' one consumer, one verdict per
+  // record; a changed fact reaches every client of the conversation (src/server/model-ask.js)
+  try {
+    const MA = require('./model-ask.js');
+    if (MA.noteServed(session, model, { recId: (rec && (rec.message?.id || rec.uuid)) || null, feed, readSessionMeta: (k) => sessionMetaStore.readSessionMeta?.(k), writeSessionMeta: (k, v) => sessionMetaStore.writeSessionMeta?.(k, v) })) MA.broadcastFacts(session, session._webuiId, broadcastToSession);
+  } catch { }
 }
 
 /** A `fallback` content block / a `model_refusal_fallback` system record said

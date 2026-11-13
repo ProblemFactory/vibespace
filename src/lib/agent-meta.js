@@ -452,6 +452,11 @@ const NO_BILLING = Object.freeze({ globalLogin: 'Subscription', cliLogin: 'CLI l
 export function terminalOnly(backend) {
   return serverCapsOf(backend).terminalOnly === true;
 }
+/** Does this harness's server STATE the model facts (and re-pin a lock at the turn's end)? Its capability row (backend-caps
+ *  `modelFacts`, lane fable-52-cli-321) — never whether a frame of facts has arrived yet (a bar before its first frame). */
+export function declaresModelFacts(backend) {
+  return serverCapsOf(backend).modelFacts === true;
+}
 /** What this harness can SHOW of its agent's subagents ('virtual' | 'threads' | 'cards' | 'none' — the caps row both tiers
  *  read, lane agy-subagent-cards): 'none' ⇒ a subagent's tool row says the harness shows no details. */
 export function subagentView(backend) {

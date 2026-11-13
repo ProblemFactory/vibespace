@@ -746,7 +746,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             if (announced) noteModelFallback(session, announced.from, announced.to);
             // through the engine's granular consumer, which also retires a
             // standing fallback stamp when something else answers (2026-09-13)
-            noteServedModel(session, msg.message.model);
+            noteServedModel(session, msg.message.model, msg, 'parse');
             try { noteModelSeen(session._servedModel); } catch { }
             // Latch a target-less lock (locked before any model was known —
             // restored sessions, pre-first-reply locks): first main-thread
@@ -793,6 +793,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               session._lockedModel = session._servedModel;
               try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: session._lockedModel }); } catch {}
               try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the latched target, told to every client (F1)
+              // …and to a bar that holds the server's facts, in the facts' own frame (round 9 (c): a lock frame carries no numbers, so such a
+              // bar keeps the newer facts it has — the engine told them for this very record BEFORE the latch, with no target)
+              try { require('../model-ask.js').broadcastFacts(session, id, broadcastToSession); } catch { }
             }
           }
           // CLI error-class telemetry (2.207.0, names/enums only — no
@@ -872,6 +875,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // it so attach/chatStatus/resume never serve the spawn-time value
           // (the old stale _permissionMode is what made a successful
           // mid-session switch look reverted after a restart/reattach).
+          // the model the CLI says it runs (round 9): what a conversation that asks for nothing is held to (src/server/model-ask.js)
+          if (msg.type === 'system' && msg.subtype === 'init' && !msg.parent_tool_use_id && typeof msg.model === 'string' && msg.model) { try { require('../model-ask.js').noteCliModel(session, msg.model, { readSessionMeta, writeSessionMeta }); } catch { } }   // told AFTER the record (below)
           if (msg.type === 'system' && msg.subtype === 'init' && typeof msg.permissionMode === 'string' && msg.permissionMode
               && session._permissionMode !== msg.permissionMode) {
             session._permissionMode = msg.permissionMode;
@@ -1078,6 +1083,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                   try { broadcastToSession(session, id, lockFrame(session, id)); } catch {} // the upgraded target, told to every client (F1)
                 }
               }
+              // …and the same LIVE record is the CLI's report of the set_model it answers (rounds 14–15): the oldest pick this hub sent that
+              // it names, else the lock's repin — a backlog's echo is no report, and no drawn record ever comes through here
+              try { const MA = require('../model-ask.js'); if (MA.noteEcho(session, parseSetModelEcho(uText, { envelope: 'required' }), { readSessionMeta, writeSessionMeta }, { late: !!recordIsLate?.(session, msg) })) MA.broadcastFacts(session, id, broadcastToSession); } catch { }
               if (sendsRequest(msg)) {
                 if (!authoritative) session._isStreaming = true;
                 (recordIsLate?.(session, msg) ? noteTurnFlight : noteRequestSent)(session, Date.now()); // the prompt's echo or a TOOL RESULT: a request goes out NOW — a backlog's record proves nothing about now (lane cache-warmth-tiles r4 — the device feed's twin)
@@ -1263,6 +1271,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
+          if (msg.type === 'result') { try { require('../model-ask.js').noteRefusal(session, msg, { readSessionMeta, writeSessionMeta }); } catch { } }   // the API's 404 naming the ask: the pressing page says it once (round 15: it writes nothing a person set)
           if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
           // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI no longer DIES not-logged-in —
           // it answers each turn with a synthetic «Not logged in · Please run /login» record and waits, so the death
@@ -1450,6 +1459,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // Feed into MessageManager (emits normalized msg ops to all clients)
           // — through the rebuild gate, never processLive directly (2.369.16)
           feedLive(session, msg);
+          // a main-thread init: the facts are told AFTER its record — the client's live-init road (master's) writes the CLI's id, and the
+          // server's facts, the later word, correct it (round 13: a client never ends a turn's start on an older reading)
+          if (msg.type === 'system' && msg.subtype === 'init' && !msg.parent_tool_use_id && typeof msg.model === 'string' && msg.model) { try { require('../model-ask.js').broadcastFacts(session, id, broadcastToSession); } catch { } }
         } catch (e) {
           // A dropped RECORD is never silent (round 3): a line that looks like
           // JSON but does not parse, or a record whose handling threw, is

@@ -952,7 +952,7 @@ class SessionMessages {
     this._ensureParsed();
     const msgs = this._all;
     let lastUsage = null, model = null, contextWindow = 0, totalCost = 0, slashCommands = null, permissionMode = null;
-    let assistantModel = null;
+    let assistantModel = null, iAsst = -1;
     // Scan depth: the tail of _all can be dominated by hundreds of surviving
     // buffer records (stdout-only system/hook events that never dedup against
     // the JSONL) — a 200-record window missed every assistant usage record and
@@ -965,11 +965,22 @@ class SessionMessages {
       // result/init records are stream-json stdout-only — they NEVER appear in
       // the JSONL, so for stopped/resumed sessions (no buffer) the assistant
       // record's message.model is the only model source available
-      if (!assistantModel && m.type === 'assistant' && m.message?.model && !String(m.message.model).startsWith('<')) assistantModel = m.message.model;
+      if (!assistantModel && m.type === 'assistant' && m.message?.model && !String(m.message.model).startsWith('<')) { assistantModel = m.message.model; iAsst = i; }
       if (!model && m.type === 'result' && m.modelUsage) { model = Object.keys(m.modelUsage)[0]; contextWindow = Object.values(m.modelUsage)[0]?.contextWindow || 0; }
       if (lastUsage && model && assistantModel) break;
     }
     if (!model) model = assistantModel;
+    // THE NEWEST TURN'S ASKED MODEL, where its record states one (lane fable-52-cli-321 rounds 14–15): a turn the CLI fell back in
+    // carries the fallback block {from, to} on the record that served — `from` is what that turn asked; a view of that history names
+    // (and locks) it, never the fallback that served. A record that states no ask in that turn: master's `model`
+    let lastAsked = null;
+    for (let j = iAsst; j >= 0 && j >= msgs.length - 2000; j--) {
+      const r = msgs[j];
+      if (r.type === 'result') break;   // the turn before the newest one
+      if (r.type !== 'assistant' || !r.message) continue;
+      const fb = Array.isArray(r.message.content) ? r.message.content.find((b) => b && b.type === 'fallback' && b.from?.model) : null;
+      if (fb && (!fb.to?.model || fb.to.model === assistantModel)) { lastAsked = fb.from.model; break; }
+    }
     for (let i = 0; i < Math.min(msgs.length, 5); i++) {
       const m = msgs[i];
       if (m.type === 'system' && m.subtype === 'init') {
@@ -1035,7 +1046,7 @@ class SessionMessages {
     for (const m of msgs) { if (m.type === 'result' && m.total_cost_usd) totalCost += m.total_cost_usd; }
     if (!lastUsage && !model) return null;
     return {
-      model, lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode,
+      model, ...(lastAsked ? { lastAsked } : {}), lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode, // lastAsked: the newest turn's asked model where its record states one (lane fable-52-cli-321 rounds 14–15)
       initFrame, // the widened claude init facts (§2.6): terminal-bound commands, memory dirs, health — null on every other harness / older CLI
       permissionModes: this._permissionModes,
       subagentMetas: getSubagentMetas(getHistorySessionId(this._session), this._session.cwd),

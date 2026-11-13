@@ -48,6 +48,13 @@ ok(real.sites.some((s) => s.file === 'scripts/test-quota-source.mjs' && s.countP
 }
 
 // ── §2 the RED control: zz-probe in a child ─────────────────────────────────────────────────────────────────────────
+// lane fable-52-cli-321 r6: a new harness's caps row DECLARES whether its server states the chat's model facts — harness-new's
+// templates name the row (`modelFacts`), and every built-in row carries it as a boolean (the chip reads that row, never a key)
+{
+  const tpl = fs.readFileSync(path.join(REPO, 'scripts/harness-new.mjs'), 'utf8');
+  const { BACKEND_CAPS } = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/backend-caps.js'));
+  ok((tpl.match(/'modelFacts'/g) || []).length >= 2 && Object.values(BACKEND_CAPS).every((r) => typeof r.modelFacts === 'boolean'), 'the harness-add checklist names the `modelFacts` capability (both harness-new templates) and every built-in caps row declares it as a boolean', Object.keys(BACKEND_CAPS).filter((id) => typeof BACKEND_CAPS[id].modelFacts !== 'boolean'));
+}
 console.log('§2 THE RED CONTROL: a planted descriptor in a child — the checklist');
 const DIR = scratch('hac'); fs.mkdirSync(DIR, { recursive: true });
 const PROBE = { id: 'zz-probe', label: 'ZZ Probe', kind: 'chat', wrapper: 'data/bin/zz-wrapper.js' };
