@@ -392,7 +392,7 @@ try {
     check('④ §2.3 as built: the conversation with an open question is the FIRST row; it MARKS it on one line «needs you · 1 · <the question>» (44 px, inside the column) — no question, no chips in the list (the owner\'s B)', mk.first === 0 && /^needs you · 1 · Which deck goes to the Q3 review\?/.test(mk.text) && mk.h >= 44 && mk.right <= 320 && mk.chips === 0, mk);
     await tap('#all-sessions-list .col-card > .ut-sess-mark:not([hidden])');
     const inPane = await waitFor(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'inbox' && document.querySelectorAll('.iw-item .iw-opt').length === 2`, 8000);
-    check('④ …its tap opens the For-you window in the conversation column on that question, its options as chips', inPane, await evalJs(`({ type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type, opts: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.textContent) })`));
+    check('④ …its tap opens the For-you window in the conversation column on that question, its options as chips', inPane, await evalJs(`({ type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type, opts: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.getAttribute('aria-label') || b.textContent) })`));
     await tap('.iw-item .iw-opts > .iw-opt:last-child');
     const answered = await waitFor(`!document.querySelector('#all-sessions-list .ut-sess-mark:not([hidden])')`, 8000);
     await tap('#mobile-nav-viewer-close');

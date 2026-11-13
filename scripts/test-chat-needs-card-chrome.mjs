@@ -337,7 +337,7 @@ const openChat = (P) => P.evalJs(`(() => { if (!${CHAT(SID)}) app.attachSession(
 /** The card of item `id` in page P: where it sits (the record's command), its kind, its verbs, its words, its rect. */
 const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const host = c.closest('.chat-msg'); const raw = host && host._rawMsg; const b = c.getBoundingClientRect(); const lr = c.closest('.chat-message-list')?.getBoundingClientRect();
   return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), kind: c.dataset.kind, hostRole: raw && raw.role, hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', head: c.querySelector('.cn-head')?.textContent || '', text: c.querySelector('.ut-text')?.textContent || '', verb: c.querySelector('.cn-line-verb')?.textContent || '', line: c.querySelector('.cn-line')?.textContent || '',
-    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => x.textContent), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
+    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => (x.getAttribute('aria-label') || x.textContent)), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
     rect: { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) }, list: lr ? { top: Math.round(lr.top), bottom: Math.round(lr.bottom) } : null, flash: c.classList.contains('chat-ask-flash'), el: !!c }; })()`;
 /** the conversation's ChatView in the page (its needs cards, its list) */
 const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && v._needsCards && v._messageList?.isConnected) return v; return null; })()`;
@@ -440,7 +440,7 @@ try {
   check('the strip above the message box: «waiting for you · 2» naming an approval and a question; its question a button', !!chip && chip.text === 'waiting for you · 2' && /an approval/.test(chip.title) && /a question/.test(chip.title) && chip.clickable, chip);
   await A.evalJs(`(() => { const l = ${CHAT(SID)} && app.sessions.get(${CHAT(SID)}.id)._messageList; l.scrollTop = 0; return true; })()`); await sleep(500);
   const shown = await A.evalJs(`(document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item') || {}).dataset?.id || null`);
-  await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false }); await sleep(700);
+  await A.press('.chat-attn-dock .cad-jump', { touch: false }) /* the landing is its own worded door (lane ui-phone-and-fit pick 0: the question now opens the item in place) */; await sleep(700);
   const land = await A.evalJs(CARD(wr && wr.id));
   check('…the strip shows the NEWEST (the watch request) and a tap on its question lands its card in view and flashes it (THE ONE LANDING)', shown === (wr && wr.id) && !!land && land.flash && land.list && land.rect.top >= land.list.top - 2 && land.rect.bottom <= land.list.bottom + 2, { shown, land });
   // acceptance round 4 (#3): A PASS THAT CHANGED NO CARD READS NO LAYOUT — the pass a broadcast runs, over cards already what
@@ -781,7 +781,17 @@ try {
     await A.waitFor(`!!document.querySelector('.cn-card[data-item="${q(5)}"]') && !!document.querySelector('.cn-card[data-item="${q(4)}"]')`, 15000); await sleep(800);
     const ok = await toEdge(A, q(4), q(5));
     const s = ok ? await spot(A, q(5)) : null;
-    const under = s ? await twice(A, s, false, q(5)) : null;
+    // lane ui-phone-and-fit pick 0 (THE OPTIONS LAW: «Reply:» once, then wrapping pills): the reveal no longer puts a verb on
+    // the exact point — the control's second press goes to the verb the reveal moved onto the POINTER'S ROW (the nearest on
+    // its line), right after the first: without the refusal it answers, as the release's point did
+    const twiceNear = async (P, p, id) => {
+      await P.clickAt(p.x, p.y); await sleep(90);
+      const n = await P.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const vs = [...c.querySelectorAll('.cn-rows button')].filter((b) => b.getClientRects().length).map((b) => { const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, top: r.top, bottom: r.bottom, cls: String(b.className).split(' ')[0] }; }).filter((b) => ${p.y} >= b.top - 14 && ${p.y} <= b.bottom + 14).sort((a, b) => Math.abs(a.x - ${p.x}) - Math.abs(b.x - ${p.x})); return vs[0] || null; })()`);
+      if (!n) return { verb: null, inCard: false, toast: '', near: null };
+      await P.clickAt(n.x, n.y); await sleep(900);
+      return { verb: n.cls, inCard: true, toast: '', near: n };
+    };
+    const under = s ? await twiceNear(A, s, q(5)) : null;
     const t5 = await api(), r5 = t5.resolved.find((i) => i.id === q(5)) || t5.open.find((i) => i.id === q(5));
     // (the card answered is a quiet line by then — what the point holds afterwards is no longer the verb it pressed)
     check(`RED CONTROL: without the card's refusal, a double click on the folded row at the bottom edge ANSWERS it with what the reveal moved under the pointer (the fifth ${r5 && r5.status}${r5 && r5.reply ? `, replied «${r5.reply.text}»` : ''} — the first press only opened it)`, ok && !!s && !!under && !!r5 && (r5.status !== 'open' || !!r5.reply), { ok, s, under, r5: r5 && { status: r5.status, reply: r5.reply || null } });

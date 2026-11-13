@@ -362,14 +362,14 @@ try {
     // the `__tests__/` question in the pane: verbatim
     await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); w._inbox.show({ itemId: ${JSON.stringify(qTests.id)} }); return 1; })()`);
     await waitFor(`!!document.querySelector('.iw-item .iw-title') && document.querySelector('.iw-item .iw-title').textContent.includes('第四个问题')`, 6000); await sleep(300);
-    const pane = await evalJs(`(() => { const t = document.querySelector('.iw-item .iw-title'), d = document.querySelector('.iw-item .iw-detail'), sub = document.querySelector('.iw-row[data-id=${JSON.stringify(qTests.id)}] .iw-row-sub'); return { title: t?.textContent, detail: d?.textContent, sub: sub?.textContent, strong: document.querySelectorAll('.iw-item .iw-title strong, .iw-item .iw-detail strong').length, chips: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.textContent) }; })()`);
+    const pane = await evalJs(`(() => { const t = document.querySelector('.iw-item .iw-title'), d = document.querySelector('.iw-item .iw-detail'), sub = document.querySelector('.iw-row[data-id=${JSON.stringify(qTests.id)}] .iw-row-sub'); return { title: t?.textContent, detail: d?.textContent, sub: sub?.textContent, strong: document.querySelectorAll('.iw-item .iw-title strong, .iw-item .iw-detail strong').length, chips: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.getAttribute('aria-label') || b.textContent) }; })()`);
     await shot('phone-382-pane-tests.png');
     check('② the pane shows `__tests__/` VERBATIM — the title, the detail and the list row\'s sub line, no <strong> (the base: «tests/» bold, «B tests__/»)', pane.title === qTests.text && pane.detail === qTests.detail && pane.sub === qTests.detail && pane.strong === 0, pane);
     check('② …and its two options as chips, each the agent\'s own words', JSON.stringify(pane.chips) === JSON.stringify(['Reply: A test/（现有）', 'Reply: B __tests__/']), pane.chips);
     // the 8-option question: 8 chips; the last one answers
     await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); w._inbox.show({ itemId: ${JSON.stringify(qEight.id)} }); return 1; })()`);
     await waitFor(`document.querySelectorAll('.iw-item .iw-opt').length === 8`, 6000); await sleep(400);
-    const eight = await evalJs(`[...document.querySelectorAll('.iw-item .iw-opt')].map((b) => { const r = b.getBoundingClientRect(); return { t: b.textContent, h: Math.round(r.height), w: Math.round(r.width), right: Math.round(r.right) }; })`);
+    const eight = await evalJs(`[...document.querySelectorAll('.iw-item .iw-opt')].map((b) => { const r = b.getBoundingClientRect(); return { t: b.getAttribute('aria-label') || b.textContent, h: Math.round(r.height), w: Math.round(r.width), right: Math.round(r.right) }; })`);
     await shot('phone-382-pane-eight.png');
     const z2 = await evalJs(SIZES);
     check('② THE TOUCH SCALE at 382: the For-you pane — every target ≥ 44 × 44 (the four verbs labelled, the chips, the reply box), every text ≥ 14 px', z2.roots >= 1 && z2.nSmall === 0 && z2.nTiny === 0, z2);
@@ -573,7 +573,9 @@ try {
         const or = await openRow('#phone-home');
         const gr = await evalJs(GEO('#phone-home', tgt)), mr = await evalJs(META('#phone-home'));
         await shot('red-r2-375-home-open.png');
-        check('⑤ RED CONTROL (the first commit\'s shapes, 375 page): the open row\'s «Chat» door covers its «detail ▾» box', or && !!gr && gr.hitDetail && !gr.below, gr);
+        // ONE ORDER (主开发 2026-11-13: the question, then the OPTIONS, then the detail): the part under the question is the
+        // options row when the item has options — the old shapes' door covers THAT part, else the «detail ▾» box
+        check('⑤ RED CONTROL (the first commit\'s shapes, 375 page): the open row\'s «Chat» door covers the part under its question (the options, else the «detail ▾» box)', or && !!gr && ((gr.hitDetail && !gr.below) || gr.others.length > 0), gr);
         check('⑤ RED CONTROL: …its meta wraps the age ALONE — a line starts with «·»', mr.some((m) => m.open && m.starts.includes('·')), mr.filter((m) => m.open));
         check('⑤ RED CONTROL: «N more — expand» sits ABOVE the rows it reveals', fr.length > 0 && fr.some((f) => !f.after && f.firstTop !== null && f.top < f.firstTop), fr);
       } finally { mutant = null; }

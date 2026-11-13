@@ -310,7 +310,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     reply.append(why, voiceField(ta, attachDictation(ta)));
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
-    el.append(head, title, dl, arts, detail, cutLine, replied, opts, reach, reply, actions);
+    el.append(head, title, dl, arts, opts, detail, cutLine, replied, reach, reply, actions); // ONE ORDER (lane ui-phone-and-fit pick 0, 主开发 13:34Z): the question, its options, then the detail
     return { el, id, dot, sess, ld, nm, board, meta, title, dl, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
@@ -520,7 +520,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // option chips (one click = a reply whose text IS the label, addressed by INDEX)
     const optSig = v.options.map((o) => o.label).join('\u0000');
     if (c.sig.opts !== optSig) {
-      c.opts.replaceChildren(...v.options.map((o) => { const b = mk('button', 'iw-opt', optionWords(o.label, t)); b.type = 'button'; b.dataset.idx = String(o.idx); return b; })); // lane controls-that-lie: a reply reads as a reply
+      // THE OPTIONS LAW (lane ui-phone-and-fit pick 0): «Reply:» once before the options, each pill its own whole words (the
+      // accessible name and the tip keep the whole reply — lane controls-that-lie)
+      c.opts.replaceChildren(mk('span', 'iw-opts-label', t('Reply:')), ...v.options.map((o) => { const b = mk('button', 'iw-opt', String(o.label)); b.type = 'button'; b.dataset.idx = String(o.idx); b.setAttribute('aria-label', optionWords(o.label, t)); b.title = optionWords(o.label, t); return b; }));
       c.sig.opts = optSig;
     }
     c.opts.style.display = v.options.length ? '' : 'none';

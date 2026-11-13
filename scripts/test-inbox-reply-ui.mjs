@@ -354,7 +354,7 @@ try {
   check('the popup opens with the seeded hostile row', await waitFor(`!!document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))})`));
   await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID) + ' .ut-detail-exp')}); if (d) d.open = true; return true; })()`);
   await sleep(400);
-  const x1 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); return { xss: window.__xss, text: r.querySelector('.ut-text').textContent, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.textContent), detail: r.querySelector('.ut-detail')?.textContent, imgs: r.querySelectorAll('img, svg:not(.ut-act svg), script').length }; })()`);
+  const x1 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); return { xss: window.__xss, text: r.querySelector('.ut-text').textContent, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.getAttribute('aria-label') || c.textContent), detail: r.querySelector('.ut-detail')?.textContent, imgs: r.querySelectorAll('img, svg:not(.ut-act svg), script').length }; })()`);
   check('window.__xss is undefined after the hostile row painted (title, option label and detail)', x1.xss === undefined, x1);
   check('the row text is the RAW title, the chips the RAW labels (as replies: «Reply: <label>», lane controls-that-lie), the detail the RAW detail', x1.text === HOSTILE_TITLE && x1.chips[0] === 'Reply: ' + HOSTILE_OPT && x1.chips[1] === 'Reply: fine' && x1.detail === HOSTILE_DETAIL, x1);
 
@@ -423,7 +423,7 @@ try {
   console.log('⑤ an option chip replies with its label');
   const chooseSel = rowSel(choose.item.id);
   const before5 = stdinFrames().length;
-  await evalJs(`[...document.querySelectorAll(${JSON.stringify(chooseSel + ' .ut-opt')})].find((c) => c.textContent === 'Reply: Wait for backup').click(); true`); // lane controls-that-lie: a chip reads as the reply it sends
+  await evalJs(`[...document.querySelectorAll(${JSON.stringify(chooseSel + ' .ut-opt')})].find((c) => (c.getAttribute('aria-label') || c.textContent) === 'Reply: Wait for backup').click(); true`); // lane controls-that-lie: a chip reads as the reply it sends
   await waitFrames(before5 + 1, 5000);
   const f5 = stdinFrames()[before5] || '';
   const reply5 = f5.split('\n\n').pop();
@@ -449,7 +449,7 @@ try {
     check('the agent route files it WITH the grant (action browser-grant on Lark\'s id)', g.item && g.item.action && g.item.action.type === 'browser-grant' && g.item.action.profileId === LARK, g);
     const gSel = rowSel(g.item.id);
     await waitFor(`!!document.querySelector(${JSON.stringify(gSel + ' .ut-action-grant')})`, 6000);
-    const face = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(gSel)}); return r ? { grant: r.querySelector('.ut-action-grant')?.textContent || null, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.textContent) } : null; })()`);
+    const face = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(gSel)}); return r ? { grant: r.querySelector('.ut-action-grant')?.textContent || null, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.getAttribute('aria-label') || c.textContent) } : null; })()`);
     check('the row: ONE button naming the grant («Let this conversation use Lark (company login)»), its option a «Reply: …»', face && face.grant === 'Let this conversation use Lark (company login)' && face.chips.length === 1 && face.chips[0] === 'Reply: Send it myself', face);
     const before5g = stdinFrames().length;
     await sleep(900);   // press-arm: a button is pressable once it sat still ARM_MS (700 ms)
@@ -465,10 +465,10 @@ try {
     const p = await fileItem(token, { text: "Share 'Gmail (company login)' with me", urgency: 'normal', options: ['Granted access', 'Send it myself'] });
     const pSel = rowSel(p.item.id);
     await waitFor(`!!document.querySelector(${JSON.stringify(pSel + ' .ut-opt')})`, 6000);
-    const chips = await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].map((c) => c.textContent)`);
+    const chips = await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].map((c) => c.getAttribute('aria-label') || c.textContent)`);
     check('a plain option reads as a reply: «Reply: Granted access» (pre-fix: a bare «Granted access» button), and no grant button', JSON.stringify(chips) === JSON.stringify(['Reply: Granted access', 'Reply: Send it myself']) && !(await evalJs(`!!document.querySelector(${JSON.stringify(pSel + ' .ut-action-grant')})`)), chips);
     const beforeP = stdinFrames().length;
-    await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].find((c) => c.textContent === 'Reply: Granted access').click(); true`);
+    await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].find((c) => (c.getAttribute('aria-label') || c.textContent) === 'Reply: Granted access').click(); true`);
     await waitFrames(beforeP + 1, 5000);
     const fP = stdinFrames()[beforeP] || '';
     check('…pressing it posts exactly its label as the reply (what it says it does) — and Gmail\'s «Who can use it» is unchanged (a reply grants nothing)', fP.startsWith(`[For you reply #${p.item.id}]`) && fP.split('\n\n').pop() === 'Granted access' && !mineIn(await getUse(GMAIL)), fP.slice(-200));

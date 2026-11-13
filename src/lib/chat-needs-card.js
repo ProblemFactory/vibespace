@@ -435,6 +435,10 @@ export class NeedsCards {
     const cur = rows.querySelector(':scope > .ut-item');
     const kept = cur && boxInUse(cur.querySelector('.ut-reply')) ? cur.dataset.id : null;
     let entry = d ? { item: d.newest } : null;
+    // THE OPEN ITEM STAYS (lane ui-phone-and-fit pick 0, law 7): while the strip holds an item open, a newer arrival or a count
+    // change redraws around it — it stays the strip's item until it is answered (or closed)
+    const openKeep = dock.classList?.contains('cad-open') && this._dockOpenId ? list.find((e) => e.item.id === this._dockOpenId) : null;
+    if (openKeep && entry && entry.item.id !== openKeep.item.id) entry = { item: openKeep.item };
     if (kept && (!entry || entry.item.id !== kept)) {
       const open = list.find((e) => e.item.id === kept), todos = inboxModel(this.app).todos || {};
       entry = open ? { item: open.item } : { item: (todos.resolved || []).find((i) => i.id === kept) || (this._dockItem && this._dockItem.id === kept ? this._dockItem : { ...cur._item }), resolved: true };
@@ -460,7 +464,9 @@ export class NeedsCards {
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
     if (row) row._item = entry.item;
     // the question is the door to its card (a navigation the owner asked for) — a button for the keyboard too
-    if (q && q.getAttribute('role') !== 'button') { q.setAttribute('role', 'button'); q.tabIndex = 0; q.title = t('Show it in the conversation'); }
+    if (q && q.getAttribute('role') !== 'button') { q.setAttribute('role', 'button'); q.tabIndex = 0; }
+    if (q && q.setAttribute) { const open = !!dock.classList?.contains('cad-open'), w = open ? t('Close it here') : t('Show the whole item here — press again to close it'); if (q.title !== w) q.title = w; if (q.getAttribute('aria-expanded') !== String(open)) q.setAttribute('aria-expanded', String(open)); }
+    if (row && dock.classList?.contains('cad-open')) this._dockDetail(dock);
     if (dock.hidden) dock.hidden = false;
     this._dockStrip(dock, d, entry); // (after the row: its clock reads the row's deadline line — r2)
     // what appeared under the pointer answers nothing for ARM_MS (the press arm) — a new key, AND (r14, the belt: the r13
@@ -482,7 +488,10 @@ export class NeedsCards {
     const clock = document.createElement('span'); clock.className = 'cad-clock'; clock.hidden = true; // …and its clock (round 2, P2: _dockStrip)
     const all = document.createElement('button'); all.type = 'button'; all.className = 'cad-all'; all.hidden = true;
     all.title = t('Open everything this conversation is waiting on in the For-you window');
-    dock.replaceChildren(head, rows, clock, look, all);
+    // lane ui-phone-and-fit pick 0 (the owner 2026-11-13): the landing in the conversation is a door of its own, in words — the
+    // question's press opens the item HERE (_dockFold), it is no longer the only way to read it
+    const jump = document.createElement('button'); jump.type = 'button'; jump.className = 'cad-jump'; jump.textContent = t('Show it in the conversation');
+    dock.replaceChildren(head, rows, clock, look, jump, all);
     this._dockWire(dock);
     return rows;
   }
@@ -492,6 +501,16 @@ export class NeedsCards {
     if (!this.app.foryouRows || !own) return; // (wired on the pass after the panel and the view's start)
     this._dockWired = true;
     this.app.foryouRows.wire(dock, { close: () => {} });
+    // THE ROW OPENS IN PLACE (lane ui-phone-and-fit pick 0): a press on the question opens the item over the chat — the whole
+    // question, its detail, every option — and the same press closes it; an item whose answer is its own door keeps its tap
+    const openIt = (ev, q) => {
+      const row = q.closest('.ut-item'), item = row && row._item;
+      if (!item || row.classList.contains('ut-item-resolved') || String(window.getSelection?.() || '')) return false;
+      if (inboxModel(this.app).isDoor?.(item.sessionKey, item)) return false;
+      ev.preventDefault();
+      this._dockFold(dock, !dock.classList.contains('cad-open'));
+      return true;
+    };
     const landIt = (ev, q) => {
       const row = q.closest('.ut-item'), item = row && row._item;
       if (!item || row.classList.contains('ut-item-resolved') || String(window.getSelection?.() || '')) return;
@@ -524,17 +543,21 @@ export class NeedsCards {
         if (keys.length) this.app.openInbox?.({ sessionKey: this.app.foryouRows?.primaryKey?.(keys) || keys[0] });
         return;
       }
+      if (ev.target.closest('.cad-jump')) { const it = this._dockItem; if (it) { ev.preventDefault(); this.land(it.id).catch(() => {}); } return; }
       if (ev.target.closest('.fy-link, .ut-art, button, textarea, input, summary')) return;
       const q = ev.target.closest('.cad-rows .ut-item > .ut-body > :is(.ut-text, .ut-meta)');
+      if (q && q.classList.contains('ut-text') && openIt(ev, q)) return;
       if (q) landIt(ev, q);
     }, { signal: own });
     // the question by its keys (a role=button — never a text box: the reply box answers its own keys through the panel)
     dock.addEventListener('keydown', (ev) => {
+      // Esc closes the opened strip (it floats over the chat — the float's own key; the reader's list)
+      if (ev.key === 'Escape' && dock.classList.contains('cad-open') && !imeOwnsKey(ev)) { ev.preventDefault(); ev.stopPropagation(); this._dockFold(dock, false); return; }
       const q = ev.target;
       if (!(enterSubmits(ev) || (ev.key === ' ' && !imeOwnsKey(ev)))) return;
       if (this.app.isMobile && (q.classList?.contains('cad-head') || (q.classList?.contains('ut-text') && !dock.classList.contains('cad-open')))) { ev.preventDefault(); this._dockFold(dock, q.classList.contains('cad-head') ? !dock.classList.contains('cad-open') : true); return; } // (the phone's fold)
       if (!q.classList?.contains('ut-text') || q.getAttribute('role') !== 'button') return;
-      landIt(ev, q);
+      if (!openIt(ev, q)) landIt(ev, q);
     }, { signal: own });
     // the strip's size moved the list's bottom edge: a pinned view stays at the live tail (a reader in history keeps the
     // line they read — the list shrinks below it, scrollTop unchanged). r16 (the r15 acceptance: its size read on every pass,
@@ -581,12 +604,54 @@ export class NeedsCards {
    *  is pressed on the open card, its command, facts and clock above it. What the open moved under the finger answers nothing
    *  for ARM_MS (`_openedAt`: every button of the item — round 2, P1 — and the press arm's Allows). */
   _dockFold(dock, open) {
+    const was = dock.classList.contains('cad-open');
+    if (open && !was) this._dockOver(dock, true);
     dock.classList.toggle('cad-open', open);
+    if (!open && was) this._dockOver(dock, false);
+    if (open) this._dockDetail(dock);
+    const q = dock.querySelector(':scope > .cad-rows > .ut-item > .ut-body > .ut-text');
+    if (q) { q.title = open ? t('Close it here') : t('Show the whole item here — press again to close it'); q.setAttribute('aria-expanded', String(open)); }
     this._dockOpenId = open && this._dockItem ? this._dockItem.id : null;
     const head = dock.querySelector(':scope > .cad-head'), look = dock.querySelector(':scope > .cad-look');
     if (head && head.getAttribute('role') === 'button') head.setAttribute('aria-expanded', String(open));
     if (look) look.setAttribute('aria-expanded', String(open));
     if (open) { dock.scrollTop = 0; dock._openedAt = performance.now(); this.app.foryouRows?.arm?.(dock); } else dock._openedAt = null;
+  }
+
+  /** THE OPEN STRIP FLOATS OVER THE CHAT (lane ui-phone-and-fit pick 0 — law 5: «never moves the chat's scroll»): a spacer of
+   *  the strip's closed height keeps its place in the column (the transcript's size, hence its scrollTop, unchanged), the strip
+   *  stands on the same bottom edge and grows upward over the transcript, at most half the view (it scrolls inside). */
+  _dockOver(dock, on) {
+    if (!on) { dock.classList.remove('cad-over'); dock._cadRO?.disconnect(); dock._cadRO = null; dock._cadSpacer?.remove(); dock.style.removeProperty('--cad-bottom'); dock.style.removeProperty('--cad-max'); return; }
+    const host = dock.parentElement, h = dock.offsetHeight; // host = the view's own .chat-view (position: relative — chat.css) in every host of the view
+    if (!host || !h) return;
+    const sp = dock._cadSpacer || (dock._cadSpacer = document.createElement('div'));
+    sp.className = 'cad-spacer'; sp.setAttribute('aria-hidden', 'true'); sp.style.height = h + 'px';
+    dock.before(sp);
+    // THE PLACE FOLLOWS ITS HOST: the strip stands on the spacer's bottom edge, bounded by half the view — read again whenever
+    // the view or what sits below the spacer resizes (the window resized, the message box grown, a phone's keyboard up)
+    const place = () => {
+      if (!sp.isConnected) return;
+      dock.style.setProperty('--cad-bottom', Math.max(0, Math.round(host.clientHeight - (sp.offsetTop + sp.offsetHeight))) + 'px');
+      dock.style.setProperty('--cad-max', Math.max(120, Math.floor(host.clientHeight * 0.5)) + 'px');
+    };
+    // out of the flow FIRST, then measured: read while the strip still stood below the spacer, the place came out a strip's
+    // height too high and the observer's next frame moved it down — after the open had armed its Allow (the claim's ㉓ r2:
+    // the Allow «moved» under a press at 821 ms and answered nothing)
+    dock.classList.add('cad-over');
+    place();
+    if (typeof ResizeObserver === 'function') {
+      dock._cadRO?.disconnect();
+      const ro = dock._cadRO = new ResizeObserver(place);
+      ro.observe(host);
+      for (let n = dock.nextElementSibling; n; n = n.nextElementSibling) ro.observe(n);
+    }
+  }
+
+  /** The open item's detail, open (THE tray's renderer — the row's own fold, its links live). */
+  _dockDetail(dock) {
+    const ex = dock.querySelector(':scope > .cad-rows > .ut-item > .ut-body > .ut-detail-exp');
+    if (ex && !ex.open) ex.open = true;
   }
 
   /** The card of item `id` in this list, or null. */

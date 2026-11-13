@@ -1593,19 +1593,22 @@ console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-li
     const view = (html) => ({
       grant: (html.match(/<button[^>]*class="ut-act ut-action-grant[^"]*"[^>]*>([^<]*)<\/button>/) || [])[1] || null,
       inBar: /ut-action-grant/.test((html.match(/<span class="ut-actions">[\s\S]*?<\/span>/) || [''])[0]),
-      chips: [...html.matchAll(/<button type="button" class="ut-opt" data-idx="\d">([^<]*)<\/button>/g)].map((m) => m[1]),
+      chips: [...html.matchAll(/<button type="button" class="ut-opt" data-idx="\d" aria-label="([^"]*)"[^>]*>[^<]*<\/button>/g)].map((m) => m[1]),   // its whole reply, as it is NAMED (lane ui-phone-and-fit pick 0: «Reply:» is said once on the row, each pill its own words)
+      faces: [...html.matchAll(/<button type="button" class="ut-opt" data-idx="\d"[^>]*>([^<]*)<\/button>/g)].map((m) => m[1]),
+      label: (html.match(/<span class="ut-opts-label">([^<]*)<\/span>/g) || []).length,
     });
     const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
     const v = view(R.renderRow(grantItem, ctx).innerHTML);
     ok(v.grant === 'Let this conversation use Lark (company login)' && !v.inBar, 'a grant ask draws ONE button that names the grant it performs, on its own line (never the hover-dimmed bar)', v);
     eq(v.chips, ['Reply: Granted access', 'Reply: Send it myself'], 'its --options read as REPLIES — «Granted access» no longer wears an action it never performed');
+    eq([v.faces, v.label], [['Granted access', 'Send it myself'], 1], 'the OPTIONS LAW (the owner 2026-11-13): «Reply:» said ONCE before the options, each pill its own words — the whole reply stays its accessible name', v);
     const vPlain = view(R.renderRow({ item: { id: 'ut-p', sessionKey: 'claude:c-1', text: 'Which way?', options: ['Run now'], createdAt: Date.now() } }, ctx).innerHTML);
     ok(vPlain.grant === null && vPlain.chips[0] === 'Reply: Run now', 'a plain ask: no grant button; its option reads «Reply: Run now»', vPlain);
     const vDone = view(R.renderRow({ item: { ...grantItem.item, clearedAt: Date.now() } }, ctx).innerHTML);
     ok(vDone.grant === null, 'a cleared grant item draws no grant button (its words are gone; nothing to read before a press)');
     const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
     // int346: lane vault-paste-request's `+ secretAskHtml(i, t, detail)` follows the grant's call on the same line — the patch drops the call alone
-    const pre = src.replace('${escHtml(optionWords(o, t))}</button>', '${escHtml(o)}</button>').replace(' + grantAskHtml(i, t)', '');
+    const pre = src.replace('aria-label="${escHtml(optionWords(o, t))}" title="${escHtml(optionWords(o, t))}"', 'aria-label="${escHtml(o)}" title="${escHtml(o)}"').replace(' + grantAskHtml(i, t)', ''); // the pill NAMED by its raw label (pick 0: its face is its words either way)
     ok(pre !== src && pre.split('grantAskHtml(i, t)').length === 1, 'CONTROL: the patch applies (the raw chip label, no grant button — the 2.369.344 row)');
     const M = mutantCopies('utgrant', ROOT);
     const Rp = await import(pathToFileURL(M.write(REL, pre, 'prefix')).href);

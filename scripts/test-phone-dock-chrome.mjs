@@ -247,7 +247,7 @@ const openChat = (P) => P.evalJs(`(() => { if (!${CHAT(SID)}) app.attachSession(
 /** The card of item `id` in page P: where it sits (the record's command), its kind, its verbs, its words, its rect. */
 const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const host = c.closest('.chat-msg'); const raw = host && host._rawMsg; const b = c.getBoundingClientRect(); const lr = c.closest('.chat-message-list')?.getBoundingClientRect();
   return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), kind: c.dataset.kind, hostRole: raw && raw.role, hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', head: c.querySelector('.cn-head')?.textContent || '', text: c.querySelector('.ut-text')?.textContent || '', verb: c.querySelector('.cn-line-verb')?.textContent || '', line: c.querySelector('.cn-line')?.textContent || '',
-    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => x.textContent), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
+    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => (x.getAttribute('aria-label') || x.textContent)), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
     rect: { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) }, list: lr ? { top: Math.round(lr.top), bottom: Math.round(lr.bottom) } : null, flash: c.classList.contains('chat-ask-flash'), el: !!c }; })()`;
 /** the conversation's ChatView in the page (its needs cards, its list) */
 const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && v._needsCards && v._messageList?.isConnected) return v; return null; })()`;
@@ -342,13 +342,15 @@ try {
       const c = await A.evalJs(S23);
       check(`㉓ ${name}: a tap on the head FOLDS it again (${c && c.dock.h} px)`, foldedOk(c, S.words), c);
     }
-    // a newer item while it is open: the row folds to the newer one's words and count; the composer keeps the focus
+    // a newer item while it is open: IT STAYS OPEN on the item the person opened (主开发 2026-11-13, the owner's case — law 7: «the
+    // open state survives a redraw of the strip: a new item arriving, a count change»; it was: the row folded to the newer one),
+    // the count says 4; the composer keeps the focus
     await show(SHAPES23.hub.item); await openStrip(A);
     await A.evalJs(`(() => { const t = [...${CHAT(s23)}.element.querySelectorAll('.chat-input-area ~ * textarea, textarea')].find((x) => !x.closest('.chat-attn-dock') && x.getClientRects().length); t.focus(); return document.activeElement === t; })()`);
     const newer = { ...SHAPES23.q3.item, id: 'ut-r23newer', text: 'Rotate the staging password now?', createdAt: Date.now() };
-    await A.evalJs(PUSH23(J([newer, SHAPES23.hub.item, ...more23]))); await A.waitFor(`(() => { const x = ${S23}; return !!x && x.id === 'ut-r23newer'; })()`, 8000); await sleep(600); await A.evalJs(noToasts23);
-    const nw = await A.evalJs(S23);
-    check(`㉓ a NEWER item while the row is open: folded on it — «${nw && nw.q}», «${nw && nw.num}» — and the composer keeps the focus (${nw && nw.focus})`, !!nw && !nw.open && nw.dock.h <= 56 && nw.q === newer.text && /4/.test(nw.num || '') && /^TEXTAREA/.test(nw.focus || ''), nw);
+    await A.evalJs(PUSH23(J([newer, SHAPES23.hub.item, ...more23]))); await A.waitFor(`(() => { const w = ${CHAT(s23)}, d = w && w.element.querySelector('.chat-attn-dock'); return !!d && /4/.test(((d.querySelector('.cad-count') || {}).textContent || '') + ((d.querySelector('.cad-num') || {}).textContent || '')); })()`, 8000); await sleep(600); await A.evalJs(noToasts23);
+    const nw = await A.evalJs(S23), cnt = await A.evalJs(`(() => { const d = ${CHAT(s23)}.element.querySelector('.chat-attn-dock'); return ((d.querySelector('.cad-count') || {}).textContent || '') + ' ' + ((d.querySelector('.cad-num') || {}).textContent || ''); })()`);
+    check(`㉓ a NEWER item while the row is open: it STAYS open on the item opened («${nw && nw.q && nw.q.slice(0, 30)}»), the count says «${cnt}» — and the composer keeps the focus (${nw && nw.focus})`, !!nw && nw.open && nw.id === SHAPES23.hub.item.id && /4/.test(cnt) && /^TEXTAREA/.test(nw.focus || ''), { nw, cnt });
     // ── round 2 (the acceptance of 6aed457b7). P1: «View» put a chip / ✕ under the finger and a second tap 150 ms later
     //    answered (only the Allows were armed) — EVERY button of the opened item answers nothing for ARM_MS (700 ms) after the
     //    open; at 820 ms the same tap answers. Three shapes. RED CONTROL: the open's stamp taken back (round 1's arm — the

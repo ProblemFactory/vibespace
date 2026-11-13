@@ -223,7 +223,7 @@ console.log('⑤ ONE RENDERER — the tray row and the For-you pane draw the age
     const ctx = { t, nameFor: () => 'payments', wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', replyState: () => ({ show: true, enabled: true }), optionsOf: (i) => O.askOptions(i, i.detail || '') };
     const row = R.renderRow({ item: q, resolved: false, band: 5 }, ctx).innerHTML;
     ok(row.includes(`<div class="ut-text">${R.wordsHtml(q.text)}</div>`) && row.includes(`<div class="ut-detail">${R.wordsHtml(q.detail)}</div>`), 'the tray row\'s words and detail ARE wordsHtml (one renderer)');
-    const chips = [...row.matchAll(/<button type="button" class="ut-opt" data-idx="(\d+)">([^<]*)<\/button>/g)].map((m) => m[2]);
+    const chips = [...row.matchAll(/<button type="button" class="ut-opt" data-idx="(\d+)" aria-label="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map((m) => m[2]); // each pill NAMED by its whole reply (lane ui-phone-and-fit pick 0: «Reply:» said once on the row)
     ok(J(chips) === J(['Reply: A test/（现有）', 'Reply: B __tests__/']), 'the row draws the parsed options as chips — «Reply: B __tests__/» verbatim (addressed by index)', chips);
     const eight = ITEMS.find((i) => i.text.length > 200);
     const r8 = R.renderRow({ item: eight, resolved: false, band: 5 }, ctx).innerHTML;

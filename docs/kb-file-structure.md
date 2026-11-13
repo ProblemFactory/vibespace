@@ -57,6 +57,8 @@ scripts/test-claude-update-needs-nothing.mjs — fast THE DRILL (lane cli-update
 scripts/test-claude-update-needs-nothing-hub.mjs — heavy: a scratch hub with the stand-in as CLAUDE_CMD — lists / prices / says it through its routes; a restart with NO claude answers from the ledger; the box's real claude read
 scripts/claude-catalog-stand-in.mjs — the stand-in claude for both: a /bin/sh stub whose bytes carry a catalog literal in the CLI's own minified shape (never run); neverSeen(base) adds Fable 6 + the family Quill
 src/server/cli-env.js — + CLAUDE_KNOWN_MODELS = the picker's full-id rows: Fable 5.1, 5.2 and 5.2 [1m] (lane fable-52-cli-321; a typed …[1m] id no row names is refused by the provider, and a bare row strips it) ⇒ kb-file-structure.md
+scripts/lib/fit-ladder.mjs — THE WIDTH LADDER (lane ui-phone-and-fit pick 0): LADDER 280…1440 / PHONE_LADDER, fitVerdictSource (controls inside container + row, no cut words, no sideways scroll), runLadder, ladderFaults — every UI fit pin measures with it ⇒
+scripts/lib/css-rules.mjs — cssRules / selectorList / lastCompound: every innermost rule of a sheet, read for the fit censuses ⇒
 src/lib/row-fold-model.js — PURE (lane phone-roster-fold) rowActionsFold: a phone status row keeps ≤ ROW_INLINE_MAX (3) buttons inline; the rest, and what the width cannot hold, fold into ONE «…» — the count in barLayout's order, then barLayout (a primary never folds) ⇒
 src/lib/manage-agents.js — + foldRowByTier (lane phone-roster-fold): each strip at the CURRENT tier (RO + vs-viewport-class, bound to the render's signal) — the phone folds by count + width into ONE «…» (row-more, context-menu, FOLDED); the desktop = the base's bar, byte for byte ⇒
 scripts/test-roster-row-fold.mjs — fast: rowActionsFold tables + sweep + 4 RED mutants; the wiring (tier read every pass); ③ THE CLI-PRESENCE CENSUS from the product's DOORS (every renderer call named); a hub suite reaching one injects the CLI shape or says why not (checked; r1's predicate RED) ⇒
@@ -14594,3 +14596,15 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **groups-engine** `markDropped` (row state `dropped`), from `deliver.onQueuedDropped`. channel-groups `deliveryOf`: dropped ⇒ `undeliverable` with `why: 'dropped'`.
 
 **Tests.** test-queued-wake (fast, 105 after round 4), test-harness-contract «a frame queued behind a turn», test-spend-paths §5b (restated), test-peer-delivery agy-peer-wake ②③ (restated), test-channel-groups (the closed set).
+
+### scripts/lib/fit-ladder.mjs + scripts/lib/css-rules.mjs (lane ui-phone-and-fit pick 0 — a fit is pinned at nine widths)
+- **Why:** the owner 2026-11-13: «考虑不同窗口尺寸了吗？» — a walk at 1440 and 390 missed a 500 px tiled chat window that cut its reply options. 主开发: every fit fix is pinned by a WIDTH LADDER on the surface's OWN container, never by the two sizes a walk used.
+- **LADDER** = 280 / 320 / 360 / 420 / 500 / 640 / 800 / 1100 / 1440. PHONE_LADDER = those a compact page can be (≤ 768).
+- **fitVerdictSource(sel, { row, controls, words, clampOk, scrollers })** → browser-side source. It returns `{ outside, clipped, sideways }`:
+  - every control's box inside the container (and its row);
+  - no control's or listed text's words cut by an ellipsis, a hidden overflow or a line clamp (a clamp only where `clampOk` allows it);
+  - no sideways scroll on the container, the row or `scrollers`.
+- **fits(v)**, **runLadder({ widths, setWidth, read })** and **ladderFaults(rows)** give a check's message by width.
+- **css-rules.mjs:** `cssRules(text, file)`, `selectorList`, `lastCompound` — the fast censuses read public/*.css with it.
+- **Users:** test-foryou-fit / test-foryou-fit-chrome (pick 0). The other UI lanes and the walk's next wave call the same helper.
+

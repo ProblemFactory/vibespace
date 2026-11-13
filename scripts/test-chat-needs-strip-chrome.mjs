@@ -242,7 +242,7 @@ const CHAT = (sid) => `[...app.wm.windows.values()].find((w) => w.type === 'chat
 /** The card of item `id` in page P: where it sits (the record's command), its kind, its verbs, its words, its rect. */
 const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const host = c.closest('.chat-msg'); const raw = host && host._rawMsg; const b = c.getBoundingClientRect(); const lr = c.closest('.chat-message-list')?.getBoundingClientRect();
   return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), kind: c.dataset.kind, hostRole: raw && raw.role, hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', head: c.querySelector('.cn-head')?.textContent || '', text: c.querySelector('.ut-text')?.textContent || '', verb: c.querySelector('.cn-line-verb')?.textContent || '', line: c.querySelector('.cn-line')?.textContent || '',
-    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => x.textContent), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
+    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent).map((x) => (x.getAttribute('data-label') || x.textContent || '').trim()), chips: [...c.querySelectorAll('.ut-opt')].map((x) => (x.getAttribute('aria-label') || x.textContent)), approve: !!c.querySelector('.ut-action-proposal[data-answer="approve"]'),
     rect: { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) }, list: lr ? { top: Math.round(lr.top), bottom: Math.round(lr.bottom) } : null, flash: c.classList.contains('chat-ask-flash'), el: !!c }; })()`;
 /** the conversation's ChatView in the page (its needs cards, its list) */
 const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && v._needsCards && v._messageList?.isConnected) return v; return null; })()`;
@@ -296,7 +296,7 @@ try {
     //      it); the OLDEST through its For-you door (the For-you window is the index of every ask now — «View all»)
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(900);
     await A.evalJs(`(() => { window.__cnFlash = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__cnFlash.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
-    await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false });
+    await A.press('.chat-attn-dock .cad-jump', { touch: false }) /* the landing is its own worded door (lane ui-phone-and-fit pick 0: the question now opens the item in place) */;
     const INPLACE = (id) => `(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="${id}"]'); if (!v || !c) return null; const raw = c.closest('.chat-msg')?._rawMsg, lr = v._messageList.getBoundingClientRect(), r = c.getBoundingClientRect();
       return { ws: v._windowStart, we: v._windowEnd, total: v._total, cmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '').slice(0, 60) : '', open: !c.classList.contains('cn-fold') && c.classList.contains('cn-open'), docked: c.classList.contains('cn-docked'), inView: r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1, docks: document.querySelectorAll('.cn-card.cn-docked').length, st: Math.round(v._messageList.scrollTop) }; })()`;
     const landed = (id, q) => A.waitFor(`(() => { const x = ${INPLACE(id)}; return !!x && x.open && x.inView && !x.docked && /(Stress|Longer) question ${q}/.test(x.cmd); })()`, 15000);
@@ -600,9 +600,11 @@ try {
       const targets = [...d.querySelectorAll('button, [role="button"]')].filter(vis).map((b) => ({ k: (b.getAttribute('data-label') || b.textContent || '').trim().slice(0, 24), chip: b.classList.contains('ut-opt'), ...box(b) }));
       const opts = d.querySelector('.cad-rows .ut-opts');
       return { shown: !d.hidden && d.getClientRects().length > 0, inList: v._messageList.contains(d), count: ((d.querySelector('.cad-count') || {}).textContent || '').trim(), all: all && !all.hidden ? all.textContent : null,
-        rows: d.querySelectorAll('.cad-rows > .ut-item').length, id: row ? row.dataset.id : null, q: q ? q.textContent.slice(0, 60) : null, qPx: cs ? parseFloat(cs.fontSize) : 0, qCut: !!q && q.scrollWidth > q.clientWidth + 1, qH: q ? Math.round(q.getBoundingClientRect().height) : 0,
+        rows: d.querySelectorAll('.cad-rows > .ut-item').length, id: row ? row.dataset.id : null, q: q ? q.textContent.slice(0, 60) : null, qPx: cs ? parseFloat(cs.fontSize) : 0, qCut: !!q && (q.scrollWidth > q.clientWidth + 1 || q.scrollHeight > q.clientHeight + 1), /* cut on its line, or at its two-line clamp (THE OPTIONS LAW ②) */ qH: q ? Math.round(q.getBoundingClientRect().height) : 0,
         dock: box(d), list: box(v._messageList), comp: box(comp), over: d.scrollWidth - d.clientWidth, targets, optsScroll: !!opts && getComputedStyle(opts).overflowX === 'auto' && opts.scrollWidth > opts.clientWidth, chips: [...d.querySelectorAll('.ut-opt')].filter(vis).map((c) => box(c)), pinned: !!v._pinned, tag: d.__tag17 || 0 }; })()`;
     const between = (x) => !!x && x.shown && !x.inList && !!x.list && !!x.comp && x.dock.top >= x.list.bottom - 1 && x.dock.bottom <= x.comp.top + 1;
+    // an OPENED strip floats over the transcript (lane ui-phone-and-fit pick 0, law 5: «it opens over the chat, never moves its scroll»): its bottom stays on the message box, a spacer keeps its place
+    const overChat = (x) => !!x && x.shown && !x.inList && !!x.list && !!x.comp && x.dock.bottom <= x.comp.top + 1 && x.dock.bottom >= x.list.bottom - 1;
     const dockIs = (P, id, n, ms = 10000) => P.waitFor(`(() => { const x = ${DOCK}; return !!x && x.shown && x.id === ${J(id)} && new RegExp(${J(n)}).test(x.count); })()`, ms);
     const VERBS4 = (x) => ['Reply', 'Open', 'Mark done', 'Dismiss'].every((k) => x.targets.some((y) => y.k === k));
     // (1) ONE item ⇒ one row, no door
@@ -635,7 +637,7 @@ try {
     await openOnly(A, sid); await sleep(600);
     // a tap on the question lands the ORIGINAL card (THE ONE LANDING: a navigation the owner asked for)
     await A.evalJs(`(() => { window.__d17 = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__d17.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
-    await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false }); await sleep(900);
+    await A.press('.chat-attn-dock .cad-jump', { touch: false }) /* the landing is its own worded door (lane ui-phone-and-fit pick 0: the question now opens the item in place) */; await sleep(900);
     const fl = await A.evalJs('window.__d17 || []'), c3 = await A.evalJs(CARD(a3 && a3.id));
     check(`r10 a tap on the strip's question lands the ORIGINAL card in the flow — its card open in its tool card, in view, flashed (${J(fl)})`, fl.includes(a3.id) && !!c3 && c3.open && c3.rect.top >= c3.list.top - 1 && c3.rect.bottom <= c3.list.bottom + 1, { fl, c3 });
     // ONE PRESS ANSWERS, the strip updates IN PLACE (the same element, the next newest)
@@ -651,7 +653,7 @@ try {
     await B.shot('phone-390-dock-two.png');
     const small = p2 ? p2.targets.filter((x) => x.h < 44 || x.w < 44) : [];
     check(`r10 THE PHONE (390×844 touch): the same strip above the message box — its question ${p2 && p2.qPx} px (≥ 16), every target ≥ 44 × 44 with its word (${p2 && p2.targets.map((x) => x.k + ' ' + x.w + '×' + x.h).join(', ')})`,
-      between(p2) && p2.qPx >= 16 && small.length === 0 && VERBS4(p2), { p2, small });
+      overChat(p2) && p2.qPx >= 16 && small.length === 0 && VERBS4(p2), { p2, small }); // OPENED, it floats over the transcript on the message box (lane ui-phone-and-fit pick 0)
     await A.evalJs(`(() => { window.__d17s = []; const f = () => { const d = ${VIEW}._attnDock, r = d.querySelector('.cad-rows > .ut-item'); window.__d17s.push((r ? r.dataset.id : '-') + '/' + ((d.querySelector('.cad-count') || {}).textContent || '')); if (window.__d17s.length < 400) setTimeout(f, 10); }; f(); return 1; })()`);
     await B.press('.chat-attn-dock .cad-rows .ut-item .ut-done', { touch: true });
     await A.front(); const moved = await dockIs(A, a1 && a1.id, 'a question');
@@ -680,26 +682,29 @@ try {
     await dockIs(A, big && big.id, '16 questions'); await sleep(400);
     const dB = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-400-chars.png');
-    check(`r10 a ${big ? big.text.length : 0}-character question ⇒ ONE line in the strip, cut (${dB && dB.qCut}), the strip's height unchanged (${dB && dB.dock.h} px)`, !!big && big.text.length >= 400 && between(dB) && dB.qCut && dB.qH <= 30 && Math.abs(dB.dock.h - d1.dock.h) <= 2, dB);
+    // THE OPTIONS LAW ② (the owner 2026-11-13): when options stand the question may take TWO lines before its cut (was: ONE line)
+    check(`r10 a ${big ? big.text.length : 0}-character question ⇒ at most TWO lines in the strip, cut at its clamp (${dB && dB.qCut}), the strip ${dB && dB.dock.h} px (one line more than ${d1 && d1.dock.h} at most)`, !!big && big.text.length >= 400 && between(dB) && dB.qCut && dB.qH <= 48 && dB.dock.h - d1.dock.h <= 24, dB);
     // (6) SIX OPTIONS ⇒ the chips on ONE line beside the question's row (sideways if they must), never a wall
     sayTo(sid, 'six choices do:six');
     const [six] = await byText(/^Which region do we open next/, 1, 60000);
     await dockIs(A, six && six.id, '17 questions'); await sleep(400);
     const d6 = await A.evalJs(DOCK);
     await A.shot('desktop-1280-dock-six-options.png');
-    const oneLine = (x) => !!x && x.chips.length === 6 && x.chips.every((c) => Math.abs(c.top - x.chips[0].top) <= 1);
-    check(`r10 SIX OPTIONS ⇒ six chips on ONE line (tops ${d6 && d6.chips.map((c) => c.top).join(',')}), the strip two lines at most (${d6 && d6.dock.h} px)`, between(d6) && oneLine(d6) && d6.dock.h <= 2 * d1.dock.h + 8, d6);
+    // THE OPTIONS LAW (lane ui-phone-and-fit pick 0 — the owner 2026-11-13, a 500 px window: «回复：保留 ag», the rest cut by the
+    // window's edge; 主开发's law: the options on a line of their own, WRAPPING, never a sideways scroll): was «six chips on ONE line»
+    const whole = (x) => !!x && x.chips.length === 6 && x.chips.every((c) => c.left >= x.dock.left - 1 && c.right <= x.dock.right + 1) && x.over <= 1 && !x.optsScroll;
+    check(`r10 SIX OPTIONS ⇒ six chips, each whole inside the strip (tops ${d6 && d6.chips.map((c) => c.top).join(',')}), no sideways scroll, the strip ${d6 && d6.dock.h} px`, between(d6) && whole(d6) && d6.dock.h <= 3 * d1.dock.h + 8, d6);
     await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, six && six.id, '17 questions'); await sleep(400);
     await openStrip(B); // (lane phone-dock-restore: opened)
     const p6 = await B.evalJs(DOCK);
     await B.shot('phone-390-dock-six-options.png'); await A.front(); await sleep(300);
-    check(`r10 …on the phone the six chips stay ONE line (sideways, ${p6 && p6.chips.length} chips, ${p6 && p6.chips.filter((c) => c.h >= 44).length} at ≥ 44 px), no giant chips; the strip ${p6 && p6.dock.h} px`, between(p6) && oneLine(p6) && p6.chips.every((c) => c.h >= 44 && c.h <= 52) && p6.dock.h <= 260, p6);
+    check(`r10 …on the phone the six chips WRAP inside the opened strip (${p6 && p6.chips.length} chips, ${p6 && p6.chips.filter((c) => c.h >= 44).length} at ≥ 44 px), none past its edge, no sideways scroll; the strip ${p6 && p6.dock.h} px ≤ 45 % of the screen`, overChat(p6) && whole(p6) && p6.chips.every((c) => c.h >= 44) && p6.dock.h <= 0.45 * 844 + 8, p6);
     // (7) A WINDOW 320 px WIDE ⇒ the row under the head, nothing past the strip's edge
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (!w) return false; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.resizeWindowTo(w.id, { w: 320, h: 700 }); return true; })()`); await sleep(900);
     const dN = await A.evalJs(DOCK);
     await A.shot('desktop-320-dock.png');
-    const outside = dN ? dN.targets.filter((x) => !x.chip && (x.left < dN.dock.left - 1 || x.right > dN.dock.right + 1)) : [];
-    check(`r10 a window 320 px wide: the strip fits (overflow ${dN && dN.over} px, ${outside.length} verbs past its edge — the six chips ride ONE line that scrolls sideways: ${dN && dN.optsScroll}), still between the transcript and the message box`, between(dN) && dN.over <= 1 && outside.length === 0 && dN.optsScroll && dN.dock.w <= 322, { dN, outside });
+    const outside = dN ? dN.targets.filter((x) => x.left < dN.dock.left - 1 || x.right > dN.dock.right + 1) : [];   // the chips too (the options law)
+    check(`r10 a window 320 px wide: the strip fits (overflow ${dN && dN.over} px, ${outside.length} verbs or chips past its edge, the options wrap — no sideways scroll: ${dN && !dN.optsScroll}), still between the transcript and the message box`, between(dN) && dN.over <= 1 && outside.length === 0 && !dN.optsScroll && dN.dock.w <= 322, { dN, outside });
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (w && !w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(700);
     // (8) THE COMPOSER GROWN TO 6 LINES ⇒ the strip rides above it, whole
     await A.evalJs(`(() => { const ta = document.querySelector(${J('.chat-input-area textarea')}); ta.focus(); ta.value = 'one\\ntwo\\nthree\\nfour\\nfive\\nsix'; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`); await sleep(700);

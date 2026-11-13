@@ -689,6 +689,7 @@
   display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 8px; row-gap: 2px; flex-shrink: 0; box-sizing: border-box; min-width: 0;
   padding: 4px 12px; border-top: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
   background: color-mix(in srgb, var(--yellow) 7%, var(--bg-titlebar)); font-size: 12px; line-height: 20px; container-type: inline-size;
+  max-height: 50%; overflow-y: auto; overscroll-behavior: contain; /* lane ui-phone-and-fit pick 0 (the reader's list): the options WRAP now — however many, the strip never takes more than half the view and never pushes the message box out (it scrolls inside) */
 }
 .chat-attn-dock[hidden] { display: none; }
 .cad-head { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 26px; color: var(--yellow); font-weight: 600; white-space: nowrap; }
@@ -706,6 +707,25 @@
 .cad-all[hidden] { display: none; }
 .cad-num, .cad-look, .cad-clock { display: none; } /* lane phone-dock-restore: the phone's folded row's count, its «View» and its clock (style.css) — never a desktop strip's */
 .chat-attn-dock > .cad-all { margin-left: auto; } /* the head's line: the count at its start, «N more · View all» at its end */
+/* THE ROW OPENS IN PLACE (lane ui-phone-and-fit pick 0 — the owner 2026-11-13: «这个下面没法展开看详情，每次都要点击跳回对话位置才能看»):
+   a press on the question opens the item OVER the chat (chat-needs-card.js _dockOver: a spacer keeps the strip's place, so
+   the transcript's size and scroll never move) — the whole question, every option on a line of its own, THEN its detail open
+   (THE tray's renderer, links live) — one order wherever an item opens (主开发 13:34Z) — at most half the view tall (it scrolls
+   inside, the question and the first option at its top); the same press closes it. The landing in the
+   conversation is its own worded door (.cad-jump) on the head's line. One item open at a time; it stays open through the
+   strip's redraws while it waits (_dockPass keeps it). */
+.chat-attn-dock > .cad-jump { margin-left: auto; flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.chat-attn-dock > .cad-jump:is(:hover, :focus-visible) { color: var(--accent); border-color: var(--accent); }
+.chat-attn-dock > .cad-jump:not([hidden]) ~ .cad-all { margin-left: 0; }
+.chat-attn-dock > .cad-jump[hidden] { display: none; }
+.cad-spacer { flex-shrink: 0; }
+.chat-attn-dock.cad-over { position: absolute; left: 0; right: 0; bottom: var(--cad-bottom, 0px); max-height: var(--cad-max, 50%); overflow-y: auto; overscroll-behavior: contain; z-index: 16; box-shadow: var(--shadow-window); } /* above the ↓ (10) and the minimap (15): nothing covers the words it opens (the reader's list) */
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-text { white-space: normal; display: block; -webkit-line-clamp: none; line-clamp: none; overflow: visible; text-overflow: clip; flex: 1 1 100%; line-height: 20px; padding-block: 3px; }
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp { display: block !important; order: 7; flex: 1 1 100%; min-width: 0; margin: 4px 0 4px; } /* ONE ORDER (主开发 13:34Z): the question, the options (order 6), then the detail — the detail scrolls below them */
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp > summary { display: none; }
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-detail-exp > .ut-detail { white-space: pre-wrap; overflow-wrap: break-word; color: var(--text); font-size: 12px; line-height: 18px; max-height: none; }
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-opts { flex-direction: column; align-items: stretch; }
+.chat-attn-dock.cad-open .cad-rows .ut-item > .ut-body > .ut-opts > .ut-opts-label { align-self: flex-start; }
 .cad-rows .ut-item { display: block; padding: 0; cursor: default; }
 .cad-rows .ut-item:hover { background: none; }
 .cad-rows .ut-item > .ut-dot { display: none; }
@@ -760,6 +780,7 @@
 .cad-rows .ut-app-card > :is(.ut-exit-answer, .ut-app-progress) { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .cad-rows .ut-body > .ut-text { order: 1; flex: 1 1 10em; min-width: 6em; min-height: 26px; line-height: 26px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cad-rows .ut-body > .ut-text:is(:hover, :focus-visible) { color: var(--accent); }
+.cad-rows .ut-body:has(> .ut-opts) > .ut-text { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 20px; padding-block: 3px; } /* THE OPTIONS LAW ②: the question two lines before its cut */
 .cad-rows .ut-item-resolved > .ut-body > .ut-text { cursor: default; }
 .cad-rows .ut-body > .ut-meta { order: 2; flex: none; margin: 0; padding: 0; font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
 .cad-rows .ut-body > .ut-actions { order: 3; float: none; flex: none; margin: 0; opacity: 1; gap: 4px; display: inline-flex; }
@@ -774,8 +795,11 @@
 /* r12: the reach an automation answer carries, SAID beside the answers (user-todos-row.js scopeHtml — the strip draws no pick;
    a press point never sends a scope it does not show); 整个 VibeSpace red-tinted (style.css .ut-ak-reach-instance) */
 .cad-rows .ut-body > .ut-ak-scope { order: 5; flex: none; margin: 0; font-size: 12px; line-height: 26px; color: var(--text-secondary); white-space: nowrap; }
-.cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
-.cad-rows .ut-opt { flex: none; min-height: 24px; box-sizing: border-box; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
+/* THE OPTIONS LAW in the strip (lane ui-phone-and-fit pick 0 — the owner 2026-11-13, a 500 px window: «回复：保留 ag», the rest
+   cut by the window's edge; style.css «THE OPTIONS LAW»): the options take a line of their own under the question and WRAP —
+   never a sideways scroll, never an ellipsis; «Reply:» once (.ut-opts-label); the question then gets two lines */
+.cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 100%; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; overflow: visible; }
+.cad-rows .ut-opt { flex: 0 1 auto; min-height: 24px; box-sizing: border-box; font-size: 12px; padding: 2px 10px; white-space: normal; max-width: 100%; overflow-wrap: break-word; text-align: left; }
 .cad-rows .ut-body > :is(.ut-reply, .ut-secret) { order: 7; flex: 1 1 100%; }
 /* r12b: a NARROW strip (a chat window under 520 px) gives the reach line and the answers a row each — the answers wrap as
    whole buttons, the Always wraps its words — so nothing runs past the window's edge (r12's longer «Always · <reach>» at

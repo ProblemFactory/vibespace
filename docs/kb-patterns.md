@@ -97,3 +97,7 @@ Pinned: test-voice-follow-chrome ⑦ (0 placements and 0 forced layouts in 5 s w
 
 ### A card's doors in the chat (lane card-door-in-chat, 2026-11-07 — the owner on a ⤓ that said «已复制！»: «这个按钮怎么是复制？！»)
 A door drawn inside a chat does what its icon says. The chat's link delegation (click = copy, Ctrl/⌘+click = open, right-click / tap = Open + Copy) acts on the chat's OWN links only: a `.chat-link` span its linkify drew, a BARE `<a href>` in its text. The one verdict is `chatLinkOf(target)` in src/lib/card-doors.js, and both delegations ask it. A card that draws an anchor into the chat gives it a class: safe-html keeps no class on what somebody else wrote, so a classed anchor is always ours, and the delegation leaves it to its card. Never re-implement the boundary with a per-card `stopPropagation`; it works only for a handler on that anchor, and the ⤓ had none. Census: test-path-linkify ⑩ (the real delegation over each card kind's door + a static census of the anchor sites in the modules that draw cards into the chat), test-channel-outbox (the verdict over every element of the real Outbox card).
+
+## A fit fix is pinned by THE WIDTH LADDER (lane ui-phone-and-fit pick 0, 2026-11-13)
+A layout fix is measured at the nine widths of its surface's own container (280 / 320 / 360 / 420 / 500 / 640 / 800 / 1100 / 1440 — scripts/lib/fit-ladder.mjs), never at a walk's two sizes: every control inside its container and row, no cut words, no sideways scroll. The owner's case: a 500 px tiled chat window cut every reply option the strip offered.
+

@@ -549,7 +549,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
       'chat-view-seek.js': { _seekTeleport: [3, 'jumpToFileMatch\'s road; the «Couldn\'t jump there» Retry; _jumpToFileTime\'s road'] },
       'chat-search.js': { _jumpToSearchResult: [4, 'the typed query; the stream\'s first hit; ↑ / ↓ between hits; the seek'], _jumpToFileMatch: [1, 'its full-file road'], _jumpToIndex: [1, 'its paged-in road'] },
       'chat-minimap.js': { _jumpToIndex: [3, 'its click / drag — the minimap\'s index wiring'], _jumpToTime: [3, 'its click / drag — the minimap\'s time wiring'] },
-      'chat-needs-card.js': { openCard: [1, 'a card\'s click / keys'], land: [1, 'the attention dock\'s question — its click / keys (lane needs-card-tail r10; the chip\'s jumpToNewest and onJumpToNeed are gone)'], jumpToBottom: [3, 'the landing\'s tail road; its put-back'], jumpToIndex: [2, 'the landing\'s index road; its put-back'] },
+      'chat-needs-card.js': { openCard: [1, 'a card\'s click / keys'], land: [2, 'the attention dock\'s landings — its meta / question keys (lane needs-card-tail r10; the chip\'s jumpToNewest and onJumpToNeed are gone) and its worded door «Show it in the conversation» (.cad-jump — lane ui-phone-and-fit pick 0: the question\'s press opens the item in place)'], jumpToBottom: [3, 'the landing\'s tail road; its put-back'], jumpToIndex: [2, 'the landing\'s index road; its put-back'] },
       'user-todos-actions.js': { landOnItem: [1, 'every For-you door'], jumpToPendingAsk: [1, 'a For-you ask that waits'] },
     };
     const unnamed = [], LIB = path.join(REPO, 'src/lib');

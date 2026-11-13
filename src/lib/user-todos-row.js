@@ -476,8 +476,12 @@ function partsOf(entry, ctx) {
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   // lane foryou-honest (P2-3): the chips are ctx.optionsOf's — the agent's options, else its detail's «A …；B …» parsed
   const optList = rowOptions(i, ctx);
+  // THE OPTIONS LAW (lane ui-phone-and-fit pick 0 — the owner 2026-11-13, a 500 px chat window: «回复：保留 ag», the rest cut):
+  // «Reply:» is said ONCE, a label before the options; each pill is the option's own words, whole (it wraps inside itself,
+  // never an ellipsis — style.css «THE OPTIONS LAW»), the agent's first (its recommendation) first; its accessible name and
+  // tip keep the whole reply («Reply: …» — lane controls-that-lie: a reply reads as a reply)
   const opts = !resolved && rs.show && optList.length
-    ? `<div class="ut-opts">${optList.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(optionWords(o, t))}</button>`).join('')}</div>` : ''; // lane controls-that-lie: a reply reads as a reply
+    ? `<div class="ut-opts"><span class="ut-opts-label">${escHtml(t('Reply:'))}</span>${optList.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}" aria-label="${escHtml(optionWords(o, t))}" title="${escHtml(optionWords(o, t))}">${escHtml(String(o))}</button>`).join('')}</div>` : '';
   let meta, ageWords = null, expWords = null; // r14: the row's VOLATILE words (the age, the lifetime) — patched in place, never in the signature
   if (resolved) {
     const by = resolvedByText(i.resolvedBy, t, i);
@@ -506,7 +510,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)

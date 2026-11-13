@@ -1580,10 +1580,16 @@ html[data-vc="compact"] .drawer-foryou svg { width: 18px; height: 18px; flex: no
 .ut-reply-btn:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
 .ut-act:disabled { opacity: 0.4; cursor: not-allowed; }
 .ut-opts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+/* THE OPTIONS LAW (lane ui-phone-and-fit pick 0 — the owner 2026-11-13: a 500 px chat window showed «回复：保留 ag» and nothing
+   else, «这样我都看不到推荐回复选项»): at every width of its door an option is drawn WHOLE — its own words (the row says «Reply:»
+   once, .ut-opts-label), wrapping inside its pill when it is wider than the line, never an ellipsis, never a sideways scroll.
+   One rule for the tray, the mini inbox, the cards, the phone sheet, the strip (chat.css) and the For-you window (.iw-opt).
+   Gate: test-foryou-fit (the rules) + test-foryou-fit-chrome (every door at the nine widths of scripts/lib/fit-ladder.mjs). */
+.ut-opts-label, .iw-opts-label { font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; align-self: center; }
 .ut-opt {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
   border-radius: 999px; padding: 1px 9px; font-size: 10px; line-height: 16px; cursor: pointer; max-width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: normal; overflow-wrap: break-word; text-align: left;
 }
 .ut-opt:not(:disabled):hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .ut-opt:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -5303,7 +5309,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .iw-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
 .iw-opt {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 999px;
-  padding: 3px 12px; font-size: 12px; line-height: 18px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 12px; font-size: 12px; line-height: 18px; cursor: pointer; max-width: 100%; white-space: normal; overflow-wrap: break-word; text-align: left; /* THE OPTIONS LAW */
 }
 .iw-opt:not(:disabled):hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .iw-opt:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -5415,7 +5421,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp > summary::after { content: '▾'; content: '▾' / ""; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp[open] > summary::after { content: '▴'; content: '▴' / ""; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opts { gap: 6px; margin-top: 8px; }
-  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; text-align: left; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; border-radius: 14px; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; overflow-wrap: break-word; text-align: left; border-radius: 14px; } /* THE OPTIONS LAW: whole, never clamped */
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions { order: 2; float: none; width: 100%; margin: 8px 0 0; display: flex; gap: 6px; opacity: 1; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-reply { order: 3; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act, .chat-attn-dock .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
@@ -5485,8 +5491,9 @@ html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open)
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-look { display: inline-flex; order: 2; flex: none; align-items: center; justify-content: center; min-height: 26px; padding: 0 10px; border: 1px solid var(--yellow); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all { order: 3; margin-left: 0; font-size: 0 !important; display: inline-flex; align-items: center; justify-content: center; }
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all[hidden] { display: none; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-jump { display: none; } /* lane ui-phone-and-fit pick 0: the folded row has no room — its open item carries the door */
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock:not(.cad-open) > .cad-all::after { content: attr(data-short); content: attr(data-short) / ""; font-size: 15px; } /* «All»: its title and its name keep «N more · View all» */
-html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max-height: calc(45vh / var(--ui-scale, 1)); max-height: calc(45dvh / var(--ui-scale, 1)); overflow-y: auto; overscroll-behavior: contain; }
+html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open { max-height: calc(45vh / var(--ui-scale, 1)); max-height: min(calc(45dvh / var(--ui-scale, 1)), var(--cad-max, 100dvh)); overflow-y: auto; overscroll-behavior: contain; } /* lane ui-phone-and-fit pick 0: floating over the transcript, it is bounded by the VIEW too (--cad-max, half of it, read again when a keyboard shrinks the view) */
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .cad-head { position: sticky; top: -4px; z-index: 1; background: inherit; }
 html:is([data-vc="compact"], [data-vc="regular"]) .chat-attn-dock.cad-open > .cad-head::after { content: '▾'; content: '▾' / ""; color: var(--text-dim); } /* the head folds it again */
 
