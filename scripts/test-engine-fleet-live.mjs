@@ -111,7 +111,7 @@ console.log('— H3 the Secret names a tag');
 project(secretAt('v0.2.1'));
 const h3 = await until(async () => { const r = await row(); return r && r.p && r.fleet && r.fleet.outcome === 'unpinned' && r.p.install && r.p.install.ref === 'v0.2.1' ? r : null; }, 30000);
 const l3 = h3 ? BM.fleetPluginWords(null, h3.fleet, tW).line : null;
-ok(!!h3 && !h3.p.trusted && h3.p.consentRequired && l3 === `The cluster names ${EID} at «v0.2.1» — not a full commit sha, so the cluster does not trust it; review it and enable it in ⚙ → Plugins → ${EID} · waiting for your consent — its kernel is not fetched`,
+ok(!!h3 && !h3.p.trusted && h3.p.consentRequired && l3 === `The cluster names ${EID} at «v0.2.1» — not a full commit sha, so the cluster does not trust it; review it, then turn ${EID} on in this list · waiting for your consent — its kernel is not fetched`,
   `H3: a tag ⇒ installed, never trusted; the panel line reads «${l3}»`, h3 ? { trusted: h3.p.trusted, fleet: h3.fleet } : null);
 try { srv.kill('SIGTERM'); } catch { /* gone */ }
 await until(() => srv.exitCode !== null || srv.signalCode !== null, 10000);

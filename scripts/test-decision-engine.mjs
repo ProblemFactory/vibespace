@@ -239,7 +239,7 @@ let eng3 = null;
   const a = await pass5();
   ok(a.calls === 1 && a.rs[0].why === 'plan' && a.rs[0].status === 402 && a.rs.slice(1).every((r) => !r.ok && r.why === 'plan' && r.status === undefined), `402: a pass of 5 records = ${a.calls} call (before: ${before[402].calls}) — the first answer stops the row (why plan), the next four are quiet refusals`, a.rs);
   const n1 = said('plan');
-  ok(n1.length === 1 && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys\./.test(n1[0].text) && n1[0].o && n1[0].o.i18n && n1[0].o.i18n.key === n1[0].text, 'ONE server notice, in the person\'s words (the client words it from its i18n key)', notes3);
+  ok(n1.length === 1 && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(n1[0].text) && n1[0].o && n1[0].o.i18n && n1[0].o.i18n.key === n1[0].text, 'ONE server notice, in the person\'s words (the client words it from its i18n key)', notes3);
   const st = eng3.status(), row = pm3.list()[0];
   ok(st.stop && st.stop.why === 'plan' && st.stop.status === 402 && st.reconnect === null && row.why === 'plan' && row.decision.stop.why === 'plan', 'the status says it: stop {why plan, status 402}; the plugin row\'s why = plan (the chip reads it); reconnect stays null', { stop: st.stop, why: row.why });
   ok(j3().filter((x) => x.outcome === 'plan').length === 1 && j3().filter((x) => x.outcome === 'refused' && x.why === 'plan').length === 1 && !JSON.stringify(j3()).includes(SECRET), 'the journal: ONE row with outcome plan (the call) + ONE quiet refusal (per 5 min, not per record) — no key');
@@ -515,7 +515,7 @@ const ROW = `(() => {
   const pg = await page(1100, 900, 'en');
   await pg.until(`/stopped/.test(document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.textContent || '')`);
   const S1 = await pg.ev(ROW), cls = await pg.ev(`document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.className`);
-  ok(r.why === 'plan' && S1 && S1.chip === 'stopped — plan refused' && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in Settings › Plugins › LLM or the key in ⚙ → System → Integrations & keys\./.test(S1.title) && /plugin-chip-warn/.test(cls || ''), `desk: the row stop is ON the chip ("${S1 && S1.chip}", warn), its title says what to do`, { S1, cls });
+  ok(r.why === 'plan' && S1 && S1.chip === 'stopped — plan refused' && /the plan does not allow this model \(HTTP 402\)\. Change the judging model in the plugin’s settings, or the key on its Integrations card\./.test(S1.title) && /plugin-chip-warn/.test(cls || ''), `desk: the row stop is ON the chip ("${S1 && S1.chip}", warn), its title says what to do`, { S1, cls });
   await pg.shot('card-stop.png');
   pg.close();
   const ph = await page(390, 844, 'zh');
