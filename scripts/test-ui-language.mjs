@@ -634,6 +634,11 @@ if (isMain) {
     const w = BSW.whenText(Date.parse('2026-11-13T16:10:00Z'), Date.parse('2026-11-13T15:30:00Z'));   // Shanghai: 11/14 00:10 against 11/13 23:30
     ok(/14/.test(w), 'a session instant past midnight in the PAGE\'s zone carries its date (whenText reads «today» in the zone it prints in)', w);
     PT.setPageZone(null);
+    // ONE countdown spelling (2.369.403): page-time durationMark({ full }) — the usage popup's «· in 1d10h50m» — and the roster's /
+    // the cap ring's fullEta (usage-eta, PURE) are the same function, over every minute of 40 d; the owner's 09-15 form stands
+    const UE = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-eta.js')).href);
+    const T0 = Date.UTC(2026, 10, 14, 12), cd = (ms) => PT.durationMark(ms, { full: true });
+    ok(Array.from({ length: 40 * 1440 }, (_, i) => (i + 1) * 60e3).every((ms) => UE.fullEta(T0 + ms, T0) === cd(ms)) && cd(2 * 1440 * 60e3 + 5 * 60e3) === '2d0h5m' && cd(3 * 3600e3) === '3h0m', 'the popup\'s countdown (durationMark({ full })) and the roster\'s fullEta are ONE spelling — usage-eta countdownMark, the owner\'s 09-15 form', [cd(2 * 1440 * 60e3 + 5 * 60e3), UE.fullEta(T0 + 3 * 3600e3, T0)]);
     // every export of the one formatter has a reader in the browser bundle (the closure: until() had none)
     const ptSrc = fs.readFileSync(path.join(REPO, 'src/lib/page-time.js'), 'utf8');
     const exportsOf = [...ptSrc.matchAll(/^export function (\w+)/gm)].map((m) => m[1]);

@@ -80,7 +80,10 @@ export function bucketEta(bucket, nowMs) {
 //     the same ETA_MIN_MS guard refuses anything closer or passed), leading
 //     zero units dropped, INNER zero units kept ("2d0h5m") so the column
 //     stays tabular — the same spelling the taskbar popup's "· in 1d10h50m"
-//     suffix has used since 2.268.6 ("跟之前差不多").
+//     suffix has used since 2.268.6 ("跟之前差不多"). ONE function spells
+//     it, `countdownMark(minutes)`; page-time durationMark({ full }) — the
+//     popup's suffix — asks the same one (2.369.403: two spellings had
+//     grown; the census pins them equal over every minute of 40 d).
 //
 //   accountResetEta(entries, nowMs) → { ms, text, blocked, label, pct } | null
 //     ONE instant per account: when a bucket is SPENT (its effective used
@@ -94,6 +97,17 @@ export function bucketEta(bucket, nowMs) {
 //     (a spent bucket whose reset has PASSED rolled over and blocks nothing).
 //     No candidate ⇒ null: "no countdown" is a fact, never "0m".
 
+/** THE COUNTDOWN's spelling — the owner's 09-15 form, in ONE function (this
+ *  module imports nothing, so it lives here; page-time durationMark({ full })
+ *  asks it): whole minutes in, leading zero units dropped, INNER zero units
+ *  kept so a column stays tabular — '2d21h38m', '2d0h5m', '21h38m', '3h0m',
+ *  '38m'; 0 → '0m'. */
+export function countdownMark(minutes) {
+  const tm = Math.max(0, Math.round(Math.abs(Number(minutes) || 0)));
+  const d = Math.floor(tm / 1440), h = Math.floor((tm % 1440) / 60), m = tm % 60;
+  return d ? `${d}d${h}h${m}m` : h ? `${h}h${m}m` : `${m}m`;
+}
+
 /** `resetAtMs` and `nowMs` are epoch milliseconds. Returns the full-precision
  *  countdown ('2d21h38m' / '21h38m' / '38m'), or null when the reset is
  *  missing, unparseable, passed, or under 45 s out. */
@@ -102,9 +116,7 @@ export function fullEta(resetAtMs, nowMs) {
   if (!Number.isFinite(at) || !Number.isFinite(now)) return null;
   const rem = at - now;
   if (!(rem >= ETA_MIN_MS)) return null;
-  const tm = Math.max(1, Math.round(rem / MIN_MS)); // whole minutes; 45 s rounds to 1m
-  const d = Math.floor(tm / 1440), h = Math.floor((tm % 1440) / 60), m = tm % 60;
-  return d ? `${d}d${h}h${m}m` : h ? `${h}h${m}m` : `${m}m`;
+  return countdownMark(Math.max(1, Math.round(rem / MIN_MS))); // whole minutes; 45 s rounds to 1m
 }
 
 /** The account-level pick. `entries` = [{ bucket, pct, label?, spentPct? }]:
