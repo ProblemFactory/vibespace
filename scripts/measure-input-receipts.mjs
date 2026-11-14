@@ -8,7 +8,7 @@ const { WebSocket } = require('ws');
 const M = require('../src/browser-mediation.js');
 const F = require('../src/browser-facts.js');
 const seen = [];
-const judge0 = M.judge; M.judge = (msg, scope, o) => { const v = judge0(msg, scope, o); if (msg && msg.method) seen.push({ at: Date.now(), method: msg.method, type: msg.params && msg.params.type, params: msg.params, paused: !!(o && o.paused), kind: v.kind }); // verify S2: the FULL params (the credit is bound to them) return v; };
+const judge0 = M.judge; M.judge = (msg, scope, o) => { const v = judge0(msg, scope, o); if (msg && msg.method) seen.push({ at: Date.now(), method: msg.method, type: msg.params && msg.params.type, params: msg.params, paused: !!(o && o.paused), kind: v.kind }); return v; }; // verify S2: the FULL params (the credit is bound to them)
 const MED = require('../src/server/cdp-mediator.js');
 const ROOT = scratch('input-receipts-measure'); fs.mkdirSync(ROOT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
