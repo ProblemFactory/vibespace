@@ -14,7 +14,7 @@
 //   ③ ONE WIDGET, ONE UNIT STYLE: the badge (the reading's age), the counts under the rings (the time to the reset) and the
 //      row's own age are MARKS — m / h / d in every language («41h», «2d», «97m»); the ring's tooltip keeps the sentence in the
 //      interface's words («…41小时前读取»);
-//   ④ the row's own age is whole (not cut, not ellipsised).
+//   ④ the row's own age is whole (not cut, not ellipsised) — read off the FIXTURE'S clock (the page's Date starts at the seed).
 // VS_ROSTER_BADGES_PNG=<dir> keeps the pictures. NETWORK SAFETY: every credential is fabricated and EXPIRED. SKIPs without chrome.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -80,6 +80,11 @@ const ROWS = [
   { name: 'Delta Max', fetched: seedAt - 24 * H, capRead: seedAt - 24 * H - 72 * H, reset: 21 * H + 20 * M, u7: 0.96, uCap: 0.97, badge: '4d', counts: '21h', age: '24h' },
 ];
 const MARK = /^\d+[mhd]$/;
+// THE FIXTURE'S «NOW» IS THE PAGE'S (the .401 cut mirror: the runner's ja pass drew «98m» — a minute had passed between the seed
+// and the read): every document starts its clock at seedAt, so an age the page computes is the fixture's, never the wall clock's
+const PAGE_CLOCK = `(() => { const RD = Date, t0 = RD.now(), seed = ${seedAt}; const now = () => seed + (RD.now() - t0);
+  function D(...a) { if (!new.target) return new RD(now()).toString(); return a.length ? new RD(...a) : new RD(now()); }
+  D.prototype = RD.prototype; D.now = now; D.parse = RD.parse; D.UTC = RD.UTC; globalThis.Date = D; })()`;
 
 try {
   bootServer();
@@ -118,6 +123,7 @@ try {
     const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
     await cdp('Page.enable'); await cdp('Runtime.enable');
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: PAGE_CLOCK });
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
     return { face, cdp, ev, errors };
   };
