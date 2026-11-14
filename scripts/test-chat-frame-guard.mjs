@@ -65,7 +65,11 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   const fake = path.join(dir, 'fake-claude.sh');
   fs.writeFileSync(fake, `#!/bin/bash\nwhile IFS= read -r l; do printf '%s\\n' "$l" >> ${cap}; printf '{"type":"result","subtype":"success"}\\n'; done\n`, { mode: 0o755 });
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta, fake], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
-  const capLines = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean) : []);
+  // A LINE COUNTS ONCE ITS NEWLINE HAS LANDED (int402, the .402 prep mirror's fast red: «… INTACT as one line (176128 bytes)» on a
+  // runner ×1.40 slow). The stand-in's printf writes a 205 KB line as 4096-byte writes; a poll between the first and the last read
+  // a PARTIAL line, and every wait below («>= 1», «>= 2», «>= n0 + 1») counted it. Made red on the box by slowing the child's writes
+  // (strace -f -e inject=write:delay_exit=2000): 3 of 3 before this reader, on 2.369.401 too; the product's write is whole.
+  const capLines = () => { const t = fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8') : ''; const nl = t.lastIndexOf('\n'); return nl < 0 ? [] : t.slice(0, nl).split('\n').filter(Boolean); };
   await until(() => fs.existsSync(meta));   // the wrapper's boot sidecar (written before it reads stdin)
   const frame = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'BIG:' + 'x'.repeat(200 * 1024) }] } });
   const fp = path.join(dir, 'frame.json');
