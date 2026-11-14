@@ -303,7 +303,10 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // re-pinned .362 by lane claude-steer-inject (09097d333468 → 43b4907f5e0b, measured: the signature differs from the base's by
   // exactly button.chat-hold-btn.hidden(svg(circle,path)) right after button.chat-steer-btn.hidden(svg(path))) — the composer's
   // HOLD button, the chain's own Alt+Enter door («hold it to the turn's end»), hidden on the desk until a Claude turn runs
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '43b4907f5e0b';
+  // re-pinned by lane ui-language (43b4907f5e0b → 7eb3a7d04bc1, measured on the box at 8fde20d8b): the fixture's bar runs in
+  // bypassPermissions, and the perm chip now carries .danger there (the walk's chat-status-bar-2: a mode that asks nothing is
+  // drawn in the warning colour) — span.chat-status-perm.chat-status-clickable.danger
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '7eb3a7d04bc1';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
