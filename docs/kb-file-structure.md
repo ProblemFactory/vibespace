@@ -15039,6 +15039,11 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   - a red deep in a subfolder.
   Also green there: a hashbang, a `.js` ES module by detection, a `.js` CommonJS file and a `.js` under `"type": "module"`. Never read: node_modules, `.txt`, `.json`. On the real tree, the measure script's old bytes put back make §1 red by name and line (`scripts/measure-input-receipts.mjs:16:12`).
 - **Cost.** 4.1 s on the box (one parse of 62 MB); its stated time is in its fast row.
+### src/routes/persistence.js — the spending rows change only by the owner's press (lane setting-doors pick 0, 2026-11-14)
+
+- `refuseSpendRows` sits beside `refuseEngineRows` on PATCH, the whole-file POST and a config import's settings section (all or nothing). A spend.* row changes only from the owner's page: `spendWriteWhy` says 'bearer' for any `Authorization: Bearer`, else the strict `pageVerdict` (Sec-Fetch-Site same-origin, or this instance's own Origin), and null means the owner's page.
+- The judgment is over the file the write would LEAVE (an omitted row is a drop; rows carried verbatim are no change). A refusal is `403 spend_row_owner_only {error, why, rows, door: vibespace://settings/<row>}`, with nothing written.
+- The model and the stated limit are in kb-design-lessons («A turn nobody typed»). The every-writer census of the settings file is test-spend-rows-owner ④; the suites' one helper is scripts/scratch.mjs `ownerPageHeaders` (⑤).
 
 ### src/server/browser-keeper.js + scripts/test-keeper-sweep-yields.mjs (NEW, fast) — THE ORPHAN WALK IN STEPS (lane keeper-sweep-yields, 2026-11-16, 2.369.407)
 - **`retireInSteps(ids)`** (reconcile's `retired`, read by `boot()` and `tick()`): one record per step, `await` a `setImmediate` before each; a record whose lease is back when its step comes is kept; its one reason is the literal 'conversation gone' (test-architecture §54b reads every `retireEphemeral` caller's reason as a literal).
