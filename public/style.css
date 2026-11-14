@@ -9845,6 +9845,7 @@ button.vw-chip { cursor: pointer; }
   .mobile-win-split {
     flex-shrink: 0; min-height: 44px; min-width: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: none; color: var(--accent); font-size: 14px; white-space: nowrap; cursor: pointer;
+    margin-block: -8px; /* its 44 px target reaches into the row's 12 px padding instead of growing the row: every row keeps the release's 61 px (the ✕'s 36 px line sets it) — test-mobile-gaps' phone list */
   }
   .mobile-win-split.refused { color: var(--text-secondary); border-style: dashed; }
   .mobile-win-split.refused { width: 44px; min-width: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; } /* an icon at the row's end: the row's centre stays its name (主开发 09:33Z) */

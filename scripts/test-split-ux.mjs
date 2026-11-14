@@ -1150,7 +1150,7 @@ else await (async () => {
       ok(s0.chain && s0.layout === 'tabs' && s0.host === sidA && s0.active === sidB && S(s0.shown) === S([sidB]) && s0.hit === sidB, '13 scene (the incident): a real merge made ONE tabs group — Alpha the HOST, Bravo the guest ON SHOW', S(s0));
       const T = s0.titles || {};
       // the phone's nav title names the window — its NAME, « (n)» on the compact bar (lane phone-six: the folder cut a 390 px bar to «Sessio…»)
-      const navNames = (nav, title) => { const n = String(title || '').split(' — ')[0]; return !!n && (nav === n || String(nav || '').startsWith(n + ' (')); };
+      const navNames = (nav, title) => { const n = String(title || '').split(' — ')[0], v = String(nav || ''); return !!n && (v === n || v.startsWith(n + ' (') || (!!title && v.startsWith(String(title)))); }; // the NAME on the regular class (phone-six's head), the WHOLE title + « (n)» on the compact class (the release's words, kept by the recovery port onto .397)
       // D1 · the sidebar card (default click = focus) of the HOST
       const nameA = String(T[sidA] || '').split(' — ')[0];
       await ev(`if (!app.sidebar.isOpen) app.sidebar.toggle(true); if (app.sidebar._activeTab !== 'folders' && app.sidebar._railGo) app.sidebar._railGo('folders'); return true;`); await sleep(500);
