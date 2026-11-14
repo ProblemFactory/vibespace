@@ -61,6 +61,9 @@ const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ?
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE LOCK'S INSTANT is the fixture's, handed to the page — never the wall clock (the rule since 2026-11-14: a suite that draws a
+// time reads no clock); the page draws «Mac 已锁屏（HH:MM 起）» from it in its own zone. The owner's Mac locked 2026-10-26 13:05Z.
+const LOCK_SINCE = Date.UTC(2026, 9, 26, 13, 5);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 for (const f of [BUNDLE, NOVNC, FIXTURE]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 
@@ -691,7 +694,7 @@ console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg
     await p.ev(`window.__open(${JSON.stringify(M)}${mode ? `, { mode: '${mode}' }` : ''})`);
     const up = await playingIn(p, WIN, n);
     const road = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 9000);
-    await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    await p.ev(`window.__locked = ${LOCK_SINCE}; true`);
     // every display's view hears the lock from ITS OWN long poll (the fetch wrapper adds `paused` to an answer — it wakes none; a poll
     // holds ≤ pollMaxMs): one display ⇒ the chip; all displays ⇒ the chip AND every display's title row locked
     const PANESQ = `[...document.querySelectorAll('${WIN} .desktop-display-pane .desktop-display-say')].filter((e) => /已锁屏/.test(e.textContent)).length`;
