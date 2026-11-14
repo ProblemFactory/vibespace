@@ -30,6 +30,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A file you dropped into a chat whose folder is temporary is kept with the conversation, the chat says where, and a file of the same name is never replaced.
 - Settings › Chat says which dropped files are kept, and removes the files of conversations that no longer exist when you ask.
 - Installing xpra from xpra.org now checks that xpra.org's key file is exactly the known one before trusting it.
+- Opening a machine's screen no longer stays black for 45 s: if direct UDP brings nothing back for 7 s it uses the device link and says which way it is on.
+- When a Mac's screen is locked, its remote screen window now says so and carries on by itself once the Mac is unlocked, instead of staying black.
 
 ## 2.369.401 — 2026-11-13
 
