@@ -118,7 +118,7 @@ try {
   sub('src/ask-options.js', "  if (!ASKS.test(String(question || '')) && !CUE.test(s.slice(0, at[0].i) + ' ' + s.slice(tail))) return [];\n", ''); // a numbered plan = chips
   sub('src/ask-options.js', "  if (s.length > SHORT_MAX || !/[?？]/.test(String(question || '') + s)) return []; // a one-line sentence is no choice\n", '');
   sub('src/lib/user-todos-panel.js', "if (expand && !item.classList.contains('ut-item-resolved') && !e.target.closest('.ut-sess')", "if (expand && !e.target.closest('.ut-sess')"); // a resolved row's click opens nothing
-  sub('src/lib/user-todos-row.js', 'const go = notice || entry.band ? `', 'const go = !resolved && (notice || entry.band) ? `'); // …and has no door
+  sub('src/lib/user-todos-row.js', 'const go = (notice || entry.band) && rowDoor ? `', 'const go = resolved ? \'\' : (notice || entry.band) && rowDoor ? `'); // …and has no door (either door: a row's declared one — lane ui-needs-a-button pick 6 — or the conversation's)
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT2 });
   R2_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
   let css = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
