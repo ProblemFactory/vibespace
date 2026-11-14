@@ -676,6 +676,11 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     drawChip();
     return true;
   };
+  /** lane mac-locked-capture (recovery .401): THE LOCK is said in the pane a view shows NOW. One view MOVES between the one-display
+   *  window and the all-displays set — spreadAll makes the one view its display's pane, collapseTo makes a display's view the one —
+   *  and keeps the handler it was born with; each handler asked only its birth role (`v === stream` / `many.get(did) === v`), so
+   *  the moved view's pane never heard the lock (verbatim in the accepted e35bde49a). A view that is neither (disposed) says nothing. */
+  const sayLock = (v, p) => { const at = v && v === stream ? '' : ([...many].find(([, x]) => x === v) || [])[0]; if (at == null) return; panes.say(at, p ? lockedText(p) : ''); drawChip(); };
   /** ② a display's own stream, in its pane. */
   const startMany = (did, { still = null, said = false } = {}) => {
     let v = null;
@@ -685,7 +690,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
       mic: true, onMicReady: (ok) => micToggle.ready(v, ok), // lane stream-mic-road
       audio: true, onSoundReady: (ok) => soundToggle.ready(v, ok), // lane speaker-passthrough-v1
       onStatus: (state, code) => { if (state === 'fallback' || state === 'stopped') { micToggle.ended(v); soundToggle.ended(v); } if (state === 'playing' && still) { still.remove(); still = null; } if (state === 'restarting' && code === 'timeout') { said = true; panes.say(did, t('Stream interrupted: {why} — reconnecting…', { why: streamWords('connect_timeout') })); } if (state === 'playing' && said) { said = false; panes.say(did, ''); } drawChip(); }, onStats: () => drawChip(), onInput: inputWords, // lane stream-leg-flap: the re-offer's words stay until its picture plays (lane werift-lite-multihomed: and a connect that ran out of time is said)
-      onPaused: (p) => { if (many.get(did) === v) { panes.say(did, p ? lockedText(p) : ''); drawChip(); } }, // lane mac-locked-capture: THE LOCK, in its pane
+      onPaused: (p) => sayLock(v, p), // lane mac-locked-capture: THE LOCK, in the pane this view shows NOW (sayLock)
       onFallback: (code, why, taken, info) => { if (still) { still.remove(); still = null; } paneEnd(v, code, why, info); } });
     v._share = share;
     many.set(did, v);
@@ -805,7 +810,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
         if (state === 'fallback' && v === stream && v.played && !held) held = stillOf(v, panes.pane('')); // its last picture stays through the ladder
         if (state === 'playing' && still) { still.remove(); still = null; } drawChip(); handover.playing(state === 'playing'); if (!tick) tick = setInterval(() => { drawChip(); }, 1000); },
       onStats: () => drawChip(),
-      onPaused: (p) => { if (v === stream) { panes.say('', p ? lockedText(p) : ''); drawChip(); } }, // lane mac-locked-capture: THE LOCK — said over the last picture, gone at the unlock
+      onPaused: (p) => sayLock(v, p), // lane mac-locked-capture: THE LOCK — said over the last picture, gone at the unlock; in the pane this view shows NOW (sayLock)
       onInput: inputWords,
       onFallback: (code, why, taken, info) => {
         if (still) { still.remove(); still = null; }

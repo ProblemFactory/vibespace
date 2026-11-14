@@ -694,10 +694,16 @@ console.log('⑦ THE LOCK OVER A ROAD (lane mac-locked-capture × stream-udp-leg
     await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
     // every display's view hears the lock from ITS OWN long poll (the fetch wrapper adds `paused` to an answer — it wakes none; a poll
     // holds ≤ pollMaxMs): one display ⇒ the chip; all displays ⇒ the chip AND every display's title row locked
-    const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '') && ((${CHIPQ}.title || '').match(/串流 · 锁屏中/g) || []).length >= ${n === 1 ? 0 : n}`, n === 1 ? 8000 : 30000);
+    const PANESQ = `[...document.querySelectorAll('${WIN} .desktop-display-pane .desktop-display-say')].filter((e) => /已锁屏/.test(e.textContent)).length`;
+    const locked = await p.until(`/^串流 · 锁屏中/.test(${CHIPQ}.textContent || '') && ((${CHIPQ}.title || '').match(/串流 · 锁屏中/g) || []).length >= ${n === 1 ? 0 : n} && ${PANESQ} >= ${n}`, n === 1 ? 8000 : 30000);
     await sleep(400); await p.shot(file, WIN);   // the picture BEFORE the verdict: on the release tree it shows what the release says
-    const r = await p.ev(`({ chip: ${CHIPQ}.textContent || '', title: ${CHIPQ}.title || '' })`);
-    ok(up && road && locked && !/设备链路/.test(r.chip) && (n === 1 ? /已锁屏/.test(r.title) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}`, r);
+    const r = await p.ev(`({ chip: ${CHIPQ}.textContent || '', title: ${CHIPQ}.title || '', panes: ${PANESQ} })`);
+    ok(up && road && locked && r.panes >= n && !/设备链路/.test(r.chip) && (n === 1 ? /已锁屏/.test(r.title) : (r.title.match(/串流 · 锁屏中/g) || []).length >= n), `⑦ ${n === 1 ? 'one display' : 'every display in one window'} over the device link, the Mac locked: THE LOCK wins over the road — the chip 串流 · 锁屏中 (never 设备链路 · N fps over a black pane), its title ${n === 1 ? 'the lock\'s words' : 'locked per display'}, and ${n === 1 ? 'its pane' : 'EVERY display\'s pane (the one view moved into the set too)'} says 已锁屏`, r);
+    if (n > 1) { // collapsed to one display while locked: that display's view becomes the one — its pane still says the lock (recovery .401)
+      await p.ev(`${byDisplay(WIN + ' .desktop-strip-seg', D1.id)}.click()`);
+      const one = await p.until(`document.querySelectorAll('${WIN} .desktop-display-pane').length === 1 && ${PANESQ} === 1 && /^串流 · 锁屏中/.test(${CHIPQ}.textContent || '')`, 15000);
+      ok(one, '⑦ …collapsed to ONE display while the Mac is locked: the view that stays says the lock in its pane, the chip 串流 · 锁屏中', await p.ev(`({ panes: document.querySelectorAll('${WIN} .desktop-display-pane').length, said: ${PANESQ}, chip: ${CHIPQ}.textContent || '' })`));
+    }
     await p.ev('window.__locked = 0; true');
     const back = await p.until(`/^串流 · 设备链路 · /.test(${CHIPQ}.textContent || '')`, 8000);
     ok(back, `⑦ …the unlock: the road's words come back by themselves (${n} display${n > 1 ? 's' : ''})`);
