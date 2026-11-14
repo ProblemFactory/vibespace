@@ -50,12 +50,14 @@ const hub = ({ dir: dirIn = null, clock = null } = {}) => {   // (round 14: a hu
   P.setup({ dataDir: dir, wss: { clients: new Set([{ readyState: 1, send: (j) => { framed += j.length; } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (clock ? clock.t : VNOW), userStateMono: () => (clock ? clock.t : VNOW) });
   const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
   /** one request, timed: the handler alone, its body already parsed (as the door's parser hands it) */
-  const timed = (method, p, body) => {
+  // (int402: `spinMs` — the suite's own hook that makes a door TRULY slower: the CPU held inside the timed window, after the handler)
+  const timed = (method, p, body, { spinMs = 0 } = {}) => {
     let status = 200, out = null;
     const res = { status(c) { status = c; return res; }, json(o) { out = o; return res; } };
     const fn = handler(method, p);
     const t = process.hrtime.bigint();
     fn({ body, query: {}, params: {}, headers: {} }, res, () => { });
+    if (spinMs > 0) { const until = process.hrtime.bigint() + BigInt(Math.round(spinMs * 1e6)); while (process.hrtime.bigint() < until) { } }
     return { ms: Number(process.hrtime.bigint() - t) / 1e6, status, body: out };
   };
   /** one request whose handler answers later (the export) — the answer, once given */
@@ -148,11 +150,38 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
     ['20 000 renames of 560 characters', { customNames: Object.fromEntries(Array.from({ length: MOVES }, (_, i) => [k(i), 'r'.repeat(560)])) }],
     ['config values at depth 4 (4 MiB)', { sessionConfigs: Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [k(i), { d: Array.from({ length: 60 }, (_, j) => [[[j, 'deep']]]) }])) }],
   ];
-  for (const [what, content] of rows) {
-    const bytes = JSON.stringify(content).length;
-    const r = hub().timed('patch', '/api/user-state', parsed(content));
-    ok(r.status === 200 && bytes <= BIG && r.ms < 2 * C,
-      `law A, master's road (the whole-key door, measured): ${what} (${(bytes / 1048576).toFixed(1)} MiB) ⇒ ${r.status} in ${xC(r.ms)} (a regression ceiling: 2×)`, { status: r.status, code: codeOf(r), ms: r.ms, C });
+  // THE VERDICT OVER ROUNDS (int402 — the .402 prep mirror's fast attempt 1 was red here, «config values at their bound ⇒ 184 ms,
+  // ×2.16 the control», on a runner that was not slow; on the box the tip and 2.369.401 read ×1.24–1.52 over ten runs, the same spread:
+  // ONE sample of the road against ONE of its control let one moment decide a regression ceiling — B-d24c's ninth). Now ROUNDS rounds,
+  // each a control and every road on fresh hubs, back to back; a road's verdict is the MEDIAN of its samples over the MEDIAN of the
+  // control's samples taken IN THE SAME ROUNDS. Its controls, through the suite's own hook (timed's spinMs): a road made truly slower
+  // than twice its control is RED by name; one round of it delayed alone does not decide (green).
+  const ROUNDS = 3;
+  const med = (a) => { const v = [...a].sort((x, y) => x - y); return v[Math.floor(v.length / 2)]; };
+  const roundsVerdict = (roadMs, ctlMs, ceil) => { const r = med(roadMs), c = med(ctlMs); return { ok: r < ceil * c, r, c, x: r / c }; };
+  const texts = rows.map(([, content]) => JSON.stringify(content)), ctlText = JSON.stringify(IMPORT(ctlState));   // (serialized ONCE; each round parses its own fresh copy, as a parser hands it)
+  const ctlS = [], roadS = rows.map(() => []), stS = rows.map(() => []);
+  for (let rd = 0; rd < ROUNDS; rd++) {
+    const ctlBody = JSON.parse(ctlText); ctlS.push(hub().timed('post', '/api/config/import', ctlBody).ms);
+    texts.forEach((text, j) => { const b = JSON.parse(text); const r = hub().timed('patch', '/api/user-state', b); roadS[j].push(r.ms); stS[j].push(r.status); });
+  }
+  const ms0 = (a) => a.map((x) => x.toFixed(0)).join(' / ');
+  rows.forEach(([what, content], j) => {
+    const bytes = texts[j].length, v = roundsVerdict(roadS[j], ctlS, 2);
+    ok(stS[j].every((st) => st === 200) && bytes <= BIG && v.ok,
+      `law A, master's road (the whole-key door, measured over ${ROUNDS} rounds): ${what} (${(bytes / 1048576).toFixed(1)} MiB) ⇒ 200 in ${v.r.toFixed(0)} ms (median), ×${v.x.toFixed(2)} the control's median ${v.c.toFixed(0)} ms (a regression ceiling: 2×) — the road ${ms0(roadS[j])}, the control ${ms0(ctlS)}`, { status: stS[j], roadMs: roadS[j], ctlMs: ctlS });
+  });
+  {
+    // THE CEILING STILL BITES, AND ONE SLOW SAMPLE DOES NOT DECIDE — the depth-4 road (the cheapest), through the hook: two rounds of it
+    // held past twice the control and two plain ones, measured once and shared — [held, held, plain] is RED by its median (a road truly
+    // slower), [held, plain, plain] is green (one slow round)
+    const j = rows.length - 1, Cm = med(ctlS);
+    const held = [0, 1].map(() => hub().timed('patch', '/api/user-state', JSON.parse(texts[j]), { spinMs: 2.3 * Cm }).ms);
+    const plain = [0, 1].map(() => hub().timed('patch', '/api/user-state', JSON.parse(texts[j])).ms);
+    const slow = [held[0], held[1], plain[0]], one = [held[0], plain[0], plain[1]];
+    const vs = roundsVerdict(slow, ctlS, 2), v1 = roundsVerdict(one, ctlS, 2);
+    ok(!vs.ok, `CONTROL: a road truly slower than twice its control (+${(2.3 * Cm).toFixed(0)} ms held in two of ${ROUNDS} rounds) is RED by its median: ×${vs.x.toFixed(2)} — ${ms0(slow)}`, { slow, ctlS });
+    ok(v1.ok && held[0] >= 2 * Cm, `CONTROL: one round of the road held past twice the control (${held[0].toFixed(0)} ms) does not decide — the median ×${v1.x.toFixed(2)} stays under the ceiling — ${ms0(one)}`, { one, ctlS });
   }
   const owner10 = { archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])) };
   // (10× the owner's store is PINNED under the control — round 13's law: within 1.25 of master or under 100 ms there; past it the numbers
