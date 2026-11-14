@@ -1563,12 +1563,15 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
   // NEGATIVE CONTROL: the retirement is not a free-running clear — a SECOND
   // init frame that still names the worktree leaves the fact standing (and
   // does not re-broadcast, so a re-attach storm cannot flap the badge).
-  const beforeWt = calls.broadcasts.filter((b) => b.id === 'w-wt').length;
+  // the WORKTREE fact's own frames (fable-52-cli-321 r16 port, .401): a main-thread init also tells the model facts after its record
+  // (round 13 — the client's live-init road writes the CLI's id, the server's facts correct it), a different frame of the same session
+  const wtFrames = () => calls.broadcasts.filter((b) => b.id === 'w-wt' && b.type === 'worktree-path').length;
+  const beforeWt = wtFrames();
   p6.data(J({ type: 'system', subtype: 'init', session_id: 'sid-wt', cwd: '/repo/.claude/worktrees/w1', model: 'claude-fable-5' }));
   await settle();
   ok('NEGATIVE CONTROL: an unchanged init frame neither clears the fact nor re-broadcasts it (idempotent)',
     s6._worktree === true && s6._worktreePath === '/repo/.claude/worktrees/w1'
-    && calls.broadcasts.filter((b) => b.id === 'w-wt').length === beforeWt);
+    && wtFrames() === beforeWt);
 
   // ── (h2) THE RESUME OF AN ISOLATED CONVERSATION (round-4 verifier) ────────
   // A resume launches in the DISCOVERY cwd, and for a worktree conversation
