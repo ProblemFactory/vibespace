@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - An account row names its plan by the plan's current name (Ultra, Max), and a row that never signed in no longer reads "logged in".
+- The Artifacts list shows what was made for you first (published pages, hand-overs, running services); touched code folds away and every file names its folder.
 
 ## 2.369.401 — 2026-11-13
 
