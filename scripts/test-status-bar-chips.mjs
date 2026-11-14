@@ -97,7 +97,7 @@ function driveTwenty(bar) {
   const touched = {};
   for (let i = 1; i <= 20; i++) {
     bar.updateUsage({ input_tokens: 1000 + i * 1000, cache_read_input_tokens: 500 + i * 100, cache_creation_input_tokens: i });
-    bar.addCost(0.1);
+    bar.turnCost(0.5 + i * 0.1); // each turn carries the conversation's FOLDED figure (src/cost-segments.js) — it replaces, never adds (2.369.402)
     bar.setTurnState(i % 2 ? 'running' : 'idle'); // drawn by NEITHER (only requires_action is a chip) — still a render
     const now = byKey(bar);
     for (const k of Object.keys(before)) if (now[k] !== before[k]) touched[k] = (touched[k] || 0) + 1;
@@ -131,7 +131,12 @@ globalThis.document = { createElement: (t) => new FakeEl(t) };
   ok(cold.every((k) => v.after[k].innerSets === 1), `① the cold chips (${cold.join('/')}) were written once and never again (${cold.map((k) => v.after[k].innerSets).join('/')})`);
   // tick 20: 21000 + 2500 + 20 = 23520 of 200000 → 12 %, "24k"
   ok(/>12%</.test(v.after.ctx.innerHTML) && /\[24k\/200k\]/.test(v.after.ctx.innerHTML), `① …and the ctx chip shows the LAST reading (${v.after.ctx.textContent})`);
-  ok(v.after.cost.innerHTML === 'This chat ≈ $2.50', `① …and the cost chip shows the accumulated cost IN WORDS (lane door-healthy-chat — the studies' W3: a bare «$0.47» read as a bill) (${v.after.cost.innerHTML})`);
+  ok(v.after.cost.innerHTML === 'This chat ≈ $2.50', `① …and the cost chip shows the LAST turn's figure IN WORDS (lane door-healthy-chat — the studies' W3: a bare «$0.47» read as a bill) (${v.after.cost.innerHTML})`);
+  { // 2.369.402: the CLI's total is a running total per process — the server folds it; a turn's figure REPLACES the shown one
+    const b2 = mkBar(ChatStatusBar); b2.applyStatus({ ...firstStatus, total_cost_usd: 0.3 }); b2.turnCost(0.3); b2.turnCost(0.3); b2.turnCost(63854.44);
+    const c2 = byKey(b2).cost.innerHTML; b2.turnCost(0.3);
+    ok(c2 === 'This chat ≈ $63,854.44' && byKey(b2).cost.innerHTML === 'This chat ≈ $0.30', `① a turn's carried figure replaces the bar's — $0.30 three times reads $0.30, never $0.90; a large figure has its thousands mark (${c2})`);
+  }
   // a render with NOTHING changed writes nothing at all
   const w = counters.innerHTML; bar.render();
   ok(counters.innerHTML === w, `① a render with no change writes no innerHTML at all (${counters.innerHTML - w} writes)`);

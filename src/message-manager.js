@@ -20,6 +20,7 @@ const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the 
 const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
 const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
+const { COST_START, costStep, costShown, sinceLastCost } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — the restore's too
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
@@ -2385,8 +2386,11 @@ class MessageManager extends MessageWindow {
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
+    // total_cost_usd is the CLI PROCESS's running total: fold it (replayed or live) — the op carries the conversation's
+    // folded figure, which the bar shows in place of its own (never adds); the restore folds the same records the same way
+    this._cost = costStep(this._cost || COST_START, raw.total_cost_usd, sinceLastCost(raw));
     if (emit) {
-      this._emit({ op: 'meta', subtype: 'turn_complete', data: { cost: raw.total_cost_usd || 0, modelUsage: raw.modelUsage || null } });
+      this._emit({ op: 'meta', subtype: 'turn_complete', data: { cost: costShown(this._cost), modelUsage: raw.modelUsage || null } });
     }
   }
 

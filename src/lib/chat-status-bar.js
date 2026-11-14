@@ -9,7 +9,7 @@ import { pagesChipGroups, pageOfDesign } from './pages-chip-model.js'; // PURE (
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, effortOptions, effortSeedLevels, hasEffortMenu, noteModelCatalog, modelLabelFor, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel, uiRow, declaresModelFacts, billingRow, statusBarRow } from './agent-meta.js';
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
-import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
 import { modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
@@ -553,8 +553,10 @@ export class ChatStatusBar {
     this.render();
   }
 
-  addCost(cost, modelUsage) {
-    if (cost) { this._statusCost += cost; }
+  /** A completed turn: `cost` is the conversation's figure folded on the server (src/cost-segments.js — the CLI reports a
+   *  running total per process) and REPLACES the shown one, never adds (2.369.402: the sum read $63,854 for a few hundred). */
+  turnCost(cost, modelUsage) {
+    if (cost) { this._statusCost = cost; }
     if (modelUsage) {
       const info = Object.values(modelUsage)[0];
       if (info?.contextWindow) this._statusContextWindow = info.contextWindow;
@@ -1252,7 +1254,7 @@ export class ChatStatusBar {
     // subscription». The colour tiers warn only where the figure can be a bill (an API key, or nobody knows); a
     // subscription's figure is quiet.
     if (this._statusCost > 0) {
-      const cw = costChipWords(this._statusCost, this._costBasis ?? null, t);
+      const cw = costChipWords(this._statusCost, this._costBasis ?? null, t, (v) => num(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); // the page's number formatter (ui-language page-time)
       const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
       chip('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}` });
     }

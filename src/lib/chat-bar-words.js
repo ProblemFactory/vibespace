@@ -17,8 +17,10 @@ export function costBasisOf(auth) {
 
 /** The cost chip: its words (the figure always beside them), its tooltip, and whether its colour may warn (`tier`: only
  *  where the figure IS a bill or nobody knows; a subscription's figure is quiet). */
-export function costChipWords(usd, basis, t) {
-  const amount = '$' + (Number(usd) || 0).toFixed(2);
+export function costChipWords(usd, basis, t, amountOf = (v) => (Number(v) || 0).toFixed(2)) {
+  // the amount goes through the formatter the caller hands in — the bar hands the page's own number formatter
+  // (page-time num: «$63,854.44» in the page's language); this module stays PURE and formats nothing itself
+  const amount = '$' + amountOf(Number(usd) || 0);
   const what = t('An estimate of this conversation\'s usage at API prices, as the agent\'s program reports it.');
   if (basis === 'subscription') return { text: t('This chat ≈ {usd} · included in your subscription', { usd: amount }), title: what + ' ' + t('Your subscription covers it — nothing is billed per use.'), tone: 'quiet' };
   if (basis === 'api') return { text: t('This chat ≈ {usd} · billed per use (API key)', { usd: amount }), title: what + ' ' + t('This conversation runs on an API key, which is billed per use.'), tone: 'tier' };
