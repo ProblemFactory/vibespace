@@ -3143,6 +3143,8 @@ export default {
   'What should be designed? (a landing page, a poster, a settings screen…)': '要设计什么？（落地页、海报、设置界面…）',
   'Public link (anyone with the link)': '公开链接（任何拿到链接的人）',
   'Create design': '创建设计',
+  'New design': '新建设计',
+  'Only this kind': '只看这类',
   'Public': '公开',
   'Private': '私有',
   'Anyone with the link can view — click to make private': '任何拿到链接的人都能查看——点击改为私有',

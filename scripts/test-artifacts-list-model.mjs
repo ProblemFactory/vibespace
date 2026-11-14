@@ -67,13 +67,13 @@ for (const group of M.GROUPS) for (const sort of M.SORTS) {
   ok(flat(a) === flat(b) && n === ROWS.length && a.every((g) => g.head.count === g.rows.length), `${group} × ${sort}: ${a.length} groups, ${n} rows, the same order from any input order`);
 }
 const byKind = M.orderRows(ROWS, { group: 'kind', sort: 'changed' }).map((g) => g.head.label);
-ok(JSON.stringify(byKind) === JSON.stringify(['doc', 'service', 'page', 'other', 'code']), `kind groups in VIEW_ORDER, code last (${byKind.join(' ')})`);
+ok(JSON.stringify(byKind) === JSON.stringify(['page', 'doc', 'service', 'file', 'code']), `kind groups in the owner's DELIVERABLE_ORDER (2026-11-14: designs · published pages · documents · images · services · files), code last (${byKind.join(' ')})`);
 const byHelper = M.orderRows(ROWS, { group: 'helper' });
 ok(byHelper[byHelper.length - 1].head.label === '' && byHelper.slice(0, -1).every((g, i, a) => i === 0 || a[i - 1].head.count >= g.head.count), 'helper groups: most rows first, the main conversation ("") last');
 const byDay = M.orderRows(ROWS, { group: 'day' }).map((g) => g.head.label);
 ok(byDay.every((d, i) => i === 0 || byDay[i - 1] > d), `day groups newest first (${byDay.join(' ')})`);
 const sorted = (rs, cmp) => rs.every((r, i) => i === 0 || cmp(rs[i - 1], r) <= 0);
-const docs = (sort) => M.orderRows(ROWS, { group: 'kind', sort })[0].rows;
+const docs = (sort) => M.orderRows(ROWS, { group: 'kind', sort }).find((g) => g.head.label === 'doc').rows; // the documents' group (the owner's order puts the published page first)
 ok(sorted(docs('changed'), (a, b) => b.lastAt - a.lastAt), 'changed: newest change first');
 ok(sorted(docs('name'), (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })) && docs('name').findIndex((r) => r.name === 'notes 9.md') < docs('name').findIndex((r) => r.name === 'notes 10.md'), 'name: numeric collation ("notes 9" before "notes 10")');
 ok(sorted(docs('edits'), (a, b) => ((b.edits + b.writes) - (a.edits + a.writes))), 'edits: most touches (edits + writes) first');
@@ -110,7 +110,7 @@ for (const col of M.COLUMNS) {
 }
 ok(keys(M.sortRows(items, { col: 'name' })).join() === keys(M.orderRows(items, { group: 'kind', sort: 'name' }).flatMap((g) => g.rows).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) || b.lastAt - a.lastAt || (a.key < b.key ? -1 : 1))).join(), 'the window\'s name sort = the popover\'s name comparator');
 const R = M.railOf(ROWS);
-ok(R.total === 217 && R.kinds.map((k) => k.key).join() === 'k:doc,k:service,k:page,k:other,k:code' && R.kinds.find((k) => k.key === 'k:code').count === 174, `the rail: all ${R.total}, kinds with counts (${R.kinds.map((k) => k.label + ' ' + k.count).join(', ')})`);
+ok(R.total === 217 && R.kinds.map((k) => k.key).join() === 'k:page,k:doc,k:service,k:file,k:code' && R.kinds.find((k) => k.key === 'k:code').count === 174, `the rail: all ${R.total}, kinds with counts (${R.kinds.map((k) => k.label + ' ' + k.count).join(', ')})`);
 ok(R.helpers.length && R.helpers.every((h) => h.label) && M.railRows(ROWS, R.helpers[0].key).length === R.helpers[0].count, `the rail's helpers (${R.helpers.map((h) => h.label + ' ' + h.count).join(', ')}) — a click selects exactly its count`);
 ok(M.railRows(ROWS, 'k:code').length === 174 && M.railRows(ROWS, 'recent').length === 5 && M.railRows(ROWS, 'all').length === 217, 'railRows: a kind · recent · all');
 
@@ -122,7 +122,7 @@ ok(!p1.sections.some((s) => s.key === 'recent') && p1.sections.find((s) => s.key
 ok(M.listPlan(V, { q: 'zzzz' }).empty === true, 'zero matches ⇒ the empty note');
 const v1 = M.viewFrom({ group: 'helper', sort: 'edits', collapsed: { helper: ['h:pt2:fix'] } });
 ok(v1.group === 'helper' && v1.sort === 'edits' && v1.collapsed.helper[0] === 'h:pt2:fix' && v1.collapsed.kind.join() === 'k:code', 'viewFrom keeps a stored choice; an absent kind fold set = 代码 collapsed');
-ok(JSON.stringify(M.viewFrom('junk')) === JSON.stringify(M.viewFrom(null)) && M.viewFrom({ group: 'x' }).group === 'intent', 'junk ⇒ the defaults (intent)');
+ok(JSON.stringify(M.viewFrom('junk')) === JSON.stringify(M.viewFrom(null)) && M.viewFrom({ group: 'x' }).group === 'kind', 'junk ⇒ the defaults (the kind — the owner\'s deliverable kinds, 2026-11-14)');
 
 console.log('⑦ the work per keystroke (filterRows → orderRows): LINEAR in WORK at 250 → 500 → 1 000 rows; the clock printed, never judged');
 const big = []; for (let i = 0; i < 500; i++) big.push({ ...ROWS[i % ROWS.length], key: 'k' + i, name: (i % 3 ? 'mod_' : 'Sec') + i + '.py' });
@@ -146,8 +146,8 @@ for (const n of [250, 500]) { const v = judgeInChild({ ...LP, n }); ok(v.ok, `li
 { // CONTROL: a quadratic listPlan copy (a findIndex dedupe over every row) must read red
   const s7 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-alm7-'));
   try {
-    const src7 = fs.readFileSync(LP.module, 'utf8'), needle7 = '  const all = [...items, ...code];\n';
-    fs.writeFileSync(path.join(s7, 'artifacts-list-model.mjs'), src7.replace(needle7, '  const all = [...items, ...code].filter((r, i, a) => a.findIndex((x) => x.key === r.key) === i);\n'));
+    const src7 = fs.readFileSync(LP.module, 'utf8'), needle7 = '  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];\n';
+    fs.writeFileSync(path.join(s7, 'artifacts-list-model.mjs'), src7.replace(needle7, '  const all = (alone ? railRows([...items, ...code], alone) : [...items, ...code]).filter((r, i, a) => a.findIndex((x) => x.key === r.key) === i);\n'));
     const q7 = judgeInChild({ ...LP, module: path.join(s7, 'artifacts-list-model.mjs'), n: 250 });
     ok(src7.includes(needle7) && !q7.ok && q7.r > LINEAR_BOUND, `CONTROL: a quadratic listPlan copy reads ×${(q7.r || 0).toFixed(2)} over 250 → 500 rows — red`, q7.err || '');
   } finally { fs.rmSync(s7, { recursive: true, force: true }); }

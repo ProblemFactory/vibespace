@@ -249,10 +249,10 @@ function ownerView({ codeNewest = false } = {}) {
 }
 const OV = ownerView();
 ok(OV.count === 30 && OV.codeCount === 41, `the fixture is the owner's «30 项产出 · 41 个代码文件» (${OV.count} + ${OV.codeCount})`);
-const plan = M.listPlan(OV, { ...M.DEFAULT_VIEW, collapsed: M.DEFAULT_VIEW.collapsed.intent });
+const plan = M.listPlan(OV, { ...M.DEFAULT_VIEW, group: 'intent', collapsed: M.DEFAULT_VIEW.collapsed.intent }); // the INTENT grouping (the person's pick since the owner's kinds became the default, 2026-11-14)
 const sec = (k) => plan.sections.find((s) => s.key === k);
 const bands = plan.sections.filter((s) => s.head.group === 'intent');
-ok(bands.map((s) => s.key + ' ' + s.head.count).join(' · ') === 'i:foryou 4 · i:made 26 · i:touched 41', `the DEFAULT plan's bands: ${bands.map((s) => s.key + ' ' + s.head.count).join(' · ')}`);
+ok(bands.map((s) => s.key + ' ' + s.head.count).join(' · ') === 'i:foryou 4 · i:made 26 · i:touched 41', `the INTENT plan's bands: ${bands.map((s) => s.key + ' ' + s.head.count).join(' · ')}`);
 ok(plan.sections[0].key === 'i:foryou' && plan.sections[0].open, 'the first section is «for you», open (the first screen = the attention list)');
 ok(sec('i:foryou').rows.map((b) => b.kind).sort().join() === 'doc,page,page,service' && sec('i:foryou').rows.every((b, i, a) => i === 0 || (a[i - 1].lastAt || 0) >= (b.lastAt || 0)), `«for you» = the 2 published pages + the hand-over + the service, newest first (${sec('i:foryou').rows.map((b) => b.name).join(', ')})`);
 ok(sec('i:touched').open === false && sec('i:touched').head.code === 41 && sec('i:touched').head.count === 41, '«touched» is FOLDED by default behind its count — 41, all code («顺带改了 41 个代码文件»)');
@@ -411,9 +411,9 @@ ok(ps === 'b/a.md b/aa.md c/mm.md x/a/zz.md' && M.sortRows(PS, { col: 'path', di
 ok(M.pathWord(svcRow, OV) === svcRow.url && M.pathWord(handed, OV) === '~/helper', 'pathWord: a service shows (and sorts by) its address; any other row its folder');
 
 // ── ④ the device-kept view ──
-console.log('④ the device-kept view: intent is the default; a view stored before it reads as it');
-ok(M.DEFAULT_VIEW.group === 'intent' && M.viewFrom(null).group === 'intent' && M.viewFrom({ group: 'kind' }).group === 'intent' && M.viewFrom({ v: 2, group: 'kind' }).group === 'kind' && M.viewFrom({ group: 'helper' }).group === 'helper',
-  'null ⇒ intent; an OLD stored {group: kind} (the old default, never a choice) ⇒ intent; a v2 kind choice and a helper choice stay');
+console.log('④ the device-kept view: the KIND is the default (the owner\'s deliverable kinds, 2026-11-14); a view stored before it reads as it');
+ok(M.DEFAULT_VIEW.group === 'kind' && M.viewFrom(null).group === 'kind' && M.viewFrom({ group: 'kind' }).group === 'kind' && M.viewFrom({ v: 2, group: 'intent' }).group === 'kind' && M.viewFrom({ v: 2, group: 'kind' }).group === 'kind' && M.viewFrom({ v: 3, group: 'intent' }).group === 'intent' && M.viewFrom({ group: 'helper' }).group === 'helper' && M.viewFrom({ v: 2, group: 'helper' }).group === 'helper',
+  'null ⇒ kind; a v2 stored {group: intent} (the v2 default, never a choice) ⇒ kind; a v3 intent CHOICE stays intent; a helper choice stays');
 const F200 = Array.from({ length: M.FOLDS_MAX }, (_, i) => 'd:2026-10-' + i);
 const f201 = M.viewFrom({ v: M.VIEW_VERSION, collapsed: { day: M.foldToggle(F200, 'd:new') } }).collapsed.day;
 ok(M.FOLDS_MAX === 200 && f201.length === 200 && f201[0] === 'd:new' && !f201.includes(F200[199]) && M.foldToggle(['a', 'b'], 'a').join() === 'b' && M.foldToggle(['a', 'b'], 'c').join() === 'c,a,b',
@@ -439,7 +439,7 @@ const src = fs.readFileSync(MODEL, 'utf8');
 const copy = async (tag, from, to) => { if (!src.includes(from)) return null; const f = path.join(scratch, `model-${tag}.mjs`); fs.writeFileSync(f, src.replace(from, to)); return import(pathToFileURL(f).href); };
 const bare = await copy('bare', '    if (rs.length < 2) { out.set(rs[0].key, n); continue; }', '    { for (const r of rs) out.set(r.key, n); continue; }');
 ok(bare && bare.listPlan(OV, { collapsed: ['i:touched'] }).ctx.names.get(':' + CWD + '/referee3/README.md') === 'README.md', 'CONTROL the bare name on a collision ⇒ the README leg reads «README.md» three times — RED');
-const more = await copy('more', '    sections.push({ key: g.head.key, head: g.head, rows: g.rows, open, folders });', '    sections.push({ key: g.head.key, head: g.head, rows: g.rows.slice(0, 8), more: Math.max(0, g.rows.length - 8), open, folders: null });');
+const more = await copy('more', '    sections.push({ key: g.head.key, head: alone ? { ...g.head, alone: true } : g.head, rows: g.rows, open, folders });', '    sections.push({ key: g.head.key, head: g.head, rows: g.rows.slice(0, 8), more: Math.max(0, g.rows.length - 8), open, folders: null });');
 const pm = more && more.listPlan(OV, { collapsed: ['i:touched'] });
 ok(pm && !(pm.sections.find((s) => s.key === 'i:made').rows.length === 26 && Array.isArray(pm.sections.find((s) => s.key === 'i:made').folders)), 'CONTROL a «show more» in place of a section (8 rows + a count) ⇒ the made-here leg (26 rows, every one in a folder) is RED');
 const dup = await copy('dup', '.filter((r) => !drawn.has(r.key))', '');
@@ -453,7 +453,7 @@ ok(unf && unf.listPlan(OV, { collapsed: unf.DEFAULT_VIEW.collapsed.intent }).sec
 const r1f = await copy('r1folder', "segs, base: 0, depth: 1, max:", "segs, base: 0, depth: 3, max:"); // r1: the folder's last three segments from the root
 const r1meta = r1f && r1f.metaLine(r1f.rowWords(REF, { cwd: CWD, host: '', kindWord: (k) => AF.kindWord(k, 'zh') }));
 ok(r1meta && r1meta !== 'referee · …/out · 文档' && r1meta.includes('vibespace-lanes'), `CONTROL r1's folderOf (a path outside the cwd printed from its root) ⇒ «${r1meta}» — RED`);
-const sub = await copy('substr', "    const k = kw ? kindHit(kw(r.kind || 'other'), s) : '';", "    const k = kw && fold(kw(r.kind || 'other')).includes(s) ? 'equal' : '';");
+const sub = await copy('substr', "    const k = kw ? kindHit(kw(kindKey(r)), s) : '';", "    const k = kw && fold(kw(kindKey(r))).includes(s) ? 'equal' : '';");
 const subP = sub && sub.listPlan(OV, { q: 'de', collapsed: ['i:touched'], kindWord: enKw });
 ok(subP && (subP.sections.some((s) => s.key === 'i:touched' && s.open) || subP.sections.reduce((n, s) => n + s.rows.length, 0) > real('de')), 'CONTROL the kind word as a substring ⇒ «de» floods «Document» / «Code» rows — RED');
 const tailS = await copy('tailsort', "        : (a, b) => WORDS.compare(pathWord(a, { cwd, host, hubWord, hostNames, folders }), pathWord(b, { cwd, host, hubWord, hostNames, folders })) || CMP.name(a, b);", '        : keyCmp((r) => pathTail(r.path));');
@@ -518,7 +518,7 @@ const r4shown = "const wasShown = (r) => !!(r && (r.shown || (r.presented ? Stri
 const AF4 = cjsCopy('src/artifacts.js', r4shown, "const wasShown = (r) => !!(r && (r.shown || (r.by !== 'user' && (r.presented || SHOWN_OPS.includes(r.lastOp)))));", 'af-r4shown');
 const rb4 = AF4 && rebuild([PERSON_REC], persist(rebuild([PERSON_REC], keep(BASE_PASTE), AF4)), AF4);
 ok(AF4 && bandBy(rb4, AF4) === 'foryou' && Object.values(rb4)[0].shown === true, 'CONTROL r4\'s wasShown (a row without `shown` read by its `by` / `presented`) ⇒ the base\'s row for the person\'s paste reads «for you», stamped `shown` and persisted — RED');
-const cap4 = await copy('cap4', 'foldsCap((v.v === VIEW_VERSION ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\'), g)', '(v.v === VIEW_VERSION ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\').slice(0, FOLDS_MAX)');
+const cap4 = await copy('cap4', 'foldsCap((v.v >= 2 ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\'), g)', '(v.v >= 2 ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === \'string\').slice(0, FOLDS_MAX)');
 ok(cap4 && touchedShut(cap4, cap4.viewFrom({ v: cap4.VIEW_VERSION, collapsed: { intent: cap4.foldToggle([...FK.slice(0, 199).reverse(), 'i:touched'], FK[199]) } })) === false, 'CONTROL r4\'s cap (the newest 200 of every key) ⇒ after 200 folds the seeded «touched» is evicted and opens — RED');
 const OFN = cjsCopy('src/harnesses/artifacts-of.js', '(ours || !CMM().opensWithServerFrame(text))', "(ours || !CMM().opensWithServerFrame(String(text).replace(/^\\s*VibeSpace \\(this workspace, not another agent\\) reports:/, '')))", 'of-nonotice');
 ok(OFN && byOf(OFN.acp({ kind: 'update', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: NOTICE } } })) === 'user', 'CONTROL the server frame without its notice-head half ⇒ VibeSpace\'s notice reads as the person\'s — RED');

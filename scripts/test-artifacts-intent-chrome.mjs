@@ -230,6 +230,8 @@ try {
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  // the INTENT grouping as the person's choice (since 2026-11-14 the panel opens on the owner's KINDS — test-deliverable-kinds); set once, never over a view a leg changed
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "if (!localStorage.getItem('vs-artifacts-view')) localStorage.setItem('vs-artifacts-view', JSON.stringify({ v: 3, group: 'intent' }));" });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await waitApp(); await sleep(800);
   const liveWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
