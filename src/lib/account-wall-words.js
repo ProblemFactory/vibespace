@@ -7,6 +7,11 @@
 // to press — it ends by itself, and the sentence says when). The reset claim's words live here too.
 const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
 const id = (s, p) => fill(s, p);
+/** THE MARK'S t (hotfix 2.369.401 — the owner 2026-11-13 under a picture of the roster: «不如还是继续用 h/d»): a MARK — a ring's age
+ *  badge, a row's age, the switch menu's age, the counts under the rings — says m / h / d in every language: the English key filled,
+ *  no dictionary («41h», «2d», «97m»). A SENTENCE a person reads (a tooltip, the popup's «read … ago», a dialog line) keeps the
+ *  interface's words through the real t. */
+export const markT = id;
 
 /** The words for ONE wall code, for one named account (`name`) or `n` accounts sharing it → { text, door } */
 export function wallWords(wall, { t = id, name = null, n = 1 } = {}) {
@@ -104,6 +109,6 @@ export function staleLaneAge(readAt, freshestAt, nowMs = Date.now(), { t = id } 
   const r = Number(readAt) || 0, f = Number(freshestAt) || 0;
   if (!r || !f || f - r <= STALE_LANE_MS) return '';
   const min = Math.max(1, Math.round((Number(nowMs) - r) / 60000));
-  // the units are the interface's (K3: «{n}m» / «{n}h» / «{n}d» — the keys every other short age uses)
+  // the keys every short age uses: a MARK passes markT (m / h / d in every language), a sentence the interface's t
   return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });
 }

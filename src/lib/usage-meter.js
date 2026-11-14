@@ -20,7 +20,7 @@ import { overageState, spendControlState } from '../spend-authorizer.js';
 // GPT-5.3-Codex-Spark model cap and `premium`, and the file on disk held the
 // Spark limit at 0 % while the plan limit — the one at 5 % — was gone.
 import * as quotaModel from '../quota-model.js';
-import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge, claimAnsweredWords, notOnDiskWords } from './account-wall-words.js'; // PURE (lane account-reset-door)
+import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge, markT, claimAnsweredWords, notOnDiskWords } from './account-wall-words.js'; // PURE (lane account-reset-door)
 import { showUnlock } from './vault-unlock.js'; // a vault wall's door: Unlock… in the toast itself
 
 export function installUsageMeter(App, ctx = {}) {
@@ -584,8 +584,8 @@ export function installUsageMeter(App, ctx = {}) {
       if (cap && cap.state === 'read') {
         const capAt = atOf(quotaModel.laneOfBucket(rl, 'scoped', cap.name)) || cap.readAt;
         cap.staleAge = staleLaneAge(capAt, freshest, Date.now(), { t });   // the words: the tooltip and the popup's «read … ago»
-        // …and the MARK the 14 px ring carries: the compact unit, untranslated like the ring's own «5h» / «7d» labels (K3 badge cure)
-        cap.staleMark = staleLaneAge(capAt, freshest, Date.now(), { t: (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m)) });
+        // …and the MARK the ring carries: m / h / d in every language, like the ring's own «5h» / «7d» labels (markT — the owner's h/d)
+        cap.staleMark = staleLaneAge(capAt, freshest, Date.now(), { t: markT });
       }
       const laneAge = (at) => { const a = staleLaneAge(at, freshest, Date.now(), { t }); return a ? `<span class="usage-stat usage-stat-stale">${escHtml(t('read {age} ago', { age: a }))}</span>` : ''; };
       const claimBtn = (lane, view, capName = null) => (noData || !lane || !view || view.unconfirmed || claimed[lane] || !(Number(view.reading?.utilization) >= quotaModel.RESET_SEEN_MIN_DROP / 100) ? ''

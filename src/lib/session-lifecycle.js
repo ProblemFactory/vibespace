@@ -3,6 +3,7 @@ import { ChatView } from './chat-view.js';
 import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
+import { markT } from './account-wall-words.js'; // PURE: the mark's t (m / h / d in every language)
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
@@ -1578,7 +1579,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       }).filter(([, v]) => v != null);
       if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
-      const ageTxt = age != null && age > 5 ? escHtml(age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+      // a MARK: m / h in every language (markT — hotfix 2.369.401, the owner's «不如还是继续用 h/d»)
+      const ageTxt = age != null && age > 5 ? escHtml(age < 100 ? markT('{n}m', { n: age }) : markT('{n}h', { n: Math.round(age / 60) })) : '';
       const seg = (k, v) => (v == null ? '' : `<span class="bsw-seg${v.est ? ' bsw-est' : ''}${v.un ? ' bsw-unconfirmed' : ''}"${v.un ? ` title="${escHtml(v.un)}"` : ''}><span class="bsw-k">${escHtml(k)}</span>${pctHtml(v.p)}</span>`);
       return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, v]) => seg(l, v)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
     };

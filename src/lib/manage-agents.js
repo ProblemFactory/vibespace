@@ -36,7 +36,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one con
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
 import { overageChip, spendControlChip, creditsChipHtml, creditsState, bucketView, unconfirmedText, capRing, readingCaps, NO5H_RINGS } from './usage-source.js';
-import { wallWords, groupWalls, staleLaneAge } from './account-wall-words.js'; // PURE (lane account-reset-door): the pool's cause in a person's words, one sentence per cause
+import { wallWords, groupWalls, staleLaneAge, markT } from './account-wall-words.js'; // PURE (lane account-reset-door): the pool's cause in a person's words, one sentence per cause
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
@@ -1687,8 +1687,11 @@ export function installManageAgents(App, ctx = {}) {
         : eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
       // L3 (lane account-reset-door): a lane whose own reading is far older than the row's freshest says so ON ITSELF
       const lk = laneOfDonut(x0);
-      const stale = lk && laneAts.get(lk) ? staleLaneAge(laneAts.get(lk), Math.max(0, ...laneAts.values()), now, { t }) : '';
-      const staleTip = stale ? ' · ' + escHtml(t('read {age} ago', { age: stale })) : '';
+      // the badge is a MARK (m / h / d in every language — the owner's «不如还是继续用 h/d», like the counts under the rings); the ring's
+      // tooltip keeps the sentence in the interface's words
+      const staleOf = (tt) => (lk && laneAts.get(lk) ? staleLaneAge(laneAts.get(lk), Math.max(0, ...laneAts.values()), now, { t: tt }) : '');
+      const stale = staleOf(markT);
+      const staleTip = stale ? ' · ' + escHtml(t('read {age} ago', { age: staleOf(t) })) : '';
       return `<span class="acct-donut-col${stale ? ' acct-donut-aged' : ''}"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}${v.unconfirmed ? ' acct-donut-unconfirmed' : ''}" title="${tip}${staleTip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${stale ? `<span class="acct-donut-age" aria-hidden="true">${escHtml(stale)}</span>` : ''}${etaHtml}</span>`;
     };
     // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
@@ -1724,7 +1727,8 @@ export function installManageAgents(App, ctx = {}) {
     // Since 2026-09-14 it is ONE line again: the row-level "tightest bucket"
     // countdown moved under the donut it describes (every donut carries its
     // own now), and the min-width stays so the donut columns stay aligned.
-    const ageLabel = age != null && age > 5 ? (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
+    // a MARK: m / h in every language (markT — the owner's h/d); its title keeps the sentence («Last refreshed {n} min ago»)
+    const ageLabel = age != null && age > 5 ? (age < 100 ? markT('{n}m', { n: age }) : markT('{n}h', { n: Math.round(age / 60) })) : '';
     // Narrow-width companion (rail panel, 2.179.1): the donut cluster is
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full

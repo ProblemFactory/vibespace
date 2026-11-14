@@ -104,7 +104,7 @@ window.ready = true;`;
         const ring = b.parentElement.querySelector(ringSel), own = b.parentElement.querySelector(labelSel);
         const cs = getComputedStyle(b), lh = parseFloat(cs.lineHeight) || 10, bt = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
         const rb = R(b);
-        out.push({ where, text: b.textContent, title: b.title || '', lines: Math.round((rb.height - bt) / lh), overOwn: own ? Math.round(cross(rb, R(own))) : -1, overOther: Math.round(rings.filter((x) => x !== ring).reduce((s, x) => s + cross(rb, R(x)), 0)) });
+        out.push({ where, text: b.textContent, title: b.title || (ring && ring.title) || '', lines: Math.round((rb.height - bt) / lh), overOwn: own ? Math.round(cross(rb, R(own))) : -1, overOther: Math.round(rings.filter((x) => x !== ring).reduce((s, x) => s + cross(rb, R(x)), 0)) });
       } }
     return out; })()`;
   const looks = {};
@@ -135,9 +135,11 @@ window.ready = true;`;
     const m = looks[`${face}/after/${lang}`];
     ok(fine(m), `${face} face, ${lang}: every badge ONE line, over neither its own ring's label nor a neighbouring ring — ${m.map((x) => `${x.where} «${x.text}» ${x.lines} line(s), own ${x.overOwn} px², other ${x.overOther} px²`).join(' · ')}`, m);
   }
+  // THE OWNER'S WORD (2026-11-13, «不如还是继续用 h/d»): a badge is a MARK — m / h / d in every language, like the counts under the
+  // rings; the sentence stays in the interface's words in the tooltip (the taskbar badge's own, the roster ring's)
   for (const lang of ['zh', 'ja']) {
     const m = looks[`box/after/${lang}`], tb = m.find((x) => x.where === 'taskbar'), ro = m.find((x) => x.where === 'roster');
-    ok(tb && /^47h$/.test(tb.text) && /47(小时|時間)/.test(tb.title) && ro && /^47(小时|時間)$/.test(ro.text), `${lang}: the taskbar's 14 px ring carries the compact mark «${tb && tb.text}» (its tooltip the words «${tb && tb.title}»); the roster's donut keeps «${ro && ro.text}»`, { tb, ro });
+    ok(tb && /^47h$/.test(tb.text) && /47 ?(小时|時間)/.test(tb.title) && ro && /^47h$/.test(ro.text) && /47 ?(小时|時間)/.test(ro.title), `${lang}: both badges carry the mark «${tb && tb.text}» / «${ro && ro.text}»; their tooltips the words «${tb && tb.title}» / «…${ro && ro.title.slice(-14)}»`, { tb, ro });
   }
   const red = ['zh', 'ja'].filter((lang) => !fine(looks[`box/before/${lang}`]));
   ok(red.length === 2, `RED CONTROL: the shipped rule and full words (4d63ec1b4's drawing) fail the same measure in zh AND ja — ${['zh', 'ja'].map((l) => looks[`box/before/${l}`].map((x) => `${l} ${x.where} «${x.text}» ${x.lines} line(s), own ${x.overOwn} px²`).join(' · ')).join(' · ')}`, red);
