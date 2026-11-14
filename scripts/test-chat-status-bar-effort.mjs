@@ -144,8 +144,8 @@ class FakeEl {
     return el ? { text: el.textContent, title: el.title } : null;
   };
   const asked = chip('antigravity', { model: 'gemini-4-argon-high', effort: 'high' });
-  ok(asked && asked.text === 'High' && /^Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
-    'antigravity, effort asked at start: the chip says it (the level\'s word, lane ui-language) — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
+  ok(asked && asked.text === 'high' && /^Reasoning effort as asked at start \(the CLI reports no per-turn effort\)/.test(asked.title),
+    'antigravity, effort asked at start: the chip says it VERBATIM (protocol values ruling) — «as asked at start (the CLI reports no per-turn effort)» (was «?» territory)', asked);
   const none = chip('antigravity', { model: 'gemini-4-argon-high' });
   ok(none && none.text === 'effort: not reported' && /^No effort was asked at start and the CLI reports none/.test(none.title),
     'antigravity, nothing asked: «effort: not reported» (was «?», lane ui-language) — and its title says why (nothing asked, nothing reported, agy\'s own default)', none);
@@ -173,11 +173,11 @@ console.log('— ④d THE PHONE PERMISSION MENU (the reader\'s F3): its decision
   // words a column one character wide. The law in the rule text: the row wraps, the words keep a min-width, the hint shrinks.
   const css = read('public/chat.css');
   const rule = (sel) => { const m = new RegExp('(?:^|\\n)' + sel.replace(/[.]/g, '\\.') + '\\s*\\{([^}]*)\\}').exec(css); return m ? m[1] : ''; };
-  const item = rule('.chat-status-perm-item'), words = rule('.chat-status-perm-words'), hint = rule('.chat-status-perm-raw');
+  const item = rule('.chat-status-perm-item'), value = rule('.chat-status-perm-value'), words = rule('.chat-status-perm-words');
   const bar = read('src/lib/chat-status-bar.js');
-  ok(/flex-wrap:\s*wrap/.test(item) && /min-width:\s*min\(\d+(\.\d+)?em,\s*100%\)/.test(words) && /flex:\s*1 1 auto/.test(words) && /flex:\s*0 1 auto/.test(hint) && /min-width:\s*0/.test(hint) && !/flex:\s*0 0 auto/.test(hint)
-    && /words\.className = 'chat-status-perm-words';/.test(bar),
-    'the permission menu row WRAPS: the words take the row with a min-width, the raw hint shrinks and drops under them (no one-character column on a phone)', { item, words, hint });
+  ok(/flex-wrap:\s*wrap/.test(item) && /min-width:\s*min\(\d+(\.\d+)?em,\s*100%\)/.test(words) && /flex:\s*1 1 auto/.test(words) && /flex:\s*0 1 auto/.test(value) && /min-width:\s*0/.test(value)
+    && /val\.className = 'chat-status-perm-value';/.test(bar) && /words\.className = 'chat-status-perm-words';/.test(bar),
+    'the permission menu row WRAPS: the mode VERBATIM shrinks, its words take the rest with a min-width and drop under it on a narrow menu (no one-character column on a phone)', { item, value, words });
 }
 console.log('— ④a THE READER\'S MUST (pick 4): a POOL auto-continue wait with a cause is DRAWN — its lines name the reset in the page\'s one format');
 {
@@ -212,16 +212,16 @@ async function permMenu(mod, backend, status) {
   chip.getBoundingClientRect = () => ({ left: 100, top: 0, right: 180, bottom: 30, width: 80, height: 30 });
   bar._onClick({ target: { closest: (sel) => (sel === '.chat-status-perm' ? chip : null) }, stopPropagation() {} });
   const dd = box.children.find((c) => c.className === 'chat-status-dropdown');
-  // a row = the mode's words + the protocol value as a dim hint (lane ui-language): the row's MODE is the hint's text (a mode with no words is its own text)
-  const modeOf = (i) => (i.children.find((c) => c.className === 'chat-status-perm-raw') || i.children[0] || i).textContent;
+  // a row = the mode VERBATIM + its words as the hint (protocol values ruling, 主开发 2026-11-14): the row's MODE is its value span
+  const modeOf = (i) => (i.children.find((c) => c.className === 'chat-status-perm-value') || i.children[0] || i).textContent;
   return { label: chip.textContent.trim(), items: dd ? dd.children.map(modeOf) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map(modeOf) : null, list: bar.permissionModes };
 }
 {
   const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
   const FOUR = am.BACKEND_META.antigravity.permissionModes;
   const cut = await permMenu(mod, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
-  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /Full access$/.test(cut.label),
-    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions (its words: «Full access») and its click opens agy\'s FOUR declared modes, the current one marked', cut);
+  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /bypassPermissions$/.test(cut.label),
+    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions (verbatim) and its click opens agy\'s FOUR declared modes, the current one marked', cut);
   const told = await permMenu(mod, 'antigravity', { permissionMode: 'plan', permissionModes: ['plan', 'auto'] });
   ok(!!told && J(told.items) === J(['plan', 'auto']) && J(told.list) === J(['plan', 'auto']), 'a status that NAMES modes still replaces the seed (the live list wins)', told);
 }
