@@ -387,8 +387,27 @@ console.log('⑦ files a person dropped');
 
 console.log('⑧ the words + the deletion list');
 {
-  const en = read('CHANGELOG.md'), at = en.indexOf('## 2.369.401'), head = en.slice(at, en.indexOf('\n## ', at + 5));   // this release's block only
-  ok(/A picture Claude Code or Codex showed/.test(head) && /A file you dropped/.test(head) && !/MB|bound|limit|trim/i.test(head), 'the words say what is covered — «a picture Claude Code or Codex showed», «a file you dropped» — and nothing about a bound', head.slice(0, 400));
+  // THE LANE'S OWN BULLETS, found by their own first words wherever a release's block puts them — the leg names no release
+  // number (主开发 2026-11-14: the hotfix took the number this lane worked under and the train re-heads the bullets), and a
+  // bound's words are banned in THOSE bullets only, as whole words (another unit's «limits» or «members» beside them is not ours)
+  const OWN_FIRST = ['A picture Claude Code or Codex showed', 'A file you dropped into a chat', 'Settings › Chat says which dropped files are kept'];
+  const BOUND_WORD = /\b(?:MB|bound(?:s|ed)?|limit(?:s|ed)?|trim(?:s|med)?)\b/i;
+  const wordsVerdict = (md) => {
+    const lines = md.split('\n'), blockOf = []; let block = -1;
+    for (const l of lines) { if (/^## /.test(l)) block++; blockOf.push(block); }
+    const found = OWN_FIRST.map((o) => lines.flatMap((l, k) => (l.startsWith('- ' + o) ? [k] : [])));
+    if (found.some((f) => f.length !== 1)) return { ok: false, why: 'each own bullet exactly once', counts: found.map((f) => f.length) };
+    const at = found.map((f) => f[0]), bullets = at.map((k) => lines[k]);
+    if (new Set(at.map((k) => blockOf[k])).size !== 1 || blockOf[at[0]] < 0) return { ok: false, why: 'the three under ONE release heading' };
+    const bound = bullets.filter((l) => BOUND_WORD.test(l));
+    return bound.length ? { ok: false, why: 'a bound named', bound } : { ok: true, bullets };
+  };
+  const wv = wordsVerdict(read('CHANGELOG.md'));
+  ok(wv.ok, 'the words say what is covered — «a picture Claude Code or Codex showed», «a file you dropped» — and nothing about a bound (the lane\'s OWN bullets, by their first words, under whichever release heading)', wv);
+  // its control: one of OUR bullets with a size bound added is red; ANOTHER unit's «limits» / «members» in the same block is not
+  const fakeLog = (extra, bounded) => ['# Changelog', '', '## 9.9.9 — 2099-01-01', '', '### Fixed', ...(wv.bullets || []).map((l, k) => (k === 0 && bounded ? l.replace(/\.$/, ', up to 500 MB per conversation.') : l)), ...extra, '', '## 9.9.8 — 2099-01-01', '', '- An older line.'].join('\n');
+  const bounded = wordsVerdict(fakeLog([], true)), neighbour = wordsVerdict(fakeLog(['- Unattended turns keep their limits, and every member of a pool sees them.'], false));
+  ok(wv.ok && wv.bullets.length === 3 && !bounded.ok && bounded.why === 'a bound named' && neighbour.ok, 'the words leg\'s control: our bullet with «500 MB» added is red; another unit\'s «limits» and «members» in the same block are not', { bounded, neighbour });
   const GONE = ['keepPicture', 'usePictureKeeper', 'PICTURE_KEEPER', 'keptPicturesMB', 'kept-pictures', 'kept.json', 'LEDGER_FILE', 'trimNow', 'wasTrimmed', 'whenKept', 'PENDING_MAX_CHARS', 'conversationBytes', 'CONVERSATION_MB_', 'chat-attachments-ledger', 'keptPictureUrl', 'data-kept-src', '_keptPictureGone', 'Pictures kept per conversation', 'Removed to stay within', '.trimmed.json'];
   const files = ['src/server/chat-attachments.js', 'src/routes/chat-attachments.js', 'src/message-manager.js', 'src/codex-message-manager.js', 'src/server/mounts-plugins-wiring.js', 'src/timed-sync.js', 'src/lib/chat-renderers.js', 'src/lib/chat-view.js', 'src/lib/settings-ui.js', 'src/lib/settings-schema.js', 'src/lib/i18n-zh.js', 'src/lib/i18n-ja.js', 'src/server/stdout/claude-stream-json.js', 'src/ws-handler.js', 'docs/settings.md', 'docs/kb-api.md', 'docs/kb-features.md', 'docs/kb-file-structure.md', 'CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'];
   // in the docs and changelogs the ledger is named as it was spelled there («<conv>/kept.json»; another feature has a kept.json of its own)
