@@ -14,11 +14,18 @@
 const shq = (s) => `'${String(s).replace(/'/g, '\'"\'"\'')}'`;
 /** THE ROOT SCRIPT + THE COMMANDS A PERSON TYPES for a plan's steps (PURE — every install plan spells them here, §7.9
  *  generalised the xpra plan's two lines): the script runs every step as root, each echoed first, under `set -e`; in
- *  `commands` a step carries sudo (a subshell / printf line as `sudo sh -c '<line>'`), a step named in `plain` is
- *  typed as is (a check a person runs as themselves). */
+ *  `commands` a step carries sudo, a step named in `plain` is typed as is (a check a person runs as themselves).
+ *  EVERY COPIED LINE RUNS WHEN PASTED (int402, 2026-11-14): sudo runs a PROGRAM, never a shell word, so only a
+ *  step that is ONE SIMPLE COMMAND is handed to it as it is; a step that holds a shell operator (a group, a subshell, a
+ *  pipe, «and» / «or», a sequence, a redirection, a substitution) or begins with a word only a shell knows goes through
+ *  `sudo sh -c '<line>'`. Decided by what the step IS, never by its first character: a fetch that began with «{» was
+ *  copied as `sudo { … }` — «sudo: {: command not found» on a machine with no passwordless elevation. */
+const SHELL_OP = /[|&;<>(){}`$]/;
+const SHELL_ONLY = /^(?:[.:[!]|printf|echo|cd|export|set|unset|exit|exec|eval|read|trap|umask|wait|command|type|test|if|for|while|until|case)(?:\s|$)/;
+const simpleCommand = (l) => !SHELL_OP.test(l) && !SHELL_ONLY.test(l);
 function planLines(steps, { plain = [] } = {}) {
   const script = ['set -e', ...steps.map((l) => `echo '+ ${l.replace(/'/g, '\'"\'"\'')}'; ${l}`)].join('\n');
-  const commands = steps.map((l) => (plain.includes(l) ? l : l.startsWith('(') || l.startsWith('printf') ? `sudo sh -c ${shq(l)}` : `sudo ${l}`));
+  const commands = steps.map((l) => (plain.includes(l) ? l : simpleCommand(l) ? `sudo ${l}` : `sudo sh -c ${shq(l)}`));
   return { script, commands };
 }
 /** Debian's package-name rule — every name that reaches a plan's root script line is re-checked against it. */

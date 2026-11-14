@@ -1321,5 +1321,41 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   ok(/ifRunning === 'attach' && v\.launch\.source === 'registry' && !v\.launch\.file/.test(ks) && /onQuickExit/.test(ks) && /rec\.appAt = now\(\);[^\n]*\n[^\n]*display\.startApp\(/.test(ks), 'WIRING: ifRunning attach (never for a document), the quick-exit hook, appAt stamped right before the app\'s spawn');
 }
 
+console.log('§copied-lines EVERY LINE A PERSON IS TOLD TO COPY RUNS WHEN PASTED (int402, 2026-11-14: the key fetch was copied as «sudo { … }»)');
+{
+  // The copied lines of every plan the product can show, each PASTED into a real /bin/sh whose PATH holds only stand-ins:
+  // «sudo» runs what it is handed (as the real one does: a program, never a shell word); «sh» only PARSES what it is
+  // handed with -c (nothing of a root step ever runs here); every other program a plan names is a stand-in that answers 0.
+  // A line that does not parse, or that hands sudo something no program answers to, is red BY ITS LINE.
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const SLOT = require('../src/install-slot.js');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-copied-lines-'));
+  process.on('exit', () => { try { fs.rmSync(bin, { recursive: true, force: true }); } catch { } });
+  const stub = (name, body) => fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  stub('sudo', 'while [ $# -gt 0 ]; do case "$1" in *=*) shift;; *) break;; esac; done\nexec "$@"');   // VAR=value before the program, as sudo takes it
+  stub('sh', '[ "$1" = -c ] || { echo "stand-in sh: only -c" >&2; exit 64; }\nexec /bin/sh -n -c "$2"');
+  for (const p of ['install', 'mv', 'apt-get', 'xpra', 'soffice', 'vncserver', 'true']) stub(p, 'exit 0');
+  const paste = (line) => { const r = spawnSync('/bin/sh', ['-c', line], { env: { PATH: bin }, encoding: 'utf8', timeout: 10000 }); return { rc: r.status, err: String(r.stderr || '').trim().slice(0, 200) }; };
+  const base = { platform: 'linux', apt: '/usr/bin/apt-get', distro: 'ubuntu', like: ['debian'], codename: 'noble', sudo: false, root: false };
+  const plans = [
+    ['xpra from xpra.org (apt offers 3.1)', M.xpraInstallPlan({ ...base, aptXpra: '3.1.5+dfsg-1ubuntu1' })],
+    ['xpra from the machine\'s own sources', M.xpraInstallPlan({ ...base, aptXpra: '6.2.5+dfsg-1' })],
+    ['xpra.org on bookworm', M.xpraInstallPlan({ ...base, distro: 'debian', like: [], codename: 'bookworm', aptXpra: '3.1' })],
+    ['a package set (the office road\'s shape)', SLOT.packageInstallPlan(base, { what: 'office', label: 'LibreOffice', packages: ['libreoffice-writer', 'libreoffice-calc'], verify: 'command -v soffice' })],
+  ];
+  const lines = plans.flatMap(([name, pl]) => (pl && pl.ok ? pl.commands.map((c) => [name, c]) : [[name, null]]));
+  const bad = lines.filter(([, c]) => c === null).map(([n]) => `${n}: no plan`).concat(lines.filter(([, c]) => c !== null).map(([n, c]) => [n, c, paste(c)]).filter(([, , r]) => r.rc !== 0).map(([n, c, r]) => `${n}: «${c.slice(0, 70)}…» rc=${r.rc} ${r.err}`));
+  ok(lines.length >= 15 && bad.length === 0, `every copied line of the ${plans.length} plans (${lines.length} lines) runs when pasted: it parses, and what follows sudo is a program`, bad);
+  // the law in the builder itself: decided by what a step IS — each kind of shell step, whatever its first character
+  const kinds = ['{ a; } || { b; }', '(a && b)', 'a | b', 'a && b', 'a; b', 'a > /etc/x', 'a < /etc/x', 'a `b`', 'a $(b)', 'a "$X"', 'printf %s x', 'cd /tmp', 'command -v a', '[ -e /x ]', 'if a; then b; fi'];
+  const built = SLOT.planLines([...kinds, 'apt-get update', 'DEBIAN_FRONTEND=noninteractive apt-get install -y a', 'install -d -m 0755 /usr/share/keyrings']).commands;
+  ok(kinds.every((k, i) => built[i].startsWith("sudo sh -c '")) && built[kinds.length] === 'sudo apt-get update' && built[kinds.length + 1] === 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y a' && built[kinds.length + 2] === 'sudo install -d -m 0755 /usr/share/keyrings',
+    'the builder decides by what a step IS: a group, a subshell, a pipe, «and», a sequence, a redirection, a substitution, a variable, a word only a shell knows ⇒ through a shell under sudo; one simple command ⇒ handed to sudo as it is', built.map((b) => b.slice(0, 40)));
+  // CONTROL: the line as it was built before (the group handed to sudo as it was) is red in this very harness, by that line
+  const cut = paste('sudo ' + M.XPRA_KEY_FETCH), cut2 = paste('sudo { true; }');
+  ok(cut.rc !== 0 && cut2.rc !== 0, `CONTROL: the line as it was built before («sudo { … }») is RED here — rc ${cut.rc} (${cut.err.slice(0, 60)}); «sudo { true; }» rc ${cut2.rc}`, { cut, cut2 });
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
