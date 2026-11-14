@@ -111,7 +111,7 @@ export function span(ms) {
  *  an age badge, a row's age say a MARK; a SENTENCE a person reads says its units in words (span / ago). Thresholds in minutes:
  *  hours from `hoursFrom`, days from `daysFrom` (the release's jobs rows: 60 / 1440; the roster's: 120 / 2880). Census ⑦ reads
  *  which is called where (a declared mark sink calls mark; a sentence never does). */
-export function mark(ms, { full = false, hoursFrom = 60, daysFrom = 1440 } = {}) {
+export function durationMark(ms, { full = false, hoursFrom = 60, daysFrom = 1440 } = {}) {
   const m = Math.round(Math.abs(Number(ms) || 0) / 60000);
   if (full) { const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60; return `${d ? `${d}d` : ''}${d || h ? `${h}h` : ''}${mm}m`; }
   return m < 1 ? '<1m' : m < hoursFrom ? `${m}m` : m < daysFrom ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
@@ -119,7 +119,7 @@ export function mark(ms, { full = false, hoursFrom = 60, daysFrom = 1440 } = {})
 /** A row's age as a MARK: «4m» + the page's word for «ago» (the release's jobs rows: «4m ago» / «4m 前»). */
 export function markAgo(at, { now = Date.now(), ...o } = {}) {
   const n = valid(at);
-  return n == null ? '' : `${mark(Math.max(0, now - n), o)} ${t('ago')}`;
+  return n == null ? '' : `${durationMark(Math.max(0, now - n), o)} ${t('ago')}`;
 }
 /** «4 分钟前» — the largest unit only; under 45 s «just now». */
 export function ago(ms, { now = Date.now() } = {}) {
