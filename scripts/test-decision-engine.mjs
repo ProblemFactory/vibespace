@@ -521,7 +521,7 @@ const ROW = `(() => {
   const ph = await page(390, 844, 'zh');
   await ph.until(`/已停/.test(document.querySelector('.plugin-row[data-plugin="llm"] .plugin-chip')?.textContent || '')`);
   const Z = await ph.ev(ROW);
-  ok(Z && Z.chip === '已停 — 套餐不支持' && /集成与密钥/.test(Z.title) && Z.sw2 <= Z.vw + 1, `phone 390 (zh): the stop chip in Chinese ("${Z && Z.chip}"), the row still fits`, Z);
+  ok(Z && Z.chip === '已停 — 套餐不支持' && /集成卡片/.test(Z.title) && Z.sw2 <= Z.vw + 1, `phone 390 (zh): the stop chip in Chinese ("${Z && Z.chip}"), the row still fits`, Z);
   await ph.shot('phone-stop.png');
   ph.close();
 }

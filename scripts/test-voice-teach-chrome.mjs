@@ -379,12 +379,12 @@ try {
   const p = await page(1280, 860);
   ok('the page is a secure, non-loopback origin (https://hub.test); the plugin is OFF and nothing is connected', await p.ev('window.isSecureContext && location.hostname === "hub.test"') && rec.enabled === false && !client.connected());
   const chip0 = await rowDoor(p);
-  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; no switch until it is connected (lane ui-controls-and-bugs: never a greyed one)', isRowDoor(chip0) && chip0.title.includes('或在「服务 › 集成」里粘贴 Dropline key') && chip0.noSwitch, chip0);
+  ok('the Plugins row: the chip is THE DOOR — a button reading 用 Fish Audio 连接 (primary tone), its title names the key\'s place; no switch until it is connected (lane ui-controls-and-bugs: never a greyed one)', isRowDoor(chip0) && chip0.title.includes('或在「集成」里粘贴 Dropline 密钥') && chip0.noSwitch, chip0);
   await p.shot('door-row.png', '#plugins');
   await p.clickSel(`${ROW} .plugin-chip`);
   const sheet = await p.until('!!document.querySelector("#voice-sheet .oauth-connect-btn") && !!document.querySelector("#voice-sheet .oauth-connect-key")', 6000);
   const sf = sheet ? await p.ev('(() => { const s = document.getElementById("voice-sheet"); const b = s.querySelector(".oauth-connect-btn"), k = s.querySelector(".oauth-connect-key"); return { btn: b.textContent, key: k.textContent, after: !!(b.compareDocumentPosition(k) & Node.DOCUMENT_POSITION_FOLLOWING) }; })()') : null;
-  ok('a press on the chip opens the Voice sheet: Connect first, then ONE line to the key — 已经有 key？粘贴到「服务 › 集成 › Dropline」', !!sf && sf.btn === '用 Fish Audio 连接' && sf.key === '已经有 key？粘贴到「服务 › 集成 › Dropline」' && sf.after, sf || await p.ev('document.body.innerText.slice(0, 400)'));
+  ok('a press on the chip opens the Voice sheet: Connect first, then ONE line to the key — 已有 Dropline 密钥？到「集成」里粘贴', !!sf && sf.btn === '用 Fish Audio 连接' && sf.key === '已有 Dropline 密钥？到「集成」里粘贴' && sf.after, sf || await p.ev('document.body.innerText.slice(0, 400)'));
   await p.shot('door-sheet.png', '#voice-sheet .dialog');
   await p.clickSel('#voice-sheet .oauth-connect-key');
   const onCard = await p.until(`!document.getElementById('voice-sheet') && !!document.querySelector('${CARD}.integ-focus')`, 6000);

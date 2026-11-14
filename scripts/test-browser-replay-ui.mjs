@@ -570,7 +570,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
     await p1.load('zh', 1280, 800);
     await p1.ev(`window.app.openBrowserReplay({ browserKey: ${J(KB)} })`);
     const e9b = await until(async () => { const s = await rs(); return s && s.empty === 'trace-off' ? s : null; }, 8000, 100);
-    ok(e9b && (await p1.text('.brp-empty')) === '操作记录已关闭 — 设置 → Agent 浏览器', `⑨ the trace off: "${await p1.text('.brp-empty')}"`);
+    ok(e9b && (await p1.text('.brp-empty')) === '操作记录已关闭 开启…' && await p1.ev(`!!document.querySelector('.brp-empty .need-door')`), `⑨ the trace off: "${await p1.text('.brp-empty')}" — the state, and on its line the door that turns it on (lane ui-needs-a-button pick 5: no menu path)`);
     await p1.shot('09b-zh-trace-off', '.window:has(.brp)');
     await api('PATCH', '/api/settings', { 'browser.actionTrace': null });
     ok(p1.errors.length === 0, `no page exception anywhere (${p1.errors.length})`, p1.errors.slice(0, 3));
