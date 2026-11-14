@@ -17,6 +17,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When waiting messages hold such a limit, the For you notice names the conversations they wait behind and opens the first.
 - An agent whose group messages have waited an hour behind another conversation's running turn is told once, in one note naming every such conversation.
 - After four hours, For you shows one item that opens that conversation. It ends when the turn ends or the messages are handed over.
+- opencode and Antigravity chats no longer offer a model lock that could not hold.
+- When the AI provider refuses the model you pick, the model chip no longer switches to it; you are told once.
+- Unlocking the model of a stopped Codex or Shell conversation now takes effect.
 
 ## 2.369.401 — 2026-11-13
 
