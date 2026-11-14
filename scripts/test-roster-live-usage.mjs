@@ -298,11 +298,12 @@ console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset R
   const U = await import(pathToFileURL(path.join(REPO, 'src/lib/utils.js')).href);
   const US = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-source.js')).href);
   const QM = await import(pathToFileURL(path.join(REPO, 'src/quota-model.js')).href);
+  const AW = await import(pathToFileURL(path.join(REPO, 'src/lib/account-wall-words.js')).href);   // markT (hotfix .401: the age is a mark)
   const SL_FROM = '    const pctOf = (x) => (x == null ? null :', SL_TO = '    const rowHtml = (nameText, subText, usage) =>';
   const hintOf = (src) => {
     const i = src.indexOf(SL_FROM), j = src.indexOf(SL_TO, i);
     if (i < 0 || j < 0) return null;
-    try { return new Function('t', 'escHtml', 'estDisplayPair', 'bucketView', 'quotaModel', 'unconfirmedText', src.slice(i, j) + '\nreturn usageHint;')(tI18n, U.escHtml, U.estDisplayPair, US.bucketView, QM, US.unconfirmedText); } catch { return null; }
+    try { return new Function('t', 'escHtml', 'estDisplayPair', 'bucketView', 'quotaModel', 'unconfirmedText', 'markT', src.slice(i, j) + '\nreturn usageHint;')(tI18n, U.escHtml, U.estDisplayPair, US.bucketView, QM, US.unconfirmedText, AW.markT); } catch { return null; }
   };
   const hintLegs = (usageHint) => {
     const h = usageHint ? usageHint(STALE, null) : '';

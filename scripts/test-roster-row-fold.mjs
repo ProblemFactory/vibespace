@@ -206,6 +206,7 @@ const WHY_MACHINES = 'opens the Machines tab only — the local CLI rows are nev
 const NO_ROW = 'no verdict reads a CLI row, a button or a width';
 const CLI_PRESENCE = {
   'test-roster-reset-eta.mjs': { doors: ['renderer', 'rail'], injects: 'both shapes: a scratch login shell + claude / codex stand-ins minted in its own HOME; §6 re-boots with neither', mark: /SHELL: path\.join\(SHAPE\[shape\], 'login-shell'\)/ },
+  'test-roster-badges-chrome.mjs': { doors: ['renderer', 'rail'], injects: 'the INSTALLED shape: a scratch login shell + claude / codex stand-ins minted in its own HOME (hotfix .401 — the owner\'s four rows)', mark: /SHELL: path\.join\(SHAPE, 'login-shell'\)/ },
   'test-cli-missing-chrome.mjs': { doors: ['renderer', 'climissing'], injects: 'a scratch login shell (a codex, no claude) + the hub\'s own PATH (a claude the shell cannot see); CLAUDE_CMD / CODEX_CMD deleted', mark: /SHELL: LOGIN_SH/ },
   'test-dialog-yield-chrome.mjs': { doors: ['renderer'], whyNot: `㉓ counts the Agents manager's roots and reads its refresh hook — ${NO_ROW}` },
   'test-vault-window-chrome.mjs': { doors: ['renderer', 'vault'], whyNot: `reads one API-key account row's ⋯ menu (Show key…) and the Vault's Add… list (Account… among its doors, never pressed) — ${NO_ROW}` },
