@@ -14,6 +14,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - An account row names its plan by the plan's current name (Ultra, Max), and a row that never signed in no longer reads "logged in".
 - The Artifacts list shows what was made for you first (published pages, hand-overs, running services); touched code folds away and every file names its folder.
+- An agent downloading in your browser borrows your download folder only while its download needs it — at most 30 seconds if none starts.
 
 ### Fixed
 - Messages queued behind a busy conversation now count toward the hourly and daily limits on unattended turns until they run, so queueing cannot pass them.
@@ -72,6 +73,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A storage connection's Edit dialog keeps a parameter VibeSpace does not know as a secret, and never shows an address carrying a password or a signature.
 - After «Remove» on a saved parameter, «Undo» puts it back before you save.
 - On a phone, an auto-continue that is off shows only its icon, so the Artifacts chip keeps its place in the bar.
+- "Who can use it" no longer says each conversation gets its own tab on a browser where they all share every tab.
+
+### Security
+- In a browser on this computer, an agent can no longer clear all your cookies or cache, skip certificate checks or install web apps; it's told what to do.
+- Where VibeSpace shares your browser with agents, an agent can no longer close your whole browser, see what you download or cancel your downloads.
 
 ## 2.369.401 — 2026-11-13
 
