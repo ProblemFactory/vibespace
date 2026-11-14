@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// EVERY SUITE FILE PARSES (the coordinator's law for 2.369.402, 2026-11-14; the train int402). Tonight a HEAVY suite that a lane had
+// EVERY SUITE FILE PARSES (the coordinator's law, 2026-11-14; the train int402). Tonight a HEAVY suite that a lane had
 // edited (test-task-detail-chrome) had not parsed since that lane's first pick: a comment placed mid-line swallowed the rest of a
 // call. No gate saw it, because the suite runs only on the hosted runner, so the mirror would have been the first to meet it, red on
 // both tries. The same cut has been in scripts/measure-input-receipts.mjs since it was born (2.369.192): its line 11 ended in a

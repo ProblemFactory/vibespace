@@ -14827,9 +14827,9 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 
 **Gated by** scripts/test-oat-add-door.mjs (fast; §0 recorders + §8–§15 for the acceptance, the token MARKER driven through every door) + test-cli-self-measure (the variant list, the ledger's scopes, the pins: 3 launch sites, 6 kills, one NETLINK after-pass) + test-oat-materialize (the row's words) + test-oat-measure-fake (heavy: the mint over the fake's `setup-token`). Not built: a shape for an unmeasured version, Free, the zero tier, an inference that rewrites a choice, any vendor call.
 
-### scripts/test-suite-files-parse.mjs (NEW, fast — int402, 2.369.402: the coordinator's law «every suite file parses»)
+### scripts/test-suite-files-parse.mjs (NEW, fast — the train int402, 2026-11-14: the coordinator's law «every suite file parses»)
 - **Why.** On 2026-11-14 a HEAVY suite a lane had edited (test-task-detail-chrome) had not parsed since that lane's first pick: a comment placed mid-line swallowed the rest of a call. No gate saw it, because the suite runs only on the hosted runner, so the mirror would have met it first, red on both tries. A gate that never loads a file cannot see that the file does not parse. The law's first run found the same cut in scripts/measure-input-receipts.mjs, there since that script was born (2.369.192): its line 11 ended in a `// verify S2 …` comment that took the arrow's `return v; };` with it. It is a measurement script, never in ci.mjs, and nothing ever ran it. The comment now ends the line.
-- **What it reads.** Every `*.mjs`, `*.cjs` and `*.js` under `scripts/` (node_modules aside), found by walking the tree (1207 files, 62 MB on 2.369.402).
+- **What it reads.** Every `*.mjs`, `*.cjs` and `*.js` under `scripts/` (node_modules aside), found by walking the tree (1207 files, 62 MB on 2026-11-14).
 - **How it parses.** One `acorn.parse` per file (the tree's devDependency, `ecmaVersion: 'latest'`), in-process, never one process per file, as the module kind Node gives the file:
   - `.mjs`: an ES module (top-level await legal);
   - `.cjs`: CommonJS as Node wraps it (a top-level `return` legal);
