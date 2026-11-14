@@ -12,6 +12,7 @@
 //        JSONL open (the pre-resume writer sweep ended the orphan), and only one respawn was asked.
 // Leg L: the crash loop — the respawned CLI dies again while STARTING → PASS = no second ask, ONE For-you item worded
 //        "again … was not restarted", no "was restarted" / "did not work" item beside it, no writer left.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';

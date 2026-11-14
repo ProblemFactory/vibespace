@@ -24,6 +24,7 @@
 //    code on hosts.sshEnv() (a fake ssh / rsync records its env; a patched _ssh with no env ⇒ RED); a REAL ControlMaster on a
 //    private sshd whose birth env (its ProxyCommand) holds no planted name.
 import { createRequire } from 'module';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 const require = createRequire(import.meta.url);
 const { agentEnv } = require('../src/ws-handler.js');
 

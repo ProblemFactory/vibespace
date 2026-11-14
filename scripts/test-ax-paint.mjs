@@ -38,8 +38,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FILE_ICONS, UI_ICONS } from '../src/lib/icons.js';
 import { scratch } from './scratch.mjs';
+import { FILE_ICONS, UI_ICONS } from '../src/lib/icons.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;

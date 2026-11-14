@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { freePort, scratch, scratchHome, withoutVendorKeys, vncEnv, handedCli, REHOMED } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
@@ -32,9 +32,11 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (process.env.VS_NO_REAL_CLI === '1') { console.log('SKIPPED test-chat-e2e: VS_NO_REAL_CLI=1 — the real haiku turn is not run'); process.exit(0); }
 let token = process.env.VIBESPACE_CI_OAT || '';
 if (!token) { try { token = fs.readFileSync(path.join(os.homedir(), '.config', 'vibespace', 'ci-oat'), 'utf-8').trim(); } catch { } }
-if (!token) { console.log('SKIP: no CI token (fill ~/.config/vibespace/ci-oat from `claude setup-token`)'); process.exit(0); }
-let hasCli = false; try { execSync('command -v claude', { stdio: 'ignore', shell: '/bin/bash' }); hasCli = true; } catch { }
-if (!hasCli) { console.log('SKIP: no claude CLI on PATH'); process.exit(0); }
+if (!token) { console.log(`SKIP: no CI token (VIBESPACE_CI_OAT, or ~/.config/vibespace/ci-oat from \`claude setup-token\`${REHOMED ? ' — this run is RE-HOMED, so it reads the env alone: the file of the home it was handed is not read' : ''})`); process.exit(0); }
+// B-ba47: the REAL claude of the env this suite was HANDED (scratch.mjs REAL_CLI_ALLOW's row — a re-homed suite's PATH is
+// built and carries no CLI); its hub is handed it by name (CLAUDE_CMD)
+const CLAUDE_REAL = handedCli('claude');
+if (!CLAUDE_REAL) { console.log('SKIP: no claude CLI on the handed env (PATH, ~/.local/bin, $VS_CLAUDE_BIN)'); process.exit(0); }
 
 const MODEL = process.env.VIBESPACE_CI_MODEL || 'claude-haiku-4-5-20251001';
 const PORT = await freePort(); // free port (2.369.46): fixed 3995 collided between concurrent gates
@@ -108,7 +110,7 @@ fs.mkdirSync(cwd, { recursive: true });
 // ANTHROPIC_AUTH_TOKEN to the CLI (a user's own choice), and either one
 // OUTRANKS the oat this suite seeds — the turn would bill metered API while
 // the badge assert below still read "the oat account".
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: CLAUDE_REAL, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 // UNCONDITIONAL cleanup (2026-09-09). The transcript removal used to live at
 // the very END of the happy path, so every early `process.exit(1)` — and every
 // signal — left it behind. It runs here, from one function, on 'exit' AND on

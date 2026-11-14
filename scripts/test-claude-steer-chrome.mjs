@@ -19,7 +19,7 @@
 //   §A THE REAL CLI behind the REAL wrapper, talking only to a LOCAL MOCK of POST /v1/messages (a scratch HOME, a
 //      loopback ANTHROPIC_BASE_URL, a fake key built by concatenation, nonessential traffic off: no vendor request,
 //      nothing billed — the R0 recording as a regression). Evidence-SKIP without the binary ($VS_CLAUDE_BIN, `claude` on
-//      PATH, $HOME/.local/bin/claude):
+//      PATH, $HOME/.local/bin/claude — of the env the suite was HANDED: scratch.mjs handedCliCandidates, REAL_CLI_ALLOW's row):
 //      ① a stamped frame written while a Bash runs reaches the model INSIDE the turn — the request after the tool result
 //        carries «The user sent a new message while you were working: <text>»; the wrapper says handed → landed; ONE turn
 //      ② Stop while the CLI still holds it: the CLI starts a turn for it, the wrapper interrupts that turn on its init —
@@ -51,7 +51,7 @@ import http from 'node:http';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper, handedCliCandidates } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -678,7 +678,9 @@ try { fs.rmSync(scratchRoot, { recursive: true, force: true }); } catch { }
 // ── §A THE REAL CLI, A LOCAL MOCK ──
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
 const claudeBin = (() => {
-  const cands = [process.env.VS_CLAUDE_BIN, ...String(process.env.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, 'claude')), path.join(process.env.HOME || '/nonexistent', '.local/bin/claude')].filter(Boolean);
+  // B-ba47 pick B: the HANDED env's candidates — this suite is the one row of scratch.mjs REAL_CLI_ALLOW (a suite handed a
+  // non-temp home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §108)
+  const cands = handedCliCandidates('claude');
   for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile() && fs.statSync(real).size > 10 * 1048576) return real; } catch { } }
   return null;
 })();

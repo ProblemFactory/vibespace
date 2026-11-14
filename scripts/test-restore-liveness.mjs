@@ -37,10 +37,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { vncEnv } from './scratch.mjs';
 import { WebSocket } from 'ws';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
-import { vncEnv } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);

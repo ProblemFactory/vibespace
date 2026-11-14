@@ -23,6 +23,7 @@
 //   ⑫ (主开发 12:43Z, pick 3c) ONE name for the machine and each build's reason by its CODE, in the interface's language
 //   ⑪ WHAT A PERSON READS: the sheet before the press (ONE button), the done line, the microphone card per state (MUST 1), the
 //      settings doors' reasons by code
+import './scratch.mjs';   // B-ba47: a suite runs on a home of its own, decided at import — a NEW one takes the import first
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
