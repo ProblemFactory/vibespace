@@ -17,6 +17,7 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 if (!fs.existsSync(path.join(REPO, 'src/machine-needs.js'))) { ok(false, 'the census exists (src/machine-needs.js)'); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
 const MN = require(path.join(REPO, 'src/machine-needs.js'));
+const UI = fs.existsSync(path.join(REPO, 'src/ui-needs.js')) ? require(path.join(REPO, 'src/ui-needs.js')) : null; // the one runner's second table (lane ui-needs-a-button)
 
 // ── the tree's words: every t() / tr() / i18nKey() literal in src/ (not the dictionaries), with the files that hold it ──
 const tRe = /\b(?:t|tr|i18nKey)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
@@ -29,16 +30,19 @@ for (const [file, text] of sources) for (const m of text.matchAll(tRe)) { let k;
 
 /** The census over a set of sentences → { rows: Map(id → {row, sentences, files}), non: [...], unclaimed: [...] } */
 function census(ws) {
-  const rows = new Map(MN.NEEDS.map((r) => [r.id, { row: r, sentences: [], files: new Set() }])), non = [], unclaimed = [];
+  const rows = new Map(MN.NEEDS.map((r) => [r.id, { row: r, sentences: [], files: new Set() }])), non = [], unclaimed = [], byUi = [];
   for (const [s, files] of ws) {
     if (!MN.inNet(s)) continue;
     const r = MN.needOf(s);
     if (r) { const e = rows.get(r.id); e.sentences.push(s); for (const f of files) e.files.add((r.door.via && r.door.via[f]) || f); continue; }
     const n = MN.notNeedOf(s);
     if (n) { non.push({ s, why: n.why }); continue; }
+    // THE ONE RUNNER's rule (scripts/test-needs-doors.mjs — a sentence goes to the FIRST table that claims it, machine then ui):
+    // a sentence the ui table claims is claimed here too (2.369.402: «That browser engine plugin is not running…» is its engine-plugin-off)
+    if (UI && (UI.needOf(s) || UI.notNeedOf(s))) { byUi.push(s); continue; }
     unclaimed.push({ s, files: [...files] });
   }
-  return { rows, non, unclaimed };
+  return { rows, non, unclaimed, byUi };
 }
 /** The surfaces of a present-door need whose source lacks the door's marker. */
 const markerOf = (mk, f) => (mk instanceof RegExp ? mk : mk[f] || /(?!)/); // one regex, or one per surface (a surface the map does not name has no door)

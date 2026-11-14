@@ -62,7 +62,9 @@ const NEEDS = Object.freeze([
 const NOT_NEEDS = Object.freeze([
   { why: 'a setting\'s description (its words explain a choice, they ask nothing of a machine)', match: /^(Show the |How long |Whether |Which agent-browser |When an SSH |Expose a machine|VibeSpace also answers|What an agent's browser|When this machine has no desktop session$|ON \(recommended\): )/ },
   { why: 'where a browser runs on the hub machine (an outcome, said; nothing to install)', match: /has no desktop session|the page's picture — this machine has no display/ },
-  { why: 'a session\'s own login or an app\'s sign-in road (accounts, not the machine)', match: /has no login on this machine|CLI login|runs on this machine only|company app has no relay page/ },
+  { why: 'a session\'s own login or an app\'s sign-in road (accounts, not the machine)', match: /has no login on this machine|CLI login|[Rr]uns on this machine only|company app has no relay page|OAuth login and its long-lived token|subscription login has its own absolute lifetime/ }, // 2.369.402's meetings: the account rows' «Runs on this machine only» (a capital R) and login-expiry's two lifetime facts
+  { why: 'how the stream travels (a road fact: the device link carries it), said in the details — nothing for the person to do', match: /has no direct UDP — the device link carries it/ }, // the stream lane's sentence (machine-desktop.js), ruled 2.369.402
+  { why: 'what an install puts on a machine, said before it runs (the install is that need\'s door)', match: /^This installs what VibeSpace needs on that machine/ },
   { why: 'the hub\'s own record of usage (its data, not a machine\'s need)', match: /usage-history/ },
   { why: 'a door\'s own label or outcome (the need\'s row owns the sentence that states it)', match: /^(Install (xpra|LibreOffice|the Calibri|TightVNC)|\{app\} is not installed on \{machine\}$|Not installed — this machine could not start it|This machine has no virtual microphone to remove)/ },
   { why: 'a platform fact with its alternative said (desktop apps are Linux\'s; a Mac / Windows machine has its whole desktop)', match: /no X11 server/ },
