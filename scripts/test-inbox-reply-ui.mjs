@@ -375,7 +375,7 @@ try {
   const dotSel = `#user-todos-popup .ut-live-dot[data-key=${JSON.stringify(liveKey)}]`;
   check('the live session\'s group dot is idle (hollow green), titled "running, idle"', await waitFor(`document.querySelector(${JSON.stringify(dotSel)})?.dataset.state === 'idle'`, 8000), await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(dotSel)}); return d ? { state: d.dataset.state, title: d.title } : null; })()`));
   const planSel = rowSel(plan.item.id);
-  check('its reply button is ENABLED', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}); return !!b && !b.disabled && b.title === 'Reply'; })()`));
+  check('its reply button is ENABLED', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}); return !!b && !b.disabled && b.getAttribute('aria-label') === 'Reply'; })()`));   // its NAME (lane ui-controls-and-bugs pick 6: a title that only repeated the drawn word is the aria-label now)
   await evalJs(`document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}).click(); true`);
   check('the reply button opens a box under the row with the textarea focused', await waitFor(`document.activeElement === document.querySelector(${JSON.stringify(planSel + ' .ut-reply textarea')})`, 3000));
   const before = stdinFrames().length;
