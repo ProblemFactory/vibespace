@@ -20,6 +20,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - opencode and Antigravity chats no longer offer a model lock that could not hold.
 - When the AI provider refuses the model you pick, the model chip no longer switches to it; you are told once.
 - Unlocking the model of a stopped Codex or Shell conversation now takes effect.
+- Requests no longer go missing from the Usage window when VibeSpace stops reading conversation history midway because a folder stops answering.
+- If a remote machine notices that sending its usage failed, the next collection sends those requests again instead of skipping them.
+- A remote machine's usage too large for one collection now arrives over several collections instead of being lost.
 
 ## 2.369.401 — 2026-11-13
 

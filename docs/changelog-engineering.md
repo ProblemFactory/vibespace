@@ -353,6 +353,59 @@ This file is the engineers' record of every release: the lanes, the verification
   - THE SEEDED WALK (test-status-bar-chips ⑧): 300 seeds × 24 steps over the real modules (ws-handler's set-model text, model-ask, session-brain's gate, the engine's repin text, two real bars and a reload; a stub CLI + wrapper; both feeds at random lags with duplicates; lost answers; restarts) — six invariants at every rest point. It found five orderings of its own while being written (an earlier typed /model overwritten by a later refused one; a pick not superseding a typed arm; a stale queue snapshot from the lagging feed releasing a hold; a turn's records in flight across the arm; a restart) — each fixed. On b7ac5058b it reds by itself: (iii) ×240 (finding 1), (vi) ×21.
   - Smaller: dispose clears the pending timer; the three refusals and a dropped saved model are said in zh / ja; a dated id spelled with «@» is a dated snapshot in modelHeld.
 
+### B-6ded — a usage walk that does not reach its commit point leaves the cursor map as it found it (lane usage-walk-one-folder; 主开发 03:50Z GO)
+- **The loss, on the release too.** The hub walks transcripts IN-PROCESS over its own cursor store (`UsageHistory._cursors`), and the mount gate stops a timed walk at a budget point (`onBudget` throws `paused`).
+  - The walker advanced the store's entries IN PLACE (`cursors[fp] || …`, then `cur.offset += nb`), while the stopped walk's buffered rows were dropped.
+  - So the requests of the bytes it had consumed never reached the ledger and were never read again. The acceptance's drivers lost 7 of 22 (int359 acc-399 uw1 `pause.js`) and 2–5 per scene (the refuter's `pause.mjs`).
+  - It escaped test-mount-health's «a walk in flight stops at its next yield, cursors untouched»: that leg runs on an EMPTY map, where an entry is only added at a file's end.
+- **The law, per spelling:**
+  - **src/usage-walker.js:** the walk's cursors are its own. A map handed in is copied, and each entry is copied before it advances; the walk returns them. Every field is a scalar, so a shallow copy per entry is whole.
+  - **src/usage-history.js:** `this._cursors = walk.cursors` moved from before the shard appends to after them, just before the cursor write (the block stays synchronous).
+    - A paused walk, a thrown one, or an append that fails on one shard (EISDIR, ENOSPC) leaves `_cursors` as it was.
+    - The next walk re-reads those bytes, and rows already in a shard are refused by the ledger's id filter (`knows`).
+  - **data/bin/vibespace-usage-scan:** its commit point is a flushed stdout.
+    - Measured on this box's Node: a dead pipe calls the write's callback FIRST, with EPIPE, and emits 'error' after. The release wrote the cursor file in that callback, past every event the hub never received.
+    - Now an error skips the write (exit 1).
+    - What it covers: a write the scanner SEES fail (the hub's end gone before or while it writes: EPIPE, ENOSPC). Bytes that already left are not covered — see «Known» under the readers' list below.
+- **Pins:** test-usage-walk-parity «B-6ded», 15 legs.
+  - Module, 2 legs: a walk stopped at a budget point, and a whole walk. The handed map stays as found, its entries the same objects.
+  - Hub through UsageHistory, 10 legs:
+    - the readers' nine scenes: `pause.js` one name / two names; `pause.mjs` prior / alias-prior / alias-finished / two files; `pause2.mjs` link-after / link-before / other-link-after;
+    - plus the commit's own failure: December's shard path made a directory after November's rows landed ⇒ 3 appended, 3 re-read refused, none missing.
+  - Scanner, 1 leg: a dead stdout pipe leaves the cursor file byte for byte, and the next live run emits all 400 events.
+  - A planted control: the walker advancing the caller's own entry fails the module leg.
+  - RED on the release (an export of 935960b7e with this suite): 13 of 13.
+    - The two-name scenes keep their rows on the release through the alias's second read. They are red by the law: the map advanced.
+    - `pause2.mjs` at its own 1 MiB default has no budget point in a 7-request walk, so the release cannot be cut there; its scenes run at 300 bytes.
+- **Cost:** row 717 → 790 ms (×1.10 vs the .398 copy: 1 072 → 1 180 ms, three runs each, one box). A walk copies the cursor map once (O(keys); the walk already stats every file it lists) and each entry it visits.
+- **Not changed:** the device road (`--usage-scan-child`). The hub keeps that cursor and commits it after a durable ingest (lane ledger-dedup-law F2); the child's map is its own.
+
+### B-6ded, the readers' list — two readers, ACCEPTED AFTER ONE LIST (主开发 09:13Z; int359 acc-399 verdict-batch3, keys b6ded-walk and b6ded-scanner)
+- **What held, driven by the readers:** every exit a walk has (a pause at every yield, a throw in the walker or a line handler, an append failing on the first / middle / last shard, a cursor write that throws, a second scan, a reload, SIGKILL at ten points) leaves the map as found, and the next walk writes every request. The release loses 1–15 of 18. The scanner keeps its cursor on EPIPE before the start, EPIPE mid-write and ENOSPC. 480 seeded rounds with 162 cuts lost 0 (the release lost 367 and 2 162).
+- **1. A harvest that cannot finish makes progress every run.** This was new with B-6ded: on the ssh road a backlog over the hub's limits failed every harvest the same way (the cursor rightly kept), and was retried at the next kick — a full remote walk and up to 128 MiB buffered each time, while spend made after it never landed.
+  - src/hosts.js: the hub's limits are ONE constant, `USAGE_HARVEST_LIMITS` (maxBuffer 128 MiB, timeoutMs 180 s). `usageScanBound` takes half the bytes and a third of the seconds. The ssh command carries it (`VIBESPACE_USAGE_SCAN_MAX_BYTES=… VIBESPACE_USAGE_SCAN_MAX_MS=… node …`), and execFile takes its limits from the same constant.
+  - data/bin/vibespace-usage-scan: a run that has read something stops after a WHOLE line once its output bytes or its walk time reach the bound. The file it stopped in keeps that line's cursor and the files after it keep theirs, so the cursor written is exactly what was printed. Without the env: 32 MiB and 60 s (the device road's script-ship rung has a 120 s deadline).
+  - A compressed rollout stopped part-way keeps `zpart: 1` beside its `zsize`. Both spellings read such a rollout on from its offset instead of skipping it: src/usage-walker.js reads the mark, and only the scanner writes it.
+  - A failed harvest backs off: 1 min, doubling, at most 30 min (`_harvestFailed` / `_harvestLanded`). A forced harvest, the owner's own ask, goes. The dial road's failure takes the same backoff.
+  - Legs:
+    - the hub's own `harvestUsage` over an ssh stand-in that relays through a pipe, its limits scaled to a 30 000-byte buffer: 240 requests land over 4 harvests of at most 73, with the 40 made meanwhile, none missing;
+    - the bound sits below the limits;
+    - a failed harvest backs off 1 → 2 min, and the link back clears it;
+    - the scanner run in-process, held to 1 500 bytes and to 12 ms (a clock that moves 1 ms per look), emits over 13 and 9 runs exactly the 90 events of one walk, in its order, and ends at the walk's cursors (a .zst rollout read part-way, then on).
+    - RED on 817b0f4fb: 4 (the hub states no limits, one harvest takes the whole backlog, a failed harvest is retried at once, the scanner ignores the bound).
+- **2. The codex half pinned.** A module leg (a handed map with a rollout entry, the walk stopped at its 2nd budget point) and the hub's paused walk over a grown rollout at yields 1 / 3 / 6 (the reader's `codex-pause.mjs`). RED on the release: the map moved, 2 / 5 / 10 of 22 missing. The planted control now also reverts the codex copy (the reader's mutant W3) and must fail the codex module leg.
+- **3. Known — where the fix ends, on the ssh road.** The scanner's commit point is its flushed stdout, BEFORE the hub's durable ingest. The release and this fix both lose the batch when:
+  - the hub DEFERS the ingest (`ledger-index-loading`: the first remote ingest after a hub start, into a month shard over 8 MiB). Nothing is appended, and the remote cursor is past it;
+  - the ingest fails (an append EISDIR or ENOSPC, a hold that could not be written);
+  - the hub cuts a harvest whose bytes already sit in the pipe and ssh buffers. A typical incremental harvest of a few MiB is written whole before any drop, so the scanner sees success.
+  - Also known, read only: the old-daemon script-ship rung (`runStream`) ingests partial text (no `truncated` check) while the device-side scanner, its pipe drained, writes its cursor; its 120 s deadline does not stop the device child.
+  - Also known, older than B-6ded: a torn shard append on the hub (half a text, then ENOSPC) glues the re-walk's first row onto the fragment, so one request is missing on the cold road (the release misses more).
+  - The lasting cure for the ssh road is the device road's shape: the hub keeps the cursor and commits it after its durable ingest (lane ledger-dedup-law F2).
+- **4. The id filter's sentence made true.** On a WARM ledger the cache had not loaded what a half-done commit appended (our own append only marks it for a re-check), so the re-walk appended those rows again. Readers never counted them (the first row per id wins).
+  - Now the ids a commit DID append before an append failed are kept (`_partialRids`), and the next walk's filter refuses them until a commit completes.
+  - Leg: the warm failed append. RED on 817b0f4fb: 11 rows for 8 requests.
+- **Cost:** row 790 → 968 ms (×1.35 vs the .398 copy: 1 109 → 1 497 ms, three runs each; the harvest legs run the ssh stand-in 8 times).
+
 ## 2.369.401 — 2026-11-13
 
 ### k3-badge-cure (主开发's ruling 2026-11-13 21:57Z — the first pick of .401) — a ring's age badge is ONE line and never covers its ring's label
