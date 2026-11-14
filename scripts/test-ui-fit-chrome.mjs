@@ -68,7 +68,11 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 const dataDir = path.join(wt, 'data'); fs.mkdirSync(dataDir, { recursive: true });
 const { makeFixture, writeAliveStamp } = await import(path.join(repo, 'scripts/jobs-triage-fixture.mjs'));
-const fx = makeFixture(Date.now());
+// THE FIXTURE'S «NOW» IS HANDED TO THE PAGE (主开发's rule, 2026-11-14 — a new suite that draws a time never reads the wall clock):
+// the jobs' ages are drawn by the page's own clock (jobs-panel.js hum(Date.now() − t)), so each document starts its clock AT the
+// fixture's now (advancing from there) — the rows read «2m», «1h», «4d» as the fixture wrote them, however long the run took
+const FIX_NOW = Date.now();
+const fx = makeFixture(FIX_NOW);
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 fs.writeFileSync(path.join(dataDir, 'jobs.json'), JSON.stringify(fx.jobs.map(strip)));
 fs.writeFileSync(path.join(dataDir, 'job-notifications.json'), JSON.stringify(fx.notifs));
@@ -120,6 +124,9 @@ const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date
 const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
 await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const T = ${FIX_NOW}, p0 = performance.now(), R = Date, at = () => Math.round(T + (performance.now() - p0));
+  function D(...a) { if (!new.target) return new R(at()).toString(); return a.length ? new R(...a) : new R(at()); }
+  D.prototype = R.prototype; D.now = at; D.parse = R.parse; D.UTC = R.UTC; Object.setPrototypeOf(D, R); window.Date = D; })();` }); // the fixture's now, handed to the page
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" }); // the walk's language (zh)
 const desk = async (w = 1440, h = 900) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'hover' }, { name: 'pointer', value: 'fine' }] }); };
 const phone = async (w = 390, h = 844) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 3, mobile: true }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); };
