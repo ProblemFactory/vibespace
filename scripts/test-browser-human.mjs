@@ -1428,9 +1428,12 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   // browser is USED goes through holdersOn; one that needs a CONVERSATION reads the leases. A new site is RED until classified.
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const lines = src.split('\n');
-  const fnAt = (i) => { for (let x = i; x >= 0; x--) { const m = /^  (?:async )?function (\w+)\(|^  const (\w+) = (?:\(|async|\w+ =>|\{)/.exec(lines[x]); if (m) return m[1] || m[2]; } return '(top)'; };
-  const sites = {};
-  lines.forEach((l, i) => { if (/^\s*(\*|\/\/|\/\*)/.test(l)) return; const n = (l.replace(/\/\/.*$/, '').match(/reg\.leases/g) || []).length; if (n) { const f = fnAt(i); sites[f] = (sites[f] || 0) + n; } });
+  // lane chrome-157 (the .402 prep mirror): a callback handed to a hook (`x.onTold((t) => {` — it has no name of its own) is named
+  // by its HOOK, never credited to the named function above it; `hook: false` is the census without that rule (the CONTROL below)
+  const FN = /^  (?:async )?function (\w+)\(|^  const (\w+) = (?:\(|async|\w+ =>|\{)/, HOOK = /^  (?:if \(.*\) )?\w+\.(on[A-Z]\w*)\((?:async )?\([^)]*\) => \{\s*$/;
+  const fnAtBy = (hook) => (i) => { for (let x = i; x >= 0; x--) { const m = FN.exec(lines[x]); if (m) return m[1] || m[2]; const h = hook && HOOK.exec(lines[x]); if (h) return h[1]; } return '(top)'; };
+  const siteCount = (fnAt) => { const out = {}; lines.forEach((l, i) => { if (/^\s*(\*|\/\/|\/\*)/.test(l)) return; const n = (l.replace(/\/\/.*$/, '').match(/reg\.leases/g) || []).length; if (n) { const f = fnAt(i); out[f] = (out[f] || 0) + n; } }); return out; };
+  const sites = siteCount(fnAtBy(true)), sites0 = siteCount(fnAtBy(false));
   // conversation-only: admission, caps, pins, the takeover's siblings, the re-judge, the ephemeral records, the timers, the
   // log lines that count conversations — each needs a CONVERSATION (his row has no session, no key an agent could hold)
   const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1,
@@ -1490,6 +1493,10 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-shared-profile-freeze: the scope road's url is minted only for a CONVERSATION lease that stands (an agent's
     // key — the user's own Browse-yourself key keeps the raw url, leaseRoadVerdict's `human` row)
     leaseUrlFor: 1,
+    // lane chrome-157 (THE WINDOW; the .402 prep mirror): the callback handed to the mediator's onTold hook finds the lease whose
+    // download folder it was — by the profile and that CONVERSATION's own browser key — to name the conversation its notice goes to;
+    // a told event comes only from a grant, and a grant is minted only for a conversation lease (the person's own key keeps the raw url)
+    onTold: 1,
   };
   // holder: "who holds this browser / is it used" — through holdersOn (the conversations' leases + his row)
   const HOLDER = { list: 1, holdersOn: 1 };
@@ -1497,6 +1504,10 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const unclassified = Object.keys(sites).filter((f) => !(f in want)).map((f) => `${f}: ${sites[f]}`);
   const moved = Object.keys(sites).filter((f) => f in want && want[f] !== sites[f]).map((f) => `${f}: ${sites[f]} (table ${want[f]})`);
   ok(!unclassified.length && !moved.length, `the HOLDER census: every \`reg.leases\` site of browser-keeper.js (${Object.values(sites).reduce((a, b) => a + b, 0)} in ${Object.keys(sites).length} functions) is classified conversation-only or holder — a new or moved site is RED until the table says which it is`, { unclassified, moved });
+  // CONTROL (lane chrome-157): the census WITHOUT the hook rule credits the onTold callback's site to the named function above it,
+  // which the table does not list — RED, as the .402 prep mirror met it; the hook rule is what classifies it
+  { const un0 = Object.keys(sites0).filter((f) => !(f in want)), mv0 = Object.keys(sites0).filter((f) => f in want && want[f] !== sites0[f]), sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+    ok(sites.onTold === 1 && !('onTold' in sites0) && sum(sites0) === sum(sites) && (un0.length + mv0.length) > 0, 'CONTROL: without the hook rule the onTold callback\'s site lands on the function above it and the census is RED (the same sites, one credited wrongly)', { un0, mv0 }); }
   ok(/const leasedNow = \(profileId\) => holdersOn\(profileId\)\.length > 0;/.test(src) && /B\.browserIdle\(rec, holdersOn\(rec\.profileId\), t, idleMs\(\)\)/.test(src) && /humans: humanRowsOn\(p\.id\)/.test(src), 'the holder readers go through holdersOn: the idle clock, the heal, the switch\'s hold');
   // lane browser-windows verify r5 ⑥: "does the USER drive any window of this browser" is a HOLDER question (the conversations'
   // leases + his row) — r4 read reg.leases by hand and was classified conversation-only; it goes through holdersOn now (each
