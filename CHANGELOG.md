@@ -32,6 +32,45 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Installing xpra from xpra.org now checks that xpra.org's key file is exactly the known one before trusting it.
 - Opening a machine's screen no longer stays black for 45 s: if direct UDP brings nothing back for 7 s it uses the device link and says which way it is on.
 - When a Mac's screen is locked, its remote screen window now says so and carries on by itself once the Mac is unlocked, instead of staying black.
+- The auto-continue chip says what it means («continues at 21:22», «Auto-continue: off»); a press opens a small panel first.
+- Unticking «All subscriptions» in a pool brings back the members you picked, instead of ticking every account.
+- The Ports panel no longer shows its forwards and its input box twice.
+- Right-clicking a message from another agent opens its menu again.
+- The hex viewer no longer shows «Load more»: scrolling loads the rest.
+- Menus no longer grey out an option and hide the reason in a tooltip: an option you can't use says why on its row, and a heading is plain text.
+- The billing account menu says what it is; an account you can't switch to says why on its row, with a «Manage agents…» button.
+- «Rules & checks» runs its one available check directly when there is only one, instead of opening a menu with one row.
+- An app's default-scale menu shows the current choice as a normal ✓ row, no longer greyed out, and links to the scale setting for every app.
+- A right-click menu no longer runs off the screen: it moves up or scrolls inside, and its last items (Properties, Terminate, Delete) stay in view.
+- A status-bar panel opened near a window's right edge keeps its width and moves left, instead of shrinking to a narrow strip.
+- Creating a group: «Create» is no longer greyed; pressed too early, it says what is still missing above the buttons.
+- A question card's «Submit» can be pressed before you answer; it then says «Pick an answer first» instead of being greyed.
+- The new browser profile list no longer shows rows you cannot pick; one line says where a desktop window is shared instead.
+- An integration with no cluster default no longer shows a greyed «Use cluster default» choice.
+- Plugins: no greyed switch before a plugin is connected, and no greyed ⚙ on a plugin with nothing to set.
+- The process list shows every row it received and says how many of the machine's processes that is, instead of a «show all» button.
+- The System panel's vault line says «Set up the vault…» when there is no vault yet, not «View contents…».
+- A job row's right-click menu has the row's own actions (Stop, Start, Remove), not only «Clear content…».
+- «Download another build…» in the browser build dialog is a button.
+- A channel app's setup lists its steps under «Before you start, check:».
+- A machine's setup window shows its Log only once there is something in it.
+- The file explorer's tools show their names beside their icons, Upload has its own icon, and tools that do not fit go into a ⋯ menu.
+- The sessions filter is a funnel (with a count while it filters); the sort button says its order and opens a small menu.
+- For-you rows' buttons are no longer faded, and each shows its name on hover or keyboard focus.
+- On the phone, each row of the window list has a ⋯ that opens that window's menu.
+- The auto-continue chip's tooltip no longer says «click to cancel»: a click opens its panel, where cancelling is a row.
+- In the file explorer, a tool folded into ⋯ opens its menu beside the ⋯.
+- The session list's search row fits a narrow sidebar: sort shows its icon there, and at the narrowest width sort and manage move into ⋯.
+- Background Work's start button says what it does: «Run again» for a task that ran, «Start» for a service, «Resume» for a cron that is off.
+- The sidebar's ▸ / ■ job buttons now carry their words as their names and tooltips.
+- A storage connection's Edit dialog no longer shows its secrets: a sign-in token, a client secret, a key or a password.
+- Since July the Edit form filled in saved secrets; as decided on 2026-11-13 it no longer does. The vault window shows the original once you confirm it's you.
+- A saved secret says «Saved» with «Replace…», whose box starts empty; the sign-in says «Authorized» beside Re-authorize.
+- A channel account's Edit and Re-authorize dialogs no longer show the account's own app secret either.
+- Signing in again with the same app keeps the saved secret.
+- A storage connection's saved parameter can be removed again («Remove»), and plain settings such as on/off switches and addresses show again.
+- A storage connection's Edit dialog keeps a parameter VibeSpace does not know as a secret, and never shows an address carrying a password or a signature.
+- After «Remove» on a saved parameter, «Undo» puts it back before you save.
 
 ## 2.369.401 — 2026-11-13
 
