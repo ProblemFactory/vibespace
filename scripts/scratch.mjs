@@ -52,6 +52,12 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 // B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)
 const MINTED = (globalThis[Symbol.for('vibespace.scratch.minted')] ??= new Map());
+/** lane setting-doors pick 0 (2026-11-14): THE OWNER'S PAGE, written once for every suite — the marks a browser on this instance's own
+ *  page sends (Sec-Fetch-Site same-origin and its Origin). A spend.* row changes ONLY with them (src/routes/persistence.js
+ *  refuseSpendRows: a bearer, or a request with no mark of the page, is refused): a suite that writes a spending row on its scratch
+ *  hub writes it with these headers, so «who may write» has one place in the tests too (test-spend-rows-owner ⑤ is the census). */
+export function ownerPageHeaders(base) { return { Origin: new URL(base).origin, 'Sec-Fetch-Site': 'same-origin' }; }
+
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),

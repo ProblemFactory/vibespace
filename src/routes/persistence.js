@@ -1064,10 +1064,43 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   const refuseEngineRows = (req, res, next) => { const hit = engineRowsTouched(req, next); if (!hit.length) return false; res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the program a browser engine runs and the sites it may reach are the owner's to set (Settings, signed in) — a bearer token (an agent, a job, an automation key) cannot set, change or drop them; nothing was written`, code: 'engine_row_owner_only' }); return true; };
 
+  // lane setting-doors pick 0 (主开发 2026-11-14; MEASURED on a scratch hub with sign-in OFF: a conversation's shell wrote the day ceiling
+  // by four roads — no header at all, forged browser headers, the whole-file POST, its own token). THE MODEL: the spending ceilings
+  // guard against a loop and against an agent that helps itself when it is blocked — accident and eagerness, not a determined
+  // adversary. So a spend.* row (the money gate's ceilings, its notice percent, overage turns) changes ONLY from the owner's page,
+  // on every write road (PATCH, the whole-file POST, a config import's settings section), sign-in on or off, judged over the file
+  // the write would LEAVE (an omitted row = dropped): (a) a request carrying a bearer (an agent, a job, an automation key) is
+  // refused by name; (b1) a write with NO browser mark (the strict page verdict: Sec-Fetch-Site same-origin, or an Origin that is
+  // this instance's own) is refused too — after it an agent changes a ceiling only by KNOWINGLY dressing its request as the owner's
+  // browser, and the refusal it met has told it whose press that is. Nothing is written when it refuses; the refusal names the
+  // rule, the row and the row's own link. (A program running as the hub's own user can still edit data/settings.json — it takes
+  // effect at the next restart; no route closes that: the box's boundary is the user.)
+  const SPEND_OWNER_ROW_RE = /^spend\./;
+  const spendWriteWhy = (req) => {
+    const WO = require('../write-origin.js'), h = (req && req.headers) || {};
+    if (WO.pressBearer(h)) return 'bearer';
+    const v = WO.pageVerdict(h, WO.ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) }));
+    return v.ok ? null : v.why;   // null = the owner's page
+  };
+  const spendRowsTouched = (req, next) => {
+    if (!spendWriteWhy(req)) return [];
+    const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
+    const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && JSON.stringify(cur[k]) === JSON.stringify(nxt[k]);
+    return [...new Set([...Object.keys(cur), ...Object.keys(nxt)])].filter((k) => SPEND_OWNER_ROW_RE.test(k) && !same(k));
+  };
+  const SPEND_REFUSED_BY = { bearer: 'a request carrying a bearer token (an agent, a job, an automation key)', 'no-browser': 'a request with no mark of the owner\'s page (neither Sec-Fetch-Site nor this instance\'s own Origin)' };
+  const refuseSpendRows = (req, res, next) => {
+    const hit = spendRowsTouched(req, next); if (!hit.length) return false;
+    const why = spendWriteWhy(req), door = `vibespace://settings/${hit[0]}`;
+    res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the limits on turns nobody typed change only by the owner's press on the owner's own page (Settings › Spending — ${door}); ${SPEND_REFUSED_BY[why] || `a request whose page is not this instance's (${why})`} cannot set, change or drop them, sign-in on or off; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: hit, door });
+    return true;
+  };
+
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
     if (refuseEngineRows(req, res, data)) return; // lane engine-spi-egress L1b (V3) — r2: the whole file it would leave (an omitted row = dropped)
+    if (refuseSpendRows(req, res, data)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
@@ -1082,6 +1115,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const merged = { ...current, ...patch };
     for (const [k, v] of Object.entries(merged)) { if (v === null) delete merged[k]; }
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
+    if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
     writeSettings(merged);
     res.json({ success: true });
   });
@@ -1239,6 +1273,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // lane engine-spi-egress L1b r2 (V3): a bearer's import whose settings section would set, change or drop an engine's program / site
     // list row is refused WHOLE — all or nothing: no section of it is applied
     if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseEngineRows(req, res, file.sections.settings)) return;
+    if (sections.includes('settings') && file.sections.settings && typeof file.sections.settings === 'object' && refuseSpendRows(req, res, file.sections.settings)) return; // lane setting-doors pick 0: all or nothing, as the engine rows
     const applied = [];
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;

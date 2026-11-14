@@ -1097,6 +1097,7 @@ export default {
   "Set model": "モデルを設定",
   "Set password": "パスワードを設定",
   "Set password…": "パスワードを設定…",
+  "Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.": "サインインがオフです：VibeSpace に接続できるものなら何でもこれらの上限を変更できます。パスワードを設定すると、あなただけが変更できます。",
   "Set status…": "ステータスを設定…",
   "Set up both…": "両方をセットアップ…",
   "Show all agent types": "すべてのエージェントタイプを表示",

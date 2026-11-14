@@ -1098,6 +1098,7 @@ export default {
   "Set model": "设置模型",
   "Set password": "设置密码",
   "Set password…": "设置密码…",
+  "Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.": "未开启登录：任何能连到 VibeSpace 的程序都能修改这些上限。设置密码后只有你能改。",
   "Set status…": "设置状态…",
   "Set up both…": "两个都设置…",
   "Show all agent types": "显示所有 agent 类型",
