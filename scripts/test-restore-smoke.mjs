@@ -6,6 +6,7 @@
 // (it caught the deviceMgr live-read gap the empty-data boot smoke could not).
 // NEVER run server.js from the repo dir for smokes: the repo's data/ is
 // PRODUCTION and restoreSessions would attach to live sessions (#127 class).
+import { vncEnv } from './scratch.mjs';
 import { WebSocket } from 'ws';
 import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
@@ -13,7 +14,6 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { vncEnv } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const wt = `/tmp/vs-restore-smoke-${process.pid}`;

@@ -22,6 +22,7 @@
 //      · §14 THE TOKEN MARKER under recorders on every log, spawn, answer, broadcast and file · §15 the probe's new fences
 //   RED CONTROLS: the shape verdict without the typeless clause (materializeVerdict says no-scopes); the reader without the plan
 //      scanner (no plans); a marker the recorders are shown to catch
+import './scratch.mjs';   // B-ba47: a suite runs on a home of its own, decided at import — a NEW one takes the import first
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

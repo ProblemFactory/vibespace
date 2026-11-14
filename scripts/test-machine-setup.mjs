@@ -13,6 +13,7 @@
 //      runs; ffmpeg through the agent; TightVNC in the agent's ONE administrator window (visible then, a child of it — its exit is
 //      never the task's), inline when already administrator, alone with -NoElevate (Q2); its result read off port 5900; the
 //      summary LAST
+import './scratch.mjs';   // B-ba47: a suite runs on a home of its own, decided at import — a NEW one takes the import first
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

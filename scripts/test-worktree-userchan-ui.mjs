@@ -28,10 +28,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
-import { scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);

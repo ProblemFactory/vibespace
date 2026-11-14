@@ -4,6 +4,7 @@
 // covering every row shape: CLI login w/ usage, long name, scoped bucket +
 // age, missing usage, API account, current ✓. Screenshot to
 // /tmp/vs-uiscale-shots/billing-menu.png + per-row single-line asserts.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

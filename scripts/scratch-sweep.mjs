@@ -42,10 +42,14 @@ export function sweepPaceLine({ why, what = '', ran = null, sinceMs = null } = {
  *  only the other rules can keep it); `liveRoots` = the paths live processes name; `production` = never a unit (exact
  *  regexes); `keepList` = paths it may neither be, sit in, nor contain (the repo, its data/); `owner` = its run record's
  *  owner state (scratch-run.mjs runOwnerState) or null. */
-export function dirVerdict({ path: p, name, mtimeMs, now, liveRoots = [], prefixes = SCRATCH_SWEEP.prefixes, production = SCRATCH_SWEEP.production, keepList = [], isDir = true, symlink = false, owner = null, staleMs = DIR_STALE_MS }) {
+export function dirVerdict({ path: p, name, mtimeMs, now, liveRoots = [], prefixes = SCRATCH_SWEEP.prefixes, production = SCRATCH_SWEEP.production, keepList = [], isDir = true, symlink = false, owner = null, staleMs = DIR_STALE_MS, markerOk = null }) {
   const keep = (why) => ({ verdict: 'keep', why });
   const unit = prefixes.find((u) => path.posix.dirname(p) === u.under && path.posix.basename(p) === name && NAME_RE.test(name) && name.startsWith(u.prefix) && name.length > u.prefix.length);
   if (!unit) return keep('no minted prefix under a declared tmp root');
+  // a unit with a SHAPE of its own (B-ba47's node cache): taken only by its name's exact form and the stamp it wrote
+  if (unit.nameRe && !unit.nameRe.test(name)) return keep("not the unit's own shape (its name)");
+  if (unit.marker && !(unit.markerExempt && unit.markerExempt.test(name)) && markerOk === false) return keep(`not the unit's own shape (no ${unit.marker} of its own)`);
+  if (unit.staleMs) staleMs = unit.staleMs;
   const prod = production.find((re) => re.test(p));
   if (prod) return keep(`a production root (${prod})`);
   const inKeep = keepList.find((k) => p === k || p.startsWith(k + '/') || k.startsWith(p + '/'));
@@ -105,11 +109,12 @@ export function sweepScratchDirs({ liveRoots = [], now = Date.now(), dryRun = fa
       if (!name.startsWith(u.prefix)) continue;
       const p = path.posix.join(u.under, name);
       let st; try { st = fs.lstatSync(p); } catch { continue; }
-      const facts = { path: p, name, now, liveRoots, prefixes, production, keepList, staleMs, isDir: st.isDirectory(), symlink: st.isSymbolicLink() };
+      const unit = prefixes.find((x) => x === u), markerOk = unit && unit.marker ? (() => { try { return fs.lstatSync(path.posix.join(p, unit.marker)).isFile(); } catch { return false; } })() : null;
+      const facts = { path: p, name, now, liveRoots, prefixes, production, keepList, staleMs, isDir: st.isDirectory(), symlink: st.isSymbolicLink(), markerOk };
       let v = dirVerdict({ ...facts, mtimeMs: -Infinity });
       if (v.verdict === 'reap') {
         const owner = readOwner(p);
-        const t = treeFacts(p, { stopAt: now - staleMs });
+        const t = treeFacts(p, { stopAt: now - (u.staleMs || staleMs) });
         v = dirVerdict({ ...facts, owner, mtimeMs: t.newest });
         if (v.verdict === 'reap') {
           try { if (!dryRun) removeUnit(p, { prefixes, rm }); } catch (e) { res.failed.push({ path: p, why: e.message }); log(`[ci] dir sweep: could not reap ${p} — ${e.message}`); continue; }

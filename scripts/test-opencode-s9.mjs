@@ -24,8 +24,8 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
-import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
 import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv } from './scratch.mjs';
+import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);

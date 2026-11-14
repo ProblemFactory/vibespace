@@ -42,13 +42,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import cp from 'node:child_process';
+import { scratchDir } from './scratch.mjs';
 import { buildFixture, FIXTURE_TEXT } from './make-vault-run-card-facts.mjs';
 import * as I18N from './i18n-check.mjs';
 import zlib from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import * as GHG from './gen-gh-grammar.mjs';   // round 5: the gh grammar's ONE generator — the census (⑤c) re-runs its parse against the live gh and diffs the shipped table
-import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, ghPin = '';   // round 5: the gh grammar census names itself in the total (a SKIP changes the count)

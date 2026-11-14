@@ -800,7 +800,12 @@ console.log('— ⑦ resume, an agent error, text only');
     ok('a resume is --conversation <id> from the first start, the session record says load', ses.how === 'load' && ses.sessionId === firstCid && startArgv.includes('--conversation') && startArgv.includes(firstCid), { ses, startArgv });
     w.send({ type: 'chat-input', text: 'this will fail', msgId: 'f1' });
     const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
-    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && w.find('notice', (r) => r.noticeKind === 'agy-error' && /model unavailable/.test(r.text)), end);
+    // the AGY_ERROR line (agy's stderr) and the ERROR result (its stdout) come on TWO pipes: which the wrapper reads first is
+    // the scheduler's, so the notice may be journaled just after the turn's end (B-ba47's hosted run 43702977809 read the end
+    // first) — it is waited for, bounded; never coming, the wrapper's own record of agy's stderr says why
+    let said = null; try { said = await w.until(() => w.find('notice', (r) => r.noticeKind === 'agy-error' && /model unavailable/.test(r.text)), 3000, 'the agy-error notice'); } catch { said = null; }
+    const wlog = () => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8').split('\n').filter((l) => /\[stderr\]|stopped agy|restart|AGY_ERROR|exited/.test(l)).slice(-8); } catch (e) { return ['(no wrapper log: ' + e.code + ')']; } };
+    ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && !!said, said ? end : { end, wrapperLog: wlog() });
     // lane agy-harness-fixes, bug 3: a PASTED picture reaches agy — written once under <cwd>/.vibespace-uploads/, its path
     // FIRST in the text (the composer's upload road); agy's stream still gets text only (another block ends it, exit 1)
     const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

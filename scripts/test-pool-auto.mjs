@@ -6,6 +6,7 @@
 // proactively toward a strictly-sooner deadline (margin 1h).
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 const require = createRequire(import.meta.url);
 const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, classifyAuthFailure, conversationDisplayName } = require(path.resolve('src/account-pool-auto.js'));
 
