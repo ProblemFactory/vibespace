@@ -440,6 +440,105 @@ This file is the engineers' record of every release: the lanes, the verification
   - test-desktop-remote's capability pin; test-image-cards, test-channels-agent-cli (the cache legs), test-kept-copies, test-card-grammar;
   - test-sync-fs-census (the upload route); test-architecture §86 (the rows).
 
+### machine-needs-at-pairing pick 2 — every «needs X» has its door: 「取得 FFmpeg」, the settings pages, THE CENSUS (主开发's GO 2026-11-13 02:01Z: laws 1, 2, 4, 5; Q5, Q6)
+- **THE FFMPEG ROW** (NEW PURE src/ffmpeg-install.js, registered in src/installs.js). Two published builds, each a FIXED release asset with the archive's AND ffmpeg.exe's SHA-256 pinned. No publisher signs a Windows ffmpeg (measured: an empty certificate table), so the two fingerprints are the whole pin (Q5).
+  - 1st: gyan.dev's FFmpeg 9.0.2 essentials (its GitHub mirror), 114,768,076 B. 2nd: BtbN's month-end 9.0 build, pruned 2028-10.
+  - The plan is an UNELEVATED PowerShell (`stream: true`). It downloads, checks the archive's hash, takes the ONE named member out, checks ffmpeg.exe's hash, writes a STAMP beside it, then puts the exe in place in ONE step (ReplaceFile keeps the old copy until the new one is in). The 2nd row is tried when the 1st fails.
+  - The hub's road: installPackage → NEW runStreamInstall (dm.runStream — the install slot's shell does not exist on Windows) → the stream facts read again. The route's DONE.ffmpeg = SP.ffmpegPasses, `still_absent` otherwise.
+- **THE AGENT CHECKS A FETCHED COPY BEFORE IT RUNS IT** (Q5). src/agentd/stream-screen.js: a candidate with a stamp is hashed once per agent life (cached by size + mtime). A copy whose bytes changed is never run; its refusal (ffmpegVerdict `changed`) says to fetch it again. An UNSTAMPED copy — one a person put there, as the old words told them — is judged as before.
+- **THE DOOR ON THE LINE** (NEW src/lib/ffmpeg-door.js). Kind (a), on the line that states it (law 5). The press opens a small SHEET with the facts and ONE button; that button runs GET install-plan → POST install with its planDigest, NDJSON, and the line says what it fetched. It sits on:
+  - the desktop dialog — a NEW line, read when the dialog opens and at Check again, from the facts route's new `ffmpegPasses` / `ffmpegWhy`;
+  - the desktop window's strip (stream no_ffmpeg / no_encoder; the sound's no_ffmpeg through `onNeed`), as the Mac switch's pill;
+  - an app's own window (its say line);
+  - the microphone strip's words.
+  It is shown only when no candidate passes (Q6).
+- **THE SETTINGS DOORS** (NEW src/lib/machine-settings-door.js; laws 2 and kind c). The PURE tables in src/stream-plan.js: MAC_SETTINGS gains `sharing`; NEW MAC_DOORS `clt` = `/usr/bin/xcode-select --install`; NEW WIN_SETTINGS `remotedesktop` / `sound`. The route takes SETTINGS_PANES; desktop-access lets a Windows machine through. A Windows screen source answers `settings-open` with a hidden PowerShell's `Start-Process` of the ms-settings: link (the module's ONE run — no new child site, never a console). A Mac's door runs through its helper's run. The doors:
+  - M1 / M2: the Mac's no-VNC dialog line gets «Open System Settings» (General › Sharing);
+  - M3 / M5: the strip's Mac pill takes no_helper (the Command Line Tools' installer), and an app window's say line gets the pane or the installer;
+  - W6: the mic card's «turned off» line gets Windows' Sound page;
+  - W7: the RemoteApp card's Remote Desktop row gets its page.
+  The sound toggle's Screen Recording refusal reaches the strip's pill.
+- **THE CENSUS** (NEW PURE src/machine-needs.js + NEW fast test-machine-needs). Every t() / tr() / i18nKey() sentence in src/ that names a machine AND a need is claimed by a row or by a non-need with its reason. It is PRINTED: 17 needs; door present / NONE(why) / deferred «machine-needs · B-bd27» (X1–X3 and the hub's own rows).
+  - It is RED on an unclaimed sentence, and on a surface that states a present-door need without its door. Its first run named the gaps this pick then closed: W6, and M3 / M5 on the app window.
+- **The device agent's bundle changes** (stream-screen.js, stream-mac.js, stream-plan.js, ffmpeg-install.js), so the release needs its signed manifest. An older agent:
+  - takes the first ffmpeg it finds and has no stamp check;
+  - answers a Windows settings-open with not_mac. The door then says where to go by hand.
+- **Pins:** test-ffmpeg-install (NEW, fast), test-machine-needs (NEW, fast), test-installed-apps §8 (the dialog's ffmpeg line in both Q6 states; the Mac's Sharing door), test-stream-plan (unchanged legs green).
+- **The reader's list (int359 acc-399 mn2, «THE FETCH HOLDS; ACCEPTED AFTER ONE LIST», 主开发 09:32Z) — one more commit on 7774887da, a leg per item RED on 7774887da:**
+  - **MUST 1, the microphone card.** Pick 2's Sound-page door sat inside the words' else-chain and took its last `else`: installed, absent and reboot_owed read «did not say where your voice would go» in red. The door now follows the chain. test-ffmpeg-install ⑪ drives the card per state.
+  - **2, only the pinned bytes run, on every road.** ONE accessor, SP.runnableFfmpeg(ff, road), gives a path only for a copy that is not `changed` and passes that road's verdict (screen, window, voice, sound). planScreen / planWindow take it, and so does the agent's `createScreen().runnable`. On Windows, agentd hands the voice and the sound that accessor only, and desktop-mic does no PATH scan of its own. ⑩ holds the census of the agent's ffmpeg starts: 8 sites, each from the accessor.
+  - **3, read before the press.** The press opens the product's own sheet (createModalShell). It names the build, its publisher and size, its release address on GitHub, the licence, the folder, that no administrator right is asked, that VibeSpace did not build it, the two fingerprints, and the 2nd build with its size and address. It has ONE button. The done line names the build that WAS fetched: the stamp's label → the facts' `fetched` → DONE.ffmpeg.
+  - **4, each row's reason.** The plan keeps each row's reason («the download failed (…)» or «not the pinned file (its SHA-256 differs)») and its last line names them all. runStreamInstall's error is that last line, never «the log above says why».
+  - **5, the pins.** ⑦ holds a digest of FFMPEG_BUILDS. test-approval-census pins that a streamed plan's digest covers its argv, and §3c holds the fingerprint of the ffmpeg plan's bytes. The surviving mutants each have a leg: M1–M4 (⑦), M8 / M9 (⑧, on the new lines), M10 / M12 / M16 (⑨, through the real router).
+  - **6, the plan's edges.** One placement keeps the old copy at .old until the new one is in, so a kill never leaves no ffmpeg.exe. A stray .old with no ffmpeg.exe is put back first. A killed run's `.dl-<guid>` folder is swept by the next run. A stamp that fails after the move is said truly, and the run counts as done. The run writes its pid to `ffmpeg.fetching`: after install_timeout / install_link_lost the hub holds its slot while the machine's facts say `fetching` (the agent's run-stream child outlives a lost link). A hash that could not be read refuses that once and is never cached.
+  - **7, a settings door says why.** settingsRefusalText goes by the answer's code: not connected, an older agent, the hub refused, the machine's own failure, no answer. A refusal at the hub's send point (`stage: 'gate'`) comes back as that refusal, never as host_unavailable.
+  - **8, the census says what it is.** Its header and kb-features say it is a net over sentences that carry a machine word and a need word. It cannot see a need worded past those words, a device's own refusal strings, or a log line.
+  - **Two heavy reds of 7774887da's own claim (jb-f61e721e):** test-stream-op's mutant copy of stream-screen.js re-points its requires, and now re-points ffmpeg-install.js too. test-desktop-webrtc-chrome's strip-order anchor names ffEl.
+  - **How the fingerprints were obtained** (the lane's ffmpeg-builds measurement, 2026-11-12): each archive was downloaded with `curl -fL` into its own new folder (logs dl-gyan / dl-btbn-gpl / dl-btbn-lgpl: time, URL, HTTP code, bytes, SHA-256) and hashed with sha256sum. Each archive's hash matched the publisher's own checksum file and GitHub's digest. Only `bin/ffmpeg.exe` was unpacked (unzip) and hashed. Only the gyan.dev zip is kept on the box (re-hashed 2026-11-13: the pin; 主开发 hashed it again at 12:43Z — 114,768,076 B, the row's SHA-256). The BtbN archives were deleted after measuring: the second row's pin stands on that measurement — the publisher's checksum file + GitHub's digest (log dl-btbn-gpl) — and nobody downloads it again without the owner's word.
+  - **THE POWERSHELL WAS NEVER EXECUTED.** There is no Windows and no pwsh on this box: every line of the plan is pinned by READING it (⑧), never run. The owner's acceptance on a real Windows PC is its first run.
+
+### machine-needs-at-pairing pick 3a — xpra.org's apt key is PINNED (主开发: «a fix of the shipped plan whether or not xpra rides pairing»)
+- **The gap.** src/desktop-apps.js xpraRepoSteps (and deploy/docker/Dockerfile, the same lines) fetched https://xpra.org/xpra.asc straight into /usr/share/keyrings and named it as the repository's signer — whatever that address served was trusted as root.
+- **The pin, measured 2026-11-13.** The primary key «Xpra <xpra@xpra.org>» B4993B57323148E37977E5D873254CAD17978FAF (created 2023-06-10). The same fingerprint is on keys.openpgp.org (its e-mail verified there) and keyserver.ubuntu.com. The file's SHA-256 4df3209e…ed7d is pinned too, for a machine without gpg.
+- **The steps now:** fetch to xpra.asc.new → XPRA_KEY_CHECK → move into the keyring → the deb822 source → the apt pin.
+  - XPRA_KEY_CHECK is ONE subshell line (as of pick 3d): sha256sum checks the FILE against the pinned SHA-256, gpg or not — an earlier cut asked gpg only whether the fingerprint was in the file. A mismatch removes the download, says so and stops with exit 3, nothing changed.
+  - A person's copy of the line is `sudo sh -c '…'`, as for every `(`-line.
+  - The image runs the same lines (test-desktop-apps §xpra-repo pins both).
+- **Pins.** test-desktop-apps §xpra-repo: the order; the check run in a real sh — the fixture key (scripts/fixtures/xpra/xpra.asc, the public key) passes, another key is refused and removed, and with no gpg on PATH the SHA-256 passes it and a changed file fails it.
+
+### machine-needs-at-pairing pick 3b — THE PAIRING DOES IT (主开发's law 3; Q1–Q4; the place agreed with pair-dialog-polish)
+- **The sheet's step ②** «What this device will be used for» (src/lib/sidebar-mounts.js) sits between ① the system and ③ the command, since the tick changes the command. One house check row per thing, with its source, size, the rights it asks and what it listens on, from the PURE rows (src/ffmpeg-install.js FFMPEG, src/machine-desktop-model.js TIGHTVNC):
+  - Windows: «its desktop and streaming» ticked — FFmpeg (no rights, listens on nothing, two fixed SHA-256) + TightVNC (one administrator prompt + its password there, 127.0.0.1 / ::1:5900). With normal rights the sheet says TightVNC alone still asks once (Q2).
+  - Mac: «its screen, sound, keys and clicks» ticked (vibespace-screen's two permissions + its helper). «Its whole desktop through macOS Screen Sharing» is UNTICKED and says it listens on the local network (Q1).
+  - Linux: «desktop apps (xpra 6.x)» unticked (Q4; its key pinned in 3a).
+  - The tick IS `-Setup desktop` / `--setup mac[,sharing]` / `--setup xpra`, appended by cmdOf; setOs re-draws the step. Step ③ says the command's last lines name what was set up. The microphone is out of the set (Q3).
+- **The agent's setup modes** (NEW src/agentd/setup-mode.js, one-shot like --dial-check). agentd.js hands the flags there and returns before its daemon body, so its main guard stays as it was and it names nothing of the desktop rung (§D014):
+  - `--setup-plan tightvnc|xpra` prints that install row's own PURE plan (TIGHTVNC_INSTALL / XPRA_INSTALL from src/desktop-apps.js — TightVNC's commands, xpra's root script), found by the row's own id rather than a branch on the install's name (§78). Never the whole registry: its microphone row's osascript would ride the agent bundle (test-stream-mac §7).
+  - `--setup ffmpeg` runs the agent's own lookup (a passing ffmpeg is kept, Q6), else the pinned row, unelevated, then looks again;
+  - `--setup mac[,sharing]` reads the screen helper (its Screen Recording row added) and opens the panes through openSettings (the Command Line Tools' installer when there is no helper).
+  - One line per need; exit 0 = met, 4 = some not, 2 = an unknown word. On Windows the marks are ASCII (OK / x / ->), since a console decodes a child in its OEM code page.
+- **The Windows installer** (-Setup desktop), after the agent runs:
+  - ffmpeg goes through the agent (shown as it goes). TightVNC's commands come from the agent's plan and ride the agent's ONE administrator window — VISIBLE then, run as a child so the window's exit stays the task's; inline when already administrator; alone with -NoElevate (Q2).
+  - TightVNC's result is what listens on 5900 afterwards.
+  - A TightVNC already listening beyond loopback is left and SAID.
+  - The summary is the script's LAST lines.
+- **The Mac / Linux installer** (--setup):
+  - the block runs LAST (after the older installs are retired);
+  - the agent's mac setup / the xpra plan run under sudo with the password read from /dev/tty (no terminal ⇒ ✗ said);
+  - every exit code is read under `set -euo pipefail`, never fatal.
+- **The census seam:** pair-dialog-polish's words «Needs curl …» (capitalised) and «Put it on the device in three steps» meet pick 2's census (/needs curl/i; a pairing step is not a need). That is carried here and in pick 2's amend.
+- **Pins:**
+  - test-machine-setup (NEW, fast, 20): the step's place and defaults, the tick = the flag, the facts from the PURE rows; the agent's modes run; the sh block run in a real bash with a stand-in agent (RED CONTROL: unguarded, the first unmet need ends the script); the ps1 read.
+  - test-pair-dialog-polish (heavy): 4 steps; ⑦ the defaults per system and the tick = the flag in Chrome.
+- **UNMEASURED here** (no Windows, no Mac): the owner's acceptance list in the pick 3 report — one minute per machine.
+
+### machine-needs-at-pairing pick 3c — the fetch's failure said by ONE name, each build's reason in the interface's language (主开发 12:43Z, the two smalls on pick 2's pictures)
+- **The codes.** The plan names each step's code just before it (no_folder, download_failed, archive_differs, member_missing, exe_differs, not_placed). A build that fails prints `VS-FFMPEG-ROW <code> <label>` just before the last line, so the last line stays the words. PURE `fetchRowsOf` reads them.
+- **The road.** runStreamInstall hangs the codes on its error (`rows`), and the route's error line carries them.
+- **The page.** ffmpegFailText says each code's sentence (zh / ja / en). The machine is named once, by the sheet title's name, never the hub's id. The raw line stays in the sheet's fold «What the machine printed». A code line is never said as it streams.
+- **The zh title** has a space after 为, as between the other Chinese and Latin runs on the sheet.
+- **Pins:** test-ffmpeg-install ⑫. The approval census's held plan digest moved with the bytes (§3c — by design).
+
+### machine-needs-at-pairing pick 3d — the reader's list on pick 3 (主开发 15:15Z: «yes after a list»; verdict-closure-wf_8bb316e0, the drivers in closure/mn3)
+- **MUST (3a): EXACTLY the pinned key.** The gpg branch only asked whether the fingerprint was in the file. A file with the pinned key plus another key (either order), or a truncated one, passed and was placed. Signed-By then made apt trust every key in it. XPRA_KEY_CHECK now checks the FILE's SHA-256 always, gpg or not, so a key the publisher changed is refused and said. A failed key fetch (curl, then wget, which makes its -O file first) removes the .new and stops (XPRA_KEY_FETCH). The Dockerfile carries the same check line.
+- **The Linux installer:** what sudo runs is the plan's STDOUT only. The agent's stderr is kept apart for the ✗ line.
+- **«already installed»** only when the plan has nothing left to do (setup-mode planAnswer). xpra being present still installs the rung's companions (xterm, xdotool, xauth, xvfb).
+- **The Windows installer:** the two setup calls run under ErrorActionPreference Continue inside try. Anything thrown is SAID and the installer goes on to register its task. This is read only, since nothing here runs PowerShell. A run where the fetch fails is on the owner's checklist.
+- **ONE name:** the fetch's words from the hub carry no host id. The page names the machine by the sheet title's name and never rewrites free text. The microphone strip's sheet names its machine.
+- **Pins:**
+  - the source line's exact `Signed-By: /usr/share/keyrings/xpra.asc` (plan and image);
+  - hostile facts ⇒ the root script byte-equal to the clean one;
+  - every FFMPEG_FAIL_CODES code has the page's sentence and its zh / ja row;
+  - test-desktop-apps §xpra-repo (the two-key / truncated / failed-fetch cases);
+  - test-machine-setup ⑤;
+  - test-ffmpeg-install ⑫.
+- **Step ②'s words** say:
+  - Windows: where ffmpeg comes from and where it lands, that VibeSpace did not build it, and that an administrator's console fetches it as administrator.
+  - Linux: that xpra.org stays an apt source and xpra is held at 6.x, every package installed, and the one sudo.
+- **Open, said:**
+  - The apt pin names the version (6.*) but no origin. An apt preferences record takes ONE `Pin:` line, so origin and version cannot both bound one record. Base had it.
+  - The pinned fingerprint and SHA-256 against xpra.org itself: nobody here may download again without the owner's word.
+
 ## 2.369.401 — 2026-11-13
 
 ### k3-badge-cure (主开发's ruling 2026-11-13 21:57Z — the first pick of .401) — a ring's age badge is ONE line and never covers its ring's label
