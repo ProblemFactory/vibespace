@@ -6,7 +6,9 @@
 //   Ⓐ THE SATURATED LOOP: a KNOWN busy function at ~80 % in callbacks of 50–200 ms (nothing ≥ 1 s) — commit 1 says nothing
 //      (no [loop-hold] line); the trigger's capture names the function FIRST, its share within ±10 points of the child's
 //      own measured truth; ONE block ≤ 15 lines; its .cpuprofile kept and its own table the block's; a second trigger
-//      inside the interval captures nothing
+//      inside the interval captures nothing. Its samples are judged at the rate the capture SAYS it ran: asked every 50 ms,
+//      halved only where an ask passed its bound and the block says so (the hosted runner's .401 heavy: one ask took 4.36 ms
+//      ⇒ every 100 ms, 244 samples) — a pin on that capture's own record first
 //   Ⓑ THE SWITCH OFF: nothing automatic, the door works
 //   Ⓒ IDLE IS NEVER WORK: ~10 % busy in one callback ⇒ ~10 % work, ~90 % idle — never that callback at 100 %; and a
 //      MUTANT of the worker's tick (its idle rule removed, a scratch copy of src/) is RED by name
@@ -16,12 +18,14 @@
 //   Ⓕ THE ASKS' COST: said; one past its bound ⇒ the rate halves, said; the sum past its bound ⇒ it stops early, said
 //   Ⓖ THE CAPTURE'S OWN COST: a busy child's work done with and without a capture, interleaved — measured and printed
 //   Ⓗ A DEBUGGER: a port open ⇒ the door refused by name, nothing automatic; opened mid-capture ⇒ it stops early, said
-//   Ⓘ NODE 22: Ⓐ Ⓒ Ⓓ under the binary named by VS_NODE22 — else «not run: no Node 22 given»
+//   Ⓘ NODE 22: Ⓐ Ⓒ Ⓓ under the binary named by VS_NODE22 — else «not run: no Node 22 given». The legs above are labelled
+//      by the Node that runs this suite (the hosted runner's is 22, this box's 24) — the same laws on either
 //   Ⓙ A READ, A WRITE THAT NEVER RETURNS (the follow-up, heading .394): the watchdog thread's stat of the install's files
 //      never answers (a preload in that thread stands for the hung kernel call and counts it) — four captures START ONE
 //      read, the later three say why their functions go by location alone; the capture file's write never answers —
 //      three captures start ONE write, the later two say it is not kept. Two MUTANTS (a scratch copy of src/: the read's
-//      guard cleared at the budget; the write's guard removed) are RED by name
+//      guard cleared at the budget; the write's guard removed) are RED by name. THE READ'S PREMISE, asserted by name: each
+//      capture samples the install's code (a function to name) — the loop is busy half the time, not 10 %
 // Run: node scripts/test-cpu-capture-live.mjs        (VS_NODE22=/path/to/node22 for Ⓘ; VS_CC_LEGS=A,C… a maintainer's subset)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -67,7 +71,7 @@ const rnd = (() => { let s = 12345; return () => { s = (s * 1103515245 + 12345) 
 let stop = false;
 const plans = {
   saturated() { const go = () => { if (stop) return; const x = 50 + 150 * rnd(); if (rnd() < 0.9) H.knownBusy(x); else H.otherWork(x); setTimeout(go, x * 0.12); }; go(); },
-  ten() { const go = () => { if (stop) return; H.tenBusy(20); setTimeout(go, 180); }; go(); },
+  ten() { const go = () => { if (stop) return; H.tenBusy(20); setTimeout(go, cfg.restMs || 180); }; go(); },
   json() { const text = '[' + '{"a":1,"b":"xyz","c":[1,2,3]},'.repeat(cfg.jsonN || 200000) + '{"a":2}]'; const go = () => { if (stop) return; H.jsonCaller(text); setTimeout(go, 40); }; go(); },
   churn() { const go = () => { if (stop) return; H.churn(120); setTimeout(go, 30); }; go(); },
   units() {   // work units back to back; the main thread's OWN cpu time (its schedstat) at the start and the end
@@ -126,14 +130,39 @@ const rowsOf = (r) => (r.out && r.out.capture && r.out.capture.last ? r.out.capt
 const pctOf = (r, fn) => { const x = rowsOf(r).find((y) => y.fn === fn); return x ? x.pct : 0; };
 
 // ── Ⓐ THE SATURATED LOOP ──────────────────────────────────────────────────────────────────────────────────────────
+// THE RATE IT RAN AT, AS THE CAPTURE SAYS IT: asked every 50 ms; one ask past its 4 ms bound halves the rate (the product's
+// own law, Ⓕ) and the block says so. The hosted runner's .401 heavy (Node 22): «the rate halved to every 100 ms — an ask took
+// 4.36 ms of the main thread (the bound 4 ms)», 244 samples — the old «≥ 360 samples» assumed no ask ever passes its bound.
+// Measured on this box (the asks' own runs, 4 captures each): Node 24 p50 0.07–0.09 ms, max 1.46 ms; Node 22 p50 0.09–0.10 ms,
+// max 0.29 ms; a CPU shared with a hog, the child niced below it: max 3.07 ms — no halving, 385–416 samples. So the samples are
+// ≥ 90 % of the window at the rate it ran at the END (≤ 110 % at 50 ms), and the block names a halving exactly when it ran one.
+const HALVED_WORDS = /the rate halved(?: \d+ times)? to every (\d+) ms — an ask took \d+\.\d\d ms of the main thread \(the bound 4 ms\)/;
+function rateOf(L) {
+  if (!L) return { ok: false, last: null, said: null };
+  const m = (L.lines || []).map((l) => HALVED_WORDS.exec(l)).find(Boolean), last = L.finalEveryMs || L.everyMs;
+  const ok = L.everyMs === 50 && L.windowMs >= 19500 && (L.finalEveryMs ? !!m && Number(m[1]) === L.finalEveryMs : !m)
+    && L.samples >= 0.9 * L.windowMs / last && L.samples <= 1.1 * L.windowMs / L.everyMs;
+  return { ok, last, said: m ? m[0] : null };
+}
+// the hosted runner's own capture (the .401 cut's heavy shard 2, try 1 — its record and its block's cost line)
+const RUNNER_401 = { auto: true, cause: 'lag', windowMs: 20000, everyMs: 50, finalEveryMs: 100, samples: 244,
+  lines: ['[cpu-profile]   244 samples, the asks themselves took 25 ms of the main thread (0.1 %); the rate halved to every 100 ms — an ask took 4.36 ms of the main thread (the bound 4 ms); kept as data/cpu-profiles/2026-11-14T03-34-09-216Z-auto.cpuprofile'] };
+function pinRate() {
+  const said = rateOf(RUNNER_401), unsaid = rateOf({ ...RUNNER_401, lines: [] }), unmoved = rateOf({ ...RUNNER_401, finalEveryMs: undefined }),
+    few = rateOf({ ...RUNNER_401, samples: 170 }), old = rateOf({ ...RUNNER_401, finalEveryMs: undefined, lines: [] });
+  ok(said.ok && !unsaid.ok && !unmoved.ok && !few.ok && !old.ok, 'the rate read as the capture says it: the hosted runner\'s (244 samples, halved to every 100 ms where an ask took 4.36 ms, said) holds; the same halving unsaid, a halving said at an unmoved rate, 170 samples at 100 ms, 244 at 50 ms — each refused',
+    { said, unsaid: unsaid.ok, unmoved: unmoved.ok, few: few.ok, old: old.ok });
+}
 async function legSaturated(tag, node) {
   console.log(`Ⓐ the saturated loop names its top function — production timings, a 20 s capture (${tag})`);
   const r = await run({ plan: 'saturated', lag: 1, afterMs: 3000 }, { node });
   const L = r.out ? r.out.capture.last : null, b = block(r);
   const held = r.lines.filter((l) => l.startsWith('[loop-hold] the main loop was held') || l.startsWith('[sync-fs] the main loop has been held'));
-  if (L) say(`${tag}: ${L.samples} samples in ${(L.windowMs / 1000).toFixed(1)} s — ${rowsOf(r).map((x) => `${x.fn} ${x.pct} %`).join(', ')}; the truth ${JSON.stringify(r.out.truth)}; the asks ${L.costMs} ms`);
+  const rate = rateOf(L);
+  if (L) say(`${tag}: ${L.samples} samples in ${(L.windowMs / 1000).toFixed(1)} s at every ${rate.last} ms${rate.said ? ` («${rate.said}»)` : ''} — ${rowsOf(r).map((x) => `${x.fn} ${x.pct} %`).join(', ')}; the truth ${JSON.stringify(r.out.truth)}; the asks ${L.costMs} ms`);
   ok(held.length === 0 && r.out && r.out.holds.length === 0, `${tag}: callbacks of 50–200 ms — commit 1's hold watchdog says NOTHING (no hold of a second)`, held.slice(0, 2));
-  ok(L && L.auto === true && L.cause === 'lag' && L.windowMs >= 19500 && L.everyMs === 50 && L.samples >= 360, `${tag}: the trigger's ONE capture: 20 s at 50 ms (${L ? L.samples : '?'} samples)`, L && { auto: L.auto, cause: L.cause, w: L.windowMs, n: L.samples });
+  ok(L && L.auto === true && L.cause === 'lag' && rate.ok, `${tag}: the trigger's ONE capture: 20 s asked every 50 ms${rate.last && rate.last !== 50 ? `, halved to every ${rate.last} ms where an ask passed its bound — said` : ''} (${L ? L.samples : '?'} samples ≥ 90 % of the window at the rate it ran)`,
+    L && { auto: L.auto, cause: L.cause, w: L.windowMs, every: L.everyMs, final: L.finalEveryMs, n: L.samples, said: rate.said, cost: (L.lines || []).find((l) => /\d+ samples, the asks/.test(l)) });
   ok(L && L.rows[0] && L.rows[0].fn === 'knownBusy' && L.rows[0].loc === 'src/hogs.js:4' && Math.abs(L.rows[0].pct - r.out.truth.knownBusy) <= 10, `${tag}: it names the KNOWN function FIRST — knownBusy · src/hogs.js:4 at ${L && L.rows[0] ? L.rows[0].pct : '?'} %, the child's own measure ${r.out && r.out.truth ? r.out.truth.knownBusy : '?'} % (±10 points)`, L && L.rows);
   ok(b.length === 1 && b[0].split('\n').length <= 15 && b[0].split('\n').every((l) => l.startsWith('[cpu-profile] ')) && /time inside native calls is counted on the JavaScript caller/.test(b[0]) && /\d+ samples, the asks themselves took \d+ ms of the main thread/.test(b[0]),
     `${tag}: ONE block in the journal, ≤ 15 lines (${b[0] ? b[0].split('\n').length : 0})`, b);
@@ -219,11 +248,22 @@ async function legDebugger() {
 const blocksOf = (r) => (r.out ? r.out.lines.filter((l) => l.startsWith('[cpu-profile] captured on request')) : []);
 async function legHungRead(tree = null) {
   const log = path.join(ROOT, `hang-read-${Date.now()}.log`); fs.writeFileSync(log, '');
-  // four door captures of 1.2 s, 4 s apart (each ends within its 2 s reading time on any tree)
-  const r = await run({ plan: 'ten', auto: false, captureMs: 1200, doors: [300, 4300, 8300, 12300], untilMs: 16500, ...(tree ? { tree } : {}) },
+  // four door captures of 1.2 s, 4 s apart (each ends within its 2 s reading time on any tree). THE PREMISE: each capture
+  // samples the install's code, so it HAS a function to name — a capture that sampled none reads nothing and rightly says no
+  // reason. At 10 % busy (20 ms in 200) that was chance: of 118 such captures on this box (Node 24 4 / 59, Node 22 7 / 59)
+  // 11 sampled no JavaScript at all, and on a CPU shared with a hog 9 of 118 sampled only frames outside the child's install
+  // — the old leg red 1 of 17 here, 3 times on the hosted runner («4 blocks», one or two of them with no reason). Busy HALF
+  // the time (20 ms in 40): 0 of 177 captures (this box, Node 22, the hog) without its row, the row ≥ 27.7 %. The premise is
+  // asserted by name (its row at src/hogs.js in every block), the law judged only on it
+  const r = await run({ plan: 'ten', restMs: 20, auto: false, captureMs: 1200, doors: [300, 4300, 8300, 12300], untilMs: 16500, ...(tree ? { tree } : {}) },
     { pre: HANG, env: { VS_CC_HANG: JSON.stringify({ log, stat: ROOT + '/' }) } });
   const stats = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean), b = blocksOf(r);
-  return { r, stats, b, ok: stats.length === 1 && b.length === 4 && (r.out.doors || []).every((d) => d && d.ok) && b.slice(1).every((x) => /some functions are said by their location alone: a read of the install's files has not returned — one read waits, no other starts/.test(x)) };
+  const named = b.map((x) => { const m = /^\[cpu-profile\]\s+([\d.]+) % · [^\n]* · src\/hogs\.js:\d+/m.exec(x); return m ? Number(m[1]) : 0; });
+  const premise = b.length === 4 && named.every((p) => p > 0);
+  const law = stats.length === 1 && b.length === 4 && (r.out.doors || []).every((d) => d && d.ok)
+    && /some functions are said by their location alone: the install's files did not answer within the capture's reading time/.test(b[0])
+    && b.slice(1).every((x) => /some functions are said by their location alone: a read of the install's files has not returned — one read waits, no other starts/.test(x));
+  return { r, stats, b, named, premise, law, ok: premise && law };
 }
 async function legHungWrite(tree = null) {
   const log = path.join(ROOT, `hang-write-${Date.now()}.log`); fs.writeFileSync(log, '');
@@ -236,14 +276,16 @@ async function legHungWrite(tree = null) {
 async function legHung() {
   console.log('Ⓙ a read, a write that never returns: ONE in flight, whoever starts it');
   const a = await legHungRead();
-  ok(a.ok, `four captures against a stat that never answers: ${a.stats.length} read started (ONE); ${a.b.length} blocks, the later three say a read has not returned`, { stats: a.stats, doors: a.r.out && a.r.out.doors, b: a.b.map((x) => x.split('\n').slice(-1)[0]) });
+  ok(a.premise, `the read leg's premise: each of the ${a.b.length} captures samples the install's code — its function's row ${a.named.join(' / ')} % (a loop busy half the time)`, { named: a.named, splits: a.b.map((x) => (/the split: [^\n]*/.exec(x) || [''])[0]) });
+  ok(a.ok, a.premise ? `four captures against a stat that never answers: ${a.stats.length} read started (ONE); ${a.b.length} blocks — the first «did not answer within the capture's reading time», the later three «a read has not returned»`
+    : 'four captures against a stat that never answers: NOT JUDGED — the premise above failed', { stats: a.stats, doors: a.r.out && a.r.out.doors, b: a.b.map((x) => x.split('\n').slice(-1)[0]) });
   const w = await legHungWrite();
   ok(w.ok, `three captures against a write that never answers: ${w.writes.length} write started (ONE); the first «the disk did not answer in 10 s», the next two «has not been written yet»`, { writes: w.writes, doors: w.r.out && w.r.out.doors, b: w.b.map((x) => x.split('\n').slice(-1)[0]) });
   // THE MUTANTS: a scratch copy of src/, one text swap each in the watchdog thread
   const mut = (name, from, to) => { const dir = path.join(ROOT, name); fs.cpSync(path.join(REPO, 'src'), path.join(dir, 'src'), { recursive: true }); const p = path.join(dir, 'src/server/sync-fs-witness-worker.js'), t = fs.readFileSync(p, 'utf8'); if (!t.includes(from)) return null; fs.writeFileSync(p, t.replace(from, to)); return dir; };
   const m1 = mut('mut-read', "if (took == null) why = 'budget';", "if (took == null) { why = 'budget'; naming = null; }");
   const ma = m1 ? await legHungRead(m1) : { ok: true, stats: [] };
-  ok(!ma.ok && ma.stats.length > 1, `MUTANT «the read's guard cleared at its budget» is RED by name: ${ma.stats.length} reads started`, ma.stats);
+  ok(ma.premise !== false && !ma.ok && ma.stats.length > 1, `MUTANT «the read's guard cleared at its budget» is RED by name: ${ma.stats.length} reads started`, ma.stats);
   const m2 = mut('mut-write', 'if (c.dir && writing) fileError = CC.writePendingWords(writing);\n    else if (c.dir) {', 'if (c.dir) {');
   const mw = m2 ? await legHungWrite(m2) : { ok: true, writes: [] };
   ok(!mw.ok && mw.writes.length > 1, `MUTANT «no guard on the capture's write» is RED by name: ${mw.writes.length} writes started`, mw.writes);
@@ -252,20 +294,21 @@ async function legHung() {
 const LEGS = String(process.env.VS_CC_LEGS || '').split(',').filter(Boolean), leg = (n) => !LEGS.length || LEGS.includes(n);
 if (LEGS.length) console.log(`(only the legs ${LEGS.join(', ')} — VS_CC_LEGS; the gate runs every leg)`);
 const report = {};
+const HERE = `Node ${process.versions.node.split('.')[0]}`;   // the Node running this suite (the hosted runner's 22, this box's 24)
 try {
-  if (leg('A')) await legSaturated('Node 24', process.execPath);
+  if (leg('A')) { pinRate(); await legSaturated(HERE, process.execPath); }
   if (leg('B')) await legSwitch();
   if (leg('C')) {
-    const c = await legIdle('Node 24', process.execPath);
-    ok(c.ok, `Node 24: ~10 % busy in one callback ⇒ JavaScript ${c.sp.js} %, idle ${c.sp.idle} % (the callback ${c.L ? pctOf(c.r, 'tenBusy') : '?'} %, its truth ${c.r.out && c.r.out.truth ? c.r.out.truth.tenBusy : '?'} % ±5) — never that callback at 100 %`, c.L && c.L.split);
+    const c = await legIdle(HERE, process.execPath);
+    ok(c.ok, `${HERE}: ~10 % busy in one callback ⇒ JavaScript ${c.sp.js} %, idle ${c.sp.idle} % (the callback ${c.L ? pctOf(c.r, 'tenBusy') : '?'} %, its truth ${c.r.out && c.r.out.truth ? c.r.out.truth.tenBusy : '?'} % ±5) — never that callback at 100 %`, c.L && c.L.split);
     // THE MUTANT: the worker's tick without its idle rule (a scratch copy of src/, one text swap in src/cpu-capture.js)
     const MUT = path.join(ROOT, 'mut'); fs.cpSync(path.join(REPO, 'src'), path.join(MUT, 'src'), { recursive: true });
     const mp = path.join(MUT, 'src/cpu-capture.js'), msrc = fs.readFileSync(mp, 'utf8'), anchor = "if (s !== 'running' && w === 'ep_poll' && beatAgeMs <= freshMs) return 'idle';";
     fs.writeFileSync(mp, msrc.replace(anchor, ''));
-    const m = msrc.includes(anchor) ? await legIdle('Node 24', process.execPath, MUT) : { ok: true, sp: {} };
+    const m = msrc.includes(anchor) ? await legIdle(HERE, process.execPath, MUT) : { ok: true, sp: {} };
     ok(!m.ok, `MUTANT «the kernel state not read first» (the tick's idle rule removed) is RED by name: idle ${m.sp.idle} % — not ~90 %`, m.sp);
   }
-  if (leg('D')) await legNative('Node 24', process.execPath);
+  if (leg('D')) await legNative(HERE, process.execPath);
   if (leg('E')) await legGc();
   if (leg('F')) await legCost();
   if (leg('G')) report.ownCost = await legOwnCost();
@@ -279,7 +322,7 @@ try {
     const c = await legIdle('Node 22', n22);
     ok(c.ok, `Node 22: ~10 % busy ⇒ JavaScript ${c.sp.js} %, idle ${c.sp.idle} %`, c.L && c.L.split);
     await legNative('Node 22', n22);
-  } else console.log('Ⓘ not run: no Node 22 given (VS_NODE22=/path/to/node22)');
+  } else console.log(`Ⓘ not run: no Node 22 given (VS_NODE22=/path/to/node22) — the legs above ran under this suite's Node ${process.version}`);
   if (process.env.CC_REPORT) { try { fs.writeFileSync(process.env.CC_REPORT, JSON.stringify(report, null, 1)); } catch { } }
 } finally {
   fs.rmSync(ROOT, { recursive: true, force: true });
