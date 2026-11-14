@@ -20,7 +20,7 @@ const { offerOf, offerResolution } = require('./reset-credit.js'); // PURE: the 
 const { refOf: channelRefOf } = require('./channel-ref.js'); // PURE (B-c127): a channel notice's conversation — `peerChannel`
 const { groupOf: groupCardOf, readReport, cardOfReport } = require('./group-card.js'); // PURE (lane group-report-card): a group message's card facts — `peerGroup`
 const { MessageWindow } = require('./message-window.js'); // the ordered card list + its window arithmetic (dc-twins M10)
-const { COST_START, costStep, costShown, sinceLastCost } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — the restore's too
+const { COST_START, costFold, costKey, costShown, validCost } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — the restore's too
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
@@ -2324,6 +2324,17 @@ class MessageManager extends MessageWindow {
     }
   }
 
+  /** The conversation's cost fold (src/cost-segments.js) — what the restore reads before the buffer and what the claude
+   *  stdout consumer keeps on the conversation's meta (`costKept`) after each result. */
+  costState() { return validCost(this._cost) ? this._cost : null; }
+  /** Seed the fold: the boot hands the kept fact resumed over the buffer; a rebuild hands the old normalizer's fold with
+   *  `seek` — its replay then passes over every result up to the one that fold counted last. */
+  seedCost(state, { seek = false } = {}) {
+    if (!validCost(state)) return;
+    this._cost = { done: state.done, last: state.last, key: state.key || null };
+    this._costSeek = seek && state.key ? state.key : null;
+  }
+
   _processResult(raw, emit) {
     this._noteTurnEnded(); // lane midturn-order: what is afloat now lands at the next turn's first card at the latest
     this._finalizeStreaming(emit);
@@ -2388,7 +2399,8 @@ class MessageManager extends MessageWindow {
 
     // total_cost_usd is the CLI PROCESS's running total: fold it (replayed or live) — the op carries the conversation's
     // folded figure, which the bar shows in place of its own (never adds); the restore folds the same records the same way
-    this._cost = costStep(this._cost || COST_START, raw.total_cost_usd, sinceLastCost(raw));
+    // a REPLAY over a carried fold (the rebuild) passes over the results that fold already counted, through its own key
+    if (this._costSeek && !emit) { if (costKey(raw) === this._costSeek) this._costSeek = null; } else { this._costSeek = null; this._cost = costFold(this._cost || COST_START, raw); }
     if (emit) {
       this._emit({ op: 'meta', subtype: 'turn_complete', data: { cost: costShown(this._cost), modelUsage: raw.modelUsage || null } });
     }

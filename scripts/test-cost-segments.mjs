@@ -104,14 +104,54 @@ ok(BW.costChipWords(0.24, 'subscription', fmt, two).text === 'This chat ≈ $0.2
 const bw = read('src/lib/chat-bar-words.js'), sb0 = read('src/lib/chat-status-bar.js');
 ok(!/toLocale\w*String|Intl\.NumberFormat/.test(bw) && /import \{[^}]*\bnum\b[^}]*\} from '\.\/page-time\.js'/.test(sb0) && /costChipWords\(this\._statusCost, this\._costBasis \?\? null, t, \(v\) => num\(v, \{ minimumFractionDigits: 2, maximumFractionDigits: 2 \}\)\)/.test(sb0), '⑦ the words module formats no number itself; the bar hands it page-time num (test-ui-language ⑦\'s one formatter)');
 
+console.log('— ⑨ THE KEPT FACT: a conversation that outlived a process (its first trimmed away entirely)');
+// process A then process B of one conversation (2.1.312-stamped, B resumed under A's id); the buffer keeps B only
+const lnsR = asResume(false).split('\n'), firstBLine = lnsR.findIndex((l) => { try { const o = JSON.parse(l); return o.session_id === sidA && o.type !== 'result' && lnsR.slice(0, lnsR.indexOf(l)).some((x) => /"type":"result"/.test(x)) && lnsR.slice(0, lnsR.indexOf(l)).filter((x) => /"type":"result"/.test(x)).length === 2; } catch { return false; } });
+const onlyB = lnsR.slice(firstBLine).join('\n'), aRecs = recs(lnsR.slice(0, firstBLine).join('\n'));
+if (ok(!!CS && typeof CS.costResume === 'function', '⑨ the fold resumes a kept fact: src/cost-segments.js exports costResume / costFold / resultsIn')) {
+  const kept = CS.costOfResults(aRecs);
+  ok(near(CS.costShown(kept), 0.00027) && typeof kept.key === 'string' && resultTotals(onlyB).length === 2, `⑨ the kept fact after process A: 270 µ$ with its last result's key; the buffer holds process B's two results only (${resultTotals(onlyB).map(µ).join(' ')})`);
+  ok(near(CS.costShown(CS.costResume(kept, recs(onlyB))), 0.000465) && near(CS.costShown(CS.costResume(null, recs(onlyB))), 0.000195), `⑨ resumed: 270 kept + B's 195 = 465 µ$; the buffer alone reads 195 — the figure that SHRANK after a restart`);
+  const keptA1 = CS.costOfResults(aRecs.filter((r) => r.type !== 'result' || r === aRecs.find((x) => x.type === 'result')));
+  const fromA2 = lnsR.slice(lnsR.findIndex((l) => /"type":"result"/.test(l)) + 1).join('\n');
+  ok(near(CS.costShown(CS.costResume(keptA1, recs(fromA2))), 0.000465), '⑨ a kept fact one result behind (its write lagged; its own result trimmed away): every result the buffer holds is newer — 465 µ$');
+  const r1 = recs(onlyB).find((r) => r.type === 'result'), once = CS.costFold(kept, r1);
+  ok(CS.costFold(once, r1) === once, '⑨ the same result record twice folds once (a live repeat of a replayed one)');
+  const r308 = recs(ST308), res308 = r308.filter((x) => x.type === 'result');
+  const old = r308.map((r) => (res308.indexOf(r) >= 2 ? { ...r, total_cost_usd: r.total_cost_usd + 0.00015 } : r)); // process B's totals raised above A's last
+  ok(near(CS.costShown(CS.costOfResults(old)), 0.000615), `⑨ a CLI before 2.1.312 (no share): a new process whose first total is HIGHER (300 after 270) is still a restart by its result_index 0 — 270 + 345 = 615 µ$ (got ${µ(CS.costShown(CS.costOfResults(old)))})`);
+}
+// THE ROADS — they run on any tree (RED where nothing keeps the fold): a normalizer seeded as the boot seeds it
+const keptA = CS && typeof CS.costOfResults === 'function' ? CS.costOfResults(aRecs) : null;
+const seeded = () => { const m = createMessageManager('claude', 'cost-seg'); if (typeof m.seedCost === 'function' && CS && CS.costResume) m.seedCost(CS.costResume(keptA, CS.resultsIn(onlyB))); return m; };
+const restoreWith = (text, m) => new SessionMessages({ buffer: text, cwd: '/tmp/vs-cost-segments-fixture', backend: 'claude', claudeSessionId: 'e2e00000-0000-4000-8000-00000c057000', _normalizer: m }, 'cost-seg', {}).chatStatus()?.total_cost_usd;
+const m1 = seeded();
+ok(near(restoreWith(onlyB, m1), 0.000465), `⑨ THE RESTORE after a hub restart reads the conversation's fold before the buffer: 465 µ$ (got ${µ(restoreWith(onlyB, m1))}; the buffer alone 195)`);
+const lastB = recs(onlyB).filter((r) => r.type === 'result').pop();
+const next = { ...lastB, uuid: 'e2e00000-0000-4000-8000-00000c0570aa', result_index: 2, total_cost_usd: 0.00024, model_usage_since_last_result: { m: { costUSD: 0.000045 } } };
+const ops = []; m1.onOp((op) => { if (op && op.op === 'meta' && op.subtype === 'turn_complete') ops.push(op.data.cost); });
+m1.processLive(next);
+ok(near(ops[0], 0.00051) && near(restoreWith(onlyB + JSON.stringify(next) + '\n', m1), 0.00051), `⑨ THE LIVE ROAD after the restart: B's next turn (240) ⇒ 270 + 240 = 510 µ$ on the op, and the restore reads the same (op ${µ(ops[0])})`);
+// a REBUILD (the first attach): the new normalizer takes the old one's fold and its replay passes over what it counted
+const m2 = createMessageManager('claude', 'cost-seg'); if (typeof m2.seedCost === 'function') m2.seedCost(m1.costState(), { seek: true });
+m2.convertHistory(recs(onlyB + JSON.stringify(next) + '\n'));
+const opsR = []; m2.onOp((op) => { if (op && op.op === 'meta' && op.subtype === 'turn_complete') opsR.push(op.data.cost); });
+const after = { ...next, uuid: 'e2e00000-0000-4000-8000-00000c0570ab', result_index: 3, total_cost_usd: 0.000285 };
+m2.processLive(after);
+ok(near(opsR[0], 0.000555), `⑨ a REBUILD carries the fold: after replaying the same buffer, B's next turn (285) ⇒ 270 + 285 = 555 µ$ — the replay added nothing it had counted (got ${µ(opsR[0])})`);
+const br = read('src/server/boot-restore.js'), nz = read('src/normalizers.js'), cj = read('src/server/stdout/claude-stream-json.js');
+ok((br.match(/seedCost\(costSeedOf\(meta\.costKept, (savedBuffer|'')\)\)/g) || []).length === 2 && /const costSeedOf = \(kept, bufferText\) => costResume\(kept, resultsIn\(bufferText\)\)/.test(br), '⑨ the boot seeds BOTH claude normalizers it makes with the kept fact resumed over the buffer it read (boot-restore costSeedOf)');
+ok(/const carriedCost = typeof session\._normalizer\?\.costState === 'function' \? session\._normalizer\.costState\(\) : null;/.test(nz) && /mm\.seedCost\(carriedCost, \{ seek: true \}\)/.test(nz), '⑨ a rebuild carries the old normalizer\'s fold into the new one, seeking past what it counted (normalizers rebuildHistory)');
+ok(/feedLive\(session, msg\);\n\s*if \(msg\.type === 'result'\) keepCost\(session\);/.test(cj) && /writeSessionMeta\(s\.sockName, \{ \.\.\.\(readSessionMeta\(s\.sockName\) \|\| \{\}\), costKept: st \}\)/.test(cj), '⑨ the claude stdout consumer keeps the fold on the conversation\'s meta (costKept) after each result it feeds');
+
 console.log('— ⑧ ONE fold: no source adds a total again');
 const SRC = path.join(repo, 'src'), adders = [];
 const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f); else if (/\.(c|m)?js$/.test(e.name) && e.name !== 'cost-segments.js') fs.readFileSync(f, 'utf-8').split('\n').forEach((l, i) => { if (/\+=[^;\n]*total_cost_usd|total_cost_usd[^;\n]*\+=/.test(l)) adders.push(path.relative(repo, f) + ':' + (i + 1)); }); } };
 walk(SRC);
 ok(adders.length === 0, '⑧ no file under src/ adds a total_cost_usd (only src/cost-segments.js folds it)', adders.join(', '));
 const ss = read('src/session-store.js'), mm = read('src/message-manager.js'), bar = read('src/lib/chat-status-bar.js'), cv = read('src/lib/chat-view.js');
-ok(/require\('\.\/cost-segments\.js'\)/.test(ss) && /costShown\(costOfResults\(msgs\)\)/.test(ss), '⑧ the restore folds through it (session-store chatStatus: costShown(costOfResults(msgs)))');
-ok(/require\('\.\/cost-segments\.js'\)/.test(mm) && /costStep\(this\._cost \|\| COST_START, raw\.total_cost_usd, sinceLastCost\(raw\)\)/.test(mm) && /subtype: 'turn_complete', data: \{ cost: costShown\(this\._cost\)/.test(mm), '⑧ …and the live road through the SAME function (message-manager: costStep per result, the turn_complete carries costShown)');
+ok(/require\('\.\/cost-segments\.js'\)/.test(ss) && /costShown\(costResume\(norm && typeof norm\.costState === 'function' \? norm\.costState\(\) : null, msgs\)\)/.test(ss), '⑧ the restore folds through it — the conversation\'s fold (the kept fact resumed) BEFORE the buffer (session-store chatStatus: costShown(costResume(…costState(), msgs)))');
+ok(/require\('\.\/cost-segments\.js'\)/.test(mm) && /this\._cost = costFold\(this\._cost \|\| COST_START, raw\)/.test(mm) && /subtype: 'turn_complete', data: \{ cost: costShown\(this\._cost\)/.test(mm), '⑧ …and the live road through the SAME function (message-manager: costFold per result, the turn_complete carries costShown)');
 ok(!/_statusCost \+=/.test(bar) && /turnCost\(cost, modelUsage\) \{\n\s*if \(cost\) \{ this\._statusCost = cost; \}/.test(bar) && /this\._statusBar\.turnCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);/.test(cv), '⑧ the bar REPLACES its figure with the carried one (turnCost), never `+=`');
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

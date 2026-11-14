@@ -264,6 +264,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
 
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos }) {
     let lineBuf = '';
+    // 2.369.402: the conversation's cost fold (src/cost-segments.js) KEPT on its own meta after each result (`costKept`) —
+    // the boot resumes it before the buffer, whose head may have lost every earlier process. Paced: the next result
+    // rewrites it, and a lost write leaves the boot the buffer's own fold.
+    function keepCost(s) {
+      const st = typeof s._normalizer?.costState === 'function' ? s._normalizer.costState() : null;
+      if (!st || !s.sockName) return;
+      try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), costKept: st }); } catch { }
+    }
     // The directory the linked-worktree probe has already been asked about for
     // THIS attach (see the init-frame arbiter below). Per-attach closure state,
     // like lineBuf — not a session `_field` — so a re-attach simply asks once
@@ -1462,6 +1470,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // a main-thread init: the facts are told AFTER its record — the client's live-init road (master's) writes the CLI's id, and the
           // server's facts, the later word, correct it (round 13: a client never ends a turn's start on an older reading)
           if (msg.type === 'system' && msg.subtype === 'init' && !msg.parent_tool_use_id && typeof msg.model === 'string' && msg.model) { try { require('../model-ask.js').broadcastFacts(session, id, broadcastToSession); } catch { } }
+          if (msg.type === 'result') keepCost(session);
         } catch (e) {
           // A dropped RECORD is never silent (round 3): a line that looks like
           // JSON but does not parse, or a record whose handling threw, is
