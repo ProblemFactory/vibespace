@@ -423,11 +423,11 @@ export function installUsageMeter(App, ctx = {}) {
       // so past 100 % it bills pay-per-use instead of stopping. Both are THE
       // credits chip (2.369.189: the money icon + one word, the sentence in
       // title + aria-label) — the same builder the Agents roster rows use.
-      const ovc = overageChip(overageState(snap), { t });
       // lane ui-needs-a-button (the verifier's list for picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)»
       // is the in-use chip's tip — its door sits beside the chip: the setting that allows them (the popup's click delegate); closure 3:
-      // drawn only while that setting is OFF — a door names an act still to do
+      // drawn only while that setting is OFF — a door names an act still to do; closure 4: the tip is worded by the same setting
       const turnsAllowed = this.settings?.get?.('spend.allowOverageTurns') === true;
+      const ovc = overageChip(overageState(snap), { t, turnsAllowed });
       if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }) + (ovc.kind === 'inUse' && !turnsAllowed ? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend.allowOverageTurns">${escHtml(t('Allow automatic turns…'))}</button>` : ''));
       // …and the harness's own "this account is refusing requests" fact, which
       // leaves the donut friendly (nothing marks a window spent for it).

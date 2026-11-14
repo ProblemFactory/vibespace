@@ -126,7 +126,7 @@ export function stampText(ts, { locale = undefined } = {}) {
 // for every surface (the roster rows, the usage popup).
 // the default `t` fills {params} like the real one (the tip carries `{money}`)
 const tIdent = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);
-export function overageChip(state, { t = tIdent } = {}) {
+export function overageChip(state, { t = tIdent, turnsAllowed = false } = {}) {
   if (!state) return null;
   if (state.inUse === 'yes') {
     const money = state.spend
@@ -139,7 +139,8 @@ export function overageChip(state, { t = tIdent } = {}) {
       tip: [
         t('Using paid overage credits — this account’s subscription quota is spent and its requests are billed pay-per-use.'),
         money ? t('Spent this period: {money}.', { money }) : '',
-        t('Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).'),
+        // lane ui-needs-a-button (closure 4): the tip says what spend.allowOverageTurns does NOW (the usage popup passes it)
+        turnsAllowed ? t('Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).') : t('Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).'),
       ].filter(Boolean).join(' '),
     };
   }

@@ -13839,9 +13839,11 @@ export default {
   "{account}'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly": "{account} 的订阅已失效（自 {since} 起）：在它重新应答之前池会跳过它 — 用量刷新在设置里已关闭：打开它才能重新检查，或直接在这个账户上跑一轮对话",
   // lane ui-needs-a-button (closure 3–6): the verifier's list — the act on the lapsed chip, the overage door, the replace note
   "Turn on usage refresh…": "打开用量刷新…",
-  "Allow automatic turns…": "允许自动 turn…",
+  "Allow automatic turns…": "允许自动回合…",
   "Its exit grants and port forwards go with the old entry — set them again once the machine is added.": "旧条目的出口授权和端口转发也会随它一起删除——机器添加好之后请重新设置。",
   // lane ui-needs-a-button (closure 3)
   "The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.": "设置里的遥测转发目标（诊断数据转发到中央收集端）在反馈入口回答了 {status}：它接收诊断数据，不接收 agent 反馈。这些报告留在这里，见 ⚙ 系统 ▸ Agent 反馈…——{n} 条等待转发（超过 {max} 条时丢弃最旧的）。VibeSpace 每天再问一次该目标，它能接收时就发送。",
   "This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.": "这个临时浏览器的通行密钥随本对话保存，对话删除时一并移除。取消这个请求后，可以用网页的其他登录方式，或在你自己的设备上登录；新的通行密钥只有在你允许后才会注册。",
+  // lane ui-needs-a-button (closure 4)
+  "Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).": "该账号按量付费期间，自动回合照常进行（花费里的设置允许了它们）。",
 };

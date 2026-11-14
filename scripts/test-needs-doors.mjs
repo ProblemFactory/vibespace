@@ -14,11 +14,24 @@
 //   ③ CONTROLS: a new sentence a net catches that no row claims is RED by name; a surface stating a present-door need without its
 //      door is RED by name
 //   ⑩ THE STORED-WORDS CENSUS (the closure verifier's list for picks 3–6, item 1 — a hand list of five missed a sixth): every producer
-//      that STORES words is read from the tree — each For-you store's add / redrawItem and the i18n its item keeps (storedWordsReader),
-//      here and in the last release (git cat-file; a depth-1 clone holds none: a named SKIP). Found on the lane's .401 tree: 94 filings
-//      in 43 producer files (2 of them pass-through forYou adapters); the release 66c6d99c0 stored 435 sentences with rows, 6 of them
-//      filed by no producer now — the 6 STORED_WORDS_LEGACY rows; of its 89 zh rows gone at 30378b3fc ONE was stored (the paused
-//      feedback forward's detail), the other 88 were never stored. A SERVER NOTICE's words are not stored as keys anywhere a later page
+//      that STORES words is read from the tree — each call of the store's filing methods and the i18n its item keeps (storedWordsReader),
+//      here and in the release this tree was cut from (git cat-file). CLOSURE 4 — A FILING IS FOUND BY WHAT ITS RECEIVER HOLDS, never
+//      by the handle's spelling: the store is the class src/user-todos.js declares (its methods that take an item's `i18n` are the
+//      filing methods: add, redrawItem); every call of one (two arguments or more) in server.js and src/ (not src/lib) is placed —
+//      followed back to `new` of the store, `this` inside it, an adapter whose filing method files to it, or a handle the tree's
+//      wiring sets to it (the handle names read FORWARD from the store, printed), or known not to be the store; a call carrying words
+//      on a receiver the census cannot place is RED BY NAME, never skipped. Found on the lane's .401 tree: 106 filings in 48 producer
+//      files (closure 4 found 12 the spellings hid — oat-identity `t = T()`, engine-distribution `ut = T()`, the frp plugin
+//      `ut = forYou()` with relay-token.js's words, browser-dialogs' eight `forYou.add?.(`, the store's own set-aside notice); ONE
+//      filing the store REFUSES (browser-dialogs promptAsk: its i18n.detail is an object, not an array of lines — add() throws, the
+//      sign-in ask is never filed) is REFUSED_DEBT, named. THE RELEASE IS FOUND BY ANCESTRY, never by a subject's words: the newest
+//      commit at or below HEAD that changed package.json's "version" line (git log -G'"version":' -- package.json) whose version
+//      differs from its parent's (content) — a lane never bumps the version, so that is what the tree was cut from (a lane commit
+//      titled «2.N.N: …» is no release); a HEAD that is such a commit is checked against the one before it; a shallow clone holds
+//      none with its parent: the comparison is SKIPPED by name and counted in the suite's last line («· 1 skipped by name: …»).
+//      The release 66c6d99c0 stored 505 sentences with rows (435 seen before closure 4), 6 of them filed by no producer now — the 6
+//      STORED_WORDS_LEGACY rows; of its 89 zh rows gone at 30378b3fc ONE was stored (the paused feedback forward's detail), the other
+//      88 were never stored. A SERVER NOTICE's words are not stored as keys anywhere a later page
 //      draws them: serverNotice sends {key, params} once, the page words it on arrival, and its toast history (localStorage) keeps the
 //      words as said — never the key — so a reworded notice key (pick 5's LLM stop notice) strands nothing
 // DEBT (closure 3, the verifier's M5): the nets read the ENGLISH key — a need word added to a zh / ja VALUE only is not seen.
@@ -29,6 +42,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
+const SKIPS = [];   // closure 4 (item 3): a leg that did not run is named and counted in the last line
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 1400) : '')); } };
 const TABLES = [['machine', 'src/machine-needs.js'], ['ui', 'src/ui-needs.js']].filter(([, f]) => fs.existsSync(path.join(REPO, f))).map(([scope, f]) => ({ scope, file: f, T: require(path.join(REPO, f)) }));
 ok(TABLES.some((x) => x.scope === 'ui'), 'the ui table exists (src/ui-needs.js)');
@@ -1537,12 +1551,15 @@ console.log('⑨ THE OUTBOX POINTER\'S DOOR (lane ui-needs-a-button pick 6 — �
 }
 
 // ── THE STORED-WORDS READER (closure 3, item 1) — the words a For-you producer STORES with its item: its `i18n` (text / source a
-// line, detail lines, each line's key, its WORDS and clause params, its fold), read from the tree by acorn. A filing = a For-you store's
-// add(key, item) / redrawItem(pred, patch) (userTodos / todos / store / forYou / todosOf() / getUserTodos()); the item's i18n is
-// followed through bindings and reassignments, calls and returns (a model's function, a required module's export, a method by its
-// name), a helper's parameters (its callers in the file, a property method's callers by name, an exported factory's callers in the
-// files that require it, an iterator's element), until a key is a literal. A line whose key it cannot read is OPEN (red); a fact a
-// producer hands in as a param is not a word of the item. Files: a Map path → source (this tree, or the release's from git).
+// line, detail lines, each line's key, its WORDS and clause params, its fold), read from the tree by acorn. A filing = a call of the
+// STORE's filing methods (the methods of src/user-todos.js's class that take an item's `i18n`: add, redrawItem) whose RECEIVER holds
+// the store — closure 4: found by what the receiver holds, never by its spelling (placeOf below: `t = T()`, `ut = forYou()` and
+// `this.userTodos` are followed to the store; a receiver it cannot place is UNPLACED, red by name). The item's i18n is followed
+// through bindings and reassignments, calls and returns (a model's function, a required module's export, a method by its name),
+// a helper's parameters (its callers in the file, a property method's callers by name, an exported factory's callers in the files
+// that require it, a class constructor's `new`, an iterator's element), `this.k` (what the class sets it to), until a key is a
+// literal. A line whose key it cannot read is OPEN (red); a fact a producer hands in as a param is not a word of the item. Files: a
+// Map path → source (this tree, or the release's from git; src/ outside src/lib, and server.js — where the hub builds the store).
 function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new Map(), scopes: new WeakMap(), binds: new WeakMap(), rets: new WeakMap() } }) {
   const FILES = files;
   const kids = (n) => { const out = []; for (const k in n) { if (k === 'parent' || k === 'file') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') out.push(x); } else if (v && typeof v.type === 'string') out.push(v); } return out; };
@@ -1558,13 +1575,15 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
       if (ast) {
         const nodes = [], st = [[ast, null]];
         while (st.length) { const [n, p] = st.pop(); n.parent = p; n.file = f; nodes.push(n); for (const c of kids(n)) st.push([c, n]); }
-        const byCallee = new Map(), asg = new Map();
+        const byCallee = new Map(), asg = new Map(), byNew = new Map(), ids = new Map();
         const put = (m, k, v) => { if (k == null) return; let x = m.get(k); if (!x) m.set(k, x = []); x.push(v); };
         for (const n of nodes) {
           if (n.type === 'CallExpression') { const c = n.callee.type === 'ChainExpression' ? n.callee.expression : n.callee; put(byCallee, c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed ? c.property.name : null, n); }
           if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier') put(asg, n.left.name, n);
+          if (n.type === 'Identifier') put(ids, n.name, n);
+          if (n.type === 'NewExpression') put(byNew, n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' && !n.callee.computed ? n.callee.property.name : null, n);
         }
-        rec = { f, src, ast, nodes, byCallee, asg };
+        rec = { f, src, ast, nodes, byCallee, asg, byNew, ids };
         shared.recs.set(f + '\0' + src.length, rec);
       }
     }
@@ -1615,7 +1634,7 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
   };
   // ── names across the tree: the member calls `.name(` and the definitions `name(…) {` / `name: (…) =>` / `function name` at a
   // line's start, each file's list read once (shared between trees by content) ──
-  const idxOf = (f) => { const s = FILES.get(f); const k = f + '\0' + s.length; let e = shared.idx.get(k); if (!e || e.src !== s) { e = { src: s, files: /(?:userTodos|todos|forYou|store|todosOf\(\)|getUserTodos\(\))\??\.(?:add|redrawItem)\(/.test(s), requires: [...s.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)].map((m) => m[1]), calls: new Set([...s.matchAll(/\.([A-Za-z_$][\w$]*)\??\.?\(/g)].map((m) => m[1])), defs: new Set([...s.matchAll(/^[ \t]*(?:(?:async|static|get|set)[ \t]+)*(?:function[ \t]*\*?[ \t]*)?([A-Za-z_$][\w$]*)[ \t]*(?:\(|[:=][ \t]*(?:async[ \t]*)?(?:function\b|\(|[A-Za-z_$][\w$]*[ \t]*=>))/gm)].map((m) => m[1])) }; shared.idx.set(k, e); } return e; };
+  const idxOf = (f) => { const s = FILES.get(f); const k = f + '\0' + s.length; let e = shared.idx.get(k); if (!e || e.src !== s) { e = { src: s, requires: [...s.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)].map((m) => m[1]), calls: new Set([...s.matchAll(/\.([A-Za-z_$][\w$]*)\??\.?\(/g)].map((m) => m[1])), defs: new Set([...s.matchAll(/^[ \t]*(?:(?:async|static|get|set)[ \t]+)*(?:function[ \t]*\*?[ \t]*)?([A-Za-z_$][\w$]*)[ \t]*(?:\(|[:=][ \t]*(?:async[ \t]*)?(?:function\b|\(|[A-Za-z_$][\w$]*[ \t]*=>))/gm)].map((m) => m[1])) }; shared.idx.set(k, e); } return e; };
   let NAMES = null;
   const named = () => { if (!NAMES) { NAMES = { calls: new Map(), defs: new Map(), requirers: new Map() }; for (const f of FILES.keys()) { const e = idxOf(f); for (const [m, set] of [[NAMES.calls, e.calls], [NAMES.defs, e.defs]]) for (const n of set) { let x = m.get(n); if (!x) m.set(n, x = []); x.push(f); } for (const r of e.requires) { const t = resolveReq(f, r); if (!t) continue; let x = NAMES.requirers.get(t); if (!x) NAMES.requirers.set(t, x = new Set()); x.add(f); } } } return NAMES; };
   const GENERIC = new Set(['add', 'set', 'get', 'push', 'call', 'apply', 'bind', 'then', 'catch', 'run', 'map', 'emit', 'send', 'log', 'warn', 'error', 'create', 'file', 'update', 'has', 'delete', 'remove', 'start', 'stop', 'close', 'open', 'write', 'read', 'join', 'slice', 'filter', 'find', 'forEach', 'reduce', 'some', 'every', 'toString', 'trim', 'replace', 'split', 'test', 'exec', 'keys', 'values', 'entries', 'assign', 'freeze', 'stringify', 'parse', 'resolve', 'reject', 'all', 'concat', 'sort', 'includes', 'indexOf']);
@@ -1635,6 +1654,7 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
     const p = fn.parent;
     if (p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier') { const b = bindingOf(p.id); return (parse(fn.file).byCallee.get(p.id.name) || []).filter((c) => c.callee.type === 'Identifier' && bindingOf(c.callee) === b); }
     if (fn.type === 'FunctionDeclaration' && fn.id) return (parse(fn.file).byCallee.get(fn.id.name) || []).filter((c) => c.callee.type === 'Identifier');
+    if (p && p.type === 'MethodDefinition' && p.kind === 'constructor') return newsOf(p.parent.parent);   // closure 4: constructor options
     if (p && (p.type === 'Property' || p.type === 'MethodDefinition')) { const nm = nameOf(p.key); return nm && !GENERIC.has(nm) ? callsNamed(nm) : []; }
     return [];
   };
@@ -1642,6 +1662,20 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
   // require('./x').create(…)) — a factory's context object is read where the factory is called
   const RQ = new Map();
   const requirersOf = (f) => { if (RQ.has(f)) return RQ.get(f); const gs = [...(named().requirers.get(f) || [])]; const out = []; RQ.set(f, out); if (gs.length > 6) return out; for (const g of gs) { const R = parse(g); if (!R) continue; for (const c of R.byCallee.get('require') || []) if (c.arguments[0] && c.arguments[0].type === 'Literal' && resolveReq(g, String(c.arguments[0].value)) === f) out.push(c); } return out; };
+  // a CLASS's constructor options (closure 4): its `new C(…)` in its own file and in the files that require its module
+  const NW = new WeakMap();
+  const newsOf = (C) => {
+    if (NW.has(C)) return NW.get(C);
+    const out = []; NW.set(C, out);
+    const nm = C.id ? C.id.name : C.parent && C.parent.type === 'VariableDeclarator' && C.parent.id.type === 'Identifier' ? C.parent.id.name : null;
+    if (nm) for (const f of new Set([C.file, ...requirersOf(C.file).map((c) => c.file)])) { const R = parse(f); if (R) out.push(...(R.byNew.get(nm) || [])); }
+    return out;
+  };
+  // `this` → its class (a method, a field, a static block) or its object literal (an object's method); null in a plain function
+  const thisOf = (x) => { for (let n = x.parent; n; n = n.parent) { if (n.type === 'PropertyDefinition' || n.type === 'StaticBlock') return n.parent.parent; if (isFn(n) && n.type !== 'ArrowFunctionExpression') { const p = n.parent; if (p && p.type === 'MethodDefinition') return p.parent.parent; if (p && p.type === 'Property' && p.parent.type === 'ObjectExpression') return p.parent; return null; } } return null; };
+  // what a class sets `this.k` to: every `this.k = v` in its methods, a field `k = v`
+  const TS = new Map();
+  const thisSets = (C, k) => { const key = C.file + '\0' + C.start + '\0' + k; if (TS.has(key)) return TS.get(key); const out = []; const R = parse(C.file); if (R) for (const n of R.nodes) { if (n.start < C.start || n.end > C.end) continue; if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' && n.left.object.type === 'ThisExpression' && !n.left.computed && nameOf(n.left.property) === k && thisOf(n.left.object) === C) out.push(n.right); else if (n.type === 'PropertyDefinition' && !n.computed && nameOf(n.key) === k && n.value && n.parent.parent === C) out.push(n.value); } TS.set(key, out); return out; };
   const XA = new Map();
   const exportsOfFile = (f) => { if (XA.has(f)) return XA.get(f); const R = parse(f); const byNode = new Map(), byName = new Map(); const put = (m, k, v) => { let x = m.get(k); if (!x) m.set(k, x = []); x.push(v); }; if (R) for (const n of R.ast.body) { const e = n.type === 'ExpressionStatement' ? n.expression : null; if (!e || e.type !== 'AssignmentExpression' || e.left.type !== 'MemberExpression') continue; const l = srcOf(e.left); if (l === 'module.exports' && e.right.type === 'ObjectExpression') { for (const p of e.right.properties) if (p.type === 'Property') { if (p.value.type === 'Identifier') put(byName, p.value.name, nameOf(p.key)); else put(byNode, p.value, nameOf(p.key)); } } else if (/^(module\.)?exports\.\w+$/.test(l)) { if (e.right.type === 'Identifier') put(byName, e.right.name, nameOf(e.left.property)); else put(byNode, e.right, nameOf(e.left.property)); } } const r = { byNode, byName }; XA.set(f, r); return r; };
   const exportedAs = (fn) => { const x = exportsOfFile(fn.file); const id = fn.type === 'FunctionDeclaration' ? fn.id && fn.id.name : fn.parent && fn.parent.type === 'VariableDeclarator' && fn.parent.id.type === 'Identifier' && fn.parent.parent.parent && fn.parent.parent.parent.type === 'Program' ? fn.parent.id.name : null; return [...(x.byNode.get(fn) || []), ...(id ? x.byName.get(id) || [] : [])]; };
@@ -1662,22 +1696,28 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
   };
   // a function handed BY NAME to an iterator (lines.map(strip)): its first parameter is an element of the receiver
   const byRef = (fn) => { const p = fn.parent; const id = fn.type === 'FunctionDeclaration' ? fn.id : p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier' ? p.id : null; if (!id) return []; const R = parse(fn.file), out = []; for (const nm of ['map', 'forEach', 'filter', 'find', 'some', 'every', 'flatMap']) for (const c of R.byCallee.get(nm) || []) { const a = c.arguments[0], cal = calleeOf(c); if (a && a.type === 'Identifier' && a.name === id.name && cal.type === 'MemberExpression') { const b = bindingOf(a); if (b && b.id === id) out.push(cal.object); } } return out; };
-  const RECV = /(?:^|\.)(?:userTodos|todos|forYou|store)$|(?:todosOf|getUserTodos)\(\)$/;
-  // the item's OWN stored words handed back (a redraw that keeps them): the store's get(id)
-  const ownWords = (x) => x.type === 'CallExpression' && calleeOf(x).type === 'MemberExpression' && nameOf(calleeOf(x).property) === 'get' && RECV.test(srcOf(calleeOf(x).object).replace(/\?$/, ''));
+  // the item's OWN stored words handed back (a redraw that keeps them): the store's get(id) — its receiver placed at the store
+  const ownWords = (x) => { if (x.type !== 'CallExpression' || calleeOf(x).type !== 'MemberExpression' || nameOf(calleeOf(x).property) !== 'get') return false; if (!HANDLES_READ) TAINT = true; return placeOf(calleeOf(x).object, null).kind === 'store'; };   // (read while the handle names are still being read: kept for this pass only)
   // ── VALUES: what an expression can stand for — objects, arrays, literals, functions, modules (#ns), or #open (unread) ──
   const PK = new Map(), AR = new Map(), OPENS = new Map();
   const mkPick = (of, key) => { let m = PK.get(of); if (!m) PK.set(of, m = new Map()); const k = key == null ? '\0' : String(key); if (!m.has(k)) m.set(k, { type: '#pick', of, key }); return m.get(k); };
   const mkArr = (n, els) => { if (!AR.has(n)) AR.set(n, { type: 'ArrayExpression', elements: els, file: n.file }); return AR.get(n); };
-  const openOf = (v) => { if (!OPENS.has(v)) OPENS.set(v, { type: '#open', node: v }); return OPENS.get(v); };
+  // closure 4: an OPEN value keeps the NAME it was reached by (a destructured key, a member's property, a parameter's or a callee's
+  // name) — the store's handles are placed by it; a SOFT open is a parameter whose callers the reader cannot see but which has a
+  // default: the words ignore it (as before), the placement does not (a default is never the whole story of a handle)
+  const nameAt = (v) => (!v ? null : v.type === 'Identifier' ? v.name : v.type === 'MemberExpression' && !v.computed ? v.property.name : v.type === 'CallExpression' ? nameAt(calleeOf(v)) : v.type === 'ChainExpression' ? nameAt(v.expression) : null);
+  const openOf = (v) => { if (!OPENS.has(v)) OPENS.set(v, { type: '#open', node: v, name: nameAt(v) }); return OPENS.get(v); };
+  const SOFTS = new Map(), KEYED = new Map();
+  const softOf = (v) => { if (!SOFTS.has(v)) SOFTS.set(v, { type: '#open', node: v, name: nameAt(v), soft: true }); return SOFTS.get(v); };
+  const keyedOf = (o, key) => { const base = o.base || o; let m = KEYED.get(base); if (!m) KEYED.set(base, m = new Map()); const k = String(key); if (!m.has(k)) m.set(k, { type: '#open', node: base.node, name: k, soft: base.soft, base }); return m.get(k); };   // one per (open, key): a cycle never grows a chain
   const pick = (vals, key) => {
     const out = [];
     for (const v of vals) {
       if (v.type === 'ObjectExpression') { for (const q of v.properties) { if (q.type === 'Property' && (key == null || nameOf(q.key) === String(key))) out.push(q.value); if (q.type === 'SpreadElement') out.push(mkPick(q.argument, key)); } }
       else if (v.type === '#ns') { if (key != null) out.push(...exportOf(v.file, String(key))); else out.push(openOf(v)); }
       else if (v.type === 'ArrayExpression') { if (typeof key === 'number') { if (v.elements[key]) out.push(v.elements[key]); } else for (const e of v.elements) if (e) out.push(e.type === 'SpreadElement' ? mkPick(e.argument, null) : e); }
-      else if (v.type === '#open') out.push(v);
-      else if (!(v.type === 'Literal' || v.type === 'TemplateLiteral' || isFn(v))) out.push(openOf(v));
+      else if (v.type === '#open') out.push(key == null ? v : keyedOf(v, key));
+      else if (!(v.type === 'Literal' || v.type === 'TemplateLiteral' || isFn(v))) out.push(key == null ? openOf(v) : keyedOf(openOf(v), key));
     }
     return out;
   };
@@ -1713,7 +1753,7 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
           const call = b.fn.parent, inIter = call && call.type === 'CallExpression' && call.arguments[0] === b.fn && calleeOf(call).type === 'MemberExpression' && ITER.test(nameOf(calleeOf(call).property));
           if (inIter && b.index === 0) src.push(mkPick(calleeOf(call).object, null));
           const refs = b.index === 0 ? byRef(b.fn) : []; for (const r of refs) src.push(mkPick(r, null));
-          if (!cs.length && !b.dflt && !inIter && !refs.length) src.push(openOf(n));
+          if (!cs.length && !inIter && !refs.length) src.push(b.dflt ? softOf(n) : openOf(n));
         }
         else if (b.kind === 'forof') src.push(mkPick(b.loop.right, null));
         else src.push(openOf(n));
@@ -1721,7 +1761,12 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
         for (const k of b.path || []) vals = all(pick(vals, k));
         return vals;
       }
-      case 'MemberExpression': return all(pick(values(n.object), n.computed ? (n.property.type === 'Literal' ? n.property.value : null) : n.property.name));
+      case 'MemberExpression': {
+        const key = n.computed ? (n.property.type === 'Literal' ? n.property.value : null) : n.property.name;
+        // closure 4: `this.k` in a class reads what the class sets it to (a constructor's options reach it through the class's `new`)
+        if (n.object.type === 'ThisExpression' && key != null) { const C = thisOf(n.object); if (C && C.type !== 'ObjectExpression') { const set = thisSets(C, String(key)); if (set.length) return all(set); } }
+        return all(pick(values(n.object), key));
+      }
       case 'ChainExpression': case 'ParenthesizedExpression': return values(n.expression);
       case 'AwaitExpression': return values(n.argument);
       case 'SequenceExpression': return values(n.expressions[n.expressions.length - 1]);
@@ -1747,7 +1792,7 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
   // ── WORDS, read by the item's shape (src/user-todos.js normalizeI18n): i18n.text / .source a LINE, i18n.detail LINES; a line's
   // `key`, its WORDS / clause params (`{key}` / `{at, key, gone}`) and its fold (`more`) — a key the reader cannot read is OPEN ──
   const NOT_TEXT = (v) => isFn(v) || v.type === 'ObjectExpression' || v.type === 'ArrayExpression' || v.type === 'NewExpression' || v.type === 'UnaryExpression' || v.type === 'UpdateExpression' || (v.type === 'BinaryExpression' && v.operator !== '+');
-  const keyWords = (k, out, sink) => { for (const v of values(k)) { if (v.type === 'Literal') { if (typeof v.value === 'string') out.add(v.value); } else if (v.type === 'TemplateLiteral' && !v.expressions.length) out.add(v.quasis[0].value.cooked); else if (!NOT_TEXT(v)) sink.push(v.type === '#open' ? v.node : v); } };
+  const keyWords = (k, out, sink) => { for (const v of values(k)) { if (v.type === 'Literal') { if (typeof v.value === 'string') out.add(v.value); } else if (v.type === 'TemplateLiteral' && !v.expressions.length) out.add(v.quasis[0].value.cooked); else if (!NOT_TEXT(v) && !v.soft) sink.push(v.type === '#open' ? v.node : v); } };
   // a LINE (depth 0: text / source / a detail row / a fold row) — its key unread is OPEN; a param's WORDS (depth 1+) unread is LOOSE
   // (a param is a fact the producer hands in; a WORDS param is the rarer case, and a fact read as one is no word of the item)
   function lineWords(l, out, seen, depth = 0) {
@@ -1757,10 +1802,10 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
       if (v.type === 'ObjectExpression') {
         for (const k of pick([v], 'key')) keyWords(k, out, sink);
         for (const k of pick([v], 'gone')) keyWords(k, out, sink);
-        for (const p of all(pick(all(pick([v], 'params')), null))) if (p.type === 'ObjectExpression') lineWords(p, out, seen, depth + 1); else if (p.type === '#open') out.loose.push(p.node);
+        for (const p of all(pick(all(pick([v], 'params')), null))) if (p.type === 'ObjectExpression') lineWords(p, out, seen, depth + 1); else if (p.type === '#open' && !p.soft) out.loose.push(p.node);
         for (const m of all(pick(all(pick([v], 'more')), null))) lineWords(m, out, seen, depth);
       } else if (v.type === 'ArrayExpression') { for (const e of pick([v], null)) lineWords(e, out, seen, depth); }
-      else if (v.type === '#open') sink.push(v.node);
+      else if (v.type === '#open') { if (!v.soft) sink.push(v.node); }
       else if (!(v.type === 'Literal' && v.value == null) && !NOT_TEXT(v)) sink.push(v);
     }
   }
@@ -1768,41 +1813,168 @@ function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new 
     const seen = new Set();
     for (const l of all(pick(values(root), 'text'))) lineWords(l, out, seen);
     for (const l of all(pick(values(root), 'source'))) lineWords(l, out, seen);
-    for (const d of all(pick(values(root), 'detail'))) { if (d.type === 'Literal' && d.value == null) continue; for (const l of pick([d], null)) lineWords(l, out, seen); }
-  }
-  // ── THE FILINGS: every call that STORES a For-you item — a For-you store's add(key, item) / redrawItem(pred, patch) ──
-  const filings = [];
-  for (const f of FILES.keys()) {
-    if (!idxOf(f).files) continue;
-    const R = parse(f);
-    if (!R) { filings.push({ f, line: 0, unparsed: true, words: new Set(), open: [] }); continue; }
-    for (const name of ['add', 'redrawItem']) for (const c of R.byCallee.get(name) || []) {
-      const cal = calleeOf(c);
-      if (cal.type !== 'MemberExpression' || !c.arguments[1]) continue;
-      const recv = srcOf(cal.object).replace(/\?$/, '');
-      if (RECV.test(recv)) filings.push({ f, line: R.src.slice(0, c.start).split('\n').length, recv, arg: c.arguments[1] });
+    for (const d of all(pick(values(root), 'detail'))) {
+      if (d.type === 'Literal' && d.value == null) continue;
+      // closure 4: the store's shape (normalizeI18n) — `detail` is an ARRAY of lines; an object or a string is REFUSED (add() throws,
+      // the item is never filed): a refusal of its own, never read as lines
+      if (d.type === 'ObjectExpression' || d.type === 'Literal' || d.type === 'TemplateLiteral') { if (out.refused) out.refused.push(d); continue; }
+      for (const l of pick([d], null)) lineWords(l, out, seen);
     }
   }
-  // a pass-through: the item is the parameter of a `forYou: { add(…, item) }` adapter — its callers are filings of their own
-  const passThrough = (x) => { if (x.type !== 'Identifier') return false; const b = bindingOf(x); const fn = b && b.kind === 'param' ? b.fn : null; const p = fn && fn.parent, o = p && p.parent, q = o && o.parent; return !!(p && p.type === 'Property' && nameOf(p.key) === 'add' && o.type === 'ObjectExpression' && q && q.type === 'Property' && nameOf(q.key) === 'forYou'); };
-  let sig = null, converged = false;
+  // ── THE STORE (closure 4): the class src/user-todos.js declares whose methods take an item's `i18n` — those are its FILING
+  // methods. A FILING CALL = a call of one of them (two arguments or more) anywhere in the files; its receiver is PLACED below ──
+  const STORE_FILE = 'src/user-todos.js';
+  const takesI18n = (fn) => fn.params.slice(1).some((q) => { const o = q.type === 'AssignmentPattern' ? q.left : q; return o.type === 'ObjectPattern' && o.properties.some((x) => x.type === 'Property' && nameOf(x.key) === 'i18n'); });
+  let STORE = null; const FILING = [];
+  { const R = parse(STORE_FILE); if (R) for (const n of R.nodes) if (!STORE && /^Class(Declaration|Expression)$/.test(n.type)) { const ms = n.body.body.filter((m) => m.type === 'MethodDefinition' && m.kind === 'method' && isFn(m.value) && takesI18n(m.value)); if (ms.length) { STORE = n; FILING.push(...ms.map((m) => nameOf(m.key))); } } }
+  const lineOf = (n) => (P.get(n.file) || parse(n.file)).src.slice(0, n.start).split('\n').length;
+  const siteOf = (n) => (n && n.file ? `${n.file}:${lineOf(n)}` : '?');
+  const FILE_RE = FILING.length ? new RegExp(`\\.\\s*(?:${FILING.join('|')})\\b`) : /$^/;
+  const cands = [];
+  for (const [f, s] of FILES) {
+    if (!FILE_RE.test(s)) continue;
+    const R = parse(f);
+    if (!R) { cands.push({ f, line: 0, unparsed: true, words: new Set(), open: [], place: { kind: 'store', how: 'unparsed' } }); continue; }
+    for (const name of FILING) for (const c of R.byCallee.get(name) || []) {
+      const cal = calleeOf(c);
+      if (cal.type !== 'MemberExpression' || c.arguments.length < 2) continue;
+      cands.push({ f, line: lineOf(c), recv: srcOf(cal.object).replace(/\?$/, ''), recvNode: cal.object, arg: c.arguments[1], method: name, call: c });
+    }
+  }
+  // ── PLACING A RECEIVER: what it can hold, read by values() — bindings, calls and returns, a deps object's property at the factory's
+  // callers, a constructor's options at its `new`, `this.k` at what the class sets it to — each value judged:
+  //   THE STORE: `new <the store's class>(…)`; `this` inside it; an ADAPTER (an object / class / module whose filing method itself
+  //     files to the store); or a HANDLE where the reader's road ends (a parameter whose callers it cannot see — a plugin's host
+  //     handle `h` —, a member of one): the name it was reached by is one of the store's HANDLE NAMES below
+  //   NOT the store: any other class's instance, object, array, literal, function or module
+  //   OPEN: anything else — the receiver is UNPLACED: red by name when its call carries words, never skipped
+  const HANDLES = new Map(), FLOW = new Set(), ADAPT = new Map(), PLACING = new Set(); let HANDLES_READ = false, FLOW_FROM = '';
+  function handleOf(name) { return name && HANDLES.has(name) ? { site: HANDLES.get(name) } : null; }
+  function candsIn(fn) { return cands.filter((c) => !c.unparsed && c.f === fn.file && c.call.start >= fn.start && c.call.end <= fn.end); }
+  function adapterOf(holder, m) {
+    let r = ADAPT.get(holder); if (!r) ADAPT.set(holder, r = new Map());
+    const k = m || '*'; if (r.has(k)) return r.get(k);
+    r.set(k, null);
+    const names = m ? [m] : FILING, fns = [];
+    if (holder.type === 'ObjectExpression') { for (const q of holder.properties) if (q.type === 'Property' && names.includes(nameOf(q.key))) fns.push(...values(q.value).filter(isFn)); }
+    else if (/^Class/.test(holder.type)) { for (const q of holder.body.body) if (q.type === 'MethodDefinition' && names.includes(nameOf(q.key))) fns.push(q.value); }
+    else if (holder.type === '#ns') { for (const nm of names) fns.push(...all(exportOf(holder.file, nm)).filter(isFn)); }
+    let out = null;
+    for (const fn of fns) { for (const c of candsIn(fn)) { const pl = placeOf(c.recvNode, c.method); if (pl.kind === 'store') { out = { site: siteOf(c.call), how: pl.how }; break; } } if (out) break; }
+    r.set(k, out);
+    return out;
+  }
+  function classify(v, m) {
+    if (v.type === '#open') { const h = handleOf(v.name); return h ? { kind: 'store', by: 'handle', how: `the handle «${v.name}» (set to the store at ${h.site})` } : { kind: 'open', how: `${siteOf(v.node)} «${v.name || srcOf(v.node).slice(0, 40)}»${v.soft ? ' (only a default seen)' : ''}` }; }
+    if (v.type === 'NewExpression') {
+      const cls = values(v.callee);
+      if (cls.includes(STORE)) return { kind: 'store', by: 'store', how: `new ${STORE.id ? STORE.id.name : 'the store'} (${siteOf(v)})` };
+      for (const C of cls) if (/^Class/.test(C.type)) { const a = adapterOf(C, m); if (a) return { kind: 'store', by: 'adapter', how: `an adapter whose ${m || 'filing method'} files to the store (${a.site})` }; }
+      return { kind: 'not', how: `new ${srcOf(v.callee).slice(0, 40)}` };
+    }
+    if (v.type === 'ThisExpression') { const C = thisOf(v); if (C && C === STORE) return { kind: 'store', by: 'store', how: `this, inside the store (${siteOf(v)})` }; if (!C) return { kind: 'open', how: `${siteOf(v)} «this» in a plain function` }; v = C; }
+    if (v.type === 'ObjectExpression' || /^Class/.test(v.type) || v.type === '#ns') { const a = adapterOf(v, m); return a ? { kind: 'store', by: 'adapter', how: `an adapter whose ${m || 'filing method'} files to the store (${a.site})` } : { kind: 'not', how: v.type === '#ns' ? `the module ${v.file}` : `${v.type} (${siteOf(v)})` }; }
+    if (v.type === 'CallExpression') { const nm = nameAt(v); const h = handleOf(nm); return h ? { kind: 'store', by: 'handle', how: `the handle «${nm}» (set to the store at ${h.site})` } : { kind: 'open', how: `${siteOf(v)} «${srcOf(v).slice(0, 40)}»` }; }
+    if (v.type === 'Literal' || v.type === 'TemplateLiteral' || v.type === 'ArrayExpression' || isFn(v) || /^(Binary|Unary|Update)Expression$/.test(v.type)) return { kind: 'not', how: v.type };
+    return { kind: 'open', how: `${siteOf(v)} «${v.type}»` };
+  }
+  function placeExprs(es, m) {
+    const ps = [];
+    for (const e of es) {
+      if (!e) continue;
+      if (PLACING.has(e)) { ps.push({ kind: 'open', how: `${siteOf(e)} (a cycle)` }); continue; }
+      PLACING.add(e);
+      try { const vs = values(e); if (!vs.length) ps.push({ kind: 'open', how: `${siteOf(e)} «${srcOf(e).slice(0, 40)}» holds nothing the reader sees` }); for (const v of vs) ps.push(classify(v, m)); } finally { PLACING.delete(e); }
+    }
+    const st = ps.find((x) => x.kind === 'store');
+    if (!st && es.some((e) => FLOW.has(e))) return { kind: 'store', by: 'flow', how: `the store's own flow reaches it from new ${STORE && STORE.id ? STORE.id.name : 'the store'} (${FLOW_FROM})` };
+    return st || ps.find((x) => x.kind === 'open') || ps[0] || { kind: 'open', how: 'nothing' };
+  }
+  function placeOf(e, m) { return placeExprs([e], m); }
+  // does a call's item carry words (text / detail / i18n)? 'no' only when every value it can hold is read and carries none
+  const carries = (arg) => { const vs = values(arg); if (!vs.length) return 'unread'; let r = 'no'; for (const v of vs) { if (v.type === 'ObjectExpression') { if (v.properties.some((q) => q.type === 'SpreadElement' || ['text', 'detail', 'i18n'].includes(nameOf(q.key)))) return 'yes'; } else if (!(v.type === 'Literal' || v.type === 'TemplateLiteral' || v.type === 'ArrayExpression' || isFn(v))) r = 'unread'; } return r; };
+  // a pass-through: the item is a parameter of an adapter's own filing method (`forYou: { add(…, item) }`) — its callers are
+  // filings of their own (placed at the store through the adapter)
+  const passThrough = (x) => { if (x.type !== 'Identifier') return false; const b = bindingOf(x); const fn = b && b.kind === 'param' ? b.fn : null; const p = fn && fn.parent; return !!(p && (p.type === 'Property' || p.type === 'MethodDefinition') && FILING.includes(nameOf(p.key))); };
+  // THE STORE'S HANDLE NAMES, read FORWARD from the store's own object — every `new <the store's class>(…)` — along the code's own
+  // flow: bindings, `||` / `?:` / `await`, assignments, returns (a function that returns the store is a getter: it counts as the
+  // store), a getter's calls, a function's parameter it is handed to, a DEPS OBJECT's property into the callee's parameter (`{ k }`
+  // destructured, `opts.k` read), a constructor's options, `this.k = …` into the class's `this.k`. Where the store lands in an
+  // object's property, a member or a field, that NAME is a handle (printed); only a receiver whose road ends where the reader
+  // cannot see (a plugin's host handle, a caller outside the files) is placed by it
+  {
+    const STORE_NAME = STORE && STORE.id ? STORE.id.name : null;
+    const seen = FLOW, work = [];
+    const push = (e) => { if (e && !seen.has(e)) { seen.add(e); work.push(e); } };
+    const addName = (k, n) => { if (k && !HANDLES.has(k)) HANDLES.set(k, siteOf(n)); };
+    const isRef = (x) => { const p = x.parent; if (!p) return false; if (p.type === 'MemberExpression' && p.property === x && !p.computed) return false; if ((p.type === 'Property' || p.type === 'MethodDefinition' || p.type === 'PropertyDefinition') && p.key === x && p.value !== x && !p.computed) return false; return true; };
+    const RF = new Map();
+    const refsOf = (b) => { if (!b || !b.id) return []; if (RF.has(b.id)) return RF.get(b.id); const R = parse(b.id.file); const out = R ? (R.ids.get(b.id.name) || []).filter((x) => x !== b.id && isRef(x) && bindingOf(x) === b) : []; RF.set(b.id, out); return out; };
+    const toBinding = (id) => { for (const r of refsOf(bindingOf(id))) push(r); };
+    // a parameter handed the store (k = null) or an object holding it under k: what the function body reads of it
+    const intoParam = (q, k) => {
+      if (!q) return;
+      if (q.type === 'AssignmentPattern') q = q.left;
+      if (k == null) { if (q.type === 'Identifier') toBinding(q); return; }
+      if (q.type === 'ObjectPattern') { for (const x of q.properties) if (x.type === 'Property' && !x.computed && nameOf(x.key) === k) for (const y of patNames(x.value)) if (!y.path.length) toBinding(y.id); return; }
+      if (q.type === 'Identifier') for (const r of refsOf(bindingOf(q))) { const m = r.parent; if (m.type === 'MemberExpression' && m.object === r && !m.computed && nameOf(m.property) === k) push(m); else if (m.type === 'VariableDeclarator' && m.init === r && m.id.type === 'ObjectPattern') intoParam(m.id, k); }
+    };
+    const calleesOf = (c) => (c.type === 'NewExpression' ? values(c.callee).filter((C) => /^Class/.test(C.type)).map((C) => (C.body.body.find((m) => m.kind === 'constructor') || {}).value).filter(Boolean) : values(calleeOf(c)).filter(isFn));
+    // the call an object literal is handed to (through parentheses / `||`), with its argument index
+    const argOf = (o) => { let e = o; while (e.parent && (e.parent.type === 'ParenthesizedExpression' || e.parent.type === 'LogicalExpression')) e = e.parent; const c = e.parent; if (c && (c.type === 'CallExpression' || c.type === 'NewExpression') && c.callee !== e) { const i = c.arguments.indexOf(e); if (i >= 0) return [c, i]; } return null; };
+    if (STORE_NAME) for (const [f, src] of FILES) { if (!src.includes(STORE_NAME)) continue; const R = parse(f); if (R) for (const n of R.byNew.get(STORE_NAME) || []) if (values(n.callee).includes(STORE)) { push(n); FLOW_FROM = FLOW_FROM || siteOf(n); } }
+    const climb = (e) => {
+      if (e.type === 'FunctionDeclaration') { if (e.id) toBinding(e.id); return; }
+      const p = e.parent; if (!p) return;
+      switch (p.type) {
+        case 'ParenthesizedExpression': case 'ChainExpression': case 'AwaitExpression': case 'LogicalExpression': push(p); return;
+        case 'ConditionalExpression': if (p.test !== e) push(p); return;
+        case 'SequenceExpression': if (p.expressions[p.expressions.length - 1] === e) push(p); return;
+        case 'VariableDeclarator': if (p.init === e && p.id.type === 'Identifier') toBinding(p.id); return;
+        case 'AssignmentExpression': if (p.right === e && p.operator === '=') {
+          if (p.left.type === 'Identifier') toBinding(p.left);
+          else if (p.left.type === 'MemberExpression' && !p.left.computed) { const k = nameOf(p.left.property); addName(k, p); if (p.left.object.type === 'ThisExpression') { const C = thisOf(p.left.object); const R = C && parse(C.file); if (R) for (const x of R.ids.get(k) || []) { const m = x.parent; if (m.type === 'MemberExpression' && m.property === x && !m.computed && m.object.type === 'ThisExpression' && thisOf(m.object) === C && !(m.parent.type === 'AssignmentExpression' && m.parent.left === m)) push(m); } } }
+          push(p);
+        } return;
+        case 'Property': if (p.value === e && p.parent.type === 'ObjectExpression' && !p.computed) { const k = nameOf(p.key); addName(k, p); const a = argOf(p.parent); if (a) for (const fn of calleesOf(a[0])) intoParam(fn.params[a[1]], k); } return;
+        case 'PropertyDefinition': case 'MethodDefinition': if (p.value === e && !p.computed) addName(nameOf(p.key), p); return;
+        case 'ReturnStatement': { let F = p.parent; while (F && !isFn(F)) F = F.parent; if (F) push(F); return; }
+        case 'ArrowFunctionExpression': if (p.body === e) push(p); return;
+        case 'CallExpression': case 'NewExpression': {
+          if (p.callee === e) { push(p); return; }   // a getter called: the store
+          const i = p.arguments.indexOf(e); if (i >= 0) for (const fn of calleesOf(p)) intoParam(fn.params[i], null);
+          return;
+        }
+        default: return;
+      }
+    };
+    for (let guard = 0; work.length && guard < 100000; guard++) climb(work.pop());
+  }
+  HANDLES_READ = true;
+  let sig = null, converged = false, filings = [];
   for (PASS = 1; PASS <= 12; PASS++) {
+    ADAPT.clear();
+    for (const c of cands) if (!c.unparsed) c.place = placeOf(c.recvNode, c.method);
+    filings = cands.filter((c) => c.place.kind === 'store');
     let size = 0;
     for (const fl of filings) {
       if (fl.unparsed) continue;
-      const out = new Set(); out.open = []; out.loose = [];
-      for (const r of all(pick(values(fl.arg), 'i18n'))) { if (r.type === 'Literal' && r.value == null) continue; if (r.type === '#open') { out.open.push(r.node); continue; } i18nWords(r, out); }
-      fl.words = out; fl.open = [...new Set(out.open)].filter((x) => !passThrough(x)); fl.pass = out.open.some(passThrough); fl.loose = [...new Set(out.loose)];
+      const out = new Set(); out.open = []; out.loose = []; out.refused = [];
+      for (const r of all(pick(values(fl.arg), 'i18n'))) { if (r.type === 'Literal' && r.value == null) continue; if (r.type === '#open') { if (!r.soft) out.open.push(r.node); continue; } i18nWords(r, out); }
+      fl.words = out; fl.open = [...new Set(out.open)].filter((x) => !passThrough(x)); fl.pass = out.open.some(passThrough); fl.loose = [...new Set(out.loose)]; fl.refused = [...new Set(out.refused)];
       size += out.size;
     }
     let tz = 0; for (const m of VM.values()) if (m.tainted) tz += m.r.length;
-    const now = size + ':' + tz;
+    const now = size + ':' + tz + ':' + cands.map((c) => c.place.kind[0]).join('');
     if (now === sig) { converged = true; break; }
     sig = now;
   }
+  const unplaced = cands.filter((c) => !c.unparsed && c.place.kind === 'open').map((c) => Object.assign(c, { carries: carries(c.arg) })).filter((c) => c.carries !== 'no');
+  const notStore = cands.filter((c) => !c.unparsed && c.place.kind === 'not');
+  const handles = [...HANDLES].map(([name, where]) => ({ name, site: where }));
   const words = new Map();
   for (const fl of filings) for (const w of fl.words) { if (!words.has(w)) words.set(w, []); words.get(w).push(`${fl.f}:${fl.line}`); }
-  return { filings, words, parsed, passes: PASS, converged, exhausted: BUDGET > 400000, where: (n) => (n && n.file ? `${n.file} ${srcOf(n).slice(0, 60)}` : String(n && n.type)) };
+  return { filings, cands, unplaced, notStore, handles, store: STORE ? `${STORE_FILE} ${STORE.id ? STORE.id.name : '(a class)'}` : null, filing: FILING, words, parsed, passes: PASS, converged, exhausted: BUDGET > 400000, where: (n) => (n && n.file ? `${n.file} ${srcOf(n).slice(0, 60)}` : String(n && n.type)) };
 }
 console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the census since closure 3 —, the overage door, the lapsed chip\'s act)');
 {
@@ -1823,22 +1995,63 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
   const acornS = require(path.join(REPO, 'node_modules/acorn'));
   const SHARED = { recs: new Map(), idx: new Map(), scopes: new WeakMap(), binds: new WeakMap(), rets: new WeakMap() };
   const NOW = new Map([...sources].filter(([f]) => !f.startsWith('src/lib/')));
+  NOW.set('server.js', fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'));   // closure 4: where the hub builds the store and hands it on
   const SWN = storedWordsReader({ files: NOW, acorn: acornS, shared: SHARED });
   const storedNow = new Set(SWN.words.keys());
   const producers = new Set(SWN.filings.map((x) => x.f));
   console.log(`  · the stored-words census: ${SWN.filings.length} filings in ${producers.size} producer files store ${storedNow.size} sentences (${[...storedNow].filter((x) => has(ZH, x)).length} with a zh row); ${SWN.filings.filter((x) => x.pass).length} pass-through adapters; ${SWN.passes} passes`);
+  const byHow = {}; for (const x of SWN.filings) byHow[x.place.by || 'unparsed'] = (byHow[x.place.by || 'unparsed'] || 0) + 1;
+  console.log(`  · the store: ${SWN.store} (filing methods ${SWN.filing.join(', ')}); ${SWN.cands.length} filing calls — ${Object.entries(byHow).map(([k, n]) => `${n} placed by ${k}`).join(', ')}; ${SWN.notStore.length} not the store; ${SWN.unplaced.length} unplaced. Its handle names (read forward from the store): ${SWN.handles.map((h) => `${h.name} (${h.site})`).join(', ')}`);
   ok(SWN.filings.length >= 60 && !SWN.exhausted && SWN.converged && SWN.filings.every((x) => !x.unparsed && !x.open.length),
     'stored words (closure 3): the census reads every For-you filing in src/ — each store\'s add / redrawItem parsed, its i18n followed to the keys its lines store (no OPEN line), within its budget, to a fixpoint',
     { n: SWN.filings.length, exhausted: SWN.exhausted, converged: SWN.converged, open: SWN.filings.filter((x) => x.unparsed || x.open.length).map((x) => `${x.f}:${x.line} ${(x.open || []).map(SWN.where).join(' | ')}`.slice(0, 160)).slice(0, 6) });
   ok(SWN.filings.some((x) => x.pass) && SWN.filings.some((x) => x.recv === 'forYou' && x.words.size > 0),
     'stored words: a pass-through adapter (`forYou: { add(…, item) }`) stores what its callers hand in — and its callers (forYou.add) are filings the census reads', SWN.filings.filter((x) => x.pass).map((x) => `${x.f}:${x.line}`));
+  // CLOSURE 4 (item 1): THE CENSUS FOLLOWS A HANDLE TO ITS STORE — the store and its filing methods read from the tree; every call of
+  // them carrying words placed; an unplaced receiver RED by its file and line
+  ok(SWN.store === 'src/user-todos.js UserTodoManager' && ['add', 'redrawItem'].every((m) => SWN.filing.includes(m)),
+    'stored words (closure 4): the store is read from the tree — src/user-todos.js\'s class; its filing methods are the ones that take an item\'s i18n (add, redrawItem)', { store: SWN.store, filing: SWN.filing });
+  for (const c of SWN.unplaced) ok(false, `stored words (closure 4): ${c.f}:${c.line} ${c.recv}.${c.method}(…) files words on a receiver the census cannot place — ${c.place.how}`, { carries: c.carries });
+  ok(SWN.unplaced.length === 0 && SWN.filings.length >= 100,
+    `stored words (closure 4): every call of the store's filing methods that carries words is PLACED — at the store (its own object, an adapter, a handle the tree sets to it) or known not to be the store (${SWN.cands.length} calls: ${SWN.filings.length} at the store, ${SWN.notStore.length} not, ${SWN.unplaced.length} unplaced)`, SWN.unplaced.map((c) => `${c.f}:${c.line} ${c.recv}`));
+  const ALIASED = ['src/server/oat-identity.js', 'src/server/engine-distribution.js', 'src/plugins/frp.js', 'src/server/browser-dialogs.js', 'src/user-todos.js'];
+  ok(ALIASED.every((f) => SWN.filings.some((x) => x.f === f && x.words.size > 0)),
+    'stored words (closure 4): the producers that file through a handle spelled otherwise are filings, with their words — oat-identity (`t = T()`), engine-distribution (`ut = T()`), the frp plugin (`ut = forYou()`, its words from relay-token.js), browser-dialogs (`forYou.add?.(`), the store\'s own notice (`this.add`)',
+    ALIASED.filter((f) => !SWN.filings.some((x) => x.f === f && x.words.size > 0)));
+  // A FILING THE STORE REFUSES (its i18n.detail not an array of lines: add() throws, the item is never filed) is NAMED — the known
+  // one is a debt (the sign-in ask, browser-dialogs promptAsk); another is red, and a fix of it removes its row
+  const REFUSED_DEBT = ['src/server/browser-dialogs.js «A page in the agent browser asks you to sign in ({host})»'];
+  const refusedNow = SWN.filings.filter((x) => x.refused && x.refused.length).map((x) => `${x.f} «${[...x.words][0] || '?'}»`).sort();
+  if (refusedNow.length) console.log(`  · ${refusedNow.length} filing(s) the store refuses (i18n.detail not an array of lines — never filed): ${refusedNow.join(', ')}`);
+  ok(JSON.stringify(refusedNow) === JSON.stringify(REFUSED_DEBT),
+    'stored words (closure 4): a filing the store REFUSES (i18n.detail not an array of lines — add() throws, the item is never filed) is named: the known one (REFUSED_DEBT, the sign-in ask) and no other', refusedNow);
   // CONTROLS: a planted producer that files its words through a model (a constant, a WORDS param, a helper handed to .map BY NAME),
   // beside a live route answer in the same model — the census finds the three stored keys and never the answer
+  const PLANT_STORE = ['src/user-todos.js', "'use strict';\nclass UserTodoManager { add(key, { text, i18n } = {}) { return key; } redrawItem(pred, { i18n } = {}) { return pred; } }\nmodule.exports = { UserTodoManager };\n"];
   const PLANT = new Map([
+    PLANT_STORE,
+    ['server.js', "'use strict';\nconst { UserTodoManager } = require('./src/user-todos.js');\nconst userTodos = new UserTodoManager();\nrequire('./src/server/zz-plant.js').create({ userTodos });\n"],
     ['src/zz-plant-model.js', "'use strict';\nconst i18nKey = (s) => s;\nconst A = i18nKey('Planted stored sentence {n}.');\nconst B = Object.freeze({ gone: 'Planted detail line.' });\nfunction strip(l) { return { key: l.key, ...(l.params ? { params: l.params } : {}) }; }\nfunction words(n) { const lines = [{ key: B.gone }]; return { text: 'x', i18n: { text: { key: A, params: { n, what: { key: 'Planted words param.' } } }, detail: lines.map(strip) } }; }\nfunction answer(res) { res.json({ error: { key: i18nKey('Planted live answer.') } }); }\nmodule.exports = { words, answer };\n"],
     ['src/server/zz-plant.js', "'use strict';\nconst M = require('../zz-plant-model.js');\nfunction create({ userTodos }) { const file = (n) => { const w = M.words(n); userTodos.add('k', { origin: 'server', text: w.text, i18n: w.i18n }); }; return { file }; }\nmodule.exports = { create };\n"],
   ]);
   const SWP = storedWordsReader({ files: PLANT, acorn: acornS });
+  // CONTROLS (closure 4): a handle spelled otherwise (a `todos` getter, called through a local `T()`), a plugin's host handle `h`
+  // whose road the reader cannot see (placed by the handle name the wiring sets: forYou), a receiver it cannot place (RED by its
+  // file and line), a class's own add (not the store)
+  const PLANT2 = new Map([
+    PLANT_STORE,
+    ['server.js', "'use strict';\nconst { UserTodoManager } = require('./src/user-todos.js');\nconst userTodos = new UserTodoManager();\nrequire('./src/server/zz-aliased.js').create({ todos: () => userTodos });\nclass Plugins { constructor(opts) { this.opts = opts; } }\nnew Plugins({ forYou: () => userTodos });\n"],
+    ['src/server/zz-aliased.js', "'use strict';\nfunction create({ todos = () => null } = {}) { const T = () => { try { return typeof todos === 'function' ? todos() : todos; } catch { return null; } }; return { file() { const t = T(); if (t) t.add('k', { origin: 'server', text: 'x', i18n: { text: { key: 'Planted aliased sentence.' } } }); } }; }\nmodule.exports = { create };\n"],
+    ['src/plugins/zz-plugin.js', "'use strict';\nmodule.exports = { id: 'zz', create(h) { const fy = () => (h.opts && typeof h.opts.forYou === 'function' ? h.opts.forYou() : null); return { file() { const u = fy(); if (u) u.add('p', { origin: 'plugin', i18n: { text: { key: 'Planted plugin sentence.' } } }); } }; } };\n"],
+    ['src/server/zz-unplaced.js', "'use strict';\nfunction relay(out) { out.add('k', { origin: 'server', text: 'x', i18n: { text: { key: 'Planted unplaced sentence.' } } }); }\nmodule.exports = { relay };\n"],
+    ['src/server/zz-box.js', "'use strict';\nclass Box { add(k, v) { return [k, v]; } }\nconst bx = new Box();\nbx.add('k', { text: 'not a For-you item' });\nmodule.exports = {};\n"],
+  ]);
+  const SW2 = storedWordsReader({ files: PLANT2, acorn: acornS });
+  const w2 = [...SW2.words.keys()].sort();
+  ok(JSON.stringify(w2) === JSON.stringify(['Planted aliased sentence.', 'Planted plugin sentence.']) && SW2.unplaced.length === 1 && SW2.unplaced[0].f === 'src/server/zz-unplaced.js' && SW2.unplaced[0].line === 2
+    && SW2.notStore.length === 1 && SW2.notStore[0].f === 'src/server/zz-box.js' && ['todos', 'forYou'].every((n) => SW2.handles.some((h) => h.name === n)),
+    'CONTROL (closure 4): the census follows a handle spelled otherwise to the store (`t = T()` over a `todos` getter; a plugin\'s `h.opts.forYou()` by the handle name the wiring sets), names an unplaced receiver by its file and line, and a class\'s own add is not the store',
+    { words: w2, how: SW2.cands.map((c) => `${c.f}:${c.line} ${c.place.kind} ${c.place.how}`.slice(0, 140)), handles: SW2.handles.map((h) => h.name) });
   const plantWords = [...SWP.words.keys()].sort();
   ok(JSON.stringify(plantWords) === JSON.stringify(['Planted detail line.', 'Planted stored sentence {n}.', 'Planted words param.']) && SWP.filings.length === 1 && !SWP.filings[0].open.length,
     'CONTROL: the census follows a planted producer into its model — the text\'s key, a WORDS param, a detail line built by a helper handed to .map by name — and never counts the model\'s live route answer', plantWords);
@@ -1848,18 +2061,40 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
   const PS = 'Planted stored sentence {n}.';
   const lawRed = lawOf(new Set([PS]), new Set(), {}, {}, {}), lawGreen = lawOf(new Set([PS]), new Set(), { [PS]: '种下' }, { [PS]: '植えた' }, { p: { key: PS } });
   ok(lawRed.length === 1 && lawRed[0].s === PS && !lawRed[0].rows && lawGreen.length === 0, 'CONTROL: a planted stored sentence reworded since its release is RED by its words (no rows, no legacy row); its rows kept and its legacy row named, it is green', { lawRed, lawGreen });
-  // THE RELEASE: the newest release commit below HEAD (a release commit HEAD is itself checked against the one before it)
+  // THE RELEASE (closure 4, item 2 — by ANCESTRY, never by a subject's words): the newest commit at or below HEAD that changed
+  // package.json's "version" line (git log -G) and whose version differs from its parent's (the content, read with git cat-file) — the
+  // release this tree was cut from (a lane never bumps the version); a HEAD that is such a commit (a release commit) is checked against
+  // the release before it. A commit the clone holds without its parent (the edge of a shallow clone) is no release: a named SKIP
   const { spawnSync } = await import('node:child_process');
   const git = (...a) => { try { return execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 }).trim(); } catch { return null; } };
-  const head = git('log', '-1', '--format=%H%x09%s', 'HEAD');
-  const relLine = head ? git('log', '-1', '--format=%H%x09%s', '-E', '--grep=^2\\.[0-9]+\\.[0-9]+: ', /^2\.\d+\.\d+: /.test(head.split('\t')[1] || '') ? 'HEAD^' : 'HEAD') : null;
-  const [relSha, relSubj] = relLine ? relLine.split('\t') : [null, ''];
+  const versionOf = (txt) => { try { return JSON.parse(txt).version || null; } catch { return null; } };
+  const pkgsAt = (specs) => {   // spec → package.json's text (null: the clone does not hold it); null when cat-file itself fails
+    const pc = spawnSync('git', ['-C', REPO, 'cat-file', '--batch'], { input: specs.join('\n') + '\n', maxBuffer: 1 << 24 });
+    if (pc.status !== 0 || !pc.stdout) return null;
+    const out = new Map();
+    for (let off = 0, i = 0; off < pc.stdout.length && i < specs.length; i++) { const nl = pc.stdout.indexOf(10, off); const h1 = pc.stdout.slice(off, nl).toString().split(' '); if (h1[1] !== 'blob') { out.set(specs[i], null); off = nl + 1; continue; } const size = Number(h1[2]); out.set(specs[i], pc.stdout.slice(nl + 1, nl + 1 + size).toString('utf8')); off = nl + 1 + size + 1; }
+    return out;
+  };
+  const headSha = git('log', '-1', '--format=%H', 'HEAD');
+  const bumps = (git('log', '--format=%H %P', '-G"version":', '-n', '12', 'HEAD', '--', 'package.json') || '').split('\n').filter(Boolean).map((l) => l.split(' '));
+  let relSha = null, relVer = null, edge = null;
+  for (const [sha, parent] of bumps) {
+    if (sha === headSha) continue;   // HEAD a release commit: checked against the release before it
+    if (!parent) { edge = sha; break; }   // the clone's edge (or the first commit): nothing to compare its version with
+    const pk = pkgsAt([`${sha}:package.json`, `${parent}:package.json`]);
+    const v = pk && versionOf(pk.get(`${sha}:package.json`)), pv = pk && versionOf(pk.get(`${parent}:package.json`));
+    if (v && pv && v !== pv) { relSha = sha; relVer = v; break; }
+  }
   let relStored = null;
-  if (!relSha) console.log('  ~ SKIP: stored words against the last release — this clone holds no release commit («2.N.N: …») below HEAD (a depth-1 checkout); the census of this tree, its legacy rows and its controls stand');
-  else {
-    const relVer = relSubj.split(':')[0];
-    const list = (git('ls-tree', '-r', '--name-only', relSha, '--', 'src') || '').split('\n').filter((f) => f.endsWith('.js') && (/^src\/lib\/i18n-(zh|ja)\.js$/.test(f) || (!f.startsWith('src/lib/') && !/^i18n/.test(path.posix.basename(f)))));
-    const changed = new Set((git('diff', '--name-only', '--no-renames', relSha, '--', 'src') || '').split('\n'));
+  if (!relSha) {
+    const shallow = git('rev-parse', '--is-shallow-repository') === 'true', depth = Number(git('rev-list', '--count', 'HEAD')) || 0;
+    const why = shallow ? (depth === 1 ? 'a depth-1 clone' : `a shallow clone of ${depth} commits`) : edge ? 'the history holds no version change with its parent' : 'no commit at or below HEAD changed the version';
+    SKIPS.push(`the release comparison (${why})`);
+    console.log(`  ~ SKIP: stored words against the release this tree was cut from — ${why}: no commit at or below HEAD that changed package.json's version is here with its parent; the census of this tree, its legacy rows and its controls stand`);
+  } else {
+    console.log(`  · the release this tree was cut from (by ancestry: the newest commit at or below HEAD that changed package.json's version): ${relSha.slice(0, 9)} (${relVer})`);
+    const list = [...(git('ls-tree', '-r', '--name-only', relSha, '--', 'src') || '').split('\n').filter((f) => f.endsWith('.js') && (/^src\/lib\/i18n-(zh|ja)\.js$/.test(f) || (!f.startsWith('src/lib/') && !/^i18n/.test(path.posix.basename(f))))), 'server.js'];
+    const changed = new Set((git('diff', '--name-only', '--no-renames', relSha, '--', 'src', 'server.js') || '').split('\n'));
     const want = list.filter((f) => f.startsWith('src/lib/') || !NOW.has(f) || changed.has(f));
     const blobs = new Map();
     const cat = spawnSync('git', ['-C', REPO, 'cat-file', '--batch'], { input: want.map((f) => `${relSha}:${f}`).join('\n') + '\n', maxBuffer: 1 << 28 });
@@ -1900,10 +2135,19 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     'overage (verifier #4, picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)» is a present row again — «Allow automatic turns…» beside the Credits chip in the usage popup opens the Spending row that allows them', ov && ov.door);
   // closure 3 (item 4): the door names an act STILL TO DO — drawn only while spend.allowOverageTurns is off (the popup's chip line,
   // evaluated with the setting off and on)
-  const ovLine = (UM.match(/^[ \t]*const turnsAllowed = [^\n]*\n[ \t]*if \(ovc\) parts\.push\([^\n]*\n/m) || [''])[0];
-  const drawOv = (allowed) => { const parts = []; try { new Function('parts', 'ovc', 'creditsChipHtml', 'escHtml', 't', 'UI_ICONS', ovLine).call({ settings: { get: (k) => (k === 'spend.allowOverageTurns' ? allowed : undefined) } }, parts, { kind: 'inUse' }, () => '<chip>', (x) => String(x), (x) => x, { money: '' }); } catch (e) { return 'THREW ' + e.message; } return parts.join(''); };
+  // closure 4 (item 4): the chip's TIP is worded by the same setting (the popup hands it to overageChip) — the three lines, evaluated
+  // with the real overageChip (src/lib/usage-source.js) and the setting off and on
+  const US = await imp('src/lib/usage-source.js');
+  const ovLine = (UM.match(/^[ \t]*const turnsAllowed = [^\n]*\n[ \t]*const ovc = overageChip\([^\n]*\n[ \t]*if \(ovc\) parts\.push\([^\n]*\n/m) || [''])[0];
+  const drawOv = (allowed) => { const parts = []; try { new Function('parts', 'snap', 'overageChip', 'overageState', 'creditsChipHtml', 'escHtml', 't', 'UI_ICONS', ovLine).call({ settings: { get: (k) => (k === 'spend.allowOverageTurns' ? allowed : undefined) } }, parts, {}, US.overageChip, () => ({ inUse: 'yes' }), (c) => `<chip tip="${c.tip}">`, (x) => String(x), (x) => x, { money: '' }); } catch (e) { return 'THREW ' + e.message; } return parts.join(''); };
   const ovOff = drawOv(false), ovOn = drawOv(true);
-  ok(/^<chip> <button [^>]*usage-spend-door/.test(ovOff) && ovOn === '<chip>', 'overage (closure 3, item 4): «Allow automatic turns…» is drawn beside the in-use Credits chip only while spend.allowOverageTurns is OFF — with it on, the chip alone', { off: ovOff.slice(0, 120), on: ovOn.slice(0, 120) });
+  ok(/^<chip tip="[^"]*"> <button [^>]*usage-spend-door/.test(ovOff) && /^<chip tip="[^"]*">$/.test(ovOn), 'overage (closure 3, item 4): «Allow automatic turns…» is drawn beside the in-use Credits chip only while spend.allowOverageTurns is OFF — with it on, the chip alone', { off: ovOff.slice(0, 220), on: ovOn.slice(0, 220) });
+  const RUN = 'Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).';
+  ok(ovOff.includes(ovSentence) && !ovOff.includes(RUN) && ovOn.includes(RUN) && !/refused/.test(ovOn)
+    && US.overageChip({ inUse: 'yes' }).tip.includes(ovSentence) && US.overageChip({ inUse: 'yes' }, { turnsAllowed: true }).tip.includes(RUN),
+    'overage (closure 4, item 4): the Credits chip\'s tip says what the Spending setting does NOW — «Automatic turns are refused …» while spend.allowOverageTurns is off, «Automatic turns still run …» once it allows them (the popup hands the setting to overageChip)', { off: ovOff.slice(0, 260), on: ovOn.slice(0, 260) });
+  ok(ZH['Allow automatic turns…'] === '允许自动回合…' && /自动回合/.test(ZH[RUN] || '') && /自動ターン/.test(JA[RUN] || '') && JA['Allow automatic turns…'] === '自動ターンを許可…',
+    'overage (closure 4, item 4): the door and the new tip say «automatic turns» in each dictionary\'s own term — zh 自动回合 («允许自动回合…»), ja 自動ターン', { zh: [ZH['Allow automatic turns…'], ZH[RUN]], ja: [JA['Allow automatic turns…'], JA[RUN]] });
   // #5 the lapsed chip under refresh 'off' is the setting's door — its VISIBLE words say the act (never only its title)
   const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   const cs = MA.indexOf('export function serveLapsedChipHtml('), ce = MA.indexOf('\n}\n', cs);
@@ -1930,5 +2174,6 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     'pick 6: on a touch row the trailing door of a pointer with a declared door says ITS verb («Open the Outbox»), not «Chat»');
 }
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* a FIFO left by a hung read */ }
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+const skipped = SKIPS.length ? ` · ${SKIPS.length} skipped by name: ${SKIPS.join('; ')}` : '';
+console.log(fail ? `\n${fail} FAILED (${pass} passed)${skipped}` : `\nALL PASS (${pass})${skipped}`);
 process.exit(fail ? 1 : 0);

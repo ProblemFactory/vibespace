@@ -13843,4 +13843,6 @@ export default {
   // lane ui-needs-a-button (closure 3)
   "The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.": "設定のテレメトリ転送先（診断データを中央コレクターへ転送）がフィードバックの受け口で {status} を返しました。診断データは受け取りますが、エージェントのフィードバックは受け取りません。レポートはここ（⚙ システム ▸ エージェントのフィードバック…）に残ります — 転送待ち {n} 件（{max} 件を超えると古いものから削除）。VibeSpace は1日に1回この転送先を再確認し、受け取れるようになったら送ります。",
   "This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.": "この一時ブラウザのパスキーはこの会話に保存され、会話とともに削除されます。リクエストを取り消すと、ページの別のログイン方法か、自分のデバイスでのサインインが使えます。新しいパスキーはあなたが許可した後にだけ登録されます。",
+  // lane ui-needs-a-button (closure 4)
+  "Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).": "このアカウントが従量課金中でも、自動ターンは実行されます（支出の設定で許可されています）。",
 };
