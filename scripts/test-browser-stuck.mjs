@@ -1213,18 +1213,22 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   ok(JSON.stringify(got) === JSON.stringify({ 'two-tabs': ['second'], answered: [], 'tab-closed': [], down: [], shutdown: ['first'] }), 'r2 holes 4.1 / 4.4 / 4.5 / 4.6 / 4.7: ONE pending dialog notice per conversation (two tabs ⇒ the newest), withdrawn when its dialog is answered, its tab closes or the browser goes away — KEPT across a VibeSpace shutdown (the dialog is still open in Chrome)', got);
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
-  const dCut = (a, b, tag) => { if (dsrc.split(a).length !== 2) return null; return MUT.load('src/server/browser-dialogs.js', dsrc.replace(a, () => b), tag); };
+  const gone = [];   // lane chrome-157 (主开发 10:45Z): a control whose anchor matches nothing FAILS BY NAME, never a quiet gap in the count
+  const dCut = (a, b, tag) => { if (dsrc.split(a).length !== 2) { gone.push(tag.replace(/^hole-/, '')); return null; } return MUT.load('src/server/browser-dialogs.js', dsrc.replace(a, () => b), tag); };
   const reds = [];
   { const m = dCut("${r.error}`); held(w, tid, d); }", '${r.error}`); }', 'hole-2.6'); const r = m && await failedAccept(m); if (r && r.via !== 'event' && r.notices === 0) reds.push('2.6'); }
-  { const a = '    if (replaceKind) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));\n';
-    if (ssrc.split(a).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a, '\n'), 'hole-4.1'); const r = await noticeCase('two-tabs', { SSmod: SSm }); if (r.length === 2) reds.push('4.1'); } }
+  // lane chrome-157 (the .402 claim C, rule 3(a)): the filter line now also holds the one-state kinds (session-status ONE_STATE_KINDS) —
+  // the anchor follows the line as it stands; the mutant still cuts the WHOLE filter
+  { const a = '    if (replaceKind || ONE_STATE_KINDS.has(n.kind)) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));\n';
+    if (ssrc.split(a).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a, '\n'), 'hole-4.1'); const r = await noticeCase('two-tabs', { SSmod: SSm }); if (r.length === 2) reds.push('4.1'); } else gone.push('4.1'); }
   { const m = dCut('    if (d) withdrawNotices([d.id]);\n  }', '  }', 'hole-4.4'); const r = m && await noticeCase('answered', { Dmod: m }); if (r && r.length === 1) reds.push('4.4'); }
   { const m = dCut("by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }", "by: 'tab-closed', at: now(), targetId: tid } }); }", 'hole-4.5'); const r = m && await noticeCase('tab-closed', { Dmod: m }); if (r && r.length === 1) reds.push('4.5'); }
   { const m = dCut('    if (!keepNotices) withdrawNotices(open.map((d) => d.id));', '', 'hole-4.6'); const r = m && await noticeCase('down', { Dmod: m }); if (r && r.length === 1) reds.push('4.6'); }
   { const m = dCut("down(w, 'the server is restarting', { keepNotices: true });", "down(w, 'the server is restarting');", 'hole-4.7'); const r = m && await noticeCase('shutdown', { Dmod: m }); if (r && r.length === 0) reds.push('4.7'); }
   { const a2 = '    rec.pendingNotices = keep;\n    if (!keep.length';
-    if (ssrc.split(a2).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a2, '    if (!keep.length'), 'hole-4.8'); const r = await noticeCase('answered', { SSmod: SSm }); if (r.length === 1) reds.push('4.8'); } }
+    if (ssrc.split(a2).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a2, '    if (!keep.length'), 'hole-4.8'); const r = await noticeCase('answered', { SSmod: SSm }); if (r.length === 1) reds.push('4.8'); } else gone.push('4.8'); }
   ok(reds.join(',') === '2.6,4.1,4.4,4.5,4.6,4.7,4.8', 'CONTROLS: each of those seven parts reverted ALONE reddens its leg (they stayed green in the r1 suite; 4.8 = the store\'s own drop, beside another pending notice)', reds);
+  ok(!gone.length, gone.length ? gone.map((g) => `control ${g}: its anchor is gone`).join(' · ') : 'CONTROLS: every one of the seven anchors is in the source as it stands (a gone anchor fails by name)', gone);
   // 5.3: a navigation that STOPS (a download, a 204, a stop) — or moves within the document — ends the loading run
   const navEnd = async (Dmod) => {
     const ch = await fakeChrome().listen(); ch.addTab('T1');
