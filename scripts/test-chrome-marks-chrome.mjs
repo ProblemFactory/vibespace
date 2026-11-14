@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -48,9 +48,22 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 const DATA = path.join(wt, 'data'); fs.mkdirSync(DATA, { recursive: true });
 fs.writeFileSync(path.join(DATA, 'settings.json'), JSON.stringify({ 'chrome.arrangement': OWNER_ARRANGEMENT, 'chrome.springs': OWNER_SPRINGS, 'desktop.dynamicEnabled': true }, null, 2));
+// THE CLI SHAPE IS THE FIXTURE'S, NEVER THE BOX'S (the claim of 9cf4868c6 ran outside the lane's wrapper: the hub inherited the
+// box's HOME and found its real codex — a second usage row): a scratch HOME, a scratch login shell whose PATH holds claude /
+// codex STAND-INS (they answer --version, refuse everything else), and a hub PATH with no directory that holds either
+const home = scratchHome('chrome-marks-home', fs);
+const CLI_BIN = path.join(home, '.local', 'bin'), TOOLS = path.join(home, '.vs-shape', 'tools'), SHAPE = path.join(home, '.vs-shape', 'installed');
+for (const d of [CLI_BIN, TOOLS, SHAPE]) fs.mkdirSync(d, { recursive: true });
+fs.writeFileSync(path.join(CLI_BIN, 'claude'), '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.314 (Claude Code)"; exit 0; }\nexit 1\n', { mode: 0o755 });
+fs.writeFileSync(path.join(CLI_BIN, 'codex'), '#!/bin/sh\n[ "$1" = --version ] && { echo "codex-cli 0.130.0"; exit 0; }\nexit 1\n', { mode: 0o755 });
+fs.symlinkSync(['/usr/bin/printenv', '/bin/printenv'].find((p) => fs.existsSync(p)) || '/usr/bin/printenv', path.join(TOOLS, 'printenv'));
+fs.writeFileSync(path.join(SHAPE, 'login-shell'), `#!/bin/sh\nPATH='${CLI_BIN}:${TOOLS}'; export PATH\nwhile [ $# -gt 0 ]; do case "$1" in -c) shift; exec /bin/sh -c "$1";; *) shift;; esac; done; exit 9\n`, { mode: 0o755 });
+const hubPath = (process.env.PATH || '').split(':').filter((d) => d && !['claude', 'codex'].some((n) => fs.existsSync(path.join(d, n)))).join(':');
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, PATH: hubPath, SHELL: path.join(SHAPE, 'login-shell'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN, VIBESPACE_CHANGELOG_FIXTURE_DIR: FIXTURE };
+for (const k of ['CLAUDE_CMD', 'CODEX_CMD', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) delete srvEnv[k];
 let srv = null;
 const srvLog = fs.openSync(path.join(PNG, 'server.log'), 'a');
-const startServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN, VIBESPACE_CHANGELOG_FIXTURE_DIR: FIXTURE }, stdio: ['ignore', srvLog, srvLog] }); };
+const startServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', srvLog, srvLog] }); };
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode != null) { clearTimeout(t); r(); } else p.once('exit', () => { clearTimeout(t); r(); }); }); };
 const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
 const chromes = [];
@@ -60,6 +73,7 @@ const cleanup = () => {
   try { endRootedProcesses(wt); } catch { }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   try { fs.rmSync(FIXTURE, { recursive: true, force: true }); } catch { }
+  try { fs.rmSync(home, { recursive: true, force: true }); } catch { }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -114,7 +128,13 @@ const MEASURE_LIB = `window.__marks = (() => {
       title: e.title || '', label: lab ? { lines: lines(lab), shown: labCs.display !== 'none' && R(lab).width > 1, clipped: lab.scrollWidth > lab.clientWidth + 0.5 } : null };
   };
   const springs = (zone) => [...document.querySelectorAll('[data-zone="' + zone + '"] > .chrome-spring')].map((s) => Math.round(R(s).width * 10) / 10);
-  const row = (zone) => { const z = document.querySelector('[data-zone="' + zone + '"]'); if (!z) return null; const r = R(z); return { h: Math.round(r.height * 10) / 10, w: Math.round(r.width * 10) / 10, over: Math.round((z.scrollWidth - z.clientWidth) * 10) / 10 }; };
+  // the row is ONE ROW HIGH when it is no taller than its tallest OTHER element (the lock chip and the springs aside) + its own
+  // padding and borders, or its min-height — a second usage row (two harnesses) is a taller row, a wrapped chip is not one row
+  const row = (zone) => { const z = document.querySelector('[data-zone="' + zone + '"]'); if (!z) return null; const r = R(z), cs = getComputedStyle(z);
+    const others = [...z.children].filter((e) => e.id !== 'taskbar-vault' && !e.classList.contains('chrome-spring') && getComputedStyle(e).display !== 'none').map((e) => R(e).height);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    const fit = Math.max(parseFloat(cs.minHeight) || 0, (others.length ? Math.max(...others) : 0) + pad);
+    return { h: Math.round(r.height * 10) / 10, fit: Math.round(fit * 10) / 10, w: Math.round(r.width * 10) / 10, over: Math.round((z.scrollWidth - z.clientWidth) * 10) / 10 }; };
   return { one, springs, row };
 })(); true`;
 const CHIP = `(() => { const c = document.getElementById('taskbar-vault'); return c ? window.__marks.one(c) : null; })()`;
@@ -122,8 +142,10 @@ const CHIP = `(() => { const c = document.getElementById('taskbar-vault'); retur
 const BADGE = `(() => { const b = document.querySelector('#toolbar-row2 .usage-age-badge'); if (!b) return null; const R = (e) => e.getBoundingClientRect(); const rb = R(b), lab = b.parentElement.querySelector('.usage-donut-label'), rl = lab ? R(lab) : null, row = R(document.getElementById('toolbar-row2'));
   const cs = getComputedStyle(b), lh = parseFloat(cs.lineHeight) || 10, bt = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
   const over = rl ? Math.max(0, Math.min(rb.right, rl.right) - Math.max(rb.left, rl.left)) * Math.max(0, Math.min(rb.bottom, rl.bottom) - Math.max(rb.top, rl.top)) : -1;
-  return { text: b.textContent, lines: Math.round((rb.height - bt) / lh), overLabel: Math.round(over), inRow: rb.top >= row.top - 0.5 && rb.bottom <= row.bottom + 0.5 }; })()`;
-const badgeFine = (b) => !b || (b.lines === 1 && b.overLabel === 0);
+  let clip = document.documentElement; for (let p = b.parentElement; p && p !== document.body; p = p.parentElement) { const pc = getComputedStyle(p); if (/(auto|scroll|hidden|clip)/.test(pc.overflowX + ' ' + pc.overflowY) || pc.contain.includes('paint')) { clip = p; break; } }
+  const rc = clip.getBoundingClientRect(), cut = Math.max(0, rc.top - rb.top) + Math.max(0, rb.bottom - rc.bottom) + Math.max(0, rc.left - rb.left) + Math.max(0, rb.right - rc.right);
+  return { text: b.textContent, lines: Math.round((rb.height - bt) / lh), overLabel: Math.round(over), inRow: rb.top >= row.top - 0.5 && rb.bottom <= row.bottom + 0.5, cut: Math.round(cut * 10) / 10 }; })()`;
+const badgeFine = (b) => !b || (b.lines === 1 && b.overLabel === 0 && b.cut === 0);
 // a chip is FINE: one line, its icon whole, its own width (or — no spring left in its row — its words given, icon and title kept)
 const chipFine = (c, springsLeft = 1) => !!c && !c.hidden && c.lines <= 1 && c.nat.lines <= 1 && c.taller <= 0.5 && c.iconSquashed <= 0.5 && (c.narrower <= 0.5 || (springsLeft === 0 && !!c.title && c.label && c.label.lines <= 1));
 const chipSays = (c) => (c ? `«${c.text}» ${c.lines} line(s), ${Math.round(c.w)}/${Math.round(c.nat.w)} px wide, ${Math.round(c.h)}/${Math.round(c.nat.h)} px high, icon ${c.svgW == null ? '-' : Math.round(c.svgW * 10) / 10}/${c.nat.svgW == null ? '-' : Math.round(c.nat.svgW * 10) / 10} px` : 'no chip');
@@ -189,9 +211,9 @@ try {
         }
       }
       results.A[`${P.face}/${lang}`] = A;
-      const bad = A.filter((x) => !chipFine(x.chip, x.springs.some((s) => s > 0.5) ? 1 : 0) || (x.row && x.row.h > 40) || !badgeFine(x.badge));
-      check(`A ${P.face} ${lang} (seed ${seeded}): the owner's row at ${WIDTHS.join(' / ')} px — the lock chip one line, its icon whole, as wide as its words; the row one row high (≤ 40 px); the usage ring's age badge one line, off its label`,
-        bad.length === 0, bad.map((x) => `${x.w} px: ${chipSays(x.chip)}; row ${x.row && x.row.h} px high; springs ${x.springs.join(' ')}; badge ${x.badge ? `«${x.badge.text}» ${x.badge.lines} line(s), ${x.badge.overLabel} px² over its label, in the row ${x.badge.inRow}` : 'none'}`).join(' · '));
+      const bad = A.filter((x) => !chipFine(x.chip, x.springs.some((s) => s > 0.5) ? 1 : 0) || (x.row && x.row.h > x.row.fit + 1) || !badgeFine(x.badge));
+      check(`A ${P.face} ${lang} (seed ${seeded}): the owner's row at ${WIDTHS.join(' / ')} px — the lock chip one line, its icon whole, as wide as its words; the row one row high (no taller than its tallest other element + padding); the usage ring's age badge one line, off its label, never cut`,
+        bad.length === 0, bad.map((x) => `${x.w} px: ${chipSays(x.chip)}; row ${x.row && x.row.h} px high (its own fit ${x.row && x.row.fit}); springs ${x.springs.join(' ')}; badge ${x.badge ? `«${x.badge.text}» ${x.badge.lines} line(s), ${x.badge.overLabel} px² over its label, cut ${x.badge.cut} px, inside the row ${x.badge.inRow}` : 'none'}`).join(' · '));
       // ── B: every zone — For-you (the chip beside it) crowded by a fixed spring wider than the window
       if (lang === 'zh' || P.face === 'box') {
         const B = [];
@@ -226,8 +248,8 @@ try {
           const left = x.springs.some((s) => s > 0.5) ? 1 : 0;
           const gave = x.els.filter((e) => e && !e.hidden && (e.taller > 0.5 || e.lines > e.nat.lines || e.iconSquashed > 0.5 || e.narrower > 0.5));
           const wrong = gave.filter((e) => !(e.id === 'taskbar-vault' && chipFine(e, left)));
-          check(`C ${P.face} zh @${x.w} px: the census — ${x.els.filter((e) => e && !e.hidden).length} elements in one over-full row (springs ${x.springs.join(' / ')}; row ${x.row.h} px high, ${x.row.over} px past its end): none taller than its own one-line box, none narrower than its content, no icon squashed${gave.length ? ' (gave: ' + gave.map((e) => e.id).join(', ') + ')' : ''}`,
-            wrong.length === 0 && x.row.h <= 40, wrong.map((e) => `${e.id} «${e.text}» ${Math.round(e.w)}/${Math.round(e.nat.w)} w, ${Math.round(e.h)}/${Math.round(e.nat.h)} h, ${e.lines} line(s), icon −${e.iconSquashed}`).join(' · '));
+          check(`C ${P.face} zh @${x.w} px: the census — ${x.els.filter((e) => e && !e.hidden).length} elements in one over-full row (springs ${x.springs.join(' / ')}; row ${x.row.h} px high — its own fit ${x.row.fit} — ${x.row.over} px past its end): none taller than its own one-line box, none narrower than its content, no icon squashed${gave.length ? ' (gave: ' + gave.map((e) => e.id).join(', ') + ')' : ''}`,
+            wrong.length === 0 && x.row.h <= x.row.fit + 1, wrong.map((e) => `${e.id} «${e.text}» ${Math.round(e.w)}/${Math.round(e.nat.w)} w, ${Math.round(e.h)}/${Math.round(e.nat.h)} h, ${e.lines} line(s), icon −${e.iconSquashed}`).join(' · '));
         }
       }
     }
