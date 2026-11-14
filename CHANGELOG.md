@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.401 — 2026-11-13
+
+### Fixed
+- The ages on the usage rings and on the account rows read m / h / d again in every language, and a ring's age no longer wraps or covers its label.
+- The “Vault locked” mark stays on one line with its lock icon in a crowded toolbar row; a fixed-width space set in Customize now gives way first.
+
 ## 2.369.400 — 2026-11-13
 
 ### Changed
