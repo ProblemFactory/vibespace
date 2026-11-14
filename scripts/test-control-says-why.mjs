@@ -286,6 +286,18 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   const css = /\.sfr-bar > \.bar-folded \{ display: none !important; \}/.test(CSS4) && /\.sort-btn\.sort-compact \.sort-ico \{ display: inline; \}/.test(CSS4) && !/#sort-toggle \{[^}]*(white-space: normal|max-width)/.test(CSS4);
   ok(r.join('|') === 'refresh|refresh+sort|refresh+sort+manage|refresh+sort+manage' && wired && css,
     'the sessions filter row never runs past the sidebar (evaluated): the sort\'s words, else its icon, else it and manage are rows of the ⋯ — the chrome-bar fold', JSON.stringify({ r, wired, css })); }
+{ // THE ONE ROW (the .402 rehearsal: test-artifacts-handover-ui red at 390 px — pick 1's «Auto-continue: off» words, 20 → 92 px,
+  // took the Artifacts chip's place): an OFF auto-continue is its ICON on the one-row bar, its words on the wide bar; ARMED keeps
+  // its words. EVALUATED: the real phoneBarFold at 390 px with the rehearsal's measured row (the box's face, model 113; the
+  // runner's, model 100) — the icon keeps «产出 · N» in the row; CONTROL: the words put back fold it
+  const CSB3 = read('src/lib/chat-status-bar.js');
+  const tc = await import(new URL('../src/lib/title-chips.js', import.meta.url).href);
+  const room = 390 - 24 - (36 + 8), row = (ar, model) => [{ key: 'search', w: 36 }, { key: 'model', w: model }, { key: 'goal', w: 20 }, { key: 'autoresume', w: ar }, { key: 'design', w: 28 }, { key: 'artifacts', w: 60 }];
+  const fold = (ar, model) => tc.phoneBarFold({ chips: row(ar, model), room, gap: 8 }).folded.has('artifacts');
+  const v = { boxIcon: fold(20, 113), runnerIcon: fold(20, 100), boxWords: fold(92, 113), runnerWords: fold(92, 100) };
+  ok(!v.boxIcon && !v.runnerIcon && v.boxWords && v.runnerWords, 'the one row at 390 px (evaluated phoneBarFold, both faces): an OFF auto-continue as its icon keeps the Artifacts chip in the row — CONTROL: its words put back fold it behind ⋯', JSON.stringify(v));
+  ok(/const offWords = this\._oneRow\(\) \? '' : ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(CSB3) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(CSB3) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: when \}\)\)/.test(CSB3),
+    'the rule in one sentence: on the one-row bar (a phone, a narrow window) an auto-continue that is OFF is its icon; armed, with its time, it keeps its words'); }
 { const UT2 = read('src/lib/user-todos-row.js');
   const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];
   const glyphOnly = btns.filter((m) => !/\bt\(|\btc\(|escHtml\(/.test(m[2]) && !/data-label=/.test(m[1])).map((m) => m[1].match(/class="([^"]*)"/)[1]);

@@ -760,7 +760,7 @@ const p2 = await newPage();
     const rec = ((JSON.parse(fs.readFileSync(path.join(wt, 'data', 'channels', 'adapters.json'), 'utf8')).adapters) || []).find((x) => x.id === id) || {}; const c = rec.credential || {};
     let sec = null; try { sec = c.appSecretEnc ? box.dec(c.appSecretEnc) : null; } catch { sec = 'UNREADABLE'; } return { label: rec.label, key: rec.credentialKey, appId: c.appId, secret: sec }; };
   const before = storeOf(B.id);
-  await p1.evaljs(`(() => { const d = ${DLG('edit')}; const n = d.querySelector('[data-field="name"]'); n.value = ${JSON.stringify('Gmail (copy) renamed')}; n.dispatchEvent(new Event('input', { bubbles: true })); d.querySelector('.dialog-actions .btn-create').click(); return 1; })()`);
+  await p1.evaljs(`(() => { const d = ${DLG('edit')}; const n = [...d.querySelectorAll('input')].find((i) => i.value === ${JSON.stringify(before.label)}); n.value = ${JSON.stringify('Gmail (copy) renamed')}; n.dispatchEvent(new Event('input', { bubbles: true })); d.querySelector('.dialog-actions .btn-create').click(); return 1; })()`);
   let after = null; for (let i = 0; i < 40; i++) { after = storeOf(B.id); if (after.label === 'Gmail (copy) renamed') break; await sleep(100); }
   ok(before.key === 'custom' && before.appId === CUSTOM_ID && before.secret === CUSTOM_SECRET && after.label === 'Gmail (copy) renamed' && after.key === 'custom' && after.appId === CUSTOM_ID && after.secret === CUSTOM_SECRET,
     `D3b: Save after changing only the name keeps the account's OWN client and the SAME stored secret (${JSON.stringify({ before: { ...before, secret: before.secret === CUSTOM_SECRET ? '=' : before.secret }, after: { ...after, secret: after.secret === CUSTOM_SECRET ? '=' : after.secret } })})`);
