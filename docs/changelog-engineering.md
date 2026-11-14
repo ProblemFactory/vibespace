@@ -24,6 +24,23 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The first row.** Measured on the real Agents panel at the list's top: the first row's badge is whole before and after (0 px cut by `.rail-panel-agents`; the badge sits 3 px above its row, inside the list's 4 px margin). The cut in the owner's picture is the crop or a scrolled panel — no rule clips it at the top.
 - **The pin** scripts/test-roster-badges-chrome.mjs (heavy, 53 legs): the owner's four rows (badges 2d / 41h / 2d / 4d, counts 7d / 4d / 41h / 21h, ages 97m / — / 27h / 24h) on the real Agents panel, en / zh / ja × a wide panel and the narrowest list that draws rings (341 px) × both faces: one line, off the label and every other ring, inside the clipping box, ONE unit style, the ages whole. Red on 66c6d99c0 (26 of 53: «41小时» 2 lines 69 px² over the label, «2天» beside «7d», «97分»); green on the cure. «168 小时» cannot be a badge: at 48 h a badge says 2d.
 
+### Known in 2.369.401 — still open from 2.369.400, and named with this hotfix (2026-11-14); each a pick of a later train
+- **K1 (from .400 K1: minor, from .399 K1).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it. A plugin status child in flight at a stop outlives the hub.
+- **K2 (from .400 K2: from .399 K2).** Laws 2 and 3 of queued-is-not-woke are not in this release: a message behind a turn that never ends waits with no bound and no For-you item.
+- **K3 (from .400 K3: from .399 K3, the hosted runners' Claude Code 2.1.323).** The suite of the hold door and of Stop (test-claude-steer-chrome) is red on about half its tries on the hosted runners, on released trees as well; on this box, with 2.1.322, it is green on every tree. Nothing in this release touches it.
+- **K4 (from .400 K4: file preview on a mount).** A healthy workbook queued behind one on a hung mount is told «Storage not responding».
+- **K5 (from .400 K5: the pairing sheet).** One Windows machine has three names along its pairing path: device, PC, machine.
+- **K6 (from .400 K6: the pairing sheet).** On one allow row of the sheet, «sessions» is explained as «conversations».
+- **K7 (from .400 K7: law 1).** A queued entry the release had already bound wrongly keeps that binding through the update, and is marked carried at its first listing.
+- **K8 (from .400 K8: connection-notice B, by design).** A reader that trickles while under 4 MiB of backlog is never cut: its memory is bounded per socket.
+- **K9 (from .400 K9: the owner's case).** The For-you window's «Reply:» label carries an option's tooltip.
+- **K10 (from .400 K10: the owner's case).** The open strip's place is not read again when a bar appears under it after it opened.
+- **K11 (from .400 K11: chrome-157; its docs and test cure rides 2.369.402).** The method-name shape check is pinned only by the heavy mediation suite; a fast pin rides .402. docs/kb-features.md still says a rowless method is refused «while the user drives», and its census list stops at Chrome 156. docs/kb-api.md's refusal-code list lacks method_unclassified; the code and the agent's manual are right. test-cdp-census's ci row still states 117 ms; the suite has grown since, and the row is restated in .402.
+- **K12 (from .400 K12: older than this train).** An ask's attached file chip is not drawn in the strip, also when the item is opened in place.
+- **K13 (the hosted runner, a test).** test-channel-window-render's leg ⑫ — the principal picker reopened after Save — can be red, then green on the retry, on a slow hosted runner: the suite reads the dialog without checking its own wait. Its test-only cure rides 2.369.402.
+- **K14 (the hosted fast tier, tests).** On a hosted runner 15–38 % slower than usual, a fast suite's timing leg can go red once; the release's fast job is judged by attempt (re-run alone, at most three), and the five such suites of 2.369.400's day are named in 2.369.402's notes.
+- **K15 (the toolbar's second row, named by the lock-chip census, not cured).** A second row holding more marks than fit, with no spring left to give, runs past its end (13 marks at a 769 px page: 441 px over); row 2 has no fold like row 1's ⋯.
+
 ## 2.369.400 — 2026-11-13
 
 ### ui-phone-and-fit pick 0 — THE OWNER'S CASE: a For-you row's options are whole at every width, and the strip's row opens in place (the owner 2026-11-13; 主开发's law, both halves)
