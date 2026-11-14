@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.402 — 2026-11-14
+
+### Added
+- An account added by pasting its long-lived token asks for its subscription type: sign in once (recommended), or choose it yourself.
+- You can change a long-lived token's subscription type at its row (⋯ → Subscription type…); a later sign-in replaces your choice and says so.
+
+### Changed
+- An account row names its plan by the plan's current name (Ultra, Max), and a row that never signed in no longer reads "logged in".
+
 ## 2.369.401 — 2026-11-13
 
 ### Fixed
