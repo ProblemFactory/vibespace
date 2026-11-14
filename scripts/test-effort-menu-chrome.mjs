@@ -7,7 +7,7 @@
 // page's /api/session-options is the hub route's own PURE answer (src/harness-efforts.js sessionOptionsAnswer over the
 // REAL harness registry, the claude CLI's parsed five). Each leg clicks the «推理强度» chip and reads the rows:
 //   ① antigravity: 默认（重置） + low … max — NO ultracode; the chip shows the COMMANDED effort «as asked at start»,
-//      «推理强度：?» only when nothing was asked; picking max sends set-effort max.
+//      «推理强度：未报告» only when nothing was asked (lane ui-language: was «推理强度：?»); picking max sends set-effort max.
 //   ② claude: 默认（重置） + low … max + ultracode (claude's own extra — unchanged).
 //   ③ opencode (no effort levels): NO effort chip at all.
 //   ④ MUTANT — a bar copy whose menu asks WITHOUT its backend (2.369.336) ⇒ ① RED: antigravity is offered ultracode.
@@ -136,7 +136,7 @@ try {
   ok(a.chip === 'high' && a.title.startsWith('推理强度（启动时指定的值 — 该 CLI 不报告每轮的强度）'), 'the «推理强度» chip shows the COMMANDED effort, titled «as asked at start (the CLI reports no per-turn effort)»', [a.chip, a.title]);
   ok(J(a.sent) === '["max"]' && a.chipAfter === 'max', 'picking max sends set-effort max and the chip follows', [a.sent, a.chipAfter]);
   const q = await probe('antigravity', { model: 'gemini-4-argon-high' });
-  ok(q.chip === '推理强度：?' && q.title.startsWith('启动时未指定推理强度，CLI 也不报告'), '«推理强度：?» only when nothing was asked — and the title says agy\'s own default applies', [q.chip, q.title]);
+  ok(q.chip === '推理强度：未报告' && q.title.startsWith('启动时未指定推理强度，CLI 也不报告'), '«推理强度：未报告» only when nothing was asked (was «推理强度：?» — lane ui-language: the absence in words) — and the title says agy\'s own default applies', [q.chip, q.title]);
   console.log('— ② claude');
   const c = await probe('claude', { model: 'claude-fable-5-1', effort: 'xhigh' });
   ok(J(words(c.rows)) === J(['默认（重置）', ...FIVE, 'ultracode']), 'the menu = 默认（重置） + low … max + ultracode (claude\'s own extra)', c.rows);
