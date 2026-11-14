@@ -24,6 +24,7 @@ const t = (s, p) => (typeof I18N.t === 'function' ? I18N.t(s, p) : s);
 const deviceLocale = () => (typeof I18N.deviceLocale === 'function' ? I18N.deviceLocale() : undefined);
 const resolveLang = () => (typeof I18N.resolveLang === 'function' ? I18N.resolveLang() : 'en');
 import { shortName } from '../when-words.js';
+import { countdownMark } from './usage-eta.js';   // THE countdown's spelling (PURE, imports nothing — the owner's 09-15 form)
 
 let PAGE_ZONE = null;   // null = the device's own zone
 /** app.js, at boot and when the instance's zone setting changes: the zone the page prints in. */
@@ -113,7 +114,7 @@ export function span(ms) {
  *  which is called where (a declared mark sink calls mark; a sentence never does). */
 export function durationMark(ms, { full = false, hoursFrom = 60, daysFrom = 1440 } = {}) {
   const m = Math.round(Math.abs(Number(ms) || 0) / 60000);
-  if (full) { const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60; return `${d ? `${d}d` : ''}${d || h ? `${h}h` : ''}${mm}m`; }
+  if (full) return countdownMark(m);   // a countdown: usage-eta's ONE spelling («2d23h59m»), the roster's fullEta says the same
   return m < 1 ? '<1m' : m < hoursFrom ? `${m}m` : m < daysFrom ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 }
 /** A row's age as a MARK: «4m» + the page's word for «ago» (the release's jobs rows: «4m ago» / «4m 前»). */

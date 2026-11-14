@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ETA_MIN_MS, accountResetEta, compactEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from '../src/lib/usage-eta.js';
+import { ETA_MIN_MS, accountResetEta, compactEta, bucketEta, bucketMayNameDeadline, bucketResetMs, countdownMark, fullEta } from '../src/lib/usage-eta.js';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0, passed = 0;
@@ -99,6 +99,8 @@ const full = [
   [30 * D, '30d0h0m', '30 d'],
 ];
 for (const [rem, want, why] of full) check(`${why} → ${JSON.stringify(want)}`, fullEta(NOW + rem, NOW) === want, fullEta(NOW + rem, NOW));
+check('fullEta IS countdownMark over whole minutes (ONE spelling: every minute from 1 min to 40 d)', Array.from({ length: 40 * 1440 }, (_, i) => i + 1).every((m) => fullEta(NOW + m * M, NOW) === countdownMark(m)));
+check('countdownMark spells the table\'s own form (2d21h38m · 2d0h5m · 3h0m · 38m · 0m)', ['2d21h38m', '2d0h5m', '3h0m', '38m', '0m'].join() === [2 * 1440 + 21 * 60 + 38, 2 * 1440 + 5, 180, 38, 0].map(countdownMark).join());
 check('fullEta: reset passed → null', fullEta(NOW - 5 * M, NOW) === null);
 check('fullEta: reset missing / NaN / non-numeric → null', fullEta(undefined, NOW) === null && fullEta(NaN, NOW) === null && fullEta('soon', NOW) === null);
 check('fullEta: now missing → null (no clock, no countdown)', fullEta(NOW + H, undefined) === null);
