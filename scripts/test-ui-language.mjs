@@ -118,7 +118,7 @@ export function scanFiles(files, repo = REPO) {
     // the names this file imports from the one formatter (§1b: every export of page-time has a reader)
     const ptNames = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][./]*(?:lib\/)?page-time\.js['"]/g)].flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean));
     // ⑦ marks: the lines that call page-time's mark / markAgo (the census reads which is called where)
-    const markLines = ptNames.some((x) => x === 'mark' || x === 'markAgo') ? src.split('\n').map((ln, i) => [i + 1, ln]).filter(([, ln]) => /(?<![.\w$])(?:mark|markAgo)\(/.test(ln.replace(/\s\/\/\s.*$/, ''))).map(([n, ln]) => ({ line: n, text: ln.trim() })) : [];
+    const markLines = ptNames.some((x) => x === 'durationMark' || x === 'markAgo') ? src.split('\n').map((ln, i) => [i + 1, ln]).filter(([, ln]) => /(?<![.\w$])(?:durationMark|markAgo)\(/.test(ln.replace(/\s\/\/\s.*$/, ''))).map(([n, ln]) => ({ line: n, text: ln.trim() })) : [];
     return { file: f, ...r, reached, ptNames, markLines };
   });
 }
@@ -180,19 +180,19 @@ function exemptLines(src) {
 const CAPS_RE = /\.charAt\(0\)\.to(?:Locale)?UpperCase\(\)|\[0\]\.to(?:Locale)?UpperCase\(\)|\.replace\(\s*\/(?:\^|\\b)(?:\.|\\w|\\S|\[a-z\])\/[gimsuy]*\s*,[^;]*?\.to(?:Locale)?UpperCase\(\)/;   // ⑥(d) — also `.replace(/^./, (c) => c.toUpperCase())` (the reader's M2c)
 /** ⑦ THE MARK SINKS (主开发 2026-11-14, the owner's «不如还是继续用 h/d»): every place a compact duration MARK is drawn — a row's
  *  age, a badge, a countdown — named by its line. A declared sink calls page-time's mark / markAgo and never a sentence's span /
- *  ago; a line that calls mark / markAgo and is NOT declared here is a sentence printing a mark — both red. */
+ *  ago; a line that calls durationMark / markAgo and is NOT declared here is a sentence printing a mark — both red. */
 export const MARK_SINKS = [
-  ['src/lib/jobs-panel.js', 'if (run.startedAt && !run.endedAt) bits.push(mark(', 'a job row: how long its run has gone'],
+  ['src/lib/jobs-panel.js', 'if (run.startedAt && !run.endedAt) bits.push(durationMark(', 'a job row: how long its run has gone'],
   ['src/lib/jobs-panel.js', 'else if (run.endedAt) bits.push(markAgo(', 'a job row: how long ago its run ended'],
-  ['src/lib/jobs-panel.js', "if (j.nextFireAt) bits.push(t('next') + ' ~' + mark(", 'a job row: when it fires next'],
+  ['src/lib/jobs-panel.js', "if (j.nextFireAt) bits.push(t('next') + ' ~' + durationMark(", 'a job row: when it fires next'],
   ['src/lib/jobs-panel.js', 'sage.textContent = sess.latestAt ? markAgo(', 'a conversation group\'s age'],
   ['src/lib/jobs-panel.js', 'age.textContent = g.latestAt ? markAgo(', 'a family group\'s age'],
-  ['src/lib/jobs-panel.js', '${run.endedAt ? mark(run.endedAt - run.startedAt)', 'a run row\'s duration'],
-  ['src/lib/usage-meter.js', 'const fmtDur = (sec) => mark(', 'the usage meter\'s reset countdown («2d23h59m»)'],
+  ['src/lib/jobs-panel.js', '${run.endedAt ? durationMark(run.endedAt - run.startedAt)', 'a run row\'s duration'],
+  ['src/lib/usage-meter.js', 'const fmtDur = (sec) => durationMark(', 'the usage meter\'s reset countdown («2d23h59m»)'],
   ['src/lib/utils.js', "label = age ? t('as of {when}', { when: markAgo(age) })", 'a host chip\'s age'],
-  ['src/lib/account-wall-words.js', 'if (t === markT) return mark(', 'a ring\'s stale-lane mark (the roster, the usage meter — hotfix 2.369.401)'],
-  ['src/lib/manage-agents.js', 'const ageLabel = age != null && age > 5 ? mark(', 'the roster row\'s age (hotfix 2.369.401)'],
-  ['src/lib/session-lifecycle.js', 'const ageTxt = age != null && age > 5 ? escHtml(mark(', 'the account-switch menu\'s age (hotfix 2.369.401)'],
+  ['src/lib/account-wall-words.js', 'if (t === markT) return durationMark(', 'a ring\'s stale-lane mark (the roster, the usage meter — hotfix 2.369.401)'],
+  ['src/lib/manage-agents.js', 'const ageLabel = age != null && age > 5 ? durationMark(', 'the roster row\'s age (hotfix 2.369.401)'],
+  ['src/lib/session-lifecycle.js', 'const ageTxt = age != null && age > 5 ? escHtml(durationMark(', 'the account-switch menu\'s age (hotfix 2.369.401)'],
 ];
 /** PURE: the mark findings over (the tree's mark-calling lines, a file → its source lines). */
 export function markFindings(markLines, linesOf, sinks = MARK_SINKS) {
@@ -200,9 +200,9 @@ export function markFindings(markLines, linesOf, sinks = MARK_SINKS) {
   for (const [f, anchor, why] of sinks) {
     const hits = (linesOf(f) || []).filter((ln) => ln.includes(anchor));
     if (hits.length !== 1) { out.push(`${f}: the mark sink «${anchor}» (${why}) is found ${hits.length}× — move or drop its row`); continue; }
-    if (/(?<![.\w$])(?:span|ago)\(/.test(hits[0]) || !/(?<![.\w$])(?:mark|markAgo)\(/.test(hits[0])) out.push(`${f}: the mark sink «${anchor}» (${why}) calls a SENTENCE's span / ago — a mark says mark()`);
+    if (/(?<![.\w$])(?:span|ago)\(/.test(hits[0]) || !/(?<![.\w$])(?:durationMark|markAgo)\(/.test(hits[0])) out.push(`${f}: the mark sink «${anchor}» (${why}) calls a SENTENCE's span / ago — a mark says durationMark()`);
   }
-  for (const m of markLines) if (!sinks.some(([f, anchor]) => f === m.file && m.text.includes(anchor))) out.push(`${m.file}:${m.line} calls mark / markAgo but is no declared mark sink — a sentence says span / ago (or declare the mark)`);
+  for (const m of markLines) if (!sinks.some(([f, anchor]) => f === m.file && m.text.includes(anchor))) out.push(`${m.file}:${m.line} calls durationMark / markAgo but is no declared mark sink — a sentence says span / ago (or declare the mark)`);
   return out;
 }
 /** ⑥(d) the AST form of a hand capitalisation: `<first piece>.to(Locale)UpperCase()` + `<value>.slice(1)` (or substring / substr) —
@@ -560,9 +560,9 @@ if (isMain) {
     const sc2 = scanFile('src/lib/sc2.js', "a.textContent = n.slice(0, 1).toUpperCase() + n.slice(1);\nb.title = n.substring(0, 1).toLocaleUpperCase() + n.substring(1);\nc.textContent = n.at(0).toUpperCase() + n.substr(1);\nd.textContent = n.toUpperCase() + m.slice(2);");
     ok(sc2.caps.length === 3 && sc2.caps.map((x) => x.line).join() === '1,2,3', '⑥(d) a capitalisation spelled with slice / substring / at(0) is named (the AST form: an upper-cased first piece + the rest); a whole upper-case is not', JSON.stringify(sc2.caps));
     // ⑦ marks (主开发 2026-11-14): a declared mark sink that calls a sentence's ago(), and an undeclared line printing a mark
-    const mk = markFindings([{ file: 'src/lib/x.js', line: 3, text: "p.textContent = t('Updated {ago}', { ago: markAgo(at) });" }, { file: 'src/lib/x.js', line: 1, text: 'a.textContent = mark(ms);' }],
-      (f) => (f === 'src/lib/x.js' ? ['a.textContent = mark(ms);', 'b.textContent = ago(at);', "p.textContent = t('Updated {ago}', { ago: markAgo(at) });"] : []), [['src/lib/x.js', 'a.textContent = mark('], ['src/lib/x.js', 'b.textContent = ago(', 'a row age']]);
-    ok(mk.length === 2 && mk.some((x) => /calls a SENTENCE/.test(x)) && mk.some((x) => /x\.js:3 calls mark/.test(x)), '⑦ a mark sink calling a sentence\'s ago() is named, and a sentence printing a mark is named; a declared mark is not', JSON.stringify(mk));
+    const mk = markFindings([{ file: 'src/lib/x.js', line: 3, text: "p.textContent = t('Updated {ago}', { ago: markAgo(at) });" }, { file: 'src/lib/x.js', line: 1, text: 'a.textContent = durationMark(ms);' }],
+      (f) => (f === 'src/lib/x.js' ? ['a.textContent = durationMark(ms);', 'b.textContent = ago(at);', "p.textContent = t('Updated {ago}', { ago: markAgo(at) });"] : []), [['src/lib/x.js', 'a.textContent = durationMark('], ['src/lib/x.js', 'b.textContent = ago(', 'a row age']]);
+    ok(mk.length === 2 && mk.some((x) => /calls a SENTENCE/.test(x)) && mk.some((x) => /x\.js:3 calls durationMark/.test(x)), '⑦ a mark sink calling a sentence\'s ago() is named, and a sentence printing a mark is named; a declared mark is not', JSON.stringify(mk));
     // the reader's round (13:41Z): its four green mutants, planted — each shape is RED here
     const m1c = scanFile('src/lib/m1c.js', "function sysLine(by) { return '{by} created the group'.replace('{by}', by); }\nfunction ok2(by) { return t('{by} created the group', { by }); }\nconst path = '/api/{id}/x'.replace('{id}', id);");
     ok(m1c.visible.length === 1 && m1c.visible[0].line === 1 && m1c.visible[0].sink === 'hand-filled', '① M1c: a {param} sentence filled by hand (`.replace(\'{by}\', by)`) is named wherever it stands; the same key through t(), and a path template, are not', JSON.stringify(m1c.visible));
@@ -670,7 +670,7 @@ if (isMain) {
   {
     const srcLines = new Map(); const linesOf = (f) => { if (!srcLines.has(f)) { try { srcLines.set(f, fs.readFileSync(path.join(REPO, f), 'utf8').split('\n')); } catch { srcLines.set(f, []); } } return srcLines.get(f); };
     const mf = markFindings(now.markLines, linesOf);
-    ok(mf.length === 0, `⑦ a compact duration MARK is drawn only at a declared mark sink, through page-time's mark (${MARK_SINKS.length} sinks, ${now.markLines.length} mark calls) — a sentence says span / ago`, mf);
+    ok(mf.length === 0, `⑦ a compact duration MARK is drawn only at a declared mark sink, through page-time's durationMark (${MARK_SINKS.length} sinks, ${now.markLines.length} mark calls) — a sentence says span / ago`, mf);
   }
   ok(now.plugins.length === 0, `⑥(e) every built-in plugin's label and description that is words has zh + ja rows (src/plugins — drawn through a dynamic t(p.label))`, now.plugins);
   ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);

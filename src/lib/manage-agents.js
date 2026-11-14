@@ -21,7 +21,7 @@ function cliConfigChipsHtml(cc, { where, remote = false }) {
   return `<div class="agents-cli-config">${lines.map((l) => `<div class="${cls(l.tone)}">${escHtml(l.text)}</div>`).join('')}</div>`;
 }
 import { t } from './i18n.js';
-import { dateOf, stampAt as when, mark } from './page-time.js';
+import { dateOf, stampAt as when, durationMark } from './page-time.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { cliWhereWords } from './cli-missing-dialog.js'; // lane cli-shell-truth: the census line (where the login shell found each CLI)
@@ -1760,7 +1760,7 @@ export function installManageAgents(App, ctx = {}) {
     // countdown moved under the donut it describes (every donut carries its
     // own now), and the min-width stays so the donut columns stay aligned.
     // a MARK: m / h in every language (page-time's mark — the owner's h/d); its title keeps the sentence («Last refreshed {n} min ago»)
-    const ageLabel = age != null && age > 5 ? mark(age * 60000, { hoursFrom: 100, daysFrom: Infinity }) : '';
+    const ageLabel = age != null && age > 5 ? durationMark(age * 60000, { hoursFrom: 100, daysFrom: Infinity }) : '';
     // Narrow-width companion (rail panel, 2.179.1): the donut cluster is
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full

@@ -164,17 +164,18 @@ This file is the engineers' record of every release: the lanes, the verification
   - test-codex-0153 / test-effort-extras are the release's lines again; test-harness-honesty and test-init-frame stand as they were.
   - The init-health note is the release's sentence again (test-init-frame pins it).
 - **No NAMES for protocol values in this unit.** value-words loses the effort / response-style / mcp-state / load-error / perm-mode tables, and permission-mode-labels its permissionModeShort. The seven rows only they read leave (§78). If the status strip's lane names values, the names come from ONE table beside each harness's descriptor.
-- **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `mark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
+- **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `durationMark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
   - The jobs rows, group ages and run duration, the usage meter's countdown, and the host chip's age go back to marks.
   - Census ⑦ declares the mark sinks (`MARK_SINKS`, 8) and reads which is called where: a sink calling span / ago is red, and so is an undeclared line calling mark.
-  - The hotfix 2.369.401's marks call page-time's `mark` (below).
+  - The hotfix 2.369.401's marks call page-time's `durationMark` (below).
 
 ### ui-language on 2.369.401 — ONE mark function (主开发 05:47Z: this lane rebases onto the hotfix, the only one that does)
 - The stack is replayed onto d64075ba4: the hotfix's six product files are all this lane's too, and session-lifecycle's import line merged line by line.
-- **The hotfix's marks go through page-time's `mark`:**
-  - the roster row's age (manage-agents) and the account-switch menu's age (session-lifecycle): `mark(age, { hoursFrom: 100, daysFrom: Infinity })`;
-  - the rings' stale-lane mark (manage-agents, usage-meter): account-wall-words `staleLaneAge(…, { t: markT })` returns `mark(…, { hoursFrom: 120, daysFrom: 2880 })`. `markT` stays the token a caller hands in (test-account-reset-door pins it); a sentence keeps the interface's keys.
+- **The hotfix's marks go through page-time's `durationMark`:**
+  - the roster row's age (manage-agents) and the account-switch menu's age (session-lifecycle): `durationMark(age, { hoursFrom: 100, daysFrom: Infinity })`;
+  - the rings' stale-lane mark (manage-agents, usage-meter): account-wall-words `staleLaneAge(…, { t: markT })` returns `durationMark(…, { hoursFrom: 120, daysFrom: 2880 })`. `markT` stays the token a caller hands in (test-account-reset-door pins it); a sentence keeps the interface's keys.
 - Census ⑦ MARK_SINKS: 8 → 11.
+- The function is named `durationMark`, never `mark`: test-bundle-globals reads every export name as a symbol, and «mark(» stands bare in two files' own helpers and in English prose («the vault's mark (…)»). The trap pick 4 met with `when`.
 - test-roster-live-usage hands `mark` to the usageHint it rebuilds from source.
 
 ## 2.369.402 — 2026-11-14

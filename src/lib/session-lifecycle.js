@@ -4,7 +4,7 @@ import { namedModel } from '../model-providers.js'; // THE model door (lane fabl
 import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
-import { stampAt as when, mark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, durationMark } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
@@ -1584,7 +1584,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (f == null && s7 == null && !scoped.length) return '';
       const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
       // a MARK: m / h in every language (page-time's mark — hotfix 2.369.401, the owner's «不如还是继续用 h/d»)
-      const ageTxt = age != null && age > 5 ? escHtml(mark(age * 60000, { hoursFrom: 100, daysFrom: Infinity })) : '';
+      const ageTxt = age != null && age > 5 ? escHtml(durationMark(age * 60000, { hoursFrom: 100, daysFrom: Infinity })) : '';
       const seg = (k, v) => (v == null ? '' : `<span class="bsw-seg${v.est ? ' bsw-est' : ''}${v.un ? ' bsw-unconfirmed' : ''}"${v.un ? ` title="${escHtml(v.un)}"` : ''}><span class="bsw-k">${escHtml(k)}</span>${pctHtml(v.p)}</span>`);
       return `<span class="bsw-usage">${seg('5h', f)}${seg('7d', s7)}${scoped.map(([l, v]) => seg(l, v)).join('')}${ageTxt ? `<span class="bsw-age">${ageTxt}</span>` : ''}</span>`;
     };
