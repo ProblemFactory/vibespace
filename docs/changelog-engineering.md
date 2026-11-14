@@ -165,6 +165,7 @@ This file is the engineers' record of every release: the lanes, the verification
   - The init-health note is the release's sentence again (test-init-frame pins it).
 - **No NAMES for protocol values in this unit.** value-words loses the effort / response-style / mcp-state / load-error / perm-mode tables, and permission-mode-labels its permissionModeShort. The seven rows only they read leave (§78). If the status strip's lane names values, the names come from ONE table beside each harness's descriptor.
 - **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `durationMark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
+  - A countdown (`full`) and the roster's / the cap ring's `fullEta` are ONE spelling: usage-eta `countdownMark` (the owner's 09-15 form, byte for byte — the module imports nothing, so it lives there). No drawn character changes; test-usage-eta and the census pin the two equal over every minute of 40 d.
   - The jobs rows, group ages and run duration, the usage meter's countdown, and the host chip's age go back to marks.
   - Census ⑦ declares the mark sinks (`MARK_SINKS`, 8) and reads which is called where: a sink calling span / ago is red, and so is an undeclared line calling mark.
   - The hotfix 2.369.401's marks call page-time's `durationMark` (below).
