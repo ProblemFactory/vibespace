@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - An account added by pasting its long-lived token asks for its subscription type: sign in once (recommended), or choose it yourself.
 - You can change a long-lived token's subscription type at its row (⋯ → Subscription type…); a later sign-in replaces your choice and says so.
+- A Windows machine with no usable ffmpeg gets «Get FFmpeg» on that line. It first says what is fetched and from where; the machine fetches it, no admin rights.
+- A setting a machine needs from you now has its own button: a Mac's Sharing and Command Line Tools, Windows' Remote Desktop and Sound pages.
+- Pairing a device now says what it will be used for and sets that up as it pairs; whatever it could not set up is said, and the pairing still works.
 
 ### Changed
 - An account row names its plan by the plan's current name (Ultra, Max), and a row that never signed in no longer reads "logged in".
@@ -26,6 +29,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A picture Claude Code or Codex showed is drawn from the conversation's own record, so it still shows once its temporary file is gone, in old conversations too.
 - A file you dropped into a chat whose folder is temporary is kept with the conversation, the chat says where, and a file of the same name is never replaced.
 - Settings › Chat says which dropped files are kept, and removes the files of conversations that no longer exist when you ask.
+- Installing xpra from xpra.org now checks that xpra.org's key file is exactly the known one before trusting it.
 
 ## 2.369.401 — 2026-11-13
 
