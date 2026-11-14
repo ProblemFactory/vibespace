@@ -12,6 +12,12 @@
 // ONE fold for both roads: the restore (session-store chatStatus: every result on record) and the live road
 // (message-manager: each result as it lands; its turn_complete carries the folded figure and the bar REPLACES its number
 // with it — never adds). What the figure means is unchanged: the CLI's own estimate at API prices.
+// THE KEPT FACT (主开发's follow-up, 01:54Z): a wrapper buffer keeps only its tail — a conversation that outlived a process
+// loses the earlier segments from it, and a restart would show the present segment only (the figure SHRANK). The fold's
+// state {done, last, key} is therefore kept on the conversation's own meta record (`costKept`, written after each result
+// by the claude stdout consumer) and resumed BEFORE the buffer: `costResume(kept, records)` folds only the results after
+// the kept one (its `key`), or every result when the kept one was trimmed away (they are all newer). On a CLI too old to
+// write its share, a process's first result says so itself: `result_index` 0 — a restart even when its total is higher.
 // PURE: imports nothing.
 
 /** The fold before any result: `done` = the closed segments' last totals summed, `last` = the open segment's last total. */
@@ -37,14 +43,57 @@ function costStep(state, total, since = null) {
   return restart ? { done: st.done + (st.last || 0), last: t } : { done: st.done, last: t };
 }
 
+/** A result's own key: its uuid (2.1.308+), else a fingerprint of what it reports. */
+function costKey(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.uuid === 'string' && raw.uuid) return raw.uuid;
+  return ['fp', raw.session_id, raw.result_index, raw.num_turns, raw.duration_ms, raw.total_cost_usd].join('|');
+}
+
+/** A fold state that can be resumed: {done ≥ 0, last null | ≥ 0, key}. */
+function validCost(st) {
+  return !!st && typeof st === 'object' && Number.isFinite(st.done) && st.done >= 0 && (st.last === null || (Number.isFinite(st.last) && st.last >= 0));
+}
+
+/** One RESULT RECORD folded in (both roads call this): its key is kept; the same record twice folds once; with no
+ *  since-last share (a CLI before 2.1.312) `result_index` 0 marks a process's first result — a restart whatever its total. */
+function costFold(state, raw) {
+  const st = validCost(state) ? state : COST_START;
+  if (!raw || raw.type !== 'result') return st;
+  const t = raw.total_cost_usd;
+  if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) return st;
+  const key = costKey(raw);
+  if (key && st.key === key) return st;
+  const since = sinceLastCost(raw);
+  // a CLI too old to write its share (before 2.1.312) still numbers its results per process: index 0 = a restart. With the
+  // share present it decides alone — a resume that CARRIES its total forward also starts at index 0, and stays one segment
+  const first = since === null && raw.result_index === 0 && st.last !== null;
+  const next = costStep(first ? { done: st.done + st.last, last: null } : st, t, since);
+  return next === st || next === COST_START ? st : { ...next, key };
+}
+
+/** THE RESTORE: the kept fact first, then the results the buffer holds after it. */
+function costResume(kept, records) {
+  const rs = (records || []).filter((m) => m && m.type === 'result');
+  if (!validCost(kept)) return rs.reduce(costFold, COST_START);
+  const at = kept.key ? rs.findIndex((r) => costKey(r) === kept.key) : -1;
+  return rs.slice(at + 1).reduce(costFold, { done: kept.done, last: kept.last, key: kept.key || null });
+}
+
+/** The result records of a wrapper buffer's text (the boot reads the file; only a line naming a result is parsed). */
+function resultsIn(text) {
+  const out = [];
+  for (const l of String(text || '').split('\n')) {
+    if (!l.includes('"type":"result"')) continue;
+    try { const o = JSON.parse(l); if (o && o.type === 'result') out.push(o); } catch { }
+  }
+  return out;
+}
+
 /** The figure a fold shows. */
 function costShown(state) { return state && Number.isFinite(state.done) ? state.done + (state.last || 0) : 0; }
 
-/** The restore: every claude `result` record on record, in order. */
-function costOfResults(records) {
-  let st = COST_START;
-  for (const m of records || []) if (m && m.type === 'result') st = costStep(st, m.total_cost_usd, sinceLastCost(m));
-  return st;
-}
+/** Every claude `result` record on record, in order, with no kept fact. */
+function costOfResults(records) { return costResume(null, records); }
 
-module.exports = { COST_START, sinceLastCost, costStep, costShown, costOfResults };
+module.exports = { COST_START, sinceLastCost, costStep, costShown, costOfResults, costKey, validCost, costFold, costResume, resultsIn };

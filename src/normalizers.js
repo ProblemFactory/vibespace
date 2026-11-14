@@ -648,8 +648,12 @@ const artifactsOptsOf = (session, sessionId) => { const o = artifactDeriveOpts({
 function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
+  // 2.369.402: the conversation's cost fold rides the rebuild — the old normalizer's (the kept fact the boot resumed + every
+  // result since) seeds the new one, whose replay passes over the results it already counted (src/cost-segments.js)
+  const carriedCost = typeof session._normalizer?.costState === 'function' ? session._normalizer.costState() : null;
   const mm = createMessageManager(session.backend || 'claude', sessionId, { threadId: session.backendSessionId || session.claudeSessionId || null }); // the rendered conversation's id = the codex ledger-key DEFAULT (file-tagged records key by their own file; wrapper_meta re-points it; null before a fresh thread is adopted)
   for (const h of opHandlers) mm.onOp(h);
+  if (carriedCost && typeof mm.seedCost === 'function') mm.seedCost(carriedCost, { seek: true });
   if (typeof mm.setHelperAskedAt === 'function') mm.setHelperAskedAt(session._helperAskedAt || null); // verify r3: a rebuilt ask keeps its real arrival (the 60 s inbox clock survives the restart)
   session._normalizer = mm;
   session._normEpoch = Date.now();

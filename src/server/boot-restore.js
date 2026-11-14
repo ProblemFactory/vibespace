@@ -10,6 +10,8 @@ const path = require('path');
 const { restoredTurnState } = require('../turn-state.js'); // PURE (lane parked-ask-stall): the ring's last turn-state record
 const pty = require('node-pty');
 const { createMessageManager } = require('../normalizers');
+const { costResume, resultsIn } = require('../cost-segments.js'); // PURE (2.369.402): the conversation's cost fold
+const costSeedOf = (kept, bufferText) => costResume(kept, resultsIn(bufferText)); // the kept fact, then the results the buffer holds after it
 const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck holds a listener SET (the liveness stamp + the consumer)
 const { dedupWebuiSockets } = require('../session-store');
 const { list: harnessList } = require('../harnesses');
@@ -714,6 +716,9 @@ function restoreSessions() {
     if (sessionMode === 'chat') {
       session._normalizer = createMessageManager(session.backend || 'claude', id);
       session._normEpoch = Date.now();
+      // 2.369.402: the conversation's cost fold — the kept fact (meta.costKept) resumed over the results the buffer still holds
+      // (a trimmed head lost the earlier processes; the kept fact did not) — src/cost-segments.js
+      if (typeof session._normalizer.seedCost === 'function') { try { session._normalizer.seedCost(costSeedOf(meta.costKept, savedBuffer)); } catch { } }
       session._normalizer.onOp((op) => {
         try { if (session.host && session.keeperSid) sbNoteServerOp(session.host, session.keeperSid, op); } catch { } // step-2 dark tap (the daemon streams by ITS sid = keeperSid)
         broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
@@ -995,6 +1000,7 @@ async function readoptOrphanKeeperSessions() {
     });
     session._normalizer = createMessageManager('claude', id);
     session._normEpoch = Date.now();
+    try { session._normalizer.seedCost(costSeedOf(meta.costKept, '')); } catch { } // 2.369.402: the kept cost fold (no buffer here)
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
