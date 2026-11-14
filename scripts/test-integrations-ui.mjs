@@ -697,8 +697,11 @@ const p2 = await newPage();
   await p1.probe('the red line + Reconnect button', `.rail-panel-channels .chan-account[data-adapter="${B.id}"] .chan-sec-reauth`);
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-reauth-btn').click(); 1`);
   ok(await p1.evaljs(WAIT_DLG('reauth')), 'the button opens Re-authorize');
-  const re1 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; const kids = [...d.children].filter((e) => e.style.display !== 'none').map((e) => e.tagName === 'LABEL' ? 'label:' + e.textContent : e.tagName === 'SELECT' ? 'select' : e.tagName === 'BUTTON' ? 'button:' + e.textContent : e.tagName === 'INPUT' ? 'input' : e.className); const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { order: kids, client: d.querySelector(':scope > select').value, hint: d.firstElementChild.textContent, id: inputs.map((i) => i.value)[0], secret: inputs.map((i) => i.value)[1] }; })()`);
-  ok(re1.client === 'custom' && re1.id === CUSTOM_ID && re1.secret === CUSTOM_SECRET, `the OAuth client select on top carries the account's OWN custom client, prefilled (${JSON.stringify({ client: re1.client, id: re1.id })})`);
+  const re1 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; const kids = [...d.children].filter((e) => e.style.display !== 'none').map((e) => e.tagName === 'LABEL' ? 'label:' + e.textContent : e.tagName === 'SELECT' ? 'select' : e.tagName === 'BUTTON' ? 'button:' + e.textContent : e.tagName === 'INPUT' ? 'input' : e.className); const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { order: kids, client: d.querySelector(':scope > select').value, hint: d.firstElementChild.textContent, id: inputs.map((i) => i.value)[0], secret: inputs.map((i) => i.value)[1], held: (d.querySelector('.mounts-held .mounts-held-state') || {}).textContent || null, leak: d.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)}) }; })()`);
+  // THE WRITE-ONLY LAW (the owner's word, 2026-11-13 — it replaces July's «the edit form pre-fills the real secrets»): the
+  // account's OWN client is in place — «custom», its client ID shown — and its secret is HELD («Saved» + «Replace…»), its bytes
+  // nowhere in the dialog; Sign in with the box left empty uses the stored secret (the consent below runs under this client)
+  ok(re1.client === 'custom' && re1.id === CUSTOM_ID && re1.secret === undefined && re1.held === 'Saved' && !re1.leak, `the OAuth client select on top carries the account's OWN custom client — its ID shown, its secret held, never its bytes (${JSON.stringify({ client: re1.client, id: re1.id, held: re1.held, leak: re1.leak })})`);
   ok(/^Google reported the saved sign-in as expired or revoked/.test(re1.hint) && re1.order[0] === 'mounts-field-hint' && re1.order[1] === 'label:OAuth client' && re1.order.includes('button:Sign in with Google'), `the storage shape: who reported the death → the client select → Sign in with Google (${JSON.stringify(re1.order)})`);
   await p1.probe('the re-authorize dialog', '#chan-reauth-dialog .dialog');
   // lane lark-signin-dialog (the owner 2026-10-26: his dialog finished 77 s after the consent landed — it waited for the pass
@@ -747,11 +750,24 @@ const p2 = await newPage();
   // (m) Edit on the custom account prefills the SECRET (D3)
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-head .mounts-icon-btn').click(); 1`);
   ok(await p1.evaljs(WAIT_DLG('edit')), 'Edit on the custom account');
-  const ec = await p1.evaljs(`(() => { const d = ${DLG('edit')}; const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { client: d.querySelector(':scope > select').value, values: inputs.map((i) => i.value), labels: ${visibleLabels('edit')} }; })()`);
-  ok(ec.client === 'custom' && ec.values.includes(CUSTOM_ID) && ec.values.includes(CUSTOM_SECRET) && ec.labels.includes('Custom OAuth client ID') && ec.labels.includes('Custom OAuth client secret'), `D3: the custom client id AND secret are prefilled with their real values (the storage edit rule) (${JSON.stringify(ec.labels)})`);
+  const ec = await p1.evaljs(`(() => { const d = ${DLG('edit')}; const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { client: d.querySelector(':scope > select').value, values: inputs.map((i) => i.value), labels: ${visibleLabels('edit')}, held: (d.querySelector('.mounts-held .mounts-held-state') || {}).textContent || null, leak: d.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)}) }; })()`);
+  // THE WRITE-ONLY LAW (the owner's word, 2026-11-13; July's D3 «prefilled with their real values» is replaced): the client ID
+  // is shown (not a secret), the secret is HELD — «Saved» + «Replace…» — and its bytes are nowhere in the dialog
+  ok(ec.client === 'custom' && ec.values.includes(CUSTOM_ID) && !ec.values.includes(CUSTOM_SECRET) && ec.held === 'Saved' && !ec.leak && ec.labels.includes('Custom OAuth client ID') && ec.labels.includes('Custom OAuth client secret'), `D3: the custom client's ID is shown, its secret HELD («Saved» + «Replace…»), never its bytes (${JSON.stringify({ labels: ec.labels, held: ec.held, leak: ec.leak })})`);
+  // D3b — SAVE WITHOUT TOUCHING THE SECRET KEEPS IT (主开发 11:58Z, measured on the store): only the name changes; the account
+  // keeps ITS OWN client (credentialKey custom, the same client ID) and the SAME stored secret (never emptied, never a placeholder)
+  const storeOf = (id) => { const { secretBox } = require(path.join(wt, 'src/secret-box.js')); const box = secretBox(path.join(wt, 'data', '.channels-key'));
+    const rec = ((JSON.parse(fs.readFileSync(path.join(wt, 'data', 'channels', 'adapters.json'), 'utf8')).adapters) || []).find((x) => x.id === id) || {}; const c = rec.credential || {};
+    let sec = null; try { sec = c.appSecretEnc ? box.dec(c.appSecretEnc) : null; } catch { sec = 'UNREADABLE'; } return { label: rec.label, key: rec.credentialKey, appId: c.appId, secret: sec }; };
+  const before = storeOf(B.id);
+  await p1.evaljs(`(() => { const d = ${DLG('edit')}; const n = d.querySelector('[data-field="name"]'); n.value = ${JSON.stringify('Gmail (copy) renamed')}; n.dispatchEvent(new Event('input', { bubbles: true })); d.querySelector('.dialog-actions .btn-create').click(); return 1; })()`);
+  let after = null; for (let i = 0; i < 40; i++) { after = storeOf(B.id); if (after.label === 'Gmail (copy) renamed') break; await sleep(100); }
+  ok(before.key === 'custom' && before.appId === CUSTOM_ID && before.secret === CUSTOM_SECRET && after.label === 'Gmail (copy) renamed' && after.key === 'custom' && after.appId === CUSTOM_ID && after.secret === CUSTOM_SECRET,
+    `D3b: Save after changing only the name keeps the account's OWN client and the SAME stored secret (${JSON.stringify({ before: { ...before, secret: before.secret === CUSTOM_SECRET ? '=' : before.secret }, after: { ...after, secret: after.secret === CUSTOM_SECRET ? '=' : after.secret } })})`);
+  await api('PUT', `/api/channels/adapters/${encodeURIComponent(B.id)}`, { label: before.label }, { 'Sec-Fetch-Site': 'same-origin' });   // the name back for the legs below
   ok(!(await p2.evaljs(`document.body.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)})`)), 'the secret never reached the OTHER client (it rides only the owner-only config route, never a broadcast)');
   ok(!(await api('GET', '/api/channels')).text.includes(CUSTOM_SECRET), 'nor the digest');
-  await p1.evaljs(`document.querySelector('[id^="chan-account-"] .dialog-close').click(); 1`);
+  await p1.evaljs(`(() => { const x = document.querySelector('[id^="chan-account-"] .dialog-close'); if (x) x.click(); return 1; })()`);
 
   // (n) Remove: refused BY NAME while referenced; an unreferenced account goes
   const conv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
