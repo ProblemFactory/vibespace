@@ -405,14 +405,24 @@ console.log('THE CARD · NO BILLED TURN · NOTHING REACHES A CLIENT · THE WORDS
   const name = 'a {since} $& name';
   ok('…a name holding «{since}» or a «$» pattern cannot corrupt the stored English text', WW.ownerWords({ name, n: 2, since: 1_800_000_000_000 }).text.startsWith(`2 group messages have not been handed to ${name} yet`));
   // every tracked file under src, server.js, data/bin, searched by git grep for the gone names as FIXED strings (one process; a JS
-  // alternation over the whole tree was 0.3 s of this suite — 主开发 17:45Z item 4); no match = exit 1
-  const GONE = ['group-waits', 'waitsAt', 'loadWaits', 'keptFrom', 'nothingBehind', 'setWaitRecord', 'waitRecord(', 'noteStillWaiting', 'waitTold', 'waitsOf(', 'refillWaits', 'migrateWaits', 'waitingFor(', 'WAIT_READS_PER_MIN', 'readSeen', 'handedAtOnce', 'adoptOf', '_turnQuietSince', '_turnLifeBack', 'lifeWitness', 'quiet-turn', '/api/turn-quiet', '2026-11-waits-kept'];
+  // alternation over the whole tree was 0.3 s of this suite — 主开发 17:45Z item 4); no match = exit 1. A gone name that is an
+  // ordinary word is named by its SHAPE, the way the removed thing was spelled: the cut's `function keptFrom(g, tail)` and its
+  // engine hook `_keptFrom` — never the bare word, which another lane may use for something else (2.369.402: chat-attachments'
+  // `keptFrom`, the temporary folder an upload was kept away from — 主开发 14:05Z)
+  const GONE = ['group-waits', 'waitsAt', 'loadWaits', 'keptFrom(', '_keptFrom', 'nothingBehind', 'setWaitRecord', 'waitRecord(', 'noteStillWaiting', 'waitTold', 'waitsOf(', 'refillWaits', 'migrateWaits', 'waitingFor(', 'WAIT_READS_PER_MIN', 'readSeen', 'handedAtOnce', 'adoptOf', '_turnQuietSince', '_turnLifeBack', 'lifeWitness', 'quiet-turn', '/api/turn-quiet', '2026-11-waits-kept'];
   const grepped = (() => { try { return String(require('node:child_process').execFileSync('git', ['grep', '-lzF', ...GONE.flatMap((w) => ['-e', w]), '--', 'src', 'server.js', 'data/bin'], { cwd: REPO })); } catch (e) { if (e && e.status === 1) return ''; throw e; } })();
   const left = grepped.split('\0').filter((f) => f && (/\.(js|mjs|cjs)$/.test(f) || f.startsWith('data/bin/')));
   if (/applyMarks|stampWaits|function keep\(/.test(read('src/server/groups-engine.js'))) left.push('src/server/groups-engine.js (the cut\'s keep / applyMarks / stampWaits)');
   if (/test-group-waits|group-waits/.test(read('scripts/ci.mjs'))) left.push('scripts/ci.mjs (a test-group-waits row)');
   ok('THE REMOVAL (the deletion list of the page, against the cut 9a9b3a65a and shape B): no ledger store, seq, load, kept instants, wait record, told mark, waitsOf, migration — none of shape B\'s definitions either; the cut\'s and shape B\'s end words gone',
     left.length === 0 && !fs.existsSync(path.join(REPO, 'src/server/group-waits.js')) && !fs.existsSync(path.join(REPO, 'scripts/test-group-waits.mjs')) && !/not delivered — the hub dropped them|the conversation or its group is gone|it was muted in that group|It is not in a turn now\./.test(read('src/foryou-actions.js') + read('src/lib/i18n-zh.js') + read('src/lib/i18n-ja.js') + read('src/wait-words.js')), J(left));
+  {   // the needles tell the removed definition from an unrelated name of the same letters (主开发 14:05Z): the cut's own lines
+      // (9a9b3a65a, src/server/groups-engine.js) are caught; chat-attachments' field and variable (2.369.402) are not
+    const hit = (l) => GONE.some((w) => l.includes(w));
+    const CUT = ['  function keptFrom(g, tail) {', '      const k = keptFrom(g, tail);', '    _kept: (gid) => GW.get(gid), _keptFrom: (gid, tail) => keptFrom(getGroup(gid), tail),'];
+    const OTHER = ['  let keptFrom = null;   // the temporary folder the files were kept away from', '        if (home) { keptFrom = destDir; destDir = x; }', "    return (data.files || []).map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '' } : f));", '    if (keptFrom) {', "{ dir: kept.keptDir, from: kept.keptFrom }"];
+    ok('…THE REMOVAL names each gone thing by its shape: the cut\'s keptFrom definition, call and hook are caught; an unrelated `keptFrom` field or variable (chat-attachments, 2.369.402) is not', CUT.every(hit) && !OTHER.some(hit), J({ cut: CUT.map(hit), other: OTHER.map(hit) }));
+  }
 }
 
 console.log('RED CONTROLS — patched copies, each rule taken out');
