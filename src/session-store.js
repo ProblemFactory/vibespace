@@ -15,6 +15,7 @@ const { readJsonlTail } = require('./adapters/codex');
 // A test suite's synthetic transcript is never a conversation (see the essay
 // in src/fixture-guard.js — one declaration, shared with the usage walk).
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
+const { costOfResults, costShown } = require('./cost-segments.js'); // PURE (2.369.402): THE ONE fold of the CLI's running totals — this restore and message-manager's live road
 const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: SHARED — the witness's storage roots (none in a process nobody set)
 
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
@@ -951,7 +952,7 @@ class SessionMessages {
   chatStatus() {
     this._ensureParsed();
     const msgs = this._all;
-    let lastUsage = null, model = null, contextWindow = 0, totalCost = 0, slashCommands = null, permissionMode = null;
+    let lastUsage = null, model = null, contextWindow = 0, slashCommands = null, permissionMode = null;
     let assistantModel = null, iAsst = -1;
     // Scan depth: the tail of _all can be dominated by hundreds of surviving
     // buffer records (stdout-only system/hook events that never dedup against
@@ -1043,7 +1044,8 @@ class SessionMessages {
       const used = (lastUsage.input_tokens || 0) + (lastUsage.cache_read_input_tokens || 0) + (lastUsage.cache_creation_input_tokens || 0);
       if (used > 190000) contextWindow = 1000000;
     }
-    for (const m of msgs) { if (m.type === 'result' && m.total_cost_usd) totalCost += m.total_cost_usd; }
+    // the CLI's total_cost_usd is its PROCESS's running total: the shown figure is each segment's LAST total, summed (src/cost-segments.js)
+    const totalCost = costShown(costOfResults(msgs));
     if (!lastUsage && !model) return null;
     return {
       model, ...(lastAsked ? { lastAsked } : {}), lastUsage, contextWindow, total_cost_usd: totalCost, slashCommands, permissionMode, // lastAsked: the newest turn's asked model where its record states one (lane fable-52-cli-321 rounds 14–15)

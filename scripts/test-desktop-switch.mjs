@@ -619,7 +619,7 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
     const cv = read('src/lib/chat-view.js'), lab = cv.slice(cv.indexOf('  _onServerStreamLabel(label, kind) {'), cv.indexOf('\n  }\n', cv.indexOf('  _onServerStreamLabel(label, kind) {')));
     const ts = cv.slice(cv.indexOf('  _turnStarted() {'), cv.indexOf('\n  }\n', cv.indexOf('  _turnStarted() {')));
     ok(!!lab && !/_turnStarted\(/.test(lab) && /turnWaitStep\(\{ why: \[\.\.\.\(w\._waitWhy \|\| \[\]\)\], waiting: cl\.contains\('window-waiting'\) \}, 'start'\)/.test(ts) && /import \{ turnWaitStep, turnSeq \} from '\.\.\/desktop-switch\.js';/.test(cv)
-      && /this\._channelTouches\?\.noteTurn\(msg\.ts\);\n(?:\s*\/\/[^\n]*\n)*\s*this\._turnSeqNote\(\{ record: msg \}\);/.test(cv) && /this\._statusBar\.addCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);\n\s*this\._turnSeqNote\(\{ done: true \}\);/.test(cv)
+      && /this\._channelTouches\?\.noteTurn\(msg\.ts\);\n(?:\s*\/\/[^\n]*\n)*\s*this\._turnSeqNote\(\{ record: msg \}\);/.test(cv) && /this\._statusBar\.turnCost\(op\.data\?\.cost, op\.data\?\.modelUsage\);\n\s*this\._turnSeqNote\(\{ done: true \}\);/.test(cv)
       && /_turnSeqNote\(ev\) \{\n\s*const r = turnSeq\(this\._turnSeqState, \{ \.\.\.ev, epoch: this\._normEpoch \}\);\n\s*this\._turnSeqState = r\.s;\n\s*if \(r\.starts\) this\._turnStarted\(\);/.test(cv),
       'chat-view: every record (above the deferral, every path) and every completion feed PURE turnSeq; a record of a LATER turn ends the finished turn\'s mark through turnWaitStep — the activity label ends nothing (r3)');
   }
@@ -656,7 +656,7 @@ console.log('⑪ THE WAITING DOORS (lane phone-take-photo, the owner 2026-11-10 
         sessionId: SID, app: {}, winInfo: { element, _waitWhy: new Set(), _notifyChanged() { } },
         ws: { send() { }, onGlobal(h) { handlers.push(h); }, offGlobal(h) { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); }, attachesInFlight: () => 0 },
         _readOnly: false, _disconnected: false, _disposed: false, _suspended: false, _normEpoch: 'e1', _seqEpoch: 'e1', _lastSeq: 10, _serverOpSeq: 10,
-        _chatInput: { setDisconnected() { } }, _statusBar: { addCost() { }, setModel() { } }, _trace() { }, _noteTurnBoundary() { }, _hideTyping() { }, _showTyping() { }, _startCollabTick() { },
+        _chatInput: { setDisconnected() { } }, _statusBar: { turnCost() { }, setModel() { } }, _trace() { }, _noteTurnBoundary() { }, _hideTyping() { }, _showTyping() { }, _startCollabTick() { },
         _applyInitHealth() { }, _applyLiveMeta() { }, applyStatus() { }, _noteRecordKind() { }, _reattachCatchUp() { }, _attachSlabHint: () => 'floor',
         _teleported: true, _total: 0, _newMsgCount: 0, _scrollBtn: { innerHTML: '', classList: { remove() { } } }, _messages: [], _renderedMsgIds: new Set(), _elements: new Map(),
       });

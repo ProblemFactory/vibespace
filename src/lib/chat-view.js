@@ -4996,7 +4996,7 @@ class ChatView {
     } else if (op.subtype === 'turn_complete') {
       this._noteTurnBoundary();
       this._hideTyping();
-      this._statusBar.addCost(op.data?.cost, op.data?.modelUsage);
+      this._statusBar.turnCost(op.data?.cost, op.data?.modelUsage);
       this._turnSeqNote({ done: true }); // the completion's place in the turn sequence (lane phone-take-photo r3)
       // Blink window
       if (!this.winInfo.element.classList.contains('window-active')) {
