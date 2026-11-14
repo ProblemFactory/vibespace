@@ -13,6 +13,15 @@
 //      declares — by default the sentence IS the `words` of a needLine call whose `doors` hold the live door
 //   ③ CONTROLS: a new sentence a net catches that no row claims is RED by name; a surface stating a present-door need without its
 //      door is RED by name
+//   ⑩ THE STORED-WORDS CENSUS (the closure verifier's list for picks 3–6, item 1 — a hand list of five missed a sixth): every producer
+//      that STORES words is read from the tree — each For-you store's add / redrawItem and the i18n its item keeps (storedWordsReader),
+//      here and in the last release (git cat-file; a depth-1 clone holds none: a named SKIP). Found on the lane's .401 tree: 94 filings
+//      in 43 producer files (2 of them pass-through forYou adapters); the release 66c6d99c0 stored 435 sentences with rows, 6 of them
+//      filed by no producer now — the 6 STORED_WORDS_LEGACY rows; of its 89 zh rows gone at 30378b3fc ONE was stored (the paused
+//      feedback forward's detail), the other 88 were never stored. A SERVER NOTICE's words are not stored as keys anywhere a later page
+//      draws them: serverNotice sends {key, params} once, the page words it on arrival, and its toast history (localStorage) keeps the
+//      words as said — never the key — so a reworded notice key (pick 5's LLM stop notice) strands nothing
+// DEBT (closure 3, the verifier's M5): the nets read the ENGLISH key — a need word added to a zh / ja VALUE only is not seen.
 // The machine table is read when it exists (it lands on its own lane's pick); the ui table always.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -380,7 +389,11 @@ function shapeReader({ follow = null, read = null } = {}) {
     };
     go(n);
     const doors = objs.filter((o) => propOf(o, 'run') || propOf(o, 'label'));
-    return { doors, live: doors.filter((o) => liveRun((propOf(o, 'run') || {}).value)), dead: doors.filter((o) => !liveRun((propOf(o, 'run') || {}).value)), opaque };
+    // closure 3 (item 2): a run whose every call CLOSES (close / rclose / iclose / m.close() / x.remove() / hide) reaches no act — it
+    // counts only on a door whose words ARE the closing («Close», «Cancel», «Dismiss»; door id …-close / dismiss / cancel)
+    const closesOnly = (o) => { const run = (propOf(o, 'run') || {}).value; if (!isFn(run)) return false; const cs = []; const st = [run.body]; while (st.length) { const x = st.pop(); if (x.type === 'CallExpression') cs.push(x); st.push(...kids(x)); } const closer = (c) => { const k = c.callee.type === 'ChainExpression' ? c.callee.expression : c.callee; const nm = k.type === 'Identifier' ? k.name : k.type === 'MemberExpression' && !k.computed ? nameOf(k.property) : ''; return /^(?:[a-z]?close|close[A-Z]\w*|hide|dismiss|remove)$/.test(nm || ''); }; if (!cs.length || !cs.every(closer)) return false; const d = (propOf(o, 'door') || {}).value, lb = (propOf(o, 'label') || {}).value; const said = (v) => (v && v.type === 'Literal' ? String(v.value) : v && v.type === 'CallExpression' && v.arguments[0] && v.arguments[0].type === 'Literal' ? String(v.arguments[0].value) : ''); return !(/(?:^|-)(?:close|dismiss|cancel)$/.test(said(d)) || /^(?:Close|Cancel|Dismiss|Not now)$/.test(said(lb))); };
+    const isLive = (o) => liveRun((propOf(o, 'run') || {}).value) && !closesOnly(o);
+    return { doors, live: doors.filter(isLive), dead: doors.filter((o) => !isLive(o)), opaque };
   }
   const calls = (f, name) => { const R = fileOf(f); return R ? (R.byCallee.get(name) || []) : []; };
   // ── THE SHAPES: how a row's sentence and its door are tied on screen (each kind checked over the surface's AST) ──
@@ -1118,6 +1131,37 @@ if (CL) {
     ok(w[0] === 'The .deb file is not there any more.' && w[1] === 'The .deb file cannot be read.' && w[2] === w[0] && w[3] === 'This file is not on gpu-01: /a.deb' && w.every((x) => !/ on : |: $| on \{|\{path\}/.test(x)),
       'reader #9: appRefusalText(file_missing | file_unreadable) with no path / machine is a WHOLE sentence (r.399 picks: «在上找不到这个文件：»)', w);
   }
+  // closure 3 (item 2): «A LIVE DOOR» MEANS A PRESS REACHES WHAT ITS WORDS PROMISE — ②b reads a run that calls something (and,
+  // since closure 3, not only a closer) as live; what a run's other call DOES it cannot follow. remove-failed's doors are PRESSED
+  // here by name: «Forget it» (its own confirm, then the forget request for THIS entry), «Copy the command» (the recipe on the
+  // clipboard), «Close» (the dialog gone, nothing sent)
+  {
+    const sent = [], nav = globalThis.navigator, clip = { writeText: async (x) => { clip.got = x; } };
+    const hadElement = Object.prototype.hasOwnProperty.call(globalThis, 'Element');
+    if (!hadElement) globalThis.Element = Nd;   // a sheet's close detaches through Element.prototype.remove (utils createModalShell)
+    const okBtn = async () => { for (let i = 0; i < 50; i++) { await tick(2); const b = DOC.body.querySelectorAll('button.btn-create').pop(); if (b) return b; } return null; };
+    const lineOf = () => DOC.body.querySelectorAll('.desktop-adopt-witness').pop() || null;
+    const doorIn = (line, name) => (line ? line.querySelectorAll('.need-door').find((x) => x.dataset.door === name) || null : null);
+    FETCH = async (url) => { const u = String(url); sent.push(u); const forget = /\/forget$/.test(u); return { ok: forget, status: forget ? 200 : 500, json: async () => (forget ? { ok: true } : { ok: false, code: 'failed', error: 'the recipe exited 100', output: 'E: frob is held' }) }; };
+    nav.clipboard = clip;
+    const row = { id: 'app-frob', label: 'Frob', remove: { exec: 'apt-get', args: ['remove', '-y', 'frob'] } };
+    const open = async () => { sent.length = 0; if (!fn('DAL', 'removeRegistered')) return null; const p = DAL.removeRegistered(row, { onDone: async () => ({ registry: [] }) }); const c = await okBtn(); if (c) c.click(); await p; return lineOf(); };
+    const l1 = await open();
+    const asked = sent.slice();
+    const cp = doorIn(l1, 'remove-copy'); if (cp) cp.click(); await tick(10);
+    const copied = clip.got || null, stays = !!(l1 && l1.isConnected);
+    const n0 = sent.length; const cl = doorIn(l1, 'remove-close'); if (cl) cl.click(); await tick(5);
+    const closed = !!l1 && !l1.isConnected && sent.length === n0;
+    const l2 = await open();
+    const fg = doorIn(l2, 'remove-forget'); if (fg) fg.click();
+    const c2 = await okBtn(); const confirmWords = c2 ? c2.textContent : null; if (c2) c2.click(); await tick(10);
+    const forgot = sent.filter((u) => u === '/api/desktop/apps/app-frob/forget');
+    ok(asked.join() === '/api/desktop/apps/app-frob/remove' && !!fg && fg.textContent === 'Forget it' && confirmWords === 'Forget' && forgot.length === 1 && !!l2 && !l2.isConnected,
+      'remove-failed (closure 3, item 2): «Forget it» PRESSED reaches its act — its own confirm («Forget»), then the forget request for THIS entry (…/app-frob/forget); the failed dialog closes', { asked, door: fg && fg.textContent, confirmWords, sent: sent.slice(0, 4), open: !!(l2 && l2.isConnected) });
+    ok(!!copied && /apt-get remove -y frob/.test(copied) && stays && closed, 'remove-failed (closure 3, item 2): «Copy the command» PRESSED puts the recipe on the clipboard (the dialog stays); «Close» PRESSED closes it and sends nothing', { copied, stays, closed });
+    FETCH = async () => { throw new Error('no fetch in this leg'); }; nav.clipboard = null;
+    if (!hadElement) delete globalThis.Element;
+  }
   // settings-13: «Takes effect after a reload» against the value this PAGE LOADED with, re-judged on the store's change event (reader #4 / #13)
   {
     const path13 = Object.keys(SS.SETTINGS_SCHEMA).find((p) => { const r = SS.SETTINGS_SCHEMA[p]; return r && !r.liveApply && r.type === 'boolean' && !r.store; });
@@ -1369,6 +1413,14 @@ console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 
   const pw = BP.passkeyWords({ state: BP.PASSKEY_OPEN_CODE, rpId: 'shop.example', id: 'p1' }, null, {});
   ok(pw && pw.settings === 'Passkey settings…' && !/Agent browser panel/.test(pw.line) && /open: 'passkeys'/.test(src('src/lib/browser-live-window.js')) && /if \(r && !pkOpen\.has\(r\.id\)\) pkToggle\(r\);/.test(src('src/lib/browser-trace-view.js')),
     'browser-live-13: a page waiting for a passkey has «Passkey settings…» beside Cancel — the Agent browser panel at that profile, its Passkeys open', pw);
+  // closure 3 (item 7): the door is drawn only with a SAVED profile — a conversation's temporary browser has none, so its line names no
+  // profile and promises no door: its passkeys are kept with the conversation and removed with it (browser-keeper removeProfile drops
+  // a record's passkeys; a temporary browser's record goes with its conversation). The view says the line its door matches
+  const pwT = BP.passkeyWords({ state: BP.PASSKEY_OPEN_CODE, rpId: 'shop.example', id: 'p1' }, null, { temporary: true });
+  const LW = src('src/lib/browser-live-window.js');
+  ok(pwT && pwT.settings === '' && !/profile/i.test(pwT.line) && /^This temporary browser keeps its passkeys with this conversation; they are removed with it\./.test(pwT.line) && /profile’s passkey settings/.test(pw.line)
+    && /temporary: !pkPid, deskDoor: door \}/.test(LW) && /if \(pkw\.settings && pkPid && typeof app\.openBrowserProfiles === 'function'\)/.test(LW),
+    'browser-live-13 (closure 3): a temporary browser\'s passkey line names no profile and promises no door — its passkeys live with the conversation and go with it; the view passes `temporary` exactly when it draws no «Passkey settings…»', { line: pwT && pwT.line, settings: pwT && pwT.settings });
 }
 
 console.log('⑦ ACTS, DEAD ENDS AND COMPANY WORDS (lane ui-needs-a-button pick 4)');
@@ -1484,44 +1536,374 @@ console.log('⑨ THE OUTBOX POINTER\'S DOOR (lane ui-needs-a-button pick 6 — �
     'CONTROL: the pointer\'s sentence is stated by the tray row AND the For-you window (`via`); the row without its door is RED by name', ob && { files: [...ob.files], red: doorless(ob, noDoor) });
 }
 
-console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words, the overage door, the lapsed chip\'s act)');
+// ── THE STORED-WORDS READER (closure 3, item 1) — the words a For-you producer STORES with its item: its `i18n` (text / source a
+// line, detail lines, each line's key, its WORDS and clause params, its fold), read from the tree by acorn. A filing = a For-you store's
+// add(key, item) / redrawItem(pred, patch) (userTodos / todos / store / forYou / todosOf() / getUserTodos()); the item's i18n is
+// followed through bindings and reassignments, calls and returns (a model's function, a required module's export, a method by its
+// name), a helper's parameters (its callers in the file, a property method's callers by name, an exported factory's callers in the
+// files that require it, an iterator's element), until a key is a literal. A line whose key it cannot read is OPEN (red); a fact a
+// producer hands in as a param is not a word of the item. Files: a Map path → source (this tree, or the release's from git).
+function storedWordsReader({ files, acorn, shared = { recs: new Map(), idx: new Map(), scopes: new WeakMap(), binds: new WeakMap(), rets: new WeakMap() } }) {
+  const FILES = files;
+  const kids = (n) => { const out = []; for (const k in n) { if (k === 'parent' || k === 'file') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') out.push(x); } else if (v && typeof v.type === 'string') out.push(v); } return out; };
+  const P = new Map(); let parsed = 0;
+  const parse = (f) => {
+    if (P.has(f)) return P.get(f);
+    const src = FILES.get(f); let rec = src == null ? null : shared.recs.get(f + '\0' + src.length) ;
+    if (rec && rec.src !== src) rec = null;
+    if (src != null && !rec) {
+      let ast = null;
+      for (const sourceType of ['script', 'module']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true }); break; } catch { /* the other */ } }
+      parsed++;
+      if (ast) {
+        const nodes = [], st = [[ast, null]];
+        while (st.length) { const [n, p] = st.pop(); n.parent = p; n.file = f; nodes.push(n); for (const c of kids(n)) st.push([c, n]); }
+        const byCallee = new Map(), asg = new Map();
+        const put = (m, k, v) => { if (k == null) return; let x = m.get(k); if (!x) m.set(k, x = []); x.push(v); };
+        for (const n of nodes) {
+          if (n.type === 'CallExpression') { const c = n.callee.type === 'ChainExpression' ? n.callee.expression : n.callee; put(byCallee, c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed ? c.property.name : null, n); }
+          if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier') put(asg, n.left.name, n);
+        }
+        rec = { f, src, ast, nodes, byCallee, asg };
+        shared.recs.set(f + '\0' + src.length, rec);
+      }
+    }
+    P.set(f, rec || null);
+    return rec || null;
+  };
+  const isFn = (n) => !!n && /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(n.type);
+  const nameOf = (k) => (k && (k.type === 'Identifier' ? k.name : k.type === 'Literal' ? String(k.value) : null));
+  const srcOf = (n) => (P.get(n.file) || parse(n.file)).src.slice(n.start, n.end);
+  const calleeOf = (c) => (c.callee.type === 'ChainExpression' ? c.callee.expression : c.callee);
+  // ── bindings (scopes read once per AST, shared between trees) ──
+  const patNames = (p, pathTo = [], out = []) => {
+    if (!p) return out;
+    if (p.type === 'Identifier') out.push({ name: p.name, path: pathTo, id: p });
+    else if (p.type === 'ObjectPattern') for (const q of p.properties) { if (q.type === 'RestElement') patNames(q.argument, pathTo, out); else patNames(q.value, [...pathTo, nameOf(q.key)], out); }
+    else if (p.type === 'ArrayPattern') p.elements.forEach((e, i) => patNames(e, [...pathTo, i], out));
+    else if (p.type === 'AssignmentPattern') { for (const x of patNames(p.left, pathTo, [])) out.push({ ...x, dflt: p.right }); }
+    else if (p.type === 'RestElement') patNames(p.argument, pathTo, out);
+    return out;
+  };
+  const scopeNames = (n) => {
+    if (shared.scopes.has(n)) return shared.scopes.get(n);
+    const m = new Map(); const put = (k, b) => { if (!m.has(k)) m.set(k, b); };
+    const stmts = (list) => { for (const s0 of list) { const d = s0 && (s0.type === 'ExportNamedDeclaration' ? s0.declaration : s0); if (!d) continue; if (d.type === 'VariableDeclaration') for (const v of d.declarations) for (const x of patNames(v.id)) put(x.name, { kind: 'var', decl: v, path: x.path, id: x.id }); if ((d.type === 'FunctionDeclaration' || d.type === 'ClassDeclaration') && d.id) put(d.id.name, { kind: 'fn', node: d, id: d.id }); } };
+    if (isFn(n)) { n.params.forEach((p, i) => { for (const x of patNames(p)) put(x.name, { kind: 'param', fn: n, index: i, path: x.path, dflt: x.dflt, id: x.id }); }); if (n.type === 'FunctionExpression' && n.id) put(n.id.name, { kind: 'fn', node: n, id: n.id }); }
+    else if (n.type === 'BlockStatement' || n.type === 'Program' || n.type === 'StaticBlock') stmts(n.body);
+    else if (n.type === 'SwitchCase') stmts(n.consequent);
+    else if ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && n.left.type === 'VariableDeclaration') for (const x of patNames(n.left.declarations[0].id)) put(x.name, { kind: 'forof', loop: n, path: x.path, id: x.id });
+    else if (n.type === 'ForStatement' && n.init && n.init.type === 'VariableDeclaration') stmts([n.init]);
+    else if (n.type === 'CatchClause' && n.param) for (const x of patNames(n.param)) put(x.name, { kind: 'catch', id: x.id });
+    shared.scopes.set(n, m); return m;
+  };
+  const bindingOf = (id) => { if (shared.binds.has(id)) return shared.binds.get(id); let r = null; for (let n = id.parent; n && !r; n = n.parent) { const m = scopeNames(n); if (m.has(id.name)) r = m.get(id.name); } shared.binds.set(id, r); return r; };
+  const returnsOf = (fn) => { if (fn.type === 'ArrowFunctionExpression' && fn.expression) return [fn.body]; if (shared.rets.has(fn)) return shared.rets.get(fn); const out = [], st = [fn.body]; while (st.length) { const x = st.pop(); if (x.type === 'ReturnStatement') { if (x.argument) out.push(x.argument); continue; } if (isFn(x)) continue; st.push(...kids(x)); } shared.rets.set(fn, out); return out; };
+  // ── modules (CommonJS: require('./x') → x's module.exports) ──
+  const resolveReq = (from, spec) => { if (!/^\.\.?\//.test(spec)) return null; const p = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec)); for (const c of [p, p + '.js', p + '/index.js']) if (FILES.has(c)) return c; return null; };
+  const EXP = new Map();
+  const exportOf = (f, name) => {
+    const k = f + '\0' + name; if (EXP.has(k)) return EXP.get(k);
+    const R = parse(f), out = [];
+    if (R) for (const n of R.nodes) {
+      if (n.type !== 'AssignmentExpression' || n.left.type !== 'MemberExpression') continue;
+      const l = srcOf(n.left);
+      if (l === 'module.exports' && n.right.type === 'ObjectExpression') { for (const p of n.right.properties) if (p.type === 'Property' && nameOf(p.key) === name) out.push(p.value); }
+      else if (l === `module.exports.${name}` || l === `exports.${name}`) out.push(n.right);
+    }
+    EXP.set(k, out); return out;
+  };
+  // ── names across the tree: the member calls `.name(` and the definitions `name(…) {` / `name: (…) =>` / `function name` at a
+  // line's start, each file's list read once (shared between trees by content) ──
+  const idxOf = (f) => { const s = FILES.get(f); const k = f + '\0' + s.length; let e = shared.idx.get(k); if (!e || e.src !== s) { e = { src: s, files: /(?:userTodos|todos|forYou|store|todosOf\(\)|getUserTodos\(\))\??\.(?:add|redrawItem)\(/.test(s), requires: [...s.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)].map((m) => m[1]), calls: new Set([...s.matchAll(/\.([A-Za-z_$][\w$]*)\??\.?\(/g)].map((m) => m[1])), defs: new Set([...s.matchAll(/^[ \t]*(?:(?:async|static|get|set)[ \t]+)*(?:function[ \t]*\*?[ \t]*)?([A-Za-z_$][\w$]*)[ \t]*(?:\(|[:=][ \t]*(?:async[ \t]*)?(?:function\b|\(|[A-Za-z_$][\w$]*[ \t]*=>))/gm)].map((m) => m[1])) }; shared.idx.set(k, e); } return e; };
+  let NAMES = null;
+  const named = () => { if (!NAMES) { NAMES = { calls: new Map(), defs: new Map(), requirers: new Map() }; for (const f of FILES.keys()) { const e = idxOf(f); for (const [m, set] of [[NAMES.calls, e.calls], [NAMES.defs, e.defs]]) for (const n of set) { let x = m.get(n); if (!x) m.set(n, x = []); x.push(f); } for (const r of e.requires) { const t = resolveReq(f, r); if (!t) continue; let x = NAMES.requirers.get(t); if (!x) NAMES.requirers.set(t, x = new Set()); x.add(f); } } } return NAMES; };
+  const GENERIC = new Set(['add', 'set', 'get', 'push', 'call', 'apply', 'bind', 'then', 'catch', 'run', 'map', 'emit', 'send', 'log', 'warn', 'error', 'create', 'file', 'update', 'has', 'delete', 'remove', 'start', 'stop', 'close', 'open', 'write', 'read', 'join', 'slice', 'filter', 'find', 'forEach', 'reduce', 'some', 'every', 'toString', 'trim', 'replace', 'split', 'test', 'exec', 'keys', 'values', 'entries', 'assign', 'freeze', 'stringify', 'parse', 'resolve', 'reject', 'all', 'concat', 'sort', 'includes', 'indexOf']);
+  const CN = new Map();
+  const callsNamed = (name) => { if (CN.has(name)) return CN.get(name); const fs0 = named().calls.get(name) || []; const out = []; if (fs0.length <= 8) for (const f of fs0) { const R = parse(f); if (R) out.push(...(R.byCallee.get(name) || []).filter((c) => calleeOf(c).type === 'MemberExpression')); } CN.set(name, out); return out; };
+  const DN = new Map();
+  const defsNamed = (name, inFile = null) => {
+    const key = (inFile || '') + '\0' + name; if (DN.has(key)) return DN.get(key);
+    const out = []; DN.set(key, out);
+    const fs0 = inFile ? [inFile] : named().defs.get(name) || [];
+    if (fs0.length > 4) return out;
+    for (const f of fs0) { const R = parse(f); if (R) for (const x of R.nodes) { if ((x.type === 'MethodDefinition' || x.type === 'Property') && nameOf(x.key) === name && isFn(x.value)) out.push(x.value); else if (x.type === 'FunctionDeclaration' && x.id && x.id.name === name) out.push(x); else if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && x.id.name === name && isFn(x.init)) out.push(x.init); else if (x.type === 'AssignmentExpression' && x.left.type === 'MemberExpression' && nameOf(x.left.property) === name && isFn(x.right)) out.push(x.right); } }
+    return out;
+  };
+  const ITER = /^(map|forEach|filter|find|some|every|flatMap)$/;
+  const callersOf = (fn) => {
+    const p = fn.parent;
+    if (p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier') { const b = bindingOf(p.id); return (parse(fn.file).byCallee.get(p.id.name) || []).filter((c) => c.callee.type === 'Identifier' && bindingOf(c.callee) === b); }
+    if (fn.type === 'FunctionDeclaration' && fn.id) return (parse(fn.file).byCallee.get(fn.id.name) || []).filter((c) => c.callee.type === 'Identifier');
+    if (p && (p.type === 'Property' || p.type === 'MethodDefinition')) { const nm = nameOf(p.key); return nm && !GENERIC.has(nm) ? callsNamed(nm) : []; }
+    return [];
+  };
+  // an EXPORTED function (module.exports = { create }): its callers in the files that require its module (M.create(…) /
+  // require('./x').create(…)) — a factory's context object is read where the factory is called
+  const RQ = new Map();
+  const requirersOf = (f) => { if (RQ.has(f)) return RQ.get(f); const gs = [...(named().requirers.get(f) || [])]; const out = []; RQ.set(f, out); if (gs.length > 6) return out; for (const g of gs) { const R = parse(g); if (!R) continue; for (const c of R.byCallee.get('require') || []) if (c.arguments[0] && c.arguments[0].type === 'Literal' && resolveReq(g, String(c.arguments[0].value)) === f) out.push(c); } return out; };
+  const XA = new Map();
+  const exportsOfFile = (f) => { if (XA.has(f)) return XA.get(f); const R = parse(f); const byNode = new Map(), byName = new Map(); const put = (m, k, v) => { let x = m.get(k); if (!x) m.set(k, x = []); x.push(v); }; if (R) for (const n of R.ast.body) { const e = n.type === 'ExpressionStatement' ? n.expression : null; if (!e || e.type !== 'AssignmentExpression' || e.left.type !== 'MemberExpression') continue; const l = srcOf(e.left); if (l === 'module.exports' && e.right.type === 'ObjectExpression') { for (const p of e.right.properties) if (p.type === 'Property') { if (p.value.type === 'Identifier') put(byName, p.value.name, nameOf(p.key)); else put(byNode, p.value, nameOf(p.key)); } } else if (/^(module\.)?exports\.\w+$/.test(l)) { if (e.right.type === 'Identifier') put(byName, e.right.name, nameOf(e.left.property)); else put(byNode, e.right, nameOf(e.left.property)); } } const r = { byNode, byName }; XA.set(f, r); return r; };
+  const exportedAs = (fn) => { const x = exportsOfFile(fn.file); const id = fn.type === 'FunctionDeclaration' ? fn.id && fn.id.name : fn.parent && fn.parent.type === 'VariableDeclarator' && fn.parent.id.type === 'Identifier' && fn.parent.parent.parent && fn.parent.parent.parent.type === 'Program' ? fn.parent.id.name : null; return [...(x.byNode.get(fn) || []), ...(id ? x.byName.get(id) || [] : [])]; };
+  const XC = new WeakMap();
+  const exportCallers = (fn) => {
+    if (XC.has(fn)) return XC.get(fn);
+    const out = []; XC.set(fn, out);
+    const names = exportedAs(fn); if (!names.length) return out;
+    for (const rq of requirersOf(fn.file)) {
+      const R = parse(rq.file);
+      // require('./x').create(…) directly, or a binding of the module: const M = require('./x') … M.create(…)
+      const p = rq.parent;
+      if (p && p.type === 'MemberExpression' && p.object === rq && names.includes(nameOf(p.property)) && p.parent && p.parent.type === 'CallExpression' && p.parent.callee === p) out.push(p.parent);
+      if (p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier') { const b = bindingOf(p.id); for (const nm of names) for (const c of R.byCallee.get(nm) || []) { const cal = calleeOf(c); if (cal.type === 'MemberExpression' && cal.object.type === 'Identifier' && cal.object.name === p.id.name && bindingOf(cal.object) === b) out.push(c); } }
+      if (p && p.type === 'VariableDeclarator' && p.id.type === 'ObjectPattern') for (const q of p.id.properties) if (q.type === 'Property' && names.includes(nameOf(q.key)) && q.value.type === 'Identifier') { const b = bindingOf(q.value); for (const c of R.byCallee.get(q.value.name) || []) if (c.callee.type === 'Identifier' && bindingOf(c.callee) === b) out.push(c); }
+    }
+    return out;
+  };
+  // a function handed BY NAME to an iterator (lines.map(strip)): its first parameter is an element of the receiver
+  const byRef = (fn) => { const p = fn.parent; const id = fn.type === 'FunctionDeclaration' ? fn.id : p && p.type === 'VariableDeclarator' && p.id.type === 'Identifier' ? p.id : null; if (!id) return []; const R = parse(fn.file), out = []; for (const nm of ['map', 'forEach', 'filter', 'find', 'some', 'every', 'flatMap']) for (const c of R.byCallee.get(nm) || []) { const a = c.arguments[0], cal = calleeOf(c); if (a && a.type === 'Identifier' && a.name === id.name && cal.type === 'MemberExpression') { const b = bindingOf(a); if (b && b.id === id) out.push(cal.object); } } return out; };
+  const RECV = /(?:^|\.)(?:userTodos|todos|forYou|store)$|(?:todosOf|getUserTodos)\(\)$/;
+  // the item's OWN stored words handed back (a redraw that keeps them): the store's get(id)
+  const ownWords = (x) => x.type === 'CallExpression' && calleeOf(x).type === 'MemberExpression' && nameOf(calleeOf(x).property) === 'get' && RECV.test(srcOf(calleeOf(x).object).replace(/\?$/, ''));
+  // ── VALUES: what an expression can stand for — objects, arrays, literals, functions, modules (#ns), or #open (unread) ──
+  const PK = new Map(), AR = new Map(), OPENS = new Map();
+  const mkPick = (of, key) => { let m = PK.get(of); if (!m) PK.set(of, m = new Map()); const k = key == null ? '\0' : String(key); if (!m.has(k)) m.set(k, { type: '#pick', of, key }); return m.get(k); };
+  const mkArr = (n, els) => { if (!AR.has(n)) AR.set(n, { type: 'ArrayExpression', elements: els, file: n.file }); return AR.get(n); };
+  const openOf = (v) => { if (!OPENS.has(v)) OPENS.set(v, { type: '#open', node: v }); return OPENS.get(v); };
+  const pick = (vals, key) => {
+    const out = [];
+    for (const v of vals) {
+      if (v.type === 'ObjectExpression') { for (const q of v.properties) { if (q.type === 'Property' && (key == null || nameOf(q.key) === String(key))) out.push(q.value); if (q.type === 'SpreadElement') out.push(mkPick(q.argument, key)); } }
+      else if (v.type === '#ns') { if (key != null) out.push(...exportOf(v.file, String(key))); else out.push(openOf(v)); }
+      else if (v.type === 'ArrayExpression') { if (typeof key === 'number') { if (v.elements[key]) out.push(v.elements[key]); } else for (const e of v.elements) if (e) out.push(e.type === 'SpreadElement' ? mkPick(e.argument, null) : e); }
+      else if (v.type === '#open') out.push(v);
+      else if (!(v.type === 'Literal' || v.type === 'TemplateLiteral' || isFn(v))) out.push(openOf(v));
+    }
+    return out;
+  };
+  // memo with a FIXPOINT: a value read inside a cycle (or from such a value) is TAINTED — kept for this pass, read again in the
+  // next with the last pass's answer, until nothing grows (the answer is the same in any order the filings are read)
+  const VM = new Map(), VIN = new Set(); let TAINT = false, PASS = 0, BUDGET = 0;
+  const TERMINAL = (n) => n.type === '#open' || n.type === '#ns' || isFn(n) || n.type === 'ObjectExpression' || n.type === 'ArrayExpression' || n.type === 'Literal' || n.type === 'TemplateLiteral';
+  function values(n) {
+    if (!n) return [];
+    if (TERMINAL(n)) return [n];
+    const m = VM.get(n);
+    if (m && (m.pass === PASS || !m.tainted)) { if (m.tainted) TAINT = true; return m.r; }
+    if (VIN.has(n) || ++BUDGET > 400000) { TAINT = true; return m ? m.r : []; }
+    VIN.add(n); const saved = TAINT; TAINT = false;
+    let r; try { r = [...new Set(values1(n))]; } finally { VIN.delete(n); }
+    VM.set(n, { r, tainted: TAINT, pass: PASS });
+    TAINT = saved || TAINT;
+    return r;
+  }
+  const all = (xs) => xs.flatMap((x) => values(x));
+  function values1(n) {
+    switch (n.type) {
+      case '#pick': return all(pick(values(n.of), n.key));
+      case 'Identifier': {
+        if (n.name === 'undefined') return [];
+        const b = bindingOf(n); if (!b) return [openOf(n)];
+        const src = [];
+        if (b.kind === 'fn') return [b.node];
+        if (b.kind === 'var') { if (b.decl.init) src.push(b.decl.init); for (const a of parse(b.id.file).asg.get(b.id.name) || []) if (bindingOf(a.left) === b) src.push(a.right); }
+        else if (b.kind === 'param') {
+          if (b.dflt) src.push(b.dflt);
+          const cs = [...callersOf(b.fn), ...exportCallers(b.fn)]; for (const c of cs) if (c.arguments[b.index]) src.push(c.arguments[b.index]);
+          const call = b.fn.parent, inIter = call && call.type === 'CallExpression' && call.arguments[0] === b.fn && calleeOf(call).type === 'MemberExpression' && ITER.test(nameOf(calleeOf(call).property));
+          if (inIter && b.index === 0) src.push(mkPick(calleeOf(call).object, null));
+          const refs = b.index === 0 ? byRef(b.fn) : []; for (const r of refs) src.push(mkPick(r, null));
+          if (!cs.length && !b.dflt && !inIter && !refs.length) src.push(openOf(n));
+        }
+        else if (b.kind === 'forof') src.push(mkPick(b.loop.right, null));
+        else src.push(openOf(n));
+        let vals = all(src);
+        for (const k of b.path || []) vals = all(pick(vals, k));
+        return vals;
+      }
+      case 'MemberExpression': return all(pick(values(n.object), n.computed ? (n.property.type === 'Literal' ? n.property.value : null) : n.property.name));
+      case 'ChainExpression': case 'ParenthesizedExpression': return values(n.expression);
+      case 'AwaitExpression': return values(n.argument);
+      case 'SequenceExpression': return values(n.expressions[n.expressions.length - 1]);
+      case 'AssignmentExpression': return values(n.right);
+      case 'ConditionalExpression': return [...values(n.consequent), ...values(n.alternate)];
+      case 'LogicalExpression': return [...values(n.left), ...values(n.right)];
+      case 'CallExpression': {
+        const c = calleeOf(n);
+        if (c.type === 'Identifier' && c.name === 'require' && n.arguments[0] && n.arguments[0].type === 'Literal') { const f = resolveReq(n.file, String(n.arguments[0].value)); return f ? [{ type: '#ns', file: f }] : [openOf(n)]; }
+        if (c.type === 'Identifier' && /^(i18nKey|t|tr)$/.test(c.name) && n.arguments[0]) return values(n.arguments[0]);
+        if (ownWords(n)) return [];   // the item the store already holds (a redraw keeps its own words): no new words
+        if (c.type === 'MemberExpression' && /^Object\.(freeze|assign)$/.test(srcOf(c))) return all(n.arguments);
+        const pn = c.type === 'MemberExpression' && !c.computed ? c.property.name : null;
+        if ((pn === 'map' || pn === 'flatMap') && n.arguments[0]) { const cbs = isFn(n.arguments[0]) ? [n.arguments[0]] : values(n.arguments[0]).filter(isFn); if (cbs.length) return [mkArr(n, cbs.flatMap(returnsOf))]; }
+        if (pn && /^(filter|slice|concat|sort|reverse)$/.test(pn)) return [...values(c.object), ...(pn === 'concat' ? all(n.arguments) : [])];
+        let fns = c.type === 'Identifier' ? values(c).filter(isFn) : isFn(c) ? [c] : c.type === 'MemberExpression' ? all(pick(values(c.object), c.computed ? null : c.property.name)).filter(isFn) : [];
+        if (!fns.length && c.type === 'MemberExpression' && !c.computed && !GENERIC.has(c.property.name)) fns = defsNamed(c.property.name, c.object.type === 'ThisExpression' ? n.file : null);
+        return fns.length ? all(fns.flatMap(returnsOf)) : [n];
+      }
+      default: return [n];
+    }
+  }
+  // ── WORDS, read by the item's shape (src/user-todos.js normalizeI18n): i18n.text / .source a LINE, i18n.detail LINES; a line's
+  // `key`, its WORDS / clause params (`{key}` / `{at, key, gone}`) and its fold (`more`) — a key the reader cannot read is OPEN ──
+  const NOT_TEXT = (v) => isFn(v) || v.type === 'ObjectExpression' || v.type === 'ArrayExpression' || v.type === 'NewExpression' || v.type === 'UnaryExpression' || v.type === 'UpdateExpression' || (v.type === 'BinaryExpression' && v.operator !== '+');
+  const keyWords = (k, out, sink) => { for (const v of values(k)) { if (v.type === 'Literal') { if (typeof v.value === 'string') out.add(v.value); } else if (v.type === 'TemplateLiteral' && !v.expressions.length) out.add(v.quasis[0].value.cooked); else if (!NOT_TEXT(v)) sink.push(v.type === '#open' ? v.node : v); } };
+  // a LINE (depth 0: text / source / a detail row / a fold row) — its key unread is OPEN; a param's WORDS (depth 1+) unread is LOOSE
+  // (a param is a fact the producer hands in; a WORDS param is the rarer case, and a fact read as one is no word of the item)
+  function lineWords(l, out, seen, depth = 0) {
+    for (const v of values(l)) {
+      if (seen.has(v)) continue; seen.add(v);
+      const sink = depth ? out.loose : out.open;
+      if (v.type === 'ObjectExpression') {
+        for (const k of pick([v], 'key')) keyWords(k, out, sink);
+        for (const k of pick([v], 'gone')) keyWords(k, out, sink);
+        for (const p of all(pick(all(pick([v], 'params')), null))) if (p.type === 'ObjectExpression') lineWords(p, out, seen, depth + 1); else if (p.type === '#open') out.loose.push(p.node);
+        for (const m of all(pick(all(pick([v], 'more')), null))) lineWords(m, out, seen, depth);
+      } else if (v.type === 'ArrayExpression') { for (const e of pick([v], null)) lineWords(e, out, seen, depth); }
+      else if (v.type === '#open') sink.push(v.node);
+      else if (!(v.type === 'Literal' && v.value == null) && !NOT_TEXT(v)) sink.push(v);
+    }
+  }
+  function i18nWords(root, out) {
+    const seen = new Set();
+    for (const l of all(pick(values(root), 'text'))) lineWords(l, out, seen);
+    for (const l of all(pick(values(root), 'source'))) lineWords(l, out, seen);
+    for (const d of all(pick(values(root), 'detail'))) { if (d.type === 'Literal' && d.value == null) continue; for (const l of pick([d], null)) lineWords(l, out, seen); }
+  }
+  // ── THE FILINGS: every call that STORES a For-you item — a For-you store's add(key, item) / redrawItem(pred, patch) ──
+  const filings = [];
+  for (const f of FILES.keys()) {
+    if (!idxOf(f).files) continue;
+    const R = parse(f);
+    if (!R) { filings.push({ f, line: 0, unparsed: true, words: new Set(), open: [] }); continue; }
+    for (const name of ['add', 'redrawItem']) for (const c of R.byCallee.get(name) || []) {
+      const cal = calleeOf(c);
+      if (cal.type !== 'MemberExpression' || !c.arguments[1]) continue;
+      const recv = srcOf(cal.object).replace(/\?$/, '');
+      if (RECV.test(recv)) filings.push({ f, line: R.src.slice(0, c.start).split('\n').length, recv, arg: c.arguments[1] });
+    }
+  }
+  // a pass-through: the item is the parameter of a `forYou: { add(…, item) }` adapter — its callers are filings of their own
+  const passThrough = (x) => { if (x.type !== 'Identifier') return false; const b = bindingOf(x); const fn = b && b.kind === 'param' ? b.fn : null; const p = fn && fn.parent, o = p && p.parent, q = o && o.parent; return !!(p && p.type === 'Property' && nameOf(p.key) === 'add' && o.type === 'ObjectExpression' && q && q.type === 'Property' && nameOf(q.key) === 'forYou'); };
+  let sig = null, converged = false;
+  for (PASS = 1; PASS <= 12; PASS++) {
+    let size = 0;
+    for (const fl of filings) {
+      if (fl.unparsed) continue;
+      const out = new Set(); out.open = []; out.loose = [];
+      for (const r of all(pick(values(fl.arg), 'i18n'))) { if (r.type === 'Literal' && r.value == null) continue; if (r.type === '#open') { out.open.push(r.node); continue; } i18nWords(r, out); }
+      fl.words = out; fl.open = [...new Set(out.open)].filter((x) => !passThrough(x)); fl.pass = out.open.some(passThrough); fl.loose = [...new Set(out.loose)];
+      size += out.size;
+    }
+    let tz = 0; for (const m of VM.values()) if (m.tainted) tz += m.r.length;
+    const now = size + ':' + tz;
+    if (now === sig) { converged = true; break; }
+    sig = now;
+  }
+  const words = new Map();
+  for (const fl of filings) for (const w of fl.words) { if (!words.has(w)) words.set(w, []); words.get(w).push(`${fl.f}:${fl.line}`); }
+  return { filings, words, parsed, passes: PASS, converged, exhausted: BUDGET > 400000, where: (n) => (n && n.file ? `${n.file} ${srcOf(n).slice(0, 60)}` : String(n && n.type)) };
+}
+console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the census since closure 3 —, the overage door, the lapsed chip\'s act)');
 {
   const { pathToFileURL } = await import('node:url');
   const imp = (f) => import(pathToFileURL(path.join(REPO, f)).href);
-  // #0 STORED WORDS: an item an older hub already STORED keeps its key — the five templates picks 3 and 5 reworded keep their zh / ja
-  // rows (restored verbatim from 4d63ec1b4), named as legacy keys (src/foryou-actions.js STORED_WORDS_LEGACY: the release each left
-  // in, the producer that filed it — the job-model FOR_YOU_WORDS_LEGACY way), and an item stored with one says it in zh / ja
+  // #0 STORED WORDS — THE CENSUS (closure 3: a hand list of five missed a sixth). A For-you item keeps the i18n its hub FILED and the
+  // page says it with t(key) at any later time, so every sentence the LAST RELEASE stored is drawn after the update: it keeps its zh /
+  // ja rows, and when no producer files it any more it is a NAMED legacy row (src/foryou-actions.js STORED_WORDS_LEGACY, its release
+  // and its producer). The stored sentences are READ from the tree (storedWordsReader above) — this tree's, and the last release's
+  // (the newest «2.N.N: …» commit below HEAD, read with git cat-file; a depth-1 clone holds none: a named SKIP)
   const FA = require(path.join(REPO, 'src/foryou-actions.js'));
   const LEG = FA.STORED_WORDS_LEGACY || {};
   const ZH = (await imp('src/lib/i18n-zh.js')).default, JA = (await imp('src/lib/i18n-ja.js')).default;
   const UTL = await imp('src/lib/user-todos-layout.js');
-  const tOf = (dict) => (k, p) => String(Object.prototype.hasOwnProperty.call(dict, k) ? dict[k] : k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const has = (d, k) => Object.prototype.hasOwnProperty.call(d, k);
+  const tOf = (dict) => (k, p) => String(has(dict, k) ? dict[k] : k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
   const sentence = /\b[A-Za-z]{2,}(?: [A-Za-z]{2,}){3,}\b/;   // four English words in a row = an English sentence on a zh / ja page
-  const OLD = [   // the five, as the release's producers STORED them (the item's i18n: a detail line, or the lapsed notice's text)
-    ['no-switch', 'No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….', 'detail'],
-    ['outbox-account', 'Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.', 'detail'],
-    ['outbox-conversation', 'Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.', 'detail'],
-    ['reach-ask', 'Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.', 'detail'],
-    ['pool-lapsed-off', '{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly', 'text'],
-  ];
-  const drawn = OLD.map(([name, key, where]) => {
-    const item = where === 'text' ? { id: 'ut-1', text: 'x', i18n: { text: { key, params: { account: 'UCI Max', since: '10/8/26, 1:30 PM' } } } } : { id: 'ut-1', text: 'x', i18n: { detail: [{ key }] } };
-    const say = (dict) => { const t0 = tOf(dict); const said = (l) => UTL.saidLine(l, t0); return where === 'text' ? UTL.itemTextOf(item, said) : UTL.itemDetailLinesOf(item, said).join(' '); };
+  const acornS = require(path.join(REPO, 'node_modules/acorn'));
+  const SHARED = { recs: new Map(), idx: new Map(), scopes: new WeakMap(), binds: new WeakMap(), rets: new WeakMap() };
+  const NOW = new Map([...sources].filter(([f]) => !f.startsWith('src/lib/')));
+  const SWN = storedWordsReader({ files: NOW, acorn: acornS, shared: SHARED });
+  const storedNow = new Set(SWN.words.keys());
+  const producers = new Set(SWN.filings.map((x) => x.f));
+  console.log(`  · the stored-words census: ${SWN.filings.length} filings in ${producers.size} producer files store ${storedNow.size} sentences (${[...storedNow].filter((x) => has(ZH, x)).length} with a zh row); ${SWN.filings.filter((x) => x.pass).length} pass-through adapters; ${SWN.passes} passes`);
+  ok(SWN.filings.length >= 60 && !SWN.exhausted && SWN.converged && SWN.filings.every((x) => !x.unparsed && !x.open.length),
+    'stored words (closure 3): the census reads every For-you filing in src/ — each store\'s add / redrawItem parsed, its i18n followed to the keys its lines store (no OPEN line), within its budget, to a fixpoint',
+    { n: SWN.filings.length, exhausted: SWN.exhausted, converged: SWN.converged, open: SWN.filings.filter((x) => x.unparsed || x.open.length).map((x) => `${x.f}:${x.line} ${(x.open || []).map(SWN.where).join(' | ')}`.slice(0, 160)).slice(0, 6) });
+  ok(SWN.filings.some((x) => x.pass) && SWN.filings.some((x) => x.recv === 'forYou' && x.words.size > 0),
+    'stored words: a pass-through adapter (`forYou: { add(…, item) }`) stores what its callers hand in — and its callers (forYou.add) are filings the census reads', SWN.filings.filter((x) => x.pass).map((x) => `${x.f}:${x.line}`));
+  // CONTROLS: a planted producer that files its words through a model (a constant, a WORDS param, a helper handed to .map BY NAME),
+  // beside a live route answer in the same model — the census finds the three stored keys and never the answer
+  const PLANT = new Map([
+    ['src/zz-plant-model.js', "'use strict';\nconst i18nKey = (s) => s;\nconst A = i18nKey('Planted stored sentence {n}.');\nconst B = Object.freeze({ gone: 'Planted detail line.' });\nfunction strip(l) { return { key: l.key, ...(l.params ? { params: l.params } : {}) }; }\nfunction words(n) { const lines = [{ key: B.gone }]; return { text: 'x', i18n: { text: { key: A, params: { n, what: { key: 'Planted words param.' } } }, detail: lines.map(strip) } }; }\nfunction answer(res) { res.json({ error: { key: i18nKey('Planted live answer.') } }); }\nmodule.exports = { words, answer };\n"],
+    ['src/server/zz-plant.js', "'use strict';\nconst M = require('../zz-plant-model.js');\nfunction create({ userTodos }) { const file = (n) => { const w = M.words(n); userTodos.add('k', { origin: 'server', text: w.text, i18n: w.i18n }); }; return { file }; }\nmodule.exports = { create };\n"],
+  ]);
+  const SWP = storedWordsReader({ files: PLANT, acorn: acornS });
+  const plantWords = [...SWP.words.keys()].sort();
+  ok(JSON.stringify(plantWords) === JSON.stringify(['Planted detail line.', 'Planted stored sentence {n}.', 'Planted words param.']) && SWP.filings.length === 1 && !SWP.filings[0].open.length,
+    'CONTROL: the census follows a planted producer into its model — the text\'s key, a WORDS param, a detail line built by a helper handed to .map by name — and never counts the model\'s live route answer', plantWords);
+  // THE LAW, one function: a sentence the release stored (with its rows there) keeps its zh and ja rows now, and is filed by a
+  // producer now or NAMED in STORED_WORDS_LEGACY
+  const lawOf = (relStored, nowStored, zh, ja, leg) => { const named = new Set(Object.values(leg).map((e) => e.key)); return [...relStored].flatMap((x) => { const rows = has(zh, x) && has(ja, x), ok1 = nowStored.has(x) || named.has(x); return rows && ok1 ? [] : [{ s: x, rows, named: named.has(x), filedNow: nowStored.has(x) }]; }); };
+  const PS = 'Planted stored sentence {n}.';
+  const lawRed = lawOf(new Set([PS]), new Set(), {}, {}, {}), lawGreen = lawOf(new Set([PS]), new Set(), { [PS]: '种下' }, { [PS]: '植えた' }, { p: { key: PS } });
+  ok(lawRed.length === 1 && lawRed[0].s === PS && !lawRed[0].rows && lawGreen.length === 0, 'CONTROL: a planted stored sentence reworded since its release is RED by its words (no rows, no legacy row); its rows kept and its legacy row named, it is green', { lawRed, lawGreen });
+  // THE RELEASE: the newest release commit below HEAD (a release commit HEAD is itself checked against the one before it)
+  const { spawnSync } = await import('node:child_process');
+  const git = (...a) => { try { return execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 26 }).trim(); } catch { return null; } };
+  const head = git('log', '-1', '--format=%H%x09%s', 'HEAD');
+  const relLine = head ? git('log', '-1', '--format=%H%x09%s', '-E', '--grep=^2\\.[0-9]+\\.[0-9]+: ', /^2\.\d+\.\d+: /.test(head.split('\t')[1] || '') ? 'HEAD^' : 'HEAD') : null;
+  const [relSha, relSubj] = relLine ? relLine.split('\t') : [null, ''];
+  let relStored = null;
+  if (!relSha) console.log('  ~ SKIP: stored words against the last release — this clone holds no release commit («2.N.N: …») below HEAD (a depth-1 checkout); the census of this tree, its legacy rows and its controls stand');
+  else {
+    const relVer = relSubj.split(':')[0];
+    const list = (git('ls-tree', '-r', '--name-only', relSha, '--', 'src') || '').split('\n').filter((f) => f.endsWith('.js') && (/^src\/lib\/i18n-(zh|ja)\.js$/.test(f) || (!f.startsWith('src/lib/') && !/^i18n/.test(path.posix.basename(f)))));
+    const changed = new Set((git('diff', '--name-only', '--no-renames', relSha, '--', 'src') || '').split('\n'));
+    const want = list.filter((f) => f.startsWith('src/lib/') || !NOW.has(f) || changed.has(f));
+    const blobs = new Map();
+    const cat = spawnSync('git', ['-C', REPO, 'cat-file', '--batch'], { input: want.map((f) => `${relSha}:${f}`).join('\n') + '\n', maxBuffer: 1 << 28 });
+    if (cat.status !== 0) console.log(`  ~ SKIP: the release's blobs could not be read (git cat-file answered ${cat.status}) — its stored-words legs below go red by name`);
+    for (let off = 0, i = 0; cat.status === 0 && cat.stdout && off < cat.stdout.length && i < want.length; i++) { const nl = cat.stdout.indexOf(10, off); const head1 = cat.stdout.slice(off, nl).toString().split(' '); if (head1[1] !== 'blob') { off = nl + 1; continue; } const size = Number(head1[2]); blobs.set(want[i], cat.stdout.slice(nl + 1, nl + 1 + size).toString('utf8')); off = nl + 1 + size + 1; }
+    const REL = new Map(list.filter((f) => !f.startsWith('src/lib/')).map((f) => [f, blobs.has(f) ? blobs.get(f) : NOW.get(f)]));
+    const keysOf = (txt) => new Set([...String(txt || '').matchAll(/^  ("(?:[^"\\]|\\.)*"): /gm)].map((m) => { try { return JSON.parse(m[1]); } catch { return JSON.parse(m[1].replace(/\\'/g, "'")); } }));
+    const relZh = keysOf(blobs.get('src/lib/i18n-zh.js'));
+    const SWR = storedWordsReader({ files: REL, acorn: acornS, shared: SHARED });
+    relStored = new Set([...SWR.words.keys()].filter((x) => relZh.has(x)));
+    const lost = [...relStored].filter((x) => !storedNow.has(x));
+    const gone = [...relZh].filter((k) => !has(ZH, k));
+    console.log(`  · the release ${relSha.slice(0, 9)} (${relVer}): ${SWR.filings.length} filings stored ${relStored.size} sentences with a zh row; ${lost.length} are filed by no producer now; ${gone.length} of its zh rows are gone now — ${gone.filter((k) => SWR.words.has(k)).length} of them stored (the census decides, not a judgment)`);
+    ok(relZh.size > 5000 && SWR.filings.length >= 60 && !SWR.exhausted && SWR.converged && SWR.filings.every((x) => !x.unparsed && !x.open.length),
+      `stored words: the release ${relVer} is read the same way (its dictionaries and every filing of its producers)`, { zh: relZh.size, n: SWR.filings.length, open: SWR.filings.filter((x) => x.unparsed || x.open.length).map((x) => `${x.f}:${x.line}`).slice(0, 6) });
+    const red = lawOf(relStored, storedNow, ZH, JA, LEG);
+    for (const x of red) ok(false, `stored words (closure 3): «${x.s.slice(0, 110)}…» — a ${relVer} hub stored it (${(SWR.words.get(x.s) || []).slice(0, 2).join(', ')}); an item it filed is drawn after the update, so it keeps its zh and ja rows and, filed by no producer now, is a NAMED legacy row`, { rows: x.rows, named: x.named, filedNow: x.filedNow });
+    ok(red.length === 0, `stored words (closure 3): each of the ${relStored.size} sentences the release ${relVer} stored keeps its zh and ja rows now; the ${lost.length} no producer files any more are named legacy rows`, red.map((x) => x.s.slice(0, 90)));
+    ok(Object.values(LEG).every((e) => e.left !== relVer || relStored.has(e.key)), `stored words: every legacy row left in ${relVer} is a sentence that release STORED (read from it, never picked)`, Object.entries(LEG).filter(([, e]) => e.left === relVer && !relStored.has(e.key)).map(([k]) => k));
+  }
+  // EACH LEGACY ROW: its release, its producer, its two rows, filed by no producer now — and an item stored with it says it in zh / ja
+  for (const [name, e] of Object.entries(LEG)) {
+    const params = Object.fromEntries([...String(e.key).matchAll(/\{(\w+)\}/g)].map((m) => [m[1], m[1] === 'account' ? 'UCI Max' : m[1] === 'since' ? '10/8/26, 1:30 PM' : 3]));
+    const item = { id: 'ut-1', text: 'x', i18n: { text: { key: e.key, params }, detail: [{ key: e.key, params }] } };
+    const say = (dict) => { const said = (l) => UTL.saidLine(l, tOf(dict)); return `${UTL.itemTextOf(item, said)} ${UTL.itemDetailLinesOf(item, said).join(' ')}`; };
     const zh = say(ZH), ja = say(JA);
-    return { name, named: !!LEG[name] && LEG[name].key === key && LEG[name].left === '2.369.400' && typeof LEG[name].filedBy === 'string' && fs.existsSync(path.join(REPO, LEG[name].filedBy)),
-      rows: Object.prototype.hasOwnProperty.call(ZH, key) && Object.prototype.hasOwnProperty.call(JA, key), filedNow: words.has(key), zh, ja, english: sentence.test(zh) || sentence.test(ja) };
-  });
-  for (const d of drawn) ok(d.named && d.rows && !d.filedNow && !d.english, `stored words (verifier #0, picks 3–6): «${d.name}» — a key a 2.369.399 hub stored is a NAMED legacy key (STORED_WORDS_LEGACY, left in 2.369.400) with its zh and ja rows; an item stored with it says it in zh / ja, not English; no producer files it any more`, { named: d.named, rows: d.rows, filedNow: d.filedNow, zh: d.zh.slice(0, 90), ja: d.ja.slice(0, 90) });
-  ok(Object.keys(LEG).length === OLD.length, `STORED_WORDS_LEGACY names exactly the ${OLD.length} reworded templates of stored items`, Object.keys(LEG));
+    const d = { named: /^2\.\d+\.\d+$/.test(String(e.left)) && typeof e.filedBy === 'string' && fs.existsSync(path.join(REPO, e.filedBy)), rows: has(ZH, e.key) && has(JA, e.key), filedNow: words.has(e.key) || storedNow.has(e.key), english: sentence.test(zh) || sentence.test(ja) };
+    ok(d.named && d.rows && !d.filedNow && !d.english, `stored words: legacy «${name}» (left in ${e.left}, filed by ${e.filedBy}) — its key keeps its zh and ja rows, no producer files it now, and an item stored with it says it in zh / ja, not English`, { ...d, zh: zh.slice(0, 90), ja: ja.slice(0, 90) });
+  }
   // #4 the overage refusal is a need with its door (a rewording had taken it out of the net): the row, present, its door beside the chip
   const UI = TABLES.find((x) => x.scope === 'ui').T;
   const ov = UI.NEEDS.find((r) => r.id === 'overage-turns');
   const ovSentence = 'Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).';
   const UM = fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8');
   ok(!!ov && !!ov.door.present && UI.needOf(ovSentence) === ov && UI.inNet(ovSentence) && (ov.door.via || {})['src/lib/usage-source.js'] === 'src/lib/usage-meter.js'
-    && /ovc\.kind === 'inUse' \? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend\.allowOverageTurns">\$\{escHtml\(t\('Allow automatic turns…'\)\)\}<\/button>`/.test(UM)
+    && /ovc\.kind === 'inUse' && !turnsAllowed \? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend\.allowOverageTurns">\$\{escHtml\(t\('Allow automatic turns…'\)\)\}<\/button>`/.test(UM)
     && /const sp = e\.target\.closest\('\.usage-spend-door'\);[^\n]*\n\s*if \(sp\) \{ e\.stopPropagation\(\); const d = settingsDoor\(this, 'spend\.allowOverageTurns'/.test(UM),
     'overage (verifier #4, picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)» is a present row again — «Allow automatic turns…» beside the Credits chip in the usage popup opens the Spending row that allows them', ov && ov.door);
+  // closure 3 (item 4): the door names an act STILL TO DO — drawn only while spend.allowOverageTurns is off (the popup's chip line,
+  // evaluated with the setting off and on)
+  const ovLine = (UM.match(/^[ \t]*const turnsAllowed = [^\n]*\n[ \t]*if \(ovc\) parts\.push\([^\n]*\n/m) || [''])[0];
+  const drawOv = (allowed) => { const parts = []; try { new Function('parts', 'ovc', 'creditsChipHtml', 'escHtml', 't', 'UI_ICONS', ovLine).call({ settings: { get: (k) => (k === 'spend.allowOverageTurns' ? allowed : undefined) } }, parts, { kind: 'inUse' }, () => '<chip>', (x) => String(x), (x) => x, { money: '' }); } catch (e) { return 'THREW ' + e.message; } return parts.join(''); };
+  const ovOff = drawOv(false), ovOn = drawOv(true);
+  ok(/^<chip> <button [^>]*usage-spend-door/.test(ovOff) && ovOn === '<chip>', 'overage (closure 3, item 4): «Allow automatic turns…» is drawn beside the in-use Credits chip only while spend.allowOverageTurns is OFF — with it on, the chip alone', { off: ovOff.slice(0, 120), on: ovOn.slice(0, 120) });
   // #5 the lapsed chip under refresh 'off' is the setting's door — its VISIBLE words say the act (never only its title)
   const MA = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
   const cs = MA.indexOf('export function serveLapsedChipHtml('), ce = MA.indexOf('\n}\n', cs);
@@ -1533,6 +1915,13 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words, the overage
   const visible = chipOff.replace(/ title="[^"]*"/g, '').replace(/<[^>]+>/g, '').trim();
   ok(/role="button"/.test(chipOff) && /data-serve-setting="accounts\.onDemandQuotaRefresh"/.test(chipOff) && /· Turn on usage refresh…$/.test(visible) && /^subscription inactive since /.test(visible),
     'lapsed chip (verifier #5, picks 3–6): under usage refresh «off» the chip is the setting\'s door and its visible words say that act («… · Turn on usage refresh…»), as the other chip says «· Re-check»', visible);
+  // closure 3 (item 5): the chip's two visible verbs go into its HTML through escHtml (a translation is text, never markup)
+  let escOff = '', escMan = '';
+  try {
+    const chipE = new Function('t', 'escHtml', 'loginWhenText', 'ROSTER_ICONS', MA.slice(cs, ce + 2).replace(/^export /, '') + '\nreturn serveLapsedChipHtml;')((k, p) => (k === 'Turn on usage refresh…' || k === 'Re-check' ? `<b>${k}</b>` : k.replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''))), (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'), () => '10/8/26, 1:30 PM', { CLOCK: '' });
+    escOff = chipE({ id: 'sub-1', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'off' }); escMan = chipE({ id: 'sub-1', serve: { state: 'lapsed', since: 1, why: 'x' } }, { mode: 'manual' });
+  } catch (e) { escOff = 'THREW ' + e.message; }
+  ok(/ · &lt;b&gt;Turn on usage refresh…&lt;\/b&gt;<\/span>$/.test(escOff) && / · &lt;b&gt;Re-check&lt;\/b&gt;<\/span>$/.test(escMan), 'lapsed chip (closure 3, item 5): «· Turn on usage refresh…» and «· Re-check» go into the chip\'s HTML through escHtml', { off: escOff.slice(-80), manual: escMan.slice(-80) });
 }
 
 { // pick 6, the 390 px picture: a touch row folds to its sentence + ONE trailing door — a pointer's declared door is that door

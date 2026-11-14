@@ -13840,4 +13840,7 @@ export default {
   "Turn on usage refresh…": "使用量の更新をオンにする…",
   "Allow automatic turns…": "自動ターンを許可…",
   "Its exit grants and port forwards go with the old entry — set them again once the machine is added.": "古い項目の出口の許可とポート転送も一緒に削除されます — マシンを追加したあとで設定し直してください。",
+  // lane ui-needs-a-button (closure 3)
+  "The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.": "設定のテレメトリ転送先（診断データを中央コレクターへ転送）がフィードバックの受け口で {status} を返しました。診断データは受け取りますが、エージェントのフィードバックは受け取りません。レポートはここ（⚙ システム ▸ エージェントのフィードバック…）に残ります — 転送待ち {n} 件（{max} 件を超えると古いものから削除）。VibeSpace は1日に1回この転送先を再確認し、受け取れるようになったら送ります。",
+  "This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.": "この一時ブラウザのパスキーはこの会話に保存され、会話とともに削除されます。リクエストを取り消すと、ページの別のログイン方法か、自分のデバイスでのサインインが使えます。新しいパスキーはあなたが許可した後にだけ登録されます。",
 };

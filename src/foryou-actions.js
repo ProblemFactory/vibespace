@@ -204,18 +204,21 @@ const PARKED_ASK_TYPES = Object.freeze(['main-ask', 'helper-ask']);
 const isParkedAsk = (item) => !!(item && item.action && PARKED_ASK_TYPES.includes(item.action.type));
 const CLOSERS = Object.freeze(['hide']);   // a row's `closer` (absent = the generic ✓ / ✕ / ↺)
 const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
-// lane ui-needs-a-button (the verifier's list for picks 3–6 — STORED WORDS): a For-you item keeps the words its hub FILED (the
-// i18n {key, params} it stored) and the page draws them with t(key). Picks 3 and 5 reworded five of those templates (their menu
-// paths became doors on the line), so an item a 2.369.399 hub filed still carries the OLD key: each stays a dictionary key with its
-// zh / ja rows, restored verbatim from 4d63ec1b4, for as long as such an item can be open — named here (job-model
-// FOR_YOU_WORDS_LEGACY's way) with the release it left in and the producer that filed it, so the dictionary census sees every row
-// referenced. Plain strings, never i18nKey(): no producer files them any more.
+// lane ui-needs-a-button (the verifier's list for picks 3–6 — STORED WORDS; closure 3 — the census): a For-you item keeps the
+// words its hub FILED (the i18n {key, params} it stored) and the page draws them with t(key) at any later time — so a template an
+// older hub already filed is still drawn after the update. A key the last release STORED that no producer files any more stays a
+// dictionary key with its zh / ja rows (restored verbatim), named here with the release it left in and the producer that filed it
+// (job-model FOR_YOU_WORDS_LEGACY's way), so the dictionary census sees every row referenced. Plain strings, never i18nKey(). The
+// list is not kept by hand: test-needs-doors ⑩ reads every producer's stored words in this tree and in the last release (git) — a
+// release-stored sentence keeps its rows or is named here.
 const STORED_WORDS_LEGACY = Object.freeze({
   'no-switch': Object.freeze({ left: '2.369.400', filedBy: 'src/browser-switch.js', key: 'No switch can be offered: this version of VibeSpace cannot switch a browser for the agent yet. If a site refuses this browser, install a browser plugin (⚙ → Plugins → Install plugin…) and choose it for this profile with Change build….' }),
   'outbox-account': Object.freeze({ left: '2.369.400', filedBy: 'src/server/channels-outbound.js', key: 'Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.' }),
   'outbox-conversation': Object.freeze({ left: '2.369.400', filedBy: 'src/server/channels-outbound.js', key: 'Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.' }),
   'reach-ask': Object.freeze({ left: '2.369.400', filedBy: 'src/server/channels-access.js', key: 'Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.' }),
   'pool-lapsed-off': Object.freeze({ left: '2.369.400', filedBy: 'src/server/usage-pool-engine.js', key: '{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly' }),
+  // closure 3: the paused feedback forward's detail (feedback-forward-model PAUSE_DETAIL, reworded by pick 5) — filed ONCE a pause
+  'feedback-pause': Object.freeze({ left: '2.369.400', filedBy: 'src/server/feedback-forward.js', key: 'The telemetry forward target in Settings (Forward diagnostics to a central collector) answered {status} at its feedback door: it takes diagnostics, not agent feedback. The reports stay here, in ⚙ System ▸ Agent feedback… — {n} waiting to be forwarded (past {max} the oldest is dropped). VibeSpace asks the target again once a day and sends them when it takes them.' }),
 });
 // THE «CHECK AGAIN» VERBS (lane cli-self-measure): every row that declares `checkAgain` (its hover) is ONE button the For-you
 // window draws and ONE verb it runs (the model's runAction) — the window reads the row, never a branch per type

@@ -197,7 +197,7 @@ console.log('— wiring pins');
     && /creditsSlotHtml\(this\._codexAccountUsage\?\.\['__global_codex__'\]\) \+ resetSlot\('__global_codex__'\)/.test(ma)
     && /creditsSlotHtml\(this\._codexAccountUsage\?\.\[isPool \? a\.current : a\.id\]\)/.test(ma));
   ok('the usage CELL no longer draws either credits state (the in-use sentence pushed the next-usable column)', !/ovc\.kind !== 'credits'/.test(ma) && !/acct-usage-credits/.test(ma));
-  ok('the usage popup draws the SAME chip (creditsChipHtml + UI_ICONS.money)', /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um));
+  ok('the usage popup draws the SAME chip (creditsChipHtml + UI_ICONS.money)', /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um));
   ok('ci.mjs runs this suite', /'test-roster-live-usage'/.test(fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8')));
 }
 console.log('— B-ce1c: the machine login and a named account of the same identity are TWO sign-ins');

@@ -425,8 +425,10 @@ export function installUsageMeter(App, ctx = {}) {
       // title + aria-label) — the same builder the Agents roster rows use.
       const ovc = overageChip(overageState(snap), { t });
       // lane ui-needs-a-button (the verifier's list for picks 3–6): «Automatic turns are refused … (a Spending setting can allow them)»
-      // is the in-use chip's tip — its door sits beside the chip: the setting that allows them (the popup's click delegate)
-      if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }) + (ovc.kind === 'inUse' ? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend.allowOverageTurns">${escHtml(t('Allow automatic turns…'))}</button>` : ''));
+      // is the in-use chip's tip — its door sits beside the chip: the setting that allows them (the popup's click delegate); closure 3:
+      // drawn only while that setting is OFF — a door names an act still to do
+      const turnsAllowed = this.settings?.get?.('spend.allowOverageTurns') === true;
+      if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }) + (ovc.kind === 'inUse' && !turnsAllowed ? ` <button type="button" class="mounts-btn need-door usage-spend-door" data-door="settings:spend.allowOverageTurns">${escHtml(t('Allow automatic turns…'))}</button>` : ''));
       // …and the harness's own "this account is refusing requests" fact, which
       // leaves the donut friendly (nothing marks a window spent for it).
       const scc = spendControlChip(spendControlState(snap), { t });

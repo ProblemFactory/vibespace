@@ -1186,8 +1186,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     }
     if (dialogBar.dataset.prompt) delete dialogBar.dataset.prompt;
     const pk = !d ? pkFactNow() : null;
+    const pkPid = st.target && st.target.profileId ? st.target.profileId : null; // closure 3 (browser-live-13): a saved profile — none = the conversation's temporary browser
     const door = !!deskDoor.dataset.ds; // the .367 seam: x-seat's «Open in Desktop» door is drawn under this banner ⇒ its sentence drops the Desktop clause
-    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null, display: pk.display || null, deskDoor: door }) : null;
+    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null, display: pk.display || null, temporary: !pkPid, deskDoor: door }) : null;
     const pkUnknown = pkw && pkw.unknown ? pkw : null; // lane passkey-browse-yourself: the watch cannot see this browser — a quiet line, below every other state
     const pkElse = !d && !(pkw && !pkUnknown) ? pkElsewhere() : null; // acceptance r1: ANOTHER browser of this conversation waits — a note naming it, never a Cancel aimed at the one on show
     if (pkw && !pkUnknown) {
@@ -1209,8 +1210,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         b.disabled = !!st.passkeyCancelling;
         acts.append(b);
         // lane ui-needs-a-button (browser-live-13): «Passkey settings…» — the Agent browser panel at this profile, its Passkeys open
-        const pid = st.target && st.target.profileId ? st.target.profileId : null;
-        if (pkw.settings && pid && typeof app.openBrowserProfiles === 'function') acts.append(textBtn(pkw.settings, () => app.openBrowserProfiles({ focus: pid, open: 'passkeys' }), 'browser-live-dialog-dismiss browser-live-passkey-settings'));
+        if (pkw.settings && pkPid && typeof app.openBrowserProfiles === 'function') acts.append(textBtn(pkw.settings, () => app.openBrowserProfiles({ focus: pkPid, open: 'passkeys' }), 'browser-live-dialog-dismiss browser-live-passkey-settings'));
         dialogBar.append(acts);
       }
       dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', true); dialogBar.classList.toggle('blind', false); // acceptance r1: an unknown line before it left the quiet look on (an urgent banner painted grey)

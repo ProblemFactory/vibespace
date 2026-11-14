@@ -313,9 +313,9 @@ export function serveLapsedChipHtml(a, { mode = 'manual', pooled = true } = {}) 
   const label = `${ROSTER_ICONS.CLOCK}${t('subscription inactive since {when}', { when: escHtml(when) })}`;
   // lane ui-needs-a-button pick 5: under 'off' the chip is the SETTING's door (the ⟳ route refuses — no Re-check verb); the verifier's
   // list (picks 3–6): its words say that act («· Turn on usage refresh…», as the other chip says «· Re-check»), never only its title
-  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" role="button" tabindex="0" data-serve-setting="accounts.onDemandQuotaRefresh" style="color:var(--red,#e55)" title="${head} ${tail}">${label} · ${t('Turn on usage refresh…')}</span>`;
+  if (mode === 'off') return ` <span class="acct-blocked-hint acct-serve-chip-off" role="button" tabindex="0" data-serve-setting="accounts.onDemandQuotaRefresh" style="color:var(--red,#e55)" title="${head} ${tail}">${label} · ${escHtml(t('Turn on usage refresh…'))}</span>`;
   return ` <span class="acct-blocked-hint acct-serve-chip" role="button" tabindex="0" data-serve-recheck="${escHtml(a.id)}" style="color:var(--red,#e55)"`
-    + ` title="${head} ${tail}">${label} · ${t('Re-check')}</span>`;
+    + ` title="${head} ${tail}">${label} · ${escHtml(t('Re-check'))}</span>`;
 }
 
 export function acctExtrasHtml({ login = '', oat = '', oatWarn = false, prov = '', note = '' } = {}) {

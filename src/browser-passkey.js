@@ -224,7 +224,7 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
  *  lane passkey-ui (§2.4 / §2.5): `passkey_ask` = the page waits for the OWNER's card — the banner carries that card's
  *  words and choices (`card`, the same buttons as the tray and the chat; the same approve route). */
-function passkeyWords(b, tIn, { headed = false, card = null, display = null, deskDoor = false } = {}) {
+function passkeyWords(b, tIn, { headed = false, card = null, display = null, deskDoor = false, temporary = false } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line; a Retry press when the re-arms stopped), never nothing
   if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.') : b.why === 'refused' && b.cause ? t('VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.', { cause: str(b.cause) }) : b.why === 'not-watched' ? t('VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.') : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '', retry: b.why === 'gave-up' ? t('Retry') : '' }; // acceptance r2: gave-up ⇒ the Retry press (the bridge re-arms)
@@ -236,8 +236,12 @@ function passkeyWords(b, tIn, { headed = false, card = null, display = null, des
   }
   const w = {
     title: t('This page is waiting for a passkey ({rp})', { rp }),
-    line: t('Cancel the request to use the page’s other way in, or sign in on your own device. A kept passkey signs in by this profile’s passkey settings; a new one is registered only after you allow it.'),
-    settings: t('Passkey settings…'), // lane ui-needs-a-button (browser-live-13): the door the line names, beside Cancel
+    // lane ui-needs-a-button (closure 3, browser-live-13): a TEMPORARY browser (a conversation's own — no saved profile) has no
+    // profile and no passkey settings to open: its line says where its passkeys live (with the conversation; its record's removal
+    // drops them — browser-keeper removeProfile → passkeyDrop) and no door is promised
+    line: temporary ? t('This temporary browser keeps its passkeys with this conversation; they are removed with it. Cancel the request to use the page’s other way in, or sign in on your own device; a new passkey is registered only after you allow it.')
+      : t('Cancel the request to use the page’s other way in, or sign in on your own device. A kept passkey signs in by this profile’s passkey settings; a new one is registered only after you allow it.'),
+    settings: temporary ? '' : t('Passkey settings…'), // lane ui-needs-a-button (browser-live-13): the door the line names, beside Cancel
     // lane passkey-browse-yourself: a browser on a VIRTUAL display (the attach road) — the sentence names the display and the ways in
     desktop: headed ? (display ? t(DOORS_WORDS, { display: str(display).slice(0, 40), rp }) : t('Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.')) : '',
     cancel: t('Cancel passkey request'),

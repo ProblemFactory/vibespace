@@ -3901,7 +3901,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
   const ma2 = read('src/lib/manage-agents.js'), um2 = read('src/lib/usage-meter.js');
   ok('§7c PANEL: the roster renders the credits chip on the identity line (creditsSlotHtml → creditsChipHtml) and the popup beside the provenance line (the same creditsChipHtml, the money icon)',
     /const creditsSlotHtml = \(u\) => `<span class="acct-credits-slot">\$\{creditsChipHtml\(creditsChipFor\(u\), \{ esc: escHtml, icon: UI_ICONS\.money \}\)\}<\/span>`/.test(ma2)
-    && /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um2));
+    && /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)(?: \+ \(ovc\.kind === 'inUse' && !turnsAllowed \? ` <button [^`]*data-door=\"settings:spend\.allowOverageTurns\"[^`]*` : ''\))?\);/.test(um2));
   // THE ORG FACTS SURVIVE THE IDENTITY REPAIR (final verifier, the fail-closed
   // census): repairSidecarsByApiPhase rebuilds a cache whose 7d contradicts the
   // account's API phase — and used to rebuild it WITHOUT `overage`/`spend`, so
