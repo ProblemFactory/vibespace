@@ -57,7 +57,9 @@
 //      360 en — cut where it BEGINS in reading order (its first character outside the box, its last 12 inside) — CONTROL: r4's box
 //      (an rtl box over every name: the END cut) RED
 //   ⑤ THE TIERS — a rotation to landscape (the regular class): no fold, no ⋯, the five badges back; portrait again: folded again; a
-//      tablet in portrait (the regular class, 700 px): its column bar keeps 文件, no fold; a desktop page (1280, a mouse): no ⋯ built,
+//      tablet in portrait (the regular class, 700 px): its column bar keeps 文件, no fold — the five numbers become ONE only when the
+//      name would fall under its readable minimum (主开发 09:45Z: the name wins; the owner's 12 glyphs do, a short name keeps the five);
+//      a desktop page (1280, a mouse): no ⋯ built,
 //      the nav hidden — the desktop chrome's markup hash is printed (the report compares it with the base's)
 //   ⑪ «+» IS THE CREATE MENU (r6 L1) — 360 px compact, a web view open, the attention list EMPTY (no For-you page, so no 文件 card):
 //      from EVERY drawn door of the bar (a real touch tap each, never a long press) the roads to Files in two taps — «+» → its Files
@@ -972,9 +974,20 @@ else await (async () => {
   { const b = await bar(); judgeBar(b, 'back to portrait', { wantFolded: ['desktops', 'usage', 'gear'] }); }
   await device(700, 1000); await sleep(600); await settle();
   {
-    const b = await bar(); console.log(`    tablet portrait: ${say(b)}`);
-    ok(b.vc === 'regular' && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow') && b.badges.every((x) => !x.c.includes('mnav-one')), `a tablet in portrait (the regular class): its own bar — no fold, no ⋯, no one-badge form (${b.dir}; ${ids(b)})`, say(b));
+    // 主开发 09:45Z, ruling 4's order (B): THE NAME'S READABLE MINIMUM WINS. In the tablet's 348 px column the five numbers
+    // become ONE only when the name would fall under its readable minimum (the ladder's «badges» step, after «win»); with room
+    // the tablet keeps its five. The case (the owner's 12-glyph name, 31 open) and its opposite (a short name) side by side.
+    const YIELD = `document.getElementById('mobile-nav').dataset.yield || ''`;
+    const b = await bar(), y = await evalJs(YIELD); console.log(`    tablet portrait, the owner's name: ${say(b)} · yield ${y || '—'}`);
+    ok(b.vc === 'regular' && b.title.readable && y === 'badges' && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
+      `a tablet in portrait (the regular class), the owner's 12-glyph name in its 348 px column: the five numbers become ONE only because the name would fall under its readable minimum (the ladder's «${y || 'no'}» step) — the name readable (${b.title.w} px ≥ ${b.title.minW}), no fold, no ⋯ (${b.dir}; ${ids(b)})`, say(b));
     await shot('after-en-tablet.png');
+    await dress({ title: '游戏' }); await sleep(400); await settle();
+    const s5 = await bar(), y5 = await evalJs(YIELD); console.log(`    tablet portrait, a short name: ${say(s5)} · yield ${y5 || '—'}`);
+    ok(s5.vc === 'regular' && s5.title.whole && y5 !== 'badges' && s5.badges.length >= 2 && s5.badges.every((x) => !x.c.includes('mnav-one')) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
+      `…its opposite: the same tablet with a short name («游戏») keeps its FIVE numbers (${s5.badges.map((x) => x.n).join('/')}) — the name whole, no one-badge form, no fold, no ⋯`, say(s5));
+    await shot('after-en-tablet-short.png');
+    await dress({ title: OWNER }); await sleep(400); await settle();
   }
   // ── ④ THE + ROAD ──
   console.log('④ the + road (LAW 3)');
