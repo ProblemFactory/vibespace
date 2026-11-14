@@ -6,7 +6,7 @@
 // and the door that ends it (`door`: 'unlock' = the vault's Unlock…, 'relogin' = Manage agents' re-login, 'oat-shape' = the
 // guided door of a token with no subscription type yet (lane oat-add-door), null = nothing
 // to press — it ends by itself, and the sentence says when). The reset claim's words live here too.
-import { mark } from './page-time.js'; // THE ONE MARK (lane ui-language, 主开发's ruling 2026-11-14): m / h / d in every language
+import { durationMark } from './page-time.js'; // THE ONE MARK (lane ui-language, 主开发's ruling 2026-11-14): m / h / d in every language
 const fill = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m));
 const id = (s, p) => fill(s, p);
 /** THE MARK'S t (hotfix 2.369.401 — the owner 2026-11-13 under a picture of the roster: «不如还是继续用 h/d»): a MARK — a ring's age
@@ -119,7 +119,7 @@ export function staleLaneAge(readAt, freshestAt, nowMs = Date.now(), { t = id } 
   if (!r || !f || f - r <= STALE_LANE_MS) return '';
   const min = Math.max(1, Math.round((Number(nowMs) - r) / 60000));
   // a MARK (the caller handed markT): page-time's mark — the same letters in every language, the roster's thresholds
-  if (t === markT) return mark(min * 60000, { hoursFrom: 120, daysFrom: 48 * 60 });
+  if (t === markT) return durationMark(min * 60000, { hoursFrom: 120, daysFrom: 48 * 60 });
   // a SENTENCE: the interface's words for the same short age
   return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });
 }
