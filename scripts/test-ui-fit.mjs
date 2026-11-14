@@ -121,5 +121,16 @@ for (const [f, re] of [['src/lib/vault-paste-box.js', /mk\('label', 'ut-login-al
   check(`⑥ ${path.basename(f)}: its box-and-words label is the house check row (#10 / #39 / #49)`, (read(f).match(re) || []).length >= 1);
 check('⑥ the webhook pick row (#1): its «why» sits under the words in the row\'s grid, never in the box\'s column', has('.chan-wh-why', 'grid-column: 2') && !/flex-basis: 100%/.test(rule('.chan-wh-why').body));
 
+// ⑦ test-ui-fit-chrome's FIRST CLAIM (e4404e6d1) — each a pin, each with the shape it caught refused
+const footOk = (src) => /foot\.className = 'btn-bar agents-foot';/.test(src) && /note\.className = 'agents-note btn-bar-text';/.test(src) && !/foot\.style\.cssText = 'display:flex;justify-content:space-between/.test(src);
+check('⑦ the Agents panel\'s footer is a BUTTON BAR: the note takes its 12 em, «Re-check» keeps its words and wraps whole (it was squeezed to 48 px, one glyph a line)', footOk(AGENTS));
+check('⑦ CONTROL: the inline flex footer (e4404e6d1\'s) is refused', !footOk(AGENTS.replace("foot.className = 'btn-bar agents-foot';", "foot.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;';")));
+const namesTipped = (src) => (src.match(/<span class="acct-key-name" title="\$\{escHtml\(a\.name\)\}">/g) || []).length === 3 && !/<span class="acct-key-name">\$\{escHtml\(a\.name\)\}<\/span>/.test(src);
+check('⑦ an account\'s name cut to one line carries its WHOLE name as its tip (all three roster rows)', namesTipped(AGENTS));
+check('⑦ CONTROL: a name without its tip is refused', !namesTipped(AGENTS.replace('<span class="acct-key-name" title="${escHtml(a.name)}">', '<span class="acct-key-name">')));
+check('⑦ the System panel in the rail: a row\'s figure takes its own line under the name and wraps whole (it was cut to «已用 8…» at the 200 px floor)', has('.rail-panel .sys-mem-row > .sys-mem-sub', 'grid-column: 1 / -1', 'white-space: normal', 'text-overflow: clip') && has('.rail-panel .sys-mem-row', 'grid-template-columns: minmax(0, 1fr) auto'));
+const LADDER_SRC = read('scripts/lib/fit-ladder.mjs');
+check('⑦ the column facts: an ellipsis inside its OWN box whose tip holds the whole words is a preview, not a cut — one without the tip still is', /const tipped = cs\(el\)\.textOverflow === 'ellipsis' && el\.getBoundingClientRect\(\)\.right <= pr\.right \+ 1 && \[el, el\.parentElement, el\.parentElement\?\.parentElement\]\.some/.test(LADDER_SRC) && /if \(!tipped && Math\.max\(/.test(LADDER_SRC));
+
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed, ' + fail + ' failed' : ''})`);
 process.exit(fail ? 1 : 0);

@@ -84,7 +84,10 @@ export const columnFactsSource = (sel) => `(() => {
   for (let n = tw.nextNode(); n; n = tw.nextNode()) {
     const s = n.textContent, el = n.parentElement; if (!s.trim() || !el || !vis(el)) continue;
     const rects = rangeRects(n); if (!rects.length) continue;
-    if (Math.max(...rects.map((q) => q.right)) > pr.right + 1 && clipped.length < 8) clipped.push(s.trim().slice(0, 24));
+    // an ellipsis drawn INSIDE its own box (the box within the column) whose tip — its own, its parent's or grandparent's title or
+    // aria-label — holds the whole words is a deliberate one-line preview, not a cut (a job's last line); without the tip it is
+    const tipped = cs(el).textOverflow === 'ellipsis' && el.getBoundingClientRect().right <= pr.right + 1 && [el, el.parentElement, el.parentElement?.parentElement].some((x) => x && ((x.getAttribute('title') || '') + ' ' + (x.getAttribute('aria-label') || '')).includes(s.trim().slice(0, 40)));
+    if (!tipped && Math.max(...rects.map((q) => q.right)) > pr.right + 1 && clipped.length < 8) clipped.push(s.trim().slice(0, 24));
     const tops = new Set(rects.map((q) => Math.round(q.top + q.height / 2)));
     const w = Math.max(...rects.map((q) => q.width));
     if (tops.size >= 3 && w < 3 * em && s.trim().length >= 3 && squeezed.length < 8) squeezed.push(s.trim().slice(0, 24));

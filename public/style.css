@@ -5873,6 +5873,8 @@ button.plugin-chip.plugin-chip-primary { border: 1px solid color-mix(in srgb, va
 .sys-mem-row { display: grid; grid-template-columns: minmax(7em, 1fr) auto minmax(0, max-content); gap: 6px; padding: 1px 0; color: var(--text-secondary); }
 .sys-mem-mb { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 .sys-mem-sub { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-panel .sys-mem-row { grid-template-columns: minmax(0, 1fr) auto; } /* lane ui-phone-and-fit pick 1 (test-ui-fit-chrome's first claim: «已用 84 MB» cut to 44 px at the 200 px floor): in the rail the sub (a figure) takes its own line under the name and wraps whole */
+.rail-panel .sys-mem-row > .sys-mem-sub { grid-column: 1 / -1; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: break-word; }
 .sys-mem-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sys-mem-fold > summary { list-style: none; cursor: pointer; }
 .sys-mem-fold > summary::-webkit-details-marker { display: none; }

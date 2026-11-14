@@ -217,7 +217,7 @@ try {
     await new Promise((r) => setTimeout(r, 1500));
     const dlg = document.querySelector('.guided-cli-dialog');
     const during = { yield: w.classList.contains('ob-yield'), vis: getComputedStyle(w).visibility, dialog: !!dlg && dlg.getClientRects().length > 0 };
-    const cancel = dlg && [...dlg.querySelectorAll('button')].find((b) => /取消|Cancel|关闭|Close/.test(b.textContent));
+    const cancel = dlg && (dlg.querySelector('.dialog-close') || [...dlg.querySelectorAll('button')].find((b) => /取消|Cancel|关闭|Close/.test(b.textContent + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.title || '')))); // its ✕ (.dialog-close) — the first claim pressed nothing
     cancel?.click();
     await Promise.race([p, new Promise((r) => setTimeout(r, 5000))]);
     await new Promise((r) => setTimeout(r, 300));
