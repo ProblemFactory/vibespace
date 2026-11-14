@@ -293,6 +293,7 @@ class SettingsUI {
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
       if (cat === t('Spending')) this._renderDecisionSpend(section, content, nav);   // lane decision-spend-readout: the judge bills too
+      if (cat === t('Spending') && !this.app?._authEnabled) this._renderSpendSignInOff(section);   // lane setting-doors pick 0 (b3): the truth on a sign-in-off instance
       // A HARNESS section (derived from its descriptor table, design §4.2):
       // one line saying what these values are for, then THREE sub-blocks by
       // what a row is (2.369.132, owner "区分全局配置项和 session-level 配置项"):
@@ -596,6 +597,24 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'text'));
+  }
+
+  /** lane setting-doors pick 0 (b3): with sign-in OFF nothing tells the owner's page from another program, so Settings › Spending
+   *  says so — the ceilings refuse a bearer and a request with no mark of the owner's page, yet anything that can reach this
+   *  instance and dresses as its page can change them — with the door to turn sign-in on (the ⚙ menu's own password dialog). */
+  _renderSpendSignInOff(section) {
+    // a STANDARD row's shape (words in .settings-row-info, the door in .settings-row-control) so the layout rail treats it as
+    // any row (test-settings-row-layout: a row of its own shape wrapped its button under the words at 600 / 390 px)
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-spend-signin';
+    const info = Object.assign(document.createElement('div'), { className: 'settings-row-info' });
+    info.append(Object.assign(document.createElement('div'), { className: 'settings-row-desc', textContent: t('Sign-in is off: anything that can reach VibeSpace can change these limits. Set a password so only you can.') }));
+    const controlWrap = Object.assign(document.createElement('div'), { className: 'settings-row-control' });
+    const open = Object.assign(document.createElement('button'), { className: 'settings-link-btn', textContent: t('Set password…') });
+    open.onclick = () => this.app._showPasswordDialog();
+    controlWrap.appendChild(open);
+    row.append(info, controlWrap);
+    section.appendChild(row);
   }
 
   /** lane decision-spend-readout: Settings › Spending lists what bills — the LLM plugin's day and month beside the

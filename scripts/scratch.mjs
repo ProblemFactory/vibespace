@@ -45,6 +45,12 @@ export const PRESET_KEYS = Object.freeze({ 'vs-onboarded': '1', 'vs-vault-later'
 export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(' ')} } catch {}`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
+/** lane setting-doors pick 0 (2026-11-14): THE OWNER'S PAGE, written once for every suite — the marks a browser on this instance's own
+ *  page sends (Sec-Fetch-Site same-origin and its Origin). A spend.* row changes ONLY with them (src/routes/persistence.js
+ *  refuseSpendRows: a bearer, or a request with no mark of the page, is refused): a suite that writes a spending row on its scratch
+ *  hub writes it with these headers, so «who may write» has one place in the tests too (test-spend-rows-owner ⑤ is the census). */
+export function ownerPageHeaders(base) { return { Origin: new URL(base).origin, 'Sec-Fetch-Site': 'same-origin' }; }
+
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
   // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
