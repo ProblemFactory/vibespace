@@ -65,7 +65,11 @@ const MUTBIN = path.join(ROOT, 'data', 'bin');
 fs.mkdirSync(MUTBIN, { recursive: true });
 try { fs.symlinkSync(path.join(REPO, 'src'), path.join(ROOT, 'src')); } catch { }
 const CLEAN_ENV = { ...process.env };
-for (const k of Object.keys(CLEAN_ENV)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete CLEAN_ENV[k];
+// THE CALLER'S OWN CONVERSATION IS NOT THIS SUITE'S (int402, 2026-11-14): a suite started from inside an agent
+// conversation inherits the hub's injected CLAUDE_WEBUI_* names; the wrapper reads CLAUDE_WEBUI_SESSION_ID to keep a picture
+// with its conversation when the cwd is temporary, so with the name left in, the picture leg wrote under data/chat-attachments/
+// of the CALLER's conversation and was red. Every name the hub injects is dropped; a leg that wants one sets it itself.
+for (const k of Object.keys(CLEAN_ENV)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_|^CLAUDE_WEBUI_/.test(k)) delete CLEAN_ENV[k];
 
 const H = require(path.join(REPO, 'src/harnesses/index.js'));
 const g = H.get('antigravity');
