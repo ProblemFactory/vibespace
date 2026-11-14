@@ -129,6 +129,8 @@ const namesTipped = (src) => (src.match(/<span class="acct-key-name" title="\$\{
 check('⑦ an account\'s name cut to one line carries its WHOLE name as its tip (all three roster rows)', namesTipped(AGENTS));
 check('⑦ CONTROL: a name without its tip is refused', !namesTipped(AGENTS.replace('<span class="acct-key-name" title="${escHtml(a.name)}">', '<span class="acct-key-name">')));
 check('⑦ the System panel in the rail: a row\'s figure takes its own line under the name and wraps whole (it was cut to «已用 8…» at the 200 px floor)', has('.rail-panel .sys-mem-row > .sys-mem-sub', 'grid-column: 1 / -1', 'white-space: normal', 'text-overflow: clip') && has('.rail-panel .sys-mem-row', 'grid-template-columns: minmax(0, 1fr) auto'));
+check('⑦ the System panel in the rail: a row\'s NAME wraps whole too (it was «usage ledger cold col…» past the 200 px floor, an ellipsis with no tip)', has('.rail-panel .sys-mem-row > .sys-mem-name', 'white-space: normal', 'overflow: visible', 'text-overflow: clip'));
+check('⑦ the Jobs panel: a crontab or unit line breaks inside a path wider than the column (it ran past the 200 px floor)', has('.jobs-esc-line', 'overflow-wrap: anywhere'));
 const LADDER_SRC = read('scripts/lib/fit-ladder.mjs');
 check('⑦ the column facts: an ellipsis inside its OWN box whose tip holds the whole words is a preview, not a cut — one without the tip still is', /const tipped = cs\(el\)\.textOverflow === 'ellipsis' && el\.getBoundingClientRect\(\)\.right <= pr\.right \+ 1 && \[el, el\.parentElement, el\.parentElement\?\.parentElement\]\.some/.test(LADDER_SRC) && /if \(!tipped && Math\.max\(/.test(LADDER_SRC));
 
