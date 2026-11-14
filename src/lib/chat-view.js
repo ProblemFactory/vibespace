@@ -2233,7 +2233,9 @@ class ChatView {
     const fmt = (n) => (typeof n === 'number' ? num(n) : null);
     const rows = [];
     const add = (label, val, copyable) => { if (val != null && val !== '') rows.push({ label, val: String(val), copyable }); };
-    add(t('Role'), msg.role === 'tool' ? `${valueWord('msg-role', 'tool', t)} (${msg.toolName || '?'})` : valueWord('msg-role', msg.role, t));
+    // a value the CLI REPORTS stays VERBATIM, its words beside it as the hint (protocol values ruling, 主开发 2026-11-14)
+    const verbatim = (set, v) => { const w = valueWord(set, v, t); return w && w !== v ? `${v} — ${w}` : v; };
+    add(t('Role'), msg.role === 'tool' ? `${verbatim('msg-role', 'tool')} (${msg.toolName || '?'})` : verbatim('msg-role', msg.role));
     add(t('Time'), msg.ts ? when(msg.ts, { seconds: true, full: true }) : null);
     add(t('Model'), meta.model);
     if (u.input_tokens != null || u.output_tokens != null) {
@@ -2246,7 +2248,7 @@ class ChatView {
       add(t('Cache write'), cw ? fmt(cw) : null);
       add(t('Output tokens'), fmt(u.output_tokens));
       if (u.reasoning_output_tokens != null) add(t('Reasoning tokens'), fmt(u.reasoning_output_tokens)); // codex: the reasoning share of output_tokens
-      if (u.service_tier) add(t('Service tier'), valueWord('service-tier', u.service_tier, t));
+      if (u.service_tier) add(t('Service tier'), verbatim('service-tier', u.service_tier));
     }
     // THE TURN'S reasoning effort (turn_context / the wrapper's live twin).
     // 'ultra' is a delegation MODE, not a level — effortDisplay names the
@@ -2254,7 +2256,7 @@ class ChatView {
     // multi_agent_reasoning_effort), so a user who picked ultra does not read
     // a bare 'xhigh' here and conclude their pick was dropped (2.369.62).
     if (meta.effort) add(t('Effort'), effortDisplay(this._backendId(), meta.effort, { model: meta.model }));
-    add(t('Stop reason'), meta.stopReason ? valueWord('stop-reason', meta.stopReason, t) : null);
+    add(t('Stop reason'), meta.stopReason ? verbatim('stop-reason', meta.stopReason) : null);
     // THE TURN this message closed (claude turn_duration, design-unknown-records
     // 2026-09-21): "Turn: 3m18s · 66 messages [· budget n/limit]".
     if (meta.turn && (meta.turn.durationMs != null || meta.turn.messageCount != null)) {

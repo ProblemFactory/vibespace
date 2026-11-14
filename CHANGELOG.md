@@ -7,15 +7,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - In Chinese and Japanese, Customize mode and the Theme Editor are now shown in your language.
 - In Chinese and Japanese, adding a machine, its key and its set-up are shown in your language, and the set-up says what it will install.
-- The permission mode in a chat's status bar shows a plain name; its menu says what each mode does and shows a mode that asks nothing in red.
+- The permission menu in a chat's status bar says what each mode does in your language and shows a mode that asks nothing in red.
 - The dialog that offers to resume interrupted sessions no longer shows raw formatting marks.
 - A conversation waiting for your permission is explained in your language in For you, and its title no longer shows backticks.
 - A Claude login warning in For you is in your language, and system items there name their source in your language.
 - The dialog for adding a machine has a Cancel button and its own button for picking a key file; a name already in use is said in your language.
 - A setting's description no longer shows a raw {n} or ** marks.
-- The effort and style menus in a chat's status bar name their values in your language, and the model chip names the model as its menu does.
-- A chat's list of what is not working says what is wrong in your language.
-- A message's details show its author, why it stopped and its service tier in your language.
+- The model chip in a chat's status bar names the model as its menu does.
+- A message's details show its author, why it stopped and its service tier as reported, each with its meaning in your language.
 - A helper's status in a chat keeps its task's name instead of the command line tool's English activity line.
 - Background Work shows a job's state, who may see it, how a run ended and what started it in your language.
 - A conversation's card shows its board mark apart from its run status, in your language, and its resume settings say Default in your language.
@@ -30,7 +29,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The code editor's unsaved and saved marks, tooltips and messages, and an email's From, To and Date labels, are in your language.
 - The sidebar's «more» button and its manage bar's Clear and Done are in your language.
 - Dates and times follow your language everywhere: in Chinese and Japanese «2026/11/12 19:27», today just «19:27», this year «11/12 19:27».
-- Durations and «… ago» are written in your language's units instead of «1h59m» or «3m ago».
+- A duration inside a sentence is written in your language's units; short marks such as «3m» or «2h» are unchanged.
 - Counts and costs are written the way your device's language writes numbers.
 - The usage popup's reset times and countdowns, a message's time, job runs, file times and the vault's key history all use this format.
 - When VibeSpace's time zone is not this device's, a time says which zone it is in.

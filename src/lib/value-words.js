@@ -6,11 +6,10 @@
 //
 // PURE: `t` is injected (the i18nKey literals below are what scripts/i18n-extract.mjs reads; ② of test-ui-language holds
 // their zh + ja rows). Where a set already had its table, the door READS that table — it never keeps a twin:
-//   job-state → src/job-model.js STATE_WORDS · perm-mode → ./permission-mode-labels.js.
+//   job-state → src/job-model.js STATE_WORDS.
 // test-ui-language ⑥ holds every set whose values the tree lists (session-status STATES / URGENCIES, backend-caps
 // response styles, job-model GLYPH, themes BUILTIN_THEMES …) fully worded, and reds a code-named field drawn raw.
 import { STATE_WORDS as JOB_STATE_WORDS } from '../job-model.js';
-import { permissionModeShort } from './permission-mode-labels.js';
 
 const i18nKey = (s) => s;
 
@@ -25,17 +24,6 @@ export const VALUE_SETS = Object.freeze({
   }),
   // the usage's service tier
   'service-tier': Object.freeze({ standard: i18nKey('service-tier::Standard'), priority: i18nKey('Priority tier'), batch: i18nKey('service-tier::Batch'), flex: i18nKey('service-tier::Flex') }),
-  // a reasoning-effort level (claude --effort, codex reasoning effort, the ultra / ultracode extras)
-  effort: Object.freeze({
-    minimal: i18nKey('Minimal'), low: i18nKey('Low'), medium: i18nKey('Medium'), high: i18nKey('High'), xhigh: i18nKey('XHigh'),
-    max: i18nKey('Max'), ultra: i18nKey('Ultra'), ultracode: i18nKey('Ultracode'), none: i18nKey('None'),
-  }),
-  // a response style's NAME (claude outputStyle; the hint stays agent-meta's responseStyleHints)
-  // claude outputStyle names + codex personalities (src/backend-caps.js responseStyle.values)
-  'response-style': Object.freeze({ Concise: i18nKey('Concise'), Explanatory: i18nKey('Explanatory'), Learning: i18nKey('Learning'), Proactive: i18nKey('Proactive'), none: i18nKey('None'), friendly: i18nKey('Friendly'), pragmatic: i18nKey('Pragmatic') }),
-  // an MCP server's status in the init frame, and a plugin / MCP config error's type (open sets on the wire)
-  'mcp-state': Object.freeze({ connected: i18nKey('connected'), failed: i18nKey('connection failed'), 'needs-auth': i18nKey('needs sign-in'), pending: i18nKey('starting'), disabled: i18nKey('turned off') }),
-  'load-error': Object.freeze({ 'load-error': i18nKey('failed to load'), 'parse-error': i18nKey('could not be read'), 'not-found': i18nKey('not found') }),
   // a conversation's board status (src/session-status.js STATES / URGENCIES)
   'session-state': Object.freeze({ working: i18nKey('working'), 'needs-input': i18nKey('needs input'), blocked: i18nKey('blocked'), review: i18nKey('review'), done: i18nKey('done') }),
   urgency: Object.freeze({ low: i18nKey('low'), normal: i18nKey('normal'), high: i18nKey('high'), urgent: i18nKey('urgent') }),
@@ -81,7 +69,6 @@ function wordOf(k, t) {
 export function valueWord(set, value, t, { backend = null } = {}) {
   const v = value == null ? '' : String(value);
   if (set === 'job-state') return Object.prototype.hasOwnProperty.call(JOB_STATE_WORDS, v) ? t(JOB_STATE_WORDS[v]) : v;
-  if (set === 'perm-mode') return permissionModeShort(backend, v, t) || v;
   if (set === 'browser-claim' && /^http-\d{3}$/.test(v)) return t('it answered HTTP {code}', { code: v.slice(5) });
   const table = VALUE_SETS[set];
   return table && Object.prototype.hasOwnProperty.call(table, v) ? wordOf(table[v], t) : v;

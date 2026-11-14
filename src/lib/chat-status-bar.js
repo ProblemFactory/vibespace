@@ -10,8 +10,8 @@ import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, ef
 import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane agy-status-bar-facts): the facts row's window table + what it lacks
 import { t } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { permissionModeShort, permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
-import { valueWord, modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
+import { permissionModeWords, permissionModeDanger } from './permission-mode-labels.js';
+import { modelLabelWords } from './value-words.js'; // lane ui-language pick 2: the effort / model chips and the model menu in words // lane ui-language: the lock chip and its menu in words, never the protocol value
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
 const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
@@ -887,7 +887,7 @@ export class ChatStatusBar {
         const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
           + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
           + (eOriginLine ? '\n' + eOriginLine() : '');
-        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(valueWord('effort', this._statusEffort, t)) : t('effort: not reported'));
+        chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: not reported'));   // the level VERBATIM (protocol values ruling, 主开发 2026-11-14)
       }
     }
 
@@ -1143,7 +1143,7 @@ export class ChatStatusBar {
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permMode = this._statusPermMode || 'default';
-    const permLabel = permissionModeShort(this._backend, permMode, t) || permMode;
+    const permLabel = permMode;   // the mode VERBATIM where it is reported (protocol values ruling); its words go to the title below
     const permWords = permissionModeWords(this._backend, permMode, t);
     const permTitle = (permWords ? permWords + ' — ' : '') + (this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode'));
     chip('perm', `chat-status-perm chat-status-clickable${permissionModeDanger(this._backend, permMode) ? ' danger' : ''}`, permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
@@ -1776,7 +1776,7 @@ export class ChatStatusBar {
       }
       const note = document.createElement('div');
       note.className = 'chat-status-dropdown-note';
-      note.textContent = t('Reported by the agent\u2019s CLI when this session started.');
+      note.textContent = t('Reported by the harness in this session\u2019s start frame.');   // the release's sentence (test-init-frame pins it; its law stands)
       dropdown.appendChild(note);
       return;
     }
@@ -2385,12 +2385,13 @@ export class ChatStatusBar {
     for (const mode of modes) {
       const item = document.createElement('div');
       item.className = 'chat-status-dropdown-item chat-status-perm-item' + (mode === this._statusPermMode ? ' active' : '') + (permissionModeDanger(this._backend, mode) ? ' danger' : '');
-      // the words a person reads; the protocol value stays as a dim hint (the word a manual or an error uses)
-      const words = document.createElement('span');
-      words.className = 'chat-status-perm-words';
-      words.textContent = permissionModeWords(this._backend, mode, t) || mode;
-      item.appendChild(words);
-      if (permissionModeWords(this._backend, mode, t)) { const raw = document.createElement('span'); raw.className = 'chat-status-perm-raw'; raw.textContent = mode; item.appendChild(raw); }
+      // the value a person picks, VERBATIM (protocol values ruling, 主开发 2026-11-14); what it does is its hint, in the reader's words
+      const val = document.createElement('span');
+      val.className = 'chat-status-perm-value';
+      val.textContent = mode;
+      item.appendChild(val);
+      const said = permissionModeWords(this._backend, mode, t);
+      if (said) { const words = document.createElement('span'); words.className = 'chat-status-perm-words'; words.textContent = said; item.appendChild(words); }
       item.onclick = (ev) => {
         ev.stopPropagation();
         dropdown.remove();

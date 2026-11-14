@@ -155,6 +155,20 @@ This file is the engineers' record of every release: the lanes, the verification
 - **⑥(d) the AST form:** an upper-cased first piece + the rest (`slice(0, 1)` / `substring` / `substr` / `at(0)`). A planted control.
 - **value-words:** valueWord's doc comment is back above it.
 
+### ui-language — the protocol values ruling and the compact marks (主开发 2026-11-14 01:45Z, ui-fix/ruling-protocol-values.md)
+- **A value a person picks or the CLI reports stays VERBATIM where it is chosen and where it is reported.**
+  - agent-meta effortLabel / responseStyleLabel / initHealthLabel are the release's text again (the value verbatim, its hint and frame through t).
+  - The effort chip and the perm chip print the value; the perm chip's words stay in its title.
+  - A perm menu row is the mode verbatim, with its words as the hint.
+  - The record-info fields (role, stop reason, service tier) read «end_turn — <its words>».
+  - test-codex-0153 / test-effort-extras are the release's lines again; test-harness-honesty and test-init-frame stand as they were.
+  - The init-health note is the release's sentence again (test-init-frame pins it).
+- **No NAMES for protocol values in this unit.** value-words loses the effort / response-style / mcp-state / load-error / perm-mode tables, and permission-mode-labels its permissionModeShort. The seven rows only they read leave (§78). If the status strip's lane names values, the names come from ONE table beside each harness's descriptor.
+- **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `mark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
+  - The jobs rows, group ages and run duration, the usage meter's countdown, and the host chip's age go back to marks.
+  - Census ⑦ declares the mark sinks (`MARK_SINKS`, 8) and reads which is called where: a sink calling span / ago is red, and so is an undeclared line calling mark.
+  - The hotfix 2.369.401's `markT` (account-wall-words) becomes a call to `mark` once both are on master.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

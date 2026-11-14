@@ -32,7 +32,7 @@
 //   ⑥ A STORED VALUE IS WORDED WHERE IT IS DRAWN — never translated in storage, never printed raw. (a) The For-you heads: every
 //      literal sessionName head a producer in src/ files is a row of src/foryou-actions.js FORYOU_HEADS (the walk's
 //      chat-cards-3: «Manage Agents» stood English on a Chinese card). (b) THE DOOR, src/lib/value-words.js: every value the
-//      tree LISTS for a set it words is in its table (session-status STATES / URGENCIES, backend-caps response styles,
+//      tree LISTS for a set it words is in its table (session-status STATES / URGENCIES,
 //      automation-engine's key.* acts, jobs.js's run causes and triggers, channel-caps PUSH_CLAIMS, themes.js THEMES) and every delegated word (job-model STATE_WORDS)
 //      has zh + ja rows — a new enum value without words is RED. (c) A code-named field (.state .status .role .urgency
 //      .stopReason .verb .trigger .cause .tier .theme .permissionMode .effort …) put straight into a visible sink, never
@@ -117,7 +117,9 @@ export function scanFiles(files, repo = REPO) {
     const reached = specsOf(ast).map((s) => resolveSpec(f, s, repo)).filter(Boolean);
     // the names this file imports from the one formatter (§1b: every export of page-time has a reader)
     const ptNames = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"][./]*(?:lib\/)?page-time\.js['"]/g)].flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean));
-    return { file: f, ...r, reached, ptNames };
+    // ⑦ marks: the lines that call page-time's mark / markAgo (the census reads which is called where)
+    const markLines = ptNames.some((x) => x === 'mark' || x === 'markAgo') ? src.split('\n').map((ln, i) => [i + 1, ln]).filter(([, ln]) => /(?<![.\w$])(?:mark|markAgo)\(/.test(ln.replace(/\s\/\/\s.*$/, ''))).map(([n, ln]) => ({ line: n, text: ln.trim() })) : [];
+    return { file: f, ...r, reached, ptNames, markLines };
   });
 }
 async function scanAll(files, repo) {
@@ -176,6 +178,30 @@ function exemptLines(src) {
   return set;
 }
 const CAPS_RE = /\.charAt\(0\)\.to(?:Locale)?UpperCase\(\)|\[0\]\.to(?:Locale)?UpperCase\(\)|\.replace\(\s*\/(?:\^|\\b)(?:\.|\\w|\\S|\[a-z\])\/[gimsuy]*\s*,[^;]*?\.to(?:Locale)?UpperCase\(\)/;   // ⑥(d) — also `.replace(/^./, (c) => c.toUpperCase())` (the reader's M2c)
+/** ⑦ THE MARK SINKS (主开发 2026-11-14, the owner's «不如还是继续用 h/d»): every place a compact duration MARK is drawn — a row's
+ *  age, a badge, a countdown — named by its line. A declared sink calls page-time's mark / markAgo and never a sentence's span /
+ *  ago; a line that calls mark / markAgo and is NOT declared here is a sentence printing a mark — both red. */
+export const MARK_SINKS = [
+  ['src/lib/jobs-panel.js', 'if (run.startedAt && !run.endedAt) bits.push(mark(', 'a job row: how long its run has gone'],
+  ['src/lib/jobs-panel.js', 'else if (run.endedAt) bits.push(markAgo(', 'a job row: how long ago its run ended'],
+  ['src/lib/jobs-panel.js', "if (j.nextFireAt) bits.push(t('next') + ' ~' + mark(", 'a job row: when it fires next'],
+  ['src/lib/jobs-panel.js', 'sage.textContent = sess.latestAt ? markAgo(', 'a conversation group\'s age'],
+  ['src/lib/jobs-panel.js', 'age.textContent = g.latestAt ? markAgo(', 'a family group\'s age'],
+  ['src/lib/jobs-panel.js', '${run.endedAt ? mark(run.endedAt - run.startedAt)', 'a run row\'s duration'],
+  ['src/lib/usage-meter.js', 'const fmtDur = (sec) => mark(', 'the usage meter\'s reset countdown («2d23h59m»)'],
+  ['src/lib/utils.js', "label = age ? t('as of {when}', { when: markAgo(age) })", 'a host chip\'s age'],
+];
+/** PURE: the mark findings over (the tree's mark-calling lines, a file → its source lines). */
+export function markFindings(markLines, linesOf, sinks = MARK_SINKS) {
+  const out = [];
+  for (const [f, anchor, why] of sinks) {
+    const hits = (linesOf(f) || []).filter((ln) => ln.includes(anchor));
+    if (hits.length !== 1) { out.push(`${f}: the mark sink «${anchor}» (${why}) is found ${hits.length}× — move or drop its row`); continue; }
+    if (/(?<![.\w$])(?:span|ago)\(/.test(hits[0]) || !/(?<![.\w$])(?:mark|markAgo)\(/.test(hits[0])) out.push(`${f}: the mark sink «${anchor}» (${why}) calls a SENTENCE's span / ago — a mark says mark()`);
+  }
+  for (const m of markLines) if (!sinks.some(([f, anchor]) => f === m.file && m.text.includes(anchor))) out.push(`${m.file}:${m.line} calls mark / markAgo but is no declared mark sink — a sentence says span / ago (or declare the mark)`);
+  return out;
+}
 /** ⑥(d) the AST form of a hand capitalisation: `<first piece>.to(Locale)UpperCase()` + `<value>.slice(1)` (or substring / substr) —
  *  the first piece spelled any way (charAt(0), [0], slice(0, 1), substring(0, 1), substr(0, 1), at(0)). */
 const UPPER_FIRST = (e) => !!e && e.type === 'CallExpression' && e.callee.type === 'MemberExpression' && !e.callee.computed && /^to(Locale)?UpperCase$/.test(e.callee.property.name || '');
@@ -400,7 +426,6 @@ export function setFindings(lists, sets, delegated = {}, rows = {}) {
 async function setsOf(repo) {
   const req = createRequire(path.join(repo, 'package.json'));
   const ss = req(path.join(repo, 'src', 'session-status.js')), bc = req(path.join(repo, 'src', 'backend-caps.js')), jm = req(path.join(repo, 'src', 'job-model.js'));
-  const styles = new Set(); for (const c of Object.values(bc.BACKEND_CAPS || {})) for (const v of (c && c.responseStyle && c.responseStyle.values) || []) styles.add(v);
   const ae = fs.readFileSync(path.join(repo, 'src', 'server', 'automation-engine.js'), 'utf8');
   const jobs = fs.readFileSync(path.join(repo, 'src', 'jobs.js'), 'utf8');
   const causes = new Set([...jobs.matchAll(/'(ok\(until-output\)|interrupted|ok|timeout|error|update_window|wrapper-mismatch)'/g)].map((m) => m[1]).concat(jm.MEMORY_CAUSES || []));
@@ -409,7 +434,7 @@ async function setsOf(repo) {
   const th = fs.readFileSync(path.join(repo, 'src', 'lib', 'themes.js'), 'utf8');
   const themeBody = th.slice(th.indexOf('const THEMES = {'), th.indexOf('const BUILTIN_THEMES'));
   const themes = [...themeBody.matchAll(/^  ([a-z][a-z0-9-]*): \{/gm)].map((m) => m[1]);
-  const lists = { 'push-claim': cc.PUSH_CLAIMS || [], theme: themes, 'session-state': ss.STATES || [], urgency: ss.URGENCIES || [], 'response-style': [...styles], 'vault-act': [...new Set([...ae.matchAll(/verb: '(key\.[a-z]+)'/g)].map((m) => m[1]))], 'job-cause': [...causes], 'job-trigger': [...triggers] };
+  const lists = { 'push-claim': cc.PUSH_CLAIMS || [], theme: themes, 'session-state': ss.STATES || [], urgency: ss.URGENCIES || [], 'vault-act': [...new Set([...ae.matchAll(/verb: '(key\.[a-z]+)'/g)].map((m) => m[1]))], 'job-cause': [...causes], 'job-trigger': [...triggers] };
   const vw = await import(pathToFileURL(path.join(repo, 'src', 'lib', 'value-words.js')).href);
   return { lists, sets: vw.VALUE_SETS, delegated: { 'job-state': jm.STATE_WORDS || {} } };
 }
@@ -482,8 +507,9 @@ export async function census(repo = REPO) {
   const loginRows = loginFindings(lw.LOGIN_WORDS);
   const authSrc = fs.readFileSync(path.join(repo, 'src', 'auth.js'), 'utf8');
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
+  const markLines = scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : (r.markLines || []).map((m) => ({ file: r.file, ...m }))));
   const ptUsed = [...new Set(scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : r.ptNames || [])))];
-  return { files: files.length, ptUsed, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -530,6 +556,10 @@ if (isMain) {
     ok(nk.raw.length === 1 && nk.raw[0].line === 1 && /key:t/.test(nk.raw[0].sink), '⑥(c) a code-named field handed to t() as its KEY (t(st.state)) is named; the door, and a non-stored dynamic key, are not', JSON.stringify(nk.raw));
     const sc2 = scanFile('src/lib/sc2.js', "a.textContent = n.slice(0, 1).toUpperCase() + n.slice(1);\nb.title = n.substring(0, 1).toLocaleUpperCase() + n.substring(1);\nc.textContent = n.at(0).toUpperCase() + n.substr(1);\nd.textContent = n.toUpperCase() + m.slice(2);");
     ok(sc2.caps.length === 3 && sc2.caps.map((x) => x.line).join() === '1,2,3', '⑥(d) a capitalisation spelled with slice / substring / at(0) is named (the AST form: an upper-cased first piece + the rest); a whole upper-case is not', JSON.stringify(sc2.caps));
+    // ⑦ marks (主开发 2026-11-14): a declared mark sink that calls a sentence's ago(), and an undeclared line printing a mark
+    const mk = markFindings([{ file: 'src/lib/x.js', line: 3, text: "p.textContent = t('Updated {ago}', { ago: markAgo(at) });" }, { file: 'src/lib/x.js', line: 1, text: 'a.textContent = mark(ms);' }],
+      (f) => (f === 'src/lib/x.js' ? ['a.textContent = mark(ms);', 'b.textContent = ago(at);', "p.textContent = t('Updated {ago}', { ago: markAgo(at) });"] : []), [['src/lib/x.js', 'a.textContent = mark('], ['src/lib/x.js', 'b.textContent = ago(', 'a row age']]);
+    ok(mk.length === 2 && mk.some((x) => /calls a SENTENCE/.test(x)) && mk.some((x) => /x\.js:3 calls mark/.test(x)), '⑦ a mark sink calling a sentence\'s ago() is named, and a sentence printing a mark is named; a declared mark is not', JSON.stringify(mk));
     // the reader's round (13:41Z): its four green mutants, planted — each shape is RED here
     const m1c = scanFile('src/lib/m1c.js', "function sysLine(by) { return '{by} created the group'.replace('{by}', by); }\nfunction ok2(by) { return t('{by} created the group', { by }); }\nconst path = '/api/{id}/x'.replace('{id}', id);");
     ok(m1c.visible.length === 1 && m1c.visible[0].line === 1 && m1c.visible[0].sink === 'hand-filled', '① M1c: a {param} sentence filled by hand (`.replace(\'{by}\', by)`) is named wherever it stands; the same key through t(), and a path template, are not', JSON.stringify(m1c.visible));
@@ -633,6 +663,11 @@ if (isMain) {
     const PAIRS = [['.mounts-sec-head', '.mounts-sec-sub']];
     const bad = PAIRS.filter(([h, c]) => /text-transform:\s*uppercase/.test(ruleOf(h)) && !/text-transform:\s*none/.test(ruleOf(c)));
     ok(bad.length === 0, 'CSS: a caption sentence inside an upper-cased head is not upper-cased (the Machines caption «运行 AGENT 会话»)', bad);
+  }
+  {
+    const srcLines = new Map(); const linesOf = (f) => { if (!srcLines.has(f)) { try { srcLines.set(f, fs.readFileSync(path.join(REPO, f), 'utf8').split('\n')); } catch { srcLines.set(f, []); } } return srcLines.get(f); };
+    const mf = markFindings(now.markLines, linesOf);
+    ok(mf.length === 0, `⑦ a compact duration MARK is drawn only at a declared mark sink, through page-time's mark (${MARK_SINKS.length} sinks, ${now.markLines.length} mark calls) — a sentence says span / ago`, mf);
   }
   ok(now.plugins.length === 0, `⑥(e) every built-in plugin's label and description that is words has zh + ja rows (src/plugins — drawn through a dynamic t(p.label))`, now.plugins);
   ok(now.sets.findings.length === 0 && now.sets.lists > 30, `⑥ every value the tree lists for a set the door words is in its table (${now.sets.lists} listed values), every delegated word has zh + ja rows`, now.sets.findings);
