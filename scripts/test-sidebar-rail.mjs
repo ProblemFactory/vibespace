@@ -230,7 +230,8 @@ try {
     gear: !!c.querySelector('.plugin-gear'),
     state: (c.querySelector('.plugin-chip')?.textContent || '').trim() })))`));
   check('plugin rows: the ONE list in order (tailscale, frp, opencode-serve)', cards.map((c) => c.name).join('|') === 'Tailscale|Public URLs (frp)|OpenCode background service', JSON.stringify(cards));
-  check('every row: ONE control (its switch) + ⚙ — the relay fields are settings rows now', cards.every((c) => c.controls === 1 && c.switches === 1 && c.gear), JSON.stringify(cards));
+  // lane ui-controls-and-bugs pick 3: a switch nobody can use is NOT drawn — the row's chip says why and is its door
+  check('every row: at most ONE control — its switch, drawn only when it can be used (else its chip says why) — + ⚙; the relay fields are settings rows now', cards.every((c) => c.controls === c.switches && c.switches <= 1 && c.gear && (c.switches === 1 || !!c.state)), JSON.stringify(cards));
   check('the relay row (provides relay) says its relay state', /relay not configured|connected|stopped|not installed/.test(cards[1]?.state || ''), JSON.stringify(cards[1]));
 
   // re-click active item collapses the sidebar — but the rail STRIP persists

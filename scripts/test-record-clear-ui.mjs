@@ -280,9 +280,11 @@ const press = async (P, sel, button = 'left') => {
 };
 const menuLabels = (P) => P.evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent)`);
 const pickMenu = async (P, label) => {
-  const idx = await P.evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].findIndex((e) => e.textContent === ${J(label)})`);
-  if (idx < 0) return false;
-  return press(P, `.context-menu .context-menu-item:nth-child(${idx + 1})`);
+  // the menu's ROW by its words, pressed by a MARK — never by an nth-child index: a separator or a caption sits among the items
+  // (lane ui-controls-and-bugs: a job row's menu draws its own verbs, a separator, then «Clear content…»)
+  const found = await P.evalJs(`(() => { document.querySelectorAll('[data-pick-menu]').forEach((x) => x.removeAttribute('data-pick-menu')); const e = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent === ${J(label)}); if (!e) return false; e.setAttribute('data-pick-menu', '1'); return true; })()`);
+  if (!found) return false;
+  return press(P, '.context-menu [data-pick-menu="1"]');
 };
 /** the open confirm dialog: its words + geometry */
 const dialogState = (P) => P.evalJs(`(() => { const o = document.getElementById('record-clear-dialog'); if (!o) return null; const d = o.querySelector('.dialog'); const vr = { w: innerWidth, h: innerHeight }; const r = d.getBoundingClientRect(); const inV = (q) => q.left >= -0.5 && q.top >= -0.5 && q.right <= vr.w + 0.5 && q.bottom <= vr.h + 0.5; const btns = [...d.querySelectorAll('button')].filter((b) => b.getClientRects().length); return { title: d.querySelector('.dialog-header h3').textContent, rows: [...d.querySelectorAll('.rc-item')].map((x) => ({ when: x.querySelector('.rc-when').textContent, words: x.querySelector('.rc-words').textContent })), more: d.querySelector('.rc-more')?.textContent || '', hint: d.querySelector('.rc-hint').textContent, copies: d.querySelector('.rc-copies')?.textContent || '', confirm: d.querySelector('.rc-confirm').textContent, inViewport: inV(r), buttonsInside: btns.every((b) => inV(b.getBoundingClientRect())), unclipped: btns.every((b) => b.scrollWidth <= b.clientWidth + 1), rowsInside: [...d.querySelectorAll('.rc-item')].every((x) => { const q = x.getBoundingClientRect(); return q.left >= r.left - 0.5 && q.right <= r.right + 0.5; }), focus: document.activeElement === d.querySelector('.rc-confirm') }; })()`);
