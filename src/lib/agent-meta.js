@@ -1,5 +1,4 @@
 import { t } from './i18n.js';
-import { valueWord, hasWord } from './value-words.js'; // lane ui-language: a protocol value is worded at display (the walk's chat-status-bar-3 / -6 / -8)
 // The queue VERB TABLE law lives once, in the PURE server module (CJS pulled
 // into the bundle like task-color-seq/search-card): each row below declares
 // its own {queue, queueVerbs} MIRROR of src/backend-caps.js and derives the
@@ -207,9 +206,8 @@ export const BACKEND_META = {
 export function effortLabel(backend, value, { capitalize = false } = {}) {
   const v = String(value || '');
   const extra = BACKEND_META[backend]?.ui?.effortExtras?.find((x) => x.value === v);
-  // the level's words (the door); a level it does not know keeps the harness's own label / spelling (never hidden)
-  // ui-words: a level the door has no word for keeps the harness's own spelling, shown as itself
-  const base = hasWord('effort', v) ? valueWord('effort', v, t) : capitalize ? (extra?.label || v.charAt(0).toUpperCase() + v.slice(1)) : v;
+  // ui-words: the harness's level as its pickers spell it (capitalised in the release's pickers) — a protocol value, never named
+  const base = capitalize ? (extra?.label || v.charAt(0).toUpperCase() + v.slice(1)) : v;
   const hint = BACKEND_META[backend]?.effortHints?.[v] || extra?.hint;
   return hint ? `${base} — ${t(hint)}` : base;
 }
@@ -282,8 +280,7 @@ export function effortDisplay(backend, value, { model = '' } = {}) {
 export function responseStyleLabel(backend, value) {
   const v = String(value || '');
   const hint = BACKEND_META[backend]?.responseStyleHints?.[v];
-  const name = valueWord('response-style', v, t);   // the style's NAME in the reader's words — the value on the wire is unchanged
-  return hint ? `${name} \u2014 ${t(hint)}` : name;
+  return hint ? `${v} \u2014 ${t(hint)}` : v;
 }
 
 /** The harness's response-style capability row ({live, values}) — mirrors the
@@ -668,11 +665,7 @@ export function initHealthLabel(issue) {
   if (!issue) return '';
   const name = issue.name || '';
   const head = issue.kind === 'plugin' ? t('plugin {name}', { name }) : t('MCP {name}', { name });
-  // the status / error TYPE in words (lane ui-language, the walk's chat-status-bar-6: «failed», «needs-auth», «load-error»
-  // stood raw); an unknown value is shown as itself, and an upstream message after it stays as written
-  const d = String(issue.detail || '');
-  const words = issue.kind === 'mcp-server' ? valueWord('mcp-state', d, t) : d.replace(/^([a-z][a-z-]*)(?=:|$)/, (m) => valueWord('load-error', m, t));
-  return head + (d ? ' — ' + words : '');
+  return head + (issue.detail ? ' — ' + issue.detail : '');
 }
 
 /** PURE: the composer's slash-command completion list. TWO rules, both from

@@ -59,15 +59,6 @@ export function permissionModeLabel(backend, value, t) {
   return v ? `${words} · ${v}` : words;
 }
 
-/** The SHORT name a chip shows (lane ui-language, the walk's chat-status-bar-2: the status bar's lock chip printed
- *  «default» / «bypassPermissions»). Null for a mode we do not know — the caller shows the raw value. */
-export function permissionModeShort(backend, value, t) {
-  const v = String(value == null ? '' : value);
-  if (backend === 'codex') return { '': t('Default'), 'read-only': t('Read only'), 'safe-yolo': t('Ask on failure'), yolo: t('Full access') }[v] || null;
-  if (backend === 'opencode') return { '': t('Default'), build: t('Build'), plan: t('Plan only') }[v] || null;
-  if (backend === 'antigravity') return { '': t('Default'), 'accept-edits': t('Edit freely'), auto: t('Auto'), plan: t('Plan only'), bypassPermissions: t('Full access') }[v] || null;
-  return { '': t('Default'), default: t('Ask first'), manual: t('Ask first'), acceptEdits: t('Edit freely'), auto: t('Auto'), bypassPermissions: t('Full access'), dontAsk: t('Pre-approved only'), plan: t('Plan only') }[v] || null;
-}
 
 /** A mode that lets the agent act with NO confirmation at all — the menu draws it in the warning colour. */
 export function permissionModeDanger(backend, value) {

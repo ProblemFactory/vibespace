@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { ago as pageAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
+import { ago as pageAgo, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
 import { menuPlace } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
@@ -1663,7 +1663,7 @@ export function hostStateChip(state, { text = '', age = 0, title = '' } = {}) {
   if (!label) {
     // the default words in the reader's language (lane ui-language, the reader's round: «as of 4 分钟前» mixed two languages)
     if (state === 'pending') label = t('checking…');
-    else if (state === 'stale') label = age ? t('as of {when}', { when: agoText(age) }) : t('cached');
+    else if (state === 'stale') label = age ? t('as of {when}', { when: markAgo(age) }) : t('cached');   // a chip's age is a MARK (the owner's h / d ruling)
     else if (state === 'error') label = t('unreachable');
   }
   el.textContent = label;

@@ -6,7 +6,7 @@ import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, sho
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { t } from './i18n.js';
-import { stampAt as when, clockOf, span, ago, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, clockOf, ago, stampAt, mark, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: a job's state / access / end / start in words (the walk's jobs-2 / jobs-6)
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
@@ -123,10 +123,10 @@ export function focusJobsPanel(app, jobId) {
 function stateLine(j) {
   const run = j.run || {};
   const bits = [valueWord('job-state', j.state, t)];
-  if (run.startedAt && !run.endedAt) bits.push(span(Date.now() - run.startedAt));
-  else if (run.endedAt) bits.push(ago(run.endedAt));
+  if (run.startedAt && !run.endedAt) bits.push(mark(Date.now() - run.startedAt));
+  else if (run.endedAt) bits.push(markAgo(run.endedAt));
   if (run.exit !== null && run.exit !== undefined) bits.push(t('exit code {n}', { n: run.exit }));
-  if (j.nextFireAt) bits.push(t('next') + ' ~' + span(j.nextFireAt - Date.now()));
+  if (j.nextFireAt) bits.push(t('next') + ' ~' + mark(j.nextFireAt - Date.now()));
   const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
   if (memEnd) bits.push(memEnd);
   const left = runLeftWords(run, t, (ms) => stampAt(ms)); // round 5: what the job left running — stopped (a task's), kept (a service's)
@@ -230,7 +230,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
     sh.appendChild(ssp);
     const seenBtn = seenAllButton(sess.ackable, refresh, { compact });
     if (seenBtn) sh.appendChild(seenBtn);
-    const sage = document.createElement('span'); sage.className = 'jobs-group-age'; sage.textContent = sess.latestAt ? ago(sess.latestAt) : '';
+    const sage = document.createElement('span'); sage.className = 'jobs-group-age'; sage.textContent = sess.latestAt ? markAgo(sess.latestAt) : '';
     sh.appendChild(sage);
     sh.onclick = () => { setFold(sess, layout); refresh?.(); };
     root.appendChild(sh);
@@ -251,7 +251,7 @@ function renderTaskSection(app, root, list, { compact, refresh, archivedCount })
       if (g.failedUnacked) chip('jobs-group-bad', `${g.failedUnacked} ${t('failed')}`);
       if (g.failedAcked) chip('jobs-group-seen', `${g.failedAcked} ${t('seen')}`);
       const sp = document.createElement('span'); sp.style.flex = '1';
-      const age = document.createElement('span'); age.className = 'jobs-group-age'; age.textContent = g.latestAt ? ago(g.latestAt) : '';
+      const age = document.createElement('span'); age.className = 'jobs-group-age'; age.textContent = g.latestAt ? markAgo(g.latestAt) : '';
       btn.append(sp, age);
       btn.onclick = () => { setFold(g, layout); refresh?.(); };
       root.appendChild(btn);
@@ -455,7 +455,7 @@ async function expandDetail(app, el, j, refresh) {
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
     const left = runLeftWords(run, t, (ms) => stampAt(ms)); // round 5: what it left running
-    rr.textContent = `${stampAt(run.startedAt)} · ${run.endedAt ? span(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
+    rr.textContent = `${stampAt(run.startedAt)} · ${run.endedAt ? mark(run.endedAt - run.startedAt) : t('running')} · ${run.exit != null ? t('exit code {n}', { n: run.exit }) : '—'}${run.cause ? ' ' + valueWord('job-cause', run.cause, t) : ''} (${valueWord('job-trigger', run.trigger, t)})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }
