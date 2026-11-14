@@ -43,6 +43,83 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The .400 train's two reds of this unit, cured for .401 (主开发 17:32Z / 17:55Z).** test-still-press ⑤ — test-artifacts-intent-chrome pressed by coordinates once outside THE still door: its phone tap now goes through scripts/scratch.mjs `stillPresser` (8f850451b; no ledger row). test-conversation-needs ⑨ — src/agent-routes/status.js `asksOf` picks a conversation's items by its key set and was no SURFACES row: src/foryou-actions.js gains `ask-artifacts` with `about: false` (the conversation's own key BY LAW — an ask is filed only under askKey, never with `about`), and the census gains the rule that keeps a false row honest (it reads `about` ⇒ red until its row says true) with a RED control; on 8f850451b the suite is 3 ✗ by name.
 - **Gates (this tree — da58eb9d6 + its words cure, on 2.369.399).** The rows the tree states for this lane: test-artifacts-intent 110 ms (new), test-artifacts 180, test-artifacts-handover 110, test-artifacts-list-model 650, test-artifacts-panel 325, test-inbox-reply 186 (the lane's restatements, measured on the .382 base in rounds 1–9); test-user-todos-layout 780 and test-foryou-links 456 are master's rows, kept — the lane's 453 / 458 (measured on the .382 base) did not come into the port (no restatement under the thermal cap). The fast-tier sum on this tree: 1 069 177 ms of the 1 070 000 cap. The gate on da58eb9d6 (a detached worktree, the fast-tier lock, niced, one at a time): the build (i18n 10 962 / 10 962, test-architecture 942), direct 125 + tree-wide 70 + the count censuses = 179 of 179, scans clean. Heavies: test-foryou-honest-chrome 77, test-inbox-reply-ui, test-inbox-window-ui on da58eb9d6; test-artifacts-intent-chrome 57 / 0, test-artifacts-chrome 53 / 0, test-wake-approve-card, test-parked-ask-ui 18 on 551c24330 (主开发's rule: a re-run only for a file both this lane and 2.369.399 changed — src/user-todos.js). Each round's own numbers on the .382 base: the lane report.
 
+### B-0a33 — the ceiling was passed by queueing: a reservation is counted where its turn runs (law 1's money; 主开发 07:20Z, round 1 08:03Z)
+- **The finding** (the .399 readers, int359/acc-399/l23b/drivers/d2-money.cjs F2, real guard + queued-wakes on one clock): cap 5/h, 5 frames queued behind a hung turn filled hour 0; at +3 h 5 unattended turns were spent; then the turn ended and its 5 ran — 10 billed unattended turns in one hour.
+- **The law:** no window of the ceiling holds more billed unattended turns than its cap, whenever the turn a reservation pays for runs; the day axis and «given back once» unchanged.
+- **The change** (src/spend-authorizer.js): a WAITING reservation is in the hour of every authorize; a carried one is in the hour it ran (`ran`); one queued-wakes gives up unknown (process gone or replaced, conversation archived) is in the hour it stopped waiting (`end`, via `note({ended})`). A waiting stamp is kept past the day horizon while its entry lives (7 days). The day count reads `at`; a carry a day after its send is counted in the day it runs, as the aged-out stamp's re-stamp was.
+- **Cost:** a frame waiting behind a running turn takes a slot of every hour it waits through, so unattended turns are refused sooner while a queue waits. A full hour of waiting frames promises no «next allowed» instant.
+- **Round 1** (its reader, verdict wf_ffa65a83: the hour cure held — F2 5 against 10, 0 hour overruns in 2000 seeded timelines against the release's 560, never looser in 240 000 states):
+  - THE DAY SAYS WHAT THE HOUR SAYS: every window (hour, day, the instance's day) counts a stamp at its count instant — waiting = now, carried = where it ran (`ran`, a stash drain too), given up = where the hub stopped (`end`). The send re-base goes. The reader's day scene (day cap 5, five frames queued at 0 h and run at 20 h) is refused at 24 h 01 (the release and 39ab2d834: free, ten in (20 h, 44 h]).
+  - A WAITING STAMP NOBODY HOLDS IS LET GO, SAID TRULY: queued-wakes reconciles the guard's waiting reservations (`waitingReservations`, wired beside reservationState) against its live entries, at load and at each sweep. One no entry holds ends as «given up» at that instant, once: counted there, never returned, no longer said to wait. The 7-day bound is read inside the count (true with no prune running).
+  - THE REFUSAL SAYS WHAT WAITS AND WHERE: a reservation's stamp names the conversation it waits behind (`wb`: its For-you key and name, from the ladder). A refusal those frames hold names them — at most three, then «and N more» — in the journal line and the notice. The notice is filed under the first one's key (its own link opens it), its door says so, and it comes once per wait (the release re-filed every 6 h). The «promised» line now says truly: «counted while they wait, given back only if they are known not to have run». CHOSEN: the refusal notice itself, not shape B's item — the two picks ship apart.
+  - Evidence on the new tip: the reader's d7 property, 2000 seeds × 4 days (≈ 139 600 billed turns, with and without restarts): 0 violations of any kind (39ab2d834: day 268, instance-day 134). d8 ①b: the worst rolling 24 h 5 (was 10). ⑤b and ⑥ — with the server's wiring (the driver builds queued-wakes without the new dependency) — let the orphans go at load: refused that hour, free the next, «0 waiting».
+- **Pins:** test-spend-paths §5f, 26 legs (457 → 483 with the rest):
+  - the reader's scene through the real guard + queued-wakes;
+  - THE LAW over 40 seeded 4-day timelines: no hour window and no rolling 24 h over its cap;
+  - the reader's day scene; the unit legs (carried, waiting 30 h, the 7-day bound in the count, given up, a stash drain — the reader's M10 — and the prune past the last instant — the reader's M11, looser, cap 1);
+  - the load and sweep reconcile through the real guard; the refusal's names, door, key and once-per-wait;
+  - ten patched-copy controls, each red: every window at the send, the day at the send, a carry keeping its send's instant, a drain keeping it, the prune by the send, «ended» ignored, no age bound in the count, no reconcile at load, the refusal without its names, plus the build check.
+- **Follow-up** (主开发 08:35Z, on b0b11962a):
+  - THE NOTICE DOES NOT GO SILENT WHILE THE WAIT STILL REFUSES: exactly one notice of a wait is open. It is filed again at the first refusal after the previous one expired — its expiry IS the 6-hour re-file mark — never two at once, and a person's dismissal stands until that mark (leg: a 13-hour wait refused every 61 minutes ⇒ notices at 0 h, 6 h 06, 12 h 12).
+  - AN UNREADABLE msg-queued.json IS NOT AN EMPTY ONE: the load tells ENOENT (nothing on disk) from any other read or parse failure. After a failed read the reconcile holds off for that process's life, so the waiting stamps stand — counted, under the 7-day bound — never freed by a read that failed (legs: EIO, a torn file).
+  - Both legs are red on b0b11962a, and nothing else is.
+- **Follow-up 2** (主开发 08:53Z, on 980991658): THE KEY IS THE PLACE, not the frame. The notice is keyed by (the account, the cap, the conversation the frames wait behind) with the 6-hour cadence — the oldest frame changes at every carry of a draining queue (leg: eight frames, one carried each hour, a refusal every ten minutes ⇒ notices at 0 h and 6 h 10 only; a second conversation's wait gets its own at once).
+- **Known** (named by its reader, not asked; each the release's too):
+  - a frame the hub stopped waiting for — aged out at 7 days, or a process wrongly judged gone — can still run uncounted in its hour (the reader's d8 ③b: worst hour 3 at cap 2; ④: worst hour 6 at cap 3, plus 3 repeat copies stashed);
+  - carries the release made in the hour before the update are counted at their send: one window of at most an hour (d10: 10 in (3 h, 4 h] at cap 5);
+  - frames already waiting run past a cap lowered below them (d8 ⑦: 5 run at cap 2 and at cap 0); a null setting reads as 0 (budgetLimits gives 30 / 0 / 30 / 30 for false / null / 'off' / -1).
+
+### The seam B-0a33 × shape C (主开发 15:30Z item 8) — one owner item per stuck turn
+- While a «messages waiting» item stands for a conversation, B-0a33's spending notice for the conversation the frames wait behind (the same key, `<backend>:<cid>`) is not filed: that item speaks for the turn. Once it is gone, the notice is filed as before. The journal says so once per the notice's six-hour cadence, under its own stamp (never one line per refusal, never the notice's stamp). Pins: test-spend-paths §5f «THE SEAM» and «its journal line keeps the notice's cadence».
+
+### queued-is-not-woke laws 2 + 3 — SHAPE C: a wait is read from the hub's own record at that moment; nothing is kept (row B-580f; closes K6 of 2.369.398)
+- **The ruling** (主开发 2026-11-13 13:35Z / 13:42Z). The cut (a ledger of instants kept in per-group files) was right in steady state: 15 000 walk steps, 66 SIGKILLs, 0 divergence. Its readers broke it on every SWITCH, each in machinery that existed only to keep the ledger. A fleet day measured the noise: about 100 owner items a day at one hour, and 254 lines to a coordinator. Shape C keeps nothing.
+- **Law 1 — only a conversation in a RUNNING turn** (turn-facts `turnOf`: running / waiting). An idle conversation's quiet mail waits by design.
+  - THE SENDER, at one hour of its own oldest message not handed: ONE entry per sender in the ladder's new keyed stash slot (conversation-deliver `stashSlot(cid, 'waiting', …)`), naming every such member with a count, the oldest instant, and «in a turn since T» where a record states the opening (else «in a turn»).
+    - It is replaced in place, never counted against the stash's 30 (so it never evicts), and rendered whole.
+    - It is filed again ONLY when its set of members changes. The set it last handed rides the stash file (`__slots`, which a release drops), so the same set is never handed twice.
+  - THE OWNER, at four hours of the conversation's oldest: ONE For-you item per conversation and turn, key `messages-waiting:<cid>:<the turn's opening, or the instant this process first saw it run>`.
+    - At a first sight after a restart, the newest item a restart left (open, or a person's ✕) is this turn's: two turns across a restart read as one.
+    - Its only door opens the conversation. A ✕ stands for that turn, and an Undo is drawn again.
+    - Its two ends: «the turn ended» and «they were handed to it».
+  - The sweep runs every five minutes (ages are in hours).
+- **Law 2 — «not yet handed» is asked of the record at that moment** (groups-engine `readWaiting`):
+  - each group's log through `readFoldedAsync`, the fold over the store's async tail (`readTailAsync`, a FileHandle), off the loop;
+  - the marks through `reachFor` — the reach the next report uses: mute reaches nothing, `mention` only what @-names it or an awaited reply; messages only, never its own;
+  - plus each held frame's records.
+  THE GATE: a group is read only when its mark — or a held frame's start — is older than an hour with records after it. Those are persisted facts, so a restart changes nothing. At the bound (2 000 records) no count is said: «since at least» the oldest it saw.
+- **Law 3 — what is remembered is only what was SHOWN:** the item and its ✕, by key, in the For-you store; the sender's slot and the set it handed. No wait record, no told mark, no ledger.
+- claude says «in a turn», never «since» (no record states its opening). The turn's opening is said only for the turn running now (law D).
+- **Measured on reader B's fleet day** (its driver, copied: seeds 42 / 7 / 99, with and without the 8 h hang):
+  - owner items 4–10 a day (about 100 at one hour);
+  - entries handed to the coordinator 11–14 a day (254 lines before), never the same set twice;
+  - reads a sweep median 28–31, max 39; a sweep 4.5–5.7 ms at the median, 26 ms at most;
+  - the hang seen after 284 and 389 minutes. In seed 7 the hung worker's first message came four hours into its turn, so by the law it is never seen.
+- **Its reader's list (主开发 15:30Z «yes after a list»), one commit:**
+  - test-wait-walk's red control runs at the walk's own 3 000 steps (in 800 it never bit; the first divergence comes at step 1 590). The walk's compare is now the reader's own, with a GATE leg: no wait older than its bound is hidden.
+  - {X} → {} → {X} is a leave and a join: when a sender's set is empty at a sweep, its entry leaves AND the set it handed is forgotten.
+  - A sweep in which any reading failed touches no slot (a reading not taken says nothing and ends nothing).
+  - A restart adopts only an OPEN item: a ✕ of an earlier turn never silences a later wait. A ✕ of the same turn still stands, because the key is the record's opening.
+  - THE LOOP (no single hold over 20 ms): the reading has its OWN bound — the newest 200 records or 256 KB, read in 64 KB windows. The sweep yields to the loop between reads, and the store's async tail takes a byte budget and says whether it reached the start. Beyond the bound: no count, «since at least». The sender pass yields after each sender (owner-facts.when costs 0.18 ms a call, 15 ms at its first).
+    Measured with the reader's cost driver (300 groups × 2 000 records × 1 KB, 40 conversations in running turns, 600 reads a sweep), the release's boot unread warm-up done first:
+    - the base 73c8e03b6: a sweep 3.0 s, the longest hold 27–30 ms;
+    - now: 0.33–0.41 s, the longest hold 14–15 ms on a process's first sweep (that one-time setup), and none over 5 ms after.
+    The reader's 80–100 ms holds were the RELEASE's boot warm-up of the unread counts (groups-engine, 4 groups a step, a synchronous 2 000-record readLog each), which overlapped a sweep run 50 ms after the engine was made — not the reading.
+  - A name is a peer's text: one clipped line (toAgentText line, 80) for the owner's item and the sender's entry, quoted «» in the sender's entry. The census rows say which belt runs.
+  - The reader's scenes pinned: S1d, S2b, S2c, S2x, S3 antigravity, S3 claude.
+- **The walk:** reader A's oracle and 23-act walk (copied), five seeds × 3 000 steps with the await act on — 0 divergences. One fix to the copied driver: its ladder shadowed the store, so it never held a frame. It now does: 1 777 – 31 418 frame-steps a seed.
+- **Deleted against the cut 9a9b3a65a:**
+  - src/server/group-waits.js and its store-timing and reader rows;
+  - `waitsAt`, the load, `keptFrom` / `applyMarks`, and every instant write;
+  - the wait record `waits[cid]`, `waitTold`, `noteStillWaiting`, `waitsOf`;
+  - test-group-waits;
+  - the end words dropped / gone / muted.
+- **Pins:**
+  - test-wait-watch, fast, 57 legs, six patched-copy controls;
+  - test-wait-walk, heavy: the walk, with a control (a reading without `also` diverges);
+  - test-wait-fleet, heavy: the four numbers, with a control (a slot that forgets its handed set hands the same set again).
+  The peer-text census learns `stashSlot`. The fast sum cap stays 2.369.399's 1070 s by arithmetic (its rows as stated, 1069.095 s over 574, + test-wait-watch 0.6 = 1069.695 over 575).
+
 ## 2.369.401 — 2026-11-13
 
 ### k3-badge-cure (主开发's ruling 2026-11-13 21:57Z — the first pick of .401) — a ring's age badge is ONE line and never covers its ring's label

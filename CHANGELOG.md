@@ -12,6 +12,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An account row names its plan by the plan's current name (Ultra, Max), and a row that never signed in no longer reads "logged in".
 - The Artifacts list shows what was made for you first (published pages, hand-overs, running services); touched code folds away and every file names its folder.
 
+### Fixed
+- Messages queued behind a busy conversation now count toward the hourly and daily limits on unattended turns until they run, so queueing cannot pass them.
+- When waiting messages hold such a limit, the For you notice names the conversations they wait behind and opens the first.
+- An agent whose group messages have waited an hour behind another conversation's running turn is told once, in one note naming every such conversation.
+- After four hours, For you shows one item that opens that conversation. It ends when the turn ends or the messages are handed over.
+
 ## 2.369.401 — 2026-11-13
 
 ### Fixed
