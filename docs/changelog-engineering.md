@@ -406,6 +406,40 @@ This file is the engineers' record of every release: the lanes, the verification
   - Leg: the warm failed append. RED on 817b0f4fb: 11 rows for 8 requests.
 - **Cost:** row 790 → 968 ms (×1.35 vs the .398 copy: 1 109 → 1 497 ms, three runs each; the harvest legs run the ssh stand-in 8 times).
 
+### chat-attachments-persist — the cut: a picture Claude Code or Codex showed is read FROM ITS RECORD; a file a person dropped into a temporary folder lives with the conversation (the owner 2026-11-11: old conversations lose their pictures)
+- **The map (no build before it).** Pasted pictures were never lost: the CLI transcript keeps their bytes inline (409 / 409 in one 2 GB transcript) and the view draws them. What vanished:
+  - (d) an AGENT's pictures, drawn from their path through /api/file/raw;
+  - (a) files dropped into a conversation whose cwd is temporary (9 of the owner's 100 live sessions);
+  - (b) Antigravity's pasted pictures under such a cwd;
+  - (c) the agent's copy of a channel attachment (os.tmpdir()).
+- **Two rounds of a COPY store were not accepted** (round 0 e5e2879f7, round 1 d41dc0496): a prototype-open extension table, one picture under two conversation ids, a bound that re-trimmed on every read, decoded bytes queued per replay; then round 1's own ledger did not converge after a kill, and its bounded queue backfilled about 5 pictures per read after a restart. 主开发's ruling (2026-11-13 08:47Z / 08:54Z), from the lane's page: «the record is the store» — NO copy, NO bound, NO ledger, NO queue, NO setting chat.keptPicturesMB.
+- **(d) THE PLACE.** A lifted picture carries `place {b, tx, agent?, key, n}`:
+  - Claude: the record's transcript id, the uuid, the sub-agent's agentId, and the ordinal in document order.
+  - Codex view_image: the rollout id and the output's call_id.
+  - MEASURED on the real 2.1.322, against a loopback mock: the live stream's user record carries the same uuid as its transcript line, a sub-agent's in <session>/subagents/agent-<agent_id>.jsonl. So a live card has its place at once (fixture scripts/fixtures/claude-cli/2.1.322-picture-records.json).
+- **THE READER — src/transcript-picture.js, SHARED: the hub's transcript worker and the device agent run it.**
+  - An index per file of the lines holding a picture (or a rescue stub), built in one native-indexOf pass and EXTENDED, never rebuilt, when the file only grew; indexed again when it was replaced or shrank. 16 held, LRU.
+  - The line is read once; a structural scan skips strings by indexOf; the answer is the picture's base64 byte range (the hub) or its text (the device).
+  - GET /api/chat-picture/:tx/:key/:n: found only through the harness's own locate in ONE dedicated transcript worker. A sub-agent's file must be among the conversation's own.
+  - A paired machine's agent is asked only when its hello-ack names `transcript-picture`, else 409 old-agent. **The agent bundle changes: the cut signs it.**
+  - The owner's cookie only (a bearer is refused by name); the type from an own entry of a null-prototype table; nosniff, private immutable + ETag.
+  - At most 3 readings at once; a closed page's requests leave the queue; past 10 s ⇒ 503 finding and the view asks again. The decode is streamed block by block from the file's byte range.
+  - Every OLD conversation's pictures come back at once, with no migration. A record the owner's rescue stubbed answers «rescued»; a compressed Codex rollout answers «compressed», in words.
+- **(a) THE UPLOAD.** chat.uploadDir unset + a cwd under os.tmpdir() / /tmp / /var/tmp ⇒ data/chat-attachments/<hub conversation id>/files/ (a remote host: ~/.vibespace/chat-attachments/<conv>/), said in the answer and a toast.
+  - Each file is a temp file in the folder LINKED to a free name, so an existing file is never overwritten («a (1).png», also between two writes at once). The numbering is ONLY on this kept road: the explorer and a chat in an ordinary folder replace a same-named file, as the release did (the reader's moderate).
+  - Only the writer's own temp shape (`.<name>.<pid>-<8 hex>.vs-tmp`) older than a minute is removed at start; a person's own «….vs-tmp» file stays.
+  - THE LINK `<conv>/conversation.json` (which conversation the folder is: backend + transcript id; through the store writer) is written at the upload and refreshed while the hub lists the conversation.
+  - Settings › Chat («Upload files to») says what is kept, and «files of conversations that no longer exist» with a Remove door that acts only on the count and size it named. «No longer exists» is PROVEN (the reader's MUST): no live session, no session record in any form (.json / .json.orphan / .json.stopped), and the link's transcript proven absent by the harness's own locate. A terminated conversation, one a restart kept as stopped and an archived one keep their files. THE CLOSURE (主开发 15:15Z): absence is proven only by reads that SUCCEEDED — the transcript trees are walked whole (the channels' pair-sweep indexes; the projects directory itself read), a link that cannot be read or parsed is kept, an unreadable records folder offers nothing; the folders a failed read kept are said in Settings («could not check whether N conversations still exist — their files are kept»). VibeSpace has no conversation delete; removeConversation is the door a future one calls.
+- **(b) Antigravity:** its wrapper resolves the same folder from CLAUDE_WEBUI_SESSION_ID. It writes temp + link, and the extension comes only from an own entry of its table.
+- **(c) the agent's channel-attachment copies** (a change against the release, not only against round 1): they lived in os.tmpdir(), which the system empties at a reboot; now ~/.vibespace/channel-attachments/<instance>/<adapter>/, bounded at 512 MB with the oldest removed and the count said in the CLI's output — so a path an agent saved earlier can be removed by the bound.
+- **(1) the paste road:** nothing moves; the CLI's «[Image source: /tmp/…]» note reads «The picture is kept in this conversation's history».
+- **Not covered:** ACP agents draw no picture today (their tool images are text), so the user lines name Claude Code and Codex.
+- **Gates:**
+  - scripts/test-chat-attachments.mjs (rewritten, fast);
+  - test-transcript-parity (+ the picture over a real agent: the same bytes);
+  - test-desktop-remote's capability pin; test-image-cards, test-channels-agent-cli (the cache legs), test-kept-copies, test-card-grammar;
+  - test-sync-fs-census (the upload route); test-architecture §86 (the rows).
+
 ## 2.369.401 — 2026-11-13
 
 ### k3-badge-cure (主开发's ruling 2026-11-13 21:57Z — the first pick of .401) — a ring's age badge is ONE line and never covers its ring's label

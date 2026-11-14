@@ -23,6 +23,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Requests no longer go missing from the Usage window when VibeSpace stops reading conversation history midway because a folder stops answering.
 - If a remote machine notices that sending its usage failed, the next collection sends those requests again instead of skipping them.
 - A remote machine's usage too large for one collection now arrives over several collections instead of being lost.
+- A picture Claude Code or Codex showed is drawn from the conversation's own record, so it still shows once its temporary file is gone, in old conversations too.
+- A file you dropped into a chat whose folder is temporary is kept with the conversation, the chat says where, and a file of the same name is never replaced.
+- Settings › Chat says which dropped files are kept, and removes the files of conversations that no longer exist when you ask.
 
 ## 2.369.401 — 2026-11-13
 
