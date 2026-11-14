@@ -72,13 +72,15 @@ function ensureSpringEl(id) {
 
 // Per-spring config (`chrome.springs` setting): flexible with a strength
 // weight (flex-grow — two springs at 1× and 2× split leftover space 1:2), or
-// FIXED width in px (a rigid spacer — e.g. mirror the "☰ VibeSpace" section's
-// width at the start of an extra row so both rows' centers coincide).
+// FIXED width in px (a spacer that never grows — e.g. mirror the "☰ VibeSpace" section's
+// width at the start of an extra row so both rows' centers coincide; it gives first when the row lacks room).
 // Default (flex, 1×) needs no entry (sparse).
 function applySpringStyle(el, cfg) {
   const fixed = cfg?.mode === 'fixed';
   el.classList.toggle('spring-fixed', fixed);
-  el.style.flex = fixed ? '0 0 auto' : `${cfg?.weight || 1} 1 24px`;
+  // a FIXED spring is its width while the row has room, and gives first when it has not (hotfix 2.369.401: two fixed springs that
+  // never gave left a mark with words — the lock chip — as the one thing to shrink, one CJK character wide)
+  el.style.flex = fixed ? '0 1 auto' : `${cfg?.weight || 1} 1 24px`;
   // fixed width: px, or pct = % of the viewport width (vw — "12% of screen")
   el.style.width = fixed ? (cfg?.pct != null ? `${cfg.pct}vw` : `${cfg?.px || 120}px`) : '';
   // label shown inside the hatched bar while editing
@@ -275,7 +277,7 @@ export class CustomizeMode {
   }
 
   // Spring config popover: Flexible (strength 1–9, the flex-grow weight) or
-  // Fixed (width in px or % of screen width — a rigid spacer, e.g. to mirror
+  // Fixed (width in px or % of screen width — a spacer that never grows, e.g. to mirror
   // the "☰ VibeSpace" section so two rows' centers line up). "Match" enters a
   // pick mode: click any chrome element(s) to sum their widths into the
   // spring. Live-applies on every change.
