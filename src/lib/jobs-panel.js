@@ -28,6 +28,10 @@ const KIND_ICON = {
 // sidebar unification — the rail panel is THE surface now, so it must not
 // collapse what the user opened every time the engine broadcasts)
 const EXPANDED = new Set();
+// a unit name or a crontab line from outside the registry, at a narrow column (lane ui-phone-and-fit pick 1, test-ui-fit-chrome's
+// third claim: «snap.snapd-desktop-integration.…service» was cut inside «snapd» at the 200 px rail): it breaks at its OWN joints —
+// after . / _ @ : (a hyphen already is one) — and inside a run only when the run alone is wider than the line
+const escLine = (line) => { const e = document.createElement('div'); e.className = 'jobs-esc-line'; for (const part of String(line).split(/(?<=[./_@:])/)) e.append(part, document.createElement('wbr')); return e; };
 
 // ── TRIAGE state (design §13, 2026-09-14) ─────────────────────────────────
 // The user's fold choices live in user state (`jobsPanelFolds`, PATCH
@@ -545,7 +549,7 @@ export function openJobsWindow(app, opts = {}) {
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
-      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) { const e = document.createElement('div'); e.className = 'jobs-esc-line'; e.textContent = line; root.appendChild(e); }
+      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
   }
   btnRefresh.onclick = render;
@@ -587,7 +591,7 @@ openJobsWindow.renderRail = (app, c) => {
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
-      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) { const e = document.createElement('div'); e.className = 'jobs-esc-line'; e.textContent = line; root.appendChild(e); }
+      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
     if (focusId) { const el = root.querySelector(`[data-job="${CSS.escape(focusId)}"]`); el?.scrollIntoView({ block: 'center' }); el?.classList.add('jobs-focus'); }
   }
