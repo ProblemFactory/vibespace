@@ -30,13 +30,18 @@ export const GROUPS = Object.freeze(['intent', 'kind', 'helper', 'day']);
 export const INTENT_ORDER = Object.freeze(['foryou', 'made', 'touched']); // src/artifacts.js INTENTS — the list's first axis
 export const SORTS = Object.freeze(['changed', 'name', 'edits']);
 export const COLUMNS = Object.freeze(['name', 'kind', 'helper', 'edits', 'changed', 'path']);
-export const KIND_ORDER = Object.freeze(['doc', 'service', 'page', 'design', 'media', 'upload', 'other', 'code']); // src/artifacts.js VIEW_ORDER + code last
+export const KIND_ORDER = Object.freeze(['design', 'page', 'doc', 'image', 'service', 'file', 'code']); // src/artifacts.js DELIVERABLE_ORDER — the owner's kinds (2026-11-14), code last
+// a row's KIND for the list = its deliverable kind (`dk`, the server's src/artifacts.js deliverableKind on every block —
+// observed: a design canvas · a page that was published · a document · a picture · a service · any other file); a block
+// from before the field is mapped from its raw kind
+const RAW_KIND = Object.freeze({ design: 'design', page: 'page', doc: 'doc', media: 'image', service: 'service', upload: 'file', other: 'file', code: 'code' });
+export const kindKey = (r) => (r && KIND_ORDER.includes(r.dk) ? r.dk : (r && RAW_KIND[r.kind]) || 'file');
 export const FILTER_MAX = 80;
 export const RECENT_N = 5;
 export const RECENT_MIN_ROWS = 8;
 export const FOLDER_OVER = 8; // a section with more rows than this sub-groups by folder; ≤ 8 stays flat
-export const VIEW_VERSION = 2; // a stored view without it predates the intent default (its `kind` was the default, never a choice)
-export const DEFAULT_VIEW = Object.freeze({ group: 'intent', sort: 'changed', collapsed: Object.freeze({ intent: Object.freeze(['i:touched']), kind: Object.freeze(['k:code']), helper: Object.freeze([]), day: Object.freeze([]) }) });
+export const VIEW_VERSION = 3; // 3: the KIND default (the owner's deliverable kinds, 2026-11-14) — a stored view before it whose group is `intent` held the v2 default, never a choice; before 2 `kind` was the default
+export const DEFAULT_VIEW = Object.freeze({ group: 'kind', sort: 'changed', collapsed: Object.freeze({ intent: Object.freeze(['i:touched']), kind: Object.freeze(['k:code']), helper: Object.freeze([]), day: Object.freeze([]) }) });
 
 const str = (v) => (v == null ? '' : String(v));
 const say = (s, v) => str(s).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] != null ? v[k] : '')); // the English words when no t() is handed in
@@ -220,7 +225,7 @@ export function filterRows(rows, q, { cwd = '', host = '', hubWord = 'Local', ho
   const ctx = { cwd, host, hubWord, hostNames, folders }, kw = typeof kindWord === 'function' ? kindWord : null;
   const out = all.filter((r) => {
     if (fold(r.name).includes(s) || fold(folderOf(r, ctx)).includes(s) || fold(relPath(r, ctx)).includes(s) || fold(helperOf(r)).includes(s)) return true;
-    const k = kw ? kindHit(kw(r.kind || 'other'), s) : '';
+    const k = kw ? kindHit(kw(kindKey(r)), s) : '';
     if (k === 'prefix') weak.add(r.key);
     return !!k;
   });
@@ -235,7 +240,7 @@ export function orderRows(rows, { group = 'intent', sort = 'changed' } = {}) {
   const g = GROUPS.includes(group) ? group : 'intent', cmp = CMP[SORTS.includes(sort) ? sort : 'changed'];
   const by = new Map();
   for (const r of asRows(rows)) {
-    const label = g === 'intent' ? bandOf(r) : g === 'kind' ? (KIND_ORDER.includes(r.kind) ? r.kind : 'other') : g === 'helper' ? helperOf(r) : dayOf(r.lastAt);
+    const label = g === 'intent' ? bandOf(r) : g === 'kind' ? kindKey(r) : g === 'helper' ? helperOf(r) : dayOf(r.lastAt);
     if (!by.has(label)) by.set(label, []);
     by.get(label).push(r);
   }
@@ -272,7 +277,7 @@ export function sortRows(rows, { col = 'changed', dir = '', cwd = '', host = '',
   const d = dir === 'asc' || dir === 'desc' ? dir : natural;
   const keyCmp = (f) => (a, b) => WORDS.compare(f(a), f(b)) || CMP.changed(a, b);
   const base = c === 'name' ? CMP.name : c === 'edits' ? CMP.edits : c === 'changed' ? CMP.changed
-    : c === 'kind' ? (a, b) => KIND_ORDER.indexOf(KIND_ORDER.includes(a.kind) ? a.kind : 'other') - KIND_ORDER.indexOf(KIND_ORDER.includes(b.kind) ? b.kind : 'other') || CMP.changed(a, b)
+    : c === 'kind' ? (a, b) => KIND_ORDER.indexOf(kindKey(a)) - KIND_ORDER.indexOf(kindKey(b)) || CMP.changed(a, b) // the deliverable kind the cell shows, in its order
       : c === 'helper' ? (a, b) => (helperOf(a) === '') - (helperOf(b) === '') || keyCmp(helperOf)(a, b)
         : (a, b) => WORDS.compare(pathWord(a, { cwd, host, hubWord, hostNames, folders }), pathWord(b, { cwd, host, hubWord, hostNames, folders })) || CMP.name(a, b);
   const out = asRows(rows).slice().sort(base);
@@ -293,7 +298,7 @@ export function railRows(rows, sel) {
   const all = asRows(rows), s = str(sel);
   if (s === 'recent') return recentOf(all);
   if (s.startsWith('i:')) return all.filter((r) => bandOf(r) === s.slice(2));
-  if (s.startsWith('k:')) return all.filter((r) => (KIND_ORDER.includes(r.kind) ? r.kind : 'other') === s.slice(2));
+  if (s.startsWith('k:')) return all.filter((r) => kindKey(r) === s.slice(2));
   if (s.startsWith('h:')) return all.filter((r) => helperOf(r) === s.slice(2));
   return all;
 }
@@ -305,7 +310,7 @@ export const recentShown = ({ total = 0, filtering = false } = {}) => !filtering
  *  it left «for you»). `t` = i18n t(), `kindWord(kind)` = src/artifacts.js's words, `ago(ts)` = the house relative
  *  time, `cwd` / `host` = the conversation's (the folder is read from them; `folders` / `hubWord` = the list's — listCtx). */
 export function rowWords(r, { t = say, kindWord = (k) => k, ago = () => '', cwd = '', host = '', hubWord = 'Local', hostNames = null, folders = null } = {}) {
-  const kind = kindWord((r && r.kind) || 'other');
+  const kind = kindWord(kindKey(r)); // the deliverable kind's word (a picture says «图片», an mp3 «文件»)
   const helper = helperOf(r), { folder, away } = whereOf(r, { cwd, host, hubWord, hostNames, folders });
   if (r && r.kind === 'service') {
     const stopped = r.state === 'stopped';
@@ -343,8 +348,8 @@ export const foldsCap = (list, g) => { const seed = (DEFAULT_VIEW.collapsed[g] |
 export function viewFrom(raw) {
   const v = raw && typeof raw === 'object' ? raw : {};
   const c = v.collapsed && typeof v.collapsed === 'object' ? v.collapsed : {};
-  const list = (g) => (Array.isArray(c[g]) ? foldsCap((v.v === VIEW_VERSION ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === 'string'), g) : DEFAULT_VIEW.collapsed[g].slice());
-  const group = GROUPS.includes(v.group) && (v.v === VIEW_VERSION || v.group !== 'kind') ? v.group : DEFAULT_VIEW.group;
+  const list = (g) => (Array.isArray(c[g]) ? foldsCap((v.v >= 2 ? c[g] : c[g].slice().reverse()).filter((x) => typeof x === 'string'), g) : DEFAULT_VIEW.collapsed[g].slice());
+  const group = GROUPS.includes(v.group) && (v.v === VIEW_VERSION || (v.v === 2 ? v.group !== 'intent' : v.group !== 'kind')) ? v.group : DEFAULT_VIEW.group;
   return { v: VIEW_VERSION, group, sort: SORTS.includes(v.sort) ? v.sort : DEFAULT_VIEW.sort, collapsed: { intent: list('intent'), kind: list('kind'), helper: list('helper'), day: list('day') } };
 }
 /** THE LIST'S PLAN (the popover): what to draw, in order — sections [{key, head, rows, open, folders}] (a section over
@@ -357,9 +362,10 @@ export function viewFrom(raw) {
  *  NO OPEN SECTION DRAWS (a row never shows twice on one screen) — gone when every one of them is already shown; by
  *  intent it sits just above «touched» (its rows are the folded ones; the first screen stays the attention list),
  *  otherwise first. */
-export function listPlan(v, { q = '', group = 'intent', sort = 'changed', collapsed = [], kindWord = null, peek = null, hubWord = 'Local' } = {}) {
+export function listPlan(v, { q = '', group = 'intent', sort = 'changed', collapsed = [], kindWord = null, peek = null, hubWord = 'Local', only = '' } = {}) {
   const items = asRows(v && v.items), code = asRows(v && v.code);
-  const all = [...items, ...code];
+  const alone = group === 'kind' && /^k:/.test(str(only)) ? str(only) : ''; // ONE KIND ALONE (the owner's kinds, 2026-11-14): a press on a kind's head; the others are not drawn
+  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];
   const ctx = listCtx(v, { hubWord }), names = ctx.names;
   const f = filterRows(all, q, { ...ctx, kindWord }), filtering = !!f.q;
   const shut = new Set(collapsed);
@@ -368,17 +374,17 @@ export function listPlan(v, { q = '', group = 'intent', sort = 'changed', collap
   const inFolder = (rs) => ({ ...ctx, inFolder: true, names: new Map(rs.map((r) => [r.key, str(r.name)])) }); // the head names the folder — ONE directory (r3), so the BARE name
   const sections = [], drawn = new Set();
   for (const g of orderRows(f.rows, { group, sort })) {
-    const open = unfold(g.head.key, g.rows);
+    const open = alone ? true : unfold(g.head.key, g.rows);
     const subs = g.rows.length > FOLDER_OVER ? foldersOf(g.rows, { section: g.head.key, sort, cwd: ctx.cwd, host: ctx.host, hubWord: ctx.hubWord, hostNames: ctx.hostNames, folders: ctx.folders }) : [];
     const folders = subs.length > 1 ? subs.map((x) => ({ key: x.head.key, head: x.head, rows: x.rows, bare: !x.head.label, open: !x.head.label || unfold(x.head.key, x.rows), ctx: x.head.label ? inFolder(x.rows) : null })) : null; // one folder = no sub-head
     if (open) for (const x of folders || [{ rows: g.rows, open: true }]) if (x.open) for (const r of x.rows) drawn.add(r.key);
-    sections.push({ key: g.head.key, head: g.head, rows: g.rows, open, folders });
+    sections.push({ key: g.head.key, head: alone ? { ...g.head, alone: true } : g.head, rows: g.rows, open, folders });
   }
-  const recent = recentShown({ total: all.length, filtering }) ? recentOf(all).filter((r) => !drawn.has(r.key)) : [];
+  const recent = !alone && recentShown({ total: all.length, filtering }) ? recentOf(all).filter((r) => !drawn.has(r.key)) : [];
   if (recent.length) {
     const ti = sections.findIndex((x) => x.key === 'i:touched');
     const at = group !== 'intent' ? 0 : ti >= 0 ? ti : sections.length; // by intent: beside the folded band its rows come from — never on the attention list's first screen
     sections.splice(at, 0, { key: 'recent', head: { key: 'recent', group: 'recent', label: '', count: recent.length }, rows: recent, open: !shut.has('recent'), folders: null });
   }
-  return { sections, filtering, empty: filtering && !f.rows.length, count: { items: items.length, code: code.length, filtered: filtering ? f : null }, q: f.q, ctx };
+  return { sections, filtering, empty: filtering && !f.rows.length, count: { items: items.length, code: code.length, filtered: filtering ? f : null }, q: f.q, ctx, alone };
 }

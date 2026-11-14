@@ -1716,7 +1716,10 @@ export class ChatStatusBar {
       if (!dropdown) return;
       // lane artifacts-list-scale (design 021 E1): BOUNDED — the room above the chip in its container (layout px) caps the panel; it scrolls inside
       dropdown.style.setProperty('--af-room', Math.max(160, (afEl.getBoundingClientRect().top - container.getBoundingClientRect().top) / uiScale() - 8) + 'px'); // the room above the chip INSIDE its container (a chat window clips what rises past its top)
-      renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove(), app: this._app, onExpand: this._onOpenArtifactsWindow ? () => this._onOpenArtifactsWindow() : null });
+      renderArtifactList(dropdown, this._artifacts, { onOpen: (b) => this._onOpenArtifact?.(b), close: () => dropdown.remove(), app: this._app, onExpand: this._onOpenArtifactsWindow ? () => this._onOpenArtifactsWindow() : null,
+        // the Design entry folded into the deliverables (P1): a new design = the design request in THIS popover; All designs… = the Design window's home
+        onNewDesign: this._onDesignRequest ? () => { dropdown.replaceChildren(); dropdown.classList.remove('chat-artifacts-panel'); this._renderDesignPopover(dropdown); } : null,
+        onAllDesigns: this._onDesignRequest && this._onOpenDesign ? () => this._onOpenDesign({ host: '', dir: '' }) : null });
       return;
     }
     // lane outbox-session-chip: Outbox chip -> the Outbox window, filtered to this conversation (the window's own view state)

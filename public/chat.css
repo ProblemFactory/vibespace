@@ -2091,6 +2091,13 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-artifacts-panel .af-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
 .chat-artifacts-panel .chat-artifact-head { display: flex; align-items: center; gap: 4px; padding: 8px 10px 3px; font-size: 10px; cursor: pointer; user-select: none; }
 .af-head-word { flex: 1; min-width: 0; }
+.af-head-all { flex: none; color: var(--accent); text-transform: none; letter-spacing: 0; } /* ONE KIND ALONE: the way back to every kind, on the kind's own head */
+.af-head-all:empty { display: none; }
+.chat-artifact-head[data-kind-head="true"] .af-head-chev { display: none; } /* a kind's head says what its press does — no fold arrow */
+.af-design-acts { display: flex; gap: 6px; align-items: center; padding: 4px 10px 2px; } /* P1: the Design entry folded into the deliverables */
+.af-design-acts button { display: inline-flex; align-items: center; gap: 4px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.af-design-acts .af-new-design { color: var(--accent); border-color: var(--accent); }
+.af-act-ic { display: inline-flex; width: 12px; height: 12px; } .af-act-ic svg { width: 12px; height: 12px; }
 .chat-artifact-head.af-head-recent, .chat-artifact-head.af-head-recent .af-head-ic { color: var(--accent); }
 .chat-artifacts-panel .chat-artifact-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 10px; min-height: 40px; box-sizing: border-box; }
 .chat-artifacts-panel .chat-artifact-row:focus { outline: none; background: var(--bg-hover); }

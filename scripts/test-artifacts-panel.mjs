@@ -103,7 +103,8 @@ function fixture() {
   return rows;
 }
 const ROWS = fixture().map((r) => ({ ...r, intent: AF.intentOf(r) })); // the server's verdict rides every block (cardBlock)
-const kindView = () => STORE.set('vs-artifacts-view', JSON.stringify({ v: 2, group: 'kind' })); // the secondary grouping ①–④ pin
+const kindView = () => STORE.set('vs-artifacts-view', JSON.stringify({ v: 2, group: 'kind' })); // the kind grouping ①–④ pin (a v2 kind CHOICE stays kind)
+const intentView = () => STORE.set('vs-artifacts-view', JSON.stringify({ v: 3, group: 'intent' })); // the INTENT grouping as the person's choice (the kind is the default since the owner's kinds, 2026-11-14)
 const viewOf = (rows, extra = {}) => ({ ok: true, items: rows.filter((r) => r.kind !== 'code'), code: rows.filter((r) => r.kind === 'code'), count: rows.filter((r) => r.kind !== 'code').length, codeCount: rows.filter((r) => r.kind === 'code').length, ...extra });
 const V = viewOf(ROWS);
 const APP = { openFileExplorer() { }, openJobs() { }, sidebar: { _allSessions: [] }, attachSession() { }, viewSession() { } };
@@ -137,7 +138,7 @@ function cssBounded(css) {
   return /max-height:\s*min\(calc\(100vh\s*-\s*var\(--taskbar-height[^)]*\)\s*-\s*24px\),\s*var\(--af-room/.test(panel) && /display:\s*flex/.test(panel) && /flex-direction:\s*column/.test(panel) && /overflow-y:\s*auto/.test(list) && /min-height:\s*0/.test(list) && /position:\s*sticky/.test(top);
 }
 async function legPeek(mod, v = V) { // lane artifacts-by-intent r3 (z3): a head tapped while filtering is a PEEK, never saved
-  STORE.clear();
+  STORE.clear(); intentView();
   const nCode = M.rowsOfView(v).filter((r) => r.kind === 'code').length;
   const box = new N('div'); const c = mod.renderArtifactList(box, v, { app: APP });
   const head = (b) => b.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'i:touched');
@@ -156,7 +157,7 @@ async function legPeek(mod, v = V) { // lane artifacts-by-intent r3 (z3): a head
 const SMALL = viewOf([...ROWS.filter((r) => r.kind === 'doc').slice(0, 4), ...ROWS.filter((r) => r.kind === 'code').slice(0, 4)]); // the r4 legs: a fold, an order — never the 217 rows' cost
 async function legFoldCap(mod) { // r4 (W3): the device-kept folds keep the NEWEST 200 — a new fold survives the round trip, the oldest goes
   const old = Array.from({ length: 200 }, (_, i) => `f:i:made::/w/other${i}`); // 200 folds other conversations left, newest first
-  STORE.clear(); STORE.set('vs-artifacts-view', JSON.stringify({ v: 2, group: 'intent', collapsed: { intent: [...old, 'i:touched'] } })); // r5: the seeded fold behind them
+  STORE.clear(); STORE.set('vs-artifacts-view', JSON.stringify({ v: 3, group: 'intent', collapsed: { intent: [...old, 'i:touched'] } })); // r5: the seeded fold behind them (v3: the intent a person chose)
   const madeHead = (b) => b.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'i:made');
   const box = new N('div'); mod.renderArtifactList(box, SMALL, { app: APP });
   fire(madeHead(box), 'click'); // the 201st fold
@@ -216,7 +217,7 @@ const ctrl = mod.renderArtifactList(box, V, { onOpen: (b) => { opened = b; }, cl
 ok(box.classList.contains('chat-artifacts-panel') && box._afList === ctrl && box.querySelector('.af-top') && box.querySelector('.af-list'), 'the panel carries .chat-artifacts-panel, a sticky .af-top and the scrolling .af-list; box._afList = the controller');
 ok(cssBounded(SRC.css), 'chat.css: the panel is a column with max-height min(viewport − taskbar − 24 px, the room above the chip); the list scrolls (overflow-y auto, min-height 0); the top is sticky');
 const heads = box.querySelectorAll('.chat-artifact-head').map((h) => h.dataset.group);
-ok(heads.join() === 'recent,k:doc,k:service,k:page,k:other,k:code', `heads: the 最近 band then the kinds, code last (${heads.join(' ')})`);
+ok(heads.join() === 'recent,k:page,k:doc,k:service,k:file,k:code', `heads: the 最近 band then the kinds in the owner's order (published pages · documents · services · files), code last (${heads.join(' ')})`);
 const codeHead = box.querySelectorAll('.chat-artifact-head').find((h) => h.dataset.group === 'k:code');
 ok(codeHead.dataset.fold === 'shut' && codeHead.textContent.includes('Code · 174') && rowsIn(box).filter((r) => r.dataset.kind === 'code').length === 3, `代码 collapsed by default ("${codeHead.textContent}"); only the band's newest code shows (${rowsIn(box).filter((r) => r.dataset.kind === 'code').length})`);
 ok(box.querySelector('.af-count').textContent === '43 artifacts · 174 code files', `the count line: "${box.querySelector('.af-count').textContent}"`);
@@ -316,8 +317,15 @@ const reg = (globalThis.__wt || []).find((r) => r.type === 'artifacts');
 let replayed = null; reg && reg.replay({ openArtifacts: (o) => { replayed = o; } }, { action: 'openArtifacts', sessionId: 's9', name: 'personal-life' }, { syncId: 'y' });
 ok(reg && reg.action === 'openArtifacts' && reg.icon && replayed && replayed.sessionId === 's9' && replayed.name === 'personal-life' && replayed.syncId === 'y', 'registered: type artifacts, action openArtifacts; the replay re-opens {sessionId, name}');
 
-console.log('⑧b lane artifacts-by-intent — the INTENT default: the bands, folder heads, the names a person tells apart, the phone ⋯ / ✕');
+console.log('⑧b lane artifacts-by-intent — the INTENT grouping (the person\'s choice; the KIND is the default since 2026-11-14): the bands, folder heads, the names a person tells apart, the phone ⋯ / ✕');
 STORE.clear();
+{ // no stored view ⇒ the KINDS (the owner, 2026-11-14: «把设计/发布页面/文档/图片（如果有的话）这些分开»)
+  const kb = new N('div'); mod.renderArtifactList(kb, V, { app: APP });
+  const kk = kb.querySelectorAll('.chat-artifact-head').map((h) => h.dataset.group).filter((k) => k.startsWith('k:'));
+  ok(kk.join() === 'k:page,k:doc,k:service,k:file,k:code', `no stored view ⇒ the KINDS in the owner's order, an absent kind no head (${kk.join(' ')})`);
+  STORE.clear();
+}
+intentView();
 const ib = new N('div'); let iclosed = 0;
 const SET = new Map([['artifacts.autoOpenDocs', true]]);
 const IAPP = { ...APP, settings: { get: (k) => SET.get(k), set: (k, v) => SET.set(k, v) } };
@@ -326,7 +334,7 @@ const iheads = ib.querySelectorAll('.chat-artifact-head');
 const ikeys = iheads.map((h) => h.dataset.group);
 const fi = ikeys.filter((k) => k.startsWith('f:'));
 ok(ikeys[0] === 'i:foryou' && ikeys[1] === 'i:made' && fi.length >= 2 && fi.every((k) => k.startsWith('f:i:made:')) && ikeys.at(-2) === 'recent' && ikeys.at(-1) === 'i:touched',
-  `no stored view ⇒ the bands: for you · made here (its folder heads) · 最近 (only the folded code) · touched (${ikeys.join(' ')})`);
+  `the intent CHOICE ⇒ the bands: for you · made here (its folder heads) · 最近 (only the folded code) · touched (${ikeys.join(' ')})`);
 const bh = (k) => iheads.find((h) => h.dataset.group === k);
 ok(bh('i:foryou').classList.contains('af-head-band') && bh('i:foryou').dataset.band === 'foryou' && bh('i:foryou').textContent === 'For you · 2', `the «for you» head is a band head with its count ("${bh('i:foryou').textContent}")`);
 ok(bh('i:touched').dataset.fold === 'shut' && bh('i:touched').textContent === 'Touched 174 code files', `«touched» folded behind its count ("${bh('i:touched').textContent}")`);

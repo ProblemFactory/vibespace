@@ -89,6 +89,8 @@ const KIND_WORDS = Object.freeze({
   code: { en: 'Code', zh: '代码', ja: 'コード' },
   service: { en: 'Service', zh: '服务', ja: 'サービス' },
   other: { en: 'File', zh: '文件', ja: 'ファイル' },
+  image: { en: 'Image', zh: '图片', ja: '画像' }, // a deliverable kind's singular (a row's meta line; the head says DELIVERABLE_WORDS)
+  file: { en: 'File', zh: '文件', ja: 'ファイル' },
 });
 
 const baseName = (p) => String(p || '').replace(/\/+$/, '').split('/').pop() || String(p || '');
@@ -269,7 +271,7 @@ function cardBlock(row) {
   if (!row || !row.key) return null;
   return { type: 'artifact', key: row.key, host: row.host || '', path: row.path, name: row.name, kind: row.kind,
     by: row.by, writes: row.writes || 0, edits: row.edits || 0, lastOp: row.lastOp, firstAt: row.firstAt || 0, lastAt: row.lastAt || 0,
-    intent: intentOf(row), ...(row.shown ? { shown: true } : {}), // lane artifacts-by-intent: the band the list reads it in
+    intent: intentOf(row), dk: deliverableKind(row), ...(row.shown ? { shown: true } : {}), // lane artifacts-by-intent: the band the list reads it in
     ...(row.url ? { url: row.url } : {}), ...(row.state ? { state: row.state } : {}),
     ...(row.via ? { via: row.via } : {}), ...(row.handedTo && row.handedTo.length ? { handedTo: row.handedTo } : {}),
     ...(row.presented ? { presented: true, page: row.page, public: !!row.public, publisher: row.publisher || '', ...(row.gone ? { gone: true } : {}) } : {}),
@@ -541,6 +543,38 @@ function rowFor(rows, arg, host = '') {
   return (rows || {})[keyOf(host, a.replace(/\/+$/, '') || a)] || null;
 }
 const kindWord = (kind, lang = 'en') => (KIND_WORDS[kind] || KIND_WORDS.other)[lang] || (KIND_WORDS[kind] || KIND_WORDS.other).en;
+// THE DELIVERABLE KINDS (the chat status strip; the owner 2026-11-14 on the drawn strip: «产出部分可以分更细一点，比如把设计/发布
+// 页面/文档/图片（如果有的话）这些分开»): the chip's panel groups the SAME rows by WHAT EACH THING IS — read from the row's
+// recorded facts, never declared by an agent and never guessed from a title: a design canvas (the designs registry's kind) ·
+// a page that was PUBLISHED (the pages store's state on the row, its /p/ link, or a page put in this chat — `presented`; a web
+// file never published is a file) · a document a person reads (the ONE extension table's text / document / office / data
+// categories) · a picture (its image category — sound and video are files) · a server the conversation runs (a service) ·
+// every other file; code stays the chip's fold. An upload goes by what its file IS (the intent axis says it is the
+// person's own). A kind with nothing is no group at all (the list builds groups from rows).
+const DELIVERABLE_ORDER = Object.freeze(['design', 'page', 'doc', 'image', 'service', 'file', 'code']);
+const DOC_CATEGORIES = new Set(['text', 'document', 'office', 'data']);
+function deliverableKind(r) {
+  if (!r || typeof r !== 'object') return 'file';
+  if (r.kind === 'code') return 'code';
+  if (r.kind === 'design') return 'design';
+  if (r.kind === 'service') return 'service';
+  if (r.presented || (r.kind === 'page' && (r.state === 'published' || r.state === 'unpublished' || /^\/p\/[\w-]+\/?$/.test(String(r.url || ''))))) return 'page';
+  const e = FILE_TYPES[extOf(r.path)];
+  const cat = e && e.category;
+  if (cat === 'image') return 'image';
+  if (DOC_CATEGORIES.has(cat)) return 'doc';
+  return 'file';
+}
+const DELIVERABLE_WORDS = Object.freeze({
+  design: { en: 'Designs', zh: '设计', ja: 'デザイン' },
+  page: { en: 'Published pages', zh: '已发布的页面', ja: '公開したページ' },
+  doc: { en: 'Documents', zh: '文档', ja: 'ドキュメント' },
+  image: { en: 'Images', zh: '图片', ja: '画像' },
+  service: { en: 'Services', zh: '服务', ja: 'サービス' },
+  file: { en: 'Other files', zh: '其他文件', ja: 'その他のファイル' },
+  code: { en: 'Code', zh: '代码', ja: 'コード' },
+});
+const deliverableWord = (k, lang = 'en') => (DELIVERABLE_WORDS[k] || DELIVERABLE_WORDS.file)[lang] || (DELIVERABLE_WORDS[k] || DELIVERABLE_WORDS.file).en;
 // the bands' words (lane artifacts-by-intent — the closed set's words, like KIND_WORDS; «For you» alone is the tray's 待你处理 in t())
 const INTENT_WORDS = Object.freeze({
   foryou: { en: 'For you', zh: '给你看的', ja: 'あなたに見せるもの' },
@@ -551,6 +585,7 @@ const intentWord = (band, lang = 'en') => (INTENT_WORDS[band] || INTENT_WORDS.to
 
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, normDots, keyOf, apply, fold, merge, view,
   INTENTS, SHOWN_OPS, INTENT_WORDS, intentOf, intentWord, opAuthor, quotedOps, wasShown,
+  DELIVERABLE_ORDER, DELIVERABLE_WORDS, deliverableKind, deliverableWord,
   cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows, stampsGained,
   MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, askOp, askOps, resolvePresented,

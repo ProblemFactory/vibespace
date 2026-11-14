@@ -3143,6 +3143,8 @@ export default {
   'What should be designed? (a landing page, a poster, a settings screen…)': '何をデザインしますか？（ランディングページ、ポスター、設定画面…）',
   'Public link (anyone with the link)': '公開リンク（リンクを知っている人は誰でも）',
   'Create design': 'デザインを作成',
+  'New design': '新しいデザイン',
+  'Only this kind': 'この種類だけ',
   'Public': '公開',
   'Private': '非公開',
   'Anyone with the link can view — click to make private': 'リンクを知っている人は誰でも閲覧可 — クリックで非公開に',

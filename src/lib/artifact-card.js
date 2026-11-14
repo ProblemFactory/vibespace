@@ -8,7 +8,7 @@ import { t, resolveLang } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { getFileIcon } from './file-types.js';
 import { agoText } from './user-todos-row.js';
-import { cardFacts, kindWord, intentWord } from '../artifacts.js';
+import { cardFacts, kindWord, intentWord, deliverableWord } from '../artifacts.js';
 import { UI_ICONS } from './icons.js';
 import { absUrl, showContextMenu, copyText } from './utils.js';
 import { replayOpenSpec } from './window-types.js'; // lane artifacts-services-url: "Show in Ports" = the Ports window's own open action
@@ -221,14 +221,14 @@ const dayWords = (d) => {
   return !d ? t('No date') : d === at(0) ? t('Today') : d === at(1) ? t('Yesterday') : d;
 };
 /** A group head's words: the band · the kind's word · the helper (the main conversation) · the day · the folder. */
-export const artifactHeadWords = (h) => (h.group === 'recent' ? t('Recent') : h.group === 'intent' ? intentWord(h.label, lang()) : h.group === 'kind' ? kindWord(h.label, lang()) : h.group === 'helper' ? (h.label || t('Main conversation')) : h.group === 'folder' ? (h.label || '/') : dayWords(h.label));
+export const artifactHeadWords = (h) => (h.group === 'recent' ? t('Recent') : h.group === 'intent' ? intentWord(h.label, lang()) : h.group === 'kind' ? deliverableWord(h.label, lang()) : h.group === 'helper' ? (h.label || t('Main conversation')) : h.group === 'folder' ? (h.label || '/') : dayWords(h.label));
 /** A head's whole line: "<words> · <count>"; the touched band says what it holds ("顺带改了 41 个代码文件"). */
 export const artifactHeadLine = (h) => (h.group === 'intent' && h.label === 'touched' ? (h.count === 1 ? (h.code ? t('Touched 1 code file') : t('Touched 1 file')) : h.code === h.count ? t('Touched {n} code files', { n: h.count }) : t('Touched {n} files', { n: h.count })) : `${artifactHeadWords(h)} · ${h.count}`);
 
 /** THE POPOVER (`renderArtifactList(box, v, {onOpen, close, app, onExpand})` keeps its signature): mounts the bounded
  *  list into `box` and returns its controller {update(v)} (also `box._afList` — the chip's live refresh patches it). */
-export function renderArtifactList(box, v, { onOpen = null, close = null, app = null, onExpand = null } = {}) {
-  const st = { v, q: '', view: loadArtifactsView(), peek: new Map() }; // peek: a head tapped while filtering — this popover's own, never stored (r3)
+export function renderArtifactList(box, v, { onOpen = null, close = null, app = null, onExpand = null, onNewDesign = null, onAllDesigns = null } = {}) {
+  const st = { v, q: '', view: loadArtifactsView(), peek: new Map(), only: '' }; // peek: a head tapped while filtering — this popover's own, never stored (r3); only: ONE KIND ALONE ('k:<kind>', the owner's kinds 2026-11-14 — never stored)
   const opts = { onOpen, close, app };
   box.classList.add('chat-artifacts-panel');
   const top = div('af-top');
@@ -269,6 +269,15 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
   }
   const list = div('af-list'); list.setAttribute('role', 'listbox');
   box.append(top, list);
+  // THE DESIGN ENTRY, FOLDED IN (the chat status strip, P1 — the owner's drawn strip: «＋ 新建设计» inside the deliverables): a new
+  // design opens the design request in this same popover (its form, every design with Open / Publish…, every page with its links);
+  // «All designs…» the Design window's home. Only where the bar has a design door (a view-only window has none).
+  if (onNewDesign || onAllDesigns) {
+    const acts = div('af-design-acts');
+    if (onNewDesign) { const b = button('af-new-design', t('New design')); const ic = span('af-act-ic'); ic.setAttribute('aria-hidden', 'true'); ic.innerHTML = UI_ICONS.plus || ''; const w = span('af-act-word'); w.textContent = t('New design'); b.append(ic, w); b.addEventListener('click', (e) => { e.stopPropagation(); onNewDesign(); }); acts.appendChild(b); }
+    if (onAllDesigns) { const a = button('af-all-designs', t('All designs…')); a.textContent = t('All designs…'); a.addEventListener('click', (e) => { e.stopPropagation(); if (close) close(); onAllDesigns(); }); acts.appendChild(a); }
+    box.insertBefore(acts, list);
+  }
   const rowEls = new Map(), headEls = new Map();
   const notes = { empty: div('chat-status-dropdown-note af-empty'), none: div('chat-status-dropdown-note af-none'), full: div('chat-status-dropdown-note af-full') };
   notes.empty.textContent = t('No matching artifacts');
@@ -287,14 +296,16 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
       h.dataset.group = s.key; h.setAttribute('role', 'button'); h.tabIndex = -1;
       if (band) h.dataset.band = s.head.label;
       const ic = span('af-head-ic'); ic.setAttribute('aria-hidden', 'true'); if (s.key === 'recent') ic.innerHTML = UI_ICONS.clock || ''; else if (folder) ic.innerHTML = UI_ICONS.folder || '';
-      h.append(ic, span('af-head-word'), span('af-head-chev'));
-      h.addEventListener('click', (e) => { e.stopPropagation(); if (queryOf(st.q)) peek(s.key, h.dataset.fold === 'shut'); else toggle(s.key); }); // while filtering: a peek either way (a head a kind word's prefix left folded opens), never saved
+      h.append(ic, span('af-head-word'), span('af-head-all'), span('af-head-chev'));
+      h.addEventListener('click', (e) => { e.stopPropagation(); if (st.view.group === 'kind' && /^k:/.test(s.key)) { st.only = st.only === s.key ? '' : s.key; list.scrollTop = 0; draw(); return; } if (queryOf(st.q)) peek(s.key, h.dataset.fold === 'shut'); else toggle(s.key); }); // a KIND's head shows that kind alone, and again shows them all // while filtering: a peek either way (a head a kind word's prefix left folded opens), never saved
       headEls.set(s.key, h);
     }
     const words = artifactHeadLine(s.head);
     const w = h.querySelector('.af-head-word'); if (w.textContent !== words) w.textContent = words;
+    const kindHead = s.head.group === 'kind'; // a KIND's head SAYS what its press does (主开发 00:07Z: an arrow read as «fold this group»): «Only this kind», alone «Show all»
+    const all = kindHead ? (s.head.alone ? t('Show all') : t('Only this kind')) : ''; const a = h.querySelector('.af-head-all'); if (a && a.textContent !== all) a.textContent = all;
     const chev = s.open ? 'open' : 'shut';
-    if (h.dataset.fold !== chev) { h.dataset.fold = chev; h.setAttribute('aria-expanded', String(s.open)); h.querySelector('.af-head-chev').innerHTML = (s.open ? UI_ICONS.chevronDown : UI_ICONS.chevronRight) || ''; }
+    if (h.dataset.fold !== chev || h.dataset.kindHead !== String(kindHead)) { h.dataset.fold = chev; h.dataset.kindHead = String(kindHead); h.setAttribute('aria-expanded', String(s.open)); h.querySelector('.af-head-chev').innerHTML = kindHead ? '' : (s.open ? UI_ICONS.chevronDown : UI_ICONS.chevronRight) || ''; } // a kind's head has NO fold arrow: its press shows the kind alone, said in words
     return h;
   };
   const rowEl = (section, b, q, ctx) => {
@@ -305,7 +316,9 @@ export function renderArtifactList(box, v, { onOpen = null, close = null, app = 
     return it;
   };
   function draw() {
-    const plan = listPlan(st.v, { q: st.q, group: st.view.group, sort: st.view.sort, collapsed: st.view.collapsed[st.view.group], kindWord: artifactKindWord, peek: st.peek, hubWord: t('Local') });
+    if (st.view.group !== 'kind') st.only = '';
+    const plan = listPlan(st.v, { q: st.q, group: st.view.group, sort: st.view.sort, collapsed: st.view.collapsed[st.view.group], kindWord: artifactKindWord, peek: st.peek, hubWord: t('Local'), only: st.only });
+    if (plan.alone && !plan.sections.length) { st.only = ''; return draw(); } // the kind shown alone has no row left: all of them again
     const want = [];
     if (!st.q && !(st.v && Array.isArray(st.v.items) && st.v.items.length)) want.push(notes.none);
     for (const s of plan.sections) {
