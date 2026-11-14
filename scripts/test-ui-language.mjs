@@ -190,6 +190,9 @@ export const MARK_SINKS = [
   ['src/lib/jobs-panel.js', '${run.endedAt ? mark(run.endedAt - run.startedAt)', 'a run row\'s duration'],
   ['src/lib/usage-meter.js', 'const fmtDur = (sec) => mark(', 'the usage meter\'s reset countdown («2d23h59m»)'],
   ['src/lib/utils.js', "label = age ? t('as of {when}', { when: markAgo(age) })", 'a host chip\'s age'],
+  ['src/lib/account-wall-words.js', 'if (t === markT) return mark(', 'a ring\'s stale-lane mark (the roster, the usage meter — hotfix 2.369.401)'],
+  ['src/lib/manage-agents.js', 'const ageLabel = age != null && age > 5 ? mark(', 'the roster row\'s age (hotfix 2.369.401)'],
+  ['src/lib/session-lifecycle.js', 'const ageTxt = age != null && age > 5 ? escHtml(mark(', 'the account-switch menu\'s age (hotfix 2.369.401)'],
 ];
 /** PURE: the mark findings over (the tree's mark-calling lines, a file → its source lines). */
 export function markFindings(markLines, linesOf, sinks = MARK_SINKS) {
