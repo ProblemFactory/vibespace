@@ -162,7 +162,7 @@ try {
     const more = el.querySelector('.task-detail-more > summary'); const foot = el.querySelector('.task-detail-footer');
     const pre = el.querySelector('.task-detail-preview');
     return pre && !/^加载/.test(pre.textContent) && labels.length >= 4 ? { tabs, labels, more: more ? [...more.querySelectorAll('.ctx-chip')].map((c) => c.textContent.replace(/\\s+/g, ' ').trim()) : null, foot: foot ? foot.textContent.replace(/\\s+/g, ' ').trim() : null, rows: el.querySelectorAll('.ctx-row:not(.ctx-headrow)').length } : null; })()`), 20000);
-  check('the tabs: 设置 · Backlog (1) · 活动记录 · 成员 (1), 设置 open', !!shape && JSON.stringify(shape.tabs.map((x) => x.t)) === JSON.stringify(['设置', 'Backlog（搁置区） (1)', '活动记录', '成员 (1)']) && shape.tabs[0].on, shape && shape.tabs);
+  check('the tabs: 设置 · Backlog (1) · 活动记录 · 成员 (1), 设置 open', !!shape && JSON.stringify(shape.tabs.map((x) => x.t)) === JSON.stringify(['设置', '搁置区 (1)', '活动记录', '成员 (1)']) && shape.tabs[0].on, shape && shape.tabs);
   check('设置, top to bottom: 名称 → 说明 / 常驻指令 → Context 表 → 新对话会收到 → 更多选项', !!shape && JSON.stringify(shape.labels) === JSON.stringify(['名称', '说明 / 常驻指令', 'Context 表', '新对话会收到']) && !!shape.more, shape && shape.labels);
   check('更多选项 carries its values on the chips (通知 继承 · 外部 封闭 · 浏览器配置 默认 · 颜色 自动 · 导出 / 导入)', !!shape && shape.more && JSON.stringify(shape.more) === JSON.stringify(['通知 继承', '外部 封闭', '浏览器配置 默认', '颜色 自动', '导出 / 导入']), shape && shape.more);
   check('the footer: 改动即时保存 + 归档', !!shape && /改动即时保存（路径行离开字段就生效，回车也行）/.test(shape.foot) && /归档/.test(shape.foot), shape && shape.foot);
