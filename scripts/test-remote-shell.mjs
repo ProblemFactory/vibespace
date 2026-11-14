@@ -5,6 +5,7 @@
 // PATH/nvm string or the POSIX node finder.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 const require = createRequire(import.meta.url);
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude } = require('../src/remote-shell.js');
 

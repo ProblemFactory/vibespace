@@ -72,7 +72,10 @@ jobs:
       # that one leg (run 41116833934). So this job installs THE reviewed gh: the release tarball for linux amd64, its sha256
       # the literal below (= the line for it in the release's gh_2.102.0_checksums.txt — never fetched at run time), checked
       # on every run, cache hit or miss, before anything is unpacked; its bin/gh is byte-identical to the row's toolSha256.
-      # It goes first on PATH for every later step. A re-pin (gen-gh-grammar.mjs --repin — a vault-agent-own re-review)
+      # It goes first on PATH for every later step — unpacked into the runner's TOOL CACHE (/opt/hostedtoolcache, where
+      # setup-node puts node), never under the account home: a suite handed /home/runner runs re-homed (B-ba47, scripts/
+      # scratch.mjs) and drops every PATH entry under it, so a gh under $RUNNER_TEMP (/home/runner/work/_temp) vanished from
+      # the suites that re-parse it. A re-pin (gen-gh-grammar.mjs --repin — a vault-agent-own re-review)
       # moves the row AND these literals. The cache keeps the tarball, keyed on the version + its sha256; a stalled restore
       # is a miss after 2 min (the fonts cache's rule).
       - name: Cache the pinned gh
@@ -94,7 +97,7 @@ jobs:
           tgz="gh_${GH_PIN_VERSION}_linux_amd64.tar.gz"; c="$HOME/.cache/vs-gh-pinned"; mkdir -p "$c"
           [ -s "$c/$tgz" ] || curl -fsSL --retry 5 --connect-timeout 20 --max-time 120 -o "$c/$tgz" "https://github.com/cli/cli/releases/download/v${GH_PIN_VERSION}/${tgz}"
           echo "${GH_PIN_SHA256}  $c/$tgz" | sha256sum -c --strict - || { rm -f "$c/$tgz"; echo "::error::the gh ${GH_PIN_VERSION} tarball is not the pinned sha256"; exit 1; }
-          d="$RUNNER_TEMP/gh-pinned"; rm -rf "$d"; mkdir -p "$d"; tar -xzf "$c/$tgz" -C "$d" --strip-components=1
+          d="$RUNNER_TOOL_CACHE/vs-gh-pinned/$GH_PIN_VERSION"; rm -rf "$d"; mkdir -p "$d"; tar -xzf "$c/$tgz" -C "$d" --strip-components=1
           [ "$("$d/bin/gh" --version | sed -n 's/^gh version \([^ ]*\).*/\1/p')" = "$GH_PIN_VERSION" ] || { echo "::error::the unpacked gh is not ${GH_PIN_VERSION}"; exit 1; }
           echo "$d/bin" >> "$GITHUB_PATH"
           echo "gh pinned ${GH_PIN_VERSION} (runner had ${had:-none})"
@@ -264,10 +267,16 @@ jobs:
       # kernel OOM killer is SIGKILL) is a RED here, not a supersession — that
       # confusion is what once showed this job a green tick for a tier that
       # crashed and then ran nothing.
+      # the chrome suites' pictures folder, made before the first suite (B-ba47: /tmp, off the account home — see VS_UI_SHOTS_DIR below)
+      - name: Make the chrome suites' pictures folder
+        run: mkdir -p /tmp/ci-ui-shots
+        timeout-minutes: 1
       - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
-          VS_UI_SHOTS_DIR: ${{ runner.temp }}/vs-shots
+          # /tmp, never ${{ runner.temp }} (/home/runner/work/_temp): a suite handed the account home runs re-homed
+          # (B-ba47) and drops every value naming a path under it — this one too
+          VS_UI_SHOTS_DIR: /tmp/ci-ui-shots
       # A chrome suite that goes red HERE and green locally (2.369.125's
       # test-gear-menu Esc legs) leaves its screenshots on a runner nobody can
       # log into; ship them as an artifact so the failure can be read instead
@@ -284,7 +293,7 @@ jobs:
           name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}
           path: |
             data/ci-heavy/fail-logs/*.log
-            ${{ runner.temp }}/vs-shots/
+            /tmp/ci-ui-shots/
           if-no-files-found: ignore
           retention-days: 7
   # THE ONE HEAVY STATUS: green only when every shard is green. always(), so a

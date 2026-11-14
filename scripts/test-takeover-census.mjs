@@ -29,8 +29,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { gitEnvFrom } from './git-env.mjs';
 import { scratchDir } from './scratch.mjs';
+import { gitEnvFrom } from './git-env.mjs';
 export const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 export const SURFACE_CLASSES = {

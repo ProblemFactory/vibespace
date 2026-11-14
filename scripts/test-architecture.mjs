@@ -20,10 +20,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, envCensus, outsideReaders, OUTSIDE_ROW } from './hub-home-census.mjs';   // §57 + §108: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -2924,47 +2926,7 @@ await section(async () => {
   // …and (2.369.181) a server.js spawned THROUGH a launcher — `spawn(DBUS, ['--', process.execPath, 'server.js'])`, the
   // shape lane D's test-desktop-app-snap used (dbus-run-session): node is an argv ELEMENT there, never the command, and the
   // first cut of this census read it as no spawn at all (the suite booted with the machine-global :7 / 5901)
-  const SPAWN = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[[^\]]*?|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,[^\]]*?)(?:['"`]server\.js['"`]|path\.join\([^)]*?['"`]server\.js['"`]\s*\))\s*\]/g;
-  // walk(t, i, false) = the balanced text from the opening bracket at `i`; walk(t, i, true) = from `i` to the end of its statement (strings skipped)
-  const walk = (t, i, stopAtStatementEnd) => {
-    let d = 0, q = null;
-    for (let j = i; j < t.length; j++) {
-      const c = t[j];
-      if (q) { if (c === '\\') j++; else if (c === q) q = null; continue; }
-      if (c === '"' || c === "'" || c === '`') { q = c; continue; }
-      if ('{(['.includes(c)) d++;
-      else if ('})]'.includes(c)) { if (stopAtStatementEnd && d === 0) return t.slice(i, j); d--; if (!stopAtStatementEnd && d === 0) return t.slice(i, j + 1); }
-      else if (stopAtStatementEnd && d === 0 && (c === ';' || c === '\n')) return t.slice(i, j);
-    }
-    return t.slice(i);
-  };
-  // offsets inside a string literal, a template's text, a regex literal or a comment: a spawn SPELLED there is data (a
-  // control or a pin), never a spawn. Templates nest through `${ … }` (a brace-depth stack); a regex literal is told
-  // from a division by the token before it (a regex carrying a backtick desynced the first cut for 90 lines).
-  const dataRanges = (t) => {
-    const out = [], tpl = []; let depth = 0;
-    const chunk = (j) => { // template text from the ` or } at j to the next ` or ${
-      let k = j + 1;
-      while (k < t.length && t[k] !== '`' && !(t[k] === '$' && t[k + 1] === '{')) k += t[k] === '\\' ? 2 : 1;
-      out.push([j, k + 1]);
-      if (t[k] === '$') { tpl.push(depth); depth++; return k + 1; }
-      return k;
-    };
-    for (let j = 0; j < t.length; j++) {
-      const c = t[j], n = t[j + 1];
-      if (c === '/' && (n === '/' || n === '*')) { const e = n === '/' ? t.indexOf('\n', j) : t.indexOf('*/', j + 2); const end = e < 0 ? t.length : e + (n === '/' ? 0 : 2); out.push([j, end]); j = end - 1; continue; }
-      if (c === '"' || c === "'") { let k = j + 1; while (k < t.length && t[k] !== c && t[k] !== '\n') k += t[k] === '\\' ? 2 : 1; out.push([j, k + 1]); j = k; continue; }
-      if (c === '/' && /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$/.test(t.slice(Math.max(0, j - 12), j))) {
-        let k = j + 1, cls = false;
-        while (k < t.length && t[k] !== '\n' && (cls || t[k] !== '/')) { if (t[k] === '\\') k++; else if (t[k] === '[') cls = true; else if (t[k] === ']') cls = false; k++; }
-        out.push([j, k + 1]); j = k; continue;
-      }
-      if (c === '`') { j = chunk(j); continue; }
-      if (c === '}' && tpl.length && depth - 1 === tpl[tpl.length - 1]) { depth--; tpl.pop(); j = chunk(j); continue; }
-      if (c === '{') depth++; else if (c === '}') depth--;
-    }
-    return out;
-  };
+  // SPAWN, walk and dataRanges: scripts/hub-home-census.mjs since 2026-11-14 (§108 reads the same sites) — moved unchanged
   const judge = (t) => {
     const data = dataRanges(t);
     const isData = (i) => data.some(([a, b]) => i >= a && i < b);
@@ -4015,13 +3977,16 @@ await section(async () => {
   // ONE reasoned scripts site (batch 34 cure, 主开发 09:32Z): the scratch reaper's never-a-root guard compares a configured root with
   // the ACCOUNT'S REAL home, so a gate under a scratch HOME still refuses it — a path compared, never opened. It lives in
   // scripts/scratch-run.mjs since the reach cure (2026-11-20: the harness imports nothing of the gate's; ci.mjs re-exports it)
-  const SCRIPT_ALLOW = { 'scripts/scratch-run.mjs': [/THE REAL HOME IS NEVER A SCRATCH ROOT/, 1] };
+  // + ONE more reasoned site (B-ba47 pick B, 主开发 01:18Z b): scratch.mjs compares a handed home that is empty or relative as the
+  // account entry's home — a path compared, never opened
+  const SCRIPT_ALLOW = { 'scripts/scratch-run.mjs': [/THE REAL HOME IS NEVER A SCRATCH ROOT/, 1], 'scripts/scratch.mjs': [/THE ACCOUNT ENTRY'S HOME IS THE HOME COMPARED/, 1] };
   const allowed = (f, h) => !!SCRIPT_ALLOW[f] && h.length === SCRIPT_ALLOW[f][1] && h.every((x) => x.includes('userInfo().homedir')) && SCRIPT_ALLOW[f][0].test(fs.readFileSync(f, 'utf8'));
   const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
   const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([f, h]) => h.length && !allowed(f, h));
   ok(Object.keys(SCRIPT_ALLOW).every((f) => { const h = judge(fs.readFileSync(f, 'utf8')); return h.length === SCRIPT_ALLOW[f][1] && allowed(f, h); }), `§68 the one reasoned scripts site is alive — exactly ${SCRIPT_ALLOW['scripts/scratch-run.mjs'][1]} passwd read in scripts/scratch-run.mjs, with its reason (a second read, or the reason gone, is red)`);
   ok(scope.length >= 100, `§68 census scope is non-vacuous (${scope.length} scripts; ${locals.size} local accounts under /home)`);
   ok(bad.length === 0, `§68 no suite reads the passwd home or names a real account's /home/<name>${bad.length ? ' — ' + bad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  ok(judge("const h = '/home/" + "runner/work/_temp';").length === 1, '§68 CONTROL: a literal /home/runner is red on THIS box too — the hosted runner\'s account is judged as real everywhere');
   ok(judge("const realBrowsers = path.join(os.userInfo().homedir, '.agent-browser');").length === 1 && judge("// a comment naming os.userInfo().homedir\nconst h = path.join(os.homedir(), 'x');").length === 0 && judge("const h = '/home/alice/.agent-browser';", new Set(['alice'])).length === 1 && judge("const h = '/home/u/.agent-browser'; const g = path.join(os.homedir(), 'x');", new Set(['alice'])).length === 0,
     '§68 NEGATIVE CONTROLS: the passwd read is caught (not in a comment); a real account\'s literal home is caught; a fixture home and os.homedir() pass');
   // verify r7 (T2 ④): the PRODUCT too — a lane env pins HOME to a scratch home and src/ must never reach the real one past it:
@@ -8401,6 +8366,149 @@ await section(async () => {
 });
 
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor
+
+// ── §108 (B-ba47 pick B, lane cli-update-needs-nothing — 主开发's ruling 2026-11-14 11:04Z): EVERY HUB A SUITE BOOTS RUNS ON A
+// TEMP HOME. The 2.369.401 hotfix night: a claim launched outside the lane env handed its suites the person's HOME, and the
+// hubs two of them booted found the real CLIs in ~/.local/bin, walked ~/.claude/projects and created their usage index
+// under ~/.vibespace. Decided ONCE at the suite process: scripts/scratch.mjs re-homes a suite or a debug script handed a
+// home outside every temp root, at import, by src/home-verdict.js — the verdict and the value rule the hub's own boot
+// will use (shape H). So (a) every file that boots a hub imports ./scratch.mjs, directly or through a boot module, or is
+// a named row; (b) every boot site's env is CLASSED by how it is built (scripts/hub-home-census.mjs: inherits · spreads
+// the process's · HOME from the process · HOME from a scratch source) and a site whose HOME comes from none of those is
+// red unless it is a named row with its reason; (c) the REAL-CLI ALLOW LIST: only its rows ask scratch.mjs for the
+// HANDED env's CLI; (d) ONE verdict: scratch.mjs keeps no rule of its own.
+console.log('§108 every hub a suite or debug script boots runs on a temp home: re-homed at import, every boot site classed');
+{
+  const r = judgeHubHomes(path.join(REPO, 'scripts'));
+  const sites = r.files.reduce((a, f) => a + f.sites.length, 0), byCls = {};
+  for (const f of r.files) for (const x of f.sites) byCls[x.cls] = (byCls[x.cls] || 0) + 1;
+  const has = (f) => r.files.some((x) => x.file === f);
+  ok(r.files.length >= 200 && sites >= 220 && ['test-vault-chrome.mjs', 'test-chrome-marks-chrome.mjs', 'pairing-ui-harness.mjs', 'xpra-window-boot.mjs', 'dbg-close-smoke.mjs'].every(has)
+    && r.files.filter((f) => f.file.startsWith('dbg-')).length >= 14 && r.viaModules.length >= 10,
+    `§108 the census is non-vacuous: ${r.files.length} files boot a hub at ${sites} sites (${Object.entries(byCls).map(([k, v]) => `${k} ${v}`).join(' · ')}) — the hotfix night's two suites, the two boot modules (${r.modules.join(', ')}, ${r.viaModules.length} suites through them) and the debug scripts among them`);
+  ok(r.red.length === 0, `§108 every hub-booting file is re-homed and every boot site's HOME comes from the re-homed process or a scratch source (${HUB_SITE_ROWS.length} named sites)${r.red.length ? ' — ' + r.red.join(' | ') : ''}`, r.red);
+  ok(r.stale.length === 0, `§108 every named site still names a red site (a row that matches none is stale)${r.stale.length ? ' — ' + r.stale.map((x) => x.file).join(', ') : ''}`);
+  ok(r.modules.every((m) => r.files.find((f) => f.file === m).rehome === 'direct'), `§108 each boot module imports ./scratch.mjs itself, so every suite booting through it is re-homed (${r.modules.join(', ')})`);
+  // NEGATIVE CONTROLS: the red shapes are named; the four good ones pass; a spawn spelled in a string is data; an import in a comment is none
+  const cls = (t) => classifyBoots(t).map((x) => x.cls).join(',');
+  const B = "spawn(process.execPath, ['server.js'], ";
+  const reds = {
+    'an env with no HOME and no process env (the hub falls back to the passwd home)': `${B}{ cwd: wt, env: { PORT: String(PORT) } });`,
+    'a HOME literal outside every temp root': `${B}{ env: { ...process.env, HOME: '/home/someone' } });`,
+    'the passwd home': `${B}{ env: { ...process.env, HOME: os.userInfo().homedir } });`,
+    'a launcher-wrapped boot with no HOME': "spawn(DBUS, ['--', process.execPath, 'server.js'], { env: { PORT } });",
+    'a named env built without the process env': `const srvEnv = { PATH: '/usr/bin', PORT: '1' };\n${B}{ env: srvEnv });`,
+  };
+  const goods = {
+    inherits: `${B}{ cwd: wt, stdio: 'ignore' });`,
+    process: `const env = { ...process.env, PORT: '1' };\n${B}{ cwd: wt, env });`,
+    'process-home': `${B}{ env: { PATH: process.env.PATH, HOME: os.homedir() } });`,
+    'scratch-home': `const home = scratchHome('x-home', fs);\n${B}{ env: { ...process.env, HOME: home } });`,
+  };
+  const redBad = Object.entries(reds).filter(([, t]) => { const c = cls(t); return !c || HUB_OK.includes(c); }).map(([k]) => k);
+  const goodBad = Object.entries(goods).filter(([k, t]) => cls(t) !== k).map(([k, t]) => `${k}: ${cls(t)}`);
+  ok(redBad.length === 0 && goodBad.length === 0 && cls(`const f = "${B}{ env: { PORT } });";`) === '',
+    `§108 CONTROLS: ${Object.keys(reds).length} red shapes are red, the four good classes pass, a boot spelled inside a string is data${redBad.length || goodBad.length ? ' — ' + [...redBad, ...goodBad].join(' | ') : ''}`);
+  const mod = (m) => (m === 'boot-x.mjs' ? "import { scratch } from './scratch.mjs';" : '');
+  ok(rehomedBy("import { scratch } from './scratch.mjs';", mod) === 'direct' && rehomedBy("import './scratch.mjs';", mod) === 'direct' && rehomedBy("import { boot } from './boot-x.mjs';", mod) === 'via boot-x.mjs'
+    && rehomedBy("// import { scratch } from './scratch.mjs';\nimport fs from 'node:fs';", mod) === null && rehomedBy("const s = \"import { scratch } from './scratch.mjs';\";", mod) === null,
+    '§108 CONTROLS: re-homed by a direct import, a bare import or a boot module that imports it — never by one in a comment or a string');
+  // (c) THE REAL-CLI ALLOW LIST
+  const sm = read('scripts/scratch.mjs'), smCode = sm.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const allowBlock = (sm.match(/export const REAL_CLI_ALLOW = Object\.freeze\(\[([\s\S]*?)\n\]\);/) || [, ''])[1];
+  const allowRows = [...allowBlock.matchAll(/suite: '([\w.-]+\.mjs)', kind: '(suite|by-hand)', why: (['"])(.{40,}?)\3 \}/g)].map((m) => ({ suite: m[1], kind: m[2], why: m[4] }));
+  const allow = allowRows.map((r) => r.suite);
+  const codeCalls = (re) => fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => f.endsWith('.mjs') && f !== 'scratch.mjs')
+    .filter((f) => { const t = read('scripts/' + f), data = dataRanges(t); return [...t.matchAll(re)].some((m) => !data.some(([a, b]) => m.index >= a && m.index < b)); }).sort();   // a call in CODE — never one spelled in a string or a comment
+  const callers = codeCalls(/\bhandedCli(?:Candidates)?\s*\(/g);
+  ok(allowRows.length >= 5 && allow[0] === 'test-claude-steer-chrome.mjs' && JSON.stringify(callers) === JSON.stringify([...allow].sort()) && allowRows.every((r) => r.why.length > 40),
+    `§108 THE REAL-CLI ALLOW LIST (${allowRows.map((r) => `${r.suite} [${r.kind}]`).join(', ')}): each row has its kind and reason and asks for the HANDED env's CLI; no other script does (callers: ${callers.join(', ') || 'none'})`);
+  // (c2) 主开发 12:20Z: a BY-HAND row is by hand only — its reason says so, and NOTHING names or imports its file: no ci.mjs
+  // tier row, no suite, no other script (the allow list itself and this census are the two places that may)
+  const HAND_ONLY = "by hand only, on the owner's word for that run; never a gate";
+  const later = allowRows.filter((r) => r.kind === 'by-hand');
+  const namers = (scripts) => later.flatMap((r) => scripts.filter(([f, t]) => f !== 'scratch.mjs' && f !== 'test-architecture.mjs' && f !== r.suite && t.includes(r.suite.replace(/\.mjs$/, ''))).map(([f]) => `${f} names ${r.suite}`));
+  const scriptTexts = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /\.(m?js|sh)$/.test(f)).map((f) => [f, read('scripts/' + f)]);
+  const named = namers(scriptTexts), inTiers = later.filter((r) => read('scripts/ci.mjs').includes(`name: '${r.suite.replace(/\.mjs$/, '')}'`)).map((r) => r.suite);
+  const plantedTier = namers([['ci.mjs', read('scripts/ci.mjs').replace("  { name: 'test-home-verdict',", `  { name: '${(later[0] || { suite: 'x.mjs' }).suite.replace(/\.mjs$/, '')}', tier: 'heavy', why: 'planted' },\n  { name: 'test-home-verdict',`)]]);
+  ok(later.length >= 1 && later.every((r) => r.why.startsWith(HAND_ONLY)) && named.length === 0 && inTiers.length === 0 && plantedTier.length === later.length && allowRows.filter((r) => r.kind === 'suite').every((r) => !r.why.startsWith(HAND_ONLY)),
+    `§108 every BY-HAND allow-list row (${later.map((r) => r.suite).join(', ')}) is by hand only: its reason begins «${HAND_ONLY}», and no ci.mjs tier, suite or other script names or imports it (CONTROL: its name planted in a tier list is red)${named.length || inTiers.length ? ' — ' + [...named, ...inTiers].join(', ') : ''}`);
+  // (c3) THE WATCHERS (主开发 17:06Z item C): only a HOME_WATCHERS row reads the handed home (scratch.mjs handedHome), its reason
+  // says it READS, and the accessor refused is a RED in it (an ok(false…)), never a skip — CONTROL: a catch that prints SKIP is red
+  const watchBlock = (sm.match(/export const HOME_WATCHERS = Object\.freeze\(\[([\s\S]*?)\n\]\);/) || [, ''])[1];
+  const watchers = [...watchBlock.matchAll(/suite: '([\w.-]+\.mjs)', why: (['"])(.{20,}?)\2 \}/g)].map((m) => ({ suite: m[1], why: m[3] }));
+  const watchCallers = codeCalls(/\bhandedHome\s*\(/g);
+  const redOnCut = (t) => /try\s*\{[^{}]*?handedHome\(\)[^{}]*?\}\s*catch\s*\(\s*\w+\s*\)\s*\{\s*ok\(/.test(t.replace(/\(\) => \{/g, '(() => {'));
+  ok(watchers.length === 2 && watchers.every((w) => /^READS\b/.test(w.why)) && JSON.stringify(watchCallers) === JSON.stringify(watchers.map((w) => w.suite).sort()) && watchers.every((w) => redOnCut(read('scripts/' + w.suite)))
+    && redOnCut("let h; try { h = handedHome(); } catch (e) { ok(false, 'x', e.message); }") && !redOnCut("let h; try { h = handedHome(); } catch (e) { console.log('SKIP: no home'); }"),
+    `§108 THE WATCHERS (${watchers.map((w) => w.suite).join(', ')}): only they read the handed home, each READS (never writes) and is RED when the accessor refuses (CONTROL: a catch that skips is red)${JSON.stringify(watchCallers) !== JSON.stringify(watchers.map((w) => w.suite).sort()) ? ' — callers: ' + watchCallers.join(', ') : ''}`);
+  // (c4) THE DEVICE DAEMON'S PATH (主开发 17:06Z, RULE-2 / RULE-7): agentd puts the REAL node's directory first on the PATH of
+  // what it spawns (agentd.js composes it from execPath) — reached by NO suite: none sends a bare-name agent CLI to a daemon it
+  // started. Pinned so it stays so; curing it in the daemon changes the signed device bundle (a pick of its own).
+  const AGENT_BARE = /\b(?:openSession|openPipeSession|openPipeSess\w*|runCmd|runStream|execOp)\s*\([^)]*?['"`](?:claude|codex|opencode|agy|gemini)['"`]/;
+  const daemonSuites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').filter((f) => /vibespace-agentd|agentd\/agentd\.js|agentd\.js['"`]/.test(read('scripts/' + f)));   // never this census (it holds the planted send)
+  const bareSends = daemonSuites.filter((f) => AGENT_BARE.test(read('scripts/' + f)));
+  ok(daemonSuites.length >= 5 && bareSends.length === 0 && AGENT_BARE.test("await d.runCmd({ argv: ['claude', '-p', 'x'] })") && /const nodeDir = path\.dirname\(process\.execPath\)/.test(read('src/agentd/agentd.js')),
+    `§108 THE DEVICE DAEMON'S PATH: agentd still puts the real node's directory first for what it spawns, and none of the ${daemonSuites.length} suites that start one sends it a bare-name agent CLI (CONTROL: a planted send is seen) — curing it in the daemon is a pick of its own (the signed bundle)${bareSends.length ? ' — ' + bareSends.join(', ') : ''}`);
+  // (e) THE ORDER (主开发 14:15Z): the re-home happens when scratch.mjs is EVALUATED — nothing of a suite's own code runs
+  // before it. Every test-* / dbg-* file that reaches scratch.mjs loads it FIRST (builtins aside), directly or as the first
+  // import of its first import.
+  const ord = orderCensus(path.join(REPO, 'scripts'));
+  const planted = { 'm-first.mjs': "import { scratch } from './scratch.mjs';\nimport x from './y.mjs';", 'm-second.mjs': "import x from './y.mjs';\nimport { scratch } from './scratch.mjs';" };
+  const rf = (t) => rehomesFirst(t, (m) => planted[m] || '');
+  const SPELLINGS = ["import{a}from'./m-second.mjs';\nimport { scratch } from './scratch.mjs';", "export { a } from './m-second.mjs';\nimport { scratch } from './scratch.mjs';",
+    "import a from'./m-second.mjs';\nimport { scratch } from './scratch.mjs';", "import * as A from './m-second.mjs';\nimport { scratch } from './scratch.mjs';", "{}import a from './m-second.mjs';\nimport { scratch } from './scratch.mjs';"];
+  ok(ord.reach.length >= 700 && ord.late.length === 0 && rf("import fs from 'node:fs';\nimport path from 'path';\nimport { scratch } from './scratch.mjs';") && rf("import { a } from './m-first.mjs';")
+    && !rf("import { a } from './mutant-copy.mjs';\nimport { scratch } from './scratch.mjs';") && !rf("import { a } from './m-second.mjs';") && !rf("const t = \"import { scratch } from './scratch.mjs';\";\nimport x from './y.mjs';")
+    && rf("#!/usr/bin/env node\nimport { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nimport { scratch } from './scratch.mjs';")
+    && SPELLINGS.every((t) => !rf(t)) && !rf("import x from 'some-package';\nimport { scratch } from './scratch.mjs';"),
+    `§108 THE ORDER (stated as what the FIRST IMPORT IS — ESM runs every import before any other statement): every one of the ${ord.reach.length} suite / debug files that reaches scratch.mjs has, builtins aside, the scratch import as its first import, or a local module's whose first it is — CONTROLS: a module before it, a first import that loads it second, an import spelled in a string, and the five spellings of an earlier import (no space before the brace, an export-from, a default glued to «from», a namespace import, a block before it) are red; a plain statement before it is not${ord.late.length ? ' — LATE: ' + ord.late.join(', ') : ''}`, ord.late);
+  // (e2) THE SEAM (主开发 23:36Z): VS_REHOME_NOT_TEMP is read by scripts/scratch.mjs alone and set by test-home-verdict alone —
+  // nothing in the product, data/bin, the wrappers or ci.mjs sets or reads it (the docs may name it)
+  const seamFiles = trackedFiles(REPO).filter((f) => (/\.(?:m?js|cjs|sh|ya?ml|json)$/.test(f) || f.startsWith('data/bin/')) && !f.startsWith('docs/') && f !== 'scripts/test-architecture.mjs').filter((f) => { try { return read(f).includes('VS_REHOME_NOT_TEMP') || (f !== 'scripts/scratch.mjs' && /\bNOT_TEMP_ENV\b/.test(read(f))); } catch { return false; } }).sort();
+  ok(JSON.stringify(seamFiles) === JSON.stringify(['scripts/scratch.mjs', 'scripts/test-home-verdict.mjs']) && /process\.env\[NOT_TEMP_ENV\]/.test(smCode),
+    `§108 THE SEAM: VS_REHOME_NOT_TEMP is read by scripts/scratch.mjs alone and set by test-home-verdict alone — nothing in the product, data/bin, the wrappers or ci.mjs names it (${seamFiles.join(', ')})`, seamFiles);
+  // (e4) THE ENVIRONMENT'S TABLE, HELD BOTH WAYS (主开发 01:23Z amendment 7): every name a test-* / dbg-* file reads in its own
+  // code is carried, a not-carried row, set first, or one of the suites' own knobs — the derived list, equal both ways; every
+  // row is read by the tree or names the program that reads it
+  const HVm = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/home-verdict.js'));
+  const envc = envCensus(REPO, HVm);
+  const knobsFile = JSON.parse(read('scripts/suite-env-knobs.json')).knobs;
+  const missing = envc.knobs.filter((n) => !knobsFile.includes(n)), stale = knobsFile.filter((n) => !envc.knobs.includes(n));
+  ok(missing.length === 0 && stale.length === 0 && envc.unread.length === 0 && HVm.ENV_ROWS.length >= 10 && HVm.ENV_NOT.length >= 10,
+    `§108 THE ENVIRONMENT IS BUILT, its table held both ways: every name a suite reads is carried (${HVm.ENV_ROWS.length} rows), not carried by name (${HVm.ENV_NOT.length}), set first, or one of the ${knobsFile.length} suites' own knobs (scripts/suite-env-knobs.json, derived) — and every row is read or names its program${missing.length ? ' — NEW knobs (regenerate the list or give each a row): ' + missing.join(', ') : ''}${stale.length ? ' — STALE knobs: ' + stale.join(', ') : ''}${envc.unread.length ? ' — rows nothing reads: ' + envc.unread.join(', ') : ''}`);
+  // (f) the main files that run on the handed home ON PURPOSE: named rows, each a file of scripts/ with its reason
+  const nrBlock = (sm.match(/export const NOT_REHOMED = Object\.freeze\(\[([\s\S]*?)\n\]\);/) || [, ''])[1];
+  const nr = [...nrBlock.matchAll(/'([\w.-]+\.mjs)'/g)].map((m) => m[1]);
+  ok(nr.length === 10 && nr.slice(0, 3).join() === 'ci.mjs,probe-claude-stdout.mjs,measure-tier3.mjs' && nr.every((f) => fs.existsSync(path.join(REPO, 'scripts', f))) && /BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver/.test(sm),
+    `§108 (f) every scripts/ main file that loads the scratch module re-homes, except the NAMED rows (${nr.join(', ')}), each a file with its reason`);
+  // (g) said limits: a worker's own execPath, the process title and the report's command line still name the handed node — nothing reads them
+  const codeFiles = trackedFiles(REPO).filter((f) => /^(?:scripts|src)\/.*\.(?:m?js|cjs)$/.test(f) && !f.startsWith('scripts/fixtures/') && f !== 'scripts/test-architecture.mjs');
+  const titleReads = codeFiles.filter((f) => { const t = read(f).replace(/\/\/[^\n]*/g, ''); return [...t.matchAll(/process\.title\b(?!\s*=[^=])/g)].some((m) => !/['"`]/.test(t.slice(Math.max(0, m.index - 40), m.index).split('\n').pop())); });
+  const reportReads = codeFiles.filter((f) => /header\s*\.\s*(?:commandLine|argv|execPath)\b/.test(read(f)));
+  const codeOnly = (t) => { const a = t.split(''); for (const [x, y, k] of dataRanges(t)) if (k !== 'regex') for (let i = x; i < y && i < a.length; i++) if (a[i] !== '\n') a[i] = ' '; return a.join(''); };   // a worker source written in a string is a child's
+  // a WORKER in a suite's own process sees the node it was started with, not the suite's own: the product's worker code that a
+  // suite loads in-process (src/), and a worker source a suite writes in a string — neither may read process.execPath.
+  // src/agentd/agentd.js is not one: it runs as its OWN process (the device daemon), started from the suite's own node.
+  const WORKER_OWN_PROCESS = { 'src/agentd/agentd.js': 'the device daemon runs as its own process, started from the suite\'s own node — its workers see that node' };
+  const workerExec = [
+    ...codeFiles.filter((f) => f.startsWith('src/') && !WORKER_OWN_PROCESS[f]).filter((f) => { const t = codeOnly(read(f)); return /\bparentPort\b/.test(t) && /process\.execPath/.test(t); }),
+    ...codeFiles.filter((f) => /^scripts\/(?:test|dbg)-/.test(f)).filter((f) => { const t = read(f); return dataRanges(t).some(([x, y, k]) => k !== 'comment' && k !== 'regex' && /\bparentPort\b/.test(t.slice(x, y)) && /process\.execPath/.test(t.slice(x, y))); }),
+  ];
+  ok(titleReads.length === 0 && reportReads.length === 0 && workerExec.length === 0, `§108 (g) the said limits: nothing reads the process title (${titleReads.length}), the report's command line (${reportReads.length}), or a worker's own execPath (${workerExec.length})`, { titleReads, reportReads, workerExec });
+  // (e3) A1's said limit: the suite's own executable link in the process table still names the handed node — so nothing reads it
+  const selfExe = trackedFiles(REPO).filter((f) => /^(?:scripts|src)\/.*\.(?:m?js|cjs)$/.test(f) && !f.startsWith('scripts/fixtures/') && f !== 'scripts/test-architecture.mjs').filter((f) => { try { return read(f).includes('/proc/self/exe'); } catch { return false; } });
+  ok(selfExe.length === 0, `§108 A1's limit: no file in scripts/ or src/ reads /proc/self/exe (the suite's own process keeps the kernel's answer; ${selfExe.length})`, selfExe);
+  // (f) THE SUITES OUTSIDE BOTH FENCES — one row (主开发 14:15Z: many ⇒ a row; they ride with shape H): the count may only fall
+  const outs = outsideReaders(path.join(REPO, 'scripts'), ord.outside);
+  ok(outs.length > 0 && outs.length <= OUTSIDE_ROW.max && OUTSIDE_ROW.why.length > 40,
+    `§108 THE ROW: ${outs.length} of the ${ord.outside.length} suite / debug files with no path to scratch.mjs load a home-reading product module or read the home themselves (≤ ${OUTSIDE_ROW.max}): ${OUTSIDE_ROW.why}`, outs.length);
+  // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
+  const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
+    .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));
+  ok(/require\('\.\.\/src\/home-verdict\.js'\)/.test(smCode) && /HV\.suiteRehome\(/.test(smCode) && /HV\.rehomeEnv\(/.test(smCode) && copies.length === 0,
+    `§108 ONE verdict: scratch.mjs re-homes by src/home-verdict.js's suiteRehome + rehomeEnv, and no other file keeps a copy of them${copies.length ? ' — ' + copies.join(', ') : ''}`);
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

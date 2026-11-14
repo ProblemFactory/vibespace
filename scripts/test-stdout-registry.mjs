@@ -12,6 +12,7 @@
 // engine calls), plus split-chunk line buffering and non-JSON passthrough,
 // (4) the wiring pins (the 2.331.0 lesson: a seam with an unstaged call site
 // is dead while unit tests glow green).
+import { handedCli } from './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on one of its own; its real CLI comes from the HANDED env (REAL_CLI_ALLOW)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -450,7 +451,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   //    evidence, never quietly pass).
   // real-cli-env: here the installed claude is only grepped and asked `--version`; the ONE real turn runs in scripts/probe-claude-stdout.mjs, which strips the keys itself (§50 scope) (B-5f0b audit)
   let bin = null;
-  try { bin = fs.realpathSync(require('child_process').execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim()); } catch { }
+  bin = handedCli('claude');   // B-ba47: the handed env's CLI (REAL_CLI_ALLOW's row)
   if (!bin || !fs.existsSync(bin)) {
     console.log('  SKIP: no claude CLI on PATH — the emitted-vs-declared spelling was not re-dumped (the fixtures above still run)');
   } else {
@@ -670,7 +671,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   // ⓔ ASK THE BINARY why leg ⓓ exists and leg ⓑ is dormant (facts law: dump,
   //    never remember). SKIP LOUDLY without a CLI.
   let bin = null;
-  try { bin = fs.realpathSync(require('child_process').execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim()); } catch { }
+  bin = handedCli('claude');   // B-ba47: the handed env's CLI (REAL_CLI_ALLOW's row)
   if (!bin || !fs.existsSync(bin)) {
     console.log('  SKIP: no claude CLI on PATH — the sdk_status↔compact_progress fork was not re-dumped (leg ⓓ still runs on the production-buffer fixtures)');
   } else {

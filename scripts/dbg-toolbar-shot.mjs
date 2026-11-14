@@ -2,6 +2,7 @@
 // Capture how the top bars actually LOOK when resized (userW/xingwei report:
 // resizing produces a big empty gap). Screenshots default / tall toolbar /
 // taskbar-top tall taskbar → /tmp/tbshot-*.png for visual inspection.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { createRequire } from 'node:module';

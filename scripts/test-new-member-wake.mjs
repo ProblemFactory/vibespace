@@ -60,6 +60,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import { gitEnvFrom } from './git-env.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);

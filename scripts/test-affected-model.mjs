@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import * as M from './affected-model.mjs';
 import { SUITES, affectedSuites, suiteInputs, listAffected, reachContext } from './ci.mjs';
 import { gitEnvFrom } from './git-env.mjs';

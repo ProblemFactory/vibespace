@@ -4,6 +4,7 @@
 // Remote tab → This-machine 🔌 → ports dialog → Forward → Open. Prints where
 // the flow breaks. Throwaway worktree server + headless chrome (rail-smoke
 // scaffolding). Run: node scripts/dbg-mobile-ports.mjs
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';

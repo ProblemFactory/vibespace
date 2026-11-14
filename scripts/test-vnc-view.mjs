@@ -17,11 +17,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { scratch } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { scratch } from './scratch.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);

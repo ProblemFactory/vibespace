@@ -24,8 +24,8 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
-import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
 import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses } from './scratch.mjs';
+import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 // A SUITE ENDS WHAT IT STARTS (主开发 r1108 — the integrator's watcher found a «vibespace-device» of this suite alive after it ended): the

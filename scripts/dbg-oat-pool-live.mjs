@@ -17,6 +17,7 @@
 //  · Real turns cost real Max quota (authorized). Kept minimal.
 //
 // Run: node scripts/dbg-oat-pool-live.mjs
+import { handedCliCandidates } from './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own — the REAL claude it needs is named from the HANDED env (scratch.mjs REAL_CLI_ALLOW's row)
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,6 +53,11 @@ if (safe.length < 2) {
 const [A, B] = safe; // A = safest (most life)
 console.log(`Using safe subs: A=${A.id} (${A.hrs.toFixed(1)}h)  B=${B.id} (${B.hrs.toFixed(1)}h)`);
 
+// ── the REAL claude, from the env this script was handed (its hub runs on a temp home: its own PATH names none) ──
+const REAL_CLAUDE = handedCliCandidates('claude').map((c) => { try { return fs.realpathSync(c); } catch { return null; } })
+  .find((c) => { try { return c && fs.statSync(c).isFile() && fs.statSync(c).size > 10 * 1048576; } catch { return false; } });
+if (!REAL_CLAUDE) { console.log('SKIP: no real claude binary on the handed env ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude)'); process.exit(0); }
+
 // ── throwaway worktree + copied creds ────────────────────────────────────────
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -83,7 +89,7 @@ console.log(`Accounts: pool=${pool.id} (→ ${pool.current})  oatOnly=${oatOnly}
 const spawnedSessions = new Set();
 const srv = spawn(process.execPath, ['server.js'], {
   cwd: wt,
-  env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CODE_OAUTH_TOKEN: A.token /* ambient — must be stripped from spawns */ },
+  env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: REAL_CLAUDE, CLAUDE_CODE_OAUTH_TOKEN: A.token /* ambient — must be stripped from spawns */ },
   stdio: 'ignore',
 });
 const cleanup = () => {

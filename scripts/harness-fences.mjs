@@ -196,6 +196,10 @@ export function scanTables(files, names) {
 export const FENCE_EXEMPT = Object.freeze([
   { file: 'src/server/loop-day-report.js', needle: 'CLI_RE /^(', ids: ['shell'], why: "the hub's processes by kind name agent CLI PROGRAMS; a terminal session runs the person's own shell, counted as «other»" },
   { file: 'src/server/loop-day-report.js', needle: 'CLI_SCRIPT_RE', ids: ['shell'], why: "the node SCRIPTS of agent CLIs (a node process told by the script it runs); the shell harness runs no CLI script" },
+  { file: 'src/home-verdict.js', needle: "'cursor-agent'", ids: ['shell'], why: "the agent CLI PROGRAMS a re-homed PATH never links by name (B-ba47 V1); the shell harness runs the person's own shell — it has no program of its own" },
+  { file: 'scripts/test-architecture.mjs', needle: 'AGENT_BARE', ids: ['shell'], why: "§108's device-daemon leg: the agent CLIs a daemon would resolve by BARE NAME on its own PATH; the shell harness runs the person's own shell — no program a suite sends by name" },
+  { file: 'scripts/test-home-verdict.mjs', needle: 'CLI5', ids: ['shell'], why: "A1's pin: the stand-in agent CLI PROGRAMS planted beside a stand-in node and in ~/.local/bin, that no child started the house way may find; the shell harness has no program to plant" },
+  { file: 'scripts/test-home-verdict.mjs', needle: "STANDINS", ids: ['shell'], why: "the V1 pin's stand-in PROGRAMS planted in a stand-in node directory; the shell harness has no program to plant" },
   { file: 'scripts/ci.mjs', needle: 'REAL_PROGRAMS', ids: ['shell'], why: "a terminal session runs the person's own shell — no program a suite spawns by harness name" },
   { file: 'scripts/ci.mjs', needle: 'REAP_NAMES', ids: ['shell'], why: 'the reaper names agent PROGRAMS left behind; the shell harness has none' },
   { file: 'scripts/test-architecture.mjs', needle: 'KEY_LITERAL', ids: ['shell'], why: 'shell declares no settings table — no `shell.` key can exist' },

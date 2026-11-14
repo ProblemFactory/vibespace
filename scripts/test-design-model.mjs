@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this suite runs on a temp home of its own before any of its code
 import { startWorkMeter, linear } from './work-meter.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 startWorkMeter(); // BEFORE the measured module loads (its functions need block counters)

@@ -31,13 +31,13 @@
 // pretending it does not exist.
 //
 // Run: node scripts/test-fixture-isolation.mjs
+import { scratch, scratchHome, fixtureSid, handedHome } from './scratch.mjs';   // FIRST (B-ba47): the re-home before any of this suite's code; its sweep reads the HANDED home through the one accessor (HOME_WATCHERS)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const G = require('../src/fixture-guard.js');
-const { scratch, scratchHome, fixtureSid } = await import('./scratch.mjs');
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + String(e).slice(0, 400) : '')); } };
@@ -175,7 +175,11 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
 
 // ── ④ THE REAL HOME (read-only) ────────────────────────────────────────────
 {
-  const projects = path.join(os.homedir(), '.claude', 'projects');
+  // B-ba47 (主开发 17:06Z item C): THE WATCHER READS THE HANDED HOME — the person's, not the suite's re-homed one — through
+  // scratch.mjs handedHome(), a HOME_WATCHERS row; the accessor refused ⇒ RED, never a skip
+  let realHome = null;
+  try { realHome = handedHome(); } catch (e) { ok(false, '④ the sweep reads the HANDED home through scratch.mjs handedHome() (a HOME_WATCHERS row)', e.message); }
+  const projects = path.join(realHome || '/nonexistent-handed-home', '.claude', 'projects');
   let entries = null;
   try {
     entries = fs.readdirSync(projects, { withFileTypes: true }).filter((d) => d.isDirectory())

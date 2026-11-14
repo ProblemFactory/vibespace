@@ -4,6 +4,7 @@
 // session must still spawn byte-identically. Creates a shell terminal session
 // over WS against a throwaway server and asserts it reaches 'created' + the
 // dtach wrapper actually runs (no claude/login needed). Arg 1 = checkout dir.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

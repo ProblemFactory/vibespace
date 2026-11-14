@@ -57,7 +57,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, handedCli } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
@@ -75,7 +75,7 @@ const CONSUMED = ['tools', 'mcp_servers', 'agents', 'skills', 'plugins', 'plugin
   'mcp_server_errors', 'terminal_slash_commands', 'output_style', 'memory_paths', 'betas', 'claude_code_version', 'slash_commands'];
 // real-cli-env: the installed claude is only READ (its zod schema bytes) — never spawned for a turn (B-5f0b audit)
 let claudeBin = null;
-try { claudeBin = fs.realpathSync(execFileSync('bash', ['-lc', 'command -v claude'], { encoding: 'utf8' }).trim()); } catch { }
+claudeBin = handedCli('claude');   // B-ba47: the handed env's CLI (scratch.mjs REAL_CLI_ALLOW's row) — a re-homed suite's PATH carries none
 // A bounded window after a literal marker inside the (215MB, single-line)
 // binary. `grep -o '<marker>.\{0,9000\}'` needs half a minute on a line that
 // long — a streaming indexOf is ~200ms and is exactly as literal.

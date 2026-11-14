@@ -19,6 +19,7 @@
 // a suite that renames its scratch dir cannot walk out from under the guard.
 import net from 'node:net';
 import fs from 'node:fs';
+import os from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -254,6 +255,242 @@ export function endScratchAtExit(dir) {
 /** A root handed to a detached process: not removed at exit (the dir sweep judges it by its holders). */
 export function keepScratch(dir) { ENDS.delete(dir); return dir; }
 function endAll() { for (const d of ENDS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { } } ENDS.clear(); }
+
+/** B-ba47 pick B (lane cli-update-needs-nothing, 2026-11-14): A SUITE RUNS ON A HOME OF ITS OWN. The 2.369.401 hotfix night
+ *  handed a claim's suites the person's HOME (launched outside the lane env): hubs that named no HOME of their own found
+ *  the real CLIs in ~/.local/bin, walked ~/.claude/projects and created their usage index under ~/.vibespace. So it is
+ *  decided ONCE, here, at import — before the suite's own body runs: a SUITE or a DEBUG SCRIPT (argv[1] is a
+ *  scripts/test-*.mjs or dbg-*.mjs — a person runs those by hand from a real shell) handed a home outside every temp
+ *  root (src/home-verdict.js suiteRehome — the hub boot's own verdict) runs on /tmp/vs-rehome-<pid>, re-homed by the
+ *  ONE value rule (rehomeEnv): HOME there, the four XDG base dirs unset (they follow it), every value naming a path under
+ *  the handed home dropped (in either spelling, normalised), EVERY PATH entry under it dropped — node, npm and npx
+ *  linked by name into the new home's own .vs-bin (binLinks; an agent CLI never). Every hub the suite starts with its env — spread, inherited, or
+ *  HOME read from it — inherits the temp home by construction. A home already under a temp root (the lane env's) is
+ *  left alone, so on a lane nothing changes. One stderr line says it: the NAMES dropped, never a value.
+ *  test-architecture §108 holds every hub-booting suite to this module and every boot site's env to its class. */
+const HV = require('../src/home-verdict.js');
+/** What the process was handed — before the re-home: its home, PATH and CLI pins (the REAL-CLI ALLOW LIST's), and the node
+ *  it was started with. */
+// THE ACCOUNT ENTRY'S HOME IS THE HOME COMPARED when the handed HOME is empty or relative (主开发 01:18Z b): a path compared,
+// never opened — with no home to compare against every value naming the account's own home would be carried
+const HOME_COMPARED = (() => { const h = os.homedir(); return h && h.startsWith('/') ? h : os.userInfo().homedir; })();
+const HANDED = Object.freeze({ HOME: HOME_COMPARED, PATH: process.env.PATH || '', EXEC: process.execPath,
+  // the agent CLI PINS as handed (VS_<CLI>_BIN) — the real-CLI accessor's alone: the built environment carries none of them
+  ...Object.fromEntries(HV.AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map((k) => [k, process.env[k] || ''])) });
+/** This checkout's scripts folder: an accessor's row is a FILE here (主开发 18:25Z item 2). */
+const SCRIPTS_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '');
+/** Where this process's main file RESOLVES — read once, at import. */
+const ME = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return null; } })();
+/** THE MAIN FILES THAT RUN ON THE HANDED HOME ON PURPOSE (主开发 01:18Z f): every other main file of this checkout's
+ *  scripts folder that loads this module re-homes (and so does a test-* / dbg-* file anywhere). Each row a reason. */
+const BY_HAND_BROWSER = "by hand: it drives the person's OWN browser driver (agent-browser, found on the person's PATH) — on purpose, the measurement's point";
+export const NOT_REHOMED = Object.freeze([
+  Object.freeze({ file: 'ci.mjs', why: "the TIER RUNNER: each suite re-homes itself from the env it hands; its own `gh api` runs on the account's gh sign-in and its usage-index sweep reads ~/.vibespace/db on purpose" }),
+  Object.freeze({ file: 'probe-claude-stdout.mjs', why: "the owner's ONE real turn on the owner's own login, by hand — the stdout registry's wire probe" }),
+  Object.freeze({ file: 'measure-tier3.mjs', why: "its §12.36 leg finds the stock Chrome in the person's own agent-browser install, on purpose, by hand" }),
+  // the by-hand browser measurements (主开发 02:28Z cure 6): re-homed, they no longer found the person's driver and SKIPPED in silence
+  ...['measure-browser-windows.mjs', 'measure-dialog-hold.mjs', 'measure-held-enable.mjs', 'measure-hidden-window-cpu.mjs', 'measure-input-receipts.mjs', 'measure-navigation-loop.mjs', 'measure-shared-profile-freeze.mjs'].map((file) => Object.freeze({ file, why: BY_HAND_BROWSER })),
+]);
+const REHOMES = (() => {
+  const base = path.basename(process.argv[1] || '');
+  const dirReal = (() => { try { return fs.realpathSync(SCRIPTS_DIR); } catch { return SCRIPTS_DIR; } })();
+  const inScripts = !!ME && path.dirname(ME) === dirReal;
+  // a row is the FILE that resolves (a link named like the tier runner is not the tier runner — 主开发 02:28Z 8a)
+  if (inScripts && NOT_REHOMED.some((r) => { try { return fs.realpathSync(path.join(dirReal, r.file)) === ME; } catch { return false; } })) return false;
+  return /^(?:test|dbg)-[A-Za-z0-9._-]+\.mjs$/.test(base) || inScripts;
+})();
+/** Link the named tools (src/home-verdict.js binLinks) into a re-homed PATH's own folder; → the names linked. */
+export function linkTools(binDir, links) {
+  fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
+  const done = [];
+  for (const { name, target } of links) { try { fs.symlinkSync(target, path.join(binDir, name)); done.push(name); } catch { } }
+  return done;
+}
+/** THE FILE SYSTEM'S WALK (主开发 18:25Z B1): src/home-verdict.js walk over lstat's kind and readlink — a path resolved as
+ *  the kernel walks it, links first, a parent step applied to what the prefix resolved to. One resolver = one memo (the
+ *  re-home makes one for the handed env at import); → the path, or null when it could not look. */
+export function makeResolver() {
+  const K = new Map(), L = new Map();
+  const kind = (p) => {
+    if (!K.has(p)) { let k; try { const st = fs.lstatSync(p); k = st.isSymbolicLink() ? 'link' : st.isDirectory() ? 'dir' : 'file'; } catch (e) { k = e && e.code === 'ENOENT' ? 'missing' : 'error'; } K.set(p, k); }
+    return K.get(p);
+  };
+  const readlink = (p) => { if (!L.has(p)) L.set(p, fs.readlinkSync(p)); return L.get(p); };
+  return (p) => HV.walk(String(p).startsWith('/') ? String(p) : `${process.cwd()}/${p}`, { kind, readlink });
+}
+export function resolveFs(p) { return makeResolver()(p); }
+const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
+/** THE SEAM (主开发 23:36Z, on three conditions): `VS_REHOME_NOT_TEMP=<a folder a suite made under a temp root>` — that
+ *  folder is NOT a temp root for the verdict, so a stand-in home made in it is re-homed. It can only turn a re-home ON;
+ *  a value outside every temp root is ignored; the line names it when used. Set by test-home-verdict (and a reader's
+ *  probe) only — test-architecture §108 pins that nothing in the product or the wrappers sets or reads it. */
+export const NOT_TEMP_ENV = 'VS_REHOME_NOT_TEMP';
+const SEAM_AT = (() => {
+  const v = process.env[NOT_TEMP_ENV]; if (!v || !v.startsWith('/')) return null;
+  const r = resolveFs(v), roots = [...TMP_ROOTS, os.tmpdir()].map((t) => resolveFs(t) || t);
+  if (!r || !HV.tempRootOf(r, roots)) return null;   // a value outside every temp root is IGNORED
+  return { path: r, isRoot: roots.includes(r) };       // the seam set to a temp root ITSELF is refused at the re-home (d)
+})();
+const SEAM = SEAM_AT && !SEAM_AT.isRoot ? SEAM_AT.path : null;
+/** THE SUITE'S OWN NODE (主开发 18:25Z A1, 23:36Z's five amendments): when the node this process runs RESOLVES under the
+ *  handed home, every `spawn(process.execPath)`, `fork()`, daemon and `dirname(process.execPath)` PATH would bring that
+ *  folder back — with the agent CLIs a per-account install keeps beside node. So the suite gets a node of its own, out of
+ *  the home: `<cache>/vs-node-<key>/bin/node` (key = the file's identity), a LINK of the file where the system allows it,
+ *  else a COPY; npm / npx beside it as links to the handed install's own. Made ASIDE and renamed into place; RUN ONCE where
+ *  it stands (it must print this node's version), else the re-home REFUSES by name; reused only when OURS — judged by lstat,
+ *  never through a link: a folder, our owner, mode 0700, its stamp agreeing with the file's own identity; anything else at
+ *  the name is never adopted (this run makes its own, removed at exit). Each use touches the folder; the gate sweep reaps
+ *  a `vs-node-*` folder a day after its last use (age alone). The cache is /var/tmp (disk: /tmp may be RAM, a copy is the
+ *  node binary's size); with the seam set, beside the seam folder. */
+export const NODE_CACHE_PREFIX = 'vs-node-';
+/** The present FORM of a node folder, in its name: an older form of our own shape never blocks this one (主开发 02:28Z cure 4) —
+ *  the sweep ages the old ones out by their shape. */
+export const NODE_CACHE_FORM = 'v2';
+export function nodeKeyOf(st) { return require('node:crypto').createHash('sha256').update(`${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}`).digest('hex').slice(0, 16); }
+/** The node folder at `dir`, if it is OURS for `key` — judged without following a link, and holding EXACTLY what was made
+ *  (主开发 01:18Z a: a program installed into it later makes it not ours). → { file } | null */
+export function oursNode(dir, key, { lstat = fs.lstatSync, read = (f) => fs.readFileSync(f, 'utf8'), readdir = (d) => fs.readdirSync(d), uid = process.getuid() } = {}) {
+  try {
+    const d = lstat(dir), b = lstat(path.join(dir, 'bin')), sf = lstat(path.join(dir, 'stamp.json')), f = lstat(path.join(dir, 'bin', 'node'));
+    if (!d.isDirectory() || d.uid !== uid || (d.mode & 0o777) !== 0o700 || !b.isDirectory() || !sf.isFile() || !f.isFile()) return null;
+    const st = JSON.parse(read(path.join(dir, 'stamp.json')));
+    if (st.source !== key || !st.file || st.file.ino !== f.ino || st.file.size !== f.size || st.file.mtimeMs !== f.mtimeMs) return null;
+    if (JSON.stringify([...readdir(dir)].sort()) !== '["bin","stamp.json"]' || JSON.stringify([...readdir(path.join(dir, 'bin'))].sort()) !== JSON.stringify([...(st.bin || [])].sort())) return null;
+    return { file: path.join(dir, 'bin', 'node') };
+  } catch { return null; }
+}
+/** Put the node file at `dst`: a COPY of `src`, with the clone flag (主开发 01:18Z must-fix 1: never a link — a link moves
+ *  the person's own file's link count and changed-time; a copy changes nothing under the handed home). */
+export function placeNodeFile(src, dst, { copy = (a, b) => { fs.copyFileSync(a, b, fs.constants.COPYFILE_FICLONE); fs.chmodSync(b, 0o755); } } = {}) {
+  copy(src, dst);
+}
+const runOnce = (file) => spawnSync(file, ['-p', 'process.version'], { encoding: 'utf8', cwd: '/', env: { PATH: '/usr/bin:/bin' }, timeout: 20000 });
+/** The suite's own node for `src` (resolved, under the handed home): → { file, made, dir, own? } or { refused: why }. */
+export function ownNode(src, nodeInstall, opt = {}) {
+  try { return makeOwnNode(src, nodeInstall, opt); } catch (e) { return { refused: `its node cache cannot be made (${(e && e.code) || e}${e && e.path ? ' at ' + e.path : ''})` }; }
+}
+function makeOwnNode(src, nodeInstall, { root = SEAM ? `${SEAM}.node-cache` : '/var/tmp', run = runOnce, place = placeNodeFile } = {}) {
+  const st = fs.statSync(src), key = nodeKeyOf(st);
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const final = path.join(root, `${NODE_CACHE_PREFIX}${NODE_CACHE_FORM}-${key}`);
+  const touch = (d) => { const t = new Date(); try { fs.utimesSync(d, t, t); } catch { } };
+  const have = oursNode(final, key);
+  if (have) { touch(final); return { ...have, dir: final }; }
+  const aside = fs.mkdtempSync(`${final}.tmp-`);
+  try { return makeIn(aside); } catch (e) { try { fs.rmSync(aside, { recursive: true, force: true }); } catch { } throw e; }   // a make that throws removes what it made (cure 5)
+  function makeIn(aside) {
+  fs.chmodSync(aside, 0o700);
+  fs.mkdirSync(path.join(aside, 'bin'), { mode: 0o700 });
+  const file = path.join(aside, 'bin', 'node');
+  place(src, file);
+  const made = ['node'];
+  for (const n of ['npm', 'npx']) { const b = path.join(nodeInstall, n); if (fs.existsSync(b)) try { fs.symlinkSync(b, path.join(aside, 'bin', n)); made.push(n); } catch { } }
+  const ran = run(file);
+  if (ran.status !== 0 || String(ran.stdout).trim() !== process.version) {
+    fs.rmSync(aside, { recursive: true, force: true });
+    return { refused: `it does not run out of the home (${ran.error ? ran.error.code : `exit ${ran.status}`}${ran.stderr ? ', ' + String(ran.stderr).trim().split('\n')[0].slice(0, 120) : ''})` };
+  }
+  const fst = fs.lstatSync(file);
+  fs.writeFileSync(path.join(aside, 'stamp.json'), JSON.stringify({ source: key, file: { ino: fst.ino, size: fst.size, mtimeMs: fst.mtimeMs }, bin: made }) + '\n', { mode: 0o600 });
+  try { fs.renameSync(aside, final); return { file: path.join(final, 'bin', 'node'), dir: final }; } catch { }
+  const won = oursNode(final, key);   // another import won the race: used only after the SAME check
+  if (won) { fs.rmSync(aside, { recursive: true, force: true }); touch(final); return { ...won, dir: final }; }
+  process.on('exit', () => { try { fs.rmSync(aside, { recursive: true, force: true }); } catch { } });   // never adopted: this run's own
+  return { file, dir: aside, own: true };
+  }
+}
+/** null when this process was left alone; else { home, why, dropped, notCarried, linked, node, initPaths, seam }. */
+export const REHOMED = (() => {
+  if (!REHOMES) return null;
+  const resolve = makeResolver();
+  const v = HV.suiteRehome({ home: HANDED.HOME, tmpRoots: TMP_ROOTS, varRoots: [os.tmpdir()], notTemp: SEAM ? [SEAM] : [], resolve });
+  if (!v.rehome) return null;
+  const me = path.basename(process.argv[1]);
+  const refuse = (what) => { process.stderr.write(`[scratch] ${me}: handed a home outside every temp root, and ${what} — it REFUSES to run there: run it with a node outside the home (a system node), or through the lane's environment (a home under a temp root)\n`); process.exit(1); };
+  if (SEAM_AT && SEAM_AT.isRoot) refuse(`the seam ${NOT_TEMP_ENV} names a temp root itself (${SEAM_AT.path}) — it may name only a folder a suite made under one`);
+  const checkout = path.dirname(SCRIPTS_DIR);
+  const src = resolve(HANDED.EXEC) || HANDED.EXEC;
+  const nodeUnder = HV.judgePath(src, HV.homeKeys([HANDED.HOME], resolve), { resolve });
+  let node = null;
+  if (nodeUnder) {
+    node = ownNode(src, path.dirname(src));
+    if (node.refused) refuse(`the node it runs (${src.startsWith(HANDED.HOME + '/') ? '~' + src.slice(HANDED.HOME.length) : 'under that home'}) ${node.refused}`);
+  }
+  // the new home is MADE, never assumed (主开发 17:06Z item D): a fresh unique folder, 0700 — never a fixed name that may exist
+  const home = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}rehome-`)));
+  fs.chmodSync(home, 0o700);
+  stampScratchRun(home);   // as the scratch homes are (主开发 18:25Z item 6): a hub that inherits it is attributable to this run
+  const { env, carried, notCarriedNames, notCarried, handedPath, binDir } = HV.rehomeEnv(process.env, { oldHome: HANDED.HOME, newHome: home, platform: process.platform, resolve, checkout });
+  env.npm_config_prefix = path.join(home, '.npm-global');   // npm's global folder dies with the run (主开发 01:18Z a) — never the node cache's own
+  const dropped = notCarriedNames.map((x) => x.name);
+  const runs = node ? node.file : src;
+  const linked = linkTools(binDir, HV.binLinks({ execPath: runs, nodeInstall: path.dirname(src), handedPath, home: HANDED.HOME, exists: isFile, resolve, platform: process.platform }));
+  for (const k of Object.keys(process.env)) if (!Object.prototype.hasOwnProperty.call(env, k)) delete process.env[k];
+  Object.assign(process.env, env);
+  let initPaths = null;
+  if (node) {
+    process.execPath = node.file; process.argv[0] = node.file;   // the suite's own answers to «where is node» (A1)
+    const M = require('node:module');
+    initPaths = typeof M._initPaths === 'function';   // the CJS global folders follow the new HOME and node
+    if (initPaths) M._initPaths();
+  }
+  const n = dropped.length, groups = new Map();
+  const KNOBS = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(SCRIPTS_DIR, 'suite-env-knobs.json'), 'utf8')).knobs); } catch { return new Set(); } })();
+  for (const x of notCarriedNames) { const t = HV.ENV_NOT.find((r) => r.name === x.name)?.tag || (KNOBS.has(x.name) ? "a suite's own knob — to carry it, name it under VS_" : x.why); if (!groups.has(t)) groups.set(t, []); groups.get(t).push(x.name); }
+  process.stderr.write(`[scratch] ${me}: handed a home outside every temp root — it runs on its own (${home}): HOME there; the environment is BUILT: ${carried.length} name${carried.length === 1 ? '' : 's'} carried`
+    + `${n ? `, ${n} not carried — ${[...groups].map(([t, l]) => `${l.join(', ')} (${t})`).join('; ')} — one a suite needs: add it to src/home-verdict.js ENV_ROWS with its shape, or run through the lane's environment` : ''}; `
+    + `${node ? `node: its own (${node.file}, a copy), out of the home${initPaths ? '' : ' — the module folders were NOT re-read (this node has no Module._initPaths)'}; ` : ''}`
+    + `PATH is its own: ${binDir} (${linked.join(', ') || 'nothing linked'}) + the system's directories`
+    + `${notCarried.length ? ` — not carried: ${notCarried.join(', ')}` : ''}; a tool missing there: install it in a system directory, or add a named row to src/home-verdict.js TOOL_ROWS (a real agent CLI: scripts/scratch.mjs REAL_CLI_ALLOW)`
+    + `${SEAM ? `; the seam ${NOT_TEMP_ENV} made ${SEAM} not a temp root` : ''}\n`);
+  return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME });
+})();
+/** Is the process whose main file RESOLVES to `me` a row of `rows` — the row's FILE in this checkout's scripts folder,
+ *  compared where both resolve (主开发 18:25Z item 2: a file with a row's name elsewhere, or a link named after one, is not
+ *  the row)? The model is ACCIDENT, not adversary: a suite that rewrites its own argument list is deliberate evasion,
+ *  which no accessor stops. Pure over `resolve`. */
+export function isRowCaller(me, rows, { scriptsDir = SCRIPTS_DIR, resolve = (f) => { try { return fs.realpathSync(f); } catch { return null; } } } = {}) {
+  return !!me && rows.some((r) => resolve(path.join(scriptsDir, r.suite)) === me);
+}
+/** THE WATCHERS (主开发 17:06Z item C): a suite whose law is «the person's home is untouched» READS the handed home on
+ *  purpose — through this ONE accessor, which answers only a process whose main file resolves to a row's file in this
+ *  checkout, and throws for every other. A row may READ, never write. test-architecture §108 holds every caller to a row;
+ *  each watcher is RED (never a skip) when the accessor fails. */
+export const HOME_WATCHERS = Object.freeze([
+  Object.freeze({ suite: 'test-fixture-isolation.mjs', why: "READS the real transcript folder (~/.claude/projects) — the standing sweep for fixture litter the gate runs last on purpose" }),
+  Object.freeze({ suite: 'test-claude-retention.mjs', why: "READS the person's ~/.claude tree to hash it — «the owner's home is untouched» by the retention sweep" }),
+]);
+export function handedHome() {
+  if (!isRowCaller(ME, HOME_WATCHERS)) throw new Error(`handedHome(): ${path.basename(process.argv[1] || '')} is not a row of HOME_WATCHERS (scripts/scratch.mjs) as a file of this checkout — only a watcher reads the handed home`);
+  return HANDED.HOME;
+}
+/** THE REAL-CLI ALLOW LIST (主开发's rulings, 2026-11-14): a script that runs a REAL agent CLI found on the HANDED env (the
+ *  one it was started with, before the re-home) is a row here with its reason. A SUITE row is FENCED — a home of its own,
+ *  no person's sign-in, no turn beyond the one the hosted run is sanctioned for — and the CLI is its point; a BY-HAND row
+ *  is never a gate. handedCliCandidates() answers only a process whose main file resolves to a row's file in this checkout; test-architecture §108 holds every caller to one. */
+export const REAL_CLI_ALLOW = Object.freeze([
+  Object.freeze({ suite: 'test-claude-steer-chrome.mjs', kind: 'suite', why: "§A, the fenced leg: the real claude behind the real wrapper, under the leg's own scratch HOME, talking only to a loopback mock of POST /v1/messages — nothing billed, no sign-in read" }),
+  // row 2 (主开发 2026-11-14 12:20Z): KEPT on three conditions — its reason below; no tier, suite or other script names or
+  // imports it (test-architecture §108); nobody in a lane runs it (it reads pool members' sign-ins — the owner's word per run)
+  Object.freeze({ suite: 'dbg-oat-pool-live.mjs', kind: 'by-hand', why: "by hand only, on the owner's word for that run; never a gate — the LIVE pool test (real subscriptions, the owner's quota): its throwaway hub runs on a temp home and is handed the real claude as CLAUDE_CMD; the sign-in goes by value (CLAUDE_CODE_OAUTH_TOKEN) and by the creds it copies from data/subs" }),
+  // rows 3–5 (主开发 17:08Z): the three suites that look for the real CLI — each judged by what it DOES with it
+  Object.freeze({ suite: 'test-chat-e2e.mjs', kind: 'suite', why: "a WHOLE TURN — the ONE haiku turn through the product's own chat pipe (the fast tier's EXCEPTION row): on a scratch home of its own, signed in by the CI token alone (VIBESPACE_CI_OAT, by value), the turn the hosted run is sanctioned for — the real CLI is its point" }),
+  Object.freeze({ suite: 'test-init-frame.mjs', kind: 'suite', why: "READS the installed CLI's bytes (its init-frame schema) — never spawned for a turn, no sign-in: it tells us when the CLI's frames change — the CLI is its point" }),
+  Object.freeze({ suite: 'test-stdout-registry.mjs', kind: 'suite', why: "greps the installed CLI's bytes and asks `--version` — no turn (its one real turn lives in scripts/probe-claude-stdout.mjs), no sign-in: the stdout consumers against the CLI's own strings — the CLI is its point" }),
+]);
+/** The REAL `cli` a row may run: the first of handedCliCandidates that resolves to a file, resolved — or null. A row only. */
+export function handedCli(cli) {
+  return handedCliCandidates(cli).map((c) => { try { return fs.realpathSync(c); } catch { return null; } }).find((c) => isFile(c)) || null;
+}
+/** Where a REAL `cli` may be, by the handed env: $VS_<CLI>_BIN, each handed PATH dir, the handed ~/.local/bin. */
+export function handedCliCandidates(cli) {
+  if (!isRowCaller(ME, REAL_CLI_ALLOW)) throw new Error(`handedCliCandidates(): ${path.basename(process.argv[1] || '')} is not a row of REAL_CLI_ALLOW (scripts/scratch.mjs) as a file of this checkout`);
+  return cliCandidatesOf(cli, HANDED);
+}
+/** PURE: where a REAL `cli` may be, by a handed env `{ HOME, PATH, VS_<CLI>_BIN }`. */
+export function cliCandidatesOf(cli, handed) {
+  return [handed[`VS_${String(cli).toUpperCase()}_BIN`], ...String(handed.PATH || '').split(':').filter(Boolean).map((d) => path.join(d, cli)), path.join(handed.HOME || '/nonexistent', '.local/bin', cli)].filter(Boolean);
+}
 
 /** lane app-page-csp (design q-043 D6, §5 P0-d): EVERY CHROME SUITE ENDS WITH ZERO CSP REPORTS — the ONE teardown check.
  *  A SUITE's hubs inherit `VIBESPACE_CSP_REPORTS_FILE` (set here at import; server.js hands it to src/server/csp-reports.js):
@@ -774,7 +1011,7 @@ if (CSP_REPORTS_FILE) { process.env[CSP_REPORTS_ENV] = CSP_REPORTS_FILE; process
  *  scratch('ab') refuses), sock-path's tmp rung (src/sock-path.js: /tmp/vs-dev-<uid>) and the workspace. */
 export const WORK_ROOT = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}work`);
 export const SCRATCH_SWEEP = Object.freeze({
-  prefixes: Object.freeze([Object.freeze({ under: TMP_ROOTS[0], prefix: FIXTURE_CWD_PREFIX }), Object.freeze({ under: WORK_ROOT, prefix: '' })]),
+  prefixes: Object.freeze([Object.freeze({ under: TMP_ROOTS[0], prefix: FIXTURE_CWD_PREFIX }), Object.freeze({ under: WORK_ROOT, prefix: '' }), Object.freeze({ under: '/var/tmp', prefix: NODE_CACHE_PREFIX, nameRe: /^vs-node-(?:v\d+-)?[0-9a-f]{16}(?:\.tmp-[A-Za-z0-9]{6})?$/, marker: 'stamp.json', markerExempt: /\.tmp-/, staleMs: 7 * 24 * 3600e3 }), Object.freeze({ under: '/var/tmp', prefix: 'vs-hv-', nameRe: /^vs-hv-[A-Za-z0-9]{6}$/ })]),   // the suites' own node (B-ba47 A1): by its own shape, a week after its last use (a half-made one by its name); the home-verdict suite's made stand-ins
   production: Object.freeze([/^\/tmp\/vs-ab-(?:\d+|u)$/, /^\/tmp\/vs-dev-(?:\d+|u)$/, new RegExp(`^${WORK_ROOT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)]),
 });
 

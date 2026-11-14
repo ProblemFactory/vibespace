@@ -28,8 +28,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER, cmpVersion, retiredRowVerdict } from './codex-protocol-census.mjs';
 import { scratch, stopWrapper, withoutVendorKeys, endRootedProcesses } from './scratch.mjs';
+import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER, cmpVersion, retiredRowVerdict } from './codex-protocol-census.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { writeStub } from './codex-app-server-stub.mjs';
 
