@@ -522,8 +522,20 @@ const LEGS = {
     return { ok: atOnce === 1 && inGap === 1 && waited >= GAP - 10 && starts === 2, detail: `a write after a quiet gap: ${atOnce} sweep at once; a write within the gap: started after ${waited} ms (gap ${GAP} ms); sweeps: ${starts}` };
   },
   async 'gap:burst'(A) {
-    const G0 = 12, N = 120;
+    // THE GAP IS SIZED BY THIS RUN'S OWN SWEEP (int402 — the .402 prep mirror's fast attempt 2: the mutant «no gap» NOT red here on a
+    // runner, 4 sweeps where the bound is 13). A wiring with NO gap starts a sweep per write only while one sweep is shorter than the
+    // writes' spacing; a sweep that outlasts the writes behind it folds them into one (sweepAgain), and the control looks obedient.
+    // Made red on the box by slowing each sweep through this world's own hook: +15 ms and +30 ms ⇒ master (the before control) and the
+    // mutant both «obedient». So the gap comes from the sweep time THIS run measures, in a probe world of the SAME tree (a cold sweep,
+    // then two warm ones, the slower): G0 = max(12 ms, 8 × it) — one rule for the leg and its controls, so a control's verdict never
+    // depends on the runner's speed (the law: the leg owns its gap; a slow machine widens it, it never flips a verdict).
+    const N = 120;
+    const probe = await world(A, { gap: 0, now: () => Date.now() });
+    await probe.w.groups.sweepEnded();
+    let sweepMs = 0; for (let k = 0; k < 2; k++) { const t = performance.now(); await probe.w.groups.sweepEnded(); sweepMs = Math.max(sweepMs, performance.now() - t); }
+    const G0 = Math.max(12, Math.ceil(8 * sweepMs));
     const x = await world(A, { gap: G0, now: () => Date.now() });
+    await x.w.groups.sweepEnded();   // this world's cold sweep, before the count (the engine's own call: the wiring's clock is untouched)
     let starts = 0; const real = x.w.groups.sweepEnded; x.w.groups.sweepEnded = (...a) => { starts++; return real(...a); };
     // write i at t0 + i·(11 gaps)/(N−1): the owner's 120 writes in 55 s against a 5 s gap, scaled
     const t0 = performance.now();
@@ -536,7 +548,7 @@ const LEGS = {
     await sleep(G0 * 4);
     // a sweep starts no sooner than a gap after the last ENDED: the leading one + one per gap + the one after the last write
     const bound = Math.floor(span / G0) + 2;
-    return { ok: starts <= bound && starts >= 2, detail: `${N} writes over ${span.toFixed(0)} ms (11 gaps of ${G0} ms — the owner's 120 writes in 55 s at 5 s, scaled): ${starts} sweeps (≤ ${bound}: 1 leading + 1 per gap + 1 trailing)`, starts };
+    return { ok: starts <= bound && starts >= 2, detail: `${N} writes over ${span.toFixed(0)} ms (11 gaps of ${G0} ms = max(12, 8 × this run's sweep ${sweepMs.toFixed(1)} ms) — the owner's 120 writes in 55 s at 5 s, scaled): ${starts} sweeps (≤ ${bound}: 1 leading + 1 per gap + 1 trailing)`, starts, sweepMs, gap: G0 };
   },
 };
 
