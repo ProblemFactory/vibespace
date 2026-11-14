@@ -1033,7 +1033,12 @@ export class ChatStatusBar {
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
       // lane ui-controls-and-bugs (the walk's MAJOR: a bare «09:22 PM», one press turned it off): the chip SAYS what it means —
       // «21:22 自动继续» / «自动继续：关» — and a press opens it (below), never acts at once
-      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: when }))) : (a.enabled ? ' ' + escHtml(t('auto')) : ' ' + escHtml(t('Auto-continue: off')));
+      // THE ONE ROW (a phone, a narrow window — the owner's angle on the strip, 2026-11-14; the .402 rehearsal: «产出 · 4» folded
+      // behind ⋯ at 390 px): what a person must always FIND keeps its place before the WORDS of a low-frequency state — an
+      // auto-continue that is OFF is its ICON there (as on 2.369.400; its words in the tooltip and the panel), its words on the
+      // wide bar; armed, with its time, it keeps its words everywhere
+      const offWords = this._oneRow() ? '' : ' ' + escHtml(t('Auto-continue: off'));
+      const arLabel = a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: when }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
       chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
