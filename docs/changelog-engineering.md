@@ -167,7 +167,15 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The compact MARK (the owner, 2026-11-13: «不如还是继续用 h/d»):** page-time `mark(ms, { full, hoursFrom, daysFrom })` + `markAgo(at)` — «<1m», «4m», «2h», «3d», «2d23h59m»; the same letters in every language.
   - The jobs rows, group ages and run duration, the usage meter's countdown, and the host chip's age go back to marks.
   - Census ⑦ declares the mark sinks (`MARK_SINKS`, 8) and reads which is called where: a sink calling span / ago is red, and so is an undeclared line calling mark.
-  - The hotfix 2.369.401's `markT` (account-wall-words) becomes a call to `mark` once both are on master.
+  - The hotfix 2.369.401's marks call page-time's `mark` (below).
+
+### ui-language on 2.369.401 — ONE mark function (主开发 05:47Z: this lane rebases onto the hotfix, the only one that does)
+- The stack is replayed onto d64075ba4: the hotfix's six product files are all this lane's too, and session-lifecycle's import line merged line by line.
+- **The hotfix's marks go through page-time's `mark`:**
+  - the roster row's age (manage-agents) and the account-switch menu's age (session-lifecycle): `mark(age, { hoursFrom: 100, daysFrom: Infinity })`;
+  - the rings' stale-lane mark (manage-agents, usage-meter): account-wall-words `staleLaneAge(…, { t: markT })` returns `mark(…, { hoursFrom: 120, daysFrom: 2880 })`. `markT` stays the token a caller hands in (test-account-reset-door pins it); a sentence keeps the interface's keys.
+- Census ⑦ MARK_SINKS: 8 → 11.
+- test-roster-live-usage hands `mark` to the usageHint it rebuilds from source.
 
 ## 2.369.402 — 2026-11-14
 
