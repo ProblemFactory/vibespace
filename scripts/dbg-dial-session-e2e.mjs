@@ -5,6 +5,7 @@
 // the wrapper buffer. A fake `claude` on the daemon's PATH emits stream-json so
 // no real CLI/login is needed. Covers: daemon-crash-on-bad-cwd fix, OFFSET_MODE
 // relay, device-home cwd default, /api/file/info?host= (dial), device home API.
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script and every hub it boots run on a temp home of their own
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';

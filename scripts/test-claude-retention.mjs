@@ -15,7 +15,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch, scratchDir } from './scratch.mjs';
+import { scratch, scratchDir, handedHome } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -158,7 +158,9 @@ const os = (await import('node:os')).default;
 const crypto = (await import('node:crypto')).default;
 const HKC = scratchDir('hkc');
 const ENV_HOME = process.env.HOME;
-const OWNER_HOME = os.homedir(); // 2.369.200 integration: the home through $HOME only (test-architecture §68, lane profile-lock-roll) — the product's own reach past a pinned HOME is §68's src census
+// B-ba47 (主开发 17:06Z item C): THE WATCHER READS THE HANDED HOME (scratch.mjs handedHome, a HOME_WATCHERS row) — a re-homed
+// suite's os.homedir() is its own temp home; the accessor refused ⇒ RED (ok false), never a skip
+const OWNER_HOME = (() => { try { return handedHome(); } catch (e) { ok('the watcher reads the HANDED home through scratch.mjs handedHome() (a HOME_WATCHERS row)', false, e.message); return '/nonexistent-handed-home'; } })(); // 2.369.200 integration: the home through $HOME only (test-architecture §68, lane profile-lock-roll) — the product's own reach past a pinned HOME is §68's src census
 const OWNER_FILES = [...new Set([OWNER_HOME, ENV_HOME])].flatMap((h) => ['.claude/settings.json', '.codex/hooks.json', '.codex/config.toml'].map((r) => path.join(h, r)));
 const fp = (f) => { try { const b = fs.readFileSync(f); return crypto.createHash('sha256').update(b).digest('hex') + ':' + fs.statSync(f).mtimeMs; } catch { return 'absent'; } };
 const ownerBefore = OWNER_FILES.map(fp);

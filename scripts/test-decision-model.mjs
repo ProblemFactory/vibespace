@@ -10,6 +10,7 @@
 import { createRequire } from 'module';
 import crypto from 'crypto';
 import fs from 'fs';
+import './scratch.mjs';   // FIRST (B-ba47): handed a home outside every temp root, this script runs on a temp home of its own before any of its code
 const require = createRequire(import.meta.url);
 const M = require('../src/decision-model.js');
 const P = require('../src/peer-text.js');

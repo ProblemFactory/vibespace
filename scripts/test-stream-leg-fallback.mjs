@@ -45,6 +45,7 @@
 //      12–20 s, a re-take whose trial ends by the WORD with the device link's push 750 ms behind: no line for the second take — RED
 //      CONTROL: 5d9d2be7 read the first take's «bound» again and said it with the first take's totals; two bound-ended takes: each
 //      line counts its own take (the session's beside) — RED: 5d9d2be7's second line is the session's
+import './scratch.mjs';   // B-ba47: a suite runs on a home of its own, decided at import — a NEW one takes the import first
 import path from 'node:path';
 import dgram from 'node:dgram';
 import { createRequire } from 'node:module';
