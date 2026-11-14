@@ -125,6 +125,9 @@ const SHOTS = (() => { const i = process.argv.indexOf('--shots'); return i > 0 ?
 let pass = 0, fail = 0;
 const ok = (c, msg, detail) => { if (c) { pass++; console.log('  ✓ ' + msg); } else { fail++; console.log('  ✗ ' + msg + (detail !== undefined ? '\n      ' + JSON.stringify(detail).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE LOCK'S INSTANT is the fixture's, handed to the page — never the wall clock (the rule since 2026-11-14: a suite that draws a
+// time reads no clock); the page draws «Mac 已锁屏（HH:MM 起）» from it in its own zone. The owner's Mac locked 2026-10-26 13:05Z.
+const LOCK_SINCE = Date.UTC(2026, 9, 26, 13, 5);
 for (const f of [BUNDLE, NOVNC, FIXTURE]) if (!fs.existsSync(f)) { ok(false, `${path.relative(REPO, f)} exists (npm run build first)`); process.exit(1); }
 
 // ── the scratch device: Windows-shaped, THE resident script = a fixture powershell.exe ───────────────────────────────
@@ -1535,7 +1538,7 @@ console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locke
     await p.ev(LOCKWRAP);
     await p.ev(`window.__open(${JSON.stringify(MM)})`);
     const up = await playing(p);
-    await p.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    await p.ev(`window.__locked = ${LOCK_SINCE}; true`);
     const said = await p.until(`${WORDS}.test(${SAY}) && /串流 · 锁屏中/.test(${CHIP}.textContent || '')`, at === '/' ? 8000 : 4000);
     const r1 = await p.ev(`({ say: ${SAY}, chip: ${CHIP}.textContent || '', title: ${CHIP}.title || '' })`);
     if (at === '/prelock') { ok(up && !said && r1.say === '' && !/锁屏/.test(r1.chip), '㉑ RED CONTROL: the page without THE LOCK\'s door says nothing while the hub says paused (the base: 串流 · N ms · 0 fps over a black pane)', r1); await p.close(); continue; }
@@ -1553,7 +1556,7 @@ console.log('㉑ THE LOCK (lane mac-locked-capture): a Mac whose screen is locke
     await ph.ev(LOCKWRAP);
     await ph.ev(`window.__open(${JSON.stringify(MM)})`);
     const upP = await playing(ph);
-    await ph.ev(`window.__locked = ${Date.now() - 90000}; true`);
+    await ph.ev(`window.__locked = ${LOCK_SINCE}; true`);
     const saidP = await ph.until(`${WORDS}.test(${SAY})`, 8000);
     await sleep(300); await ph.shot('locked-phone.png', WIN);
     ok(upP && saidP, '㉑ phone 390: the locked Mac is said in the same words in the phone\'s window', { say: await ph.ev(SAY) });
