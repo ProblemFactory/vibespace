@@ -297,7 +297,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
-        + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
+        + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
         v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null);
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
@@ -333,7 +333,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       const text = A.noticeText(r.warn);
       log(`[spend] ${text}`);
       try { global.__vsEvent?.('spend-budget-notice', `${r.warn.scope}:${r.warn.pct}`); } catch { }
-      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}`, 'normal', noticeExpiry(r.warn.scope, now));
+      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}\n\nThe limit, to raise or lower it: vibespace://settings/${A.warnRowOf(r.warn)}`, 'normal', noticeExpiry(r.warn.scope, now));   // lane setting-doors pick 1: the warning names its row
     }
     return r.warn;
   }
