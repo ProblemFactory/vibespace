@@ -187,6 +187,7 @@ const settingHolds = require('./setting-holds.js').create({ dataDir: path.join(r
   userTodos });
 settingHolds.start().catch((e) => console.log('[setting-holds] start failed:', e && e.message));
 require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: settingHolds });
+app.locals.settingHolds = settingHolds;   // the agent's ask route judges a lasting change against a live hold (law A)
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
@@ -1555,7 +1556,7 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+  return { settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
     bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { const line = engineDistribution.bootLine(r); if (line) console.log(line); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }

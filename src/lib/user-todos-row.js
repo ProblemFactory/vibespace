@@ -42,7 +42,7 @@ import { attachDictation, voiceField } from './voice-input.js'; // lane voice-ev
 import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
-import { pressVerdict as settingPressVerdict, isProposable, isSettingChange, PROPOSABLE } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): an ask that PROPOSES one change of one setting — THE verdict the card draws (the hub judges it again)
+import { pressVerdict as settingPressVerdict, isProposable, isSettingChange, holdIsLive, PROPOSABLE } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): an ask that PROPOSES one change of one setting — THE verdict the card draws (the hub judges it again)
 import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (the product's one spelling — «22:00», «Sun 22:00»)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -434,7 +434,9 @@ let settingFacts = null;
 const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));   // ask-setting's NUM: Number(null) is 0 — an absent field is NO number
 export function registerSettingFacts(f) { settingFacts = f && typeof f === 'object' ? f : null; }
 const factValue = (key) => { let v = NaN; try { v = settingFacts && typeof settingFacts.value === 'function' ? num(settingFacts.value(key)) : NaN; } catch { v = NaN; } return Number.isFinite(v) ? v : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN; };
-const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) ? h : null; } catch { return null; } };
+// LAW B (the check, 2026-11-15): a hold is LIVE only while the row holds its value — a row the owner changed by hand has no hold
+// here at once (no held line, no «then …», no «End now»), before the hub's `setting-holds` broadcast that ends it arrives
+const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) && holdIsLive(h, factValue(key)) ? h : null; } catch { return null; } };
 /** the hub said what the row holds NOW (a press answered «moved» / «same» / «passed») — the card redraws on it, nothing is pressed again */
 export function noteSettingPresent(key, value) { try { if (settingFacts && typeof settingFacts.present === 'function' && Number.isFinite(num(value))) settingFacts.present(key, num(value)); } catch { /* the next broadcast tells */ } }
 /** the item's proposed change (its action) when it is one of a proposable row, else null — the ONE test every surface asks */
@@ -464,7 +466,7 @@ export function settingCardOf(i, t, { now = hubNow() } = {}) {
   const key = String(a.key), value = num(a.value), cur = factValue(key), was = num(a.was);
   const schema = SETTINGS_SCHEMA[key];
   const held = factHold(key);
-  const verdict = settingPressVerdict(a, { present: cur, now });
+  const verdict = settingPressVerdict(a, { present: cur, now, lasting: held ? holdBack(key, held) : undefined });   // LAW A: a live hold's «before» is the row's lasting value
   const rel = Number.isFinite(num(a.untilRel)) ? num(a.untilRel) : null;
   const at = rel == null && Number.isFinite(num(a.untilAt)) ? num(a.untilAt) : null;
   const timed = rel != null || at != null;
@@ -484,11 +486,13 @@ export function settingCardOf(i, t, { now = hubNow() } = {}) {
     const p = { value, time: at != null ? untilClock(at, t, { now }) : '', span: rel != null ? spanWords(rel, t) : '' };
     const words = at != null ? (raise ? t('Raise to {value} until {time}', p) : t('Lower to {value} until {time}', p))
       : rel != null ? (raise ? t('Raise to {value} for {span}', p) : t('Lower to {value} for {span}', p))
-      : t('Lower to {value}', p);   // a lasting change is never a raise (the verdict refuses one)
+      : held ? t('Set to {value} for good — the hold ends', p)   // a lasting change on a held row: at or below its «before» (law A)
+      : t('Lower to {value}', p);   // a lasting change with no hold is never a raise (the verdict refuses one)
     button = { words, raise, title: timed ? t('Sets it to {value} now and back to {back} at that moment, then tells the agent', { value, back }) : t('Sets it to {value} now, then tells the agent', { value }) };
   } else if (verdict.why === 'same') whyWords = t('It is already {value} — nothing to change', { value: cur });
   else if (verdict.why === 'passed') { whyWords = t('That moment ({time}) has passed — change it on the row', { time: at != null ? untilClock(at, t, { now }) : '' }); whyLink = true; }
   else if (verdict.why === 'raise-needs-until') { whyWords = t('A raise needs its «until» — change it on the row'); whyLink = true; }
+  else if (verdict.why === 'raise-over-hold') { whyWords = t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value, back: verdict.lasting }); whyLink = true; }
   else { whyWords = t('This change cannot be pressed here — change it on the row'); whyLink = true; }
   const vol = { prop, asked: t('asked {ago}', { ago: agoText(num(a.askedAt) || num(i.createdAt) || Date.now(), t) }) };
   return { key, label: schema && typeof schema.label === 'string' ? schema.label : key, value, now: cur, was, moved, held, back, verdict, button, nowWords, heldWords, whyWords, whyLink, vol,

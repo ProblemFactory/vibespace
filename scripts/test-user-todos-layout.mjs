@@ -1745,7 +1745,7 @@ console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-li
   ok(gb.length > 200 && gb.indexOf('/use`') < gb.indexOf("method: 'PATCH'") && gb.indexOf("method: 'PATCH'") < gb.indexOf('return postReply(rec.id, grantReplyText(') && /if \(rec && rec\.action && rec\.action\.type === 'browser-grant'\) return grantBrowser\(rec\);/.test(acts),
     'runAction(browser-grant) reads the list (GET …/use), writes it (the whole-list PATCH with its base), and only THEN answers the agent (postReply)');
   const panelSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
-  ok(/\.ut-action-grant'\)\) \{|closest\('\.ut-action-grant'\)/.test(panelSrc) && /\.ut-action-app\.ut-app-install, \.ut-action-grant(, \.ut-action-setting)?'/.test(panelSrc), 'the tray presses it through runAction, armed like every Approve (press-arm; lane setting-doors pick 2: + a proposed change\'s one button)');
+  ok(/\.ut-action-grant'\)\) \{|closest\('\.ut-action-grant'\)/.test(panelSrc) && /\.ut-action-app\.ut-app-install, \.ut-action-grant, \.ut-action-setting'/.test(panelSrc), 'the tray presses it through runAction, armed like every Approve (press-arm; lane setting-doors pick 2: + a proposed change\'s one button)');
   const win = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8'), winL = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window-layout.js'), 'utf8');
   ok(/'browser-grant': \(it\) =>/.test(win) && /if \(a === 'browser-grant'\) \{/.test(win) && /optionWords\(o\.label, t\)/.test(win) && /\.\.\.\(grantAsk \? \['browser-grant'\] : \[\]\)/.test(winL), 'the For-you window draws the same grant button first and the same «Reply: …» chips');
   const cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
