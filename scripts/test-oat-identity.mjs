@@ -666,10 +666,10 @@ const hookCensus = (src) => {
   const runs = (src.match(/\bpostCheck\(\);/g) || []).length;
   const after = /\{ outcome: 'archived', producer: producer\(\) \}\);\n\s+postCheck\(\);\n\s+return;/.test(src) && /if \(r\.unknownType\) \{ global\.__vsEvent\?\.\('rate-limit-event-unknown-type', r\.unknownType\); postCheck\(\); return; \}/.test(src)
     && /noteApiDerivedWindow\(writeKey, witnessEv, session, \{ outcome: 'write', producer: producer\(\) \}\);\n\s+postCheck\(\);/.test(src)
-    // + lane readings-attribution-2 P2: law 2's cap-only record (a cap the turn never asked of the account) — archived, the check run
-    && /if \(ev\.modelCap\) \{ postCheck\(\); return; \}/.test(src)
-    // + P3: law 3's record held whole (its representative fell unconfirmed) — not written, the check run
-    && /if \(held\.whole\) \{ postCheck\(\); return; \}/.test(src);
+    // + lane readings-attribution-2 P2: law 2's record with nothing left but a cap the turn never asked of the account — archived, the check run
+    && /if \(!statesALane\(ev\)\) \{ postCheck\(\); return; \}/.test(src)
+    // + P3: law 3's record held whole (nothing in it but what fell unconfirmed) — not written, the check run
+    && /if \(!statesALane\(held\.ev\)\) \{ postCheck\(\); return; \}/.test(src);
   return { calls: calls.length, rekey: rekey.length, shapeOk, handsOver, guardNext: /if \(win\) \{\n\s+const target = guardReadingTarget\(key, win, /.test(before), runs, after };
 };
 {

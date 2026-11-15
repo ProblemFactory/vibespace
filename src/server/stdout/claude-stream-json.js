@@ -37,7 +37,7 @@ const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../norma
 const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
 const bypassAutoAllow = require('../../server/bypass-auto-allow'); // (spelled from src/ like every require here) lane bypass-no-prompts: under bypassPermissions a can_use_tool is answered at the door
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
-const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest } = require('../../turn-state.js');
+const { isTurnState, turnStateEffect, noteTurnFlight, noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { nextStampIn } = require('../../record-lateness.js'); // PURE: the late-record rule's look-ahead (lane-hot-switch)
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
@@ -914,6 +914,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // session's descriptor hook; the device feed's claudeSideEffects makes the SAME call — the row moves once per call id)
           // lane artifacts-handover: + the user record that ENDS a Task / workflow agent (its sidechain's writes are this conversation's)
           if (msg.type === 'assistant' || msg.type === 'user') { try { require('../artifact-registry.js').observe(session, msg); } catch (e) { console.warn('[claude] artifacts consumer failed:', e.message); } }
+          // a SUB-AGENT's prompt or tool result sends its next request on the credential the CLI reads now: its instant names the
+          // request the next reading answers (lane readings-attribution-2) — the device feed's claudeSideEffects makes the SAME call
+          if (sendsSubRequest(msg) && !recordIsLate?.(session, msg)) noteSubRequestSent(session, Date.now());
           // TodoWrite / TaskCreate / TaskUpdate → the session's live TODO
           // summary (board pill). TaskCreate's id arrives in the RESULT.
           if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
