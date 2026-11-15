@@ -196,14 +196,19 @@ function sayToCommand(list, agyPid, text) {
   }
   return false;
 }
+// LAW 3 OF THE LOOK AT 99f65d547 (主开发 07:49Z): «ended» is said only when something was ended — every verb is answered by
+// ONE `command_ended` record that says what happened: {ok: true, ended: [names], survivors: [names]} — the hub says «ended»
+// only when `ended` names something — or {ok: false, code}: 'no-turn', 'no-command' (nothing runs below agy: «there is
+// nothing to end»), 'already-ending'. M5: the ending is CLAIMED before the first await, so of two verbs together one runs
+// and the other is answered «already ending».
 let commandEnding = false;
 async function endCommand(by, afterMin) {
-  if (commandEnding) return;
-  if (!child || !activePrompt || !activePrompt.dispatched) { record('command_ended', { ok: false, code: 'no-turn', by }); return; }
-  const list = await treeBelow(child.pid);
-  if (!list.length) { record('command_ended', { ok: false, code: 'no-command', by }); return; }
+  if (commandEnding) { record('command_ended', { ok: false, code: 'already-ending', by }); return; }
   commandEnding = true;
   try {
+    if (!child || !activePrompt || !activePrompt.dispatched) { record('command_ended', { ok: false, code: 'no-turn', by }); return; }
+    const list = await treeBelow(child.pid);
+    if (!list.length) { record('command_ended', { ok: false, code: 'no-command', by }); return; }
     const min = Number(afterMin) > 0 ? Math.round(Number(afterMin)) : null;
     const why = by === 'by-itself'
       ? `VibeSpace ended this command${min ? ` after ${min} minutes` : ''} with no output and nothing it started working.`
@@ -211,8 +216,10 @@ async function endCommand(by, afterMin) {
     const told = sayToCommand(list, child.pid, why);
     const r = await endTree(list);
     record('command_ended', { ok: true, by, ended: r.ended, survivors: r.survivors, told });
-    if (r.survivors.length) notice('error', `${by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended'}, but ${r.survivors.length} of its processes could not be ended: ${namesOf(r.survivors)}.`, 'command-ended');
-    else notice('info', `${by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended'} (${namesOf(r.ended)}); the turn goes on.`, 'command-ended');
+    const said = by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended';
+    if (!r.ended.length && r.survivors.length) notice('error', `The command could not be ended: ${r.survivors.length} of its processes are still running: ${namesOf(r.survivors)}.`, 'command-ended');
+    else if (r.survivors.length) notice('error', `${said}, but ${r.survivors.length} of its processes could not be ended: ${namesOf(r.survivors)}.`, 'command-ended');
+    else if (r.ended.length) notice('info', `${said} (${namesOf(r.ended)}); the turn goes on.`, 'command-ended');
   } finally { commandEnding = false; }
 }
 // …and `turnOpenedAt`: the moment this wrapper wrote the turn's text to agy (0 between turns) — a turn whose CLI has said

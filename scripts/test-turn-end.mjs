@@ -35,10 +35,10 @@ function startAgy(env = {}, { cmd = path.join(REPO, 'scripts/fixtures/antigravit
   const child = spawn(process.execPath, [path.join(REPO, 'data/bin/agy-wrapper.js'), path.join(dir, 'x.buf'), path.join(dir, 'x.json'), cmd],
     { env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: 'C.UTF-8', AGY_WEBUI_CWD: dir, AGY_WEBUI_BACKEND: 'antigravity', AGY_STUB_LOG: log, AGY_WEBUI_AUTH_GRACE_MS: '400', AGY_WEBUI_END_GRACE_MS: '600', VIBESPACE_CLI_WROTE_PACE_MS: '100', VS_NO_REAL_CLI: '1', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   every.add(child.pid);
-  const h = { child, dir, log, recs: [], mm: createMessageManager('antigravity', 'x'), exited: null, own: new Set() };
+  const h = { child, dir, log, recs: [], mm: createMessageManager('antigravity', 'x'), exited: null, own: new Set(), taps: [] };
   let lb = '';
   child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) !== -1) { const l = lb.slice(0, i).trim(); lb = lb.slice(i + 1); try { const r = JSON.parse(l); h.recs.push(r); h.mm.processLive(r); } catch { } } });
+  child.stdout.on('data', (d) => { for (const f of h.taps) f(d); lb += d; let i; while ((i = lb.indexOf('\n')) !== -1) { const l = lb.slice(0, i).trim(); lb = lb.slice(i + 1); try { const r = JSON.parse(l); h.recs.push(r); h.mm.processLive(r); } catch { } } });
   child.stderr.on('data', () => { });
   child.on('exit', (code) => { h.exited = { code, at: Date.now() }; });
   h.send = (o) => { try { child.stdin.write(JSON.stringify(o) + '\n'); } catch { } };
@@ -96,7 +96,11 @@ job('— ② «End the command»: its processes end, agy stays, the step ends an
 /** the REAL watch over a live wrapper; only the clocks move (`skew`, on the wall AND the steady one — the look's law 1: the
  *  watch counts only stillness it OBSERVED, a reading a minute; `walk` reads every minute from..to) */
 function watched(h, { setting = () => undefined } = {}) {
-  const sessions = new Map([['x', { mode: 'chat', backend: 'antigravity', name: 'live', _isStreaming: true, _normalizer: h.mm, pty: { write: (l) => h.child.stdin.write(l) } }]]);
+  const sessions = new Map([['x', { mode: 'chat', backend: 'antigravity', name: 'live', _isStreaming: true, _normalizer: h.mm, buffer: '', pty: { write: (l) => h.child.stdin.write(l) } }]]);
+  // the wrapper's stdout ALSO goes through the hub's REAL acp-events consumer — the one door its command_ended record reaches the watch by
+  const ACP = require(path.join(REPO, 'src/server/stdout/acp-events.js'));
+  ACP.create({ engine: { noteTurnEnd: () => { }, sessionModelFor: () => null }, noteHarnessModels: () => { }, deliverRef: null, permissionRulesRef: null })
+    .attach(sessions.get('x'), 'x', { onData: (cb) => h.taps.push(cb) }, { feedLive: () => { }, broadcastToSession: () => { }, broadcastActiveSessions: () => { }, readSessionMeta: () => null, writeSessionMeta: () => true, updateSessionTodos: () => { } });
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(h.dir, 'd-')), onChange: () => { } });
   const W = { skew: 0, ut, sessions };
   W.w = TWatch.create({ activeSessions: sessions, buffersDir: h.dir, getUserTodos: () => ut, sessionKeyOf: () => 'key:x', serverSetting: setting, adapterOf: () => ({ formatInterrupt: () => '{"type":"interrupt"}', postInterrupt: () => { } }), now: () => Date.now() + W.skew, mono: () => performance.now() + W.skew, log: { log: () => { } } });
@@ -158,6 +162,41 @@ job('— ③c «silent» (no command open) is never ended by itself; 0 = never',
   const w2 = TWatch.create({ activeSessions: s2, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, serverSetting: (k) => (k === TWatch.END_SETTING ? 0 : undefined), now: () => clock, mono: () => clock, log: { log: () => { } } });
   for (let m = 600; m <= 700; m++) { clock = T0 + m * MIN; await w2.sweep(); }
   ok(!s2.get('s').pty.write.calls && !writes.some((l) => /end-command/.test(l)), 'the setting at 0: a stuck command is said, never ended by itself');
+});
+
+job('— ③d LAW 3 (M5): two end verbs together — ONE runs, the other is answered «already ending»', async (ok) => {
+  const h = startAgy();
+  try {
+    await h.run('run the hang-command now');
+    await commandUp(h); await sleep(600);
+    const list = await h.tree();
+    const v = JSON.stringify({ type: 'end-command', by: 'person' }) + '\n';
+    h.child.stdin.write(v + v);   // in ONE write: the wrapper reads both before the first await
+    await until(() => h.count('command_ended') >= 2, 8000);
+    const recs = h.recs.filter((r) => r.type === 'acp' && r.kind === 'command_ended');
+    ok(recs.length === 2 && recs.filter((r) => r.ok === true).length === 1 && recs.some((r) => r.ok === false && r.code === 'already-ending'), 'two records: one ending ran (ok), the other was answered «already ending»', recs.map((r) => [r.ok, r.code || '']));
+    ok(list.every((p) => !aliveAs(p)) && await until(() => h.has('notice', (r) => r.noticeKind === 'command-ended'), 4000) && h.count('notice', (r) => r.noticeKind === 'command-ended') === 1, 'its processes ended once, said once');
+  } finally { await h.stop(); }
+});
+
+job('— ③e LAW 3 (M4): a step open with NOTHING below agy — «nothing to end», the item stays with Stop, never ended by itself', async (ok) => {
+  const h = startAgy();
+  try {
+    await h.run('run the stuck step now');   // the stub opens a run_command step and starts nothing
+    await until(() => h.mm.openTool(), 8000); await sleep(600);
+    ok((await h.tree()).length === 0, 'nothing runs below agy');
+    const W = watched(h);
+    await W.at(0); await sleep(200); await W.walk(1, 11);
+    const F = require(path.join(REPO, 'src/foryou-actions.js'));
+    let it = W.items()[0];
+    ok(it && it.status === 'open' && it.action.nothingToEnd === true && /There is nothing to end/.test(it.text) && F.buttonsFor(it).map((b) => b.answer).join() === 'keep-waiting,stop-turn', 'said at 10: «there is nothing to end: Antigravity CLI itself waits on a step with no command running» — Keep waiting and Stop the turn', it && [it.text, F.buttonsFor(it).map((b) => b.answer)]);
+    h.send({ type: 'end-command', by: 'person' });   // a press anyway (an old window's door)
+    const r = await until(() => h.recs.find((x) => x.type === 'acp' && x.kind === 'command_ended'), 6000);
+    ok(r && r.ok === false && r.code === 'no-command', 'the wrapper answers no-command (nothing signalled)', r);
+    await W.walk(12, 45);
+    it = W.items()[0];
+    ok(it.status === 'open' && h.count('command_ended') === 1 && !h.recs.some((x) => x.kind === 'command_ended' && x.by === 'by-itself'), 'forty-five minutes: never ended by itself, the item still open, «ended» never said', [it.status, it.resolvedBy]);
+  } finally { await h.stop(); }
 });
 
 job('— ⑤ a restart whose old agy never exits is SAID, with «Start it again anyway»', async (ok) => {

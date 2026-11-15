@@ -119,6 +119,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
             session._turnOpenSaidAt = Date.parse(msg.ts) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»
             try { if (session.backendSessionId) deliverRef?.noteTurnStarted?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-start note failed: ${e.message}`); }
+          } else if (msg.kind === 'command_ended') {
+            // lane turn-never-silent (law 3 of the look): the wrapper's OWN record of an ending — the only way the hub's turn watch
+            // learns whether something was ended (it says «ended» on this record alone)
+            try { require('../turn-watch.js').noteCommandEnded(session, msg); } catch (e) { console.warn(`[acp] ${id}: an ending's record was not read: ${e.message}`); }
           } else if (msg.kind === 'prompt_end') {
             session._isStreaming = false; newLabel = '';
             delete session._turnOpenSaidAt;   // the cut (D): the opening said is the turn running NOW — cleared at its end record

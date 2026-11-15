@@ -41,6 +41,9 @@ function world({ backend = 'antigravity' } = {}) {
     const s = { mode: 'chat', backend, name: 'lane ' + id, _isStreaming: true, _normalizer: { pendingToolCalls: tools, openTool: () => { let l = null; for (const v of tools.values()) l = v; return l ? { name: l.block.name, cmd: l.block.input ? l.block.input.command : null } : null; } }, ...o };
     W.sessions.set(id, s); return s;
   };
+  /** a pty whose wrapper ANSWERS an ending the way agy-wrapper does (its command_ended record, through THE door acp-events
+   *  uses): `reply(verb)` → the record, or null (no answer yet) */
+  W.answering = (id, reply = () => ({ ok: true, ended: ['node'], survivors: [] }), into = []) => ({ write: (l) => { const v = JSON.parse(String(l)); into.push({ ...v, wall: W.clock }); if (v.type === 'end-command') { const r = reply(v); if (r) TWatch.noteCommandEnded(W.sessions.get(id), { type: 'acp', kind: 'command_ended', by: v.by, ...r }); } } });
   W.tool = (id, name, command) => W.sessions.get(id)._normalizer.pendingToolCalls.set('t-' + name, { msgId: 'm', block: { type: 'tool_use', name, ...(command ? { input: { command } } : {}) } });
   W.reader = { readBelow: async (pid, { now } = {}) => { const t = W.trees.get(pid) || { readable: true, alive: true, list: [] }; return { readable: t.readable !== false, alive: t.alive !== false, why: null, at: now ? now() : W.clock, cut: false, list: (t.list || []).map((p) => ({ ...p })) }; } };
   W.life = () => TWatch.create({ activeSessions: W.sessions, buffersDir: W.buf, getUserTodos: () => W.ut, sessionKeyOf: (s, id) => 'key:' + id, serverSetting: () => undefined,
@@ -260,8 +263,8 @@ console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION,
 {
   const F = require(path.join(REPO, 'src/foryou-actions.js'));
   // a stuck command on a wrapper that serves end-command (agy): the next act after the press is the by-itself ending
-  let Wk = world(); const writes = [];
-  Wk.session('k', { pty: { write: (l) => writes.push(String(l)) } }); Wk.tool('k', 'run_command'); Wk.sidecar('k', { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); Wk.trees.set(4001, { list: idle });
+  let Wk = world(); const verbs = [];
+  Wk.session('k', { pty: Wk.answering('k', undefined, verbs) }); const writes = { some: (f) => verbs.some((v) => f(JSON.stringify(v))), get length() { return verbs.length; } }; Wk.tool('k', 'run_command'); Wk.sidecar('k', { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); Wk.trees.set(4001, { list: idle });
   for (let m = 0; m <= 10; m++) await Wk.at(m);
   Wk.to(12);
   const r = Wk.watch.keepWaiting('k');
@@ -306,8 +309,8 @@ console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION,
 function endWorld(id, o = {}) {
   const X = world();
   if (o.settings) X.watch = TWatch.create({ activeSessions: X.sessions, buffersDir: X.buf, getUserTodos: () => X.ut, sessionKeyOf: (s, i) => 'key:' + i, serverSetting: (k) => o.settings[k], procTree: X.reader, now: () => X.clock, mono: () => X.mclock, log: { log: () => { } } });
-  X.verbs = []; X.min = 0;
-  X.session(id, { pty: { write: (l) => { const v = JSON.parse(String(l)); X.verbs.push({ ...v, wall: X.clock, min: X.min }); } } });
+  X.verbs = []; X.min = 0; X.reply = () => ({ ok: true, ended: ['node'], survivors: [] });
+  X.session(id, { pty: X.answering(id, (v) => X.reply(v), X.verbs) });
   X.tool(id, 'run_command', 'node driver.mjs --watch');
   X.sidecar(id, { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); X.trees.set(4001, { list: idle });
   const at0 = X.at; X.at = async (m) => { X.min = m; return at0(m); };
@@ -445,6 +448,72 @@ console.log('— ㉓ S1: the by-itself ending is gated on the ROW («no bound of
   for (let m = 0; m <= 45; m++) await X.at(m);
   const it = X.open()[0];
   ok(it && it.action.endable === true && it.i18n.text.params.then.key === TW.THEN.notByItself && !verbs.some((v) => v.type === 'end-command'), 'a harness whose row bounds its own commands (claude: commandBound «cli»), on a wrapper that advertises the verb: the door is drawn, the card says VibeSpace does not end it, and 45 minutes end nothing', [it && it.i18n.text.params.then, verbs.length]);
+}
+
+console.log('— ㉔ LAW 3 (M4, M5): «ended» is said only on the wrapper\'s own record that something was ended; «nothing to end» keeps the item, its door Stop; one ending at a time');
+{
+  const F = require(path.join(REPO, 'src/foryou-actions.js'));
+  const doorsOf = (i) => F.buttonsFor(i).map((b) => b.answer).join();
+  // M4: a tool step open with NOTHING running below the CLI — said as such from the start, never ended by itself
+  let X = endWorld('a'); X.trees.set(4001, { list: [] });
+  for (let m = 0; m <= 10; m++) await X.at(m);
+  let it = X.open()[0];
+  ok(it && it.i18n.text.params.then.key === TW.THEN.nothingToEnd && /There is nothing to end: Antigravity CLI itself waits on a step with no command running\.$/.test(it.text) && it.action.nothingToEnd === true && doorsOf(it) === 'keep-waiting,stop-turn', 'a step open and nothing below the CLI: «there is nothing to end: the CLI itself waits on a step with no command running» — its doors Keep waiting and Stop the turn, no «End the command»', [it && it.text, it && doorsOf(it)]);
+  for (let m = 11; m <= 70; m++) await X.at(m);
+  ok(X.ends().length === 0 && X.open().length === 1 && X.watch.endCommand('a').code === 'nothing-to-end', 'sixty minutes: never ended by itself, the item STAYS; a press anyway is refused «nothing to end»');
+  // the wrapper finds nothing to end (the command left between the reading and the press): the item stays, says so
+  X = endWorld('b'); X.reply = () => ({ ok: false, code: 'no-command' });
+  for (let m = 0; m <= 12; m++) await X.at(m);
+  const r = X.watch.endCommand('b', 'person');
+  it = X.open()[0];
+  ok(r.ok && r.code === 'ending' && it && it.status === 'open' && it.action.nothingToEnd === true && it.i18n.text.params.then.key === TW.THEN.nothingToEnd && doorsOf(it) === 'keep-waiting,stop-turn', 'the press is ASKED («Ending the command…»); the wrapper answers no-command: the item STAYS open, says there is nothing to end, Stop its door', [r, it && it.resolvedBy, it && doorsOf(it)]);
+  for (let m = 13; m <= 60; m++) await X.at(m);
+  ok(X.ends().length === 1 && X.items().length === 1 && X.open().length === 1, 'and it is never ended by itself after it (one verb in all — the person\'s)');
+  // the wrapper ended NOTHING (gone on their own) or could end nothing (survivors only): never «ended»
+  for (const [why, rep] of [['every process had already gone', { ok: true, ended: [], survivors: [] }], ['its processes would not end', { ok: true, ended: [], survivors: ['sleep'] }]]) {
+    X = endWorld('c'); X.reply = () => rep;
+    for (let m = 0; m <= 12; m++) await X.at(m);
+    X.watch.endCommand('c');
+    ok(X.open().length === 1 && !X.items().some((i) => /ended/.test(String(i.resolvedBy || ''))), `${why}: the item stays — «ended» is never said`, X.items().map((i) => i.resolvedBy));
+  }
+  // a KEPT card whose by-itself ending finds nothing to end: the item is OPEN again, «nothing to end», Stop its door
+  X = endWorld('k');
+  for (let m = 0; m <= 10; m++) await X.at(m);
+  X.to(12); X.watch.keepWaiting('k'); X.reply = () => ({ ok: false, code: 'no-command' });
+  for (let m = 13; m <= 42; m++) await X.at(m);
+  it = X.items()[0];
+  ok(X.ends().length === 1 && it.status === 'open' && it.action.nothingToEnd === true && doorsOf(it) === 'keep-waiting,stop-turn', 'a kept card whose ending at :42 found nothing to end: the item is open again, says so, Stop its door', [it.status, it.resolvedBy, doorsOf(it)]);
+  // M5: one ending at a time — a second press while one is asked is answered «already ending»; nothing more is written
+  X = endWorld('d'); X.reply = () => null;   // the wrapper has not answered yet
+  for (let m = 0; m <= 29; m++) await X.at(m);
+  X.to(29.5);
+  const one = X.watch.endCommand('d', 'person'), two = X.watch.endCommand('d', 'person');
+  ok(one.ok && two.ok === false && two.code === 'already-ending' && X.ends().length === 1, 'two presses together: the first is asked, the second answered «already ending» — ONE verb written', [one, two, X.ends().length]);
+  await X.at(30); await X.at(31);
+  ok(X.ends().length === 1 && X.open().length === 1, 'the by-itself ending\'s time (:30) comes while the person\'s ending is still asked: no second verb; the item stays (nothing said ended yet)', X.ends().map((v) => v.by));
+  TWatch.noteCommandEnded(X.sessions.get('d'), { ok: false, code: 'already-ending', by: 'by-itself' });
+  ok(X.open().length === 1, 'an «already ending» record (another verb\'s) does not settle it');
+  TWatch.noteCommandEnded(X.sessions.get('d'), { ok: true, by: 'person', ended: ['node', 'sleep'], survivors: [] });
+  ok(X.open().length === 0 && X.items()[0].resolvedBy === 'command-ended', 'the wrapper\'s record that something was ended: the item ends «the command was ended» AT ONCE');
+  // the ending moves the tree BEFORE its record comes (a reading in between): the record speaks, never «it moved on»
+  X = endWorld('f'); X.reply = () => null;
+  for (let m = 0; m <= 12; m++) await X.at(m);
+  X.to(12.5); X.watch.endCommand('f', 'person');
+  X.trees.set(4001, { list: [] }); await X.at(13);
+  ok(X.open().length === 1, 'a reading between the press and the record sees the processes gone: the item still stands (the movement is the ending\'s own)', X.items().map((i) => i.resolvedBy));
+  TWatch.noteCommandEnded(X.sessions.get('f'), { ok: true, by: 'person', ended: ['node'], survivors: [] });
+  ok(X.items()[0].resolvedBy === 'command-ended', '…and the record ends it «the command was ended»', X.items()[0].resolvedBy);
+  // no answer at all: let go after ENDING_WAIT_MS — the item stays and the door works again
+  X = endWorld('e'); X.reply = () => null;
+  for (let m = 0; m <= 12; m++) await X.at(m);
+  X.watch.endCommand('e', 'person');
+  await X.at(13); await X.at(14);
+  ok(X.watch.endCommand('e').code === 'already-ending', 'a minute or two later: still asked');
+  await X.at(15);
+  ok(X.open().length === 1 && X.watch.endCommand('e').ok === true, 'no record after two minutes: let go (said in the log) — the item stays, a press asks again');
+  // the door's words: asking, never «ended»
+  const row = F.ROW_OF['turn-stuck'];
+  ok(row.buttons.find((b) => b.answer === 'end-command').said === 'Ending the command…' && row.refused['already-ending'] && row.refused['nothing-to-end'], 'the press says «Ending the command…» (the item says «ended» when the record comes); «already ending» and «nothing to end» are refused by name');
 }
 
 console.log('— ㉒ P2: the command\'s first words, cut and escaped where they are drawn');

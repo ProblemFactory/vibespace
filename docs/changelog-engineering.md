@@ -6,6 +6,23 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent — the look at 99f65d547, follow-up 2: «ended» is said only when something was ended (主开发's law 3, M4 + M5)
+- **The wrapper answers every verb with ONE record** (data/bin/agy-wrapper.js `command_ended`):
+  - `{ok: true, ended: [names], survivors: [names]}`;
+  - or `{ok: false, code}`, where code is 'no-turn', 'no-command' (nothing below agy) or 'already-ending'.
+  The ending is CLAIMED before its first await (M5): of two verbs together one runs and the other is answered «already ending». A notice says «ended» only when `ended` names something; «could not be ended» when only survivors remain.
+- **The hub's ONE door**: src/server/stdout/acp-events.js calls turn-watch `noteCommandEnded(session, rec)` on that record. The session keeps counts, never names (`_commandEnded`, a session-schema row), and the watch holding the session settles at once.
+- **endCommand ASKS; settle answers.** A press or the by-itself ending writes the verb and returns `{ok, code: 'ending'}`; the door's toast is «Ending the command…». What the record says decides the item:
+  - something ended ⇒ the item ends «the command was ended» / «ended by itself», and a new stretch starts (law 2);
+  - 'no-command' ⇒ the item STAYS and says «there is nothing to end: <CLI> itself waits on a step with no command running». Its doors are Keep waiting and Stop the turn, and it is never ended by itself. A kept card is opened again;
+  - nothing ended, or only survivors ⇒ the item stays, said in the log.
+  While an ending is asked, a second press is refused 'already-ending' and the by-itself ending writes nothing. A movement the ending itself causes is not «it moved on»: the record speaks. An ending never answered is let go after two minutes (ENDING_WAIT_MS); the item stays and a press asks again.
+- **M4 from the start.** A step open with NOTHING below the CLI (a readable tree, no process) says «nothing to end» from its first filing. A press anyway is refused 'nothing-to-end'.
+- **The pins.**
+  - test-turn-watch ㉔: 18 legs — the wrapper's answers scripted through the same door.
+  - test-turn-end ③d + ③e: the REAL wrapper, its stdout through the REAL acp-events consumer. Two verbs in one write give one ok record and one «already ending», with one notice. The stub's `stuck` step with nothing below agy: «nothing to end», the wrapper answers no-command, and 45 minutes end nothing.
+  - The mutants: 10 run, 10 red (the late claim; no pending at the hub; «ended» at the press; ok counted as ended; the tree's emptiness not read; no-command ignored; the kept card not reopened; the acp-events call dropped; «already ending» settling; the ending's own movement read as «moved»).
+
 ### turn-never-silent — the look at 99f65d547, follow-up 1: the watch counts only stillness it observed; each stuck stretch is its own (主开发's laws 1 + 2, 07:49Z; the GO and its three amendments, 07:53Z)
 - **Law 1.** NEW PURE `stillnessStep` (src/turn-liveness.js) counts stillness from reading to reading on a STEADY clock (`process.hrtime`), inside one life of the hub. A gap is not stillness: no previous reading (a restart), a steady gap over twice the reading period, or wall and steady gaps more than 30 s apart (a clock step, a suspend). After a gap the count starts again. The CLI's own stamp (and the turn's opening) is a witness of MOVEMENT only. The verdict is fed the observed count, never a stamp's age.
 - **Law 2.** A stretch is one unbroken run, keyed `turn-stuck:<id>:<turn token>:<its first reading's instant>`. It has its own item, and the by-itself ending acts only after that item stood (it was filed at an EARLIER reading). An ending, or a movement, starts a new stretch. The base's «ended-by-itself» guard in show() is gone: the next stuck command files its own item.
