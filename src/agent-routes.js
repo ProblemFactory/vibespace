@@ -12,6 +12,7 @@ const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
 const { capsOf } = require('./backend-caps.js'); // lane turn-never-silent: a harness's liveness row (commandBound — the one rule line)
+const TLV = require('./turn-liveness.js');   // lane turn-never-silent (the look's S2): the by-itself ending's minutes the rule line says (PURE)
 const { sameToken } = require('./pairing-token.js'); // B-8dda: every vsst_ lookup compares in constant time
 
 // ── stash → injection block (drain-at-render) ─────────────────────────────
@@ -2073,7 +2074,8 @@ const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
   channelsReachMemo.set(s, out);
   return out;
 };
-const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}), ...(((capsOf(s && s.backend).liveness || {}).commandBound === 'none') ? { noCommandBound: true } : {}) }; };   // lane turn-never-silent: the one rule line for a CLI that bounds no command (STANDING_RULES 'command-bounds')
+const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}), ...(((capsOf(s && s.backend).liveness || {}).commandBound === 'none') ? { noCommandBound: true, commandEndMin: commandEndMinNow() } : {}) }; };   // lane turn-never-silent: the one rule line for a CLI that bounds no command (STANDING_RULES 'command-bounds') — with the by-itself ending's minutes (the look's S2)
+const commandEndMinNow = () => { const ms = TLV.endBoundMsOf(serverSetting('turns.endStuckCommandMin'), TLV.boundMsOf(serverSetting('turns.stuckAfterMin'))); return ms ? Math.round(ms / 60000) : 0; };   // the turn watch's own reading of the two settings
 // lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the
 // free road only: the engine queues each carry on the conversation's chain, into this session's stash — it rides this
 // member's next injection; at SessionStart that is its first prompt). Asked at the stash drain; never a timer.

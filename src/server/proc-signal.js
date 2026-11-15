@@ -43,7 +43,30 @@ function create({ readStat = (pid) => fs.readFileSync(`/proc/${pid}/stat`, 'utf8
     const survivors = live.filter(sameBirth);
     return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm) };
   }
-  return { sameBirth, signalOne, killGroup, endTree };
+  /** the group of a process found by its RECORDED birth (`left` = the agy a wrapper's sidecar names) — signalled only while
+   *  its leader is still that very process (sameBirth: above the floor, its birth, not a zombie), never our own group */
+  function signalRecordedGroup(left, sig) { if (!sameBirth(left) || left.pid === myGroup()) return false; try { if (kill) kill(-left.pid, sig); else process.kill(-left.pid, sig); return true; } catch { return false; } }
+  /** S6 (the look at 99f65d547): a conversation ended while its wrapper was already killed past its own exit handler leaves
+   *  agy (its own session) and its command running. After `graceMs` — the wrapper's own handler ends its group first when it
+   *  can — the agy its sidecar recorded, if it is STILL that process, is ended: SIGTERM to its group, SIGKILL after `killMs`.
+   *  → 'not-recorded' | 'gone' (nothing to end) | 'ended' | 'survived' */
+  async function endLeftGroup(left, { graceMs = 5000, killMs = 3000, say = () => { } } = {}) {
+    if (!left) return 'not-recorded';
+    await wait(graceMs);
+    if (!signalRecordedGroup(left, 'SIGTERM')) return 'gone';
+    say(`agy (pid ${left.pid}) outlived its wrapper — its group was sent SIGTERM`);
+    await wait(killMs);
+    if (!signalRecordedGroup(left, 'SIGKILL')) return 'ended';
+    await wait(300);
+    if (sameBirth(left)) { say(`agy (pid ${left.pid}) outlived its wrapper and SIGKILL — still running`); return 'survived'; }
+    return 'ended';
+  }
+  return { sameBirth, signalOne, killGroup, endTree, signalRecordedGroup, endLeftGroup };
 }
 
-module.exports = { create, pidFloor, groupOf };
+/** S6: the agy a wrapper's sidecar records ({childPid, childStart}) → {pid, startTicks} | null — read off the loop */
+async function recordedChildOf(sidecarFile, { readFile = (f) => fs.promises.readFile(f, 'utf8') } = {}) {
+  try { const j = JSON.parse(await readFile(sidecarFile)); const pid = Number(j && j.childPid), st = Number(j && j.childStart); return pidFloor(pid) && Number.isFinite(st) && st > 0 ? { pid, startTicks: st } : null; } catch { return null; }
+}
+
+module.exports = { create, pidFloor, groupOf, recordedChildOf };

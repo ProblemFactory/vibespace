@@ -256,6 +256,33 @@ job('— ⑦ THE KILL PROOFS (the look at 99f65d547): the restart\'s late group 
   } finally { await h.stop(); }
 });
 
+job('— ⑨ S6: a wrapper killed past its own handler leaves agy (its own session) and its command — the kill path ends them by agy\'s RECORDED birth', async (ok) => {
+  const h = startAgy({ AGY_STUB_EXIT_DELAY_MS: '20000' });   // an agy that outlives its stdin's end (as the kill law must assume)
+  try {
+    await h.run('run the hang-command now');
+    await commandUp(h); await sleep(600);
+    const m = h.meta(), agy = Number(m.childPid), list = await h.tree();
+    every.add(agy); h.own.add(agy);
+    ok(Number.isInteger(m.childStart) && birth(agy) && m.childStart === birth(agy).startTicks, 'the sidecar records agy\'s BIRTH beside its pid (childStart)', [m.childPid, m.childStart]);
+    h.child.kill('SIGKILL');   // the wrapper killed past its own exit handler (an OOM kill)
+    await sleep(700);
+    ok(!!birth(agy) && list.every(aliveAs), 'the wrapper is gone; agy and its command still run (the gap the look named)');
+    const PSM = require(path.join(REPO, 'src/server/proc-signal.js'));
+    const left = await PSM.recordedChildOf(path.join(h.dir, 'x.json'));
+    const said = [];
+    const r = await PSM.create().endLeftGroup(left, { graceMs: 100, killMs: 800, say: (l) => said.push(l) });
+    ok(left && left.pid === agy && r === 'ended' && !birth(agy) && list.every((p) => !aliveAs(p)) && said.length === 1, 'endLeftGroup: agy\'s group ended by its recorded birth — agy and its command gone, said once', [r, said]);
+    const sent = [];
+    const c = spawn('sleep', ['30'], { stdio: 'ignore' }); every.add(c.pid); await sleep(150);
+    const r2 = await PSM.create({ kill: (pid, sig) => sent.push([pid, sig]) }).endLeftGroup({ pid: c.pid, startTicks: birth(c.pid).startTicks + 1 }, { graceMs: 10, killMs: 10 });
+    ok(r2 === 'gone' && sent.length === 0, 'a recorded pid now someone else\'s (another birth): nothing is signalled («gone»)', [r2, sent]);
+    try { c.kill('SIGKILL'); } catch { }
+    const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+    const a = ws.indexOf("const leftAgy = await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`));"), b = ws.indexOf('removeWrapperFiles(BUFFERS_DIR, data.sessionId);', a);
+    ok(a > 0 && b > a && ws.slice(a, b).includes("\n      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: "), 'the hub\'s kill path (endSessionBody) reads the recorded agy BEFORE the sidecar goes, and ends it after its grace (a source pin: endSessionBody\'s deps are a whole server\'s)');
+  } finally { await h.stop(); }
+});
+
 for (const j of jobs) { await j.p; console.log(j.title); for (const [c, n, e] of j.R) ok(c, n, e); }
 
 console.log('— ⑧ THE KILL PROOFS (the look at 99f65d547): src/server/proc-signal.js — the birth comparison, the floors, never our own group');
