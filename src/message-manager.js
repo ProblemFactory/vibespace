@@ -593,11 +593,13 @@ class MessageManager extends MessageWindow {
    *  pendingAsksOf over the cards that ever carried one — `msgIndex` = the
    *  index the chat window pages by). */
   /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
-   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+   *  — its card's name and its command's first line (the look's P2) — or null. The hub's turn watch asks this, and only this
+   *  (src/server/turn-watch.js). */
   openTool() {
     let last = null; for (const v of this.pendingToolCalls.values()) last = v;
     const b = last && last.block; const name = b && (b.name || b.title);
-    return name ? { name: String(name).slice(0, 80) } : null;
+    const i = b && b.input;
+    return name ? { name: String(name).slice(0, 80), cmd: (() => { const c = i && i.command; const line = Array.isArray(c) ? c.join(' ') : typeof c === 'string' ? c : ''; return line ? line.split('\n')[0].slice(0, 200) : null; })() } : null;
   }
 
   pendingAsks() {

@@ -159,6 +159,34 @@ function treeWorked(prev, cur) {
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 
+const SKEW_MS = 30 * 1000;   // a wall gap and a steady gap further apart than this between two readings = a clock step or a suspend
+
+/** LAW 1 OF THE LOOK AT 99f65d547 (主开发 07:49Z): THE WATCH COUNTS ONLY STILLNESS IT OBSERVED — from reading to reading, on a
+ *  STEADY clock (`mono`: it stops during a suspend and ignores a wall step), inside ONE life of the hub. Between two consecutive
+ *  readings that BOTH show nothing written (`wrote`, the wrapper's stamp, unchanged) and nothing working below the CLI
+ *  (`worked` not true), the count grows by the steady gap. A gap longer than twice the reading period, or one whose wall gap
+ *  and steady gap disagree by more than SKEW_MS (a step, a suspend), is NOT stillness: the count starts again at that reading.
+ *  There is no previous reading after a restart: the count starts at the new life's first. The wrapper's stamp is a witness
+ *  of MOVEMENT only, never a start of stillness.
+ *  prev / cur: {mono, wall, wrote, stillMs (prev only), worked (cur only: treeWorked of the two readings — null = not read)}
+ *  → {stillMs, moved, gap} */
+function stillnessStep(prev, cur, { periodMs = READ_EVERY_MS, skewMs = SKEW_MS } = {}) {
+  if (!cur || !Number.isFinite(cur.mono) || !Number.isFinite(cur.wall)) return { stillMs: 0, moved: false, gap: true };
+  if (!prev || !Number.isFinite(prev.mono) || !Number.isFinite(prev.wall)) return { stillMs: 0, moved: false, gap: true };
+  if (cur.worked === true || (Number(cur.wrote) || 0) !== (Number(prev.wrote) || 0)) return { stillMs: 0, moved: true, gap: false };
+  const dm = cur.mono - prev.mono, dw = cur.wall - prev.wall;
+  if (!(dm > 0) || dm > 2 * periodMs || Math.abs(dw - dm) > skewMs) return { stillMs: 0, moved: false, gap: true };
+  return { stillMs: (Number(prev.stillMs) || 0) + dm, moved: false, gap: false };
+}
+
+/** THE STATE A QUIET TURN SAYS (the verdict's own last step, and the watch's when it carries an item across a gap — the
+ *  look at 99f65d547, amendment 2: the open item is patched in place while the count starts again): undeclared or unreadable
+ *  ⇒ «unknown»; a tool step open ⇒ «stuck on a command»; none ⇒ «silent». */
+function speakingStateOf({ row, treeReadable, openTool } = {}) {
+  if (!row || typeof row !== 'object' || treeReadable === false) return 'unknown';
+  return openTool && typeof openTool.name === 'string' && openTool.name ? 'stuck-on-command' : 'silent';
+}
+
 /** THE VERDICT (L1). Every fact handed in:
  *   row            capsOf(backend).liveness — an object (the vocabulary above), NO_TURN, or null (undeclared)
  *   streaming      a turn is open (the one flag every gate reads)
@@ -198,10 +226,10 @@ function livenessVerdict(f = {}) {
   // nothing WORKING since — the silence AND the last work below the CLI, whichever is latest
   const stillFrom = Math.max(quietFrom, num(f.workSeenAt));
   if (now - stillFrom < boundMs) return out('busy', 'working', quietFrom);
-  return tool ? out('stuck-on-command', 'command', quietFrom, stillFrom) : out('silent', 'no-command', quietFrom, stillFrom);
+  return speakingStateOf(f) === 'stuck-on-command' ? out('stuck-on-command', 'command', quietFrom, stillFrom) : out('silent', 'no-command', quietFrom, stillFrom);
 }
 
 module.exports = {
   DEFAULT_BOUND_MIN, DEFAULT_END_MIN, MIN_BOUND_MIN, MAX_BOUND_MIN, READ_EVERY_MS, TREE_MAX, STATES, SPEAKING, ROW_VALUES, ROW_KEYS, NO_TURN,
-  rowProblem, boundMsOf, endBoundMsOf, parseStat, parseIo, readingOf, treeWorked, livenessVerdict,
+  rowProblem, boundMsOf, endBoundMsOf, stillnessStep, SKEW_MS, speakingStateOf, parseStat, parseIo, readingOf, treeWorked, livenessVerdict,
 };

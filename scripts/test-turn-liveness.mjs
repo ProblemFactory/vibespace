@@ -194,5 +194,33 @@ console.log('— ⑧ THE BY-ITSELF ENDING (the owner\'s «可以», 03:02Z): onl
   ok(real === false && mutant === true, 'CONTROL: a mutant that ends on the written silence alone ends a WORKING command; the verdict never does');
 }
 
+console.log('— ⑨ LAW 1 (the look, 07:49Z): stillness only from reading to reading, on a steady clock, inside one life');
+{
+  const P = 60e3, S = (o) => L.stillnessStep(o.prev, o.cur, { periodMs: P });
+  const r0 = { mono: 1_000, wall: 1_800_000_000_000, wrote: 7, stillMs: 0 };
+  const at = (m, o = {}) => ({ mono: r0.mono + m * P, wall: r0.wall + m * P, wrote: 7, worked: false, ...o });
+  ok(S({ prev: null, cur: at(0) }).gap === true && S({ prev: null, cur: at(0) }).stillMs === 0, 'no previous reading (a hub just started): a gap — the count starts at this reading');
+  let prev = r0, x;
+  for (let m = 1; m <= 10; m++) { x = S({ prev, cur: at(m) }); prev = { ...at(m), stillMs: x.stillMs }; }
+  ok(x.stillMs === 10 * P && !x.gap && !x.moved, 'ten readings a minute apart with nothing written and nothing working: ten observed minutes', x);
+  x = S({ prev, cur: at(11, { worked: true }) });
+  ok(x.moved && x.stillMs === 0, 'work below the CLI between two readings: movement — the count is 0');
+  x = S({ prev, cur: at(11, { wrote: 8 }) });
+  ok(x.moved && x.stillMs === 0, 'the wrapper\'s stamp changed (the CLI wrote a line): movement');
+  x = S({ prev, cur: { ...at(11), mono: prev.mono + 3 * P, wall: prev.wall + 3 * P } });
+  ok(x.gap && x.stillMs === 0, 'readings three minutes apart (the hub held up): a gap — never counted as stillness');
+  x = S({ prev, cur: { ...at(11), mono: prev.mono + P, wall: prev.wall + 40 * P } });
+  ok(x.gap && x.stillMs === 0, 'the WALL clock stepped forward 40 minutes in one steady minute: a gap — nothing ends at once (M2)');
+  x = S({ prev, cur: { ...at(11), mono: prev.mono + P, wall: prev.wall + 60 * P } });
+  ok(x.gap && x.stillMs === 0, 'an hour\'s suspend (the steady clock stopped, the wall went on): a gap (M2)');
+  x = S({ prev, cur: { ...at(11), mono: prev.mono + P, wall: prev.wall + P + 20e3 } });
+  ok(!x.gap && x.stillMs === 11 * P, 'a wall gap within 30 s of the steady gap is a reading on time');
+  x = S({ prev, cur: { ...at(11), mono: prev.mono } });
+  ok(x.gap, 'a steady clock that did not advance is no reading');
+  // RED CONTROL: counting on the WALL clock (the base's way) ends a command idle for two real minutes after a 40-minute step
+  const wallCount = (p, c) => (p.stillMs || 0) + (c.wall - p.wall);
+  ok(wallCount(prev, { ...at(11), wall: prev.wall + 40 * P }) >= 30 * P && L.stillnessStep(prev, { ...at(11), mono: prev.mono + P, wall: prev.wall + 40 * P }).stillMs === 0, 'CONTROL: on the wall clock a 40-minute step reads as 50 still minutes (an ending at once); the steady count reads none');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

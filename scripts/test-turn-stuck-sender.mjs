@@ -32,7 +32,7 @@ console.log('— ① the watch keeps ONE fact on the session while it says the t
   const sessions = new Map([['x', s]]);
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(dir, 'd-')), onChange: () => { } });
   const reader = { readBelow: async () => ({ readable: true, alive: true, at: clock, cut: false, list: [{ pid: 11, startTicks: 5, ticks: 1 }] }) };
-  const w = TWatch.create({ activeSessions: sessions, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, log: { log: () => { } } });
+  const w = TWatch.create({ activeSessions: sessions, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, mono: () => clock, log: { log: () => { } } });
   const at = async (m) => { clock = T0 + m * MIN; await w.sweep(); };
   for (let m = 0; m <= 9; m++) await at(m);
   ok(!('_turnStuckSince' in s), 'nine minutes: no fact (nothing said)');
@@ -124,7 +124,7 @@ console.log('— ⑤ P7 (主开发 04:44Z): a sender ALREADY waiting when the tu
   ok(sent.ok && (sent.queued || []).length === 1 && !('stuckSince' in sent.queued[0]), 'alpha\'s wake is queued behind xray\'s running turn (not stuck yet — no such fact in its answer)');
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(dir, 'd-')), onChange: () => { } });
   const reader = { readBelow: async () => ({ readable: true, alive: true, at: clock, cut: false, list: [{ pid: 4100, startTicks: 5, ticks: 1 }] }) };
-  const w = TWatch.create({ activeSessions: sessions, buffersDir: path.join(dir, 'session-buffers'), getUserTodos: () => ut, getGroups: () => eng, getDeliver: () => deliver, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, log: { log: () => { } } });
+  const w = TWatch.create({ activeSessions: sessions, buffersDir: path.join(dir, 'session-buffers'), getUserTodos: () => ut, getGroups: () => eng, getDeliver: () => deliver, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, mono: () => clock, log: { log: () => { } } });
   const at = async (m) => { clock = T0 + m * MIN; await w.sweep(); };
   for (let m = 1; m <= 9; m++) await at(m);
   const framesBefore = frames.length;

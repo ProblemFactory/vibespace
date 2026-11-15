@@ -560,11 +560,13 @@ class CodexMessageManager extends MessageWindow {
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
   /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
-   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+   *  — its card's name and its command's first line (the look's P2) — or null. The hub's turn watch asks this, and only this
+   *  (src/server/turn-watch.js). */
   openTool() {
     let last = null; for (const v of this.pendingToolCalls.values()) last = v;
     const name = last && (last.rawName || last.name);
-    return name ? { name: String(name).slice(0, 80) } : null;
+    const m = last && this.messageIndex.get(last.msgId), i = m && m.content && m.content[0] && m.content[0].input;
+    return name ? { name: String(name).slice(0, 80), cmd: (() => { const c = i && i.command; const line = Array.isArray(c) ? c.join(' ') : typeof c === 'string' ? c : ''; return line ? line.split('\n')[0].slice(0, 200) : null; })() } : null;
   }
 
   injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null, exitRun = null, channel = null }) {

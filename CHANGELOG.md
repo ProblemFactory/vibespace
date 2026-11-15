@@ -12,6 +12,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Stopping an Antigravity turn now also ends what its command started; whatever could not be ended is said by name.
 - An agent whose message waits behind a stuck turn is told so: stuck since when, and that you have been asked.
 - After Keep waiting the card stays in the conversation: when you chose, what happens at the next bound, and End the command now.
+- The stuck card names the command's first words and says what happens if nothing is pressed, and when.
+- That time is when it happens: after a sleep, a clock change or a VibeSpace restart the count starts again, and the card's time moves with it.
 
 ## 2.369.404 — 2026-11-15
 
