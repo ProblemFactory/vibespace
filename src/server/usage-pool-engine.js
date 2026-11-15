@@ -3786,9 +3786,9 @@ function recordRateLimitEventNow(session, msg) {
     // archived whole. The placeholder names no model: unjudged
     if (ev.status !== 'rejected' && (ev.modelCap || (ev.windows && ev.windows.modelCap)) && ev.modelCapName && !turnAskedFamily(session, writeKey, ev.modelCapName)) {
       const fam = ev.modelCapName;
-      console.log(`[usage] rate-limit-event: a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request — the lane archived, whatever else the record states written`);
+      console.log(`[usage] rate-limit-event: a ${fam} model cap on a turn in which this hub saw no ${fam} request to ${nameOf(writeKey)} — the lane archived, whatever else the record states written`);
       global.__vsEvent?.('usage-reading-cap-unasked', `${writeKey}:${fam}`);
-      appendReadingArchive({ key: writeKey, sid: session?._webuiId || '-', what: 'rate-limit-event:model-cap', reason: `a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request`, matched: [], ownWindow: null, entry: { cap: ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : ev.windows.modelCap, asked: (session._turnAsks && session._turnAsks[writeKey]) || [], slot } });
+      appendReadingArchive({ key: writeKey, sid: session?._webuiId || '-', what: 'rate-limit-event:model-cap', reason: `a ${fam} model cap on a turn in which this hub saw no ${fam} request to ${nameOf(writeKey)}`, matched: [], ownWindow: null, entry: { cap: ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : ev.windows.modelCap, asked: (session._turnAsks && session._turnAsks[writeKey]) || [], slot } });
       ev = { ...ev, ...(ev.modelCap ? { repWithheld: true } : {}), windows: { ...ev.windows, modelCap: null }, modelCapLane: null, modelCapName: null, modelCapDisplay: null };
       if (!statesALane(ev)) { postCheck(); return; }
     }
@@ -4309,6 +4309,10 @@ function heldFallOf(session, key, ev, now = Date.now()) {
   try {
     const row = lastRepointRow(session, { at: now, minAt: now - readingLag.SHADOW_MS });
     if (!row) return null;   // a producer that was not moved: its fall is its own confirmation
+    // A CONVERSATION'S CREATION IS NO RE-POINT (主开发 2026-11-15T13:21Z, the bounded check): its link row runs from the pool's
+    // default member to the member it was placed on (a resumed one's too — the kill path drops its link), and a new process
+    // never sent a request on another member — holding its fall defends nothing and leaves the number stale
+    if (row.why === 'spawn') return null;
     const stored = new Map(quotaModel.lanesOfReading(usageWrite.readCacheObject(USAGE_CACHE_DIR, key)).filter((l) => !l.mark).map((l) => [l.lane, l]));
     const lanes = [];
     const sd = ev.kind === 'sevenDay' ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.sevenDay);
