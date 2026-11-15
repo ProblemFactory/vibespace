@@ -2140,6 +2140,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-artifacts-panel .chat-artifact-row { min-height: 56px; padding-right: 0; }
   .chat-artifacts-panel .chat-artifact-name { font-size: 16px; }
   .chat-artifacts-panel .chat-artifact-meta, .chat-artifacts-panel .af-ago { font-size: 14px; }
+  .chat-artifacts-panel .chat-artifact-meta { white-space: normal; overflow-wrap: break-word; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; } /* a meta that does not fit takes a second line, never cut (artifacts-by-intent .403: the page's «20 min ago» took 2 px from «referee · …/out · Document» at 360 in DejaVu) */
   .chat-artifacts-panel .chat-artifact-more { visibility: visible; width: 44px; height: 44px; }
   .chat-artifacts-panel .af-key { display: none; }
 }
