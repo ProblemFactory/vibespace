@@ -19,8 +19,8 @@
  *     `password` resolves to `current` when `current` exists, and to `pending` when `current` is `null` (unconfirmed `register`).
  *   · SECURITY GATES — browser-truth origin match (`tabOrigin === entry.origin`, HTTPS or localhost HTTP only), top-frame only
  *     (`inFrame` => `login_in_frame`), grant door `browser-login` (`<origin>#<user>`, `<origin>#*`, `*`, or caller-owned entry),
- *     `vault_locked` immediate refusal, live-fill read fence (`409 login_fill_live`), zero digests on disk (`RULE 5′`), and
- *     strict generation-aware fence recovery (`entryGen` + `rev`, `RULE 5″/5‴`).
+ *     `vault_locked` immediate refusal, live-fill read fence (`409 login_fill_live`), zero digests or login identity on disk
+ *     (`RULE 5′`, Shape S: any tab fenced or guarded at Hub restart stays fenced until top-frame navigation).
  */
 const GM = require('./grant-model.js');
 
@@ -69,7 +69,7 @@ const REFUSALS = Object.freeze([
 const LIVE_FILL_ALLOW_VERBS = Object.freeze([
   'click', 'dblclick', 'press', 'key', 'keydown', 'keyup', 'focus', 'hover',
   'scroll', 'scrollintoview', 'check', 'uncheck', 'select', 'fill', 'type',
-  'open', 'goto', 'navigate', 'back', 'forward', 'reload', 'wait',
+  'open', 'goto', 'navigate', 'back', 'forward', 'reload', 'tab', 'wait',   // lane chrome-157 (round 32, Q3): `tab` = its two ACTS only (liveFillAllowsVerb); `window` is not admitted
   'close', 'stop',
 ]);
 
@@ -93,7 +93,6 @@ const CLASSES = Object.freeze([
 const ALL_CHARS = CLASSES.join('');
 
 const LOCKED = 'the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then (do not ask them to)';
-const HOLD_VAULT_LOCKED = 'vault_locked';
 const HOLD_TOO_MUCH_TEXT = 'too much text to check';
 const HOLD_UNKNOWN_TYPED = 'unknown_typed';
 
@@ -343,37 +342,6 @@ function mintEntryGen(rng) {
   let hex = '';
   for (let i = 0; i < 6; i++) hex += (bytes[i] & 0xff).toString(16).padStart(2, '0');
   return `lg-${hex}`;
-}
-
-/** Recover the exact secret value(s) typed when a persisted live-fill fence was armed (`RULE 5″/5‴`).
- *  Any generation mismatch (`entryGen`) or revision mismatch (`rev !== r.rev`) fails closed (`movedOn: true`). */
-function slotSecretsAtRev(rec, { typedSlot = null, rev = null, entryGen = null, minBytes = 1 } = {}) {
-  const r = rec && rec.v === 1 ? rec : recordOf(rec);
-  if (!r) return { ok: false, movedOn: true, values: [] };
-  const fGen = typeof entryGen === 'string' && ENTRY_GEN_RE.test(entryGen) ? entryGen : null;
-  const rGen = typeof r.entryGen === 'string' && ENTRY_GEN_RE.test(r.entryGen) ? r.entryGen : null;
-  if ((fGen || rGen) && fGen !== rGen) return { ok: false, movedOn: true, values: [] };
-  const curRev = Number.isInteger(r.rev) && r.rev >= 1 ? r.rev : 1;
-  const slot = TYPED_SLOTS.includes(typedSlot) ? typedSlot : null;
-  if (slot === 'otp') return { ok: false, movedOn: true, values: [] };
-  const revNum = Number(rev);
-  if (!slot || !Number.isInteger(revNum) || revNum < 1 || curRev !== revNum) {
-    return { ok: false, movedOn: true, values: [] };
-  }
-  const raw = [];
-  if (slot === 'previous') {
-    if (r.previous && r.previous.password) raw.push(r.previous.password);
-  } else if (slot === 'pending') {
-    if (!r.pending) return { ok: false, movedOn: true, values: [] };
-    raw.push(r.pending.password);
-    if (r.current && r.current.password) raw.push(r.current.password);
-  } else {
-    if (!r.current) return { ok: false, movedOn: true, values: [] };
-    raw.push(r.current.password);
-  }
-  const floor = Number.isFinite(Number(minBytes)) && Number(minBytes) > 0 ? Number(minBytes) : 1;
-  const values = [...new Set(raw.filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= floor))];
-  return values.length ? { ok: true, movedOn: false, values } : { ok: false, movedOn: true, values: [] };
 }
 
 /** Create a brand-new 3-slot record (`pending === 'register'` seals into `pending` with `current: null`; else seals into `current`). */
@@ -743,6 +711,15 @@ function liveFillAllowsVerb(verb, argv = []) {
     const a = Array.isArray(argv) ? argv.map(String) : [];
     if (a.some((x) => x === '--fn' || x.startsWith('--fn=') || x === '--text' || x.startsWith('--text='))) return false;
   }
+  // lane chrome-157 (vault-login round 32, 主开发's ruling Q3): a fenced tab's SECOND DOOR needs two acts — open a new tab, switch to
+  // another tab. `tab new …` and `tab <id|label>` are admitted; the listing (`tab`, `tab list`) and `tab close` are not (a listing
+  // answers with titles and addresses the fenced document controls). `window` is not admitted at all: the driver's sub-verbs
+  // cannot all be proven free of a read path (its README names only `window new`; a closed binary may carry more).
+  if (v === 'tab') {
+    const a = Array.isArray(argv) ? argv.map(String) : [];
+    const sub = a.slice(1).find((x) => x && !x.startsWith('-'));
+    if (sub === undefined || sub === 'list' || sub === 'close') return false;
+  }
   return true;
 }
 
@@ -758,17 +735,50 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
   } else if (liveFillAllowsVerb(v, argv)) {
     return { ok: true };
   }
-  const reason = holdReason === HOLD_VAULT_LOCKED
-    ? ' (the vault was locked while the fill was live)'
-    : holdReason === HOLD_TOO_MUCH_TEXT
-      ? ' (the page holds too much text to verify wipe; navigate or close the tab)'
-      : holdReason === HOLD_UNKNOWN_TYPED
-        ? ' (the credential changed while the browser stayed open; navigate or close the tab)'
-        : '';
+  const site = str(origin || 'this site');
+  const cmd = str(verb || 'command');
+  if (holdReason === HOLD_UNKNOWN_TYPED) {
+    return no(
+      'login_fill_live',
+      `refused "${cmd}" on ${site} because VibeSpace can no longer verify whether a filled login secret is still on this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+    );
+  }
+  if (holdReason === HOLD_TOO_MUCH_TEXT) {
+    return no(
+      'login_fill_live',
+      `refused "${cmd}" while a vault login fill is held on ${site} (the page holds too much text to verify wipe) — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+    );
+  }
   return no(
     'login_fill_live',
-    `refused "${str(verb || 'command')}" while a vault login fill is in progress or unsubmitted on ${str(origin || 'this site')}${reason} — wait for the fill to finish and submit the login form (click / press Enter) or navigate away before reading`
+    `refused "${cmd}" while a vault login fill is in progress or unsubmitted on ${site} — wait for the fill to finish and submit the login form (click / press Enter), reload or navigate this tab, or open or switch to another tab (until this tab submits, reloads, or navigates, cross-origin credential requests from this page are blocked)`
   );
+}
+
+/** Pure Law 1 verdict after checking active post-lift guards on a tab:
+ *  a guard retirement (`url` moved within document) is NEVER a check, so a `postLiftHeld` fence lifts ONLY when every guard
+ *  that armed it was genuinely checked on this pass and verified clean; otherwise it converts to `HOLD_UNKNOWN_TYPED` until navigation. */
+function postLiftOutcomeVerdict({ postLiftHeld = false, heldGuardIds = [], checkedGuardIds = [], refilledGuardIds = [], retiredGuardCount = 0, anyTooMuch = false } = {}) {
+  const checked = new Set(Array.isArray(checkedGuardIds) ? checkedGuardIds : []);
+  const held = Array.isArray(heldGuardIds) ? heldGuardIds.filter((x) => x != null) : [];
+  const refilled = Array.isArray(refilledGuardIds) ? refilledGuardIds.filter((x) => x != null) : [];
+  const unverifiedHeld = Boolean(postLiftHeld) && (
+    held.length > 0 ? held.some((id) => !checked.has(id)) : (checked.size === 0 || Number(retiredGuardCount) > 0)
+  );
+  if (unverifiedHeld) {
+    return { action: 'hold_unknown', holdReason: HOLD_UNKNOWN_TYPED, heldGuardIds: [] };
+  }
+  if (refilled.length > 0) {
+    return {
+      action: 'rearm_held',
+      holdReason: anyTooMuch ? HOLD_TOO_MUCH_TEXT : '',
+      heldGuardIds: [...new Set(refilled)],
+    };
+  }
+  if (postLiftHeld) {
+    return { action: 'lift_verified_empty', holdReason: '', heldGuardIds: [] };
+  }
+  return { action: 'allow', holdReason: '', heldGuardIds: [] };
 }
 
 // ── closed-set agent & owner words ──────────────────────────────────────────
@@ -845,12 +855,12 @@ module.exports = {
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,
-  LOCKED, HOLD_VAULT_LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED,
+  LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
-  recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen, slotSecretsAtRev,
+  recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
   newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord,
   shouldRemindPending, pendingRemindKey,
   generatePassword, parseVaultFillSpec, fillVerdict,
-  liveFillAllowsVerb, liveFillVerdict,
+  liveFillAllowsVerb, liveFillVerdict, postLiftOutcomeVerdict,
   loginText, noticeWords,
 };

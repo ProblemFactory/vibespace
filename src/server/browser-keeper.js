@@ -473,6 +473,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // per-profile screencast hang on the keeper without the keeper knowing them;
   // `digestExtras` lets them add their facts (recording state) to `list()`.
   const leaseListeners = new Set();
+  const profileDropListeners = new Set();
+  function onProfileDrop(fn) { if (typeof fn !== 'function') return () => {}; profileDropListeners.add(fn); return () => profileDropListeners.delete(fn); }
   const digestExtras = new Set();
   const changeListeners = new Set(); // lane S2: `onChange` — the browser fact's re-publish hook (notify() fans out)
   function emitLease(ev) {
@@ -900,6 +902,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function profile(id) { ensureLoaded(); return reg.profiles.find((p) => p.id === id) || null; }
   function profileByRef(ref) { ensureLoaded(); return B.findProfile(named(), ref); }
   function browserOf(profileId) { ensureLoaded(); return reg.browsers[profileId] || null; }
+  /** lane chrome-157 (vault-login round 32, ruling Q8): THE one same-browser identity of a profile — browserIdentityOfRecord over
+   *  this keeper's record (a watch hands its url for a browser the keeper has no record of). */
+  function browserIdentityOf(profileId, { url = '' } = {}) { ensureLoaded(); return browserIdentityOfRecord(reg.browsers[String(profileId || '')] || null, url); }
   function leasesFor(browserKey, opts) { ensureLoaded(); return B.leasesOf(reg.leases, browserKey, opts).map(leaseView); }
   function leasesOn(profileId) { ensureLoaded(); return reg.leases.filter((l) => l.profileId === profileId).map(leaseView); }
 
@@ -1423,7 +1428,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }   // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
-    ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end
+    ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; if (reg.loginFences) delete reg.loginFences[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end; vault-login Shape S: nor its persisted fences
     displays.dropEngineWrapper(id); // lane engine-args-string r2: its engine wrapper goes with it (removal needs a stopped browser)
     dropEgress(id); // lane engine-spi-egress: its egress proxy never outlives its record (a conversation's browser on a wrapped engine had one each)
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
@@ -1432,6 +1437,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
     let passkeys = 0; try { passkeys = passkeyDrop ? Number(passkeyDrop(id)) || 0 : 0; } catch (e) { log.warn?.(`[browser] the passkeys of ${id} were not removed — ${e && e.message}`); }
+    for (const fn of [...profileDropListeners]) { try { fn(id); } catch { /* best effort */ } }
     if (passkeys) log.log?.(`[browser] profile ${id}: its ${passkeys} passkey(s) removed with it`);
     return { removed: id, dir: p.dir, passkeys };
   }
@@ -6898,19 +6904,21 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     let n = 0;
     for (const l of reg.leases) if (l && l.profileId === pid && Array.isArray(l.permissions)) { delete l.permissions; n++; } // lane browser-ui-prompts-r2: a fresh Chrome forgot them
     for (const l of reg.leases) if (l && l.profileId === pid && Array.isArray(l.tabs) && l.tabs.length) { delete l.tabs; n++; }
+    if (reg.loginFences && reg.loginFences[pid]) { delete reg.loginFences[pid]; n++; }
+    for (const fn of [...profileDropListeners]) { try { fn(pid); } catch { /* best effort */ } }
     if (n) commit();
     return n;
   }
-  /** lane vault-login: read/write persisted live-fill fences & scrub entry names through the ONE registry writer (zero secret bytes or digests on disk). */
+  /** lane vault-login (Shape S, r32): read/write persisted tab fences (`{targetId, urlAtFill, origin, at, browserKey?}`) & scrub entry names through the ONE registry writer (zero login identity, secret bytes, or digests on disk). */
   function loginFenceStateOf(profileId) {
     ensureLoaded();
     const pid = String(profileId || '');
     const st = reg.loginFences && reg.loginFences[pid];
-    if (!st || typeof st !== 'object') return { fences: [], scrubs: [], guards: [] };
+    if (!st || typeof st !== 'object') return { fences: [], scrubs: [] };
+    const norm = B.normalizeLoginFenceState(st);
     return {
-      fences: Array.isArray(st.fences) ? st.fences.map((f) => ({ ...f, ...(Array.isArray(f.also) ? { also: f.also.map((a) => ({ ...a })) } : {}) })) : [],
-      scrubs: Array.isArray(st.scrubs) ? st.scrubs.map((s) => ({ ...s })) : [],
-      guards: Array.isArray(st.guards) ? st.guards.map((g) => ({ ...g, ...(Array.isArray(g.also) ? { also: g.also.map((a) => ({ ...a })) } : {}) })) : [],
+      fences: norm.fences.map((f) => ({ ...f })),
+      scrubs: norm.scrubs.map((s) => ({ ...s })),
     };
   }
   function saveLoginFenceState(profileId, { fences = [], scrubs = [], guards = [] } = {}) {
@@ -6918,40 +6926,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const pid = String(profileId || '');
     if (!pid || !B.isProfileId(pid)) return false;
     if (!reg.loginFences || typeof reg.loginFences !== 'object') reg.loginFences = {};
-    const normFence = (f, includeHold = true) => {
-      const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a === 'object' && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
-        loginId: String(a.loginId).slice(0, 320),
-        ...(a.typedSlot === 'current' || a.typedSlot === 'password' || a.typedSlot === 'previous' || a.typedSlot === 'pending' || a.typedSlot === 'otp' ? { typedSlot: a.typedSlot } : {}),
-        ...(Number.isInteger(a.rev) && a.rev >= 1 ? { rev: a.rev } : {}),
-        ...(typeof a.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(a.entryGen) ? { entryGen: a.entryGen } : {}),
-        ...(a.typedPrevious === true ? { typedPrevious: true } : {}),
-        ...(Number.isFinite(a.at) && a.at > 0 ? { at: Math.floor(a.at) } : {}),
-      })) : [];
-      return {
-        targetId: String(f.targetId).slice(0, 64),
-        urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
-        origin: String(f.origin).slice(0, 512),
-        loginId: String(f.loginId || '').slice(0, 320),
-        at: Number(f.at) || 0,
-        ...(typeof f.mode === 'string' && f.mode ? { mode: String(f.mode).slice(0, 24) } : {}),
-        ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
-        ...(includeHold && typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
-        ...(f.typedSlot === 'current' || f.typedSlot === 'password' || f.typedSlot === 'previous' || f.typedSlot === 'pending' || f.typedSlot === 'otp' ? { typedSlot: f.typedSlot } : {}),
-        ...(Number.isInteger(f.rev) && f.rev >= 1 ? { rev: f.rev } : {}),
-        ...(typeof f.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(f.entryGen) ? { entryGen: f.entryGen } : {}),
-        ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
-        ...(includeHold && f.unknownTyped === true ? { unknownTyped: true } : {}),
-        ...(includeHold && f.postLiftHeld === true ? { postLiftHeld: true } : {}),
-        ...(also.length ? { also } : {}),
-      };
-    };
-    const nf = (Array.isArray(fences) ? fences : []).filter((f) => f && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => normFence(f, true));
-    const ng = (Array.isArray(guards) ? guards : []).filter((g) => g && typeof g.targetId === 'string' && g.targetId && typeof g.origin === 'string' && g.origin).slice(-32).map((g) => normFence(g, false));
-    const ns = (Array.isArray(scrubs) ? scrubs : []).filter((s) => s && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
-      name: String(s.name).slice(0, 320),
-      at: Number(s.at) || 0,
-    }));
-    const next = nf.length || ns.length || ng.length ? { fences: nf, scrubs: ns, ...(ng.length ? { guards: ng } : {}) } : null;
+    const norm = B.normalizeLoginFenceState({ fences, scrubs, guards });
+    const next = norm.fences.length || norm.scrubs.length ? norm : null;
     const prev = reg.loginFences[pid] || null;
     if (JSON.stringify(prev) === JSON.stringify(next)) return true;
     if (next) reg.loginFences[pid] = next;
@@ -7722,7 +7698,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
      *  would take — the same verdict the leases use; the sharing dialogs word «each conversation in its own tab» only where it holds */
     onDownloadFolder: (fn) => { if (typeof fn !== 'function') return () => { }; folderListeners.add(fn); return () => folderListeners.delete(fn); },   // (lane chrome-157: THE WINDOW's notice road)
     agentRoadFor: (id, { host = null } = {}) => (id ? dialogRoadOf(named().find((p) => p.id === String(id)) || null) : M.leaseRoadVerdict({ mediated: false, proxy: !!(mediator && mediationOn() && typeof mediator.grantFor === 'function'), ephemeral: false, remote: !!host, agent: true })),
-    list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
+    list, profile, profileByRef, browserOf, browserIdentityOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
     engineFactOf, engineRowsView, defaultEngineNow, // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
     installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
@@ -7785,7 +7761,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor /* lane vault-login */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor, onProfileDrop /* lane vault-login */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields
@@ -7809,4 +7785,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   return api;
 }
 
-module.exports = { create, keeper, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };
+/** lane chrome-157 (vault-login round 32, ruling Q8): THE ONE same-browser identity, PURE, built from what exists — the browser's
+ *  own id (the devtools UUID Chrome mints per launch, off the record's cdpUrl, else the url the caller watches) and the keeper's
+ *  process identity of the record (pid + starttime + startedAt). Two answers are the same browser only when they are equal and
+ *  not null: a replacement browser that reuses the process number has another starttime and another UUID. null when neither
+ *  exists, or for a record that is neither starting nor ready (a stopped or failed browser is nobody's to inherit). */
+const DEVTOOLS_UUID = /\/devtools\/browser\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+function browserIdentityOfRecord(rec, url = '') {
+  if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;
+  const m = DEVTOOLS_UUID.exec(String((rec && rec.cdpUrl) || '')) || DEVTOOLS_UUID.exec(String(url || '').trim());
+  const uuid = m ? m[1].toLowerCase() : '';
+  const proc = rec && rec.pid != null ? `${rec.pid}:${rec.starttime ?? ''}:${rec.startedAt || ''}` : '';
+  return uuid || proc ? `${uuid}|${proc}` : null;
+}
+
+module.exports = { create, keeper, browserIdentityOfRecord, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };
