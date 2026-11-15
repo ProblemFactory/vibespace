@@ -667,12 +667,24 @@ console.log('④ bounds — body, type, pace, rotation, the day\'s notices');
   ok(fs.existsSync(F + '.1') && fs.statSync(F).size <= 900, 'past the cap the file rotates to .1 (one generation kept)', { rotated: fs.existsSync(F + '.1'), size: fs.statSync(F).size });
   const sm = H.sink.summary();
   ok(sm.app.lines + sm.frames.lines === linesOf(F).length + linesOf(F + '.1').length, 'the count of lines on disk follows the rotation (this file + its .1 — what a restart reads back)', { sm, cur: linesOf(F).length, old: linesOf(F + '.1').length });
-  const H3 = await hub({ dir: path.join(ROOT, 'pace', 'data') });
+  // THE PACE ON ITS OWN CLOCK (int403 — B-d24c's tenth: the .402 release mirror's fast attempt 1 was red here, received 64 / written 64 /
+  // paced 0, on a runner that was not slow: the burst ran across a minute's edge of the wall clock, and the sink counts in FIXED
+  // minutes — Math.floor(now() / 60 s) — so 64 posts in two minutes pace none). The sink takes `now`; the burst gets an instant in the
+  // middle of one minute, so it sits in one bucket by construction. The edge itself is said by the leg after these.
+  const T3 = Date.UTC(2026, 0, 1, 12, 0, 30);
+  const H3 = await hub({ dir: path.join(ROOT, 'pace', 'data'), now: () => T3 });
   const st = []; for (let i = 0; i < 64; i++) st.push((await post(H3, report({ 'blocked-uri': `https://n${i}.example.net/x` }))).status);
   ok(st.slice(0, 60).every((x) => x === 204) && st.slice(60).every((x) => x === 429) && H3.sink.stats().paced === 4, 'the 61st post a minute from one address that would ADD a line ⇒ 429 (counted, not logged)', { st: st.slice(55), stats: H3.sink.stats() });
   const rep = []; for (let i = 0; i < 100; i++) rep.push((await post(H3, report({ 'blocked-uri': 'https://n0.example.net/x' }))).status);
   ok(rep.every((x) => x === 204) && H3.sink.stats().paced === 4, 'a REPEAT is never paced (it writes nothing) — a burst of repeats cannot hide the next new report', { codes: [...new Set(rep)], stats: H3.sink.stats() });
   await H3.close();
+  // THE BUCKET'S TRUTH: a FIXED minute — a burst across a minute's edge is counted in two, 32 + 32 new posts from one address pace none
+  // (by design: the window is the clock's minute, not the last 60 s)
+  let T4 = Date.UTC(2026, 0, 1, 12, 0, 59, 500);
+  const H4 = await hub({ dir: path.join(ROOT, 'pace-edge', 'data'), now: () => T4 });
+  const ed = []; for (let i = 0; i < 64; i++) { if (i === 32) T4 += 1000; ed.push((await post(H4, report({ 'blocked-uri': `https://e${i}.example.net/x` }))).status); }
+  ok(ed.every((x) => x === 204) && H4.sink.stats().paced === 0, 'the pace is the clock\'s FIXED minute: 64 new posts from one address across a minute\'s edge (32 + 32) pace none — each minute counts its own', { codes: [...new Set(ed)], stats: H4.sink.stats() });
+  await H4.close();
   ok(SINK.BODY_MAX === 32 * 1024 && SINK.FILE_MAX === 1024 * 1024 && SINK.PACE_PER_MIN === 60, 'the bounds are 32 KB a body, 1 MB a file, 60 a minute an address');
   await H.close();
 }
