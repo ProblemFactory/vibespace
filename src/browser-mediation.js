@@ -339,9 +339,9 @@ function liveFillCdpVerdict(method, { allowVerb = null, params = null, holdReaso
   if (m === 'Browser.getVersion') return { refuse: false, code: null, why: null, error: null };
   const row = CENSUS.rowOf(m);
   const msg = holdReason === 'unknown_typed'
-    ? `${m} is refused because VibeSpace can no longer verify whether a filled login secret is still in this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+    ? `${m} is refused because VibeSpace can no longer verify whether a filled login secret is still in this tab — reload or navigate this tab (a reload of an address too long to check keeps it held: go to another page), or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
     : holdReason === 'await_vault'
-      ? `${m} is refused because VibeSpace restarted while a filled login secret was in this tab — it checks this tab again once the vault is unlocked; until then open or switch to another tab`
+      ? `${m} is refused — open or switch to another tab: VibeSpace restarted while a filled login secret was in this tab, and it checks this tab again once the vault is unlocked`
     : holdReason === 'entry_gone'
       ? `${m} is refused because what was filled in this tab is no longer in the vault, so VibeSpace cannot check this tab again — open or switch to another tab (closing this tab ends it)`
     : holdReason === 'value_shown'

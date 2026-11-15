@@ -392,6 +392,27 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
       };
       const checkMethod = ct.wrapped ? (ct.innerMethod || msg.method) : msg.method;
       const checkParams = ct.wrapped ? ct.innerParams : (msg.params || null);
+      // lane chrome-157 (主开发's L4): a read about to be refused on a plain live fill waits for ONE look at the filled box — when the box
+      // no longer holds the secret the fence lifts and the read goes on (forwardAfterFence judges the fence again); the calls of this
+      // connection keep their order behind it
+      if (loginFence && !credit && checkTid && typeof loginFence.filledBoxLookDue === 'function' && loginFence.filledBoxLookDue(g.profileId, checkTid)
+        && !ct.wrapped && M.liveFillCdpVerdict(checkMethod, { allowVerb: null, params: checkParams }).refuse) {
+        conn.postLiftChain = Promise.resolve(conn.postLiftChain)
+          .then(() => loginFence.lookAtFilledBox(g.profileId, checkTid))
+          .catch(() => null)
+          .then(() => (typeof loginFence.hasPostLiftGuard === 'function' && loginFence.hasPostLiftGuard(g.profileId, checkTid) ? loginFence.recheckPostLift(g.profileId, checkTid) : null))   // (a lift leaves its guard: the read waits for it, as the verb door does)
+          .catch(() => ({ ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' }))
+          .then((rc) => {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            if (rc && rc.checkFailed) {
+              g.refusals = (g.refusals || 0) + 1;
+              try { ws.send(JSON.stringify(M.refusal(msg.id, rc.code || 'login_check_failed', rc.error || 'VibeSpace could not check this tab — try again', sid))); } catch { /* gone */ }
+              return;
+            }
+            forwardAfterFence();
+          });
+        return;
+      }
       if (loginFence && !credit && checkTid && typeof loginFence.hasPostLiftGuard === 'function' && loginFence.hasPostLiftGuard(g.profileId, checkTid)
         && (ct.wrapped || M.liveFillCdpVerdict(checkMethod, { allowVerb: null, params: checkParams }).refuse)) {
         conn.postLiftChain = Promise.resolve(conn.postLiftChain)
