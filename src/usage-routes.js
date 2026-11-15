@@ -8,6 +8,7 @@
  */
 const fs = require('fs');
 const UP = require('./usage-predict.js');   // the lanes a screen may draw (usage-predict)
+const doorReads = require('./door-reads.js');   // today's reads of an on-demand account, by caller (usage-predict pick 1)
 const { accountLoginState } = require('./login-state.js'); // THE credential-state reader (shared with the pool engine + the repair migration)
 const path = require('path');
 const os = require('os');
@@ -1574,7 +1575,8 @@ function onDemandReadings() {
       if (!a || !a.id || !harnesses.get(a.backend || 'claude')?.quota?.onDemand) continue;
       const c = usageWrite.readCacheObject(USAGE_CACHE_DIR, a.id);
       if (!c || !Array.isArray(c.limits) || !c.limits.length) continue;
-      out[a.id] = { limits: c.limits, fetchedAt: c.fetchedAt || null, source: c.source || null, windowNames: c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null };
+      out[a.id] = { limits: c.limits, fetchedAt: c.fetchedAt || null, source: c.source || null, windowNames: c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null,
+        reads: doorReads.todayOf(doorReads.readDoorReads(USAGE_CACHE_DIR, a.id), Date.now()) };   // how often its CLI was asked today, by whom
     }
   } catch { }
   return out;
