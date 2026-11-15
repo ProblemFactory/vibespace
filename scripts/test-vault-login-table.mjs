@@ -33,7 +33,7 @@ await runR32LoginTable({ repoDir: REPO, ok });
 console.log('— one mutant per law (+ Q7\'s cell)');
 const MUT = mutantCopies('vl-r32-mutants', REPO);
 await runR32Mutants({ repoDir: REPO, ok, MUT });
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 27 })) ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 29 })) ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
