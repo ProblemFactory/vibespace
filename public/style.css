@@ -1971,6 +1971,9 @@ html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: cal
   padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,0.1);
 }
 .settings-row.modified { background: color-mix(in srgb, var(--accent) 5%, transparent); margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); }
+/* lane setting-doors pick 1: the row a `vibespace://settings/<key>` link opened on, marked for a moment (settings-ui _focusRow) —
+   the width a modified row takes (no shift), the highlight-flash every «found it» mark uses */
+.settings-row.settings-row-focus { margin: 0 -8px; padding: 8px; border-radius: var(--radius-sm); animation: highlight-flash 1.6s ease-out; }
 .settings-row-info { flex: 1; min-width: 0; }
 .settings-row-label { font-size: 12px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .settings-row-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -3222,6 +3225,13 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
   overflow-wrap: anywhere;
 }
 .global-toast-x, .global-toast-action, .global-toast-tap { pointer-events: auto; }
+/* lane setting-doors pick 1: a `vibespace://settings/<key>` in a toast's words (utils.js registerSettingLinks) — a link to that
+   row inside the words; it takes the pointer, the words around it still pass it through (B-a42d) */
+.global-toast-setting {
+  pointer-events: auto; border: none; background: none; padding: 0; margin: 0; font: inherit; line-height: inherit;
+  color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; text-align: start; overflow-wrap: anywhere;
+}
+.global-toast-setting:hover { color: var(--accent-hover); }
 .global-toast-body { min-width: 0; }
 .global-toast-x {
   flex: none; border: none; background: none; color: var(--text-dim);

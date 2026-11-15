@@ -35,6 +35,7 @@ import { dateOf, stampAt } from './page-time.js'; // lane ui-language: the ONE f
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
+import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a `vibespace://settings/<key>` link only when the key IS a row
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -423,7 +424,7 @@ export const optionWords = (label, t) => t('Reply: {label}', { label: String(lab
 /** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
  *  (foryou-links linkedHtml — every segment escaped, a link a span around its own words), never markdown — the tray's rows
  *  and the For-you window's pane both draw this (the pane's markdown turned `__tests__/` into a bold «tests/»). */
-export const wordsHtml = (text, { whole = false } = {}) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole });   // B-3f50: `whole` = the text IS the agent's own stored field — its end «…» is the store's cut only at a cap   // lane mask-value-shape: a masked link = words + THE note
+export const wordsHtml = (text, { whole = false } = {}) => linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), whole, has: isSettingKey });   // B-3f50: `whole` = the text IS the agent's own stored field — its end «…» is the store's cut only at a cap   // lane mask-value-shape: a masked link = words + THE note
 /** The labels a row's chips stand for (lane foryou-honest): ctx.optionsOf (the model's — explicit, else parsed), else the item's own. */
 export const rowOptions = (i, ctx) => (ctx && typeof ctx.optionsOf === 'function' ? ctx.optionsOf(i) : i && Array.isArray(i.options) ? i.options : []) || [];
 
@@ -608,8 +609,8 @@ export function linkifyInto(el) {
     // it is its words (fy-masked), and THE note is a sibling AFTER the block, never inside it (a copy of the block copies the command)
     let block = n.parentElement ? n.parentElement.closest('pre') || n.parentElement.closest('code') : null;
     if (block && !el.contains(block)) block = null;
-    let segs = segmentText(inCode ? '`' + n.data + '`' : n.data);
-    if (inCode) segs = segs.length > 1 && segs[0].s === '`' && segs[segs.length - 1].s === '`' ? segs.slice(1, -1) : segmentText(n.data);
+    let segs = segmentText(inCode ? '`' + n.data + '`' : n.data, { has: isSettingKey });   // lane setting-doors pick 1: a link to one setting too
+    if (inCode) segs = segs.length > 1 && segs[0].s === '`' && segs[segs.length - 1].s === '`' ? segs.slice(1, -1) : segmentText(n.data, { has: isSettingKey });
     if (!segs.some((g) => g.t === 'link' || g.t === 'masked')) continue;
     const frag = document.createDocumentFragment();
     for (const g of segs) {

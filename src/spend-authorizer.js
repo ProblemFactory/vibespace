@@ -793,7 +793,8 @@ function refusalText(v, { sessionName = null, behind = null } = {}) {
   const spent = spentBy ? ` ${promisedHere > 0 ? 'Spent or promised' : 'Spent'} by: ${spentBy}.` : '';
   // B-0a33 round 1: when waiting frames hold the cap, the line names the conversations they wait behind (at most three)
   const wb = promisedHere > 0 && Array.isArray(behind) && behind.length ? ` They wait behind ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more conversations` : ''}.` : '';
-  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}`;
+  const row = spendRowOf(v), door = row ? ` The limit: ${SL.settingLink(row)} — the owner changes it there.` : '';   // lane setting-doors pick 1
+  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}${wb}${door}`;
 }
 
 /** PURE. THE REFUSAL AS STRUCTURE (lane owner-press-attended; r2: «a notice never loses a fact it carried» — r1 filed one
@@ -854,6 +855,23 @@ const DOOR_WORDS = Object.freeze({
   ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
+// lane setting-doors pick 1 (2026-11-14): a refusal that names a value names where to change it — THE ROW, as its link
+// (src/setting-links.js `vibespace://settings/<key>`; the owner's page draws it as a door to that one row)
+// PURE, imports nothing: the link's spelling is src/setting-links.js SCHEME (test-setting-links pins the two equal)
+const SL = Object.freeze({ settingLink: (key) => `vibespace://settings/${key}` });
+const SPEND_ROW_KEYS = Object.freeze({ perIdentityHour: 'spend.unattendedPerIdentityHour', perIdentityDay: 'spend.unattendedPerIdentityDay', perInstanceDay: 'spend.unattendedPerInstanceDay', noticePct: 'spend.budgetNoticePct', allowOverage: 'spend.allowOverageTurns' });
+const DOOR_LINK_WORDS = Object.freeze({
+  spending: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change this limit in Settings → Spending: {link}',
+  overage: 'Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage»: {link}',
+});
+/** PURE. The spending row a verdict names (a ceiling by its cap, overage by its switch), or null. */
+function spendRowOf(v) {
+  const cap = v && CAP_OF[v.why];
+  if (cap) return SPEND_ROW_KEYS[cap[0]];
+  return v && v.why === 'overage-in-use' ? SPEND_ROW_KEYS.allowOverage : null;
+}
+/** PURE. The ceiling an 80 % warning is about. */
+function warnRowOf(warn) { return warn ? SPEND_ROW_KEYS[warn.scope === 'hour' ? 'perIdentityHour' : warn.scope === 'instance' ? 'perInstanceDay' : 'perIdentityDay'] : null; }
 const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
@@ -904,7 +922,8 @@ function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   // r3: the fold is for the EYE, not the record — «And N more» carries the folded rows (`more`); Copy says every producer
   if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS }, more: by.slice(SPENT_ROWS).map(spentRow) });
   const door = waits ? 'waiting' : ROW_DOOR[row];
-  detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : { key: DOOR_WORDS[door] });
+  const rowKey = spendRowOf(v);   // lane setting-doors pick 1: the row this refusal names, as its link
+  detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : rowKey && DOOR_LINK_WORDS[door] ? { key: DOOR_LINK_WORDS[door], params: { link: SL.settingLink(rowKey) } } : { key: DOOR_WORDS[door] });
   return { text, detail, door };
 }
 
@@ -916,10 +935,11 @@ function noticeText(warn) {
   const window = warn.scope === 'hour' ? 'this hour' : 'today';
   const spentBy = producersText(warn.producers);
   const spent = spentBy ? ` Top producers ${window}: ${spentBy}.` : '';
-  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%).${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
+  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%).${spent} VibeSpace will refuse further automatic turns on it when the budget is spent. The limit: ${SL.settingLink(warnRowOf(warn))}`;   // lane setting-doors pick 1: the warning names its row
 }
 
 module.exports = {
+  SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, warnRowOf,
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP, RESERVATION_WAIT_MAX_MS,
   budgetLimits, capUnset, waitingOverCap, emptyBudget, pruneBudget, mergeBudget, spendCounts, stampAt, countAt, waitingStamp, waitingRids, waitingBehind, stampReason, producerCounts, producersText,

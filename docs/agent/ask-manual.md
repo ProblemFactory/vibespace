@@ -15,6 +15,8 @@ to the “待你处理” tray at the top right of your screen": the label they 
 the place it is NOW (they may have moved it, and a phone has it in the top
 bar). Never a place from memory, and never "your inbox" or "your queue".
 
+**A setting the owner must change** (lane setting-doors, 2026-11-14): when an ask needs a setting changed, the ask carries that setting's link — `vibespace://settings/<key>`, the key exactly as Settings prints it on the row (e.g. `vibespace://settings/spend.unattendedPerInstanceDay`) — never a path in words. The owner's press opens Settings on that one row; the link never writes a value, and an agent cannot write the spending rows itself.
+
 ## Verbs
 
 ```

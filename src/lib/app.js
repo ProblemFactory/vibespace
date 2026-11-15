@@ -20,7 +20,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
+import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
@@ -40,7 +40,7 @@ import { installNewSessionForm } from './new-session-form.js'; // lane new-sessi
 import { createPlan } from './new-session-model.js'; // PURE: what Create sends (lane new-session-layout-v3-build: Agent | Terminal + the harness's own terminal UI → the road + the v2 payload)
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
-import { SETTINGS_SCHEMA, registerHarnessSettings } from './settings-schema.js';
+import { SETTINGS_SCHEMA, registerHarnessSettings, isSettingKey } from './settings-schema.js';
 import { SettingsUI } from './settings-ui.js';
 import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
@@ -224,6 +224,9 @@ class App {
       getSeconds: () => this.settings.get('taskbar.toastSeconds'),
       getAnchor: () => document.getElementById('taskbar-user-todos'),
     });
+    // lane setting-doors pick 1: a toast's words (a server notice, a refusal) draw a `vibespace://settings/<key>` naming a known
+    // row as a link to it — THE door, openSettingAt; every other word stays text
+    registerSettingLinks({ has: isSettingKey, open: (key) => this.openSettingAt(key) });
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
@@ -2486,6 +2489,16 @@ class App {
    *  `openIntegration('lark')` scrolls to and highlights that row; an id that
    *  no longer exists opens the window with nothing highlighted, never throws. */
   openIntegration(id, opts) { return openIntegrationsWindow(this, { focus: id || null, ...(opts || {}) }); }
+  /** A DOOR TO ONE SETTING (lane setting-doors pick 1 — the owner: «…提供一个 vibespace://settings/ 之类的链接可以让我点了之后直通
+   *  对应的选项来改»): THE ONE door every `vibespace://settings/<key>` link opens through — the chat's setting span
+   *  (chat-renderers setupLinkHandler), a For-you item's words (user-todos-actions openLink, kind `setting`) and a toast
+   *  (utils registerSettingLinks). Settings opens ON that row (settings-ui open({ focusKey })): its section in view, its nav
+   *  group unfolded, an advanced / unused row drawn for this open, the row marked; a phone shows that section alone; an
+   *  open Settings window moves there. A key that is no row opens Settings as the ⚙ does. A LINK OPENS, IT NEVER WRITES:
+   *  no value rides it and nothing here touches a setting. */
+  openSettingAt(key) {
+    return this._settingsUI?.open(isSettingKey(key) ? { focusKey: key } : {});
+  }
 
   // Diagnostics report: renders the local telemetry summary (client errors,
   // boot crashes, feature usage) as a static HTML page in the embedded

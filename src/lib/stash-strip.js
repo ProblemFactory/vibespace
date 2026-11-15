@@ -19,6 +19,7 @@ import { fetchJson, showToast } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { maskedNoteOf } from './foryou-links.js'; // lane mask-value-shape: a link a belt masked inside says so (THE note, one rule with For you)
 import { UI_ICONS } from './icons.js';
+import { spendRowOf } from '../spend-authorizer.js'; // lane setting-doors pick 1: the row a spend refusal names
 import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords, handOverRefusalWords, groupHandOverWords, groupHandedWords } from '../stash-summary.js';
 
 const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
@@ -34,7 +35,8 @@ function showRefusal(r) {
   const w = handOverRefusalWords(r, t, { now: Date.now(), locale: deviceLocale() });
   const settings = globalThis.app && globalThis.app._settingsUI;
   const app = globalThis.app;
-  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => settings.open({ category: t('Spending') }) }
+  const row = spendRowOf({ why: r && r.why });   // lane setting-doors pick 1: the refused ceiling's row (the refusal's `why`) — the door opens THAT row
+  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => (row && app && typeof app.openSettingAt === 'function' ? app.openSettingAt(row) : settings.open({ category: t('Spending') })) }
     : w.door === 'usage' && app && typeof app.openUsage === 'function' ? { label: t('Open Usage'), run: () => app.openUsage() } : null;   // r2: a signed-out or unnamed account's door is the Usage window
   showToast(w.text, { type: r && r.code === 'nothing_waiting' ? 'info' : 'error', ...(action ? { action, duration: 12000 } : {}) });
 }

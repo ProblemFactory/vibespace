@@ -412,8 +412,8 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
       && /acct-1 is billing paid overage/.test(over.text) && over.door === 'spending' && /acct-1 cannot sign requests right now/.test(out.text) && out.door === 'usage' && /switched off for acct-1/.test(zero.text) && zero.door === 'spending',
       'R2 every refusal that remains after the attended law has its own words — another day names its weekday; overage and a cap of 0 («switched off») carry the Settings door, a signed-out account the Usage window (r2)', JSON.stringify([day.text, inst.text, over.text, out.text, zero.text]));
     const src = read('src/lib/stash-strip.js');
-    ok(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src) && /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => settings\.open\(\{ category: t\('Spending'\) \}\) \}/.test(src),
-      'R2 the strip\'s refusal toast carries the door: «Open Settings → Spending» opens the Settings window on its Spending section');
+    ok(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src) && /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => \(row && app && typeof app\.openSettingAt === 'function' \? app\.openSettingAt\(row\) : settings\.open\(\{ category: t\('Spending'\) \}\)\) \}/.test(src),
+      'R2 the strip\'s refusal toast carries the door: «Open Settings → Spending» opens the Settings window on the refused ceiling\'s ROW (lane setting-doors pick 1: spendRowOf over the refusal\'s why), else on its Spending section');
     // r2: THE SAME TABLE AS THE NOTICE (accept-r1 finding 1 + attack 2): no body with no identity says «the limit is reached»
     // unless the refusal WAS a cap; an instant already PAST is said «free now — press again», never «(in 1 min)»
     const noId = (why) => S.handOverRefusalWords({ ...body, why, identity: null, cap: null, retryAfter: 0 }, tEn, { now }).text;

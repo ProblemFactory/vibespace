@@ -218,6 +218,7 @@ export function inboxModel(app) {
     if (!tg) return false;
     if (tg.open === 'url' || tg.open === 'mail') { window.open(tg.href, '_blank', 'noopener'); return true; }
     if (tg.open === 'page') { window.open(new URL(tg.path, location.origin).href, '_blank', 'noopener'); return true; }
+    if (tg.open === 'setting') { app.openSettingAt?.(tg.key); return true; }   // lane setting-doors pick 1: THE door — Settings on that row; it opens, never writes
     const host = tg.host || undefined;
     for (const c of tg.cands) {
       const info = await fetchJson(`/api/file/info?path=${encodeURIComponent(c)}${host ? '&host=' + encodeURIComponent(host) : ''}`);
