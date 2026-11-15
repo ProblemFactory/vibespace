@@ -13,16 +13,19 @@
 // words (`{what}`) — and says, where it is seen (never in a fold), what happens if nothing is pressed and when (`{then}`):
 // «it is ended by itself at HH:MM», «VibeSpace does not end it by itself», or law 3's «there is nothing to end».
 const TEXT = Object.freeze({
-  command: 'Stuck on a command: {what} has shown nothing since {since}, and nothing it started is working. {then}',
+  // the tool alone (no command words) or the tool AND its command's first words (`cmd*`) — a key each, so each language sets its own spacing
+  command: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working. {then}',
+  cmd: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working. {then}',
+  cmdAlive: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is running. {then}',
+  cmdGone: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is not running. {then}',
   silent: 'No output since {since}, and no command is open. {then}',
   unknown: 'No output since {since} — whether its processes are working cannot be read on this machine. {then}',
   // the headline says whether the CLI process runs (the pictures of 11-15: in the fold, nobody saw it) — one key per fact
-  commandAlive: 'Stuck on a command: {what} has shown nothing since {since}, and nothing it started is working — {cli} is running. {then}',
-  commandGone: 'Stuck on a command: {what} has shown nothing since {since}, and nothing it started is working — {cli} is not running. {then}',
+  commandAlive: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running. {then}',
+  commandGone: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running. {then}',
   silentAlive: 'No output since {since}, and no command is open — {cli} is running. {then}',
   silentGone: 'No output since {since}, and no command is open — {cli} is not running. {then}',
 });
-const WHAT = '{tool} «{cmd}»';
 const THEN = Object.freeze({
   // an INSTANT CLAUSE (the For-you renderer's `{at, key, gone}`): its clock in the viewer's zone while it is ahead, `gone` after
   endAt: 'If nothing changes, the command is ended by itself at {time}.',
@@ -45,22 +48,23 @@ const fill = (k, p) => k.replace(/\{(\w+)\}/g, (m, x) => (x in p ? p[x] : m));  
 
 /** the item's words for a speaking verdict (src/turn-liveness.js livenessVerdict, or the state an item carried across a gap
  *  says — speakingStateOf) — {text, detail, i18n}; null for a state that does not speak. `cli` = the harness's label;
- *  `endAt` = the instant the by-itself ending acts (0 = it does not); `nothingToEnd` = law 3 (a step open, nothing below). */
-function stuckWords(v, { cli = 'The CLI', endAt = 0, nothingToEnd = false } = {}) {
+ *  `endAt` = the instant the by-itself ending acts (0 = it does not); `nothingToEnd` = law 3 (a step open, nothing below);
+ *  `kept` = the person chose to wait: the headline states no time (the kept card's own line says the next one — one time
+ *  per card, the one that is true). */
+function stuckWords(v, { cli = 'The CLI', endAt = 0, nothingToEnd = false, kept = false } = {}) {
   if (!v || !['stuck-on-command', 'silent', 'unknown'].includes(v.state)) return null;
   const known = v.cliAlive === true ? 'Alive' : v.cliAlive === false ? 'Gone' : '';
-  const key = v.state === 'stuck-on-command' ? TEXT['command' + known] : v.state === 'silent' ? TEXT['silent' + known] : TEXT.unknown;
   const tool = String(v.tool || 'a tool').slice(0, 80);
   const cmd = v.state === 'stuck-on-command' ? cmdWords(v.cmd) : '';
+  const key = v.state === 'stuck-on-command' ? TEXT[(cmd ? 'cmd' : 'command') + known] : v.state === 'silent' ? TEXT['silent' + known] : TEXT.unknown;
   const since = Number(v.since) || 0;
   const ends = v.state === 'stuck-on-command' && !nothingToEnd && Number(endAt) > 0;
   const thenKey = v.state === 'stuck-on-command' && nothingToEnd ? THEN.nothingToEnd : ends ? THEN.endAt : THEN.notByItself;
-  const then = thenKey === THEN.nothingToEnd ? { key: thenKey, params: { cli: String(cli) } } : ends ? { at: Number(endAt), key: thenKey, gone: THEN.endingNow } : { key: thenKey };
-  const what = cmd ? fill(WHAT, { tool, cmd }) : tool;
-  const thenText = fill(thenKey, thenKey === THEN.nothingToEnd ? { cli: String(cli) } : ends ? { time: hhmm(endAt) } : {});
-  const text = fill(key, { what, since: hhmm(since), cli: String(cli), then: thenText });
+  const then = kept ? '' : thenKey === THEN.nothingToEnd ? { key: thenKey, params: { cli: String(cli) } } : ends ? { at: Number(endAt), key: thenKey, gone: THEN.endingNow } : { key: thenKey };
+  const thenText = kept ? '' : fill(thenKey, thenKey === THEN.nothingToEnd ? { cli: String(cli) } : ends ? { time: hhmm(endAt) } : {});
+  const text = fill(key, { tool, cmd, since: hhmm(since), cli: String(cli), then: thenText }).trim();
   const i18n = {
-    text: { key, params: { ...(v.state === 'stuck-on-command' ? { what: cmd ? { key: WHAT, params: { tool, cmd } } : tool } : {}), ...(known ? { cli: String(cli) } : {}), since: { at: since }, then } },
+    text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool, ...(cmd ? { cmd } : {}) } : {}), ...(known ? { cli: String(cli) } : {}), since: { at: since }, then } },
     detail: [],
   };
   return { text, detail: '', i18n };
@@ -71,4 +75,4 @@ function restartWords({ since, state }, { cli = 'The CLI' } = {}) {
   return { text: fill(RESTART_TEXT, { ...p, since: hhmm(since) }), detail: '', i18n: { text: { key: RESTART_TEXT, params: { ...p, since: { at: Number(since) || 0 } } }, detail: [] } };
 }
 
-module.exports = { TEXT, WHAT, THEN, CMD_MAX, RESTART_TEXT, hhmm, cmdWords, stuckWords, restartWords };
+module.exports = { TEXT, THEN, CMD_MAX, RESTART_TEXT, hhmm, cmdWords, stuckWords, restartWords };

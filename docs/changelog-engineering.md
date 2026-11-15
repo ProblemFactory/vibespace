@@ -6,6 +6,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent — the look at 99f65d547, follow-up 5: what the new pictures showed
+- **One time per card, the true one.** The first walk's kept card said TWO times: its headline still ended «…ended by itself at 01:27» while its kept line said «…at 01:30». Keep waiting now redraws the headline without its `{then}` (stuckWords `kept: true` ⇒ `then: ''`); the kept line carries the next time and is patched with the count.
+- **Each language its own spacing.** zh read «run_command「node driver.mjs」 自 00:56» — a space after the bracket, because the command's words were a param of a sentence spaced for a bare tool name. The command form is now its own keys (TEXT.cmd / cmdAlive / cmdGone: `{tool} «{cmd}»`; zh `{tool}「{cmd}」自 …`, ja `{tool}「{cmd}」は …`); the `{what}` words param is gone.
+- **The gate's own rows.**
+  - test-turn-end restated 6.9 → 8.7 s. Its ③b busy walk reads every 60 ms (a busy loop moves ~6 ticks), and ④'s red control reads with no pause (its mutant counts no work at all).
+  - test-turn-watch restated 2.95 → 3.9 s.
+  - FAST_SUM_CAP_MS 1097 → 1100 s by arithmetic (1099.479 s over 590).
+- **The pins.** test-turn-watch ⑰ (the headline drops its time at the press), ㉒ (the zh line read from the REAL dictionary: no space after 」; a kept headline states no time); test-ci-gate's cap.
+
 ### turn-never-silent — the look at 99f65d547, follow-up 4: the smalls (S2, S3, S5, S6) and picture P4
 - **S2: the injected line SAYS the by-itself ending.**
   - The agy session's rule now reads «…no time limit of its own; VibeSpace ends one that has shown nothing, with nothing it started working, for 30 minutes (the owner's setting) — even a quiet wait by design; the step fails and the turn goes on. Run one that may wait for input as `timeout …`; a long quiet wait … goes through Background Work».
