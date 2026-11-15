@@ -117,6 +117,9 @@ const ROWS = Object.freeze([
   { type: 'turn-stuck', identity: 'sessionId', producer: 'src/server/turn-watch.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'conversation',
     // the chat's own «no output for N min» note yields while this item stands: one voice, and this one carries the doors
     quietsStall: true,
+    // the closure check (主开发 10:53Z): its item's first detail line — WHEN the command is ended by itself (or that it is not, or
+    // that there is nothing to end) — is drawn as its LEAD, its own short line under the headline, kept in a folded row
+    leadLine: true,
     // P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION, never the card — resolved by this end, the item's `kept` fact draws the
     // card in place in its KEPT state (keptOf): when the person chose, when the next bound falls and what then, and its door
     kept: Object.freeze({ by: 'kept-waiting' }),
@@ -1144,6 +1147,9 @@ function keptOf(item) {
 }
 /** lane turn-never-silent: does an open item of this type speak for a silent turn (the chat's stall note then yields)? */
 function quietsStallOf(type) { const r = ROW_OF[type]; return !!(r && r.quietsStall === true); }
+/** lane turn-never-silent (the closure check, 主开发 10:53Z): does this row draw its item's FIRST detail line as its LEAD — its own
+ *  short line under the headline, kept in a folded row (the tray clamps a headline; the line that says WHEN must be read)? */
+function leadLineOf(type) { const r = ROW_OF[type]; return !!(r && r.leadLine === true); }
 /** lane turn-never-silent: a declared button's refusal words by the route's code */
 function refusedOf(type, code) { const r = ROW_OF[type]; return (r && r.refused && typeof r.refused[code] === 'string') ? r.refused[code] : null; }
 /** lane turn-never-silent: the row's buttons that APPLY to this item (a button's `when` = a fact on its action) */
@@ -1181,4 +1187,4 @@ const FORYOU_HEADS = Object.freeze({
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
 
 module.exports = {
-  FORYOU_HEADS, headWordOf, buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, quietsStallOf, refusedOf, keptOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  FORYOU_HEADS, headWordOf, buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, quietsStallOf, leadLineOf, refusedOf, keptOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

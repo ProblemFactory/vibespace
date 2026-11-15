@@ -12,6 +12,7 @@
 // suites' floor legs only (a floor mutant must never reach a real kill(0)).
 const fs = require('fs');
 const TL = require('../turn-liveness.js');
+const PI = require('../proc-identity.js');   // THE tree's process identity ({pid, starttime, bootId}): a record read after a reboot never matches
 
 /** the floor of every signal: an integer pid above 1 that is not this process */
 function pidFloor(pid, self = process.pid) { return Number.isInteger(pid) && pid > 1 && pid !== self; }
@@ -44,30 +45,36 @@ function create({ readStat = (pid) => fs.readFileSync(`/proc/${pid}/stat`, 'utf8
     const survivors = live.filter(sameBirth);
     return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm) };
   }
-  /** the group of a process found by its RECORDED birth (`left` = the agy a wrapper's sidecar names) — signalled only while
-   *  its leader is still that very process (sameBirth: above the floor, its birth, not a zombie), never our own group */
-  function signalRecordedGroup(left, sig) { if (!sameBirth(left) || left.pid === myGroup()) return false; try { if (kill) kill(-left.pid, sig); else process.kill(-left.pid, sig); return true; } catch { return false; } }
-  /** S6 (the look at 99f65d547): a conversation ended while its wrapper was already killed past its own exit handler leaves
-   *  agy (its own session) and its command running. After `graceMs` — the wrapper's own handler ends its group first when it
-   *  can — the agy its sidecar recorded, if it is STILL that process, is ended: SIGTERM to its group, SIGKILL after `killMs`.
-   *  → 'not-recorded' | 'gone' (nothing to end) | 'ended' | 'survived' */
-  async function endLeftGroup(left, { graceMs = 5000, killMs = 3000, say = () => { } } = {}) {
+  /** S6 (the look at 99f65d547; the closure check, 主开发 10:53Z): a conversation ended while its wrapper was already killed past
+   *  its own exit handler leaves agy (its own session) and its command running. After `graceMs` — the wrapper's own handler ends
+   *  its group first when it can — the agy its sidecar RECORDED (`left` = proc-identity's {pid, starttime, bootId}) is ended
+   *  through the tree's own signalIdentity (its group first): only while judge() says it is still that very process (another
+   *  boot, a recycled pid, a zombie, no birth ⇒ nothing sent), never under the floor nor our own group. SIGTERM, then SIGKILL
+   *  after `killMs`. → 'not-recorded' | 'refused' (ours / under the floor) | 'gone' (nothing to end) | 'ended' | 'survived' */
+  async function endLeftGroup(left, { graceMs = 5000, killMs = 3000, say = () => { }, procOpts = {} } = {}) {
     if (!left) return 'not-recorded';
+    if (!pidFloor(Number(left.pid), self) || Number(left.pid) === myGroup()) return 'refused';
     await wait(graceMs);
-    if (!signalRecordedGroup(left, 'SIGTERM')) return 'gone';
+    const send = (sig) => PI.signalIdentity(left, sig, { ...procOpts, group: true, ...(kill ? { kill } : {}), what: 'the agy a killed wrapper left', say: () => { } });
+    if (!send('SIGTERM').ok) return 'gone';
     say(`agy (pid ${left.pid}) outlived its wrapper — its group was sent SIGTERM`);
     await wait(killMs);
-    if (!signalRecordedGroup(left, 'SIGKILL')) return 'ended';
+    if (!send('SIGKILL').ok) return 'ended';
     await wait(300);
-    if (sameBirth(left)) { say(`agy (pid ${left.pid}) outlived its wrapper and SIGKILL — still running`); return 'survived'; }
+    if (PI.judge(left, procOpts).verdict === 'same') { say(`agy (pid ${left.pid}) outlived its wrapper and SIGKILL — still running`); return 'survived'; }
     return 'ended';
   }
-  return { sameBirth, signalOne, killGroup, endTree, signalRecordedGroup, endLeftGroup };
+  return { sameBirth, signalOne, killGroup, endTree, endLeftGroup };
 }
 
-/** S6: the agy a wrapper's sidecar records ({childPid, childStart}) → {pid, startTicks} | null — read off the loop */
+/** S6: the agy a wrapper's sidecar records — its proc-identity `childIdentity` {pid, starttime, bootId} → that identity, or null
+ *  when a part is missing (no birth, no boot: answering nothing — never a bare pid) — read off the loop */
 async function recordedChildOf(sidecarFile, { readFile = (f) => fs.promises.readFile(f, 'utf8') } = {}) {
-  try { const j = JSON.parse(await readFile(sidecarFile)); const pid = Number(j && j.childPid), st = Number(j && j.childStart); return pidFloor(pid) && Number.isFinite(st) && st > 0 ? { pid, startTicks: st } : null; } catch { return null; }
+  try {
+    const j = JSON.parse(await readFile(sidecarFile)), r = j && j.childIdentity;
+    const pid = Number(r && r.pid), starttime = Number(r && r.starttime), bootId = r && typeof r.bootId === 'string' ? r.bootId : '';
+    return pidFloor(pid) && r && r.starttime != null && Number.isFinite(starttime) && starttime > 0 && bootId ? { pid, starttime, bootId } : null;
+  } catch { return null; }
 }
 
 module.exports = { create, pidFloor, groupOf, recordedChildOf };

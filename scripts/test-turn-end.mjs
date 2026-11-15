@@ -118,7 +118,7 @@ job('— ③a the by-itself ending: a command stuck for the second bound is ende
     await commandUp(h); await sleep(700);
     const list = await h.tree(); const W = watched(h);
     await W.at(0); await sleep(300); await W.walk(1, 11);
-    ok(W.items().length === 1 && W.items()[0].status === 'open' && W.items()[0].action.endable === true && /ended by itself at/.test(W.items()[0].text), 'at 11 min: said, with when it would be ended by itself — in its headline', W.items().map((i) => i.text));
+    ok(W.items().length === 1 && W.items()[0].status === 'open' && W.items()[0].action.endable === true && /ended by itself at/.test(W.items()[0].detail) && W.items()[0].i18n.detail.length === 1, 'at 11 min: said, with when it would be ended by itself — its lead line (the first detail line, drawn under the headline)', W.items().map((i) => i.detail));
     await W.walk(12, 29);
     ok(list.every(aliveAs) && !h.recs.some((r) => r.kind === 'command_ended'), 'at 29 min: not ended');
     await W.walk(30, 31);
@@ -189,7 +189,7 @@ job('— ③e LAW 3 (M4): a step open with NOTHING below agy — «nothing to en
     await W.at(0); await sleep(200); await W.walk(1, 11);
     const F = require(path.join(REPO, 'src/foryou-actions.js'));
     let it = W.items()[0];
-    ok(it && it.status === 'open' && it.action.nothingToEnd === true && /There is nothing to end/.test(it.text) && F.buttonsFor(it).map((b) => b.answer).join() === 'keep-waiting,stop-turn', 'said at 10: «there is nothing to end: Antigravity CLI itself waits on a step with no command running» — Keep waiting and Stop the turn', it && [it.text, F.buttonsFor(it).map((b) => b.answer)]);
+    ok(it && it.status === 'open' && it.action.nothingToEnd === true && /There is nothing to end/.test(it.detail) && F.buttonsFor(it).map((b) => b.answer).join() === 'keep-waiting,stop-turn', 'said at 10: «there is nothing to end: Antigravity CLI itself waits on a step with no command running» — Keep waiting and Stop the turn', it && [it.detail, F.buttonsFor(it).map((b) => b.answer)]);
     h.send({ type: 'end-command', by: 'person' });   // a press anyway (an old window's door)
     const r = await until(() => h.recs.find((x) => x.type === 'acp' && x.kind === 'command_ended'), 6000);
     ok(r && r.ok === false && r.code === 'no-command', 'the wrapper answers no-command (nothing signalled)', r);
@@ -263,7 +263,8 @@ job('— ⑨ S6: a wrapper killed past its own handler leaves agy (its own sessi
     await commandUp(h); await sleep(600);
     const m = h.meta(), agy = Number(m.childPid), list = await h.tree();
     every.add(agy); h.own.add(agy);
-    ok(Number.isInteger(m.childStart) && birth(agy) && m.childStart === birth(agy).startTicks, 'the sidecar records agy\'s BIRTH beside its pid (childStart)', [m.childPid, m.childStart]);
+    const boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    ok(m.childIdentity && m.childIdentity.pid === agy && m.childIdentity.starttime === birth(agy).startTicks && m.childIdentity.bootId === boot, 'the sidecar records agy\'s IDENTITY beside its pid — the tree\'s own {pid, starttime, bootId} (proc-identity identityOf)', m.childIdentity);
     h.child.kill('SIGKILL');   // the wrapper killed past its own exit handler (an OOM kill)
     await sleep(700);
     ok(!!birth(agy) && list.every(aliveAs), 'the wrapper is gone; agy and its command still run (the gap the look named)');
@@ -271,16 +272,27 @@ job('— ⑨ S6: a wrapper killed past its own handler leaves agy (its own sessi
     const left = await PSM.recordedChildOf(path.join(h.dir, 'x.json'));
     const said = [];
     const r = await PSM.create().endLeftGroup(left, { graceMs: 100, killMs: 800, say: (l) => said.push(l) });
-    ok(left && left.pid === agy && r === 'ended' && !birth(agy) && list.every((p) => !aliveAs(p)) && said.length === 1, 'endLeftGroup: agy\'s group ended by its recorded birth — agy and its command gone, said once', [r, said]);
-    const sent = [];
+    ok(left && left.pid === agy && r === 'ended' && !birth(agy) && list.every((p) => !aliveAs(p)) && said.length === 1, 'endLeftGroup: agy\'s group ended through the recorded identity (signalIdentity, its group first) — agy and its command gone, said once', [r, said]);
+    // what answers NOTHING (the verifier's mutants): a recycled pid, another boot's record, a record with no birth, our own group
     const c = spawn('sleep', ['30'], { stdio: 'ignore' }); every.add(c.pid); await sleep(150);
-    const r2 = await PSM.create({ kill: (pid, sig) => sent.push([pid, sig]) }).endLeftGroup({ pid: c.pid, startTicks: birth(c.pid).startTicks + 1 }, { graceMs: 10, killMs: 10 });
-    ok(r2 === 'gone' && sent.length === 0, 'a recorded pid now someone else\'s (another birth): nothing is signalled («gone»)', [r2, sent]);
+    const st = birth(c.pid).startTicks, sent = [], P = PSM.create({ kill: (pid, sig) => sent.push([pid, sig]) }), q = { graceMs: 10, killMs: 10 };
+    const rs = [await P.endLeftGroup({ pid: c.pid, starttime: st + 1, bootId: boot }, q), await P.endLeftGroup({ pid: c.pid, starttime: st, bootId: 'another-boot' }, q), await P.endLeftGroup({ pid: c.pid, starttime: null, bootId: boot }, q)];
+    ok(rs.every((x) => x === 'gone') && sent.length === 0, 'a pid now someone else\'s, a record from another boot, a record with no birth: nothing is sent («gone»)', [rs, sent]);
+    const side = path.join(h.dir, 'nobirth.json');
+    fs.writeFileSync(side, JSON.stringify({ childPid: c.pid, childIdentity: { pid: c.pid, starttime: null, bootId: boot } }));
+    const side2 = path.join(h.dir, 'noboot.json');
+    fs.writeFileSync(side2, JSON.stringify({ childPid: c.pid, childIdentity: { pid: c.pid, starttime: st } }));
+    ok(await PSM.recordedChildOf(side) === null && await PSM.recordedChildOf(side2) === null && await PSM.recordedChildOf(path.join(h.dir, 'none.json')) === null, 'a sidecar whose record misses its birth or its boot, or no sidecar: no recorded agy at all (never a bare pid)');
+    const G = PSM.create({ kill: (pid, sig) => sent.push([pid, sig]), readStat: (pid) => (pid === process.pid ? `${pid} (node) S 1 ${c.pid} ${c.pid} 0 -1 4194304` : fs.readFileSync(`/proc/${pid}/stat`, 'utf8')) });
+    ok(await G.endLeftGroup({ pid: c.pid, starttime: st, bootId: boot }, q) === 'refused' && await P.endLeftGroup({ pid: process.pid, starttime: birth(process.pid).startTicks, bootId: boot }, q) === 'refused' && sent.length === 0, 'the hub\'s OWN group and its own pid: refused, nothing sent', sent);
+    ok(await P.endLeftGroup({ pid: c.pid, starttime: st, bootId: boot }, q) === 'survived' && JSON.stringify(sent) === JSON.stringify([[-c.pid, 'SIGTERM'], [-c.pid, 'SIGKILL']]), 'CONTROL: the same process by its true identity — its group is signalled, SIGTERM then SIGKILL (the injected kill sends nothing real: «survived»)', sent);
     try { c.kill('SIGKILL'); } catch { }
     const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-    const a = ws.indexOf("const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;"), b = ws.indexOf('removeWrapperFiles(BUFFERS_DIR, data.sessionId);', a);
+    const rd = ws.indexOf("const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;");
+    const dk = ws.indexOf("process.kill(dpid, 'SIGTERM')", rd), pk = ws.indexOf('if (session.pty) session.pty.kill();', rd), rm = ws.indexOf('removeWrapperFiles(BUFFERS_DIR, data.sessionId);', pk);
+    const el = ws.indexOf("\n      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: ", pk);
+    ok(rd > 0 && dk > rd && pk > dk && rm > pk && el > pk && el < rm && !/\bawait\b/.test(ws.slice(pk, rm)), 'the hub\'s kill path (endSessionBody): the record is read BEFORE the kills; kill and removal stay one step (no await between); the ending is started there, never awaited (a source pin: its deps are a whole server\'s)');
     ok(ws.includes("const ownGroup = ((require('./backend-caps.js').capsOf(session.backend).liveness || {}).stop === 'restart');") && require(path.join(REPO, 'src/backend-caps.js')).capsOf('antigravity').liveness.stop === 'restart' && require(path.join(REPO, 'src/backend-caps.js')).capsOf('claude').liveness.stop !== 'restart', 'only a harness whose CLI runs in its own group (agy: stop \'restart\') reads the sidecar on the kill path — every other kill answers as before');
-    ok(a > 0 && b > a && ws.slice(a, b).includes("\n      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: "), 'the hub\'s kill path (endSessionBody) reads the recorded agy BEFORE the sidecar goes, and ends it after its grace (a source pin: endSessionBody\'s deps are a whole server\'s)');
   } finally { await h.stop(); }
 });
 

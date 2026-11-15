@@ -302,7 +302,7 @@ function startChild() {
   try { child = spawn(cmd, args, { cwd: baseCwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: true }); }   // lane turn-never-silent (L3): its own process group
   catch (err) { notice('error', `Could not start Antigravity (${cmd}): ${err.message}`, 'spawn-failed'); finalizeExit(1); return; }
   const mine = child;
-  meta.childPid = child.pid; meta.childStart = (() => { try { return TLV.parseStat(fs.readFileSync(`/proc/${child.pid}/stat`, 'utf8')).startTicks; } catch { return null; } })(); scheduleMeta();   // the look's S6: agy's BIRTH beside its pid (its group = its pid: spawned detached) — the hub's kill path ends it by that birth if this wrapper was killed past its handler
+  meta.childPid = child.pid; meta.childIdentity = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')).identityOf(child.pid); } catch { return null; } })(); scheduleMeta();   // the look's S6 (+ the closure check): agy's IDENTITY beside its pid — the tree's own {pid, starttime, bootId}; its group = its pid (spawned detached). The hub's kill path ends it by that identity if this wrapper was killed past its handler
   log(`spawned ${cmd} ${args.join(' ')} pid=${child.pid}`);
   childSpokeAt = 0; childStartedAt = Date.now();
   let outBuf = Buffer.alloc(0), errBuf = '';

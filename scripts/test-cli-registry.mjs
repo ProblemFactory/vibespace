@@ -201,7 +201,7 @@ console.log('— ③b the standing rules (a usage wall\'s reset is one account\'
       /VibeSpace's account pool may switch you at once/, /when you may continue, VibeSpace sends the continue message \(that message IS the signal\)/,
       /say so on the board \(`vibespace-status blocked --reason "usage wall"`\) and stop/, /never a backlog item "after the reset"/],
     // lane turn-never-silent (the owner's «可以»): the one line for a CLI that bounds no command of its own
-    'command-bounds': [/^COMMANDS THAT MAY WAIT: /, /this CLI gives a command no time limit of its own/, /VibeSpace ends one that has shown nothing, with nothing it started working, for 30 minutes \(the owner's setting\) — even a quiet wait by design; the step fails and the turn goes on/, /`timeout <seconds> <command> < \/dev\/null`/, /a long quiet wait .* goes through Background Work \(`vibespace-job run`\)/],
+    'command-bounds': [/^COMMANDS THAT MAY WAIT: /, /this CLI gives a command no time limit of its own/, /where VibeSpace can read its processes, it ends one that has shown nothing, with nothing it started working, for 30 minutes \(the owner's setting\) — even a quiet wait by design; the step fails and the turn goes on/, /`timeout <seconds> <command> < \/dev\/null`/, /a long quiet wait .* goes through Background Work \(`vibespace-job run`\)/],
   };
   const ruleProblems = (rules) => {
     const sec = REG.renderSessionStartTools(TT, {}, REG.ROWS, rules).join('\n');
@@ -225,7 +225,7 @@ console.log('— ③b the standing rules (a usage wall\'s reset is one account\'
   const plain = REG.renderSessionStartTools({ status: true, ask: true, task: true, jobs: true, channels: 'read' }, {}).join('\n');
   ok(!/COMMANDS THAT MAY WAIT/.test(plain) && /\nCOMMANDS THAT MAY WAIT: /.test(REG.renderSessionStartTools(TT, {}).join('\n')), 'lane turn-never-silent: the command-bounds line rides ONLY a session whose CLI bounds no command (toolsFor\'s noCommandBound — agy\'s row); every other harness\'s section is unchanged');
   const cb = (REG.STANDING_RULES || []).find((r) => r.id === 'command-bounds');
-  ok(cb && /for 1440 minutes \(the owner's setting\)/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 1440 })) && !/VibeSpace ends/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 0 })) && /^COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own\. Run one/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 0 })), 'the look\'s S2: the line says the by-itself ending with the SETTING\'s minutes; the ending off (0) ⇒ not said');
+  ok(cb && /for 1440 minutes \(the owner's setting\)/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 1440 })) && !/it ends one/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 0 })) && /^COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own\. Run one/.test(cb.text({ jobs: true, noCommandBound: true, commandEndMin: 0 })), 'the look\'s S2: the line says the by-itself ending with the SETTING\'s minutes; the ending off (0) ⇒ not said');
   const removed = ruleProblems((REG.STANDING_RULES || []).filter((r) => r.id !== 'usage-walls'));
   ok(removed.length === 1 && removed[0] === 'usage-walls: no standing rule row', `CONTROL: the usage-walls row removed ⇒ RED by name (${removed[0]})`);
   const gutted = ruleProblems((REG.STANDING_RULES || []).map((r) => (r.id === 'usage-walls' ? { ...r, text: () => 'USAGE WALLS: wait for the reset.' } : r)));

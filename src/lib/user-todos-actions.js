@@ -739,7 +739,7 @@ export function inboxModel(app) {
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
-    rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },
+    rowCtx: { t, nameFor, wordsOf, detailOf, detailLinesOf, replyState, optionsOf: optionsFor, lang: resolveLang },   // detailLinesOf: a row's LEAD line (foryou-actions leadLineOf)
     /** Subscribe: `todos` (every snapshot, the store's order), `live` (an
      *  active-sessions payload was ingested), `status` (the board statuses
      *  moved). A surface that closes passes its AbortSignal (or calls the

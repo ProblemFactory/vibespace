@@ -38,7 +38,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, keptOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
+import { buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, keptOf, leadLineOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
@@ -489,7 +489,12 @@ function partsOf(entry, ctx) {
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
   const run = card ? null : runCardOf(i, { t }); // r7: the run card's facts — its headline is the row's question
   const words = card ? cardWords(card, t, lang).title : run ? run.headline : ctx.wordsOf(i);
-  const detail = ctx.detailOf(i);
+  // lane turn-never-silent (the closure check, 主开发 10:53Z): a row that declares its LEAD (foryou-actions leadLineOf) draws its
+  // item's first detail line as its own short line under the headline — a folded row keeps it (a `.ut-deadline` line with no
+  // clock: the ticker reads only `[data-deadline-at]`); the rest of the detail stays in the fold
+  const leadLines = !resolved && i && i.action && leadLineOf(i.action.type) && typeof ctx.detailLinesOf === 'function' ? ctx.detailLinesOf(i) : null;
+  const lead = leadLines && leadLines.length ? String(leadLines[0] || '') : '';
+  const detail = lead ? leadLines.slice(1).join('\n') : ctx.detailOf(i);
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
     ? '<span class="ut-dot" data-urgency=""></span>'
@@ -538,7 +543,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : resolved ? keptHtml(i, t) : exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t)}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${lead ? `<div class="ut-deadline ut-lead">${escHtml(lead)}</div>` : ''}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : resolved ? keptHtml(i, t) : exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t)}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
