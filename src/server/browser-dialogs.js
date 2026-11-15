@@ -455,7 +455,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w.kernel && w.mode !== 'person') decideAhead(w, info.browserContextId || null); // acceptance r1: never on the person's watch (Chrome asks him, his saved grants stand) // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
-    if (known) { known.url = String(info.url || known.url || ''); if (info.url) known.loginNavUrl = String(info.url); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
+    if (known) { known.url = String(info.url || known.url || ''); if (info.url) known.loginNavUrl = String(info.url); known.title = String(info.title || known.title || ''); known.navTextsStale = false; return known.enabling || Promise.resolve(); }
     let restoredRefs = null, expiredByNav = false;
     const stashMap = stashedSnapshotsByProfile.get(w.profileId);
     if (stashMap && stashMap.has(tid)) {
@@ -562,7 +562,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) { e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; if (e.activeFill && p.url) { const reqOrigin = BL().originOf(String(p.url)); if (!reqOrigin || (e.activeFill.wantOrigin && reqOrigin !== e.activeFill.wantOrigin)) { e.activeFill.crossNav = reqOrigin || 'an unverified page'; e.activeFill.abort?.(); } } } return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || ''); /* lane chrome-157 (the real-browser claim, scene 16): Chrome sends the fragment APART (frame.urlFragment) — the address the page shows, and the one check reads, is both */ if (navUrl) { e.loginNavUrl = navUrl; e.url = navUrl; e.title = navUrl; } /* lane chrome-157: the new document's address and title are not the old one's — Chrome's own first title is its address; a later one is a said limit */ e.navSeq = (e.navSeq || 0) + 1; e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq)); if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e, w); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || ''); /* lane chrome-157 (the real-browser claim, scene 16): Chrome sends the fragment APART (frame.urlFragment) — the address the page shows, and the one check reads, is both */ if (navUrl) e.loginNavUrl = navUrl; e.navTextsStale = true; /* lane chrome-157 (the cure of 2026-11-15, 主开发's GO 18:22Z): the tab's url and title stay the browser's own target info for every reader (a busy verdict, site-reset, a takeover card name the tab as the browser names it); the old document's url and title are only marked STALE for the fence's one check, which reads the navigation's own address until the next target info clears the mark (tabCheckTexts) */ e.navSeq = (e.navSeq || 0) + 1; e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq)); if (e.activeFill) { const navOrigin = BL().originOf(navUrl); if (!navOrigin || (e.activeFill.wantOrigin && navOrigin !== e.activeFill.wantOrigin)) e.activeFill.crossNav = navOrigin || 'an unverified page'; else e.activeFill.contextGone = true; e.activeFill.abort?.(); } if (e.snapshotRefs) e.snapshotExpiredByNav = true; e.snapshotRefs = null; if (e.inflightCredReqs) e.inflightCredReqs.clear(); clearPostLiftOnTab(e, w); endNav(e); hop(w, e, { url: navUrl }); if (e.liveFill) clearLiveFillOnTab(w, e, 'navigated'); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) {
@@ -3391,7 +3391,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   const checkMemo = new Map();   // digest → the check's answer (≤ 64, the oldest goes first)
   const valueShownIn = (w, e, lf, texts, heldVals = null) => checkTexts(w, e, lf, texts, heldVals) !== 'clean';   // («cannot tell» holds)
-  const valueShownByTab = (w, e, lf, heldVals = null) => Boolean(e) && valueShownIn(w, e, lf, [tabLoginUrlOf(e), e.url, e.title], heldVals);
+  /** The texts the fence's one check reads for a tab: the navigation's own address, and the tab's url and title only once the
+   *  browser's target info has named them after a top-frame commit — never the OLD document's (lane chrome-157, the cure of
+   *  2026-11-15: a stale title had kept a clean next page held; the tab's name itself stays the browser's for every reader). */
+  const tabCheckTexts = (e) => (e ? [tabLoginUrlOf(e), ...(e.navTextsStale ? [] : [e.url, e.title])] : []);
+  const valueShownByTab = (w, e, lf, heldVals = null) => Boolean(e) && valueShownIn(w, e, lf, tabCheckTexts(e), heldVals);
   /** …and the same check on the event that carries the next address to the agent (the mediator asks it of a fenced tab's top-frame
    *  navigation): true ⇒ the event names the address at the fill, as the listing does. */
   function navShowsValue(profileId, targetId, url) {
@@ -3843,7 +3847,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (persist) syncPersistedLoginFences(w.profileId);
       return;
     }
-    const cst = (why === 'navigated' || why === 'same-doc-nav' || why === 'submitted' || why === 'ceiling' || why === 'box-empty') ? checkTexts(w, e, lf, [tabLoginUrlOf(e), e.url, e.title], heldVals) : 'clean';
+    const cst = (why === 'navigated' || why === 'same-doc-nav' || why === 'submitted' || why === 'ceiling' || why === 'box-empty') ? checkTexts(w, e, lf, tabCheckTexts(e), heldVals) : 'clean';
     if (cst !== 'clean') {
       lf.valueShown = cst === 'shown';
       lf.holdReason = cst === 'shown' ? BL().HOLD_VALUE_SHOWN : BL().HOLD_UNKNOWN_TYPED;   // (shown: its refusal says so — a reload of this address keeps it, another page or another tab ends it; «cannot tell»: held, the next navigation checked again)
@@ -4297,7 +4301,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       const word = lf.restoredWord || 'live';
       const base = { targetId: e.targetId, urlAtFill: lf.urlAtFill, docId: lf.docId, origin: lf.origin, browserKey: lf.browserKey, at: lf.at, loginId: refNames[0], also: refNames.slice(1).map((n) => ({ loginId: n })), credSigs: vals.map(credSigOf).filter(Boolean), stepOtpValues: [], isoContextId: 0 };
-      const st = checkTexts(w, e, base, [tabLoginUrlOf(e), e.url, e.title], vals);
+      const st = checkTexts(w, e, base, tabCheckTexts(e), vals);
       if (st !== 'clean') {
         armLiveFillOnTab(w, e, st === 'shown' ? { ...base, valueShown: true, holdReason: BL().HOLD_VALUE_SHOWN } : { ...base, unknownTyped: true, holdReason: BL().HOLD_UNKNOWN_TYPED }, { persist: false, noTimer: true });
         if (st === 'shown' && word === 'value_shown' && e.liveFill) e.liveFill.valueShownNoticed = true;   // (the same hold as before the restart: its notice stands — never filed again)

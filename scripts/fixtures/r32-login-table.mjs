@@ -2297,6 +2297,90 @@ async function cureOrdinary(mods) {
   return { ok: Object.values(out).every((x) => x.ok), ...out };
 }
 
+/** 主开发's GO of 2026-11-15 18:22Z (the cure of the prep mirror's two reds): A TAB IS NAMED AS THE BROWSER NAMES IT, for every
+ *  reader — a top-frame commit with no target info yet (the way the suites' fakes move a tab) changes neither its address nor its
+ *  title for the busy verdict, site-reset's current sites, the stop / close / capture answers, the held-tab fact, the passkey tab's
+ *  name and the takeover request's name (a title is never shown as an address); the next target info names the new page. */
+async function cureNames(mods) {
+  const ST = mods.req('./src/browser-stuck.js');
+  const Dx = mods.req('./src/server/browser-dialogs.js');
+  const s = await cureScene(mods, 'cnnm', 'bk-0000c0ba', { tabs: 2 });
+  try {
+    const h = await s.start({ fresh: true });
+    await h.dialogs.arm(s.pid); s.bind(h); await sleep(60);
+    const T = { profileId: s.pid, browserKey: s.KEY };
+    const [t1, t2] = s.tids;
+    const TITLE = 'Cure Bank, sign in', TITLE2 = 'Second tab', U2 = `${s.ORIGIN}/second`;
+    s.fk.setTitle(t1, TITLE, s.U0); s.fk.setTitle(t2, TITLE2, U2); await sleep(100);   // (the browser's own target info)
+    const MOVED = 'https://moved.example.test/elsewhere', MOVED2 = 'https://moved.example.test/again';
+    // t1 is moved by a LOOP of frame-only commits (the shape of site-reset's hops: requested, started, committed, stopped — no
+    // target info), t2 by one frame-only commit
+    const hopTo = async (t, url, i) => {
+      s.relay.emitTargetEvent(t, 'Page.frameRequestedNavigation', { frameId: t, reason: 'metaTagRefresh', url, disposition: 'currentTab' });
+      s.relay.emitTargetEvent(t, 'Page.frameStartedNavigating', { frameId: t, url, navigationType: 'differentDocument', loaderId: `L-hop-${t}-${i}` });
+      s.relay.emitTargetEvent(t, 'Page.frameNavigated', { frame: { id: t, loaderId: `L-hop-${t}-${i}`, url, securityOrigin: 'https://moved.example.test', mimeType: 'text/html' }, type: 'Navigation' });
+      await sleep(8); s.relay.emitTargetEvent(t, 'Page.frameStoppedLoading', { frameId: t }); await sleep(20);
+    };
+    for (let i = 0; i < 8; i++) await hopTo(t1, i % 2 ? MOVED2 : MOVED, i);
+    await hopTo(t2, MOVED, 0);
+    await sleep(120);
+    const notMoved = (txt) => !String(txt || '').includes('moved.example.test');
+    const ans = await h.dialogs.pageAnswers(T, { targets: [t1] });
+    const busy = ST.pageBusyVerdict({ ...ans, pages: (ans.pages || []).map((x) => ({ ...x, answered: false })) });
+    const own = h.dialogs.ownTabs(T);
+    const own1 = own.find((x) => x.targetId === t1) || {};
+    const site = ST.siteResetVerdict({ host: new URL(s.ORIGIN).hostname, current: own.map((x) => x.url) });
+    const cap = await h.dialogs.captureTab(T);   // (the looping tab's picture — before the stop ends the loop)
+    const stop = await h.dialogs.stopTab(T, { targetId: t1 });
+    const e1 = h.dialogs._watches.get(s.pid).targets.get(t1);
+    e1.heldAt = Date.now();
+    const fact = JSON.stringify(h.dialogs.factFor({ ...T, consume: false }));
+    e1.heldAt = 0;
+    const pkName = Dx.tabName({ title: e1.title, url: e1.url });   // (the passkey tab's name: pkTabName = tabName of the tab's title and url)
+    const takeoverName = Dx.tabName({ title: own1.title, url: own1.url });   // (the takeover request names the tab askTabOf reads — ownTabs' first)
+    const e2 = h.dialogs._watches.get(s.pid).targets.get(t2);
+    e2.heldAt = Date.now();   // (closeTab by id closes only a tab nobody can answer — page_busy's way out)
+    const close = await h.dialogs.closeTab(T, { targetId: t2 });
+    const bdSrc = fs.readFileSync(path.join(mods.req.resolve('./src/server/browser-dialogs.js')), 'utf8');
+    const capReads = /async function captureTab[\s\S]*?return \{ ok: true, data: r\.result\.data, url: ST\.pageText\(e\.url, 300\), title: ST\.pageText\(e\.title, 120\)/.test(bdSrc);   // (capture's name = the same two fields stop's answer reads)
+    const rows = {
+      busyVerdict: Boolean(busy && busy.text && busy.text.includes(TITLE) && notMoved(busy.text)),
+      siteResetCurrent: own1.url === s.U0 && Boolean(site && site.ok),
+      stopAnswer: Boolean(stop && stop.ok && String(stop.url).startsWith(s.U0) && stop.title === TITLE),
+      captureAnswer: Boolean(cap && (cap.ok ? String(cap.url).startsWith(s.U0) && cap.title === TITLE : cap.code === 'no_picture' && capReads)),   // (the fake draws no picture: the looping tab's capture answers no_picture; its success names the tab by the same fields stop's answer reads)
+      closeAnswer: Boolean(close && close.ok && String(close.url).startsWith(U2) && close.title === TITLE2),
+      heldFact: fact.includes(TITLE) && notMoved(fact),
+      passkeyName: pkName.includes(TITLE) && notMoved(pkName),
+      takeoverName: takeoverName.includes(TITLE) && !/^https?:/.test(takeoverName) && notMoved(takeoverName),
+    };
+    s.fk.setTitle(t1, 'The moved page', MOVED); await sleep(100);   // the browser's target info names the new page: so does every reader
+    const after = h.dialogs.ownTabs(T).find((x) => x.targetId === t1) || {};
+    rows.nextTargetInfo = after.url === MOVED && after.title === 'The moved page';
+    return { ok: Object.values(rows).every(Boolean), ...rows };
+  } finally { await s.close(); }
+}
+
+/** …and THE FENCE'S CHECK, both ways (the case the persisted hold's line was written for): after a top-frame commit with no target
+ *  info yet, the check reads the navigation's own address and never the old document's title — a clean next page is not kept held
+ *  because the OLD title carried the value; a next address that carries the value is held. */
+async function cureStale(mods) {
+  const s = await cureScene(mods, 'cnstl', 'bk-0000c0bb', { tabs: 2 });
+  try {
+    const h = await s.start({ fresh: true });
+    const [t1, t2] = s.tids;
+    await s.fill(h, t1);
+    s.fk.setTitle(t1, CURE_PW); await sleep(100);   // (the old document's title IS the typed value, as the browser names it)
+    s.relay.emitTargetEvent(t1, 'Page.frameNavigated', { frame: { id: t1, loaderId: 'L-clean-1', url: `${s.ORIGIN}/home`, securityOrigin: s.ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
+    await sleep(150);
+    const clean = await s.read(h, t1);
+    await s.fill(h, t2);
+    s.relay.emitTargetEvent(t2, 'Page.frameNavigated', { frame: { id: t2, loaderId: 'L-shown-2', url: `${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`, securityOrigin: s.ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
+    await sleep(150);
+    const shown = await s.read(h, t2);
+    return { ok: clean.status === 200 && shown.status === 409 && /own address or title/.test(String(shown.json?.error || '')), clean: clean.status, shown: shown.status };
+  } finally { await s.close(); }
+}
+
 /** S2 / S3 — THE CHECK'S VERDICT, pure: a value under the floor only as a whole component or the whole title; at or above it anywhere
  *  and in every spelling; one stray or non-UTF-8 percent sequence spoils nothing else; past a cap the answer is «cannot tell». */
 function cureCheckRows(BLx) {
@@ -2322,6 +2406,8 @@ function cureCheckRows(BLx) {
 }
 
 const CURE_LEGS = {
+  names: { fn: cureNames, label: () => 'R32-NAMES (主开发 18:22Z, the prep mirror\'s two reds): a tab moved by a top-frame commit with no target info is named AS THE BROWSER NAMES IT by every reader — the busy verdict, site-reset\'s current sites, the stop / close / capture answers, the held-tab fact, the passkey tab\'s name, the takeover request\'s name (a title, never an address); the next target info names the new page' },
+  stale: { fn: cureStale, label: () => 'R32-STALE (the fence\'s one check, both ways): after a top-frame commit with no target info yet, the check reads the navigation\'s own address and never the old document\'s title — a clean next page is read, a next address carrying the value is held' },
   ordinary: { fn: cureOrdinary, label: () => 'R32-ORDINARY (主开发 2026-11-15: an ordinary login FINISHES): L1 a form posting to a sibling host of the same site (Chrome\'s own registrable domain) lifts at its answer, a foreign host still blocked; L4 a box the page empties by itself lifts at the next read; a user name filled from the vault closes nothing; a next step rendered in the same document after the submit is read; L3 + item 2 — on a fenced tab every act passes (click, press, fill, wait, open, reload, every `tab` form incl. the listing and close) and every read is refused' },
   bound: { fn: cureBound, label: (r) => `R32-BOUND (item 7: a check that keeps failing has a bound): a put-back value whose check never answers is «try again» ${r.firstHold} times, then held until it navigates with both doors named (on both doors); a new document ends it` },
   notices: { fn: cureNotices, label: () => 'R32-NOTICES (S1 + amendment 3): the owner\'s notice of a hold ends with it when the browser stops and when the profile is deleted — by its key, a past hub life\'s too — and the For-you store raises nothing when a notice is re-filed under its key' },
@@ -2562,6 +2648,12 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   await holdsMutant('RENEWAL (the document id not renewed at a top-frame navigation — P1)',
     once(bdSrc, "e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq));", "/* MUTANT RENEWAL */"),
     'r32-holds-no-renewal', { words: ['live'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.cell.doc === 'known' && x.cell.phase === 2));
+  await cureMutant('NAMES (a top-frame commit names the tab by the frame\'s address — the line the prep mirror caught)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "if (navUrl) e.loginNavUrl = navUrl; e.navTextsStale = true;", "if (navUrl) { e.loginNavUrl = navUrl; e.url = navUrl; e.title = navUrl; } e.navTextsStale = true; /* MUTANT NAMES */"), 'r32-cure-names', 'names',
+    (r) => r.ok === false && r.busyVerdict === false && r.siteResetCurrent === false);
+  await cureMutant('STALE-TITLE (the fence\'s check reads the old document\'s url and title after a commit)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "  const tabCheckTexts = (e) => (e ? [tabLoginUrlOf(e), ...(e.navTextsStale ? [] : [e.url, e.title])] : []);", "  const tabCheckTexts = (e) => (e ? [tabLoginUrlOf(e), e.url, e.title] : []);   /* MUTANT STALE-TITLE */"), 'r32-cure-stale-title', 'stale',
+    (r) => r.ok === false && r.clean === 409);
   await cureMutant('REFILE (a restart files the hold\'s notice again — a notice the owner marked done is raised again; F6)', 'src/server/browser-dialogs.js',
     once(bdSrc, "      if (f.hold === 'value_shown' && e.liveFill) e.liveFill.valueShownNoticed = true;", "      if (f.hold === 'value_shown') fileValueShownNotice(w, e, e.liveFill);   /* MUTANT REFILE */"), 'r32-cure-refile', 'notices',
     (r) => r.ok === false && r.doneStaysDone && r.doneStaysDone.raised > 0);
