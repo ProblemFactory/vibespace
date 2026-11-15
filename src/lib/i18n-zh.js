@@ -12552,4 +12552,8 @@ export default {
   "started again": "已重新启动",
   "End a stuck command by itself after (minutes, 0 = never)": "卡住的命令多久后自动结束（分钟，0 = 永不）",
   "A command that has shown nothing and has nothing working for this long is ended, the same as pressing End the command; the agent gets the command's failure and goes on. A command that is working is never ended. Keep waiting starts the time again": "一条命令在这么长时间里没有任何输出、也没有进程在工作时，会被结束，与按「结束这条命令」相同；agent 会收到命令失败的结果并继续。仍在工作的命令永远不会被结束。「继续等待」会重新计时",
+  "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running": "卡在一条命令上：{tool} 自 {since} 起没有任何输出，它启动的进程也都没在工作——{cli} 仍在运行",
+  "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running": "卡在一条命令上：{tool} 自 {since} 起没有任何输出，它启动的进程也都没在工作——{cli} 已不在运行",
+  "No output since {since}, and no command is open — {cli} is running": "自 {since} 起没有任何输出，也没有正在运行的命令——{cli} 仍在运行",
+  "No output since {since}, and no command is open — {cli} is not running": "自 {since} 起没有任何输出，也没有正在运行的命令——{cli} 已不在运行",
 };

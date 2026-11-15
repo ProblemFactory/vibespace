@@ -6,6 +6,11 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent P3 follow-up — what the pictures showed (a real scratch hub, the stub agy, zh)
+- **The CLI's state was in a fold.** «Antigravity CLI 仍在运行» sat in the item's «详情», so nobody saw it. The headline now carries it, with one key per fact (commandAlive / commandGone / silentAlive / silentGone; zh / ja). The detail keeps only when the by-itself ending would come.
+- **OPEN, for 主开发's word: «kept waiting at HH:MM» is not seen.** The item has no filing record, so its quiet line stands at the nearest record, the running tool, whose run folds («▸ 1 条 Bash · 运行中…»). Placing it at the conversation's end (`placeAt: 'end'`, tried) made it worse: an end-placed card is drawn only in the attention dock, whose one line cuts the headline. Not shipped. The pictures (shots/tip/06) show the gap.
+- Pictures: /var/tmp/vibespace-lanes/turn-never-silent/shots/p34/ (before this cure) and shots/tip/ (after it: the headline whole in the tray and on the card).
+
 ### turn-never-silent P4 — stopping ends what the turn started; «End the command»; the by-itself ending at thirty minutes (the owner's word «可以»)
 - **agy in its own process group** (data/bin/agy-wrapper.js: spawned `detached`).
   - Stop, steer and the wrapper's own end signal the GROUP (SIGTERM at 300 ms, then SIGKILL, `AGY_WEBUI_KILL_MS`, default 5 s).

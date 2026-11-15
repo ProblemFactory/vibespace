@@ -12551,4 +12551,8 @@ export default {
   "started again": "起動し直しました",
   "End a stuck command by itself after (minutes, 0 = never)": "止まったコマンドを自動で終了するまで（分、0 = しない）",
   "A command that has shown nothing and has nothing working for this long is ended, the same as pressing End the command; the agent gets the command's failure and goes on. A command that is working is never ended. Keep waiting starts the time again": "コマンドがこの時間、何も出力せず、どのプロセスも動いていないとき、「このコマンドを終了」を押したのと同じように終了します。エージェントはコマンドの失敗を受け取って続けます。動いているコマンドを終了することはありません。「待ち続ける」で時間はやり直しになります",
+  "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running": "コマンドで止まっています：{tool} は {since} から何も出力しておらず、起動したプロセスもどれも動いていません——{cli} は動いています",
+  "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running": "コマンドで止まっています：{tool} は {since} から何も出力しておらず、起動したプロセスもどれも動いていません——{cli} は動いていません",
+  "No output since {since}, and no command is open — {cli} is running": "{since} から何も出力がなく、実行中のコマンドもありません——{cli} は動いています",
+  "No output since {since}, and no command is open — {cli} is not running": "{since} から何も出力がなく、実行中のコマンドもありません——{cli} は動いていません",
 };
