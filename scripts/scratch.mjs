@@ -98,6 +98,19 @@ const HOME_COMPARED = (() => { const h = os.homedir(); return h && h.startsWith(
 const HANDED = Object.freeze({ HOME: HOME_COMPARED, PATH: process.env.PATH || '', EXEC: process.execPath,
   // the agent CLI PINS as handed (VS_<CLI>_BIN) — the real-CLI accessor's alone: the built environment carries none of them
   ...Object.fromEntries(HV.AGENT_CLIS.map((c) => `VS_${c.toUpperCase().replace(/-/g, '_')}_BIN`).map((k) => [k, process.env[k] || ''])) });
+/** THE ENVIRONMENT THIS PROCESS WAS STARTED WITH (B-ba47 B2, 主开发 2026-11-15 11:17Z item 3): the kernel's copy of the
+ *  exec-time block, which no setenv changes (measured: a planted name, a changed one, a removed one, a long title set on the process
+ *  leave it as it was) — what tells a name the suite set ITSELF from one it was handed (rehomeEnv `handed`: its own is kept
+ *  as it is). A suite that loads this module only after its own code ran — a dynamic import of a module that loads it
+ *  (`import('./mutant-copy.mjs')`: hub-home-census.mjs `lateLoads`) — keeps what it planted. null where there is no /proc. */
+const STARTED_ENV = (() => {
+  let t; try { t = fs.readFileSync('/proc/self/environ', 'utf8'); } catch { return null; }
+  const o = {}; for (const kv of t.split('\0')) { const i = kv.indexOf('='); if (i > 0 && !Object.prototype.hasOwnProperty.call(o, kv.slice(0, i))) o[kv.slice(0, i)] = kv.slice(i + 1); }
+  return Object.freeze(o);
+})();
+/** The re-home's folders are minted with this prefix (REHOMED's mkdtemp below spells the same path) — ci.mjs's reaper knows a
+ *  re-home root by it (judgeScratch). */
+export const REHOME_PREFIX = path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}rehome-`);
 /** This checkout's scripts folder: an accessor's row is a FILE here (主开发 18:25Z item 2). */
 const SCRIPTS_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname).replace(/\/+$/, '');
 /** Where this process's main file RESOLVES — read once, at import. */
@@ -241,7 +254,7 @@ export const REHOMED = (() => {
   const home = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}rehome-`)));
   fs.chmodSync(home, 0o700);
   stampScratchRun(home);   // as the scratch homes are (主开发 18:25Z item 6): a hub that inherits it is attributable to this run
-  const { env, carried, notCarriedNames, notCarried, handedPath, binDir } = HV.rehomeEnv(process.env, { oldHome: HANDED.HOME, newHome: home, platform: process.platform, resolve, checkout });
+  const { env, carried, notCarriedNames, notCarried, handedPath, binDir, own, ownPath } = HV.rehomeEnv(process.env, { oldHome: HANDED.HOME, newHome: home, platform: process.platform, resolve, checkout, handed: STARTED_ENV });
   env.npm_config_prefix = path.join(home, '.npm-global');   // npm's global folder dies with the run (主开发 01:18Z a) — never the node cache's own
   const dropped = notCarriedNames.map((x) => x.name);
   const runs = node ? node.file : src;
@@ -263,8 +276,10 @@ export const REHOMED = (() => {
     + `${node ? `node: its own (${node.file}, a copy), out of the home${initPaths ? '' : ' — the module folders were NOT re-read (this node has no Module._initPaths)'}; ` : ''}`
     + `PATH is its own: ${binDir} (${linked.join(', ') || 'nothing linked'}) + the system's directories`
     + `${notCarried.length ? ` — not carried: ${notCarried.join(', ')}` : ''}; a tool missing there: install it in a system directory, or add a named row to src/home-verdict.js TOOL_ROWS (a real agent CLI: scripts/scratch.mjs REAL_CLI_ALLOW)`
-    + `${SEAM ? `; the seam ${NOT_TEMP_ENV} made ${SEAM} not a temp root` : ''}\n`);
-  return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME });
+    + `${SEAM ? `; the seam ${NOT_TEMP_ENV} made ${SEAM} not a temp root` : ''}`
+    + `${own.length || ownPath.length ? `; LOADED AFTER ITS OWN CODE RAN — what it set itself is kept as it is: ${[...own, ...(ownPath.length ? [`${ownPath.length} PATH entr${ownPath.length === 1 ? 'y' : 'ies'} of its own (in front)`] : [])].join(', ')}` : ''}`
+    + `${STARTED_ENV ? '' : '; the environment it was started with is not readable here (no /proc): every name was judged'}\n`);
+  return Object.freeze({ home, why: v.why, dropped: Object.freeze(dropped), notCarried: Object.freeze(notCarried), linked: Object.freeze(linked), node: node ? Object.freeze({ file: node.file }) : null, initPaths, seam: SEAM, carried: Object.freeze(carried), notCarriedNames: Object.freeze(notCarriedNames), compared: HANDED.HOME, own: Object.freeze(own), ownPath: Object.freeze(ownPath) });
 })();
 /** Is the process whose main file RESOLVES to `me` a row of `rows` — the row's FILE in this checkout's scripts folder,
  *  compared where both resolve (主开发 18:25Z item 2: a file with a row's name elsewhere, or a link named after one, is not

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const { MessageManager } = createRequire(import.meta.url)('../src/message-manager.js');
 let failed = 0; const check=(n,c,e)=>{ if(c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e?' — '+e:''}`);} };
 // REAL record shape captured from the transcript

@@ -11,6 +11,7 @@
 // the agent replying to nothing.
 import { createRequire } from 'module';
 import fs from 'node:fs';
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const require = createRequire(import.meta.url);
 const { MessageManager } = require('../src/message-manager.js');
 const { CodexMessageManager } = require('../src/codex-message-manager.js');

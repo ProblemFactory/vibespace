@@ -193,6 +193,13 @@ const envTable = (mod) => {
     ['…and what was not carried of PATH is NAMED, a home path in ~ form: ~/.local/bin, ~/.nvm/…, the fnm link by where it resolves, /opt/tools/bin, the empty and the relative entry',
       JSON.stringify(r.notCarried) === JSON.stringify(['~/.local/bin', '~/.nvm/versions/node/v22/bin', '~/.local/share/fnm/v22/installation/bin', '/opt/tools/bin', '(an empty entry)', '(relative: rel/bin)'])],
     ['the report holds NAMES, reasons and ~-form entries only — no account name, no value', !JSON.stringify({ d: r.notCarriedNames, n: r.notCarried }).includes(H) && !JSON.stringify(r.notCarried).includes(HR) && !JSON.stringify(r.notCarriedNames).includes('caller-token') && !JSON.stringify(r.notCarriedNames).includes('job-tok')],
+    // B-ba47 B2 (主开发 2026-11-15 11:17Z item 3: «a suite's own planted names … reach its own children exactly as on master»):
+    // THE STARTED ENV — only what the process was started with is judged; what it set itself is its own, kept as it is
+    ['B2: a name the process set ITSELF (absent from the started env) is kept as it is — never judged; a handed name beside it is judged as before', (() => { const r2 = mod.rehomeEnv({ ...IN, HV_PLANTED: 'p-1', AWS_SECRET_ACCESS_KEY: 'p-2' }, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO, handed: IN }); return r2.env.HV_PLANTED === 'p-1' && r2.env.AWS_SECRET_ACCESS_KEY === 'p-2' && JSON.stringify(r2.own) === JSON.stringify(['AWS_SECRET_ACCESS_KEY', 'HV_PLANTED']) && r2.notCarriedNames.some((x) => x.name === 'VIBESPACE_SESSION_TOKEN') && JSON.stringify(r2.carried) === JSON.stringify(r.carried); })()],
+    ['B2: a handed name the process CHANGED is its own (its new value kept); one it REMOVED stays removed', (() => { const e2 = { ...IN, SSH_AUTH_SOCK: '/tmp/vs-hv/agent.sock' }; delete e2.DISPLAY; const r2 = mod.rehomeEnv(e2, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO, handed: IN }); return r2.env.SSH_AUTH_SOCK === '/tmp/vs-hv/agent.sock' && r2.own.includes('SSH_AUTH_SOCK') && !('DISPLAY' in r2.env); })()],
+    ['B2: its own PATH entries (not in the handed PATH) go IN FRONT of the built PATH; the handed ones are judged as before', (() => { const r2 = mod.rehomeEnv({ ...IN, PATH: '/opt/own/bin:' + IN.PATH }, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO, handed: IN }); return r2.env.PATH === `/opt/own/bin:/tmp/vs-rehome-7/.vs-bin:${SYS}` && JSON.stringify(r2.ownPath) === '["/opt/own/bin"]' && JSON.stringify(r2.notCarried) === JSON.stringify(r.notCarried); })()],
+    ['B2: a started env EQUAL to the env holds nothing of its own — the same build as with none', (() => { const r2 = mod.rehomeEnv(IN, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO, handed: IN }); return JSON.stringify(r2.env) === JSON.stringify(e) && r2.own.length === 0 && r2.ownPath.length === 0; })()],
+    ['B2: the started env NOT KNOWN (null: no /proc) — every name is judged, the rule before (a planted name is not carried)', (() => { const r2 = mod.rehomeEnv({ ...IN, HV_PLANTED: 'p-1' }, { oldHome: H, newHome: '/tmp/vs-rehome-7', resolve: RSof(mod), checkout: CO }); return !('HV_PLANTED' in r2.env) && r2.own.length === 0 && r2.notCarriedNames.some((x) => x.name === 'HV_PLANTED' && x.why === 'not a row'); })()],
     ['the input env is not mutated', JSON.stringify(IN) === before],
     ['macOS builds from its own fixed directories', mod.rehomeEnv({ PATH: '/usr/bin' }, { oldHome: H, newHome: '/tmp/vs-rehome-9', platform: 'darwin' }).env.PATH === `/tmp/vs-rehome-9/.vs-bin:${HV.SYSTEM_PATHS.darwin.join(':')}`],
     ['a new home that is not absolute is refused', (() => { try { mod.rehomeEnv({}, { oldHome: H, newHome: 'rel' }); return false; } catch { return true; } })()],
@@ -324,6 +331,8 @@ const CONTROLS = [
   { what: 'item 1: the temp-directory variable counted even when it holds the home', needle: '...rootsOf(varRoots).map(at).filter((t) => !isUnder(h, t))', repl: '...rootsOf(varRoots).map(at)', reds: ['item 1: TMPDIR EQUAL to the handed home is no temp root', 'item 1: TMPDIR ABOVE the handed home is no temp root'] },
   { what: 'item 1: the home judged by its spelling', needle: '  const h = at(home);', repl: '  const h = cleanPath(home);', reds: ['item 1: a home SPELLED through a temp root (/tmp/../home/u) is judged where it resolves', 'item 1: a home that is a LINK under /tmp into /home/u is judged where it resolves'] },
   { what: 'hubRehome trusts a temp root inside the home', needle: '.filter((t) => !(isAbs(h) && isUnder(t, h)));', repl: ';', reds: ['a root under a temp root that lies INSIDE the home (TMPDIR=/home/u/tmp)'] },
+  { what: 'B2: what the process set itself judged like a handed name', needle: '    if (isOwn(k, v)) { out[k] = v; own.push(k); continue; }   // the process set it itself: its own, never judged', repl: '', reds: ['env: B2: a name the process set ITSELF (absent from the started env) is kept as it is — never judged; a handed name beside it is judged as before', 'env: B2: a handed name the process CHANGED is its own (its new value kept); one it REMOVED stays removed'] },
+  { what: "B2: its own PATH entries dropped", needle: "  out.PATH = [...ownPath, bin, ...sys].join(':');", repl: "  out.PATH = [bin, ...sys].join(':');", reds: ['env: B2: its own PATH entries (not in the handed PATH) go IN FRONT of the built PATH; the handed ones are judged as before'] },
 ];
 for (const c of CONTROLS) {
   ok(src.split(c.needle).length === 2, `control "${c.what}": the needle is in the shipped source once (a stale control would prove nothing)`);
@@ -366,6 +375,17 @@ let kid = null;
 if (KIDS_ON) { const k = spawnSync(process.execPath, [${JSON.stringify(KID)}, '0'], { encoding: 'utf8', env: { ...process.env, PATH: path.dirname(process.execPath) + ':' + process.env.PATH } }); try { kid = JSON.parse(k.stdout); } catch { kid = { err: String(k.stderr).slice(0, 300) }; } }
 let st = null; try { st = fs.statSync(R.home); } catch { }
 console.log(JSON.stringify({ rehomed: R && { home: R.home, node: R.node, initPaths: R.initPaths, dropped: R.dropped, notCarried: R.notCarried, notCarriedNames: R.notCarriedNames, carried: R.carried, linked: R.linked, seam: R.seam }, compared: !!(R && R.compared && R.compared.startsWith('/')), npmPrefix: process.env.npm_config_prefix || null, pid: process.pid, homeMode: st && (st.mode & 0o777), hasRun: !!(R && fs.existsSync(path.join(R.home, '.vs-run.json'))), exec: process.execPath, argv0: process.argv[0], gpaths: Module.globalPaths, kid }));`;
+// B-ba47 B2 — THE LATE LOAD (the second hosted run: test-agentd-remote planted its census names, THEN `import('./mutant-copy.mjs')`
+// loaded this module): the suite's own code runs BEFORE its first load of the module — what it set must reach its own children
+const PLANT_LATE = ['planted', 'late', String(process.pid)].join('-');
+const LATE_PROBE = (url) => `import { spawnSync } from 'node:child_process';
+process.env.HV_PLANTED_LATE = ${JSON.stringify(PLANT_LATE)};
+process.env.CLAUDE_CONFIG_DIR = '/tmp/vs-hv-late-cfg';
+process.env.PATH = '/opt/vs-hv-own/bin:' + process.env.PATH;
+const S = await import(${JSON.stringify(url)});
+const R = S.REHOMED;
+const kid = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({ planted: process.env.HV_PLANTED_LATE ?? null, cfg: process.env.CLAUDE_CONFIG_DIR ?? null, noRow: process.env.HV_HANDED_NOROW ?? null, path: process.env.PATH, home: require("os").homedir() }))'], { encoding: 'utf8' }).stdout;
+console.log(JSON.stringify({ home: R && R.home, own: R && R.own, ownPath: R && R.ownPath, kid }));`;
 const start = (file, env, src, { exec = process.execPath, clean = false, cwd } = {}) => {
   if (src !== null) fs.writeFileSync(file, src);
   return new Promise((resolve) => {
@@ -474,6 +494,7 @@ const MUT = {
   m15: mutant('m15', "  env.npm_config_prefix = path.join(home, '.npm-global');", ''),
   m17: mutant('m17', '  return /^(?:test|dbg)-[A-Za-z0-9._-]+\\.mjs$/.test(base) || inScripts;', '  return /^(?:test|dbg)-[A-Za-z0-9._-]+\\.mjs$/.test(base);'),
   m18: mutant('m18', "  if (inScripts && NOT_REHOMED.some((r) => { try { return fs.realpathSync(path.join(dirReal, r.file)) === ME; } catch { return false; } })) return false;", "  if (inScripts && NOT_REHOMED.some((r) => r.file === base)) return false;"),
+  m19: mutant('m19', ', handed: STARTED_ENV });', ' });'),
   m16: mutant('m16', "    if (JSON.stringify([...readdir(dir)].sort()) !== '[\"bin\",\"stamp.json\"]' || JSON.stringify([...readdir(path.join(dir, 'bin'))].sort()) !== JSON.stringify([...(st.bin || [])].sort())) return null;\n", ''),
 };
 const SA = standin('a1'), S7 = standin('seven', { small: true, own: true }), PM = plant(standin('pmode', { small: true }), 'mode'), PL = plant(standin('plink', { small: true }), 'link'), PS = plant(standin('pstamp', { small: true }), 'stamp'), PX = plant(standin('pextra', { small: true }), 'extra'), PO = plant(standin('pold'), 'old'), PR = plant(standin('pro', { small: true, premade: false }), 'ro');
@@ -485,7 +506,7 @@ const PF = plant(standin('poldform', { small: true, premade: false }), 'oldform'
 const TREE_PLAIN = mutant('plain', 'export const NOT_REHOMED', 'export const NOT_REHOMED');
 const plainDir = path.dirname(TREE_PLAIN.probe);
 const viaLink = (tree, tag) => { const d = path.join(DIR, `lnk-${tag}`); fs.mkdirSync(d, { recursive: true }); const real = path.join(path.dirname(tree.probe), `test-hv-real-${tag}.mjs`); fs.writeFileSync(real, PROBE.replace(JSON.stringify(SCRATCH_URL), JSON.stringify(tree.url))); fs.symlinkSync(real, path.join(d, 'ci.mjs')); return path.join(d, 'ci.mjs'); };
-const SMUT = Object.fromEntries(Object.keys(MUT).filter((k) => !['m10', 'm11', 'm13', 'm14', 'm17', 'm18'].includes(k)).map((k) => [k, ({ m3: () => plant(standin(k, { small: true }), 'mode'), m4: () => plant(standin(k, { small: true }), 'link'), m5: () => plant(standin(k, { small: true }), 'stamp'), m12: () => plant(standin(k), 'old'), m16: () => plant(standin(k, { small: true }), 'extra') }[k] || (() => standin(k)))()]));
+const SMUT = Object.fromEntries(Object.keys(MUT).filter((k) => !['m10', 'm11', 'm13', 'm14', 'm17', 'm18', 'm19'].includes(k)).map((k) => [k, ({ m3: () => plant(standin(k, { small: true }), 'mode'), m4: () => plant(standin(k, { small: true }), 'link'), m5: () => plant(standin(k, { small: true }), 'stamp'), m12: () => plant(standin(k), 'old'), m16: () => plant(standin(k, { small: true }), 'extra') }[k] || (() => standin(k)))()]));
 const SMUT_ELF = ELF ? Object.fromEntries(['m10', 'm11'].map((k) => [k, standinElf(`${k}e`)])) : {};
 const elfRun = (s, url, file) => runA1(s, url, file, false, { cwd: path.dirname(s.node) });
 const KIDS = {
@@ -499,6 +520,7 @@ const KIDS = {
   seamOut: start(path.join(DIR, 'test-hv-seamout.mjs'), { ...handed, [SM.NOT_TEMP_ENV]: `${STANDIN}-seam` }, PROBE),
   seamRoot: start(path.join(DIR, 'test-hv-seamroot.mjs'), { ...handed, [SM.NOT_TEMP_ENV]: '/tmp' }, PROBE),
   emptyHome: start(path.join(DIR, 'test-hv-emptyhome.mjs'), { HOME: '', PATH: '/usr/bin:/bin' }, A1_PROBE(SCRATCH_URL), { clean: true }),
+  late: start(path.join(DIR, 'test-hv-late.mjs'), { ...handed, HV_HANDED_NOROW: 'handed-no-row' }, LATE_PROBE(SCRATCH_URL)),
   a1: runA1(SA),
   seven: Array.from({ length: 7 }, (_, i) => runA1(S7, SCRATCH_URL, path.join(DIR, `test-hv-seven-${i}.mjs`), false)),
   pmode: runA1(PM, SCRATCH_URL, path.join(DIR, 'test-hv-pmode.mjs'), false),
@@ -517,6 +539,7 @@ const KIDS = {
       : k === 'm14' ? start(m.probe, { HOME: '', PATH: '/usr/bin:/bin' }, A1_PROBE(m.url), { clean: true })
         : k === 'm17' ? start(path.join(path.dirname(m.probe), 'hv-plain.mjs'), handed, PROBE.replace(JSON.stringify(SCRATCH_URL), JSON.stringify(m.url)))
           : k === 'm18' ? start(viaLink(m, 'm18'), handed, null)
+          : k === 'm19' ? start(path.join(path.dirname(m.probe), 'test-hv-late-m19.mjs'), { ...handed, HV_HANDED_NOROW: 'handed-no-row' }, LATE_PROBE(m.url))
             : ['m10', 'm11'].includes(k) ? (SMUT_ELF[k] ? elfRun(SMUT_ELF[k], m.url, m.probe) : Promise.resolve(null)) : runA1(SMUT[k], m.url, m.probe, ['m1', 'm2', 'm15'].includes(k))])),
 };
 const SYSDIRS = HV.SYSTEM_PATHS[process.platform === 'darwin' ? 'darwin' : 'linux'];
@@ -556,6 +579,17 @@ const lineOf = (err) => String(err).split('\n').find((l) => l.startsWith('[scrat
   const r = await KIDS.emptyHome;
   ok(r.j && r.j.rehomed && r.j.compared === true, '(b) a handed HOME that is empty ⇒ the process re-homes, comparing against the account entry\'s home (an absolute path), never against nothing', r.j && { rehomed: !!r.j.rehomed, compared: r.j.compared });
 }
+const legsLate = (r) => {
+  const j = r && r.j, k = (() => { try { return JSON.parse(j.kid); } catch { return null; } })(), line = r ? lineOf(r.err) : '';
+  return [
+    { name: 'B2 THE LATE LOAD: a name the suite planted BEFORE its first load of the module reaches its own child', good: !!k && k.planted === PLANT_LATE },
+    { name: 'B2 THE LATE LOAD: a handed name it CHANGED reaches its child with the new value; one it left is judged as before (not carried)', good: !!k && k.cfg === '/tmp/vs-hv-late-cfg' && k.noRow === null },
+    { name: 'B2 THE LATE LOAD: its own PATH entry goes in front of the built PATH', good: !!k && !!j.home && k.path === `/opt/vs-hv-own/bin:${j.home}/.vs-bin:${SYSDIRS.join(':')}` },
+    { name: 'B2 THE LATE LOAD: the one line says it was loaded after its own code ran and names what it kept — names, never a value', good: /LOADED AFTER ITS OWN CODE RAN — what it set itself is kept as it is: CLAUDE_CONFIG_DIR, HV_PLANTED_LATE, 1 PATH entry of its own \(in front\)/.test(line) && !String(r && r.err).includes(PLANT_LATE) },
+    { name: 'B2 THE LATE LOAD: it is still re-homed — the child\'s home is the made one', good: !!k && !!j.home && k.home === j.home && /^\/tmp\/vs-rehome-/.test(j.home) },
+  ];
+};
+{ const r = await KIDS.late; for (const l of legsLate(r)) ok(l.good, l.name, l.good ? undefined : (r.j || r.err.slice(0, 400))); }
 ok(!fs.existsSync(STANDIN), 'the handed stand-in home was never made by anything above');
 const under = (p, s) => typeof p === 'string' && (p === s.home || p.startsWith(s.home + '/') || p.startsWith(path.join(s.seam, 'homelink') + '/'));
 const legsA1 = (j, s) => {
@@ -628,7 +662,7 @@ const legsRowLink = (r) => [{ name: '8a a LINK named like a not-re-homed row (ci
   const ro = await KIDS.pro; fs.chmodSync(PR.cache, 0o700);
   ok(ro.status === 1 && /its node cache cannot be made \(EACCES/.test(ro.err) && /it REFUSES to run there/.test(ro.err), '(d) a node cache place that cannot be written ⇒ a named refusal with the door (exit 1), not a stack', { status: ro.status, err: ro.err.slice(0, 300) });
 }
-{ // EIGHTEEN mutant copies of scripts/scratch.mjs — each weakened law must turn its own named legs RED, through the import
+{ // NINETEEN mutant copies of scripts/scratch.mjs — each weakened law must turn its own named legs RED, through the import
   const WANT = {
     m1: ["today's shape (the node under the home kept)", (r) => legsA1(r.j, SMUT.m1), ['A1: a CHILD started the house way (PATH from its node) finds no stand-in CLI and runs outside the home']],
     m2: ['the module folders not re-read', (r) => legsA1(r.j, SMUT.m2), ['A1: the CJS global folders name nothing under the handed home']],
@@ -648,6 +682,7 @@ const legsRowLink = (r) => [{ name: '8a a LINK named like a not-re-homed row (ci
     m16: ['(a) «ours» without «exactly what was made»', (r) => legsExtra(r, SMUT.m16), ['(a) a node folder holding a program installed into it since is NOT ours — never adopted']],
     m17: ['7a the union cut: only test- / dbg- names re-home', (r) => legsUnion(r), ['7a THE UNION: a main file of the checkout\'s scripts folder that is NO suite (hv-plain.mjs) and loads the module re-homes']],
     m18: ['8a the rows matched by NAME, not by the file that resolves', (r) => legsRowLink(r), ['8a a LINK named like a not-re-homed row (ci.mjs), leading to one of the tree\'s suites, is NOT the row — it re-homes']],
+    m19: ['B2 the started env not passed (every name judged, the rule before)', (r) => legsLate(r), ['B2 THE LATE LOAD: a name the suite planted BEFORE its first load of the module reaches its own child', 'B2 THE LATE LOAD: its own PATH entry goes in front of the built PATH']],
   };
   for (const [k, [what, legs, reds]] of Object.entries(WANT)) {
     const r = await KIDS.mut[k];

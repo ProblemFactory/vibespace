@@ -352,12 +352,34 @@ export function rehomesFirst(src, readModule, depth = 0) {
   if (depth < 4) return rehomesFirst(readModule(first.slice(2)), readModule, depth + 1);
   return false;
 }
-/** Does the text reach ./scratch.mjs at all — statically through its scripts/ imports, or by a dynamic import? */
+/** The scripts/ modules a text loads AT RUN TIME, code only — `import(…)` or `require(…)` whose argument names `<x>.mjs`
+ *  ('./x.mjs', a path joined to scripts/x.mjs, a URL), in order, de-duplicated. B-ba47 B2 (the second hosted run, 主开发
+ *  2026-11-15 11:17Z): a dynamic import of a module that loads scratch.mjs re-homes the process IN THE MIDDLE of its run — 22
+ *  suites through `import('./mutant-copy.mjs')`, unseen by this census (it followed a dynamic import of scratch.mjs itself
+ *  only): test-agentd-remote planted four names before it (the rebuild dropped them), and its npm wrote the handed home's
+ *  ~/.npm/_logs. */
+export function lateLoads(src) {
+  const { code, strs } = codeOf(src);
+  const out = [];
+  for (const m of code.matchAll(/\b(?:import|require)\(\s*([^;]{0,240}?)\)/g)) {
+    if (strs.some(([x, y]) => m.index >= x && m.index < y)) continue;   // spelled in a string or a template: a child's code, not this file's
+    for (const n of m[1].matchAll(/['"`/]([\w.-]+\.mjs)['"`]/g)) if (!out.includes(n[1])) out.push(n[1]);
+  }
+  return out;
+}
+/** Does the text reach ./scratch.mjs at all — statically through its scripts/ imports, or at run time (lateLoads: a dynamic
+ *  import or a require of scratch.mjs or of a module that reaches it)? A file that reaches it late is held by THE ORDER like
+ *  any other: the scratch import first. */
 export function reachesScratch(src, readModule, seen = new Set()) {
   if (dynamicScratch(src)) return true;
   for (const s of staticImports(src)) {
     if (s === './scratch.mjs') return true;
     if (/^\.\/[\w.-]+\.mjs$/.test(s) && !seen.has(s)) { seen.add(s); if (reachesScratch(readModule(s.slice(2)), readModule, seen)) return true; }
+  }
+  for (const m of lateLoads(src)) {
+    if (m === 'scratch.mjs') return true;
+    const s = './' + m;
+    if (!seen.has(s)) { seen.add(s); const t = readModule(m); if (t && reachesScratch(t, readModule, seen)) return true; }
   }
   return false;
 }

@@ -9,6 +9,7 @@
 // the missed bytes, and the exit sentinel arrives. Throwaway roots only.
 // Run: node scripts/test-agentd-remote.mjs
 import { createRequire } from 'node:module';
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
