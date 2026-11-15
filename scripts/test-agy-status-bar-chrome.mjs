@@ -273,6 +273,8 @@ try {
   console.log('⑤ THE MODE CHIP (lane agy-harness-fixes-2): picked in the chip, through a reply that cuts the journal\'s head, a reload, a Resume');
   const BUFS = path.join(wt, 'data', 'session-buffers');
   const FOUR = ['accept-edits', 'auto', 'plan', 'bypassPermissions'];
+  // a mode row = the value VERBATIM (.chat-status-perm-value) + what it does in the reader's words (.chat-status-perm-words —
+  // ui-language's permission menu, the protocol values ruling 2026-11-14): the four are read from the value, never the row's whole text
   const sideOf = (sid) => { try { return JSON.parse(fs.readFileSync(path.join(BUFS, sid + '.json'), 'utf8')); } catch { return null; } };
   // the chip as a person meets it: its window raised, its box on screen; a REAL press opens the menu
   const permChip = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="perm"]'); if (!c) return null;
@@ -284,7 +286,7 @@ try {
     if (!c || !c.w) return { chip: c, items: null };
     await press(c.x, c.y);
     await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 3000);
-    return { chip: c, items: await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => i.textContent.trim()) : null; })()`) };
+    return { chip: c, items: await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => (i.querySelector('.chat-status-perm-value') || i).textContent.trim()) : null; })()`) };
   };
   const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.textContent); })()`, 20000);
   const mSid = await createChat('__agym', { cwd: CWD, name: 'agy-mode', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
@@ -293,7 +295,7 @@ try {
   for (let i = 0; i < 40 && !sideOf(mSid)?.sessionId; i++) await sleep(250); // the wrapper adopted agy's conversation
   const m1 = await openMenu('__agym');
   check(`a REAL press on the 🔒 chip («${m1.chip && m1.chip.text}») opens agy's FOUR modes`, JSON.stringify(m1.items) === JSON.stringify(FOUR), m1);
-  const row = await evalJs(`(() => { const it = [...document.querySelectorAll('.chat-status-dropdown .chat-status-dropdown-item')].find((i) => i.textContent.trim() === 'bypassPermissions'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  const row = await evalJs(`(() => { const it = [...document.querySelectorAll('.chat-status-dropdown .chat-status-dropdown-item')].find((i) => (i.querySelector('.chat-status-perm-value') || i).textContent.trim() === 'bypassPermissions'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   if (row) await press(row.x, row.y);
   for (let i = 0; i < 60 && sideOf(mSid)?.agentMode !== 'bypassPermissions'; i++) await sleep(250);
   const s1 = sideOf(mSid);
