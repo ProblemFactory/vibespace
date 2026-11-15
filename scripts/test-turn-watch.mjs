@@ -59,8 +59,8 @@ let W = world();
   await W.at(10);
   const it = W.open()[0];
   ok(W.open().length === 1 && it.itemKey === `turn-stuck:a:${T0}` && it.sessionKey === 'key:a', 'at the bound: ONE For-you item, keyed per conversation + turn, filed under the conversation', W.items().map((i) => [i.itemKey, i.status]));
-  ok(it.i18n.text.key === TW.TEXT.command && it.i18n.text.params.tool === 'run_command' && it.i18n.text.params.since.at === T0 && /run_command/.test(it.text), 'it names the open tool and since when (an instant the viewer reads in its own zone)', it.i18n);
-  ok(it.detail === 'Antigravity CLI is running.' && it.i18n.detail[0].key === TW.LINES.alive, 'it says the CLI is running (the reader\'s fact)', it.detail);
+  ok(it.i18n.text.key === TW.TEXT.commandAlive && it.i18n.text.params.tool === 'run_command' && it.i18n.text.params.since.at === T0 && /run_command/.test(it.text), 'it names the open tool and since when (an instant the viewer reads in its own zone)', it.i18n);
+  ok(/ — Antigravity CLI is running$/.test(it.text) && it.i18n.text.params.cli === 'Antigravity CLI', 'its HEADLINE says the CLI is running (the reader\'s fact — never in a fold)', it.text);
   for (let m = 11; m <= 20; m++) await W.at(m);
   ok(W.items().length === 1 && W.open().length === 1, 'ten more readings: still ONE item, never a second beside it');
 }
@@ -92,11 +92,11 @@ W = world();
   W.session('c'); W.sidecar('c', { cliWroteAt: T0, turnOpenedAt: T0 }); W.trees.set(4001, { list: [] });
   for (let m = 0; m <= 10; m++) await W.at(m);
   const it = W.open()[0];
-  ok(it && it.i18n.text.key === TW.TEXT.silent && !('tool' in it.i18n.text.params), 'no tool step open: «no output since …, and no command is open» (silent)', it && it.i18n);
+  ok(it && it.i18n.text.key === TW.TEXT.silentAlive && !('tool' in it.i18n.text.params), 'no tool step open: «no output since …, and no command is open» (silent)', it && it.i18n);
   W.trees.set(4001, { alive: false, list: [] });
   await W.at(10.5);
   const c2 = W.items().filter((i) => i.action.sessionId === 'c');
-  ok(c2.length === 1 && c2[0].status === 'open' && c2[0].detail === 'Antigravity CLI is not running.' && c2[0].id === it.id, '…patched IN PLACE when its words change (the CLI gone — the same item, its words redrawn)', c2.map((i) => [i.status, i.detail]));
+  ok(c2.length === 1 && c2[0].status === 'open' && c2[0].i18n.text.key === TW.TEXT.silentGone && /is not running$/.test(c2[0].text) && c2[0].id === it.id, '…patched IN PLACE when its words change (the CLI gone — the same item, its words redrawn)', c2.map((i) => [i.status, i.text]));
   W.session('d'); W.tool('d', 'run_command'); W.sidecar('d', { cliWroteAt: T0, turnOpenedAt: T0, remote: { state: 'connected' } });
   for (let m = 11; m <= 22; m++) await W.at(m);
   const u = W.open().find((i) => i.action.sessionId === 'd');
@@ -213,7 +213,7 @@ console.log('— ⑯ LIVE: the REAL agy wrapper, its records through the REAL me
   };
   const [h, b] = await Promise.all([live('hang'), live('busy')]);
   ok(h.open && h.open.name === 'run_command', 'the REAL ACP message manager answers openTool(): agy\'s open run_command step (the conversation\'s own running tool card)', h.open);
-  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.command && h.items[0].i18n.text.params.tool === 'run_command' && h.items[0].detail.startsWith('Antigravity CLI is running. ') && /the command is ended by itself at/.test(h.items[0].detail) && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command, Antigravity running, and when it is ended by itself (pick 4: its wrapper serves end-command)', h.items.map((i) => i.text + ' | ' + i.detail));
+  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.commandAlive && h.items[0].i18n.text.params.tool === 'run_command' && / — Antigravity CLI is running$/.test(h.items[0].text) && /the command is ended by itself at/.test(h.items[0].detail) && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command, Antigravity running, and when it is ended by itself (pick 4: its wrapper serves end-command)', h.items.map((i) => i.text + ' | ' + i.detail));
   ok(b.items.length === 0, 'busy-command: nothing (its command works below agy)', b.items.map((i) => i.text));
 }
 

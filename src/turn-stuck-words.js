@@ -13,6 +13,11 @@ const TEXT = Object.freeze({
   command: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working',
   silent: 'No output since {since}, and no command is open',
   unknown: 'No output since {since} — whether its processes are working cannot be read on this machine',
+  // the headline says whether the CLI process runs (the pictures of 11-15: in the fold, nobody saw it) — one key per fact
+  commandAlive: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running',
+  commandGone: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running',
+  silentAlive: 'No output since {since}, and no command is open — {cli} is running',
+  silentGone: 'No output since {since}, and no command is open — {cli} is not running',
 });
 const LINES = Object.freeze({
   alive: '{cli} is running.',
@@ -28,15 +33,16 @@ const fill = (k, p) => k.replace(/\{(\w+)\}/g, (m, x) => (x in p ? p[x] : m));  
  *  that does not speak. `cli` = the harness's label (Antigravity, Claude Code). */
 function stuckWords(v, { cli = 'The CLI', endAt = 0 } = {}) {
   if (!v || !['stuck-on-command', 'silent', 'unknown'].includes(v.state)) return null;
-  const key = v.state === 'stuck-on-command' ? TEXT.command : v.state === 'silent' ? TEXT.silent : TEXT.unknown;
+  const known = v.cliAlive === true ? 'Alive' : v.cliAlive === false ? 'Gone' : '';
+  const key = v.state === 'stuck-on-command' ? TEXT['command' + known] : v.state === 'silent' ? TEXT['silent' + known] : TEXT.unknown;
   const tool = String(v.tool || 'a tool').slice(0, 80);
   const since = Number(v.since) || 0;
-  const text = fill(key, { tool, since: hhmm(since) });
-  const line = v.cliAlive === false ? LINES.gone : v.cliAlive === true ? LINES.alive : null;
+  const text = fill(key, { tool, since: hhmm(since), cli: String(cli) });
+  const line = null;   // the CLI's state is IN the headline now (LINES.alive / gone stay for an item filed before)
   const ends = v.state === 'stuck-on-command' && Number(endAt) > 0;
   const detail = [line ? fill(line, { cli: String(cli) }) : '', ends ? fill(LINES.endAt, { endAt: hhmm(endAt) }) : ''].filter(Boolean).join(' ');
   const i18n = {
-    text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool } : {}), since: { at: since } } },
+    text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool } : {}), ...(known ? { cli: String(cli) } : {}), since: { at: since } } },
     detail: [...(line ? [{ key: line, params: { cli: String(cli) } }] : []), ...(ends ? [{ key: LINES.endAt, params: { endAt: { at: Number(endAt) } } }] : [])],
   };
   return { text, detail, i18n };
