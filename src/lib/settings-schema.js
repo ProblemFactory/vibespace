@@ -1502,7 +1502,7 @@ const SETTINGS_SCHEMA = {
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [
-      { value: 'manual', label: t('Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work') },
+      { value: 'manual', label: t('Manual (⟳ button) — plus Antigravity’s own reads') },
       { value: 'auto', label: t('Auto on popup open (when >30 min stale)') },
       { value: 'auto-cli', label: t('Auto via the CLI (burn-aware background refresh)') },
       { value: 'off', label: t('Off (never contact Anthropic)') },
