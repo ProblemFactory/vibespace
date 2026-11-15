@@ -6,6 +6,42 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent P3 — a stuck turn says so where the person is: ONE For-you item, also its card in the conversation, with its own doors
+- **NEW src/server/turn-watch.js (ORCH).** A reading every 60 s over the local chat sessions in a turn. For each it reads:
+  - the sidecar (fs.promises): `cliWroteAt`, `turnOpenedAt`, `childPid`;
+  - the processes below the CLI (P2's reader);
+  - the open tool step;
+  - whether the turn waits on the person (the chip's own fact, chipAsksOf; a requires_action turn too).
+
+  The verdict comes from P1's PURE module. A speaking state files ONE item per stuck turn: type `turn-stuck`, itemKey `turn-stuck:<id>:<the turn's token>` (the wrapper's turnOpenedAt, else the record's opening, else first sight). It is drawn again in place only when its words change. The hub ends it with:
+  - «it moved on»: a line, or work below the CLI;
+  - «the turn ended»;
+  - «the conversation is gone».
+
+  A person's ✕ stands for that turn. After a restart the first reading adopts the open item a restart left, and the verdict comes at the second reading. Installed on the wait watch's server.js line, so server.js keeps its 1904 lines.
+- **The open tool step is the conversation's own running tool card.** Every message manager answers `openTool()`:
+  - MessageManager (claude): its pendingToolCalls;
+  - CodexMessageManager: its pendingToolCalls (rawName);
+  - AcpMessageManager (agy, opencode): its tool cards whose message is still pending (the card's title), a subagent card excluded.
+
+  test-harness-contract holds every chat harness whose row says `openTool: 'tool-card'` to answering it.
+- **The words** (NEW src/turn-stuck-words.js, PURE): «Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working», «No output since {since}, and no command is open» (silent), and the «unknown» sentence for a paired machine; plus «{cli} is running.» / «… is not running.». Each instant is an `{at}` param the viewer reads in its own zone, with zh / ja dictionary rows.
+- **The doors are the registry row's own buttons** (src/foryou-actions.js 'turn-stuck': `chat: true`, `card: 'row'`, `quietsStall: true`):
+  - «Keep waiting»: the item ends «kept waiting at {time}», and the turn is judged again only after another FULL bound, then under the same key;
+  - «Stop the turn»: the ws 'interrupt' recipe, for that session.
+
+  A declared button with a `route` now POSTs to it generically (src/lib/user-todos-actions.js: its `{field}`s from the item's action, its `said` words, the row's `refused` words by the answer's code; no type branch). NEW src/routes/turn-stuck.js, `POST /api/turns/:sessionId/stuck`, takes a person's click only (personVerdict: a bearer ⇒ human_only). An end word may name its `{time}`, the item's own resolution instant (src/lib/user-todos-row.js).
+- **The chat's own stall note yields.** chat-view's give-up note («no output for N min…») is not drawn while an open item of this conversation has `quietsStall` (chat-needs-card stallSpoken): one voice, and the item carries the doors. The delivery re-attach ladder is unchanged.
+- **The bound is a setting:** `turns.stuckAfterMin`, Chat, default 10, 2–1440; docs/settings.md is regenerated.
+- **The one injected line** (the owner's word «可以»). STANDING_RULES 'command-bounds': «COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own — run one that may wait for input as `timeout <seconds> <command> < /dev/null`; a long quiet wait … goes through Background Work (`vibespace-job run`).»
+  - It rides ONLY a session whose row says `commandBound: 'none'` (agy). The other values are claude 'cli' (its command tool's own 2/10-minute bound) and codex / opencode 'unverified' (not read here). It is passed as toolsFor's `noCommandBound`, never an id branch.
+  - Its bytes against the injection budget: 266 B (264 + its blank line). The widest SessionStart shape, now an agy session's, is 3 151 → 3 417 B, so CAPS.sessionStart goes 3 160 → 3 426 B by the line's own bytes. test-prompt-budget ③ re-judges an agy session's shapes and they fit whole (5 821 / 6 442 / 7 847 B for none / one / three groups).
+- **The pin.**
+  - scripts/test-turn-watch.mjs (fast, 32 legs, 2.95 s): the REAL watch over the REAL For-you store, a fake reader and a virtual clock (once, in place, moved, ended, gone, busy never, silent, unknown, the person's ask, Keep waiting and the same key, a ✕, a restart, Stop, the route's person verdict, the stall yield read from the row). Then LIVE: the REAL agy wrapper, its records through the REAL ACP message manager and the REAL reader. hang-command gives ONE item, «stuck on run_command, Antigravity CLI running»; busy-command gives none.
+  - RED on pick 2: the watch absent.
+- **The fast tier's cap** 1087 → 1090 s by arithmetic (1089.529 s over 588 rows).
+- **Not in this pick.** «End the command» and the by-itself ending are P4; until then the item's doors are Keep waiting and Stop the turn, and no greyed third door is drawn. The sender's words are P5.
+
 ### turn-never-silent P2 — the witnesses: each wrapper stamps the CLI's OWN last line, and the processes below the CLI are read without holding the hub
 - **«Written» = `cliWroteAt` in the sidecar**, stamped by the WRAPPER. The wrapper is the only place that tells the CLI's own line from its own echoes. The time is exact; the write is paced to one per 30 s (`VIBESPACE_CLI_WROTE_PACE_MS` for the suites), and every other sidecar write carries it too. It survives a hub restart, because the wrapper keeps running in dtach. What each wrapper counts:
   - agy-wrapper.js: agy's lines, never an old process's after a restart;

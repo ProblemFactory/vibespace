@@ -591,6 +591,14 @@ class MessageManager extends MessageWindow {
   /** EVERY ask the user can answer here, oldest first (src/helper-ask.js
    *  pendingAsksOf over the cards that ever carried one — `msgIndex` = the
    *  index the chat window pages by). */
+  /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
+   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+  openTool() {
+    let last = null; for (const v of this.pendingToolCalls.values()) last = v;
+    const b = last && last.block; const name = b && (b.name || b.title);
+    return name ? { name: String(name).slice(0, 80) } : null;
+  }
+
   pendingAsks() {
     const ids = this._askIds;
     if (!ids || !ids.size) return [];

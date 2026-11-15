@@ -58,6 +58,12 @@ for (const reach of ['read', 'request']) {
   ok(crBad.length === 0 && cr.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group') && cr.reminder.one > 0 && cr.reminder.multi < cr.cap, `channels reach '${reach}': every shape still fits whole with ≥ ${ROOM_MIN} B room (the paragraph rides the group shapes), the reminder ${cr.reminder.one} B${crBad.length ? ' — ' + crBad.join('; ') : ''}`);
 }
 
+{ // lane turn-never-silent: an agy session's shape carries the command-bounds line (its CLI bounds no command) — it fits whole too
+  const ca = census({ noCommandBound: true });
+  const caBad = judge(ca);
+  ok(caBad.length === 0 && ca.shapes.every((s, i) => s.total > c.shapes[i].total || s.name === 'no Task Group'), `an agy session's shape (the command-bounds line): every shape still fits whole${caBad.length ? ' — ' + caBad.join('; ') : ''} (${ca.shapes.map((s) => s.name + ' ' + s.total + ' B').join(', ')})`);
+}
+
 console.log('— ④ every pointer names a served manual; every surface has one');
 const intro = AR.sessionToolsIntro(T, { browserVariant: 'D' });
 const section = TaskGroupManager.prototype._toolsSectionParts.call({}, '', false, T).join('\n');

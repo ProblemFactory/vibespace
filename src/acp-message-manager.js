@@ -669,6 +669,13 @@ class AcpMessageManager extends MessageWindow {
     this.toolCards.set(toolCallId, msg.id);
     if (emit) this._emit({ op: 'create', message: msg });
   }
+  /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
+   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+  openTool() {
+    let name = null;
+    for (const id of this.toolCards.values()) { const m = this.messageIndex.get(id); if (m && m.status === 'pending' && !(m.taskInfo && m.taskInfo.subId)) name = (m.backendMeta && m.backendMeta.title) || m.toolName || name; }
+    return name ? { name: String(name).slice(0, 80) } : null;
+  }
   _toolCallUpdate(u, emit) {
     const toolCallId = u.toolCallId;
     if (!toolCallId) return;

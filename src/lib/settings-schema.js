@@ -272,6 +272,13 @@ const SETTINGS_SCHEMA = {
     description: t("Show how warm each conversation's prompt cache still is (a band on its box; green to red over the cache hour; nothing after it expires). Off by default. It costs nothing: no request and no timer of its own \u2014 it rides the session list the page already asks for."),
     category: t('Window'), liveApply: true,
   },
+  // lane turn-never-silent (law L1): a turn that has written nothing and has nothing working below its CLI for this long is
+  // said as stuck — in the conversation and as ONE For-you item (src/server/turn-watch.js)
+  'turns.stuckAfterMin': {
+    type: 'number', default: 10, min: 2, max: 1440, step: 1, label: t('Say a turn is stuck after (minutes)'),
+    description: t('When a turn has written nothing and nothing it started is working for this long, its conversation and For-you say so, with Keep waiting and Stop the turn. A command that is working is never called stuck'),
+    category: t('Chat'), liveApply: true,
+  },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
     description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),

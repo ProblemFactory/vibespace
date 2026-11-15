@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.403 — 2026-11-14
+
+### Added
+- A turn stuck on a command now says so: after ten minutes with no output and nothing working, its conversation and For-you name the command and since when.
+- That item offers Keep waiting and Stop the turn; a command that is working is never called stuck.
+
 ## 2.369.402 — 2026-11-14
 
 ### Added

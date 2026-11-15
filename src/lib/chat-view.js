@@ -5818,6 +5818,8 @@ class ChatView {
       });
       if (verdict === 'give-up-once') {
         this._stallGaveUp = true;
+        // lane turn-never-silent: the hub already says this turn is stuck (its item, with its doors) — one voice, not two
+        if (this._needsCards?.stallSpoken?.()) return;
         const quiet = Math.round((Date.now() - Math.max(this._lastRecordAt || 0, this._typingSince)) / 60000);
         const note = this._renderers?.appendSystem?.(t('no output for {n} min — the agent may be waiting on something not shown; Stop or check the session', { n: quiet }));
         note?.classList?.add('chat-stall-note');

@@ -241,6 +241,14 @@ function doorHits(read) {
 const pin = (f, re, words) => ({ f, re, words });
 const decl = (why) => ({ declared: why });
 const ROWS = [
+  // lane turn-never-silent (law L2): a turn stuck on a command / silent — ONE item per stuck turn, also its card in the chat; its doors press the hub's own route
+  { id: 'turn-stuck', surface: 'a stuck turn — "Stuck on a command: <tool> has shown nothing since <time>, and nothing it started is working" / "No output since <time>, and no command is open" (Keep waiting / Stop the turn — and End the command, Start it again anyway where they apply — in For you and in the conversation)',
+    doors: [['A', 'src/server/turn-watch.js', /^turn-stuck$/]],
+    a: [pin('src/server/turn-watch.js', /const words = TW\.stuckWords\(v, \{ cli: labelOf\(s\.backend\)(?:, endAt)? \}\);/, 'the item\'s words ARE the facts the hub read: the open step\'s name, since when nothing was written, whether the CLI runs — never a guess at why')],
+    b: [decl('its buttons press the hub\'s own route, a person\'s click only (the person verdict); the watch re-checks at the press — a turn it no longer holds as stuck is refused (not-stuck), a session not running here (not-live)')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'turn-stuck', identity: 'sessionId', producer: 'src\/server\/turn-watch\.js',/, 'THE registry row: one producer, one identity (the conversation), its buttons read from the row')],
+    d: [decl('no agent wrote words here to be read and approved: the item names a tool step as the CLI\'s own step names it (clipped to 80), whether the CLI runs, and an instant')],
+    gate: [['scripts/test-turn-watch.mjs', 'ONE For-you item, keyed per conversation + turn']] },
   // lane queued-is-not-woke laws 2 + 3 (Shape B): messages that have waited an hour behind a running turn — ONE item per conversation per wait, its only door opens the conversation
   { id: 'messages-waiting', surface: 'group messages not yet handed — "N group messages have not been handed to <name> yet — the oldest sent at <time>" + its turn\'s opening where a record states it (Open the conversation in For you; one item per conversation and turn, at four hours)',
     doors: [['A', 'src/server/wait-watch.js', /^messages-waiting$/]],

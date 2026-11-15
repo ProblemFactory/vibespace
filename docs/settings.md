@@ -142,6 +142,7 @@ Every setting is listed below, the advanced ones and the ones that only apply in
 <!-- settings-table: Chat -->
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
+| `turns.stuckAfterMin` | number | `10` | **Say a turn is stuck after (minutes)** — When a turn has written nothing and nothing it started is working for this long, its conversation and For-you say so, with Keep waiting and Stop the turn. A command that is working is never called stuck |
 | `chat.compactMode` | boolean | `true` | **Compact mode** — Dense document-style layout instead of chat bubbles. Closer to TUI information density. |
 | `artifacts.autoOpenDocs` | boolean | `true` | **Open a new document beside the chat automatically** — When the agent writes a NEW document (.md, .txt, .docx, .pdf…) while the chat is on screen, it opens beside the chat without taking the keyboard — the caret stays where you were typing. Not on a phone. Off = its card in the chat only. An edit never opens it again. The same switch is in the Artifacts chip. |
 | `chat.roleIndicator` | enum | `border` | **Role indicator style** — How to visually distinguish user vs assistant messages in compact mode. |

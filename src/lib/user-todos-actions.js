@@ -18,7 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang, deviceLocale } from './i18n.js';
-import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
+import { ROW_OF as FORYOU_ROW_OF, buttonsOf, refusedOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -402,7 +402,17 @@ export function inboxModel(app) {
     // A ROW'S DECLARED BUTTON (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting): 'jump' = the item's
     // conversation, its only door
     { const btn = rec && rec.action ? (buttonsOf(rec.action.type) || []).find((b) => b.answer === answer) : null;
-      if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; } }
+      if (btn && btn.door === 'jump') { jump(rec.sessionKey || null, rec); return true; }
+      // lane turn-never-silent: a declared button that PRESSES the hub's own route (its `{field}`s from the item's action) —
+      // its words on success, the row's own refusal words by the answer's code, never a raw code
+      if (btn && typeof btn.route === 'string') {
+        const url = btn.route.replace(/\{(\w+)\}/g, (m, k) => encodeURIComponent(String((rec.action && rec.action[k]) || '')));
+        const r = await fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer }) });
+        if (r && r.ok) { if (btn.said) showToast(t(btn.said)); return true; }
+        const why = r && r.code ? refusedOf(rec.action.type, r.code) : null;
+        showToast(why ? t(why) : (r && r.error) || t('server unreachable'), { type: 'error' });
+        return false;
+      } }
     if (rec && rec.action && rec.action.type === 'exit-run-ask') {
       // lane-pairing ⑥: THE person's answer to an agent's command on a machine (cookie route; an agent's bearer is
       // refused human_only). The server resolves the item; a failure is said, never swallowed.

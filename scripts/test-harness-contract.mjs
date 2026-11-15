@@ -325,6 +325,13 @@ console.log('— liveness (lane turn-never-silent, law L1: every harness declare
     ok(why === null, `${id}: declares its liveness row (${JSON.stringify(row.liveness)})`, why || '');
   }
   ok(capsOf('gemini').liveness === null, 'an unknown backend reads undeclared (null) — judged «unknown», never a borrowed row');
+  // its row's openTool 'tool-card' is a promise: the harness's own message manager answers openTool() (pick 3's watch asks only it)
+  for (const id of chatHarnessIds()) {
+    const row = capsOf(id).liveness;
+    if (!row || row === TL.NO_TURN || row.openTool !== 'tool-card') continue;
+    let mm = null; try { mm = createMessageManager(id, 'contract-open-tool'); } catch { }
+    ok(!!mm && typeof mm.openTool === 'function' && mm.openTool() === null, `${id}: its message manager answers openTool() (null with no step open)`);
+  }
   // every harness with a turn has a wrapper to stamp the CLI's own line (its descriptor's `wrapper`, a file in the tree)
   for (const id of harnessIds()) {
     const row = capsOf(id).liveness;

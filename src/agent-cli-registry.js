@@ -60,6 +60,16 @@ const STANDING_RULES = Object.freeze([
     text: ({ status }) => 'USAGE WALLS: a limit message from the CLI ("resets at …", weekly or 5-hour) names ONE account\'s reset — never schedule, park or promise work for that time. VibeSpace\'s account pool may switch you at once; when you may continue, VibeSpace sends the continue message (that message IS the signal). '
       + (status ? 'If you must wait, say so on the board (`vibespace-status blocked --reason "usage wall"`) and stop' : 'If you must wait, say so and stop') + ' — never a backlog item "after the reset".',
   },
+  // lane turn-never-silent (the owner's word «可以», 2026-11-15 03:02Z): a harness whose CLI bounds no command of its own (its
+  // liveness row's commandBound 'none' — agy) — a command that waits for input never returns there; this one line rides its
+  // sessions only (toolsFor's `noCommandBound`), every other harness's section is unchanged
+  {
+    id: 'command-bounds',
+    text: ({ noCommandBound, jobs }) => (noCommandBound
+      ? 'COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own — run one that may wait for input as `timeout <seconds> <command> < /dev/null`'
+        + (jobs ? '; a long quiet wait (a server, a watcher, a long test run) goes through Background Work (`vibespace-job run`).' : '.')
+      : ''),
+  },
 ]);
 
 const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'always']);
@@ -69,11 +79,14 @@ const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'alway
  *    agent-feedback's paragraph took 154 B of that room (2 715 B — 10 B left: the next paragraph cuts another); lane
  *    resume-words' USAGE WALLS standing rule is a rule every session needs, not a CLI's paragraph — it raises the cap by
  *    its own 442 B (440 + its blank line: 2 709 → 3 151 B measured, 3 160 B), test-prompt-budget ③ re-judged with it;
+ *    lane turn-never-silent's command-bounds rule (an agy session's only — its CLI bounds no command) raises it by its own
+ *    266 B (264 + its blank line: 3 151 → 3 417 B measured in the widest shape, an agy session's; 3 426 B), test-prompt-budget ③
+ *    re-judged with it;
  *  · reminder — the bare line, measured 1 077 B (a manager, several groups, read reach) + room for ONE more segment the size
  *    of the channels one (113 B): the next taught row pays for itself or cuts another — lane agent-feedback's segment and
  *    its `feedback` pointer topic took 101 B (1 178 B — 22 B left);
  *  · summary — one index cell. */
-const CAPS = Object.freeze({ summary: 140, sessionStart: 3160, reminder: 1200 });
+const CAPS = Object.freeze({ summary: 140, sessionStart: 3426, reminder: 1200 });
 
 // ctx: sessionStart { g: the `--group <id> ` prefix ('' single-group), multi, reach, tray } · reminder { multi, reach, topics, tray }
 // (tray = the hub's words for where the owner's tray is — src/tray-words.js trayWords().phrase)
@@ -218,7 +231,7 @@ function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {
       : 'They\'re bound to THIS session — you never pass a group id.'];
   for (const x of on) out.push('', x.text);
   // the standing rules (lane resume-words) — after every paragraph, whatever rows rendered
-  for (const r of rules) { const text = r.text({ status: !!F.status }); if (text) out.push('', text); }
+  for (const r of rules) { const text = r.text({ status: !!F.status, jobs: !!F.jobs, noCommandBound: !!F.noCommandBound }); if (text) out.push('', text); }
   return out;
 }
 
