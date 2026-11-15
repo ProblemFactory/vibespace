@@ -186,6 +186,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - **① a piece of an enclosing tag is markup:** a template inside an html template's `${…}` with no tag of its own (`` ` data-record-src="${…}"` ``, chat-attachments) had its attribute read as words. Its attributes are markup now, except a title / placeholder / aria-label / alt value. The baseline loses 10 such rows (467), and ⑤ loses «{shown} of {total}» (ui-controls reworded it).
 - **test-control-says-why:** its two source pins read `{ t: resetAt }`, the chip's local renamed from the shadowing `when` (the reader's round).
 
+### ui-language — the .403 prep mirror's reds (主开发 2026-11-15 18:14–18:47Z: eleven suites, one follow-up stack on 715848950)
+- **The chip** (test-decision-engine, test-sidebar-rail, test-voice-teach-chrome): a comment in the MIDDLE of plugins-ui.js's one-line `pluginRow({…})` swallowed `tone, chip, chipTitle, onChip,`, so every Plugins row drew an empty chip titled «undefined». The comment now has its own line. Census ⑨ reds a trailing `//` that leaves its code open and ends like code; run once over the whole tree (2 291 files), this was the only one.
+- **The redraw** (test-channels-panel-redraw: 600–1 450 ms against 40): page-time built an Intl.DateTimeFormat per call just to read the device's zone. The zone is now kept for a minute (the limit is in the kb row). Formatters are keyed by locale + printing zone + constant option objects. A quarter-hour's day, its repeated-hour check and the zone's name are memoised (bounded, 16 384). Node, 1 758 warm calls: stampAt 433 → 6.6 ms, and the output is identical over 744 366 calls.
+- **The date in a sentence** (test-resume-account-chrome): stampAt / dateOf `words: true` = the locale's own words («2026年11月12日»), for every page-time date that fills a {param} of a t() sentence (26 sites). Census ⑦ reds one without it. A cell or a title keeps the slashed near shape.
+- **The span** (test-machine-card-fold-ui): page-time `stampSpan(from, to)` says the date once (today none, one day at its start, two days both, the zone at its end). The machine run's head and label go through it (chat-run-summary `machineRunPart({ span })`). It is the bundle's only drawn span of two instants; the other «a–b» lines are configured hours, byte offsets or block numbers, not instants.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

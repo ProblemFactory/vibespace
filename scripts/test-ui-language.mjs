@@ -744,6 +744,18 @@ if (isMain) {
       PT.setPageZone(null);
       ok(sizes && worst.formats <= sizes.formatsMax && worst.memo <= sizes.memoMax && worst.names <= sizes.namesMax && worst.memo > 1000, `page-time's caches stay under their bounds over a walk of ${zones.length} zones × 150 days (formats ${worst.formats} ≤ ${sizes && sizes.formatsMax}, quarter-hours ${worst.memo} ≤ ${sizes && sizes.memoMax}, zone names ${worst.names} ≤ ${sizes && sizes.namesMax})`, worst);
     }
+    // THE SPAN FORM (主开发 2026-11-15, the machine card's head «· 10/4 11:39–10/4 11:41»): the date ONCE — today none, one day the
+    // date at the start, two days both, one reading one stamp, the zone's words once at the end
+    {
+      const now2 = Date.parse('2026-11-15T19:00:00Z'), T = Date.parse('2026-10-04T18:39:00Z'), o = { now: now2 };
+      PT.setPageZone('America/Los_Angeles');
+      const today = PT.stampSpan(now2 - 3600e3, now2 - 3480e3, o), oneDay = PT.stampSpan(T, T + 125e3, o), twoDays = PT.stampSpan(T, T + 864e5, o), one = PT.stampSpan(T, T + 20e3, o);
+      const ok1 = today === `${PT.clockOf(now2 - 3600e3)}–${PT.clockOf(now2 - 3480e3)}` && oneDay === `${PT.stampAt(T, o)}–${PT.clockOf(T + 125e3)}` && twoDays === `${PT.stampAt(T, o)}–${PT.stampAt(T + 864e5, o)}` && one === PT.stampAt(T, o);
+      PT.setPageZone('Asia/Tokyo');
+      const z = PT.stampSpan(T, T + 125e3, o), zn = (z.match(/GMT\+9|JST/g) || []).length;
+      PT.setPageZone(null);
+      ok(ok1 && zn === 1, 'page-time stampSpan says the date ONCE: today none, one day at its start, two days both, one reading one stamp — the zone\'s words once, at the end', { today, oneDay, twoDays, one, z });
+    }
     // ONE countdown spelling (2.369.403): page-time durationMark({ full }) — the usage popup's «· in 1d10h50m» — and the roster's /
     // the cap ring's fullEta (usage-eta, PURE) are the same function, over every minute of 40 d; the owner's 09-15 form stands
     const UE = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-eta.js')).href);

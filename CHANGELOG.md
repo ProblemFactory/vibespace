@@ -28,7 +28,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The browser limit chip says it counts browsers, and the theme names in layouts and settings are in your language.
 - The code editor's unsaved and saved marks, tooltips and messages, and an email's From, To and Date labels, are in your language.
 - The sidebar's «more» button and its manage bar's Clear and Done are in your language.
-- Dates and times follow your language everywhere: in Chinese and Japanese «2026/11/12 19:27», today just «19:27», this year «11/12 19:27».
+- Dates follow your language: in a list, a table or a tooltip, Chinese and Japanese show «2026/11/12 19:27», today «19:27», this year «11/12 19:27».
+- Inside a sentence, Chinese and Japanese write a date in words, with the year, month and day characters, not slashes.
+- A span of two times says its date once: «11/12 19:27–19:40».
 - A duration inside a sentence is written in your language's units; short marks such as «3m» or «2h» are unchanged.
 - Counts and costs are written the way your device's language writes numbers.
 - The usage popup's reset times and countdowns, a message's time, job runs, file times and the vault's key history all use this format.
