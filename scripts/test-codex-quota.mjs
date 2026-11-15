@@ -66,7 +66,7 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
     && require('../src/backend-caps.js').capsOf('codex').quotaProbe !== 'cli-usage' && require('../src/backend-caps.js').capsOf('claude').quotaProbe === 'cli-usage');
   const um = read('src/lib/usage-meter.js');
   // (lane reset-unproven: each bucket goes through its display verdict first — bucketView — and the pair is drawn from it)
-  ok('the popup codex section renders est pairs like the claude one', /bucketView\(quotaModel, codex\?\.fiveHour, cEstSel\?\.fiveHour,/.test(um) && /estDisplayPair\(cv5\.reading, cv5\.est\)/.test(um) && /estBar\(cp5\)/.test(um) && /estStat\(cp7, cEstSel, 'sevenDay'\)/.test(um));   // usage-predict pick 2: the stat names its lane (its verdict's)
+  ok('the popup codex section renders est pairs like the claude one', /bucketView\(quotaModel, codex\?\.fiveHour, cEstSel\?\.fiveHour,/.test(um) && /estDisplayPair\(cv5\.reading, cv5\.est\)/.test(um) && /estBar\(cpp5\)/.test(um) && /estStat\(cpp7, cEstPop, 'sevenDay'\)/.test(um));   // law B4: the popup's own views (cpp*) read the provisional-merged cEstPop   // usage-predict pick 2: the stat names its lane (its verdict's)
   ok('cache-efficiency bar drops the fake cache-write segment for codex-only views', /codexOnly \? \[\] : \[\{ k: t\('Cache writes'\)/.test(read('src/lib/usage-window.js')));
 }
 

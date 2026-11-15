@@ -3376,10 +3376,11 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
     'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
     'usage-meter.js': [
-      ["${estStat(p5, estSel, 'fiveHour')}", 'usage-predict P2: the lane KEY names the projection\'s verdict state (the band\'s words), never a bucket\'s reading'],
-      ["${estStat(p7, estSel, 'sevenDay')}", '…the 7-day lane\'s verdict state'],
-      ["${estStat(cp5, cEstSel, 'fiveHour')}", '…codex\'s 5-hour lane\'s verdict state'],
-      ["${estStat(cp7, cEstSel, 'sevenDay')}", '…codex\'s 7-day lane\'s verdict state'],
+      ["${estStat(pp5, estPop, 'fiveHour')}", 'usage-predict P2: the lane KEY names the projection\'s verdict state (the band\'s words), never a bucket\'s reading'],
+      ["${estStat(pp7, estPop, 'sevenDay')}", '…the 7-day lane\'s verdict state'],
+      ["${estStat(cpp5, cEstPop, 'fiveHour')}", '…codex\'s 5-hour lane\'s verdict state'],
+      ["${estStat(cpp7, cEstPop, 'sevenDay')}", '…codex\'s 7-day lane\'s verdict state'],
+      ["const scPop = (estPop?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;", 'usage-predict law B4: the POPUP\'s own estimate of a cap (a provisional lane merged in); its bar goes through bucketView (vScP)'],
       ["const named = new Set((e.scopedWeekly || []).map((x) => String((x && x.name) || '').toLowerCase()));", 'usage-predict law B4: popupEst merges two ESTIMATE views (ON and provisional) by scope name — no reading is read or drawn here'],
       ["return { ...e, fiveHour: e.fiveHour || p.fiveHour || null, sevenDay: e.sevenDay || p.sevenDay || null,", '…an ON lane kept, a provisional one added where none is ON (estimate views only)'],
       ["scopedWeekly: [...(e.scopedWeekly || []), ...(p.scopedWeekly || []).filter((x) => x && !named.has(String(x.name || '').toLowerCase()))] };", '…the provisional scoped lanes the ON view does not hold'],
@@ -3415,7 +3416,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
       ['const eRaw = estBucket ?', 'estDisplayPair (the estimate)'],
     ],
   };
-  const VIEWS22 = { 'usage-meter.js': 5, 'manage-agents.js': 3, 'session-lifecycle.js': 1 }; // v5 v7 vSc cv5 cv7 · donut, narrow pill, host pill · eff
+  const VIEWS22 = { 'usage-meter.js': 10, 'manage-agents.js': 3, 'session-lifecycle.js': 1 }; // v5 v7 vSc cv5 cv7 + the popup's own pv5 pv7 vScP cpv5 cpv7 (usage-predict law B4: a provisional lane in the popup alone) · donut, narrow pill, host pill · eff
   const strip22 = (l) => (/^\s*(\*|\/\*)/.test(l) ? '' : l.replace(/(^|\s)\/\/.*$/, ''));
   const census22 = (texts) => {
     const offenders = [], used = new Set(), counts = {};
@@ -3443,7 +3444,7 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const r1 = census22(swap22('usage-meter.js', 'const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour };'));
   ok(r1.offenders.some((o) => /^usage-meter\.js:\d+: const v5 = \{ reading: rl\?\.fiveHour/.test(o)) && r1.short.length === 1, `㉒g RED: the usage popup's 5h read raw (the taskbar pie + the phone chip ride it) is NAMED: ${JSON.stringify(r1.offenders)}`);
   const r2 = census22(swap22('usage-meter.js', 'const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });', 'const vSc = { reading: sc, est: scEst };'));
-  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 4 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
+  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 9 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
   const r3 = census22(swap22('session-lifecycle.js', 'const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });', 'const v = { reading: raw0, est: e0 };'));
   ok(r3.short.some((x) => x.startsWith('session-lifecycle.js: 0 ')), `㉒g RED: the billing switcher's eff read raw is NAMED: ${JSON.stringify(r3.short)}`);
   const r4 = census22(swap22('manage-agents.js', 'const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x };'));
