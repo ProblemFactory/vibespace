@@ -30,7 +30,9 @@ export function markConversationLinks(md) {
 /** The SANITIZED HTML → each marked link becomes `<span class="chat-link chat-sub-link" data-sub="<id>">`; `known(id)`
  *  false ⇒ the span also carries the chip «unknown subagent». The inner HTML is the sanitizer's own output. */
 export function conversationLinksHtml(html, { known = () => true, t = (s) => s, escHtml = esc0 } = {}) {
-  return String(html || '').replace(/<a href="#vs-conversation-([0-9a-f-]{36})"[^>]*>([\s\S]*?)<\/a>/g, (m, id, inner) => {
+  // THE EXACT-TAG LAW (主开发 2026-11-15): only the tag the rewrite + sanitizer write, `<a href="#vs-conversation-<id>">` byte for byte — an anchor
+  // carrying anything more stays the sanitizer's inert in-page anchor (an older engine writes a raw `>` inside an attribute value)
+  return String(html || '').replace(/<a href="#vs-conversation-([0-9a-f-]{36})">([\s\S]*?)<\/a>/g, (m, id, inner) => {
     if (!SUB_ID.test(id)) return m;
     if (known(id)) return `<span class="chat-link chat-sub-link" data-sub="${id}" title="${escHtml(t('Open this subagent'))}">${inner}</span>`;
     return `<span class="chat-link chat-sub-link chat-sub-unknown" data-sub="${id}" title="${escHtml(t('This conversation started no subagent with this id that VibeSpace could read'))}">${inner} <span class="chat-sub-chip">${escHtml(t('unknown subagent'))}</span></span>`;

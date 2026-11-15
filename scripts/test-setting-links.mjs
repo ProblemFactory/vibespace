@@ -219,5 +219,53 @@ console.log('⑥ A LINK OPENS, IT NEVER WRITES');
   ok(openSrc.length > 500 && !/_setShowAdvanced\(|_showAdvanced = true|setItem\(SHOW_ADVANCED_KEY/.test(openSrc.replace(/advInput\.onchange = \(\) => \{ this\._setShowAdvanced\(advInput\.checked\);/, '')), 'l3: open({ focusKey }) never turns «show advanced» on — the row is revealed for THIS open only (only the switch\'s own toggle writes it)');
 }
 
+console.log('⑦ THE EXACT-TAG LAW (主开发 2026-11-15, the verifier\'s F4): a pass that rewrites a SANITIZED anchor takes only the tag the tree writes — string legs, as an older engine serializes');
+{
+  const os = await import('node:os');
+  const esbuild = createRequire(path.join(REPO, 'package.json'))('esbuild');
+  const SCR = fs.mkdtempSync(path.join(os.default.tmpdir(), 'vs-exacttag-'));
+  process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
+  const URI_RULE = String.raw`^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))`;
+  const STUB = `const OK = new RegExp(${JSON.stringify(URI_RULE)}, 'i');\nexport const sanitizeHtml = (h) => h.replace(/(<a\\b[^>]*?)\\shref="([^"]*)"/gi, (m, pre, v) => (OK.test(v.replace(/[\\u0000-\\u0020]/g, '')) ? m : pre));\nexport const sanitizeDiagramSvg = () => '';`;
+  let n = 0;
+  const bundle = async (entry, patchFile = null, patch = null) => {
+    const out = path.join(SCR, `b${n++}.mjs`);
+    const plug = { name: 'et', setup(b) {
+      b.onResolve({ filter: /(build-version|safe-html)\.js$/ }, (a) => ({ path: path.basename(a.path), namespace: 'et-stub' }));
+      b.onLoad({ filter: /.*/, namespace: 'et-stub' }, (a) => ({ contents: a.path === 'safe-html.js' ? STUB : "export const BUILD_VERSION = 'test';", loader: 'js' }));
+      if (patchFile) b.onLoad({ filter: new RegExp(patchFile.replace(/[.]/g, '\\.') + '$') }, (a) => ({ contents: patch(fs.readFileSync(a.path, 'utf8')), loader: 'js', resolveDir: path.dirname(a.path) }));
+    } };
+    await esbuild.build({ entryPoints: [path.join(REPO, entry)], bundle: true, format: 'esm', platform: 'node', target: 'es2022', outfile: out, logLevel: 'silent', loader: { '.css': 'text' }, plugins: [plug] });
+    return import(out);
+  };
+  // the tags that OPEN outside an attribute value — a quoted value is read whole (a raw `>` inside it never ends the tag)
+  const tagsOutside = (html) => { const out = []; const s = String(html); let i = 0;
+    while (i < s.length) { if (s[i] !== '<') { i++; continue; } const m = /^<\/?([a-zA-Z][\w-]*)/.exec(s.slice(i)); if (!m) { i++; continue; } out.push(m[1].toLowerCase()); i += m[0].length;
+      while (i < s.length && s[i] !== '>') { if (s[i] === '"' || s[i] === "'") { const q = s[i]; const e = s.indexOf(q, i + 1); i = e < 0 ? s.length : e + 1; } else i++; } i++; }
+    return out; };
+  const K = 'spend.unattendedPerInstanceDay', UUID = '0e0e0e0e-1111-4222-8333-444455556666';
+  const EVIL = 'a>b<img src=x onerror=alert(1)>';   // an engine before Chrome 138 / Firefox 140 / Safari 26 writes `>` raw in a value
+  const mk = (R) => new R.ChatRenderers({ ws: null, sessionId: 's', app: {}, backend: 'claude', compact: false, messageList: { addEventListener() { } } });
+  const CR = await bundle('src/lib/chat-renderers.js'), SC = await bundle('src/lib/subagent-card.js');
+  const r = mk(CR);
+  const setRaw = `<p><a href="#vs-setting-${K}" title="${EVIL}">label</a></p>`, setOk = `<p><a href="#vs-setting-${K}">label</a></p>`;
+  const convRaw = `<p><a href="#vs-conversation-${UUID}" title="${EVIL}">x</a></p>`, convOk = `<p><a href="#vs-conversation-${UUID}">x</a></p>`;
+  const maskRaw = `<p><a href="https://x.example/?token=«redacted»" title="${EVIL}" target="_blank" rel="noopener noreferrer">label</a></p>`, maskOk = `<p><a href="https://x.example/?token=«redacted»" target="_blank" rel="noopener noreferrer">label</a></p>`;
+  const legs = (R, S) => { const rr = mk(R);
+    return { set: rr._settingAnchors(setRaw), setOk: rr._settingAnchors(setOk), conv: S.conversationLinksHtml(convRaw), convOk: S.conversationLinksHtml(convOk), mask: rr.linkify(maskRaw), maskOk: rr.linkify(maskOk) }; };
+  const L = legs(CR, SC);
+  ok(!tagsOutside(L.set).includes('img') && L.set === setRaw && /chat-setting-link/.test(L.setOk), 'the setting pass: an anchor carrying more than its href stays the sanitizer\'s own (no tag opens outside an attribute); the ordinary one is the door', L.set);
+  ok(!tagsOutside(L.conv).includes('img') && L.conv === convRaw && /chat-sub-link/.test(L.convOk), 'the conversation-link pass (subagent-card): the same — only `<a href="#vs-conversation-<id>">` is rewritten', L.conv);
+  ok(!tagsOutside(L.mask).includes('img') && /masked-link-note/.test(L.maskOk) && /masked-link-note/.test(L.mask), 'the masked-anchor pass: the tree\'s own open tag read with each value WHOLE (a titled masked link is still words + its note, and nothing opens outside the title)', { mask: L.mask, ok: L.maskOk });
+  // the mutants: the old «not a greater-than sign» run put back, pass by pass — each is RED
+  const crOld = (src) => src.replace("const SETTING_ANCHOR_RE = new RegExp('<a\\\\x20href=\"(' + SETTING_ANCHOR + '[' + SETTING_KEY_CH + ']+)\">([\\\\s\\\\S]*?)<\\\\/a>', 'g');", "const SETTING_ANCHOR_RE = new RegExp('<a\\\\b[^>]*?\\\\shref=\"(' + SETTING_ANCHOR + '[^\"]*)\"[^>]*>([\\\\s\\\\S]*?)<\\\\/a>', 'g');")
+    .replace('const open = SANITIZED_ANCHOR_OPEN_RE.exec(a);', 'const open = /^<a\\b[^>]*>/i.exec(a);').replace('const href = [open[0], open[1]], inner', 'const href = /\\shref\\s*=\\s*"([^"]*)"/i.exec(open[0]), inner');
+  const scOld = (src) => src.replace('/<a href="#vs-conversation-([0-9a-f-]{36})">([\\s\\S]*?)<\\/a>/g', '/<a href="#vs-conversation-([0-9a-f-]{36})"[^>]*>([\\s\\S]*?)<\\/a>/g');
+  const crSrc = read('src/lib/chat-renderers.js'), scSrc = read('src/lib/subagent-card.js');
+  ok(crOld(crSrc) !== crSrc && scOld(scSrc) !== scSrc && crOld(crSrc).split('[^>]*').length - crSrc.split('[^>]*').length >= 2, 'the mutants\' needles are in this tree (the old patterns can be put back)');
+  const M = legs(await bundle('src/lib/chat-renderers.js', 'chat-renderers.js', crOld), await bundle('src/lib/subagent-card.js', 'subagent-card.js', scOld));
+  ok(tagsOutside(M.set).includes('img') && tagsOutside(M.conv).includes('img') && tagsOutside(M.mask).includes('img'), 'RED CONTROL: each pass with its old «[^>]*>» run writes an <img onerror> OUTSIDE an attribute — the setting pass, the conversation pass, the masked pass', { set: M.set, conv: M.conv, mask: M.mask });
+}
+
 console.log(fail ? `✗ test-setting-links: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
