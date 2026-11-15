@@ -227,7 +227,7 @@ export function itemView(item, ctx = {}) {
   // lane browser-unresponsive: a hung browser's ONE item carries its way out — Restart, first (the profile's id only)
   const restartAsk = !resolved && i.action && i.action.type === 'browser-restart' && i.action.profileId ? { profileId: String(i.action.profileId) } : null;
   // a row that DECLARES its buttons (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting: Open the conversation), first
-  const rowBtns = !resolved && i.action && typeof ctx.buttonsOf === 'function' ? ctx.buttonsOf(i.action.type) : null;   // the caller hands the registry's reader in (this file imports nothing)
+  const rowBtns = !resolved && i.action && typeof ctx.buttonsOf === 'function' ? (ctx.buttonsOf(i.action.type) || []).filter((b) => !b.when || !!i.action[b.when]) : null;   // lane turn-never-silent: only the buttons that apply (`when`)   // the caller hands the registry's reader in (this file imports nothing)
   // B-0b8c (lane browser-probe-transient): the browser version could not be read — Check again (one probe now), first
   // …and (lane cli-self-measure) a held Claude Code's check failed / could not run / was stopped — Check again (the hub's own check once more): ONE verb family
   const checkAsk = !resolved && i.action && (i.action.type === 'browser-floor-check' || i.action.type === 'cli-check-again') ? i.action.type : null;

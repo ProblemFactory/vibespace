@@ -30,8 +30,9 @@ const { chipAsksOf } = require('../helper-ask.js');
 const { createProcTree } = require('./proc-tree.js');
 
 const ITEM_KEY = 'turn-stuck:';                 // the producer's identity (the registry row is the type's home)
-const OWN_ENDS = Object.freeze(['moved', 'turn-ended', 'kept-waiting', 'gone']);   // the ends THIS producer writes
+const OWN_ENDS = Object.freeze(['moved', 'turn-ended', 'kept-waiting', 'gone', 'command-ended', 'ended-by-itself', 'restarted']);   // the ends THIS producer writes
 const BOUND_SETTING = 'turns.stuckAfterMin';     // the told bound (minutes; default ten)
+const END_SETTING = 'turns.endStuckCommandMin';  // the by-itself ending (minutes; default thirty; 0 = never) — the owner's word «可以», 2026-11-15
 
 function create({ activeSessions, buffersDir, getUserTodos = () => null, sessionKeyOf = null, serverSetting = () => undefined,
   adapterOf = () => null, labelOf = (b) => { try { return require('../harnesses').harnessOf(b).label || b; } catch { return b; } }, asksOf = chipAsksOf, procTree = createProcTree(), readFile = (f) => fs.promises.readFile(f, 'utf8'),
@@ -43,13 +44,15 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
   const keyOfItem = (i) => String((i && i.itemKey) || '');
   const items = () => { try { const ut = getUserTodos(); const sn = ut && ut.snapshot ? ut.snapshot() : null; return sn ? [...(sn.open || []), ...(sn.resolved || [])].filter((i) => keyOfItem(i).startsWith(ITEM_KEY)) : []; } catch { return []; } };
   const boundMs = () => TL.boundMsOf(serverSetting(BOUND_SETTING));
+  const endBoundMs = () => TL.endBoundMsOf(serverSetting(END_SETTING), boundMs());
+  const writeVerb = (s, o) => { try { s.pty.write(JSON.stringify(o) + '\n'); return true; } catch { return false; } };
   // the open tool step = the conversation's own running tool card: its message manager answers (openTool — every harness's)
   const openToolOf = (s) => { try { const t = s && s._normalizer && typeof s._normalizer.openTool === 'function' ? s._normalizer.openTool() : null; return t && t.name ? { name: t.name, since: null } : null; } catch { return null; } };
   async function sidecarOf(id) {
     try { const j = JSON.parse(await readFile(path.join(buffersDir, `${id}.json`))); return j && typeof j === 'object' ? j : null; } catch { return null; }
   }
   function end(it, why) { try { getUserTodos().setStatus(it.id, 'done', why); } catch (e) { say(`[turn-watch] ${it.id}: not ended — ${e && e.message}`); } }
-  function show(id, s, w, words) {
+  function show(id, s, w, words, facts = {}) {
     const ut = getUserTodos(); if (!ut) return;
     const it = items().find((i) => keyOfItem(i) === w.key);
     if (it && it.status === 'open') {   // patched in place, only when its own words differ
@@ -57,6 +60,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
       try { ut.redrawItem((x) => x.id === it.id, { text: words.text, detail: words.detail, i18n: words.i18n }); } catch { }
       return;
     }
+    if (it && it.resolvedBy === 'ended-by-itself' && facts.stuck) return;   // the act was taken for this stillness; a new one files after it moves
     if (it && !OWN_ENDS.includes(String(it.resolvedBy || ''))) return;   // a person's ✕ stands for this turn
     const sk = sessionKeyOf ? sessionKeyOf(s, id) : id;
     if (!sk) return;
@@ -64,7 +68,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
       ut.add(sk, {
         origin: 'agent', by: 'agent', urgency: 'high', kind: 'action', sessionName: s.name || null,
         text: words.text, detail: words.detail, i18n: words.i18n, itemKey: w.key,   // ONE item per stuck turn (a re-file of an item this producer ended reopens it)
-        action: { type: 'turn-stuck', sessionId: String(id) },
+        action: { type: 'turn-stuck', sessionId: String(id), ...facts },   // facts: which of its buttons apply (the row's `when`)
       });
       say(`[turn-watch] ${id}: a turn said as stuck — one For-you item`);
     } catch (e) { say(`[turn-watch] ${id}: the For-you item was not filed — ${e && e.message}`); }
@@ -100,6 +104,14 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
       for (const [id, s] of activeSessions) {
         if (!s || s.mode !== 'chat') continue;
         const row = capsOf(s.backend).liveness;
+        // L3: a restart of a 'restart' harness (Stop, steer) whose old process has not exited within its bound — said with its door
+        if (row && row.stop === 'restart') {
+          const rc = await sidecarOf(id);
+          const rs = rc && rc.restartStuck;
+          const rkey = rs ? `${ITEM_KEY}${id}:restart:${Number(rs.since) || 0}` : null;
+          for (const it of items()) if (it.status === 'open' && keyOfItem(it).startsWith(`${ITEM_KEY}${id}:restart:`) && keyOfItem(it) !== rkey) end(it, 'restarted');
+          if (rs) { show(id, s, { key: rkey }, TW.restartWords(rs, { cli: labelOf(s.backend) }), { restartStuck: true }); said++; }
+        }
         const t = turnOf(s);
         if (t !== 'running' && t !== 'waiting') { if (st.has(id)) { endOpen(id, 'turn-ended'); st.delete(id); } continue; }
         live.add(id); looked++;
@@ -121,11 +133,18 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
           row, streaming: true, waitingOnUser: t === 'waiting' || waitingOnUser({ turnState: s._turnState || null, pendingAsks: asksOf(s) }),
           openedAt: Number(sc && sc.turnOpenedAt) || Number(s._turnOpenSaidAt) || Number(s._turnOpenedAt) || 0,
           lastWroteAt: Number(sc && sc.cliWroteAt) || 0, keptAt: w.keptAt, treeReadable, readings: w.readings, workSeenAt: w.workSeenAt,
-          openTool: openToolOf(s), cliAlive, boundMs: boundMs(), endBoundMs: null, now: now(),
+          openTool: openToolOf(s), cliAlive, boundMs: boundMs(), endBoundMs: endBoundMs(), now: now(),
         });
         if (TL.SPEAKING.includes(v.state)) {
-          const words = TW.stuckWords(v, { cli: labelOf(s.backend) });
-          if (words) { show(id, s, w, words); said++; }
+          // «End the command» applies to a command that is stuck, on a wrapper that serves it (its sidecar's advert)
+          const endable = v.state === 'stuck-on-command' && !!(sc && sc.caps && sc.caps.endCommand === true);
+          const eb = endBoundMs();
+          const endAt = endable && eb !== null ? Number(v.stillSince) + eb : 0;
+          const words = TW.stuckWords(v, { cli: labelOf(s.backend), endAt });
+          if (words) { show(id, s, w, words, { stuck: true, ...(endable ? { endable: true } : {}) }); said++; }
+          // THE BY-ITSELF ENDING (the owner's «可以»): ONLY a command stuck — open, nothing written, nothing below the CLI working —
+          // for the second bound; the same act as the door; once per stillness; the turn goes on (no turn is started)
+          if (endable && v.endDue && w.endedFor !== v.stillSince) { w.endedFor = v.stillSince; endCommand(id, 'by-itself'); }
         } else if (v.state === 'busy' || v.why === 'not-yet') endOpen(id, 'moved');   // something was written, or worked below the CLI
       }
       for (const id of [...st.keys()]) if (!live.has(id)) { endOpen(id, activeSessions.has(id) ? 'turn-ended' : 'gone'); st.delete(id); }
@@ -140,6 +159,27 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     if (!w) return { ok: false, code: 'not-stuck' };
     w.keptAt = now();
     endOpen(id, 'kept-waiting');
+    return { ok: true };
+  }
+  /** «End the command» (a person's press, or the by-itself ending): the wrapper ends the processes below the CLI and leaves the
+   *  CLI — its tool step ends with the command's failure and the turn goes on. → {ok, code} */
+  function endCommand(id, by = 'person') {
+    const s = activeSessions.get(id);
+    if (!s || !s.pty || s.mode !== 'chat') return { ok: false, code: 'not-live' };
+    const w = st.get(id);
+    if (!w) return { ok: false, code: 'not-stuck' };
+    const eb = endBoundMs();
+    if (!writeVerb(s, { type: 'end-command', by, ...(by === 'by-itself' && eb ? { afterMin: Math.round(eb / 60e3) } : {}) })) return { ok: false, code: 'not-live' };
+    endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');
+    say(`[turn-watch] ${id}: the command ended (${by})`);
+    return { ok: true };
+  }
+  /** «Start it again anyway» (L3): the old CLI process never exited — the wrapper starts a new one without it */
+  function restartAnyway(id) {
+    const s = activeSessions.get(id);
+    if (!s || !s.pty || s.mode !== 'chat') return { ok: false, code: 'not-live' };
+    if (!writeVerb(s, { type: 'restart-anyway' })) return { ok: false, code: 'not-live' };
+    for (const it of items()) if (it.status === 'open' && keyOfItem(it).startsWith(`${ITEM_KEY}${id}:restart:`)) end(it, 'restarted');
     return { ok: true };
   }
   /** «Stop the turn»: the composer's own Stop (the ws 'interrupt' recipe), for the session the item names → {ok, code} */
@@ -158,9 +198,9 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     tick();   // the first reading at once (a restart's turns are judged at the second)
   }
   function stop() { if (timer) { clearTimer(timer); timer = null; } }
-  return { sweep, keepWaiting, stopTurn, start, stop, _state: st };
+  return { sweep, keepWaiting, stopTurn, endCommand, restartAnyway, start, stop, _state: st };
 }
 
 function install(deps) { const w = create(deps); w.start(); return w; }
 
-module.exports = { create, install, ITEM_KEY, OWN_ENDS, BOUND_SETTING };
+module.exports = { create, install, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING };

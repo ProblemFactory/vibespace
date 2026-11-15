@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
+import { buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
@@ -179,7 +179,8 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
 /** A row that DECLARES its buttons (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting: Open the conversation) — drawn
  *  from the registry's fields; the press runs through runAction's ONE generic door. */
-const rowButtonsHtml = (i, t) => { const bs = i && i.action ? buttonsOf(i.action.type) : null; if (!bs) return ''; const note = buttonsNoteOf(i.action.type);
+const rowButtonsHtml = (i, t) => { const bs = i && i.action ? buttonsFor(i) : null; if (!bs || !bs.length) return '';   // lane turn-never-silent: only the buttons that apply (`when`)
+  const note = buttonsNoteOf(i.action.type);
   return `<div class="ut-exit-answer ut-row-buttons">${bs.map((b) => `<button type="button" class="ut-act ut-action-exit" data-answer="${escHtml(b.answer)}" title="${escHtml(t(b.title))}">${escHtml(t(b.label))}</button>`).join('')}</div>`
     + (note ? `<div class="ut-exit-note">${escHtml(t(note))}</div>` : ''); };
 /** lane mask-value-shape r6 (m7): the note of a masked run in a VERBATIM command — a block after it, never inside it ('' when none). */

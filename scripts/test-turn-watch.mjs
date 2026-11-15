@@ -213,7 +213,7 @@ console.log('— ⑯ LIVE: the REAL agy wrapper, its records through the REAL me
   };
   const [h, b] = await Promise.all([live('hang'), live('busy')]);
   ok(h.open && h.open.name === 'run_command', 'the REAL ACP message manager answers openTool(): agy\'s open run_command step (the conversation\'s own running tool card)', h.open);
-  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.command && h.items[0].i18n.text.params.tool === 'run_command' && h.items[0].detail === 'Antigravity CLI is running.', 'hang-command: ONE item — stuck on run_command, Antigravity running', h.items.map((i) => i.text + ' | ' + i.detail));
+  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.command && h.items[0].i18n.text.params.tool === 'run_command' && h.items[0].detail.startsWith('Antigravity CLI is running. ') && /the command is ended by itself at/.test(h.items[0].detail) && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command, Antigravity running, and when it is ended by itself (pick 4: its wrapper serves end-command)', h.items.map((i) => i.text + ' | ' + i.detail));
   ok(b.items.length === 0, 'busy-command: nothing (its command works below agy)', b.items.map((i) => i.text));
 }
 

@@ -101,7 +101,7 @@ const meta = {
   // a STOP + a new billed turn, never codex's free fold into the running turn: said explicitly, so the verb list above
   // can never make a mid-turn notification look free (src/server/wrapper-files.js wrapperCaps: explicit beats derived).
   // receipts (lane human-cli r4): the receipts road below — the person's CLI sends here only while it can be told a torn line
-  caps: { frameFile: true, peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true, receipts: true },
+  caps: { frameFile: true, peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true, receipts: true, endCommand: true, restartAnyway: true },
   queue: [],
 };
 
@@ -149,6 +149,71 @@ function noteCliWrote() {
   meta.cliWroteAt = Date.now();
   if (first) { scheduleMeta(); return; }
   if (!cliWroteTimer) { cliWroteTimer = setTimeout(() => { cliWroteTimer = null; scheduleMeta(); }, CLI_WROTE_PACE_MS); cliWroteTimer.unref?.(); }
+}
+// STOPPING ENDS WHAT THE TURN STARTED (lane turn-never-silent, law L3): agy runs in its OWN process group (spawned
+// detached), so Stop, steer and this wrapper's own end signal the GROUP; what moved to a group of its own but is still in
+// the tree below agy is signalled by pid, each one's birth checked first (a pid is never an identity); after the bound,
+// what is still alive is SAID by name and count. «End the command» (stdin verb `end-command`) ends the processes below agy
+// and leaves agy: its tool step ends with the command's failure and the turn goes on. Measured 2026-11-12: an idle agy
+// has no child at all — what is below it during a turn is the turn's own work.
+const PT = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'server', 'proc-tree.js')).createProcTree(); } catch { return null; } })();
+const TLV = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'turn-liveness.js')); } catch { return null; } })();
+const END_GRACE_MS = Math.max(50, Number(process.env.AGY_WEBUI_END_GRACE_MS) || 3000);   // SIGTERM → SIGKILL for a command's processes
+const RESTART_BOUND_MS = Math.max(100, Number(process.env.AGY_WEBUI_RESTART_BOUND_MS) || 15000);   // a restart not done by then is said
+const KILL_MS = Math.max(500, Number(process.env.AGY_WEBUI_KILL_MS) || 5000);   // a restart's SIGTERM → SIGKILL (the suites shorten it)
+async function treeBelow(pid) { if (!PT || !pid) return []; try { const r = await PT.readBelow(pid, { parent: process.pid }); return r.readable ? r.list : []; } catch { return []; } }
+function sameBirth(p) { try { const s = TLV && TLV.parseStat(fs.readFileSync(`/proc/${p.pid}/stat`, 'utf8')); return !!s && s.startTicks === p.startTicks && s.state !== 'Z'; } catch { return false; } }
+function signalOne(p, sig) { if (!sameBirth(p)) return false; try { process.kill(p.pid, sig); return true; } catch { return false; } }
+/** end these processes (SIGTERM, then SIGKILL after END_GRACE_MS) → {ended: [names], survivors: [names]} */
+async function endTree(list) {
+  const live = list.filter(sameBirth);
+  for (const p of live) signalOne(p, 'SIGTERM');
+  await new Promise((r) => setTimeout(r, END_GRACE_MS));
+  for (const p of live) if (sameBirth(p)) signalOne(p, 'SIGKILL');
+  await new Promise((r) => setTimeout(r, 300));
+  const survivors = live.filter(sameBirth);
+  return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm) };
+}
+const namesOf = (names) => { const c = new Map(); for (const n of names) c.set(n, (c.get(n) || 0) + 1); return [...c].map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(', '); };
+// `proc` is ONLY the child this wrapper spawned itself (startChild: spawn(…, { detached: true })) — its pgid IS its pid, the group is agy's
+function killGroup(proc, sig) { try { process.kill(-proc.pid, sig); return true; } catch { try { proc.kill(sig); return true; } catch { return false; } } }
+/** the command's own output (its fd 1 or 2) when it is a PIPE that agy's own tree reads — agy itself, or a process below it (a
+ *  pipeline): a sentence written there is the step's output, so the agent reads why. Never a file, a terminal or a pipe out of
+ *  the tree. A socket pair (what a Node CLI's own spawn gives a child) cannot be opened from outside: then nothing is written,
+ *  the agent sees the command's failure, and the conversation carries the sentence (the notice). → whether it was written */
+function sayToCommand(list, agyPid, text) {
+  const pipesOf = (pid) => { const out = new Set(); try { for (const fd of fs.readdirSync(`/proc/${pid}/fd`)) { try { const l = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); if (l.startsWith('pipe:')) out.add(l); } catch { } } } catch { } return out; };
+  const held = new Map([[agyPid, pipesOf(agyPid)], ...list.map((p) => [p.pid, pipesOf(p.pid)])]);
+  for (const p of list) for (const fd of [1, 2]) {
+    try {
+      const l = fs.readlinkSync(`/proc/${p.pid}/fd/${fd}`);
+      if (!l.startsWith('pipe:') || !sameBirth(p)) continue;
+      if (![...held].some(([pid, set]) => pid !== p.pid && set.has(l))) continue;   // the other end is in the tree (or agy)
+      const h = fs.openSync(`/proc/${p.pid}/fd/${fd}`, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
+      try { fs.writeSync(h, '\n' + text + '\n'); } finally { fs.closeSync(h); }
+      return true;
+    } catch { }
+  }
+  return false;
+}
+let commandEnding = false;
+async function endCommand(by, afterMin) {
+  if (commandEnding) return;
+  if (!child || !activePrompt || !activePrompt.dispatched) { record('command_ended', { ok: false, code: 'no-turn', by }); return; }
+  const list = await treeBelow(child.pid);
+  if (!list.length) { record('command_ended', { ok: false, code: 'no-command', by }); return; }
+  commandEnding = true;
+  try {
+    const min = Number(afterMin) > 0 ? Math.round(Number(afterMin)) : null;
+    const why = by === 'by-itself'
+      ? `VibeSpace ended this command${min ? ` after ${min} minutes` : ''} with no output and nothing it started working.`
+      : 'VibeSpace ended this command at the person\'s request.';
+    const told = sayToCommand(list, child.pid, why);
+    const r = await endTree(list);
+    record('command_ended', { ok: true, by, ended: r.ended, survivors: r.survivors, told });
+    if (r.survivors.length) notice('error', `${by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended'}, but ${r.survivors.length} of its processes could not be ended: ${namesOf(r.survivors)}.`, 'command-ended');
+    else notice('info', `${by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended'} (${namesOf(r.ended)}); the turn goes on.`, 'command-ended');
+  } finally { commandEnding = false; }
 }
 // …and `turnOpenedAt`: the moment this wrapper wrote the turn's text to agy (0 between turns) — a turn whose CLI has said
 // nothing yet counts its silence from there, never from the turn before.
@@ -228,7 +293,7 @@ function childArgs() {
 function startChild() {
   const args = childArgs();
   childRetryBypass = retryBypass && state.mode !== 'bypassPermissions';
-  try { child = spawn(cmd, args, { cwd: baseCwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] }); }
+  try { child = spawn(cmd, args, { cwd: baseCwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: true }); }   // lane turn-never-silent (L3): its own process group
   catch (err) { notice('error', `Could not start Antigravity (${cmd}): ${err.message}`, 'spawn-failed'); finalizeExit(1); return; }
   const mine = child;
   meta.childPid = child.pid; scheduleMeta();
@@ -246,10 +311,16 @@ function startChild() {
     let i;
     while ((i = errBuf.indexOf('\n')) !== -1) { const line = errBuf.slice(0, i).replace(/\r/g, ''); errBuf = errBuf.slice(i + 1); if (line.trim()) handleStderr(line, mine); }
   });
-  child.on('error', (err) => { notice('error', `Antigravity process error: ${err.message}`, 'child-error'); });
+  child.on('error', (err) => {
+    notice('error', `Antigravity process error: ${err.message}`, 'child-error');
+    // lane turn-never-silent (L3): a spawn that failed (no pid) never says 'exit' — it IS the exit (a self-update replaced the binary)
+    if (!mine.pid) onExit(null, null);
+  });
   setImmediate(drainPromptQueue); // what queued behind a restart runs on the new process
   if ([...subs.values()].some((x) => !x.done)) armSubTail(); // a sub still working when agy restarted
-  child.on('exit', (code, signal) => {
+  let exited = false;
+  const onExit = (code, signal) => {
+    if (exited) return; exited = true;
     if (mine !== child) return; // an old child after a restart
     child = null;
     if (restarting) return;   // the restart path starts the next one
@@ -262,7 +333,8 @@ function startChild() {
       else if (!markReadyDone || code) notice('error', `Antigravity exited (${signal ? 'signal ' + signal : 'exit code ' + code}) — see agy-wrapper.log. Resume the conversation to continue.`, 'agent-exited');
     }
     finalizeExit(authFailed ? 1 : (code ?? 0));
-  });
+  };
+  child.on('exit', onExit);
 }
 
 /** Restart agy on the same conversation with the current flags (a model / effort / mode switch, or Stop). */
@@ -271,10 +343,24 @@ function restartChild(why) {
   if (!child) { startChild(); return; }
   restarting = true;
   const old = child;
-  old.once('exit', () => { restarting = false; if (!shuttingDown) startChild(); });
+  let gone = false;
+  const tree = treeBelow(old.pid);   // read NOW (before the signals): what the turn started, each one's birth
+  old.once('exit', () => {
+    gone = true; if (meta.restartStuck) { meta.restartStuck = null; scheduleMeta(); }
+    if (restarting) { restarting = false; if (!shuttingDown) startChild(); }   // after «Start it again anyway» the new one is already up
+    // what moved out of agy's group but was in its tree: by pid (its birth checked); what still lives is said
+    tree.then(async (list) => { if (!list.length) return; const r = await endTree(list); if (r.survivors.length) notice('error', `Stopped, but ${r.survivors.length} process${r.survivors.length > 1 ? 'es' : ''} the turn started could not be ended: ${namesOf(r.survivors)}.`, 'stop-survivors'); }).catch(() => { });
+  });
   try { old.stdin.end(); } catch { }
-  setTimeout(() => { try { old.kill('SIGTERM'); } catch { } }, 300).unref();
-  setTimeout(() => { try { old.kill('SIGKILL'); } catch { } }, 5000).unref();
+  setTimeout(() => { killGroup(old, 'SIGTERM'); }, 300).unref();
+  setTimeout(() => { killGroup(old, 'SIGKILL'); }, KILL_MS).unref();
+  // THE RESTART'S BOUND (L3): an old agy that has not exited by then (state D on a stalled mount) is SAID, with its door
+  setTimeout(() => {
+    if (gone || old !== child && child) return;
+    let state = '?'; try { state = TLV.parseStat(fs.readFileSync(`/proc/${old.pid}/stat`, 'utf8')).state; } catch { }
+    meta.restartStuck = { since: Date.now(), pid: old.pid, state }; scheduleMeta();
+    notice('error', `The old Antigravity process (pid ${old.pid}, state ${state}) has not exited — the next one waits for it. «Start it again anyway» starts a new one now.`, 'restart-stuck');
+  }, RESTART_BOUND_MS).unref();
   log(`restart (${why}) on conversation ${meta.sessionId || '(new)'}`);
 }
 
@@ -985,6 +1071,11 @@ async function handleInput(msg) {
     case 'read-permission-rules':
       record('permission_rules', { ok: false, requestId: typeof msg.requestId === 'string' ? msg.requestId : '', reason: 'unsupported-by-protocol', detail: "Antigravity's stream has no config-read method — its rules live in ~/.gemini/antigravity-cli/settings.json (permissions.allow).", mode: state.mode || null, modes: modeValues() });
       return;
+    case 'end-command': endCommand(msg.by === 'by-itself' ? 'by-itself' : 'person', msg.afterMin).catch((e) => notice('error', `The command could not be ended: ${e.message}`, 'command-ended')); return;   // lane turn-never-silent (L3)
+    case 'restart-anyway': {   // lane turn-never-silent (L3): the old agy never exited — start a new one without it
+      if (!restarting || !meta.restartStuck) { record('restart_anyway', { ok: false, code: 'not-stuck' }); return; }
+      restarting = false; meta.restartStuck = null; scheduleMeta(); child = null; startChild(); record('restart_anyway', { ok: true }); return;
+    }
     case 'queue-op': return handleQueueOp(msg);
     case 'queue-resync': publishQueue(); return;
     case 'permission-response': resolveSoftDeny(msg); return;
@@ -1061,7 +1152,7 @@ function finalizeExit(code) {
   log(`session ended code=${code}`);
   process.exit(code ?? 0);
 }
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { shuttingDown = true; try { child?.stdin.end(); } catch { } setTimeout(() => { try { child?.kill('SIGTERM'); } catch { } finalizeExit(0); }, 500).unref(); });
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { shuttingDown = true; try { child?.stdin.end(); } catch { } setTimeout(() => { if (child) killGroup(child, 'SIGTERM'); finalizeExit(0); }, 500).unref(); });   // lane turn-never-silent (L3): agy's whole group
 
 function boot() {
   // a RESUMED conversation started with no stated mode runs in its OWN mode (THE CONVERSATION'S MODE above) — never

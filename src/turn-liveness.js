@@ -99,7 +99,7 @@ function boundMsOf(minutes) {
 /** the by-itself ending's bound in ms from its setting's minutes: 'off' (or false) = never (null); a number is clamped to
  *  [the told bound, a day] — a command is never ended before it was told; anything else is the default thirty minutes */
 function endBoundMsOf(minutes, boundMs = boundMsOf(DEFAULT_BOUND_MIN)) {
-  if (minutes === false || minutes === 'off') return null;
+  if (minutes === false || minutes === 'off' || minutes === 0 || minutes === '0') return null;   // the setting's 0 = never
   const n = typeof minutes === 'string' && minutes.trim() !== '' ? Number(minutes) : minutes;
   const m = typeof n === 'number' && Number.isFinite(n) ? n : DEFAULT_END_MIN;
   return Math.round(Math.min(MAX_BOUND_MIN * 60 * 1000, Math.max(Number(boundMs) || 0, MIN_BOUND_MIN * 60 * 1000, m * 60 * 1000)));

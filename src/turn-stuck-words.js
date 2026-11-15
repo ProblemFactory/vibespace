@@ -17,25 +17,34 @@ const TEXT = Object.freeze({
 const LINES = Object.freeze({
   alive: '{cli} is running.',
   gone: '{cli} is not running.',
+  endAt: 'If nothing changes, the command is ended by itself at {endAt}.',
 });
+// L3: a restart of the CLI (Stop, steer) whose old process has not exited within its bound
+const RESTART_TEXT = 'The old {cli} process has not exited since {since} (state {state}) — the next one waits for it';
 const hhmm = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) && Number(at) > 0 ? d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : ''; };
 const fill = (k, p) => k.replace(/\{(\w+)\}/g, (m, x) => (x in p ? p[x] : m));   // ONE pass: a tool name holding «{since}» never corrupts it
 
 /** the item's words for a speaking verdict (src/turn-liveness.js livenessVerdict) — {text, detail, i18n}; null for a state
  *  that does not speak. `cli` = the harness's label (Antigravity, Claude Code). */
-function stuckWords(v, { cli = 'The CLI' } = {}) {
+function stuckWords(v, { cli = 'The CLI', endAt = 0 } = {}) {
   if (!v || !['stuck-on-command', 'silent', 'unknown'].includes(v.state)) return null;
   const key = v.state === 'stuck-on-command' ? TEXT.command : v.state === 'silent' ? TEXT.silent : TEXT.unknown;
   const tool = String(v.tool || 'a tool').slice(0, 80);
   const since = Number(v.since) || 0;
   const text = fill(key, { tool, since: hhmm(since) });
   const line = v.cliAlive === false ? LINES.gone : v.cliAlive === true ? LINES.alive : null;
-  const detail = line ? fill(line, { cli: String(cli) }) : '';
+  const ends = v.state === 'stuck-on-command' && Number(endAt) > 0;
+  const detail = [line ? fill(line, { cli: String(cli) }) : '', ends ? fill(LINES.endAt, { endAt: hhmm(endAt) }) : ''].filter(Boolean).join(' ');
   const i18n = {
     text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool } : {}), since: { at: since } } },
-    detail: line ? [{ key: line, params: { cli: String(cli) } }] : [],
+    detail: [...(line ? [{ key: line, params: { cli: String(cli) } }] : []), ...(ends ? [{ key: LINES.endAt, params: { endAt: { at: Number(endAt) } } }] : [])],
   };
   return { text, detail, i18n };
 }
+/** L3: the item's words for a restart whose old process has not exited (the wrapper's sidecar `restartStuck`) */
+function restartWords({ since, state }, { cli = 'The CLI' } = {}) {
+  const p = { cli: String(cli), state: String(state || '?').slice(0, 2) };
+  return { text: fill(RESTART_TEXT, { ...p, since: hhmm(since) }), detail: '', i18n: { text: { key: RESTART_TEXT, params: { ...p, since: { at: Number(since) || 0 } } }, detail: [] } };
+}
 
-module.exports = { TEXT, LINES, hhmm, stuckWords };
+module.exports = { TEXT, LINES, RESTART_TEXT, hhmm, stuckWords, restartWords };

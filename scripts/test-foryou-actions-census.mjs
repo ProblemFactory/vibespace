@@ -132,7 +132,7 @@ ok(FA.ROWS.some((r) => typeof r.checkRoute === 'string') && doorMiss(ACT.replace
 ok(FA.ROWS.some((r) => Array.isArray(r.buttons)) && doorMiss(ACT.replace(BUTTONS_DOOR, '/* the buttons door, removed */')).includes('messages-waiting'), 'RED CONTROL: the declared-buttons door removed ⇒ a row that declares its buttons has no branch at all');
 const ROWJS = code(files['src/lib/user-todos-row.js']);
 const rowImports = [...ROWJS.matchAll(/from '\.\/([\w-]+\.js)'/g)].map((m) => `src/lib/${m[1]}`);
-const ROW_BUTTONS = /const rowButtonsHtml = \(i, t\) => \{ const bs = i && i\.action \? buttonsOf\(i\.action\.type\) : null;[\s\S]*?exitAskHtml\(i, t\) \+ rowButtonsHtml\(i, t\)/;   // lane queued-is-not-woke: the row draws DECLARED buttons generically
+const ROW_BUTTONS = /const rowButtonsHtml = \(i, t\) => \{ const bs = i && i\.action \? (?:buttonsOf\(i\.action\.type\)|buttonsFor\(i\)) : null;[\s\S]*?exitAskHtml\(i, t\) \+ rowButtonsHtml\(i, t\)/;   // lane turn-never-silent: buttonsFor(i) — only the buttons that apply (`when`)   // lane queued-is-not-woke: the row draws DECLARED buttons generically
 const rowDraws = (ty, src = ROWJS) => src.includes(`'${ty}'`) || rowImports.some((f) => new RegExp(`export const [A-Z_]+ = '${ty}'`).test(files[f] || '')) || (Array.isArray((FA.ROW_OF[ty] || {}).buttons) && ROW_BUTTONS.test(src));
 const WIN = code(files['src/lib/inbox-window.js'] + '\n' + files['src/lib/inbox-window-layout.js']);
 { const bad = FA.ROWS.filter((r) => (r.card === 'row' && !rowDraws(r.type)) || (r.card !== 'row' && rowDraws(r.type)) || (r.card === 'inbox-window' && !WIN.includes(`'${r.type}'`))).map((r) => `${r.type} (${r.card})`);
