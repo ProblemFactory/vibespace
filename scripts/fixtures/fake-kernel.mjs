@@ -108,7 +108,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   // lane chrome-157 (vault-login round 32): THE DOCUMENT'S ID as Chrome keeps it — a new loaderId per new document (a navigation,
   // a reload, a setDom told `newDocument`), the same one across a move inside the document
   const loaderOf = (t) => 'L' + t.targetId + (t.doc ? '.' + t.doc : '');
-  const frameOf = (t) => ({ id: t.targetId, loaderId: loaderOf(t), url: t.url, domainAndRegistry: '', securityOrigin: originOfUrl(t.url) || 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
+  const frameOf = (t) => ({ id: t.targetId, loaderId: loaderOf(t), url: t.url, domainAndRegistry: String(t.site || ''),   /* (lane chrome-157, L1: Chrome's own registrable domain — '' unless a test names one, setSite) */ securityOrigin: originOfUrl(t.url) || 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
   // ── the surface protocol ──
   const onTarget = (tid, fn) => { for (const [sid, s] of sessions) if (s.targetId === tid) fn(sid, s); };
   /** A VibeSpace.* event on every session of the tab that enabled surfaces (Q2: the frame's sessionId + params.targetId). */
@@ -1024,6 +1024,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
     loaderIdOf: (targetId) => { const t = targets.get(targetId); return t ? loaderOf(t) : null; },   // (lane chrome-157: the id of a tab's present document, as Page.getFrameTree names it)
+    setSite: (targetId, reg) => { const t = targets.get(targetId); if (t) t.site = String(reg || ''); },   // (lane chrome-157, L1: the registrable domain Chrome would name for the tab's document)
     setDom, setTitle, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
     navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.doc = (x.doc || 0) + 1; /* (lane chrome-157, P4: a page's own navigation is a new document — a new loaderId) */ x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },

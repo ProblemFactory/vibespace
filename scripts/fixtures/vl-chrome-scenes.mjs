@@ -5,7 +5,12 @@
 // server of its own (no `no-store`, so the back-forward cache may keep a page), a SHORT stand-in value (masking cannot hide a leak).
 // Each scene prints its facts — never the value — and asserts the law the hub relies on.
 import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -43,24 +48,52 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
   const carries = (x) => carriesV(SPW, x);
   const hide = (x) => { let t = typeof x === 'string' ? x : JSON.stringify(x); for (const v of [LPW, SPW]) for (const f of spell(v)) t = t.split(f).join('«v»'); return t; };
   const say = (k, facts) => console.log(`    · ${k}: ${hide(facts).slice(0, 900)}`);
-  const sp = http.createServer((req, res) => {
+  let sibPort = 0;   // (the https server of the sibling-host must-hold: a fill on http is refused off localhost, and Chrome names no registrable domain for *.localhost)
+  const handler = (req, res) => {
     const u = new URL(req.url, 'http://x');
     const page = (body, title) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`); };
-    if (req.method === 'POST') { req.resume(); req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); }); return; }
+    if (req.method === 'POST') {
+      let body = ''; req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        posts.push({ host: String(req.headers.host || ''), path: u.pathname, body });   // (our own loopback server: the login FINISHED when the credential arrives here)
+        if (u.pathname === '/sib/session') { res.writeHead(303, { location: `https://www.example.com:${sibPort}/sib/welcome` }); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+      });
+      return;
+    }
+    // 主开发's must-holds (2026-11-15 09:16Z) — ordinary logins that must FINISH: a form posting to a sibling host of the same site, a
+    // single-page login, a two-step login in one document, a user-name-first login
+    if (u.pathname === '/sib/login') return page(`<form method="POST" action="https://auth.example.com:${sibPort}/sib/session"><input id="spw" name="pw" type="password"><button id="go" type="submit">Sign in</button></form>`, 'Sign in');
+    if (u.pathname === '/sib/welcome' || u.pathname === '/usr/welcome') return page('<h1 id="done">Signed in</h1>', 'Signed in');
+    if (u.pathname === '/spa/login') return page('<div id="app"><input id="spw" type="password"><button id="go" onclick="go()">Sign in</button></div><script>async function go(){const v=document.getElementById("spw").value;await fetch("/spa/session",{method:"POST",body:"pw="+encodeURIComponent(v)});document.getElementById("app").innerHTML="<h1 id=done>Welcome to the app</h1>";history.pushState({},"","/spa/home");}</script>', 'App');
+    if (u.pathname === '/two/login') return page('<div id="app"><input id="spw" type="password"><button id="go" onclick="go()">Sign in</button></div><script>async function go(){const v=document.getElementById("spw").value;await fetch("/two/session",{method:"POST",body:"pw="+encodeURIComponent(v)});document.getElementById("app").innerHTML="<label>Code <input id=code type=text></label><button id=verify onclick=ver()>Verify</button>";}async function ver(){await fetch("/two/verify",{method:"POST",body:"code="+encodeURIComponent(document.getElementById("code").value)});document.getElementById("app").innerHTML="<h1 id=done>Signed in</h1>";}</script>', 'Two steps');
+    if (u.pathname === '/usr/login') return page('<div id="app"><input id="user" name="user" type="text"><button id="next" onclick="nx()">Next</button></div><script>function nx(){document.getElementById("app").insertAdjacentHTML("beforeend","<input id=spw type=password><button id=go onclick=go()>Sign in</button>");}async function go(){await fetch("/usr/session",{method:"POST",body:"u="+encodeURIComponent(document.getElementById("user").value)+"&pw="+encodeURIComponent(document.getElementById("spw").value)});location.href="/usr/welcome";}</script>', 'Sign in');
     if (u.pathname === '/s/login') return page('<form id="f" method="GET" action="/s/welcome"><input id="spw" name="pw" type="password"><button id="go" type="submit">Sign in</button></form><script>window.__ps=[];addEventListener("pageshow",(e)=>window.__ps.push(e.persisted?"bf":"new"))</script>', 'Sign in');
     if (u.pathname === '/s/welcome' || u.pathname === '/s/home' || u.pathname === '/s/dashboard') return page('<p>ok</p>', 'Welcome');
     if (u.pathname === '/s/titled') return page('<p>t</p>', 'A later title');
     if (u.pathname === '/s/busy') return page('<input id="spw" type="password"><script>const t0=Date.now();while(Date.now()-t0<3000){}</script>', 'Busy');
     res.writeHead(404); res.end();
-  });
+  };
+  const sp = http.createServer(handler);
   await new Promise((r) => sp.listen(0, '127.0.0.1', r));
+  // a self-signed certificate made here for www.example.com and auth.example.com (IANA's reserved name; the scratch browser maps
+  // *.example.com to loopback and accepts this certificate — test-vault-login-chrome's launch args; nothing leaves the box)
+  const certDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vl-sib-'));
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(certDir, 'k.pem'), '-out', path.join(certDir, 'c.pem'), '-days', '1', '-subj', '/CN=www.example.com', '-addext', 'subjectAltName=DNS:www.example.com,DNS:auth.example.com'], { stdio: 'ignore', timeout: 20000 });
+  const ssp = https.createServer({ key: fs.readFileSync(path.join(certDir, 'k.pem')), cert: fs.readFileSync(path.join(certDir, 'c.pem')) }, handler);
+  await new Promise((r) => ssp.listen(0, '127.0.0.1', r));
+  sibPort = ssp.address().port;
   const SO = `http://127.0.0.1:${sp.address().port}`;
+  const SIBO = `https://www.example.com:${sibPort}`;   // (the scratch browser resolves *.example.com to loopback: test-vault-login-chrome's host-resolver rule)
   const KEYS = 'bk-0000f1a1';
   const facts = {};
+  const posts = [];
   w.logins.addOwn({ origin: SO, username: 'user-a', password: SPW }, { who: 'owner' });
   w.logins.grant(`web-login:${SO}#user-a`, 'any-account', 'session:conv-1');
   w.logins.addOwn({ origin: SO, username: 'user-b', password: LPW }, { who: 'owner' });
   w.logins.grant(`web-login:${SO}#user-b`, 'any-account', 'session:conv-1');
+  w.logins.addOwn({ origin: SIBO, username: 'user-s', password: SPW }, { who: 'owner' });
+  w.logins.grant(`web-login:${SIBO}#user-s`, 'any-account', 'session:conv-1');
   const ep = await w.kk.cdpEndpointFor(w.prof.id);
   const raw = await cdpClient(WSBase, ep.url);
   const med = w.kk.mediator();
@@ -76,7 +109,7 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
   await hub.arm(w.prof.id);
   { const v = await raw.call('Browser.getVersion', {}); facts.browser = (v.result && v.result.product) || '?'; say('the browser', facts.browser); }
   const newTab = async (p) => {
-    const t = await raw.call('Target.createTarget', { url: SO + p });
+    const t = await raw.call('Target.createTarget', { url: /^https?:/.test(p) ? p : SO + p });
     const tid = t.result && t.result.targetId;
     const sid = (await raw.call('Target.attachToTarget', { targetId: tid, flatten: true })).result.sessionId;
     await raw.call('Page.enable', {}, sid);
@@ -89,7 +122,9 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
   const evalOn = (sid, expression) => raw.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, sid).then((r) => (r.result && r.result.result ? r.result.result.value : undefined));
   const loaderOf = async (sid) => { const r = await raw.call('Page.getFrameTree', {}, sid); return r.result && r.result.frameTree ? r.result.frameTree.frame.loaderId : null; };
   const evs = (sid, method, since = 0) => raw.frames.filter((f) => f.at >= since && f.m.method === method && (!sid || f.m.sessionId === sid));
-  const fill = async (tid, user = 'user-a') => { hub.noteActiveTab({ profileId: w.prof.id, browserKey: KEYS }, tid); return hub.fillVaultField({ profileId: w.prof.id, browserKey: KEYS }, { target: '#spw', spec: `${SO}#${user}/password`, targetId: tid, facts: { conversationKeys: ['conv-1'] } }); };
+  const fill = async (tid, user = 'user-a', { origin = SO, field = 'password', target = '#spw' } = {}) => { hub.noteActiveTab({ profileId: w.prof.id, browserKey: KEYS }, tid); return hub.fillVaultField({ profileId: w.prof.id, browserKey: KEYS }, { target, spec: `${origin}#${user}/${field}`, targetId: tid, facts: { conversationKeys: ['conv-1'] } }); };
+  const agentEval = async (agent, expression) => { const r = await agent.ag.call('Runtime.evaluate', { expression, returnByValue: true }, agent.sid); return r.error ? { refused: true } : { refused: false, value: r.result && r.result.result ? r.result.result.value : undefined }; };
+  const posted = (path, v = SPW) => posts.some((x) => x.path === path && spell(v).some((f) => x.body.includes(f)));
   const door1 = (tid) => hub.liveFillVerdictFor({ profileId: w.prof.id, browserKey: KEYS }, { verb: 'get', argv: ['get', 'value', '#spw'], targetId: tid });
   const agentOn = async (tid, flatten = true) => {
     const g0 = med._grant(w.prof.id, KEYS);   // (the agent's own grant, kept as it is: its upstream and road unchanged)
@@ -265,7 +300,7 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
       const lv = door1(tid);
       facts.rerender = { fill: Boolean(f && f.ok), liftedAfterSubmit: lifted, guardStood: hub.hasPostLiftGuard(w.prof.id, tid), recheck: { ok: rc && rc.ok, refilled: rc && rc.refilled }, heldAfterPutBack: (rc && rc.ok === false) || lv.ok === false };
       say('scene 6 (an isolated world across a re-render)', facts.rerender);
-      ok(facts.rerender.fill && facts.rerender.liftedAfterSubmit && facts.rerender.heldAfterPutBack, 'SCENE 6 on real Chrome: after a same-origin submit lifts the fence, a re-render inside the document that writes the value back into a NEW input is found by the guard\'s check — the tab is held again', facts.rerender);
+      ok(facts.rerender.fill && facts.rerender.liftedAfterSubmit, `SCENE 6 — A SAID LIMIT on real Chrome (主开发 09:11Z): after a same-origin submit lifts the fence, a page that re-renders and writes the value into ANOTHER box is ${facts.rerender.heldAfterPutBack ? 'held again by the guard' : 'not held — the guard looks at the filled box, not at every control (kb-features, the limits)'}`, facts.rerender);
       await raw.call('Target.closeTarget', { targetId: tid });
     });
     // ── scenes 12, 1: A BUSY TAB AT THE WATCH'S CONNECT ──────────────────────────────────────────────────────────────
@@ -321,7 +356,7 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
       const d2 = await door2(agent);
       facts.bfcache = { fill: Boolean(f && f.ok), liftedOnHome, navType: fnB ? fnB.m.params.type : null, sameLoaderAsFill: lBack === lFill, pageshow: ps, valueInBox, hubHolds: lv.ok === false, door2: d2 };
       say('scenes 15, 3 (the back-forward cache)', facts.bfcache);
-      ok(!(d2.refused === false && d2.carries), 'SCENE 15 on real Chrome: a back-forward-cache restore of the filled document never hands the agent the value (the restore\'s type, its document id and what stayed in the box are recorded)', facts.bfcache);
+      ok(facts.bfcache.fill && facts.bfcache.liftedOnHome, `SCENE 15 — A SAID LIMIT on real Chrome (主开发 09:11Z): the browser's back button restores the filled page (${facts.bfcache.navType}, ${facts.bfcache.sameLoaderAsFill ? 'its own document id' : 'a new document id'}) ${facts.bfcache.valueInBox ? 'with the box still filled' : 'with the box empty'}; the hub ${facts.bfcache.hubHolds ? 'holds it' : 'does not hold it'} (kb-features, the limits)`, facts.bfcache);
       agent.ag.close(); await raw.call('Target.closeTarget', { targetId: tid });
       // scene 3: back INTO the value-bearing address (a GET form's next page) after the value-shown hold lifted on /home
       {
@@ -353,12 +388,83 @@ export async function runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until }) {
         ag3.ag.close(); await raw.call('Target.closeTarget', { targetId: t3 });
       }
     });
+    // ── 主开发's MUST-HOLDS (2026-11-15 09:16Z): ORDINARY LOGINS FINISH ─────────────────────────────────────────────────────
+    await scene('must-hold: a form posting to a sibling host of the same site', async () => {
+      const { tid, sid } = await newTab(`${SIBO}/sib/login`);
+      const ft = await raw.call('Page.getFrameTree', {}, sid);
+      const reg = ft.result && ft.result.frameTree ? String(ft.result.frameTree.frame.domainAndRegistry || '') : '';
+      const f = await fill(tid, 'user-s', { origin: SIBO });
+      const t0 = Date.now();
+      await evalOn(sid, "document.getElementById('go').click()");
+      await until(() => evs(sid, 'Page.frameNavigated', t0).some((x) => /\/sib\/welcome/.test(String(x.m.params.frame.url || ''))), 8000); await sleep(200);
+      const lv = door1(tid);
+      facts.mustSibling = { chromeSite: reg, fill: Boolean(f && f.ok), posted: posted('/sib/session'), onWelcome: /\/sib\/welcome/.test(String(((await raw.call('Target.getTargetInfo', { targetId: tid })).result || {}).targetInfo?.url || '')), readable: lv.ok === true };
+      say('must-hold sibling host', facts.mustSibling);
+      ok(reg === 'example.com' && facts.mustSibling.fill && facts.mustSibling.posted && facts.mustSibling.onWelcome && facts.mustSibling.readable,
+        'MUST-HOLD on real Chrome (L1): a login form on www.example.com posting to auth.example.com — the same site by Chrome\'s own registrable domain — FINISHES: the credential reaches the sibling host, the tab lands on the signed-in page, and the agent reads it', facts.mustSibling);
+      await raw.call('Target.closeTarget', { targetId: tid });
+    });
+    await scene('must-hold: a single-page login', async () => {
+      const { tid, sid } = await newTab('/spa/login');
+      const agent = await agentOn(tid, true);
+      const f = await fill(tid);
+      await evalOn(sid, "document.getElementById('go').click()");
+      await until(async () => (await evalOn(sid, "Boolean(document.getElementById('done'))")) === true, 6000);
+      await until(() => door1(tid).ok === true, 4000);
+      const lv = door1(tid);
+      const seen = await agentEval(agent, 'document.body.innerText');
+      facts.mustSpa = { fill: Boolean(f && f.ok), posted: posted('/spa/session'), readable: lv.ok === true, agentSees: !seen.refused && /Welcome to the app/.test(String(seen.value || '')) };
+      say('must-hold single-page login', facts.mustSpa);
+      ok(facts.mustSpa.fill && facts.mustSpa.posted && facts.mustSpa.readable && facts.mustSpa.agentSees,
+        'MUST-HOLD on real Chrome: a single-page login (fetch + pushState, no new document) FINISHES — the credential reaches the site, the fence lifts at its answer, and the agent reads the signed-in app', facts.mustSpa);
+      agent.ag.close(); await raw.call('Target.closeTarget', { targetId: tid });
+    });
+    await scene('must-hold: a two-step login in one document', async () => {
+      const { tid, sid } = await newTab('/two/login');
+      const agent = await agentOn(tid, true);
+      const f = await fill(tid);
+      await evalOn(sid, "document.getElementById('go').click()");
+      await until(async () => (await evalOn(sid, "Boolean(document.getElementById('code'))")) === true, 6000);
+      await until(() => door1(tid).ok === true, 4000);
+      const step = await agentEval(agent, "Boolean(document.getElementById('code')) && document.body.innerText");
+      await agentEval(agent, "document.getElementById('code').value = '123456'; document.getElementById('verify').click(); 1");
+      await until(async () => (await evalOn(sid, "Boolean(document.getElementById('done'))")) === true, 6000);
+      facts.mustTwoStep = { fill: Boolean(f && f.ok), posted: posted('/two/session'), agentReadsStep: !step.refused && /Code/.test(String(step.value || '')), verified: posts.some((x) => x.path === '/two/verify' && x.body.includes('123456')) };
+      say('must-hold two-step in one document', facts.mustTwoStep);
+      ok(facts.mustTwoStep.fill && facts.mustTwoStep.posted && facts.mustTwoStep.agentReadsStep && facts.mustTwoStep.verified,
+        'MUST-HOLD on real Chrome: a two-step login in ONE document FINISHES — after the password\'s submit the agent reads the code step the page rendered in place, types the code and verifies', facts.mustTwoStep);
+      agent.ag.close(); await raw.call('Target.closeTarget', { targetId: tid });
+    });
+    await scene('must-hold: a user-name-first login', async () => {
+      const { tid, sid } = await newTab('/usr/login');
+      const agent = await agentOn(tid, true);
+      const fu = await fill(tid, 'user-a', { field: 'user', target: '#user' });
+      const lvUser = door1(tid);
+      await evalOn(sid, "document.getElementById('next').click()");
+      await sleep(150);
+      const readsNext = await agentEval(agent, "Boolean(document.getElementById('spw')) && Boolean(document.getElementById('go'))");
+      const fp = await fill(tid);
+      const lvPw = door1(tid);
+      const t0 = Date.now();
+      await evalOn(sid, "document.getElementById('go').click()");
+      await until(() => evs(sid, 'Page.frameNavigated', t0).length > 0, 8000); await sleep(200);
+      const lvAfter = door1(tid);
+      facts.mustUserFirst = { userFill: Boolean(fu && fu.ok), userClosesNothing: lvUser.ok === true, agentReadsNextStep: !readsNext.refused && readsNext.value === true, passwordFill: Boolean(fp && fp.ok), passwordCloses: lvPw.ok === false, posted: posts.some((x) => x.path === '/usr/session' && spell(SPW).some((v) => x.body.includes(v))), readableAfter: lvAfter.ok === true };
+      say('must-hold user-name-first', facts.mustUserFirst);
+      ok(Object.values(facts.mustUserFirst).every(Boolean),
+        'MUST-HOLD on real Chrome: a user-name-first login FINISHES — the user name filled from the vault closes nothing (the agent reads the next step), the password closes the tab until the button the agent read is pressed, the credential reaches the site and the next page is read', facts.mustUserFirst);
+      agent.ag.close(); await raw.call('Target.closeTarget', { targetId: tid });
+    });
   } finally {
     try { hub.shutdown(); } catch { /* */ }
     try { w.swapDialogs(w.dialogs); } catch { /* */ }   // (the suite's own hub takes the mediator's fence back)
     raw.close();
+    try { sp.closeAllConnections(); ssp.closeAllConnections(); } catch { /* */ }
+    await new Promise((r) => ssp.close(r));
+    try { fs.rmSync(certDir, { recursive: true, force: true }); } catch { /* */ }   // (Chrome keeps its sockets alive: close waits on them otherwise — the claim on 48cbb4349 hung to its deadline here)
     await new Promise((r) => sp.close(r));
     for (const u of ['user-a', 'user-b']) { try { w.logins.drop(`web-login:${SO}#${u}`, { who: 'owner' }); } catch { /* */ } }
+    try { w.logins.drop(`web-login:${SIBO}#user-s`, { who: 'owner' }); } catch { /* */ }
   }
   return facts;
 }
