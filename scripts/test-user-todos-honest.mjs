@@ -285,7 +285,7 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
   { const CARD = read('src/lib/chat-needs-card.js'), P2 = read('src/lib/user-todos-panel.js');
     ok(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\)/.test(P2) && /const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{\s*reconcileKeyed\(container, entries, \{[\s\S]{0,160}create: \(e\) => renderRow\(e, ctx\), patch: \(row, e\) => patchRow\(row, e, ctx\)/.test(P2) && /this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item \}\]\);/.test(CARD) && !/innerHTML = [^;]*ut-text/.test(CARD),
       'ONE RENDERER in the chat too: the needs card\'s row is renderRow / patchRow (the panel\'s reconcileRows, the mini inbox\'s context) — the card writes no row of its own');
-    ok(/const miniCtx = \{ \.\.\.rowCtx, mini: true \};/.test(P2) && /rowCtx: \{ t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang \}/.test(ACT),
+    ok(/const miniCtx = \{ \.\.\.rowCtx, mini: true \};/.test(P2) && /rowCtx: \{ t, nameFor, wordsOf, detailOf, detailLinesOf, replyState, optionsOf: optionsFor, lang: resolveLang \}/.test(ACT),
       'the needs card\'s chips are the tray\'s (the model\'s optionsFor — explicit, else the detail\'s parsed choice) through the same context');
   }
   const ROWS = read('src/lib/user-todos-row.js');
