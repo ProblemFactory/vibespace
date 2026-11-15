@@ -470,7 +470,8 @@ console.log('— THE has5h CENSUS over src/lib');
 // reader in src/lib is a registered NON-ring surface (a second copy of the cap ring would be a new, unregistered reader) ────
 const SCOPED = {
   'usage-source.js': [['const scopedEstOf = (estSel, name) => (estSel?.scopedWeekly', 'a cap\'s estimate (readingCaps, capRing)'], ['return (Array.isArray(reading?.scopedWeekly)', 'readingCaps — THE reading of the caps (the roster for every harness, capRing on top)'], ['const known = (estSel?.scopedWeekly', 'capRing — the not-read ring\'s name']],
-  'usage-meter.js': [['for (const sc of rl?.scopedWeekly', 'the popup\'s scoped sections (a bar per cap, not a ring)'], ['const scEst = (estSel?.scopedWeekly', '…their estimate lookup']],
+  'usage-meter.js': [['for (const sc of rl?.scopedWeekly', 'the popup\'s scoped sections (a bar per cap, not a ring)'], ['const scEst = (estSel?.scopedWeekly', '…their estimate lookup'],
+    ['const named = new Set((e.scopedWeekly', 'usage-predict law B4: popupEst merges the ON and the provisional ESTIMATE views (not a ring)'], ['scopedWeekly: [...(e.scopedWeekly', '…the provisional scoped lanes the ON view does not hold']],
   'session-lifecycle.js': [['const scoped = (u.scopedWeekly', 'the billing switcher\'s text segments (not a ring)'], ['const e = (est?.scopedWeekly', '…their estimate lookup']],
 };
 const scopedCensus = censusOf('scopedWeekly', SCOPED);
