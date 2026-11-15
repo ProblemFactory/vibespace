@@ -13189,6 +13189,8 @@ Consumers: src/adapters/claude-code.js (the spawn's `--settings permissions.allo
 
 **PURE modules stay import-free.** usage-source gets the formatter from app.js (`setStampFormatter`); cli-registration-words gets `when` from its caller.
 
+**Its cost (every row of a long list calls it — the Channels panel's 1 758 rows):** no Intl.DateTimeFormat is built per call. The formatters are cached by what they depend on: the locale, the printing zone, and constant option objects. A quarter-hour's day, its repeated-hour check and the zone's name are memoised in a bounded map; a zone's name is asked once per zone + offset. Clocked in node over 1 758 calls (warm): stampAt about 7 ms, dateOf about 4, clockOf about 3.5. **THE LIMIT:** the device's own zone is read once a minute, so a device whose zone changes prints in the old zone for up to a minute (`setPageZone` re-reads it at once). test-ui-language §1b pins the minute and the bounds.
+
 **Census:** test-ui-language ⑦.
 - No formatter call or hand-built month in the browser bundle outside this file: zero tolerance.
 - A legitimate one says `// page-time: <why>`.
