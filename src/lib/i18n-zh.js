@@ -10618,7 +10618,7 @@ export default {
   "Open this setting": "打开这项设置", // lane setting-doors pick 2
   "Now: {value}": "现在：{value}", // lane setting-doors pick 2
   "It is {now} now — it was {was} when asked": "现在是 {now}——提出时是 {was}", // lane setting-doors pick 2
-  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提议：从你按下起 {span} 内为 {value}（约到 {time}），之后回到 {back}", // lane setting-doors pick 2
+  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提议：从你按下起 {span}内为 {value}（约到 {time}），之后回到 {back}", // lane setting-doors pick 2
   "Proposed: {value} until {time}, then {back}": "提议：{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
   "Proposed: {value} — it stays until you change it": "提议：{value}——一直保持，直到你再改", // lane setting-doors pick 2
   "{value} until {time}, then {back}": "{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
