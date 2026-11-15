@@ -2171,10 +2171,19 @@ export function judgeScratch({ procRoot = defaultProcRoot(), now = Date.now(), s
   // a process's GROUP is the FIRST root it names that passes (a) — cwd first, as before: a daemon a heavy suite still
   // has in flight under the isolated worktree stays grouped there
   const groups = new Map();
+  const rehomeHome = (c) => c.via === 'HOME' && c.root.startsWith(REHOME_PREFIX);   // B-ba47 B2: a re-home root named by HOME (below)
   for (const i of infos.values()) {
     if (skip.has(i.pid)) continue;
     if (i.argv.some((a) => /scripts\/ci\.mjs$/.test(a))) continue; // a gate runner, never a candidate
     const claims = scratchRootClaims(i); if (!claims.length) continue;
+    // B-ba47 B2 (主开发 2026-11-15 11:17Z item 3: «a suite's own planted names and records reach its own children exactly as on
+    // master»): A RE-HOMED SUITE'S HOME IS EVERY CHILD'S. scripts/scratch.mjs runs a suite handed a home outside every temp root
+    // on a root of its own (REHOME_PREFIX), stamped with the suite's run so that a hub inheriting it is attributable — and EVERY
+    // process the suite starts inherits it as HOME. So it decides only for a process that names no root of its own; a root the
+    // process names itself (its cwd, a root variable, an argument) is judged exactly as when the suite ran on its handed home.
+    // (The second hosted run of B2: test-ci-gate-reaper's planted stray — cwd = a root whose record names an exited owner — was
+    // spared «its root's owner is alive» by the live re-home root its HOME named.)
+    if (claims.some((c) => !rehomeHome(c))) for (let k = claims.length - 1; k >= 0; k--) if (rehomeHome(claims[k])) claims.splice(k, 1);
     // verify r3 (T2): a claim the kernel marked gone (`gone`) is never the live root that spares, and it is grouped as `<root> (deleted)`
     const live = claims.map((c) => (c.gone ? null : rootInfo(c.root))).find((ri) => ri && ri.owner && ri.owner.alive);
     if (live) { res.spared.push(row(i, live.root, null, { why: `its root's owner is alive (${live.owner.why})` })); continue; }

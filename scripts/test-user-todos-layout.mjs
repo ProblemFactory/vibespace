@@ -30,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { execFileSync } from 'node:child_process';
 // the viewer's zone (page-time prints the For-you instants in the page's zone = this process's when none is set — lane

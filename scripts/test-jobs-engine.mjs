@@ -3,6 +3,7 @@
 // the repo's production data/). Pins: spawn→adopt-by-stamp across engine
 // generations, single-engine lock refusal, verified handle-kill, until-output
 // completion, rm-refuses-live, GC-never-on-live, cron notify fire.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 process.env.VIBESPACE_JOBS_GRACE_MS = '1000';
 import fs from 'node:fs';
 import os from 'node:os';

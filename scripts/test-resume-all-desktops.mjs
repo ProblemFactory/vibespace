@@ -4,6 +4,7 @@
 // desktop passes through restoreState; the other desktops' windows are lazy
 // saved states — scanStoppedInDesktopStates is the pure scan that folds their
 // dead sessions into the offer. This pins the whole decision matrix.
+import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
 import { scanStoppedInDesktopStates } from '../src/lib/layout.js';
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };

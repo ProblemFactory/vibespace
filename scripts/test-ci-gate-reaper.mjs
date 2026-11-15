@@ -20,6 +20,7 @@ import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, s
 // dir's: the built-in shape must not claim them), where no directory sweep looks — so a signal to the suite removes every
 // fixture too, then is raised again (only a SIGKILL can leave them)
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.once(sig, () => { for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } process.kill(process.pid, sig); });
+import { REHOME_PREFIX } from './scratch.mjs';   // B-ba47 B2: the re-home root's prefix (§9b')
 
 try {
 
@@ -352,6 +353,59 @@ console.log('\n§9b the reaper judges the singleton Desktop\'s X server (Xtigerv
     let alive = true; try { process.kill(dpid, 0); } catch { alive = false; }
     ok(alive, '…and listing signalled nothing: the process is still alive until this suite ends it');
   } finally { if (dpid > 0) { try { process.kill(dpid, 'SIGKILL'); } catch { } } }
+}
+
+// ── §9b' A RE-HOMED SUITE'S HOME IS EVERY CHILD'S (B-ba47 B2 — the second hosted run, 主开发 2026-11-15 11:17Z item 3: «a
+// suite's own planted names and records reach its own children exactly as on master») ──
+// scripts/scratch.mjs runs a suite handed a home outside every temp root on a root of its own (REHOME_PREFIX), stamped with the
+// suite's run — and every process the suite starts inherits it as HOME. On the runner this suite's own DRY RUN pair (§9b) went
+// red twice: its planted stray (cwd = a root whose record names an exited owner) was spared «its root's owner is alive» by
+// the live re-home root its HOME named. The re-home root decides only for a process that names no root of its own.
+console.log("\n§9b' a re-homed suite's home is every child's: it decides only for a process naming no root of its own");
+{
+  const root = mktmp('procroot-rehome');
+  const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000;
+  const mk = (pid, { name, argv, ppid, cwd, env = {}, born = NOW, starttime = 12345 }) => {
+    const d = path.join(root, String(pid)); fs.mkdirSync(d);
+    fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 ${starttime} 0 0`);
+    fs.writeFileSync(path.join(d, 'cmdline'), (argv || [name]).join('\0') + '\0');
+    fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
+    fs.symlinkSync(cwd, path.join(d, 'cwd'));
+    fs.utimesSync(d, born / 1000, born / 1000);
+  };
+  const made = (pre) => { const d = fs.mkdtempSync(pre); tmpDirs.push(d); return d; };
+  const record = (dir, run, pid, starttime) => fs.writeFileSync(path.join(dir, '.vs-run.json'), JSON.stringify({ v: 1, run, pid, starttime, bootId: '', createdAt: NOW }) + '\n');
+  const hLive = made(`${REHOME_PREFIX}cigate9r-live-${process.pid}-`), hGone = `${REHOME_PREFIX}cigate9r-gone-${process.pid}-nowhere`;
+  const sDead = made(`/tmp/vs-cigate9r-dead-${process.pid}-`), sPlain = made(`/tmp/vs-cigate9r-plain-${process.pid}-`);
+  record(hLive, 'cigate9r-suite', 50, 12345);       // the re-home root: the live suite's run
+  record(sDead, 'cigate9r-dead-owner', 77777, 1);   // a root the suite planted: its owner has exited (no pid 77777 in this table)
+  mk(1, { name: 'systemd', argv: ['/usr/lib/systemd/systemd', '--user'], ppid: 0, cwd: '/' });
+  mk(50, { name: 'node', argv: ['node', 'scripts/test-x.mjs'], ppid: 1, cwd: '/w', env: { HOME: hLive }, born: OLD });   // the live re-homed suite
+  mk(60, { name: 'Xtigervnc', argv: ['Xtigervnc'], ppid: 1, cwd: sDead, env: { HOME: hLive }, born: OLD });                // THE HOSTED RED's shape
+  mk(61, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: '/', env: { HOME: hLive }, born: OLD });     // names only the re-home root
+  mk(62, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: '/', env: { HOME: hGone }, born: OLD });     // only a GONE re-home root
+  mk(63, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: '/', env: { HOME: hLive, VIBESPACE_DEVICE_ROOT: sDead + '/device' }, born: OLD });   // a root variable of its own
+  mk(64, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sPlain, env: { HOME: hLive }, born: OLD });              // its own root holds no record
+  const judge = (mod) => { const v = mod.judgeScratch({ procRoot: root, now: NOW, self: 999999 }); const of = (pid) => v.victims.find((o) => o.pid === pid) || v.spared.find((o) => o.pid === pid) || v.ignored.find((o) => o.pid === pid) || null; return { v, of, out: (pid) => v.victims.some((o) => o.pid === pid) }; };
+  const legs = (mod) => { const { of, out } = judge(mod); return [
+    { name: "B2: the HOSTED RED's shape — a stray whose cwd root's record names an exited owner, its HOME the live re-home root — is judged by its OWN root: listed «owner gone»", good: out(60) && /^owner gone: run cigate9r-dead-owner pid 77777 is gone/.test(of(60).why) && of(60).root === sDead },
+    { name: 'B2: a root variable of its own (VIBESPACE_DEVICE_ROOT) decides the same way — listed «owner gone»', good: out(63) && /^owner gone: run cigate9r-dead-owner/.test(of(63).why) },
+    { name: "B2: its own root WITHOUT a record is judged as that root (the record-less rule: stale, unowned, a suite's executable)", good: out(64) && of(64).root === sPlain && /^orphaned 30 min/.test(of(64).why) },
+    { name: 'B2: a process naming ONLY the live re-home root is the run\'s — spared «its root\'s owner is alive»', good: !out(61) && /^its root's owner is alive \(run cigate9r-suite pid 50 is alive\)/.test((of(61) || {}).why || '') },
+    { name: 'B2: a process naming ONLY a GONE re-home root stays attributable — listed «scratch dir gone»', good: out(62) && of(62).why === 'scratch dir gone' && of(62).root === hGone },
+  ]; };
+  const CI = await import('./ci.mjs');
+  for (const l of legs(CI)) ok(l.good, l.name);
+  ok(REHOME_PREFIX === '/tmp/vs-rehome-' && SCRATCH_ROOT_RE.test(hLive), "the re-home root is the scratch-root shape the reaper reads (/tmp/vs-rehome-…, scripts/scratch.mjs's REHOME_PREFIX)");
+  // CONTROL: the rule taken out (a copy) — the re-home root spares the hosted red's shape and the root variable's: RED as it must
+  const Mr = mutantCopies('cigate9r', REPO);
+  const srcR = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  const cut = "    if (claims.some((c) => !rehomeHome(c))) for (let k = claims.length - 1; k >= 0; k--) if (rehomeHome(claims[k])) claims.splice(k, 1);\n";
+  const pre = srcR.includes(cut) ? await import(Mr.write('scripts/ci.mjs', srcR.replace(cut, ''), 'no-rehome-rule', { esm: true })) : null;
+  const red = pre ? legs(pre).filter((l) => !l.good).map((l) => l.name) : null;
+  ok(!!red && red.length === 3 && red.every((n) => /HOSTED RED|root variable|WITHOUT a record/.test(n)) && /^its root's owner is alive/.test(judge(pre).of(60).why),
+    `CONTROL: the rule taken out (a copy) — the hosted red's shape, the root variable's and the record-less root's are spared «its root's owner is alive» by the re-home root: RED as it must (${red ? red.length : 'no copy: the line is not in ci.mjs'} legs red)`, red);
+  for (const row of copiesCensus(Mr.files, Mr.dir, REPO)) ok(row.pass, row.name, row.detail);
 }
 
 // ── §9c A ROOT NAMED ONLY IN THE ARGUMENTS (2026-09-25, test-browser-resources' leak) ──

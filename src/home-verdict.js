@@ -243,8 +243,15 @@ function judgeValue(row, v, keys, opt) {
  *  ENV_ROWS (and not of ENV_NOT) and its value fits the row's shape and passes its judgment. `checkout` = the suite's own
  *  tree (a path under it is carried even when it lies under the handed home: the hosted runner's workspace does).
  *  → { env, carried, notCarriedNames: [{ name, why }], dropped: [names], notCarried: [PATH entries], pathDropped,
- *  handedPath, binDir, unset } — names, entries and reasons, never a value. The home's keys are made ONCE. */
-function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'linux', resolve = noLinks, checkout = null, rows = ENV_ROWS, not = ENV_NOT } = {}) {
+ *  handedPath, binDir, unset, own, ownPath } — names, entries and reasons, never a value. The home's keys are made ONCE.
+ *  `handed` (B-ba47 B2, 主开发 2026-11-15 11:17Z item 3: «a suite's own planted names and records reach its own children
+ *  exactly as on master») = the environment the process was STARTED with (scripts/scratch.mjs reads the kernel's copy,
+ *  /proc/self/environ): only what it holds is the caller's to judge. A name the process set ITSELF — absent from it, or with
+ *  another value — is the suite's own and is kept as it is (`own`); its own PATH entries (`ownPath`: not in the handed PATH)
+ *  go in front of the built one; a handed name it removed stays removed. A suite whose first load of the re-home comes after
+ *  its own code ran (a dynamic import: test-agentd-remote's census leg planted four names, then `import('./mutant-copy.mjs')`)
+ *  so loses nothing it planted. null = not known (no /proc): every name is judged, the rule before. */
+function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'linux', resolve = noLinks, checkout = null, rows = ENV_ROWS, not = ENV_NOT, handed = null } = {}) {
   const nh = trimSlash(newHome);
   if (!isAbs(nh) || nh === '/') throw new Error('rehomeEnv(): newHome must be an absolute directory');
   const homes = [oldHome, ...(Array.isArray(oldHomes) ? oldHomes : [])];
@@ -252,7 +259,11 @@ function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'l
   const co = checkout ? homeKeys([checkout], resolve) : [];
   const bin = isAbs(binDir) ? trimSlash(binDir) : `${nh}/.vs-bin`;
   const out = {}, carried = [], notCarriedNames = [], unset = XDG_BASE.filter((k) => env && env[k] !== undefined);
-  const handedPath = String((env && env.PATH) || '').split(':');
+  const started = handed && typeof handed === 'object' ? handed : null;
+  const isOwn = (k, v) => !!started && (!Object.prototype.hasOwnProperty.call(started, k) || started[k] !== v);
+  const handedPath = String((started && typeof started.PATH === 'string' ? started.PATH : env && env.PATH) || '').split(':');
+  const ownPath = started ? [...new Set(String((env && env.PATH) || '').split(':').filter((d) => d && !handedPath.includes(d)))] : [];
+  const own = [];
   const keyOf = (q) => keys.find((k) => lc(q) === k || lc(q).startsWith(k + '/'));
   const tilde = (d) => {   // the ~ form of an entry under the home — by its spelling first, by where it resolves when that does not answer
     const raw = cleanPath(d), rk = keyOf(raw);
@@ -263,15 +274,16 @@ function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'l
   const notCarried = [...new Set(handedPath.filter((d) => !sys.includes(trimSlash(d))).map((d) => (!d ? '(an empty entry)' : !isAbs(d) ? `(relative: ${d})` : tilde(d))))];
   for (const [k, v] of Object.entries(env || {})) {
     if (v === undefined || k === 'HOME' || k === 'PATH') continue;
+    if (isOwn(k, v)) { out[k] = v; own.push(k); continue; }   // the process set it itself: its own, never judged
     const no = notRow(k, not), row = no ? null : rowOf(k, rows);
     const why = no ? no.why : !row ? 'not a row' : judgeValue(row, String(v), keys, { resolve, checkout: co });
     if (why) { notCarriedNames.push({ name: k, why }); continue; }
     out[k] = v; carried.push(k);
   }
-  out.PATH = [bin, ...sys].join(':');
+  out.PATH = [...ownPath, bin, ...sys].join(':');
   out.HOME = nh;
   notCarriedNames.sort((a, b) => (a.name < b.name ? -1 : 1));
-  return { env: out, carried: carried.sort(), notCarriedNames, dropped: notCarriedNames.map((x) => x.name), notCarried, pathDropped: notCarried.length, handedPath: handedPath.filter(Boolean), binDir: bin, unset };
+  return { env: out, carried: carried.sort(), notCarriedNames, dropped: notCarriedNames.map((x) => x.name), notCarried, pathDropped: notCarried.length, handedPath: handedPath.filter(Boolean), binDir: bin, unset, own: own.sort(), ownPath };
 }
 
 module.exports = { XDG_BASE, SYSTEM_PATHS, TOOL_ROWS, AGENT_CLIS, ENV_ROWS, ENV_NOT, SHAPES, tempRootOf, suiteRehome, hubRehome, cleanPath, walk, noLinks, homeKeys, judgePath, binLinks, rehomeEnv };

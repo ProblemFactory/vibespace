@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, envCensus, outsideReaders, OUTSIDE_ROW } from './hub-home-census.mjs';   // §57 + §108: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW } from './hub-home-census.mjs';   // §57 + §108: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8463,6 +8463,16 @@ console.log('§108 every hub a suite or debug script boots runs on a temp home: 
     && rf("#!/usr/bin/env node\nimport { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nimport { scratch } from './scratch.mjs';")
     && SPELLINGS.every((t) => !rf(t)) && !rf("import x from 'some-package';\nimport { scratch } from './scratch.mjs';"),
     `§108 THE ORDER (stated as what the FIRST IMPORT IS — ESM runs every import before any other statement): every one of the ${ord.reach.length} suite / debug files that reaches scratch.mjs has, builtins aside, the scratch import as its first import, or a local module's whose first it is — CONTROLS: a module before it, a first import that loads it second, an import spelled in a string, and the five spellings of an earlier import (no space before the brace, an export-from, a default glued to «from», a namespace import, a block before it) are red; a plain statement before it is not${ord.late.length ? ' — LATE: ' + ord.late.join(', ') : ''}`, ord.late);
+  // (e3) THE LATE LOAD (B-ba47 B2, the second hosted run — 主开发 2026-11-15 11:17Z): a file that loads scratch.mjs only AT RUN
+  // TIME — a dynamic import or a require of a module that loads it (`import('./mutant-copy.mjs')`, a path joined to
+  // scripts/ci.mjs) — re-homes in the middle of its run: what it planted before was rebuilt away, and what it wrote before
+  // landed in the handed home (test-agentd-remote's npm: ~/.npm/_logs). THE ORDER reads those loads too, so such a file is
+  // held to the first import like any other — 25 were, and took it
+  const reachP = (t) => reachesScratch(t, (m) => planted[m] || '');
+  const LATE_SPELLINGS = ["const { a } = await import('./m-first.mjs');", "const M = await import(path.join(REPO, 'scripts/m-second.mjs'));", "const { b } = require('./m-first.mjs');", "if (x) { const s = await import('./scratch.mjs'); }"];
+  ok(LATE_SPELLINGS.every((t) => reachP(t) && !rf(t)) && !reachP("const t = 'await import(\"./m-first.mjs\")';") && !reachP("const { a } = await import('./m-none.mjs');")
+    && JSON.stringify(lateLoads("await import('./a.mjs'); await import(path.join(R, 'scripts', 'b.mjs')); require('./a.mjs');")) === JSON.stringify(['a.mjs', 'b.mjs']) && reachP("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');") && rf("import './scratch.mjs';\nconst { a } = await import('./m-first.mjs');"),
+    `§108 (e3) THE LATE LOAD: a file that loads scratch.mjs at run time — a dynamic import or a require of a module that loads it — REACHES it and is late unless the scratch import is its first; ${ord.reach.length} files reach it, ${ord.late.length} late (CONTROLS: ${LATE_SPELLINGS.length} run-time spellings counted and late; a load spelled in a string, a module that loads nothing, not counted; with the first import, first)`);
   // (e2) THE SEAM (主开发 23:36Z): VS_REHOME_NOT_TEMP is read by scripts/scratch.mjs alone and set by test-home-verdict alone —
   // nothing in the product, data/bin, the wrappers or ci.mjs sets or reads it (the docs may name it)
   const seamFiles = trackedFiles(REPO).filter((f) => (/\.(?:m?js|cjs|sh|ya?ml|json)$/.test(f) || f.startsWith('data/bin/')) && !f.startsWith('docs/') && f !== 'scripts/test-architecture.mjs').filter((f) => { try { return read(f).includes('VS_REHOME_NOT_TEMP') || (f !== 'scripts/scratch.mjs' && /\bNOT_TEMP_ENV\b/.test(read(f))); } catch { return false; } }).sort();
