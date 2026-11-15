@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
+import { buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, keptOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
@@ -69,6 +69,7 @@ export function statusWords(i, t) {
   if (i && i.resolvedBy === 'ask-expired' && i.action) return t('timed out — the agent\'s command was refused (it may ask again)'); // r7 addendum: an ask nobody answered in time keeps its place, its outcome said (never «done»)
   const end = endOf(i);
   if (end && end.unknown) return t('outcome unknown'); // r8: a decision row's end this client cannot classify — its code beside it (endCodeOf), never «done»
+  if (keptOf(i)) return t('waiting');   // lane turn-never-silent P6: a KEPT card — the person chose to wait; nothing was done
   return i && i.status === 'dismissed' ? t('dismissed') : t('done');
 }
 /** r8: the code of an end this client cannot classify (THE registry's endOf) — drawn monospace beside «outcome unknown»; '' else. */
@@ -177,6 +178,16 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
     + planNoteHtml(exitCmdOf(i), t) // lane mask-value-shape r6 (m7): the command reads as written; a masked run's note FOLLOWS it
     + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
+/** lane turn-never-silent P6: a KEPT card's body (foryou-actions keptOf) — the person's choice and when, the next bound and what
+ *  happens then, the full time (this device's clock); and its door where it applies (`when`), named by the moment and the act */
+const hhmmOf = (at) => { const d = new Date(Number(at) || 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+const keptHtml = (i, t) => {
+  const k = keptOf(i); if (!k) return '';
+  const next = k.act === 'end' ? t('If nothing changes, the command is ended by itself at {time}.', { time: hhmmOf(k.nextAt) }) : t('If nothing changes, you are asked again at {time}.', { time: hhmmOf(k.nextAt) });
+  const door = (buttonsFor({ ...i, status: 'open' }) || []).find((b) => b.answer === 'end-command');
+  return `<div class="ut-kept"><div class="ut-kept-words">${escHtml(t('You chose to keep waiting at {time}.', { time: hhmmOf(k.at) }))} ${escHtml(next)}</div>`
+    + (door ? `<div class="ut-exit-answer ut-row-buttons"><button type="button" class="ut-act ut-action-exit" data-answer="end-command" title="${escHtml(t(door.title))}">${escHtml(t('End the command now'))}</button></div>` : '') + '</div>';
+};
 /** A row that DECLARES its buttons (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting: Open the conversation) — drawn
  *  from the registry's fields; the press runs through runAction's ONE generic door. */
 const rowButtonsHtml = (i, t) => { const bs = i && i.action ? buttonsFor(i) : null; if (!bs || !bs.length) return '';   // lane turn-never-silent: only the buttons that apply (`when`)
@@ -470,7 +481,8 @@ function partsOf(entry, ctx) {
   // lane lark-refresh-stall r2 (acceptance r1's shots: desktop cut «…飞书的一…», phone 390 «…卡住了 8…» — the number itself): a row
   // whose words carry a CAUSE (`{cause}` — a words param: a dead sign-in's) WRAPS whole, folded or not
   const wraps = !!(i && !i.clearedAt && i.i18n && i.i18n.text && i.i18n.text.params && i.i18n.text.params.cause && typeof i.i18n.text.params.cause === 'object');
-  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '') + (wraps ? ' ut-item-wraps' : '');
+  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved && !keptOf(i) ? ' ut-item-resolved' : '') + (resolved && keptOf(i) ? ' ut-item-kept' : '')   // lane turn-never-silent P6: a KEPT card is no finished item — never struck through
+     + (resolved && !tail && !keptOf(i) ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '') + (wraps ? ' ut-item-wraps' : '');
   const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
   const run = card ? null : runCardOf(i, { t }); // r7: the run card's facts — its headline is the row's question
@@ -524,7 +536,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : resolved ? keptHtml(i, t) : exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t)}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)

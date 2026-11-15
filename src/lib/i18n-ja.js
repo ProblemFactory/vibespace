@@ -12555,4 +12555,8 @@ export default {
   "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running": "コマンドで止まっています：{tool} は {since} から何も出力しておらず、起動したプロセスもどれも動いていません——{cli} は動いていません",
   "No output since {since}, and no command is open — {cli} is running": "{since} から何も出力がなく、実行中のコマンドもありません——{cli} は動いています",
   "No output since {since}, and no command is open — {cli} is not running": "{since} から何も出力がなく、実行中のコマンドもありません——{cli} は動いていません",
+  "You chose to keep waiting at {time}.": "{time} に待ち続けることにしました。",
+  "If nothing changes, the command is ended by itself at {time}.": "このまま変化がなければ、このコマンドは {time} に自動で終了します。",
+  "If nothing changes, you are asked again at {time}.": "このまま変化がなければ、{time} にもう一度確認します。",
+  "End the command now": "今すぐこのコマンドを終了",
 };

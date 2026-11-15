@@ -217,5 +217,47 @@ console.log('— ⑯ LIVE: the REAL agy wrapper, its records through the REAL me
   ok(b.items.length === 0, 'busy-command: nothing (its command works below agy)', b.items.map((i) => i.text));
 }
 
+console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION, the card stays in its KEPT state, with its door');
+{
+  const F = require(path.join(REPO, 'src/foryou-actions.js'));
+  // a stuck command on a wrapper that serves end-command (agy): the next act after the press is the by-itself ending
+  let Wk = world(); const writes = [];
+  Wk.session('k', { pty: { write: (l) => writes.push(String(l)) } }); Wk.tool('k', 'run_command'); Wk.sidecar('k', { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); Wk.trees.set(4001, { list: idle });
+  for (let m = 0; m <= 10; m++) await Wk.at(m);
+  Wk.clock = T0 + 12 * MIN;
+  const r = Wk.watch.keepWaiting('k');
+  let it = Wk.items()[0], k = F.keptOf(it);
+  ok(r.ok && it.status !== 'open' && it.resolvedBy === 'kept-waiting', 'the press resolves the item — the tray\'s attention goes (a press is attended)', [it.status, it.resolvedBy]);
+  ok(k && k.at === T0 + 12 * MIN && k.act === 'end' && k.nextAt === T0 + 42 * MIN, 'the card\'s KEPT fact: when the person chose, the next bound (thirty minutes on) and its act — ended by itself', k);
+  ok(F.buttonsFor({ ...it, status: 'open' }).some((b) => b.answer === 'end-command'), '…and its door «End the command» still applies (the row keeps it: `when` endable)');
+  for (let m = 13; m <= 40; m++) await Wk.at(m);
+  it = Wk.items()[0];
+  ok(Wk.items().length === 1 && it.resolvedBy === 'kept-waiting' && !!F.keptOf(it) && !writes.some((l) => /end-command/.test(l)), 'its next act is the ending: NOT asked again at the told bound (no second item), not ended before 42', [Wk.items().length, it.resolvedBy]);
+  await Wk.at(42);
+  it = Wk.items()[0];
+  ok(writes.some((l) => /"by":"by-itself"/.test(l)) && it.resolvedBy === 'ended-by-itself' && F.keptOf(it) === null, 'at 42 the bound acts: the command is ended by itself, and the card goes quiet («ended by itself»)', [it.resolvedBy, writes.length]);
+  // a turn that MOVES after the press: the kept card goes («it moved on»); a «not yet» right after the press never ends it
+  Wk = world(); Wk.session('m'); Wk.tool('m', 'run_command'); Wk.sidecar('m', { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); Wk.trees.set(4001, { list: idle });
+  for (let m = 0; m <= 10; m++) await Wk.at(m);
+  Wk.clock = T0 + 11 * MIN; Wk.watch.keepWaiting('m');
+  await Wk.at(12); await Wk.at(13);
+  ok(!!F.keptOf(Wk.items()[0]), 'readings right after the press («not yet» — the clock restarted on the press): the kept card stays');
+  Wk.sidecar('m', { cliWroteAt: T0 + 14 * MIN, turnOpenedAt: T0, caps: { endCommand: true } }); await Wk.at(14.5);
+  ok(Wk.items()[0].resolvedBy === 'moved' && F.keptOf(Wk.items()[0]) === null, 'the CLI wrote after the press: the kept card goes («it moved on»)', Wk.items()[0].resolvedBy);
+  // a harness where «End the command» does not apply (no end-command served): the next act is to ASK again
+  Wk = world(); Wk.session('a'); Wk.tool('a', 'run_command'); Wk.sidecar('a', { cliWroteAt: T0, turnOpenedAt: T0 }); Wk.trees.set(4001, { list: idle });
+  for (let m = 0; m <= 10; m++) await Wk.at(m);
+  Wk.clock = T0 + 11 * MIN; Wk.watch.keepWaiting('a');
+  k = F.keptOf(Wk.items()[0]);
+  ok(k && k.act === 'ask' && k.nextAt === T0 + 21 * MIN && !F.buttonsFor({ ...Wk.items()[0], status: 'open' }).some((b) => b.answer === 'end-command'), 'no end-command served: the kept card says the person is asked again at the next bound, and offers no ending', k);
+  await Wk.at(21);
+  ok(Wk.items().length === 1 && Wk.items()[0].status === 'open' && F.keptOf(Wk.items()[0]) === null, 'at that bound: asked again — the SAME item reopened (no longer kept)');
+  // the chat keeps the kept card's tool run open (the fold rule and the run signature read `.cn-stay`)
+  const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), cn = fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8');
+  ok(cv.includes(':is(.cn-card.cn-open, .cn-card.cn-kept, .cn-card.cn-stay)') && cn.includes("if (keptOf(e.item)) {\n        card.classList.add('cn-stay');") && cn.includes(':is(.cn-card.cn-kept, .cn-card.cn-stay)'), 'the chat draws a kept card IN PLACE (`.cn-stay`) and its record never folds into a run while it stands');
+  ok(JSON.stringify(F.closersOf({ action: { type: 'turn-stuck', sessionId: 'x' }, status: 'done', resolvedBy: 'kept-waiting', facts: { kept: { at: 1, nextAt: 2, act: 'end' } } })) === '[]' && JSON.stringify(F.closersOf({ action: { type: 'turn-stuck', sessionId: 'x' }, status: 'done', resolvedBy: 'moved' })) === '["reopen"]', 'a KEPT card offers no generic closer (its one door is «End the command now»); once quiet, the record\'s usual ↺');
+  ok(F.keptOf({ action: { type: 'messages-waiting' }, status: 'done', resolvedBy: 'kept-waiting', facts: { kept: { at: 1, nextAt: 2, act: 'end' } } }) === null, 'keptOf reads the registry row (`kept`), never a type branch: a row without it is never kept');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

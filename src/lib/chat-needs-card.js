@@ -65,7 +65,7 @@ import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
-import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE, quietsStallOf } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE, quietsStallOf , keptOf } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -380,7 +380,7 @@ export class NeedsCards {
     // when an open card now stands in ANOTHER record (lane needs-card-tail: a landing's jumpToIndex folds the new window's runs
     // before its cards are drawn — the landed card stood inside a folded run, out of sight)
     const at = (c) => c.parentNode && c.parentNode.parentNode ? c.parentNode.parentNode.dataset.msgId || '' : '';
-    const openIds = open.map((e) => e.item.id).join('|') + '@' + [...view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')].map((c) => `${c.dataset.item}:${at(c)}`).join('|') + '#' + [...view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-kept')].map((c) => c.dataset.item).join('|');
+    const openIds = open.map((e) => e.item.id).join('|') + '@' + [...view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')].map((c) => `${c.dataset.item}:${at(c)}`).join('|') + '#' + [...view._messageList.querySelectorAll(':scope > * > .cn-cards > :is(.cn-card.cn-kept, .cn-card.cn-stay)')].map((c) => c.dataset.item).join('|');   // lane turn-never-silent P6: a kept card keeps its run open too
     if (openIds !== this._openIds) {
       this._openIds = openIds;
       try { view._updateRuns?.(); } catch { }
@@ -728,6 +728,19 @@ export class NeedsCards {
       const line = `<span class="cn-line-mark" aria-hidden="true">${code ? '?' : e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span>${code ? ` · <code class="ut-end-code">${escHtml(code)}</code>` : ''}<span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
       // THE row's keep rule (round 3, #4 — an answer from another client wiped the lines being typed here): a box in use
       // stays — the quiet line above it, the row resolved AROUND it (patchRow keeps a box in use); it folds on leaving
+      // lane turn-never-silent P6 (主开发 04:44Z): a KEPT card (the person kept waiting) stays where it was pressed, open, in its
+      // kept state — the row draws its words and its door (user-todos-row keptHtml); its record never folds into a run
+      // (chat-view's fold rule: `.cn-stay`) until it goes quiet (the turn moved / ended / the bound acted)
+      if (keptOf(e.item)) {
+        card.classList.add('cn-stay');
+        card.querySelector(':scope > .cn-head')?.remove();
+        card.querySelector(':scope > .cn-line')?.remove();
+        let kr = card.querySelector(':scope > .cn-rows');
+        if (!kr) { kr = document.createElement('div'); kr.className = 'cn-rows'; card.append(kr); }
+        this.app.foryouRows?.reconcile(kr, [{ item: e.item, resolved: true }]);
+        delete card.dataset.sig;
+        return;
+      }
       const rows = card.querySelector(':scope > .cn-rows');
       if (rows && boxInUse(rows.querySelector('.ut-reply'))) {
         card.classList.add('cn-kept'); // its record never folds into a run under the typist (chat-view.js's fold rule)

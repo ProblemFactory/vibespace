@@ -6,6 +6,22 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent P6 — the kept card (主开发's word, 04:44Z: «the card stays where the person pressed, in its kept state»)
+- **«Keep waiting» ends the ATTENTION, not the card.** The press draws the open item once more with a `kept` fact {at, nextAt, act}, then resolves it «kept-waiting», so the tray's item goes (a press is attended). In the conversation the SAME card stands where it was pressed, in its KEPT state. foryou-actions `keptOf`, read from the row's `kept: { by: 'kept-waiting' }`, never a type branch. The card says:
+  - when the person chose to keep waiting;
+  - when the next bound falls and what happens then: where «End the command» applies and the ending is on, the command is ended by itself at that time; otherwise, the person is asked again;
+  - and it keeps its door, «现在结束这条命令» (End the command now), where the row has it. The button names the moment and the act.
+
+  The full time is on the card (this device's clock). No mark is drawn, so no compact time is needed. zh / ja.
+- **A kept card is no finished item**: never struck through (`ut-item-kept`, neither `ut-item-resolved` nor `ut-item-inplace`); its status word is «等待中» (the dictionary's own «waiting»), never «完成»; it has no generic closer (closersOf: its one door is its own). The first kept pictures showed all three.
+- **Its tool run stays open.** chat-view's fold rule and the cards' run signature read `.cn-stay`, so a card inside a fold is no longer unseen.
+- **It goes** when the turn moves after the press (a line, or work below the CLI, after the press — a «not yet» right after it never ends it), ends, is gone, or the bound acts. Its resolvedBy then says which, and the card is quiet.
+- **The watch.** After a press whose next act is the ending, the person is not asked again at the told bound; the ending acts at the press + thirty. Otherwise the same key reopens at the next bound (Q3 as ruled).
+- **No transcript record is written** (the agent does not need the person's press, and one wrapper could not write it).
+- **The person's own line under a group message does not carry the stuck fact.** The client's group copy and session list carry no `_turnStuckSince`, so it would need a new broadcast field, which is more than the same session fact read by the client. Left, as ruled.
+- **P4's suite** (test-turn-end): its two notice legs checked for the conversation's line right after the record that precedes it, so they flaked 1 in 2 here. They now wait for the line (4 of 4 green).
+- **The pin.** test-turn-watch ⑰, 11 legs: the press resolves and the attention goes; the kept fact (act end, next = +30); its door; not asked again; at the bound the ending acts and the card goes quiet; a «not yet» keeps it; the CLI writing after the press ends it («moved»); no end-command served ⇒ act ask, asked again at the bound with the same item reopened; the fold rule; keptOf reads the row. test-conversation-needs' fold pin follows the rule's new class.
+
 ### turn-never-silent P5 — a message queued behind a stuck turn says where it is (law L4)
 - **ONE fact on the session**, `_turnStuckSince` (session-schema, owner engine, not persisted), written ONLY by the turn watch while it says the turn is stuck (stuck-on-command or silent). It is deleted when the turn moves or ends, or when the person keeps waiting.
 - **The sender is told.** The deliverer's queued answer carries it (conversation-deliver, the rpc-queue lane), and the groups engine passes it on (its wake return and the post's `queued` entries). vibespace-msg says: «xray's current turn (running since 03:10Z) — a turn stuck since 03:12Z; the owner has been asked». Shape C's sender entry (the wait watch, at its hour) says the same. Delivery is unchanged: the message waits in the queue and is handed over when the turn is released. No turn is started.
