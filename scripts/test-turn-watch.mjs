@@ -71,7 +71,7 @@ let W = world();
   await W.at(10);
   const it = W.open()[0];
   ok(W.open().length === 1 && it.itemKey === `turn-stuck:a:${T0}:${T0}` && it.sessionKey === 'key:a', 'at the bound OBSERVED (ten readings a minute apart): ONE For-you item, keyed per conversation + turn + STRETCH, filed under the conversation', W.items().map((i) => [i.itemKey, i.status]));
-  ok(it.i18n.text.key === TW.TEXT.commandAlive && it.i18n.text.params.what === 'run_command' && it.i18n.text.params.since.at === T0 && /run_command/.test(it.text), 'it names the open tool and since when (an instant the viewer reads in its own zone)', it.i18n);
+  ok(it.i18n.text.key === TW.TEXT.commandAlive && it.i18n.text.params.tool === 'run_command' && !('cmd' in it.i18n.text.params) && it.i18n.text.params.since.at === T0 && /run_command/.test(it.text), 'it names the open tool and since when (an instant the viewer reads in its own zone)', it.i18n);
   ok(/ — Antigravity CLI is running\. VibeSpace does not end it by itself\.$/.test(it.text) && it.i18n.text.params.cli === 'Antigravity CLI' && it.i18n.text.params.then.key === TW.THEN.notByItself, 'its HEADLINE says the CLI is running and what happens if nothing is pressed — here: VibeSpace does not end it (its wrapper serves no ending) — never in a fold (P1)', it.text);
   for (let m = 11; m <= 20; m++) await W.at(m);
   ok(W.items().length === 1 && W.open().length === 1, 'ten more readings: still ONE item, never a second beside it');
@@ -259,7 +259,7 @@ console.log('— ⑯ LIVE: the REAL agy wrapper, its records through the REAL me
   };
   const [h, b] = await Promise.all([live('hang'), live('busy')]);
   ok(h.open && h.open.name === 'run_command' && h.open.cmd === 'node driver.mjs', 'the REAL ACP message manager answers openTool(): agy\'s open run_command step and its command\'s first line (the conversation\'s own running tool card)', h.open);
-  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.commandAlive && /^Stuck on a command: run_command «node driver\.mjs» has shown nothing since .* — Antigravity CLI is running\. If nothing changes, the command is ended by itself at .*\.$/.test(h.items[0].text) && h.items[0].i18n.text.params.then.key === TW.THEN.endAt && h.items[0].i18n.text.params.then.at > 0 && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command «node driver.mjs» (P2), Antigravity running, and IN ITS HEADLINE when it is ended by itself (P1)', h.items.map((i) => i.text));
+  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.cmdAlive && h.items[0].i18n.text.params.cmd === 'node driver.mjs' && /^Stuck on a command: run_command «node driver\.mjs» has shown nothing since .* — Antigravity CLI is running\. If nothing changes, the command is ended by itself at .*\.$/.test(h.items[0].text) && h.items[0].i18n.text.params.then.key === TW.THEN.endAt && h.items[0].i18n.text.params.then.at > 0 && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command «node driver.mjs» (P2), Antigravity running, and IN ITS HEADLINE when it is ended by itself (P1)', h.items.map((i) => i.text));
   ok(b.items.length === 0, 'busy-command: nothing (its command works below agy)', b.items.map((i) => i.text));
 }
 
@@ -275,6 +275,7 @@ console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION,
   let it = Wk.items()[0], k = F.keptOf(it);
   ok(r.ok && it.status !== 'open' && it.resolvedBy === 'kept-waiting', 'the press resolves the item — the tray\'s attention goes (a press is attended)', [it.status, it.resolvedBy]);
   ok(k && k.at === T0 + 12 * MIN && k.act === 'end' && k.nextAt === T0 + 42 * MIN, 'the card\'s KEPT fact: when the person chose, the next bound (thirty minutes on) and its act — ended by itself', k);
+  ok(it.i18n.text.params.then === '' && !/ended by itself at/.test(it.text), 'its headline drops the time it had before the press — one time per card, the kept line\'s', it.text);
   ok(F.buttonsFor({ ...it, status: 'open' }).some((b) => b.answer === 'end-command'), '…and its door «End the command» still applies (the row keeps it: `when` endable)');
   for (let m = 13; m <= 40; m++) await Wk.at(m);
   it = Wk.items()[0];
@@ -557,13 +558,17 @@ console.log('— ㉒ P2: the command\'s first words, cut and escaped where they 
 {
   const v = { state: 'stuck-on-command', tool: 'run_command', since: T0, cliAlive: true };
   const w1 = TW.stuckWords({ ...v, cmd: 'node driver.mjs --name "<img src=x onerror=alert(1)>"\nsecond line' }, { cli: 'Antigravity CLI' });
-  ok(w1.i18n.text.params.what.key === TW.WHAT && w1.i18n.text.params.what.params.cmd === 'node driver.mjs --name "<img src=x onerror=alert(1)>"' && /run_command «node driver\.mjs --name "<img/.test(w1.text), 'its first line only, as a param of its own words', w1.i18n.text.params.what);
+  ok(w1.i18n.text.key === TW.TEXT.cmdAlive && w1.i18n.text.params.cmd === 'node driver.mjs --name "<img src=x onerror=alert(1)>"' && /run_command «node driver\.mjs --name "<img/.test(w1.text), 'its first line only, as a param of its own sentence (a key with the command, each language its own spacing)', w1.i18n.text);
   ok(TW.cmdWords('x'.repeat(200)).length === TW.CMD_MAX && TW.cmdWords('x'.repeat(200)).endsWith('…') && TW.cmdWords('a\u0007b\tc') === 'a b c' && TW.cmdWords(['git', 'status']) === 'git status', 'at most 60 characters (the cut said «…»), control characters out, an argv joined');
   const L = await import(path.join(REPO, 'src/lib/user-todos-layout.js')), R = await import(path.join(REPO, 'src/lib/user-todos-row.js'));
-  const zh = (k, p) => { const d = { [TW.TEXT.commandAlive]: '卡在一条命令上：{what} 自 {since} 起没有任何输出，它启动的进程也都没在工作——{cli} 仍在运行。{then}', [TW.WHAT]: '{tool}「{cmd}」', [TW.THEN.notByItself]: 'VibeSpace 不会自动结束它。' }; return String(d[k] || k).replace(/\{(\w+)\}/g, (m, x) => (p && x in p ? p[x] : m)); };
+  const zhD = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
+  const zhOf = (k) => { const m = zhD.match(new RegExp('\\n  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:[^"\\\\]|\\\\.)*")')); return m ? JSON.parse(m[1]) : k; };
+  const zh = (k, p) => String(zhOf(k)).replace(/\{(\w+)\}/g, (m, x) => (p && x in p ? p[x] : m));
   const line = L.saidLine(w1.i18n.text, zh, { now: T0, timeZone: 'UTC' });
   const html = R.wordsHtml(line);
-  ok(/^卡在一条命令上：run_command「node driver\.mjs --name "<img src=x onerror=alert\(1\)>"」 自 .* 起没有任何输出，它启动的进程也都没在工作——Antigravity CLI 仍在运行。VibeSpace 不会自动结束它。$/.test(line) && !/<img/.test(html) && /&lt;img/.test(html), 'said in the viewer\'s language — and drawn ESCAPED (THE row renderer\'s words)', [line, html.slice(0, 160)]);
+  ok(/^卡在一条命令上：run_command「node driver\.mjs --name "<img src=x onerror=alert\(1\)>"」自 .* 起没有任何输出，它启动的进程也都没在工作——Antigravity CLI 仍在运行。VibeSpace 不会自动结束它。$/.test(line) && !/<img/.test(html) && /&lt;img/.test(html), 'said in the viewer\'s language (the dictionary\'s own zh: no space after 」) — and drawn ESCAPED (THE row renderer\'s words)', [line, html.slice(0, 160)]);
+  const kw = TW.stuckWords({ ...v, cmd: 'node driver.mjs' }, { cli: 'Antigravity CLI', endAt: T0 + 30 * MIN, kept: true });
+  ok(kw.i18n.text.params.then === '' && /is running\.$/.test(kw.text) && !/ended by itself/.test(kw.text), 'a KEPT headline states no time (the kept line says the one true time)', kw.text);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -302,7 +302,9 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     const act = S.byItself ? 'end' : 'ask';
     const kept = { at: wall, nextAt: minuteOf(actAt(last, (act === 'end' ? endBoundMs() : boundMs()) + wall - last)), act };
     S.kept = kept;
-    try { getUserTodos().redrawItem((x) => x.id === it.id, { text: it.text, detail: it.detail || '', i18n: it.i18n, facts: { ...(it.facts || {}), kept }, action: it.action }); } catch { }
+    // one time per card, the true one: the headline drops its «ended by itself at …» (the kept line says the next time)
+    const s = activeSessions.get(id), words = S.said && s ? TW.stuckWords(S.said, { cli: labelOf(s.backend), nothingToEnd: S.nothing, kept: true }) : null;
+    try { getUserTodos().redrawItem((x) => x.id === it.id, { text: words ? words.text : it.text, detail: it.detail || '', i18n: words ? words.i18n : it.i18n, facts: { ...(it.facts || {}), kept }, action: it.action }); } catch { }
     end(it, 'kept-waiting');
     return { ok: true, kept };
   }

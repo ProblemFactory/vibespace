@@ -137,7 +137,7 @@ job('— ③b a BUSY command is never ended; «Keep waiting» at 29 keeps a hung
     await commandUp(b); await commandUp(k); await sleep(700);
     const bl = await b.tree(), kl = await k.tree();
     const WB = watched(b), WK = watched(k);
-    await WB.walk(0, 61, 120);   // a reading a (virtual) minute, 120 ms of real time apart: its CPU moves between every two
+    await WB.walk(0, 61, 60);   // a reading a (virtual) minute, 60 ms of real time apart: its CPU moves between every two (a busy loop: ~6 ticks)
     ok(bl.every(aliveAs) && !b.recs.some((r) => r.kind === 'command_ended') && WB.items().length === 0, 'busy-command (its CPU moving every reading) for 61 min: never said, never ended');
     await WK.at(0); await sleep(300); await WK.walk(1, 29);
     WK.skew = 29 * MIN; WK.w.keepWaiting('x');
@@ -312,7 +312,7 @@ console.log('— ④ RED CONTROL: a mutant that counts the WRITTEN silence alone
   const b = startAgy({ AGY_STUB_BUSY_MS: '20000' });
   try {
     await b.run('run the busy-command now'); await commandUp(b); await sleep(700);
-    const W = watched(b); await W.walk(0, 31, 60);
+    const W = watched(b); await W.walk(0, 31);   // no pause: the mutant reads no work at all (its CPU never counts)
     ok(await until(() => b.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.by === 'by-itself'), 8000), 'the mutant ends the busy command at 30 min — ③b\'s leg is what catches it');
   } finally { TL.stillnessStep = orig; await b.stop(); }
 }
