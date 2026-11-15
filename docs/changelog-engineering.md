@@ -179,6 +179,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - The function is named `durationMark`, never `mark`: test-bundle-globals reads every export name as a symbol, and «mark(» stands bare in two files' own helpers and in English prose («the vault's mark (…)»). The trap pick 4 met with `when`.
 - test-roster-live-usage hands `mark` to the usageHint it rebuilds from source.
 
+### ui-language on 2.369.402 — what the census caught in the release's own lines (主开发's ride-403: ui-language first, one rebase)
+- **The rebase:** 16 commits replayed onto 7e25f325e (ui-language/bin/rebase403.py). The meetings: the For-you heads beside the release's row buttons (both kept), the host set-up dialog (my hint + the release's hidden log fold + «Start installing»; the release's step words, a later step's own label through `tr`), the agent-meta import (both names), the auto-continue chip (the release's words with my renamed local `resetAt`).
+- **⑦ a hand-built clock in the release's new line:** machine-app.js `lockedText` (lane mac-locked-capture) built «HH:MM» from getHours / getMinutes. It is now page-time `clockOf`: «13:05» on a zh / ja page, the device's own on en, in the page's zone. Its comment's worry («the suites bundle this file over an i18n stub of `t` alone») no longer holds: page-time imports i18n as a namespace.
+- **① words the page never draws, by name:** census `NOT_DRAWN` rows. The first is stream-model.js `legVerdictOf` (lane stream-udp-leg-fallback). Its `words` are the hub log's line and the session record's `relay.leg.verdict`, and no page file reads them. A row whose function is gone goes red; a control proves the next function's words are still named.
+- **① a piece of an enclosing tag is markup:** a template inside an html template's `${…}` with no tag of its own (`` ` data-record-src="${…}"` ``, chat-attachments) had its attribute read as words. Its attributes are markup now, except a title / placeholder / aria-label / alt value. The baseline loses 10 such rows (467), and ⑤ loses «{shown} of {total}» (ui-controls reworded it).
+- **test-control-says-why:** its two source pins read `{ t: resetAt }`, the chip's local renamed from the shadowing `when` (the reader's round).
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)

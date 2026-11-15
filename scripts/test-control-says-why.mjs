@@ -296,7 +296,7 @@ console.log('⑩b NO PRESS AROUND THE WHY · EVERY CONTROL HAS ITS WORDS — cen
   const fold = (ar, model) => tc.phoneBarFold({ chips: row(ar, model), room, gap: 8 }).folded.has('artifacts');
   const v = { boxIcon: fold(20, 113), runnerIcon: fold(20, 100), boxWords: fold(92, 113), runnerWords: fold(92, 100) };
   ok(!v.boxIcon && !v.runnerIcon && v.boxWords && v.runnerWords, 'the one row at 390 px (evaluated phoneBarFold, both faces): an OFF auto-continue as its icon keeps the Artifacts chip in the row — CONTROL: its words put back fold it behind ⋯', JSON.stringify(v));
-  ok(/const offWords = this\._oneRow\(\) \? '' : ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(CSB3) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(CSB3) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: when \}\)\)/.test(CSB3),
+  ok(/const offWords = this\._oneRow\(\) \? '' : ' ' \+ escHtml\(t\('Auto-continue: off'\)\);/.test(CSB3) && /: \(a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\) : offWords\);/.test(CSB3) && /' ' \+ escHtml\(t\('continues at \{t\}', \{ t: resetAt \}\)\)/.test(CSB3),
     'the rule in one sentence: on the one-row bar (a phone, a narrow window) an auto-continue that is OFF is its icon; armed, with its time, it keeps its words'); }
 { const UT2 = read('src/lib/user-todos-row.js');
   const btns = [...UT2.matchAll(/<button([^>]*class="ut-act[^"]*"[^>]*)>([\s\S]*?)<\/button>/g)];
@@ -389,7 +389,7 @@ const arAt = SB.indexOf("const arEl = e.target.closest('.chat-status-autoresume'
 const arBlock = arAt >= 0 ? SB.slice(arAt, SB.indexOf('\n    }\n', arAt)) : '';
 ok(arBlock.length > 200 && arBlock.indexOf('showDropdown(arEl') >= 0 && arBlock.indexOf('showDropdown(arEl') < arBlock.indexOf("type: 'auto-resume'") && /act\.onclick = \(ev\) => \{[\s\S]*type: 'auto-resume'/.test(arBlock),
   'auto-continue: a press OPENS the chip\'s panel; the on / off act sits behind a press inside it');
-ok(/t\('continues at \{t\}', \{ t: when \}\)/.test(SB) && /t\('Auto-continue: off'\)/.test(SB), 'auto-continue: the chip says «… 自动继续» / «自动继续：关», never a bare time or a bare icon');
+ok(/t\('continues at \{t\}', \{ t: resetAt \}\)/.test(SB) && /t\('Auto-continue: off'\)/.test(SB), 'auto-continue: the chip says «… 自动继续» / «自动继续：关», never a bare time or a bare icon');
 const HX = read('src/lib/hex-viewer.js');
 ok(!/t\('Load more'\)/.test(HX) && /upTo >= this\.fileSize \? '' :/.test(HX) && /new IntersectionObserver/.test(HX), 'hex viewer: no «Load more» (the scroll loads), and a whole file says nothing more');
 
