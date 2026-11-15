@@ -50,6 +50,19 @@ const SLOT = 'stuck-turn:';   // P7: the keyed stash slot that tells a waiting s
 const END_SETTING = 'turns.endStuckCommandMin';  // the by-itself ending (minutes; default thirty; 0 = never) — the owner's word «可以», 2026-11-15
 const GONE_AFTER_MS = 5 * 60 * 1000;             // S4: an item whose conversation is not here ends «gone» only after this long in THIS life (a boot restores the live set after the watch's first reading)
 const minuteOf = (t) => Math.floor(Number(t) / 60000) * 60000;   // a time a card SHOWS (HH:MM): stored to the minute, so a reading's own jitter never redraws it
+const ENDING_WAIT_MS = 2 * 60 * 1000;            // law 3: an ending asked of the wrapper whose record never came is let go after this (the item stays)
+const LIVE = new Set();                          // the watches of this process (a wrapper's record reaches the one holding its session)
+
+/** LAW 3 OF THE LOOK AT 99f65d547: the wrapper's OWN record of an ending (`command_ended`, data/bin/agy-wrapper.js) — the
+ *  ONE door the hub learns what was ended through (src/server/stdout/acp-events.js calls it). The session keeps the
+ *  answer's facts (`_commandEnded`, counted); the watch holding the session settles its asked ending AT ONCE. */
+function noteCommandEnded(session, rec) {
+  if (!session || !rec || typeof rec !== 'object') return;
+  const prev = session._commandEnded;
+  session._commandEnded = { n: ((prev && Number(prev.n)) || 0) + 1, ok: rec.ok === true, by: rec.by === 'by-itself' ? 'by-itself' : 'person', code: typeof rec.code === 'string' ? rec.code.slice(0, 40) : null,
+    ended: Array.isArray(rec.ended) ? rec.ended.length : 0, survivors: Array.isArray(rec.survivors) ? rec.survivors.length : 0 };
+  for (const w of LIVE) { try { w._settleSession(session); } catch { } }
+}
 
 function create({ activeSessions, buffersDir, getUserTodos = () => null, getGroups = () => null, getDeliver = () => null, sessionKeyOf = null, serverSetting = () => undefined,
   adapterOf = () => null, labelOf = (b) => { try { return require('../harnesses').harnessOf(b).label || b; } catch { return b; } }, asksOf = chipAsksOf, procTree = createProcTree(), readFile = (f) => fs.promises.readFile(f, 'utf8'),
@@ -83,7 +96,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
   function end(it, why) { try { getUserTodos().setStatus(it.id, 'done', why); } catch (e) { say(`[turn-watch] ${it.id}: not ended — ${e && e.message}`); } }
   /** the stretch's ONE item: filed at the bound, then drawn again IN PLACE only when its words or its doors change.
    *  → 'filed' | 'open' | undefined (not drawn: a person's ✕, a kept card whose next act is the ending, patchOnly) */
-  function show(id, s, key, words, facts = {}, { patchOnly = false } = {}) {
+  function show(id, s, key, words, facts = {}, { patchOnly = false, reopen = false } = {}) {
     const ut = getUserTodos(); if (!ut) return;
     const doors = { type: 'turn-stuck', sessionId: String(id), ...facts };   // facts: which of its buttons apply (the row's `when`)
     const it = items().find((i) => keyOfItem(i) === key);
@@ -94,7 +107,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     }
     if (patchOnly) return;
     // P6 (主开发 04:44Z): the person kept waiting and the next act is the by-itself ending — the kept card says so; not asked again
-    if (it && keptFactOf(it) && keptFactOf(it).act === 'end') return;
+    if (it && keptFactOf(it) && keptFactOf(it).act === 'end' && !reopen) return;
     if (it && !OWN_ENDS.includes(String(it.resolvedBy || ''))) return;   // a person's ✕ stands for this stretch
     const sk = sessionKeyOf ? sessionKeyOf(s, id) : id;
     if (!sk) return;
@@ -175,6 +188,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
         live.add(id); looked++;
         const sc = await sidecarOf(id);
         const w = watchOf(id, s, sc);
+        if (w.ending && !settle(id) && w.ending && mono() - w.ending.mono > ENDING_WAIT_MS) { say(`[turn-watch] ${id}: the wrapper never answered the ending asked ${Math.round((mono() - w.ending.mono) / 1000)} s ago — the item stays`); w.ending = null; }
         // THE READING: the tree below the CLI, then the two clocks
         let treeReadable = true, cliAlive = null, worked = null, below = null;
         if (!sc || sc.remote || !sc.childPid) treeReadable = false;   // a paired machine's session (its processes live there), or no sidecar
@@ -189,7 +203,8 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
         const asks = t === 'waiting' || waitingOnUser({ turnState: s._turnState || null, pendingAsks: asksOf(s) });
         w.readings++;
         w.prev = { mono: m, wall, wrote, stillMs: asks ? 0 : step.stillMs };   // a turn waiting on the PERSON is never stuck: its count starts when it is answered
-        if (step.moved) {
+        if (step.moved && w.ending) say(`[turn-watch] ${id}: it moved while its ending is asked — the wrapper's record says what was ended`);   // law 3: our own ending moves the tree; its record speaks, never «it moved on»
+        else if (step.moved) {
           // the stretch is over: its item goes (a new turn opened between two readings: «the turn ended»)
           const tk = tokenOf(s, sc).token;
           endOpen(id, tk && tk !== w.token ? 'turn-ended' : 'moved');
@@ -222,11 +237,12 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
           const act = S.byItself ? 'end' : 'ask';
           const nextAt = minuteOf(actAt(wall, (act === 'end' ? eb : bound) - stillMs));
           if (act !== S.kept.act || nextAt !== minuteOf(S.kept.nextAt)) patchKept(S, { ...S.kept, act, nextAt });
-          if (act === 'end') { if (stillMs >= eb) endCommand(id, 'by-itself'); continue; }
+          if (act === 'end') { if (stillMs >= eb && !w.ending) endCommand(id, 'by-itself'); continue; }
           if (!speaking) continue;
           S.kept = null;   // its next act: the person is asked again — the SAME item reopened
         }
         const endAt = S.byItself ? minuteOf(actAt(wall, Math.max(eb - stillMs, stood ? 0 : 1))) : 0;
+        S.said = { state, tool: tool && tool.name, cmd: tool && tool.cmd, since, cliAlive };   // what the item says (law 3 redraws it at the wrapper's answer)
         const words = TW.stuckWords({ state, tool: tool && tool.name, cmd: tool && tool.cmd, since, cliAlive }, { cli: labelOf(s.backend), endAt, nothingToEnd: S.nothing });
         const facts = { stuck: true, ...(endDoor ? { endable: true } : {}), ...(S.nothing ? { nothingToEnd: true } : {}), wrote: S.wrote };
         const r = show(id, s, S.key, words, facts, { patchOnly: !speaking });
@@ -236,7 +252,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
         if ((r === 'filed' || r === 'open') && (state === 'stuck-on-command' || state === 'silent')) s._turnStuckSince = since; else delete s._turnStuckSince;
         // THE BY-ITSELF ENDING (the owner's «可以»): ONLY a command stuck — open, nothing written, nothing below the CLI working —
         // for the second bound OBSERVED; only after its own item stood; the same act as the door; the turn goes on
-        if (S.byItself && stood && stillMs >= eb) endCommand(id, 'by-itself');
+        if (S.byItself && stood && stillMs >= eb && !w.ending) endCommand(id, 'by-itself');
       }
       for (const id of [...st.keys()]) if (!live.has(id)) { endOpen(id, activeSessions.has(id) ? 'turn-ended' : 'gone'); st.delete(id); }
       // S4: an item whose conversation is not here (gone while the hub was down) — after GONE_AFTER_MS of this life
@@ -290,19 +306,48 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     end(it, 'kept-waiting');
     return { ok: true, kept };
   }
-  /** «End the command» (a person's press, or the by-itself ending): the wrapper ends the processes below the CLI and leaves the
-   *  CLI — its tool step ends with the command's failure and the turn goes on. → {ok, code} */
+  /** «End the command» (a person's press, or the by-itself ending): the wrapper is ASKED to end the processes below the CLI
+   *  and leave the CLI — its tool step ends with the command's failure and the turn goes on. LAW 3: the item says «ended»
+   *  only on the wrapper's own record that something was ended (settle); one ending at a time — a second press while one is
+   *  asked is answered «already ending» (M5). → {ok, code} */
   function endCommand(id, by = 'person') {
     const s = activeSessions.get(id);
     if (!s || !s.pty || s.mode !== 'chat') return { ok: false, code: 'not-live' };
     const w = st.get(id);
-    if (!w) return { ok: false, code: 'not-stuck' };
+    if (!w || !w.stretch) return { ok: false, code: 'not-stuck' };
+    if (w.ending) return { ok: false, code: 'already-ending' };
+    if (w.stretch.nothing) return { ok: false, code: 'nothing-to-end' };
     const eb = endBoundMs();
-    if (!writeVerb(s, { type: 'end-command', by, ...(by === 'by-itself' && eb ? { afterMin: Math.round(eb / 60e3) } : {}) })) return { ok: false, code: 'not-live' };
-    endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');   // (a kept card ends with it)
-    w.stretch = null; if (w.prev) w.prev = { ...w.prev, stillMs: 0 };   // law 2: after an ending, the next stuck stretch is its own
-    say(`[turn-watch] ${id}: the command ended (${by})`);
-    return { ok: true };
+    w.ending = { by, mono: mono(), n0: (s._commandEnded && Number(s._commandEnded.n)) || 0 };   // asked BEFORE the verb is written (its answer may come at once)
+    if (!writeVerb(s, { type: 'end-command', by, ...(by === 'by-itself' && eb ? { afterMin: Math.round(eb / 60e3) } : {}) })) { w.ending = null; return { ok: false, code: 'not-live' }; }
+    say(`[turn-watch] ${id}: the command's ending asked (${by})`);
+    return { ok: true, code: 'ending' };
+  }
+  /** the wrapper's answer to the asked ending (noteCommandEnded's fact on the session) → whether it settled. Something ended ⇒
+   *  the item ends «the command was ended» / «ended by itself» and the next stuck stretch is its own (law 2); nothing runs below
+   *  the CLI ⇒ the item STAYS, says «there is nothing to end» and keeps Stop as its door, never ended by itself; another
+   *  verb's ending under way ⇒ its answer is still to come; anything else ⇒ said in the log, the item stays. */
+  function settle(id) {
+    const w = st.get(id), s = activeSessions.get(id);
+    const f = s && s._commandEnded;
+    if (!w || !w.ending || !f || !(Number(f.n) > w.ending.n0)) return false;
+    if (f.code === 'already-ending') { w.ending.n0 = Number(f.n); return false; }
+    const by = w.ending.by, S = w.stretch;
+    w.ending = null;
+    if (f.ok && f.ended > 0) {
+      endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');   // (a kept card ends with it)
+      w.stretch = null; if (w.prev) w.prev = { ...w.prev, stillMs: 0 };   // law 2: after an ending, the next stuck stretch is its own
+      say(`[turn-watch] ${id}: the command was ended (${by}; ${f.ended} process(es)${f.survivors ? `, ${f.survivors} still running` : ''})`);
+      return true;
+    }
+    if (!f.ok && f.code === 'no-command' && S) {
+      S.nothing = true; S.byItself = false; S.kept = null;
+      if (S.said) show(id, s, S.key, TW.stuckWords(S.said, { cli: labelOf(s.backend), nothingToEnd: true }), { stuck: true, nothingToEnd: true, wrote: S.wrote }, { reopen: true });
+      say(`[turn-watch] ${id}: there is nothing to end — the CLI waits on a step with no command running; the item stays`);
+      return true;
+    }
+    say(`[turn-watch] ${id}: the command was not ended (${f.code || (f.survivors ? `${f.survivors} process(es) still running` : 'nothing was running')}) — the item stays`);
+    return true;
   }
   /** «Start it again anyway» (L3): the old CLI process never exited — the wrapper starts a new one without it */
   function restartAnyway(id) {
@@ -322,15 +367,19 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     return { ok: true };
   }
 
+  function settleSession(session) { for (const [id, s] of activeSessions) if (s === session) { settle(id); return; } }
+
   function start() {
     if (timer) return;
     const tick = () => { sweep().catch((e) => say('[turn-watch] reading failed: ' + (e && e.message))).finally(() => { timer = setTimer(tick, readEveryMs); if (timer && timer.unref) timer.unref(); }); };
     tick();   // the first reading at once (a restart's turns are judged at the second)
   }
-  function stop() { if (timer) { clearTimer(timer); timer = null; } }
-  return { sweep, keepWaiting, stopTurn, endCommand, restartAnyway, start, stop, _state: st };
+  function stop() { if (timer) { clearTimer(timer); timer = null; } LIVE.delete(api); }
+  const api = { sweep, keepWaiting, stopTurn, endCommand, restartAnyway, start, stop, _settleSession: settleSession, _state: st };
+  LIVE.add(api);
+  return api;
 }
 
 function install(deps) { const w = create(deps); w.start(); return w; }
 
-module.exports = { create, install, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING, SLOT };
+module.exports = { create, install, noteCommandEnded, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING, SLOT, ENDING_WAIT_MS };
