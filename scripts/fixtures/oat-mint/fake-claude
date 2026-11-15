@@ -68,7 +68,11 @@ process.stdin.on('data', (d) => {
   const code = lineBuf.slice(0, nl); lineBuf = '';
   record({ ...facts, code });
   if (mode === 'error') out('\n' + sp('OAuth error: Invalid code. Please make sure the full code was copied.') + '\n' + sp('Press Enter to retry.') + '\n');
-  else success();
+  else if (process.env.FAKE_OAT_GATE) {   // (test-oat-mint, int403: the token's screen waits until the suite has read the code's echo — the
+    const t0 = Date.now();                //  gate file appears; never past 10 s, so a gate nobody opens only slows a run)
+    const tick = () => (fs.existsSync(process.env.FAKE_OAT_GATE) || Date.now() - t0 > 10000 ? success() : setTimeout(tick, 10));
+    tick();
+  } else success();
 });
 if (mode === 'local') {
   const srv = http.createServer((req, res) => {
