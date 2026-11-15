@@ -21,6 +21,7 @@ This file is the engineers' record of every release: the lanes, the verification
   - a missing birth, another boot, a recycled pid ⇒ «gone», nothing sent;
   - CONTROL: the true identity ⇒ its group signalled, SIGTERM then SIGKILL.
 - **5. The said limits** (kb-features, one line each): a card's minute can be one off while readings run slow; a wrapper that never answers is asked again about every three minutes; a hub that cannot read processes ends nothing — the agent's line now says «where VibeSpace can read its processes» (CAPS.sessionStart 3611 → 3644 B by its own 33 B; test-prompt-budget ③ re-judged: 5 821 / 6 657 / 8 062 B); a wrapper that dies by itself leaves its CLI until the conversation is ended; ending a conversation ends the CLI's own group only.
+- **The delta gate's two reds (cured, test-only):** test-user-todos-honest and test-user-todos-layout pin the row context's literal; it now carries `detailLinesOf` (the lead line's reader).
 - **The pins.** test-turn-watch ㉖ (the lead: registry, renderer, folded-row CSS, the words) and its legs moved from the headline to the lead; test-turn-end ⑨ (identity record, the four nothing-sent cases, the own group, the order); test-cli-registry (the new clause).
 
 ### turn-never-silent — the look at 99f65d547, follow-up 5: what the new pictures showed

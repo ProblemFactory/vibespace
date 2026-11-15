@@ -166,7 +166,7 @@ console.log('⑦ THE REPLY BUTTON — PURE replyButtonState = the ONE replyVerdi
   // below reads the code where it lives now AND the panel's use of it
   const acts = fs.existsSync(path.join(ROOT, 'src/lib/user-todos-actions.js')) ? fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8') : '';
   ok(/const replyState = \(i\) => replyButtonState\(i, factFor\(i\.sessionKey\)\);/.test(acts) && /const st = liveDotState\(factFor\(dot\.dataset\.key\)\);/.test(acts)
-    && /rowCtx: \{ t, nameFor, wordsOf, detailOf, replyState(, optionsOf: optionsFor)?(, lang: resolveLang)? \}/.test(acts) && /const rowCtx = model\.rowCtx;/.test(panel) && /const patchDot = \(dot\) => model\.patchDot\(dot\);/.test(panel),
+    && /rowCtx: \{ t, nameFor, wordsOf, detailOf,( detailLinesOf,)? replyState(, optionsOf: optionsFor)?(, lang: resolveLang)? \}/.test(acts) && /const rowCtx = model\.rowCtx;/.test(panel) && /const patchDot = \(dot\) => model\.patchDot\(dot\);/.test(panel),
     'the panel draws the reply button and the dot through the PURE projections (the model\'s replyState + patchDot, which the panel\'s rows and dots use)');
   ok(/msg\.type === 'active-sessions' && Array\.isArray\(msg\.sessions\)\) \{ ingestLive\(msg\.sessions\); emit\('live'\); \}/.test(acts) && /model\.on\('live', \(\) => \{ patchLive\(\); scheduleBadges\(\); \}\);/.test(panel),
     'the model subscribes to active-sessions (ingests the facts) and the panel patches the live facts in place on its `live` event');
