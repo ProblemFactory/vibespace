@@ -678,7 +678,9 @@ try {
       const trows = await p1.evalJs(`[...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].map((e) => e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim())`);
       check(`the taskbar menu carries "Share with agent…" and "Ask an agent to take control…" (${JSON.stringify(trows)})`, trows.includes('Share with agent…') && trows.includes('Ask an agent to take control…'), trows);
       const idx = trows.indexOf('Share with agent…');
-      if (idx >= 0) await trustedClick(p1, `.taskbar-context-menu > .taskbar-context-menu-item:nth-child(${idx + 1})`);
+      // pressed by a MARK on the row found by its words — never an nth-child index (lane ui-controls-and-bugs pick 2: a menu's
+      // information rows are CAPTIONS, children that are not items, which an item index miscounts)
+      if (idx >= 0) { await p1.evalJs(`(() => { document.querySelectorAll('[data-pick-row]').forEach((x) => x.removeAttribute('data-pick-row')); const r = [...document.querySelectorAll('.taskbar-context-menu > .taskbar-context-menu-item')].find((e) => (e.childNodes[0] ? e.childNodes[0].textContent.trim() : e.textContent.trim()) === 'Share with agent…'); if (r) r.setAttribute('data-pick-row', '1'); return !!r; })()`); await trustedClick(p1, '.taskbar-context-menu > [data-pick-row="1"]'); }
       const checked = await until(() => p1.evalJs(`(() => { const i = document.querySelector('#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]'); return i ? { checked: i.getAttribute('aria-selected') === 'true', mode: document.querySelector('#window-share-dialog .wshare-mode-btn.active')?.dataset.mode } : null; })()`), 8000, 150);
       check('…it opens the same dialog, the agent PICKED and Pixels active (the current share)', !!checked && checked.checked && checked.mode === 'pixels', checked);
       await trustedClick(p1, `#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]`);

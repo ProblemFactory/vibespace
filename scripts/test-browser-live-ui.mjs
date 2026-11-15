@@ -435,11 +435,21 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
                 if (r.v && r.v.overflow.length) {
                   await evaluate(`(${LIVE})._browserLive.el().querySelector('.browser-live-more').click()`);
                   await sleep(150);
-                  const rows = await evaluate(`[...document.querySelectorAll('.browser-live-more-menu > .context-menu-item')].map((e) => e.textContent)`);
-                  const want = await evaluate(`(${LIVE})._browserLive.state().foldedRows.map((r) => r.label)`);
+                  // THE MENU GRAMMAR (lane ui-controls-and-bugs pick 2): an information row — who drives, the keyboard state, the
+                  // viewers, a fit chip that cannot act, the agent's browser's name — is a CAPTION with its words; an act is an item.
+                  // The menu is read AS DRAWN, captions and items in their order, and compared with the product's own folded rows by
+                  // caption-or-label in the same order (a caption's words read from the very element the product reads them from)
+                  const drawn = await evaluate(`[...document.querySelector('.browser-live-more-menu').children].filter((e) => e.matches('.context-menu-caption, .context-menu-item')).map((e) => (e.classList.contains('context-menu-caption') ? 'caption: ' : 'item: ') + e.textContent)`);
+                  const want = await evaluate(`(() => { const L = (${LIVE})._browserLive, s = L.state(), root = L.el();
+                    const sel = { badge: '.browser-live-mode', kbd: '.browser-live-kbd-chip', viewers: '.browser-live-viewers', fit: '.browser-live-fit' };
+                    const keys = s.folded.filter((k) => !(k === 'open' && s.folded.includes('url')));   // the product's own skip: Open rides the URL row
+                    return s.foldedRows.map((r, i) => { if (r.label != null) return 'item: ' + r.label; const k = keys[i], e = sel[k] && root.querySelector(sel[k]); return 'caption: ' + (e ? (k === 'badge' ? (e.title || e.textContent) : e.textContent) : '<no element for ' + k + '>'); }); })()`);
                   await evaluate(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
+                  const rows = drawn.filter((x) => x.startsWith('item: ')).map((x) => x.slice(6));
                   const tabsRow = r.v.overflow.includes('tabs') ? rows.find((x) => x.includes(`(${mode === 'takeover' ? 3 : 1})`)) : true;
-                  ok(rows.length === want.length && rows.length >= 1 && same(rows, want) && !!tabsRow, `${name}: the ⋯ menu lists exactly the ${want.length} folded item(s) (${rows.join(' · ')}) — the pane rows with their live counts`, { rows, want, overflow: r.v.overflow });
+                  const menuIs = (d) => d.length === want.length && d.length >= 1 && same(d, want) && want.every((w) => !/^caption: (<no element|\s*$)/.test(w));
+                  ok(menuIs(drawn) && !!tabsRow, `${name}: the ⋯ menu lists exactly the ${want.length} folded row(s), captions with their words and items, in order (${drawn.join(' · ')}) — the pane rows with their live counts`, { drawn, want, overflow: r.v.overflow });
+                  if (want.some((w) => w.startsWith('caption: '))) ok(!menuIs(drawn.filter((x) => !x.startsWith('caption: '))), `${name} CONTROL: the same drawn menu with its captions cut fails that judge — a caption is read with its words, never dropped from the pin`);
                   menuChecked = true;
                 }
               }
@@ -755,12 +765,15 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
               if (hostW === 320) {
                 await evaluate(`(${LIVE})._browserLive.el().querySelector('.browser-live-more').click()`);
                 await sleep(150);
-                const m = await evaluate(`[...document.querySelectorAll('.browser-live-more-menu > .context-menu-item')].map((e) => ({ text: (e.textContent || '').trim(), disabled: e.classList.contains('disabled') }))`);
+                const m = await evaluate(`[...document.querySelector('.browser-live-more-menu').children].filter((e) => e.matches('.context-menu-caption, .context-menu-item')).map((e) => ({ text: (e.textContent || '').trim(), caption: e.classList.contains('context-menu-caption') }))`);
                 const mr = await evaluate(`(() => { const m = document.querySelector('.browser-live-more-menu'); if (!m) return null; const r = m.getBoundingClientRect(); const b = (${LIVE})._browserLive.el().querySelector('.browser-live-bar').getBoundingClientRect(); const x = Math.min(r.left, b.left) - 8, y = b.top - 8; return { x, y, width: Math.max(r.right, b.right) - x + 8, height: r.bottom - y + 8 }; })()`);
                 if (mr) await shot(path.join(SHOTS, `${name}-more-menu.png`), mr);
                 await evaluate(`document.querySelectorAll('.context-menu').forEach((m) => m.remove())`);
-                if (m.length && m[0].text === x.badgeFull && m[0].disabled) menuRows++;
-                else bad.push(`${name}: the ⋯ menu's first row is not the folded badge's sentence "${x.badgeFull}" (${JSON.stringify(m.slice(0, 2))})`);
+                // THE MENU GRAMMAR (lane ui-controls-and-bugs pick 2): who drives is an information row — the menu's first row is
+                // the folded badge's whole sentence as a CAPTION; CONTROL: the same drawn menu with its captions cut fails it
+                const badgeFirst = (rowsOf) => rowsOf.length > 0 && rowsOf[0].caption && rowsOf[0].text === x.badgeFull;
+                if (badgeFirst(m) && !badgeFirst(m.filter((q) => !q.caption))) menuRows++;
+                else bad.push(`${name}: the ⋯ menu's first row is not the folded badge's sentence "${x.badgeFull}" as its caption — or the cut-captions control passed (${JSON.stringify(m.slice(0, 2))})`);
               }
             }
           }
