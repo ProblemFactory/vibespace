@@ -526,6 +526,18 @@ async function measure(o = {}) {
     ev('message_stop', { type: 'message_stop' });
     res.end();
   };
+  // a tool_use answer (the turn plan): ONE tool call, stop_reason tool_use — the CLI runs it and asks again in the same turn
+  const sseTool = async (res, model, tool, headers) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream', ...headers });
+    const ev = (name, data) => res.write(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+    ev('message_start', { type: 'message_start', message: { id: 'msg_' + Math.random().toString(16).slice(2), type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 12, output_tokens: 1 } } });
+    ev('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_' + crypto.randomBytes(8).toString('hex'), name: tool.name, input: {} } });
+    ev('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(tool.input || {}) } });
+    ev('content_block_stop', { type: 'content_block_stop', index: 0 });
+    ev('message_delta', { type: 'message_delta', delta: { stop_reason: 'tool_use', stop_sequence: null }, usage: { output_tokens: 5 } });
+    ev('message_stop', { type: 'message_stop' });
+    res.end();
+  };
   let PORT = 0;
   const server = http.createServer((req, res) => {
     let body = '';
@@ -583,6 +595,16 @@ async function measure(o = {}) {
         if (a && M.mode.fail401.has(a)) { rec.status = 401; res.writeHead(401, { 'content-type': 'application/json', 'request-id': 'req_401' }); res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'OAuth token has expired. Please obtain a new token or refresh your existing token.' } })); return; }
         if (a && M.mode.reject429.has(a)) { rec.status = 429; res.writeHead(429, { 'content-type': 'application/json', ...rlHeaders(a, true) }); res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'Error' } })); return; }
         if (!a) { rec.status = 401; res.writeHead(401, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })); return; }
+        // THE TURN PLAN (lane readings-attribution-2, P0 — when does a RUNNING claude follow a re-point INSIDE a turn?): a
+        // main-thread request (it carries the Read tool) takes the plan's next step — a tool_use the CLI runs before its next
+        // request of the SAME turn. `arrive` runs as the request lands (the pool's move, mid-turn); `holdMs` holds the answer,
+        // so the CLI's next request leaves that long after the move. Past the plan's steps the turn ends in text
+        const plan = M.mode.turnPlan;
+        if (plan && j?.stream && Array.isArray(j.tools) && j.tools.some((x) => x && x.name === 'Read')) {
+          const st = plan.steps[plan.n] || null; rec.planStep = plan.n++;
+          if (st && typeof st.arrive === 'function') { try { st.arrive(rec); } catch (e) { event('plan arrive', e); } }
+          if (st && st.tool) { setTimeout(() => sseTool(res, j?.model || 'claude-x', st.tool, rlHeaders(a, false)).catch((e) => event('sse', e)), Number(st.holdMs) || 0); return; }
+        }
         const text = `ok from ${a}`;
         if (j?.stream) sse(res, j?.model || 'claude-x', text, rlHeaders(a, false)).catch((e) => event('sse', e));
         else { res.writeHead(200, { 'content-type': 'application/json', ...rlHeaders(a, false) }); res.end(JSON.stringify({ id: 'msg_x', type: 'message', role: 'assistant', model: j?.model || 'claude-x', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 12, output_tokens: 3 } })); }
@@ -635,7 +657,7 @@ async function measure(o = {}) {
     CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', DISABLE_AUTOUPDATER: '1',
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', // the CLI's optional traffic off — on EVERY rung (assertEnv requires it)
   });
-  const resetMock = () => { M.reqs = []; M.heads = []; M.otel = []; M.oauth = []; M.other = []; M.foreign = []; M.mode.reject429.clear(); M.mode.fail401.clear(); M.mode.slowMs = 0; M.gen = { A: 1, B: 1 }; };
+  const resetMock = () => { M.reqs = []; M.heads = []; M.otel = []; M.oauth = []; M.other = []; M.foreign = []; M.mode.reject429.clear(); M.mode.fail401.clear(); M.mode.slowMs = 0; M.mode.turnPlan = null; M.gen = { A: 1, B: 1 }; };
   const mark = (out) => ({ reqs: M.reqs.length, heads: M.heads.length, otel: M.otel.length, oauth: M.oauth.length, other: M.other.length, escapes: M.escapes.length, out: out.length });
 
   // ── strace: one parsed line per syscall; connect() classified ──────────────
@@ -697,6 +719,8 @@ async function measure(o = {}) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         let o = null; try { o = JSON.parse(line); } catch { continue; }
         out.push({ t: Date.now(), o });
+        // (the turn plan's Read of the scratch note in its cwd is never asked on the permission road — recorded on 2.1.322: no
+        //  permission request in the CLI's stdout — so the driver answers none)
         if (o.type === 'result') for (const w of waiters.splice(0)) w(o);
       }
     });
@@ -710,7 +734,9 @@ async function measure(o = {}) {
       child.on('exit', gone);
       child.on('error', (e) => { event('cli process', e); if (child.pid === undefined) gone(); });
     });
-    const send = (text) => { try { child.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } }) + '\n'); } catch { } };
+    // ONE writer of the CLI's stdin (its 'error' listener above)
+    const writeLine = (obj) => { try { child.stdin.write(JSON.stringify(obj) + '\n'); } catch { } };
+    const send = (text) => writeLine({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
     const turn = async (text, ms = 90000) => { if (ESCAPED.length || exited) return { t: Date.now(), end: Date.now(), result: ESCAPED.length ? 'ABORTED' : 'EXITED' }; const p = new Promise((r) => { waiters.push(r); setTimeout(() => r(null), ms); }); const t = Date.now(); send(text); const r = await p; return { t, end: Date.now(), result: r ? { subtype: r.subtype, is_error: r.is_error, text: String(r.result || '').slice(0, 160) } : (ESCAPED.length ? 'ABORTED' : exited ? 'EXITED' : 'TIMEOUT') }; };
     const stop = async () => {
       endStdin();
@@ -775,16 +801,29 @@ async function measure(o = {}) {
     const env = { ...cliEnv(home), CLAUDE_SECURESTORAGE_CONFIG_DIR: link, ...(NETNS ? {} : PROXY_ENV) };
     const { out, turn, stop, stderr: errOf, record } = startCli({ dir, env, variant: name });
 
+    // MID-TURN (P0): msg1 is ONE turn of three requests; the link moves to B as its FIRST request lands; `midturn-late` holds
+    // that answer 70 s, so request 2 leaves well past any credential cache. msg2 (a plain turn) follows 3 s after msg1 ends
+    const MID = name === 'midturn' || name === 'midturn-late';
+    let tMid = null;
+    if (MID) {
+      const note = path.join(dir, 'cwd', 'note.txt'); fs.writeFileSync(note, 'a note\n', { mode: 0o600 });
+      const credB0 = path.join(B, '.credentials.json');
+      M.mode.turnPlan = { n: 0, steps: [
+        { tool: { name: 'Read', input: { file_path: note } }, holdMs: name === 'midturn-late' ? 70000 : 0, arrive: () => { repoint(link, B, credB0); tMid = Date.now(); } },
+        { tool: { name: 'Read', input: { file_path: note } } },
+      ] };
+    }
     const steps = [];
     const m0 = mark(out);
-    const t1 = await turn('one');
+    const t1 = await turn('one', MID ? 240000 : undefined);
     const m1 = mark(out);
     steps.push({ step: 'msg1', ...t1, reqs: M.reqs.slice(m0.reqs, m1.reqs) });
     // ── the change ──
     const credA = path.join(A, '.credentials.json'), credB = path.join(B, '.credentials.json');
-    const tChange = Date.now();
+    const tChange = MID && tMid ? tMid : Date.now();
     let change = '';
-    if (name === 'symlink' || name === 'refresh' || name === 'gate429-later') { repoint(link, B, credB); change = 'repointPoolSymlink(link→B)+utimes(B)'; }
+    if (MID) { change = `the link moved to B (+utimes, the pool's own move) as msg1's request 1 landed (mid-turn${name === 'midturn-late' ? ', its answer held 70 s' : ''})${tMid ? '' : ' — NOT DONE: no main-thread request carried the Read tool'}`; M.mode.turnPlan = null; }
+    else if (name === 'symlink' || name === 'symlink-quick' || name === 'refresh' || name === 'gate429-later') { repoint(link, B, credB); change = 'repointPoolSymlink(link→B)+utimes(B)'; }
     else if (name === 'symlink-bare') { repoint(link, B, null); change = 'repoint(link→B), no utimes'; }
     else if (name === 'overwrite') { const fd = fs.openSync(credA, 'r+'); const data = fs.readFileSync(credB); fs.ftruncateSync(fd, 0); fs.writeSync(fd, data, 0, data.length, 0); fs.closeSync(fd); change = 'B bytes written in place into A/.credentials.json (same inode)'; }
     else if (name === 'hardlink-mtime') { const tmp = credA + '.hl'; fs.linkSync(credB, tmp); fs.renameSync(tmp, credA); const n = Date.now() / 1000; fs.utimesSync(credA, n, n); change = 'A/.credentials.json := hard link to B (new inode), mtime bumped'; }
@@ -793,7 +832,7 @@ async function measure(o = {}) {
     else if (name === 'gate429') { change = 'none yet (msg1 was a 429)'; }
     else if (name === 'baseline') { change = 'none'; }
     else if (name === 'slowstream') { M.mode.slowMs = 25000; change = 'msg2 streams its one text block for 25 s'; }
-    const gap = name === 'refresh' ? Math.max(GAP, 60e3) : GAP;
+    const gap = name === 'refresh' ? Math.max(GAP, 60e3) : (MID || name === 'symlink-quick') ? 3000 : GAP;
     await sleep(gap);
     const t2 = await turn('two');
     const m2 = mark(out);
@@ -828,7 +867,7 @@ async function measure(o = {}) {
     const rle = out.filter((x) => x.o.type === 'rate_limit_event').map((x) => ({ t: x.t, info: x.o.rate_limit_info || x.o }));
     const res = {
       variant: name, version, change, tChange,
-      steps: steps.map((s) => ({ step: s.step, change: s.change, gapMs: s.gapMs, result: s.result, accts: s.reqs.map((r) => `${r.acct || '-'}:${r.status}${r.stream ? '' : '(ns)'}`), orgHeaders: [...new Set(s.reqs.map((r) => r.org).filter(Boolean))] })),
+      steps: steps.map((s) => ({ step: s.step, change: s.change, gapMs: s.gapMs, result: s.result, accts: s.reqs.map((r) => `${r.acct || '-'}:${r.status}${r.stream ? '' : '(ns)'}`), afterChangeMs: s.reqs.map((r) => Math.round(r.t - tChange)), planSteps: s.reqs.map((r) => (r.planStep == null ? null : r.planStep)), orgHeaders: [...new Set(s.reqs.map((r) => r.org).filter(Boolean))] })),
       otel: M.otel.filter((o) => o.event === 'api_request' || /api_request|api_error/.test(o.event || '')).map((o) => ({ phase: phase(o.t), event: o.event, org: o.org })),
       otelEvents: [...new Set(M.otel.map((o) => o.event))],
       oauth: M.oauth.map((o) => ({ phase: phase(o.t), ...o, t: undefined })),
@@ -840,6 +879,11 @@ async function measure(o = {}) {
       stderrTail: errOf().slice(-400),
       events: eventsOf(name, steps),
     };
+    // the fences, as runOat says them (P0: 主开发 02:35Z — every open under the person's home outside the program file, listed)
+    res.foreignTokens = M.foreign.length;
+    res.guardedReads = guardedReadsOf(recd, [...(o.guarded || GUARDED).map((g) => g.path), ...(o.forbid || [])], { deny: DENY, allow: ALLOW });
+    if (res.foreignTokens || res.guardedReads.length) res.void = res.foreignTokens ? 'foreign-token' : 'guarded-read';
+    else if (recd.gap) { res.void = recd.gap.void; res.traceGap = recd.gap.why; }
     if (o.dump) { try { fs.writeFileSync(path.join(o.dump, `stdout-${name}.ndjson`), out.map((x) => JSON.stringify({ at: x.t, rec: x.o })).join('\n') + '\n'); } catch { } }
     return res;
   }

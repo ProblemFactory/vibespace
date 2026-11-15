@@ -4,6 +4,11 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.403 — 2026-11-15
+
+### readings-attribution-2 (主开发 2026-11-15) — a reading is never filed on an account the conversation was not using
+- P0, the measurement: when does a RUNNING claude spend a re-pointed credential? scripts/measure-claude-cred-read.mjs gains `midturn` (one turn of three requests: the shared probe's mock answers a Read tool call, the link moves as request 1 lands), `midturn-late` (request 1's answer held 70 s) and `symlink-quick`; its hot-switch variants now say their fences like the oat ones (guarded reads, foreign tokens, the trace gap). Measured on the real 2.1.322 and 2.1.321 (rung loopback-real: fake credentials, the loopback mock, the strace belt — it never fired; no open under the person's home): THE NEXT REQUEST, inside a turn too. Record: scripts/fixtures/claude-cred-read-midturn-2.1.322.json; `hotSwitchEvidence.midTurn`; kb-design-lessons §18.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)
