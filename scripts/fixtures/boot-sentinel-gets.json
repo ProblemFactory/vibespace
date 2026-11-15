@@ -278,6 +278,7 @@
   "/api/session-status/history",
   "/api/session-todos",
   "/api/sessions",
+  "/api/setting-holds",
   "/api/settings",
   "/api/subagent-messages",
   "/api/subagents",

@@ -363,7 +363,7 @@ export function installUserTodos(app) {
   };
   const armExitButtons = (root = document) => {
     const now = performance.now();
-    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
+    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant, .ut-action-setting')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install; lane setting-doors pick 2: so is a proposed change's one button
       stampArm(b, now);
       armed.add(b);
     }
@@ -1085,6 +1085,17 @@ export function installUserTodos(app) {
         { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.recordOf ? model.recordOf(rec) : model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },   // r3 (lane owner-press-attended): the RECORD — a fold said whole
         ...model.menuFor(id),
       ]);
+      return;
+    }
+    const setBtn = e.target.closest('.ut-action-setting');
+    if (setBtn) {
+      // lane setting-doors pick 2: the change an ask proposes, in ONE press (the model's runAction → POST /api/setting-holds/press,
+      // the value the button drew as `shown`) — a button that appeared, moved or was reworded a moment ago is not the one the user read
+      armExitButtons();
+      const pv = pressVerdict({ since: setBtn._armSince ?? null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      setBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'setting', { shown: setBtn.dataset.shown })).finally(() => { setBtn.disabled = false; });
       return;
     }
     const grantBtn = e.target.closest('.ut-action-grant');

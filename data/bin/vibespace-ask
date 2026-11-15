@@ -64,6 +64,10 @@ const options = optionsRaw === undefined ? undefined : optionsRaw.split('|').map
 // itself («Let this conversation use …»), which changes «Who can use it» and then answers you; an --options label is only
 // ever a reply the user sends (it shows as «Reply: …»), so never offer a label that names an action it cannot perform
 const grant = opt('grant');
+// --propose <row>=<value> [--until 22:00 | 6h | 90m] (lane setting-doors pick 2): ONE change of ONE row the owner takes in ONE press —
+// built by the hub from the schema's own facts (a closed list: the three ceilings on turns nobody typed); a raise always needs
+// its --until (5 min – 48 h); you never write the setting yourself
+const propose = opt('propose'), until = opt('until');
 // --notice (2.369.118): the item is FOR THE USER'S INFORMATION, not an ask — it
 // lands in the inbox's own Notices section with a grey count, never the red badge.
 const noticeIdx = rawArgs.indexOf('--notice');
@@ -91,6 +95,9 @@ const USAGE = [
   '                   adds this conversation to the profile\'s list, then you are answered «Granted …» with how to attach (`vibespace-browser use <id>`).',
   '                   A channel conversation is asked with `vibespace-channels request`; a machine only in words (the user opens it on its row)',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
+  '      --propose <row>=<value> [--until 22:00|6h|90m] = ONE change of ONE setting the owner takes in ONE press (only the three ceilings on',
+  '                   turns nobody typed, e.g. spend.unattendedPerInstanceDay=1600); a RAISE always needs --until (5 min – 48 h) and goes back by',
+  '                   itself; anything else is refused by name with the row\'s link — never write a setting yourself',
   '      a setting to change: put its link in the question or --detail — vibespace://settings/<key> (the key as Settings prints it on the row);',
   '                   the owner\'s press opens that row; never a path in words, and never write the setting yourself',
   '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) for the question, --detail-file <path> for --detail;',
@@ -186,7 +193,7 @@ async function fileItem(typed) {
     if (d.error) { console.error('vibespace-ask: refused — ' + d.error.replace(/nothing was sent$/, 'nothing was filed')); process.exit(TX.STRAY_EXIT); }
     detail = d.text;
   }
-  const body = { add: { text, detail, urgency, kind, options, ...(grant !== undefined ? { grant } : {}) } };
+  const body = { add: { text, detail, urgency, kind, options, ...(grant !== undefined ? { grant } : {}), ...(propose !== undefined ? { propose, tzOffsetMin: -new Date().getTimezoneOffset() } : {}), ...(until !== undefined ? { until } : {}) } };
   if (artifacts.length) body.add.artifacts = artifacts; // lane foryou-attachments: judged by the server — any that would not open ⇒ nothing filed
   const answer = await call(body);
   const { item } = answer;
@@ -198,6 +205,7 @@ async function fileItem(typed) {
   if (answer.filed && !item.existing) console.log(answer.filed);   // lane chat-needs-you-card: THE line to quote — the hub's words (the card in this conversation + the tray)
   console.log('  ' + TX.sentLine(answer, text, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
+  if (answer.proposed) console.log('  ' + answer.proposed);   // lane setting-doors pick 2: the hub's words for a --propose (src/ask-setting.js proposedLine) — what the owner sees and what one press does
   if (item.action && item.action.type === 'browser-grant') console.log('  grant: the user sees «Let this conversation use ' + item.action.label + '» — one press adds this conversation to the profile\'s «Who can use it» and answers you');
   for (const a of Array.isArray(item.artifacts) ? item.artifacts : []) console.log('  attached: ' + (a.kind === 'page' ? a.url : a.path) + ' (' + a.kind + (a.host ? ' on ' + a.host : '') + ') — one press opens it from the item');
   if (item.artifactsCut) console.log('NOTE: only the first ' + item.artifactsCut + ' attachments were kept — attach the rest to a second item.');

@@ -100,6 +100,8 @@ const ROWS = Object.freeze([
   { type: 'main-ask', identity: 'requestId', producer: 'src/server/main-asks.js', builtIn: 'src/main-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the conversation\'s own permission / question card (lane parked-ask-inbox) — src/lib/chat-renderers.js', on: 'the permission card in this conversation', scope: 'conversation' },
   { type: 'helper-ask', identity: null, producer: 'src/server/helper-asks.js', builtIn: 'src/helper-ask.js', waits: true, answer: 'card', card: 'none', handled: true, chat: false, owner: 'the helper\'s permission card on its Agent card (lane S1) — src/lib/chat-renderers.js', on: 'the helper\'s permission card in this conversation', scope: 'conversation' },
   { type: 'browser-grant', identity: 'profileId', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-grant.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--grant browser:<profile>', 'filed'), scope: 'conversation' },
+  // lane setting-doors pick 2: an ask that PROPOSES one change of one row — the owner's one press writes it (src/server/setting-holds.js)
+  { type: 'setting-change', identity: 'key', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-setting.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--propose <row>=<value> [--until …]', 'filed'), scope: 'conversation' },
   // ── machines ──
   // lane queued-is-not-woke laws 2 + 3, SHAPE C (主开发 2026-11-13 13:35Z / 13:42Z): ONE item per conversation and TURN — filed
   // when a group message has not been handed to a conversation in a RUNNING turn for FOUR HOURS (read from the hub's own record

@@ -30,12 +30,12 @@
 //          replyState(item) → {show, enabled, why}, optionsOf(item) → [label] (the chips: the agent's options, else
 //          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml } from './utils.js';
-import { tc, t as tr } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
+import { tc, t as tr, deviceLocale } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
 import { dateOf, stampAt } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
-import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a `vibespace://settings/<key>` link only when the key IS a row
+import { isSettingKey, SETTINGS_SCHEMA } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a `vibespace://settings/<key>` link only when the key IS a row
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -43,6 +43,8 @@ import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   /
 import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isAsk } from '../inbox-origin.js'; // PURE: the AGENT's own ask (via 'ask', vibespace-ask) — batch 47's cure: only its fields are its whole words
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
+import { pressVerdict as settingPressVerdict, isProposable, isSettingChange, PROPOSABLE } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): an ask that PROPOSES one change of one setting — THE verdict the card draws (the hub judges it again)
+import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (the product's one spelling — «22:00», «Sun 22:00»)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
 export function agoText(ts, t) {
@@ -419,6 +421,130 @@ const grantAskHtml = (i, t) => {
   const g = grantAskOf(i);
   return g ? `<div class="ut-exit-answer ut-grant-answer"><button type="button" class="ut-act ut-action-grant ut-grant-go" data-answer="grant" title="${escHtml(t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }))}">${escHtml(t('Let this conversation use {label}', { label: g.label }))}</button></div>` : '';
 };
+
+/** lane setting-doors pick 2 — AN ASK THAT PROPOSES ONE CHANGE OF ONE SETTING (`vibespace-ask "…" --propose <row>=<value> --until 6h`;
+ *  the item's action = { type, key, value, was, untilRel? | untilAt?, askedAt }, built by the hub from the schema — src/ask-setting.js):
+ *  ONE box — the row's label and its door, THE VALUE NOW (a value that moved since the ask is SAID), the proposal with its «until» on
+ *  the owner's clock and the value it returns to, a hold that already stands, how old the ask is — and ONE button whose words name
+ *  the amount and the moment, drawn only when THE verdict (ask-setting pressVerdict, against the value NOW) says it can be pressed;
+ *  else the reason, with the row's link. The tray, the mini inbox, the phone sheet, the chat's card and its strip draw it here;
+ *  the For-you window draws the same box as nodes (settingCardEls: its press is the pane's action row). */
+// THE LIVE FACTS (registered by the app — src/lib/app.js: its settings store and the holds cache, GET /api/setting-holds + the
+// `setting-holds` broadcast): `value(key)` = the row's value NOW, `holdOf(key)` = its standing hold or null, `present(key, v)` =
+// the hub answered a press with another present value («moved») — the app redraws on it. None registered ⇒ the row's default.
+let settingFacts = null;
+const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));   // ask-setting's NUM: Number(null) is 0 — an absent field is NO number
+export function registerSettingFacts(f) { settingFacts = f && typeof f === 'object' ? f : null; }
+const factValue = (key) => { let v = NaN; try { v = settingFacts && typeof settingFacts.value === 'function' ? num(settingFacts.value(key)) : NaN; } catch { v = NaN; } return Number.isFinite(v) ? v : PROPOSABLE[key] ? PROPOSABLE[key].def : NaN; };
+const factHold = (key) => { try { const h = settingFacts && typeof settingFacts.holdOf === 'function' ? settingFacts.holdOf(key) : null; return h && typeof h === 'object' && Number.isFinite(num(h.value)) && Number.isFinite(num(h.untilAt)) ? h : null; } catch { return null; } };
+/** the hub said what the row holds NOW (a press answered «moved» / «same» / «passed») — the card redraws on it, nothing is pressed again */
+export function noteSettingPresent(key, value) { try { if (settingFacts && typeof settingFacts.present === 'function' && Number.isFinite(num(value))) settingFacts.present(key, num(value)); } catch { /* the next broadcast tells */ } }
+/** the item's proposed change (its action) when it is one of a proposable row, else null — the ONE test every surface asks */
+const settingAskOf = (i) => (i && !i.clearedAt && isSettingChange(i.action) && Number.isFinite(num(i.action.value)) ? i.action : null);
+/** A MOMENT ON THE OWNER'S CLOCK (the device's zone and locale): «22:00» today, «22:00 tomorrow», else THE instant spelling (a weekday). */
+export function untilClock(at, t, { now = Date.now() } = {}) {
+  const locale = deviceLocale();
+  const hm = clockAt(at, { now: at, locale });
+  const day = (x) => { try { return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(x)); } catch { return ''; } };
+  if (day(at) === day(now)) return hm;
+  if (day(at) === day(now + 86400000)) return t('{time} tomorrow', { time: hm });
+  return clockAt(at, { now, locale });
+}
+const spanWords = (ms, t) => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return t('{n} min', { n: m }); const h = Math.floor(m / 60), r = m % 60; return r ? t('{h} h {m} min', { h, m: r }) : t('{n} h', { n: h }); };
+const holdBack = (key, h) => (Number.isFinite(num(h.before)) ? num(h.before) : PROPOSABLE[key].def);   // `before` null = the row's default
+/** A STANDING HOLD IN WORDS — «1600 until 22:00, then 800» — the card's held line and the Settings row's (settings-ui) say it ONE way; '' = none. */
+export function holdWords(key, t, { now = Date.now() } = {}) {
+  const h = isProposable(key) ? factHold(key) : null;
+  return h ? t('{value} until {time}, then {back}', { value: num(h.value), time: untilClock(num(h.untilAt), t, { now }), back: holdBack(key, h) }) : '';
+}
+/** THE CARD'S FACTS against the value NOW → null | { key, label, value, now, was, moved, held, back, verdict, button: {words, title,
+ *  raise} | null, nowWords, heldWords, whyWords, whyLink, vol: {prop, asked} (the words that move with the clock — patched in place,
+ *  never in a row's signature), sig }. `now` = the HUB's time (the verdict's, as the press is judged). */
+export function settingCardOf(i, t, { now = hubNow() } = {}) {
+  const a = settingAskOf(i);
+  if (!a) return null;
+  const key = String(a.key), value = num(a.value), cur = factValue(key), was = num(a.was);
+  const schema = SETTINGS_SCHEMA[key];
+  const held = factHold(key);
+  const verdict = settingPressVerdict(a, { present: cur, now });
+  const rel = Number.isFinite(num(a.untilRel)) ? num(a.untilRel) : null;
+  const at = rel == null && Number.isFinite(num(a.untilAt)) ? num(a.untilAt) : null;
+  const timed = rel != null || at != null;
+  const back = held ? holdBack(key, held) : cur;   // a hold keeps its FIRST «before» (src/server/setting-holds.js amendment 4)
+  const moved = Number.isFinite(was) && was !== cur;
+  const nowWords = moved ? t('It is {now} now — it was {was} when asked', { now: cur, was }) : t('Now: {value}', { value: cur });
+  const prop = rel != null ? t('Proposed: {value} for {span} from your press (until about {time}), then {back}', { value, span: spanWords(rel, t), time: untilClock(now + rel, t, { now }), back })
+    : at != null ? t('Proposed: {value} until {time}, then {back}', { value, time: untilClock(at, t, { now }), back })
+    : t('Proposed: {value} — it stays until you change it', { value });
+  const hold = held ? holdWords(key, t, { now }) : '';
+  const heldWords = !held ? '' : !verdict.press ? t('Held at {hold}', { hold })   // no press: what stands, nothing it would replace
+    : timed ? t('Held at {hold} — this press replaces the hold\'s value and moment; it still returns to {back}', { hold, back })
+    : t('Held at {hold} — this press ends the hold; it stays at {value}', { hold, value });
+  let button = null, whyWords = '', whyLink = false;
+  if (verdict.press) {
+    const raise = !!verdict.raise;
+    const p = { value, time: at != null ? untilClock(at, t, { now }) : '', span: rel != null ? spanWords(rel, t) : '' };
+    const words = at != null ? (raise ? t('Raise to {value} until {time}', p) : t('Lower to {value} until {time}', p))
+      : rel != null ? (raise ? t('Raise to {value} for {span}', p) : t('Lower to {value} for {span}', p))
+      : t('Lower to {value}', p);   // a lasting change is never a raise (the verdict refuses one)
+    button = { words, raise, title: timed ? t('Sets it to {value} now and back to {back} at that moment, then tells the agent', { value, back }) : t('Sets it to {value} now, then tells the agent', { value }) };
+  } else if (verdict.why === 'same') whyWords = t('It is already {value} — nothing to change', { value: cur });
+  else if (verdict.why === 'passed') { whyWords = t('That moment ({time}) has passed — change it on the row', { time: at != null ? untilClock(at, t, { now }) : '' }); whyLink = true; }
+  else if (verdict.why === 'raise-needs-until') { whyWords = t('A raise needs its «until» — change it on the row'); whyLink = true; }
+  else { whyWords = t('This change cannot be pressed here — change it on the row'); whyLink = true; }
+  const vol = { prop, asked: t('asked {ago}', { ago: agoText(num(a.askedAt) || num(i.createdAt) || Date.now(), t) }) };
+  return { key, label: schema && typeof schema.label === 'string' ? schema.label : key, value, now: cur, was, moved, held, back, verdict, button, nowWords, heldWords, whyWords, whyLink, vol,
+    sig: JSON.stringify([key, value, cur, was, held ? [num(held.value), num(held.untilAt), held.before] : null, verdict.press ? 1 : verdict.why, button && button.words, at, rel]) };
+}
+/** THE BOX's lines, in order — ONE list both renderers draw (the row's escaped HTML, the For-you window's nodes): the label and its
+ *  door, the value now, the proposal (its clock words volatile), a standing hold, the ask's age (not in the strip — its meta says it),
+ *  and with no press the reason (+ the row's door). */
+const cardLines = (c, strip) => [
+  { cls: 'ut-sc-head', label: c.label, door: true },
+  { cls: 'ut-sc-now' + (c.moved ? ' ut-sc-moved' : ''), text: c.nowWords },
+  c.verdict.why === 'same' ? null : { cls: 'ut-sc-prop', vol: 'prop' },   // already the value proposed: the why line says it (no «then» to promise)
+  c.heldWords ? { cls: 'ut-sc-held', text: c.heldWords } : null,
+  strip ? null : { cls: 'ut-sc-asked', vol: 'asked' },
+  c.button ? null : { cls: 'ut-exit-note ut-sc-why', text: c.whyWords, door: c.whyLink },
+].filter(Boolean);
+/** THE BOX (escaped words only) with its ONE press; `strip` = the chat's attention strip (the row's meta already says the age).
+ *  The row's door is THE setting link's own span (foryou-links' shape: `.fy-link` data-fy="setting" — every surface's link press
+ *  opens Settings on the row; it opens, never writes). */
+export function settingCardHtml(i, t, { strip = false } = {}) {
+  const c = settingCardOf(i, t);
+  if (!c) return '';
+  const door = `<span class="fy-link ut-sc-link" role="link" tabindex="0" data-fy="setting" data-ref="${escHtml(c.key)}">${escHtml(t('Open this setting'))}</span>`;
+  const lineHtml = (l) => `<div class="${l.cls}">${l.label != null ? `<span class="ut-sc-label">${escHtml(l.label)}</span>` : l.vol ? `<span class="ut-sc-vol" data-vol="${l.vol}">${escHtml(c.vol[l.vol])}</span>` : escHtml(l.text)}${l.door ? ' ' + door : ''}</div>`;
+  return `<div class="ut-setting-change" data-key="${escHtml(c.key)}" data-press="${escHtml(c.verdict.press ? 'yes' : String(c.verdict.why))}">`
+    + cardLines(c, strip).map(lineHtml).join('')
+    + (c.button ? `<div class="ut-exit-answer ut-setting-answer"><button type="button" class="ut-act ut-action-setting ut-setting-go" data-answer="setting" data-shown="${escHtml(String(c.now))}" title="${escHtml(c.button.title)}">${escHtml(c.button.words)}</button></div>` : '')
+    + '</div>';
+}
+/** The same box as NODES (the For-you window — every item string is textContent there; its press is the pane's action row). */
+export function settingCardEls(i, t) {
+  const c = typeof document === 'undefined' ? null : settingCardOf(i, t);
+  if (!c) return [];
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const door = () => { const d = el('span', 'fy-link ut-sc-link', t('Open this setting')); d.setAttribute('role', 'link'); d.tabIndex = 0; d.dataset.fy = 'setting'; d.dataset.ref = c.key; return d; };
+  const box = el('div', 'ut-setting-change');
+  box.dataset.key = c.key; box.dataset.press = c.verdict.press ? 'yes' : String(c.verdict.why);
+  for (const l of cardLines(c, false)) {
+    const line = el('div', l.cls);
+    if (l.label != null) line.append(el('span', 'ut-sc-label', l.label));
+    else if (l.vol) { const v = el('span', 'ut-sc-vol', c.vol[l.vol]); v.dataset.vol = l.vol; line.append(v); }
+    else line.append(document.createTextNode(l.text));
+    if (l.door) line.append(' ', door());
+    box.append(line);
+  }
+  return [box];
+}
+/** the box's words that move with the clock, written into the nodes already drawn (a minute's «asked 3min ago» never rebuilds the
+ *  button — THE LIVE CARD LAW, r14) */
+export function patchSettingVolatile(root, i, t) {
+  const c = root && typeof root.querySelectorAll === 'function' ? settingCardOf(i, t) : null;
+  if (!c) return;
+  for (const n of root.querySelectorAll('.ut-setting-change .ut-sc-vol')) { const w = c.vol[n.dataset.vol]; if (typeof w === 'string' && n.textContent !== w) n.textContent = w; }
+}
 /** An --options label is a REPLY the person sends — it reads as one («Reply: …»), never as the act it names. */
 export const optionWords = (label, t) => t('Reply: {label}', { label: String(label) });
 /** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
@@ -530,7 +656,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words, { whole: wordsWhole })}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + rowButtonsHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + settingCardHtml(i, t, { strip: !!ctx.noPick }) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${opts}${card ? '' : detailFold}<div class="ut-meta">${meta}</div>`; // ONE ORDER where an item opens (主开发 13:34Z): the question, its OPTIONS, then the detail — a person decides first and reads the reason under it
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
@@ -551,11 +677,12 @@ function partsOf(entry, ctx) {
   // the deadline line's words, accent and state move every second (the ticker's) — the signature reads its facts only
   const sigBody = (deadline ? body.replace(deadline, deadline.replace(/>[^<]*<\/div>$/, '></div>').replace(/ ut-deadline-warn| data-state="[^"]*"/g, '')) : body)
     .replace(/ name="(ut-ak-reach-[^"]*)-\d+" value="(\w+)"(?: checked)?/g, ' name="$1" value="$2"') // r11: a copy's own group and the pick are no change of the row (a pick never repaints the radio under the person)
+    .replace(/<span class="ut-sc-vol" data-vol="(\w+)">[^<]*<\/span>/g, '<span class="ut-sc-vol" data-vol="$1"></span>') // lane setting-doors pick 2: a proposed change's «until about 21:40» / «asked 3min ago» move with the clock (patchVolatile writes them)
     // lane needs-card-tail r14 (the r13 acceptance: «1min ago» → «3min ago» rebuilt the strip's Allow, and nothing re-armed the
     // new one — a press 30 s later was «moved under the pointer just now»): the age and the lifetime are words that move with
     // the clock — patchRow writes them in place (THE LIVE CARD LAW: never detach a button in use); a change of them is no change of the row
     .replace(/<span class="ut-(age|exp)">[^<]*<\/span>/g, '<span class="ut-$1"></span>');
-  return { cls, dot, body, actions, deadline: !!deadline, age: ageWords, exp: expWords, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
+  return { cls, dot, body, actions, deadline: !!deadline, age: ageWords, exp: expWords, item: resolved ? null : i, t, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
 }
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
@@ -780,6 +907,7 @@ function patchVolatile(el, p) {
     const n = w == null ? null : el.querySelector(`:scope > .ut-body > .ut-meta > .${cls}`);
     if (n && n.textContent !== w) n.textContent = w;
   }
+  if (p.item) patchSettingVolatile(el, p.item, p.t); // lane setting-doors pick 2: a proposed change's «until about» / «asked …»
 }
 
 /** THE KEYED RECONCILER (design-user-inbox-reply D1.9; §9 shares it with the

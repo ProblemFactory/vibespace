@@ -10884,6 +10884,37 @@ export default {
   "the list could not be read; open the Agent browser panel → {label} → Who can use it": "名单读不到；请打开 Agent 浏览器面板 → {label} → 谁能使用",
   "{label} was already open to this conversation — the agent was told": "{label} 本来就对这个对话开放——已告诉 agent",
   "{label}: this conversation may use it now — the agent was told": "{label}：这个对话现在可以使用了——已告诉 agent",
+  "Open this setting": "打开这项设置", // lane setting-doors pick 2
+  "Now: {value}": "现在：{value}", // lane setting-doors pick 2
+  "It is {now} now — it was {was} when asked": "现在是 {now}——提出时是 {was}", // lane setting-doors pick 2
+  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提议：从你按下起 {span} 内为 {value}（约到 {time}），之后回到 {back}", // lane setting-doors pick 2
+  "Proposed: {value} until {time}, then {back}": "提议：{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
+  "Proposed: {value} — it stays until you change it": "提议：{value}——一直保持，直到你再改", // lane setting-doors pick 2
+  "{value} until {time}, then {back}": "{value}，到 {time} 为止，之后回到 {back}", // lane setting-doors pick 2
+  "{time} tomorrow": "明天 {time}", // lane setting-doors pick 2
+  "Held at {hold} — this press replaces the hold's value and moment; it still returns to {back}": "正在保持：{hold}——这次按下会替换保持的数值和时刻；之后仍回到 {back}", // lane setting-doors pick 2
+  "Held at {hold} — this press ends the hold; it stays at {value}": "正在保持：{hold}——这次按下会结束保持；之后一直是 {value}", // lane setting-doors pick 2
+  "asked {ago}": "{ago}提出", // lane setting-doors pick 2
+  "Raise to {value} until {time}": "提高到 {value}，到 {time} 为止", // lane setting-doors pick 2
+  "Raise to {value} for {span}": "提高到 {value}，持续 {span}", // lane setting-doors pick 2
+  "Lower to {value} until {time}": "降低到 {value}，到 {time} 为止", // lane setting-doors pick 2
+  "Lower to {value} for {span}": "降低到 {value}，持续 {span}", // lane setting-doors pick 2
+  "Lower to {value}": "降低到 {value}", // lane setting-doors pick 2
+  "Sets it to {value} now and back to {back} at that moment, then tells the agent": "现在设为 {value}，到那个时刻自动回到 {back}，然后告诉 agent", // lane setting-doors pick 2
+  "Sets it to {value} now, then tells the agent": "现在设为 {value}，然后告诉 agent", // lane setting-doors pick 2
+  "It is already {value} — nothing to change": "已经是 {value}——无需更改", // lane setting-doors pick 2
+  "That moment ({time}) has passed — change it on the row": "那个时刻（{time}）已经过了——请在设置项上修改", // lane setting-doors pick 2
+  "A raise needs its «until» — change it on the row": "提高必须带上「到何时」——请在设置项上修改", // lane setting-doors pick 2
+  "This change cannot be pressed here — change it on the row": "这项更改不能在这里一键完成——请在设置项上修改", // lane setting-doors pick 2
+  "It changed meanwhile — look again": "这期间它已经变了——请再看一遍", // lane setting-doors pick 2
+  "Could not change it: {why}": "无法更改：{why}", // lane setting-doors pick 2
+  "{label}: {value} until {time}, then {back} — the agent was told": "{label}：{value}，到 {time} 为止，之后回到 {back}——已告诉 agent", // lane setting-doors pick 2
+  "{label}: {value} from now on — the agent was told": "{label}：从现在起为 {value}——已告诉 agent", // lane setting-doors pick 2
+  "Held at {hold}": "正在保持：{hold}", // lane setting-doors pick 2
+  "End now": "立即结束", // lane setting-doors pick 2
+  "Ends the hold now: the row goes back at once": "现在结束保持：设置项立即改回", // lane setting-doors pick 2
+  "Could not end the hold: {why}": "无法结束保持：{why}", // lane setting-doors pick 2
+  "A held setting is back to {value} — the hold ended: {link}": "一项被保持的设置已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2
   "Draft · not sent": "草稿 · 未发送", // lane gmail-draft-not-a-message
   "saved {time}": "保存于 {time}", // lane gmail-draft-not-a-message
   "1 deleted draft": "1 条草稿已删除", // lane gmail-draft-not-a-message

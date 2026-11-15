@@ -166,7 +166,8 @@ const windowWordsFiled = (i) => { const w = i && i.facts && typeof i.facts === '
  *   may lead the item's own status by a broadcast), reply ({show, enabled,
  *   why, code} — replyButtonState), ago(ts), expires(ts), resolvedBy(by), endCode(item) (r8),
  *   detailState ('whole' | 'loading' | 'failed' — a resolved item's snapshot
- *   carries a 300-char preview; the window loads the rest) + loadError.
+ *   carries a 300-char preview; the window loads the rest) + loadError;
+ *   settingAsk ({press} — lane setting-doors pick 2: a proposed change's verdict against the value NOW, the caller's reading).
  * Returns {id, sessionKey, title, detail, name, urgency, notice, resolved,
  *   status, meta:[{kind, text}], replied, options:[{idx, label}],
  *   reply:{show, enabled, why}, actions:[id…], producer, copy,
@@ -242,7 +243,11 @@ export function itemView(item, ctx = {}) {
   const appNoteAsk = !resolved && i.action && i.action.type === 'desktop-app-notify' && i.action.appId ? { appId: String(i.action.appId) } : null;
   // lane controls-that-lie: an ask that names a GRANT carries the grant — «Let this conversation use …», first (it DOES it)
   const grantAsk = !resolved && !i.clearedAt && i.action && i.action.type === 'browser-grant' && i.action.profileId ? { profileId: String(i.action.profileId), label: String(i.action.label || i.action.profileId) } : null;
-  const actions = resolved ? ['reopen', 'copy'] : [...(grantAsk ? ['browser-grant'] : []), ...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(rowBtns ? rowBtns.map((b) => 'btn:' + b.answer) : []), ...(checkAsk ? [checkAsk] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk && hubAsk.type === 'vault-words-ask' ? ['words-allow', 'hub-deny'] : hubAsk && hubAsk.type === 'vault-grant-ask' && hubAsk.standing ? ['grant-standing', 'hub-deny'] : hubAsk ? ['hub-once', ...(hubAsk.type === 'vault-grant-ask' ? ['grant-8h'] : hubAsk.type === 'vault-run-ask' ? [...(hubAsk.window ? ['shape-window'] : []), ...(hubAsk.always ? ['shape-always'] : [])] : [hubAsk.type === 'automation-ask' ? 'auto-always' : hubAsk.type === 'pool-cross-provider' ? 'pool-always' : 'hub-always']), 'hub-deny'] : []), ...(secretAsk ? ['secret-paste', 'secret-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  // lane setting-doors pick 2: an ask that PROPOSES one change of one setting — its ONE press («Raise to 1600 until 22:00»), first,
+  // only while THE verdict against the value NOW allows it (`ctx.settingAsk` = the caller's reading, user-todos-row settingCardOf —
+  // this file imports nothing); a change that cannot be pressed says why in its box, never a button
+  const settingAsk = !resolved && !i.clearedAt && ctx.settingAsk && typeof ctx.settingAsk === 'object' ? { press: !!ctx.settingAsk.press } : null;
+  const actions = resolved ? ['reopen', 'copy'] : [...(settingAsk && settingAsk.press ? ['setting-press'] : []), ...(grantAsk ? ['browser-grant'] : []), ...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(rowBtns ? rowBtns.map((b) => 'btn:' + b.answer) : []), ...(checkAsk ? [checkAsk] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk && hubAsk.type === 'vault-words-ask' ? ['words-allow', 'hub-deny'] : hubAsk && hubAsk.type === 'vault-grant-ask' && hubAsk.standing ? ['grant-standing', 'hub-deny'] : hubAsk ? ['hub-once', ...(hubAsk.type === 'vault-grant-ask' ? ['grant-8h'] : hubAsk.type === 'vault-run-ask' ? [...(hubAsk.window ? ['shape-window'] : []), ...(hubAsk.always ? ['shape-always'] : [])] : [hubAsk.type === 'automation-ask' ? 'auto-always' : hubAsk.type === 'pool-cross-provider' ? 'pool-always' : 'hub-always']), 'hub-deny'] : []), ...(secretAsk ? ['secret-paste', 'secret-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
   if (hubAsk && hubAsk.lost) actions.splice(actions.indexOf('hub-once'), 1);   // lane wake-approve-card r8: a LATE run card after a restart (vault-agent-own r23 `restartLost`) — an Allow would mint nothing: 拒绝 alone
   // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS — `ctx.closers` (the caller asks the registry's closersOf; this file
   // imports nothing): false / [] draws no Mark done / Dismiss beside its Approve / Deny, and no Reopen once it is decided;
@@ -262,6 +267,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions: cardActs || verbs, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || verbs, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, settingAsk, copy, cut,
   };
 }

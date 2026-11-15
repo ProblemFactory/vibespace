@@ -25,7 +25,7 @@ import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
-import { agoText as agoWords } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
+import { agoText as agoWords, registerSettingFacts } from './user-todos-row.js'; // the client's relative-time helper («5min ago»), in the device's words
 import { installManageAgents } from './manage-agents.js';
 import { openAccountModelsDialog } from './account-models.js'; // q-053 §3 (lane models-at-session): a provider with no models — the door to its account's models
 import { MENU_EMPTY } from '../model-providers.js'; // PURE: the one line an empty menu says
@@ -227,6 +227,25 @@ class App {
     // lane setting-doors pick 1: a toast's words (a server notice, a refusal) draw a `vibespace://settings/<key>` naming a known
     // row as a link to it — THE door, openSettingAt; every other word stays text
     registerSettingLinks({ has: isSettingKey, open: (key) => this.openSettingAt(key) });
+    // lane setting-doors pick 2: THE LIVE FACTS an agent's proposed change is drawn against (user-todos-row.js registerSettingFacts) —
+    // the row's value NOW (this settings store; a hub's «moved» answer to a press is noted until the store hears the row move) and its
+    // standing HOLD (GET /api/setting-holds at boot and every reconnect, then every `setting-holds` broadcast). A change of either
+    // redraws the For-you rows on the snapshot they hold; a change of the holds redraws an open Settings window too (its held line)
+    this._settingHolds = [];
+    const saidNow = new Map();   // key → the value the hub answered a press with (until the store says the row moved)
+    const proposable = Object.keys(SETTINGS_SCHEMA).filter((k) => SETTINGS_SCHEMA[k] && SETTINGS_SCHEMA[k].proposable === true);
+    registerSettingFacts({
+      value: (key) => (saidNow.has(key) ? saidNow.get(key) : this.settings.get(key)),
+      holdOf: (key) => this._settingHolds.find((h) => h && h.key === key) || null,
+      present: (key, v) => { saidNow.set(key, v); try { this._inboxModel?.redraw?.(); } catch { } },
+    });
+    for (const key of proposable) this.settings.on(key, () => { saidNow.delete(key); try { this._inboxModel?.redraw?.(); } catch { } });
+    this._setSettingHolds = (holds) => {
+      this._settingHolds = Array.isArray(holds) ? holds.filter((h) => h && typeof h.key === 'string') : [];
+      try { this._inboxModel?.redraw?.(); } catch { }
+      this._settingsUI?.redrawOpen?.();
+    };
+    this._loadSettingHolds = () => fetchJson('/api/setting-holds').then((d) => { if (d && Array.isArray(d.holds)) this._setSettingHolds(d.holds); });
     this.themeManager = new ThemeManager();
     this.ws = new WsManager();
     this.wm = new WindowManager(document.getElementById('workspace'));
@@ -331,6 +350,7 @@ class App {
 
     // Load settings asynchronously (non-blocking — modules use defaults until loaded)
     this.settings.load();
+    this._loadSettingHolds(); // lane setting-doors pick 2: the rows' standing holds (a For-you card's held line, a Settings row's «End now»)
 
     // Sync settings from other clients via WebSocket
     this.ws.onGlobal((msg) => {
@@ -340,6 +360,7 @@ class App {
       if (msg.type === 'custom-themes-updated' && msg.themes) {
         this._applyCustomThemesFromServer(msg.themes);
       }
+      if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
         this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(msg), ...accountDefaultsOf(msg) }; // every harness's default field (agent-meta) + the providers' rows (lane lg-providers U5)
         // Live-re-render an OPEN Manage Agents surface — without this the
@@ -632,6 +653,7 @@ class App {
       // changes made while this tab was disconnected)
       fetchJson('/api/maintenance').then((m) => { if (m) this._renderMaintenance?.(m); }).catch(() => {});
       try { this.settings?.refetch?.(); } catch {}
+      try { this._loadSettingHolds?.(); } catch {} // lane setting-doors pick 2: the holds are a broadcast-only mirror too
       // user-state too (2.223.4 — the userW names/stars/archives blackout):
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.

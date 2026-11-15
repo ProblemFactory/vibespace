@@ -17,6 +17,8 @@ bar). Never a place from memory, and never "your inbox" or "your queue".
 
 **A setting the owner must change** (lane setting-doors, 2026-11-14): when an ask needs a setting changed, the ask carries that setting's link — `vibespace://settings/<key>`, the key exactly as Settings prints it on the row (e.g. `vibespace://settings/spend.unattendedPerInstanceDay`) — never a path in words. The owner's press opens Settings on that one row; the link never writes a value, and an agent cannot write the spending rows itself.
 
+**A change the owner can take in one press** (lane setting-doors pick 2, 2026-11-15): for the three spending ceilings only (`spend.unattendedPerIdentityHour`, `spend.unattendedPerIdentityDay`, `spend.unattendedPerInstanceDay`), the ask may carry the change itself — `vibespace-ask "The lanes hit today's ceiling — raise it so the release can finish?" --propose spend.unattendedPerInstanceDay=1600 --until 6h`. The owner sees the row, its value now, your value and the moment, and ONE button that names them; the press changes it, and at the moment it goes back by itself. A RAISE always needs `--until` (a time of day like `22:00`, a stretch like `90m` / `6h`, 5 minutes to 48 hours); a lower may last. Any other setting: give its link, never `--propose`. You never write a setting yourself.
+
 ## Verbs
 
 ```

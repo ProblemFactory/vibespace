@@ -46,6 +46,7 @@ console.log('① THE CENSUS — every producer a row (its origin, where it files
 // 'group' = a group key only (no conversation — no chat draws it) · 'mixed' = some sites of each
 const PRODUCERS = {
   'src/server/spend-guard.js': { origin: 'spend', scope: 'group', types: [] },
+  'src/server/setting-holds.js': { origin: 'spend', scope: 'group', types: [], why: 'lane setting-doors pick 2: ONE notice when a held ceiling\'s return could not be written, or the holds could not be read at boot — the Spending group, the row named with its link; no conversation (the return is the hub\'s act)' },
   'src/server/login-expiry-watch.js': { origin: 'login', scope: 'group', types: [] },
   'src/migration-runner.js': { origin: 'server', scope: 'group', types: [], why: 'int365 seam F (.365): a boot migration that failed files ONE notice per migration id in the hub\'s «Migrations» group (lane job-secrets-retire r3/r4 sayFailed) — it only informs (the retry is automatic at the next start), no action type' },
   'src/server/migrations.js': { origin: ['vault', 'browser'], scope: 'group', types: [], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — its words name a MANUAL owner step (put each secret into the vault, delete the file; with two files, move one out and restart), but it files no action type and draws no button; int376 (.376): + the CloakBrowser-to-plugin notice (2026-11-cloak-to-plugin, lane engine-spi-egress L3) in the Agent browser group — origin \'browser\', its own notice, no action type — so this file files from TWO origins' },
@@ -72,7 +73,7 @@ const PRODUCERS = {
   'src/server/browser-logins.js': { origin: 'browser', scope: 'group', types: ['save-login'], why: 'int360 seam (lane browser-login): the save-login / pending-confirm card + its notices, under the browser\'s group key' },
   'src/server/browser-dialogs.js': { origin: 'browser', scope: 'group', types: [], why: 'lane vault-login r22: live-fill ceiling notice under the browser\'s group key' },
   'src/server/browser-propose.js': { origin: 'browser', scope: 'conversation', types: ['browser-proposal'] },
-  'src/agent-routes/status.js': { origin: 'agent', scope: 'conversation', types: ['browser-grant'] },
+  'src/agent-routes/status.js': { origin: 'agent', scope: 'conversation', types: ['browser-grant', 'setting-change'] },   // lane setting-doors pick 2: + an ask that proposes one change of one setting (`--propose`)
   'src/server/helper-asks.js': { origin: 'agent', scope: 'conversation', types: ['helper-ask'] },
   'src/server/main-asks.js': { origin: 'agent', scope: 'conversation', types: ['main-ask'] },
   'src/server/unexpected-exit.js': { origin: 'agent', scope: 'conversation', types: [] },
