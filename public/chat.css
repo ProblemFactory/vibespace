@@ -739,7 +739,9 @@
 .cad-rows .ut-item > .ut-dot { display: none; }
 .cad-rows .ut-item > .ut-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; min-width: 0; }
 /* the strip shows the question, its clock and what answers it — the rest (the detail fold, notes, attachments, the reach pick) is the card's */
-.cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-deadline, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-ak-scope, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-run, .ut-opts, .ut-reply, .ut-secret) { display: none !important; }
+.cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-deadline, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-ak-scope, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-run, .ut-opts, .ut-reply, .ut-secret, .ut-setting-change) { display: none !important; }
+/* lane setting-doors pick 2: a proposed change's box stands in the strip whole — what its one press changes, to what and until when, on its own line under the ask (a press point never sends what it does not show) */
+.cad-rows .ut-body > .ut-setting-change { order: 4; flex: 1 1 100%; min-width: 0; margin: 0; }
 /* r14 (the r13 acceptance: a vault-run ask's strip had no command, no answers, no clock — its run card holds them): a RUN CARD
    (user-todos-row.js runFactsHtml) gives the strip its command head (one line, the card's box whole) and its answers.
    r15 (the r14 acceptance: those answers stood without the facts they decide on — a press point never sends a scope it does

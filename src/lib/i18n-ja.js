@@ -10614,6 +10614,37 @@ export default {
   "the list could not be read; open the Agent browser panel → {label} → Who can use it": "一覧を読み取れませんでした。エージェントブラウザのパネル → {label} → 使える会話 を開いてください",
   "{label} was already open to this conversation — the agent was told": "{label} はもともとこの会話に開かれていました — エージェントに伝えました",
   "{label}: this conversation may use it now — the agent was told": "{label}：この会話で使えるようになりました — エージェントに伝えました",
+  "Open this setting": "この設定を開く", // lane setting-doors pick 2
+  "Now: {value}": "現在：{value}", // lane setting-doors pick 2
+  "It is {now} now — it was {was} when asked": "現在は {now} — 依頼時は {was} でした", // lane setting-doors pick 2
+  "Proposed: {value} for {span} from your press (until about {time}), then {back}": "提案：押してから {span} の間 {value}（{time} ごろまで）、その後 {back} に戻ります", // lane setting-doors pick 2
+  "Proposed: {value} until {time}, then {back}": "提案：{time} まで {value}、その後 {back} に戻ります", // lane setting-doors pick 2
+  "Proposed: {value} — it stays until you change it": "提案：{value} — 変更するまでそのままです", // lane setting-doors pick 2
+  "{value} until {time}, then {back}": "{time} まで {value}、その後 {back}", // lane setting-doors pick 2
+  "{time} tomorrow": "明日 {time}", // lane setting-doors pick 2
+  "Held at {hold} — this press replaces the hold's value and moment; it still returns to {back}": "保持中：{hold} — この操作で保持の値と時刻を置き換えます。戻り先は {back} のままです", // lane setting-doors pick 2
+  "Held at {hold} — this press ends the hold; it stays at {value}": "保持中：{hold} — この操作で保持を終え、{value} のままになります", // lane setting-doors pick 2
+  "asked {ago}": "{ago}に依頼", // lane setting-doors pick 2
+  "Raise to {value} until {time}": "{time} まで {value} に上げる", // lane setting-doors pick 2
+  "Raise to {value} for {span}": "{span} の間 {value} に上げる", // lane setting-doors pick 2
+  "Lower to {value} until {time}": "{time} まで {value} に下げる", // lane setting-doors pick 2
+  "Lower to {value} for {span}": "{span} の間 {value} に下げる", // lane setting-doors pick 2
+  "Lower to {value}": "{value} に下げる", // lane setting-doors pick 2
+  "Sets it to {value} now and back to {back} at that moment, then tells the agent": "今すぐ {value} にし、その時刻に {back} へ戻します。その後エージェントに伝えます", // lane setting-doors pick 2
+  "Sets it to {value} now, then tells the agent": "今すぐ {value} にし、その後エージェントに伝えます", // lane setting-doors pick 2
+  "It is already {value} — nothing to change": "すでに {value} です — 変更はありません", // lane setting-doors pick 2
+  "That moment ({time}) has passed — change it on the row": "その時刻（{time}）は過ぎました — 設定の行で変更してください", // lane setting-doors pick 2
+  "A raise needs its «until» — change it on the row": "引き上げには「いつまで」が必要です — 設定の行で変更してください", // lane setting-doors pick 2
+  "This change cannot be pressed here — change it on the row": "この変更はここでは実行できません — 設定の行で変更してください", // lane setting-doors pick 2
+  "It changed meanwhile — look again": "その間に変わりました — もう一度確認してください", // lane setting-doors pick 2
+  "Could not change it: {why}": "変更できませんでした：{why}", // lane setting-doors pick 2
+  "{label}: {value} until {time}, then {back} — the agent was told": "{label}：{time} まで {value}、その後 {back} — エージェントに伝えました", // lane setting-doors pick 2
+  "{label}: {value} from now on — the agent was told": "{label}：これから {value} — エージェントに伝えました", // lane setting-doors pick 2
+  "Held at {hold}": "保持中：{hold}", // lane setting-doors pick 2
+  "End now": "今すぐ終了", // lane setting-doors pick 2
+  "Ends the hold now: the row goes back at once": "保持を今すぐ終えます：設定はすぐに元に戻ります", // lane setting-doors pick 2
+  "Could not end the hold: {why}": "保持を終了できませんでした：{why}", // lane setting-doors pick 2
+  "A held setting is back to {value} — the hold ended: {link}": "保持していた設定が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2
   "Draft · not sent": "下書き · 未送信", // lane gmail-draft-not-a-message
   "saved {time}": "{time} に保存", // lane gmail-draft-not-a-message
   "1 deleted draft": "削除された下書き 1 件", // lane gmail-draft-not-a-message

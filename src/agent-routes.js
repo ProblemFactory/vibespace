@@ -431,7 +431,7 @@ const carryOutstanding = TC.createOutstanding(carryDir);
     catch (e) { console.warn(`[inject] ${s.sockName}: the seen marks were not persisted — a restart repeats this delivery: ${(e && e.message) || e}`); }
   };
 // ── vibespace-ask / vibespace-status — src/agent-routes/status.js (the status / todos family, decoupling wave 2b)
-require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b) }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
+require('./agent-routes/status.js').register(app, { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems: (b) => handoverItems(b), serverSetting }); // lane foryou-attachments: vibespace-ask --artifact reads the hand-over's argument shape
 // "CLEAR CONTENT…" AS AN AGENT (2026-09-28): the caller an agent's own verbs
 // hand the ONE clear entry point (src/server/record-clear.js) — its keys (the
 // status key and the pre-conversation webui key: an entry written before the

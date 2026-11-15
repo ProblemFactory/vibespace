@@ -13,6 +13,7 @@ import { ATTENTION_RULES, attentionPolicy, presetOf, presetSwitches } from './ch
 import { paintDecisionLine, liveDecisionLine } from './decision-readout.js';   // lane decision-spend-readout: the judge's money (ONE PURE line)
 import { mountSuggestionList } from './voice-teach-ui.js';   // lane voice-dictionary-nag: 「词典建议」's words, each 加入 / 忽略
 import { mountLearnDraft } from './learn-card.js';   // lane rule-learning: 「从我的判定起草」 — the text model's proposal card (only with an OpenRouter key)
+import { holdWords } from './user-todos-row.js';   // lane setting-doors pick 2: a held row's words («1600 until 22:00, then 800») — ONE spelling with the For-you card's held line
 const DECISION_BUDGET_PATH = 'plugin.llm.dailyBudgetUsd';   // src/plugin-settings.js: the judge's daily cap row
 const VOICE_SUGGEST_PATH = 'plugin.voice-input.suggest';     // src/plugin-settings.js: 「词典建议」 — its row lists the words suggested now
 
@@ -484,6 +485,7 @@ class SettingsUI {
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
+    if (schema.proposable === true) this._renderHeldLine(info, path);   // lane setting-doors pick 2: a hold an agent's proposed change left on the row — its words and «End now»
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';
@@ -508,6 +510,34 @@ class SettingsUI {
 
     row.append(info, controlWrap);
     return row;
+  }
+
+  /** lane setting-doors pick 2: A HELD ROW SAYS SO — a one-press change from an agent's ask stands on it («1600 until 22:00, then 800»,
+   *  the For-you card's own words) with «End now»: POST /api/setting-holds/end — the hold returns now (the hub's act: back to its
+   *  «before» only while the row still holds the hold's value). A refusal is said in the hub's words. Redrawn when the holds change
+   *  (app.js — the `setting-holds` broadcast ⇒ redrawOpen). No hold ⇒ nothing drawn. */
+  _renderHeldLine(info, path) {
+    const words = holdWords(path, t);
+    if (!words) return;
+    const line = document.createElement('div');
+    line.className = 'settings-row-held';
+    line.dataset.held = path;
+    const said = document.createElement('span');
+    said.className = 'settings-row-held-words';
+    said.textContent = t('Held at {hold}', { hold: words });
+    const end = document.createElement('button');
+    end.type = 'button';
+    end.className = 'settings-link-btn settings-held-end';
+    end.textContent = t('End now');
+    end.title = t('Ends the hold now: the row goes back at once');
+    end.onclick = async () => {
+      end.disabled = true;
+      const r = await fetchJson('/api/setting-holds/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: path }) });
+      end.disabled = false;
+      if (!(r && r.ok)) showToast(t('Could not end the hold: {why}', { why: r && r.error ? t(String(r.error)) : t('server unreachable') }), { type: 'error', duration: 9000 });
+    };
+    line.append(said, end);
+    info.appendChild(line);
   }
 
   /** lane owner-press-attended: a number row's SAVE MARK — «Not saved yet» → «Saving…» → «Saved» (a Spending row adds the
