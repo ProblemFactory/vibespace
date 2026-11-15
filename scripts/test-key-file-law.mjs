@@ -849,8 +849,9 @@ try {
   const dsrc5 = realRead(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   // lane chrome-157 (vault-login round 32): the fence record's writer is SHAPE S's one record kind now — M4's anchor follows its
   // address line; the mutant still smuggles the typed value's digest into the persisted record; a gone anchor fails BY NAME
-  const m4Anchor = "          const urlAtFill = String(e.liveFill.urlAtFill || curUrl || '');";
-  const m4Src5 = dsrc5.split(m4Anchor).length === 2 ? dsrc5.replace(m4Anchor, "          const urlAtFill = String((e.liveFill.credSigs && e.liveFill.credSigs[0] && e.liveFill.credSigs[0].sha256) || e.liveFill.urlAtFill || curUrl || '');") : dsrc5;
+  // (the persisted hold: the row's address goes through addressToKeep — the mutant puts the digest in front of it)
+  const m4Anchor = "            urlAtFill: addressToKeep(w, e, lf, lf.urlAtFill, lfOrigin),";
+  const m4Src5 = dsrc5.split(m4Anchor).length === 2 ? dsrc5.replace(m4Anchor, "            urlAtFill: String((lf.credSigs && lf.credSigs[0] && lf.credSigs[0].sha256) || addressToKeep(w, e, lf, lf.urlAtFill, lfOrigin)),") : dsrc5;
   const MUT5 = mutantCopies('key-file-law-r22-m4', REPO);
   const Dm5M4 = m4Src5 !== dsrc5 ? MUT5.load('src/server/browser-dialogs.js', m4Src5, 'kfl-m4-evasive') : null;
   const d5M4 = freshDir('r22-data-m4');

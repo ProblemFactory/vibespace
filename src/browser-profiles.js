@@ -1360,32 +1360,36 @@ function normalizeRegistry(doc) {
     loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => [k, normalizeLoginFenceState(v)]).filter(([, v]) => v.fences.length || v.scrubs.length)),
   };
 }
-/** Shape S normalizer for one profile's persisted `loginFences` record: merges `fences` + legacy `guards` (deduplicated by
- *  `targetId`, bounded to 32) keeping ONLY `{targetId, urlAtFill, origin, at, browserKey?}`, plus `scrubs` (`{name, at}`). */
+/** THE persisted hold, normalized (lane chrome-157, round 32's persisted hold — 主开发's GO 2026-11-15): ONE row per held tab,
+ *  `{targetId, urlAtFill, docId, origin, at, browserKey?, hold, refs}` — `hold` a word of browser-login's closed HOLD_WORDS (a row
+ *  without one is a shape that never shipped and is NOT READ); `docId` the top frame's loaderId at the fill, '' = unknown (read
+ *  as the same document); `urlAtFill` the address at the fill and nothing later; `refs` opaque ids of the names list's entries
+ *  (never a name, never a value). Plus `scrubs` — the names list `{name, at, id}` the values come back from after an unlock. */
 function normalizeLoginFenceState(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return { fences: [], scrubs: [] };
-  // lane chrome-157 (vault-login round 32, the owner's sentence — 6): ONE record kind is read, {targetId, urlAtFill, docId, origin,
-  // at, browserKey?} — a fence belongs to its DOCUMENT (docId: Chrome's loaderId at the fill); a row of a shape that never shipped
-  // (no docId; the r22–r31 `guards`) is NOT READ. No released version wrote any (measured on master: no fence record at all).
+  const isHoldWord = require('./login-hold-words.js').isHoldWord;   // (the dependency-free words — never browser-login, which the device bundle must not carry)
+  const refId = (x) => typeof x === 'string' && /^n[0-9a-f]{8}$/.test(x);
   const byTarget = new Map();
   for (const f of (Array.isArray(v.fences) ? v.fences : [])) {
     if (!f || typeof f !== 'object' || typeof f.targetId !== 'string' || !f.targetId || typeof f.origin !== 'string' || !f.origin) continue;
-    if (typeof f.docId !== 'string' || !f.docId) continue;
+    if (!isHoldWord(f.hold)) continue;
     const tid = String(f.targetId).slice(0, 64);
     byTarget.set(tid, {
       targetId: tid,
       urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
-      docId: String(f.docId).slice(0, 128),
+      docId: typeof f.docId === 'string' ? f.docId.slice(0, 128) : '',
       origin: String(f.origin).slice(0, 512),
       at: Number(f.at) || 0,
       ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
+      hold: f.hold,
+      refs: (Array.isArray(f.refs) ? f.refs : []).filter(refId).slice(0, 8),
     });
   }
   const fences = [...byTarget.values()].slice(-32);
   const scrubs = (Array.isArray(v.scrubs) ? v.scrubs : [])
     .filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name.startsWith('web-login:'))
-    .slice(-32)
-    .map((s) => ({ name: String(s.name).slice(0, 320), at: Number(s.at) || 0 }));
+    .slice(-64)
+    .map((s) => ({ name: String(s.name).slice(0, 320), at: Number(s.at) || 0, ...(refId(s.id) ? { id: s.id } : {}) }));
   return { fences, scrubs };
 }
 /** Resolve a profile by id or by label (exact, case-insensitive). */

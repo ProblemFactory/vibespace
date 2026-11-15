@@ -50,16 +50,26 @@ const scrubText = (s) => String(s).replace(PLANTED_RE, '«a typed value»');
 const scrubbedOk = (ok) => (c, label, detail) => ok(c, scrubText(label), detail === undefined ? undefined : scrubText(JSON.stringify(detail)));
 
 // ── Law-based pure oracle (`go-shape-s.md` + `fixups-r32.md` #1/#2/#4/#5) ───────────────────────────────────────────
+/** The SECOND phase of a cold restart's cell (amendment 2): the vault is open, the values are back by the row's names — each kind
+ *  follows its ordinary rules on its document (a still tab: the connected oracle, every check able to look); a fill whose entry is
+ *  gone (the unknown cells' login was dropped) can never be checked: held until the tab is closed, saying so. */
+export function expectedVerdictAfterUnlock(cell) {
+  if (cell.fence === 'none' && !cell.guards) return { status: 200, code: null, flavor: 'allow', readableAtMovedUrl: false };
+  if (cell.fence === 'unknown') return { status: 409, code: 'login_fill_live', flavor: 'entry_gone', readableAtMovedUrl: false };
+  return expectedVerdictForCell({ ...cell, check: 'mem', conn: 'connected' });
+}
 export function expectedVerdictForCell({ fence, guards, check, page, url, conn }) {
   // lane chrome-157 (the owner's sentence, 2026-11-15): A GUARD BELONGS TO ITS DOCUMENT — an address move inside the document keeps
   // it, so a value an ordinary single-page app puts back after an in-app move re-arms there as it does at the old address (the
   // address axis now proves that a move retires nothing; no cell is ever readable with the value in it)
   const activeGuards = guards;
   const readableAtMovedUrl = false;
-  // Law S1 (Shape S): Hub restart ends all rechecks; any tab with a fence or active guard at stop time fences until top-frame nav.
+  // Law S1 (Shape S) + 主开发's amendment 1: a hub restart ends every recheck, and NO HOLD LIFTS UNCHECKED — before the vault is
+  // unlocked and the values are back, every tab with a fence or a guard at the stop is held, its sentence naming the vault and the
+  // door that always works (another tab). After the unlock: expectedVerdictAfterUnlock.
   if (conn === 'hub_restart') {
     if (fence !== 'none' || activeGuards > 0) {
-      return { status: 409, code: 'login_fill_live', flavor: 'until_nav', readableAtMovedUrl: false };
+      return { status: 409, code: 'login_fill_live', flavor: 'await_vault', readableAtMovedUrl: false };
     }
     return { status: 200, code: null, flavor: 'allow', readableAtMovedUrl };
   }
@@ -102,7 +112,9 @@ export function generateR32Table() {
               if (fence === 'live' && url === 'moved') { prune('live_fence_lifts_on_same_doc_nav'); continue; }
               if (fence === 'none' && guards === 0 && page === 'putback') { prune('unfilled_tab_cannot_putback'); continue; }
               const id = `${fence}|g${guards}|${check}|${page}|${url}|${conn}`;
-              cells.push({ id, fence, guards, check, page, url, conn, expected: expectedVerdictForCell({ fence, guards, check, page, url, conn }) });
+              const cell = { id, fence, guards, check, page, url, conn, expected: expectedVerdictForCell({ fence, guards, check, page, url, conn }) };
+              if (conn === 'hub_restart') cell.expectedUnlocked = expectedVerdictAfterUnlock(cell);
+              cells.push(cell);
             }
           }
         }
@@ -198,6 +210,16 @@ async function startKernelRelay(WebSocket, WebSocketServer, fk, initialUuid = '1
         if (sid) entry.sendToClient({ method, params, sessionId: sid });
       }
     },
+    // (a browser-level event — no session — to every connection: Target.targetInfoChanged and its kind)
+    emitBrowserEvent(method, params) { for (const entry of state.watchSenders) entry.sendToClient({ method, params }); },
+    // lane chrome-157 (主开发's P2): the same event as a NON-flat session receives it — wrapped in Target.receivedMessageFromTarget on the
+    // browser's own connection, the inner session the one each connection holds for the tab
+    emitWrappedEvent(targetId, method, params) {
+      for (const entry of state.watchSenders) {
+        const sid = entry.sessionsOnConn.get(String(targetId));
+        if (sid) entry.sendToClient({ method: 'Target.receivedMessageFromTarget', params: { sessionId: sid, targetId: String(targetId), message: JSON.stringify({ method, params, sessionId: sid }) } });
+      }
+    },
     dropSockets() {
       for (const c of wss.clients) { try { c.terminate(); } catch { /* */ } }
     },
@@ -263,6 +285,8 @@ async function openCdpClient(WebSocket, wsUrl) {
 }
 
 const TWO_DOORS_RE = /reload or navigate this tab[\s\S]*open or switch to another tab/i;
+const AWAIT_VAULT_RE = /checks this tab again once the vault is unlocked[\s\S]*open or switch to another tab/i;   // (lane chrome-157, amendment 1: the one sentence of a restored hold)
+const ENTRY_GONE_RE = /no longer in the vault[\s\S]*open or switch to another tab/i;   // (…and of one whose entry is gone)
 const CROSS_ORIGIN_RE = /cross-origin requests from this page are blocked/i;
 
 function matchesExpected(actual, expected, secrets) {
@@ -283,6 +307,8 @@ function matchesExpected(actual, expected, secrets) {
     if (!TWO_DOORS_RE.test(actual.resolveError) || !CROSS_ORIGIN_RE.test(actual.resolveError)) return false;
     if (!TWO_DOORS_RE.test(actual.med.error) || !CROSS_ORIGIN_RE.test(actual.med.error)) return false;
   }
+  if (expected.flavor === 'await_vault' && (!AWAIT_VAULT_RE.test(actual.resolveError) || !AWAIT_VAULT_RE.test(actual.med.error))) return false;
+  if (expected.flavor === 'entry_gone' && (!ENTRY_GONE_RE.test(actual.resolveError) || !ENTRY_GONE_RE.test(actual.med.error))) return false;
   if (expected.flavor === 'check_failed') {
     if (!actual.followUpOk) return false;
   }
@@ -531,6 +557,7 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
     // Evaluate `connected` and `same_proc_reconnect` buckets on Hub 1 one bucket at a time
     const evalBucket = async (b, medClient, { restartUnlockedPass = false } = {}) => {
       for (const c of b.cells) {
+        const expNow = restartUnlockedPass && c.expectedUnlocked ? c.expectedUnlocked : c.expected;   // (amendment 2: a cold restart's two phases)
         const putVal = secretForCell(c);
         if (!restartUnlockedPass) {
           if (c.conn !== 'hub_restart') {
@@ -551,11 +578,13 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
         });
 
         // Re-plant put-back secret if Door 1 (`recheck`) legitimately wiped `#pw` so Door 2 (`cdp-mediator`) faces the exact same DOM state!
-        if (!restartUnlockedPass && c.conn !== 'hub_restart' && c.page === 'putback' && c.check === 'mem'
+        if ((restartUnlockedPass || c.conn !== 'hub_restart') && c.page === 'putback' && (c.check === 'mem' || restartUnlockedPass)
           && (c.fence === 'none' || c.fence === 'postLiftHeld') && !c.nothingToCheck) {   // (every address — a guard belongs to its document, a move retires nothing; Q7's cells: a check with nothing to look with cannot wipe — the hold keeps the value unread)
           const domAfterR1 = fk.readDomValues(c.tid).pw;
           if (domAfterR1 !== '') {
-            results.push({ cell: c, pass: false, detail: { why: 'resolve_did_not_wipe_putback_dom', domAfterR1, r1 } });
+            const why = { why: 'resolve_did_not_wipe_putback_dom', domAfterR1, r1, ...(restartUnlockedPass ? { phase: 'after_unlock' } : {}) };
+            const prev = restartUnlockedPass ? results.find((x) => x.cell.id === c.id) : null;
+            if (prev) { prev.pass = false; prev.detail = why; } else results.push({ cell: c, pass: false, detail: why });
             continue;
           }
           await rawWs.writePw(c.tid, putVal);
@@ -565,7 +594,7 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
         throwBudget.delete(c.tid);
 
         let followUpOk = true;
-        if (c.expected.flavor === 'check_failed') {
+        if (expNow.flavor === 'check_failed') {
           // Law 4 second half: once the transient throw clears, the very next read rechecks cleanly!
           const rNext = await post('/api/agent/browser/resolve', {
             profile: c.pid,
@@ -592,12 +621,12 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
           med: medRes,
           followUpOk,
         };
-        const pass = matchesExpected(actual, c.expected, ALL_SECRETS);
+        const pass = matchesExpected(actual, expNow, ALL_SECRETS);
         if (restartUnlockedPass) {
           const prev = results.find((x) => x.cell.id === c.id);
           if (prev && !pass) {
             prev.pass = false;
-            prev.detail = { why: 'failed_after_post_restart_vault_unlock', actual, expected: c.expected };
+            prev.detail = { why: 'failed_after_post_restart_vault_unlock', actual, expected: expNow };
           }
         } else {
           results.push({ cell: c, pass, detail: pass ? null : { actual, expected: c.expected } });
@@ -683,7 +712,7 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
       }
       // Unlock `vault2` and re-verify every `hub_restart` cell still holds Shape S (`until_nav`)!
       await vault2.unlock(VPW);
-      await sleep(30);
+      await sleep(400);   // (the restored holds are checked when the vault opens: every tab's check, then its kind's rules)
       for (const b of restartBuckets) {
         await evalBucket(b, medClients2.get(b.pid), { restartUnlockedPass: true });
       }
@@ -1131,7 +1160,8 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
     const rearmBody = rearmMatch ? rearmMatch[0] : '';
     const vaultOpenMatch = /unsubVaultOpen = logins\.onVaultOpen\(\(\) => \{[\s\S]*?\}\);/.exec(bdSrc);
     const vaultOpenBody = vaultOpenMatch ? vaultOpenMatch[0] : '';
-    const restoreTouchesVaultDirectly = /\blogins\./.test(rearmBody) || /\bhydrate(?!PersistedScrubs)/.test(rearmBody + '\n' + vaultOpenBody);
+    // (lane chrome-157: `logins.isLocked()` reads no secret — the vault's state; the behaviour census R32-VAULT-READS is the proof that bites)
+    const restoreTouchesVaultDirectly = /\blogins\.(?!isLocked\b)/.test(rearmBody) || /\bhydrate(?!PersistedScrubs)/.test(rearmBody + '\n' + vaultOpenBody);
 
     // Every `"the owner has already been told"` sentence in login modules must call `blocked(` right before returning it.
     const blSrc = fs.readFileSync(path.join(repoDir, 'src/server/browser-logins.js'), 'utf8');
@@ -1266,7 +1296,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       // (a) Check disk JSON directly: 0 login identity fields, no `guards` key, both fenced + guard-only merged into `fences`
       const diskRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8'));
       const diskPid = diskRaw?.loginFences?.[PID];
-      const allowedFenceKeys = new Set(['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey']);   // (the one record kind: its document's id, no login identity)
+      const allowedFenceKeys = new Set(['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey', 'hold', 'refs']);   // (the one record kind: its document's id, its hold's word, opaque refs into the names list — no login identity in a row)
       const diskZeroIdentity = Boolean(diskPid)
         && !Object.prototype.hasOwnProperty.call(diskPid, 'guards')
         && Array.isArray(diskPid.fences) && diskPid.fences.length === 3
@@ -1280,11 +1310,21 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       relay.state.uuid = 'bbbbbbbb-1111-4222-8333-444444444444';
       fk.setDom(tidMovedDown, { url: U_MOVED, newDocument: true, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });   // (it NAVIGATED while down: a new document)
       await rawWs.writePw(tidGuard, '');
+      vault.lock('test', { quiet: true });   // (the replacement comes up with the vault locked: the record alone can answer)
       await dialogs.arm(PID);
 
       const lfValuesCleared = (LF.valuesForTarget(tidFence) || []).length === 0 && (LF.valuesForTarget(tidGuard) || []).length === 0;
-      const rGuardDifferentBrowser = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidGuard });
-      const rMovedWhileDown = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tidMovedDown });
+      const readTab = (t) => post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: t });
+      // lane chrome-157 (主开发's amendment 1): no hold lifts unchecked — before the values are back BOTH tabs are held (the one whose
+      // document changed while down too), with the words naming the vault and the door that always works…
+      const rGuardLocked = await readTab(tidGuard);
+      const rMovedLocked = await readTab(tidMovedDown);
+      // …and once the vault is open the values come back BY NAME (never from the old browser's RAM stash) and each tab follows its
+      // kind's ordinary rules: the guard on its document with a clean page reads; the tab on a new, clean document is lifted
+      await vault.unlock('r32-stash-pw');
+      await sleep(80);
+      const rGuardDifferentBrowser = await readTab(tidGuard);
+      const rMovedWhileDown = await readTab(tidMovedDown);
 
       // (c) `removeProfile` drops `PID_DROP` persisted fences & RAM secrets immediately; `disarm` drops `PID` fences & RAM secrets
       const hadDropSecretsBefore = (LF.valuesForTarget(tidDrop) || []).length > 0;
@@ -1296,12 +1336,12 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       ok(
         diskZeroIdentity
           && lfValuesCleared
-          && rGuardDifferentBrowser.status === 409 && rGuardDifferentBrowser.json?.code === 'login_fill_live'
-          && TWO_DOORS_RE.test(String(rGuardDifferentBrowser.json?.error || ''))
+          && [rGuardLocked, rMovedLocked].every((r) => r.status === 409 && r.json?.code === 'login_fill_live' && AWAIT_VAULT_RE.test(String(r.json?.error || '')))
+          && rGuardDifferentBrowser.status === 200
           && rMovedWhileDown.status === 200
           && hadDropSecretsBefore && dropCleared && disarmCleared,
-        'R32-Stash (RAM stash & browser identity laws): 0 login identity on disk, replacement browser never inherits old RAM stash/LF secrets (holds Shape S until nav, drops a tab whose document changed), and removeProfile + disarm drop stash/fences immediately',
-        { diskPid, diskZeroIdentity, lfValuesCleared, rGuardDifferentBrowser, rMovedWhileDown: rMovedWhileDown.status, hadDropSecretsBefore, dropCleared, disarmCleared },
+        'R32-Stash (RAM stash & browser identity laws): 0 login identity in a row on disk, replacement browser never inherits old RAM stash/LF secrets (with the vault locked every tab is held, a changed document too; once it opens the values come back by name and each tab follows its rules), and removeProfile + disarm drop stash/fences immediately',
+        { diskPid, diskZeroIdentity, lfValuesCleared, rGuardLocked: rGuardLocked.status, rMovedLocked: rMovedLocked.status, rGuardDifferentBrowser: rGuardDifferentBrowser.status, rMovedWhileDown: rMovedWhileDown.status, hadDropSecretsBefore, dropCleared, disarmCleared },
       );
     } finally {
       rawWs.close();
@@ -1358,7 +1398,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
     // Seed Shape S persisted fence directly on `tid1` (cold restart state, Vault never even created/unlocked!) — the one record kind,
     // its document the tab's present one
     keeper.saveLoginFenceState(PID, {
-      fences: [{ targetId: tid1, urlAtFill: U0, docId: fk.loaderIdOf(tid1), origin: ORIGIN, at: clock - 5000, browserKey: KEY }],
+      fences: [{ targetId: tid1, urlAtFill: U0, docId: fk.loaderIdOf(tid1), origin: ORIGIN, at: clock - 5000, browserKey: KEY, hold: 'live', refs: [] }],
       scrubs: [],
     });
     const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl(), targetIds: [tid1, tid2], mode: 'scope' });
@@ -1406,9 +1446,12 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       const medTab2 = await medWs.readPw(tid2);
       const rReadTab1StillFenced = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['snapshot', '-i'], targetId: tid1 });
 
-      // Door 1: `reload` allowed (`200`) on `tid1`, and top-frame `Page.frameNavigated` lifts fence + unblocks cross-origin Fetch
+      // Door 1 AFTER A COLD RESTART (主开发's amendment 1): `reload` is admitted (`200`), but no hold lifts unchecked — the reloaded
+      // document stays held until the vault is unlocked and the values are back (this hub has no vault: it never opens), with the
+      // sentence naming the vault and the door that always works (another tab); cross-origin requests stay blocked
       const rReload = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['reload'], targetId: tid1 });
-      relay.emitTargetEvent(tid1, 'Page.frameNavigated', { frame: { id: tid1, url: U0, securityOrigin: ORIGIN } });
+      fk.setDom(tid1, { url: U0, newDocument: true, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      relay.emitTargetEvent(tid1, 'Page.frameNavigated', { frame: { id: tid1, loaderId: fk.loaderIdOf(tid1), url: U0, securityOrigin: ORIGIN } });
       await sleep(30);
       const rReadTab1AfterReload = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['snapshot', '-i'], targetId: tid1 });
       const medTab1AfterReload = await medWs.readPw(tid1);
@@ -1419,8 +1462,8 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
           && rReadTab2.status === 200 && medTab2.ok === true
           && rReadTab1StillFenced.status === 409
           && rReload.status === 200
-          && rReadTab1AfterReload.status === 200 && medTab1AfterReload.ok === true,
-        'R32-Doors (Both exit doors & cross-origin block): Shape S tab blocks cross-origin requests, Door 2 (`tab new` / `tab` + other tab read) works while original tab stays fenced, and Door 1 (`reload` + frameNavigated) lifts fence',
+          && rReadTab1AfterReload.status === 409 && AWAIT_VAULT_RE.test(String(rReadTab1AfterReload.json?.error || '')) && medTab1AfterReload.ok === false,
+        'R32-Doors (Both exit doors & cross-origin block): a restored tab blocks cross-origin requests, Door 2 (`tab new` / `tab` + other tab read) works while the tab stays fenced, and after a cold restart a reload (Door 1) does NOT lift it before the vault is back — its sentence names the vault and the other tab',
         { blockedBeforeReload, rTabNew: rTabNew.status, rTabSwitch: rTabSwitch.status, rReadTab2: rReadTab2.status, medTab2, rReadTab1StillFenced: rReadTab1StillFenced.status, rReload: rReload.status, rReadTab1AfterReload: rReadTab1AfterReload.status, medTab1AfterReload },
       );
     } finally {
@@ -1468,12 +1511,21 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
     const legEntry = legacyNormalized.loginFences?.['bp-11223344'] || { fences: [], scrubs: [] };
     const oneKind = BP.normalizeRegistry({
       profiles: [{ id: 'bp-55667788', label: 'OneKind', createdAt: 1000 }],
-      loginFences: { 'bp-55667788': { fences: [{ targetId: 'T-ONE', urlAtFill: 'https://one.example.test/login', docId: 'L-T-ONE.1', origin: 'https://one.example.test', at: 777, browserKey: 'bk-1', user: 'never-kept' }], scrubs: [] } },
+      loginFences: { 'bp-55667788': { fences: [
+        { targetId: 'T-ONE', urlAtFill: 'https://one.example.test/login', docId: 'L-T-ONE.1', origin: 'https://one.example.test', at: 777, browserKey: 'bk-1', user: 'never-kept', hold: 'value_shown', refs: ['n0011aabb', 'web-login:never-a-name'] },
+        { targetId: 'T-UNKNOWN', urlAtFill: 'https://one.example.test/login', docId: '', origin: 'https://one.example.test', at: 778, hold: 'live', refs: [] },
+        { targetId: 'T-NOWORD', urlAtFill: 'https://one.example.test/login', docId: 'L-T-NOWORD.1', origin: 'https://one.example.test', at: 779 },
+        { targetId: 'T-BADWORD', urlAtFill: 'https://one.example.test/login', docId: 'L-T-BADWORD.1', origin: 'https://one.example.test', at: 780, hold: 'open' },
+      ], scrubs: [] } },
     }).loginFences?.['bp-55667788'];
-    const allowedKeys = ['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey'];
+    // (lane chrome-157, the persisted hold: the one kind = its fields + its hold's WORD + opaque refs; a row WITH a word is read whatever
+    // its document id — an empty one is «unknown», the same document — and a row without a word of the closed set is not read)
+    const allowedKeys = ['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey', 'hold', 'refs'];
     const legacyToShapeSOk = (legEntry.fences || []).length === 0
       && Array.isArray(legEntry.scrubs) && legEntry.scrubs.length === 1
-      && Boolean(oneKind) && oneKind.fences.length === 1 && JSON.stringify(Object.keys(oneKind.fences[0]).sort()) === JSON.stringify([...allowedKeys].sort()) && oneKind.fences[0].docId === 'L-T-ONE.1';
+      && Boolean(oneKind) && oneKind.fences.length === 2 && JSON.stringify(Object.keys(oneKind.fences[0]).sort()) === JSON.stringify([...allowedKeys].sort())
+      && oneKind.fences[0].docId === 'L-T-ONE.1' && oneKind.fences[0].hold === 'value_shown' && JSON.stringify(oneKind.fences[0].refs) === JSON.stringify(['n0011aabb'])
+      && oneKind.fences[1].targetId === 'T-UNKNOWN' && oneKind.fences[1].docId === '';
 
     // (c) Door-level `catch` defense in `cdp-mediator.js` even if `recheckPostLift` itself rejects directly
     const fkDoor = await startFakeKernel({ firstUrl: 'https://doorcatch.example.test/login', mode: { standard: true } });
@@ -1495,7 +1547,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
 
     ok(
       legacyToShapeSOk && doorCatchOk,
-      'R32-Compat (the one record kind & door catch): a record of a shape that never shipped gives no fence (its scrub names stay), the one kind {targetId, urlAtFill, docId, origin, at, browserKey} round-trips with no login identity, and cdp-mediator rejects fail-closed on direct recheck rejection',
+      'R32-Compat (the one record kind & door catch): a record of a shape that never shipped gives no fence (its scrub names stay), the one kind {targetId, urlAtFill, docId, origin, at, browserKey, hold, refs} round-trips with no login identity — a row with a word read whatever its document id, one without a word of the closed set not read — and cdp-mediator rejects fail-closed on direct recheck rejection',
       { legacyToShapeSOk, legEntry, oneKind, medRejectRes },
     );
   } catch (e) {
@@ -1513,11 +1565,12 @@ const CURE_PW = 'Cu6!r3';   // (short ON PURPOSE: under the mask's floor, so mas
 const CURE_VPW = 'r32-table-vault-pw';
 const PW_EL = { id: 'pw', tag: 'input', type: 'password', name: 'Password' };
 const b64State = (pw) => Buffer.from(JSON.stringify({ u: 'dana', p: pw })).toString('base64url');
-const valueForms = (pw) => [pw, encodeURIComponent(pw), b64State(pw)];
+const formSpelling = (pw) => new URLSearchParams([['a', pw]]).toString().slice(2);   // (how an HTML form writes it: «!» as %21)
+const valueForms = (pw) => [...new Set([pw, encodeURIComponent(pw), formSpelling(pw), b64State(pw)])];
 
 /** A fake kernel behind a relay, and a hub (mediator, keeper, vault, grants, logins, dialogs, routes) that can be STOPPED and
  *  started again on the same data — a restart; the For-you notices it files are counted. */
-export async function cureScene(mods, label, KEY) {   // (exported: a reproducer or a measurement drives the same scene)
+export async function cureScene(mods, label, KEY, { tabs = 1, unknownDoc = [] } = {}) {   // (exported: a reproducer or a measurement drives the same scene)
   const { express, WebSocket, WebSocketServer, VE, GS, BK, Lm, CM, Rm, Dm, LF, startFakeKernel } = mods;
   const ORIGIN = `https://${label}.example.test`;
   const U0 = `${ORIGIN}/login`;
@@ -1530,14 +1583,44 @@ export async function cureScene(mods, label, KEY) {   // (exported: a reproducer
   const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/seed`, mode: { standard: true, omitFilledPassword: true } });
   const relay = await startKernelRelay(WebSocket, WebSocketServer, fk);
   const raw = await openCdpClient(WebSocket, fk.wsUrl);
-  const tid = fk.addTarget(U0);
-  fk.setDom(tid, { url: U0, elements: [PW_EL] });
+  const tids = [];
+  for (let i = 0; i < Math.max(1, tabs); i++) { const t = fk.addTarget(U0); fk.setDom(t, { url: U0, elements: [PW_EL] }); tids.push(t); }
+  const tid = tids[0];
+  // (a tab whose document id is never read: its frame-tree answer does not come in time — the hub's 1.5 s bound — while `dropDoc`)
+  const unknownSet = new Set(unknownDoc.map((i) => tids[i]).filter(Boolean));
+  const ctl = { dropDoc: unknownSet.size > 0 };
+  const droppedOnce = new Set();
+  relay.state.hook = async (msg, { sessionsOnConn }) => {
+    if (!ctl.dropDoc || msg.method !== 'Page.getFrameTree' || !msg.sessionId || droppedOnce.has(msg.sessionId)) return false;
+    for (const [t, sid] of sessionsOnConn) if (sid === msg.sessionId && unknownSet.has(t)) { droppedOnce.add(msg.sessionId); return true; }   // (the watch's first look: no answer)
+    return false;
+  };
+  // (the wipe of a tab told to be slow or crowded: 'throw' = the page never answers a check; 'too_much' = too much text to check)
+  const wipeMode = new Map();
+  const origWipe = LF.wipeTabTypedInputs;
+  LF.wipeTabTypedInputs = (o, ...rest) => {
+    const m = wipeMode.get(String((o && o.targetId) || ''));
+    if (m === 'throw') throw new Error('the page does not answer');
+    if (m === 'too_much') return Promise.resolve({ ok: true, wiped: 0, verifiedEmpty: false, tooMuchText: true });
+    return origWipe(o, ...rest);
+  };
   const SID = `sess-r32-${label}`;
   const TOKEN = `vsst_r32_${label}_` + crypto.randomBytes(6).toString('hex');
+  // (the For-you store's own key rules, as the browser wiring gets them: a filing under an OPEN item's key is that item — nothing
+  // raised again (`raises` counts the filings that raised one); `sweep(prefix)` resolves the open items whose key starts so)
   const notices = [];
+  const tray = { raises: 0 };
   const forYou = {
-    add: (_pid, item) => { const id = `n${notices.length + 1}`; notices.push({ id, text: String((item && item.text) || ''), resolved: false }); return id; },
+    add: (_pid, item) => {
+      const key = item && item.itemKey ? String(item.itemKey) : null;
+      const open = key ? notices.find((x) => x.key === key && !x.resolved) : null;
+      if (open) return open.id;
+      const id = `n${notices.length + 1}`; tray.raises++;
+      notices.push({ id, key, text: String((item && item.text) || ''), resolved: false });
+      return id;
+    },
     resolve: (id) => { const n = notices.find((x) => x.id === id); if (n) n.resolved = true; },
+    sweep: (prefix) => { let k = 0; for (const n of notices) if (!n.resolved && n.key && n.key.startsWith(String(prefix))) { n.resolved = true; k++; } return k; },
   };
   let pid = null, prof = null;
   const hubs = [];
@@ -1590,31 +1673,36 @@ export async function cureScene(mods, label, KEY) {   // (exported: a reproducer
     try { await h.med.shutdown(); } catch { /* */ }
     try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
   }
-  const bind = (h) => { h.dialogs.bindTab?.({ profileId: pid, browserKey: KEY }, tid); h.dialogs.noteActiveTab?.({ profileId: pid, browserKey: KEY }, tid); };
-  const fill = async (h) => {
+  const bind = (h, t = null) => { for (const x of (t ? [t] : tids)) h.dialogs.bindTab?.({ profileId: pid, browserKey: KEY }, x); h.dialogs.noteActiveTab?.({ profileId: pid, browserKey: KEY }, t || tid); };
+  const fill = async (h, t = tid) => {
     await h.dialogs.arm(pid);
-    bind(h);
-    return h.post('/api/agent/browser/fill-vault', { profile: pid, target: '#pw', spec: `${label}.example.test#dana/password`, targetId: tid });
+    bind(h, t);
+    return h.post('/api/agent/browser/fill-vault', { profile: pid, target: '#pw', spec: `${label}.example.test#dana/password`, targetId: t });
   };
-  const read = (h) => h.post('/api/agent/browser/resolve', { profile: pid, handle: pid, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
-  const medRead = async (h) => { const c = await openCdpClient(WebSocket, h.grantUrl); try { return await c.readPw(tid); } finally { c.close(); } };
+  const read = (h, t = tid) => h.post('/api/agent/browser/resolve', { profile: pid, handle: pid, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: t });
+  const medRead = async (h, t = tid) => { const c = await openCdpClient(WebSocket, h.grantUrl); try { return await c.readPw(t); } finally { c.close(); } };
   /** The page goes to `url`: a NEW document (its own loaderId, Page.frameNavigated) or a move INSIDE the document. */
-  const nav = async (url, { newDocument = true, keepValue = false } = {}) => {
-    const cur = keepValue ? (fk.readDomValues(tid).pw || '') : '';
-    fk.setDom(tid, { url, newDocument, elements: [{ ...PW_EL, ...(cur ? { value: cur } : {}) }] });
-    if (newDocument) relay.emitTargetEvent(tid, 'Page.frameNavigated', { frame: { id: tid, loaderId: fk.loaderIdOf(tid), url, securityOrigin: ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
-    else relay.emitTargetEvent(tid, 'Page.navigatedWithinDocument', { frameId: tid, url });
-    await sleep(150);
+  const nav = async (url, { newDocument = true, keepValue = false, wait = 150 } = {}, t = tid) => {
+    const cur = keepValue ? (fk.readDomValues(t).pw || '') : '';
+    fk.setDom(t, { url, newDocument, elements: [{ ...PW_EL, ...(cur ? { value: cur } : {}) }] });
+    const [bare, frag] = (() => { const i = url.indexOf('#'); return i < 0 ? [url, ''] : [url.slice(0, i), url.slice(i)]; })();   // (Chrome's own shape: the fragment rides apart, frame.urlFragment)
+    if (newDocument) relay.emitTargetEvent(t, 'Page.frameNavigated', { frame: { id: t, loaderId: fk.loaderIdOf(t), url: bare, ...(frag ? { urlFragment: frag } : {}), securityOrigin: ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
+    if (newDocument) relay.emitBrowserEvent('Target.targetInfoChanged', { targetInfo: { targetId: t, type: 'page', title: url, url, attached: true, canAccessOpener: false, browserContextId: 'ctx-1' } });   // (Chrome's own: the new document's title — the fake's is its address)
+    else relay.emitTargetEvent(t, 'Page.navigatedWithinDocument', { frameId: t, url });
+    if (wait) await sleep(wait);
   };
+  const closeTab = async (t) => { await raw.call('Target.closeTarget', { targetId: t }, undefined, 800); await sleep(80); };
   const close = async () => {
+    LF.wipeTabTypedInputs = origWipe;
+    relay.state.hook = null;
     for (const h of hubs) await stop(h);
     raw.close();
     await relay.close();
     await fk.close();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   };
-  const verdictOf = (r) => ({ status: r.status, code: (r.json && r.json.code) || null, doors: TWO_DOORS_RE.test(String((r.json && r.json.error) || '')), shown: /own address or title/.test(String((r.json && r.json.error) || '')) });
-  return { ORIGIN, U0, KEY, tid, fk, relay, raw, notices, clk, dataDir, start, stop, bind, fill, read, medRead, nav, close, verdictOf, get pid() { return pid; } };
+  const verdictOf = (r) => ({ status: r.status, code: (r.json && r.json.code) || null, doors: TWO_DOORS_RE.test(String((r.json && r.json.error) || '')), shown: /own address or title/.test(String((r.json && r.json.error) || '')), awaits: AWAIT_VAULT_RE.test(String((r.json && r.json.error) || '')), gone: /no longer in the vault/.test(String((r.json && r.json.error) || '')) });
+  return { ORIGIN, U0, KEY, tid, tids, fk, relay, raw, notices, tray, ctl, wipeMode, clk, dataDir, start, stop, bind, fill, read, medRead, nav, closeTab, close, verdictOf, get pid() { return pid; } };
 }
 
 /** item 7 — A CHECK THAT KEEPS FAILING HAS A BOUND: a guard whose page put the value back and never answers the check is «try again»
@@ -1633,18 +1721,25 @@ async function cureBound(mods) {
     await s.raw.writePw(s.tid, CURE_PW);   // the page puts the value back…
     const orig = LF.wipeTabTypedInputs;
     LF.wipeTabTypedInputs = () => { throw new Error('the page does not answer'); };   // …and never answers a check
+    // (M4: …and writes it into its address by a move inside the document: the hold that follows keeps the address AT THE FILL)
+    await s.nav(`${s.ORIGIN}/login?typed=${encodeURIComponent(CURE_PW)}`, { newDocument: false, keepValue: true });
     const reads = [];
     try {
       for (let i = 0; i < 6; i++) { s.clk.t += 60_000; reads.push(s.verdictOf(await s.read(h))); }
     } finally { LF.wipeTabTypedInputs = orig; }
     const med = await s.medRead(h);
+    const storeLeaks = storeHolds(s);
+    const lc = await openCdpClient(mods.WebSocket, h.grantUrl);
+    const listing = await lc.call('Target.getTargets', {}, undefined, 800);
+    lc.close();
+    const listingLeak = valueForms(CURE_PW).some((v) => JSON.stringify(listing).includes(v));
     const firstHold = reads.findIndex((r) => r.status === 409 && r.code === 'login_fill_live' && r.doors);
     const bounded = firstHold >= 1 && reads.slice(0, firstHold).every((r) => r.status === 409 && r.code === 'login_check_failed')
       && reads.slice(firstHold).every((r) => r.status === 409 && r.code === 'login_fill_live' && r.doors);
     await s.nav(`${s.ORIGIN}/login?again=1`);   // door 1: a new document
     const afterNav = s.verdictOf(await s.read(h));
-    const ok = fill.status === 200 && guardOnly && bounded && med.ok === false && afterNav.status === 200;
-    return { ok, fill: fill.status, guardOnly, reads, firstHold, medRefused: med.ok === false, afterNav };
+    const ok = fill.status === 200 && guardOnly && bounded && med.ok === false && afterNav.status === 200 && !storeLeaks.length && !listingLeak;
+    return { ok, fill: fill.status, guardOnly, reads, firstHold, medRefused: med.ok === false, afterNav, storeLeaks, listingLeak };
   } finally { await s.close(); }
 }
 
@@ -1654,19 +1749,30 @@ async function cureBound(mods) {
  *  receives names the address at the fill; a clean next document lifts it and the notice goes. */
 async function cureNext(mods) {
   const { WebSocket } = mods;
-  const s = await cureScene(mods, 'cnext', 'bk-0000c0a2');
+  const s = await cureScene(mods, 'cnext', 'bk-0000c0a2', { tabs: 2 });
   try {
     const h = await s.start({ fresh: true });
+    // (the pin that stays: a tab with NO fill pays nothing — its navigations never reach the check)
+    await h.dialogs.arm(s.pid); s.bind(h);
+    const BLm = mods.req ? mods.req('./src/browser-login.js') : null;
+    let unfencedChecks = 0;
+    const origVerdict = BLm && BLm.valueShownVerdict;
+    if (BLm) BLm.valueShownVerdict = (...a) => { unfencedChecks++; return origVerdict(...a); };
+    try {
+      await s.nav(`${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`, {}, s.tids[1]);
+      await s.nav(`${s.ORIGIN}/elsewhere`, { newDocument: false }, s.tids[1]);
+    } finally { if (BLm) BLm.valueShownVerdict = origVerdict; }
     const fill = await s.fill(h);
     const ag = await openCdpClient(WebSocket, h.grantUrl);   // an ordinary agent: its own session on the tab
     const agFrames = [];
     ag.ws.on('message', (d) => { if (agFrames.length < 5000) agFrames.push(String(d)); });
     const att = await ag.call('Target.attachToTarget', { targetId: s.tid, flatten: true });
     const attached = Boolean(att && att.result && att.result.sessionId);
-    const GET_URL = `${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`;
+    // (M3: a form that goes by GET writes the value in the FORM spelling, beside a stray percent sign and a non-UTF-8 sequence elsewhere)
+    const GET_URL = `${s.ORIGIN}/welcome?note=100%&x=%C3%28&pw=${formSpelling(CURE_PW)}`;
     await s.nav(GET_URL);   // a form that goes by GET
     const rawList = await s.raw.call('Target.getTargets', {}, undefined, 800);
-    const premise = JSON.stringify(rawList).includes(encodeURIComponent(CURE_PW));
+    const premise = JSON.stringify(rawList).includes(formSpelling(CURE_PW));
     const heldGet = Boolean(h.dialogs.liveFillOnTarget(s.pid, s.tid));
     const readGet = s.verdictOf(await s.read(h));
     const medGet = await s.medRead(h);
@@ -1674,6 +1780,10 @@ async function cureNext(mods) {
     await s.nav(`${s.ORIGIN}/welcome?state=${b64State(CURE_PW)}`);   // a router that keeps its form's state in the address
     const heldB64 = Boolean(h.dialogs.liveFillOnTarget(s.pid, s.tid));
     const readB64 = s.verdictOf(await s.read(h));
+    // (P2: a NON-flat session receives the navigation wrapped in Target.receivedMessageFromTarget — the mask holds there too)
+    s.relay.emitWrappedEvent(s.tid, 'Page.frameNavigated', { frame: { id: s.tid, loaderId: s.fk.loaderIdOf(s.tid), url: `${s.ORIGIN}/welcome?again=${encodeURIComponent(CURE_PW)}`, securityOrigin: s.ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
+    await sleep(80);
+    const wrappedSeen = agFrames.some((f) => f.includes('"Target.receivedMessageFromTarget"') && f.includes('Page.frameNavigated'));
     const toldOnce = s.notices.filter((n) => /own address or title/.test(n.text)).length === 1;
     await s.nav(`${s.ORIGIN}/home`);   // the site's clean next page
     const readClean = s.verdictOf(await s.read(h));
@@ -1683,8 +1793,31 @@ async function cureNext(mods) {
     const navs = agFrames.filter((f) => f.includes('"Page.frameNavigated"'));
     const leaked = agFrames.filter((f) => valueForms(CURE_PW).some((v) => f.includes(v))).length;
     const ok = fill.status === 200 && attached && premise && heldGet && readGet.status === 409 && readGet.shown && medSaysShown && heldB64 && readB64.status === 409 && readB64.shown && toldOnce
-      && readClean.status === 200 && noticeGone && navs.length >= 3 && navs[navs.length - 1].includes('/home') && leaked === 0;
-    return { ok, fill: fill.status, attached, premise, heldGet, readGet, medSaysShown, heldB64, readB64, toldOnce, readClean, noticeGone, navEvents: navs.length, leaked };
+      && readClean.status === 200 && noticeGone && navs.length >= 3 && navs[navs.length - 1].includes('/home') && leaked === 0 && wrappedSeen && unfencedChecks === 0;
+    return { ok, fill: fill.status, attached, premise, wrappedSeen, unfencedChecks, heldGet, readGet, medSaysShown, heldB64, readB64, toldOnce, readClean, noticeGone, navEvents: navs.length, leaked };
+  } finally { await s.close(); }
+}
+
+/** scene 16 of the real-browser claim — THE FRAGMENT: Chrome sends a navigation's fragment apart (frame.urlFragment); a page whose next
+ *  address carries the value ONLY in its fragment is held all the same, and the agent's own navigation event carries none of it. */
+async function cureFragment(mods) {
+  const { WebSocket } = mods;
+  const s = await cureScene(mods, 'cfrag', 'bk-0000c0b3');
+  try {
+    const h = await s.start({ fresh: true });
+    const fill = await s.fill(h);
+    const ag = await openCdpClient(WebSocket, h.grantUrl);
+    const agFrames = [];
+    ag.ws.on('message', (d) => { if (agFrames.length < 2000) agFrames.push(String(d)); });
+    await ag.call('Target.attachToTarget', { targetId: s.tid, flatten: true });
+    await s.nav(`${s.ORIGIN}/welcome#pw=${encodeURIComponent(CURE_PW)}`);
+    const held = Boolean(h.dialogs.liveFillOnTarget(s.pid, s.tid));
+    const read = s.verdictOf(await s.read(h));
+    await sleep(40);
+    ag.close();
+    const leaked = agFrames.filter((f) => valueForms(CURE_PW).some((v) => f.includes(v))).length;
+    const sawNav = agFrames.some((f) => f.includes('"Page.frameNavigated"'));
+    return { ok: fill.status === 200 && held && read.status === 409 && read.shown && sawNav && leaked === 0, fill: fill.status, held, read, sawNav, leaked };
   } finally { await s.close(); }
 }
 
@@ -1717,8 +1850,19 @@ async function cureRestarts(mods) {
       const med = await s.medRead(h);
       await s.nav(`${s.ORIGIN}/login?fresh=1`);   // door 1: a new document
       const afterNav = s.verdictOf(await s.read(h));
-      out[mode] = { ok: fill.status === 200 && valueInBox && r.status === 409 && r.code === 'login_fill_live' && r.doors && med.ok === false && afterNav.status === 200,
-        fill: fill.status, valueInBox, read: r, medRefused: med.ok === false, afterNav };
+      if (mode === 'restart-move') {
+        // (主开发's amendment 1) a COLD restart: held — the sentence names the vault — through the new document too, until the vault is
+        // unlocked and the values are back; then the new document is checked (clean) and lifted
+        await h.vault.unlock(CURE_VPW);
+        await sleep(80);
+        const afterUnlock = s.verdictOf(await s.read(h));
+        out[mode] = { ok: fill.status === 200 && valueInBox && r.status === 409 && r.code === 'login_fill_live' && r.awaits && med.ok === false
+          && afterNav.status === 409 && afterNav.awaits && afterUnlock.status === 200,
+        fill: fill.status, valueInBox, read: r, medRefused: med.ok === false, afterNav, afterUnlock };
+      } else {
+        out[mode] = { ok: fill.status === 200 && valueInBox && r.status === 409 && r.code === 'login_fill_live' && r.doors && med.ok === false && afterNav.status === 200,
+          fill: fill.status, valueInBox, read: r, medRefused: med.ok === false, afterNav };
+      }
     } finally { await s.close(); }
   }
   return { ok: Object.values(out).every((x) => x.ok), ...out };
@@ -1797,7 +1941,7 @@ async function cureVaultReads(mods) {
       get(t, k, rcv) {
         const v = Reflect.get(t, k, rcv);
         if (typeof v !== 'function') return v;
-        return function (...a) { calls.push({ name: String(k), phase, inHydrate: /hydratePersistedScrubs/.test(String(new Error().stack)) }); return v.apply(t, a); };
+        return function (...a) { calls.push({ name: String(k), arg: typeof a[0] === 'string' ? a[0] : null, phase, inHydrate: /hydratePersistedScrubs/.test(String(new Error().stack)) }); return v.apply(t, a); };
       },
     });
     const h = await s.start({ wrapLogins });
@@ -1809,8 +1953,10 @@ async function cureVaultReads(mods) {
     phase = 'after';
     await s.nav(`${s.ORIGIN}/login?fresh=1`);
     const fill2 = await h.post('/api/agent/browser/fill-vault', { profile: s.pid, target: '#pw', spec: `cvlt.example.test#dana/password`, targetId: s.tid });
-    const SUBSCRIPTIONS = new Set(['onVaultOpen', 'onVaultLock']);
-    const outside = calls.filter((c) => c.phase === 'restore' && !SUBSCRIPTIONS.has(c.name) && !c.inHydrate).map((c) => c.name);
+    const SUBSCRIPTIONS = new Set(['onVaultOpen', 'onVaultLock', 'isLocked']);   // (isLocked: the vault's state, no secret)
+    const recordNames = new Set(['web-login:https://cvlt.example.test#dana']);
+    // (主开发's P3: inside the re-hydration only the record's OWN names are read — never another name, never a listing)
+    const outside = calls.filter((c) => c.phase === 'restore' && (c.inHydrate ? !(c.name === 'scrubSecretsOf' && recordNames.has(c.arg)) : !SUBSCRIPTIONS.has(c.name))).map((c) => c.name + (c.inHydrate ? '@hydrate' : ''));
     const seenAfter = calls.some((c) => c.phase === 'after' && c.name === 'resolveFill');
     const hydrated = calls.some((c) => c.phase === 'restore' && c.inHydrate && c.name === 'scrubSecretsOf');
     const ok = fill.status === 200 && restoreRead.status === 409 && hydrated && outside.length === 0 && seenAfter;   // (the census's controls: the re-hydration's read and the next fill's are seen)
@@ -1818,11 +1964,263 @@ async function cureVaultReads(mods) {
   } finally { await s.close(); }
 }
 
+// ── THE HOLD TABLE (lane chrome-157, round 32's persisted hold — 主开发's GO 2026-11-15 + amendments 1–3): THE HOLD IS ONE STATE WITH
+// ONE PERSISTED FORM, AND THE TABLE WALKS IT. hold kind (browser-login HOLD_WORDS) × the document id known / unknown × a same-process
+// reconnect / a cold restart × the tab still / reloaded / gone to another page / closed; a cold restart in TWO phases (before the
+// values are back; after), and per kind a cell whose entry is GONE when the vault opens. Per cell: closed at least as before, with
+// the kind's words on both doors; the store grepped for every form of the value: nothing; the owner's notice open exactly while
+// the hold stands. A CENSUS: the kinds are the source's own — a HOLD_* reason without its word, or a word without its producer, is red.
+const HOLD_AFTERS = ['still', 'reload', 'other', 'closed'];
+const HOLD_NOTICE_KINDS = new Set(['value_shown', 'too_much_text', 'unknown_typed']);   // (the kinds whose producer files the owner's notice)
+const WORDS_RE = {
+  live: /in progress or unsubmitted/, shown: /own address or title/, too_much: /too much text/, unknown: /can no longer verify/,
+  await: /checks this tab again once the vault is unlocked[\s\S]*open or switch to another tab/, entry_gone: /no longer in the vault[\s\S]*open or switch to another tab/,
+};
+const valueSpellings = (pw) => [...new Set([pw, encodeURIComponent(pw), new URLSearchParams([['a', pw]]).toString().slice(2), b64State(pw)])];
+
+/** The oracle: what a tab of kind `word` shows after `after`, by connection and phase. */
+export function holdExpected(word, after, conn, phase, doc = 'known') {
+  if (after === 'closed') return { state: 'gone' };
+  if (doc === 'unknown' && (after === 'reload' || after === 'other')) after = 'still';   // (an unknown document id reads as the SAME document: a reload or another page is ruled as the tab still — more closed)
+  const open = { state: 'open' }, held = (w) => ({ state: 'held', words: w });
+  const ordinary = () => {   // (each kind's ordinary rules, the values in memory, the page as its producer left it)
+    if (after === 'other') return open;
+    if (after === 'reload') return word === 'value_shown' ? held('shown') : open;
+    return { live: held('live'), held: open, guard: open, too_much_text: held('too_much'), unknown_typed: held('unknown'), value_shown: held('shown') }[word];
+  };
+  if (conn === 'reconnect') return ordinary();
+  if (phase === 1) return held('await');
+  if (phase === 'gone') return held('entry_gone');
+  return ordinary();
+}
+
+/** Drive tab `t` of scene `s` on hub `h` into the hold `word`; true when it stands. The kinds share a scene, so the clock moves once. */
+const HOLD_PRODUCERS = {
+  live: async () => true,
+  value_shown: async (s, h, t) => { await s.nav(`${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`, { wait: 0 }, t); return true; },
+  guard: async () => true, held: async () => true, too_much_text: async () => true, unknown_typed: async () => true,
+};
+async function produceHolds(s, h, word, tabs) {
+  for (const t of tabs) { const f = await s.fill(h, t); if (f.status !== 200) return { ok: false, why: 'fill ' + f.status }; }
+  if (word === 'value_shown') { for (const t of tabs) await HOLD_PRODUCERS.value_shown(s, h, t); await sleep(150); }
+  if (['guard', 'held', 'too_much_text', 'unknown_typed'].includes(word)) {
+    if (word === 'too_much_text') for (const t of tabs) s.wipeMode.set(t, 'too_much');
+    s.clk.t += 16 * 60_000;   // (the ceiling: the fence lifts with its wipe, a guard is born — or, too much text, the fence holds so)
+    for (const t of tabs) h.dialogs.liveFillOnTarget(s.pid, t);
+    for (let i = 0; i < 200; i++) { if (tabs.every((t) => { const lf = h.dialogs.liveFillOnTarget(s.pid, t); return word === 'too_much_text' ? lf && /too much/.test(lf.holdReason || '') : !lf; })) break; await sleep(12); }
+    await sleep(300);   // (every lift's wipe and its guard settled before the page acts again)
+    for (const t of tabs) s.wipeMode.delete(t);
+    if (word === 'held' || word === 'unknown_typed') {
+      for (const t of tabs) await s.raw.writePw(t, CURE_PW);   // (the page puts the value back)
+      if (word === 'unknown_typed') for (const t of tabs) s.wipeMode.set(t, 'throw');
+      for (const t of tabs) for (let k = 0; k < (word === 'held' ? 1 : 3); k++) { await s.read(h, t); await sleep(40); }
+      for (const t of tabs) s.wipeMode.delete(t);
+    }
+  }
+  await sleep(60);
+  const kindOf = (t) => { const lf = h.dialogs.liveFillOnTarget(s.pid, t); if (!lf) return h.dialogs.hasPostLiftGuard(s.pid, t) ? 'guard' : 'none'; if (lf.valueShown) return 'value_shown'; if (/too much/.test(lf.holdReason || '')) return 'too_much_text'; if (lf.holdReason === 'unknown_typed') return 'unknown_typed'; return lf.postLiftHeld ? 'held' : 'live'; };
+  const got = tabs.map(kindOf);
+  return { ok: got.every((k) => k === word), got };
+}
+const storeHolds = (s) => {   // (every file of the scene's data folder, grepped for every spelling of the value)
+  const hits = [];
+  const walkDir = (d) => { for (const n of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, n.name); if (n.isDirectory()) walkDir(p); else { let t = ''; try { t = fs.readFileSync(p, 'latin1'); } catch { continue; } if (valueSpellings(CURE_PW).some((v) => t.includes(v))) hits.push(path.relative(s.dataDir, p)); } } };
+  try { walkDir(s.dataDir); } catch { /* */ }
+  return hits;
+};
+async function observeHold(s, h, t, exp, word) {
+  const rec = (() => { try { return JSON.parse(fs.readFileSync(path.join(s.dataDir, 'browser-profiles.json'), 'utf8')).loginFences?.[s.pid] || { fences: [] }; } catch { return { fences: [] }; } })();
+  const key = `login-hold:${s.pid}:${t}|`;
+  const noticeOpen = s.notices.some((n) => n.key === key && !n.resolved);
+  if (exp.state === 'gone') return { ok: !rec.fences.some((f) => f.targetId === t) && !noticeOpen, rowGone: !rec.fences.some((f) => f.targetId === t), noticeOpen };
+  const r = await s.read(h, t);
+  const m = await s.medRead(h, t);
+  const err = String((r.json && r.json.error) || '');
+  const leaked = (m.ok && m.value === CURE_PW) || JSON.stringify(r).includes(CURE_PW);
+  const wantNotice = exp.state === 'held' && HOLD_NOTICE_KINDS.has(word);
+  const ok = !leaked && (exp.state === 'open'
+    ? r.status === 200 && m.ok === true
+    : r.status === 409 && r.json?.code === 'login_fill_live' && WORDS_RE[exp.words].test(err) && m.ok === false && WORDS_RE[exp.words].test(String(m.error || '')))
+    && noticeOpen === wantNotice;
+  return { ok, status: r.status, words: exp.words || null, wordsOk: exp.state === 'held' ? WORDS_RE[exp.words].test(err) : null, medOk: m.ok, leaked, noticeOpen, wantNotice };
+}
+async function actOn(s, t, after) {
+  if (after === 'reload') { const u = s.fk.targets().find((x) => x.targetId === t)?.url || s.U0; await s.nav(u, { wait: 0 }, t); }
+  else if (after === 'other') await s.nav(`${s.ORIGIN}/elsewhere`, { wait: 0 }, t);
+  else if (after === 'closed') await s.closeTab(t);
+}
+
+/** One scene per (kind, connection): its tabs are the cells (document known / unknown × the four afters). */
+async function holdScene(mods, word, conn, idx) {
+  const docs = word === 'value_shown' ? ['known'] : ['known', 'unknown'];   // (pruned BY RULE: a value-shown hold follows a navigation, whose event names its document)
+  const cells = docs.flatMap((doc) => HOLD_AFTERS.map((after) => ({ word, doc, conn, after })));
+  const unknownIdx = cells.map((c, i) => (c.doc === 'unknown' ? i : -1)).filter((i) => i >= 0);
+  const s = await cureScene(mods, `ch${idx}`, `bk-0000c1${String(idx).padStart(2, '0')}`, { tabs: cells.length, unknownDoc: unknownIdx });
+  const out = [];
+  try {
+    const h1 = await s.start({ fresh: true });
+    await h1.dialogs.arm(s.pid);
+    s.bind(h1);
+    // (P1: a document the tab reached by a navigation — the id renewed at each top-frame navigation is the one the fill keeps)
+    for (const [i, c] of cells.entries()) if (c.doc === 'known') await s.nav(s.U0, { wait: 0 }, s.tids[i]);
+    await sleep(120);
+    const prod = await produceHolds(s, h1, word, s.tids);
+    s.ctl.dropDoc = false;
+    if (!prod.ok) return cells.map((c) => ({ cell: c, pass: false, detail: { why: 'producer', prod } }));
+    const raisesBefore = s.tray.raises;
+    const storeLeaks = [];
+    if (conn === 'reconnect') {
+      h1.dialogs.disarm(s.pid, 'the watch changed hands');
+      for (const [i, c] of cells.entries()) await actOn(s, s.tids[i], c.after);
+      await h1.dialogs.arm(s.pid); s.bind(h1); await sleep(120);
+      for (const [i, c] of cells.entries()) { const o = await observeHold(s, h1, s.tids[i], holdExpected(word, c.after, conn, 0, c.doc), word); out.push({ cell: { ...c, phase: 0 }, pass: o.ok, detail: o }); }
+      storeLeaks.push(...storeHolds(s));
+    } else {
+      await s.stop(h1);
+      s.clk.t += 2000;
+      const h2 = await s.start();
+      await h2.dialogs.arm(s.pid); s.bind(h2); await sleep(120);
+      const raisesAfterRestart = s.tray.raises;   // (amendment 3: a notice re-filed under its key raised nothing)
+      for (const [i, c] of cells.entries()) await actOn(s, s.tids[i], c.after);
+      await sleep(150);
+      storeLeaks.push(...storeHolds(s));
+      for (const [i, c] of cells.entries()) { const o = await observeHold(s, h2, s.tids[i], holdExpected(word, c.after, conn, 1, c.doc), word); out.push({ cell: { ...c, phase: 1 }, pass: o.ok && raisesAfterRestart === raisesBefore, detail: { ...o, raisesBefore, raisesAfterRestart } }); }
+      await h2.vault.unlock(CURE_VPW);
+      await sleep(400);
+      for (const [i, c] of cells.entries()) { const o = await observeHold(s, h2, s.tids[i], holdExpected(word, c.after, conn, 2, c.doc), word); out.push({ cell: { ...c, phase: 2 }, pass: o.ok, detail: o }); }
+      storeLeaks.push(...storeHolds(s));
+    }
+    if (storeLeaks.length) for (const r of out) { r.pass = false; r.detail = { ...r.detail, storeLeaks }; }
+  } finally { await s.close(); }
+  return out;
+}
+
+/** Every kind's entry GONE when the vault opens (dropped while the hub was down): held until the tab is closed, saying so, the
+ *  notice following the hold. */
+async function holdSceneGone(mods) {
+  const BLm = mods.req('./src/browser-login.js');
+  const words = BLm.HOLD_WORDS;
+  const out = [];
+  for (const [k, word] of words.entries()) {
+    const s = await cureScene(mods, `cg${k}`, `bk-0000c2${String(k).padStart(2, '0')}`, { tabs: 1 });
+    try {
+      const h1 = await s.start({ fresh: true });
+      await h1.dialogs.arm(s.pid); s.bind(h1);
+      await s.nav(s.U0, { wait: 0 }, s.tid); await sleep(100);
+      const prod = await produceHolds(s, h1, word, [s.tid]);
+      if (!prod.ok) { out.push({ cell: { word, gone: true }, pass: false, detail: { why: 'producer', prod } }); continue; }
+      await s.stop(h1);
+      {   // (the owner deletes the entry while the hub is down — the vault's own writer, another life of it)
+        const { VE, GS, Lm } = mods;
+        const v = VE.create({ dataDir: s.dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => s.clk.t });
+        await v.unlock(CURE_VPW);
+        const g = GS.create({ dataDir: s.dataDir, wss: { clients: new Set() }, log: quiet.log });
+        Lm.create({ vault: v, grants: () => g, now: () => s.clk.t, log: quiet.log }).drop(`web-login:https://cg${k}.example.test#dana`, { who: 'owner' });
+        v.close();
+      }
+      s.clk.t += 2000;
+      const h2 = await s.start();
+      await h2.dialogs.arm(s.pid); s.bind(h2); await sleep(120);
+      await h2.vault.unlock(CURE_VPW); await sleep(400);
+      const o = await observeHold(s, h2, s.tid, holdExpected(word, 'still', 'cold', 'gone'), word);
+      await s.closeTab(s.tid);
+      const c2 = await observeHold(s, h2, s.tid, { state: 'gone' }, word);
+      const leaks = storeHolds(s);
+      out.push({ cell: { word, gone: true }, pass: o.ok && c2.ok && !leaks.length, detail: { held: o, afterClose: c2, leaks } });
+    } finally { await s.close(); }
+  }
+  return out;
+}
+
+/** The census + the table; `only` = { words, conns, gone } narrows it for a mutant. */
+export async function runR32HoldsTable(mods, { only = null } = {}) {
+  const BLm = mods.req('./src/browser-login.js');
+  const reasons = Object.entries(BLm).filter(([k, v]) => /^HOLD_[A-Z_]+$/.test(k) && typeof v === 'string');
+  const unworded = reasons.filter(([, v]) => !(v in BLm.HOLD_WORD_OF_REASON) && !BLm.HOLD_PHASES.includes(v)).map(([k]) => k);
+  const unproduced = BLm.HOLD_WORDS.filter((w) => !(w in HOLD_PRODUCERS));
+  const census = { reasons: reasons.map(([k]) => k), words: [...BLm.HOLD_WORDS], unworded, unproduced, ok: reasons.length >= 3 && !unworded.length && !unproduced.length };
+  const results = [];
+  let idx = 0;
+  for (const word of BLm.HOLD_WORDS) {
+    for (const conn of ['reconnect', 'cold']) {
+      idx++;
+      if (only && ((only.words && !only.words.includes(word)) || (only.conns && !only.conns.includes(conn)))) continue;
+      results.push(...await holdScene(mods, word, conn, idx));
+    }
+  }
+  if (!only || only.gone) results.push(...await holdSceneGone(mods));
+  const red = results.filter((r) => !r.pass);
+  const byDim = {};
+  for (const r of results) { const k = r.cell.gone ? 'entry gone' : `${r.cell.conn}${r.cell.conn === 'cold' ? ' phase ' + r.cell.phase : ''}`; byDim[k] = (byDim[k] || 0) + 1; }
+  return { census, total: results.length, red: red.length, redCells: red.slice(0, 12).map((r) => ({ cell: r.cell, detail: r.detail })), byDim, ok: census.ok && results.length > 0 && red.length === 0 };
+}
+
+/** S1 + amendment 3 — THE OWNER'S NOTICE FOLLOWS ITS HOLD: it ends when the browser stops and when the profile is deleted (by its key,
+ *  a past hub life's too); and the For-you store itself raises nothing when a notice is re-filed under its key. */
+async function cureNotices(mods) {
+  const out = {};
+  for (const how of ['browser-stop', 'profile-deleted']) {
+    const s = await cureScene(mods, how === 'browser-stop' ? 'cnst' : 'cnpd', how === 'browser-stop' ? 'bk-0000c0b1' : 'bk-0000c0b2');
+    try {
+      const h = await s.start({ fresh: true });
+      await s.fill(h);
+      await s.nav(`${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`);
+      const openBefore = s.notices.some((n) => /own address or title/.test(n.text) && !n.resolved);
+      if (how === 'browser-stop') h.dialogs.disarm(s.pid, 'the browser stopped'); else h.keeper.removeProfile(s.pid);
+      await sleep(60);
+      const openAfter = s.notices.some((n) => !n.resolved);
+      out[how] = { ok: openBefore && !openAfter, openBefore, openAfter };
+    } finally { await s.close(); }
+  }
+  {   // (the store's own rule, through the browser wiring's arguments)
+    const { UserTodoManager } = mods.req('./src/user-todos.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r32-tray-'));
+    try {
+      let changes = 0;
+      const m = new UserTodoManager({ dataDir: dir, onChange: () => { changes++; }, expirySweepMs: 0 });
+      const item = { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', text: 'the page on a tab put a filled password into its own address or title', detail: 'Open the browser live view and leave that page, or close the tab.', itemKey: 'login-hold:bp-1:T1|' };
+      const a = m.add('browser', item);
+      const c1 = changes, snap1 = JSON.stringify(m.get(a.id));
+      const b = m.add('browser', item);
+      out.refile = { ok: a.id === b.id && changes === c1 && JSON.stringify(m.get(a.id)) === snap1, sameId: a.id === b.id, raised: changes - c1 };
+      try { m.stop(); } catch { /* */ }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+  return { ok: Object.values(out).every((x) => x.ok), ...out };
+}
+
+/** S2 / S3 — THE CHECK'S VERDICT, pure: a value under the floor only as a whole component or the whole title; at or above it anywhere
+ *  and in every spelling; one stray or non-UTF-8 percent sequence spoils nothing else; past a cap the answer is «cannot tell». */
+function cureCheckRows(BLx) {
+  const V = (vals, texts) => BLx.valueShownVerdict(vals, texts, { floor: 8 });
+  const S = CURE_PW, L = ['Long', 'erPw6!', 'zz9'].join('');   // (built at runtime: a value at the floor and beyond)
+  const rows = {
+    shortAsSegmentShown: V([S], [`https://s.test/x/${encodeURIComponent(S)}/y`]) === 'shown',
+    shortAsQueryValueShown: V([S], [`https://s.test/w?a=1&pw=${formSpelling(S)}`]) === 'shown',
+    shortInBase64FieldShown: V([S], [`https://s.test/w?state=${b64State(S)}`]) === 'shown',
+    shortWholeTitleShown: V([S], [S]) === 'shown',
+    shortSubstringNotAlarm: V([S], [`https://s.test/archive/x${S}x`]) === 'clean',
+    shortInTitleNotAlarm: V([S], [`Welcome back ${S}!`]) === 'clean',
+    strayPercentSpoilsNothing: V([S], [`https://s.test/w?note=100%&x=%C3%28&pw=${formSpelling(S)}`]) === 'shown',
+    longAnywhereShown: V([L], [`https://s.test/a/x${encodeURIComponent(L)}x`]) === 'shown',
+    longFormSpellingShown: V([L], [`https://s.test/a?q=${formSpelling(L)}`]) === 'shown',
+    longInTitleShown: V([L], [`hello ${L}`]) === 'shown',
+    cleanIsClean: V([S, L], ['https://s.test/home', 'Home']) === 'clean',
+    pastTextCapCannotTell: V([S], [`https://s.test/${'a'.repeat(BLx.CHECK_TEXT_CAP + 1)}`]) === 'unknown',
+    pastPieceCapCannotTell: V([S], [`https://s.test/?${Array.from({ length: BLx.CHECK_PIECE_CAP + 2 }, (_, i) => `p${i}=QUJDREVGR0g${i % 10}`).join('&')}`]) === 'unknown',
+    pastNodeCapCannotTell: V([S], [`https://s.test/?s=${Buffer.from(JSON.stringify(Array.from({ length: BLx.CHECK_NODE_CAP + 2 }, (_, i) => 'v' + i))).toString('base64url')}`]) === 'unknown',
+  };
+  return { ok: Object.values(rows).every(Boolean), ...rows };
+}
+
 const CURE_LEGS = {
   bound: { fn: cureBound, label: (r) => `R32-BOUND (item 7: a check that keeps failing has a bound): a put-back value whose check never answers is «try again» ${r.firstHold} times, then held until it navigates with both doors named (on both doors); a new document ends it` },
+  notices: { fn: cureNotices, label: () => 'R32-NOTICES (S1 + amendment 3): the owner\'s notice of a hold ends with it when the browser stops and when the profile is deleted — by its key, a past hub life\'s too — and the For-you store raises nothing when a notice is re-filed under its key' },
   next: { fn: cureNext, label: (r) => `R32-NEXT (items 1+2, the one check): a GET form and a base64 router carry the typed value into the next address by themselves — the tab stays fenced and both doors say why, the owner is told once, the ${r.navEvents} navigation events the agent's own session got carry it in none of its forms; the clean next page lifts it and the notice goes` },
-  restarts: { fn: cureRestarts, label: () => 'R32-RESTARTS (item 4: held by the DOCUMENT, never the address): a live fill on a page that moved its address inside the document while nobody watched is held after a cold restart (vault locked) and after a reconnect, on both doors; a new document ends it' },
+  fragment: { fn: cureFragment, label: () => 'R32-FRAGMENT (the real-browser claim\'s scene 16): a next address that carries the value ONLY in its fragment — Chrome sends it apart, frame.urlFragment — holds the tab with the value-shown words, and the agent\'s own navigation event carries none of it' },
+  restarts: { fn: cureRestarts, label: () => 'R32-RESTARTS (item 4: held by the DOCUMENT, never the address): a live fill on a page that moved its address inside the document while nobody watched is held after a cold restart (vault locked) and after a reconnect, on both doors; after a reconnect a new document ends it, after a cold restart only once the vault is back and the new document is checked' },
   window: { fn: cureWindow, label: () => 'R32-WINDOW (item 5): the watch open, the fences not yet back (the browser slow to list its tabs) — the hub\'s verb and the agent\'s own CDP read are answered from the record' },
+  holds: { fn: (mods) => runR32HoldsTable(mods), label: (r) => `R32-HOLDS (the persisted hold, 主开发's shape + amendments 1–3): ${r.total} cells (${Object.entries(r.byDim || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}) — kind × document known / unknown × reconnect / cold restart × still / reloaded / another page / closed: closed at least as before with the kind's words on both doors, nothing of the value in the store, the notice open exactly while the hold stands and raised once; census: ${(r.census && r.census.reasons || []).length} HOLD_* reasons, ${(r.census && r.census.words || []).length} words, each with its producer` },
   vaultReads: { fn: cureVaultReads, label: (r) => `R32-VAULT-READS (item 9, by behaviour, not by text): on a restore every call into the web logins is a subscription or runs inside hydratePersistedScrubs (${(r.restoreCalls || []).join(', ') || 'none'}); the census sees the next fill's read` },
 };
 
@@ -1830,6 +2228,11 @@ const CURE_LEGS = {
 export async function runR32CureLegs({ mods, ok, only = null }) {
   const out = {};
   const ident = cureIdentity(mods.BK);
+  if (!only || only === 'check') {
+    const cr = cureCheckRows(mods.req ? mods.req('./src/browser-login.js') : null);
+    out.check = cr;
+    ok(cr.ok, 'R32-CHECK (M3, S2, S3, pure): a value under the floor counts only as a whole component or the whole title (no false alarm on a substring), at or above it anywhere and in every spelling; a stray or non-UTF-8 percent sequence spoils nothing else; past each cap the answer is «cannot tell», which holds', cr);
+  }
   if (!only || only === 'identity') {
     out.identity = ident;
     ok(ident.ok, 'R32-IDENTITY (item 8): a replacement browser that reuses the process number is another browser — with a new browser id and with none; a reconnect to the same one is the same; a stopped record is nobody\'s', ident);
@@ -1944,8 +2347,8 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   const once = (s, a, b) => (s.split(a).length === 2 ? s.replace(a, b) : null);
   // LAW S1 — A RESTART HOLDS: the cold start arms the unknown-typed hold on every tab that carried a fence or a guard
   await cellMutant('S1 (a restart does not hold)', 'r32-law-s1-restart-no-hold',
-    (s) => once(s, '      armLiveFillOnTab(w, e, {\n        targetId: e.targetId,\n        urlAtFill: f.urlAtFill || tabLoginUrlOf(e),', '      if (false) armLiveFillOnTab(w, e, {   /* MUTANT S1 */\n        targetId: e.targetId,\n        urlAtFill: f.urlAtFill || tabLoginUrlOf(e),'),
-    tableSpec.cells.filter((c) => c.conn === 'hub_restart' && c.expected.flavor === 'until_nav'));
+    (s) => once(s, '      armLiveFillOnTab(w, e, {\n        targetId: e.targetId,\n        urlAtFill: f.urlAtFill || f.origin,', '      if (false) armLiveFillOnTab(w, e, {   /* MUTANT S1 */\n        targetId: e.targetId,\n        urlAtFill: f.urlAtFill || f.origin,'),
+    tableSpec.cells.filter((c) => c.conn === 'hub_restart' && c.expected.flavor === 'await_vault'));
   // LAW — A VALUE PUT BACK RE-ARMS: a guard that finds the typed value again holds the tab
   await cellMutant('PUT-BACK (a value put back does not re-arm)', 'r32-law-putback-no-rearm',
     (s) => once(s, "        if (verdict.action === 'rearm_held' && lastSnap) {", "        if (false && verdict.action === 'rearm_held' && lastSnap) {   /* MUTANT PUT-BACK */"),
@@ -2007,7 +2410,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   const cureMutant = async (label, file, src, tag, leg, red) => {
     if (!src) { ok(false, `MUTANT ${label}: its anchor is gone in ${file}`); return; }
     const X = MUT.load(file, src, tag);
-    const r = await runR32CureLegs({ mods: file.endsWith('browser-keeper.js') ? { ...legMods(Dm0), BK: X } : legMods(X), ok: silent, only: leg });
+    const r = await runR32CureLegs({ mods: file.endsWith('browser-keeper.js') ? { ...legMods(Dm0), BK: X } : file.endsWith('cdp-mediator.js') ? { ...legMods(Dm0), CM: X } : legMods(X), ok: silent, only: leg });
     const got = r[leg];
     ok(Boolean(got) && red(got), `MUTANT ${label} RED on the ${leg} leg`, got);
   };
@@ -2016,14 +2419,14 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     once(bdSrc, '  const FAILED_CHECKS_BOUND = 3;', '  const FAILED_CHECKS_BOUND = Infinity;   /* MUTANT BOUND */'), 'r32-cure-bound-none', 'bound',
     (r) => r.ok === false && r.guardOnly === true && r.firstHold === -1);
   await cureMutant('NEXT (the next address is never compared with the value)', 'src/server/browser-dialogs.js',
-    once(bdSrc, '  function valueShownIn(w, e, lf, texts, heldVals = null) {\n    if (!lf) return false;\n', '  function valueShownIn(w, e, lf, texts, heldVals = null) {\n    if (!lf) return false;\n    return false;   /* MUTANT NEXT */\n'),
+    once(bdSrc, "  function checkTexts(w, e, lf, texts, heldVals = null) {\n    if (!lf) return 'clean';\n", "  function checkTexts(w, e, lf, texts, heldVals = null) {\n    if (!lf) return 'clean';\n    return 'clean';   /* MUTANT NEXT */\n"),
     'r32-cure-next-unchecked', 'next', (r) => r.ok === false && r.premise === true && r.heldGet === false && r.leaked > 0);
   await cureMutant('RESTART-ADDRESS (a restart or a reconnect releases by the address)', 'src/server/browser-dialogs.js',
     once(once(bdSrc,
       '        if (!sameDocument(entry.docId, e.docId)) {\n',
       "        if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String((entry.liveFill && entry.liveFill.urlAtFill) || '').split('#')[0]) { try { LF().clearFilledSecretsForTarget(stashedTid); } catch { /* */ } continue; }   /* MUTANT RESTART-ADDRESS */\n        if (!sameDocument(entry.docId, e.docId)) {\n") || '',
-      '      if (!sameDocument(f.docId, e.docId)) {\n',
-      "      if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String(f.urlAtFill || '').split('#')[0]) continue;   /* MUTANT RESTART-ADDRESS */\n      if (!sameDocument(f.docId, e.docId)) {\n"),
+      "      // lane chrome-157 (主开发's amendment 1, 2026-11-15): AFTER A COLD RESTART NO HOLD LIFTS UNCHECKED — every row comes back\n",
+      "      if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String(f.urlAtFill || '').split('#')[0]) continue;   /* MUTANT RESTART-ADDRESS */\n      // lane chrome-157 (主开发's amendment 1, 2026-11-15): AFTER A COLD RESTART NO HOLD LIFTS UNCHECKED — every row comes back\n"),
     'r32-cure-restart-by-address', 'restarts', (r) => r.ok === false && r['restart-move'] && r['restart-move'].ok === false && r['reconnect-move'] && r['reconnect-move'].ok === false);
   await cureMutant('WINDOW (the state says open before the fences are back)', 'src/server/browser-dialogs.js',
     once(bdSrc, "  const fencesLive = (w) => Boolean(w && w.state === 'open' && w.fencesRearmed);", "  const fencesLive = (w) => Boolean(w && w.state === 'open');   /* MUTANT WINDOW */"),
@@ -2031,6 +2434,44 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   await cureMutant('IDENTITY (a browser known by its process number alone)', 'src/server/browser-keeper.js',
     once(bkSrc, "  if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;\n", "  if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;\n  if (rec) return String(rec.pid);   /* MUTANT IDENTITY */\n"),
     'r32-cure-identity-pid-only', 'identity', (r) => r.ok === false && r.pidReuseOther === false);
+  // THE PERSISTED HOLD'S MUTANTS (主开发's look at d8492de27 — M1/M2, amendments 1 and 3, P1, P3), each on its slice of the hold table
+  const holdsMutant = async (label, src, tag, only, red) => {
+    if (!src) { ok(false, `MUTANT ${label}: its anchor is gone in src/server/browser-dialogs.js`); return; }
+    const X = MUT.load('src/server/browser-dialogs.js', src, tag);
+    const r = await runR32HoldsTable(legMods(X), { only });
+    ok(Boolean(r) && red(r), `MUTANT ${label} RED on the hold table (${r ? r.red : '?'} of ${r ? r.total : '?'} cells of its slice)`, r && r.redCells);
+  };
+  await holdsMutant('UNKNOWN-AS-OTHER (an unknown document id read as another document — M2)',
+    once(bdSrc, '  const sameDocument = (a, b) => !a || !b || String(a) === String(b);', '  const sameDocument = (a, b) => Boolean(a) && Boolean(b) && String(a) === String(b);   /* MUTANT UNKNOWN-AS-OTHER */'),
+    'r32-holds-unknown-as-other', { words: ['live'], conns: ['cold', 'reconnect'] }, (r) => r.red > 0 && r.redCells.some((x) => x.cell.doc === 'unknown'));
+  await holdsMutant('COLD-UNCHECKED (after a cold restart a navigation lifts a hold unchecked — amendment 1)',
+    once(bdSrc, "    if (lf.restored && why !== 'tab-closed' && why !== 'browser-stop' && why !== 'disarm') {", "    if (false && lf.restored) {   /* MUTANT COLD-UNCHECKED */"),
+    'r32-holds-cold-unchecked', { words: ['live', 'value_shown'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.cell.phase === 1 && (x.cell.after === 'reload' || x.cell.after === 'other')));
+  await holdsMutant('NO-WORD (a row written without its hold word — the record forgets the hold)',
+    once(bdSrc, '            hold: holdWordOf(lf),', '            hold: undefined,   /* MUTANT NO-WORD */'),
+    'r32-holds-no-word', { words: ['value_shown'], conns: ['cold'] }, (r) => r.red > 0);
+  await holdsMutant('RENEWAL (the document id not renewed at a top-frame navigation — P1)',
+    once(bdSrc, "e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq));", "/* MUTANT RENEWAL */"),
+    'r32-holds-no-renewal', { words: ['live'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.cell.doc === 'known' && x.cell.phase === 2));
+  await holdsMutant('REFILE (a notice re-filed at a restart without its key raises again — amendment 3)',
+    once(bdSrc, "i18n: { text: i18nText, detail: i18nDetail }, itemKey: holdKeyOf(w.profileId, (e && e.targetId) || lf.targetId) }) || null;\n    } catch { /* optional */ }\n  }\n  function fileCeilingWipeNotice", "i18n: { text: i18nText, detail: i18nDetail } }) || null;   /* MUTANT REFILE */\n    } catch { /* optional */ }\n  }\n  function fileCeilingWipeNotice"),
+    'r32-holds-refile-raises', { words: ['value_shown'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.detail && x.detail.raisesAfterRestart > x.detail.raisesBefore));
+  await cureMutant('VAULT-LIST (the re-hydration also lists the vault — P3)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "    const missing = new Set();\n    for (const s of [...names]) {", "    const missing = new Set();\n    try { if (logins && typeof logins.list === 'function') logins.list(); } catch { /* */ }   /* MUTANT VAULT-LIST */\n    for (const s of [...names]) {"),
+    'r32-cure-vault-list', 'vaultReads', (r) => r.ok === false && Array.isArray(r.outside) && r.outside.includes('list@hydrate'));
+  const cmSrc2 = fs.readFileSync(path.join(repoDir, 'src/server/cdp-mediator.js'), 'utf8');
+  await cureMutant('WRAPPED (the navigation mask not put back into a wrapped session\'s message — P2)', 'src/server/cdp-mediator.js',
+    once(cmSrc2, '            if (masked !== inner) ev = { ...ev, params: { ...ev.params, message: JSON.stringify(masked) } };', '            /* MUTANT WRAPPED: the re-wrap cut */'),
+    'r32-cure-wrapped-unmasked', 'next', (r) => r.ok === false && r.wrappedSeen === true && r.leaked > 0);
+  await cureMutant('PRESENT-ADDRESS (the bound\'s hold stamped with the present address — M4)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "        urlAtFill: base.urlAtFill || base.origin || BL().originOf(tabLoginUrlOf(e)) || '',", "        urlAtFill: tabLoginUrlOf(e) || base.urlAtFill || '',   /* MUTANT PRESENT-ADDRESS */"),
+    'r32-cure-present-address', 'bound', (r) => r.ok === false && r.listingLeak === true);
+  await cureMutant('NOTICE-STAYS (a stopped browser\'s hold notices are not ended by their key — S1)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "    sweepHoldNotices(`${HOLD_KEY}${pid}:`);   // (lane chrome-157: every hold notice of the profile ends with its holds, a past hub life's too)", '    /* MUTANT NOTICE-STAYS */'),
+    'r32-cure-notice-stays', 'notices', (r) => r.ok === false && ((r['browser-stop'] && r['browser-stop'].openAfter) || (r['profile-deleted'] && r['profile-deleted'].openAfter)));
+  await cureMutant('FRAGMENT (the check reads the address without its fragment)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "const navUrl = String(p.frame.url || '') + String(p.frame.urlFragment || '');", "const navUrl = String(p.frame.url || '');   /* MUTANT FRAGMENT */"),
+    'r32-cure-fragment-dropped', 'fragment', (r) => r.ok === false && r.held === false);
   await cureMutant('VAULT-ALIAS (a restore reads the logins through an alias)', 'src/server/browser-dialogs.js',
     once(bdSrc, '    const prevStash = stashedTabFencesByProfile.get(w.profileId) || null;\n', "    { const L = logins; try { if (L && typeof L.resolveFill === 'function') L.resolveFill({ origin: '', spec: '' }); } catch { /* */ } }   /* MUTANT VAULT-ALIAS */\n    const prevStash = stashedTabFencesByProfile.get(w.profileId) || null;\n"),
     'r32-cure-vault-alias', 'vaultReads', (r) => r.ok === false && Array.isArray(r.outside) && r.outside.includes('resolveFill'));

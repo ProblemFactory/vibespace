@@ -93,9 +93,9 @@ const CLASSES = Object.freeze([
 const ALL_CHARS = CLASSES.join('');
 
 const LOCKED = 'the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then (do not ask them to)';
-const HOLD_TOO_MUCH_TEXT = 'too much text to check';
-const HOLD_UNKNOWN_TYPED = 'unknown_typed';
-const HOLD_VALUE_SHOWN = 'value_shown';   // (lane chrome-157, round 32's one check: the page put what was typed into its own address or title)
+// lane chrome-157 (round 32's persisted hold): THE HOLD REASONS AND WORDS live in the dependency-free src/login-hold-words.js (the
+// device agent's bundle carries the record's reader and must not pull this module in); re-exported here beside their sentences
+const { HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN, HOLD_AWAIT_VAULT, HOLD_ENTRY_GONE, HOLD_WORD_OF_REASON, HOLD_WORDS, HOLD_PHASES, isHoldWord } = require('./login-hold-words.js');
 
 const str = (v) => (v === undefined || v === null ? '' : String(v));
 const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
@@ -744,6 +744,18 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
       `refused "${cmd}" on ${site} because VibeSpace can no longer verify whether a filled login secret is still on this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
     );
   }
+  if (holdReason === HOLD_AWAIT_VAULT) {
+    return no(
+      'login_fill_live',
+      `refused "${cmd}" on ${site} because VibeSpace restarted while a filled login secret was on this tab — it checks this tab again once the vault is unlocked; until then open or switch to another tab`
+    );
+  }
+  if (holdReason === HOLD_ENTRY_GONE) {
+    return no(
+      'login_fill_live',
+      `refused "${cmd}" on ${site} because what was filled on this tab is no longer in the vault, so VibeSpace cannot check this tab again — open or switch to another tab (closing this tab ends it)`
+    );
+  }
   if (holdReason === HOLD_VALUE_SHOWN) {
     return no(
       'login_fill_live',
@@ -760,6 +772,84 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
     'login_fill_live',
     `refused "${cmd}" while a vault login fill is in progress or unsubmitted on ${site} — wait for the fill to finish and submit the login form (click / press Enter), reload or navigate this tab, or open or switch to another tab (until this tab submits, reloads, or navigates, cross-origin credential requests from this page are blocked)`
   );
+}
+
+// ── THE ONE CHECK (lane chrome-157, round 32 — the owner's B; 主开发's look at d8492de27: M3, S2, S3, amendment 4) ─────────────────
+// An ordinary site can carry what was typed into its next address or title by itself. PURE: the values the hub holds × the texts
+// the agent would read next ⇒ 'shown' | 'clean' | 'unknown' («cannot tell», which holds). Each component is decoded ON ITS OWN and
+// leniently (a stray or non-UTF-8 percent sequence spoils nothing else); a value UNDER the mask floor counts only as a WHOLE
+// component — a path segment, a query name or value, a fragment field, a decoded base64 piece or one of its JSON string fields —
+// or the whole title (主开发's ruling S2: «admin» in an address, a year in a path are not alarms); at or above the floor, anywhere,
+// in any of the value's spellings (as typed, encodeURIComponent, the form spelling, encodeURI, JSON-escaped). The caps bound the
+// work on the hub's loop (measured, amendment 4); past one the answer is 'unknown'.
+const CHECK_TEXT_CAP = 65536;    // characters per text
+const CHECK_PIECE_CAP = 256;     // base64-looking pieces per verdict
+const CHECK_NODE_CAP = 4096;     // JSON string fields walked per verdict
+const TD = typeof TextDecoder === 'function' ? new TextDecoder('utf-8', { fatal: false }) : null;
+const TE = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+const lenientDecode = (x) => String(x).replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+  if (!TD) return run;
+  const bytes = Uint8Array.from(run.match(/%[0-9A-Fa-f]{2}/g).map((h) => parseInt(h.slice(1), 16)));
+  return TD.decode(bytes);
+});
+const b64Decode = (tok) => {
+  try {
+    let t = String(tok).replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    while (t.length % 4) t += '=';
+    const bin = atob(t);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return TD ? TD.decode(bytes) : bin;
+  } catch { return null; }
+};
+const spellingsOf = (v) => {
+  const out = new Set([v]);
+  try { const c = encodeURIComponent(v); out.add(c); out.add(c.replace(/%20/g, '+')); } catch { /* */ }
+  try { out.add(encodeURI(v)); } catch { /* */ }
+  try { out.add(new URLSearchParams([['a', v]]).toString().slice(2)); } catch { /* */ }
+  try { out.add(JSON.stringify(v).slice(1, -1)); } catch { /* */ }
+  return [...out].filter(Boolean);
+};
+function valueShownVerdict(values, texts, { floor = 8, textCap = CHECK_TEXT_CAP, pieceCap = CHECK_PIECE_CAP, nodeCap = CHECK_NODE_CAP } = {}) {
+  const vals = [...new Set((Array.isArray(values) ? values : []).filter((v) => typeof v === 'string' && v))];
+  if (!vals.length) return 'clean';
+  const byteLen = (v) => (TE ? TE.encode(v).length : v.length);
+  const long = vals.filter((v) => byteLen(v) >= floor), short = vals.filter((v) => byteLen(v) < floor);
+  const hay = [], comps = new Set();
+  let capped = false, pieces = 0, nodes = 0;
+  const addComp = (c) => { const x = String(c); if (x) { comps.add(x); const t = x.trim(); if (t) comps.add(t); } };
+  const walk = (o, depth) => {
+    if (capped || depth > 6) return;
+    if (typeof o === 'string') { if (++nodes > nodeCap) { capped = true; return; } addComp(o); hay.push(o); return; }
+    if (typeof o === 'number') { addComp(String(o)); return; }
+    if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { addComp(k); walk(v, depth + 1); if (capped) return; }
+  };
+  const piecesOf = (x) => {
+    for (const tok of (String(x).match(/[A-Za-z0-9+/_-]{8,}={0,2}/g) || [])) {
+      if (++pieces > pieceCap) { capped = true; return; }
+      const d = b64Decode(tok);
+      if (d == null || !d) continue;
+      hay.push(d); addComp(d);
+      try { walk(JSON.parse(d), 0); } catch { /* not JSON */ }
+    }
+  };
+  for (const raw of (Array.isArray(texts) ? texts : [])) {
+    if (raw == null || raw === '') continue;
+    const t = String(raw);
+    if (t.length > textCap) { capped = true; continue; }
+    const isAddress = /^[a-z][a-z0-9+.-]*:/i.test(t);
+    const dec = lenientDecode(t), decPlus = lenientDecode(t.replace(/\+/g, ' '));
+    hay.push(t, dec, decPlus);
+    if (isAddress) {
+      for (const part of t.split(/[/?#&=;]/)) { if (!part) continue; addComp(part); addComp(lenientDecode(part)); addComp(lenientDecode(part.replace(/\+/g, ' '))); }
+    } else {
+      addComp(t);   // (a title: whole)
+    }
+    piecesOf(t); if (dec !== t) piecesOf(dec);
+    if (capped) break;
+  }
+  for (const v of long) { const sp = spellingsOf(v); if (hay.some((h) => sp.some((f) => h.includes(f)))) return 'shown'; }
+  for (const v of short) if (comps.has(v)) return 'shown';
+  return capped ? 'unknown' : 'clean';
 }
 
 /** Pure Law 1 verdict after checking active post-lift guards on a tab: a `postLiftHeld` fence lifts ONLY when every guard that armed
@@ -862,7 +952,8 @@ module.exports = {
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,
-  LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN,
+  valueShownVerdict, CHECK_TEXT_CAP, CHECK_PIECE_CAP, CHECK_NODE_CAP,
+  LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN, HOLD_AWAIT_VAULT, HOLD_ENTRY_GONE, HOLD_WORD_OF_REASON, HOLD_WORDS, HOLD_PHASES, isHoldWord,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
   newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord,
