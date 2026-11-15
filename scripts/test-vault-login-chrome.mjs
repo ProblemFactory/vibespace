@@ -17,7 +17,7 @@
 //      (`[login_bad_field]`), `L4` two-tab `@ref` isolation (`[target_not_found]`, 0 `Input.insertText`, background tab untouched),
 //      cross-origin page (`[login_phishing]`), `L1`+`N4` accidental cross-origin leak fence (`urlencoded`, `json`, `multipart/form-data`,
 //      `text/plain`, `GET ?q=btoa(pw)`, fail-closed `application/octet-stream` & scan caps -> `BlockedByClient`, harmless `FormData` allowed,
-//      same-origin all 5 allowed), `N1` fail-closed fence across mode flips, the SHAPE S leg (a restart holds the tab until it navigates; an unlock changes nothing), and `M1` `vault_locked` (`423`, 0 CDP calls).
+//      same-origin all 5 allowed), `N1` fail-closed fence across mode flips, the SHAPE S leg with the persisted hold (a cold restart holds the tab waiting for the vault; once it opens the tab follows its kind), and `M1` `vault_locked` (`423`, 0 CDP calls).
 //   ⑤ Zero-secret & zero-digest byte sweep across all output surfaces AND all files on disk (Ruling 5c / RULE 5′) +
 //      6 named RED mutants (`origin-gate-removed`, `read-fence-removed`, `mask-wipe-removed`, `multipart-branch-removed`,
 //      `secretNames-without-rev`, `async-focus-seam`) on REAL Chrome.
@@ -207,7 +207,7 @@ async function world(tag) {
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x'), VD = path.join(W, 'vault'), KD = path.join(W, 'data');
   for (const d of [path.join(KH, '.agent-browser'), KXD, VD, KD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }), { mode: 0o600 });
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', ...(process.env.VS_CHROME && fs.existsSync(process.env.VS_CHROME) ? { executablePath: process.env.VS_CHROME } : {}) }), { mode: 0o600 });   // (lane chrome-157: VS_CHROME — a Chrome for Testing build for the real-browser claim, as the other chrome suites take it)
   const hostBrowsers = path.join(process.env.HOME || '/root', '.agent-browser', 'browsers');
   const localBrowsers = path.join(KH, '.agent-browser', 'browsers');
   if (fs.existsSync(hostBrowsers) && !fs.existsSync(localBrowsers)) {
@@ -752,10 +752,11 @@ try {
           'N1 on real Chrome: during holdReason=tooMuchText and across agent->person->agent mode flip, foreign fetch() stays BlockedByClient (+1 dedup notice, 0 evil hits)',
           { lvHoldN1, ev1: ev1?.body, evPerson: evPerson?.body, evBackAgent: evBackAgent?.body, evilHits: evilPagesN1.received().length, noticeDelta: noticesAfterHoldN1 - noticesBeforeHoldN1 });
 
-        // SHAPE S on REAL Chrome (round 32, 主开发's ruling Q4 — a leg of its own): A RESTART HOLDS THE TAB UNTIL IT NAVIGATES; AN UNLOCK
-        // CHANGES NOTHING. Hub restart (watch down, the fill's memory cleared, a fresh LOCKED vault + logins) ⇒ the tab is held — the
-        // unknown-typed hold, no typed value in memory — and the page's foreign fetch() is blocked; the vault is unlocked ⇒ still the SAME
-        // hold (nothing restored from the vault) and still blocked.
+        // SHAPE S + THE PERSISTED HOLD on REAL Chrome (round 32, 主开发's ruling Q4 and the GO of 2026-11-15, amendment 1): AFTER A COLD
+        // RESTART NO HOLD LIFTS UNCHECKED. Hub restart (watch down, the fill's memory cleared, a fresh LOCKED vault + logins) ⇒ the tab is
+        // held WAITING FOR THE VAULT — its one sentence names the vault and the other tab, nothing typed in memory — and the page's foreign
+        // fetch() is blocked; the vault is unlocked ⇒ the values come back by the row's names and the tab follows its KIND (here the
+        // too-much-text hold the N1 leg left: the same hold, both doors named), still blocked.
         dN1.shutdown();
         LF.clearAllFilledSecrets();
         const engRestart = VE.create({ dataDir: w.VD, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false });
@@ -782,10 +783,11 @@ try {
         const evPreUnlock = await until(() => pages.received().find((x) => x.path === '/done/hold-evil'), 6000);
 
         await engRestart.unlock(w.VPW);
+        for (let i = 0; i < 100 && holdOf() && holdOf().holdReason === 'await_vault'; i++) await new Promise((r) => setTimeout(r, 30));   // (the vault's opening re-hydrates the names and checks the restored tab — asynchronously)
         const unlockedAfter = !loginsRestart.isLocked();
         const lvAfterUnlock = dRestart.liveFillVerdictFor({ profileId: w.prof.id, browserKey: 'bk-0000f1a1' }, { verb: 'eval', argv: ['eval', '1'] });
         const holdUnlocked = holdOf();
-        const notRestored = Boolean(holdLocked && holdUnlocked && holdLocked.holdReason === 'unknown_typed' && holdUnlocked.holdReason === 'unknown_typed' && holdLocked.typed === 0 && holdUnlocked.typed === 0);
+        const followsKind = Boolean(holdLocked && holdUnlocked && holdLocked.holdReason === 'await_vault' && holdLocked.typed === 0 && /too much text/.test(holdUnlocked.holdReason));
         pages.clear();
         await sendN1('Runtime.evaluate', { expression: "document.getElementById('hevil').click()" }, sidHold);
         const evPostUnlock = await until(() => pages.received().find((x) => x.path === '/done/hold-evil'), 6000);
@@ -795,14 +797,15 @@ try {
           && /open or switch to another tab/i.test(err || '')
           && /cross-origin requests from this page are blocked/i.test(err || '');
 
+        const awaitsVault = (err) => /checks this tab again once the vault is unlocked/i.test(err || '') && /open or switch to another tab/i.test(err || '');
         ok(lockedAtBoot === true && unlockedAfter === true
-          && !lvLockedBoot.ok && twoDoorsAndBlock(lvLockedBoot.error)
+          && !lvLockedBoot.ok && awaitsVault(lvLockedBoot.error)
           && !lvAfterUnlock.ok && twoDoorsAndBlock(lvAfterUnlock.error)
           && evPreUnlock?.body?.ok === false && evPostUnlock?.body?.ok === false
-          && notRestored
+          && followsKind
           && evilPagesN1.received().length === 0 && wrongChangedNotice === false,
-          'SHAPE S on real Chrome: a restart holds the tab until it navigates; an unlock changes nothing — the same unknown-typed hold with no typed value before and after the unlock, both doors named, the page\'s cross-origin fetch() blocked before and after',
-          { lockedAtBoot, unlockedAfter, holdLocked, holdUnlocked, lvLockedBoot, lvAfterUnlock, evPreUnlock: evPreUnlock?.body, evPostUnlock: evPostUnlock?.body, evilHits: evilPagesN1.received().length, wrongChangedNotice });
+          'SHAPE S + the persisted hold on real Chrome: a cold restart holds the tab waiting for the vault (its sentence names the vault and the other tab, nothing typed in memory); once the vault opens the tab follows its kind — the same too-much-text hold, both doors named — and the page\'s cross-origin fetch() blocked before and after',
+          { lockedAtBoot, unlockedAfter, holdLocked, holdUnlocked, followsKind, lvLockedBoot, lvAfterUnlock, evPreUnlock: evPreUnlock?.body, evPostUnlock: evPostUnlock?.body, evilHits: evilPagesN1.received().length, wrongChangedNotice });
 
         dRestart.shutdown();
         engRestart.close();
@@ -1413,6 +1416,14 @@ try {
       for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 11 })) {
         ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
       }
+
+      // THE READERS' SIXTEEN SCENES (主开发's real-browser claim, 2026-11-15): what real Chrome does where the fake kernel assumed it
+      // — the document id, the fragment, the title's timing, a GET form's order of events, the wrapped session, a busy tab, the
+      // back-forward cache — on the suite's own scratch browser, with pages of the scenes' own loopback server.
+      console.log('  — the readers\' scenes on real Chrome:');
+      const { runReadersScenes } = await import('./fixtures/vl-chrome-scenes.mjs');
+      await runReadersScenes({ w, ok, D, L, VE, LF, WSBase, until });
+      await w.dialogs.arm(w.prof.id);
     }
 
     await w.close();

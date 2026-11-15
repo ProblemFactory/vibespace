@@ -915,6 +915,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         if (pf) { pendingFetches.delete(String(p.requestId)); pf.resolve({ action: 'fail', errorReason: p.errorReason || 'Failed' }); }
         return {};
       }
+      case 'Page.reload': if (t) { t.doc = (t.doc || 0) + 1; setTimeout(() => loaded(t), 5); } return {};   // (lane chrome-157, P4: a reload is a new document — a new loaderId, the same address)
       case 'Page.navigate': if (t) {
         t.doc = (t.doc || 0) + 1;   // (a new document)
         t.url = String(p.url || 'about:blank'); t.title = t.url;
@@ -1024,7 +1025,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
     loaderIdOf: (targetId) => { const t = targets.get(targetId); return t ? loaderOf(t) : null; },   // (lane chrome-157: the id of a tab's present document, as Page.getFrameTree names it)
     setDom, setTitle, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
-    navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
+    navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.doc = (x.doc || 0) + 1; /* (lane chrome-157, P4: a page's own navigation is a new document — a new loaderId) */ x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },
     egress: () => egressLog.slice() }; // lane engine-spi-egress: every navigation's fetch (through the proxy or direct)
 }

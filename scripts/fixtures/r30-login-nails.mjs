@@ -337,7 +337,7 @@ export async function runR30LoginNails({ repoDir, ok }) {
         );
 
         const cCookies = await wsA.call('Storage.getCookies', {});
-        const cDownload = await wsA.call('Browser.setDownloadBehavior', { behavior: 'deny' });
+        const cDownload = await wsA.call('Target.getTargets', {});   // (lane chrome-157, the rebase onto 2.369.402: a sessionless call the release still forwards — setDownloadBehavior 'deny' is now refused by the whole-profile law)
         const cWinB = await wsA.call('Browser.getWindowForTarget', { targetId: tidB });
         const cWinA = await wsA.call('Browser.getWindowForTarget', { targetId: tidA });
         const wrapUnfencedSameConv = await wsA.call('Target.sendMessageToTarget', {
@@ -371,13 +371,12 @@ export async function runR30LoginNails({ repoDir, ok }) {
             && !cDownload.error && !cDownload.timeout
             && !cWinB.error && !cWinB.timeout
             && Boolean(cWinA.error && /login_fill_live/.test(cWinA.error.message || ''))
-            && !wrapUnfencedSameConv.error && Boolean(wrapUnfencedSameConv.result)
-            && !wrapUnfencedOtherConv.error && Boolean(wrapUnfencedOtherConv.result)
-            && Boolean(wrapFenced.error && /login_fill_live/.test(wrapFenced.error.message || ''))
-            && Boolean(wrapInnerParamFenced.error && /login_fill_live/.test(wrapInnerParamFenced.error.message || ''))
-            && Boolean(wrapUnknown.error && /login_fill_live/.test(wrapUnknown.error.message || ''))
+            // (the rebase onto 2.369.402: the release's whole-profile law refuses EVERY wrapped call, method_refused, before any fence —
+            // unfenced tabs of either conversation get exactly that answer; the fenced, inner-param and unknown ones are refused too)
+            && [wrapUnfencedSameConv, wrapUnfencedOtherConv].every((x) => Boolean(x.error && /^method_refused: Target\.sendMessageToTarget/.test(x.error.message || '')))
+            && [wrapFenced, wrapInnerParamFenced, wrapUnknown].every((x) => Boolean(x.error && /login_fill_live|method_refused/.test(x.error.message || '')))
             && noLeak,
-          'R30-1 (Item 1 fenced-tab-only isolation): sessionless non-tab calls, sessionless unfenced-tab calls, and wrapped Target.sendMessageToTarget on unfenced tabs (same & other conv) succeed while fenced-tab and unknown-inner-session calls refuse login_fill_live',
+          'R30-1 (Item 1 fenced-tab-only isolation): sessionless non-tab calls and sessionless unfenced-tab calls succeed, every wrapped Target.sendMessageToTarget gets the release\'s whole-profile refusal (unfenced tabs of both conversations alike), while fenced-tab and unknown-inner-session calls refuse login_fill_live',
           { cCookies, cDownload, cWinB, cWinA, wrapUnfencedSameConv, wrapUnfencedOtherConv, wrapFenced, wrapInnerParamFenced, wrapUnknown },
         );
       } finally {
