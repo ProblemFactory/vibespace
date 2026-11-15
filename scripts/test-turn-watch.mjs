@@ -305,6 +305,11 @@ console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION,
   ok(cv.includes(':is(.cn-card.cn-open, .cn-card.cn-kept, .cn-card.cn-stay)') && cn.includes("if (keptOf(e.item)) {\n        card.classList.add('cn-stay');") && cn.includes(':is(.cn-card.cn-kept, .cn-card.cn-stay)'), 'the chat draws a kept card IN PLACE (`.cn-stay`) and its record never folds into a run while it stands');
   ok(JSON.stringify(F.closersOf({ action: { type: 'turn-stuck', sessionId: 'x' }, status: 'done', resolvedBy: 'kept-waiting', facts: { kept: { at: 1, nextAt: 2, act: 'end' } } })) === '[]' && JSON.stringify(F.closersOf({ action: { type: 'turn-stuck', sessionId: 'x' }, status: 'done', resolvedBy: 'moved' })) === '["reopen"]', 'a KEPT card offers no generic closer (its one door is «End the command now»); once quiet, the record\'s usual ↺');
   ok(F.keptOf({ action: { type: 'messages-waiting' }, status: 'done', resolvedBy: 'kept-waiting', facts: { kept: { at: 1, nextAt: 2, act: 'end' } } }) === null, 'keptOf reads the registry row (`kept`), never a type branch: a row without it is never kept');
+  // the look's P4: the kept card's two sentences are ONE entry per act (each language joins its own — no stray blank), and its status line never repeats them
+  const zhD = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), rowSrc = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8');
+  const pairs = ['You chose to keep waiting at {time}. If nothing changes, the command is ended by itself at {next}.', 'You chose to keep waiting at {time}. If nothing changes, you are asked again at {next}.'];
+  ok(pairs.every((k) => { const m = zhD.match(new RegExp('\\n  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': "([^"]*)"')); return m && /。如果/.test(m[1]) && !/。 /.test(m[1]); }) && rowSrc.includes("${escHtml(words)}</div>") && !rowSrc.includes("{ time: hhmmOf(k.at) }))} ${escHtml(next)}"), 'P4: the kept card says its two sentences as ONE entry per act — zh joins them with no stray blank');
+  ok(rowSrc.includes("const by = keptOf(i) ? '' : resolvedByText(i.resolvedBy, t, i);"), 'P4: a kept card\'s status line is «waiting» alone — never «waiting · kept waiting at …» beside its own sentence');
 }
 
 // ── THE LOOK AT 99f65d547: the refuters' scenes ─────────────────────────────────────────────────────────────────────
@@ -518,6 +523,34 @@ console.log('— ㉔ LAW 3 (M4, M5): «ended» is said only on the wrapper\'s ow
   // the door's words: asking, never «ended»
   const row = F.ROW_OF['turn-stuck'];
   ok(row.buttons.find((b) => b.answer === 'end-command').said === 'Ending the command…' && row.refused['already-ending'] && row.refused['nothing-to-end'], 'the press says «Ending the command…» (the item says «ended» when the record comes); «already ending» and «nothing to end» are refused by name');
+}
+
+console.log('— ㉕ S2: the injected line SAYS the by-itself ending — through the REAL SessionStart route (the wiring: the row → toolsFor → the rule)');
+{
+  const AR = require(path.join(REPO, 'src/agent-routes.js')), TG = require(path.join(REPO, 'src/task-groups.js'));
+  const dir = fs.mkdtempSync(path.join(ROOT, 'routes-')), cwd = path.join(dir, 'work');
+  const tasks = new TG.TaskGroupManager({ dataDir: dir, onChange: () => { } });
+  const routes = {}, settings = {}, activeSessions = new Map();
+  AR.setupAgentRoutes({
+    app: { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; } }, activeSessions, tasks,
+    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], dropNotices: () => { }, pendingNotices: () => [], rekey: () => { }, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+    SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
+    userTodos: { rekey: () => { }, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
+    sessionStatusKey: (x, id) => `claude:${id}`, serverSetting: (k) => settings[k], scheduleCtxSync: () => { }, remoteCtxBaseFor: () => null,
+  });
+  tasks.create({ title: 'Lane', objective: 'build', folders: [cwd] });
+  let n = 0;
+  // what the session RECEIVES first: its SessionStart, or — a harness that does not honour SessionStart (agy) — its first prompt-context
+  const start = (backend) => { const id = 'sess' + (++n); const x = { agentToken: 'vsst_' + id + 'x'.repeat(30), backend, cwd, name: 'w' + n, ...(backend === 'claude' ? { claudeSessionId: 'c0ffee00-0000-4000-8000-00000000000' + n } : { backendSessionId: 'c0ffee00-0000-4000-8000-00000000000' + n }) }; activeSessions.set(id, x);
+    const call = (route) => { let out = null; const res = { json: (o) => { out = o; return res; }, status: () => res, setHeader: () => { } }; routes[`GET /api/agent/${route}`]({ headers: { authorization: 'Bearer ' + x.agentToken }, query: {}, body: {} }, res); return (out && out.context) || ''; };
+    return call('task-context') || call('prompt-context'); };
+  const agy = start('antigravity');
+  settings['turns.endStuckCommandMin'] = 45; const agy45 = start('antigravity');
+  settings['turns.endStuckCommandMin'] = 0; const agyOff = start('antigravity');
+  delete settings['turns.endStuckCommandMin']; const cl = start('claude');
+  ok(/\nCOMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own; VibeSpace ends one that has shown nothing, with nothing it started working, for 30 minutes \(the owner's setting\) — even a quiet wait by design; the step fails and the turn goes on\. /.test(agy), 'an agy session\'s SessionStart: the line says the by-itself ending — thirty minutes, the owner\'s setting, even a quiet wait by design', agy.slice(agy.indexOf('COMMANDS'), agy.indexOf('COMMANDS') + 300));
+  ok(/for 45 minutes \(the owner's setting\)/.test(agy45) && /COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own\. Run one/.test(agyOff) && !/VibeSpace ends one/.test(agyOff), 'the setting at 45: «45 minutes»; at 0 (never): the ending is not said');
+  ok(!/COMMANDS THAT MAY WAIT/.test(cl) && /USAGE WALLS/.test(cl), 'a claude session (its CLI bounds its own commands): no such line');
 }
 
 console.log('— ㉒ P2: the command\'s first words, cut and escaped where they are drawn');

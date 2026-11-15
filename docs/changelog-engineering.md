@@ -6,6 +6,27 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent — the look at 99f65d547, follow-up 4: the smalls (S2, S3, S5, S6) and picture P4
+- **S2: the injected line SAYS the by-itself ending.**
+  - The agy session's rule now reads «…no time limit of its own; VibeSpace ends one that has shown nothing, with nothing it started working, for 30 minutes (the owner's setting) — even a quiet wait by design; the step fails and the turn goes on. Run one that may wait for input as `timeout …`; a long quiet wait … goes through Background Work».
+  - The minutes are the setting's, read by toolsFor (`commandEndMin`, the watch's own endBoundMsOf over both settings). At 0 the ending is not said.
+  - The renderer passes `commandEndMin` to every standing rule.
+  - CAPS.sessionStart 3426 → 3611 B by the clause's own 185 B, in the widest shape (1440 minutes: 3414 → 3599 B). test-prompt-budget ③ re-judged an agy session's shapes at 5 821 / 6 624 / 8 029 B, each whole.
+  - THE WIRING has its leg: test-turn-watch ㉕ drives the REAL agent routes. An agy session's first delivery (its prompt-context — agy honours no SessionStart) carries the line with 30, then 45 at the setting's 45, and no ending at 0. A claude session gets no line.
+- **S3: the limits are said** in kb-features (a new «A turn is never silent» entry: real work outside the tree, a quiet wait by design, a process that left the tree before Stop, a paired machine's «unknown», the sentence only through a real pipe, a killed wrapper's agy) and to the agent (the line's «even a quiet wait by design»).
+- **S5: the kb.** kb-api has the route; kb-features has the entry; the kb-file-structure lines for turn-watch, turn-liveness, turn-stuck-words and routes/turn-stuck are rewritten (the stale one listed two of the four answers).
+- **S6: a wrapper killed past its own exit handler.** agy runs in its own session, so it and its command outlived the wrapper.
+  - The agy wrapper records agy's BIRTH in its sidecar (`childStart`).
+  - The hub's kill path (ws-handler endSessionBody) reads the recorded agy BEFORE the sidecar goes (proc-signal `recordedChildOf`, fs.promises). After a 5 s grace, `endLeftGroup` signals agy's group while its leader is STILL that process (`signalRecordedGroup`: sameBirth + never our own group): SIGTERM, then SIGKILL after 3 s.
+  - A pid now someone else's is never signalled. If agy itself exited first and left its command, that is a limit, said.
+  - New census rows: pid-identity (`signalRecordedGroup`, starttime) and mount-reader (proc-signal's second read).
+- **P4 (the kept card).** Its two sentences are ONE dictionary entry per act, so zh and ja join them with no stray blank. Its status line is «waiting» alone, never «waiting · kept waiting at …» beside its own sentence.
+- **The pins.**
+  - test-turn-end ⑨ (LIVE): the wrapper SIGKILLed; agy and its command still run; endLeftGroup ends them by the recorded birth, said once; a reused pid is never signalled; the kill path's wiring is a source pin (endSessionBody's deps are a whole server's).
+  - test-turn-watch ㉕ (S2) and ⑰ (P4).
+  - test-cli-registry: the rule's facts; 1440 / 0.
+  - The mutants: 6 run, 6 red — the birth not recorded, the group signalled without its birth, the kill path unwired, toolsFor without the minutes, the renderer dropping them, the rule unwired.
+
 ### turn-never-silent — the look at 99f65d547, follow-up 3: the proofs the kill law still owed, each a row and a mutant
 - **ONE small module**: NEW src/server/proc-signal.js holds sameBirth → signalOne, killGroup and endTree. data/bin/agy-wrapper.js signals through it alone.
   - THE FLOOR, both: never pid 0, 1, a negative, a non-integer, our own pid, or (a group) our own process group.

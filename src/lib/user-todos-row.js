@@ -183,9 +183,11 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
 const hhmmOf = (at) => { const d = new Date(Number(at) || 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 const keptHtml = (i, t) => {
   const k = keptOf(i); if (!k) return '';
-  const next = k.act === 'end' ? t('If nothing changes, the command is ended by itself at {time}.', { time: hhmmOf(k.nextAt) }) : t('If nothing changes, you are asked again at {time}.', { time: hhmmOf(k.nextAt) });
+  // the look's P4: the two sentences are ONE dictionary entry per act — each language joins its own (no stray blank in zh / ja)
+  const words = k.act === 'end' ? t('You chose to keep waiting at {time}. If nothing changes, the command is ended by itself at {next}.', { time: hhmmOf(k.at), next: hhmmOf(k.nextAt) })
+    : t('You chose to keep waiting at {time}. If nothing changes, you are asked again at {next}.', { time: hhmmOf(k.at), next: hhmmOf(k.nextAt) });
   const door = (buttonsFor({ ...i, status: 'open' }) || []).find((b) => b.answer === 'end-command');
-  return `<div class="ut-kept"><div class="ut-kept-words">${escHtml(t('You chose to keep waiting at {time}.', { time: hhmmOf(k.at) }))} ${escHtml(next)}</div>`
+  return `<div class="ut-kept"><div class="ut-kept-words">${escHtml(words)}</div>`
     + (door ? `<div class="ut-exit-answer ut-row-buttons"><button type="button" class="ut-act ut-action-exit" data-answer="end-command" title="${escHtml(t(door.title))}">${escHtml(t('End the command now'))}</button></div>` : '') + '</div>';
 };
 /** A row that DECLARES its buttons (foryou-actions buttonsOf — lane queued-is-not-woke's messages-waiting: Open the conversation) — drawn
@@ -510,7 +512,7 @@ function partsOf(entry, ctx) {
     ? `<div class="ut-opts"><span class="ut-opts-label">${escHtml(t('Reply:'))}</span>${optList.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}" aria-label="${escHtml(optionWords(o, t))}" title="${escHtml(optionWords(o, t))}">${escHtml(String(o))}</button>`).join('')}</div>` : '';
   let meta, ageWords = null, expWords = null; // r14: the row's VOLATILE words (the age, the lifetime) — patched in place, never in the signature
   if (resolved) {
-    const by = resolvedByText(i.resolvedBy, t, i);
+    const by = keptOf(i) ? '' : resolvedByText(i.resolvedBy, t, i);   // the look's P4: a KEPT card's own words say when it was kept — its status line never repeats them
     const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
       ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
