@@ -40,7 +40,7 @@ function fourNotices(BP) {
 
 /** census({ intro, channels }) → { shapes: [{ name, blocks: [[label, bytes]], total, room }], intro, cap, reminder }. `intro(T, facts)`
  *  replaces sessionToolsIntro (the suite's control); every other block is the production renderer's. */
-export function census({ intro = null, repo = REPO, channels = false } = {}) {
+export function census({ intro = null, repo = REPO, channels = false, noCommandBound = false } = {}) {
   // lane agent-context-owner-facts (B-7960 a): the times ride in the owner's zone, named — measured in the incident's zone
   // (America/Los_Angeles), never this box's own (PT here, UTC on a runner: the same shape would measure differently)
   require(path.join(repo, 'src/server/owner-facts.js')).configure({ setting: (k) => (k === 'instance.timezone' ? 'America/Los_Angeles' : undefined) });
@@ -48,7 +48,7 @@ export function census({ intro = null, repo = REPO, channels = false } = {}) {
   const { TaskGroupManager } = require(path.join(repo, 'src/task-groups.js'));
   const { SessionStatusManager } = require(path.join(repo, 'src/session-status.js'));
   const BP = require(path.join(repo, 'src/browser-profiles.js'));
-  const T = { status: true, ask: true, task: true, jobs: true, ...(channels ? { channels } : {}) };
+  const T = { status: true, ask: true, task: true, jobs: true, ...(channels ? { channels } : {}), ...(noCommandBound ? { noCommandBound: true } : {}) };   // lane turn-never-silent: an agy session's shape (its one command-bounds line)
   const fileTools = AR.fileToolsOf({ backend: 'claude' });
   const introOf = intro || AR.sessionToolsIntro;
   const toolsIntro = introOf(T, { browserVariant: 'D', fileTools });

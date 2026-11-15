@@ -559,6 +559,14 @@ class CodexMessageManager extends MessageWindow {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
+  /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
+   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+  openTool() {
+    let last = null; for (const v of this.pendingToolCalls.values()) last = v;
+    const name = last && (last.rawName || last.name);
+    return name ? { name: String(name).slice(0, 80) } : null;
+  }
+
   injectPeerCard({ fromName, text, resetCredit = null, kind = null, group = null, exitRun = null, channel = null }) {
     const body = String(text || '').trim();
     if (!body) return null;

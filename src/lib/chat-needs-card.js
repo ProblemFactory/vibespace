@@ -65,7 +65,7 @@ import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
-import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE, quietsStallOf } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -275,6 +275,17 @@ export class NeedsCards {
     list.removeEventListener('scroll', this._onLentScroll);
     this._roomRO?.disconnect();
     list.style.removeProperty('padding-bottom');
+  }
+
+  /** lane turn-never-silent: an OPEN item of this conversation whose registry row speaks for a silent turn (`quietsStall`) —
+   *  the chat's own «no output for N min» note then yields (one voice; the item carries the doors) */
+  stallSpoken() {
+    try {
+      const model = inboxModel(this.app);
+      const keys = model.loaded ? this.keys() : null;
+      if (!keys) return false;
+      return needsOf((model.todos && model.todos.open) || [], keys).some((e) => e.item && e.item.action && quietsStallOf(e.item.action.type));
+    } catch { return false; }
   }
 
   /** The pass's DOM work → how many cards it placed. */

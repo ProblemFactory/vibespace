@@ -134,7 +134,11 @@ export function resolvedByText(by, t, item = null) {
   }
   // a row's DECLARED end words (lane queued-is-not-woke: the messages-waiting item's ends — never a raw code in any language)
   const ew = item && item.action ? endWordsOf(item.action.type) : null;
-  if (ew && typeof by === 'string' && ew[by]) return t(ew[by]);
+  if (ew && typeof by === 'string' && ew[by]) {
+    // lane turn-never-silent: an end word that names its {time} — the item's own resolution instant, in this device's clock
+    const at = Number(item.resolvedAt); const d = at > 0 ? new Date(at) : null;
+    return t(ew[by], d ? { time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') } : { time: '' });
+  }
   return by && by !== 'user' ? by : '';
 }
 

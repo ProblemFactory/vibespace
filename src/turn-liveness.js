@@ -65,6 +65,10 @@ const ROW_VALUES = Object.freeze({
   // what Stop does to the CLI: 'restart' (the CLI process is ended and started again on the same conversation — agy, ACP)
   // or 'interrupt' (the CLI is asked to end its turn and keeps running — claude, codex)
   stop: Object.freeze(['restart', 'interrupt']),
+  // does the CLI bound its OWN commands? 'cli' = it does (claude's command tool: 2 min by default, 10 at most); 'none' = it
+  // does not (agy: no tool timeout in its help, its turn timeout pinned to 0 by our wrapper) — the rules injected for that
+  // harness gain one line (src/agent-cli-registry.js STANDING_RULES 'command-bounds'); 'unverified' = not read here
+  commandBound: Object.freeze(['cli', 'none', 'unverified']),
 });
 const ROW_KEYS = Object.freeze(Object.keys(ROW_VALUES));
 /** a harness with no turn at all (a terminal) declares exactly this */

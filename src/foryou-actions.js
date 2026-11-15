@@ -112,6 +112,17 @@ const ROWS = Object.freeze([
     ]),
     // THE ITEM'S ENDS, SAID: each end its producer writes, a sentence in the owner's language (never a raw code)
     endWords: Object.freeze({ handed: i18nKey('they were handed to it'), 'turn-ended': i18nKey('the turn ended') }) },
+  // lane turn-never-silent (law L2): a turn that has written nothing and has nothing working below its CLI for the bound —
+  // ONE item per stuck turn, also its card in the conversation; its buttons press the hub's own route (a person's click only)
+  { type: 'turn-stuck', identity: 'sessionId', producer: 'src/server/turn-watch.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'conversation',
+    // the chat's own «no output for N min» note yields while this item stands: one voice, and this one carries the doors
+    quietsStall: true,
+    buttons: Object.freeze([
+      Object.freeze({ answer: 'keep-waiting', label: i18nKey('Keep waiting'), title: i18nKey('Keep waiting — it is said again only after another full bound with nothing written and nothing working'), route: '/api/turns/{sessionId}/stuck', said: i18nKey('Kept waiting') }),
+      Object.freeze({ answer: 'stop-turn', label: i18nKey('Stop the turn'), title: i18nKey('Stop this turn — the same as the Stop button in the conversation'), route: '/api/turns/{sessionId}/stuck', said: i18nKey('Stopped') }),
+    ]),
+    refused: Object.freeze({ 'not-stuck': i18nKey('That turn is no longer stuck'), 'not-live': i18nKey('That conversation is not running here'), human_only: i18nKey('Only a person can press this'), cross_site: i18nKey('Only a person can press this') }),
+    endWords: Object.freeze({ moved: i18nKey('it moved on'), 'turn-ended': i18nKey('the turn ended'), 'kept-waiting': i18nKey('kept waiting at {time}'), gone: i18nKey('the conversation is gone') }) },
   { type: 'exit-run-ask', identity: 'askId', producer: 'src/exit-proxy.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-exit', 'run / push / pull', 'wait'), scope: 'conversation' },
   { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'about', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over'], stamp: 'allow' },   // r3: `about` = the asking conversation (an agent's act) — its chat draws the card
   // lane ledger-dedup-law F3 / r9: a background subject's ONE standing item — a NOTICE: no answer drawn (`answer: 'reply'`,
@@ -1116,6 +1127,10 @@ function filedLine(x, id, tray = null) {
 
 /** A row's OWN buttons (lane queued-is-not-woke): [{answer, label, title, door: 'jump'}] | null — and the one line drawn under
  *  them. Every surface draws and runs them from these fields (no branch on a type). */
+/** lane turn-never-silent: does an open item of this type speak for a silent turn (the chat's stall note then yields)? */
+function quietsStallOf(type) { const r = ROW_OF[type]; return !!(r && r.quietsStall === true); }
+/** lane turn-never-silent: a declared button's refusal words by the route's code */
+function refusedOf(type, code) { const r = ROW_OF[type]; return (r && r.refused && typeof r.refused[code] === 'string') ? r.refused[code] : null; }
 function buttonsOf(type) { const r = ROW_OF[type]; return r && Array.isArray(r.buttons) && r.buttons.length ? r.buttons : null; }
 function buttonsNoteOf(type) { const r = ROW_OF[type]; return r && typeof r.note === 'string' ? r.note : ''; }
 
@@ -1149,4 +1164,4 @@ const FORYOU_HEADS = Object.freeze({
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
 
 module.exports = {
-  FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, quietsStallOf, refusedOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

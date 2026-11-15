@@ -125,7 +125,7 @@ function rowProblems(rows = REG.ROWS) {
   return bad;
 }
 
-const T_ALL = (reach) => ({ status: true, ask: true, task: true, jobs: true, channels: reach });
+const T_ALL = (reach) => ({ status: true, ask: true, task: true, jobs: true, channels: reach, noCommandBound: true });   // lane turn-never-silent: the widest shape is an agy session's (its one rule line)
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
 const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
 const fileTools = AR.fileToolsOf({ backend: 'claude' });
@@ -195,11 +195,13 @@ console.log('— ③ the caps (every gate open, the widest shape)');
 // removal is red by name
 console.log('— ③b the standing rules (a usage wall\'s reset is one account\'s; VibeSpace\'s continue is the only signal)');
 {
-  const TT = { status: true, ask: true, task: true, jobs: true, channels: 'read' };
+  const TT = { status: true, ask: true, task: true, jobs: true, channels: 'read', noCommandBound: true };
   const RULE_FACTS = {
     'usage-walls': [/^USAGE WALLS: /, /a limit message from the CLI \("resets at …", weekly or 5-hour\) names ONE account's reset/, /never schedule, park or promise work for that time/,
       /VibeSpace's account pool may switch you at once/, /when you may continue, VibeSpace sends the continue message \(that message IS the signal\)/,
       /say so on the board \(`vibespace-status blocked --reason "usage wall"`\) and stop/, /never a backlog item "after the reset"/],
+    // lane turn-never-silent (the owner's «可以»): the one line for a CLI that bounds no command of its own
+    'command-bounds': [/^COMMANDS THAT MAY WAIT: /, /this CLI gives a command no time limit of its own/, /`timeout <seconds> <command> < \/dev\/null`/, /a long quiet wait .* goes through Background Work \(`vibespace-job run`\)/],
   };
   const ruleProblems = (rules) => {
     const sec = REG.renderSessionStartTools(TT, {}, REG.ROWS, rules).join('\n');
@@ -207,7 +209,7 @@ console.log('— ③b the standing rules (a usage wall\'s reset is one account\'
     for (const [id, facts] of Object.entries(RULE_FACTS)) {
       const r = (Array.isArray(rules) ? rules : []).find((x) => x && x.id === id);
       if (!r || typeof r.text !== 'function') { bad.push(`${id}: no standing rule row`); continue; }
-      const text = r.text({ status: true });
+      const text = r.text({ status: true, jobs: true, noCommandBound: true });
       for (const f of facts) if (!f.test(text)) bad.push(`${id}: lost ${f}`);
       if (!sec.split('\n').includes(text)) bad.push(`${id}: not a paragraph of the Reporting-back section`);
       if (text.split('\n').length > 3 || B(text) > 480) bad.push(`${id}: ${B(text)} B over ${text.split('\n').length} lines (≤ 3 lines, ≤ 480 B)`);
@@ -220,6 +222,8 @@ console.log('— ③b the standing rules (a usage wall\'s reset is one account\'
   ok(shapes.length >= 7 && shapes.every((x) => !x.text || /\nUSAGE WALLS: /.test(x.text)) && shapes.filter((x) => x.text).length >= 6, `every SessionStart shape the hook renders carries USAGE WALLS (${shapes.filter((x) => x.text).length} rendered; every toggle off renders nothing)`);
   const off = REG.renderSessionStartTools({ ask: true, task: true, jobs: true }, {}).join('\n');
   ok(/\nUSAGE WALLS: /.test(off) && !/vibespace-status/.test(off) && /If you must wait, say so and stop — never a backlog item "after the reset"\./.test(off), 'the status toggle closed: the rule still rides, and teaches no vibespace-status (2.211.0)');
+  const plain = REG.renderSessionStartTools({ status: true, ask: true, task: true, jobs: true, channels: 'read' }, {}).join('\n');
+  ok(!/COMMANDS THAT MAY WAIT/.test(plain) && /\nCOMMANDS THAT MAY WAIT: /.test(REG.renderSessionStartTools(TT, {}).join('\n')), 'lane turn-never-silent: the command-bounds line rides ONLY a session whose CLI bounds no command (toolsFor\'s noCommandBound — agy\'s row); every other harness\'s section is unchanged');
   const removed = ruleProblems((REG.STANDING_RULES || []).filter((r) => r.id !== 'usage-walls'));
   ok(removed.length === 1 && removed[0] === 'usage-walls: no standing rule row', `CONTROL: the usage-walls row removed ⇒ RED by name (${removed[0]})`);
   const gutted = ruleProblems((REG.STANDING_RULES || []).map((r) => (r.id === 'usage-walls' ? { ...r, text: () => 'USAGE WALLS: wait for the reset.' } : r)));

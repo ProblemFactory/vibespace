@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const OF = require('./server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the owner's clock + tray words — every time and tray sentence an agent reads here
+const { capsOf } = require('./backend-caps.js'); // lane turn-never-silent: a harness's liveness row (commandBound — the one rule line)
 const { sameToken } = require('./pairing-token.js'); // B-8dda: every vsst_ lookup compares in constant time
 
 // ── stash → injection block (drain-at-render) ─────────────────────────────
@@ -2072,7 +2073,7 @@ const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
   channelsReachMemo.set(s, out);
   return out;
 };
-const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}) }; };
+const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}), ...(((capsOf(s && s.backend).liveness || {}).commandBound === 'none') ? { noCommandBound: true } : {}) }; };   // lane turn-never-silent: the one rule line for a CLI that bounds no command (STANDING_RULES 'command-bounds')
 // lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the
 // free road only: the engine queues each carry on the conversation's chain, into this session's stash — it rides this
 // member's next injection; at SessionStart that is its first prompt). Asked at the stash drain; never a timer.

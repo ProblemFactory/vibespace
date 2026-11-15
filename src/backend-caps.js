@@ -405,7 +405,7 @@ const BACKEND_CAPS = {
     // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
     // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
     // Stop is an interrupt (control_request): the CLI keeps running.
-    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt', commandBound: 'cli' },
     inProgressTools: false,
     // lane worker-dispatch (2026-10-02): the stream SAYS when a compaction ends — every exit of the 'compacting'
     // claim goes through the stdout consumer's one writer (`endCompaction`), which notifies src/server/compaction-watch.js.
@@ -469,7 +469,7 @@ const BACKEND_CAPS = {
     // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
     // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
     // Stop is turn/interrupt: the app-server keeps running.
-    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt', commandBound: 'unverified' },
     inProgressTools: false,
     // Personality enum + thread/settings/update, both from the 0.153.4 schema
     // dump. LIVE: the running thread takes the new personality for its next
@@ -542,7 +542,7 @@ const BACKEND_CAPS = {
     // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
     // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
     // Stop is session/cancel: the ACP agent keeps running.
-    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt', commandBound: 'unverified' },
     inProgressTools: false,
     // ACP v1 has no response-style/persona verb; the agent's own config owns it.
     responseStyle: { live: false, closed: true, values: [] },
@@ -590,7 +590,7 @@ const BACKEND_CAPS = {
     // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
     // Stop RESTARTS agy (data/bin/agy-wrapper.js restartChild — its stream has no cancel): the process is ended and
     // started again on the same conversation.
-    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'restart' },
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'restart', commandBound: 'none' },
     inProgressTools: false,
     responseStyle: { live: false, closed: true, values: [] },
     worktree: NO_WORKTREE,
