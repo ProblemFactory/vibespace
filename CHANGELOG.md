@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.
 - Elsewhere the popup shows the reading and how many requests ran here since, and the account pool reads an estimate only where it has proven itself.
+- Codex and Antigravity usage estimates learn only from their own readings, never from Claude’s quota sizes.
 
 ### Fixed
 - A usage wall seen again after a restart no longer reads the Antigravity account a second time.
