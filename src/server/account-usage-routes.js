@@ -999,6 +999,11 @@ require('./stream-wall.js').configure({ harnessOf: (id) => { try { return requir
   // the wrapper's own sidecar (server.js BUFFERS_DIR/<webui id>.json): its agy `init.model` — the wall's model for a wrapper
   // that does not stamp one, across a hub restart (r3)
   wrapperMetaOf: (s) => require('./stream-wall.js').readWrapperSidecar(path.join(rootDir, 'data', 'session-buffers'), s) }); // bounded + local-only (r4)
+// …and its THIRD caller (lane usage-predict, the owner's ruling «A» 2026-11-14): the end of a stretch of work — a turn of a
+// named account's conversation ended and 5 minutes passed with no new turn of it ⇒ ONE read through this same door, at most
+// once per account per 30 minutes counted from its last read on disk; only where the descriptor declares `onDemand.afterTurn`
+require('./after-turn-read.js').configure({ harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor });
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }

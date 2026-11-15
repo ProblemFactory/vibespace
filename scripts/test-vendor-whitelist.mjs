@@ -547,39 +547,77 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     'B-9b40: the probe spawns exactly PANEL_PROBE_ARGS — no second spelling of the argv');
 }
 
-// ── 5c: THE ON-DEMAND USAGE DOOR'S CALLERS (lane agy-wall-signal; the owner's ruling «A» 2026-11-02) ──
+// ── 5c: THE ON-DEMAND USAGE DOOR'S CALLERS (lane agy-wall-signal; the owner's ruling «A» 2026-11-02 · the third: lane usage-predict, the owner's ruling «A» 2026-11-14) ──
 // src/server/cli-usage-door.js spawns a harness CLI's own usage command (antigravity: `agy -p /usage` — answered without a
 // turn; a local spawn, not an HTTP construction, so the census above never sees it). It had ONE caller: a PERSON's
 // Re-check. The owner's ruling adds exactly ONE more, deliberately, with its gates: a usage WALL the account's own
 // conversation named (src/server/stream-wall.js) fires ONE read of that account — event = the wall (never a timer, a
-// cadence, a session start / stop / idle), once per account per reset (the ledger), only for a LIVE wall record, only
-// where the descriptor declares `onDemand.onWallSignal` (gated in the door itself), judge-gated (a 'turn-started'
-// verdict disarms it until the hub restarts). A third caller, a caller without its gates, or a timer in either file is RED.
+// cadence, a session start / stop / idle), once per account per reset (the ledger — and, across a restart, the account's
+// last read on disk), only for a LIVE wall record, only where the descriptor declares `onDemand.onWallSignal` (gated in the
+// door itself), judge-gated (a 'turn-started' verdict disarms it until the hub restarts).
+// THE THIRD (the owner's A, 2026-11-14: «一个 agy 账号上的对话结束一轮、且该账号 5 分钟内没有新一轮时，读一次 agy 的 /usage；每账号
+// 每 30 分钟最多一次；轮次进行中不读；闲置账号不读»): the end of a stretch of work (src/server/after-turn-read.js) — armed ONLY at a
+// turn's END (the ACP consumer's prompt_end branch: the ONE arming site), its ONE timer the 5-minute quiet wait set there and
+// nowhere else; at most once per account per 30 minutes counted from its last read on disk; never while a turn of the
+// account runs; never for an account with no turn since its last read; a record older than the hub arms nothing (no
+// catch-up); only where the descriptor declares `onDemand.afterTurn`. A fourth caller, a caller without its gates, a timer
+// elsewhere, or an arming site beside the turn's end is RED.
 {
   const CALLERS = {
     'src/server/account-usage-routes.js': { n: 1, gates: [/usageDoor\.read\(req\.params\.id, \{ person: !isAgentBearer\(req\) \}\)/] },
     'src/server/stream-wall.js': { n: 1, gates: [/door\.read\(key, \{ wall: true \}\)/, /od\.onWallSignal === true/, /Math\.abs\(t - sig\.measuredAt\) <= LIVE_MS/,
-      /fired\.some\(\(f\) => f\.key === key && f\.limitId === sig\.limitId && Math\.abs\(f\.resetsAt - sig\.resetsAt\) <= SAME_RESET_S\)/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/] },
+      /fired\.some\(\(f\) => f\.key === key && f\.limitId === sig\.limitId && Math\.abs\(f\.resetsAt - sig\.resetsAt\) <= SAME_RESET_S\)/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/,
+      /if \(doorReads\.lastReadAt\(cacheDir, key, usageWrite\) >= sig\.measuredAt\) return null;/] },
+    'src/server/after-turn-read.js': { n: 1, gates: [/door\.read\(key, \{ afterTurn: true \}\)/, /return od && od\.afterTurn === true \? String\(session\._accountId\) : null;/,
+      /const QUIET_MS = 5 \* 60 \* 1000;/, /const PACE_MS = 30 \* 60 \* 1000;/, /if \(!\(endAt >= born\)\) return null;/, /if \(last >= endAt\) return null;/,
+      /if \(now\(\) - last < paceMs\)/, /const last = doorReads\.lastReadAt\(cacheDir, key, usageWrite\);/, /if \(busy\(key\)\) return null;/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/] },
   };
   const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
-  const callsIn = (t) => (t.replace(/^\s*(\/\/|\*).*$/gm, '').match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
+  const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
+  const callsIn = (t) => (strip(t).match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
   const found = {};
   for (const f of [...srcFiles('src'), 'server.js']) { const t = fs.readFileSync(path.join(REPO, f), 'utf-8'); if (/cli-usage-door|createCliUsageDoor|door: usageDoor|\bdoor\.read\(/.test(t) && callsIn(t)) found[f] = callsIn(t); }
   ok(JSON.stringify(Object.keys(found).sort()) === JSON.stringify(Object.keys(CALLERS).sort()) && Object.entries(CALLERS).every(([f, c]) => found[f] === c.n),
-    '5c: the usage door has exactly TWO callers — a person\'s press (account-usage-routes) and the wall one-shot (stream-wall) — one call each', JSON.stringify(found));
+    '5c: the usage door has exactly THREE callers — a person\'s press (account-usage-routes), the wall one-shot (stream-wall) and the read after a stretch of work (after-turn-read) — one call each', JSON.stringify(found));
   for (const [f, c] of Object.entries(CALLERS)) {
     const t = fs.readFileSync(path.join(REPO, f), 'utf-8');
     const missing = c.gates.filter((g) => !g.test(t)).map(String);
     ok(!missing.length, `5c: ${f} keeps its gates (${c.gates.length})`, missing.join(' · '));
   }
   const door = fs.readFileSync(path.join(REPO, 'src/server/cli-usage-door.js'), 'utf-8'), wall = fs.readFileSync(path.join(REPO, 'src/server/stream-wall.js'), 'utf-8');
-  ok(/if \(!person && !wall\) return \{ ok: false, status: 403/.test(door) && /if \(!person && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{/.test(door),
-    '5c: the DOOR refuses any other caller (403), a wall read the descriptor does not declare (400), and keeps the judge\'s STOP');
-  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1,
-    '5c: never a timer — the wall road holds none, the door only its own child\'s 30 s kill');
-  // CONTROLS: a third caller and a timer-driven re-check, planted, are RED by the same reads
+  const atr = fs.readFileSync(path.join(REPO, 'src/server/after-turn-read.js'), 'utf-8'), acp = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf-8');
+  ok(/const caller = person \? 'person' : wall === true \? 'wall' : afterTurn === true \? 'afterTurn' : null;/.test(door) && /if \(!caller\) return \{ ok: false, status: 403/.test(door)
+    && /if \(caller === 'wall' && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door)
+    && /if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{/.test(door),
+    '5c: the DOOR refuses any other caller (403), a wall read or an after-turn read the descriptor does not declare (400), and keeps the judge\'s STOP');
+  // THE ONE TIMER of the after-turn road: the quiet wait, set in onTurnEnd alone; fire() runs only from it
+  const bodyOf = (t, head) => { const i = t.indexOf(head); if (i < 0) return ''; let j = t.indexOf('{', i + head.length), d = 0; for (let k = j; k < t.length; k++) { if (t[k] === '{') d++; else if (t[k] === '}' && --d === 0) return t.slice(j, k + 1); } return ''; };
+  const timerLaw = (t) => { const c = strip(t); const inEnd = bodyOf(c, 'function onTurnEnd(session, rec)');
+    return !/setInterval/.test(c) && (c.match(/\bsetTimeout\(/g) || []).length === 1 && /setTimer = \(fn, ms\) => \{ const t = setTimeout\(fn, ms\);/.test(c)
+      && (c.match(/\bsetTimer\(/g) || []).length === 1 && /const timer = setTimer\(\(\) => fire\(key, endAt\), quietMs\);/.test(inEnd)
+      && (c.match(/\bfire\(/g) || []).length === 2 && (c.match(/\bonTurnEnd\(/g) || []).length === 3; };
+  ok(!/setInterval|setTimeout/.test(wall) && !/setInterval/.test(door) && (door.match(/setTimeout\(/g) || []).length === 1 && timerLaw(atr),
+    '5c: never a cadence — the wall road holds no timer, the door only its own child\'s 30 s kill, the after-turn road ONE: the quiet wait set in onTurnEnd alone (fire() only from it; no interval)');
+  // THE ONE ARMING SITE: the ACP consumer's prompt_end branch calls onTurnEnd, its prompt_start branch onTurnStart — once each,
+  // nowhere else in the tree; the road is configured once, beside the door
+  const branch = (t, kind) => { const i = t.indexOf(`} else if (msg.kind === '${kind}') {`); const j = i < 0 ? -1 : t.indexOf('} else if (msg.kind ===', i + 10); return i < 0 ? '' : t.slice(i, j < 0 ? undefined : j); };
+  const armLaw = (a) => { const c = strip(a);
+    return (c.match(/after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/.test(branch(c, 'prompt_end'))
+      && (c.match(/\bonTurnEnd\(/g) || []).length === 1 && (c.match(/after-turn-read\.js'\)\.onTurnStart\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnStart\(session, msg\)/.test(branch(c, 'prompt_start')); };
+  const users = [...srcFiles('src'), 'server.js'].filter((f) => f !== 'src/server/after-turn-read.js' && /after-turn-read\.js/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8')))).sort();
+  ok(armLaw(acp) && JSON.stringify(users) === JSON.stringify(['src/server/account-usage-routes.js', 'src/server/stdout/acp-events.js']),
+    '5c: the after-turn read is ARMED at a turn\'s end alone — the consumer\'s prompt_end branch (and cancelled by prompt_start); no other file reaches the road but the hub\'s configure', JSON.stringify({ arm: armLaw(acp), users }));
+  // CONTROLS: a third caller, a timer, a session start, an idle tick and a restart catch-up, planted, are RED by the same reads
   const planted = wall.replace('function readOnce(', "setInterval(() => door.read('x', { wall: true }), 3600e3);\n  function readOnce(");
   ok(planted !== wall && callsIn(planted) === 2 && /setInterval/.test(planted), 'CONTROL 5c: a timer-driven re-check planted in the wall road is a second call AND a timer (RED by both rows)', String(callsIn(planted)));
+  const CONTROLS = [
+    ['a timer (an hourly read planted in the road)', () => !timerLaw(atr.replace('  function fire(key, endAt) {', "  setInterval(() => fire('x', 0), 3600e3);\n  function fire(key, endAt) {"))],
+    ['a session start (the consumer\'s `session` record arms the wait)', () => !armLaw(acp.replace("if (msg.kind === 'session') {", "if (msg.kind === 'session') {\n            require('../after-turn-read.js').onTurnEnd(session, msg);"))],
+    ['an idle tick (fire() re-arms itself)', () => !timerLaw(atr.replace('    waits.delete(key);\n    if (busy(key)) return null;', '    waits.delete(key);\n    waits.set(key, { timer: setTimer(() => fire(key, endAt), quietMs), endAt });\n    if (busy(key)) return null;'))],
+    ['a restart catch-up (configure arms the accounts it finds)', () => !timerLaw(atr.replace('function configure(deps) { road = createAfterTurnRead(deps); return road; }', "function configure(deps) { road = createAfterTurnRead(deps); for (const s of deps.sessions || []) road.onTurnEnd(s, { ts: new Date().toISOString() }); return road; }"))],
+    ['the replay guard dropped (a record older than the hub arms)', () => !CALLERS['src/server/after-turn-read.js'].gates.every((g) => g.test(atr.replace('    if (!(endAt >= born)) return null;\n', '')))],
+  ];
+  for (const [what, red] of CONTROLS) ok(red(), `CONTROL 5c: ${what} — RED by the reads above`);
 }
 
 // ── 5d: THE CLI MODELS DOOR'S CALLERS (lane agy-models-report; the owner 2026-11-10, rulings R1 / E1, round 2 law A) ──

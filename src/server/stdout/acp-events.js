@@ -119,11 +119,16 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
             session._turnOpenSaidAt = Date.parse(msg.ts) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»
             try { if (session.backendSessionId) deliverRef?.noteTurnStarted?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-start note failed: ${e.message}`); }
+            // a turn of the account runs: its after-turn read waits for the stretch to end (lane usage-predict, the owner's A)
+            try { require('../after-turn-read.js').onTurnStart(session, msg); } catch (e) { console.warn(`[acp] after-turn read (start) failed: ${e.message}`); }
           } else if (msg.kind === 'prompt_end') {
             session._isStreaming = false; newLabel = '';
             delete session._turnOpenSaidAt;   // the cut (D): the opening said is the turn running NOW — cleared at its end record
             try { if (session.backendSessionId) deliverRef?.noteTurnEnded?.(session.backendSessionId); } catch (e) { console.warn(`[deliver] ${id}: turn-end note failed: ${e.message}`); }
             try { noteTurnEnd?.(session); } catch {}
+            // ONE usage read after a stretch of work (lane usage-predict, the owner's A): THE arming site — the account's 5-minute
+            // quiet wait starts here and nowhere else (src/server/after-turn-read.js)
+            try { require('../after-turn-read.js').onTurnEnd(session, msg); } catch (e) { console.warn(`[acp] after-turn read (end) failed: ${e.message}`); }
             // the descriptor's after-turn read (antigravity: the card of a sub its OLD wrapper journaled without one — the
             // cards' addendum): its records go through THIS loop next, as if journaled (a `sub` step to its virtual
             // session, a card to the cards) — never into the session buffer / the journal
