@@ -31,7 +31,7 @@ import { dictEntries } from './i18n-extract.mjs';
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 // the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
-const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js', 'src/server/browser-dialogs.js', 'src/server/browser-logins.js', 'src/browser-login.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js', 'src/server/browser-dialogs.js', 'src/server/browser-logins.js', 'src/browser-login.js', 'src/server/setting-holds.js' /* lane setting-doors pick 2: the hold store's notices and its return toast */].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
 // …and the server's key TABLES (each value a key the client words with t()): the jobs engine's For-you templates
 export const noticeKeyTables = () => {
   const req = createRequire(import.meta.url), RT = req('../src/relay-token.js'), BL = req('../src/browser-login.js');

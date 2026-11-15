@@ -114,6 +114,12 @@ const items = async () => { const d = ((await api('/api/user-todos')).json || {}
 const openTray = () => until(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return !!p && !p.classList.contains('hidden') && p.getBoundingClientRect().height > 0; })()`, { timeout: 10000 });
 const TOASTS_SRC = "(() => { if (window.__toasts) return; window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList && n.classList.contains('global-toast')) window.__toasts.push(n.textContent); }).observe(document.body, { childList: true, subtree: true }); })()";
 const toasts = async () => { try { return await evalJs('(window.__toasts || []).slice(-4)'); } catch { return []; } };
+/** a picture of ONE element (a box, a row) — clipped to its rect, scrolled into view first */
+const shotOf = async (name, sel) => { if (!SHOTS) return; await evalJs(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (e) e.scrollIntoView({ block: 'center' }); return !!e; })()`); await sleep(250);
+  const r = await evalJs(`(() => { const e = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.max(0, b.left - 6), y: Math.max(0, b.top - 6), width: Math.min(innerWidth, b.width + 12), height: Math.min(innerHeight, b.height + 12) }; })()`);
+  if (!r) return; fs.mkdirSync(SHOTS, { recursive: true }); const o = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...r, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(o.data, 'base64')); console.log(`    · picture ${path.join(SHOTS, name + '.png')}`); };
+const idOf = async (startsWith) => ((await items()).filter((x) => String(x.text || '').startsWith(startsWith)).pop() || {}).id;
+const byId = (id) => `#user-todos-popup .ut-item[data-id="${id}"] .ut-setting-change`;
 const box = (key, scope = '#user-todos-popup') => `${scope} .ut-setting-change[data-key="${key}"]`;
 /** the box as drawn: its words, its button (words, whole, inside the viewport) */
 const boxOf = (sel) => evalJs(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].filter((e) => e.getBoundingClientRect().height > 0).pop(); if (!b) return null;
@@ -212,6 +218,45 @@ try {
   check('a real press in the chat', (await press(`${cardSel} .ut-setting-go`)) === true);
   const v3 = await (async () => { for (let i = 0; i < 40; i++) { if (stored()[IDDAY] === 100) break; await sleep(150); } return stored()[IDDAY]; })();
   check('the row holds 100; no hold (a lasting lower)', v3 === 100 && (await holdsNow()).length === 0, { v3 });
+
+  console.log('⑦b THE CHECK\'S LAWS on a held row (主开发 2026-11-15): A — a lasting change is judged against the hold\'s «before»; B — a hand change ends the hold where it lands; C — nothing said is false');
+  await evalJs(`(() => { if (window.app && app.wm) { for (const w of [...(app.wm.windows ? app.wm.windows.values() : [])]) { try { if (w.type === 'chat') app.wm.closeWindow(w.id); } catch { } } } return true; })()`);
+  check('the owner has the row at 1500 by hand (no hold)', (await ownerPatch({ [DAY]: 1500 })).status === 200 && (await holdsNow()).length === 0);
+  const qa = await ask(['Ease the day ceiling to 1400 for good?', '--propose', `${DAY}=1400`], TOKEN);
+  const A = await idOf('Ease the day ceiling to 1400');
+  check('a lasting 1400 is filed while the row is 1500 (a lower then)', qa.code === 0 && !!A, qa.out);
+  check('…the owner sets the row back to 1200 by hand', (await ownerPatch({ [DAY]: 1200 })).status === 200 && stored()[DAY] === 1200);
+  const qb = await ask(['Raise the day ceiling for the release run?', '--propose', `${DAY}=1600`, '--until', '2h'], TOKEN);
+  const B = await idOf('Raise the day ceiling for the release run');
+  await openTray(); await until(`!!document.querySelector(${JSON.stringify(byId(B) + ' .ut-setting-go')})`, { timeout: 10000 }); await sleep(900);   // press-arm
+  check('a timed raise to 1600 for 2 h is pressed', qb.code === 0 && (await press(`${byId(B)} .ut-setting-go`)) === true);
+  const hB = await (async () => { for (let i = 0; i < 40; i++) { const h = await holdsNow(); if (h.length === 1) return h[0]; await sleep(150); } return null; })();
+  check('a hold stands: 1600, back to 1200', !!hB && hB.value === 1600 && hB.before === 1200 && stored()[DAY] === 1600, hB);
+  const qc = await ask(['Settle the day ceiling at 1000?', '--propose', `${DAY}=1000`], TOKEN), qd = await ask(['Raise the day ceiling a little more for an hour?', '--propose', `${DAY}=2000`, '--until', '1h'], TOKEN);
+  const q1400 = await ask(['Make it 1400 for good?', '--propose', `${DAY}=1400`], TOKEN);
+  check('LAW A at the ASK: on the held row a lasting 1400 (over the «before» 1200) is refused by name, with the row\'s link — nothing filed', q1400.code !== 0 && /raise-over-hold|goes back to 1200/.test(q1400.out) && q1400.out.includes(`vibespace://settings/${DAY}`), q1400.out);
+  const C = await idOf('Settle the day ceiling at 1000'), D = await idOf('Raise the day ceiling a little more');
+  check('a lasting 1000 (under the «before») and a timed 2000 are filed on the held row', qc.code === 0 && qd.code === 0 && !!C && !!D, { qc: qc.out, qd: qd.out });
+  await openTray();
+  await until(`!!document.querySelector(${JSON.stringify(byId(D))})`, { timeout: 10000 });
+  const bA = await boxOf(byId(A)), bC = await boxOf(byId(C)), bD = await boxOf(byId(D));
+  check('LAW A ON THE CARD: the lasting 1400 filed before the hold draws NO button now — the reason names 1400 and the 1200 it would stay above, with the row\'s link', !!bA && !bA.go && bA.press === 'raise-over-hold' && /1400/.test(bA.why) && /1200/.test(bA.why), bA);
+  await shotOf('zh-held-case-lasting-over-before', byId(A));
+  check('a lasting 1000 on the held row: ONE button «改为 1000 …» and the held line says the hold ends', !!bC && !!bC.go && /改为/.test(bC.go.words) && /1000/.test(bC.go.words) && /1200/.test(bC.held), bC);
+  await shotOf('zh-held-case-lasting-under-before', byId(C));
+  check('a timed 2000 on the held row: the raise button, and the held line says it still goes back to 1200', !!bD && !!bD.go && /2000/.test(bD.go.words) && /1200/.test(bD.held), bD);
+  await shotOf('zh-held-case-timed', byId(D));
+  const bytesH = settingsBytes();
+  check('LAW B: the owner types 1300 into the held row (the owner\'s page writes it)', (await ownerPatch({ [DAY]: 1300 })).status === 200 && stored()[DAY] === 1300);
+  check('…the hold ENDS where the write lands — the hub keeps none, every page is told', !!(await until(`fetch('/api/setting-holds').then((r) => r.json()).then((j) => j.holds.length === 0)`, { timeout: 8000 })));
+  check('…no return can write over it: the settings file holds the hand\'s 1300', stored()[DAY] === 1300 && !sameBytes(bytesH, settingsBytes()));
+  const bD2 = await (async () => { for (let i = 0; i < 40; i++) { const b = await boxOf(byId(D)); if (b && !b.held) return b; await sleep(150); } return boxOf(byId(D)); })();
+  check('LAW C ON THE CARD: no held line any more; the timed 2000 now goes back to the hand\'s 1300 — never «then 1200»', !!bD2 && !bD2.held && /1300/.test(bD2.text) && !/之后回到 1200/.test(bD2.text), bD2 && bD2.text);
+  await shotOf('zh-held-case-after-hand-change', byId(D));
+  await evalJs(`app.openSettingAt(${JSON.stringify(DAY)}); true`);
+  await until(`!!document.querySelector('.settings-row[data-path="${DAY}"]')`, { timeout: 10000 }); await sleep(400);
+  check('LAW C IN SETTINGS: after the hand change the row draws no held line and no «End now»', (await evalJs(`!document.querySelector('.settings-row[data-path="${DAY}"] .settings-row-held') && !document.querySelector('.settings-row[data-path="${DAY}"] .settings-held-end')`)) === true);
+  await shotOf('zh-settings-row-after-hand-change', `.settings-row[data-path="${DAY}"]`);
 
   console.log('⑧ the phone (390 px): the sheet\'s box, a tap');
   const d = await ask(['Raise the hourly ceiling for this run?', '--propose', `${HOUR}=60`, '--until', '90m'], TOKEN);

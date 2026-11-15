@@ -534,7 +534,12 @@ class SettingsUI {
       end.disabled = true;
       const r = await fetchJson('/api/setting-holds/end', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: path }) });
       end.disabled = false;
-      if (!(r && r.ok)) showToast(t('Could not end the hold: {why}', { why: r && r.error ? t(String(r.error)) : t('server unreachable') }), { type: 'error', duration: 9000 });
+      // worded BY ITS CODE (the check's words-7): a settings file that refused says so and that the row stays — never «unreachable»
+      if (!(r && r.ok)) {
+        const why = !r ? t('server unreachable') : r.code === 'return-failed' ? t('the settings file could not be written — it stays at {value}', { value: Number(r.value) })
+          : r.code === 'spend_row_owner_only' ? t('only your own page can change it — nothing changed') : t('this change cannot be pressed here — change it on the row');
+        showToast(t('Could not end the hold: {why}', { why }), { type: 'error', duration: 9000 });
+      } else if (r.changedByHand) showToast(t('You had changed it by hand, so the hold had already ended — it stays at {value}', { value: Number(r.value) }));
     };
     line.append(said, end);
     info.appendChild(line);
