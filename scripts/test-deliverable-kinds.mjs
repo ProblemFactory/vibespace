@@ -15,6 +15,9 @@
 //   ⑦ the stored view: a v2 «intent» (the old default) reads as the kind default; a v3 intent CHOICE stays
 //   ⑧ the panel's wiring (source census): the plan gets `only`, a kind's head toggles it, «Show all» on the alone head
 //   ⑨ CONTROLS (patched copies, each RED by name)
+//   ⑩ a row's AGE is the one formatter's (page-time `ago`: «10 分钟前», «1 小时前» — 主开发 09:44Z: one with a blank, one without, was
+//     user-todos-row's own agoText) at all three sites, and nothing in the card draws an age of its own (+ its control); on the phone a
+//     row's meta that does not fit beside the age takes a SECOND line, never cut (chat.css's phone block; + its control)
 // PURE + in-process.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -122,6 +125,18 @@ const rawKind = await mCopy('raw', "export const kindKey = (r) => (r && KIND_ORD
 ok(rawKind && rawKind.listPlan(V, { group: 'kind' }).sections.filter((s) => s.head.group === 'kind').map((s) => s.head.label + ' ' + s.head.count).join(' · ') !== heads.join(' · '), 'CONTROL the list grouping by the RAW kind (not dk) ⇒ the groups leg is RED');
 const noAlone = await mCopy('noalone', "  const all = alone ? railRows([...items, ...code], alone) : [...items, ...code];", "  const all = [...items, ...code];");
 ok(noAlone && noAlone.listPlan(V, { group: 'kind', only: 'k:image' }).sections.length > 1, 'CONTROL `only` not applied ⇒ the alone leg is RED');
+
+console.log('— ⑩ a row\'s age is the ONE formatter\'s');
+const ageSites = (src) => ({ imp: /^import \{ stampAt as when, ago as pageAgo \} from '\.\/page-time\.js';/m.test(src), page: (src.match(/\bpageAgo\(/g) || []).length, own: (src.match(/user-todos-row\.js|\bagoText\b|\{[mh]\}(?:min|h) ago/g) || []) });
+const ageLaw = (a) => a.imp && a.page === 3 && a.own.length === 0;
+const ages = ageSites(card);
+ok(ageLaw(ages), `artifact-card's three ages (a row's meta line, a service's «since», the list row) call page-time's ago (${ages.page}) — nothing from user-todos-row, no template of its own`, ages);
+ok(!ageLaw(ageSites(card.replace('parts.push(pageAgo(f.lastAt))', "parts.push(agoText(f.lastAt, t))"))), 'CONTROL a row age through user-todos-row\'s agoText ⇒ the age leg is RED');
+const phoneBlock = (css) => { const i = css.indexOf('@media (max-width: 480px), (pointer: coarse) and (max-width: 1023px) {\n  .chat-status-dropdown.chat-artifacts-panel'); const j = i < 0 ? -1 : css.indexOf('\n}\n', i); return i < 0 || j < 0 ? '' : css.slice(i, j); };
+const wraps = (css) => /\.chat-artifacts-panel \.chat-artifact-meta \{ white-space: normal; overflow-wrap: break-word; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; \}/.test(phoneBlock(css));
+const chatCss = read('public/chat.css');
+ok(wraps(chatCss), 'on the phone a row\'s meta takes a second line (at most two), never cut — the page\'s age words are wider than the old «20min ago» (measured: «referee · …/out · Document» needed 191 of 189 px at 360 in DejaVu)');
+ok(!wraps(chatCss.replace('.chat-artifacts-panel .chat-artifact-meta { white-space: normal;', '.chat-artifacts-panel .chat-artifact-meta { white-space: nowrap;')), 'CONTROL the phone meta kept on one line ⇒ the wrap leg is RED');
 
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

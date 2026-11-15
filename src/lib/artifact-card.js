@@ -5,9 +5,8 @@
 // write / edit rewrites its keyed children's text. One click = open the file in its kind's viewer BESIDE the chat
 // (`from`: the same door a Cmd+click on a path takes — no Cmd needed).
 import { t, resolveLang } from './i18n.js';
-import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, ago as pageAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads — a row's age too («10 分钟前», «1 小时前»: artifacts-by-intent .403 — the For-you rows' helper it borrowed spelled the hour without the blank)
 import { getFileIcon } from './file-types.js';
-import { agoText } from './user-todos-row.js';
 import { cardFacts, kindWord, intentWord, deliverableWord } from '../artifacts.js';
 import { UI_ICONS } from './icons.js';
 import { absUrl, showContextMenu, copyText } from './utils.js';
@@ -43,10 +42,10 @@ export function showInPorts(app, forwardId) {
 const stamp = (ts) => when(ts, { words: true });   // its one use is a sentence («Stopped at {time}»)
 export function artifactMetaText(b) {
   const f = cardFacts(b);
-  if (f.kind === 'service') return f.state === 'stopped' ? t('Stopped at {time}', { time: stamp(f.stoppedAt) }) : `${t('Running')} · ${t('since {ago}', { ago: agoText(f.since || f.lastAt, t) })}`;
+  if (f.kind === 'service') return f.state === 'stopped' ? t('Stopped at {time}', { time: stamp(f.stoppedAt) }) : `${t('Running')} · ${t('since {ago}', { ago: pageAgo(f.since || f.lastAt) })}`;
   const upload = f.kind === 'upload' && f.byUser && !f.changes; // lane artifacts-registries: the registries' rows say their store's fact
   const parts = [f.state === 'unpublished' ? t('Unpublished') : f.state === 'published' ? t('Published') : upload ? t('Attached by you') : f.changes ? t('Changed {n} times', { n: f.changes }) : t('Written by the agent')];
-  if (f.lastAt) parts.push(agoText(f.lastAt, t));
+  if (f.lastAt) parts.push(pageAgo(f.lastAt));
   if (f.byUser && !upload) parts.push(t('last by you'));
   // lane artifacts-handover: WHO made it for this conversation, and whom the helper handed it to
   if (f.via && f.via.kind === 'handover') parts.unshift(t('Handed over by {name}', { name: f.via.from.name || f.via.from.cid }));
@@ -135,7 +134,7 @@ const SORT_WORDS = { changed: 'Recently changed', name: 'Name', edits: 'Times ch
 export const artifactRowIcon = (b) => (b.kind === 'service' ? UI_ICONS.globe : getFileIcon(b.name || '')) || '';
 /** The row's words through the model (E6): {folder, kind, helper, edits, ago}; `ctx` = the list's (listCtx: cwd, host,
  *  the told-apart folders, the hub's word). */
-export const artifactRowWords = (b, ctx = null) => rowWords(b, { t, kindWord: (k) => kindWord(k, lang()), ago: (ts) => agoText(ts, t), cwd: (ctx && ctx.cwd) || '', host: (ctx && ctx.host) || '', hubWord: (ctx && ctx.hubWord) || t('Local'), hostNames: (ctx && ctx.hostNames) || null, folders: (ctx && ctx.folders) || null });
+export const artifactRowWords = (b, ctx = null) => rowWords(b, { t, kindWord: (k) => kindWord(k, lang()), ago: (ts) => pageAgo(ts), cwd: (ctx && ctx.cwd) || '', host: (ctx && ctx.host) || '', hubWord: (ctx && ctx.hubWord) || t('Local'), hostNames: (ctx && ctx.hostNames) || null, folders: (ctx && ctx.folders) || null });
 /** The kind's word in the house language (the filter matches it). */
 export const artifactKindWord = (k) => kindWord(k, lang());
 /** The name with the filter's match in ONE <mark> — text nodes only (a name is the agent's; never markup). */
