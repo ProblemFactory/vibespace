@@ -509,8 +509,18 @@ export function installUsageMeter(App, ctx = {}) {
       if (pair?.estPct == null || pair.estPct <= pair.darkPct) return '';
       return `<div class="usage-bar-est" style="left:${pair.darkPct}%;width:${pair.estPct - pair.darkPct}%;--est-c:${usageColor(pair.estPct)}"></div>`;
     };
-    const estStat = (pair) => (pair?.estPct == null ? '' :
-      `<span class="usage-stat usage-est-stat" title="${escHtml(t('Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.'))}">${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`);
+    // THE BAND'S WORDS (usage-predict P2): a lane is projected only where this instance's verdict for its source is on or
+    // provisional — «up to Y%» (the reading is the floor), a provisional band with its count of readings; a lane that draws
+    // nothing says how much was used here since its reading, and no number
+    const estStat = (pair, est, lane) => {
+      const ps = est && est.predict && est.predict[lane];
+      if (pair?.estPct != null && ps && (ps.state === 'on' || ps.state === 'provisional')) {
+        const words = ps.state === 'provisional' ? t('up to {pct}% · from {n} readings', { pct: pair.estPct, n: ps.n }) : t('up to {pct}%', { pct: pair.estPct });
+        return `<span class="usage-stat usage-est-stat" title="${escHtml(t("Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate."))}">${escHtml(words)}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`;
+      }
+      const n = est && Number.isFinite(Number(est.sinceRequests)) ? Number(est.sinceRequests) : null;
+      return ps && (ps.state === 'learning' || ps.state === 'off') && n ? `<span class="usage-stat usage-est-plain">${escHtml(t('{n} requests here since', { n }))}</span>` : '';
+    };
     // the «Resets» stat, or — for a reset that landed since the reading — its unconfirmed words (lane reset-unproven)
     const resetStat = (view, resetHtml) => (view && view.unconfirmed
       ? `<span class="usage-stat usage-stat-unconfirmed">${escHtml(unconfirmedText(view, { t }))}</span>`
@@ -639,7 +649,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="${barClass(vSc)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div>${estBar(pSc)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
-          ${estStat(pSc)}
+          ${estStat(pSc, estSel, 'scoped:' + String(sc.name || '').trim().toLowerCase())}
           ${resetStat(vSc, scNotStarted ? escHtml(windowNote(sc, { t })) : fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated))}
           ${scNotStarted ? '' : scAge}${scNotStarted ? '' : claimBtn(quotaModel.laneOfBucket(rl, 'scoped', sc.name), vSc, sc.name)}
         </div>
@@ -664,7 +674,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="${barClass(v5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
-          ${estStat(p5)}
+          ${estStat(p5, estSel, 'fiveHour')}
           ${resetStat(v5, fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization))}
           ${laneAge(atOf('plan:5h'))}${claimBtn('plan:5h', v5)}
         </div>
@@ -680,7 +690,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="${barClass(v7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
-          ${estStat(p7)}
+          ${estStat(p7, estSel, 'sevenDay')}
           ${resetStat(v7, fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated))}
           ${laneAge(atOf('plan:7d'))}${claimBtn('plan:7d', v7)}
         </div>
@@ -740,7 +750,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="${barClass(cv5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cp5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
-          ${estStat(cp5)}
+          ${estStat(cp5, cEstSel, 'fiveHour')}
           ${resetStat(cv5, fmtReset(codex.fiveHour?.resetsAt, codex.fiveHour?.utilization))}
         </div>
       </div>
@@ -749,7 +759,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="${barClass(cv7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cp7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
-          ${estStat(cp7)}
+          ${estStat(cp7, cEstSel, 'sevenDay')}
           ${resetStat(cv7, fmtReset(codex.sevenDay?.resetsAt, codex.sevenDay?.utilization))}
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
           ${codex.resetCredits ? `<span class="usage-stat" title="${escHtml(t('Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)'))}"><span class="usage-stat-label">${escHtml(t('Reset credits'))}</span> ${Number(codex.resetCredits.availableCount) || 0}</span>` : ''}

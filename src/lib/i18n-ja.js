@@ -2747,7 +2747,10 @@ export default {
   "Add via long-lived token": "長期トークンで追加",
   "est {pct}%": "推定 {pct}%",
   "window reset since last reading": "前回取得後にウィンドウがリセット",
-  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "推測航法による推定：最後の実測値にその後のローカル使用量を学習レートで加算（破線部分）。⟳ で実測値を取得して補正します。",
+  "up to {pct}%": "最大 {pct}%",
+  "up to {pct}% · from {n} readings": "最大 {pct}% · {n} 回の取得から",
+  "Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate.": "前回の取得値（下限）と推定の間：取得値にこのハブでのその後の使用量を、このアカウントの学習レートで加えたもの。",
+  "{n} requests here since": "その後このハブで {n} 回のリクエスト",
   "Pooled account — one billing identity auto-switching across your subscriptions": "プールアカウント — 1つの請求アイデンティティがサブスクリプション間を自動切替",
 
   // ── i18n coverage sweep (missing-key fill, added post-2.265.0 fix campaign) ──

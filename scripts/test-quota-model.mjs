@@ -437,6 +437,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       // accessor") rather than assumed here.
       ['src/account-pool-auto.js', ['view-only', 'bucketRemaining/weeklyDeadline call bucketCounts, so no empty window can become a constraint or a deadline — but they read the projected view, so ⑯c drives the projection`s own invariant']],
       ['src/usage-anchors.js', ['migrated', 'an empty bucket anchors as no-bucket, like the fabricated status:unknown one']],
+      ['src/usage-predict.js', ['migrated', 'gateEstimate only DROPS an estimated bucket by its lane\'s verdict (usage-predict) — it never writes, invents or re-reads a bucket']],
       ['src/usage-estimator.js', ['migrated', 'overlayCache never replaces a bucket the raw reading marks empty']],
       ['src/reading-lag.js', ['migrated', 'windowOf skips empty windows — a sliding reset is not identity evidence']],
       ['src/oat-identity-model.js', ['migrated', 'the long-lived token\'s identity post-check (lane oat-identity-postcheck) compares windows only through reading-lag windowOf / compareWindows, which skip empty windows; it reads no usage bucket']],
@@ -2841,6 +2842,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/account-pool-auto.js', 'bucketRemaining(undefined) = null (no claim): accountRemaining / bucketRems / projection rows skip it; weeklyDeadline never reads it; fingerprint prints "-"'],
         ['src/server/usage-pool-engine.js', 'a guessed 5h banner on a «no 5h» member walls its week; wall labels come from the buckets present; trippedWindowFacts/spentWindowOf filter missing buckets; the bucket-less `|| \'fiveHour\'` fold default is unreachable (every noteWallSignal caller names one)'],
         ['src/usage-estimator.js', 'estBucket/overlay/anchors guard `b.fiveHour ?` — a missing bucket is estimated as none'],
+        ['src/usage-predict.js', 'gateEstimate keeps or drops a PRESENT fiveHour by its lane verdict — an absent one stays absent'],
         ['src/usage-anchors.js', '`cache.fiveHour && …` — no bucket anchors as no-bucket'],
         ['src/reading-lag.js', 'windowOf: counts(b5) — an absent 5h is fiveHour:null, never identity evidence'],
         ['src/reading-repair.js', 'every 5h read is `if (b.fiveHour)` / `?? null`; its windows carry fiveHour:null'],
@@ -3370,6 +3372,10 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
     'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
     'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
     'usage-meter.js': [
+      ["${estStat(p5, estSel, 'fiveHour')}", 'usage-predict P2: the lane KEY names the projection\'s verdict state (the band\'s words), never a bucket\'s reading'],
+      ["${estStat(p7, estSel, 'sevenDay')}", '…the 7-day lane\'s verdict state'],
+      ["${estStat(cp5, cEstSel, 'fiveHour')}", '…codex\'s 5-hour lane\'s verdict state'],
+      ["${estStat(cp7, cEstSel, 'sevenDay')}", '…codex\'s 7-day lane\'s verdict state'],
       ['const claimBtn = (lane, view, capName = null)', 'lane account-reset-door: the «I reset this» button is offered on a lane\'s VIEW (bucketView — the verdict already applied) that states a spend; it draws no percent'],
       ['const pct = un ? 0 : w.usedPct', 'limitRows rows: the row\'s `display` (windowDisplay in limitRows) decides `un`'],
       ['fmtReset(w.resetsAt, (w.usedPct || 0) / 100)', '…the same row\'s reset words'],
