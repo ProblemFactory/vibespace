@@ -34,7 +34,7 @@ function asksOf(store, s, id, sessionStatusKey) {
 }
 
 function register(app, c) {
-const { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems } = c;
+const { activeSessions, sessionStatus, userTodos, sessionStatusKey, clearAsAgent, agentSession, toolOn, toolDisabled, bookkept, handoverItems, serverSetting = () => undefined } = c;
 app.post('/api/agent/user-todo', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -83,10 +83,23 @@ app.post('/api/agent/user-todo', async (req, res) => {
         if (!tg.ok) return res.status(tg.code === 'grant-not-found' ? 404 : 409).json({ error: tg.error, code: tg.code });
         grantFields = AG.grantItemFields(tg.profile);
       }
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', via: IO.ASK_VIA, sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null, ...(grantFields || {}) });
+      // lane setting-doors pick 2 (主开发's GO 2026-11-15): `--propose <row>=<value> [--until …]` — the ask carries ONE change of ONE row
+      // as its action, built HERE from the schema's own facts (PURE src/ask-setting.js), never the agent's words: a row off the closed
+      // list, a value out of range, a RAISE with no «until», a bound out of 5 min – 48 h ⇒ refused by name with the row's link, NOTHING
+      // filed. One ask, one action: never with --grant
+      let proposeFields = null;
+      if (add.propose != null) {
+        if (grantFields) return res.status(400).json({ error: 'one ask carries one action — --grant or --propose, not both; nothing was filed', code: 'propose-bad' });
+        const AS = require('../ask-setting.js');
+        const key0 = String(add.propose).split('=')[0].trim();
+        const v = AS.askVerdict({ propose: add.propose, until: add.until }, { present: AS.isProposable(key0) ? serverSetting(key0) : undefined, tzOffsetMin: Number.isFinite(Number(add.tzOffsetMin)) ? Number(add.tzOffsetMin) : undefined });
+        if (!v.ok) return res.status(400).json({ error: v.error, code: v.code });
+        proposeFields = { action: v.action };
+      } else if (add.until != null) return res.status(400).json({ error: '--until goes with --propose <row>=<value>; nothing was filed', code: 'propose-bad' });
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', via: IO.ASK_VIA, sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null, ...(grantFields || proposeFields || {}) });
       require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id, said: [item.text, item.detail] }); // the conversation's Artifacts list shows them (the one writer) — and every /p/ link the ask's words carry (lane artifacts-by-intent r4: a page an ask names is put in front of the person) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       bookkept(s);
-      return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()), ...(item.existing ? {} : { filed: CN.filedLine(item, item.id, OF.tray()) }) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
+      return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()), ...(item.existing ? {} : { filed: CN.filedLine(item, item.id, OF.tray()) }), ...(proposeFields ? { proposed: require('../ask-setting.js').proposedLine(item.action) } : {}) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)
     }
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(400).json({ error: e.message }); }

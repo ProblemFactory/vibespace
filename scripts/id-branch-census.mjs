@@ -55,6 +55,7 @@ export const ALLOW = [
   // lane dc-harness-tail (2026-10-05)
   { family: 'harness', file: /^src\/acp-message-manager\.js$|^src\/server\/stdout\/acp-events\.js$/, line: /\.type [!=]== 'acp'/, reason: 'the ACP wrapper journal\'s FRAME type (data/bin/acp-wrapper.js writes {type:\'acp\'}), not the acp harness id' },
   { family: 'harness', file: /^src\/local-index\.js$/, line: /rec\.type === 'acp'/, reason: 'lane human-cli: the ACP wrapper journal\'s FRAME type ({type:\'acp\'} — data/bin/acp-wrapper.js / agy-wrapper.js), the record family the person\'s CLI renders — not the acp harness id' },
+  { family: 'foryou', file: /^src\/lib\/xpra-client\.js$/, line: /case 'setting-change':/, reason: 'lane setting-doors pick 2: the xpra PROTOCOL\'s own packet name (the server\'s setting-change packet, ignored like ping_echo), not the For-you action type' },
   { family: 'harness', file: /^server\.js$/, line: /console\.log\(`\s*dtach: /, reason: 'the boot log line naming the resolved CLI paths (ids inside a template string, not keys)' },
 ];
 

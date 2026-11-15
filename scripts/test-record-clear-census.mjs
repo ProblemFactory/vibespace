@@ -1942,6 +1942,7 @@ const I_RECV = {
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
   'src/lib/task-detail.js|info': ['path', 'lane task-group-context: the path field\'s commit (src/lib/path-field.js `info.text`) — the path the person typed into a Context row; never a record\'s words'],
+  'src/lib/user-todos-actions.js|card': ['setting', 'a proposed change\'s card (lane setting-doors pick 2, settingCardOf): card.label = the schema row\'s label in the press\'s toast — never an item\'s words'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|v': ['host', 'the Add-machine form\'s values — the name the person just typed, said back in the refusal «a machine named … already exists» (lane ui-language)'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
   'src/lib/machine-desktop-handover.js|r.lease.holder': ['session', 'the conversation a machine\'s desktop was handed to (its name in the hand-over toast — lane desktop-handover)'],

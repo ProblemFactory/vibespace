@@ -179,6 +179,14 @@ require('../routes/chat-attachments.js').registerChatAttachmentRoutes(app, { sto
   transcripts: require('../transcript-service').createTranscriptService({ activeSessions, createSessionMessages: null, hosts }),
   hostKnown: (h) => { try { return !!(hosts && hosts.get(h)); } catch { return false; } },
   cwdOf: (tx, b) => { for (const s of activeSessions.values()) if (s && !s.host && (s.backend || 'claude') === b && (s.backendSessionId || s.claudeSessionId) === tx) return s.cwd || ''; return ''; } });
+// lane setting-doors pick 2: THE HOLDS of a one-press setting change — the press's ONE act (the hold on disk before the value) and the
+// quiet return (src/server/setting-holds.js); the door asks the pick 0 verdict (src/routes/setting-holds.js)
+const settingHolds = require('./setting-holds.js').create({ dataDir: path.join(rootDir, 'data'),
+  readSettings: () => persistenceRouter.readSettings(), patchSettings: (p) => persistenceRouter.patchSettings(p),
+  broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
+  userTodos });
+settingHolds.start().catch((e) => console.log('[setting-holds] start failed:', e && e.message));
+require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: settingHolds });
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
