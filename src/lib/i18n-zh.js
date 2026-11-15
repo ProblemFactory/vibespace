@@ -12677,7 +12677,6 @@ export default {
   "Choose a key file…": "选择密钥文件…",
   "No file chosen": "未选择文件",
   "The key has a passphrase": "密钥设有口令",
-  "Set up {name}": "在 {name} 上安装所需工具",
   "This installs what VibeSpace needs on that machine: dtach (keeps sessions alive), Node.js and Claude Code.": "将在这台机器上安装 VibeSpace 需要的工具：dtach（会话不断线）、Node.js 和 Claude Code。",
   "Start installing": "开始安装",
   "All done — close": "全部完成——关闭",

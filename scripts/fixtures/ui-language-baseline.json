@@ -1,9 +1,6 @@
 {
  "note": "lane ui-language — shrink-only: ① visible English outside t() ({file: [text…]}) and ⑤ zh/ja rows left in English. Lower with `node scripts/test-ui-language.mjs --lower`; never add a row.",
  "visible": {
-  "src/lib/chat-view.js": [
-   "data-thread-id=\""
-  ],
   "src/decision-model.js": [
    "Hi Sam, can you approve the Q3 budget by Friday? Finance is waiting on you.",
    "FYI the office plants were watered today.",
@@ -83,12 +80,9 @@
    "data-usage-src=\"codex\" data-usage-key=\"__global_codex__\"",
    "data-blocked=\"1\"",
    "data-pooled=\"1\"",
-   "data-usage-src=\"codex\" data-usage-key=\"",
-   "data-usage-src=\"codex\" data-usage-key=\"",
    "you@example.com",
    "Claude Code",
    "data-usage-src=\"global\" data-usage-key=\"__global__\"",
-   "data-usage-src=\"host-own\" data-usage-key=\"",
    "data-blocked=\"1\"",
    "data-hostsub=\"1\"",
    "data-linked=\"1\"",
@@ -131,18 +125,11 @@
    "The passkey VibeSpace lent to the tab « » could not be taken back — close that tab",
    "VibeSpace lends a saved passkey to one tab for one sign-in and takes it back when the sign-in ends. This time it is still on that tab, so that tab may still sig"
   ],
-  "src/consent-road.js": [
-   "data-chain=\""
-  ],
   "src/lib/form-window.js": [
    "Form"
   ],
   "src/lib/browser-replay-window.js": [
    "Browser replay"
-  ],
-  "src/lib/subagent-card.js": [
-   "data-sub-since=\"",
-   "data-sub-id=\""
   ],
   "src/lib/browser-live-window.js": [
    "Agent browser (live)"
@@ -160,8 +147,7 @@
   "src/lib/path-field.js": [
    "Enter",
    "Tab",
-   "Esc",
-   "data-file=\""
+   "Esc"
   ],
   "src/lib/sidebar-workbench.js": [
    "Show sessions from this machine or a remote host",
@@ -470,14 +456,8 @@
    "File Explorer",
    "Editor"
   ],
-  "src/lib/chat-input.js": [
-   "data-queue-id=\""
-  ],
   "src/lib/machine-desktop.js": [
    "Machine desktop"
-  ],
-  "src/lib/usage-meter.js": [
-   "data-cap-name=\""
   ],
   "src/lib/terminal.js": [
    "System Default",
@@ -693,7 +673,6 @@
   "zh: Bucket",
   "zh: Access key",
   "zh: Secret key",
-  "zh: {shown} of {total}",
   "zh: Git worktree",
   "zh: Agent · {name}",
   "zh: App ID",
@@ -716,7 +695,6 @@
   "ja: Find",
   "ja: Tmux",
   "ja: Hex: {name}",
-  "ja: {shown} of {total}",
   "ja: Git worktree",
   "ja: App ID",
   "ja: App Secret",

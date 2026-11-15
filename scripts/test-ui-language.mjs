@@ -171,8 +171,22 @@ export function englishOf(s) {
   return null;
 }
 const lineAt = (src, off) => { let n = 1; for (let i = 0; i < off; i++) if (src.charCodeAt(i) === 10) n++; return n; };
-function exemptLines(src) {
+/** ① WORDS THE PAGE NEVER DRAWS, by name (主开发's ride-403: «an allowed line gets a named row with its reason») — a function in
+ *  a module the browser bundle imports whose English is a log line's or a record's, never a person's. A row whose function is
+ *  gone is red (the list only holds what is there). */
+export const NOT_DRAWN = [
+  ['src/stream-model.js', 'legVerdictOf', 'the udp leg verdict\'s `words` — the hub log\'s line (desktop-webrtc verdictStep) and the session record\'s `relay.leg.verdict`; no page file reads them (lane stream-udp-leg-fallback, 2.369.402)'],
+];
+/** The lines of `function <fn>(` … its closing «}» at column 0, or null. */
+export function fnLines(src, fn) {
+  const lines = src.split('\n'), i = lines.findIndex((l) => l.startsWith(`function ${fn}(`) || l.startsWith(`export function ${fn}(`));
+  if (i < 0) return null;
+  const j = lines.findIndex((l, k) => k > i && l === '}');
+  return j < 0 ? null : [i + 1, j + 1];
+}
+function exemptLines(src, file = '') {
   const set = new Set();
+  for (const [f, fn] of NOT_DRAWN) { if (!file.endsWith(f)) continue; const r = fnLines(src, fn); if (r) for (let n = r[0]; n <= r[1]; n++) set.add(n); }
   const lines = src.split('\n');
   lines.forEach((ln, i) => { const m = ln.match(/\/\/\s*ui-words:\s*(.{8,})/); if (m) { set.add(i + 1); set.add(i + 2); } });
   return set;
@@ -220,7 +234,7 @@ export function scanFile(file, src, ast = parse(src)) {
   const isPageTime = /(^|\/)src\/lib\/page-time\.js$/.test(file);
   const timeHit = (node, what, kind = 'fmt') => { const line = at(node); if (!isPageTime && !ptEx.has(line)) time.push({ line, text: what, kind }); };
   const enLocale = (arg) => !!arg && arg.type === 'Literal' && typeof arg.value === 'string' && /^en-/.test(arg.value);
-  const ex = exemptLines(src);
+  const ex = exemptLines(src, file);
   // ⑥(d) a value capitalised by hand (the line's code — a trailing comment is not code)
   const caps = [];
   src.split('\n').forEach((ln, i) => { if (CAPS_RE.test(ln.replace(/\s\/\/\s.*$/, '')) && !ex.has(i + 1)) caps.push({ line: i + 1, text: ln.trim().slice(0, 140) }); });
@@ -329,7 +343,16 @@ export function scanFile(file, src, ast = parse(src)) {
             s.replace(/>([^<>]+)</g, (m, g) => { segs.push(g); return m; });
             s.replace(/(?:title|placeholder|aria-label|alt)="([^"$]+)"/g, (m, g) => { segs.push(g); return m; });
             for (const g of segs) { const e = englishOf(g); if (e) hit(q, 'html', e); }
-          } else if (sink && sink !== CODE) { const e = englishOf(s); if (e) hit(q, sink, e); }
+          } else if (sink && sink !== CODE) {
+            // a template inside an html template's \${…} with no tag of its own may be a piece of the enclosing tag
+            // (\` data-record-src="\${…}"\`): the attribute's name, its = and quotes are markup, never words
+            // — except a title / placeholder / aria-label / alt value, which a person reads
+            if (sink === 'html') {
+              s.replace(/(?:^|\s)(?:title|placeholder|aria-label|alt)="([^"$]+)"/g, (m, g) => { const e = englishOf(g); if (e) hit(q, 'html', e); return m; });
+              s = s.replace(/(^|\s)[a-z][\w:-]*=(?:"[^"]*"|'[^']*')/gi, ' ').replace(/(^|\s)[a-z][\w:-]*=["']?(?=$|\s)/gi, ' ').replace(/^["']/, '');
+            }
+            const e = englishOf(s); if (e) hit(q, sink, e);
+          }
           codeAfter[codeAfter.length - 1] = inCode;
         }
         node.expressions.forEach((x, i) => walk(x, html && codeAfter[i] ? CODE : html ? 'html' : sink));
@@ -532,6 +555,10 @@ if (isMain) {
     ok(r.visible.length === 4 && r.visible.map((h) => h.sink).join(',') === 'prop:textContent,html,call:showToast,key:label', `① a planted bare English literal in four sinks is named (${r.visible.length}); the same words through t() are not`, JSON.stringify(r.visible));
     const worded = scanFile('worded.js', `el.textContent = t('Customize mode — drag to move it'); showToast(t('Public key copied')); el.title = 'claude-fable-5'; x.textContent = 'Codex'; // ui-words: a planted control line\ny.textContent = 'Plain English words'; // ui-words: a planted exempt line`);
     ok(worded.visible.length === 0, '① …worded through t(), an id, a brand and a `// ui-words:` line are not', JSON.stringify(worded.visible));
+    const frag = scanFile('frag.js', 'x.innerHTML = `<img src="${a}"${b ? ` data-record-src="${b}"` : \'\'}${c ? ` data-kind="codex" data-key="${c}"` : \'\'} alt="">`; y.innerHTML = `<p>${b ? `Plain words for a person` : \'\'}</p>`; z.innerHTML = `<b${b ? ` title="Open the whole file"` : \'\'}>x</b>`;');
+    ok(frag.visible.length === 2 && /Plain words/.test(frag.visible[0].text) && /Open the whole file/.test(frag.visible[1].text), '① a piece of an enclosing tag (` data-record-src="${…}"`) is markup; words in the same place, and a title in such a piece, are named', JSON.stringify(frag.visible));
+    const nd = scanFile('src/stream-model.js', "function legVerdictOf(h) {\n  return { words: 'the daemon says its leg is up' };\n}\nfunction other() {\n  return { label: 'Words a person reads' };\n}\n");
+    ok(nd.visible.length === 1 && nd.visible[0].line === 5, '① a NOT_DRAWN row exempts its own function only — the next function\'s words are named', JSON.stringify(nd.visible));
     const p = scanFile('p.js', `x.textContent = t('Shows {n} waiting'); y.textContent = t('{n} more', { n }); z.textContent = t('{a} of {b}', { a: 1 }); const d = { description: [t('Marked “{label}”'), { label: t('needs you') }] };\nconst m = t('fire after {n} min'); // ui-words: {n} marks where the number input is embedded`);
     ok(p.params.length === 2 && p.params[1].missing.join() === 'b', '③ a {param} its call never fills is named (no params object; a params object without it); a filled one is not', JSON.stringify(p.params));
     const m = scanFile('m.js', `p.textContent = t('<b>{n}</b> sessions', { n }); q.innerHTML = t('<b>{n}</b> sessions', { n }); showToast(t('run \`{line}\` now', { line }));`);
@@ -610,6 +637,10 @@ if (isMain) {
   console.log(`§1 visible English outside t() — the universe: ${now.files} files the three browser entries reach`);
   ok(now.missed.length === 0 && now.files > 300, `the import walk holds every file a PARSED import reaches (${now.files} files)`, now.missed);
   ok(v.fresh.length === 0, `① no NEW visible English literal outside t() (${count(now.visible)} today = the baseline's ${count(base.visible || {})} rows)`, v.fresh.map((h) => `${h.file}:${h.line} [${h.sink}] ${h.text}  — word it through t() (+ zh / ja rows), or mark \`// ui-words: <why>\``));
+  {
+    const gone = NOT_DRAWN.filter(([f, fn]) => { try { return !fnLines(fs.readFileSync(path.join(REPO, f), 'utf8'), fn); } catch { return true; } });
+    ok(gone.length === 0, `① every NOT_DRAWN row names a function its file still holds (${NOT_DRAWN.length} rows)`, gone);
+  }
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.time.length === 0, `⑦ every time and number a person reads goes through src/lib/page-time.js (zero tolerance)`, now.time);
   ok(now.caps.length === 0, `⑥(d) no value capitalised by hand in the browser bundle (zero tolerance) — a theme / an id is worded through src/lib/value-words.js`, now.caps);
