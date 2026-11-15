@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An Antigravity command stuck there also gets End the command: it ends the command and what it started, and the turn goes on.
 - After thirty minutes stuck (a setting; 0 = never) it is ended by itself, and the agent is told why. Keep waiting restarts the thirty.
 - Stopping an Antigravity turn now also ends what its command started; whatever could not be ended is said by name.
+- An agent whose message waits behind a stuck turn is told so: stuck since when, and that you have been asked.
 
 ## 2.369.402 — 2026-11-14
 

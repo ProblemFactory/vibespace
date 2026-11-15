@@ -895,7 +895,7 @@ const PRINTS = {
     'r.nextTurn': 'judged:msgSendAnswer — the next-turn names the woke line prints (wokeLine\'s return, reached through `w`)',
     // lane queued-is-not-woke (law 1): the queued wake and the claude hand-in — msgSendAnswer's own rows
     'r.queued': 'judged:msgSendAnswer — the queued rows: each name msgName, `since` an instant', 'r.intoTurn': 'judged:msgSendAnswer — the hand-in names (msgNames)',
-    'into.size': `${V}:a count of the hand-in names`, 'x.since': `${V}:an instant (a queued row\'s running turn — msgSendAnswer / msgDeliveryRows)`, 'wk.since': `${V}:an instant (dispatchRecord: the worker\'s running turn)`,
+    'into.size': `${V}:a count of the hand-in names`, 'x.since': `${V}:an instant (a queued row\'s running turn — msgSendAnswer / msgDeliveryRows)`, 'x.stuckSince': `${V}:an instant (lane turn-never-silent L4: since when the hub has said that turn is stuck — the turn watch's session fact through the deliverer)`, 'wk.since': `${V}:an instant (dispatchRecord: the worker\'s running turn)`,
     'j.code': `${V}:the refusal code the server answered (refused's \`code\` local)`, 'e.message': `${V}:node's fetch error text (res._neterr's source)`,
     'JSON.stringify(body)': `${O}:the caller's own request body — reached through call()'s fetch (sent, never printed)`, 'flags.wake': `${O}:the caller's --wake — reached through the send's request body (sent, never printed)`,
     // lane worker-dispatch: the dispatch's lines — the record shaped by dispatchAnswer (each field its own row)

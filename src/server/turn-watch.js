@@ -113,7 +113,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
           if (rs) { show(id, s, { key: rkey }, TW.restartWords(rs, { cli: labelOf(s.backend) }), { restartStuck: true }); said++; }
         }
         const t = turnOf(s);
-        if (t !== 'running' && t !== 'waiting') { if (st.has(id)) { endOpen(id, 'turn-ended'); st.delete(id); } continue; }
+        if (t !== 'running' && t !== 'waiting') { delete s._turnStuckSince; if (st.has(id)) { endOpen(id, 'turn-ended'); st.delete(id); } continue; }
         live.add(id); looked++;
         const sc = await sidecarOf(id);
         const w = watchOf(id, s, sc);
@@ -135,6 +135,8 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
           lastWroteAt: Number(sc && sc.cliWroteAt) || 0, keptAt: w.keptAt, treeReadable, readings: w.readings, workSeenAt: w.workSeenAt,
           openTool: openToolOf(s), cliAlive, boundMs: boundMs(), endBoundMs: endBoundMs(), now: now(),
         });
+        // L4: the fact a sender is told (a message queued behind this turn): since when the hub has said it is stuck
+        if (v.state === 'stuck-on-command' || v.state === 'silent') s._turnStuckSince = Number(v.since) || null; else delete s._turnStuckSince;
         if (TL.SPEAKING.includes(v.state)) {
           // «End the command» applies to a command that is stuck, on a wrapper that serves it (its sidecar's advert)
           const endable = v.state === 'stuck-on-command' && !!(sc && sc.caps && sc.caps.endCommand === true);
@@ -158,6 +160,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     const w = st.get(id);
     if (!w) return { ok: false, code: 'not-stuck' };
     w.keptAt = now();
+    try { delete activeSessions.get(id)._turnStuckSince; } catch { }   // the person chose to wait: not said as stuck until another full bound
     endOpen(id, 'kept-waiting');
     return { ok: true };
   }
