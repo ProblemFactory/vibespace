@@ -23,6 +23,7 @@ const { NULL_QUOTA } = require('./null-quota');
 const AGY_USAGE = require('./antigravity-usage');
 const AGY_MODELS_REPORT = require('./antigravity-models'); // PURE: `agy models` parsed as data (the door reads stdout only)
 const AGY_WALL = require('./antigravity-wall');
+const AGY_TURN = require('../agy-turn-usage'); // pure: the wrapper's `usage` record → a ledger row (usage-every-change pick 3)
 const { AGY_SLASH_COMMANDS } = require('./antigravity-slash');
 const { HARNESS_SETTINGS } = require('../harness-settings');
 const AS = require('../agy-store');
@@ -156,6 +157,10 @@ const AGY_QUOTA = Object.freeze({
   // THE TURN STATEMENT (lane usage-every-change, law 1): agy states NOTHING at a turn's end except a wall (its refusal names the
   // reset, stamped with the record's own time); on a paired machine it runs on the machine's own login, which VibeSpace cannot name
   turnStatement: Object.freeze({ cadence: 'wall-only', stamp: 'record', reason: 'agy states nothing at a turn\'s end but a wall: its refusal names the reset', cannot: Object.freeze({ device: 'a paired machine runs agy on its own login, which VibeSpace cannot name (a named agy account is refused remote)' }) }),
+  // THE TURN'S TOKENS AS A LEDGER ROW (lane usage-every-change pick 3, law 5): agy states no number at a turn's end, so each
+  // finished turn's own `usage` record becomes ONE ledger row on the named account it ran on (src/server/usage-pool-engine.js
+  // noteTurnRow) — the screen can then say how many turns ran since the last read; no number is made from tokens
+  turnRow: AGY_TURN.ledgerRowOf,
   onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true }),
 });
 /** THE MODELS AGY REPORTS FOR AN ACCOUNT (lane agy-models-report, the owner 2026-11-10): `agy models` — MEASURED on agy 1.5.5:

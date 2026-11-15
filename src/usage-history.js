@@ -40,6 +40,7 @@ const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asl
 // round 4 (true words 6): a re-walk over a COLD ledger reads the tails of the shards it appends to — at least 256 KB, twice
 // what it appends, at most 4 MB a shard (the rows a killed walk appended are the last ones)
 const TAIL_DEDUP_MIN = 256 * 1024, TAIL_DEDUP_MAX = 4 * 1024 * 1024;
+const TURN_ROWS_MAX = 10000; // pick 3: the turn rows a ledger that cannot walk keeps (the newest)
 const DEFAULT_PRICING = {
   // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
   // (~30% more tokens per unit of English text), so effective $/word is higher.
@@ -494,6 +495,28 @@ class UsageHistory {
   // never the hub's for a host); a subagent thread ⇒ its parent's; a thread VibeSpace never saw ⇒ not tracked (said in the
   // walk's counts, `statements.untracked`). ──
   setStatementSink(fn) { this._statementSink = typeof fn === 'function' ? fn : null; }
+  /** A TURN BOOKED BY ITS OWN RECORD (lane usage-every-change pick 3, law 5 — antigravity: its turns reach the hub as a `usage`
+   *  record and no transcript the walk reads): the row waits here and joins the NEXT walk's one commit point, so it is deduped by
+   *  its id like every row (a record read again is one row) and appended in order with the walk's. Bounded (TURN_ROWS_MAX: a
+   *  ledger that cannot walk keeps the newest). The row is the ledger's own shape; its id = `<harness>:<conversation>:<record ms>:
+   *  <running total>`. → the row | null */
+  noteTurnRow(r) {
+    if (!r || !r.be || !r.acct || !r.sid || !Number.isFinite(Number(r.ts))) return null;
+    const ainfo = this._resolveAccount(r.acct) || null;
+    const ts = Number(r.ts);
+    const ev = {
+      rid: `${r.be}:${r.sid}:${ts}:${r.total != null ? r.total : (r.i || 0) + (r.cr || 0) + (r.o || 0)}`,
+      ts, sid: String(r.sid), be: String(r.be), model: r.model || null,
+      acct: String(r.acct), atype: ainfo ? ainfo.type : 'unknown', aname: ainfo ? (ainfo.name || null) : null,
+      mode: r.mode || null, host: r.host || null, cwd: r.cwd || null, origin: 'main',
+      i: r.i || 0, cw5: 0, cw1: 0, cr: r.cr || 0, o: r.o || 0, tier: null,
+    };
+    const q = this._turnRows || (this._turnRows = []);
+    if (q.some((x) => x.rid === ev.rid)) return ev; // the same record read twice before a walk: one row (the commit dedups the ledger's)
+    q.push(ev);
+    if (q.length > TURN_ROWS_MAX) q.splice(0, q.length - TURN_ROWS_MAX);
+    return ev;
+  }
   _noteStatement(pending, e, host) {
     // `rl` rides the codex rollout rows only (the walker's codex branch states it): a row without one states nothing
     if (!this._statementSink || !e || !e.sid || !e.rl || typeof e.rl !== 'object') return;
@@ -761,6 +784,10 @@ class UsageHistory {
       });
       filesTouched = walk.filesTouched;
       this._flushStatements(statements, attrib, meta);
+      // pick 3: the turns booked by their own records since the last commit join this one (removed from the queue only once
+      // committed below — a dropped or failed walk keeps them for the next)
+      const turnRows = this._turnRows && this._turnRows.length ? this._turnRows.slice() : [];
+      for (const ev of turnRows) push(ev);
       // round 3 (smaller 5): THE RE-WALK AFTER A KILL RE-APPENDS NOTHING IT ALREADY APPENDED — a kill between the shard append
       // and the cursor write re-walks those rows (20 kills: 1 128 rows for 152 request ids, compounding). The ledger knows
       // every request id it holds once warm: the walk waits for the warm (its rows are in memory; the checks below re-run
@@ -828,6 +855,7 @@ class UsageHistory {
       // (the readers' rid dedup absorbs those rows), never a window per kill
       this._cursors = walk.cursors;
       this._partialRids = null; // a commit completed: what an earlier one left half-done is in the shards and behind the cursors
+      if (turnRows.length && this._turnRows) this._turnRows.splice(0, Math.min(turnRows.length, this._turnRows.length));
       if (this._writeCursors(deadFacts) && appendedNow) { try { require('./store-writer.js').storeWriter().durable(this.cursorsFile).catch(() => { }); } catch { } }
       this._lastScan = Date.now();
     } catch (e) {

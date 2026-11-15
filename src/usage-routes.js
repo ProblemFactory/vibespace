@@ -1441,13 +1441,35 @@ function onDemandReadings() {
   const out = {};
   try {
     for (const a of (accounts.list().accounts || [])) {
-      if (!a || !a.id || !harnesses.get(a.backend || 'claude')?.quota?.onDemand) continue;
+      const q = harnesses.get(a?.backend || 'claude')?.quota;
+      if (!a || !a.id || !q?.onDemand) continue;
       const c = usageWrite.readCacheObject(USAGE_CACHE_DIR, a.id);
       if (!c || !Array.isArray(c.limits) || !c.limits.length) continue;
       out[a.id] = { limits: c.limits, fetchedAt: c.fetchedAt || null, source: c.source || null, windowNames: c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null };
+      // pick 3 (law 5): a harness whose turns are booked by their own records says how many ran since this reading
+      if (typeof q.turnRow === 'function' && c.fetchedAt) out[a.id].turnsSince = turnsSinceOf(a.id, a.backend, Number(c.fetchedAt));
     }
   } catch { }
   return out;
+}
+// ── HOW MANY TURNS RAN ON AN ACCOUNT SINCE ITS LAST READ (lane usage-every-change pick 3, law 5): a harness whose turns state no
+// number (antigravity) books each finished turn as a ledger row (quota.turnRow); the screen says the last read number, its age,
+// and this count — never a number made from tokens. Counted from the ledger (the account's rows of its own harness from the
+// reading's time), OFF the request: the answer is the last count, asked again at most every 30 s or at once when the reading
+// moved; null until a count lands ("not counted yet" — never 0). ──
+const TURNS_SINCE_EVERY_MS = 30000;
+const _turnsSince = new Map(); // account id → { since, n, at, busy }
+function turnsSinceOf(acct, backend, since) {
+  if (!Number.isFinite(since) || since <= 0 || !usageHistory || typeof usageHistory.aggregateAsync !== 'function') return null;
+  let e = _turnsSince.get(acct);
+  if (!e || e.since !== since) { e = { since, n: null, at: 0, busy: false }; _turnsSince.set(acct, e); }
+  if (!e.busy && Date.now() - e.at >= TURNS_SINCE_EVERY_MS) {
+    e.busy = true;
+    let p; try { p = Promise.resolve(usageHistory.aggregateAsync({ from: since + 1, backend, accounts: new Set([acct]) })); } catch (err) { p = Promise.reject(err); }
+    p.then((r) => { const n = Number(r && r.totals && r.totals.requests); if (_turnsSince.get(acct) === e) e.n = Number.isFinite(n) ? n : null; })
+      .catch(() => { }).finally(() => { e.busy = false; e.at = Date.now(); });
+  }
+  return e.n;
 }
 
 app.get('/api/usage', (req, res) => {

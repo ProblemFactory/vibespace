@@ -18,7 +18,7 @@ const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
   // sessionModelFor: the session's OWN model (lane agy-wall-signal r2 — the wall's group; server.js's literal must carry
   // every name destructured here: test-fable-cap-pool-storm §10)
-  const { noteTurnEnd, sessionModelFor } = engine;
+  const { noteTurnEnd, sessionModelFor, noteTurnRow } = engine; // noteTurnRow: a finished turn's tokens as a ledger row (usage-every-change pick 3)
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     let lineBuf = '';
     // lane queued-is-not-woke round 2: a (re)attach of a session whose wrapper holds frames of ours ASKS it for its queue
@@ -78,6 +78,8 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
               // agy's stdout result can be read before its stderr line): one wall, one sentence
               if (w && w.wallRoom) msg.wallRoom = w.wallRoom;
             } catch (e) { console.warn(`[acp] usage wall not read: ${e.message}`); }
+            // a finished turn's own tokens → ONE ledger row on its account (the descriptor's quota.turnRow; none declared ⇒ nothing)
+            if (msg.kind === 'usage' && typeof noteTurnRow === 'function') noteTurnRow(session, msg);
           }
           let newLabel = null;
           if (msg.kind === 'session') {

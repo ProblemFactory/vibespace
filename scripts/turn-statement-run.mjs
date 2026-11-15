@@ -52,12 +52,13 @@ function mkWorld(REPO) {
     subCredsPath: (id) => path.join(dir, 'nope', id), sessionPoolLinkPath: () => path.join(dir, 'nope-link'),
   };
   const sessions = new Map();
+  let ledger = null; // the world's UsageHistory, once a leg makes one (ledgerOf)
   const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
   const eng = engMod.create({
     app, rootDir: dir, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1,
     broadcastToSession() { }, serverNotice() { }, serverSetting() { return undefined; }, getAccounts: () => accounts, getHosts: () => null,
-    getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
+    getUsageHistory: () => ledger, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
   });
   const harnesses = require(path.join(REPO, 'src/harnesses/index.js'));
   const SW = require(path.join(REPO, 'src/server/stream-wall.js'));
@@ -65,7 +66,7 @@ function mkWorld(REPO) {
   const mkRoad = (door = null) => SW.createStreamWallRoad({ harnessOf: (id) => harnesses.get(id), cacheDir, door, now: () => Date.now(), log: (l) => logs.push(l) });
   const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({ engine: eng, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => ({ _cost: () => 0 }) });
   const session = (o) => { const s = { mode: 'chat', host: null, pty: { write() { } }, name: 'turn', ...o }; sessions.set(s._webuiId, s); return s; };
-  return { dir, cacheDir, eng, harnesses, mkRoad, brain, session, logs, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } } };
+  return { dir, cacheDir, eng, harnesses, mkRoad, brain, session, logs, setLedger: (uh) => { ledger = uh; }, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } } };
 }
 
 const nowS = () => Math.floor(Date.now() / 1000);
@@ -115,7 +116,17 @@ function ledgerOf(w, REPO, home = null) {
   const uh = new UsageHistory({ dataDir: path.join(w.dir, 'hub-data'), homeDir: home || path.join(w.dir, 'hub-home') });
   uh.codexSessionsDir = path.join(home || path.join(w.dir, 'hub-home'), '.codex', 'sessions');
   uh.setStatementSink((st) => w.eng.fileCodexStatement(st));
+  w.setLedger(uh);
   return uh;
+}
+/** One finished agy turn's `usage` record as the wrapper journals it (agy-turn-usage turnUsage: the turn = the delta road) */
+const agyUsage = (at, sid = 'conv-agt') => ({ ts: new Date(at).toISOString(), type: 'acp', kind: 'usage', sessionId: sid, total: { input: 1500, output: 160, thinking: 70, cacheRead: 9000, total: 1660 }, turn: { input: 500, output: 60, thinking: 30, cacheRead: 4000, total: 560, calls: null }, last: null, model: 'gemini-4-argon-high', modelFrom: 'agy', durationSeconds: 5 });
+/** The ledger's antigravity rows, read the way its readers read them — its aggregate (how many) and its id lookup (the rows
+ *  asked for); never its shard files (a tool in scripts/ that lists them is a shard writer to test-cache-bounds §32) */
+async function agyRowsOf(uh, rids = []) {
+  const agg = await uh.aggregateAsync({ backend: 'antigravity' });
+  const rows = []; for (const rid of rids) { const r = await uh.eventForRid(rid); if (r) rows.push(r); }
+  return { n: Number(agg && agg.totals && agg.totals.requests) || 0, rows };
 }
 /** «matches 2» (the 02:55Z ruling): a statement whose weekly window contradicts its target and matches TWO other accounts is
  *  archived — the tie is never broken (no write anywhere). `matches` 1 is the control: the same world re-files to that one.
@@ -207,6 +218,55 @@ const DRIVERS = {
     // the turn with NO wall: wall-only states nothing
     async hubPlain(w) { const s = w.session({ backend: 'antigravity', _webuiId: 'w-ag2', _accountId: 'agy-2', _spawnModel: 'gemini-4-argon-high' }); const t0 = Date.now(); w.mkRoad(null).onRecord(s, plainEnd(new Date().toISOString()), { modelOf: () => s._spawnModel }); await sleep(30); return judge(w, 'agy-2', { t0, t1: Date.now(), stamp: 'record' }); },
     async device(w) { const s = w.session({ backend: 'antigravity', _webuiId: 'w-agd', host: 'h1', _accountId: null, _spawnModel: 'gemini-4-argon-high' }); const before = filesIn(w.cacheDir).length; w.mkRoad(null).onRecord(s, agyNotice(new Date().toISOString()), { modelOf: () => s._spawnModel }); await sleep(30); return { reading: filesIn(w.cacheDir).length > before, ownTime: false, others: [] }; },
+    // pick 3 (law 5): a finished turn's own record → ONE ledger row on its named account; the screen counts them since a read
+    extra: {
+      async 'hub/turn-row'(w, REPO) {
+        const uh = ledgerOf(w, REPO);
+        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agt', _accountId: 'agy-1', backendSessionId: 'conv-agt', _spawnModel: 'gemini-4-argon-high' });
+        const rec = agyUsage(Date.now() - 2000);
+        w.eng.noteTurnRow(s, rec); w.eng.noteTurnRow(s, rec); // the same record read twice before a walk
+        await uh.scan({ force: true }); uh.flushCursors();
+        w.eng.noteTurnRow(s, rec); // …and once more after it was committed
+        await uh.scan({ force: true }); uh.flushCursors();
+        const got = await agyRowsOf(uh, [`antigravity:conv-agt:${Date.parse(rec.ts)}:1660`]), r = got.rows[0] || {};
+        return { green: got.n === 1 && got.rows.length === 1 && r.acct === 'agy-1' && r.ts === Date.parse(rec.ts) && r.i === 500 && r.cr === 4000 && r.o === 60 && r.sid === 'conv-agt' && filesIn(w.cacheDir).length === 0,
+          why: "one ledger row per finished turn on its named account, at the record's time (the record read three times: one row) — and no reading is made of it", detail: { rows: got.n, r, files: filesIn(w.cacheDir) } };
+      },
+      async 'hub/turn-row-named-only'(w, REPO) {
+        const uh = ledgerOf(w, REPO);
+        const own = w.session({ backend: 'antigravity', _webuiId: 'w-ago', _accountId: null, backendSessionId: 'conv-ago' });
+        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agu', _accountId: 'agy-1', backendSessionId: 'conv-agu' });
+        w.eng.noteTurnRow(own, agyUsage(Date.now() - 3000, 'conv-ago'));
+        w.eng.noteTurnRow(s, { ...agyUsage(Date.now() - 2000, 'conv-agu'), turn: null });
+        await uh.scan({ force: true }); uh.flushCursors();
+        const got = await agyRowsOf(uh);
+        return { green: got.n === 0, why: "the machine's own login (no account VibeSpace can name) and a turn agy could not split book nothing", detail: { rows: got.n } };
+      },
+      // THE SCREEN'S FACT through the REAL route: GET /api/usage's homeAccounts row says how many turns ran since the last read
+      async 'hub/turns-since-on-screen'(w, REPO) {
+        const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+        const am = new AccountManager({ dataDir: path.join(w.dir, 'am-data') });
+        const a = am.createHomeSubscription('antigravity', { name: 'Agy turns' });
+        const uh = ledgerOf(w, REPO);
+        const readAt = Date.now() - 60000;
+        fs.writeFileSync(path.join(w.cacheDir, a.id + '.json'), JSON.stringify({ fetchedAt: readAt, source: 'cli-usage', limits: [{ limitId: 'gemini', name: 'Gemini Models', windows: [{ kind: '7d', minutes: 10080, usedPct: 30, resetsAt: nowS() + 86400, measuredAt: readAt }] }] }));
+        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agn', _accountId: a.id, backendSessionId: 'conv-agn' });
+        for (const at of [readAt - 30000, readAt + 10000, readAt + 20000]) w.eng.noteTurnRow(s, { ...agyUsage(at, 'conv-agn'), total: { input: 1500, output: 160, thinking: 70, cacheRead: 9000, total: at } });
+        await uh.scan({ force: true }); uh.flushCursors();
+        const routes = {};
+        const app = { get: (p0, h) => { routes['GET ' + p0] = h; }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+        const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
+        const quiet = console.log; console.log = () => { };
+        try {
+          setupUsage({ app, accounts: am, hosts: null, usageHistory: uh, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(w.dir, 'usage-cache.json'), USAGE_CACHE_DIR: w.cacheDir, CODEX_SESSIONS_DIR: path.join(w.dir, 'nocodex'), META_DIR: path.join(w.dir, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(w.dir, 'buffers'), apiDerivedWindow: () => null, establishedWindows: () => null });
+          const get = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; routes['GET /api/usage']({ query: {}, headers: {} }, res); return res.body && res.body.homeAccounts && res.body.homeAccounts[a.id]; };
+          const first = get();
+          let row = first; const until = Date.now() + 3000;
+          while ((!row || row.turnsSince == null) && Date.now() < until) { await sleep(20); row = get(); }
+          return { green: !!first && first.turnsSince === null && !!row && row.turnsSince === 2, why: 'the account\'s row says the turns since its last read — 2 (the one before the read not counted); not counted yet at the first ask (null, never 0)', detail: { first: first && first.turnsSince, now: row && row.turnsSince } };
+        } finally { console.log = quiet; }
+      },
+    },
     // the checker's catch (a): a wall seen before a restart, replayed on a FRESH road (the restart's), must not read again
     async replay(w) {
       const reads = []; const door = { read: (key, o) => { reads.push([key, o]); return Promise.resolve({ ok: false }); } };

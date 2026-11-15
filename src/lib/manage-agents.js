@@ -599,6 +599,10 @@ export function rosterUsageSnapshot(stamp, maps) {
 export function onDemandUsageView(r) {
   if (!r || !Array.isArray(r.limits) || !r.limits.length) return null;
   const names = r.windowNames && typeof r.windowNames === 'object' ? r.windowNames : {};
+  // pick 3 (lane usage-every-change, law 5): HOW MANY TURNS RAN on the account since this reading — the ledger's count of the
+  // turns booked by their own records (/api/usage turnsSince); not counted yet (null) says nothing, never «0»
+  const n = Number.isInteger(r.turnsSince) && r.turnsSince >= 0 ? r.turnsSince : null;
+  const since = n == null ? '' : ' · ' + (n === 0 ? t('no turn ran on this account since this reading') : n === 1 ? t('1 turn ran on this account since this reading') : t('{n} turns ran on this account since this reading', { n }));
   const windows = [];
   for (const l of r.limits) {
     const ws = (Array.isArray(l && l.windows) ? l.windows : []).filter((w) => w && w.usedPct != null && w.usedPct !== '' && Number.isFinite(Number(w.usedPct))).slice().sort((a, b) => (Number(a.minutes) || 0) - (Number(b.minutes) || 0));
@@ -607,11 +611,11 @@ export function onDemandUsageView(r) {
       windows.push({
         label: String(w.kind || '?').slice(0, 3), kind: w.kind === '5h' ? 'fiveHour' : 'weekly',
         utilization: used / 100, ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}), ...(w.state && w.state !== 'running' ? { state: w.state } : {}),
-        tip: `${l.name || l.limitId} · ${names[`${l.limitId}/${w.kind}`] || w.kind} ${Math.round((100 - used) * 100) / 100}%`,
+        tip: `${l.name || l.limitId} · ${names[`${l.limitId}/${w.kind}`] || w.kind} ${Math.round((100 - used) * 100) / 100}%${since}`,
       });
     }
   }
-  return windows.length ? { windows, fetchedAt: r.fetchedAt || null } : null;
+  return windows.length ? { windows, fetchedAt: r.fetchedAt || null, turnsSince: n } : null;
 }
 
 // ── THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标") ────────────

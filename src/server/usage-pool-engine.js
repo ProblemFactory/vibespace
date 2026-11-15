@@ -5655,6 +5655,20 @@ function fileCodexStatement(st) {
   const w = writeCodexReading(snap, 'codex-rollout', { key }); // the transcript producer's own name (lib/usage-source.js)
   return w && w.key ? { ok: true, key: w.key, at } : { ok: false, why: w && w.archived ? 'archived' : 'refused', key };
 }
+/** A TURN'S TOKENS AS A LEDGER ROW (lane usage-every-change pick 3, law 5): a harness whose quota declares `turnRow` (antigravity —
+ *  its turns state no number) has each finished turn's own record booked as ONE ledger row ON THE ACCOUNT THE TURN RAN ON: a
+ *  named account only (a machine's own login VibeSpace cannot name writes none — law 6), at the record's time, through the
+ *  ledger's walk commit (rid-deduped: a record read twice is one row). No cost, no percentage, nothing acts. → the row | null */
+function noteTurnRow(session, rec) {
+  try {
+    if (!session || !session._accountId || !harnesses.has(session.backend)) return null;
+    const turnRow = harnesses.get(session.backend).quota?.turnRow;
+    if (typeof turnRow !== 'function') return null;
+    const row = turnRow(rec);
+    if (!row || typeof usageHistory.noteTurnRow !== 'function') return null;
+    return usageHistory.noteTurnRow({ ...row, be: session.backend, acct: session._accountId, sid: session.backendSessionId || (rec && rec.sessionId) || session._webuiId || null, mode: session.mode || null, host: session.host || null, cwd: session.cwd || null });
+  } catch (e) { console.warn('[usage] a turn row was not booked:', e && e.message); return null; }
+}
 function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = {}) {
   try {
     // verify r8 ②: a held fact replayed at the declaration is stamped at ITS instant (`asOf` = its arrival on the skewed
@@ -8147,7 +8161,7 @@ function maybeStopOnFallback(session, id, from, to) {
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
- quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, fileCodexStatement, hostGlobalKey, resolveUsageKey,
+ quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, fileCodexStatement, hostGlobalKey, noteTurnRow, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
     resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs

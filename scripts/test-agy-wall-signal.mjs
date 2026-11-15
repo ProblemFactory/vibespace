@@ -421,6 +421,18 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
   const fake = { ...A, id: 'agy-no-model-acct' };
   drive(fresh(fake), [NOTICE, PEND]);
   ok('a session that names NO model anywhere (no lock, pick, spawn or usage record) ⇒ no signal, the line — never a guess', disk(fake.id) === null && logs.slice(n0).some((l) => /not read \(model\)/.test(l)), logs.slice(n0).join(' | '));
+  // lane usage-every-change pick 3 (law 5): THE SAME CONSUMER hands every finished turn's `usage` record to the engine's
+  // noteTurnRow — the key server.js's literal carries (the turn's tokens become a ledger row on its account); no other record
+  ok('pick 3: server.js\'s session-stdout literal CARRIES noteTurnRow', KEYS.includes('noteTurnRow'), KEYS.join(','));
+  {
+    const booked = [];
+    const eng3 = { ...engineOf(KEYS), noteTurnRow: (s3, m) => { booked.push([s3._accountId, m.kind, m.ts]); return null; } };
+    const consumer = AE.create({ engine: eng3, noteHarnessModels() { }, deliverRef: {}, permissionRulesRef: {} });
+    const pty = { onData(fn) { this.fn = fn; } };
+    consumer.attach(fresh(A, { _spawnModel: 'gemini-4-argon-high' }), 'w-p3', pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    pty.fn([NOTICE, PEND, USAGE].map((r) => JSON.stringify(r)).join('\n') + '\n');
+    ok('pick 3: the real consumer books the `usage` record — ONCE, with its own time, for the session\'s account (the notice and the prompt_end book nothing)', booked.length === 1 && booked[0][0] === A.id && booked[0][1] === 'usage' && booked[0][2] === USAGE.ts, JSON.stringify(booked));
+  }
 }
 
 console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');

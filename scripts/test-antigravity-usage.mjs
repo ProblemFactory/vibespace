@@ -176,6 +176,17 @@ const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
   ok('onDemandUsageView: four windows, each group 5h then 7d, agy\'s words and number in the tooltip', v && v.windows.map((w) => w.label).join(',') === '5h,7d,5h,7d' && v.windows[0].tip === 'Gemini Models · Five Hour Limit Remaining 100%' && v.windows[3].tip === 'Claude and GPT models · Weekly Limit Remaining 100%', JSON.stringify(v?.windows));
   ok('…legacy-shaped buckets the shared renderer reads (utilization 0..1, resetsAt in seconds, the empty state kept)', v.windows.every((w) => w.utilization === 0 && w.resetsAt > 1e9 && w.resetsAt < 1e11 && w.state === 'empty'));
   ok('no reading / no limits ⇒ null (the cell draws nothing — never a fake 0 %)', MA.onDemandUsageView(null) === null && MA.onDemandUsageView({ limits: [] }) === null);
+  // lane usage-every-change pick 3 (law 5): the reading says how many turns ran on the account SINCE it (the ledger's count of
+  // the turns booked by their own records); not counted yet says nothing — never «0»
+  const tipOf = (n) => (MA.onDemandUsageView({ ...reading, turnsSince: n }) || { windows: [{}] }).windows[0].tip;
+  ok('pick 3: each window\'s tooltip says the turns since the reading — none / one / five; not counted yet (null) adds nothing',
+    /· no turn ran on this account since this reading$/.test(tipOf(0)) && /· 1 turn ran on this account since this reading$/.test(tipOf(1)) && /· 5 turns ran on this account since this reading$/.test(tipOf(5)) && tipOf(null) === v.windows[0].tip && MA.onDemandUsageView({ ...reading, turnsSince: 5 }).turnsSince === 5,
+    JSON.stringify([tipOf(0), tipOf(5), tipOf(null)]));
+  {
+    const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+    const K = ['no turn ran on this account since this reading', '1 turn ran on this account since this reading', '{n} turns ran on this account since this reading'];
+    ok('…in zh and ja too ({n} kept)', K.every((k) => zh[k] && ja[k]) && /\{n\}/.test(zh[K[2]]) && /\{n\}/.test(ja[K[2]]), JSON.stringify(K.map((k) => [zh[k], ja[k]])));
+  }
   class App { }
   MA.installManageAgents(App, {});
   const app = new App();

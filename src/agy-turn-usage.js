@@ -68,4 +68,20 @@ function turnUsage({ usage, prev = null, transcript = null, model = null, modelF
   return { total, turn, last, model: model ? String(model) : null, modelFrom: model ? (modelFrom === 'agy' ? 'agy' : 'asked') : null, durationSeconds: Number.isFinite(secs) && secs >= 0 ? secs : null };
 }
 
-module.exports = { usageOf, deltaOf, transcriptTurn, turnUsage };
+/** THE LEDGER ROW ONE FINISHED TURN MAKES (lane usage-every-change pick 3, law 5) — from the wrapper's `usage` record: the
+ *  TURN's own spend (`turn`: the transcript's rows, else the delta of two totals), i = fresh input (agy's input excludes cache
+ *  reads), cr = cache reads, o = output, at the record's own time; `total` = the running total (the row's id, replay-stable).
+ *  A turn agy could not split (`turn` null: no earlier total in this process, or a total that went DOWN — a new process, a
+ *  resume) makes NO row: never a guessed split. No cost, no percentage. → {ts, i, cr, o, model, total, calls} | null. PURE. */
+function ledgerRowOf(rec) {
+  if (!rec || rec.kind !== 'usage' || !rec.turn || typeof rec.turn !== 'object') return null;
+  const t = rec.turn, i = num(t.input), cr = num(t.cacheRead), o = num(t.output);
+  if (!i && !cr && !o) return null;
+  const ts = Date.parse(rec.ts);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  const tot = rec.total && typeof rec.total === 'object' ? Number(rec.total.total) : NaN;
+  const calls = Number(t.calls);
+  return { ts, i, cr, o, model: rec.model ? String(rec.model) : null, total: Number.isFinite(tot) ? tot : null, calls: Number.isFinite(calls) && calls > 0 ? calls : null };
+}
+
+module.exports = { usageOf, deltaOf, transcriptTurn, turnUsage, ledgerRowOf };

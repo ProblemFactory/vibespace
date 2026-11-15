@@ -64,6 +64,19 @@ ok(J(viaDelta.turn) === J({ input: 500, output: 60, thinking: 30, cacheRead: 400
 ok(U.turnUsage({ usage: { input_tokens: 0, output_tokens: 0, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 0 } }) === null && U.turnUsage({ usage: null }) === null && U.turnUsage({ usage: OWNER_1 }).last === null,
   'agy counted nothing (the unauthenticated refusal) ⇒ no record; no transcript ⇒ last null (the bar keeps what it had)');
 ok(U.turnUsage({ usage: OWNER_1, model: 'gemini-4-argon-high', modelFrom: 'agy' }).modelFrom === 'agy', 'a slug agy NAMED is marked agy (the served model); one it was only started with is «asked»');
+// lane usage-every-change pick 3 (law 5): ONE finished turn's `usage` record → ONE ledger row of the TURN's own spend, at the
+// record's own time; a turn agy could not split makes none
+{
+  const rec = { ts: '2026-11-15T01:00:00.000Z', type: 'acp', kind: 'usage', sessionId: 'c-1', ...full };
+  const lr = U.ledgerRowOf(rec);
+  ok(!!lr && lr.ts === Date.parse(rec.ts) && lr.i === full.turn.input && lr.cr === full.turn.cacheRead && lr.o === full.turn.output && lr.total === full.total.total && lr.model === 'gemini-4-argon-high' && lr.calls === 2,
+    'ledgerRowOf: the TURN\'s spend (i fresh input, cr cache reads, o output), the record\'s time, the running total (its id), the model, the calls', lr);
+  const fromDelta = U.ledgerRowOf({ ...rec, ...viaDelta });
+  ok(!!fromDelta && fromDelta.i === 500 && fromDelta.cr === 4000 && fromDelta.o === 60 && fromDelta.calls === null, '…the delta road books the same way (calls unknown ⇒ null)', fromDelta);
+  const down = U.turnUsage({ usage: { input_tokens: 10, output_tokens: 5, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 15 }, prev: U.usageOf(OWNER_1), transcript: null });
+  ok(U.ledgerRowOf({ ...rec, ...down }) === null && U.ledgerRowOf({ ...rec, turn: null }) === null && U.ledgerRowOf({ ...rec, kind: 'notice' }) === null && U.ledgerRowOf({ ...rec, ts: 'not a time' }) === null && U.ledgerRowOf({ ...rec, turn: { input: 0, output: 0, cacheRead: 0 } }) === null && U.ledgerRowOf(null) === null,
+    'ledgerRowOf: a total that went DOWN (a new process, a resume) / no split turn / not a usage record / no time / nothing spent ⇒ NO row (never a guessed split)');
+}
 const ctxPct = (last) => Math.round(((last.input + last.cacheRead) / SB.windowOf(AGY_ROW, 'gemini-4-argon-high')) * 100);
 ok(ctxPct(full.last) === 9 && SB.windowOf(AGY_ROW, 'gemini-4-argon-high') === 1048576, 'the context of the measured shape = 90 228 of the documented 1 048 576 = 9 % (the window table: Google\'s model page, named in the descriptor)');
 ok(SB.windowOf(AGY_ROW, 'gemini-3.1-pro-high') === 1048576 && SB.windowOf(AGY_ROW, 'GEMINI-3.8-FLASH-medium') === 1048576 && SB.windowOf(AGY_ROW, 'gemini-4-argonaut') === 0 && SB.windowOf(AGY_ROW, '') === 0 && SB.windowOf(H.get('claude').ui.statusBar, 'gemini-4-argon-high') === 0,
