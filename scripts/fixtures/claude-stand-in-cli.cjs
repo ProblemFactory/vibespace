@@ -116,7 +116,7 @@ function commandWork(busyShape, busyMs) {
   const script = busyShape
     ? `const end = Date.now() + ${Math.max(100, Number(busyMs) || 120000)}; const t = setInterval(() => { const s = Date.now(); while (Date.now() - s < 20) { } if (Date.now() > end) clearInterval(t); }, 200);`
     : "require('child_process').spawn('sleep', ['86400'], { stdio: 'ignore' }); setInterval(() => { }, 1 << 30);";
-  return require('child_process').spawn(process.execPath, ['-e', script], { stdio: 'ignore' });
+  return require('child_process').spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });   // its output is the step's (a real CLI reads its command's pipes)
 }
 function nextFollow() {
   if (SPLIT_FOLLOW || isCommand(queued[0])) return queued.shift();
@@ -217,11 +217,12 @@ function begin(f, { follow = false } = {}) {
     out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_t' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: spin ? 'node build-and-test.mjs' : 'node wait-for-page.mjs', description: spin ? 'Build and test' : 'Wait for the page' } }] } });
     const c = commandWork(spin, process.env.STAND_IN_SPIN_MS);
     busy.child = c;
+    let said = ''; c.stdout.on('data', (d) => { said += d; }); c.stderr.on('data', (d) => { said += d; });
     if (process.env.STAND_IN_TOOL_PIDS) { try { fs.appendFileSync(process.env.STAND_IN_TOOL_PIDS, c.pid + '\n'); } catch { } }
     c.on('exit', (code, sig) => {
       if (busy !== mine || mine.tool !== toolId) return; // the turn was interrupted: its rejected tool_result is said
       mine.child = null;
-      out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: sig ? `the command was ended (${sig})` : `the command ended (exit ${code})`, is_error: code !== 0 } ] } });
+      out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: `${said.trim() ? said.trim() + '\n' : ''}${sig ? `the command was ended (${sig})` : `the command ended (exit ${code})`}`, is_error: code !== 0 } ] } });
       mine.tool = null; mine.post = true;
       mine.timer = setTimeout(() => { say('the command ended'); end('success'); }, POST_MS);
     });

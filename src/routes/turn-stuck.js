@@ -4,7 +4,7 @@
 // page ⇒ cross_site). «Keep waiting» ends the item and restarts the bound; «Stop the turn» is the composer's own Stop.
 const { personVerdict } = require('./vault.js');
 
-const ANSWERS = Object.freeze(['keep-waiting', 'stop-turn']);
+const ANSWERS = Object.freeze(['keep-waiting', 'end-command', 'stop-turn', 'restart-anyway']);
 
 function registerTurnStuckRoutes(app, { turnWatch }) {
   app.post('/api/turns/:sessionId/stuck', (req, res) => {
@@ -14,7 +14,8 @@ function registerTurnStuckRoutes(app, { turnWatch }) {
     const answer = String((req.body && req.body.answer) || '');
     const id = String(req.params.sessionId || '');
     if (!ANSWERS.includes(answer)) return res.status(400).json({ ok: false, code: 'unknown-answer' });
-    const r = answer === 'keep-waiting' ? turnWatch.keepWaiting(id) : turnWatch.stopTurn(id);
+    const r = answer === 'keep-waiting' ? turnWatch.keepWaiting(id) : answer === 'end-command' ? turnWatch.endCommand(id, 'person')
+      : answer === 'restart-anyway' ? turnWatch.restartAnyway(id) : turnWatch.stopTurn(id);
     res.status(r && r.ok ? 200 : 409).json(r || { ok: false, code: 'failed' });
   });
 }

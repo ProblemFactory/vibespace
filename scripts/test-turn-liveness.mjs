@@ -161,7 +161,7 @@ console.log('— ⑦ THE MEASURED TURN (2026-11-12, this box: one child at 0 tic
 console.log('— ⑧ THE BY-ITSELF ENDING (the owner\'s «可以», 03:02Z): only «stuck on a command» for the second bound is due');
 {
   ok(L.endBoundMsOf() === 30 * MIN && L.DEFAULT_END_MIN === 30, 'default thirty minutes');
-  ok(L.endBoundMsOf('off') === null && L.endBoundMsOf(false) === null, "'off' = never ended by itself");
+  ok(L.endBoundMsOf('off') === null && L.endBoundMsOf(false) === null && L.endBoundMsOf(0) === null && L.endBoundMsOf('0') === null, "'off' (and the setting's 0) = never ended by itself");
   ok(L.endBoundMsOf(5, 10 * MIN) === 10 * MIN, 'never before the turn was told (clamped up to the told bound)');
   ok(L.endBoundMsOf(45) === 45 * MIN && L.endBoundMsOf('60') === 60 * MIN && L.endBoundMsOf(99999) === 24 * 60 * MIN, 'a number, a numeric string, at most a day');
   ok(['abc', null, NaN, {}].every((x) => L.endBoundMsOf(x) === 30 * MIN), 'anything else is the default');

@@ -279,6 +279,13 @@ const SETTINGS_SCHEMA = {
     description: t('When a turn has written nothing and nothing it started is working for this long, its conversation and For-you say so, with Keep waiting and Stop the turn. A command that is working is never called stuck'),
     category: t('Chat'), liveApply: true,
   },
+  // lane turn-never-silent (the owner's word «可以», 2026-11-15): a command STUCK this long (its step open, nothing written, nothing it
+  // started working) is ended by the hub — the same act as «End the command»; the turn goes on; 0 = never. A working command never
+  'turns.endStuckCommandMin': {
+    type: 'number', default: 30, min: 0, max: 1440, step: 1, label: t('End a stuck command by itself after (minutes, 0 = never)'),
+    description: t('A command that has shown nothing and has nothing working for this long is ended, the same as pressing End the command; the agent gets the command\'s failure and goes on. A command that is working is never ended. Keep waiting starts the time again'),
+    category: t('Chat'), liveApply: true,
+  },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
     description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),

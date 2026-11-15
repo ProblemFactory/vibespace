@@ -36,6 +36,10 @@ export const ROWS = [
   [RK, "for (const role of targets) { if (proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGTERM')", 'legacy', 'proven\\(m, role\\)', 'stop: the child + the keeper', 12, 1, RKWHY],
   [RK, "&& proven(m, role)) { try { process.kill(m[role + 'Pid'], 'SIGKILL')", 'legacy', 'proven\\(m, role\\)', 'stop: the survivors 2.5 s later (re-proven)', 12, 1, RKWHY],
   ['deploy/docker/entrypoint.sh', 'kill -TERM "$child"', 'handle', '"$child"', 'the entrypoint\'s own $! child'],
+  // lane turn-never-silent (law L3): Stop / end-command end what the turn started — agy's OWN group (the child this wrapper spawned
+  // detached: its pgid is its pid), and each process read below agy BEFORE the signal, its birth checked AT the signal
+  ['data/bin/agy-wrapper.js', 'function killGroup(proc, sig) { try { process.kill(-proc.pid, sig);', 'handle', 'proc.pid', 'agy\'s own process group (its spawned child\'s pid = the group)'],
+  ['data/bin/agy-wrapper.js', 'function signalOne(p, sig) { if (!sameBirth(p)) return false; try { process.kill(p.pid, sig);', 'starttime', 'sameBirth\\(p\\)', 'a process below agy (read through its children files before the signal), its stat starttime checked at the signal'],
   [CI, "process.kill(child.pid, 'SIGKILL'", 'handle', 'child.pid', 'a held gate child'],
   [CI, 'process.kill(o.pid, sig)', 'starttime', 'sameProcess\\(o,', 'the reaper\'s victims (own copy: rows from the same /proc pass; a starttime-less row is never signalled, said — B-5ee1)'],
   [CI, 'const alive = (pid) => { try { process.kill(pid, 0)', 'probe', 'the reaper\'s liveness wait', 'nothing'],

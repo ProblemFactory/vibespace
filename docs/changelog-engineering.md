@@ -6,6 +6,25 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.405 — 2026-11-16
 
+### turn-never-silent P4 — stopping ends what the turn started; «End the command»; the by-itself ending at thirty minutes (the owner's word «可以»)
+- **agy in its own process group** (data/bin/agy-wrapper.js: spawned `detached`).
+  - Stop, steer and the wrapper's own end signal the GROUP (SIGTERM at 300 ms, then SIGKILL, `AGY_WEBUI_KILL_MS`, default 5 s).
+  - What moved to a session of its own but was in the tree is signalled by pid, from the tree read BEFORE the signals, each one's birth checked (proc-tree + parseStat).
+  - What still lives after the bound is said by name and count («Stopped, but N processes the turn started could not be ended: …»).
+- **«End the command»** (stdin verb `end-command`). It ends the processes BELOW agy and leaves agy itself: SIGTERM, then SIGKILL after `AGY_WEBUI_END_GRACE_MS` (default 3 s). agy's step ends with the command's failure and the turn goes on. The wrapper records `command_ended {ok, by, ended, survivors, told}` and says so in the conversation. Measured 2026-11-12: an idle agy has no child at all, so what is below it in a turn is the turn's own work. The advert `caps.endCommand` is what the hub reads before offering the door.
+- **The by-itself ending** (the owner's «可以», 03:02Z). The watch passes the second bound (setting `turns.endStuckCommandMin`, default 30, 0 = never) to the verdict.
+  - ONLY «stuck on a command» (endDue), on a wrapper that serves end-command, once per stillness, is ended: the same act as the door, the item resolved «the command was ended by itself at HH:MM».
+  - «Keep waiting» restarts the thirty. «silent» is never ended. The item's detail says when it would be («If nothing changes, the command is ended by itself at …»).
+  - The agent is told WHY in the step's own output. The wrapper writes «VibeSpace ended this command after N minutes with no output and nothing it started working.» into the command's fd 1/2, but ONLY when that is a pipe whose other end is agy or a process below it (never a file, a terminal, or a pipe out of the tree).
+  - A socket pair (what a Node CLI's own spawn gives a child — the stub's default) cannot be opened from outside (ENXIO, measured). There the agent sees the command's failure and the conversation carries the sentence. The stub's `piped` variant (a real pipe, as a Go exec gives one) proves the sentence lands; real agy's pipes are unmeasured.
+- **The restart's bound** (`AGY_WEBUI_RESTART_BOUND_MS`, default 15 s). An old agy that has not exited is said («The old Antigravity process (pid N, state D) has not exited …») and named in the sidecar (`restartStuck`). The watch files its item, whose ONE door is «Start it again anyway» (stdin verb `restart-anyway`: a new agy now; no third one when the old finally exits).
+- **A spawn that fails** (no pid: the binary gone — a self-update) is the exit: said, and the wrapper ends.
+- **Buttons that apply.** The registry row's four buttons each carry a `when`, a fact on the item's action: `stuck` (Keep waiting, Stop the turn), `endable` (End the command), `restartStuck` (Start it again anyway). buttonsFor(item) draws only those (user-todos-row; the For-you window's layout filters the same way); test-foryou-actions-census's pin follows.
+- **The pin.**
+  - scripts/test-turn-end.mjs (fast, LAW kill, 30 legs, 6.9 s; nine real wrappers together): ① Stop ends the group and the setsid'd grandchild by its birth, and agy restarts; ② end-command ends the command, keeps the SAME agy, ends the step, and the turn goes on; ③ the REAL watch's by-itself ending with the sentence in the step output, a busy command never (61 min), Keep waiting at 29 then ended at 60, silent never, the setting's 0 never; ⑤ the restart bound and «Start it again anyway»; ⑥ a spawn error is the exit; ④ RED CONTROL: a mutant ending on the written silence alone ends a working command.
+  - RED on pick 3.
+- **The fast tier's cap** 1090 → 1097 s by arithmetic (1096.429 s over 589 rows).
+
 ### turn-never-silent P3 — a stuck turn says so where the person is: ONE For-you item, also its card in the conversation, with its own doors
 - **NEW src/server/turn-watch.js (ORCH).** A reading every 60 s over the local chat sessions in a turn. For each it reads:
   - the sidecar (fs.promises): `cliWroteAt`, `turnOpenedAt`, `childPid`;

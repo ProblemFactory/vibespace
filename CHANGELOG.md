@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - A turn stuck on a command now says so: after ten minutes with no output and nothing working, its conversation and For-you name the command and since when.
 - That item offers Keep waiting and Stop the turn; a command that is working is never called stuck.
+- An Antigravity command stuck there also gets End the command: it ends the command and what it started, and the turn goes on.
+- After thirty minutes stuck (a setting; 0 = never) it is ended by itself, and the agent is told why. Keep waiting restarts the thirty.
+- Stopping an Antigravity turn now also ends what its command started; whatever could not be ended is said by name.
 
 ## 2.369.404 — 2026-11-15
 
