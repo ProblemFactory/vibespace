@@ -710,6 +710,136 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The leg's test methods are named 'DOM.getDocument' and the like** — never the navigation method's literal name: the onboarding census (test-architecture §47) reads a suite that writes it as a suite that navigates. The census is right to be strict; the test data changed. The row's words name no browser (test-ci-gate §2 reads that word in a fast row's why as a browser suite in the fast tier).
 - **The kb states the rule as it is:** a rowless method is refused on every mediated lease, whoever drives — a newer Chrome's or an OLDER one's (the fleet's 149–152 list 6–12 rowless) — kb-features (+ the 157 bullet), the kb-api code list (`method_unclassified`; `bad_message` for a shapeless name), one incident line in kb-bugfix-invariants, a kb-file-structure index line for scripts/agent-browser-cdp-census.mjs; the browser-mediation.js index line keeps its FROZEN head (test-architecture §82 ④ matches a moved index line by its first 48 characters — the first cure rewrote it and lost it) — only its tail states the rule. The agent manual: an OLDER Chrome's rowless methods are named too; tell the user which method was refused and on which browser.
 
+### Known in 2.369.402 — still open from 2.369.401, and named with this train (2026-11-14); each a pick of a later train
+- **K1 (from .401 K1).** A stopped update says the checkout is clean, but not that the code on disk is already the new version. On an install with no supervisor, ⚙ → Update stops the server and nothing starts it.
+- **K3 (from .401 K3, the hosted runners' Claude Code 2.1.323).** The suite of the hold door and of Stop (test-claude-steer-chrome) is red on about half its tries on the hosted runners, on released trees as well; on this box, with 2.1.322, it is green.
+- **K4 (from .401 K4: file preview on a mount).** A healthy workbook queued behind one on a hung mount is told «Storage not responding».
+- **K5 (from .401 K5: the pairing sheet).** One Windows machine has three names along its pairing path: device, PC, machine.
+- **K6 (from .401 K6: the pairing sheet).** On one allow row of the sheet, «sessions» is explained as «conversations».
+- **K7 (from .401 K7: law 1).** A queued entry the release had already bound wrongly keeps that binding through the update, and is marked carried at its first listing.
+- **K8 (from .401 K8: connection-notice B, by design).** A reader that trickles while under 4 MiB of backlog is never cut: its memory is bounded per socket.
+- **K9 (from .401 K9: the owner's case).** The For-you window's «Reply:» label carries an option's tooltip.
+- **K10 (from .401 K10: the owner's case).** The open strip's place is not read again when a bar appears under it after it opened.
+- **K12 (from .401 K12: older than this train).** An ask's attached file chip is not drawn in the strip, also when the item is opened in place.
+- **K13 (from .401 K13, the hosted runner; STAYS).** test-channel-window-render's leg ⑫ — the principal picker reopened after Save — can be red, then green on the retry, on a slow hosted runner. Its cure became a PRODUCT cure (the lost press) and rides 2.369.403; it was red then green on this train's prep mirror too.
+- **K14 (from .401 K14, the hosted fast tier, tests).** On a slow hosted runner a fast suite's timing leg can go red once; the release's fast job is judged by attempt (re-run alone, at most three). This train cured three of them, test-only: test-chat-frame-guard and test-roster-per-pass by measuring the leg under a slowed process, and test-user-state-bounds by judging its road over three rounds (B-d24c's seventh to ninth). The others stay named in B-d24c.
+- **K15 (from .401 K15, the toolbar's second row).** A second row holding more marks than fit, with no spring left to give, runs past its end; row 2 has no fold like row 1's ⋯.
+- **K16 (new, the box's: B-0084).** On the integration box, test-desktop-webrtc-chrome's leg ⑲ is red: the default origin with no microphone, the agent as werift alone on the mDNS road, takes 20 s. It is red on this release and on 2.369.401 alike, and every other leg is green.
+- **K17 (new, lane ui-controls-and-bugs: a declared debt).** In a desktop app's own window menu, Show window frame ▸ and Scale ▸ still grey out the present choice, while the app's default-scale menu now shows it as a normal ✓ row. The lane's menu ledger names these rows as debt (three rows); its next pick draws the present choice as a normal ✓ row, and pressing it keeps it.
+- **Found and cured before this release (lane int361, 2026-11-14):** a copied install line «sudo { … }» on the xpra.org road (from machine-needs' pinned key). It was met by the first cut's release claim, which was never pushed; the plan builder's cure ships here.
+- **CLOSED in 2.369.402:** K2 (laws 2 and 3 of queued-is-not-woke ship: a message behind a turn that never ends has its bound and its For-you item) · K11 (chrome-157: the method-name shape has its fast pin in test-cdp-census, and docs/kb-features.md says what the hub refuses).
+
+### int402 — the .402 train's own notes (lane int361; on d64075ba4 = 2.369.401)
+- **Ten units, in the coordinator's order:**
+  1. oat-add-door (f441fa2b9 + 02e1c2461);
+  2. artifacts-by-intent (8fcc11445);
+  3. queued-is-not-woke (the stack to 1d5cbaf95 + the r16 port 72debc457);
+  4. B-6ded (8d3f48923 + b9da1453b);
+  5. chat-attachments-persist (to 0f1eb26ed + its changelog-leg cure ecae7fd4d);
+  6. machine-needs-at-pairing (to 6dbed3544);
+  7. stream-recovery (to 29e6a3791);
+  8. ui-controls-and-bugs (8feadfaaf, with the secrets pins and the phone-row cure);
+  9. chrome-157 (bfeb75afb);
+  10. the cpu-capture cure of hub-loop-stalls (7963c6165).
+
+  Then the train's own: every suite file parses, the frame guard, roster-per-pass, two census cures picked on the tip, the user-state bounds over rounds, and the cap.
+- **The train closed at fifteen units and was cut to ten on the box's fast tier.** At the close (13:02Z, an hour early) fifteen units were whole. The fifteen-unit merge was built (decd0b2b3, 146 commits, kept as a branch as the five lanes' map). The box's whole fast tier then ran on it: 579 green, 10 red.
+  - The ten reds were CENSUS MEETINGS: a lane's own baseline, sentence net or ledger meeting another unit's new lines. Six units each carry a census of the others' words.
+  - A table set each red line's catcher beside the unit it caught (by blame). On the ten units, 3 lines in 2 suites remained. On the ten + ui-language + the cost stack, 11 lines in 6 suites. On all fifteen, 35 lines in 10 suites.
+  - The coordinator cut the train to ten. The other five follow one by one in 2.369.403 and after, each lane absorbing the release's new lines in its own rebase, in this order: ui-language, the cost stack, ui-plain-words, ui-needs-a-button, ui-phone-and-fit pick 1.
+  - The ten-unit tip was a fresh merge on 2.369.401 with no hand stop. It holds no line of the five (searched by their own tokens).
+- **The two meetings that remained on ten units, each cured by the catcher's lane in ONE test-only commit on the train's tip:**
+  - test-wait-watch's removal list against chat-attachments' new name «keptFrom». A name collision: the list now names the removed function by its call and its hook, with a control leg.
+  - test-machine-needs' net against the stream's sentence about the direct link. A road fact, so a non-need row with that reason.
+- **The rehearsal before the close.** The eight units whole at 10:42Z were merged onto 2.369.401 four hours before the close.
+  - Conflicts beyond the changelogs: the fast-sum cap line, which every lane that added a fast row had moved and which the train sets once, after the last pick; showSay's options and the stream-plan export list (stream × machine-needs), both sides kept; .repo-guard-allow; the zh / ja dictionaries, as a union with the key check clean.
+  - Its prep mirror ran every hosted suite on those bytes.
+- **Three cuts (lane int361, 2026-11-14 and 15).** The first cut, c46488e3c, was cut on what was f28e929d4 (now 21df6193e) and never pushed. Its release mirror was green (every heavy shard; the fast job green by attempt), but its release claim was red on a real regression; nothing was waived.
+  - The red: test-desktop-serve, a self-hosted heavy suite, pins the commands a person copies to install xpra. machine-needs pinned xpra.org's key, which made one copied line «sudo { … }». sudo cannot run a shell group, so the line failed when pasted. It touched only a machine with no passwordless sudo, on the xpra.org road. The plan builder chose «sudo sh -c» by a step's first character.
+  - The cure (a7adf3329, product, by the coordinator for machine-needs): the builder decides by what a step is. One simple command goes to sudo as it is; a step with a shell operator, or one that starts with a word only a shell knows, goes through the shell under sudo. Its pins: a fast section of test-desktop-apps pastes every copied line of four plans into a real shell, with the old line as its red control; test-desktop-serve's section 6 now expects nine commands and no shell word handed to sudo.
+  - A test-only commit rode with it (e7f3436ab): test-agy-harness drops the caller's CLAUDE_WEBUI names.
+  - THE GAP IT SHOWED: the train's classes and both prep mirrors covered hosted heavy suites only. The range reached 63 self-hosted heavy suites that no merged tip had run before the bump. The second cut was made only after a self-hosted class on its tip: ranks 1 and 2 of what the range reaches on the box, plus test-desktop-serve by name: 28 suites on what was 66dbe679d (now e7f3436ab). Then came the ten other suites that read a menu ui-controls' grammar touched (on what was 26ba9644a, now 33c37715d), and the two its second cure changed (on what was eedee2a32, now f12bef863). All fourteen menu readers have now run on a merged tip. The class found three reds, none of them in the product:
+    - test-desktop-xpra-window-seamless and test-browser-live-ui held pins of the OLD menu shape. ui-controls' grammar draws an information row as a caption, not a menu item, and the pins counted items. That lane cured both, test-only (33c37715d, 821bef6f9): each leg reads the captions and the items in order, each caption with its words, with a control that cuts the captions. The same commit makes test-desktop-app-window press the row it found by a mark instead of by its place.
+    - test-desktop-xpra-window-close had outgrown its budget: a green run needed about 320–330 s against 322 s, because its 161 s measure was older than §10h's legs and the processor's cap. One run measured alone took 329.6 s, and its row was restated at 660 s, twice the measure (f12bef863), with its kb line (a50c3e831) and its entry in the desktop batch table (a59ca7a6d).
+    - Everything else was green; test-agy-cli-probe was skipped by name, as before.
+  - The two-suite claim ran on what was eedee2a32 (now f12bef863) and stands for the pre-bump tip a59ca7a6d: the commits after it (the kb line, the batch table) move no suite and no product byte.
+  - THE THIRD CUT. The second cut, c167240f2, was cut on what was 777f28ada and never pushed either. Its release mirror and its release claim were green, but production's own push hook refused it: its secret scan found three fixture shapes (two credential-URL shapes in test-write-only-secrets, and one armored line of the xpra public key with a cephx-key shape). The lanes had allowed them with rows in .repo-guard-allow; a push from production reads production's allow file, where rows added in the pushed range do not exist, and the hook reads every commit's added lines, so a cure on top cannot clear it.
+  - The coordinator rewrote the range that was d64075ba4..777f28ada so that no commit adds those lines: seven files change (the URLs are joined at runtime, the key file is kept as hex and decoded by its suite, the allow rows are gone, and three lines of text follow). No product byte moved. Of 95 commits, 36 keep their sha, 55 move by their parent only, and four change in content and say so.
+  - The second cut's engineering changelog lacked a line its pre-bump tip held (the coordinator's «THE FETCH LINE TOO» in machine-needs' block), because the go rebuilt a unit's block from the lane's own head and the cut compared the assembler with itself. It was found at the third cut, and the go now checks that the assembled changelogs hold every line of the pre-bump tip's, the tip's file being the oracle.
+  - A NEW GATE OF EVERY CUT since: the push hook's two scans, run the way the push runs them (production's allow file, production's secret scan, the company guard's scanner), on master..the release, with the second cut as the red control.
+  - The box's class carries by content: the class of 28, the ten further menu readers, the alone measure and the claim of two ran on bytes identical to a59ca7a6d in every product path, and no heavy suite reads the seven rewritten files. list-affected names 21 heavy suites over them (by a name, a folder, or always), so those ran on a59ca7a6d in three claims: 19 green, and test-agy-cli-probe skipped by name as before. Of the 21, test-ci-heavy-launch (a hosted suite) ran out of its default 600 s on the box on both tries, with 98 of 128 checks green and none red; the same on master; its verdict is the release mirror's.
+  - A restated row is a census of its readers. This budget was restated in three places, each found by its own red: the tier table, the kb line, and the batch table that test-ci-gate-tiers' family census reads (a stopped cut met it). Then one search of the tree for every statement of the suite's measure found no fourth, and the whole test-ci-gate family ran green on the tip.
+- **The prep mirror's rule (since 2026-11-14): no cut without a prep mirror green on the final pre-bump tip.** On the rehearsal it caught:
+  - two timing legs (the frame guard, roster-per-pass);
+  - a changelog leg that read a release block by a literal number (chat-attachments' leg ⑧, cured by its lane);
+  - one unit twice: ui-controls-and-bugs' changed law (the secrets form, test-integrations-ui) and its changed width (an OFF auto-continue's words folding the phone row's Artifacts chip, test-artifacts-handover-ui). Both were cured by the lane before the close.
+
+  No list could have named the secrets form: the suite names none of the modules the unit changed, and the model's one printed reason for it was «boots the product».
+- **The prep mirror of the real tip** (ci 43606324485 ran on what was 87165046c (now 7d14093ae), the first cut's product bytes; the first cut's tip, what was f28e929d4, added only test and docs commits, whose changed suites ran on the box. The second cut adds one source file after it, the plan builder src/install-slot.js, so for the second cut the release's own mirror is the proof of its bytes on the hosted runners):
+  - the fast job, judged by attempt: red on attempt 1 only at test-user-state-bounds (B-d24c's ninth, cured below), ALL GREEN on attempt 2 (528 s);
+  - heavy shards 1–5 and 7 green; shard 6 red only on test-browser-human. Its holder census of the browser keeper's lease sites met chrome-157's one new site. That lane ruled it conversation-only (the callback finds the told lease's own conversation) and cured the census test-only (fc4b737c0, with a control).
+  - red then green on a shard's retry, each named:
+    - test-channel-window-render (K13's leg ⑫);
+    - test-browser-resume-ui (its red control, the old wait for the switch back; chrome-157 reaches it): run alone on the box on the first cut's tip, what was f28e929d4: green, 64 of 64;
+    - test-loop-hold-live (its leg 5, the stop rows' «Waiting for the debugger…» line; it boots only).
+- **Rule 3(a), the train's half.** The range reaches 350 hosted heavy suites. The box ran three things:
+  - ranks 1–2: 46 suites in 7 claims. Rank 1 is a suite whose file changed (14). Rank 2 is a suite that names a changed doc / script / data-bin file, declares a changed read, or is an always smoke (32).
+  - the meetings that exist on ten units, in one claim: the chat status bar, the lock chip and the marks, the secrets form (7 suites);
+  - the runner's face (DejaVu) for the handover suite and the phone composer.
+
+  All were green except two:
+  - test-desktop-webrtc-chrome's leg ⑲ (B-0084, below);
+  - test-codex-effort-meta, whose leg «every version number named in the cited files is a RELEASE that exists» met the train's own essay in docs/kb-file-structure.md, which named the release it hoped to be. The essay and the parse suite's header now name the lane and the date (21df6193e), and the suite ran alone on the first cut's tip, what was f28e929d4: green.
+
+  The rest went to the prep mirror: ranks 3–7 (236 suites, about 298 minutes of hosted-runner time) and the 68 suites of the rank finding.
+- **The rank finding (B-94d3).** A hosted suite can hold a census leg that reads a changed src file as TEXT. The model ranks such a suite by what it boots or imports (ranks 5–7), so no box class reaches it.
+  - The prep mirror met one: test-browser-human's holder census over the browser keeper's lease sites, which chrome-157's one new site meets (below).
+  - With text readers counted at rank 2, 68 more hosted suites on this range were rank 2. They ran on the prep mirror, all green but that one.
+  - The coordinator's ruling for the next trains: the box takes rank 1, the meetings with pictures and one runner-face claim. Rank 2 and the text readers («2b») are the prep mirror's. B-94d3 moves every census leg that needs no browser into a fast suite.
+- **The fast tier's sum cap: 1070 → 1085 s by arithmetic.** 1084.219 s over 585 rows, +14.939 s:
+
+  | Unit | Δ s |
+  |---|---|
+  | the train (test-suite-files-parse 4.100; test-user-state-bounds 7.8 → 9.8, its rounds) | +6.100 |
+  | queued-is-not-woke's r16 port | +3.603 |
+  | ui-controls | +1.600 |
+  | chat-attachments | +1.200 |
+  | machine-needs | +1.200 |
+  | queued-is-not-woke's stack | +0.600 |
+  | B-6ded | +0.251 |
+  | oat-add-door | +0.200 |
+  | chrome-157 | +0.103 |
+  | artifacts-by-intent | +0.082 |
+  | the stream, the cpu-capture cure | 0 |
+- **Every suite file parses (the coordinator's law, a fast row).**
+  - A hosted-only heavy suite had not parsed since a lane's first pick: a comment placed mid-line cut a call. No gate loads a file it does not run, so only the mirror would have met it.
+  - scripts/test-suite-files-parse.mjs parses every code file under scripts/ once, in-process, as the module kind Node gives it, in 4.1 s. A file that does not parse is red by name and line.
+  - Its first run found a second, never parsed since it was born in 2.369.192: scripts/measure-input-receipts.mjs, a measurement script nothing runs. The comment now ends the line.
+- **Hosted fast flakes (B-d24c).**
+  - Its sixth (test-agy-harness) stays named.
+  - Its seventh (test-chat-frame-guard) and eighth (test-roster-per-pass) were CURED, test-only, by measuring the leg under a slowed process.
+    - The frame guard counted a captured line before its newline landed. The stand-in writes 4096-byte pieces; made red 3 of 3 with every write slowed 2 ms.
+    - Roster-per-pass's control was red only while one sweep is shorter than the writes' spacing. The gap now comes from the sweep time the run measures.
+  - Its NINTH (test-user-state-bounds, law A's whole-key road at 11.4 MiB: ×2.16 its control on the prep mirror, against a ceiling of 2×, on a runner that was not slow) was cured test-only by the same law: the road is measured over three rounds and judged by its median over its control's median from the same rounds.
+    - On the box, ten runs alternating the tip and 2.369.401: the tip ×1.27 / 1.39 / 1.29 / 1.42 / 1.33 (median 1.33), 2.369.401 ×1.26 / 1.24 / 1.27 / 1.52 / 1.31 (median 1.27). The same spread, so one sample's noise; the door's code was unchanged.
+    - Its controls go through the suite's own hook: a road truly slower than twice its control is red (×2.5); one delayed round does not decide.
+  - The recipe is in the runner-repro notes, beside the font recipe.
+  - B-3a3c (test-codex-effort-meta re-reads the lanes repo's live master on every call) stays open.
+- **B-0084, the box's: test-desktop-webrtc-chrome's leg ⑲.** On this box the default origin with no microphone offers one mDNS name. With the browser's own side the stream plays in about 445 ms; with the agent as werift alone it takes 20 s.
+  - One heavy turn ran the suite on the train's tip and on 2.369.401. Both were red on leg ⑲ alone, with the same sentence (20 039 ms and 20 025 ms); every other leg was green (146 and 142).
+  - It was red on the nightly full of .366 and .367 as well, and it does not hold the release. Named in Known (K16).
+- **The .399 and .400 after classes were completed on 2.369.401** (20 of 20 green in four claims; a claim on a superseded release proves nothing).
+- **The device agent bundle changes through seven units.** By esbuild's metafile over the tip, 32 of its 648 inputs changed:
+  - oat-add-door (4), artifacts-by-intent (5), queued-is-not-woke (4: 1 in the stack, 3 by its r16 port), B-6ded (1), chat-attachments (8), machine-needs (9, with the plan builder its cure changed), the stream (6, the Mac helper's Swift text among them);
+  - ui-controls, chrome-157 and the cpu-capture cure reach none.
+
+  Built with build:agentd's own flags in a scratch copy:
+  - 2.369.401 at its own version string: 6 048 965 bytes, sha256 954f3409…, the same bytes as its signed manifest;
+  - the first cut's tip, what was f28e929d4, at this release's version string: 6 125 344 bytes, sha256 f62b7ee0… (the first cut signed exactly these bytes);
+  - the final pre-bump tip a59ca7a6d (the batch-table commit on top of the docs commit a50c3e831 and the row commit f12bef863) at the same version string: 6 125 580 bytes (+1.27 %), sha256 a6d70882…. The bytes and the hash are the same for a59ca7a6d, a50c3e831, f12bef863 and e7f3436ab, because nothing after e7f3436ab is a source file (tests, the tier and batch tables, and docs only). The second cut, on what was 777f28ada, signed the same bytes.
+
+  The cut signs it (build:agentd + sign:agentd between the bump and the commit); the manifest is committed with the release, and its sha256 is the last one.
+
 ## 2.369.401 — 2026-11-13
 
 ### k3-badge-cure (主开发's ruling 2026-11-13 21:57Z — the first pick of .401) — a ring's age badge is ONE line and never covers its ring's label
