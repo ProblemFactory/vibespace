@@ -958,6 +958,19 @@
 - (2026-11-15) A READING WAS FILED ON THE ACCOUNT A CONVERSATION HAD JUST LEFT (the owner's screen; lane readings-attribution-2) — 不变量 = a reading lands on the account its request went out on
 - (2026-11-16) A CONVERSATION'S 437 BROWSER RECORDS RETIRED IN ONE LOOP TURN, A PROGRAM START EACH (keeper-sweep-yields, .407). 不变量 = a walk over a conversation's records costs the loop one record per turn and the store one write per piece; a daemon SEEN gone starts no program ⇒ kb-bugfix-invariants
 - (2026-11-14) WITH SIGN-IN OFF A CONVERSATION'S SHELL COULD RAISE ITS OWN SPENDING CEILING (lane setting-doors pick 0, measured on a scratch hub) — 不变量 = a spend.* row changes only from the owner's page: a bearer, or no page mark, is refused by name on every write road ⇒ kb-bugfix-invariants
+- (2026-11-15) AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (setting-doors acceptance, F4) — 不变量 = a pass that rewrites a sanitized anchor takes only the exact tag the tree writes; anything else stays the sanitizer's ⇒ kb-bugfix-invariants
+
+## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
+
+**What the verifier saw** (on the sanitizer model's raw serialization, int359/acc-401/sd-close/link/scene-b.mjs): browsers older than mid-2025 (Chrome before 138, Firefox before 140, Safari before 26) write a `>` RAW inside an attribute value when they serialize. Three passes that rewrite a SANITIZED anchor found the end of its open tag with «anything but `>`, then `>`»: the setting-link pass (chat-renderers `_settingAnchors`), the conversation-link pass (subagent-card `conversationLinksHtml`) and the masked-anchor pass (chat-renderers `_maskedAnchor`). An anchor whose title held `>` followed by an `<img onerror>` ended the «open tag» inside the title, and the rest was re-read as markup when the pass wrote its answer.
+
+**The cure — THE EXACT-TAG LAW.** A pass that rewrites a sanitized anchor accepts only the open tag whose every byte it can account for, the exact tag the tree's own rewrite and sanitizer produce:
+- an in-page `#vs-…` href is `<a href="…">` and nothing else (safe-html's hook adds `target` / `rel` only to other hrefs);
+- the masked pass reads href, marked's optional title, then the hook's `target="_blank" rel="noopener noreferrer"`, each value a QUOTED run.
+
+An anchor carrying anything else stays what the sanitizer returned, an inert in-page anchor. No attribute value is ever skipped by a «not `>`» run.
+
+**Pins:** test-setting-links ⑦, string legs only, old-engine raw strings. In each pass no tag opens outside an attribute, and the ordinary anchor is still rewritten. A mutant with the old pattern is RED in each pass.
 
 
 ## A CONVERSATION'S 437 BROWSER RECORDS RETIRED IN ONE LOOP TURN, A PROGRAM START EACH (2026-11-16, lane keeper-sweep-yields, 2.369.407)

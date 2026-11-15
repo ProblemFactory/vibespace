@@ -52,7 +52,12 @@ const SCHEME_AT = /https?:\/\//gi;
 // unknown scheme): `[x](vibespace://settings/<key>)`, `<vibespace://settings/<key>>`, a raw <a>; inside code marked writes `&lt;a`, so
 // only real tags. A known key becomes the fragment mark the sanitizer keeps; after linkify that anchor becomes the setting span.
 const SETTING_HREF_RE = new RegExp('(<a\\b[^>]*?\\shref\\s*=\\s*)(?:"vibespace:\\/\\/settings\\/([' + SETTING_KEY_CH + ']+)"|\'vibespace:\\/\\/settings\\/([' + SETTING_KEY_CH + ']+)\')', 'gi');
-const SETTING_ANCHOR_RE = new RegExp('<a\\b[^>]*?\\shref="(' + SETTING_ANCHOR + '[^"]*)"[^>]*>([\\s\\S]*?)<\\/a>', 'g');
+// THE EXACT-TAG LAW (主开发 2026-11-15, the verifier's F4): a pass that rewrites a SANITIZED anchor accepts only the open tag the tree's own
+// rewrite + sanitizer produce, every byte accounted for — for an in-page `#vs-…` href that is `<a href="…">` and nothing else (safe-html's
+// hook adds target / rel only to other hrefs). An anchor carrying anything more stays the sanitizer's inert in-page anchor: an engine
+// older than mid-2025 writes a raw `>` inside an attribute value, and a «not a greater-than sign» run would end the tag inside it
+const SANITIZED_ANCHOR_OPEN_RE = /^<a\x20href="([^"]*)"(?:\x20title="[^"]*")?(?:\x20target="_blank"\x20rel="noopener noreferrer")?>/;   // (\x20: a pattern READS an anchor, it makes none — test-path-linkify's anchor-site census)   // THE EXACT-TAG LAW: the tree's own anchor, byte for byte
+const SETTING_ANCHOR_RE = new RegExp('<a\\x20href="(' + SETTING_ANCHOR + '[' + SETTING_KEY_CH + ']+)">([\\s\\S]*?)<\\/a>', 'g');
 const NOTE_SPAN_RE = / ?<span class="chat-link-note masked-link-note">([^<]*)<\/span>/g;
 const BLOCK_RE = /<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>/gi;
 export function notesAfterBlocks(html) {
@@ -2897,9 +2902,11 @@ class ChatRenderers {
   }
   /** An <a>…</a> whose HREF holds a belt's mark → its words + the note; else null (the anchor's own rules run). */
   _maskedAnchor(a) {
-    const open = /^<a\b[^>]*>/i.exec(a);
+    // THE EXACT-TAG LAW (2026-11-15): the open tag the tree writes — href, marked's optional title, the hook's target + rel — each value a
+    // QUOTED run (a raw `>` inside a value is accounted for, never ends the tag); any other open tag stays the sanitizer's own anchor
+    const open = SANITIZED_ANCHOR_OPEN_RE.exec(a);
     if (!open) return null;
-    const href = /\shref\s*=\s*"([^"]*)"/i.exec(open[0]), inner = a.slice(open[0].length, -4);
+    const href = [open[0], open[1]], inner = a.slice(open[0].length, -4);
     // r2 (m3, m6): the HREF alone is judged — raw and decoded once (marked leaves a vault mark's colon raw); the label is words
     const raw = href ? href[1].replace(/&amp;/g, '&') : '';
     let dec = raw; try { dec = decodeURIComponent(raw); } catch { /* the raw href */ }
