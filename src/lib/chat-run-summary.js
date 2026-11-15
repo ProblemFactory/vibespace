@@ -420,7 +420,7 @@ const hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).pa
  * → `{text, failed, time}` (failed = the count the head shows in the alert style; time = the span, its OWN field — the
  * label puts it last and the head draws it in a span that never shrinks, lane machine-card-compact), or null for no cards.
  */
-export function machineRunPart({ cards = [], running = false, time = hhmm } = {}, t) {
+export function machineRunPart({ cards = [], running = false, time = hhmm, span = null } = {}, t) {
   const cs = (cards || []).filter(Boolean);
   if (!cs.length) return null;
   const runs = cs.filter((c) => c.verb === 'run').length, copies = cs.filter((c) => c.verb === 'copy' && !c.failed).length;
@@ -439,8 +439,9 @@ export function machineRunPart({ cards = [], running = false, time = hhmm } = {}
     : last.outcome === 'timed_out' ? t(MACHINE_WORDS.timed_out)
     : last.code != null ? t(MACHINE_WORDS.exit, { code: last.code }) : t(MACHINE_WORDS.refused));
   const a = cs[0].ts, b = cs[cs.length - 1].ts;
-  const span = a && b ? (time(a) === time(b) ? time(a) : `${time(a)}–${time(b)}`) : '';
-  return { text: parts.join(' · '), failed, time: span };
+  // `span` = the page's one span form (chat-view hands page-time's stampSpan: the date once — «10/4 11:39–11:41»)
+  const sp = a && b ? (span ? span(a, b) : time(a) === time(b) ? time(a) : `${time(a)}–${time(b)}`) : '';
+  return { text: parts.join(' · '), failed, time: sp };
 }
 
 // ── THE COMPACT LINE (lane machine-card-compact, 2026-10-04 — the owner: "如果整体已经显示了是win-desk1 每个指令没必要都展示吧").

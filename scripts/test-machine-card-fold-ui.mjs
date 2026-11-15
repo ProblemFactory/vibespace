@@ -157,7 +157,11 @@ const SIX = [ran(M, ENC, 0, '@@STATUS DONE 0 15\n@@OFF 493199\n@@MORE 0'), xfer(
 const FAILED = ran(M, 'del E:\\house3d\\locked.tmp', 1, '');
 const OTHER = ran('linux-box', 'uname -a', 0, 'Linux');
 const hm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };   // the page's local time = this process's
-const SPAN = `${hm(T0)}–${hm(T0 + 5 * 25000)}`;
+// the head's time is page-time's ONE span form (lane ui-language, 主开发 2026-11-15): the date ONCE when both ends share a day —
+// on a zh page «10/4 11:39–11:41» (the fixture's day is not today), «11:39–11:41» on the day itself, the year when it is not this one
+const dayOnce = (ts) => { const d = new Date(ts), n = new Date(); return d.toDateString() === n.toDateString() ? '' : d.getFullYear() === n.getFullYear() ? `${d.getMonth() + 1}/${d.getDate()} ` : `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} `; };
+const spanOf = (a, b) => `${dayOnce(a)}${hm(a)}–${hm(b)}`;
+const SPAN = spanOf(T0, T0 + 5 * 25000);
 const shot = async (name) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true }); const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, `${TAG}-${name}.png`), Buffer.from(r.data, 'base64')); };
 const MCENSUS = `(() => { const v = ${VIEW}; const list = v._messageList;
   const hs = [...list.querySelectorAll(':scope > .chat-run-header')].map((h) => { const r = h.getBoundingClientRect(); return { label: h.querySelector('.chat-run-label')?.textContent || '', time: h.querySelector('.chat-run-time')?.textContent || '', timeIn: (() => { const s = h.querySelector('.chat-run-time'); if (!s) return false; const q = s.getBoundingClientRect(); return q.width > 0 && q.right <= r.right + 0.5 && s.scrollWidth <= s.clientWidth + 1; })(), alert: h.classList.contains('chat-run-alert'), open: h.classList.contains('open'), h: Math.round(r.height), cut: h.scrollWidth > h.clientWidth + 1 }; });
@@ -241,7 +245,7 @@ try {
   await feed([FAILED]);
   c = await evalJs(MCENSUS);
   const fh = c.hs.filter((h) => h.label.startsWith(M));
-  check('③ still ONE head, now "… · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1" in the alert style, closed, its time whole at 390 px', fh.length === 1 && fh[0].label === 'WIN-DESK1 · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1' && fh[0].time === `· ${hm(T0)}–${hm(FAILED.ts)}` && fh[0].timeIn && fh[0].alert && !fh[0].open, c.hs);
+  check('③ still ONE head, now "… · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1" in the alert style, closed, its time whole at 390 px', fh.length === 1 && fh[0].label === 'WIN-DESK1 · 5 条命令 · 2 个文件 · 1 个失败 · 最后：退出码 1' && fh[0].time === `· ${spanOf(T0, FAILED.ts)}` && fh[0].timeIn && fh[0].alert && !fh[0].open, c.hs);
   check('③ the failed card stays ON SCREEN outside the closed fold; the six stay folded', c.cards.length === 7 && c.cards.filter((x) => x.shown).map((x) => x.id).join() === FAILED.id, c.cards);
   const fc = c.cards.find((x) => x.id === FAILED.id);
   check('③ …as ONE compact line too, in the alert style, its first error line under it ("Access is denied.")', fc && fc.compact && fc.lineShown && fc.alert && fc.out === '· exit 1 · 1.4 s' && fc.errShown && fc.err === 'Access is denied.' && !fc.headShown && !fc.detailShown && !fc.seen.includes(M), fc);

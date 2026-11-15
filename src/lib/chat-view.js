@@ -13,7 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { stampAt as when, num, span } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { stampAt as when, num, span, stampSpan } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { valueWord } from './value-words.js'; // lane ui-language: the message details' stored values in words (the walk's chat-core-4)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card (chat / tour / Manage agents)
 import { waitingTurnOf, signinWallOf } from '../signin-model.js'; // PURE (lane door-signin-fixes): the turn waiting at the wall; which wall a death gets
@@ -7654,7 +7654,7 @@ class ChatView {
           const collabStats = collabTrafficStats({ rows: collabRows });
           const liveCollabEl = this._elements.get(this._liveCollabId());
           const notes = members.filter((el, i) => memberKinds[i] === 'note').map((el) => assistantNoteOf(el._rawMsg)?.what || 'note');
-          const machinePart = machineRunPart({ cards: machineCards, running, time: (ms) => when(ms) }, t); // lane machine-card-fold: "WIN-DESK1 · 6 commands run · … · 19:39–19:42"
+          const machinePart = machineRunPart({ cards: machineCards, running, time: (ms) => when(ms), span: (a, b) => stampSpan(a, b) }, t); // lane machine-card-fold: "WIN-DESK1 · 6 commands run · … · 19:39–19:42"
           if (machinePart && machinePart.failed) header.classList.add('chat-run-alert');
           // lane machine-card-compact: inside a group of ≥ 2 Machines cards the head names the machine, so each card there is ONE
           // line (chat-renderers _machineLine; a failed one too, on screen while the group is closed); a lone card stays whole

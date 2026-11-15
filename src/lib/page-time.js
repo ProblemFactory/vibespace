@@ -9,6 +9,7 @@
 //                                     `full` keeps the year)
 //   dateOf(ms, { full, words, now })  the date only, the same near rule (`words`: the sentence form «11月12日», see stampAt)
 //   clockOf(ms, { seconds })          the time only
+//   stampSpan(from, to, { … })        a span of two instants, the date said once («10/4 11:39–11:41»)
 //   span(ms)                          a duration in the reader's units: «2 天 23 小时», «1 小时 59 分钟», «4 分钟», «12 秒»
 //   ago(ms, { now })                  «4 分钟前»
 //   num(n, opts)                      a number in the device's locale (Intl.NumberFormat options)
@@ -107,7 +108,10 @@ const EN_DATE = [false, true].map((sameYear) => Object.freeze({ ...(sameYear ? {
 // it). en is the same either way («Nov 12», «Nov 12, 2026»).
 export function stampAt(ms, { seconds = false, full = false, words = false, now = Date.now() } = {}) {
   const n = valid(ms);
-  if (n == null) return '';
+  return n == null ? '' : stampCore(n, { seconds, full, words, now }) + zoneTail(n);
+}
+/** stampAt without the zone's words (a span says them once, at its end). */
+function stampCore(n, { seconds = false, full = false, words = false, now = Date.now() } = {}) {
   const a = dayParts(n), b = dayParts(now);
   const sameDay = !full && a.y === b.y && a.m === b.m && a.d === b.d;
   const sameYear = !full && a.y === b.y;
@@ -118,7 +122,19 @@ export function stampAt(ms, { seconds = false, full = false, words = false, now 
   } else {
     out = fmt(sameDay ? TIME(seconds) : EN_STAMP[sameYear ? 1 : 0][seconds ? 1 : 0]).format(new Date(n));
   }
-  return out + zoneTail(n);
+  return out;
+}
+/** A SPAN OF TWO INSTANTS, its date said ONCE (主开发 2026-11-15, the machine card's head «· 10/4 11:39–10/4 11:41»): both ends
+ *  today «11:39–11:41»; one day «10/4 11:39–11:41»; two days, both dates «10/4 23:50–10/5 00:10»; one reading «11:39»; the
+ *  zone's words once, at the end. The same options as stampAt (`words` in a sentence: «10月4日 11:39–11:41»). */
+export function stampSpan(from, to, { seconds = false, full = false, words = false, now = Date.now() } = {}) {
+  const x = valid(from), y = valid(to), o = { seconds, full, words, now };
+  if (x == null || y == null) return x == null ? stampAt(to, o) : stampAt(from, o);
+  const [p, q] = x <= y ? [x, y] : [y, x];
+  const A = dayParts(p), B = dayParts(q), oneDay = A.y === B.y && A.m === B.m && A.d === B.d;
+  const start = stampCore(p, o), end = oneDay ? fmt(TIME(seconds)).format(new Date(q)) : stampCore(q, o);
+  if (start === stampCore(q, o)) return start + zoneTail(q);   // one reading
+  return `${start}–${end}${zoneTail(q)}`;
 }
 // the caches' sizes and bounds, for test-ui-language §1b's walk (a property of the stamp, never an export of its own)
 stampAt.cacheSizes = () => ({ formats: CACHE.size, formatsMax: CACHE_MAX, memo: MEMO.size, memoMax: MEMO_MAX, names: NAMES.size, namesMax: 256 });
