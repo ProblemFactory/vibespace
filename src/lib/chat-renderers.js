@@ -69,7 +69,7 @@ export function notesAfterBlocks(html) {
 // r4 (M4) → r9: a token's tail is shed by a backward walk over path-linkify's ONE trailing set (isTrailing); cleanPath is that walk too
 import { mcpParts } from './chat-run-summary.js';
 import { chatLinkOf, settingLinkOf } from './card-doors.js'; // lane card-door-in-chat: THE boundary — the chat's own links only, never a card's door; lane setting-doors pick 1: a link to one setting opens it
-import { splitSettingLinks, keyOfAnchor, linkRe as settingLinkRe, SCHEME as SETTING_SCHEME, ANCHOR_PREFIX as SETTING_ANCHOR, KEY_CH as SETTING_KEY_CH } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of `vibespace://settings/<key>`
+import { splitSettingLinks, keyOfAnchor, runRe as settingRunRe, hasScheme as hasSettingScheme, SCHEME as SETTING_SCHEME, ANCHOR_PREFIX as SETTING_ANCHOR, KEY_CH as SETTING_KEY_CH } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of `vibespace://settings/<key>`
 import { isSettingKey } from './settings-schema.js'; // lane setting-doors pick 1: THE client's schema test — a link only when the key IS a row
 import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
 import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
@@ -3054,9 +3054,9 @@ class ChatRenderers {
    * linked its `//settings/…` tail — never makes half a link of it. Skips a link span an earlier pass made (a URL's).
    */
   linkifySettingLinks(text) {
-    if (text.indexOf(SETTING_SCHEME) < 0) return text;
+    if (!hasSettingScheme(text)) return text;   // l1: the scheme in any case
     const html = this._linkifyBareText(text, (txt) => splitSettingLinks(txt, isSettingKey).map((g) => (g.key ? this._settingSpan(g.key, g.text) : g.text)).join(''));
-    return this._linkifyBareText(html, (txt) => txt.replace(settingLinkRe(), (run) => {
+    return this._linkifyBareText(html, (txt) => txt.replace(settingRunRe(), (run) => {   // l1: EVERY run that is no door — glued to a word or a path too — so the path pass never links its tail
       let end = run.length; while (end > SETTING_SCHEME.length && isTrailing(run[end - 1])) end--;
       return `<span class="chat-link-words">${run.slice(0, end)}</span>${run.slice(end)}`;
     }));

@@ -172,6 +172,7 @@ export function installSetupFlows(App) {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = true;
+        this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
         showToast(enabled ? t('Password changed — other devices were logged out') : t('Password set — other devices were logged out'));
       } catch { err.textContent = t('Failed'); }
@@ -190,6 +191,7 @@ export function installSetupFlows(App) {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { err.textContent = d.error || t('Failed'); return; }
         this._authEnabled = false;
+        this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
         close();
         showToast(t('Password removed — auth disabled'));
       } catch { err.textContent = t('Failed'); }
@@ -410,6 +412,7 @@ export function installSetupFlows(App) {
             const d = await res.json().catch(() => ({}));
             if (!res.ok) { errEl.textContent = d.error || t('Failed'); return; }
             this._authEnabled = true;
+            this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: the open Settings redraws — its sign-in line is true again
             step = 3; render();
           } catch { errEl.textContent = t('Failed'); }
         });
