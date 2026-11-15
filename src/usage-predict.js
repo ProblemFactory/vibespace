@@ -46,12 +46,14 @@ const CLAUDE_KEY_KINDS = new Set(['org', 'email', 'acct']);   // src/usage-ancho
 function sourceOf(identityKey) {
   const k = String(identityKey || '');
   // a non-Claude identity is `<harness id>:` + its key (the pool's identity groups); Claude's own kinds are org: / email: / acct:
+  // — so an unknown harness's key is ITS source (no adapter ⇒ no prior), never Claude's (usage-predict pick 3)
   const m = /^([a-z][a-z0-9-]*):/.exec(k);
   return m && !CLAUDE_KEY_KINDS.has(m[1]) ? m[1] : 'claude';
 }
-/** A source the estimator learns (its pairs mean something) — ANY OTHER SOURCE READS OFF, the said limit of the look: never
- *  Claude's verdict by default, never a band nobody has checked. The list lives with the harnesses (src/harnesses/predict-sources.js). */
-const { knownSource } = require('./harnesses/predict-sources.js');
+/** A source the estimator learns (its pairs mean something) — a source with a prediction adapter (src/harnesses/
+ *  predict-adapters.js). ANY OTHER SOURCE READS OFF, the said limit of the look: never Claude's verdict by default, never a
+ *  band nobody has checked. */
+const knownSource = (src) => require('./harnesses/predict-adapters.js').adapterOf(src) !== null;
 /** A calib bucket key → its lane: 'fiveHour' | 'sevenDay' | 'scoped:<name>'. */
 const laneOf = (bucketKey) => String(bucketKey);
 /** One anchor line's pairs: for each bucket of its calib, the stale reading's |error| and the projection's |error| at the new
@@ -152,4 +154,39 @@ function gateEstimate(est, stateOf, keep) {
   if (Array.isArray(out.scopedWeekly)) out.scopedWeekly = out.scopedWeekly.filter((s) => s && keep(stateOf('scoped:' + String(s.name || '').trim().toLowerCase())));
   return out.fiveHour || out.sevenDay || (out.scopedWeekly && out.scopedWeekly.length) ? out : null;
 }
-module.exports = { PREDICT, sourceOf, knownSource, laneOf, pairsOf, judge, stepState, verdictOf, boundaryAt, keepSince, walkVerdict, gateEstimate };
+// ── THE ADAPTERS (pick 3, P1: the prediction as a generic adapter on each account source) ──
+// Each source's facts — its unit, its prior — are its descriptor's `quota.predict`; the core reaches them by source through
+// src/harnesses/predict-adapters.js (the data files themselves, never the registry).
+const { ADAPTERS, adapterOf } = require('./harnesses/predict-adapters.js');
+const UNITS = Object.freeze(['usd-api', 'tokens']);
+/** Is `k` a lane key of a prior (fiveHour / sevenDay / scoped:<name>)? A prior's other members (classes5h) are not lanes. */
+const isLaneKey = (k) => k === 'fiveHour' || k === 'sevenDay' || String(k).startsWith('scoped:');
+/** A source's prior — lane → full-quota size in its unit (+ its own members) — or null when it declares none. */
+function priorOf(source) {
+  const a = adapterOf(source), p = a && a.prior;
+  return p && typeof p === 'object' && !('none' in p) ? p : null;
+}
+/** The prior of the source an identity key belongs to (the estimator's and the pool's `priorsFor`). */
+const priorsForIdentity = (identityKey) => priorOf(sourceOf(identityKey));
+/** The contract of `quota.predict` → the errors (empty = good): `{ none: '<why>' }`, or `{ unit, prior }` where prior is
+ *  `{ none: '<why>' }` or lanes → positive sizes (and `classes5h: { cw, cr, fresh }` positive when present). */
+function checkPredict(p) {
+  const errs = [];
+  const why = (x) => typeof x === 'string' && x.trim().length > 0;
+  if (!p || typeof p !== 'object') return ['missing — declare { unit, prior } or { none: \'<why>\' }'];
+  if ('none' in p) return why(p.none) ? [] : ['`none` must say why'];
+  if (!UNITS.includes(p.unit)) errs.push(`unit must be one of ${UNITS.join(' | ')} (got ${JSON.stringify(p.unit)})`);
+  const pr = p.prior;
+  if (!pr || typeof pr !== 'object') errs.push('prior must be an object ({ none } or lanes → sizes)');
+  else if ('none' in pr) { if (!why(pr.none)) errs.push('prior.none must say why'); }
+  else {
+    const lanes = Object.keys(pr).filter(isLaneKey);
+    if (!lanes.length) errs.push('prior names no lane');
+    for (const k of lanes) if (!(Number(pr[k]) > 0)) errs.push(`prior.${k} must be a positive size`);
+    for (const k of Object.keys(pr)) if (!isLaneKey(k) && k !== 'classes5h') errs.push(`prior.${k} is no lane and no known member`);
+    if (pr.classes5h !== undefined && !['cw', 'cr', 'fresh'].every((c) => Number(pr.classes5h && pr.classes5h[c]) > 0)) errs.push('prior.classes5h needs positive cw, cr and fresh');
+  }
+  return errs;
+}
+
+module.exports = { PREDICT, sourceOf, knownSource, laneOf, pairsOf, judge, stepState, verdictOf, boundaryAt, keepSince, walkVerdict, gateEstimate, ADAPTERS, UNITS, adapterOf, isLaneKey, priorOf, priorsForIdentity, checkPredict };

@@ -439,6 +439,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/account-pool-auto.js', ['view-only', 'bucketRemaining/weeklyDeadline call bucketCounts, so no empty window can become a constraint or a deadline — but they read the projected view, so ⑯c drives the projection`s own invariant']],
       ['src/usage-anchors.js', ['migrated', 'an empty bucket anchors as no-bucket, like the fabricated status:unknown one']],
       ['src/usage-predict.js', ['migrated', 'gateEstimate only DROPS an estimated bucket by its lane\'s verdict (usage-predict) — it never writes, invents or re-reads a bucket']],
+      ['src/harnesses/claude-predict.js', ['migrated', 'Claude\'s prior table names its lanes (fiveHour, sevenDay, scoped:fable) as DATA — it reads no bucket (usage-predict pick 3)']],
       ['src/usage-estimator.js', ['migrated', 'overlayCache never replaces a bucket the raw reading marks empty']],
       ['src/reading-lag.js', ['migrated', 'windowOf skips empty windows — a sliding reset is not identity evidence']],
       ['src/oat-identity-model.js', ['migrated', 'the long-lived token\'s identity post-check (lane oat-identity-postcheck) compares windows only through reading-lag windowOf / compareWindows, which skip empty windows; it reads no usage bucket']],
@@ -2685,7 +2686,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const dir = mkd('est');
     fs.writeFileSync(path.join(dir, 'anchors-org_org-n5h-r5.ndjson'), JSON.stringify({ ts: sib8.fetchedAt, fetchedAt: sib8.fetchedAt, source: 'passive', accountId: null, identityKey: 'org:org-n5h-r5',
       buckets: { fiveHour: { u: 0.905, resetsAt: sib8.fiveHour.resetsAt }, sevenDay: { u: 0.41, resetsAt: sib8.sevenDay.resetsAt }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null }) + '\n');
-    const ue = new E.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => ({ identityKey: 'org:org-n5h-r5' }), priorsFor: () => E.CLAUDE_MAX_PRIOR_FULL_USD });
+    const ue = new E.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => ({ identityKey: 'org:org-n5h-r5' }), priorsFor: () => require('../src/harnesses/claude-predict.js').prior });
     return ue.estimateFor('sub-n5h-r5', view8, Date.now());
   };
   const sweep8 = (E = EST) => {
@@ -2844,6 +2845,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
         ['src/server/usage-pool-engine.js', 'a guessed 5h banner on a «no 5h» member walls its week; wall labels come from the buckets present; trippedWindowFacts/spentWindowOf filter missing buckets; the bucket-less `|| \'fiveHour\'` fold default is unreachable (every noteWallSignal caller names one)'],
         ['src/usage-estimator.js', 'estBucket/overlay/anchors guard `b.fiveHour ?` — a missing bucket is estimated as none'],
         ['src/usage-predict.js', 'gateEstimate keeps or drops a PRESENT fiveHour by its lane verdict — an absent one stays absent'],
+        ['src/harnesses/claude-predict.js', 'a prior\'s size for the 5h lane, never a reading: an absent 5h window takes no prior (the estimator asks it only for a bucket the reading has)'],
         ['src/usage-anchors.js', '`cache.fiveHour && …` — no bucket anchors as no-bucket'],
         ['src/reading-lag.js', 'windowOf: counts(b5) — an absent 5h is fiveHour:null, never identity evidence'],
         ['src/reading-repair.js', 'every 5h read is `if (b.fiveHour)` / `?? null`; its windows carry fiveHour:null'],

@@ -256,5 +256,30 @@ console.log('— ⑨ mutant copies (a weakened rule must turn named rows red)');
   }
 }
 
+console.log('— ⑩ THE ADAPTERS (pick 3): a source\'s facts are its adapter\'s; the core holds no Claude constant');
+{
+  const readT = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const CORE = ['src/usage-estimator.js', 'src/server/usage-pool-engine.js', 'src/ledger-slot-backfill.js', 'src/usage-predict.js'];
+  const codeOf = (t) => t.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, '')).join('\n');
+  // Claude's sizes, its 5h class priors, its family list, a prior chosen by a source's NAME
+  const CLAUDE_FACTS = [/\b1730\b/, /\b875\b/, /CLAUDE_MAX_PRIOR/, /PRIOR_5H_/, /\[\s*'fable',\s*'opus'/, /startsWith\('codex:'\)\s*\?\s*null/];
+  const hits = (t) => CLAUDE_FACTS.filter((re) => re.test(codeOf(t))).map(String);
+  const found = CORE.map((f) => [f, hits(readT(f))]).filter(([, h]) => h.length);
+  ok(!found.length, `the core (${CORE.length} files) states no Claude size, class prior, family list or by-name prior — those are src/harnesses/claude-predict.js's and model-family's`, JSON.stringify(found));
+  const planted = readT('src/usage-estimator.js').replace('const PRIOR_WEIGHT_DU = 0.15;', "const PRIOR_WEIGHT_DU = 0.15;\nconst BACK = { sevenDay: 1730 };");
+  ok(planted.includes('BACK') && hits(planted).length === 1, 'CONTROL: a Claude size typed back into the core is RED by the same read');
+  const CL = require(path.join(REPO, 'src/harnesses/claude-predict.js'));
+  ok(UP.priorsForIdentity('org:made') === CL.prior && UP.priorsForIdentity('email:a@b.invalid') === CL.prior, 'an identity of Claude\'s (org:, email:) reads Claude\'s prior');
+  ok(UP.priorsForIdentity('codex:email:a@b.invalid') === null && UP.priorsForIdentity('antigravity:acct:agy-x') === null, 'codex and Antigravity identities read NONE (Antigravity was handed Claude\'s before this pick)');
+  ok(UP.sourceOf('made-acp:email:a@b.invalid') === 'made-acp' && UP.priorsForIdentity('made-acp:email:a@b.invalid') === null && ['org:x', 'email:a@b.invalid', 'acct:__global__', 'org_made'].every((k) => UP.sourceOf(k) === 'claude'),
+    'an identity of a harness the core has no adapter for is ITS source and reads no prior — never Claude\'s; Claude\'s own kinds (org:, email:, acct:) stay Claude\'s');
+  const { UsageEstimator } = require(path.join(REPO, 'src/usage-estimator.js'));
+  const est = new UsageEstimator({ anchorsDir: scratch('usage-predict-adapters'), usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => null, lagS: 0 });
+  ok(est.priorsFor('org:made') === CL.prior && est.priorsFor('antigravity:acct:x') === null, 'the estimator\'s default prior is the identity\'s source\'s (no Claude default for every key)');
+  const goodBad = [[{ none: 'states no quota' }, 0], [{ unit: 'tokens', prior: { none: 'learn first' } }, 0], [{ unit: 'usd-api', prior: { sevenDay: 10, classes5h: { cw: 1, cr: 2, fresh: 3 } } }, 0],
+    [null, 1], [{ none: '  ' }, 1], [{ unit: 'usd', prior: { none: 'x' } }, 1], [{ unit: 'tokens', prior: {} }, 1], [{ unit: 'tokens', prior: { sevenDay: 0 } }, 1], [{ unit: 'tokens', prior: { sevenDay: 5, weekly: 3 } }, 1], [{ unit: 'tokens', prior: { sevenDay: 5, classes5h: { cw: 1 } } }, 1]];
+  ok(goodBad.every(([p, bad]) => (UP.checkPredict(p).length > 0) === !!bad), 'checkPredict: three good shapes pass, seven bad ones are each refused', JSON.stringify(goodBad.map(([p]) => UP.checkPredict(p))));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
