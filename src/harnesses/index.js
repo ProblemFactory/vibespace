@@ -56,9 +56,10 @@ function assertQuotaContract(id, quota, { full = true } = {}) {
     if (quota[fn] !== undefined && typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function when declared`);
   }
   // THE PREDICTION ADAPTER (lane usage-predict pick 3): every harness declares `quota.predict` — its unit and prior, or
-  // `{ none: '<why>' }` (src/usage-predict.js checkPredict)
   // `{ none: '<why>' }` (src/usage-predict.js checkPredict). A CONTRIBUTED harness (a plugin written before the member) may
-  // omit it — read as none, the safe default; one it does declare is checked like a built-in's
+  // omit it — read as none, the safe default; one it does declare is CHECKED here and then READ BY NOTHING: the core reaches
+  // adapters only through src/harnesses/predict-adapters.js (the three built-in sources), so a contributed source reads no
+  // prior and its verdict is OFF whatever it declares (the said limit; the safe direction)
   const predictErrs = (!full && quota.predict === undefined) ? [] : require('../usage-predict.js').checkPredict(quota.predict);
   if (predictErrs.length) throw new Error(`harness '${id}': quota.predict — ${predictErrs.join('; ')}`);
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
