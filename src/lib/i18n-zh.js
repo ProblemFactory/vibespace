@@ -2787,9 +2787,9 @@ export default {
   "Add via long-lived token": "通过长期 token 添加",
   "est {pct}%": "预计 {pct}%",
   "window reset since last reading": "上次读数后窗口已重置",
-  "up to {pct}%": "最多 {pct}%",
-  "up to {pct}% · from {n} readings": "最多 {pct}% · 依据 {n} 次读数",
-  "Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate.": "介于上次读数（下限）与推算之间：读数加上本机此后的用量，按该账号学到的速率折算。",
+  "about {pct}%": "约 {pct}%",
+  "about {pct}% · from {n} readings on this hub": "约 {pct}% · 依据本机 {n} 次读数",
+  "An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate.": "估算，不是上限：上次读数加上此后本机的用量，按该账号学到的速率计算。",
   "{n} requests here since": "此后本机 {n} 次请求",
   "Pooled account — one billing identity auto-switching across your subscriptions": "池化账号 — 一个计费身份在你的订阅之间自动切换",
 

@@ -2787,9 +2787,9 @@ export default {
   "Add via long-lived token": "長期トークンで追加",
   "est {pct}%": "推定 {pct}%",
   "window reset since last reading": "前回取得後にウィンドウがリセット",
-  "up to {pct}%": "最大 {pct}%",
-  "up to {pct}% · from {n} readings": "最大 {pct}% · {n} 回の取得から",
-  "Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate.": "前回の取得値（下限）と推定の間：取得値にこのハブでのその後の使用量を、このアカウントの学習レートで加えたもの。",
+  "about {pct}%": "約 {pct}%",
+  "about {pct}% · from {n} readings on this hub": "約 {pct}% · このハブの {n} 回の取得から",
+  "An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate.": "推定値であり上限ではありません：前回の取得値に、その後このハブで使った分をこのアカウントの学習済みの速度で足したもの。",
   "{n} requests here since": "その後このハブで {n} 回のリクエスト",
   "Pooled account — one billing identity auto-switching across your subscriptions": "プールアカウント — 1つの請求アイデンティティがサブスクリプション間を自動切替",
 

@@ -717,7 +717,7 @@ class UsageEstimator {
   _readDone(key, st, lines, wins = null, endsNl = true) {
     const sig = sigOf(st); this._lastRead = { key, sig };
     if (!this._meta) this._meta = new Map();
-    const m = this._meta.get(key); if (!m || m.sig !== sig) { this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines, Date.now() - UP.PREDICT.WINDOW_MS) }); if (this._predictMemo) this._predictMemo.clear(); }
+    const m = this._meta.get(key); if (!m || m.sig !== sig) { this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines, UP.keepSince(Date.now())) }); if (this._predictMemo) this._predictMemo.clear(); }
   }
   /** The identity's meta now: by its file's signature (one stat), else one read of its lines. */
   _metaOf(key) {
@@ -746,7 +746,12 @@ class UsageEstimator {
       const named = new Set(m.named); let { lastTs, lastGlobalTs, last } = m;
       for (const l of add) { const ts = l.ts || l.fetchedAt || 0; if (ts > lastTs) lastTs = ts; if (l.accountId === undefined || l.accountId === null || l.accountId === '__global__') { if (ts > lastGlobalTs) lastGlobalTs = ts; } else named.add(l.accountId); if (!last || (l.fetchedAt || 0) >= (last.fetchedAt || 0)) last = l; }
       const tw = proofWindows(buf, m.size, st.size, 2), base = m.wins.slice(0, PROOF_SAMPLES + 2), tails = m.wins.slice(PROOF_SAMPLES + 2).concat(tw);
-      const nm = { sig: sigOf(st), ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl: true, wins: base.concat(tails.slice(Math.max(0, tails.length - (PROOF_MAX - base.length)))), named: [...named], lastTs, lastGlobalTs, last, n: m.n + add.length };
+      // law B1 (the look of 2026-11-15): a meta GROWN by its tail keeps the pairs it had and adds the tail's — one pair set,
+      // whatever road read the file (it lost them: the verdict fell to learning, an OFF lane of 80 read ON with 40)
+      const since = UP.keepSince(Date.now()), predict = (m.predict || []).filter((p) => p.t >= since);
+      for (const l of add) if (l && l.calib) for (const p of UP.pairsOf(l, since)) predict.push(p);
+      const nm = { sig: sigOf(st), ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl: true, wins: base.concat(tails.slice(Math.max(0, tails.length - (PROOF_MAX - base.length)))), named: [...named], lastTs, lastGlobalTs, last, n: m.n + add.length, predict };
+      if (this._predictMemo) this._predictMemo.clear();
       this._meta.set(key, nm); this.metaTailReads = (this.metaTailReads || 0) + 1;
       return nm;
     } catch { return null; } finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
@@ -1263,20 +1268,25 @@ class UsageEstimator {
     this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt, ik, rv });
     return ownEstimate(est, rawCache); // read through the member's own «no 5h limit» on EVERY return (the memo is the identity's)
   }
-  /** THE VERDICT OF ONE SOURCE'S LANE ON THIS INSTANCE (usage-predict): its recorded pairs of the last PREDICT.WINDOW_MS, over
-   *  every identity of that source whose lines were read (src/usage-predict.js verdictOf) — held 60 s, dropped when a file moves. */
+  /** THE VERDICT OF ONE SOURCE'S LANE ON THIS INSTANCE (usage-predict; the hold of the look of 2026-11-15): the WALK over the
+   *  fixed boundaries (src/usage-predict.js walkVerdict) of that source's recorded pairs — every identity of it whose lines
+   *  were read, the pairs kept back to `keepSince`. It moves only at a boundary; held per boundary, dropped when a file moves.
+   *  A source the estimator does not learn reads OFF (the said limit). */
   predictVerdict(source, lane, nowMs = Date.now()) {
+    if (!UP.knownSource(source)) return { state: 'off', n: 0, why: 'unknown-source' };
     if (!this._predictMemo) this._predictMemo = new Map();
-    const key = source + '|' + lane, m = this._predictMemo.get(key);
-    if (m && nowMs - m.at < 60000 && nowMs >= m.at) return m.v;
-    const pairs = [];
+    const key = source + '|' + lane, boundary = UP.boundaryAt(nowMs), m = this._predictMemo.get(key);
+    if (m && m.boundary === boundary) return m.v;
+    const since = UP.keepSince(nowMs), pairs = [];
     for (const [ik, meta] of (this._meta || new Map())) {
       if (UP.sourceOf(ik) !== source || !Array.isArray(meta.predict)) continue;
-      for (const p of meta.predict) if (p.lane === lane && p.t >= nowMs - UP.PREDICT.WINDOW_MS) pairs.push(p);
+      for (const p of meta.predict) if (p.lane === lane && p.t >= since) pairs.push(p);
     }
     pairs.sort((x, y) => x.t - y.t);
-    const v = UP.verdictOf(pairs.slice(-UP.PREDICT.RING_MAX));
-    this._predictMemo.set(key, { at: nowMs, v });
+    if (!this._walkCache) this._walkCache = new Map();
+    if (!this._walkCache.has(key)) this._walkCache.set(key, new Map());
+    const v = UP.walkVerdict(pairs, nowMs, UP.PREDICT, this._walkCache.get(key));
+    this._predictMemo.set(key, { boundary, v });
     return v;
   }
   /** The source of the identity an account reads by (claude / codex / antigravity). */
@@ -1287,6 +1297,15 @@ class UsageEstimator {
     if (!est) return out;
     for (const k of ['fiveHour', 'sevenDay']) if (est[k]) { const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
     for (const s of est.scopedWeekly || []) { const k = scopedKey(s && s.name); const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
+    return out;
+  }
+  /** THE POOL'S BURN (law B3 of the look, 2026-11-15): `burnFor` held to the lanes whose verdict is ON — the projection's lead
+   *  (when a member crosses its switch line) is the learned rate too, so a lane the verdict found worse than the reading moves
+   *  nothing in the pool. Every pool read of the estimator goes through a gate (test-usage-predict ⑧'s census). */
+  poolBurnFor(accountId, nowMs = Date.now(), opts = undefined) {
+    const burn = this.burnFor(accountId, nowMs, opts) || {};
+    const src = this.sourceFor(accountId), out = {};
+    for (const [lane, v] of Object.entries(burn)) if (this.predictVerdict(src, lane, nowMs).state === 'on') out[lane] = v;
     return out;
   }
   /** THE POOL'S ESTIMATE (usage-predict P5): the estimate kept to the lanes whose verdict is ON — a provisional, learning or

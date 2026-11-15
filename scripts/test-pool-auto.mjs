@@ -720,6 +720,7 @@ await (async () => {
     // the estimator's burn, injected on the engine's OWN instance (the ledger is
     // a stub here): member A burns its 5h at 1.2 %/min, B is idle
     eng.usageEstimator.burnFor = (id) => (id === A && burnA ? { fiveHour: burnA } : {});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, lastAgoMs) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - lastAgoMs, _lastRequestAt: Date.now() - lastAgoMs, _isStreaming: false, _turnState: 'idle' }; // the request stamp the stream's record writes (r1a′)
@@ -1596,6 +1597,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -2027,6 +2029,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -2221,6 +2224,7 @@ await (async () => {
       getSessionMetaStore: () => ({ readSessionMeta: (k) => metas.get(k) || {}, writeSessionMeta: (k, v) => metas.set(k, v) }),
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, on, { warm = false, inTurn = false, host = null } = {}) => {
       const s = { backend: 'claude', mode: 'chat', host, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: 'conv ' + sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _lastRequestAt: Date.now() - (warm ? 20e3 : 70 * 60e3), _isStreaming: inTurn, _turnState: inTurn ? 'running' : 'idle' };
@@ -3545,6 +3549,7 @@ await (async () => {
       getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
     });
     eng.usageEstimator.burnFor = () => ({});
+    eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     const mk = (sid, cid = 'cid-' + sid) => {
       const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: cid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
         _spawnModel: 'sonnet', _pickedModel: 'sonnet', _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };
@@ -3691,6 +3696,7 @@ await (async () => {
         getQuotaProbe: () => null, getSessionMetaStore: () => null, getUserTodos: () => todos,
       });
       eng.usageEstimator.burnFor = () => ({});
+      eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
       const mk = (sid, member, model = 'sonnet') => {
         const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: Pl, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
           _spawnModel: model, _pickedModel: model, _pickedModelAt: Date.now(), _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };

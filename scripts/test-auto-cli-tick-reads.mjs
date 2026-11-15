@@ -93,6 +93,7 @@ function mkWorld({ members = 13, pooled = 25, hot = true, explicit = true, engin
   });
   // a burn on every member, so a member with live conversations HAS a crossing to project (the answer compared below)
   eng.usageEstimator.burnFor = (id) => { const i = ids.indexOf(id); return i < 0 ? {} : { fiveHour: 0.0015 * (1 + (i % 4)), sevenDay: 0.0002 }; };
+  eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
   const models = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-fable-5'];
   for (let k = 0; k < pooled; k++) {
     const sid = `sess-${worldN}-${k}`;
@@ -182,6 +183,7 @@ for (const hot of [true, false]) {
   const w = mkWorld({ hot });
   const pre = PRE_ENGINE.create({ ...{}, app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
   pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
+  pre.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
   let rounds = 0, bad = [], projected = 0;
   for (const [st, apply] of Object.entries(STATES)) {
     for (const victim of [w.ids[0], w.ids[7]]) { // ids[0] holds linked conversations AND is the pool default; ids[7] holds linked conversations
@@ -203,6 +205,7 @@ for (const hot of [true, false]) {
   const moves = (engine) => {
     const w = mkWorld({ engine, hot: true });
     w.eng.usageEstimator.burnFor = () => ({});
+    w.eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     fs.writeFileSync(path.join(w.cacheDir, w.ids[0] + '.json'), JSON.stringify({ fetchedAt: Date.now() - 30e3, source: 'cli-usage', fiveHour: { utilization: 0.99, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 0.5, resetsAt: Math.floor(Date.now() / 1000) + 4 * 86400 } }));
     STATES['wiped (no accessToken)'](w, w.ids[7]);
     try { w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); } catch (e) { return 'threw ' + e.message; }
@@ -237,6 +240,7 @@ async function runTick(w, eng, loopMod, { midTick = null } = {}) {
     const w = mkWorld({ hot: true });
     const pre = PRE_ENGINE.create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: w.root, USAGE_CACHE_DIR: w.cacheDir, activeSessions: w.sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.am, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
     pre.usageEstimator.burnFor = w.eng.usageEstimator.burnFor;
+    pre.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });   // usage-predict law B3: this world's lanes are stated ON (the pool reads a burn only on an ON lane)
     if (/signs back in/.test(label)) STATES['wiped (no accessToken)'](w, w.ids[4]);
     const snap = () => Object.fromEntries(w.ids.map((id) => [id, fs.existsSync(w.credsOf(id)) && fs.statSync(w.credsOf(id)).isFile() ? fs.readFileSync(w.credsOf(id), 'utf8') : null]));
     const before = snap();
