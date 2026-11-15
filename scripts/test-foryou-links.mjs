@@ -58,7 +58,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const seen = { q: links(keptQ), d: links(keptD), u: links(keptU), whole: links(whole), words: F.segmentText(keptQ).map((g) => g.s).join('') === keptQ };
   ok(keptQ.endsWith('/p/' + P10 + '…') && !seen.q.length && !seen.d.length && !seen.u.length && J(seen.whole) === J(['page:/p/pg8888888888']) && seen.words,
     'a page token the store\'s cut went through (pg + 10 kept, the mark after it — the question at 500, the detail at 8 000, a URL form) ⇒ no link, drawn as its words; a whole link ending at the cap ⇒ a link', seen);
-  const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src));';
+  const FY1 = read('src/lib/foryou-links.js'), ONE = '  return uncutLinks(src, segmentWords(src, has), has);';   // lane setting-doors pick 1 (on .402): the schema test rides both passes
   // r10 (F2): A CONTROL COPY RESOLVES EVERY RELATIVE IMPORT OF THE MODULE IT COPIES — a data: URL copy resolves no relative
   // specifier, and a sibling lane adds imports (mask-value-shape r4: a second '../path-linkify.js' import + '../secret-shapes.js'):
   // every static `from '<./ or ../>…'` / `import '<…>'` is rewritten to the file it names, never only the ones this suite knew
@@ -66,7 +66,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const gen = { left: (fileImports(planted).match(/\b(?:from|import)\s+'\.\.?\//g) || []).length };
   const r9imp = await asData(planted.replace("from '../path-linkify.js';", `from 'file://${path.join(REPO, 'src/path-linkify.js')}';`).replace("from '../inbox-reply-text.js';", `from 'file://${path.join(REPO, 'src/inbox-reply-text.js')}';`)).then(() => 'loaded', (e) => e.code || e.message);
   ok(r9imp !== 'loaded', 'CONTROL r9\'s rewrite (the first path-linkify import and inbox-reply-text only) of the same copy ⇒ the import fails at the sibling\'s specifier — RED', r9imp);
-  const r6seg = FY1.includes(ONE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(planted).replace(ONE, '  return segmentWords(src);')))).segmentText : null;
+  const r6seg = FY1.includes(ONE) ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(planted).replace(ONE, '  return segmentWords(src, has);')))).segmentText : null;
   ok(gen.left === 0 && typeof r6seg === 'function', 'r10 (F2) the control copies resolve EVERY relative import of the copied module — a copy that gains a sibling\'s imports (a second path-linkify import, secret-shapes) loads, no relative specifier left', { ...gen, loaded: typeof r6seg });
   ok(r6seg, 'CONTROL needle present: the segmenter reads the cut runs (r7) — a tree without it has nothing to patch');
   if (r6seg) ok(J(r6seg(keptQ).filter((g) => g.t === 'link').map((g) => g.kind + ':' + g.ref)) === J(['page:/p/' + P10]), 'CONTROL r6\'s segmenter (the cut runs unread) ⇒ the tray links «page:/p/' + P10 + '» before the «…» — RED');
@@ -79,7 +79,7 @@ console.log('§1 THE SEGMENTER — one grammar with the chat, the words exactly 
   const sw8 = sweep(F.segmentText), cjk = [links('请审阅 /p/pgaaaaaaaaaa，以及更多说明文字…'), links('请看/p/pgaaaaaaaaaa以及说明…'), links('see /home/u/a.md and then more…')];
   ok(sw8.n === 184 && sw8.through.length === 0 && sw8.first === sw8.n && J(cjk) === J([['page:/p/pgaaaaaaaaaa'], ['page:/p/pgaaaaaaaaaa'], ['path:/home/u/a.md']]),
     'r8 (X1) + r9 (Y2) the store\'s cut at every one of 184 positions through a URL (query and all), an absolute path, a relative path, a home path, a mailto:, a mail address and a path with its :line:col suffix (a cut right after either \':\' too) ⇒ never a link over the cut token (no other host, no truncated target); the uncut link before it a link at every position; a whole link a CJK mark, CJK words or a space ends before the cut stays a link', { through: sw8.through.slice(0, 6), first: sw8.first, n: sw8.n, cjk });
-  const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs) {')) + 2);
+  const R7CUT = FY1.slice(FY1.indexOf('function uncutLinks(src, segs, has = null) {'), FY1.indexOf('\n}\n', FY1.indexOf('function uncutLinks(src, segs, has = null) {')) + 2);
   const r7seg = FY1.includes(ONE) && R7CUT.length > 40 ? (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY1).replace(R7CUT, "function uncutLinks(src, segs) {\n  const runs = cutRuns(src).filter(([b, e]) => e > b);\n  if (!runs.length) return segs;\n  let at = 0;\n  return segs.map((g) => { const a = at; at += g.s.length; return g.t === 'link' && runs.some(([b, e]) => b < at && e > a) ? { t: 'text', s: g.s } : g; });\n}")))).segmentText : null;
   ok(r7seg, 'CONTROL needle present: the segmenter\'s cut-token rule (r8) — a tree without it has nothing to patch');
   const PROBE = "return '0' + open.reverse().join('');"; // r9's digit — since the .399 follow-up, the continuation's head (the closers follow it)
@@ -254,12 +254,12 @@ console.log('§5 CENSUSES — one grammar · escaped words · the one artifact d
   // escaped words: the tray draws its words / detail through linkedHtml (every segment escaped); the window links TEXT nodes
   const ROW = read('src/lib/user-todos-row.js'), IW = read('src/lib/inbox-window.js');
   // lane foryou-honest (P1-2): ONE renderer — the row's words and detail AND the window's pane draw wordsHtml (= linkedHtml, escaped)
-  const wordsEscaped = (row) => /export const wordsHtml = \(text\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\) \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
+  const wordsEscaped = (row) => /export const wordsHtml = \(text\) => linkedHtml\(String\(text \|\| ''\), \{ escape: escHtml, note: \(g\) => maskedLinkNote\(g, tr\), has: isSettingKey \}\);/.test(row) && /<div class="ut-text">\$\{card \? escHtml\(words\) : wordsHtml\(words\)\}<\/div>/.test(row) && /<div class="ut-detail">\$\{wordsHtml\(detail\)\}<\/div>/.test(row) && /a\.textContent = g\.s;/.test(row) && !/\.innerHTML = g\./.test(row);
   ok(wordsEscaped(ROW), 'NO innerHTML OF RAW TEXT: the tray\'s words and detail go through linkedHtml (escaped); the window\'s links are nodes with textContent');
   ok(/function wordsInto\(el, src\) \{\s*el\.innerHTML = wordsHtml\(src\);\s*\}/.test(IW) && /wordsInto\(c\.title, v\.title\);/.test(IW) && /else wordsInto\(c\.detail, v\.detail\);/.test(IW) && /if \(plain\) linkifyInto\(c\.detail\);/.test(IW) && /c\.arts\.replaceChildren\(\.\.\.askChipEls\(it, t\)\)/.test(IW) && !/\bmdInto\(|from 'marked'/.test(IW),
     'the For-you window: its words drawn by THE tray\'s renderer (wordsHtml — one renderer over both doors, never markdown: lane foryou-honest), a command\'s verbatim <pre> linked as text nodes, its chips as nodes');
-  ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr) })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
-  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g) } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g) } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
+  ok(!wordsEscaped(ROW.replace("linkedHtml(String(text || ''), { escape: escHtml, note: (g) => maskedLinkNote(g, tr), has: isSettingKey })", 'String(text)')), 'CONTROL: the words written raw into the row HTML ⇒ the census is RED');
+  const rawHtml = (await import('data:text/javascript,' + encodeURIComponent(fileImports(FY).replace('export function linkedHtml(text, { escape = esc, note = (g) => maskedLinkNote(g), has = null } = {})', 'export function linkedHtml(text, { escape = (s) => s, note = (g) => maskedLinkNote(g), has = null } = {})')))).linkedHtml('<img src=x onerror=alert(1)>');
   ok(/<img/.test(rawHtml), 'CONTROL: a linkedHtml without its escape lets <img onerror> through — the §1 XSS leg is RED on it');
   // the one artifact door: a chip opens through openArtifactRow (artifacts-window.js) — never its own opener
   const ACT = read('src/lib/user-todos-actions.js');

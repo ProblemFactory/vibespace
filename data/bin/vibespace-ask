@@ -91,6 +91,8 @@ const USAGE = [
   '                   adds this conversation to the profile\'s list, then you are answered «Granted …» with how to attach (`vibespace-browser use <id>`).',
   '                   A channel conversation is asked with `vibespace-channels request`; a machine only in words (the user opens it on its row)',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
+  '      a setting to change: put its link in the question or --detail — vibespace://settings/<key> (the key as Settings prints it on the row);',
+  '                   the owner\'s press opens that row; never a path in words, and never write the setting yourself',
   '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) for the question, --detail-file <path> for --detail;',
   '                   the CLI refuses stray words (the question is ONE argument: a word after it ⇒ exit 2, nothing filed) and answers sent: N characters',
   '  vibespace-ask list                    print this session\'s open items',

@@ -1,5 +1,5 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
-import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords } from './settings-view.js';
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
@@ -83,21 +83,34 @@ class SettingsUI {
     if (this._advInput) this._advInput.checked = this._showAdvanced;
   }
 
-  open({ syncId, search, category } = {}) {
+  open({ syncId, search, category, focusKey } = {}) {
     // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
     // so you can tweak a setting and watch the effect on the workspace live.
     // Singleton — focus an already-open settings window instead of stacking.
     // `search` (the switch dialog's "Set location in Settings…", 2026-09-27): the search box is filled with it and the
     // filter applied before the first render — the rows that match are the ones on screen (there is no category focus).
-    const want = typeof search === 'string' && search ? search : null;
+    // `focusKey` (lane setting-doors pick 1 — a `vibespace://settings/<key>` link through app.openSettingAt): THE ROW — its
+    // category in view (on the phone that section alone), its nav group unfolded, the row drawn for THIS open even when it is
+    // advanced or unused here (settings-view `reveal`; the per-device switch is never flipped), scrolled to and marked for a
+    // moment; an open window moves there. An unknown key opens Settings as before. A link opens: nothing here writes a setting.
+    const focus = settingFocusOf(SETTINGS_SCHEMA, focusKey, { categories: SETTINGS_CATEGORIES });
+    this._reveal = focus ? focus.key : '';
+    const want = !focus && typeof search === 'string' && search ? search : null;
     // `category` (lane plugin-settings-p0 — a Plugins list row's ⚙): the section's tree node selected and scrolled to;
     // on the phone (one column, no tree) the list shows that section alone until the search box is used
-    const cat = typeof category === 'string' && SETTINGS_CATEGORIES.includes(category) ? category : null;
+    const cat = focus ? focus.category : typeof category === 'string' && SETTINGS_CATEGORIES.includes(category) ? category : null;
     this._onlyCategory = cat && this.app.isMobile ? cat : null;
     const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
     if (existing) {
       this.app.wm.revealWindow(existing.id, { replay: !!syncId }); // its own tab, restored, raised (a replay only raises)
       const inp = existing.content.querySelector('.settings-search');
+      if (focus) {   // lane setting-doors pick 1: a search the window held could hide the row — cleared, then the row
+        const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
+        if (inp) inp.value = '';
+        this._search = '';
+        if (content && nav) { this._renderContent(content, nav); this._focusRow(content, nav, focus); }
+        return;
+      }
       if (want && inp) {
         inp.value = want; this._search = want.toLowerCase();
         const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
@@ -184,8 +197,37 @@ class SettingsUI {
     this._content = content; this._nav = nav;
     this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
-    if (cat) this._showCategory(content, nav, cat);
+    if (focus) this._focusRow(content, nav, focus);   // lane setting-doors pick 1: a link to one row
+    else if (cat) this._showCategory(content, nav, cat);
     else searchInput.focus();
+  }
+  /** lane setting-doors pick 1: THE ROW a `vibespace://settings/<key>` link opened on (settings-view settingFocusOf) — its
+   *  section in view and its nav node marked (_showCategory), its nav group unfolded for this window (as the scroll-spy does;
+   *  the saved folds are not written), the row scrolled to the middle of the list and marked for a moment
+   *  (`settings-row-focus` — style.css's highlight-flash). Returns the row, or null when it is not drawn (a held row). Reads only. */
+  _focusRow(content, nav, { key, category }) {
+    this._showCategory(content, nav, category);
+    const g = nav.querySelector(`.settings-nav-group[data-group="${settingsGroupOf(category)}"]`);
+    if (g && g.classList.contains('is-folded')) {
+      g.classList.remove('is-folded'); this._navFolds?.delete(g.dataset.group);
+      const head = g.querySelector('.settings-nav-group-head'); if (head) head.title = t('Collapse group');
+    }
+    const row = [...content.querySelectorAll('.settings-row')].find((r) => r.dataset.path === key) || null;
+    if (!row) return null;
+    const place = () => {   // only the list scrolls (never the page behind the window)
+      if (!row.isConnected) return;
+      const c = content.getBoundingClientRect(), r = row.getBoundingClientRect();
+      content.scrollTop += r.top - c.top - Math.max(0, (content.clientHeight - r.height) / 2);
+    };
+    place();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(place);   // a window still taking its size (a fresh open, the phone)
+    // the mark is the window's STATE for its moment, not the node's: a re-render inside it (a store answering after a fresh open,
+    // the spend readout) draws the row again WITH it (_renderSetting reads _focusMark) — measured: a fresh open lost a node-only mark
+    this._focusMark = { key, until: Date.now() + 2400 };
+    row.classList.remove('settings-row-focus'); void row.offsetWidth; row.classList.add('settings-row-focus');
+    clearTimeout(this._focusMarkTimer);
+    this._focusMarkTimer = setTimeout(() => { this._focusMark = null; for (const r of content.querySelectorAll('.settings-row-focus')) r.classList.remove('settings-row-focus'); }, 2400);
+    return row;
   }
   /** the ⚙ door's landing: the category's section scrolled to the top and its nav node marked */
   _showCategory(content, nav, cat) {
@@ -237,7 +279,7 @@ class SettingsUI {
     // part 2): a search shows every match, a modified row always shows, a row
     // whose `when` is false is hidden, advanced rows wait for the header switch;
     // a category with nothing to draw is not drawn — nor its nav item.
-    const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t });
+    const vm = settingsViewModel(SETTINGS_SCHEMA, { categories: SETTINGS_CATEGORIES, query, showAdvanced: this._showAdvanced, ctx: this._viewCtx(), isModified: (p) => this.settings.isModified(p), t, reveal: this._reveal || '' });   // reveal: lane setting-doors pick 1
     const grouped = {};
     for (const cat of SETTINGS_CATEGORIES) grouped[cat] = this._onlyCategory && cat !== this._onlyCategory ? { ...vm.byCategory[cat], show: false } : vm.byCategory[cat];
 
@@ -403,6 +445,8 @@ class SettingsUI {
   _renderSetting(path, schema, chips = null) {
     const row = document.createElement('div');
     row.className = 'settings-row';
+    row.dataset.path = path;   // lane setting-doors pick 1: every row says its key — a link to it finds it (_focusRow)
+    if (this._focusMark && this._focusMark.key === path && Date.now() < this._focusMark.until) row.classList.add('settings-row-focus');   // the mark survives a re-render inside its moment
     if (this.settings.isModified(path)) row.classList.add('modified');
 
     const info = document.createElement('div');

@@ -9,6 +9,7 @@ import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arriva
 import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { DIALOG_ROOTS, SHEET_ROOTS, reopenVerdict, undismissableVerdict, escapeVerdict, typedVerdict, ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r2/r3): the ONE dialog predicate set + the shell's verdicts
+import { splitSettingLinks, SCHEME as SETTING_SCHEME } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting row
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -795,6 +796,37 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 // lane dialog-unsaved-guard: while an unsaved sheet's Save runs, an error the dialog's own save says (a toast) is ALSO the
 // sheet's reason — «Not saved: <the same words>» stays beside the choices after the toast fades
 let unsavedSaySink = null;
+// A DOOR TO ONE SETTING IN A TOAST (lane setting-doors pick 1): the app registers `{ has, open }` at boot — `has` = the
+// client's schema test (settings-schema isSettingKey), `open` = THE door (app.openSettingAt). A toast's words then draw each
+// `vibespace://settings/<key>` naming a KNOWN row as a button holding the link's own words (textContent): a press opens
+// Settings on that row and closes the toast; every other word stays textContent, and the body's text is the message as
+// before. Nothing registered (a page without the app, a suite) ⇒ a toast is exactly as it was. A link opens, never writes.
+let _settingLinks = null;
+export function registerSettingLinks(door) {
+  _settingLinks = door && typeof door.has === 'function' && typeof door.open === 'function' ? { has: door.has, open: door.open } : null;
+}
+/** A toast body's words (showToast): text nodes + one `.global-toast-setting` button per known setting link — never HTML.
+ *  `close` dismisses the toast. Returns the number of links drawn (0 ⇒ `body.textContent = message`, as before). */
+export function toastWordsInto(body, message, close = () => {}) {
+  const door = _settingLinks;
+  const segs = door && typeof message === 'string' && message.includes(SETTING_SCHEME) ? splitSettingLinks(message, door.has) : null;
+  if (!segs || !segs.some((g) => g.key)) { body.textContent = message; return 0; }
+  body.textContent = '';
+  let made = 0;
+  for (const g of segs) {
+    if (!g.key) { body.append(document.createTextNode(g.text)); continue; }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'global-toast-setting';
+    b.dataset.setting = g.key;
+    b.title = t('Open in Settings');
+    b.textContent = g.text;
+    const key = g.key;
+    b.onclick = (e) => { e.stopPropagation(); close(); try { (_settingLinks || door).open(key); } catch (err) { console.warn('setting link failed', err); } };
+    body.append(b); made++;
+  }
+  return made;
+}
 // `icon` (lane phone-refusal-wrap) = an SVG string of OURS (a module constant — never words) drawn before the words: a
 // toast that names a control shows the control's own icon (UI convention: SVG, no emoji)
 export function showToast(message, { type = 'info', duration, action, actions, history = null, icon = '' } = {}) {
@@ -812,7 +844,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   el.className = `global-toast global-toast-${type}`;
   const body = document.createElement('div');
   body.className = 'global-toast-body';
-  body.textContent = message;
+  toastWordsInto(body, message, () => { el.remove(); if (!stack.children.length) stack.remove(); });   // lane setting-doors pick 1: a known setting link is a button; the rest textContent
   const x = document.createElement('button');
   x.className = 'global-toast-x';
   x.setAttribute('aria-label', 'Dismiss');
