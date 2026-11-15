@@ -100,6 +100,29 @@ function stripFold({ rows = [], widths = {}, avail = Infinity, shownRef = null, 
 }
 
 /**
+ * THE CHIP'S WORDS YIELD BEFORE A TAB (the .403 prep mirror's test-browser-multiview: «2/3 browsers» — the walk's browser-live-7
+ * gave the ratio its words — took a 346 px strip's room and folded a tab, so a person's right-click met nothing). The owner's
+ * know / operate / detail rule: a tab is OPERATED, the ratio is KNOWN, the word is detail. The fold is tried with the worded chip
+ * (`chipWordsPx`); when that folds a tab, again with the bare ratio (`chipRatioPx`) — which stands when it folds fewer.
+ * → stripFold's { visible, folded } + `words` (true = the worded chip fits beside every tab it can)
+ */
+function stripFoldChip({ chipWordsPx = CHIP_PX, chipRatioPx = CHIP_PX, ...o } = {}) {
+  const a = stripFold({ ...o, chipPx: chipWordsPx });
+  if (!a.folded.length || !(chipRatioPx < chipWordsPx)) return { ...a, words: true };
+  const b = stripFold({ ...o, chipPx: chipRatioPx });
+  return b.folded.length < a.folded.length ? { ...b, words: false } : { ...a, words: true };
+}
+
+/** The chip's TEXT for a fold: `measure(text)` = its width in px with that text (the window measures its own button). Both
+ *  texts are measured on every call, so the answer never depends on which text was showing — two refolds in a row at one
+ *  width give the same chip (no flicker at the edge). → stripFoldChip's answer + `text` (the words or the bare ratio) */
+function chipFoldText({ words = '', ratio = '', measure = () => CHIP_PX, ...o } = {}) {
+  const wordsPx = measure(words), ratioPx = ratio && ratio !== words ? measure(ratio) : wordsPx;
+  const f = stripFoldChip({ ...o, chipWordsPx: wordsPx, chipRatioPx: ratioPx });
+  return { ...f, text: f.words ? words : ratio };
+}
+
+/**
  * The `own/cap` chip (D4). `rows` = the strip's list (browser-stream
  * browserListFor); `cap` = the conversation's effective cap; `machine` =
  * `{used, cap}` of the whole machine (browsers + desktop apps).
@@ -157,4 +180,4 @@ function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, moreP
   return stripFold({ rows: list, widths, avail, shownRef: shown, chipPx: endPx, morePx });
 }
 
-module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, capChip, stoppableRows, tabRowFold };
+module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, stripFoldChip, chipFoldText, capChip, stoppableRows, tabRowFold };
