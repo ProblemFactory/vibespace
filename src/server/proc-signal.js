@@ -6,7 +6,8 @@
 //  · a GROUP only through the handle this process spawned itself (killGroup: the ChildProcess it spawned detached — its pid
 //    is its group's id);
 //  · THE FLOOR, both: never pid 0 (our own group), 1 (init), a negative, a non-integer, our own pid, or our own group —
-//    `process.kill(0)` / `kill(-1)` are the shapes that took the box's user manager down before (the memory's incidents).
+//    a signal to pid 0 (our own group) or to -1 (every process we may signal) is the shape that took the box's user manager
+//    down before.
 // Each `process.kill(` here is a pid-identity census row (scripts/pid-identity-census.mjs). `kill` is injectable for the
 // suites' floor legs only (a floor mutant must never reach a real kill(0)).
 const fs = require('fs');
