@@ -5,8 +5,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.403 — 2026-11-15
 
 ### Added
-- Antigravity accounts are read once after a stretch of work: when a turn ends and 5 minutes pass with no new one, at most once every 30 minutes.
-- Hovering an Antigravity account’s usage on its row says how many times it was read today, and by whom.
+- An Antigravity account’s usage is read once after a stretch of work (5 quiet minutes, at most every 30 minutes); On-demand quota refresh → Off stops it.
+- An Antigravity account’s row says how many times its usage was read today; hover it to see who asked.
 
 ### Changed
 - The usage popup draws an estimate between readings only where this hub’s own record shows it lands closer than the last reading, as “about Y%”.

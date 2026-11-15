@@ -1642,6 +1642,7 @@ export default {
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "まだ再開できる会話がありません — まずメッセージを送るか、新規セッションでアカウントを選んでください",
   "Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work": "手動（⟳ ボタン）— さらに Antigravity は自動で：上限到達後、作業の区切り後",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今日の使用量の取得 {n} 回：手動 {person} 回 · 上限到達後 {wall} 回 · 作業の区切り後 {after} 回",
+  "usage read {n}× today": "今日 {n} 回取得",
   "Auto on popup open (when >30 min stale)": "ポップアップを開いた時に自動（30 分以上古い場合のみ）",
   "Off (never contact Anthropic)": "オフ（Anthropic に一切リクエストしない）",
   "On-demand quota refresh (model-scoped limits like Fable)": "オンデマンドのクォータ更新（Fable などモデル別上限）",

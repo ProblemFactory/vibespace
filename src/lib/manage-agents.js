@@ -614,8 +614,14 @@ export function onDemandUsageView(r) {
   return windows.length ? { windows, fetchedAt: r.fetchedAt || null } : null;
 }
 
-/** THE DAY'S READS OF AN ACCOUNT (lane usage-predict, 2026-11-15): how often its CLI was asked for its usage today and by
- *  whom — a person, a usage wall, the end of a stretch of work. A DETAIL: the usage cell's title, '' when nothing was read today. */
+/** THE DAY'S READS OF AN ACCOUNT (lane usage-predict, 2026-11-15; law A3): how often its CLI was asked for its usage today —
+ *  a figure a person looks up, never one that asks for attention (no badge, no colour): VISIBLE text on the account's
+ *  identity line whenever it is above zero (`doorReadsNote`), the split by caller as its title (`doorReadsLine`). */
+export function doorReadsNote(r) {
+  const n = Math.max(0, Math.floor(Number(r && r.total) || 0));
+  return n ? t('usage read {n}× today', { n }) : '';
+}
+/** …its title: the split by caller (a person, a usage wall, the end of a stretch of work); '' when nothing was read today. */
 export function doorReadsLine(r) {
   const n = Math.max(0, Math.floor(Number(r && r.total) || 0));
   if (!n) return '';
@@ -695,8 +701,6 @@ export function installManageAgents(App, ctx = {}) {
     const maps = { accounts: this._accountUsage, hostOwn: this._hostOwnUsage, hostAccounts: this._hostAccountUsage, codex: this._codexAccountUsage, home: this._homeAccountUsage, rateLimit: this._rateLimit, estimates: this._usageEstimates };
     let n = 0; const lists = new Set();
     for (const cell of cells) {
-      // an on-demand account's reads today ride the cell's title (usage-predict pick 1), patched like the rest
-      if (cell.dataset.usageSrc === 'home' && typeof cell.setAttribute === 'function') { const tl = doorReadsLine(maps.home?.[cell.dataset.usageKey]?.reads); if ((cell.getAttribute('title') || '') !== tl) cell.setAttribute('title', tl); }
       const snap = rosterUsageSnapshot(cell.dataset, maps);
       if (!snap) continue;
       const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);
@@ -706,6 +710,14 @@ export function installManageAgents(App, ctx = {}) {
       if (row && patchCreditsSlot(row.querySelector('.acct-credits-slot'), creditsChipFor(snap.u))) n++;
     }
     for (const list of lists) markSoonRows(list);
+    // an on-demand account's reads today (law A3): the identity line's note, patched from the same poll
+    try {
+      for (const el of document.querySelectorAll('.acct-reads[data-reads-key]')) {
+        const r = maps.home?.[el.dataset.readsKey]?.reads, note = doorReadsNote(r), text = note ? ' · ' + note : '', tl = doorReadsLine(r);
+        if (el.textContent !== text) { el.textContent = text; n++; }
+        if ((el.getAttribute('title') || '') !== tl) el.setAttribute('title', tl);
+      }
+    } catch { }
     // …and the RESET CHIP beside each capable row's name (p2): the count moves
     // when a credit is spent or the on-demand read lands, from the SAME maps
     try {
@@ -2197,6 +2209,8 @@ export function installManageAgents(App, ctx = {}) {
     const st = ctx.st?.[be] || {};
     const { CROWN, GLOBE, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
     const usageOf = (id) => { const v = onDemandUsageView(this._homeAccountUsage?.[id]); return v ? this._acctUsageHtml(v) : ''; };
+    // the day's reads as text on the identity line (law A3) — also for an account that has no reading yet
+    const readsNote = (id) => { const r = this._homeAccountUsage?.[id]?.reads, note = doorReadsNote(r); return `<span class="acct-reads" data-reads-key="${escHtml(id)}" title="${escHtml(doorReadsLine(r))}">${note ? ' · ' + escHtml(note) : ''}</span>`; };
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const globalRow = `<div class="acct-key-row${!defId ? ' is-default' : ''}" data-id="__home_global__">
@@ -2209,8 +2223,8 @@ export function installManageAgents(App, ctx = {}) {
       const ident = a.loggedIn ? escHtml(a.email || t('logged in')) : `<span class="ob-warn">${t('not logged in')}</span>`;
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
-        <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}" title="${escHtml(doorReadsLine(this._homeAccountUsage?.[a.id]?.reads))}">${usageOf(a.id)}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${readsNote(a.id)}</span></span></span>
+        <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}">${usageOf(a.id)}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
