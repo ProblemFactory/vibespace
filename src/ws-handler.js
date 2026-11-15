@@ -440,8 +440,11 @@ function registerWsHandler(wss, ctx) {
       if (session.sockName) deleteSessionMeta(session.sockName);
       // lane turn-never-silent (the look's S6): the agy a wrapper recorded (its pid + birth) is read BEFORE its sidecar goes —
       // a wrapper killed past its own exit handler leaves agy (its own session) and its command running: ended after a grace
-      // while it is still that process (src/server/proc-signal.js endLeftGroup); never awaited here
-      const leftAgy = await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`));
+      // while it is still that process (src/server/proc-signal.js endLeftGroup); the ending never awaited here. ONLY a harness
+      // whose CLI runs in its OWN process group (its liveness row's stop 'restart' — agy) reads it: every other kill answers
+      // exactly as before (a suite's kill waits 20 ms for its answer)
+      const ownGroup = ((require('./backend-caps.js').capsOf(session.backend).liveness || {}).stop === 'restart');
+      const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;
       if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: (l) => console.log(`[session] ${data.sessionId}: ${l}`) }).catch(() => { });
       // Clean up wrapper buffer files — THE ONE LIST (src/server/wrapper-files.js, lane human-cli r5): .buf, .json, and the
       // .receipts a wrapper killed past its own exit handler leaves (off the loop)
