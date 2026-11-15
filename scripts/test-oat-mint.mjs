@@ -177,18 +177,25 @@ const loadOrch = (src) => {
   const m = new Module(ORCH, null); m.filename = ORCH; m.paths = Module._nodeModulePaths(path.dirname(ORCH)); m._compile(src, ORCH); return m.exports;
 };
 // the fake's knobs ride in a wrapper (the child env is an allowlist); `probe` = the production probePanel over the same fake
-const mk = (O, mode, { ident = IDENT.work, panel = null, probe = false, ...over } = {}) => (spy) => {
-  const cmd = fakeClaudeCmd(tmpBase, { MODE: mode, TOKEN, RECORD: rec, IDENTITY: ident, PANEL: panel });
+const mk = (O, mode, { ident = IDENT.work, panel = null, probe = false, gate = null, ...over } = {}) => (spy) => {
+  const cmd = fakeClaudeCmd(tmpBase, { MODE: mode, TOKEN, RECORD: rec, IDENTITY: ident, PANEL: panel, GATE: gate });
   return O.create({ accounts: am, claudeCmd: cmd, env: baseEnv(), tmpRoot: scratchRoot, ...(probe ? { probePanel: O.panelProbeVia((o, done) => UR.spawnPanelProbe(cmd, o, done), UR.parseCliUsageText) } : {}), ...spy, ...over });
 };
 
 /** One full mint through an ORCH copy; returns what leaked where. */
+let gateN = 0;
 async function saveFlow(O, accountId) {
   const restore = captureStd();
   const unspy = spyFiles();
   let res = null;
   try {
-    const { mint, out } = spyOn(mk(O, 'code'));
+    // THE ECHO IS READ BEFORE THE TOKEN'S SCREEN CAN LAND (int403 — B2's third hosted run, fast attempt 1, on master's bytes: the RED
+    // control «the raw screen answered unmasked» read an EMPTY spy list. With the main thread held after the CR is handed over, the
+    // code's echo and the token's screen arrive in ONE chunk; the raw screen freezes before that chunk, so the echo is dropped whole and
+    // an unmasked screen had nothing to leak — B-d24c; a 300 ms hold placed there was red three of three). The fake CLI now holds its
+    // token screen behind a gate; the flow reads the raw screen once the echo is in it (a GET answer like any other), then opens the gate.
+    const gate = path.join(tmpBase, `gate-${process.pid}-${++gateN}`);
+    const { mint, out } = spyOn(mk(O, 'code', { gate }));
     const st = mint.start({ accountId });
     out.answers.push(JSON.stringify(st));
     const id = st.mint.id;
@@ -196,6 +203,13 @@ async function saveFlow(O, accountId) {
     out.answers.push(JSON.stringify(mint.get(id)));
     if (mint.screen) out.screenBefore = mint.screen(id, 0); // lane signin-card-real-screen: the raw screen is a GET answer too
     out.answers.push(JSON.stringify(mint.sendCode(id, CODE)));
+    if (mint.screen) {
+      const echoed = () => { const d = mint.screen(id, 0)?.data || ''; return d.includes(CODE) || d.includes('•'.repeat(CODE.length)); };
+      await until(echoed);
+      out.echoSeen = echoed();
+      out.answers.push(JSON.stringify(mint.screen(id, 0)));
+    }
+    fs.writeFileSync(gate, '');
     await until(() => ['saved', 'failed'].includes(mint.get(id)?.phase));
     out.answers.push(JSON.stringify(mint.get(id)), JSON.stringify(mint.forAccount(accountId)));
     if (mint.screen) out.answers.push(JSON.stringify(mint.screen(id, 0)), JSON.stringify(mint.screen(id, 7)));
@@ -223,6 +237,7 @@ console.log('§2 the ORCH over the fake claude, through the REAL AccountManager'
   ok(revs.length >= 4 && revs.every((v, i) => v === i + 1) && r.mint.get(r.id).rev === revs[revs.length - 1], 'every publication is a new revision (1, 2, …) and the GET answer carries the last — a page drops an older snapshot (lane heavy3-flake-races)', revs);
   ok(/^https:\/\/claude\.example\/cai\/oauth\/authorize\?/.test(cast.url) && /redirect_uri=http%3A%2F%2Flocalhost/.test(cast.localUrl || ''), 'the screen URL (code page) AND the $BROWSER URL (localhost callback, the zero-copy door) are both carried', cast);
   ok(r.leaks.length === 0, 'THE SPY: neither the token nor the sign-in code on any outbound path (log, console, stdout/stderr, broadcasts, GET answers, file writes)', r.leaks);
+  ok(r.out.echoSeen === true, 'the flow read the raw screen with the code\'s echo in it (as •) BEFORE the token\'s screen could land — the fake CLI\'s gate, so §4\'s unmasked mutant always has an echo to leak (int403)');
   const facts = readRec();
   const f = facts.find((x) => x.code === CODE);
   ok(f && f.home.startsWith(scratchRoot) && f.config.startsWith(f.home) && f.home !== os.homedir(), 'the CLI ran with a scratch HOME + CLAUDE_CONFIG_DIR (never the hub\'s ~/.claude)', f);
