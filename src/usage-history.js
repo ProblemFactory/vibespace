@@ -538,7 +538,7 @@ class UsageHistory {
     return null;
   }
   _flushStatements(pending, attrib, meta) {
-    const out = { filed: 0, untracked: 0, refused: 0 };
+    const out = { filed: 0, noNews: 0, untracked: 0, refused: 0 };
     if (!this._statementSink || !pending.size) return out;
     // the newest statement per (owner, limit) is the one the store can take — a cold walk over a long history hands one per
     // account and limit, never one per thread
@@ -549,9 +549,11 @@ class UsageHistory {
       const k = (owner.acct ? 'a:' + owner.acct : 'own:' + (st.host || '')) + '|' + st.limitId, cur = byOwner.get(k);
       if (!cur || st.ts >= cur.ts) byOwner.set(k, { ...st, ...owner });
     }
-    for (const st of byOwner.values()) {
+    // OLDEST FIRST (the check's must 1): an account's limits are handed in their own time order, so the file's freshest time
+    // only rises; a statement no newer than its limit's stored one is «no news», never «filed»
+    for (const st of [...byOwner.values()].sort((a, b) => a.ts - b.ts)) {
       let r = null; try { r = this._statementSink(st); } catch { r = null; }
-      if (r && r.ok) out.filed++; else out.refused++;
+      if (r && r.ok) { if (r.stale) out.noNews++; else out.filed++; } else out.refused++;
     }
     this._lastStatements = { ...out, at: Date.now() };
     return out;

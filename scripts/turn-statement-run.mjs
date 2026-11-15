@@ -99,7 +99,7 @@ function walkedRollout(w, REPO, threads, { walk = true } = {}) {
     let tot = 0;
     for (const st of stmts) {
       const at = Date.now() - st.ago; recAt = Math.max(recAt, at); tot += 15;
-      rows.push({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } }, rate_limits: { primary: { used_percent: st.used, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus' } } });
+      rows.push({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } }, rate_limits: { ...(st.lim ? { limit_id: st.lim } : {}), primary: { used_percent: st.used, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus' } } });
     }
     fs.writeFileSync(path.join(d, `rollout-2026-11-15T00-00-00-${t.tid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   }
@@ -110,6 +110,14 @@ function walkedRollout(w, REPO, threads, { walk = true } = {}) {
   const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   return { home, recAt, lines, text: lines.join('\n'), events: events.length, carried: events.filter((e) => e.be === 'codex' && e.rl).length };
 }
+/** One limit of an account's stored reading: its 7-day number, its own time, the file's time (null when the limit is not held) */
+function limitOf(w, key, lim) {
+  let o = null; try { o = JSON.parse(fs.readFileSync(path.join(w.cacheDir, key + '.json'), 'utf8')); } catch { return null; }
+  const l = ((o && o.limits) || []).find((x) => x && x.limitId === lim); if (!l) return null;
+  const wk = (l.windows || []).find((x) => x && x.kind === '7d') || {};
+  return { pct: wk.usedPct == null ? null : Math.round(Number(wk.usedPct) * 100) / 100, at: Math.max(Number(l.fetchedAt) || 0, Number(wk.measuredAt) || 0), fileAt: Number(o.fetchedAt) || 0 };
+}
+const near = (a, b) => Math.abs(Number(a) - Number(b)) <= NEAR_MS;
 /** The hub's ledger (src/usage-history.js) in the world, its statements handed to the world's engine — server.js's one wiring */
 function ledgerOf(w, REPO, home = null) {
   const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
@@ -198,6 +206,42 @@ const DRIVERS = {
         await uh.scan({ force: true }); uh.flushCursors(); // the cursors on disk before the world is removed (no writer retry outlives it)
         const j = judge(w, 'cxs-1', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' });
         return { green: j.reading && j.ownTime && !j.others.length, why: "the hub's walk files the thread's last statement on its account at the record's time", detail: j };
+      },
+      // THE CHECK'S MUST 1: one account states TWO limit ids; each limit's last statement is filed at its own time, in BOTH orders
+      async 'device/two-limits-both-orders'(w, REPO) {
+        const P = 'codex', O = 'codex_bengalfox', res = {};
+        for (const [acct, tid, stmts] of [
+          // the limit met FIRST holds the walk's NEWEST statement — the plan in one order, the other limit in the other
+          ['cxs-1', 'cccccccc-0000-4000-8000-0000000000c1', [{ ago: 50000, used: 30, lim: P }, { ago: 40000, used: 5, lim: O }, { ago: 20000, used: 41, lim: P }]],
+          ['cxs-2', 'cccccccc-0000-4000-8000-0000000000c2', [{ ago: 50000, used: 5, lim: O }, { ago: 30000, used: 41, lim: P }, { ago: 20000, used: 9, lim: O }]],
+        ]) {
+          const t0 = Date.now();
+          const x = walkedRollout(w, REPO, [{ tid, stmts }]);
+          const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: tid, acct, ts: t0 - 120000 });
+          await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+          const ago = (lim) => stmts.filter((q) => q.lim === lim).slice(-1)[0];
+          const p = limitOf(w, acct, P), o = limitOf(w, acct, O);
+          res[acct] = { p, o, said: uh._lastStatements, ok: !!p && !!o && p.pct === ago(P).used && o.pct === ago(O).used && near(p.at, t0 - ago(P).ago) && near(o.at, t0 - ago(O).ago) && near(p.fileAt, Math.max(p.at, o.at)) && uh._lastStatements && uh._lastStatements.filed === 2 };
+          fs.rmSync(path.join(w.dir, 'dev-home'), { recursive: true, force: true }); fs.rmSync(path.join(w.dir, 'hub-data'), { recursive: true, force: true });
+        }
+        return { green: res['cxs-1'].ok && res['cxs-2'].ok, why: "both limits of one account are filed — each at its own last statement and its own time, whichever limit the walk met first; the file's time is the newest of them; the walk says «filed: 2»", detail: res };
+      },
+      // …and ACROSS WALKS: a later walk's statement older than the file (another limit's newer reading) is still its limit's news;
+      // the same batch again is «no news», never «filed»
+      async 'device/two-limits-across-walks'(w, REPO) {
+        const X = 'cccccccc-0000-4000-8000-0000000000c3', Y = 'cccccccc-0000-4000-8000-0000000000c4';
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: X, acct: 'cxs-1', ts: Date.now() - 120000 }); uh.recordAttribution({ sid: Y, acct: 'cxs-1', ts: Date.now() - 120000 });
+        const t0 = Date.now();
+        const a = walkedRollout(w, REPO, [{ tid: X, stmts: [{ ago: 10000, used: 41, lim: 'codex' }] }]);
+        await uh.ingestRemoteEvents('h1', 'Host one', a.text);
+        const b = walkedRollout(w, REPO, [{ tid: Y, stmts: [{ ago: 30000, used: 9, lim: 'codex_bengalfox' }] }]); // X's rollout stays as written: the walk reads it again, unchanged
+        await uh.ingestRemoteEvents('h1', 'Host one', b.text);
+        const said2 = uh._lastStatements;
+        await uh.ingestRemoteEvents('h1', 'Host one', b.text);
+        const said3 = uh._lastStatements;
+        const p = limitOf(w, 'cxs-1', 'codex'), o = limitOf(w, 'cxs-1', 'codex_bengalfox');
+        return { green: !!p && !!o && p.pct === 41 && o.pct === 9 && near(o.at, t0 - 30000) && near(p.fileAt, t0 - 10000) && said2.filed === 1 && said2.noNews === 1 && said3.filed === 0 && said3.noNews === 2,
+          why: "a later walk's statement of the OTHER limit, older than the file's time, is filed at its own time (the file keeps its newest); the same batch again says «no news: 2», never «filed»", detail: { p, o, said2, said3 } };
       },
       // the LAST statement of a thread is the one filed; a batch sent again (an older one) never moves it back
       async 'device/last-wins'(w, REPO) {

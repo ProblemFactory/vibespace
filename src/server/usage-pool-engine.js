@@ -5583,7 +5583,17 @@ function handleResetCreditResult(session, payload) {
 /** THE ONE codex snapshot writer (the wrapper's pushes, a wall's synthesized mark, the reset-credit helper's
  *  post-consume read): attributed through the turn-pinned slot (or the helper's own key), the window guard,
  *  the producer stamped, the one cache writer. */
-function writeCodexReading(snap, source, { session = null, key: forKey = null } = {}) {
+/** THE STORED TIME OF ONE LIMIT of an account's cache object (lane usage-every-change, the check's must 1): a codex login
+ *  states several limit ids (the plan, a model's cap — B-9213), each with its own time; the FILE's fetchedAt is the newest of
+ *  them all. A file with no typed limits answers its own fetchedAt; a limit it does not hold answers 0. */
+function storedLimitAt(cur, limitId) {
+  if (!cur || typeof cur !== 'object') return 0;
+  if (!Array.isArray(cur.limits)) return Number(cur.fetchedAt) || 0;
+  const l = cur.limits.find((x) => x && String(x.limitId) === String(limitId));
+  if (!l) return 0;
+  return Math.max(Number(l.fetchedAt) || 0, ...(Array.isArray(l.windows) ? l.windows : []).map((w) => Number(w && w.measuredAt) || 0));
+}
+function writeCodexReading(snap, source, { session = null, key: forKey = null, ownLimit = false } = {}) {
   if (!snap) return null;
   // ONE attribution function for readings (2026-09-07): the codex snapshot
   // is a VALUE like every other, so it goes through the same turn-pinned
@@ -5612,22 +5622,27 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // `fetchedAt` no longer dates the count — resetCreditsLeft compares this
   // stamp with the session's own last read and trusts the fresher one
   if (snap.resetCredits && typeof snap.resetCredits === 'object' && !snap.resetCredits.at) snap.resetCredits = { ...snap.resetCredits, at: Number(snap.fetchedAt) || Date.now() };
+  let wrote = false;
   try {
     const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
-    if (!cur || (Number(cur.fetchedAt) || 0) < (Number(snap.fetchedAt) || 0)) {
+    const snapAt = Number(snap.fetchedAt) || 0, fileAt = Number(cur && cur.fetchedAt) || 0;
+    // `ownLimit` (a walked statement — usage-every-change, the check's must 1): newer than ITS OWN limit's stored time, never the
+    // file's (the newest of every limit), and the file keeps its freshest time: an older limit's statement never moves it back
+    if (!cur || (ownLimit ? storedLimitAt(cur, String(snap.limitId || 'codex')) : fileAt) < snapAt) {
       // codex has no OTel channel, so there is nothing to corroborate WITH:
       // the label is deliberately absent rather than a fabricated `true`.
       // ONE limit per push (B-9213): this snapshot names its own limitId
       // and the write path merges it under that id, so a Spark push can no
       // longer erase the plan limit this account is actually spending.
       usageWrite.writeCacheObject({
-        cacheDir: USAGE_CACHE_DIR, key, obj: snap,
+        cacheDir: USAGE_CACHE_DIR, key, obj: ownLimit && fileAt > snapAt ? { ...snap, fetchedAt: fileAt } : snap,
         set: quotaSourceFor(session ? session.backend : quotaBackendFor(key)).limitSetFromSnapshot?.(snap, { identity: key, source }) || null,
-        source, backend: 'codex',
+        source, backend: 'codex', ...(ownLimit ? { measuredAt: snapAt } : {}),
       });
+      wrote = true;
     }
   } catch { }
-  return { key, snap };
+  return { key, snap, wrote };
 }
 /** A CODEX STATEMENT FROM A WALKED ROLLOUT (lane usage-every-change pick 2, laws 2 + 4): the vendor's own numbers a
  *  token_count record carried (`rate_limits`), filed at the RECORD's time on the account src/usage-history.js resolved for the
@@ -5640,9 +5655,6 @@ function fileCodexStatement(st) {
   const key = st.acct ? String(st.acct) : st.own ? hostGlobalKey('codex', st.host || null) : null;
   if (!key) return { ok: false, why: 'not-tracked' };
   const at = Math.min(Number(st.ts) || Date.now(), Date.now());
-  // the store keeps the newest by its own time: a statement no newer than the stored reading is no news (and never reaches the
-  // window guard — a cold walk would otherwise archive a month of old windows)
-  try { const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key); if (cur && (Number(cur.fetchedAt) || 0) >= at) return { ok: true, key, at, stale: true }; } catch { }
   // an older codex states a window's reset as seconds FROM the record (`resets_in_seconds`): the record's own time makes it a time
   const rl = { ...st.rl };
   for (const pos of ['primary', 'secondary']) {
@@ -5652,8 +5664,12 @@ function fileCodexStatement(st) {
   let snap = null;
   try { snap = quotaSourceFor('codex').signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: rl } }, at)?.snapshot || null; } catch { snap = null; }
   if (!snap) return { ok: false, why: 'unparsed', key };
-  const w = writeCodexReading(snap, 'codex-rollout', { key }); // the transcript producer's own name (lib/usage-source.js)
-  return w && w.key ? { ok: true, key: w.key, at } : { ok: false, why: w && w.archived ? 'archived' : 'refused', key };
+  // NEWEST OF ITS OWN LIMIT (the check's must 1): a statement no newer than ITS limit's stored time is no news — and never
+  // reaches the window guard (a cold walk would otherwise archive a month of old windows); another limit's newer reading is
+  // not this limit's (one login states several, each at its own time)
+  try { if (storedLimitAt(usageWrite.readCacheObject(USAGE_CACHE_DIR, key), String(snap.limitId || 'codex')) >= at) return { ok: true, key, at, stale: true }; } catch { }
+  const w = writeCodexReading(snap, 'codex-rollout', { key, ownLimit: true }); // the transcript producer's own name (lib/usage-source.js)
+  return w && w.key ? { ok: true, key: w.key, at, stale: !w.wrote } : { ok: false, why: w && w.archived ? 'archived' : 'refused', key };
 }
 /** A TURN'S TOKENS AS A LEDGER ROW (lane usage-every-change pick 3, law 5): a harness whose quota declares `turnRow` (antigravity —
  *  its turns state no number) has each finished turn's own record booked as ONE ledger row ON THE ACCOUNT THE TURN RAN ON: a
