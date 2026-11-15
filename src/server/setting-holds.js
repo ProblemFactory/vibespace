@@ -19,6 +19,9 @@ const path = require('path');
 const AS = require('../ask-setting.js');
 
 const STORE_NAME = 'setting-holds.write';
+// a return the settings file refused is tried again a minute later, RETRIES more times, before it is left to the next start
+// (主开发's reading after the line, 2026-11-15: a failed return is not left to the boot at once; the owner's notice is filed ONCE)
+const RETRY_MS = 60 * 1000, RETRIES = 3;
 const NUM = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, userTodos = null, log = () => { }, now = () => Date.now(), writer = null, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
@@ -26,6 +29,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   const W = () => writer || require('../store-writer.js').storeWriter();
   let holds = {};   // key → { key, value, before (the stored value; null = the row's default), untilAt, at }
   const timers = new Map();
+  const tries = new Map();   // key → the failed returns of its hold so far (a minute apart; reset by a new press or a return)
   /** A FAILED ACT REACHES THE OWNER (amendment 6): ONE For-you notice in the Spending family (origin spend — test-user-todos-layout's
    *  producer census), the row named with its link. The only item this store files. */
   const notifyOwner = ({ text, detail }) => { try { if (userTodos) userTodos.add('accounts', { origin: 'spend', text: String(text).slice(0, 300), detail, urgency: 'high', by: 'agent', sessionName: 'Spending', kind: 'notice' }); } catch (e) { log(`[setting-holds] the owner's notice could not be filed: ${e && e.message}`); } };
@@ -50,11 +54,20 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     if (!byHand) {
       try { patchSettings({ [key]: h.before }); }   // null = the row's default (a sparse store drops it)
       catch (e) {
-        notifyOwner({ key, text: `A held setting could not go back: ${key} stays at ${h.value}`, detail: `The hold you took said it would return to ${h.before == null ? 'its default' : h.before} at ${new Date(h.untilAt).toISOString()}; the settings file could not be written (${e && e.message}). Change it on the row: ${AS.LINK(key)}` });
-        log(`[setting-holds] return ${key} → ${h.before} FAILED: ${e && e.message}`); return { ok: false, code: 'return-failed' };
+        const msg = e && e.message;
+        // «End now» is the owner's own press: its page says the refusal (the route answers it); the hold and its moment stand
+        if (why === 'end') { log(`[setting-holds] End now ${key} → ${h.before} FAILED: ${msg}`); return { ok: false, code: 'return-failed', error: `the settings file could not be written (${msg}) — the hold still stands` }; }
+        const n = (tries.get(key) || 0) + 1; tries.set(key, n);
+        if (n <= RETRIES) {   // tried again in a minute, quietly (a return that then lands is the usual quiet return)
+          disarm(key); timers.set(key, setTimer(() => { timers.delete(key); returnHold(key, why).catch((x) => log(`[setting-holds] return ${key} failed: ${x && x.message}`)); }, RETRY_MS));
+          log(`[setting-holds] return ${key} → ${h.before} FAILED (${msg}) — try ${n + 1} of ${RETRIES + 1} in a minute`); return { ok: false, code: 'return-failed', retry: n };
+        }
+        tries.delete(key);   // left to the next start (the hold stays on disk); the owner is told ONCE
+        notifyOwner({ key, text: `A held setting could not go back: ${key} stays at ${h.value}`, detail: `The hold you took said it would return to ${h.before == null ? 'its default' : h.before} at ${new Date(h.untilAt).toISOString()}; the settings file could not be written (${msg}) — tried ${RETRIES + 1} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: ${AS.LINK(key)}` });
+        log(`[setting-holds] return ${key} → ${h.before} FAILED ${RETRIES + 1} times: ${msg} — left to the next start`); return { ok: false, code: 'return-failed', left: 'start' };
       }
     }
-    delete holds[key]; disarm(key);
+    delete holds[key]; disarm(key); tries.delete(key);
     if (!(await save())) log(`[setting-holds] ${key}: the hold's end is not on disk yet — the next boot sees the row ${byHand ? 'changed by hand' : 'already returned'} and ends it`);
     log(`[setting-holds] ${key}: ${byHand ? `changed by hand (${cur}) — the hold ended without a return` : `back to ${h.before == null ? 'the default' : h.before}`} (${why})`);
     if (!byHand) {
@@ -77,6 +90,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     const v = AS.pressVerdict({ type: AS.TYPE, key, value, untilRel, untilAt }, { present, now: now() });
     if (!v.press) return { ok: false, status: 409, code: v.why, present, error: v.why === 'raise-needs-until' ? 'a raise is always time-boxed — this one names no «until»' : v.why === 'passed' ? 'the moment has passed' : v.why };
     const prior = holds[key] ? { ...holds[key] } : null;
+    tries.delete(key);   // a new press: the old hold's failed returns are no longer counted
     if (v.untilAt != null) {
       holds[key] = { key, value: v.value, before: prior ? prior.before : stored(key), untilAt: v.untilAt, at: now() };   // 4: the FIRST «before» kept
       if (!(await save())) { if (prior) holds[key] = prior; else delete holds[key]; return { ok: false, status: 503, code: 'not-durable', error: 'the hold could not be written to disk, so the raise was not made — nothing changed' }; }
@@ -102,7 +116,19 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
     try { raw = await fs.promises.readFile(file, 'utf8'); } catch (e) { if (e && e.code !== 'ENOENT') { notifyOwner({ key: null, text: 'The setting holds could not be read', detail: `data/setting-holds.json: ${e.message}. A raised ceiling may not return by itself — check the three ceilings: ${Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ')}` }); log(`[setting-holds] unreadable: ${e.message}`); } return list(); }
     try { const j = JSON.parse(raw); holds = j && j.holds && typeof j.holds === 'object' ? j.holds : {}; }
     catch (e) { notifyOwner({ key: null, text: 'The setting holds could not be read', detail: `data/setting-holds.json is not whole (${e.message}). A raised ceiling may not return by itself — check the three ceilings: ${Object.keys(AS.PROPOSABLE).map(AS.LINK).join(' · ')}` }); holds = {}; return list(); }
-    for (const k of Object.keys(holds)) { const h = holds[k]; if (!h || !AS.isProposable(k) || NUM(h.untilAt) == null) { delete holds[k]; continue; } arm(k); }
+    // a hold that cannot be kept (its row is no longer one a press may change, its moment is not a number, it is not whole) is
+    // dropped — and SAID (主开发's reading after the line): a raised value it held may now stay; ONE notice names every such row
+    const dropped = [];
+    for (const k of Object.keys(holds)) {
+      const h = holds[k], why = !h || typeof h !== 'object' ? 'it is not whole' : !AS.isProposable(k) ? 'it is no longer a row a press may change' : NUM(h.untilAt) == null ? 'its moment is not a number' : null;
+      if (why) { dropped.push({ key: String(k).slice(0, 120), why, value: h && typeof h === 'object' ? h.value : undefined }); delete holds[k]; continue; }
+      arm(k);
+    }
+    if (dropped.length) {
+      notifyOwner({ key: null, text: `A held setting may not go back by itself: ${dropped.map((d) => d.key).join(', ')}`, detail: `At this start, data/setting-holds.json held ${dropped.length === 1 ? 'a hold that could not be kept' : `${dropped.length} holds that could not be kept`} — ${dropped.map((d) => `${d.key}${d.value !== undefined ? ` (held at ${d.value})` : ''}: ${d.why}`).join('; ')}. ${dropped.length === 1 ? 'It was' : 'They were'} dropped, so a raised value may stay where it is. Check it on the row: ${dropped.map((d) => AS.LINK(d.key)).join(' · ')}` });
+      log(`[setting-holds] dropped at start: ${dropped.map((d) => `${d.key} (${d.why})`).join(', ')}`);
+      await save();   // the store as kept — the next start does not say it again
+    }
     return list();
   }
   const end = (key) => returnHold(key, 'end');
@@ -110,4 +136,4 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   return { start, take, end, list, returnHold, stop, file };
 }
 
-module.exports = { create, STORE_NAME };
+module.exports = { create, STORE_NAME, RETRY_MS, RETRIES };

@@ -131,19 +131,47 @@ console.log('③ THE HOLD STORE — one act, the hold on disk FIRST; one hold pe
     ok(!r3.ok && r3.code === 'not-proposable', 'a row off the list is no press');
   }
   {
-    const k = mk({ settings: { [DAY]: 1600 } });
-    let patched = false;
-    const H = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { patched = true; throw new Error('read-only'); }, userTodos: { add: (key, n) => { k.owner.push({ key, ...n }); return { id: 'n1' }; } }, log: () => { }, now: () => NOW, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { } });
-    fs.writeFileSync(path.join(k.dir, 'setting-holds.json'), JSON.stringify({ v: 1, holds: { [DAY]: { key: DAY, value: 1600, before: 800, untilAt: NOW + 3600e3, at: NOW } } }));
-    await H.start(); const r = await H.returnHold(DAY, 'moment');
-    ok(patched && !r.ok && k.owner.length === 1 && k.owner[0].detail.includes(`vibespace://settings/${DAY}`) && k.owner[0].text.includes(DAY) && k.owner[0].origin === 'spend' && k.owner[0].kind === 'notice' && k.owner[0].key === 'accounts', 'a return that could NOT be written reaches the owner — ONE For-you notice (the Spending family: origin spend) naming the row, with its link', k.owner);
+    // a return the file refuses: tried again a minute later, RETRIES more times; ONE notice when the last fails; a retry that lands is quiet
+    const failing = (failures) => { const k = mk({ settings: { [DAY]: 1600 } }); let n = 0; const tm = [];
+      const H = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: (p) => { n++; if (n <= failures) throw new Error('read-only'); Object.assign(k.st, p); }, userTodos: { add: (key, x) => { k.owner.push({ key, ...x }); return { id: 'n1' }; } }, log: () => { }, now: () => NOW, writer: { dirty: () => { }, durable: async () => true }, setTimer: (fn, ms) => { const h = { fn, ms }; tm.push(h); return h; }, clearTimer: (h) => { const x = tm.indexOf(h); if (x >= 0) tm.splice(x, 1); } });
+      fs.writeFileSync(path.join(k.dir, 'setting-holds.json'), JSON.stringify({ v: 1, holds: { [DAY]: { key: DAY, value: 1600, before: 800, untilAt: NOW + 3600e3, at: NOW } } }));
+      return { k, H, tm, writes: () => n }; };
+    {
+      const { k, H, tm, writes } = failing(99);
+      await H.start(); tm.length = 0;
+      const r1 = await H.returnHold(DAY, 'moment');
+      ok(!r1.ok && r1.retry === 1 && k.owner.length === 0 && tm.length === 1 && tm[0].ms === SH.RETRY_MS && SH.RETRY_MS === 60e3 && SH.RETRIES === 3, 'a return the settings file refuses is NOT left to the boot: tried again in a minute, nothing filed yet', { r1, owner: k.owner, tm: tm.map((x) => x.ms) });
+      for (let i = 0; i < SH.RETRIES; i++) { const t = tm.shift(); if (!t) break; await t.fn(); await new Promise((r) => setTimeout(r, 5)); }
+      ok(writes() === SH.RETRIES + 1 && k.owner.length === 1 && tm.length === 0 && H.list().length === 1 && k.st[DAY] === 1600, `…${SH.RETRIES + 1} tries a minute apart, then left to the next start: the hold stays on disk, ONE notice`, { writes: writes(), owner: k.owner.length, timers: tm.length });
+      ok(k.owner[0].detail.includes(`vibespace://settings/${DAY}`) && k.owner[0].text.includes(DAY) && /tried 4 times, a minute apart/.test(k.owner[0].detail) && /next start of VibeSpace tries again/.test(k.owner[0].detail) && k.owner[0].origin === 'spend' && k.owner[0].kind === 'notice' && k.owner[0].key === 'accounts', 'the ONE notice (the Spending family: origin spend) names the row with its link, the tries, and that the next start tries again', k.owner[0]);
+    }
+    {
+      const { k, H, tm, writes } = failing(2);
+      await H.start(); tm.length = 0;
+      await H.returnHold(DAY, 'moment');
+      for (let i = 0; i < 2 && tm.length; i++) { const t = tm.shift(); await t.fn(); await new Promise((r) => setTimeout(r, 5)); }
+      ok(writes() === 3 && k.st[DAY] === 800 && H.list().length === 0 && k.owner.length === 0 && tm.length === 0, 'a retry that lands is the usual QUIET return — back to 800, no notice', { writes: writes(), st: k.st[DAY], owner: k.owner.length });
+    }
+    {
+      const { k, H } = failing(99);
+      await H.start(); const e = await H.end(DAY);
+      ok(!e.ok && /the hold still stands/.test(e.error) && k.owner.length === 0 && H.list().length === 1, '«End now» refused by the file: the owner\'s own page says it (the route answers it), no notice, the hold still stands', e);
+    }
   }
   {
     const k = mk({ settings: { [DAY]: 1600 }, file: JSON.stringify({ v: 1, holds: { [DAY]: { key: DAY, value: 1600, before: 800, untilAt: NOW - 1000, at: NOW - 9e6 }, 'chat.uploadDir': { key: 'chat.uploadDir', value: 1, before: 0, untilAt: NOW + 1, at: NOW } } }) });
     await k.H.start();
     ok(k.timers.length === 1 && k.timers[0].ms === 0 && !k.H.list().some((h) => h.key === 'chat.uploadDir'), 'THE BOOT: holds read back and re-armed — a moment passed while the hub was down returns at ONCE; a row off the list is dropped', k.H.list());
+    ok(k.owner.length === 1 && /chat\.uploadDir/.test(k.owner[0].text) && k.owner[0].detail.includes('vibespace://settings/chat.uploadDir') && /no longer a row a press may change/.test(k.owner[0].detail) && /a raised value may stay/.test(k.owner[0].detail), '…and SAID: ONE notice names the dropped row with its link and why (a raised value may stay)', k.owner);
     await k.timers[0].fn(); await new Promise((r) => setTimeout(r, 10));
     ok(k.st[DAY] === 800, '…and the overdue hold returned');
+  }
+  {
+    const k = mk({ settings: { [HOUR]: 60 }, file: JSON.stringify({ v: 1, holds: { [HOUR]: { key: HOUR, value: 60, before: 30, untilAt: 'tonight', at: NOW } } }) });
+    let saved = null; const w0 = { dirty: (f, o) => { saved = JSON.parse(o.produce()); }, durable: async () => true };
+    const H = SH.create({ dataDir: k.dir, readSettings: () => k.st, patchSettings: () => { }, userTodos: { add: (key, x) => { k.owner.push({ key, ...x }); return { id: 'n1' }; } }, now: () => NOW, writer: w0, setTimer: () => ({}), clearTimer: () => { } });
+    await H.start();
+    ok(H.list().length === 0 && k.owner.length === 1 && k.owner[0].text.includes(HOUR) && /its moment is not a number/.test(k.owner[0].detail) && /held at 60/.test(k.owner[0].detail) && saved && Object.keys(saved.holds).length === 0, 'a hold whose moment is not a number is dropped AND said (the row, the value it held, its link); the store is saved as kept, so the next start says nothing again', { owner: k.owner, saved });
   }
   {
     const k = mk({ file: '{ not json' });
