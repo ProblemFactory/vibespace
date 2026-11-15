@@ -29,6 +29,9 @@ const { spawn } = require('child_process');
 const doorReads = require('../door-reads.js');
 
 const PACE_MS = 60000;
+// THE RULING'S OWN ARITHMETIC (the owner's A, 2026-11-14: «每账号每 30 分钟最多一次»): a day holds at most 24 h / 30 min = 48
+// after-turn reads of one account. More is a BUG somewhere upstream — refused here, and said in a log line (never a notice)
+const AFTER_TURN_DAY_MAX = Math.floor((24 * 60) / 30);
 const TIMEOUT_MS = 30000;
 const STDOUT_CAP = 262144;
 
@@ -57,9 +60,12 @@ function runOnce(spawnImpl, cmd, argv, { env, cwd, timeoutMs = TIMEOUT_MS }) {
  *  @param {(k:string)=>any} [o.setting]  a server setting
  *  @param {Function} [o.spawnImpl] @param {()=>number} [o.now] @param {(l:string)=>void} [o.log] */
 function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite = require('../usage-cache-write.js'), agentEnv = () => ({ ...process.env }),
-  setting = () => null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS } = {}) {
+  setting = () => null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS,
+  mono = () => performance.now(), countWriter = () => require('../store-writer.js').storeWriter() } = {}) {
   const lastAt = new Map();   // account id → when a person last read it (the once-a-minute pace)
   const inflight = new Map(); // account id → the read in flight (two presses share it)
+  const lastRunMono = new Map();   // account id → the steady clock at its last run in THIS life (law A2: a wall-clock step moves nothing)
+  const stopped = new Map();  // account id → why: the judge saw a turn — every AUTOMATIC caller stops for that account (law A)
   async function readOnce(id, a, be, od, caller) {
     const cmd = await cliCmds.check(be, { force: true });
     if (!cmd) return { ok: false, status: 409, code: 'not-installed', error: `${harnessOf(be)?.label || be} is not installed on this machine` };
@@ -70,12 +76,18 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     const env = { ...agentEnv(), ...spawnEnv.localEnv };
     for (const k of creds.keyEnvVars || []) delete env[k]; // an ambient key would answer for ANOTHER login
     const at = now();
-    try { doorReads.bumpDoorRead(cacheDir, id, caller, at, usageWrite); } catch (e) { log(`[cli-usage] ${be} ${id}: the read count was not written: ${e.message}`); }
+    // THE COUNT FIRST, AND FAIL CLOSED (law A3): the run is counted on disk before anything spawns; a count that could not be
+    // written refuses the read by name — an uncounted read would also hold no later one back
+    let counted = false;
+    try { counted = await doorReads.bumpDoorRead(cacheDir, id, caller, at, { writer: countWriter, log }); } catch (e) { counted = false; log(`[cli-usage] ${be} ${id}: the read count failed: ${e.message}`); }
+    if (!counted) { log(`[cli-usage] ${be} ${id}: the read count could not be written — not read (${caller})`); return { ok: false, status: 503, code: 'count-failed', error: 'the read count could not be written — nothing was read' }; }
+    lastRunMono.set(id, mono());
     const r = await runOnce(spawnImpl, cmd, od.argv, { env, cwd: od.cwdOf(spawnEnv.localEnv), timeoutMs });
     if (r.error) return { ok: false, status: 502, code: 'spawn-failed', error: `could not run ${path.basename(cmd)}: ${r.error.message}` };
     const j = od.judge({ code: r.code, stdout: r.stdout, stderr: r.stderr, measuredAt: at });
     if (j.verdict === 'turn-started') {
-      log(`[cli-usage] ${be} ${id}: STOP — ${j.why} (nothing written)`);
+      stopped.set(id, j.why);   // ONE stop per account for every automatic caller (the wall's, the after-turn's), until the hub restarts
+      log(`[cli-usage] ${be} ${id}: STOP — ${j.why} (nothing written; no automatic read of this account until the hub restarts)`);
       return { ok: false, status: 502, code: 'turn-started', error: j.why };
     }
     if (j.verdict === 'auth-required') return { ok: false, status: 409, code: 'login-needed', loginNeeded: true, error: j.why };
@@ -88,6 +100,10 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   }
   return {
     PACE_MS: paceMs,
+    /** The steady time since this life's last run of the account's CLI (Infinity when none ran in this life). */
+    sinceLastRunMs(id) { return lastRunMono.has(id) ? Math.max(0, mono() - lastRunMono.get(id)) : Infinity; },
+    /** Why the automatic callers stopped for this account (the judge saw a turn), or null. */
+    stoppedWhy(id) { return stopped.get(id) || null; },
     /** ONE reading of account `id`, on a person's press (`person`), a wall its conversation named (`wall`) or the end of a
      *  stretch of its work (`afterTurn`); else refused. */
     async read(id, { person = false, wall = false, afterTurn = false } = {}) {
@@ -100,6 +116,11 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
       if (!od || typeof od.judge !== 'function' || !Array.isArray(od.argv)) return { ok: false, status: 400, code: 'no-reading', error: `${harnessOf(be)?.label || be} declares no on-demand usage reading` };
       if (caller === 'wall' && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
       if (caller === 'afterTurn' && od.afterTurn !== true) return { ok: false, status: 400, code: 'no-after-turn-read', error: `${harnessOf(be)?.label || be} declares no reading after a stretch of work` };
+      if (caller !== 'person' && stopped.has(id)) return { ok: false, status: 409, code: 'stopped', error: `the automatic reads of this account stopped: ${stopped.get(id)}` };
+      if (caller === 'afterTurn') {
+        const today = doorReads.todayOf(doorReads.readDoorReads(cacheDir, id), now());
+        if (today.afterTurn >= AFTER_TURN_DAY_MAX) { log(`[cli-usage] ${be} ${id}: A BUG — ${today.afterTurn} after-turn reads today already, the ruling allows ${AFTER_TURN_DAY_MAX}; refused`); return { ok: false, status: 429, code: 'over-ruling', error: `${today.afterTurn} after-turn reads today: the ruling allows ${AFTER_TURN_DAY_MAX}` }; }
+      }
       let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
       if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
       if (inflight.has(id)) return inflight.get(id);
@@ -113,4 +134,4 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   };
 }
 
-module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS };
+module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS, AFTER_TURN_DAY_MAX };

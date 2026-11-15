@@ -29,6 +29,7 @@ const STORES = Object.freeze({
   'session-meta.read': row('read', 'session-meta/<sock>', 'src/server/session-stdout.js'),
   'session-status.write': row('write', 'session-status', 'src/session-status.js', ['_save']),   // through the store writer (lane hub-loop-stalls commit 2)
   'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)
+  'door-reads.write': row('write', 'usage-cache/.door-reads-<account>', 'src/door-reads.js', ['bumpDoorRead']),   // through the store writer, awaited before the read (lane usage-predict, law A3)
   'session-status.read': row('read', 'session-status', 'src/session-status.js'),
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_flush']),
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),

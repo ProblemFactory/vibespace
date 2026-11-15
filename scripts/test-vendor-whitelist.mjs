@@ -570,7 +570,10 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       /if \(doorReads\.lastReadAt\(cacheDir, key, usageWrite\) >= sig\.measuredAt\) return null;/] },
     'src/server/after-turn-read.js': { n: 1, gates: [/door\.read\(key, \{ afterTurn: true \}\)/, /return od && od\.afterTurn === true \? String\(session\._accountId\) : null;/,
       /const QUIET_MS = 5 \* 60 \* 1000;/, /const PACE_MS = 30 \* 60 \* 1000;/, /if \(!\(endAt >= born\)\) return null;/, /if \(last >= endAt\) return null;/,
-      /if \(now\(\) - last < paceMs\)/, /const last = doorReads\.lastReadAt\(cacheDir, key, usageWrite\);/, /if \(busy\(key\)\) return null;/, /disarmed\.set\(key,/, /if \(disarmed\.has\(key\)\)/] },
+      /if \(now\(\) - last < paceMs\)/, /const last = doorReads\.lastReadAt\(cacheDir, key, usageWrite\);/, /if \(busy\(key\)\) return null;/,
+      // law A (the look of 2026-11-15 06:16Z): «a turn runs» from the conversations themselves; the steady clock; the door's stop;
+      // the paired machine's fence; a wait whose conversation is gone
+      /return l === null \? true : l\.some\(\(s\) => s && s\._isStreaming === true\);/, /if \(steady < paceMs\)/, /door\.stoppedWhy\(key\)/, /if \(session\.host\) return null;/, /if \(!l\.includes\(w\.session\)\) return null;/] },
   };
   const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
   const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
@@ -588,8 +591,10 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const atr = fs.readFileSync(path.join(REPO, 'src/server/after-turn-read.js'), 'utf-8'), acp = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf-8');
   ok(/const caller = person \? 'person' : wall === true \? 'wall' : afterTurn === true \? 'afterTurn' : null;/.test(door) && /if \(!caller\) return \{ ok: false, status: 403/.test(door)
     && /if \(caller === 'wall' && od\.onWallSignal !== true\) return \{ ok: false, status: 400, code: 'no-wall-read'/.test(door)
-    && /if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{/.test(door),
-    '5c: the DOOR refuses any other caller (403), a wall read or an after-turn read the descriptor does not declare (400), and keeps the judge\'s STOP');
+    && /if \(caller === 'afterTurn' && od\.afterTurn !== true\) return \{ ok: false, status: 400, code: 'no-after-turn-read'/.test(door) && /if \(j\.verdict === 'turn-started'\) \{\n\s*stopped\.set\(id, j\.why\);/.test(door)
+    && /if \(caller !== 'person' && stopped\.has\(id\)\) return \{ ok: false, status: 409, code: 'stopped'/.test(door) && /if \(!counted\) \{[^\n]*return \{ ok: false, status: 503, code: 'count-failed'/.test(door)
+    && /if \(today\.afterTurn >= AFTER_TURN_DAY_MAX\)/.test(door),
+    '5c: the DOOR refuses any other caller (403), a wall read or an after-turn read the descriptor does not declare (400), keeps the judge\'s STOP as ONE stop for every automatic caller (409), counts first and refuses an uncounted read (503), and refuses a day past the ruling\'s arithmetic');
   // THE ONE TIMER of the after-turn road: the quiet wait, set in onTurnEnd alone; fire() runs only from it
   const bodyOf = (t, head) => { const i = t.indexOf(head); if (i < 0) return ''; let j = t.indexOf('{', i + head.length), d = 0; for (let k = j; k < t.length; k++) { if (t[k] === '{') d++; else if (t[k] === '}' && --d === 0) return t.slice(j, k + 1); } return ''; };
   const timerLaw = (t) => { const c = strip(t); const inEnd = bodyOf(c, 'function onTurnEnd(session, rec)');
@@ -613,7 +618,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const CONTROLS = [
     ['a timer (an hourly read planted in the road)', () => !timerLaw(atr.replace('  function fire(key, endAt) {', "  setInterval(() => fire('x', 0), 3600e3);\n  function fire(key, endAt) {"))],
     ['a session start (the consumer\'s `session` record arms the wait)', () => !armLaw(acp.replace("if (msg.kind === 'session') {", "if (msg.kind === 'session') {\n            require('../after-turn-read.js').onTurnEnd(session, msg);"))],
-    ['an idle tick (fire() re-arms itself)', () => !timerLaw(atr.replace('    waits.delete(key);\n    if (busy(key)) return null;', '    waits.delete(key);\n    waits.set(key, { timer: setTimer(() => fire(key, endAt), quietMs), endAt });\n    if (busy(key)) return null;'))],
+    ['an idle tick (fire() re-arms itself)', () => !timerLaw(atr.replace('    waits.delete(key);\n    const l = convs(key);', '    waits.delete(key);\n    waits.set(key, { timer: setTimer(() => fire(key, endAt), quietMs), endAt });\n    const l = convs(key);'))],
     ['a restart catch-up (configure arms the accounts it finds)', () => !timerLaw(atr.replace('function configure(deps) { road = createAfterTurnRead(deps); return road; }', "function configure(deps) { road = createAfterTurnRead(deps); for (const s of deps.sessions || []) road.onTurnEnd(s, { ts: new Date().toISOString() }); return road; }"))],
     ['the replay guard dropped (a record older than the hub arms)', () => !CALLERS['src/server/after-turn-read.js'].gates.every((g) => g.test(atr.replace('    if (!(endAt >= born)) return null;\n', '')))],
   ];
