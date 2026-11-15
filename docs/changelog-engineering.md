@@ -4,6 +4,41 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.403 — 2026-11-14
+
+### turn-never-silent P1 (主开发's GO 2026-11-15 02:55Z; the owner: «对了你能解决一下 agy 动不动就卡住再也不动的问题吗？») — every harness declares how its turn's life is witnessed, and ONE pure verdict reads it
+- **The cause** (the diagnosis int359/agy-stuck/results-wf_054838ad.json). Six silences in two weeks, all one shape. The CLI's command tool opened a step, its result never came, and the CLI stayed alive and wrote nothing. The turn stayed open (3 h 47 min, 6 h 06 min, 27 h 45 min) until a person pressed Stop. Nothing bounded it: the agy wrapper pins `--print-timeout 0`, and the hub had no check for any harness.
+- **The law (L1).** No turn of any harness is silent without a bound. Each BACKEND_CAPS row carries `liveness`, a closed vocabulary that src/turn-liveness.js owns:
+  - `wrote: 'wrapper-stamp'`: a line the CLI itself wrote, stamped by its wrapper (P2);
+  - `working: 'tree-below-cli'`;
+  - `openTool: 'tool-card'`;
+  - `stop: 'restart' | 'interrupt'`.
+
+  shell declares `'no-turn'`. NO_CAPS reads null, which is undeclared and judged «unknown». test-harness-contract holds every built-in row to the vocabulary and checks that each row's wrapper exists.
+- **What counts as working (measured).** A read-only sampler of this box's live sessions on 2026-11-12 (queued-is-not-woke/probe/life/real-*.csv) caught one stuck agy turn. It wrote nothing for 27 minutes, and its ONE child used 0 CPU ticks the whole time. agy itself used 22–58 ticks/min and read 12–49 KB/min, which is what an idle agy does (2–16 ticks, 10–49 KB). From that:
+  - The CLI's own counters are never read.
+  - A process merely existing is not work.
+  - Work is the counters below the CLI MOVING between two readings: CPU ticks, rchar + wchar, a birth or an end.
+  - A cut reading (more than 256 processes) is never «still».
+- **The states.** livenessVerdict returns one of:
+  - none: no turn, the turn asks the person, not yet at the bound, or read fewer than twice;
+  - busy: nothing written, but working;
+  - stuck-on-command: a tool step open, nothing written, nothing working, for the bound;
+  - silent: no tool step open, the same otherwise;
+  - unknown: no procfs, or an undeclared row.
+
+  The bound is a setting: ten minutes by default, clamped to 2 min – 1 day.
+- **Ruled by 主开发 (02:55Z).**
+  - Q1: no byte rate of a generating CLI is a witness (one 34-minute sample is not a law). A CLI generating with nothing below it reads «silent», whose words carry only the facts.
+  - Q3: «Keep waiting» restarts the bound, so the turn is judged again only after another FULL bound with nothing.
+  - Only «stuck on a command» may ever be ended by itself (held for the owner's word).
+- **The by-itself ending (the owner's word «可以», 03:02Z).** ONLY «stuck on a command» is ever due. It is due once nothing below the CLI has worked for a second bound: a setting, thirty minutes by default, never under the told bound, 'off' = never. The verdict's `endDue` says when; P4 takes the act. A working command is never due, and «silent» (no tool step open) is never due. «Keep waiting» restarts the thirty, because the press is in the clock. test-turn-liveness ⑧ runs a mutant that ends on the written silence alone as its RED control: it ends a WORKING command.
+- **Not taken from round 3 of laws 2+3** (629791b99, never on master): its witness «a child born in the turn exists = life». test-turn-liveness ⑦ runs the measured turn through it as the RED control: it reads «busy» for ever. Its echo tables and its kernel-clock birth rule are not taken either.
+- **The pin.**
+  - scripts/test-turn-liveness.mjs (fast, 80 legs, 0.06 s): the vocabulary and its refusals; the bound; stat and io parsed (a command name with spaces and parentheses; this process's own /proc); what moves; the verdict state by state; the measured turn at minute 10; the limit (a child that keeps using CPU is «busy» for two hours); the by-itself ending's bound and its red control.
+  - RED on c167240f2 (2.369.402): the module is absent.
+- Nothing a person sees changes in P1. P2 stamps the witnesses, and P3 speaks.
+
 ## 2.369.402 — 2026-11-14
 
 ### oat-add-door — the guided door for an account added by its long-lived token (the owner, 2026-11-13; 主开发's rulings 00:39Z + 00:52Z)
