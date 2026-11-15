@@ -3399,6 +3399,8 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
   const estWorld = (engineModule = engMod) => {
     const w = mkWorld({ sameDeadline: true, engineModule });
     if (!w) return null;
+    // the pool reads an estimate only where this instance's verdict is ON (usage-predict P5): stated on, so the leg is the overlay's own
+    if (w.eng && w.eng.usageEstimator) w.eng.usageEstimator.predictVerdict = () => ({ state: 'on', n: 99 });
     lift(w, 'wmax');
     const own = w.readCache(w.id.wmax);
     w.writeCache(w.id.wmax, { ...own, orgUuid: 'org-n5h-est' });

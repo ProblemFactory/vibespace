@@ -25,6 +25,7 @@ const fs = require('fs');
 const RR = require('./run-reads.js'); // B-403e: one ask per file of the mount per synchronous run
 const path = require('path');
 const { resetLanded, withOwnAbsence } = require('./quota-model.js');
+const UP = require('./usage-predict.js');   // whether a source's projection may be drawn / read by the pool (usage-predict)
 const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
 
 // Δu-equivalent weight of the prior pseudo-observation.
@@ -280,7 +281,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
     if (!costMemo.has(fromMs)) { try { costMemo.set(fromMs, costFn(fromMs, nowMs) || { total: 0, byFamily: {} }); } catch { costMemo.set(fromMs, { total: 0, byFamily: {} }); } }
     return costMemo.get(fromMs);
   };
-  let sinceCostUsd = 0;
+  let sinceCostUsd = 0, sinceRequests = null;
   // ③ LEDGER TAIL (2.340.0 audit): the transcript scan is throttled (~15s)
   // and writes lag the requests, so at predict time the last ~LAG seconds of
   // burn are not in the ledger yet — during a fast burst that's a standing
@@ -334,7 +335,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
       const trailC = costForKey(key, trail());
       if (trailC != null && trailC > 0) c += (trailC / 120) * lagS;
     }
-    sinceCostUsd = Math.max(sinceCostUsd, (cost(fromMs).total || 0));
+    { const cAll = cost(fromMs); if ((cAll.total || 0) >= sinceCostUsd) { sinceCostUsd = cAll.total || 0; if (Number.isFinite(Number(cAll.requests))) sinceRequests = Number(cAll.requests); } }   // the requests of the same window (usage-predict P2's plain line)
     // 5h class-aware prediction (B-536b): when the regression produced class
     // rates AND the cost source carries the split, predict per component —
     // the blended rate stays the fallback (pre-B-536b snapshots, degenerate
@@ -362,6 +363,7 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
   }
   if (!out.fiveHour && !out.sevenDay && !out.scopedWeekly.length) return null;
   out.sinceCostUsd = Math.round(sinceCostUsd * 100) / 100;
+  out.sinceRequests = sinceRequests;   // usage-predict P2: how much was used HERE since the reading (the ledger's own count)
   return out;
 }
 
@@ -389,15 +391,16 @@ const PROOF_WIN = 64, PROOF_SAMPLES = 8, PROOF_MAX = 24;
 const sigOf = (st) => st ? `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.birthtimeMs || 0}` : 'absent';
 /** What the account walk and the estimate need of an identity's lines (round 3 — kept per identity, tiny, whether or not the
  *  cache keeps the lines): its named account ids, the last record by fetchedAt, the newest ts and the newest __global__ ts. */
-function linesMeta(lines) {
-  const named = new Set(); let lastGlobalTs = 0, lastTs = 0;
+function linesMeta(lines, predictSince = -Infinity) {
+  const named = new Set(); let lastGlobalTs = 0, lastTs = 0; const predict = [];
   for (const l of lines) {
+    if (l.calib) for (const p of UP.pairsOf(l, predictSince)) predict.push(p);   // the instance's own record of projected vs read (usage-predict)
     const ts = l.ts || l.fetchedAt || 0;
     if (ts > lastTs) lastTs = ts;
     if (l.accountId === undefined || l.accountId === null || l.accountId === '__global__') { if (ts > lastGlobalTs) lastGlobalTs = ts; }
     else named.add(l.accountId);
   }
-  return { named: [...named], lastGlobalTs, lastTs, last: lines.length ? lines[lines.length - 1] : null, n: lines.length };
+  return { named: [...named], lastGlobalTs, lastTs, last: lines.length ? lines[lines.length - 1] : null, n: lines.length, predict };
 }
 // round 6 follow-up: a turn that spent nothing while folds are owed looks again after this (one unref'd timer: never a spin — a hub
 // with no auto pool and no fresh reading may not ask for minutes: the auto pools' tick asks every 30 s, the anchor sweep only on a new reading)
@@ -714,7 +717,7 @@ class UsageEstimator {
   _readDone(key, st, lines, wins = null, endsNl = true) {
     const sig = sigOf(st); this._lastRead = { key, sig };
     if (!this._meta) this._meta = new Map();
-    const m = this._meta.get(key); if (!m || m.sig !== sig) this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines) });
+    const m = this._meta.get(key); if (!m || m.sig !== sig) { this._meta.set(key, { sig, ino: st.ino, btime: st.birthtimeMs || 0, size: st.size, endsNl, wins, ...linesMeta(lines, Date.now() - UP.PREDICT.WINDOW_MS) }); if (this._predictMemo) this._predictMemo.clear(); }
   }
   /** The identity's meta now: by its file's signature (one stat), else one read of its lines. */
   _metaOf(key) {
@@ -1259,6 +1262,40 @@ class UsageEstimator {
     } catch (e) { est = null; if (ik && rates0) this._sayAlone(ik, String((e && e.message) || e).slice(0, 120), 0, 'estimate'); } // round 5: a failed estimate is named (read raw, as the release does)
     this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt, ik, rv });
     return ownEstimate(est, rawCache); // read through the member's own «no 5h limit» on EVERY return (the memo is the identity's)
+  }
+  /** THE VERDICT OF ONE SOURCE'S LANE ON THIS INSTANCE (usage-predict): its recorded pairs of the last PREDICT.WINDOW_MS, over
+   *  every identity of that source whose lines were read (src/usage-predict.js verdictOf) — held 60 s, dropped when a file moves. */
+  predictVerdict(source, lane, nowMs = Date.now()) {
+    if (!this._predictMemo) this._predictMemo = new Map();
+    const key = source + '|' + lane, m = this._predictMemo.get(key);
+    if (m && nowMs - m.at < 60000 && nowMs >= m.at) return m.v;
+    const pairs = [];
+    for (const [ik, meta] of (this._meta || new Map())) {
+      if (UP.sourceOf(ik) !== source || !Array.isArray(meta.predict)) continue;
+      for (const p of meta.predict) if (p.lane === lane && p.t >= nowMs - UP.PREDICT.WINDOW_MS) pairs.push(p);
+    }
+    pairs.sort((x, y) => x.t - y.t);
+    const v = UP.verdictOf(pairs.slice(-UP.PREDICT.RING_MAX));
+    this._predictMemo.set(key, { at: nowMs, v });
+    return v;
+  }
+  /** The source of the identity an account reads by (claude / codex / antigravity). */
+  sourceFor(accountId) { try { const ident = this.resolveIdentity(accountId); return UP.sourceOf(ident && ident.identityKey); } catch { return 'claude'; } }
+  /** Each lane of `est` and its state on this instance: { fiveHour, sevenDay, 'scoped:<name>' } → { state, n }. */
+  predictStatesFor(accountId, est, nowMs = Date.now()) {
+    const src = this.sourceFor(accountId), out = {};
+    if (!est) return out;
+    for (const k of ['fiveHour', 'sevenDay']) if (est[k]) { const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
+    for (const s of est.scopedWeekly || []) { const k = scopedKey(s && s.name); const v = this.predictVerdict(src, k, nowMs); out[k] = { state: v.state, n: v.n }; }
+    return out;
+  }
+  /** THE POOL'S ESTIMATE (usage-predict P5): the estimate kept to the lanes whose verdict is ON — a provisional, learning or
+   *  off lane is read as the raw reading. The pool is never moved by a guess this instance has not checked. */
+  poolEstimateFor(accountId, rawCache, nowMs = Date.now()) {
+    const est = this.estimateFor(accountId, rawCache, nowMs);
+    if (!est) return null;
+    const src = this.sourceFor(accountId);
+    return UP.gateEstimate(est, (lane) => this.predictVerdict(src, lane, nowMs).state, (st) => st === 'on');
   }
 }
 
