@@ -52,11 +52,14 @@ function bumpDoorRead(cacheDir, key, caller, atMs, opts = {}) {
   const next = { day: t.day, person: t.person, wall: t.wall, afterTurn: t.afterTurn, lastAt: Math.max(Number(atMs) || 0, Number(prev && prev.lastAt) || 0), lastBy: caller };
   next[caller] += 1;
   mem.set(f, next);
-  const w = typeof writer === 'function' ? writer() : writer;   // the store writer, or (suites) an object with its two verbs
-  w.dirty(f, { name: 'door-reads.write', rank: 0, produce: () => JSON.stringify(mem.get(f)),
-    onWritten: (ok, e) => { if (!ok) log(`[door-reads] ${f}: its write failed (${(e && (e.code || e.message)) || e})`); } });
   // a count that is not on disk is no count: memory goes back to what the file holds (the refused read never ran)
   const undo = () => { if (mem.get(f) === next) mem.set(f, prev); return false; };
+  let w = null;
+  try {
+    w = typeof writer === 'function' ? writer() : writer;   // the store writer, or (suites) an object with its two verbs
+    w.dirty(f, { name: 'door-reads.write', rank: 0, produce: () => JSON.stringify(mem.get(f)),
+      onWritten: (ok, e) => { if (!ok) log(`[door-reads] ${f}: its write failed (${(e && (e.code || e.message)) || e})`); } });
+  } catch (e) { log(`[door-reads] ${f}: the writer threw (${e.message}) — not counted`); return Promise.resolve(undo()); }   // a throw is a failed write too
   return Promise.resolve(w.durable(f)).then((ok) => (ok === true ? true : undo()), undo);
 }
 
@@ -67,7 +70,15 @@ function lastReadAt(cacheDir, key, usageWrite = require('./usage-cache-write.js'
   const d = readDoorReads(cacheDir, key);
   return Math.max(rec, Number(d && d.lastAt) || 0);
 }
+/** THE ROW /api/usage serves for an on-demand account (PURE): its reading and today's count — an account with NO reading but
+ *  reads today is served too (law A3: an account whose reads all fail shows its count); neither ⇒ null. */
+function homeAccountEntry(cache, reads) {
+  const has = !!(cache && Array.isArray(cache.limits) && cache.limits.length);
+  if (!has && !(reads && reads.total)) return null;
+  return { limits: has ? cache.limits : [], fetchedAt: (has && cache.fetchedAt) || null, source: (has && cache.source) || null,
+    windowNames: has && cache.windowNames && typeof cache.windowNames === 'object' ? cache.windowNames : null, reads };
+}
 /** Suites only: forget what memory holds (a «restart» of the reader). */
 function _forget() { mem.clear(); }
 
-module.exports = { CALLERS, doorReadsSidecarName, dayOf, readDoorReads, todayOf, bumpDoorRead, lastReadAt, _forget };
+module.exports = { CALLERS, doorReadsSidecarName, dayOf, readDoorReads, todayOf, bumpDoorRead, lastReadAt, homeAccountEntry, _forget };

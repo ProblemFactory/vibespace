@@ -1575,9 +1575,8 @@ function onDemandReadings() {
       if (!a || !a.id || !harnesses.get(a.backend || 'claude')?.quota?.onDemand) continue;
       const c = usageWrite.readCacheObject(USAGE_CACHE_DIR, a.id);
       const reads = doorReads.todayOf(doorReads.readDoorReads(USAGE_CACHE_DIR, a.id), Date.now());   // how often its CLI was asked today, by whom
-      const has = !!(c && Array.isArray(c.limits) && c.limits.length);
-      if (!has && !reads.total) continue;   // law A3: an account read today with no reading yet is still served — its count is shown
-      out[a.id] = { limits: has ? c.limits : [], fetchedAt: (has && c.fetchedAt) || null, source: (has && c.source) || null, windowNames: has && c.windowNames && typeof c.windowNames === 'object' ? c.windowNames : null, reads };
+      const row = doorReads.homeAccountEntry(c, reads);   // law A3: an account read today with no reading yet is still served — its count is shown
+      if (row) out[a.id] = row;
     }
   } catch { }
   return out;
