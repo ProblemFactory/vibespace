@@ -6,6 +6,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.405 — 2026-11-16
 
+### turn-never-silent P7 — a sender ALREADY waiting when the turn becomes stuck is told: once, at that moment, free (主开发's word, 04:44Z)
+- **At a turn's first stuck filing** (not a redraw, not an adopted item, not «unknown»), the watch reads who waits on that conversation. That is shape C's reading, groups-engine readWaiting with olderThan 0. Each AGENT sender gets ONE line in its keyed stash slot `stuck-turn:<cid>`, set = the turn's item key, so it is once per stuck turn per sender. The line comes at the sender's NEXT turn: never a wake, never a billed turn.
+- **The words** are the deliverer's sentence for a new sender: «(VibeSpace) Your group message to «xray» waits behind its current turn — a turn stuck since <owner-facts.when>; the owner has been asked. It is handed over when that turn is released.» The name goes through agentText (line, 80) and is quoted «».
+- **Nothing when the turn moves** (its ordinary delivery says that).
+- **The install** stays on the same server.js line (+ getDeliver / getGroups); server.js keeps its 1904 lines.
+- **The pin.**
+  - test-turn-stuck-sender ⑤, 6 legs: a real engine and deliverer with alpha's wake queued behind xray's turn; nothing at nine minutes; at the stuck moment ONE line in alpha's stash with the sentence; nothing written to any CLI; never told twice; nothing after the turn moves.
+  - test-peer-text-census: the new stashSlot site's door row (its pin: the agentText name).
+
 ### turn-never-silent P6 — the kept card (主开发's word, 04:44Z: «the card stays where the person pressed, in its kept state»)
 - **«Keep waiting» ends the ATTENTION, not the card.** The press draws the open item once more with a `kept` fact {at, nextAt, act}, then resolves it «kept-waiting», so the tray's item goes (a press is attended). In the conversation the SAME card stands where it was pressed, in its KEPT state. foryou-actions `keptOf`, read from the row's `kept: { by: 'kept-waiting' }`, never a type branch. The card says:
   - when the person chose to keep waiting;
