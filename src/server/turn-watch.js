@@ -28,13 +28,17 @@ const { waitingOnUser } = require('../turn-state.js');
 const { turnOf } = require('./turn-facts.js');
 const { chipAsksOf } = require('../helper-ask.js');
 const { createProcTree } = require('./proc-tree.js');
+const G = require('../channel-groups.js');
+const OF = require('./owner-facts.js');   // THE one formatter for a time an agent reads (the owner's zone, named)
+const { toAgentText: agentText } = require('../peer-text.js');   // a conversation's name on its way to an agent (the peer-text census)
 
 const ITEM_KEY = 'turn-stuck:';                 // the producer's identity (the registry row is the type's home)
 const OWN_ENDS = Object.freeze(['moved', 'turn-ended', 'kept-waiting', 'gone', 'command-ended', 'ended-by-itself', 'restarted']);   // the ends THIS producer writes
 const BOUND_SETTING = 'turns.stuckAfterMin';     // the told bound (minutes; default ten)
+const SLOT = 'stuck-turn:';   // P7: the keyed stash slot that tells a waiting sender, one per stuck conversation
 const END_SETTING = 'turns.endStuckCommandMin';  // the by-itself ending (minutes; default thirty; 0 = never) — the owner's word «可以», 2026-11-15
 
-function create({ activeSessions, buffersDir, getUserTodos = () => null, sessionKeyOf = null, serverSetting = () => undefined,
+function create({ activeSessions, buffersDir, getUserTodos = () => null, getGroups = () => null, getDeliver = () => null, sessionKeyOf = null, serverSetting = () => undefined,
   adapterOf = () => null, labelOf = (b) => { try { return require('../harnesses').harnessOf(b).label || b; } catch { return b; } }, asksOf = chipAsksOf, procTree = createProcTree(), readFile = (f) => fs.promises.readFile(f, 'utf8'),
   readEveryMs = TL.READ_EVERY_MS, now = () => Date.now(), log = console, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   const st = new Map();      // session id → this turn's watch {token, key, readings, prev, workSeenAt, keptAt}
@@ -73,6 +77,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
         action: { type: 'turn-stuck', sessionId: String(id), ...facts },   // facts: which of its buttons apply (the row's `when`)
       });
       say(`[turn-watch] ${id}: a turn said as stuck — one For-you item`);
+      return 'filed';
     } catch (e) { say(`[turn-watch] ${id}: the For-you item was not filed — ${e && e.message}`); }
   }
   /** P6: a KEPT card of this conversation (resolved «kept-waiting», its `kept` fact) ends — the turn moved / ended / is gone, or
@@ -153,7 +158,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
           const eb = endBoundMs();
           const endAt = endable && eb !== null ? Number(v.stillSince) + eb : 0;
           const words = TW.stuckWords(v, { cli: labelOf(s.backend), endAt });
-          if (words) { show(id, s, w, words, { stuck: true, ...(endable ? { endable: true } : {}) }); said++; }
+          if (words) { if (show(id, s, w, words, { stuck: true, ...(endable ? { endable: true } : {}) }) === 'filed' && v.state !== 'unknown') await tellWaiting(id, s, w, v); said++; }
           // THE BY-ITSELF ENDING (the owner's «可以»): ONLY a command stuck — open, nothing written, nothing below the CLI working —
           // for the second bound; the same act as the door; once per stillness; the turn goes on (no turn is started)
           if (endable && v.endDue && w.endedFor !== v.stillSince) { w.endedFor = v.stillSince; endCommand(id, 'by-itself'); }
@@ -169,6 +174,24 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     return { looked, said };
   }
 
+  /** P7 (主开发 04:44Z, «YES — ONCE, AT THAT MOMENT, FREE»): each AGENT whose group message waits on this turn when it becomes
+   *  stuck is told once — the same sentence a new sender gets — at its NEXT turn (a keyed stash line: never a wake, never a
+   *  billed turn); once per stuck turn per sender (the slot's set is this turn's key); nothing when the turn moves (its
+   *  ordinary delivery says that). The senders are shape C's reading of what waits (groups-engine readWaiting). → told */
+  async function tellWaiting(id, s, w, v) {
+    const groups = getGroups(), d = getDeliver();
+    const cid = (s && (s.backendSessionId || s.claudeSessionId)) || null;
+    if (!cid || !groups || typeof groups.readWaiting !== 'function' || !d || typeof d.stashSlot !== 'function') return 0;
+    let r; try { r = await groups.readWaiting(cid, { now: now(), olderThan: 0 }); } catch (e) { say(`[turn-watch] ${id}: who waits was not read — ${e && e.message} (nobody told)`); return 0; }
+    const senders = new Set();
+    for (const g of (r && r.groups) || []) for (const snd of Object.keys(g.senders || {})) if (G.isCid(snd) && snd !== cid) senders.add(snd);
+    const name = agentText(String(s.name || id), { max: 80, kind: 'line' });
+    const text = `(VibeSpace) Your group message to «${name}» waits behind its current turn — a turn stuck since ${OF.when(Number(v.since))}; the owner has been asked. It is handed over when that turn is released.`;
+    let told = 0;
+    for (const snd of senders) { try { if (d.stashSlot(snd, SLOT + cid, { source: 'agent', fromName: 'VibeSpace', text }, { set: [w.key] }).filed) told++; } catch (e) { say(`[turn-watch] a waiting sender was not told — ${e && e.message}`); } }
+    if (told) say(`[turn-watch] ${id}: ${told} waiting sender(s) told the turn is stuck`);
+    return told;
+  }
   /** «Keep waiting» (a person's press on the item): the item ends «kept waiting»; the turn is judged again only after another
    *  FULL bound with nothing written and nothing working. → {ok, code} */
   function keepWaiting(id) {
@@ -232,4 +255,4 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
 
 function install(deps) { const w = create(deps); w.start(); return w; }
 
-module.exports = { create, install, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING };
+module.exports = { create, install, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING, SLOT };

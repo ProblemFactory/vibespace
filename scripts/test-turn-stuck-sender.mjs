@@ -99,5 +99,46 @@ console.log('— ④ the wait watch\'s sender entry (shape C) says it too');
   ok(!/stuck/.test(WW.senderEntry([{ name: 'xray', n: 1, oldestText: '03:10 PT', openedText: '03:05 PT' }])), 'a turn merely running: the entry as before');
 }
 
+console.log('— ⑤ P7 (主开发 04:44Z): a sender ALREADY waiting when the turn becomes stuck is told — once, at its next turn, free');
+{
+  const DELIVER = require(path.join(REPO, 'src/server/conversation-deliver.js'));
+  const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+  const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+  const A = 'aaaaaaaa-0000-4000-8000-00000000000a', X = 'bbbbbbbb-0000-4000-8000-00000000000b';
+  const T0 = Date.parse('2026-11-11T19:00:00Z');
+  const dir = fs.mkdtempSync(path.join(ROOT, 'p7-')); fs.mkdirSync(path.join(dir, 'session-buffers'), { recursive: true });
+  const wid = 'w-agy', frames = [];
+  const S = { backend: 'antigravity', mode: 'chat', name: 'xray', host: null, socketPath: path.join(dir, 'cw-' + wid), _isStreaming: true, _turnStateSeen: true, _turnOpenedAt: T0, backendSessionId: X,
+    _normalizer: { openTool: () => ({ name: 'run_command' }) }, pty: { write: (f) => frames.push(String(f)) } };
+  const side = { pid: process.pid, startedAt: T0, mode: 'chat', backend: 'antigravity', threadId: X, childPid: 4001, cliWroteAt: T0, turnOpenedAt: T0, caps: { peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'] } };
+  fs.writeFileSync(path.join(dir, 'session-buffers', wid + '.json'), JSON.stringify(side));
+  const sessions = new Map([[wid, S]]);
+  const deliver = DELIVER.create({ dataDir: dir, activeSessions: sessions, serverSetting: () => undefined, getHosts: () => null, getConvIndex: () => null,
+    peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: true }), postChannelEvent: async () => ({ ok: true }) }, emitPeerCard: () => true,
+    authorizeSpend: () => ({ ok: true, identity: { key: 'slot-1', name: 'slot one' }, hold: 'h1' }), noteSpend: () => { }, releaseSpend: () => { }, log: () => { } });
+  let clock = T0;
+  const roster = [{ cid: A, name: 'alpha', groups: ['tg1'], reachability: null }, { cid: X, name: 'xray', groups: ['tg1'], reachability: null }];
+  const eng = GE.create({ store: createChannelStore({ dir: path.join(dir, 'channels') }), deliver, broadcast: () => { }, now: () => (clock += 1000), roster: () => roster, groupSetting: () => 'none', log: { info() { }, warn() { }, log() { } } });
+  const s0 = await eng.sendToAgent({ from: A, to: X, text: 'hello', wake: false });
+  const sent = await eng.post({ group: s0.group.id, from: A, text: 'are you there?', wake: true });
+  ok(sent.ok && (sent.queued || []).length === 1 && !('stuckSince' in sent.queued[0]), 'alpha\'s wake is queued behind xray\'s running turn (not stuck yet — no such fact in its answer)');
+  const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(dir, 'd-')), onChange: () => { } });
+  const reader = { readBelow: async () => ({ readable: true, alive: true, at: clock, cut: false, list: [{ pid: 4100, startTicks: 5, ticks: 1 }] }) };
+  const w = TWatch.create({ activeSessions: sessions, buffersDir: path.join(dir, 'session-buffers'), getUserTodos: () => ut, getGroups: () => eng, getDeliver: () => deliver, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, log: { log: () => { } } });
+  const at = async (m) => { clock = T0 + m * MIN; await w.sweep(); };
+  for (let m = 1; m <= 9; m++) await at(m);
+  const framesBefore = frames.length;
+  ok(!deliver.drainStash(A).some((e) => String(e.slot || '').startsWith(TWatch.SLOT)), 'nine minutes: nothing told');
+  await at(11);
+  const got = deliver.drainStash(A).filter((e) => String(e.slot || '').startsWith(TWatch.SLOT));
+  ok(got.length === 1 && /Your group message to «xray» waits behind its current turn — a turn stuck since .+; the owner has been asked\. It is handed over when that turn is released\./.test(got[0].text) && got[0].fromName === 'VibeSpace', 'at the stuck moment: ONE line in alpha\'s stash — where its message is, since when, that the owner was asked (the same sentence a new sender gets)', got.map((e) => e.text));
+  ok(frames.length === framesBefore && !frames.some((f) => /stuck since/.test(f)), 'a stash line, delivered at alpha\'s NEXT turn — never a wake (nothing more written to any CLI at that moment), never a billed turn', { before: framesBefore, after: frames.length });
+  for (let m = 12; m <= 30; m++) await at(m);
+  ok(!deliver.drainStash(A).some((e) => String(e.slot || '').startsWith(TWatch.SLOT)), 'readings after it: never told twice for the same stuck turn');
+  fs.writeFileSync(path.join(dir, 'session-buffers', wid + '.json'), JSON.stringify({ ...side, cliWroteAt: T0 + 31 * MIN }));
+  await at(31);
+  ok(!deliver.drainStash(A).some((e) => String(e.slot || '').startsWith(TWatch.SLOT)), 'the turn moved: nothing more is said (its ordinary delivery says that)');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
