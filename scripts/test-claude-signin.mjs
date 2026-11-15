@@ -396,10 +396,16 @@ await leg('⑯', async () => {
   orch.start({ accountId: 'acc-1' });
   const t0 = Date.now();
   getFake().emit('A sign-in screen this VibeSpace has never seen\r\nGo to claude dot example and type what it shows\r\nYour answer: ');
+  // NEVER BEFORE N, ON THE TIMER'S OWN CLOCK (int403 — B-d24c's twelfth: the .402 release mirror's fast attempt 1 read «said after 149 ms
+  // against N = 150»). The product's timer counts from the event loop's clock as it was when this turn of the loop began — before
+  // orch.start() and t0 — so a Date.now() taken here starts from a later instant and «≥ N» held only by the 10 ms poll. A reference
+  // timer for N − 1 ms set in THIS same synchronous turn shares the product timer's clock and always runs before it (due order): when
+  // it runs, the cue must not be there yet.
+  let atRef = null; setTimeout(() => { atRef = orch.get('acc-1')?.rawHint ?? 'gone'; }, N - 1);
   ok(orch.get('acc-1').rawHint === 'unknown', '⑯ a complete line the reader cannot place → the cue at once (\'unknown\')', orch.get('acc-1'));
   while (Date.now() - t0 < 2000 && orch.get('acc-1').rawHint !== 'stalled') await sleep(10);
   const g = orch.get('acc-1');
-  ok(g.rawHint === 'stalled' && g.phase === 'starting' && !g.url && Date.now() - t0 >= N, `⑯ no link N (${N} ms) after the CLI's first output → 'stalled' (the raw screen), said after ${Date.now() - t0} ms — never before N`, g);
+  ok(g.rawHint === 'stalled' && g.phase === 'starting' && !g.url && atRef === 'unknown', `⑯ no link N (${N} ms) after the CLI's first output → 'stalled' (the raw screen), said after ${Date.now() - t0} ms — never before N (a timer for N − 1 ms set in the same turn found '${atRef}')`, g);
   const scr = orch.screen('acc-1', 0);
   ok(scr && /never seen/.test(scr.data) && scr.to === scr.data.length && !scr.reset, '⑯ GET …/signin/screen = the bytes the CLI wrote', scr && scr.data.slice(0, 60));
   const tail = orch.screen('acc-1', scr.to - 7);
