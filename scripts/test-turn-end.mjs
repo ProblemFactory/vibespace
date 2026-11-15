@@ -87,7 +87,7 @@ job('— ② «End the command»: its processes end, agy stays, the step ends an
     ok(list.every((p) => !aliveAs(p)), 'every process below agy has ended');
     ok(Number(h.meta().childPid) === Number(m0.childPid) && !!birth(Number(m0.childPid)), 'agy itself is the SAME process, still running (not restarted)');
     ok(await until(() => h.count('prompt_end') > ends, 8000), 'the step ended and the turn went on to its end (the same turn — no new one)');
-    ok(h.has('notice', (r) => r.noticeKind === 'command-ended' && /The command was ended \(/.test(r.text)), 'the conversation says so, naming what was ended');
+    ok(await until(() => h.has('notice', (r) => r.noticeKind === 'command-ended' && /The command was ended \(/.test(r.text)), 4000), 'the conversation says so, naming what was ended');
     h.send({ type: 'end-command', by: 'person' });
     ok(await until(() => h.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.ok === false && r.code === 'no-turn'), 4000), 'with no turn running: refused by name (no-turn), nothing signalled');
   } finally { await h.stop(); }
@@ -120,7 +120,7 @@ job('— ③a the by-itself ending: a command stuck for the second bound is ende
     ok(done && done.ok && done.by === 'by-itself' && done.told === true, 'at 31 min: ended BY ITSELF — the same act as the door (command_ended by-itself; the sentence written to its output)', done);
     ok(await until(() => /VibeSpace ended this command after 30 minutes with no output and nothing it started working\./.test(stepOut(h)), 8000), 'the agent\'s step output carries WHY: «VibeSpace ended this command after 30 minutes with no output and nothing it started working.»', stepOut(h).slice(0, 300));
     ok(W.items()[0].status !== 'open' && W.items()[0].resolvedBy === 'ended-by-itself', 'the For-you item ends «the command was ended by itself»', W.items()[0].resolvedBy);
-    ok(await until(() => h.has('prompt_end'), 8000) && h.has('notice', (r) => r.noticeKind === 'command-ended' && /ended by itself/.test(r.text)), 'the turn goes on to its end, and the conversation says it once («The command was ended by itself …»)');
+    ok(await until(() => h.has('prompt_end'), 8000) && await until(() => h.has('notice', (r) => r.noticeKind === 'command-ended' && /ended by itself/.test(r.text)), 4000) && h.count('notice', (r) => r.noticeKind === 'command-ended') === 1, 'the turn goes on to its end, and the conversation says it once («The command was ended by itself …»)');
   } finally { await h.stop(); }
 });
 

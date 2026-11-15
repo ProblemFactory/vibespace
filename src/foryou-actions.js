@@ -117,6 +117,9 @@ const ROWS = Object.freeze([
   { type: 'turn-stuck', identity: 'sessionId', producer: 'src/server/turn-watch.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'check', scope: 'conversation',
     // the chat's own «no output for N min» note yields while this item stands: one voice, and this one carries the doors
     quietsStall: true,
+    // P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION, never the card — resolved by this end, the item's `kept` fact draws the
+    // card in place in its KEPT state (keptOf): when the person chose, when the next bound falls and what then, and its door
+    kept: Object.freeze({ by: 'kept-waiting' }),
     buttons: Object.freeze([
       // `when` = the item's action fact that makes the button apply (src/server/turn-watch.js files it); a button that does not apply is not drawn
       Object.freeze({ answer: 'keep-waiting', when: 'stuck', label: i18nKey('Keep waiting'), title: i18nKey('Keep waiting — it is said again only after another full bound with nothing written and nothing working'), route: '/api/turns/{sessionId}/stuck', said: i18nKey('Kept waiting') }),
@@ -572,6 +575,7 @@ function isHidden(item) { return !!(item && item.status !== 'open' && item.resol
 function closersOf(item, resolved = !!(item && item.status && item.status !== 'open')) {
   if (isDecisionRow(item)) return [];
   if (isPointer(item)) return resolved ? [] : ['hide'];
+  if (resolved && keptOf(item)) return [];   // lane turn-never-silent P6: a KEPT card's one door is its own («End the command now»)
   return resolved ? ['reopen'] : ['done', 'dismiss'];
 }
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1130,6 +1134,14 @@ function filedLine(x, id, tray = null) {
 
 /** A row's OWN buttons (lane queued-is-not-woke): [{answer, label, title, door: 'jump'}] | null — and the one line drawn under
  *  them. Every surface draws and runs them from these fields (no branch on a type). */
+/** lane turn-never-silent P6: a RESOLVED item in its KEPT state → its `kept` fact {at, nextAt, act: 'end' | 'ask'}, else null —
+ *  read from the registry row (`kept.by` = the end that keeps it), never a type branch */
+function keptOf(item) {
+  const r = item && item.action ? ROW_OF[item.action.type] : null;
+  if (!r || !r.kept || !item || item.status === 'open' || item.resolvedBy !== r.kept.by) return null;
+  const k = item.facts && item.facts.kept;
+  return k && Number(k.at) > 0 && Number(k.nextAt) > 0 && (k.act === 'end' || k.act === 'ask') ? k : null;
+}
 /** lane turn-never-silent: does an open item of this type speak for a silent turn (the chat's stall note then yields)? */
 function quietsStallOf(type) { const r = ROW_OF[type]; return !!(r && r.quietsStall === true); }
 /** lane turn-never-silent: a declared button's refusal words by the route's code */
@@ -1169,4 +1181,4 @@ const FORYOU_HEADS = Object.freeze({
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
 
 module.exports = {
-  FORYOU_HEADS, headWordOf, buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, quietsStallOf, refusedOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+  FORYOU_HEADS, headWordOf, buttonsOf, buttonsFor, buttonsNoteOf, endWordsOf, quietsStallOf, refusedOf, keptOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

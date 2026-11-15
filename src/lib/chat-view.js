@@ -7527,7 +7527,7 @@ class ChatView {
         if (hasPendingHelperAsk(m)) return null;
         // …and so must a record holding a For-you card that waits, or one answered elsewhere while its reply box is in use
         // (lane chat-needs-you-card; round 3 — folding the record hid the focused box, and the blur folded it)
-        if (el.querySelector(':scope > .cn-cards > :is(.cn-card.cn-open, .cn-card.cn-kept)')) return null;
+        if (el.querySelector(':scope > .cn-cards > :is(.cn-card.cn-open, .cn-card.cn-kept, .cn-card.cn-stay)')) return null;   // lane turn-never-silent P6: + a KEPT stuck-turn card (it stands where the person pressed)
         // pending/running cards collapse too (user directive — the bottom
         // streaming indicator already shows live activity)
         const mk = memberKind(el);

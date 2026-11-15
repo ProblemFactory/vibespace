@@ -61,6 +61,8 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
       return;
     }
     if (it && it.resolvedBy === 'ended-by-itself' && facts.stuck) return;   // the act was taken for this stillness; a new one files after it moves
+    // P6 (主开发 04:44Z): the person kept waiting and the next act is the by-itself ending — the kept card says so; not asked again
+    if (it && it.resolvedBy === 'kept-waiting' && it.facts && it.facts.kept && it.facts.kept.act === 'end' && facts.stuck) return;
     if (it && !OWN_ENDS.includes(String(it.resolvedBy || ''))) return;   // a person's ✕ stands for this turn
     const sk = sessionKeyOf ? sessionKeyOf(s, id) : id;
     if (!sk) return;
@@ -73,7 +75,14 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
       say(`[turn-watch] ${id}: a turn said as stuck — one For-you item`);
     } catch (e) { say(`[turn-watch] ${id}: the For-you item was not filed — ${e && e.message}`); }
   }
+  /** P6: a KEPT card of this conversation (resolved «kept-waiting», its `kept` fact) ends — the turn moved / ended / is gone, or
+   *  its command was ended: its resolvedBy says which, so the card goes quiet */
+  function endKept(id, why) {
+    if (!why) return;
+    for (const it of items()) if (it.status !== 'open' && it.resolvedBy === 'kept-waiting' && keyOfItem(it).startsWith(ITEM_KEY + id + ':')) end(it, why);
+  }
   function endOpen(id, why) {
+    endKept(id, why === 'kept-waiting' ? null : why);
     const w = st.get(id);
     const open = items().filter((i) => i.status === 'open' && (w ? keyOfItem(i) === w.key : keyOfItem(i).startsWith(ITEM_KEY + id + ':')));
     for (const it of open) end(it, why);
@@ -140,6 +149,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
         if (TL.SPEAKING.includes(v.state)) {
           // «End the command» applies to a command that is stuck, on a wrapper that serves it (its sidecar's advert)
           const endable = v.state === 'stuck-on-command' && !!(sc && sc.caps && sc.caps.endCommand === true);
+          w.endable = endable;
           const eb = endBoundMs();
           const endAt = endable && eb !== null ? Number(v.stillSince) + eb : 0;
           const words = TW.stuckWords(v, { cli: labelOf(s.backend), endAt });
@@ -147,7 +157,12 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
           // THE BY-ITSELF ENDING (the owner's «可以»): ONLY a command stuck — open, nothing written, nothing below the CLI working —
           // for the second bound; the same act as the door; once per stillness; the turn goes on (no turn is started)
           if (endable && v.endDue && w.endedFor !== v.stillSince) { w.endedFor = v.stillSince; endCommand(id, 'by-itself'); }
-        } else if (v.state === 'busy' || v.why === 'not-yet') endOpen(id, 'moved');   // something was written, or worked below the CLI
+        } else if (v.state === 'busy' || v.why === 'not-yet') {
+          // something was written, or worked below the CLI — but after a «Keep waiting» the clock restarts on the PRESS: the kept
+          // card ends only when the CLI wrote or its tree worked AFTER it (P6)
+          const moved = !w.keptAt || Number(sc && sc.cliWroteAt) > w.keptAt || Number(w.workSeenAt) > w.keptAt;
+          if (moved) endOpen(id, 'moved');
+        }
       }
       for (const id of [...st.keys()]) if (!live.has(id)) { endOpen(id, activeSessions.has(id) ? 'turn-ended' : 'gone'); st.delete(id); }
     } finally { sweeping = false; }
@@ -161,8 +176,19 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     if (!w) return { ok: false, code: 'not-stuck' };
     w.keptAt = now();
     try { delete activeSessions.get(id)._turnStuckSince; } catch { }   // the person chose to wait: not said as stuck until another full bound
-    endOpen(id, 'kept-waiting');
-    return { ok: true };
+    // P6 (主开发 04:44Z): the card stays where the person pressed, in its KEPT state — when they chose, when the next bound
+    // falls and what happens then (the by-itself ending where «End the command» applies and the ending is on; else: asked
+    // again) — and it keeps its door. The tray's item goes (a press is attended).
+    const eb = endBoundMs();
+    const act = w.endable && eb !== null ? 'end' : 'ask';
+    const kept = { at: w.keptAt, nextAt: w.keptAt + (act === 'end' ? eb : boundMs()), act };
+    const ut = getUserTodos();
+    for (const it of items()) {
+      if (it.status !== 'open' || keyOfItem(it) !== w.key) continue;
+      try { ut.redrawItem((x) => x.id === it.id, { text: it.text, detail: it.detail || '', i18n: it.i18n, facts: { ...(it.facts || {}), kept } }); } catch { }
+      end(it, 'kept-waiting');
+    }
+    return { ok: true, kept };
   }
   /** «End the command» (a person's press, or the by-itself ending): the wrapper ends the processes below the CLI and leaves the
    *  CLI — its tool step ends with the command's failure and the turn goes on. → {ok, code} */
@@ -173,7 +199,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, session
     if (!w) return { ok: false, code: 'not-stuck' };
     const eb = endBoundMs();
     if (!writeVerb(s, { type: 'end-command', by, ...(by === 'by-itself' && eb ? { afterMin: Math.round(eb / 60e3) } : {}) })) return { ok: false, code: 'not-live' };
-    endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');
+    endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');   // (a kept card ends with it: endOpen → endKept)
     say(`[turn-watch] ${id}: the command ended (${by})`);
     return { ok: true };
   }

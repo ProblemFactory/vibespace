@@ -12867,4 +12867,8 @@ export default {
   "Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running": "卡在一条命令上：{tool} 自 {since} 起没有任何输出，它启动的进程也都没在工作——{cli} 已不在运行",
   "No output since {since}, and no command is open — {cli} is running": "自 {since} 起没有任何输出，也没有正在运行的命令——{cli} 仍在运行",
   "No output since {since}, and no command is open — {cli} is not running": "自 {since} 起没有任何输出，也没有正在运行的命令——{cli} 已不在运行",
+  "You chose to keep waiting at {time}.": "你在 {time} 选择了继续等待。",
+  "If nothing changes, the command is ended by itself at {time}.": "如果一直没有变化，这条命令会在 {time} 被自动结束。",
+  "If nothing changes, you are asked again at {time}.": "如果一直没有变化，会在 {time} 再问你一次。",
+  "End the command now": "现在结束这条命令",
 };
