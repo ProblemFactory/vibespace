@@ -1057,7 +1057,7 @@ console.log('— ⑪ the model chip MATRIX: every harness row × every door — 
   // Object.assign(bar, {…}), a helper taking a field's NAME as a string, a computed property name — none is seen here; the matrix's
   // cells are what judge those roads (a door that paints the chip is a cell, whatever spells it)
   const FIELDS11 = '_statusModel|_servedModel|_askSeq|_servedSeq|_modelLocked|_lockedModel|_servedBeforeLock';   // master's fields + the two numbers (round 13)
-  const CALL11 = /(\??\.\s*|\[\s*['"`])(applyStatus|setModel|setServedModel|answerModel|addCost|_undoPress)(['"`]\s*\])?\s*(\?\.\s*)?\(/;
+  const CALL11 = /(\??\.\s*|\[\s*['"`])(applyStatus|setModel|setServedModel|answerModel|addCost|turnCost|_undoPress)(['"`]\s*\])?\s*(\?\.\s*)?\(/;
   const WRITE11 = new RegExp(`(?:\\.|\\[\\s*['"\`])(${FIELDS11})(?:['"\`]\\s*\\])?\\s*(?:\\|\\||\\?\\?|&&)?=(?!=)`);
   const normSite = (t) => t.replace(/([;}])\s+\/\/.*$/, '$1').replace(/\s+/g, ' ').trim();
   const censusOf = (files) => {
@@ -1089,7 +1089,7 @@ console.log('— ⑪ the model chip MATRIX: every harness row × every door — 
     [SB, 'if (status.modelLocked != null) this._modelLocked = !!status.modelLocked;', 1, 'applyStatus (the lock — master\'s line, round 14: the lock rides master\'s roads)'],
     [SB, "if ('lockedModel' in status) this._lockedModel = status.lockedModel || null;", 1, 'applyStatus (the lock target — master\'s line)'],
     [SB, 'if (status.lockMoved) this._servedBeforeLock = true;', 1, 'applyStatus (the model-lock op)'],
-    [SB, "if (!this._statusModel) this._statusModel = Object.keys(modelUsage)[0] || '';", 1, 'addCost (cost-op)'],
+    [SB, "if (!this._statusModel) this._statusModel = Object.keys(modelUsage)[0] || '';", 1, 'turnCost (cost-op)'], // the cost stack (2.369.403) renamed addCost: a turn's folded figure replaces, never adds
     [SB, 'this._statusModel = model;', 2, 'setModel (live-init) + the pick (master\'s, every page)'],
     [SB, 'this._servedModel = model;', 1, 'setServedModel (pick-reply on a root that tells it)'], [SB, 'this._servedBeforeLock = false;', 1, 'setServedModel'],
     [SB, 'if (a.ok && a.facts) this.applyStatus(a.facts);', 1, 'answerModel (pick — the answer\'s facts)'],
@@ -1100,7 +1100,7 @@ console.log('— ⑪ the model chip MATRIX: every harness row × every door — 
     [CV, 'if (meta.chatStatus) this.applyStatus(meta.chatStatus);', 2, 'reattach + view-only-attach (loadHistory)'],
     [CV, 'if (msg.chatStatus) this.applyStatus(msg.chatStatus);', 2, 'reattach (the heal, a held resume)'],
     [CV, 'if (page.chatStatus) this.applyStatus(page.chatStatus);', 1, 'transcript-route'],
-    [CV, 'this._statusBar.addCost(op.data?.cost, op.data?.modelUsage);', 1, 'cost-op'],
+    [CV, 'this._statusBar.turnCost(op.data?.cost, op.data?.modelUsage);', 1, 'cost-op'],
     [CV, 'this._statusBar.answerModel({ ...(op.data || {}) });', 1, 'pick (model-answer)'],
     [CV, 'this._statusBar.applyStatus(status);', 1, 'the forwarder (chat-view.applyStatus)'],
     [CV, 'this._statusBar.applyStatus({ ...(op.data || {}) });', 1, 'pick / pick-reply / live-init / stale-frame (model-facts)'],

@@ -142,7 +142,7 @@ ok(near(opsR[0], 0.000555), `⑨ a REBUILD carries the fold: after replaying the
 const br = read('src/server/boot-restore.js'), nz = read('src/normalizers.js'), cj = read('src/server/stdout/claude-stream-json.js');
 ok((br.match(/seedCost\(costSeedOf\(meta\.costKept, (savedBuffer|'')\)\)/g) || []).length === 2 && /const costSeedOf = \(kept, bufferText\) => costResume\(kept, resultsIn\(bufferText\)\)/.test(br), '⑨ the boot seeds BOTH claude normalizers it makes with the kept fact resumed over the buffer it read (boot-restore costSeedOf)');
 ok(/const carriedCost = typeof session\._normalizer\?\.costState === 'function' \? session\._normalizer\.costState\(\) : null;/.test(nz) && /mm\.seedCost\(carriedCost, \{ seek: true \}\)/.test(nz), '⑨ a rebuild carries the old normalizer\'s fold into the new one, seeking past what it counted (normalizers rebuildHistory)');
-ok(/feedLive\(session, msg\);\n\s*if \(msg\.type === 'result'\) keepCost\(session\);/.test(cj) && /writeSessionMeta\(s\.sockName, \{ \.\.\.\(readSessionMeta\(s\.sockName\) \|\| \{\}\), costKept: st \}\)/.test(cj), '⑨ the claude stdout consumer keeps the fold on the conversation\'s meta (costKept) after each result it feeds');
+ok(/feedLive\(session, msg\);(?:\n[^\n]*){0,6}\n\s*if \(msg\.type === 'result'\) keepCost\(session\);/.test(cj) && /writeSessionMeta\(s\.sockName, \{ \.\.\.\(readSessionMeta\(s\.sockName\) \|\| \{\}\), costKept: st \}\)/.test(cj), '⑨ the claude stdout consumer keeps the fold on the conversation\'s meta (costKept) after each result it feeds');
 
 console.log('— ⑧ ONE fold: no source adds a total again');
 const SRC = path.join(repo, 'src'), adders = [];

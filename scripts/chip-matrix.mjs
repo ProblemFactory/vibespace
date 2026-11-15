@@ -239,8 +239,8 @@ export async function driveChipMatrix(root) {
       cell('view-only-attach', () => { const w = world({ live: false }); w.bar.applyStatus(statusOf(row, 'two')); return w.read(); });
       cell('transcript-route', () => { const w = world({ live: false }); w.bar.applyStatus(statusOf(row, 'two')); w.bar.applyStatus(statusOf(row, 'two')); return w.read(); });
       cell('withstatus-fetch', () => { const w = world({ live: false }); w.bar.applyStatus(statusOf(row, 'two')); return w.read(); });
-      // a turn's cost op before any status named a model: its modelUsage's first key (chat-view's cost line → addCost)
-      cell('cost-op', () => { const w = world(); w.bar.addCost(0.01, { [A]: { contextWindow: 200000 } }); return w.read(); });
+      // a turn's cost op before any status named a model: its modelUsage's first key (chat-view's cost line → turnCost, master's addCost)
+      cell('cost-op', () => { const w = world(); (w.bar.turnCost || w.bar.addCost).call(w.bar, 0.01, { [A]: { contextWindow: 200000 } }); return w.read(); }); // the turn door by the bar's own name (the cost stack's turnCost; master's oracle bar: addCost)
       // ── round 11: a STOPPED conversation's view (no live session — the server answers nothing), every row ──
       cell('stopped-pick', () => { const w = world({ live: false }); w.bar.applyStatus(statusOf(row, 'two')); w.pick(C); expire(); return w.read({ cfg: w.savedCfg() }); });
       cell('stopped-lock', () => { const w = world({ live: false }); w.bar.applyStatus(statusOf(row, 'one')); const lockRow = w.offered(); if (lockRow) w.lock(); expire(); return w.read({ lockRow, cfg: w.savedCfg() }); });
