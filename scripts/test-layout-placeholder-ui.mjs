@@ -260,6 +260,8 @@ else await (async () => {
     //    a restore's press says «正在恢复…» while the hub works; the page that asked shows ITS toast alone (the base: «布局已在另一台设备上
     //    恢复» above it — the hub's broadcast reaches the asking page too). RED CONTROL: this tree's bundle with the lane's lines of
     //    setup-flows.js / app.js put back as 74b98357e had them — the same probe reads «加载中…», «暂无回滚点», the button as it was, two toasts.
+    // (lane ui-language pick 4: the layout history's button and its confirm say the dialog's own verb — `layout::Restore` «恢复»,
+    //  as in «恢复之前的布局…»; the release's «还原» stays the word of the other «Restore» senses)
     const probe6 = async (X) => {
       const held = []; const off = X.on((m) => { if (m.method === 'Fetch.requestPaused' && /\/api\/layout-history/.test(m.params.request.url)) held.push(m.params.requestId); });
       const navs = []; const offN = X.on((m) => { if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId) navs.push(Date.now()); }); // (r2: the page's reloads)
@@ -285,8 +287,8 @@ else await (async () => {
         await until(() => X.ev(`!!${DLG}?.querySelector('.lh-restore')`), 8000, 50);
         await X.ev(`(() => { window.__lh6 = []; const g = document.getElementById('global-toasts') || document.body; new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!window.__lh6.includes(t.textContent)) window.__lh6.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
         await X.click(`${DLG}.querySelector('.lh-restore')`);
-        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
-        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
         id = await next(); await sleep(300);
         out.busy = await X.ev(`(() => { const b = ${DLG}?.querySelector('.lh-restore[aria-busy="true"]'); return { open: !!${DLG}, words: b ? b.textContent : null, held: !!${DLG}?.querySelector('.lh-list')?.inert }; })()`);
         await X.ev('window.__lswMark6 = 1; true');
@@ -323,8 +325,8 @@ else await (async () => {
         await until(() => X.ev(`!!${DLG}?.querySelector('.lh-restore')`), 8000, 50);
         await X.ev(`(() => { window.__lh7 = []; const g = document.getElementById('global-toasts') || document.body; new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!window.__lh7.includes(t.textContent)) window.__lh7.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
         await X.click(`${DLG}.querySelector('.lh-restore')`);
-        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
-        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
         p = await next(); try { out.rid = JSON.parse(p.request.postData || '{}').rid || null; } catch { out.rid = null; }
         await X.ev(`(() => { window.__mark7 = 1; for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: 'r-another-device' }); } catch { } } return 1; })()`);
         await sleep(400); out.during = await X.ev('[...(window.__lh7 || [])]');
@@ -339,7 +341,7 @@ else await (async () => {
     };
     // (a toast's textContent ends with its close ✕ — the exact words are compared without it: never «… — 正在刷新…»)
     const own7 = (o) => !!o && /^r[0-9a-z]{6,}$/.test(o.rid || '') && !!o.after && o.after.mark && o.reloads === 0 && o.after.toasts.some((t) => /not found|失败/.test(t)) && !o.after.toasts.some((t) => /布局已恢复 — 正在刷新/.test(t))
-      && (o.during || []).some((t) => t.replace(/✕$/, '') === '布局已在另一台设备上恢复') && o.after.open && o.after.words === '还原' && !o.after.busy && !o.after.held;
+      && (o.during || []).some((t) => t.replace(/✕$/, '') === '布局已在另一台设备上恢复') && o.after.open && o.after.words === '恢复' && !o.after.busy && !o.after.held;
     const g7 = await probe7(P1);
     ok(own7(g7), `⑦ the press names its restore (rid «${g7.rid}»); another device's broadcast during it says «${(g7.during || []).join(' | ')}»; the hub then refuses the press ⇒ the error said (${J(g7.after && g7.after.toasts)}), the button «${g7.after && g7.after.words}» again, ${g7.reloads} reloads`, g7);
     // ⑥ r3 (Q1 — a LOST ANSWER: the hub wrote the restore and broadcast it, the POST's answer never came back; round 1 reloaded
@@ -356,8 +358,8 @@ else await (async () => {
         // (the toasts ⑦ left on screen are not this press's: only a toast drawn after this line is counted)
         await X.ev(`(() => { window.__lh8 = []; const g = document.getElementById('global-toasts') || document.body, old = new Set(g.querySelectorAll('.global-toast')); new MutationObserver(() => { for (const t of g.querySelectorAll('.global-toast')) if (!old.has(t) && !window.__lh8.includes(t.textContent)) window.__lh8.push(t.textContent); }).observe(g, { childList: true, subtree: true, characterData: true }); return 1; })()`);
         await X.click(`${DLG}.querySelector('.lh-restore')`);
-        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
-        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '还原' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
+        await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
+        await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
         post = await next(); try { out.rid = JSON.parse(post.request.postData || '{}').rid || null; } catch { out.rid = null; }
         const n0 = navs.length, t0 = Date.now();
         await X.ev(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: ${J(out.rid)} }); } catch { } } return 1; })()`);

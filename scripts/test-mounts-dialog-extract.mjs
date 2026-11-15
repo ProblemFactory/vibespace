@@ -207,6 +207,15 @@ const setSel = (key, v) => { const el = s._lastMountsDialog.inputs[key]; el.valu
       n.replaceWith(box); pathInputs++;
     }
     window.__pathInputs = pathInputs;
+    // lane ui-language (the walk's machines-16: «the key dialog had no way out but its ✕»): EVERY form of the shared component names
+    // its Cancel — the ✕'s own door, before the submit (src/lib/mounts-dialog.js). The pre-extraction blocks stay byte for byte (§0);
+    // the twin is RESTATED here, the one deliberate change drawn into it the way the product draws it — looked at side by side
+    // before (ui-language/evidence/mirror403/mdlg: in all six the only difference was this button, ~67 × 26 px; re-authorize none)
+    window.__cancelAdded = false;
+    if (variant !== 'A') {
+      const ov = document.getElementById('mounts-dialog-overlay'), acts = ov && ov.querySelector('.dialog-actions'), sub = acts && acts.querySelector('.btn-create');
+      if (sub && !acts.querySelector('.btn-cancel')) { const c = document.createElement('button'); c.type = 'button'; c.className = 'btn-cancel'; c.textContent = 'Cancel'; sub.before(c); window.__cancelAdded = true; }
+    }
     const dlg = scenario === 'edit-switch-drive-inflight' ? document.getElementById('mount-reauth-dialog')
       : scenario.startsWith('edit-') ? document.getElementById('mount-edit-dialog') : (document.querySelector('body > .dialog-overlay') || document.getElementById('mount-reauth-dialog'));
     // (lane dialog-yield r3: every storage form names its OWN id now — Connect storage 'mount-add-dialog', New submount

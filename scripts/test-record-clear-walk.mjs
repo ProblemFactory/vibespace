@@ -653,7 +653,8 @@ console.log('\n§5b MUTANT: a clear that keeps the group summary\'s lastText mak
   const { createChannelStore } = require(path.join(repo, 'src/channel-store.js'));
   const G = require(path.join(repo, 'src/channel-groups.js'));
   const src = fs.readFileSync(path.join(repo, 'src/server/groups-engine.js'), 'utf8');
-  const LINE = 'if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; }';
+  // (lane ui-language: the clear also drops the summary's lastRaw — a system line's structure the page words — on the same line)
+  const LINE = 'if (fresh.some((r) => Number(r.at) === Number(g.lastAt))) { g.lastText = RC.CLEARED_TEXT; g.lastCleared = true; g.lastRaw = null; }';
   check('§5b MUTANT setup: the clear\'s lastText line is found once in src/server/groups-engine.js', src.split(LINE).length === 2);
   const KEEP = MUT.load('src/server/groups-engine.js', src.replace(LINE, '/* MUTANT: the clear keeps lastText */'), 'keeps-lasttext');
   const REAL = require(path.join(repo, 'src/server/groups-engine.js'));
