@@ -197,6 +197,21 @@ function writeReceipt(rec) {
 }
 process.on('exit', () => { if (receiptLines.length) { try { fs.unlinkSync(receiptsFile); } catch {} } });
 function scheduleMeta() { if (!metaTimer) metaTimer = setTimeout(persistMeta, 200); }
+// THE CLI'S OWN LAST LINE (lane turn-never-silent, law L1 — src/backend-caps.js `liveness.wrote: 'wrapper-stamp'`): when
+// the ACP agent ITSELF last wrote on stdout — a notification or a request of its own, never its reply to a
+// request of ours (a reply carries an id and no method) — kept in the sidecar as
+// `cliWroteAt` (the time exact; its write paced to one per CLI_WROTE_PACE_MS, and every other sidecar write carries it), so
+// the hub's turn watch, and a hub restarted meanwhile, know how long the CLI has said nothing.
+const CLI_WROTE_PACE_MS = Math.max(50, Number(process.env.VIBESPACE_CLI_WROTE_PACE_MS) || 30000);
+let cliWroteTimer = null;
+function noteCliWrote() {
+  const first = !meta.cliWroteAt;
+  meta.cliWroteAt = Date.now();
+  if (first) { scheduleMeta(); return; }
+  if (!cliWroteTimer) { cliWroteTimer = setTimeout(() => { cliWroteTimer = null; scheduleMeta(); }, CLI_WROTE_PACE_MS); cliWroteTimer.unref?.(); }
+}
+// …and `turnOpenedAt`: the moment the prompt went to the agent (0 between turns) — an agent that says nothing as a turn
+// opens has its silence counted from there, never from the turn before.
 
 function writeRecord(rec) {
   const line = JSON.stringify(rec);
@@ -539,7 +554,7 @@ function handleQueueOp(msg) {
 function endPrompt(mine, stopReason, error, opts) {
   record('prompt_end', { promptId: mine.id, stopReason, error: error || null });
   if (activePrompt === mine) activePrompt = null;
-  meta.streaming = false; meta.activePromptId = null; scheduleMeta();
+  meta.streaming = false; meta.activePromptId = null; meta.turnOpenedAt = 0; scheduleMeta();
   if (nudgeTurnActive && opts.nudge) nudgeTurnActive = false;
   else if (stopReason === 'end_turn' && !opts.nudge && !nudgeTurnActive) maybeStopNudge().catch(() => {});
   drainPromptQueue();
@@ -576,6 +591,7 @@ async function runPrompt(blocks, opts = {}) {
   let stopReason = 'end_turn', error = null;
   try {
     mine.dispatched = true;
+    meta.turnOpenedAt = Date.now(); scheduleMeta(); // lane turn-never-silent: the turn's opening, the wrapper's own fact
     const writable = !!child?.stdin?.writable;   // send()'s own test: the prompt carrying the context reaches the agent
     const pr = request('session/prompt', { sessionId: meta.sessionId, prompt }, 0);
     if (writable && carriedId) contextCarried(carriedId);
@@ -878,6 +894,7 @@ function handleStdoutLine(line) {
     else p.resolve(msg.result);
     return;
   }
+  if (msg.method) noteCliWrote(); // lane turn-never-silent: the agent's own line (its replies returned above)
   if (hasId && msg.method) { handleAgentRequest(msg.id, msg.method, msg.params || {}); return; }
   if (msg.method === 'session/update') { handleUpdate(msg.params || {}); return; }
   if (msg.method) { record('notification', { method: msg.method, params: clip(msg.params, 2000) }); }
@@ -885,7 +902,7 @@ function handleStdoutLine(line) {
 
 function finalizeExit(code) {
   shuttingDown = true;
-  meta.streaming = false; meta.activePromptId = null;
+  meta.streaming = false; meta.activePromptId = null; meta.turnOpenedAt = 0;
   if (writeTimer) clearTimeout(writeTimer);
   if (metaTimer) clearTimeout(metaTimer);
   persistBuffer(); persistMeta();

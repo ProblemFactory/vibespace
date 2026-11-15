@@ -137,6 +137,21 @@ function rejectStdinLine(line) {
   notice('error', `Your message did not reach Antigravity: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`, 'lost-input');
 }
 function scheduleMeta() { if (!metaTimer) metaTimer = setTimeout(persistMeta, 200); }
+// THE CLI'S OWN LAST LINE (lane turn-never-silent, law L1 — src/backend-caps.js `liveness.wrote: 'wrapper-stamp'`): when
+// agy ITSELF last wrote on stdout — never this wrapper's own records (queue_changed, notices, the
+// user echo), never an old process's line after a restart — kept in the sidecar as
+// `cliWroteAt` (the time exact; its write paced to one per CLI_WROTE_PACE_MS, and every other sidecar write carries it), so
+// the hub's turn watch, and a hub restarted meanwhile, know how long the CLI has said nothing.
+const CLI_WROTE_PACE_MS = Math.max(50, Number(process.env.VIBESPACE_CLI_WROTE_PACE_MS) || 30000);
+let cliWroteTimer = null;
+function noteCliWrote() {
+  const first = !meta.cliWroteAt;
+  meta.cliWroteAt = Date.now();
+  if (first) { scheduleMeta(); return; }
+  if (!cliWroteTimer) { cliWroteTimer = setTimeout(() => { cliWroteTimer = null; scheduleMeta(); }, CLI_WROTE_PACE_MS); cliWroteTimer.unref?.(); }
+}
+// …and `turnOpenedAt`: the moment this wrapper wrote the turn's text to agy (0 between turns) — a turn whose CLI has said
+// nothing yet counts its silence from there, never from the turn before.
 function writeRecord(rec) {
   const line = JSON.stringify(rec);
   buffer += line + '\n';
@@ -223,7 +238,7 @@ function startChild() {
   child.stdout.on('data', (chunk) => {
     outBuf = outBuf.length ? Buffer.concat([outBuf, chunk]) : chunk;
     let i;
-    while ((i = outBuf.indexOf(10)) !== -1) { const line = outBuf.subarray(0, i).toString('utf8').trim(); outBuf = outBuf.subarray(i + 1); if (line) { if (!childSpokeAt) childSpokeAt = Date.now(); handleEvent(line, mine); } }
+    while ((i = outBuf.indexOf(10)) !== -1) { const line = outBuf.subarray(0, i).toString('utf8').trim(); outBuf = outBuf.subarray(i + 1); if (line) { if (!childSpokeAt) childSpokeAt = Date.now(); if (mine === child) noteCliWrote(); handleEvent(line, mine); } }
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
@@ -779,7 +794,7 @@ function stopRunningTurn(why) {
 function endPrompt(mine, stopReason, error, opts) {
   record('prompt_end', { promptId: mine.id, stopReason, error: error || null, ...(stopReason === 'error' ? servedField() : {}) });
   if (activePrompt === mine) activePrompt = null;
-  meta.streaming = false; meta.activePromptId = null; scheduleMeta();
+  meta.streaming = false; meta.activePromptId = null; meta.turnOpenedAt = 0; scheduleMeta();
   if (opts.retry && retryBypass) { retryBypass = false; if (!pendingRestart) pendingRestart = 'retry done: back to the mode'; }
   if (nudgeTurnActive && opts.nudge) nudgeTurnActive = false;
   else if (stopReason === 'end_turn' && !opts.nudge && !nudgeTurnActive) maybeStopNudge().catch(() => { });
@@ -824,6 +839,7 @@ async function runPrompt(text, opts = {}) {
   if (!child?.stdin?.writable) { endPrompt(mine, 'error', { message: 'Antigravity is not running' }, opts); return { mode: null, reason: 'Antigravity is not running' }; }
   record('prompt_start', { promptId, blocks: 1 });
   mine.dispatched = true;
+  meta.turnOpenedAt = Date.now(); scheduleMeta(); // lane turn-never-silent: the turn's opening, the wrapper's own fact
   mine.tools = new Map(); lastTurn = mine;
   child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\n');
   if (carriedId) contextCarried(carriedId);   // lane report-mark-on-ack: the turn's text carries the context
@@ -1038,7 +1054,7 @@ function handleQueueOp(msg) {
 function finalizeExit(code) {
   shuttingDown = true;
   for (const q of promptQueue.splice(0, promptQueue.length)) peerBack(q, 'Antigravity ended before it was delivered'); // the queue dies with this process: its peers' words go back
-  meta.streaming = false; meta.activePromptId = null;
+  meta.streaming = false; meta.activePromptId = null; meta.turnOpenedAt = 0;
   if (writeTimer) clearTimeout(writeTimer);
   if (metaTimer) clearTimeout(metaTimer);
   persistBuffer(); persistMeta();
