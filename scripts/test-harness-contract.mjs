@@ -316,6 +316,23 @@ ok(HARNESSES.claude.inject.hookEvents.includes('Stop') && !HARNESSES.codex.injec
 // Where "is a turn running" comes from, declared per harness and MIRRORED on
 // the client. §6's landing rule: a caps row the server does not have must not
 // exist on the client either — that is exactly how `review` drifted.
+console.log('— liveness (lane turn-never-silent, law L1: every harness declares how its turn\'s life is witnessed)');
+{
+  const TL = require(path.join(REPO, 'src/turn-liveness.js'));
+  for (const id of Object.keys(BACKEND_CAPS)) {
+    const row = BACKEND_CAPS[id];
+    const why = TL.rowProblem(row.liveness, row.turnState);
+    ok(why === null, `${id}: declares its liveness row (${JSON.stringify(row.liveness)})`, why || '');
+  }
+  ok(capsOf('gemini').liveness === null, 'an unknown backend reads undeclared (null) — judged «unknown», never a borrowed row');
+  // every harness with a turn has a wrapper to stamp the CLI's own line (its descriptor's `wrapper`, a file in the tree)
+  for (const id of harnessIds()) {
+    const row = capsOf(id).liveness;
+    if (!row || row === TL.NO_TURN || row.wrote !== 'wrapper-stamp') continue;
+    const w = HARNESSES[id] && HARNESSES[id].wrapper;
+    ok(typeof w === 'string' && fs.existsSync(path.join(REPO, w)), `${id}: its row's wrapper stamp has a wrapper (${w})`);
+  }
+}
 console.log('— turnState');
 {
   for (const id of Object.keys(BACKEND_CAPS)) {

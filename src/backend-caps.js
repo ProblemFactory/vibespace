@@ -401,6 +401,11 @@ const BACKEND_CAPS = {
     // inProgressTools is false because the record it would need is swallowed by
     // a host callback and never reaches us (see the row's essay above).
     turnState: 'authoritative',
+    // HOW THIS HARNESS'S TURN IS WITNESSED (lane turn-never-silent, law L1 — src/turn-liveness.js's vocabulary; a row
+    // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
+    // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
+    // Stop is an interrupt (control_request): the CLI keeps running.
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
     inProgressTools: false,
     // lane worker-dispatch (2026-10-02): the stream SAYS when a compaction ends — every exit of the 'compacting'
     // claim goes through the stdout consumer's one writer (`endCompaction`), which notifies src/server/compaction-watch.js.
@@ -460,6 +465,11 @@ const BACKEND_CAPS = {
     // are the app-server's own turn boundaries — already the only thing the
     // codex consumer flips _isStreaming on. No tool-granular set exists.
     turnState: 'authoritative',
+    // HOW THIS HARNESS'S TURN IS WITNESSED (lane turn-never-silent, law L1 — src/turn-liveness.js's vocabulary; a row
+    // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
+    // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
+    // Stop is turn/interrupt: the app-server keeps running.
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
     inProgressTools: false,
     // Personality enum + thread/settings/update, both from the 0.153.4 schema
     // dump. LIVE: the running thread takes the new personality for its next
@@ -493,6 +503,7 @@ const BACKEND_CAPS = {
     compactEnd: null,      // terminal-only: no compaction to observe
     inputModes: { queue: false, queueVerbs: [] },
     turnState: null, inProgressTools: false, // terminal-only: there is no turn
+    liveness: 'no-turn', // lane turn-never-silent (L1): a terminal has no turn to judge
     responseStyle: { live: false, closed: true, values: [] }, // terminal-only: no agent to style
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false }, // no agent ⇒ no rules
@@ -527,6 +538,11 @@ const BACKEND_CAPS = {
     // ACP v1's prompt_end carries a stop reason — the agent's own statement
     // that the prompt is over (acp-events already drives the flag from it).
     turnState: 'authoritative',
+    // HOW THIS HARNESS'S TURN IS WITNESSED (lane turn-never-silent, law L1 — src/turn-liveness.js's vocabulary; a row
+    // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
+    // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
+    // Stop is session/cancel: the ACP agent keeps running.
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'interrupt' },
     inProgressTools: false,
     // ACP v1 has no response-style/persona verb; the agent's own config owns it.
     responseStyle: { live: false, closed: true, values: [] },
@@ -569,6 +585,12 @@ const BACKEND_CAPS = {
     frameFile: true,
     inputModes: { queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false },
     turnState: 'authoritative',
+    // HOW THIS HARNESS'S TURN IS WITNESSED (lane turn-never-silent, law L1 — src/turn-liveness.js's vocabulary; a row
+    // without it is red in scripts/test-harness-contract.mjs): its wrapper stamps the CLI's OWN last stdout line, the
+    // processes BELOW the CLI are read for work (never the CLI's own counters), the open tool is its running tool card;
+    // Stop RESTARTS agy (data/bin/agy-wrapper.js restartChild — its stream has no cancel): the process is ended and
+    // started again on the same conversation.
+    liveness: { wrote: 'wrapper-stamp', working: 'tree-below-cli', openTool: 'tool-card', stop: 'restart' },
     inProgressTools: false,
     responseStyle: { live: false, closed: true, values: [] },
     worktree: NO_WORKTREE,
@@ -585,7 +607,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
+const NO_CAPS = Object.freeze({ modelFacts: false, terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, promptCache: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, scopedCapsOnDemand: false, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, liveness: null /* undeclared (lane turn-never-silent): a turn on it is judged «unknown», never silent for ever */, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
