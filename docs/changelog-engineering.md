@@ -6,6 +6,31 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent P2 — the witnesses: each wrapper stamps the CLI's OWN last line, and the processes below the CLI are read without holding the hub
+- **«Written» = `cliWroteAt` in the sidecar**, stamped by the WRAPPER. The wrapper is the only place that tells the CLI's own line from its own echoes. The time is exact; the write is paced to one per 30 s (`VIBESPACE_CLI_WROTE_PACE_MS` for the suites), and every other sidecar write carries it too. It survives a hub restart, because the wrapper keeps running in dtach. What each wrapper counts:
+  - agy-wrapper.js: agy's lines, never an old process's after a restart;
+  - chat-wrapper.js: claude's lines, never `_remote_*` and never a control_response (an answer to a request of ours);
+  - acp-wrapper.js and codex-chat-wrapper.js: a notification or a request of the CLI's own; its replies to our requests return before the stamp.
+- **`turnOpenedAt`.** agy and ACP also stamp the moment the turn's text went to the CLI, and clear it to 0 at the turn's end and at exit. A turn whose CLI has said nothing yet counts its silence from there, never from the turn before. claude and codex say their opening themselves (session_state_changed 'running', turn/started).
+- **NEW src/server/proc-tree.js** reads the processes BELOW a CLI:
+  - fs.promises only;
+  - each process's own children files, breadth first, never a walk of all of /proc;
+  - each child checked against its parent (a pid is never an identity); zombies not counted;
+  - at most 256 processes, past that `cut`;
+  - per process: ticks, rchar + wchar (null when unreadable, never 0), and its birth;
+  - the root = the sidecar's childPid, proven by its parent being the wrapper.
+
+  Without /proc, or without children files, it reads `readable: false` with the reason.
+- **Two stub shapes per harness**, each a REAL process:
+  - agy (antigravity-agy): `hang-command` is a child that sleeps holding nothing, with a `sleep` grandchild in its group; `busy-command` burns ~10 % of a core for $AGY_STUB_BUSY_MS. When the child ends, the step is DONE with its exit status and the turn goes on to its reply. What the REAL agy does when its command is killed is unmeasured (the stream's provenance is 'docs').
+  - claude (the stand-in): `TOOL-HANG-` / `TOOL-SPIN-` behave the same way; the tool_result comes when the child ends, and an interrupt ends the child.
+  - Like the real CLIs, neither stub ends what its command started; the suites do.
+- **The pin.**
+  - scripts/test-turn-witness.mjs (fast, 37 legs, 2.3 s; its seven live drives run together): the reader over a fake /proc (the tree, a reused pid, a zombie, an unreadable io, the cut, a gone / reused root, no children files, no /proc, no synchronous call); the reader over this process's real children (a sleeper is still, a spinner works); the agy wrapper's stamps (a queue record never moves it; turnOpenedAt at the dispatch, 0 after); hang-command still below agy, ending it ends the step and the turn goes on; busy-command works; the chat-wrapper's stamp (a control_response never moves it); TOOL-HANG- still, TOOL-SPIN- working; the ACP / codex stamp after their reply branch; one stamp site per wrapper.
+  - RED on pick 1: 16 of 33 (the reader absent, then no stamps and no shapes).
+- **The fast tier's cap** 1085 → 1087 s by arithmetic on this base (2.369.402): 1084.219 s over 585 rows + 0.060 + 2.300 = 1086.579 s over 587. A train states the merged sum.
+- **Found while probing.** A probe that killed only the agy wrapper left the stub's `hang-command` child and its `sleep` grandchild running: L3's defect (Stop signals the CLI's own pid only), reproduced on the stub. P4 cures it.
+
 ### turn-never-silent P1 (主开发's GO 2026-11-15 02:55Z; the owner: «对了你能解决一下 agy 动不动就卡住再也不动的问题吗？») — every harness declares how its turn's life is witnessed, and ONE pure verdict reads it
 - **The cause** (the diagnosis int359/agy-stuck/results-wf_054838ad.json). Six silences in two weeks, all one shape. The CLI's command tool opened a step, its result never came, and the CLI stayed alive and wrote nothing. The turn stayed open (3 h 47 min, 6 h 06 min, 27 h 45 min) until a person pressed Stop. Nothing bounded it: the agy wrapper pins `--print-timeout 0`, and the hub had no check for any harness.
 - **The law (L1).** No turn of any harness is silent without a bound. Each BACKEND_CAPS row carries `liveness`, a closed vocabulary that src/turn-liveness.js owns:

@@ -187,6 +187,21 @@ function scheduleMeta() {
   if (!metaTimer) metaTimer = setTimeout(persistMeta, 500);
 }
 
+// THE CLI'S OWN LAST LINE (lane turn-never-silent, law L1 — src/backend-caps.js `liveness.wrote: 'wrapper-stamp'`): when
+// claude ITSELF last wrote on stdout — never a transport line of ours (`_remote_*`), never a
+// control_response (the CLI answering a request of ours: an interrupt, a model switch) — kept in the sidecar as
+// `cliWroteAt` (the time exact; its write paced to one per CLI_WROTE_PACE_MS, and every other sidecar write carries it), so
+// the hub's turn watch, and a hub restarted meanwhile, know how long the CLI has said nothing.
+const CLI_WROTE_PACE_MS = Math.max(50, Number(process.env.VIBESPACE_CLI_WROTE_PACE_MS) || 30000);
+let cliWroteTimer = null;
+function noteCliWrote() {
+  const first = !meta.cliWroteAt;
+  meta.cliWroteAt = Date.now();
+  if (first) { scheduleMeta(); return; }
+  if (!cliWroteTimer) { cliWroteTimer = setTimeout(() => { cliWroteTimer = null; scheduleMeta(); }, CLI_WROTE_PACE_MS); cliWroteTimer.unref?.(); }
+}
+// (No turn-opening stamp here: claude says `session_state_changed` 'running' — its own line — as its turn opens.)
+
 { const e = persistMeta(); if (e) log(`meta write failed: ${e.message}`); } // the boot write is replaced too (ci358-reds round 2)
 
 // Ensure buffer directory exists and start with empty buffer
@@ -892,6 +907,7 @@ function processLine(line) {
     log(`Non-JSON line: ${line.substring(0, 100)}`);
     return;
   }
+  if (msg && typeof msg.type === 'string' && msg.type[0] !== '_' && msg.type !== 'control_response') noteCliWrote(); // lane turn-never-silent
 
   // Keeper sentinel: claude exited ON THE HOST — the session is really over.
   // Not teed/buffered (it's transport metadata, not conversation content).

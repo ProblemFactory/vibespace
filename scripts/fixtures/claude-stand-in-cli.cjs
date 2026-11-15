@@ -36,6 +36,11 @@
 //   $STAND_IN_POST_MS  how long the model takes to answer after a tool result (default 5) — the window in which a Stop
 //                      finds a frame already TAKEN IN (it rode the tool result: the conversation has it as read)
 // A TOOL- turn whose text also holds `LONGER-` runs its tool three times as long (a turn that outlives a server restart).
+// A TOOL- turn whose text also holds `HANG-` or `SPIN-` runs its tool as a REAL process (lane turn-never-silent): HANG- = a child
+// that sleeps holding nothing (no CPU, no I/O) with a `sleep` grandchild in its group; SPIN- = a child that keeps using CPU (~10 %
+// of a core) for $STAND_IN_SPIN_MS (default 120 s). The tool_result comes when the child ENDS (its exit status, is_error unless 0);
+// an interrupt ends the child (SIGTERM — what the real CLI does to its command's tree at an interrupt is not measured here, and
+// out of that lane). Each child's pid → $STAND_IN_TOOL_PIDS (one line each) so a suite can end what it left.
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
 // Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
@@ -107,6 +112,12 @@ const textOf = (f) => { const c = f.message && f.message.content; return typeof 
 const isCommand = (f) => /^\s*\//.test(textOf(f));
 /** What runs next after a turn ends: every held frame up to the first command, as ONE turn (the measured batching) —
  *  or one frame ($STAND_IN_SPLIT_FOLLOW, or a command, which always runs alone). */
+function commandWork(busyShape, busyMs) {
+  const script = busyShape
+    ? `const end = Date.now() + ${Math.max(100, Number(busyMs) || 120000)}; const t = setInterval(() => { const s = Date.now(); while (Date.now() - s < 20) { } if (Date.now() > end) clearInterval(t); }, 200);`
+    : "require('child_process').spawn('sleep', ['86400'], { stdio: 'ignore' }); setInterval(() => { }, 1 << 30);";
+  return require('child_process').spawn(process.execPath, ['-e', script], { stdio: 'ignore' });
+}
 function nextFollow() {
   if (SPLIT_FOLLOW || isCommand(queued[0])) return queued.shift();
   const batch = [];
@@ -119,6 +130,7 @@ function end(subtype) {
   if (!busy) return;
   clearTimeout(busy.timer);
   const interrupted = subtype !== 'success';
+  if (interrupted && busy.child) { try { busy.child.kill('SIGTERM'); } catch { } busy.child = null; }
   if (interrupted && busy.tool) {
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: busy.tool, content: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", is_error: true }] } });
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
@@ -199,6 +211,22 @@ function begin(f, { follow = false } = {}) {
   const uuids = INIT_UUIDS ? uuidsOf(f) : [];
   out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION, ...(uuids.length ? { user_message_uuids: uuids } : {}) });
   const say = (t) => out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: t }] } });
+  if (/TOOL-/.test(text) && !follow && /(HANG|SPIN)-/.test(text)) {
+    const toolId = 'toolu_stand_in_' + turnSeq, spin = /SPIN-/.test(text), mine = busy;
+    busy.tool = toolId;
+    out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_t' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: spin ? 'node build-and-test.mjs' : 'node wait-for-page.mjs', description: spin ? 'Build and test' : 'Wait for the page' } }] } });
+    const c = commandWork(spin, process.env.STAND_IN_SPIN_MS);
+    busy.child = c;
+    if (process.env.STAND_IN_TOOL_PIDS) { try { fs.appendFileSync(process.env.STAND_IN_TOOL_PIDS, c.pid + '\n'); } catch { } }
+    c.on('exit', (code, sig) => {
+      if (busy !== mine || mine.tool !== toolId) return; // the turn was interrupted: its rejected tool_result is said
+      mine.child = null;
+      out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: sig ? `the command was ended (${sig})` : `the command ended (exit ${code})`, is_error: code !== 0 } ] } });
+      mine.tool = null; mine.post = true;
+      mine.timer = setTimeout(() => { say('the command ended'); end('success'); }, POST_MS);
+    });
+    return;
+  }
   if (/TOOL-/.test(text) && !follow) {
     const toolId = 'toolu_stand_in_' + turnSeq;
     busy.tool = toolId;

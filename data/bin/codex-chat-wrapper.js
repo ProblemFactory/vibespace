@@ -533,6 +533,21 @@ function scheduleMeta() {
   if (!metaTimer) metaTimer = setTimeout(persistMeta, 200);
 }
 
+// THE CLI'S OWN LAST LINE (lane turn-never-silent, law L1 — src/backend-caps.js `liveness.wrote: 'wrapper-stamp'`): when
+// the codex app-server ITSELF last wrote on stdout — a notification or a request of its own, never its
+// reply to a request of ours (an id and no method), never a transport line of ours (`_remote_*`) — kept in the sidecar as
+// `cliWroteAt` (the time exact; its write paced to one per CLI_WROTE_PACE_MS, and every other sidecar write carries it), so
+// the hub's turn watch, and a hub restarted meanwhile, know how long the CLI has said nothing.
+const CLI_WROTE_PACE_MS = Math.max(50, Number(process.env.VIBESPACE_CLI_WROTE_PACE_MS) || 30000);
+let cliWroteTimer = null;
+function noteCliWrote() {
+  const first = !meta.cliWroteAt;
+  meta.cliWroteAt = Date.now();
+  if (first) { scheduleMeta(); return; }
+  if (!cliWroteTimer) { cliWroteTimer = setTimeout(() => { cliWroteTimer = null; scheduleMeta(); }, CLI_WROTE_PACE_MS); cliWroteTimer.unref?.(); }
+}
+// (No turn-opening stamp here: the app-server says turn/started — its own line — as its turn opens.)
+
 function send(payload) {
   const line = JSON.stringify(payload);
   if (!child?.stdin?.writable) {
@@ -3520,6 +3535,7 @@ function handleStdoutLine(line) {
     return;
   }
 
+  if (msg.method) noteCliWrote(); // lane turn-never-silent: the app-server's own line (its replies returned above)
   if (Object.prototype.hasOwnProperty.call(msg, 'id') && msg.method) {
     handleServerRequest(msg);   // classify FIRST (auto / unsupported / ask) — 2.369.58
     return;
