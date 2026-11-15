@@ -10645,7 +10645,26 @@ export default {
   "End now": "立即结束", // lane setting-doors pick 2
   "Ends the hold now: the row goes back at once": "现在结束保持：设置项立即改回", // lane setting-doors pick 2
   "Could not end the hold: {why}": "无法结束保持：{why}", // lane setting-doors pick 2
-  "A held setting is back to {value} — the hold ended: {link}": "一项被保持的设置已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2
+  "Set to {value} for good — the hold ends": "改为 {value} 并一直保持——保持随之结束", // lane setting-doors pick 2 (the check)
+  "{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row": "{value} 会一直高于保持之前的值 {back}——调高需要带上「直到」；请到那一行修改", // lane setting-doors pick 2 (the check)
+  "the hold could not be written to disk, so nothing changed": "保持无法写入磁盘，所以什么都没改", // lane setting-doors pick 2 (the check)
+  "the setting could not be written, so nothing changed": "设置无法写入，所以什么都没改", // lane setting-doors pick 2 (the check)
+  "only your own page can change it — nothing changed": "只有你自己的页面能改它——什么都没改", // lane setting-doors pick 2 (the check)
+  "this change cannot be pressed here — change it on the row": "这项更改不能在这里按——请到那一行修改", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} until {time} — but the agent could not be told: {why}": "{label}：已改为 {value}，到 {time} 为止——但没能告诉 agent：{why}", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} — but the agent could not be told: {why}": "{label}：已改为 {value}——但没能告诉 agent：{why}", // lane setting-doors pick 2 (the check)
+  "the settings file could not be written — it stays at {value}": "设置文件无法写入——它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "You had changed it by hand, so the hold had already ended — it stays at {value}": "你已经亲手改过它，所以保持早已结束——它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "{label} could not go back: it stays at {value}": "{label}没能改回：它仍是 {value}", // lane setting-doors pick 2 (the check)
+  "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持原本会在 {at} 回到 {back}；设置文件无法写入（{why}）——已每隔一分钟试了 {n} 次。VibeSpace 下次启动时会再试。请到那一行修改：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to {value} — the hold ended: {link}": "{label}已回到 {value}——保持已结束：{link}", // lane setting-doors pick 2 (the check)
+  "The setting holds could not be read": "无法读取设置的保持记录", // lane setting-doors pick 2 (the check)
+  "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "无法读取 data/setting-holds.json（{why}）。被调高的上限可能不会自动改回——请检查这三个上限：{links}", // lane setting-doors pick 2 (the check)
+  "{label} may not go back by itself": "{label}可能不会自动改回", // lane setting-doors pick 2 (the check)
+  "Its hold could not be kept at this start ({why}): it held {value}. It was dropped, so a raised value may stay where it is. Check it on the row: {link}": "这次启动时没能保留它的保持（{why}）：它保持在 {value}。保持已被丢弃，所以调高的值可能会一直留着。请到那一行检查：{link}", // lane setting-doors pick 2 (the check)
+  "it is not whole": "记录不完整", // lane setting-doors pick 2 (the check)
+  "it is no longer a row a press may change": "它已不是可以一键更改的设置项", // lane setting-doors pick 2 (the check)
+  "its moment is not a number": "它的时刻不是数字", // lane setting-doors pick 2 (the check)
   "Draft · not sent": "草稿 · 未发送", // lane gmail-draft-not-a-message
   "saved {time}": "保存于 {time}", // lane gmail-draft-not-a-message
   "1 deleted draft": "1 条草稿已删除", // lane gmail-draft-not-a-message

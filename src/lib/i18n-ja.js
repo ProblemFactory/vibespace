@@ -10644,7 +10644,26 @@ export default {
   "End now": "今すぐ終了", // lane setting-doors pick 2
   "Ends the hold now: the row goes back at once": "保持を今すぐ終えます：設定はすぐに元に戻ります", // lane setting-doors pick 2
   "Could not end the hold: {why}": "保持を終了できませんでした：{why}", // lane setting-doors pick 2
-  "A held setting is back to {value} — the hold ended: {link}": "保持していた設定が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2
+  "Set to {value} for good — the hold ends": "{value} に変更してそのまま保つ — 保持は終わります", // lane setting-doors pick 2 (the check)
+  "{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row": "{value} は保持前の値 {back} を上回ったままになります — 引き上げには「期限」が必要です。その行で変更してください", // lane setting-doors pick 2 (the check)
+  "the hold could not be written to disk, so nothing changed": "保持をディスクに書き込めなかったため、何も変わっていません", // lane setting-doors pick 2 (the check)
+  "the setting could not be written, so nothing changed": "設定を書き込めなかったため、何も変わっていません", // lane setting-doors pick 2 (the check)
+  "only your own page can change it — nothing changed": "これを変更できるのはあなた自身のページだけです — 何も変わっていません", // lane setting-doors pick 2 (the check)
+  "this change cannot be pressed here — change it on the row": "この変更はここでは押せません — その行で変更してください", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} until {time} — but the agent could not be told: {why}": "{label}：{time} まで {value} に変更しました — ただし agent に伝えられませんでした：{why}", // lane setting-doors pick 2 (the check)
+  "{label}: changed to {value} — but the agent could not be told: {why}": "{label}：{value} に変更しました — ただし agent に伝えられませんでした：{why}", // lane setting-doors pick 2 (the check)
+  "the settings file could not be written — it stays at {value}": "設定ファイルを書き込めませんでした — {value} のままです", // lane setting-doors pick 2 (the check)
+  "You had changed it by hand, so the hold had already ended — it stays at {value}": "あなたが手で変更したため、保持はすでに終わっています — {value} のままです", // lane setting-doors pick 2 (the check)
+  "{label} could not go back: it stays at {value}": "{label}を元に戻せませんでした：{value} のままです", // lane setting-doors pick 2 (the check)
+  "The hold said it would go back to {back} at {at}; the settings file could not be written ({why}) — tried {n} times, a minute apart. The next start of VibeSpace tries again. Change it on the row: {link}": "保持では {at} に {back} へ戻る予定でした。設定ファイルを書き込めませんでした（{why}）— 1 分おきに {n} 回試しました。VibeSpace の次回起動時にもう一度試します。その行で変更してください：{link}", // lane setting-doors pick 2 (the check)
+  "{label} is back to {value} — the hold ended: {link}": "{label}が {value} に戻りました — 保持は終了しました：{link}", // lane setting-doors pick 2 (the check)
+  "The setting holds could not be read": "設定の保持を読み込めませんでした", // lane setting-doors pick 2 (the check)
+  "data/setting-holds.json could not be read ({why}). A raised ceiling may not go back by itself — check the three ceilings: {links}": "data/setting-holds.json を読み込めませんでした（{why}）。引き上げた上限が自動で戻らない可能性があります — 3 つの上限を確認してください：{links}", // lane setting-doors pick 2 (the check)
+  "{label} may not go back by itself": "{label}が自動で戻らない可能性があります", // lane setting-doors pick 2 (the check)
+  "Its hold could not be kept at this start ({why}): it held {value}. It was dropped, so a raised value may stay where it is. Check it on the row: {link}": "今回の起動でこの保持を維持できませんでした（{why}）：{value} で保持していました。保持は破棄されたため、引き上げた値がそのまま残る可能性があります。その行で確認してください：{link}", // lane setting-doors pick 2 (the check)
+  "it is not whole": "記録が不完全です", // lane setting-doors pick 2 (the check)
+  "it is no longer a row a press may change": "ワンクリックで変更できる項目ではなくなりました", // lane setting-doors pick 2 (the check)
+  "its moment is not a number": "時刻が数値ではありません", // lane setting-doors pick 2 (the check)
   "Draft · not sent": "下書き · 未送信", // lane gmail-draft-not-a-message
   "saved {time}": "{time} に保存", // lane gmail-draft-not-a-message
   "1 deleted draft": "削除された下書き 1 件", // lane gmail-draft-not-a-message
