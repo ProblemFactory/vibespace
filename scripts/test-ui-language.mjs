@@ -177,6 +177,20 @@ const lineAt = (src, off) => { let n = 1; for (let i = 0; i < off; i++) if (src.
 export const NOT_DRAWN = [
   ['src/stream-model.js', 'legVerdictOf', 'the udp leg verdict\'s `words` — the hub log\'s line (desktop-webrtc verdictStep) and the session record\'s `relay.leg.verdict`; no page file reads them (lane stream-udp-leg-fallback, 2.369.402)'],
 ];
+/** ⑨ A TRAILING `//` COMMENT THAT SWALLOWED CODE (the .403 prep mirror: plugins-ui.js — a comment put in the middle of a one-line
+ *  object literal took `tone, chip, chipTitle, onChip,` with it, so every plugin row's chip drew "" titled «undefined»): the code
+ *  before the comment is left OPEN (it ends in `,` `(` `{` `[`) and the comment's text ends like code (a field list «a, b,», a
+ *  `key: value,`, an arrow body, a call's close). A real comment only — never `//` inside a string. → [{line, text}] */
+const CODEY = [/(?:\b[A-Za-z_$][\w$]*,\s*){2,}$/, /\b[A-Za-z_$][\w$]*:\s*[A-Za-z_$][\w$.]*(\([^)]*\))?,\s*$/, /=>\s*\{\s*$/, /\}\)\)?;\s*$/];
+export function swallowFindings(src) {
+  const lines = src.split('\n'), cand = new Set();
+  lines.forEach((l, i) => { const k = l.indexOf('//'); if (k > 0 && /[,({[]\s*$/.test(l.slice(0, k)) && CODEY.some((re) => re.test(l.slice(k + 2)))) cand.add(i + 1); });
+  if (!cand.size) return [];
+  const out = [], onComment = (block, text, s0, e0, ls) => { if (!block && cand.has(ls.line) && CODEY.some((re) => re.test(text))) out.push({ line: ls.line, text: ('//' + text).slice(-120) }); };
+  try { acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, locations: true, onComment }); }
+  catch { out.length = 0; try { acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, locations: true, onComment }); } catch { /* unparsable: the build refuses it */ } }
+  return out;
+}
 /** The lines of `function <fn>(` … its closing «}» at column 0, or null. */
 export function fnLines(src, fn) {
   const lines = src.split('\n'), i = lines.findIndex((l) => l.startsWith(`function ${fn}(`) || l.startsWith(`export function ${fn}(`));
@@ -369,7 +383,7 @@ export function scanFile(file, src, ast = parse(src)) {
   };
   walk(ast, null);
   for (const sh of shadowFindings(ast)) timeHit({ start: sh.start }, `${sh.name}() where a local «${sh.name}» shadows the page-time import`);
-  return { visible, markup, params, raw, time, caps };
+  return { visible, markup, params, raw, time, caps, swallowed: swallowFindings(src) };
 }
 
 // ── ②④⑤ the dictionaries ──
@@ -515,12 +529,13 @@ export async function census(repo = REPO) {
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
     dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, clocks = {}, caps = [];
+  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, clocks = {}, caps = [], swallowed = [];
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
     if (r.raw.length) raw[r.file] = r.raw;
     for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else if (h.kind === 'clock') (clocks[r.file] = clocks[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
+    for (const c of r.swallowed || []) swallowed.push(`${r.file}:${c.line} ${c.text}`);
     for (const c of r.caps) caps.push(`${r.file}:${c.line} ${c.text} — word the value through src/lib/value-words.js (or say \`// ui-words: <why>\` above it)`);
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
@@ -535,7 +550,7 @@ export async function census(repo = REPO) {
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
   const markLines = scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : (r.markLines || []).map((m) => ({ file: r.file, ...m }))));
   const ptUsed = [...new Set(scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : r.ptNames || [])))];
-  return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, swallowed, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -555,6 +570,8 @@ if (isMain) {
     ok(r.visible.length === 4 && r.visible.map((h) => h.sink).join(',') === 'prop:textContent,html,call:showToast,key:label', `① a planted bare English literal in four sinks is named (${r.visible.length}); the same words through t() are not`, JSON.stringify(r.visible));
     const worded = scanFile('worded.js', `el.textContent = t('Customize mode — drag to move it'); showToast(t('Public key copied')); el.title = 'claude-fable-5'; x.textContent = 'Codex'; // ui-words: a planted control line\ny.textContent = 'Plain English words'; // ui-words: a planted exempt line`);
     ok(worded.visible.length === 0, '① …worded through t(), an id, a brand and a `// ui-words:` line are not', JSON.stringify(worded.visible));
+    const sw = swallowFindings("x.appendChild(row({ id: p.id, label: t(p.label),   // a built-in's label is a declared word tone, chip, chipTitle, onChip,\n  sw }));\n// a comment on its own line: tone, chip,\ny.appendChild(row({ id, // its id, then\n  a, b }));\nif (ok) rec.more = more(m);   // lane x: which,\nconst u = 'http://host/a, b,';\n");
+    ok(sw.length === 1 && sw[0].line === 1, '⑨ a trailing comment that swallowed a field list (`… // words tone, chip, chipTitle, onChip,`) is named; a comment on its own line, prose after an open line, prose after a whole statement and `//` in a string are not', JSON.stringify(sw));
     const frag = scanFile('frag.js', 'x.innerHTML = `<img src="${a}"${b ? ` data-record-src="${b}"` : \'\'}${c ? ` data-kind="codex" data-key="${c}"` : \'\'} alt="">`; y.innerHTML = `<p>${b ? `Plain words for a person` : \'\'}</p>`; z.innerHTML = `<b${b ? ` title="Open the whole file"` : \'\'}>x</b>`;');
     ok(frag.visible.length === 2 && /Plain words/.test(frag.visible[0].text) && /Open the whole file/.test(frag.visible[1].text), '① a piece of an enclosing tag (` data-record-src="${…}"`) is markup; words in the same place, and a title in such a piece, are named', JSON.stringify(frag.visible));
     const nd = scanFile('src/stream-model.js', "function legVerdictOf(h) {\n  return { words: 'the daemon says its leg is up' };\n}\nfunction other() {\n  return { label: 'Words a person reads' };\n}\n");
@@ -643,6 +660,7 @@ if (isMain) {
   }
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.time.length === 0, `⑦ every time and number a person reads goes through src/lib/page-time.js (zero tolerance)`, now.time);
+  ok(now.swallowed.length === 0, `⑨ no trailing // comment swallowed code in the browser bundle (zero tolerance; the .403 mirror's plugin chip) — the comment goes on its own line`, now.swallowed);
   ok(now.caps.length === 0, `⑥(d) no value capitalised by hand in the browser bundle (zero tolerance) — a theme / an id is worded through src/lib/value-words.js`, now.caps);
   ok(un.fresh.length === 0, `⑦ no NEW English unit template (${count(now.units)} today = the baseline's ${count(base.units || {})}) — say a duration with page-time's span / ago`, un.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));
   ok(un.stale.length === 0, `⑦ no unit-template baseline row the tree no longer holds (lower it)`, un.stale.map((h) => `${h.file}: ${h.text}`));

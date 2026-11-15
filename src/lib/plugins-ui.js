@@ -285,7 +285,8 @@ export function installPluginsUI(App) {
             install.onclick = () => act(async () => { showToast(t('Downloading {name}…', { name: t(p.label) })); await api('install'); showToast(t('Installed')); });
           }
         }
-        list.appendChild(pluginRow({ id: p.id, label: t(p.label), description: t(p.description),   // a built-in's label is a declared word (lane ui-language) tone, chip, chipTitle, onChip,
+        // a built-in's label is a declared word (lane ui-language)
+        list.appendChild(pluginRow({ id: p.id, label: t(p.label), description: t(p.description), tone, chip, chipTitle, onChip,
           sw: makeSwitch(swOn, { disabled: swDisabled, label: t('Turn {name} on or off', { name: t(p.label) }), onChange: (on, cb) => onSwitch(on, cb) }),
           install, fact, gear: this._pluginGear(p.id, t(p.label)) }));
       }
@@ -479,7 +480,7 @@ export function installPluginsUI(App) {
         <div class="dialog-intro">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
         <ul class="plugin-caps-list">${items.map((it) => `<li class="plugin-cap plugin-cap-${escHtml(it.id)}">${escHtml(t(it.text, it.params || {}))}</li>`).join('')}</ul>
         ${risky && !readOnly ? `<div class="plugin-cfg-warn">${escHtml(t('Trusted code has the same power as VibeSpace itself. There is no undo beyond disabling it.'))}</div>` : ''}
-        ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: when(trust.trustedAt) }))}</div>` : ''}
+        ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: when(trust.trustedAt, { words: true }) }))}</div>` : ''}
         <div class="dialog-actions plugin-consent-actions"></div>`;
       const actions = body.querySelector('.plugin-consent-actions');
       const cancel = document.createElement('button');
