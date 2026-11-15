@@ -1075,24 +1075,23 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // browser, and the refusal it met has told it whose press that is. Nothing is written when it refuses; the refusal names the
   // rule, the row and the row's own link. (A program running as the hub's own user can still edit data/settings.json — it takes
   // effect at the next restart; no route closes that: the box's boundary is the user.)
-  const SPEND_OWNER_ROW_RE = /^spend\./;
-  const spendWriteWhy = (req) => {
-    const WO = require('../write-origin.js'), h = (req && req.headers) || {};
-    if (WO.pressBearer(h)) return 'bearer';
-    const v = WO.pageVerdict(h, WO.ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) }));
-    return v.ok ? null : v.why;   // null = the owner's page
-  };
+  // f4 (主开发 11:10Z): every row Settings › Spending draws is the owner's press only — the judge's daily dollar cap joins as ONE row
+  const SPEND_OWNER_ROW_RE = /^spend\./, SPEND_OWNER_ROWS = Object.freeze(['plugin.llm.dailyBudgetUsd']);
+  const isSpendRow = (k) => SPEND_OWNER_ROW_RE.test(k) || SPEND_OWNER_ROWS.includes(k);
+  const spendWriteWhy = (req) => require('../write-origin.js').ownerPageWhy(req);   // null = the owner's page
   const spendRowsTouched = (req, next) => {
     if (!spendWriteWhy(req)) return [];
     const cur = readSettings() || {}, nxt = next && typeof next === 'object' ? next : {};
     const same = (k) => Object.hasOwn(cur, k) === Object.hasOwn(nxt, k) && JSON.stringify(cur[k]) === JSON.stringify(nxt[k]);
-    return [...new Set([...Object.keys(cur), ...Object.keys(nxt)])].filter((k) => SPEND_OWNER_ROW_RE.test(k) && !same(k));
+    return [...new Set([...Object.keys(cur), ...Object.keys(nxt)])].filter((k) => isSpendRow(k) && !same(k));
   };
   const SPEND_REFUSED_BY = { bearer: 'a request carrying a bearer token (an agent, a job, an automation key)', 'no-browser': 'a request with no mark of the owner\'s page (neither Sec-Fetch-Site nor this instance\'s own Origin)' };
   const refuseSpendRows = (req, res, next) => {
     const hit = spendRowsTouched(req, next); if (!hit.length) return false;
-    const why = spendWriteWhy(req), door = `vibespace://settings/${hit[0]}`;
-    res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the limits on turns nobody typed change only by the owner's press on the owner's own page (Settings › Spending — ${door}); ${SPEND_REFUSED_BY[why] || `a request whose page is not this instance's (${why})`} cannot set, change or drop them, sign-in on or off; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: hit, door });
+    // f2: the door is a REAL row — the first refused key that is one, else the key is said to be no setting and the limits' first row named
+    const rows = [...Object.values(require('../spend-authorizer.js').SPEND_ROW_KEYS), ...SPEND_OWNER_ROWS], row = hit.find((k) => rows.includes(k));
+    const why = spendWriteWhy(req), door = `vibespace://settings/${row || rows[0]}`, noRow = row ? '' : ` («${hit[0]}» is no setting)`;
+    res.status(403).json({ error: `${hit.slice(0, 3).join(', ')}: the limits on turns nobody typed and the judge's daily dollar cap change only by the owner's press on the owner's own page (Settings › Spending — ${door})${noRow}; ${SPEND_REFUSED_BY[why] || `a request whose page is not this instance's (${why})`} cannot set, change or drop them, sign-in on or off; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: hit, door });
     return true;
   };
 

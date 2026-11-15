@@ -336,7 +336,7 @@ class SettingsUI {
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
       if (cat === t('Spending')) this._renderDecisionSpend(section, content, nav);   // lane decision-spend-readout: the judge bills too
-      if (cat === t('Spending') && !this.app?._authEnabled) this._renderSpendSignInOff(section);   // lane setting-doors pick 0 (b3): the truth on a sign-in-off instance
+      if (cat === t('Spending') && this.app?._authEnabled === false) this._renderSpendSignInOff(section);   // lane setting-doors pick 0 (b3): the truth on a sign-in-off instance — f1: only when it is KNOWN off (a window drawn before the home answer says nothing)
       // A HARNESS section (derived from its descriptor table, design §4.2):
       // one line saying what these values are for, then THREE sub-blocks by
       // what a row is (2.369.132, owner "区分全局配置项和 session-level 配置项"):
@@ -645,6 +645,15 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     liveDecisionLine(line, (L) => paintDecisionLine(line, L, 'text'));
+  }
+
+  /** lane setting-doors f1 (主开发 2026-11-15): the open Settings window redraws in place when a fact its rows read changed (the
+   *  sign-in flag: the password set or removed, the home answer) — a sentence about who can change money limits is never left
+   *  false while shown. */
+  redrawOpen() {
+    const w = [...this.app.wm.windows.values()].find((x) => x.type === 'settings');
+    const content = w && w.content.querySelector('.settings-content'), nav = w && w.content.querySelector('.settings-nav');
+    if (content && nav) this._rerenderKeepingPlace(content, nav);
   }
 
   /** lane setting-doors pick 0 (b3): with sign-in OFF nothing tells the owner's page from another program, so Settings › Spending

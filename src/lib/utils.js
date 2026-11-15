@@ -9,7 +9,7 @@ import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arriva
 import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { DIALOG_ROOTS, SHEET_ROOTS, reopenVerdict, undismissableVerdict, escapeVerdict, typedVerdict, ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r2/r3): the ONE dialog predicate set + the shell's verdicts
-import { splitSettingLinks, SCHEME as SETTING_SCHEME } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting row
+import { splitSettingLinks, hasScheme as hasSettingScheme } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting row
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -827,7 +827,7 @@ export function registerSettingLinks(door) {
  *  `close` dismisses the toast. Returns the number of links drawn (0 ⇒ `body.textContent = message`, as before). */
 export function toastWordsInto(body, message, close = () => {}) {
   const door = _settingLinks;
-  const segs = door && typeof message === 'string' && message.includes(SETTING_SCHEME) ? splitSettingLinks(message, door.has) : null;
+  const segs = door && typeof message === 'string' && hasSettingScheme(message) ? splitSettingLinks(message, door.has) : null;
   if (!segs || !segs.some((g) => g.key)) { body.textContent = message; return 0; }
   body.textContent = '';
   let made = 0;

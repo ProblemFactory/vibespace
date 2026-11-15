@@ -935,7 +935,9 @@ function noticeText(warn) {
   const window = warn.scope === 'hour' ? 'this hour' : 'today';
   const spentBy = producersText(warn.producers);
   const spent = spentBy ? ` Top producers ${window}: ${spentBy}.` : '';
-  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%).${spent} VibeSpace will refuse further automatic turns on it when the budget is spent. The limit: ${SL.settingLink(warnRowOf(warn))}`;   // lane setting-doors pick 1: the warning names its row
+  // lane setting-doors pick 1: the warning names its row — l2: BEFORE the producers list (the For-you question is stored under a
+  // 300-character bound: a long account name and four producers cut a link said last, and it drew as words)
+  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%) — the limit: ${SL.settingLink(warnRowOf(warn))}.${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
 }
 
 module.exports = {

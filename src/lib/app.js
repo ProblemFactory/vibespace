@@ -567,6 +567,7 @@ class App {
       setHubZone(d.zone);
       setPageZone(pageZone(this)); setStampFormatter(when);   // lane ui-language: every time a surface prints, in the page's zone
       this._authEnabled = !!d.authEnabled;
+      this._settingsUI?.redrawOpen?.();   // lane setting-doors f1: Settings › Spending's «Sign-in is off» line follows the flag (it may have drawn before this answer)
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._homeFactsSeen?.(true); // B-7959: whether this workspace is protected is known now
       initVault(this); // THE VAULT (lane vault-e2e-password): locked ⇒ the unlock modal now, behind the sign-in this page just passed

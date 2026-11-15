@@ -12,7 +12,8 @@
  *  - the key ends where the key's own characters end (letters, digits, `_`, `-`, `.`) — a sentence's trailing punctuation is shed
  *    (the shared trailing set) and the LONGEST known key wins, cut back at `.` boundaries (`…/spend.unattendedPerInstanceDay.` at a
  *    sentence's end is the row, `…/spend.nope` is text);
- *  - A LINK OPENS, IT NEVER WRITES: the grammar has no value part — `?`, `=`, `&`, `#` end the key and stay text.
+ *  - A LINK OPENS, IT NEVER WRITES: the grammar has no value part — `?`, `=`, `&`, `#` end the key and stay text;
+ *  - EVERY run of the scheme is claimed (a door, or words) — the path rule never links its tail (l1, 2026-11-15).
  */
 'use strict';
 
@@ -20,10 +21,17 @@ const { isTrailing } = require('./path-linkify.js');
 
 const SCHEME = 'vibespace://settings/';
 const KEY_CH = 'A-Za-z0-9_.\\-';
-// not inside a longer word or another URL's path (`xvibespace://…`, `/vibespace://…`)
-const LINK_SRC = `(?<![\\w/:.])vibespace:\\/\\/settings\\/([${KEY_CH}]+)`;
+// a DOOR: not glued to a word or a path before it (`xvibespace://…`, `/vibespace://…`); after a colon it is one (l1, 主开发 2026-11-15:
+// «上限在这里:» + the link — a real web address is claimed by the address pass first); the scheme in any case (`VIBESPACE://…`)
+const LINK_SRC = `(?<![\\w/.])vibespace:\\/\\/settings\\/([${KEY_CH}]+)`;
 /** A fresh global regex each call (a shared `g` regex carries lastIndex state). */
-function linkRe() { return new RegExp(LINK_SRC, 'g'); }
+function linkRe() { return new RegExp(LINK_SRC, 'gi'); }
+// EVERY RUN of the scheme, whatever precedes it — the renderers' words pass claims each one that is no door, so the path rule never
+// links its tail («//settings/<key>» answered «Not found» as a FILE)
+const RUN_SRC = `vibespace:\\/\\/settings\\/[${KEY_CH}]*`;
+function runRe() { return new RegExp(RUN_SRC, 'gi'); }
+/** Does `text` hold the scheme at all (any case)? — the renderers' cheap early way out. */
+function hasScheme(text) { return /vibespace:\/\/settings\//i.test(String(text || '')); }
 
 /** The text of a link to one row — what the product's own sentences carry. */
 function settingLink(key) { return SCHEME + String(key || ''); }
@@ -43,7 +51,7 @@ function knownKeyOf(run, has) {
 /** Every link to a KNOWN row in `text` → [{ start, end, key }] (end = after the key; the rest of the run stays text). */
 function settingLinkHits(text, has) {
   const s = String(text || ''), out = [];
-  if (typeof has !== 'function' || s.indexOf(SCHEME) < 0) return out;
+  if (typeof has !== 'function' || !hasScheme(s)) return out;
   const re = linkRe();
   for (let m; (m = re.exec(s));) {
     const key = knownKeyOf(m[1], has);
@@ -65,4 +73,4 @@ function splitSettingLinks(text, has) {
 const ANCHOR_PREFIX = '#vs-setting-';
 function keyOfAnchor(href) { const h = String(href || ''); return h.startsWith(ANCHOR_PREFIX) && new RegExp(`^[${KEY_CH}]+$`).test(h.slice(ANCHOR_PREFIX.length)) ? h.slice(ANCHOR_PREFIX.length) : null; }
 
-module.exports = { SCHEME, KEY_CH, linkRe, settingLink, knownKeyOf, settingLinkHits, splitSettingLinks, ANCHOR_PREFIX, keyOfAnchor };
+module.exports = { SCHEME, KEY_CH, linkRe, runRe, hasScheme, settingLink, knownKeyOf, settingLinkHits, splitSettingLinks, ANCHOR_PREFIX, keyOfAnchor };

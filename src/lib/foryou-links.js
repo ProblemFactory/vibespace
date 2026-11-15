@@ -15,7 +15,7 @@
 // both spans no other hit may start inside (the path rule would link the `//settings/…` tail). It opens Settings on that row;
 // no value ever rides it.
 import { pathRe, cleanPath, looksRelPath, relCandidates } from '../path-linkify.js';
-import { settingLinkHits, linkRe as settingLinkRe, KEY_CH as SETTING_KEY_CH } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting
+import { settingLinkHits, runRe as settingRunRe, KEY_CH as SETTING_KEY_CH } from '../setting-links.js'; // PURE (CJS, lane setting-doors pick 1): THE grammar of a link to one setting
 import { CJK_PUNCT, SEG, isTrailing } from '../path-linkify.js'; // lane mask-value-shape r4: THE token grammar's classes (one definition — the path rule's own)
 import { maskedLink } from '../secret-shapes.js'; // PURE: THE belt's marks — «redacted» / [vault:<entry>], raw or in an href
 import { cutRuns, FIELD_CAPS } from '../inbox-reply-text.js'; // PURE: the tokens a cut went through (lane artifacts-by-intent r7)
@@ -76,9 +76,9 @@ function proseHits(s, has) {
   if (has) {   // lane setting-doors pick 1: a link to a KNOWN row = the kind `setting`; a run naming no row = words, claimed whole
     const known = new Set();
     for (const h of settingLinkHits(s, has)) { known.add(h.start); hits.push({ start: h.start, end: h.end, kind: 'setting', ref: h.key }); }
-    for (const m of s.matchAll(settingLinkRe())) {
+    for (const m of s.matchAll(settingRunRe())) {   // l1 (2026-11-15): EVERY run of the scheme, glued to a word or a path too
       if (known.has(m.index)) continue;
-      const keyAt = m.index + m[0].length - m[1].length; let end = m.index + m[0].length; while (end > keyAt && isTrailing(s[end - 1])) end--;   // the scheme stays whole
+      const keyAt = m.index + 'vibespace://settings/'.length; let end = m.index + m[0].length; while (end > keyAt && isTrailing(s[end - 1])) end--;   // the scheme stays whole
       hits.push({ start: m.index, end, kind: 'words', ref: '' });
     }
   }
@@ -101,6 +101,15 @@ function proseHits(s, has) {
     const mk = marked && m.index >= scannedTo ? pathToken(s, m.index) : null;
     if (mk) scannedTo = mk.runEnd;
     hits.push(mk && mk.mask ? { start: m.index, end: mk.end, kind: 'masked', mask: mk.mask } : { start: m.index, end: m.index + ref.length, kind: 'path', ref });
+  }
+  if (has) {   // l1: a PATH never takes a run of the scheme — one that reaches into a run ends where the run begins, one starting inside it goes
+    const runs = hits.filter((h) => h.kind === 'setting' || h.kind === 'words');
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const h = hits[i]; if (h.kind !== 'path') continue;
+      const r = runs.find((x) => h.start < x.end && h.end > x.start); if (!r) continue;
+      if (h.start >= r.start) { hits.splice(i, 1); continue; }
+      const ref = cleanPath(s.slice(h.start, r.start)); if (ref.length < 4) hits.splice(i, 1); else { h.end = h.start + ref.length; h.ref = ref; }
+    }
   }
   hits.sort((a, b) => a.start - b.start || RANK[a.kind] - RANK[b.kind] || b.end - a.end);
   const out = [];

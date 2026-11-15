@@ -132,9 +132,18 @@ function pressOf(req, route = null) {
   PRESS_SCOPE.enterWith(press);   // the rest of THIS request's chain — never another request's
   return press;
 }
+/** lane setting-doors: WHO MAY CHANGE A SPENDING ROW (the money gate's limits, the judge's daily dollar cap) — null = the owner's
+ *  page (no bearer, and the strict page verdict above), else why not: 'bearer' or the page verdict's own word ('no-browser',
+ *  'cross-site', …). The settings routes and the old plugin /config door both ask HERE (no second copy of the rule). */
+function ownerPageWhy(req) {
+  const h = (req && req.headers) || {};
+  if (pressBearer(h)) return 'bearer';
+  const v = pageVerdict(h, ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) }));
+  return v.ok ? null : v.why;   // null = the owner's page
+}
 const isPress = (x) => !!x && typeof x === 'object' && MINTED.has(x) && PRESS_SCOPE.getStore() === x;
 /** The live view's handshake, kept for its later messages (src/server/browser-stream.js): the headers the page verdict
  *  reads — never a press. Each Hand back message mints its own from it. */
 const pageOfUpgrade = (req) => Object.freeze({ headers: Object.freeze({ ...((req && req.headers) || {}) }), socket: Object.freeze({ encrypted: !!(req && req.socket && req.socket.encrypted) }), url: String((req && req.url) || '').split('?')[0], method: 'WS' });
 
-module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer, pressOf, isPress, pageOfUpgrade };
+module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer, pressOf, isPress, pageOfUpgrade, ownerPageWhy };
