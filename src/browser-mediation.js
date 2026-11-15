@@ -340,6 +340,8 @@ function liveFillCdpVerdict(method, { allowVerb = null, params = null, holdReaso
   const row = CENSUS.rowOf(m);
   const msg = holdReason === 'unknown_typed'
     ? `${m} is refused because VibeSpace can no longer verify whether a filled login secret is still in this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+    : holdReason === 'value_shown'
+      ? `${m} is refused because the page put the filled login secret into its own address or title — navigate this tab to another page (a reload of this address keeps it refused), or open or switch to another tab (until this tab leaves this page, cross-origin credential requests from it are blocked)`
     : holdReason === 'too much text to check'
       ? `${m} is refused while a vault login fill is held in this tab (too much text to verify wipe) — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
       : `${m} is refused while a vault login fill is in progress or unsubmitted in this tab — wait for the fill to finish and submit the form, reload or navigate this tab, or open or switch to another tab (until this tab submits, reloads, or navigates, cross-origin credential requests from this page are blocked)`;

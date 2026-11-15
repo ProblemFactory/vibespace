@@ -7786,14 +7786,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 }
 
 /** lane chrome-157 (vault-login round 32, ruling Q8): THE ONE same-browser identity, PURE, built from what exists — the browser's
- *  own id (the devtools UUID Chrome mints per launch, off the record's cdpUrl, else the url the caller watches) and the keeper's
+ *  own id (the devtools UUID Chrome mints per launch, off the url the caller watches, else the record's cdpUrl) and the keeper's
  *  process identity of the record (pid + starttime + startedAt). Two answers are the same browser only when they are equal and
  *  not null: a replacement browser that reuses the process number has another starttime and another UUID. null when neither
  *  exists, or for a record that is neither starting nor ready (a stopped or failed browser is nobody's to inherit). */
 const DEVTOOLS_UUID = /\/devtools\/browser\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 function browserIdentityOfRecord(rec, url = '') {
   if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;
-  const m = DEVTOOLS_UUID.exec(String((rec && rec.cdpUrl) || '')) || DEVTOOLS_UUID.exec(String(url || '').trim());
+  const m = DEVTOOLS_UUID.exec(String(url || '').trim()) || DEVTOOLS_UUID.exec(String((rec && rec.cdpUrl) || ''));   // (the url the watch CONNECTED to first — the reviewers' note)
   const uuid = m ? m[1].toLowerCase() : '';
   const proc = rec && rec.pid != null ? `${rec.pid}:${rec.starttime ?? ''}:${rec.startedAt || ''}` : '';
   return uuid || proc ? `${uuid}|${proc}` : null;
