@@ -876,6 +876,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         const attA = await wsScope.call('Target.attachToTarget', { targetId: tidA, flatten: false });
         const sidA = attA.result && attA.result.sessionId;
         // 1) Unfenced scope session: Target.sendMessageToTarget & sessionless Browser.getVersion MUST succeed (identical to master!)
+        const wholeProfileRefused = (x) => Boolean(x && x.error && /^method_refused: Target\.sendMessageToTarget/.test(String(x.error.message || '')) && /WHOLE profile/.test(String(x.error.message || '')));
         const sendUnfenced = await wsScope.call('Target.sendMessageToTarget', { sessionId: wsScope.sid, message: '{"id":1,"method":"Runtime.enable"}' });
         const verUnfenced = await wsScope.call('Browser.getVersion', {});
 
@@ -891,14 +892,17 @@ export async function runR29LoginNails({ repoDir, ok }) {
         wsScope.close();
 
         ok(
-          Boolean(sendUnfenced && sendUnfenced.result && !sendUnfenced.error)
+          // (lane chrome-157, the rebase onto 2.369.402: the release's WHOLE-PROFILE LAW refuses every wrapped Target.sendMessageToTarget on
+          // both roads — method_refused, before any fence — so «untouched parity» is the master's answer itself: the fence changes no
+          // answer of an unfenced tab, and the fenced tab's wrapped call is refused and carries nothing)
+          wholeProfileRefused(sendUnfenced)
             && Boolean(verUnfenced && verUnfenced.result && !verUnfenced.error)
             && Boolean(fillA && fillA.ok === true)
             && Boolean(verWhileAFenced && verWhileAFenced.result && !verWhileAFenced.error)
             && readBWhileAFenced?.result?.result?.value === 'hello-B'
-            && Boolean(sendBWhileAFenced && sendBWhileAFenced.result && !sendBWhileAFenced.error)
-            && Boolean(sendAWhileAFenced && sendAWhileAFenced.error && /login_fill_live/.test(String(sendAWhileAFenced.error.message || ''))),
-          'R29-2 (Compulsory 2 untouched parity): unfenced Target.sendMessageToTarget forwards on scope grant, sessionless Browser.getVersion & Tab B reads & Tab B Target.sendMessageToTarget stay 200 while Tab A is fenced, and Tab A Target.sendMessageToTarget is refused login_fill_live',
+            && wholeProfileRefused(sendBWhileAFenced) && String(sendBWhileAFenced.error.message) === String(sendUnfenced.error.message).replace('"id":1', '"id":2')
+            && Boolean(sendAWhileAFenced && sendAWhileAFenced.error && /login_fill_live|method_refused/.test(String(sendAWhileAFenced.error.message || ''))),
+          'R29-2 (Compulsory 2 untouched parity): an unfenced wrapped Target.sendMessageToTarget gets the master\'s answer (the whole-profile law\'s method_refused) before and while Tab A is fenced, sessionless Browser.getVersion & Tab B reads stay 200, and Tab A\'s wrapped call is refused',
           { sendUnfenced, verUnfenced, fillA, verWhileAFenced, readBWhileAFenced, sendBWhileAFenced, sendAWhileAFenced },
         );
       } finally {
