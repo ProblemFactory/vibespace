@@ -109,7 +109,7 @@ function create({ activeSessions, getDeliver = () => null, getGroups = () => nul
           if (!G.isCid(sender) || !(x.oldest <= t - WW.SENDER_MS)) continue;   // an agent sender, its own message an hour old
           const list = bySender.get(sender) || (bySender.set(sender, []), bySender.get(sender));
           let e = list.find((y) => y.cid === cid);
-          if (!e) { e = { cid, name: nameOf(s, id), n: 0, oldest: x.oldest, openedAt: openedSaid(s), card }; list.push(e); }
+          if (!e) { e = { cid, name: nameOf(s, id), n: 0, oldest: x.oldest, openedAt: openedSaid(s), card, stuckSince: Number(s._turnStuckSince) || null }; list.push(e); }   // lane turn-never-silent (L4): a turn the hub has said is stuck
           e.n = e.n == null || x.n == null ? null : e.n + x.n;
           e.oldest = Math.min(e.oldest, x.oldest);
         }
@@ -130,7 +130,7 @@ function create({ activeSessions, getDeliver = () => null, getGroups = () => nul
         for (const [sender, list] of bySender) {
           if (typeof groups.endedOf === 'function' && groups.endedOf(sender)) continue;
           list.sort((a, b) => a.oldest - b.oldest);
-          const text = WW.senderEntry(list.map((e) => ({ name: e.name, n: e.n, oldestText: OF.when(e.oldest), openedText: e.openedAt ? OF.when(e.openedAt) : null, card: e.card })));
+          const text = WW.senderEntry(list.map((e) => ({ name: e.name, n: e.n, oldestText: OF.when(e.oldest), openedText: e.openedAt ? OF.when(e.openedAt) : null, card: e.card, stuckText: e.stuckSince ? OF.when(e.stuckSince) : null })));
           try { if (d.stashSlot(sender, SLOT, { source: 'agent', fromName: 'VibeSpace', text }, { set: list.map((e) => e.cid) }).filed) senders++; } catch (e) { say(`[wait-watch] the waiting entry for ${sender} was not stored — ${e && e.message}`); }
           await new Promise((r) => setImmediate(r));   // one sender at a time: its times through owner-facts.when are a slice each (the 20 ms law)
         }

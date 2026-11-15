@@ -18,7 +18,7 @@ const TICK_MS = 5 * MIN;       // the sweep (ages are in hours — 主开发 13:
 function senderEntry(members = []) {
   const part = (m) => {
     const count = m.n == null ? `since at least ${m.oldestText}` : m.n === 1 ? `1, sent at ${m.oldestText}` : `${m.n}, the oldest sent at ${m.oldestText}`;
-    const turn = m.openedText ? `in a turn since ${m.openedText}` : 'in a turn';
+    const turn = (m.openedText ? `in a turn since ${m.openedText}` : 'in a turn') + (m.stuckText ? ` — a turn stuck since ${m.stuckText}; the owner has been asked` : '');   // lane turn-never-silent (L4)
     return `to «${m.name}» (${count}; ${turn}${m.card ? '; a waiting-for-you card is open in it' : ''})`;   // the name is a peer's text: quoted, never bare in the hub's voice
   };
   return `(VibeSpace) Your group messages have not been handed yet: ${members.map(part).join('; ')}.`;

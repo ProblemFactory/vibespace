@@ -174,7 +174,8 @@ const wokeLine = (r0) => {
   if (plain.length || (!into.size && !(r.queued && r.queued.length))) bits.push(`${wakeCount(plain.length)}${plain.length ? ': ' + plain.join(', ') : ''}`);
   if (into.size) bits.push(`handed into ${[...into].map((n) => `${n}'s`).join(', ')} running turn${into.size === 1 ? '' : 's'} = ${plural(into.size, 'billed turn', 'billed turns')}`);
   const hm = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(11, 16) + 'Z' : '');
-  if (r.queued && r.queued.length) bits.push(`waiting (not billed yet): ${r.queued.map((x) => `${x.name}'s current turn${Number.isFinite(x.since) ? ` (running since ${hm(x.since)})` : ''}`).join(', ')} — read and billed when a turn carries it`);
+  // lane turn-never-silent (L4): behind a turn the hub has said is STUCK — where it is, and that the owner has been asked
+  if (r.queued && r.queued.length) bits.push(`waiting (not billed yet): ${r.queued.map((x) => `${x.name}'s current turn${Number.isFinite(x.since) ? ` (running since ${hm(x.since)})` : ''}${Number.isFinite(x.stuckSince) ? ` — a turn stuck since ${hm(x.stuckSince)}; the owner has been asked` : ''}`).join(', ')} — read and billed when a turn carries it`);
   if (r.refused && r.refused.length) bits.push(`${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they get it on their next turn instead`);
   if (held.length) bits.push(`${plural(held.length, 'wake', 'wakes')} held (not billed yet) — ${held.map((x) => `${x.name}: ${x.reason}`).join('; ')}`);
   if (r.nextTurn && r.nextTurn.length) bits.push(`on their next turn (free): ${r.nextTurn.join(', ')}`);

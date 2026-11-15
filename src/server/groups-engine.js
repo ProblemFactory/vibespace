@@ -660,7 +660,7 @@ function create({
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
     try { store.audit({ kind: 'group-wake', groupId: gid, member, why, ok: !!(r && r.ok), lane: (r && r.lane) || null, reason: r && !r.ok ? r.reason || null : null, refused: (r && r.refused) || null, spendWhy: (r && r.why) || null }); } catch { }
-    if (r && r.ok && r.queued) { await markQueued(gid, member, rep.upTo, { since: r.since }); return { ok: true, queued: true, since: Number.isFinite(r.since) ? r.since : null, lane: r.lane || null }; }   // law 1: waiting, not woke
+    if (r && r.ok && r.queued) { await markQueued(gid, member, rep.upTo, { since: r.since }); return { ok: true, queued: true, since: Number.isFinite(r.since) ? r.since : null, ...(Number.isFinite(r.stuckSince) ? { stuckSince: r.stuckSince } : {}), lane: r.lane || null }; }   // law 1: waiting, not woke; lane turn-never-silent (L4): behind a stuck turn
     if (r && r.ok) { await markReported(gid, member, rep.upTo); return { ok: true, lane: r.lane || null, ...(r.intoTurn ? { intoTurn: true } : {}) }; }
     (log.info || log.log || (() => {})).call(log, `[groups] wake of ${member.slice(0, 8)} in ${gid} (${why}) not delivered: ${(r && r.reason) || 'refused'} — it rides that member's next report`);
     return { ok: false, reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null };
@@ -972,7 +972,7 @@ function create({
         continue;
       }
       const r = await wake(gid, m, rec, v.why, null, { pressed });
-      if (r.ok && r.queued) queued.push({ member: m, name, why: v.why, lane: r.lane, since: r.since });   // law 1: behind its running turn
+      if (r.ok && r.queued) queued.push({ member: m, name, why: v.why, lane: r.lane, since: r.since, ...(Number.isFinite(r.stuckSince) ? { stuckSince: r.stuckSince } : {}) });   // law 1: behind its running turn; lane turn-never-silent (L4): one the hub has said is stuck
       else if (r.ok) woke.push({ member: m, name, why: v.why, lane: r.lane, ...(r.intoTurn ? { intoTurn: true } : {}) });
       else {
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to

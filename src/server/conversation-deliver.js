@@ -1741,9 +1741,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
             // waiting, the group's mark held, the charge OWED until a turn carries it (or released when it is handed back)
             machineTurn(); lastPostAt.set(cid, clock.now()); money.settled = true;
             const since = Number.isFinite(rpc.s._turnOpenedAt) ? rpc.s._turnOpenedAt : null;   // the turn it waits behind (acp-events / codex-events stamp it)
+            const stuckSince = Number.isFinite(rpc.s._turnStuckSince) ? rpc.s._turnStuckSince : null;   // lane turn-never-silent (L4): the hub has said that turn is stuck, since then
             const qe = queued.noteWritten(cid, { charged, text, kind, fromName: opts.fromName || null, mark: opts.wakeMark || null, since, peerName: rpc.s.name || null, holder: rpc.wc && rpc.wc.pid ? String(rpc.wc.pid) : null, waitKey: `${rpc.s.backend || 'claude'}:${cid}` });   // the hold becomes the RESERVATION; the holder = the wrapper process that took it (round 2)
             noteFrameWritten(cid, null, qe.id);
-            return { ok: true, lane: 'rpc-queue', kind, steered: false, queued: true, since, peerName: rpc.s.name || null };
+            return { ok: true, lane: 'rpc-queue', kind, steered: false, queued: true, since, ...(stuckSince ? { stuckSince } : {}), peerName: rpc.s.name || null };
           }
           else { spent(); noteFrameWritten(cid, null); }
           return { ok: true, lane: 'rpc-queue', kind, steered: steersIntoRunningTurn, peerName: rpc.s.name || null };
