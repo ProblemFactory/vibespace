@@ -12434,6 +12434,7 @@ export default {
   "{name}: the reset you marked for {what} is confirmed by its reading ({pct}% used)": "{name}：記録した{what}のリセットは読み取りで確認されました（{pct}% 使用）",
   "{name}: the reset you marked for {what} is not confirmed — its reading still says {pct}% used": "{name}：記録した{what}のリセットは確認できませんでした — 読み取りはまだ {pct}% 使用を示しています",
   "{name} was refused by Anthropic — asked again after 10 minutes": "{name} は Anthropic に拒否されました — 10 分後にもう一度確認します",
+  "{name}: {what} fell from {before}% to {after}% in one reading — not confirmed yet; it counts as {before}% until a reading confirms it": "{name} の{what}が 1 回の読み取りで {before}% から {after}% に下がりました — まだ確認されていません。確認されるまで {before}% として扱います",
   "{name}: {what} has been reset — a reading shows it ({before}% → {after}%)": "{name} の{what}がリセットされました — 読み取りに表れています（{before}% → {after}%）",
   "read {age} ago": "{age}前に読み取り",
   "the 5-hour limit": "5 時間の上限",
