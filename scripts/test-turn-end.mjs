@@ -278,7 +278,8 @@ job('— ⑨ S6: a wrapper killed past its own handler leaves agy (its own sessi
     ok(r2 === 'gone' && sent.length === 0, 'a recorded pid now someone else\'s (another birth): nothing is signalled («gone»)', [r2, sent]);
     try { c.kill('SIGKILL'); } catch { }
     const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-    const a = ws.indexOf("const leftAgy = await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`));"), b = ws.indexOf('removeWrapperFiles(BUFFERS_DIR, data.sessionId);', a);
+    const a = ws.indexOf("const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;"), b = ws.indexOf('removeWrapperFiles(BUFFERS_DIR, data.sessionId);', a);
+    ok(ws.includes("const ownGroup = ((require('./backend-caps.js').capsOf(session.backend).liveness || {}).stop === 'restart');") && require(path.join(REPO, 'src/backend-caps.js')).capsOf('antigravity').liveness.stop === 'restart' && require(path.join(REPO, 'src/backend-caps.js')).capsOf('claude').liveness.stop !== 'restart', 'only a harness whose CLI runs in its own group (agy: stop \'restart\') reads the sidecar on the kill path — every other kill answers as before');
     ok(a > 0 && b > a && ws.slice(a, b).includes("\n      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: "), 'the hub\'s kill path (endSessionBody) reads the recorded agy BEFORE the sidecar goes, and ends it after its grace (a source pin: endSessionBody\'s deps are a whole server\'s)');
   } finally { await h.stop(); }
 });
