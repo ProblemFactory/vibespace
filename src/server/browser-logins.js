@@ -925,7 +925,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     return w && w.ok ? { ok: true, removed: true } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
 
-  // ── SCRUBBER & LOCKED-BOOT FENCE RECOVERY HELPERS (`RULE 5″/5‴` + `A1`) ──
+  // ── SCRUBBER HELPERS (`RULE 5″/5‴`; the locked-boot fence recovery of `A1` left with round 32's shape S: a restart holds, it asks the vault nothing) ──
   /** A1: THE ONE answer for «is the logins vault locked?» (boolean, never inferred from an absent error code). */
   function isLocked() {
     return vstate() !== 'unlocked';
@@ -935,66 +935,6 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     if (!BL.isEntryName(name) || isLocked()) return [];
     const o = open(name);
     return o.ok && o.rec ? BL.scrubSecretsOf(o.rec, { minBytes, includePrevious }) : [];
-  }
-
-  function fenceSecretsOf(name, { typedSlot = null, rev = null, entryGen = null, minBytes = 1, at = null } = {}) {
-    if (!BL.isEntryName(name)) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-    if (isLocked()) return { ok: false, locked: true, movedOn: false, values: [], pwValues: [], otpValues: [] };
-    const o = open(name);
-    if (!o.ok) {
-      return o.code === 'vault_locked'
-        ? { ok: false, locked: true, movedOn: false, values: [], pwValues: [], otpValues: [] }
-        : { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-    }
-    if (!o.rec) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-    if (typedSlot === 'otp') {
-      if (entryGen && o.rec.entryGen && o.rec.entryGen !== entryGen) {
-        return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      }
-      const tn = str(o.rec.totpName);
-      if (!tn) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      let tg;
-      try { tg = vault.secretGet(`totp:${tn}`); } catch { return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] }; }
-      if (!tg || !tg.ok) {
-        const tc = str(tg && tg.code);
-        return (/vault_locked/.test(tc) || tc === 'vault_not_set_up')
-          ? { ok: false, locked: true, movedOn: false, values: [], pwValues: [], otpValues: [] }
-          : { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      }
-      if (!tg.value) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      let ttext = '';
-      try { ttext = tg.value.toString('utf8'); } finally { try { tg.value.fill(0); } catch { /* */ } }
-      const T = require('../totp.js');
-      const trec = T.recordOf(ttext);
-      if (!trec) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      const kb = T.base32Decode(trec.seed);
-      if (!kb.ok) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      const otpSet = new Set();
-      try {
-        const hmacNode = (alg, key, msg) => crypto.createHmac(String(alg).toLowerCase(), key).update(msg).digest();
-        const periodMs = (Number(trec.period) || 30) * 1000;
-        const anchors = [Number(now()) || Date.now()];
-        if (Number.isFinite(at) && at > 0) anchors.unshift(Number(at));
-        for (const ts of anchors) {
-          for (const d of [-1, 0, 1]) {
-            const wts = ts + d * periodMs;
-            if (wts < 0) continue;
-            try {
-              const r = T.totp(kb.bytes, { now: wts, period: trec.period, digits: trec.digits, algorithm: trec.algorithm, hmac: hmacNode });
-              if (r && r.code) otpSet.add(String(r.code));
-            } catch { /* */ }
-          }
-        }
-      } finally {
-        try { kb.bytes.fill(0); } catch { /* */ }
-      }
-      if (!otpSet.size) return { ok: false, locked: false, movedOn: true, values: [], pwValues: [], otpValues: [] };
-      const pwValues = BL.scrubSecretsOf(o.rec, { minBytes, includePrevious: true });
-      const otpValues = [...otpSet];
-      return { ok: true, locked: false, movedOn: false, values: [...new Set([...pwValues, ...otpValues])], pwValues, otpValues };
-    }
-    const r = BL.slotSecretsAtRev(o.rec, { typedSlot, rev, entryGen, minBytes });
-    return { ...r, locked: false, pwValues: r.ok ? r.values : [], otpValues: [] };
   }
 
   function onVaultOpen(fn) { if (typeof fn === 'function') openListeners.push(fn); }
@@ -1032,7 +972,6 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     grant,
     ungrant,
     scrubSecretsOf,
-    fenceSecretsOf,
     isLocked,
     onVaultOpen,
     onVaultLock,

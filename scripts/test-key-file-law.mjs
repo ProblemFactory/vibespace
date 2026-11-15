@@ -847,10 +847,10 @@ try {
     'RULE 5′ runtime data/ sweep (live browser-dialogs fillVaultField): store keys, vault password, account secret and typed web-login P0/P1 leave 0 raw/sha256/sha1/sha512 traces across all files under data/',
     sweepHits0.join(' | '));
   const dsrc5 = realRead(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-  const m4Src5 = dsrc5.replace(
-    '          urlAtFill: String(e.liveFill.urlAtFill || tabLoginUrlOf(e)),',
-    '          urlAtFill: String((e.liveFill.credSigs && e.liveFill.credSigs[0] && e.liveFill.credSigs[0].sha256) || e.liveFill.urlAtFill || tabLoginUrlOf(e)),',
-  );
+  // lane chrome-157 (vault-login round 32): the fence record's writer is SHAPE S's one record kind now — M4's anchor follows its
+  // address line; the mutant still smuggles the typed value's digest into the persisted record; a gone anchor fails BY NAME
+  const m4Anchor = "          const urlAtFill = curUrl && curOrigin === lfOrigin ? String(curUrl) : String(e.liveFill.urlAtFill || curUrl || '');";
+  const m4Src5 = dsrc5.split(m4Anchor).length === 2 ? dsrc5.replace(m4Anchor, "          const urlAtFill = String((e.liveFill.credSigs && e.liveFill.credSigs[0] && e.liveFill.credSigs[0].sha256) || (curUrl && curOrigin === lfOrigin ? String(curUrl) : String(e.liveFill.urlAtFill || curUrl || '')));") : dsrc5;
   const MUT5 = mutantCopies('key-file-law-r22-m4', REPO);
   const Dm5M4 = m4Src5 !== dsrc5 ? MUT5.load('src/server/browser-dialogs.js', m4Src5, 'kfl-m4-evasive') : null;
   const d5M4 = freshDir('r22-data-m4');
@@ -884,7 +884,7 @@ try {
     && sweepHitsM4.includes(`${path.join('sub', 'nested-sha512.json')}:loginP0`)
     && sweepHitsM4.includes(`${path.join('profiles', 'bp-00000001', 'leak.json')}:loginP0`)
     && sweepHitsM4.includes(`${path.join('run', 'leak.json')}:loginP0`),
-    'RULE 5′ PIN B evasive-mutant M4 RED control: smuggling credSigs.sha256 into persisted scrubs via live fillVaultField (and digests under sub/, profiles/, and run/) goes RED',
+    Dm5M4 ? 'RULE 5′ PIN B evasive-mutant M4 RED control: smuggling credSigs.sha256 into the persisted fence record via live fillVaultField (and digests under sub/, profiles/, and run/) goes RED' : 'RULE 5′ PIN B M4: its anchor is gone in src/server/browser-dialogs.js (the fence record\'s address line)',
     sweepHitsM4.join(' | '));
   w5.shutdown();
   await fk5.close();

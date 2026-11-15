@@ -1354,51 +1354,45 @@ function normalizeRegistry(doc) {
       key: v.key, profileId: k, since: Number(v.since) || 0, launched: v.launched === true, ownTab: /^[0-9A-Fa-f]{32}$/.test(String(v.ownTab || '')) ? String(v.ownTab) : null,
       adopted: (Array.isArray(v.adopted) ? v.adopted : []).map(String).filter((x) => /^[0-9A-Fa-f]{32}$/.test(x)).slice(-32), // verify r2: the orphan tabs he took
       state: v.state === 'driving' ? 'driving' : 'away', awaySince: Number(v.awaySince) || 0 }])),
-    // lane vault-login: persisted live-fill tab fences (`{targetId, urlAtFill, origin, loginId, at, mode?, browserKey?, holdReason?, typedSlot?, rev?, entryGen?, typedPrevious?, unknownTyped?, also?}`)
-    // and scrub entry names (`{name, at}` — NEVER a secret value or digest) per profile so hub/watch restarts re-arm both layers
-    loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => {
-      const normFenceRow = (f) => {
-        const also = Array.isArray(f.also) ? f.also.filter((a) => a && typeof a === 'object' && typeof a.loginId === 'string' && a.loginId).slice(-8).map((a) => ({
-          loginId: String(a.loginId).slice(0, 320),
-          ...(a.typedSlot === 'current' || a.typedSlot === 'password' || a.typedSlot === 'previous' || a.typedSlot === 'pending' || a.typedSlot === 'otp' ? { typedSlot: a.typedSlot } : {}),
-          ...(Number.isInteger(a.rev) && a.rev >= 1 ? { rev: a.rev } : {}),
-          ...(typeof a.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(a.entryGen) ? { entryGen: a.entryGen } : {}),
-          ...(a.typedPrevious === true ? { typedPrevious: true } : {}),
-          ...(Number.isFinite(a.at) && a.at > 0 ? { at: Math.floor(a.at) } : {}),
-        })) : [];
-        return {
-          targetId: String(f.targetId).slice(0, 64),
-          urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
-          origin: String(f.origin).slice(0, 512),
-          loginId: String(f.loginId || '').slice(0, 320),
-          at: Number(f.at) || 0,
-          ...(typeof f.mode === 'string' && f.mode ? { mode: String(f.mode).slice(0, 24) } : {}),
-          ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
-          ...(typeof f.holdReason === 'string' && f.holdReason ? { holdReason: String(f.holdReason).slice(0, 120) } : {}),
-          ...(f.typedSlot === 'current' || f.typedSlot === 'password' || f.typedSlot === 'previous' || f.typedSlot === 'pending' || f.typedSlot === 'otp' ? { typedSlot: f.typedSlot } : {}),
-          ...(Number.isInteger(f.rev) && f.rev >= 1 ? { rev: f.rev } : {}),
-          ...(typeof f.entryGen === 'string' && /^lg-[0-9a-z]{6,24}$/.test(f.entryGen) ? { entryGen: f.entryGen } : {}),
-          ...(f.typedPrevious === true ? { typedPrevious: true } : {}),
-          ...(f.unknownTyped === true ? { unknownTyped: true } : {}),
-          ...(f.postLiftHeld === true ? { postLiftHeld: true } : {}),
-          ...(also.length ? { also } : {}),
-        };
-      };
-      const fences = (Array.isArray(v.fences) ? v.fences : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map(normFenceRow);
-      const guards = (Array.isArray(v.guards) ? v.guards : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => {
-        const nr = normFenceRow(f);
-        delete nr.holdReason;
-        delete nr.unknownTyped;
-        delete nr.postLiftHeld;
-        return nr;
-      });
-      const scrubs = (Array.isArray(v.scrubs) ? v.scrubs : []).filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
-        name: String(s.name).slice(0, 320),
-        at: Number(s.at) || 0,
-      }));
-      return [k, { fences, scrubs, ...(guards.length ? { guards } : {}) }];
-    }).filter(([, v]) => v.fences.length || v.scrubs.length || (v.guards && v.guards.length))),
+    // lane vault-login (Shape S, r32): persisted tab fences (`{targetId, urlAtFill, origin, at, browserKey?}` — zero login
+    // identity, digests, or secret values on disk; legacy `{fences, guards}` records merge into `fences` so every fenced or
+    // guarded tab at Hub shutdown stays fenced until top-frame navigation) + scrub entry names (`{name, at}`).
+    loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => [k, normalizeLoginFenceState(v)]).filter(([, v]) => v.fences.length || v.scrubs.length)),
   };
+}
+/** Shape S normalizer for one profile's persisted `loginFences` record: merges `fences` + legacy `guards` (deduplicated by
+ *  `targetId`, bounded to 32) keeping ONLY `{targetId, urlAtFill, origin, at, browserKey?}`, plus `scrubs` (`{name, at}`). */
+function normalizeLoginFenceState(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return { fences: [], scrubs: [] };
+  const rawRows = [
+    ...(Array.isArray(v.fences) ? v.fences : []),
+    ...(Array.isArray(v.guards) ? v.guards : []),
+  ];
+  const byTarget = new Map();
+  for (const f of rawRows) {
+    if (!f || typeof f !== 'object' || typeof f.targetId !== 'string' || !f.targetId || typeof f.origin !== 'string' || !f.origin) continue;
+    const tid = String(f.targetId).slice(0, 64);
+    const prev = byTarget.get(tid);
+    const urlAtFill = String(f.urlAtFill || (prev && prev.urlAtFill) || '').slice(0, 2048);
+    const origin = String(prev ? prev.origin : f.origin).slice(0, 512);
+    const at = Math.max(Number(prev && prev.at) || 0, Number(f.at) || 0);
+    const bk = typeof (prev && prev.browserKey ? prev.browserKey : f.browserKey) === 'string' && (prev && prev.browserKey ? prev.browserKey : f.browserKey)
+      ? String(prev && prev.browserKey ? prev.browserKey : f.browserKey).slice(0, 40)
+      : '';
+    byTarget.set(tid, {
+      targetId: tid,
+      urlAtFill,
+      origin,
+      at,
+      ...(bk ? { browserKey: bk } : {}),
+    });
+  }
+  const fences = [...byTarget.values()].slice(-32);
+  const scrubs = (Array.isArray(v.scrubs) ? v.scrubs : [])
+    .filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name.startsWith('web-login:'))
+    .slice(-32)
+    .map((s) => ({ name: String(s.name).slice(0, 320), at: Number(s.at) || 0 }));
+  return { fences, scrubs };
 }
 /** Resolve a profile by id or by label (exact, case-insensitive). */
 function findProfile(profiles, ref) {
@@ -3490,7 +3484,7 @@ module.exports = {
   FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice, floorNoticeDetail, // B-0b8c: + the settled-unknown notice's detail
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
-  normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
+  normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, normalizeLoginFenceState, findProfile, publicProfileView,
   SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, pairsIdleMs, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,

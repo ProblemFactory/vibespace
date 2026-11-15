@@ -913,251 +913,6 @@ export async function runR29LoginNails({ repoDir, ok }) {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // R29-3 — ITEM 3: FULL FENCE RESTORATION ACROSS HUB RESTART
-    // ──────────────────────────────────────────────────────────────────────────
-    {
-      // 3a) Pure B.normalizeRegistry round-trip check for every persisted loginFences field
-      const sampleState = {
-        version: 1,
-        profiles: [],
-        leases: [],
-        browsers: {},
-        loginFences: {
-          'bp-00001234': {
-            fences: [{
-              targetId: 'T-RESTART',
-              urlAtFill: 'https://restart29.example.test/login',
-              origin: 'https://restart29.example.test',
-              loginId: 'web-login:https://restart29.example.test#alice',
-              at: 1_765_000_123_000,
-              mode: 'change',
-              browserKey: 'bk-00001234',
-              holdReason: 'vault_locked',
-              typedSlot: 'otp',
-              rev: 3,
-              entryGen: 'lg-abcdef012345',
-              typedPrevious: true,
-              unknownTyped: true,
-              also: [{
-                loginId: 'web-login:https://restart29.example.test#bob',
-                typedSlot: 'password',
-                rev: 2,
-                entryGen: 'lg-112233445566',
-                typedPrevious: true,
-                at: 1_765_000_120_000,
-              }],
-            }],
-            scrubs: [{ name: 'web-login:https://restart29.example.test#bob', at: 1_765_000_120_000 }],
-          },
-        },
-      };
-      const loaded = B.normalizeRegistry(sampleState);
-      const lf0 = loaded?.loginFences?.['bp-00001234']?.fences?.[0] || null;
-      const also0 = lf0 && Array.isArray(lf0.also) ? lf0.also[0] : null;
-
-      // 3b) End-to-end Hub restart scenes: (1) two-logins (<8B short + >=8B long) & (2) cold-locked +11m OTP hydration
-      const ORIGIN = 'https://restart29.example.test';
-      const SHORT_BOB = 'Sh!7';
-      const LONG_ALICE = 'AliceRestartPw!2026';
-      const dataDir = path.join(tmpRoot, 'data-r29-3');
-      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-      let clock = 1_765_100_000_000;
-
-      const fk = await startFakeKernel({
-        firstUrl: `${ORIGIN}/login`,
-        mode: { standard: true, omitFilledPassword: true },
-      });
-      const tidTwo = fk.targets()[0].targetId;
-      const tidOtp = fk.addTarget(`${ORIGIN}/otp`);
-      fk.setDom(tidTwo, {
-        url: `${ORIGIN}/login`,
-        elements: [
-          { id: 'u', tag: 'input', type: 'text', name: 'Mirror' },
-          { id: 'pw', tag: 'input', type: 'password', name: 'Password' },
-        ],
-      });
-      fk.setDom(tidOtp, {
-        url: `${ORIGIN}/otp`,
-        elements: [
-          { id: 'otp', tag: 'input', type: 'text', name: 'OTP' },
-        ],
-      });
-      const relay = await startKernelRelay(fk);
-      const med3 = CM.create({ log: quiet });
-      await med3.listen();
-
-      const mkKeeperWrap = () => {
-        const k = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), log: quiet, now: () => clock, install: false, mediator: med3 });
-        return {
-          raw: k,
-          wrap: {
-            ...k,
-            cdpEndpointFor: async () => ({ ok: true, url: relay.wsUrl }),
-            browserOf: () => ({ state: 'ready', wsEndpoint: relay.wsUrl, cdpPort: relay.port }),
-          },
-        };
-      };
-      const k1 = mkKeeperWrap();
-      const prof = k1.raw.createProfile({ label: 'RestartProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
-      const PID = prof.id;
-      const KEY = 'bk-0000a293';
-
-      const vault1 = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
-      await vault1.setup('r29-3-master');
-      const vtotp1 = VT.create({ dataDir, vault: vault1, now: () => clock });
-      vtotp1.addEntry({ name: 'rst-2fa', seed: 'JBSWY3DPEHPK3PXP' });
-      const grants1 = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
-      const logins1 = Lm.create({
-        vault: vault1,
-        grants: () => grants1,
-        totpCode: (n, o) => vtotp1.codeForLogin(n, o),
-        now: () => clock,
-        log: quiet.log,
-      });
-      logins1.addOwn({ origin: ORIGIN, username: 'bob', password: SHORT_BOB }, { who: 'owner' });
-      logins1.addOwn({ origin: ORIGIN, username: 'alice', password: LONG_ALICE, totpName: 'rst-2fa' }, { who: 'owner' });
-      grants1.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
-
-      const dialogs1 = Dm.create({
-        keeper: k1.wrap,
-        logins: logins1,
-        holdersOf: () => [{ browserKey: KEY, sessionId: 's-r293', ephemeral: false }],
-        leaseCountOf: () => 1,
-        liveFillMaxMs: 60_000,
-        enableTimeoutMs: 1200,
-        interceptTimeoutMs: 1200,
-        now: () => clock,
-        log: quiet,
-      });
-
-      let twoLoginsWipedBoth = false;
-      let otpLockedReasonRight = false;
-      let otpUnlockedWipedAtT0 = false;
-      let otpAtT0 = '';
-      let otpAtPlus11m = '';
-      try {
-        await dialogs1.arm(PID);
-        // Tab 1 (`tidTwo`): fill bob (`Sh!7`, <8B) into `#pw`, site mirrors `Sh!7` into `#u` (plain input without data-vs-typed after restart!), then fill alice (`LONG_ALICE`) into `#pw`
-        const fBob = await dialogs1.fillVaultField(
-          { profileId: PID, browserKey: KEY },
-          { target: '#pw', spec: 'restart29.example.test#bob/password', targetId: tidTwo, facts: { conversationKeys: [KEY] } },
-        );
-        // Site JS copies bob's short password into `#u` (setting `defaultValue` too, so `allowTypedHeuristic` alone misses it after restart unless `f.also` hydrates bob!)
-        const rawWs = await openCdpWs(WebSocket, relay.wsUrl, tidTwo);
-        await rawWs.evalInDom('(() => { const u = document.querySelector("#u"); u.value = document.querySelector("#pw").value; u.defaultValue = u.value; return u.value; })()');
-        rawWs.close();
-        const fAlice = await dialogs1.fillVaultField(
-          { profileId: PID, browserKey: KEY },
-          { target: '#pw', spec: 'restart29.example.test#alice/password', targetId: tidTwo, facts: { conversationKeys: [KEY] } },
-        );
-
-        // Tab 2 (`tidOtp`): fill alice/otp at `t0 = clock`
-        otpAtT0 = vtotp1.codeForLogin('rst-2fa', { conv: 'probe' }).code || '';
-        const fOtp = await dialogs1.fillVaultField(
-          { profileId: PID, browserKey: KEY },
-          { target: '#otp', spec: 'restart29.example.test#alice/otp', targetId: tidOtp, facts: { conversationKeys: [KEY] } },
-        );
-
-        // Simulate FULL HUB RESTART #1 (unlocked, past ceiling +65s -> `tidTwo` must wipe BOTH `LONG_ALICE` in `#pw` AND `SHORT_BOB` in `#u` via `f.also`!)
-        dialogs1.shutdown();
-        k1.raw.shutdown();
-        LF.clearAllFilledSecrets?.();
-
-        // First test `tidOtp` across a COLD-LOCKED restart at `t0 + 11 min` (before ceiling if `liveFillMaxMs = 20 min`, or past ceiling!)
-        // Advance `+11 min` (`660_000 ms`): `tidTwo` AND `tidOtp` are both past `liveFillMaxMs = 60_000`!
-        // First restart UNLOCKED at `+2s` (within ceiling) -> lock -> advance `+11m` -> unlock!
-        // Wait: even better — restart COLD-LOCKED directly at `t0 + 11 min`!
-        clock += 11 * 60_000;
-        vault1.close();
-
-        const vault2 = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clock });
-        // Notice `vault2` starts LOCKED (cold boot)!
-        const vtotp2 = VT.create({ dataDir, vault: vault2, now: () => clock });
-        const grants2 = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
-        const logins2 = Lm.create({
-          vault: vault2,
-          grants: () => grants2,
-          totpCode: (n, o) => vtotp2.codeForLogin(n, o),
-          now: () => clock,
-          log: quiet.log,
-        });
-        const k2 = mkKeeperWrap();
-        const dialogs2 = Dm.create({
-          keeper: k2.wrap,
-          logins: logins2,
-          holdersOf: () => [{ browserKey: KEY, sessionId: 's-r293', ephemeral: false }],
-          leaseCountOf: () => 1,
-          liveFillMaxMs: 60_000,
-          enableTimeoutMs: 1200,
-          interceptTimeoutMs: 1200,
-          now: () => clock,
-          log: quiet,
-        });
-        try {
-          await dialogs2.arm(PID);
-          // While locked on cold boot: `tidOtp` fence MUST say `vault_locked` (NEVER `unknown_typed` / "login changed since filling"!)
-          const lfOtpLocked = dialogs2.liveFillOnTarget(PID, tidOtp);
-          otpLockedReasonRight = Boolean(
-            fBob.ok && fAlice.ok && fOtp.ok
-              && lfOtpLocked
-              && lfOtpLocked.holdReason === 'vault_locked'
-              && !lfOtpLocked.unknownTyped,
-          );
-
-          // Now UNLOCK `vault2` at `t0 + 11 min`! `onVaultOpen` triggers `expireLiveFillCeiling` on BOTH `tidTwo` and `tidOtp`!
-          await vault2.unlock('r29-3-master');
-          otpAtPlus11m = vtotp2.codeForLogin('rst-2fa', { conv: 'probe2' }).code || '';
-          await sleep(180);
-
-          const chkTwo = await openCdpWs(WebSocket, relay.wsUrl, tidTwo);
-          const valsTwo = await chkTwo.evalInDom('JSON.stringify({ u: document.querySelector("#u").value, pw: document.querySelector("#pw").value })');
-          chkTwo.close();
-
-          const chkOtp = await openCdpWs(WebSocket, relay.wsUrl, tidOtp);
-          const valsOtp = await chkOtp.evalInDom('document.querySelector("#otp").value');
-          chkOtp.close();
-
-          const parsedTwo = JSON.parse(valsTwo?.result?.result?.value || '{}');
-          const otpDomAfter = valsOtp?.result?.result?.value;
-          twoLoginsWipedBoth = parsedTwo.u === '' && parsedTwo.pw === '' && dialogs2.liveFillOnTarget(PID, tidTwo) === null;
-          otpUnlockedWipedAtT0 = otpDomAfter === '' && dialogs2.liveFillOnTarget(PID, tidOtp) === null && otpAtT0.length === 6;
-        } finally {
-          dialogs2.shutdown();
-          k2.raw.shutdown();
-          vault2.close();
-        }
-      } finally {
-        try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
-        dialogs1.shutdown();
-        k1.raw.shutdown();
-        vault1.close();
-        await med3.shutdown();
-        await relay.close();
-        await fk.close();
-      }
-
-      const loaderOk = Boolean(
-        lf0
-          && lf0.mode === 'change'
-          && lf0.typedSlot === 'otp'
-          && lf0.typedPrevious === true
-          && lf0.unknownTyped === true
-          && also0
-          && also0.loginId === 'web-login:https://restart29.example.test#bob'
-          && also0.typedSlot === 'password'
-          && also0.rev === 2
-          && also0.entryGen === 'lg-112233445566'
-          && also0.typedPrevious === true
-          && also0.at === 1_765_000_120_000,
-      );
-      ok(
-        loaderOk && twoLoginsWipedBoth && otpLockedReasonRight && otpUnlockedWipedAtT0,
-        'R29-3 (Item 3 full restart restoration): loadState preserves mode/typedSlot=otp/typedPrevious/unknownTyped/also(at), two-logins wipes <8B short secret from first login via also, and cold-locked +11m OTP restart holds vault_locked (not unknown_typed) then wipes t0 OTP on unlock',
-        { loaderOk, lf0, twoLoginsWipedBoth, otpLockedReasonRight, otpUnlockedWipedAtT0, otpAtT0, otpAtPlus11m },
-      );
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
     // R29-4 — ITEM 4: "VALUE HAS LEFT THE PAGE" (`wipeNode` change/blur + `P2c`/`P2e` re-injection)
     // ──────────────────────────────────────────────────────────────────────────
     {
@@ -1694,41 +1449,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
         await sleep(350);
         const m2m4Held = Boolean(dialogs.liveFillOnTarget(PID, tidLock));
 
-        // Trigger `M5` (`expireLiveFillCeiling` while locked with `sigs.length === 2` & `svs.length === 1`):
-        // Re-unlock briefly to arm a short-ceiling dialogs or trigger ceiling via `M6` + `M5`:
-        // Wait: `dialogs` has `liveFillMaxMs: 60_000`; let's also test `M5` directly with a 120ms-ceiling `dialogsM5`!
-        // First trigger `M6` (`rearmLoginFences` past ceiling while locked, AND `M13` persisted `holdReason: 'vault_locked'` within ceiling!):
-        const savedBeforeM6 = keeper.loginFenceStateOf(PID);
-        // Seed `tidM13` in persisted state within ceiling (`clock - 1000`) with `holdReason: 'vault_locked'`, while `tidLock` is past ceiling (`clock - 70_000`)!
-        clock += 70_000;
-        keeper.saveLoginFenceState(PID, {
-          fences: [
-            ...savedBeforeM6.fences.filter((f) => f.targetId === tidLock),
-            {
-              targetId: tidM13,
-              urlAtFill: `${ORIGIN}/hold`,
-              origin: ORIGIN,
-              loginId: `web-login:${ORIGIN}#alice`,
-              at: clock - 1000,
-              mode: 'login',
-              browserKey: KEY,
-              holdReason: 'vault_locked',
-              typedSlot: 'current',
-              rev: 1,
-            },
-          ],
-          scrubs: savedBeforeM6.scrubs,
-        });
-        relay.dropClientSockets();
-        await sleep(40);
-        await dialogs.arm(PID);
-        await sleep(120);
-        const m6Held = Boolean(dialogs.liveFillOnTarget(PID, tidLock));
-        const lfM13 = dialogs.liveFillOnTarget(PID, tidM13);
-        const persistedM13 = (keeper.loginFenceStateOf(PID).fences || []).find((f) => f.targetId === tidM13);
-        const m13Held = Boolean(lfM13 && lfM13.holdReason === 'vault_locked' && persistedM13 && persistedM13.holdReason === 'vault_locked');
-
-        // Dedicated `M5` probe (`expireLiveFillCeiling` timer firing while locked with `sigs.length === 2` & `svs.length === 1`!):
+        // Dedicated `M5` probe (`expireLiveFillCeiling` timer firing while in-memory targets are missing):
         await vault.unlock('r29-5b-pass');
         dialogs.shutdown();
         const dialogsM5 = Dm.create({
@@ -1757,7 +1478,7 @@ export async function runR29LoginNails({ repoDir, ok }) {
           LF.clearFilledSecretsForTarget(tidLock);
           vault.lock();
           clock += 200;
-          await sleep(240); // `liveFillTimer` fires `expireLiveFillCeiling` while locked (`sigs.length === 2`, `svs.length === 1`)!
+          await sleep(240); // `liveFillTimer` fires `expireLiveFillCeiling` while in-memory targets are missing!
           m5Held = Boolean(dialogsM5.liveFillOnTarget(PID, tidLock));
         } finally {
           dialogsM5.shutdown();
@@ -1768,9 +1489,9 @@ export async function runR29LoginNails({ repoDir, ok }) {
             && resM10.ok === false && m10StillFenced && m10PendingKept
             && resM11.ok === false && resM11.code === 'login_phishing' && m11FenceCleared
             && fLockAlice.ok === true && fLockBob.ok === true
-            && m2m4Held && m5Held && m6Held && m13Held,
-          'R29-5b (Reader B mutants M2, M4, M5, M6, M8, M10, M11, M13): partial-sigs lock holds across submit/ceiling/rearm (M2, M4, M5, M6), stale-rev rollback preserves newer pending (M8), unconfirmed-empty post-insert error keeps fence+pending (M10), pre-insert abort clears armed fence (M11), and rearm preserves vault_locked holdReason (M13)',
-          { genEntryAfterM8, resM10, m10StillFenced, m10PendingKept, resM11, m11FenceCleared, m2m4Held, m5Held, m6Held, m13Held },
+            && m2m4Held && m5Held,
+          'R29-5b (Reader B in-memory mutants M2, M4, M5, M8, M10, M11): missing in-memory targets hold across submit/ceiling (M2, M4, M5), stale-rev rollback preserves newer pending (M8), unconfirmed-empty post-insert error keeps fence+pending (M10), and pre-insert abort clears armed fence (M11)',
+          { genEntryAfterM8, resM10, m10StillFenced, m10PendingKept, resM11, m11FenceCleared, m2m4Held, m5Held },
         );
       } finally {
         try { LF.clearAllFilledSecrets?.(); } catch { /* */ }

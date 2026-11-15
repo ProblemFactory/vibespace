@@ -375,6 +375,14 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     t.frames.set(fid, f);
     return f;
   }
+  // lane chrome-157 (vault-login round 32, Q3's leg): a page that changes its own title and address WITHOUT a navigation (the
+  // leg's page copies what was typed into both) — Chrome says so in Target.targetInfoChanged
+  function setTitle(targetId, title, url = null) {
+    const t = targets.get(targetId); if (!t) return false;
+    t.title = String(title); if (url) t.url = String(url);
+    all({ method: 'Target.targetInfoChanged', params: { targetInfo: info(t) } });
+    return true;
+  }
   function setDom(targetId, { url, origin, elements = [], childFrames = [], axPadBytes = 0 } = {}) {
     const t = targets.get(targetId) || [...targets.values()][0];
     if (!t) return false;
@@ -1000,7 +1008,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
-    setDom, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
+    setDom, setTitle, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
     navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },
     egress: () => egressLog.slice() }; // lane engine-spi-egress: every navigation's fetch (through the proxy or direct)

@@ -17,7 +17,7 @@
 //      (`[login_bad_field]`), `L4` two-tab `@ref` isolation (`[target_not_found]`, 0 `Input.insertText`, background tab untouched),
 //      cross-origin page (`[login_phishing]`), `L1`+`N4` accidental cross-origin leak fence (`urlencoded`, `json`, `multipart/form-data`,
 //      `text/plain`, `GET ?q=btoa(pw)`, fail-closed `application/octet-stream` & scan caps -> `BlockedByClient`, harmless `FormData` allowed,
-//      same-origin all 5 allowed), `N1`+`A1` locked-restart fail-closed fence, and `M1` `vault_locked` (`423`, 0 CDP calls).
+//      same-origin all 5 allowed), `N1` fail-closed fence across mode flips, the SHAPE S leg (a restart holds the tab until it navigates; an unlock changes nothing), and `M1` `vault_locked` (`423`, 0 CDP calls).
 //   ⑤ Zero-secret & zero-digest byte sweep across all output surfaces AND all files on disk (Ruling 5c / RULE 5′) +
 //      6 named RED mutants (`origin-gate-removed`, `read-fence-removed`, `mask-wipe-removed`, `multipart-branch-removed`,
 //      `secretNames-without-rev`, `async-focus-seam`) on REAL Chrome.
@@ -507,7 +507,7 @@ try {
         'L2 on real Chrome: re-registration after loginRevFloor rise (rev>=2) confirms cleanly via .vw-login-confirm click');
     }
 
-    console.log('④ Origin/field gates & accidental-leak/phishing fences on REAL Chrome: L5+N5 focus guards, iframe, plain input, L4 two-tab @ref, phishing, L1+N4 accidental-leak caps, N2 3000-row AX, N1+A1 hold+locked-restart, M1 0-CDP lock');
+    console.log('④ Origin/field gates & accidental-leak/phishing fences on REAL Chrome: L5+N5 focus guards, iframe, plain input, L4 two-tab @ref, phishing, L1+N4 accidental-leak caps, N2 3000-row AX, N1 hold, SHAPE S restart (held until it navigates; an unlock changes nothing), M1 0-CDP lock');
     {
       // L5 + N5 + Ruling 5a (Ruling A accidental focus-steal guard): Focus steal (`sync`, `queueMicrotask`, `setTimeout(..., 0)`, `MutationObserver` stripping `inert`) to `<input id="decoy" type="text">` on REAL Chrome!
       for (const mode of ['sync', 'microtask', 'timeout', 'mo-inert']) {
@@ -752,7 +752,10 @@ try {
           'N1 on real Chrome: during holdReason=tooMuchText and across agent->person->agent mode flip, foreign fetch() stays BlockedByClient (+1 dedup notice, 0 evil hits)',
           { lvHoldN1, ev1: ev1?.body, evPerson: evPerson?.body, evBackAgent: evBackAgent?.body, evilHits: evilPagesN1.received().length, noticeDelta: noticesAfterHoldN1 - noticesBeforeHoldN1 });
 
-        // A1 on REAL Chrome: Hub restart (watch down, LF memory cleared, fresh locked vault-engine + browser-logins) -> pre-unlock foreign fetch blocked -> unlock -> foreign fetch blocked!
+        // SHAPE S on REAL Chrome (round 32, 主开发's ruling Q4 — a leg of its own): A RESTART HOLDS THE TAB UNTIL IT NAVIGATES; AN UNLOCK
+        // CHANGES NOTHING. Hub restart (watch down, the fill's memory cleared, a fresh LOCKED vault + logins) ⇒ the tab is held — the
+        // unknown-typed hold, no typed value in memory — and the page's foreign fetch() is blocked; the vault is unlocked ⇒ still the SAME
+        // hold (nothing restored from the vault) and still blocked.
         dN1.shutdown();
         LF.clearAllFilledSecrets();
         const engRestart = VE.create({ dataDir: w.VD, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {}, error() {} }, idleTimer: false });
@@ -772,6 +775,8 @@ try {
         await dRestart.arm(w.prof.id);
         const lockedAtBoot = loginsRestart.isLocked();
         const lvLockedBoot = dRestart.liveFillVerdictFor({ profileId: w.prof.id, browserKey: 'bk-0000f1a1' }, { verb: 'eval', argv: ['eval', '1'] });
+        const holdOf = () => { const lf = dRestart.liveFillOnTarget(w.prof.id, tHold.targetId); return lf ? { holdReason: lf.holdReason || '', typed: Array.isArray(lf.credSigs) ? lf.credSigs.length : -1 } : null; };
+        const holdLocked = holdOf();
         pages.clear();
         await sendN1('Runtime.evaluate', { expression: "document.getElementById('hevil').click()" }, sidHold);
         const evPreUnlock = await until(() => pages.received().find((x) => x.path === '/done/hold-evil'), 6000);
@@ -779,18 +784,25 @@ try {
         await engRestart.unlock(w.VPW);
         const unlockedAfter = !loginsRestart.isLocked();
         const lvAfterUnlock = dRestart.liveFillVerdictFor({ profileId: w.prof.id, browserKey: 'bk-0000f1a1' }, { verb: 'eval', argv: ['eval', '1'] });
+        const holdUnlocked = holdOf();
+        const notRestored = Boolean(holdLocked && holdUnlocked && holdLocked.holdReason === 'unknown_typed' && holdUnlocked.holdReason === 'unknown_typed' && holdLocked.typed === 0 && holdUnlocked.typed === 0);
         pages.clear();
         await sendN1('Runtime.evaluate', { expression: "document.getElementById('hevil').click()" }, sidHold);
         const evPostUnlock = await until(() => pages.received().find((x) => x.path === '/done/hold-evil'), 6000);
         const wrongChangedNotice = fyRestart.some((x) => /login changed since filling/i.test(x.it?.text || ''));
 
+        const twoDoorsAndBlock = (err) => /reload or navigate this tab/i.test(err || '')
+          && /open or switch to another tab/i.test(err || '')
+          && /cross-origin requests from this page are blocked/i.test(err || '');
+
         ok(lockedAtBoot === true && unlockedAfter === true
-          && !lvLockedBoot.ok && /too much text/i.test(lvLockedBoot.error || '')
-          && !lvAfterUnlock.ok && /too much text/i.test(lvAfterUnlock.error || '')
+          && !lvLockedBoot.ok && twoDoorsAndBlock(lvLockedBoot.error)
+          && !lvAfterUnlock.ok && twoDoorsAndBlock(lvAfterUnlock.error)
           && evPreUnlock?.body?.ok === false && evPostUnlock?.body?.ok === false
+          && notRestored
           && evilPagesN1.received().length === 0 && wrongChangedNotice === false,
-          'A1 on real Chrome: across Hub restart (locked vault-engine + browser-logins, 0 credSigs on disk) and unlock, hold stays tooMuchText and foreign fetch() is BlockedByClient at every step',
-          { lockedAtBoot, unlockedAfter, lvLockedBoot, lvAfterUnlock, evPreUnlock: evPreUnlock?.body, evPostUnlock: evPostUnlock?.body, evilHits: evilPagesN1.received().length, wrongChangedNotice });
+          'SHAPE S on real Chrome: a restart holds the tab until it navigates; an unlock changes nothing — the same unknown-typed hold with no typed value before and after the unlock, both doors named, the page\'s cross-origin fetch() blocked before and after',
+          { lockedAtBoot, unlockedAfter, holdLocked, holdUnlocked, lvLockedBoot, lvAfterUnlock, evPreUnlock: evPreUnlock?.body, evPostUnlock: evPostUnlock?.body, evilHits: evilPagesN1.received().length, wrongChangedNotice });
 
         dRestart.shutdown();
         engRestart.close();

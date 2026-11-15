@@ -30,10 +30,10 @@
  *     For-you card on `Input.insertText` CDP error when `verifiedEmpty === true` so immediate retry returns
  *     `200`, while `Input.insertText` timeout stays fail-closed with actionable `/pending` / discard guidance.
  *   - R28-6a: Property 4 `4-1` — First fill = 6-digit OTP (entry also has `>= 8`-byte password) -> `vault.lock()`
- *     -> watch reconnect (`rearmLoginFences`) -> ceiling expiry / same-origin submit: 0 OTP chars readable (+ MUTANT 35).
+ *     -> watch reconnect (`rearmLoginFences`) -> ceiling expiry / same-origin submit: 0 OTP chars readable.
  *   - R28-6b: Property 4 `4-2` — Tab 1 caches another site's `>= 8`-byte password while never-filled Tab 2
- *     fills `< 8`-byte short password -> unlocked Hub restart -> `vault.lock()` -> watch reconnect -> ceiling
- *     expiry: `scrubValuesForLogin` isolates by `loginId` and `fenceLacksSecretsWhileLocked` holds fail-closed.
+ *     fills `< 8`-byte short password -> Hub restart -> `vault.lock()` -> watch reconnect -> ceiling
+ *     expiry: `scrubValuesForLogin` isolates by `loginId` and Shape S holds fail-closed until navigation.
  *   - R28-6c: 3 True First-Fill Child-Process Scenarios (`long` >= 8B password, `short` < 8B password, `otp`
  *     6-digit code) — each in a fresh `node` child process with 0 prior fills and 0 `clear*` helpers, plus
  *     never-unlocked second-process boot verification.
@@ -1704,76 +1704,6 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
         'R28-6a (Property 4 4-1): first fill = 6-digit OTP (entry also has >=8B password) -> vault.lock() -> watch reconnect -> ceiling expiry never drops fence with 6-digit OTP still on page',
         { fOtp: fOtp.status, domOtpAfter, readOtpAfter: { status: readOtpAfter.status, code: readOtpAfter.json?.code }, otpExposed },
       );
-
-      // MUTANT 35 RED (`fenceLacksSecretsWhileLocked` `sigs.length === 0` returning `availVals.length === 0` + dropping `stashedStepOtpsByProfile`):
-      if (MUT) {
-        const bdSrc = fs.readFileSync(path.join(repoDir, 'src/server/browser-dialogs.js'), 'utf8');
-        const m35Src = bdSrc
-          .replace('    if (sigs.length === 0) return true;\n', '')
-          .replace(
-            '    return !sigs.every((sg) => sg && valSigs.some((vs) => vs.len === sg.len && vs.sha256 === sg.sha256));',
-            '    return sigs.length > 0 ? !sigs.every((sg) => sg && valSigs.some((vs) => vs.len === sg.len && vs.sha256 === sg.sha256)) : availVals.length === 0;',
-          )
-          .replace('stashedOtp = cand;', 'stashedOtp = null;');
-        if (m35Src !== bdSrc) {
-          const DM_M35 = MUT.load('src/server/browser-dialogs.js', m35Src, 'r28-4-1-sigs-empty-availvals-check');
-          const mTab = fk.addTarget(`${ORIGIN}/otp-mut`);
-          fk.setDom(mTab, {
-            url: `${ORIGIN}/otp-mut`,
-            elements: [
-              { id: 'otp', tag: 'input', type: 'text', name: 'Verification code' },
-              { id: 'otp_hidden', tag: 'input', type: 'hidden', name: 'code_hidden' },
-            ],
-          });
-          let mClock = clock + 1000;
-          let mSaved = { fences: [], scrubs: [] };
-          const mKeeper = {
-            ...keeper,
-            clock: () => mClock,
-            saveLoginFenceState: (_id, st) => { mSaved = st; },
-            loginFenceStateOf: () => mSaved,
-          };
-          const dmMut = DM_M35.create({
-            keeper: mKeeper,
-            logins,
-            now: () => mClock,
-            holdersOf: () => [{ browserKey: KEY, sessionId: SID }],
-            leaseCountOf: () => 1,
-            isVaultLocked: () => vault.state() !== 'unlocked',
-            log: quiet,
-          });
-          try {
-            await dmMut.arm(PID);
-            await new Promise((r) => setTimeout(r, 30));
-            dmMut.bindTab?.({ profileId: PID, browserKey: KEY }, mTab);
-            await dmMut.fillVaultField({ profileId: PID, browserKey: KEY }, {
-              target: '#otp',
-              spec: 'shop.example.test#alice/otp',
-              targetId: mTab,
-              facts: { conversationKeys: [CONV_ID] },
-            });
-            await syncHiddenOnTab(mTab, '#otp', '#otp_hidden');
-            vault.lock();
-            mClock += 16 * 60_000;
-            relay.dropClientSockets();
-            await new Promise((r) => setTimeout(r, 30));
-            await dmMut.arm(PID);
-            await new Promise((r) => setTimeout(r, 40));
-            const verdictAfter = dmMut.liveFillVerdictFor({ profileId: PID, browserKey: KEY }, { argv: ['get', 'value', '#otp_hidden'], targetId: mTab });
-            const domMut = fk.readDomValues(mTab);
-            ok(
-              Boolean(verdictAfter && verdictAfter.ok === true) && domMut.otp_hidden === OTP_VAL,
-              'MUTANT 35 RED (R28-6a 4-1 sigs-empty-availvals): reverting sigs.length===0 to availVals.length===0 without OTP stash drops the fence while 6-digit OTP remains in #otp_hidden',
-              { verdictAfter, domMut },
-            );
-          } finally {
-            dmMut.shutdown();
-            await vault.unlock('VaultR28#SecondPw');
-          }
-        } else {
-          ok(false, 'MUTANT 35 RED: anchor not found in src/server/browser-dialogs.js');
-        }
-      }
     }
 
     // ── R28-6b: Addendum `4-2` — Tab 1 caches another site's `>= 8`-byte password while never-filled Tab 2 fills `< 8`-byte short password ──

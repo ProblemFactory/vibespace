@@ -325,7 +325,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           }
           if (lf || (!ct.wrapped && ct.unknownSession && profileFenced)) {
             const allowVerb = lf && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
-            const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null });
+            const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null, holdReason: (lf && lf.holdReason) || '' });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
               try { ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
@@ -381,7 +381,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         && (ct.wrapped || M.liveFillCdpVerdict(checkMethod, { allowVerb: null, params: checkParams }).refuse)) {
         conn.postLiftChain = Promise.resolve(conn.postLiftChain)
           .then(() => loginFence.recheckPostLift(g.profileId, checkTid))
-          .catch(() => null)
+          .catch(() => ({ ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' }))
           .then((rc) => {
             if (ws.readyState !== WebSocket.OPEN) return;
             if (rc && rc.checkFailed) {
@@ -456,12 +456,17 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           }
           if (lfNow || epochMoved || unknownWhileFenced) {
             const allowVerb = !epochMoved && lfNow && typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
-            const lfv = M.liveFillCdpVerdict(pend.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: pend.params || null });
+            const lfv = M.liveFillCdpVerdict(pend.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: pend.params || null, holdReason: (lfNow && lfNow.holdReason) || '' });
             if (lfv.refuse) {
               g.refusals = (g.refusals || 0) + 1;
               try { for (const ev of out.emit) sendClient(JSON.stringify(ev)); ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, pend.sessionId))); } catch { /* gone */ }
               return;
             }
+          }
+          // lane chrome-157 (round 32, Q3): a fenced tab's frame tree, title and location are answered with the fill's, never the document's
+          if (lfNow && !msg.error && msg.result) {
+            const fr = M.fencedReadResult(pend.method, pend.params || null, msg.result, lfNow.urlAtFill || '');
+            if (fr && out.reply && typeof out.reply === 'object') out.reply = { ...out.reply, result: fr };
           }
           if (pend.method === 'Network.getRequestPostData' || pend.method === 'Fetch.getRequestPostData') {
             const reqId = pend.params && pend.params.requestId ? String(pend.params.requestId) : '';
@@ -485,7 +490,8 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         const evSid = ev.sessionId == null ? null : String(ev.sessionId);
         const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
         const evUnknownFenced = Boolean(evSid && !evTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
-        if (M.LIVE_FILL_DROPPED_EVENTS.has(ev.method) && (liveFillFor(g.profileId, evTid) || evUnknownFenced)) {
+        // lane chrome-157 (round 32, 主开发 item 2): a fenced tab's events pass by the argued list alone (browser-mediation liveFillEventAllowed)
+        if ((liveFillFor(g.profileId, evTid) || evUnknownFenced) && !M.liveFillEventAllowed(ev, evTid)) {
           g.dropped = (g.dropped || 0) + 1;
           return;
         }
@@ -496,7 +502,7 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
           if (liveFillFor(g.profileId, innerTid) || innerUnknownFenced) {
             let inner = null;
             try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
-            if (!inner || inner.id != null || M.LIVE_FILL_DROPPED_EVENTS.has(inner.method)) { g.dropped = (g.dropped || 0) + 1; return; }
+            if (!inner || inner.id != null || !M.liveFillEventAllowed(inner, innerTid)) { g.dropped = (g.dropped || 0) + 1; return; }
           }
         }
         if (ev.method === 'Tracing.dataCollected') {

@@ -2087,7 +2087,7 @@ async function liveFillRefusal(res, k, f, profileId, req, verb) {
   }
   if (typeof D.recheckPostLiftFor === 'function') {
     let rc = null;
-    try { rc = await D.recheckPostLiftFor(t, { verb, argv, batchVerbs, targetId }); } catch { rc = null; }
+    try { rc = await D.recheckPostLiftFor(t, { verb, argv, batchVerbs, targetId }); } catch { rc = { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' }; }
     if (rc && rc.checkFailed) {
       const BL = require('../browser-login.js'), PT = require('../peer-text.js');
       const code = rc.code || 'login_check_failed';

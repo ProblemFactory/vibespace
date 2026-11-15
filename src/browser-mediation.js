@@ -200,7 +200,30 @@ function pausedWords(method, pv) {
 function isPausedMethod(method) { return pausedVerdict(method).refuse; }
 const LIVE_FILL_CODE = 'login_fill_live';
 const LIVE_FILL_REFUSED_DOMAINS = new Set(['Debugger', 'HeapProfiler', 'Profiler', 'Audits', 'Tracing']);
-const LIVE_FILL_DROPPED_EVENTS = new Set(['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded', 'Audits.issueAdded']);
+/** lane chrome-157 (vault-login round 32, 主开发 2026-11-15 item 2): the methods of a class the fence forwards unjudged (input / view /
+ *  session / harmless) whose answer CAN carry what the fenced document controls — CLOSED on a fenced tab: a search's match counts
+ *  are an oracle over the page's text (FindInPage), a frame begun headless can return its picture (HeadlessExperimental.beginFrame),
+ *  a mirror streams the tab's picture elsewhere (Cast.startTabMirroring), DevTools opened on the tab reads all of it. */
+const LIVE_FILL_CLOSED_METHODS = new Set(['FindInPage.findFirst', 'FindInPage.findNext', 'FindInPage.findPrev', 'HeadlessExperimental.beginFrame', 'Cast.startTabMirroring', 'Target.openDevTools']);
+/** …and A FENCED TAB'S EVENTS PASS BY THIS LIST ALONE (it replaced a four-name drop list: console, exceptions, log, audits), each argued to carry nothing the fenced document controls (its text, DOM, a
+ *  picture, its title, its address after the fill, a network body, its console): the load cycle's Chrome-named marks, ids and
+ *  times; the TOP frame's navigation and its contexts (a navigation ends the fence — door 1 — and the next document is not the
+ *  fenced one); context teardown (ids); the targets (every targetInfo rewritten to the address at the fill with no title). Every
+ *  other event of a fenced tab is dropped and counted — network, DOM, storage, console, dialogs, a child frame's address or origin. */
+const LIVE_FILL_EVENTS_ALLOWED = new Set(['Page.lifecycleEvent', 'Page.loadEventFired', 'Page.domContentEventFired', 'Page.frameStartedLoading', 'Page.frameStoppedLoading', 'Page.frameDetached', 'Page.frameResized',
+  'Page.frameNavigated', 'Runtime.executionContextCreated', 'Runtime.executionContextDestroyed', 'Runtime.executionContextsCleared',
+  'Target.targetCreated', 'Target.targetInfoChanged', 'Target.targetDestroyed', 'Target.attachedToTarget', 'Target.detachedFromTarget', 'Target.targetCrashed',
+  'Inspector.detached', 'Inspector.targetCrashed', 'Inspector.targetReloadedAfterCrash']);
+/** PURE: may this event of a FENCED tab (its target id = its top frame's id) reach the agent? The top-frame-only events judge their frame. */
+function liveFillEventAllowed(ev, tabId = null) {
+  const m = ev && typeof ev.method === 'string' ? ev.method : '';
+  if (!LIVE_FILL_EVENTS_ALLOWED.has(m)) return false;
+  const p = (ev && ev.params) || {};
+  if (m === 'Page.frameNavigated') return Boolean(p.frame && !p.frame.parentId);
+  if (m === 'Runtime.executionContextCreated') { const fid = p.context && p.context.auxData && p.context.auxData.frameId; return Boolean(tabId && fid && String(fid) === String(tabId)); }
+  return true;
+}
+
 const LIVE_FILL_ALLOWED_CLASSES = new Set(['input', 'view', 'session', 'harmless']);
 const POINTER_LOCATE_METHODS = Object.freeze(['Browser.getVersion', 'DOM.getBoxModel', 'DOM.resolveNode', 'DOM.getDocument', 'DOM.querySelector']);
 const NAV_HANDSHAKE_METHODS = Object.freeze(['Browser.getVersion', 'Page.getFrameTree']);
@@ -234,8 +257,9 @@ const LIVE_FILL_VERB_METHODS = Object.freeze({
   back: new Set(NAV_HANDSHAKE_METHODS),
   forward: new Set(NAV_HANDSHAKE_METHODS),
   reload: new Set(NAV_HANDSHAKE_METHODS),
-  tab: new Set(NAV_HANDSHAKE_METHODS),
-  window: new Set(NAV_HANDSHAKE_METHODS),
+  // lane chrome-157 (vault-login round 32, 主开发's ruling Q3): on a FENCED tab the `tab` acts (open a new tab, switch to another)
+  // need nothing of the fenced document — no frame tree (its present address), no title, no location; `window` is not admitted
+  tab: new Set(CLI_HANDSHAKE_METHODS),
 });
 const NAV_META_EXPRS = new Set(['location.href', 'document.title', '1', 'JSON.stringify([window.innerWidth,window.innerHeight])']);
 const EVAL_SECRET_READ_RE = /\.\s*value\b|[A-Za-z0-9_$)\]]\s*\[|\b(?:FormData|cookie|localStorage|sessionStorage|indexedDB|innerHTML|outerHTML|textContent|innerText|fetch|XMLHttpRequest|sendBeacon|WebSocket|BroadcastChannel|eval|Function)\b|\bwindow\s*\.\s*name\b/;
@@ -253,9 +277,29 @@ const SCROLL_CALL_FNS_NORM = new Set([
   'function() { if (this.scrollIntoViewIfNeeded) this.scrollIntoViewIfNeeded(); else this.scrollIntoView(); }',
 ]);
 const normVerbJs = (s) => String(s || '').replace(/\/\/[^\r\n]*/g, '').replace(/\s+/g, ' ').trim();
-const NAV_META_VERBS = new Set(['open', 'goto', 'navigate', 'back', 'forward', 'reload', 'tab', 'window', 'size', 'wait']);
+const NAV_META_VERBS = new Set(['open', 'goto', 'navigate', 'back', 'forward', 'reload', 'size', 'wait']);   // lane chrome-157 (round 32, Q3): not `tab` / `window` — a fenced tab's title and location are its document's
 const LOCATOR_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'fill', 'type', 'check', 'uncheck', 'select', 'scrollintoview', 'wait']);
 const CALL_FN_VERBS = new Set(['click', 'dblclick', 'hover', 'focus', 'fill', 'type', 'check', 'uncheck', 'select', 'scrollintoview']);
+/** lane chrome-157 (vault-login round 32, 主开发's ruling Q3): AN ADMITTED VERB RETURNS NOTHING THE FENCED DOCUMENT CONTROLS. The
+ *  navigation verbs (door 1) are admitted on a fenced tab with their handshake — the frame tree, the title, the location — and a
+ *  page can copy what was typed into its title and its address. So on a FENCED tab those answers are the fill's, never the
+ *  document's: the top frame's url and `location.href` are the address at the fill, `document.title` is empty, the child frames are
+ *  left out (a page names its iframes). PURE: → the result to send, or null when the call is not one of these. */
+function fencedReadResult(method, params, result, urlAtFill) {
+  if (!result || typeof result !== 'object') return null;
+  const at = String(urlAtFill || '');
+  if (method === 'Page.getFrameTree' && result.frameTree && result.frameTree.frame) {
+    const frame = { ...result.frameTree.frame, url: at };
+    delete frame.urlFragment;
+    return { ...result, frameTree: { frame } };
+  }
+  if (method === 'Runtime.evaluate' && params && typeof params.expression === 'string' && result.result && typeof result.result === 'object') {
+    const expr = params.expression.trim();
+    if (expr === 'document.title') return { ...result, result: { ...result.result, type: 'string', value: '' } };
+    if (expr === 'location.href') return { ...result, result: { ...result.result, type: 'string', value: at } };
+  }
+  return null;
+}
 function isAllowedVerbScript(verb, method, params) {
   if (!verb || !params || typeof params !== 'object') return false;
   if (method === 'Runtime.evaluate') {
@@ -290,19 +334,25 @@ function isAllowedVerbScript(verb, method, params) {
  *  outside those domains. When a specific allowed CLI verb is in flight (`allowVerb` = string verb name), exempts ONLY the exact
  *  methods named in `LIVE_FILL_VERB_METHODS[allowVerb]` (and built-in non-value locator expressions via `isAllowedVerbScript`,
  *  NEVER `Runtime.evaluate` or `Runtime.callFunctionOn` wholesale). */
-function liveFillCdpVerdict(method, { allowVerb = null, params = null } = {}) {
+function liveFillCdpVerdict(method, { allowVerb = null, params = null, holdReason = '' } = {}) {
   const m = String(method || '');
   if (m === 'Browser.getVersion') return { refuse: false, code: null, why: null, error: null };
   const row = CENSUS.rowOf(m);
+  const msg = holdReason === 'unknown_typed'
+    ? `${m} is refused because VibeSpace can no longer verify whether a filled login secret is still in this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+    : holdReason === 'too much text to check'
+      ? `${m} is refused while a vault login fill is held in this tab (too much text to verify wipe) — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+      : `${m} is refused while a vault login fill is in progress or unsubmitted in this tab — wait for the fill to finish and submit the form, reload or navigate this tab, or open or switch to another tab (until this tab submits, reloads, or navigates, cross-origin credential requests from this page are blocked)`;
   const refuse = (why) => ({
     refuse: true,
     code: LIVE_FILL_CODE,
     why,
-    error: `${m} is refused while a vault login fill is in progress or unsubmitted in this tab — wait for the fill to finish and submit the form, or reload / navigate away before reading`,
+    error: msg,
   });
   if (!row) return refuse('unclassified');
   if (LIVE_FILL_REFUSED_DOMAINS.has(row.domain)) return refuse(row.domain);
   if (row.cls === 'refused') return refuse('refused');
+  if (LIVE_FILL_CLOSED_METHODS.has(m)) return refuse('closed');   // (lane chrome-157, round 32: an unjudged class's reader, closed)
   if (LIVE_FILL_ALLOWED_CLASSES.has(row.cls)) return { refuse: false, code: null, why: null, error: null };
   const verb = typeof allowVerb === 'string' && allowVerb ? allowVerb.trim() : '';
   if (verb) {
@@ -956,7 +1006,7 @@ module.exports = {
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, isPausedMethod, AUTO_ATTACH_PAUSE_WORDS, // identity verify r4: the browser-level pause refusal's words
   CENSUS, pausedVerdict, pausedWords, wholeProfileVerdict, windowStep, windowToldText, NO_WINDOW_TOLD, OTHER_WINDOW_TOLD, PLACE_UNKNOWN_TOLD, OWN_CONTEXT_TOLD, isLeaseFrame, WINDOW_BOUND_MS, WINDOW_BUSY_TEXT, WINDOW_CLOSING_TEXT, UNCLASSIFIED_CODE, unclassifiedWords, METHOD_NAME_MAX, methodShaped, malformedWords, browserLabel, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
   interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
-  LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_DROPPED_EVENTS, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, isAllowedVerbScript, liveFillCdpVerdict, // lane vault-login-chrome r3+r4+r5+r28: census-class CDP fence + dropped page read events while a vault secret stands filled in the tab
+  LIVE_FILL_CODE, LIVE_FILL_REFUSED_DOMAINS, LIVE_FILL_CLOSED_METHODS, LIVE_FILL_EVENTS_ALLOWED, liveFillEventAllowed, LIVE_FILL_ALLOWED_CLASSES, LIVE_FILL_VERB_METHODS, isAllowedVerbScript, fencedReadResult, liveFillCdpVerdict, // lane vault-login-chrome r3+r4+r5+r28: census-class CDP fence + dropped page read events while a vault secret stands filled in the tab
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
   SCOPE_MODE, MEDIATED_MODE, judgeScope, leaseRoadVerdict, LOGIN_CHANNEL_CODE, loginFillChannelVerdict, // lane browser-shared-profile-freeze + vault-login r29: the scope road & the ONE login-channel verdict
   INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)
