@@ -7,7 +7,7 @@
 //                                     test-bundle-globals reads every export name as a symbol, and «when()» is a word in a log line)
 //   in the near shape (today drops the date, this year drops the year;
 //                                     `full` keeps the year)
-//   dateOf(ms, { full, now })         the date only, the same near rule
+//   dateOf(ms, { full, words, now })  the date only, the same near rule (`words`: the sentence form «11月12日», see stampAt)
 //   clockOf(ms, { seconds })          the time only
 //   span(ms)                          a duration in the reader's units: «2 天 23 小时», «1 小时 59 分钟», «4 分钟», «12 秒»
 //   ago(ms, { now })                  «4 分钟前»
@@ -101,7 +101,11 @@ const EN_STAMP = [false, true].map((sameYear) => [false, true].map((sec) => Obje
 const EN_DATE = [false, true].map((sameYear) => Object.freeze({ ...(sameYear ? {} : { year: 'numeric' }), month: 'short', day: 'numeric' }));
 
 /** A date + time in the near shape. '' for a time that is not one. */
-export function stampAt(ms, { seconds = false, full = false, now = Date.now() } = {}) {
+// `words` = THE SENTENCE FORM (the .403 prep mirror's test-resume-account-chrome: «…已于 2026/11/12 退出登录…»): inside running text
+// a Chinese / Japanese reader expects «11月12日» / «2026年11月12日» (the locale's own words); the slashed «2026/11/12» is a
+// table's, a column's, a tooltip's. A date that fills a {param} of a t() sentence asks `words: true` (test-ui-language ⑦ reads
+// it). en is the same either way («Nov 12», «Nov 12, 2026»).
+export function stampAt(ms, { seconds = false, full = false, words = false, now = Date.now() } = {}) {
   const n = valid(ms);
   if (n == null) return '';
   const a = dayParts(n), b = dayParts(now);
@@ -110,7 +114,7 @@ export function stampAt(ms, { seconds = false, full = false, now = Date.now() } 
   let out;
   if (cjk()) {
     const clock = fmt(TIME(seconds)).format(new Date(n));
-    out = sameDay ? clock : sameYear ? `${a.m}/${a.d} ${clock}` : `${a.y}/${a.m}/${a.d} ${clock}`;
+    out = sameDay ? clock : words ? `${fmt(EN_DATE[sameYear ? 1 : 0]).format(new Date(n))} ${clock}` : sameYear ? `${a.m}/${a.d} ${clock}` : `${a.y}/${a.m}/${a.d} ${clock}`;
   } else {
     out = fmt(sameDay ? TIME(seconds) : EN_STAMP[sameYear ? 1 : 0][seconds ? 1 : 0]).format(new Date(n));
   }
@@ -119,12 +123,12 @@ export function stampAt(ms, { seconds = false, full = false, now = Date.now() } 
 // the caches' sizes and bounds, for test-ui-language §1b's walk (a property of the stamp, never an export of its own)
 stampAt.cacheSizes = () => ({ formats: CACHE.size, formatsMax: CACHE_MAX, memo: MEMO.size, memoMax: MEMO_MAX, names: NAMES.size, namesMax: 256 });
 /** The date only, the same near rule (today is still a date here: «11/12»). */
-export function dateOf(ms, { full = false, now = Date.now() } = {}) {
+export function dateOf(ms, { full = false, words = false, now = Date.now() } = {}) {
   const n = valid(ms);
   if (n == null) return '';
   const a = dayParts(n), b = dayParts(now);
   const sameYear = !full && a.y === b.y;
-  if (cjk()) return sameYear ? `${a.m}/${a.d}` : `${a.y}/${a.m}/${a.d}`;
+  if (cjk() && !words) return sameYear ? `${a.m}/${a.d}` : `${a.y}/${a.m}/${a.d}`;
   return fmt(EN_DATE[sameYear ? 1 : 0]).format(new Date(n));
 }
 /** The time only. */

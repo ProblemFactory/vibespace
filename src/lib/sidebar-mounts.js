@@ -78,7 +78,7 @@ const NEEDS_PASS = new Set(['key-encrypted', 'key-bad-passphrase']);
 function secondDialerLine(dh) {
   const line = document.createElement('div');
   line.className = 'mounts-path mounts-exit-line mounts-second-dialer';
-  const since = when(Number(dh.since) || Date.now());
+  const since = when(Number(dh.since) || Date.now(), { words: true });
   const words = document.createElement('span');
   words.textContent = [tr('Another VibeSpace agent is also dialing in from {from} with an old token (refused every {every} s since {since}) — stop the extra agent on that machine (launchd / scheduled task / a second install), or pair again', { from: dh.from || '?', every: dh.every || 30, since }),
     dh.live ? tr('The live install on that machine is {live}; stop the others — the stop command stops its launch item and the agent itself.', { live: dh.live }) : '',
@@ -330,7 +330,7 @@ export function installSidebarMounts(Sidebar) {
         for (const s of d.shares) {
           const row = document.createElement('div');
           row.className = 'mounts-share-row';
-          const exp = s.expiresAt ? ' · ' + tr('expires {date}', { date: dateOf(s.expiresAt) }) : '';
+          const exp = s.expiresAt ? ' · ' + tr('expires {date}', { date: dateOf(s.expiresAt, { words: true }) }) : '';
           const sub = s.kind === 'cephmount'
             ? `${escHtml(s.path || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${escHtml(tr('direct CephFS'))}`
             : `${escHtml(s.prefix || s.bucket || '')} · ${s.mode === 'ro' ? tr('Read-only') : tr('Read-write')} · ${s.method === 'sts' ? tr('expires in 7 days') : tr('no expiry')}${exp}`;

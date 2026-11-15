@@ -1002,7 +1002,7 @@ function dotTitle(a) {
   const bits = [laneNote(a.lane)];
   if (a.identityObserved) {
     const o = a.identityObserved;
-    let s = t('Last real send was attributed by the platform to {who} ({when})', { who: o.senderType === 'user' ? t('the user') : t('an app / bot'), when: when(o.at) });
+    let s = t('Last real send was attributed by the platform to {who} ({when})', { who: o.senderType === 'user' ? t('the user') : t('an app / bot'), when: when(o.at, { words: true }) });
     if (o.declared === 'unknown') s += ' — ' + t('this channel\'s identity declaration is still unverified in code; this measurement is what settles it');
     bits.push(s);
   }

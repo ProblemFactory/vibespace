@@ -1076,7 +1076,7 @@ class App {
       body.innerHTML = '';
       const head = document.createElement('p');
       head.className = 'agents-note';
-      head.textContent = t('Exported {date} — each selected section REPLACES the current data.', { date: file.exportedAt ? when(file.exportedAt, { full: true }) : t('(unknown date)') });
+      head.textContent = t('Exported {date} — each selected section REPLACES the current data.', { date: file.exportedAt ? when(file.exportedAt, { full: true, words: true }) : t('(unknown date)') });
       const secWrap = document.createElement('div');
       secWrap.className = 'cfg-rows';
       for (const [id, data] of Object.entries(file.sections || {})) {

@@ -1012,7 +1012,7 @@ export class ChatStatusBar {
       // The server sends the STRUCTURE (statusFor().cause); the words are ours.
       const c = a.armed && !a.watch && a.cause && a.cause.scope === 'pool' && a.cause.soonest && a.cause.soonest.name ? a.cause : null;
       if (c) {
-        const clock = (ms) => when(ms);
+        const clock = (ms) => when(ms, { words: true });   // the pool lines are sentences («… resets at {t}»): the words form
         const s = c.soonest, sb = s.bucket && s.bucket.label ? s.bucket : null, r = c.rejector;
         const lines = [];
         if (r && r.name && r.ownWall && r.ownWall.unknownWindow && r.id !== s.id) lines.push(t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name }));

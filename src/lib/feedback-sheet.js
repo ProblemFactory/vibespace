@@ -69,8 +69,8 @@ function paintRow(node, r, act) {
   text.onclick = () => node.classList.toggle('fb-open');
   // lane feedback-handled-verb: a report the maintainer marked through vibespace-api names the release and the conversation
   const handled = r.status !== 'handled' || !r.handledAt ? ''
-    : r.handledVersion ? t('handled in {version} by {who}, {when}', { version: r.handledVersion, who: r.handledBy === MAINTAINER_BY ? t('the maintainers') : r.handledBy || t('an agent'), when: whenText(r.handledAt) })
-      : t('handled {when}', { when: whenText(r.handledAt) });
+    : r.handledVersion ? t('handled in {version} by {who}, {when}', { version: r.handledVersion, who: r.handledBy === MAINTAINER_BY ? t('the maintainers') : r.handledBy || t('an agent'), when: when(Number(r.handledAt) || 0, { words: true }) })
+      : t('handled {when}', { when: when(Number(r.handledAt) || 0, { words: true }) });
   const meta = el('div', 'fb-meta', [r.harness, r.instance && r.instance.name, r.instance && r.instance.version ? 'v' + r.instance.version : '', handled].filter(Boolean).join(' · '));
   node.append(head, text, meta);
   if (r.status === 'handled' && r.handledNote) node.append(el('div', 'fb-handled-note', r.handledNote));   // text, never HTML

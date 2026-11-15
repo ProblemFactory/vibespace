@@ -187,7 +187,7 @@ export function dialReasonText(reason) {
 }
 // naive-user L-time: the DEVICE's locale (i18n.js deviceLocale — the one Intl tag every surface prints dates with), never
 // the browser's own: a zh page on an en-US browser read "最近一次拨号：被拒绝（令牌不匹配），04:24 PM"
-const hhmm = (ms) => when(ms);
+const hhmm = (ms) => when(ms, { words: true });   // every use is inside a sentence or a «{time} · …» line: the words form
 /** THE sentence of a dial row state (PURE dialRowState's structure → words; the device's own language). */
 export function dialStateText(rs) {
   const base = dialStateBase(rs);

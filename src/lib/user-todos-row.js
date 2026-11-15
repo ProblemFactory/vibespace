@@ -100,7 +100,7 @@ export function resolvedByText(by, t, item = null) {
   // lane passkey-browse-yourself r10: a passkey registration card's «Allow once» taken back by a later answer before it was used — read off the record's
   // FACT (browser-dialogs is the one writer of endedBy 'later-answer'), never a literal action id (test-architecture §78's ratchet)
   const pkEnd = item && item.resolvedFact && item.resolvedFact.endedBy === 'later-answer' ? Number(item.resolvedFact.endedAt) : 0;
-  if (pkEnd > 0) { const d = new Date(pkEnd); return t('allowed once · withdrawn by your later answer at {time}', { time: stampAt(d.getTime()) }); }
+  if (pkEnd > 0) { const d = new Date(pkEnd); return t('allowed once · withdrawn by your later answer at {time}', { time: stampAt(d.getTime(), { words: true }) }); }
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
   if (by === 'expired') return item && isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired'); // r3: a wake ask's END (its lifetime) — the card's words
@@ -130,7 +130,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'resumed') {
     const at = item && item.resolvedFact && Number(item.resolvedFact.resumedAt);
     if (!at) return t('running again');
-    return t('running again (resumed {time})', { time: stampAt(at) });   // the page's one format (lane ui-language: beyond today, its date)
+    return t('running again (resumed {time})', { time: stampAt(at, { words: true }) });   // the page's one format (lane ui-language: beyond today, its date)
   }
   // a row's DECLARED end words (lane queued-is-not-woke: the messages-waiting item's ends — never a raw code in any language)
   const ew = item && item.action ? endWordsOf(item.action.type) : null;
