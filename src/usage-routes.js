@@ -1615,13 +1615,18 @@ app.get('/api/usage', (req, res) => {
         const e = app.locals.usageEstimator;
         if (!e) return {};
         const out = {}; const now = Date.now();
-        // usage-predict P2/P3: a lane is DRAWN only where this instance's verdict for its source is on or provisional
+        // usage-predict P2/P3: a lane is DRAWN only where this instance's verdict for its source is on (or, in the popup alone, provisional)
         // (src/usage-predict.js); every lane says its state, and how much was used here since the reading (the plain line)
         const screen = (id, est) => {
           if (!est) return null;
           const st = typeof e.predictStatesFor === 'function' ? e.predictStatesFor(id, est, now) : {};
-          const drawn = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'on' || x === 'provisional');
-          return { ...(drawn || { estimated: true, anchorAt: est.anchorAt, asOf: est.asOf, fiveHour: null, sevenDay: null, scopedWeekly: [] }), sinceCostUsd: est.sinceCostUsd, sinceRequests: est.sinceRequests ?? null, predict: st };
+          // law B4 (the look of 2026-11-15): the estimate carries ON lanes only — every surface draws those; a PROVISIONAL lane
+          // rides `provisional`, read by the popup alone, which marks it
+          const drawn = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'on');
+          const prov = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'provisional');
+          return { ...(drawn || { estimated: true, anchorAt: est.anchorAt, asOf: est.asOf, fiveHour: null, sevenDay: null, scopedWeekly: [] }),
+            provisional: prov ? { fiveHour: prov.fiveHour || null, sevenDay: prov.sevenDay || null, scopedWeekly: prov.scopedWeekly || [] } : null,
+            sinceCostUsd: est.sinceCostUsd, sinceRequests: est.sinceRequests ?? null, predict: st };
         };
         for (const [id, snap] of Object.entries(viewedAccounts)) {
           const est = screen(id, e.estimateFor(id, snap, now));
