@@ -24,6 +24,16 @@ import { wallWords, outcomeText, laneWords, claimConfirmWords, staleLaneAge, mar
 import { showUnlock } from './vault-unlock.js'; // a vault wall's door: Unlock… in the toast itself
 import { openOatShapeDialog } from './oat-shape-dialog.js'; // lane oat-add-door: a token with no subscription type — the guided door, never a re-login
 
+/** THE POPUP'S ESTIMATE (law B4 of the look, 2026-11-15): /api/usage's `estimates` carry ON lanes only — what the rings, the
+ *  switch menu and the phone's chip draw; a PROVISIONAL lane rides `provisional` beside them, and only the popup merges it in
+ *  (its words mark it «· from N readings on this hub»). */
+export function popupEst(e) {
+  const p = e && e.provisional;
+  if (!p) return e;
+  const named = new Set((e.scopedWeekly || []).map((x) => String((x && x.name) || '').toLowerCase()));
+  return { ...e, fiveHour: e.fiveHour || p.fiveHour || null, sevenDay: e.sevenDay || p.sevenDay || null,
+    scopedWeekly: [...(e.scopedWeekly || []), ...(p.scopedWeekly || []).filter((x) => x && !named.has(String(x.name || '').toLowerCase()))] };
+}
 export function installUsageMeter(App, ctx = {}) {
   Object.assign(App.prototype, {
   _setupUsage() {
@@ -334,6 +344,7 @@ export function installUsageMeter(App, ctx = {}) {
     if (sel === 'auto') estSel = (claudeDefId && this._accountUsage?.[claudeDefId]) ? estimates[claudeDefId] : estimates.__global__;
     else if (sel === '__global__') estSel = estimates.__global__;
     else estSel = estimates[sel] || (gl.accountId === sel ? estimates.__global__ : null) || null;
+    estSel = popupEst(estSel);   // the popup alone draws a PROVISIONAL lane (marked by its words); every other surface reads ON lanes
     // Codex mirrors the Claude selection model: per-account quota buckets from
     // /api/usage codexAccounts (key = cxs id / '__global_codex__'), the machine
     // login linked to a named ChatGPT account by email, 'auto' = default account.
@@ -366,6 +377,7 @@ export function installUsageMeter(App, ctx = {}) {
     let cEstSel = null;
     if (cSel === 'auto') cEstSel = (codexDefId && cBuckets[codexDefId]) ? estimates[codexDefId] : estimates.__global_codex__;
     else cEstSel = estimates[cSel] || null;
+    cEstSel = popupEst(cEstSel);
     const hasSwitch = claudeSubs.length > 0;
     const codexHasSwitch = codexSubs.length > 0;
 
@@ -509,14 +521,15 @@ export function installUsageMeter(App, ctx = {}) {
       if (pair?.estPct == null || pair.estPct <= pair.darkPct) return '';
       return `<div class="usage-bar-est" style="left:${pair.darkPct}%;width:${pair.estPct - pair.darkPct}%;--est-c:${usageColor(pair.estPct)}"></div>`;
     };
-    // THE BAND'S WORDS (usage-predict P2): a lane is projected only where this instance's verdict for its source is on or
-    // provisional — «up to Y%» (the reading is the floor), a provisional band with its count of readings; a lane that draws
-    // nothing says how much was used here since its reading, and no number
+    // THE BAND'S WORDS (usage-predict P2; law B4 of the look, 2026-11-15): a lane is projected only where this instance's verdict
+    // for its source is on or provisional — «about Y%», never «up to» (the rule measures how far off a projection lands, not
+    // which side: it is no bound); a provisional band with its count of readings ON THIS HUB (the source's, not the account's);
+    // a lane that draws nothing says how much was used here since its reading, and no number
     const estStat = (pair, est, lane) => {
       const ps = est && est.predict && est.predict[lane];
       if (pair?.estPct != null && ps && (ps.state === 'on' || ps.state === 'provisional')) {
-        const words = ps.state === 'provisional' ? t('up to {pct}% · from {n} readings', { pct: pair.estPct, n: ps.n }) : t('up to {pct}%', { pct: pair.estPct });
-        return `<span class="usage-stat usage-est-stat" title="${escHtml(t("Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate."))}">${escHtml(words)}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`;
+        const words = ps.state === 'provisional' ? t('about {pct}% · from {n} readings on this hub', { pct: pair.estPct, n: ps.n }) : t('about {pct}%', { pct: pair.estPct });
+        return `<span class="usage-stat usage-est-stat" title="${escHtml(t("An estimate, not a bound: the last reading plus this hub's use since, at this account's learned rate."))}">${escHtml(words)}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}</span>`;
       }
       const n = est && Number.isFinite(Number(est.sinceRequests)) ? Number(est.sinceRequests) : null;
       return ps && (ps.state === 'learning' || ps.state === 'off') && n ? `<span class="usage-stat usage-est-plain">${escHtml(t('{n} requests here since', { n }))}</span>` : '';

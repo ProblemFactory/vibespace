@@ -211,6 +211,7 @@ export const FENCE_EXEMPT = Object.freeze([
   { file: 'scripts/test-settings-view.mjs', needle: 'harnesses', ids: ['shell'], why: 'the installed-CLI facts of the Settings view; shell has no settings section' },
   { file: 'src/artifacts.js', needle: 'AGENT_CONFIG_DIR', ids: ['antigravity', 'shell'], why: "keyed by the agent's config DOTDIR, not its id: antigravity's is .gemini (listed); a terminal has none" },
   { file: 'src/harness-settings.js', needle: 'HARNESS_SETTINGS', ids: ['shell'], why: 'shell declares no settings table (the contract allows none)' },
+  { file: 'src/harnesses/predict-sources.js', needle: 'claude: true', ids: ['opencode', 'shell'], why: 'the sources whose pairs the estimator learns (usage-predict): a harness with no quota has no pairs — a source missing here reads OFF, the safe default; a new harness WITH a quota is flagged here until it is named' },
   { file: 'src/lib/app.js', needle: 'BACKEND_SESSION_OPTIONS', ids: ['shell'], why: 'a terminal has no model / effort options' },
   { file: 'src/lib/manage-agents.js', needle: 'BACKENDS', ids: ['opencode', 'shell'], why: "the Agents panel's CLI rows (a login / update / install command each): an ACP agent's presence rides the server's harness list (cli-env), a terminal is no CLI" },
   { file: 'src/model-providers.js', needle: "kind('self-hosted", ids: ['antigravity', 'shell'], why: "a kind's harness list is its interface projection (q-045 §2.2): antigravity speaks only Google's own login; shell runs no model" },

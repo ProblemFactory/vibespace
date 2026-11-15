@@ -7421,7 +7421,7 @@ function warmHoldWhy(d) {
 function projectionBurnMemo(now) {
   const memo = new Map();
   return (id) => {
-    if (!memo.has(id)) { let b = {}; try { b = usageEstimator.burnFor(id, now) || {}; } catch { b = {}; } memo.set(id, b); }
+    if (!memo.has(id)) { let b = {}; try { b = usageEstimator.poolBurnFor(id, now) || {}; } catch { b = {}; } memo.set(id, b); }   // law B3: ON lanes only
     return memo.get(id);
   };
 }
@@ -7470,7 +7470,7 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     if (!fams.size) return null;
     const hot = accounts.poolsWithMember(memberId).some((p) => p.auto && p.hot && capsOf(p.backend).hotSwitch === 'verified'); // memberPoolsOf's answer read live with ONE login per pool — memberPoolsOf re-listed every login per account (prod-stall-202)
     const view = poolReadCache()(memberId);
-    const burn = usageEstimator.burnFor(memberId, nowMs) || {};
+    const burn = usageEstimator.poolBurnFor(memberId, nowMs) || {};   // law B3: the lead projection reads ON lanes only
     let best = null;
     for (const fam of fams) {
       const c = projectionCrossing(projectCacheForFamily(view, fam), burn, nowMs / 1000, { hot });
