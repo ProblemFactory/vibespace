@@ -14,6 +14,7 @@ This file is the engineers' record of every release: the lanes, the verification
   - test-turn-watch restated 2.95 → 3.9 s.
   - FAST_SUM_CAP_MS 1097 → 1100 s by arithmetic (1099.479 s over 590).
 - **The pins.** test-turn-watch ⑰ (the headline drops its time at the press), ㉒ (the zh line read from the REAL dictionary: no space after 」; a kept headline states no time); test-ci-gate's cap.
+- **The heavy claim's one red (cured):** test-exit-forensics' kill-door census counts every `.kill(` call per server file. src/server/proc-signal.js had none declared, and its header comment's call-shaped words counted as a fifth. The comment is reworded; its four sites are a declared row (`KILL_DOORS`).
 
 ### turn-never-silent — the look at 99f65d547, follow-up 4: the smalls (S2, S3, S5, S6) and picture P4
 - **S2: the injected line SAYS the by-itself ending.**
