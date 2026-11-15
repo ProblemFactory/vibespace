@@ -12,15 +12,21 @@
 const { BACKEND_CAPS } = require('../backend-caps');
 const { AcpAdapter } = require('../adapters/acp');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
-const { NULL_QUOTA } = require('./null-quota');
+const { notVisibleQuota } = require('./null-quota');
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: a built-in ACP harness (opencode) has a declared table; a contributed one brings its own
+
+// THE TURN STATEMENT (lane usage-every-change, law 1 — the checker's wording): an ACP agent logs in on its OWN (`opencode auth
+// login`), VibeSpace holds no credential and ACP v1 states no subscription window — its usage is NOT VISIBLE to VibeSpace, which
+// is never «no limit» (a provider behind it can be a subscription the person also uses here). An agent that does state one brings
+// its own `quota`.
+const ACP_QUOTA = notVisibleQuota('the agent logs in on its own (its own auth login): VibeSpace holds no credential, and ACP v1 states no subscription window');
 
 const ACP_DEFAULT_CAPS = Object.freeze({
   pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
   fork: false, streamProtocol: 'acp-events', peerDelivery: 'stash-only', frameFile: true,
 });
 
-function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = {}, brand = null, terminal = {}, caps = null } = {}) {
+function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = {}, brand = null, terminal = {}, caps = null, quota = ACP_QUOTA } = {}) {
   if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id)) throw new Error(`acpHarness: id must be a lowercase slug (got ${JSON.stringify(id)})`);
   if (typeof command !== 'string' || !command) throw new Error(`acpHarness('${id}'): command (the agent executable name) is required`);
   const capsRow = caps || BACKEND_CAPS[id] || ACP_DEFAULT_CAPS;
@@ -63,12 +69,12 @@ function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = 
       // own store: src/harnesses/opencode.js reads it off `opencode serve`.
       SessionMessages: AcpSessionMessages,
     },
-    quota: NULL_QUOTA,            // no quota concept over ACP (usage_update is context size, not a subscription window)
+    quota,                        // ACP_QUOTA by default: no quota concept over ACP (usage_update is context size, not a subscription window)
     // AUTO-RESUME'S RESUME VERB (owner ruling 2026-09-08) — see the claude
     // descriptor for the law. FORM 'prompt': the shared acp-wrapper's
     // `chat-input` verb dispatches `session/prompt` when nothing is running
     // (its own promptQueue holds it otherwise), so the verb EXISTS and is
-    // declared honestly. The other half does NOT: `quota` above is NULL_QUOTA,
+    // declared honestly. The other half does NOT: `quota` above is ACP_QUOTA (NULL's nothing, «not visible»),
     // so `caps.autoResume.signal` is false and `supported` is false — ACP v1
     // exposes no subscription window, so nothing can ever ARM an ACP session
     // and no surface offers the toggle. Declaring the verb anyway is the point

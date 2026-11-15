@@ -66,8 +66,8 @@ const REPO = process.argv[2];
 const H = require(REPO + '/src/harnesses/index.js');
 const { BackendAdapter } = require(REPO + '/src/adapters/base.js');
 class ZzAdapter extends BackendAdapter {}
-// the REQUIRED keys (id/label/kind/caps/Adapter/adapterConfig/wrapper) — and the quota contract register() demands of everyone (NULL_QUOTA: no limit signal)
-H.register({ ...${JSON.stringify(PROBE)}, caps: { pool: false }, Adapter: ZzAdapter, adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }), quota: H.NULL_QUOTA });
+// the REQUIRED keys (id/label/kind/caps/Adapter/adapterConfig/wrapper) — and the quota contract register() demands of everyone (notVisibleQuota: no limit signal, its own «not visible» turn statement — NULL_QUOTA's «none» is a terminal's)
+H.register({ ...${JSON.stringify(PROBE)}, caps: { pool: false }, Adapter: ZzAdapter, adapterConfig: (cfg) => ({ ptyWrapper: cfg.ptyWrapper }), quota: H.notVisibleQuota('the census probe: VibeSpace sees no statement') });
 const F = await import(REPO + '/scripts/harness-fences.mjs');
 const r = F.census({ repo: REPO, descriptors: H.list(), builtin: H.ids().filter((id) => H.isBuiltin(id)), override: { ${JSON.stringify(PROBE.wrapper)}: ${JSON.stringify(WRAPPER)} } });
 process.stdout.write(JSON.stringify({ ok: r.ok, ids: H.ids(), sites: r.sites.length, missing: r.missing, rows: r.rows, dead: r.dead, rules: r.rules.map((x) => ({ suite: x.suite, alive: x.alive })), text: F.formatChecklist(r) }));

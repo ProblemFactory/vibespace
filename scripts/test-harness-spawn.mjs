@@ -58,9 +58,9 @@ ok(capsOf('acme').pool === true && capsOf('acme-nopool').pool === false && capsO
 const prodRegistry = createAdapterRegistry({ ptyWrapper: '/stub/pty-wrapper.js' });
 ok(prodRegistry.get('acme') instanceof AcmeAdapter && prodRegistry.get('acme') === prodRegistry.get('acme'),
   'the PRODUCTION adapter registry (built before the register) resolves acme from its descriptor, once');
-let threw = null; try { H.register({ id: 'acme-typo', quota: NULL_QUOTA, spawn: { otelExprot: true } }); } catch (e) { threw = e.message; }
+let threw = null; try { H.register({ id: 'acme-typo', kind: 'terminal', quota: NULL_QUOTA, spawn: { otelExprot: true } }); } catch (e) { threw = e.message; }
 ok(/spawn\.otelExprot is not a declared spawn row/.test(String(threw)), 'a misspelt spawn row THROWS at registration (never a silent "no")', threw);
-threw = null; try { H.register({ id: 'acme-type', quota: NULL_QUOTA, spawn: { localPipe: 'yes' } }); } catch (e) { threw = e.message; }
+threw = null; try { H.register({ id: 'acme-type', kind: 'terminal', quota: NULL_QUOTA, spawn: { localPipe: 'yes' } }); } catch (e) { threw = e.message; }
 ok(/spawn\.localPipe must be a boolean/.test(String(threw)), '…and so does a row of the wrong type', threw);
 ok(!/\bacme\b/i.test(read('src/ws-create.js')) && !/\bacme\b/i.test(read('server.js')), 'src/ws-create.js and server.js never name the fake (zero core edits)');
 

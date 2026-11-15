@@ -445,6 +445,9 @@ module.exports = {
   normalize: normalizeCodexRateLimit,
   readLive, settleLive, // the live read the engine calls for any harness that declares it (above)
   signalFromStream,
+  // THE TURN STATEMENT (lane usage-every-change, law 1): every response states the quota twice — the app-server's
+  // account/rateLimits/updated push and the rate_limits inside the rollout's token_count record — each with its own time
+  turnStatement: Object.freeze({ cadence: 'every-response', stamp: 'record', reason: 'every response states it twice: the app-server pushes account/rateLimits/updated, and the rollout\'s token_count record carries rate_limits', cannot: Object.freeze({}) }),
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server
   classifyAuthFailure,
   classifyServeFailure: (info = {}) => (classifyAuthFailure(info) ? { kind: 'auth', why: String((info && info.message) || '').slice(0, 120) } : null), // no lapse census (see the header)

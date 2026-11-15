@@ -51,7 +51,7 @@ const usageRoutes = require(path.join(REPO, 'src/usage-routes.js'));
     ok(`${h.id}: quota.probe mirrors capsOf().quotaProbe (${String(q.probe)})`, q.probe === capsOf(h.id).quotaProbe);
   }
   // a CONTRIBUTED harness (plugin tier-5 / tests): register → dispatch → unregister
-  const fake = { id: 'fake-acp', label: 'Fake ACP', quota: { normalize: (raw) => (raw ? { fiveHour: { utilization: 0.5 } } : null), signalFromStream: (r) => (r?.type === 'acp_limit' ? { source: 'acp_limit', kind: 'exhausted', resetsAtMs: 0 } : null), probe: null, classifyAuthFailure: () => false } };
+  const fake = { id: 'fake-acp', label: 'Fake ACP', quota: { turnStatement: Object.freeze({ cadence: 'on-change', stamp: 'arrival', reason: 'a contributed test harness: its stream names a limit (acp_limit)', cannot: Object.freeze({}) }), normalize: (raw) => (raw ? { fiveHour: { utilization: 0.5 } } : null), signalFromStream: (r) => (r?.type === 'acp_limit' ? { source: 'acp_limit', kind: 'exhausted', resetsAtMs: 0 } : null), probe: null, classifyAuthFailure: () => false } };
   harnesses.register(fake);
   ok('a contributed harness registers and dispatches through the same get()', harnesses.get('fake-acp').quota.normalize({}).fiveHour.utilization === 0.5 && harnesses.get('fake-acp').quota.signalFromStream({ type: 'acp_limit' }).kind === 'exhausted');
   let e3 = null; try { harnesses.register(fake); } catch (e) { e3 = e.message; }
@@ -422,7 +422,7 @@ const cxSess = mkCodex('w-cx', 'cxs-1', (m, s) => {
   const reads = [];
   harnesses.register({
     id: 'fakeq', label: 'FakeQ', kind: 'chat', caps: BACKEND_CAPS.fakeq,
-    quota: { ...NULL_QUOTA, probe: 'rpc-rate-limits',
+    quota: { ...NULL_QUOTA, probe: 'rpc-rate-limits', turnStatement: Object.freeze({ cadence: 'not-visible', stamp: null, reason: 'a test harness read on demand only (readLive): its stream states nothing', cannot: Object.freeze({}) }),
       readLive(s, ms, opts) { reads.push([s._webuiId, ms, !!(opts && opts.fresh)]); return Promise.resolve({ ok: true, key: s._accountId }); },
       settleLive() { } },
     creds: { ...harnesses.get('codex').creds, subsDirName: 'fakeq-subs', spawnEnvVar: 'FAKEQ_HOME', defaultIdField: 'defaultFakeqAccountId', loginLabel: 'FakeQ', parseAuth: () => ({ loggedIn: true, email: 'fq@example.test' }) },

@@ -13,11 +13,14 @@
 // src/server/stdout/index.js RESOLVES it (S5) — test-harness-contract pins that
 // every chat harness's protocol has a registered consumer and that no
 // stdout/stream twin of caps.streamProtocol exists here.
-const { NULL_QUOTA } = require('./null-quota');
+const { NULL_QUOTA, NULL_STATEMENT, notVisibleQuota } = require('./null-quota');
 const { AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume, contributeCaps } = require('../backend-caps');
 const { checkTable } = require('../harness-settings'); // PURE: the settings-table validator (design-harness-settings §2/§7)
 
 const QUOTA_PROBE_RUNGS = Object.freeze(['cli-usage', 'rpc-rate-limits', null]);
+const TURN_CADENCES = Object.freeze(['every-response', 'on-change', 'wall-only', 'not-visible', 'none']);
+const TURN_ROADS = Object.freeze(['hub', 'device']);
+const STATING = Object.freeze(['every-response', 'on-change', 'wall-only']);
 const REQUIRED = ['id', 'label', 'kind', 'caps', 'Adapter', 'adapterConfig', 'wrapper'];
 
 /** Can this harness's QuotaSignalSource ever CLASSIFY a limit? NULL_QUOTA is
@@ -47,7 +50,7 @@ function assertResumeContract(id, resume) {
 
 /** The quota contract every harness carries (S4): the engine reaches quota
  *  behaviour through this object, never through a backend-id branch. */
-function assertQuotaContract(id, quota) {
+function assertQuotaContract(id, quota, kind) {
   if (!quota || typeof quota !== 'object') throw new Error(`harness '${id}': quota contract missing (use NULL_QUOTA for a harness without quota)`);
   for (const fn of ['normalize', 'signalFromStream', 'classifyAuthFailure']) {
     if (typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function`);
@@ -56,6 +59,33 @@ function assertQuotaContract(id, quota) {
     if (quota[fn] !== undefined && typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function when declared`);
   }
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
+  assertTurnStatement(id, quota, kind);
+}
+
+/** THE TURN STATEMENT'S CONTRACT (lane usage-every-change, law 1; null-quota.js says what it is). Asked BY IDENTITY, like
+ *  hasLimitSignal: NULL_QUOTA itself is a terminal's «none» and nobody else's; a quota that spread NULL_QUOTA and kept its
+ *  statement is refused — «not at all» is never inherited by forgetting. A statement that says it states a reading must have
+ *  a limit signal, and one that states nothing must have none: the declaration cannot contradict the classifier. */
+function assertTurnStatement(id, quota, kind) {
+  if (quota === NULL_QUOTA) {
+    if (kind !== 'terminal') throw new Error(`harness '${id}': NULL_QUOTA's «none» is a terminal's — a ${kind || 'contributed'} harness declares its own quota.turnStatement (notVisibleQuota(reason) when VibeSpace sees no statement)`);
+    return;
+  }
+  const ts = quota.turnStatement;
+  if (ts === NULL_STATEMENT) throw new Error(`harness '${id}': quota.turnStatement is NULL_QUOTA's «none», inherited by spreading NULL_QUOTA — declare how its usage is stated at a turn's end`);
+  if (!ts || typeof ts !== 'object') throw new Error(`harness '${id}': quota.turnStatement missing — how is its usage stated at a turn's end?`);
+  if (!TURN_CADENCES.includes(ts.cadence)) throw new Error(`harness '${id}': turnStatement.cadence must be one of ${TURN_CADENCES.join('|')} (got ${String(ts.cadence)})`);
+  if (ts.cadence === 'none') throw new Error(`harness '${id}': turnStatement «none» is a terminal's (NULL_QUOTA) — an agent whose usage VibeSpace cannot see is 'not-visible'`);
+  if (typeof ts.reason !== 'string' || !ts.reason.trim()) throw new Error(`harness '${id}': turnStatement.reason must say it in words`);
+  const states = STATING.includes(ts.cadence);
+  if (states !== hasLimitSignal(quota)) throw new Error(`harness '${id}': turnStatement '${ts.cadence}' ${states ? 'states a reading but its quota has no limit signal' : 'states nothing but its quota classifies a limit'}`);
+  if (states ? !['record', 'arrival'].includes(ts.stamp) : ts.stamp !== null) throw new Error(`harness '${id}': turnStatement.stamp must be ${states ? "'record' or 'arrival'" : 'null'} (got ${String(ts.stamp)})`);
+  const cannot = ts.cannot == null ? {} : ts.cannot;
+  if (typeof cannot !== 'object') throw new Error(`harness '${id}': turnStatement.cannot must be an object of road → reason`);
+  for (const [road, why] of Object.entries(cannot)) {
+    if (!TURN_ROADS.includes(road)) throw new Error(`harness '${id}': turnStatement.cannot.${road} is no road (${TURN_ROADS.join('|')})`);
+    if (typeof why !== 'string' || !why.trim()) throw new Error(`harness '${id}': turnStatement.cannot.${road} must say why in words`);
+  }
 }
 
 /** THE SETTINGS TABLE CONTRACT (design-harness-settings §2 + §7). A harness
@@ -122,7 +152,7 @@ function validate(h, { full = true } = {}) {
       for (const k of ['wrapper', 'Normalizer', 'store']) if (!h[k]) throw new Error(`harness "${h.id}" is chat-capable but declares no ${k}`);
     }
   }
-  assertQuotaContract(h.id, h.quota);
+  assertQuotaContract(h.id, h.quota, h.kind);
   assertResumeContract(h.id, h.resume);
   assertSettingsContract(h, { full });
   assertSpawnContract(h);
@@ -199,5 +229,5 @@ function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
 
-module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
+module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, validate, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA, NULL_STATEMENT, notVisibleQuota, TURN_CADENCES, TURN_ROADS, assertTurnStatement,
   hasLimitSignal, assertResumeContract, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME, SPAWN_ROWS, assertSpawnContract, spawnOf };

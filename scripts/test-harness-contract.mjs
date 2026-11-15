@@ -12,6 +12,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { runTurnStatements, OWED as TURN_OWED } from './turn-statement-run.mjs'; // lane usage-every-change law 1: the conformance run
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // The mutation control's copy of src/ws-create.js is written OUTSIDE the tree
@@ -987,7 +988,7 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
   const { sweepWriters } = require(path.join(REPO, 'src/writer-sweep.js'));
   const calls = [];
   const acmeSweep = (rid, shq, o) => { calls.push({ rid, protectSids: o.protectSids }); return `echo SWEPT:4242 # ${shq(rid)}`; };
-  harnesses.register({ id: 'acme-store', label: 'Acme', quota: harnesses.NULL_QUOTA,
+  harnesses.register({ id: 'acme-store', label: 'Acme', quota: harnesses.notVisibleQuota('a test agent: VibeSpace sees no statement'),
     store: { writerSweep: acmeSweep, forkChain: (id) => (id === 'r2' ? ['r0', 'r1'] : []), forkChainEnv: 'ACME_FORKED_FROM', locate: (id) => `/acme/${id}.log` } }, { replace: true });
   try {
     const live = new Map([['s-acme', { backend: 'acme-store', host: null }], ['s-acme-remote', { backend: 'acme-store', host: 'h1' }], ['s-claude', { backend: 'claude', host: null }]]);
@@ -1044,7 +1045,7 @@ console.log('\n— the resumable id: every harness answers it or has none; locat
   ok(JSON.stringify(harnessIds().filter((id) => harnessOf(id).store?.locateIsProof === true).sort()) === JSON.stringify(['claude', 'codex']),
     'locate is PROOF of «no transcript» for claude (the .jsonl) and codex (the rollout) only — agy\'s sqlite store and ACP agents answer null for every id');
   // a FAKE harness through register() alone: boot-restore reaches ITS hook (no id branch anywhere)
-  harnesses.register({ id: 'acme-resume', label: 'Acme', quota: harnesses.NULL_QUOTA, store: { resumeIdOf: (m) => (m && m.acmeConv) || null } }, { replace: true });
+  harnesses.register({ id: 'acme-resume', label: 'Acme', quota: harnesses.notVisibleQuota('a test agent: VibeSpace sees no statement'), store: { resumeIdOf: (m) => (m && m.acmeConv) || null } }, { replace: true });
   try {
     ok(BR.resumeIdOf({ backend: 'acme-resume', acmeConv: 'ac-1', backendSessionId: 'generic' }) === 'ac-1' && BR.resumeIdOf({ backend: 'acme-resume', backendSessionId: 'generic' }) === null,
       'fake harness: the resumable id is ITS hook\'s answer — its own field, and none when its hook says none (the generic id is not used)');
@@ -1078,7 +1079,7 @@ console.log('\n— the long tail\'s declared rows (terminalOnly / oauthUsage / g
   // THE PROOF: two fakes through register() alone (zero consumer edits)
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
   H.register({ id: 'acme-term', label: 'Acme Term', kind: 'terminal', quota: H.NULL_QUOTA });
-  H.register({ id: 'acme-chat', label: 'Acme', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: { globalUsageKey: '__global_acme__', usage: 'accounts' } }, caps: { oauthUsage: true } });
+  H.register({ id: 'acme-chat', label: 'Acme', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), ui: { billing: { globalUsageKey: '__global_acme__', usage: 'accounts' } }, caps: { oauthUsage: true } });
   try {
     const WR = require(path.join(REPO, 'src/window-reach.js'));
     const sessions = [{ id: 'sess-acme-term-1', backend: 'acme-term', name: 'acme' }, { id: 'sess-claude-1', backend: 'claude', name: 'cl' }];
@@ -1123,8 +1124,8 @@ console.log('\n— the subagent row (ui.subagents ⇄ caps.subagents)');
   ok(!conforms(noUi, BACKEND_CAPS.antigravity) && !conforms(agy, noCaps) && !conforms({ ...agy, ui: { ...agy.ui, subagents: 'cards-ish' } }, { ...noCaps, subagents: 'cards-ish' }),
     'RED: a chat descriptor without ui.subagents, a caps row without subagents, an unknown value — each fails the conformance row');
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
-  H.register({ id: 'acme-subs', label: 'Acme Subs', kind: 'chat', quota: H.NULL_QUOTA, ui: { subagents: 'cards' } });
-  H.register({ id: 'acme-nosubs', label: 'Acme', kind: 'chat', quota: H.NULL_QUOTA });
+  H.register({ id: 'acme-subs', label: 'Acme Subs', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), ui: { subagents: 'cards' } });
+  H.register({ id: 'acme-nosubs', label: 'Acme', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement') });
   try {
     ok(capsOf('acme-subs').subagents === 'cards' && subagentView('acme-subs') === 'cards' && capsOf('acme-nosubs').subagents === 'none',
       'PROOF: a register()ed harness gets its row from its descriptor alone (declared ⇒ that view; none declared ⇒ none, never another harness\'s)');
@@ -1162,8 +1163,8 @@ console.log('\n— the Artifacts sentence (lane artifacts-prompt-hint)');
   ok(cl && cl.artifactTools.length === 4 && cl.artifactTools.every((n) => AO.claude(rec(n)).length === 1) && AO.claude(rec('Bash')).length === 0,
     'the declared names are exactly the tools the reader witnesses (each yields a row; Bash yields none)');
   // THE PROOF: a register()ed fake declaring X / Y renders "X / Y" with zero core edits; a fake without a reader renders nothing
-  H.register({ id: 'acme-files', label: 'Acme Files', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: () => [], artifactTools: ['X', 'Y'] });
-  H.register({ id: 'acme-noart', label: 'Acme NoArt', kind: 'chat', quota: H.NULL_QUOTA, artifactsOf: null, artifactTools: ['Z'] });
+  H.register({ id: 'acme-files', label: 'Acme Files', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), artifactsOf: () => [], artifactTools: ['X', 'Y'] });
+  H.register({ id: 'acme-noart', label: 'Acme NoArt', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), artifactsOf: null, artifactTools: ['Z'] });
   try {
     const intro = AR.sessionToolsIntro(T, { fileTools: AR.fileToolsOf({ backend: 'acme-files' }) });
     ok(intro.includes('Use your file tools (X / Y) for files') && intro.split(MARK).length === 2, 'PROOF: a register()ed harness declaring X / Y is taught "(X / Y)" — once in the intro');
@@ -1375,8 +1376,8 @@ console.log('\nstatusBar: every harness declares what its status bar shows');
   for (const [row, why] of bad) ok(SB.statusBarErrors(row).length > 0, `RED row: ${why} is refused`, JSON.stringify(row));
   // a contributed harness that declares no row reports nothing (the bar says so); one that declares a row gets it
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
-  H.register({ id: 'acme-facts', label: 'Acme Facts', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: null } });
-  H.register({ id: 'acme-facts2', label: 'Acme Facts 2', kind: 'chat', quota: H.NULL_QUOTA, ui: { billing: null, statusBar: { ...good } } });
+  H.register({ id: 'acme-facts', label: 'Acme Facts', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), ui: { billing: null } });
+  H.register({ id: 'acme-facts2', label: 'Acme Facts 2', kind: 'chat', quota: H.notVisibleQuota('a test agent: VibeSpace sees no statement'), ui: { billing: null, statusBar: { ...good } } });
   try {
     ok(SB.unreportedRows(SB.statusBarOf(H.harnessOf('acme-facts').ui)).length === 5 && SB.unreportedRows(SB.statusBarOf(H.harnessOf('acme-facts2').ui)).join() === 'odometer,duration',
       'a register()ed harness: no ui.statusBar ⇒ every fact «not reported»; a declared row ⇒ exactly its own gaps');
@@ -1435,6 +1436,50 @@ console.log('\n— a frame queued behind a turn: every row\'s peer lane says wha
     const moneyOk = want === 'queued' ? money.auth === 1 && money.note === 1 : want === 'into-turn' ? money.note === 1 : money.note === 0;   // queued: the unit RESERVED at the send (round 2)
     ok(got === want && moneyOk, `${id} (${lane}): a frame into a running turn is «${want}» — ${want === 'queued' ? 'waiting — its unit reserved at the send, the carrying turn that same unit' : want === 'into-turn' ? 'a wake into the running turn, charged once (master, ruled)' : 'the wake refused, not billed'}`, JSON.stringify({ r, money }));
   }
+}
+
+// ── THE TURN STATEMENT (lane usage-every-change, law 1 — the owner 2026-11-14: «我关心的是它的数字至少要一直是准确的，也就是每次
+// 发生变动…都必须能跟踪新的用量是多少»). Every harness's quota declares how its usage is STATED at a turn's end (null-quota.js);
+// the declaration is checked BY IDENTITY, so «not at all» is never inherited; and the CONFORMANCE RUN (./turn-statement-run.mjs)
+// drives a stub turn of every harness down BOTH roads — the hub's and a paired machine's — to a reading on the billed account at
+// the declared time, or to the declared «cannot». Legs red today are the OWED table, held both ways.
+console.log('\n§ the turn statement — every harness declares how its usage is stated; a stub turn down both roads');
+{
+  const H = require(path.join(REPO, 'src/harnesses/index.js'));
+  const ids = H.ids();
+  const decl = ids.map((id) => [id, H.get(id).quota.turnStatement]);
+  ok(decl.every(([, t]) => t && H.TURN_CADENCES.includes(t.cadence) && typeof t.reason === 'string' && t.reason.trim()), `every harness declares its turn statement (${decl.map(([id, t]) => `${id} ${t && t.cadence}`).join(' · ')})`);
+  ok(decl.filter(([, t]) => t === H.NULL_STATEMENT).every(([id]) => H.get(id).kind === 'terminal'), 'only a TERMINAL carries NULL_QUOTA\'s «none»');
+  const throws = (fn) => { try { fn(); return null; } catch (e) { return e.message; } };
+  const sig = { signalFromStream: () => ({ kind: 'limit' }) };
+  const c1 = throws(() => H.assertQuotaContract('acme-forgot', Object.freeze({ ...H.NULL_QUOTA, ...sig }), 'chat'));
+  ok(/inherited by spreading NULL_QUOTA/.test(c1 || ''), 'CONTROL: a quota that spreads NULL_QUOTA and states a stream signal but no statement of its own THROWS (never inherits «not at all»)', c1);
+  const c2 = throws(() => H.assertQuotaContract('acme-chat-null', H.NULL_QUOTA, 'chat'));
+  ok(/a terminal's/.test(c2 || ''), 'CONTROL: a chat harness handing NULL_QUOTA itself THROWS (its «none» is a terminal\'s)', c2);
+  const c2b = throws(() => H.assertQuotaContract('acme-kindless', H.NULL_QUOTA, undefined));
+  ok(/a terminal's/.test(c2b || ''), 'CONTROL: a contributed harness with no kind handing NULL_QUOTA THROWS too', c2b);
+  const c3 = throws(() => H.assertQuotaContract('acme-lies', Object.freeze({ ...H.NULL_QUOTA, turnStatement: { cadence: 'every-response', stamp: 'record', reason: 'says so', cannot: {} } }), 'chat'));
+  ok(/states a reading but its quota has no limit signal/.test(c3 || ''), 'CONTROL: a statement that states a reading with no limit signal THROWS (the declaration cannot contradict the classifier)', c3);
+  const c4 = throws(() => H.assertQuotaContract('acme-hides', Object.freeze({ ...H.NULL_QUOTA, ...sig, turnStatement: { cadence: 'not-visible', stamp: null, reason: 'says so', cannot: {} } }), 'chat'));
+  ok(/states nothing but its quota classifies a limit/.test(c4 || ''), 'CONTROL: «not visible» over a quota that classifies a limit THROWS', c4);
+  const c5 = throws(() => H.assertQuotaContract('acme-road', Object.freeze({ ...H.NULL_QUOTA, ...sig, turnStatement: { cadence: 'on-change', stamp: 'arrival', reason: 'says so', cannot: { moon: 'far' } } }), 'chat'));
+  ok(/is no road/.test(c5 || ''), 'CONTROL: a «cannot» on a road that does not exist THROWS', c5);
+  const c6 = throws(() => H.assertQuotaContract('acme-none', Object.freeze({ ...H.NULL_QUOTA, turnStatement: { cadence: 'none', stamp: null, reason: 'says so', cannot: {} } }), 'chat'));
+  ok(/is a terminal's/.test(c6 || ''), 'CONTROL: an agent declaring «none» THROWS (an agent VibeSpace cannot see is «not-visible»)', c6);
+  ok(H.notVisibleQuota('x').turnStatement.cadence === 'not-visible' && !H.hasLimitSignal(H.notVisibleQuota('x')) && throws(() => H.notVisibleQuota('')) !== null, 'notVisibleQuota(reason): its own «not visible» statement, no limit signal, a reason required');
+
+  const legs = await runTurnStatements({ REPO });
+  const legIds = new Set(legs.map((l) => l.id));
+  for (const l of legs) {
+    if (TURN_OWED[l.id]) ok(!l.green, `OWED (red while owed): ${l.id} — ${TURN_OWED[l.id]}`, l.green ? 'GREEN now — cured: move it off the OWED table in the commit that cured it' : undefined);
+    else ok(l.green, `conformance: ${l.id} — ${String(l.why).slice(0, 140)}`, l.green ? undefined : JSON.stringify(l.detail || l.why).slice(0, 400));
+  }
+  ok(Object.keys(TURN_OWED).every((k) => legIds.has(k)), `every OWED entry is a leg the run drives or names (${Object.keys(TURN_OWED).length} owed)`, Object.keys(TURN_OWED).filter((k) => !legIds.has(k)));
+  // CONTROL of the table itself: a green leg planted as owed, and a red leg left off it, are both caught by the same two rules
+  const green1 = legs.find((l) => l.green && !TURN_OWED[l.id]);
+  const red1 = legs.find((l) => !l.green && TURN_OWED[l.id]);
+  const held = (l, owed) => (owed ? !l.green : l.green);
+  ok(!!green1 && !!red1 && !held(green1, true) && !held(red1, false), `CONTROL: the table is held both ways — «${green1 && green1.id}» planted as owed reads cured, «${red1 && red1.id}» off the table reads red`);
 }
 
 console.log('\ntree: the patched copies never touch the tree');

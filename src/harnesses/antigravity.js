@@ -153,6 +153,9 @@ const spawnEnvOf = (dir) => ({ HOME: dir, DBUS_SESSION_BUS_ADDRESS: 'disabled:' 
 const AGY_QUOTA = Object.freeze({
   ...NULL_QUOTA,
   signalFromStream: AGY_WALL.signalFromStream,
+  // THE TURN STATEMENT (lane usage-every-change, law 1): agy states NOTHING at a turn's end except a wall (its refusal names the
+  // reset, stamped with the record's own time); on a paired machine it runs on the machine's own login, which VibeSpace cannot name
+  turnStatement: Object.freeze({ cadence: 'wall-only', stamp: 'record', reason: 'agy states nothing at a turn\'s end but a wall: its refusal names the reset', cannot: Object.freeze({ device: 'a paired machine runs agy on its own login, which VibeSpace cannot name (a named agy account is refused remote)' }) }),
   onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true }),
 });
 /** THE MODELS AGY REPORTS FOR AN ACCOUNT (lane agy-models-report, the owner 2026-11-10): `agy models` — MEASURED on agy 1.5.5:

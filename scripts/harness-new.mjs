@@ -87,7 +87,7 @@ module.exports = {
 // a harness must be in) is \`node scripts/test-harness-add-census.mjs\`.
 // MEASURE FIRST: scripts/fixtures/${ID}-cli/ holds the real CLI's --version / --help / stream shapes (never a guess).
 const { BACKEND_CAPS, capsOf } = require('../backend-caps');
-const { NULL_QUOTA } = require('./null-quota');
+const { notVisibleQuota } = require('./null-quota');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 ${o.kind === 'acp' ? `const { acpHarness } = require('./acp');
 
@@ -120,7 +120,7 @@ module.exports = {
   wrapper: '${o.wrapper}',
   Normalizer: AcpMessageManager,              // TODO: the wrapper journals 'acp-events' records? else its own normalizer (src/normalizers.js)
   store: { locate: () => null, SessionMessages: AcpSessionMessages }, // TODO: where the CLI keeps a conversation (null = the journal is the history)
-  quota: NULL_QUOTA,                          // TODO: a QuotaSignalSource when the CLI reports limits (see codex-quota.js / antigravity-usage.js)
+  quota: notVisibleQuota('TODO: why VibeSpace cannot see this CLI\'s usage — or a QuotaSignalSource with its turnStatement when the CLI states its limits (see codex-quota.js / antigravity.js)'),
   resume: null,                               // TODO: { form: 'prompt'|'message'|'turn-start', deliver(session, text, deps) } — or null (no verb)
   ui: null,                                   // TODO: the client META ui row (src/lib/agent-meta.js mirrors it key for key)
   creds: undefined,                           // TODO: accounts / login (see antigravity.js creds) — or none (the agent holds its own login)

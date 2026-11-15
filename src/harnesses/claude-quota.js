@@ -406,6 +406,9 @@ function classifyServeFailure(info = {}) {
 module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
   signalFromStream,
+  // THE TURN STATEMENT (lane usage-every-change, law 1): the CLI states its limits in a rate_limit_event when a rounded number
+  // MOVES — once per process — and the record carries no time of its own (filed at its arrival)
+  turnStatement: Object.freeze({ cadence: 'on-change', stamp: 'arrival', reason: 'the CLI states its limits (rate_limit_event) when a rounded number moves, once per process; the record carries no time of its own', cannot: Object.freeze({}) }),
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim
   classifyServeFailure, SERVE_CENSUS, // a LAPSED subscription (durable) vs a transient auth failure (the 10-min mark)
