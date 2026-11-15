@@ -161,9 +161,21 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
   const roundsVerdict = (roadMs, ctlMs, ceil) => { const r = med(roadMs), c = med(ctlMs); return { ok: r < ceil * c, r, c, x: r / c }; };
   const texts = rows.map(([, content]) => JSON.stringify(content)), ctlText = JSON.stringify(IMPORT(ctlState));   // (serialized ONCE; each round parses its own fresh copy, as a parser hands it)
   const ctlS = [], roadS = rows.map(() => []), stS = rows.map(() => []);
+  // AN OLD TAB'S ONE CHANGE ON 10× THE OWNER'S STORE, IN THE SAME ROUNDS (int403 — B2's third hosted run, fast attempt 2, on master's
+  // bytes for this leg: «10× the owner's store ⇒ 284 ms, ×1.18 the control (ceiling 1×)»; it decided on ONE sample against ONE control
+  // sample, so one held moment decided — B-d24c; a 60 ms pause placed in that one window was red twice). The leg keeps ONE hub holding
+  // the store; in every round below it sends an old tab's whole key with ONE more id than the hub holds; its verdict is the median of
+  // its samples over the median of the control's samples of the same rounds.
+  const owner10 = { archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])) };
+  const o10 = { n: 66670, h: hub(), head: JSON.stringify({ archivedSessions: owner10.archivedSessions }).slice(0, -2), ms: [], status: [] };
+  o10.h.timed('post', '/api/config/import', parsed(IMPORT(US(owner10))));
   for (let rd = 0; rd < ROUNDS; rd++) {
     const ctlBody = JSON.parse(ctlText); ctlS.push(hub().timed('post', '/api/config/import', ctlBody).ms);
     texts.forEach((text, j) => { const b = JSON.parse(text); const r = hub().timed('patch', '/api/user-state', b); roadS[j].push(r.ms); stS[j].push(r.status); });
+    {   // (the body serialized from the head once, parsed per round, as a parser hands it: the store's ids + rd + 1 more)
+      const b = JSON.parse(o10.head + Array.from({ length: rd + 1 }, (_, i) => ',' + JSON.stringify(k(o10.n + 1 + i))).join('') + ']}');
+      const r = o10.h.timed('patch', '/api/user-state', b); o10.ms.push(r.ms); o10.status.push(r.status);
+    }
   }
   const ms0 = (a) => a.map((x) => x.toFixed(0)).join(' / ');
   rows.forEach(([what, content], j) => {
@@ -183,10 +195,17 @@ const xC = (ms) => `${ms.toFixed(0)} ms, ×${(ms / C).toFixed(2)} the control`;
     ok(!vs.ok, `CONTROL: a road truly slower than twice its control (+${(2.3 * Cm).toFixed(0)} ms held in two of ${ROUNDS} rounds) is RED by its median: ×${vs.x.toFixed(2)} — ${ms0(slow)}`, { slow, ctlS });
     ok(v1.ok && held[0] >= 2 * Cm, `CONTROL: one round of the road held past twice the control (${held[0].toFixed(0)} ms) does not decide — the median ×${v1.x.toFixed(2)} stays under the ceiling — ${ms0(one)}`, { one, ctlS });
   }
-  const owner10 = { archivedSessions: Array.from({ length: 66670 }, (_, i) => k(i)), customNames: Object.fromEntries(Array.from({ length: 7530 }, (_, i) => [k(i), 'a conversation name of forty characters!'])) };
   // (10× the owner's store is PINNED under the control — round 13's law: within 1.25 of master or under 100 ms there; past it the numbers
   // are the kb's, so ~270 000 ids carries only a ceiling against a regression of its shape: 3×)
-  for (const [what, st, n, ceil] of [['10× the owner\'s store', owner10, 66670, 1], ['~270 000 archived ids (≈ 12 MiB)', { archivedSessions: Array.from({ length: 270000 }, (_, i) => k(i)) }, 270000, 3]]) {
+  {
+    const onDisk = (JSON.parse(o10.h.file()).archivedSessions || []).length, v = roundsVerdict(o10.ms, ctlS, 1);
+    ok(o10.status.every((st) => st === 200) && onDisk === o10.n + ROUNDS && v.ok,
+      `law A, master's road: an old tab archives ONE more on 10× the owner's store (its whole key, measured over ${ROUNDS} rounds, ${o10.n + 1} to ${o10.n + ROUNDS} ids) ⇒ 200 in ${v.r.toFixed(0)} ms (median), ×${v.x.toFixed(2)} the control's median ${v.c.toFixed(0)} ms (ceiling 1×), ${onDisk} on disk — the leg ${ms0(o10.ms)}, the control ${ms0(ctlS)}`, { status: o10.status, ms: o10.ms, ctl: ctlS, onDisk });
+  }
+  // STILL ONE SAMPLE AGAINST ONE (int403, the coordinator's ruling): the ~270 000 leg below decides on one sample against the one control C, with a
+  // margin of about a control's length (about 100 ms on the box, about 450 ms on the hosted runner); it has never been red. If it is ever
+  // red, it takes the same rounds then, with the row's debt (the rounds cost about 0.35 s and put the row over the tier rule's 10 s).
+  for (const [what, st, n, ceil] of [['~270 000 archived ids (≈ 12 MiB)', { archivedSessions: Array.from({ length: 270000 }, (_, i) => k(i)) }, 270000, 3]]) {
     const h = hub();
     h.timed('post', '/api/config/import', parsed(IMPORT(US(st))));
     const r = h.timed('patch', '/api/user-state', parsed({ archivedSessions: [...st.archivedSessions, k(n + 1)] }));
