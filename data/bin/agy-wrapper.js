@@ -162,21 +162,20 @@ const END_GRACE_MS = Math.max(50, Number(process.env.AGY_WEBUI_END_GRACE_MS) || 
 const RESTART_BOUND_MS = Math.max(100, Number(process.env.AGY_WEBUI_RESTART_BOUND_MS) || 15000);   // a restart not done by then is said
 const KILL_MS = Math.max(500, Number(process.env.AGY_WEBUI_KILL_MS) || 5000);   // a restart's SIGTERM → SIGKILL (the suites shorten it)
 async function treeBelow(pid) { if (!PT || !pid) return []; try { const r = await PT.readBelow(pid, { parent: process.pid }); return r.readable ? r.list : []; } catch { return []; } }
-function sameBirth(p) { try { const s = TLV && TLV.parseStat(fs.readFileSync(`/proc/${p.pid}/stat`, 'utf8')); return !!s && s.startTicks === p.startTicks && s.state !== 'Z'; } catch { return false; } }
-function signalOne(p, sig) { if (!sameBirth(p)) return false; try { process.kill(p.pid, sig); return true; } catch { return false; } }
+// THE KILL HELPERS live in ONE module (src/server/proc-signal.js — the look at 99f65d547): a process signalled only with its
+// birth checked, a group only through the handle spawned here, and never under the floor (0, 1, a negative, our own pid / group)
+const PS = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'server', 'proc-signal.js')).create(); } catch { return null; } })();
+const sameBirth = (p) => !!PS && PS.sameBirth(p);
 /** end these processes (SIGTERM, then SIGKILL after END_GRACE_MS) → {ended: [names], survivors: [names]} */
-async function endTree(list) {
-  const live = list.filter(sameBirth);
-  for (const p of live) signalOne(p, 'SIGTERM');
-  await new Promise((r) => setTimeout(r, END_GRACE_MS));
-  for (const p of live) if (sameBirth(p)) signalOne(p, 'SIGKILL');
-  await new Promise((r) => setTimeout(r, 300));
-  const survivors = live.filter(sameBirth);
-  return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm) };
-}
+async function endTree(list) { return PS ? PS.endTree(list, { graceMs: END_GRACE_MS }) : { ended: [], survivors: (list || []).map((p) => p.comm) }; }
 const namesOf = (names) => { const c = new Map(); for (const n of names) c.set(n, (c.get(n) || 0) + 1); return [...c].map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(', '); };
-// `proc` is ONLY the child this wrapper spawned itself (startChild: spawn(…, { detached: true })) — its pgid IS its pid, the group is agy's
-function killGroup(proc, sig) { try { process.kill(-proc.pid, sig); return true; } catch { try { proc.kill(sig); return true; } catch { return false; } } }
+// `proc` is ONLY the child this wrapper spawned itself (startChild: spawn(…, { detached: true })) — its pgid IS its pid, the group is
+// agy's; every group signal is logged (the restart's suite reads that none is sent after the old agy exited)
+function killGroup(proc, sig) {
+  const sent = PS ? PS.killGroup(proc, sig) : (() => { try { return proc.kill(sig) === true; } catch { return false; } })();
+  log(`group ${sig} → ${proc && proc.pid}${sent ? '' : ' (not sent)'}`);
+  return sent;
+}
 /** the command's own output (its fd 1 or 2) when it is a PIPE that agy's own tree reads — agy itself, or a process below it (a
  *  pipeline): a sentence written there is the step's output, so the agent reads why. Never a file, a terminal or a pipe out of
  *  the tree. A socket pair (what a Node CLI's own spawn gives a child) cannot be opened from outside: then nothing is written,
@@ -352,15 +351,18 @@ function restartChild(why) {
   const old = child;
   let gone = false;
   const tree = treeBelow(old.pid);   // read NOW (before the signals): what the turn started, each one's birth
+  // the group's signals — CANCELLED when the old agy exits (the look: a late SIGKILL to a group whose leader is gone may reach
+  // a group that reused its id; what stayed below is ended by pid, each birth checked, from the tree read above)
+  const term = setTimeout(() => { killGroup(old, 'SIGTERM'); }, 300); term.unref();
+  const hard = setTimeout(() => { killGroup(old, 'SIGKILL'); }, KILL_MS); hard.unref();
   old.once('exit', () => {
+    clearTimeout(term); clearTimeout(hard);
     gone = true; if (meta.restartStuck) { meta.restartStuck = null; scheduleMeta(); }
     if (restarting) { restarting = false; if (!shuttingDown) startChild(); }   // after «Start it again anyway» the new one is already up
     // what moved out of agy's group but was in its tree: by pid (its birth checked); what still lives is said
     tree.then(async (list) => { if (!list.length) return; const r = await endTree(list); if (r.survivors.length) notice('error', `Stopped, but ${r.survivors.length} process${r.survivors.length > 1 ? 'es' : ''} the turn started could not be ended: ${namesOf(r.survivors)}.`, 'stop-survivors'); }).catch(() => { });
   });
   try { old.stdin.end(); } catch { }
-  setTimeout(() => { killGroup(old, 'SIGTERM'); }, 300).unref();
-  setTimeout(() => { killGroup(old, 'SIGKILL'); }, KILL_MS).unref();
   // THE RESTART'S BOUND (L3): an old agy that has not exited by then (state D on a stalled mount) is SAID, with its door
   setTimeout(() => {
     if (gone || old !== child && child) return;
