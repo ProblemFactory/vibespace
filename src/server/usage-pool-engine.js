@@ -5682,7 +5682,7 @@ function noteTurnRow(session, rec) {
     if (typeof turnRow !== 'function') return null;
     const row = turnRow(rec);
     if (!row || typeof usageHistory.noteTurnRow !== 'function') return null;
-    return usageHistory.noteTurnRow({ ...row, be: session.backend, acct: session._accountId, sid: session.backendSessionId || (rec && rec.sessionId) || session._webuiId || null, mode: session.mode || null, host: session.host || null, cwd: session.cwd || null });
+    return usageHistory.noteTurnRow({ ...row, be: session.backend, acct: session._accountId, sid: (rec && rec.sessionId) || session.backendSessionId || session._webuiId || null, mode: session.mode || null, host: session.host || null, cwd: session.cwd || null });
   } catch (e) { console.warn('[usage] a turn row was not booked:', e && e.message); return null; }
 }
 function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = {}) {

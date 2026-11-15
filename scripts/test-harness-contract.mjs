@@ -1472,7 +1472,9 @@ console.log('\n§ the turn statement — every harness declares how its usage is
   const legs = await runTurnStatements({ REPO, stampWindow: (dir, key, stamp) => require(path.join(REPO, 'src/window-stamp.js')).writeWindowStamp(dir, key, stamp, 'login') });
   const legIds = new Set(legs.map((l) => l.id));
   for (const l of legs) {
-    if (TURN_OWED[l.id]) ok(!l.green, `OWED (red while owed): ${l.id} — ${TURN_OWED[l.id]}`, l.green ? 'GREEN now — cured: move it off the OWED table in the commit that cured it' : undefined);
+    // red while owed AND for its stated cause (the check's F9/C9: an owed leg red for another reason — 0 reads where 2 are owed —
+    // is not the debt it names)
+    if (TURN_OWED[l.id]) ok(!l.green && !!l.cause, `OWED (red while owed, for its cause): ${l.id} — ${TURN_OWED[l.id]}`, l.green ? 'GREEN now — cured: move it off the OWED table in the commit that cured it' : !l.cause ? 'RED, but not for its owed cause: ' + JSON.stringify(l.detail || {}).slice(0, 200) : undefined);
     else ok(l.green, `conformance: ${l.id} — ${String(l.why).slice(0, 140)}`, l.green ? undefined : JSON.stringify(l.detail || l.why).slice(0, 400));
   }
   ok(Object.keys(TURN_OWED).every((k) => legIds.has(k)), `every OWED entry is a leg the run drives or names (${Object.keys(TURN_OWED).length} owed)`, Object.keys(TURN_OWED).filter((k) => !legIds.has(k)));

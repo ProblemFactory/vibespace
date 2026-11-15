@@ -433,6 +433,16 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
     pty.fn([NOTICE, PEND, USAGE].map((r) => JSON.stringify(r)).join('\n') + '\n');
     ok('pick 3: the real consumer books the `usage` record — ONCE, with its own time, for the session\'s account (the notice and the prompt_end book nothing)', booked.length === 1 && booked[0][0] === A.id && booked[0][1] === 'usage' && booked[0][2] === USAGE.ts, JSON.stringify(booked));
   }
+  {
+    // the check's F7: a booking that THROWS never costs the record's feed — the call has a try of its own
+    const fed = [], eng4 = { ...engineOf(KEYS), noteTurnRow: () => { throw new Error('planted: the ledger refused'); } };
+    const consumer = AE.create({ engine: eng4, noteHarnessModels() { }, deliverRef: {}, permissionRulesRef: {} });
+    const pty = { onData(fn) { this.fn = fn; } };
+    consumer.attach(fresh(A, { _spawnModel: 'gemini-4-argon-high' }), 'w-p3t', pty, { feedLive: (_s, m) => fed.push(m.kind), broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    const warn = console.warn; console.warn = () => { };
+    try { pty.fn([NOTICE, PEND, USAGE].map((r) => JSON.stringify(r)).join('\n') + '\n'); } finally { console.warn = warn; }
+    ok('the check\'s F7: a booking that throws never costs a record — notice, prompt_end and usage all reach the chat', fed.join() === 'notice,prompt_end,usage', fed.join());
+  }
 }
 
 console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');

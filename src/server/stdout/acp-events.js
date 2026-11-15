@@ -79,7 +79,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
               if (w && w.wallRoom) msg.wallRoom = w.wallRoom;
             } catch (e) { console.warn(`[acp] usage wall not read: ${e.message}`); }
             // a finished turn's own tokens → ONE ledger row on its account (the descriptor's quota.turnRow; none declared ⇒ nothing)
-            if (msg.kind === 'usage' && typeof noteTurnRow === 'function') noteTurnRow(session, msg);
+            if (msg.kind === 'usage' && typeof noteTurnRow === 'function') { try { noteTurnRow(session, msg); } catch (e) { console.warn(`[acp] a turn row was not booked: ${e.message}`); } } // its own try: never the record's feed
           }
           let newLabel = null;
           if (msg.kind === 'session') {

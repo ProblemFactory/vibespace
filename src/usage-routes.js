@@ -1325,7 +1325,9 @@ function summarizeCodexRateLimits() {
   } catch {}
   // (the wrapper-sidecar and rollout-tail rungs are retired — see above: the engine files every statement, this reads the store)
   let overall = null;
-  for (const s of Object.values(byAccount)) if (!overall || (s.fetchedAt || 0) > (overall.fetchedAt || 0)) overall = s;
+  // the freshest of the HUB's own keys (the check's s3): a paired machine's own login (__global_codex__.<host>) is never drawn as
+  // this hub's «Codex» (the popup's Auto falls back to this field)
+  for (const [k, s] of Object.entries(byAccount)) if (!/^__global_codex__\./.test(k) && (!overall || (s.fetchedAt || 0) > (overall.fetchedAt || 0))) overall = s;
   // Same-account merge (codex global ↔ linked named account): newest wins both.
   const gid = _codexUsageGlobalLink.accountId;
   if (gid) {

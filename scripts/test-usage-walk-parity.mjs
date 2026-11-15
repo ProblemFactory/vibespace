@@ -268,6 +268,13 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(got.length === 2 && got[1].host === 'host-st' && got[1].acct === 'cxs-par' && got[1].ts === Date.parse(at(9)), 'pick 2: the remote ingest hands the same machine\'s last statement, named by its host', JSON.stringify(got.slice(1).map((g) => [g.host, g.acct, g.ts])));
   const rows = fs.readdirSync(uhS.dir).filter((f) => /^events-.*\.ndjson$/.test(f)).map((f) => fs.readFileSync(path.join(uhS.dir, f), 'utf8')).join('');
   ok(rows.includes(KID) && !/"rl":|"par":/.test(rows), 'pick 2: no ledger row (the walk\'s, the ingest\'s) stores rl or par — a statement is filed, never kept in the ledger', `${rows.length} B of rows`);
+  // usage-every-change (the check's F7): a turn row booked twice before a walk is ONE line on disk — the queue's own dedup
+  // (the readers' id dedup would hide a second line from every count)
+  const turn = { be: 'antigravity', acct: 'agy-dd', sid: 'conv-dd', ts: Date.parse(at(8)), i: 5, cr: 0, o: 1, total: 6, model: 'gemini-x' };
+  uhS.noteTurnRow(turn); uhS.noteTurnRow(turn);
+  await uhS.scan({ force: true }); uhS.flushCursors();
+  const lines = fs.readdirSync(uhS.dir).filter((f) => /^events-.*\.ndjson$/.test(f)).flatMap((f) => fs.readFileSync(path.join(uhS.dir, f), 'utf8').split('\n')).filter((l) => l.includes('"antigravity:conv-dd:'));
+  ok(lines.length === 1 && /"np":1/.test(lines[0]), 'the check\'s F7: a turn row booked twice before a walk is ONE line on disk (and states no price: np)', `${lines.length} line(s)`);
 }
 
 // ── CODEX FORK REPLAY (2.369.203): a forked rollout opens by replaying its

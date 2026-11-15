@@ -46,8 +46,9 @@ function mkWorld(REPO) {
     'cxs-3': { id: 'cxs-3', name: 'Codex C', type: 'subscription', backend: 'codex' },
     'agy-1': { id: 'agy-1', name: 'Agy A', type: 'subscription', backend: 'antigravity' },
   };
+  const calls = { list: 0, notice: 0, bcast: 0 }; // what a filing must never cause (the check's s5): a pool evaluation (it lists the accounts), a notice, a frame
   const accounts = {
-    get: (id) => ROSTER[id] || null, list: () => ({ accounts: Object.values(ROSTER) }),
+    get: (id) => ROSTER[id] || null, list: () => { calls.list++; return { accounts: Object.values(ROSTER) }; },
     poolCurrentFor: () => null, poolCurrent: () => null, poolMembers: () => [],
     subCredsPath: (id) => path.join(dir, 'nope', id), sessionPoolLinkPath: () => path.join(dir, 'nope-link'),
   };
@@ -57,7 +58,7 @@ function mkWorld(REPO) {
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
   const eng = engMod.create({
     app, rootDir: dir, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1,
-    broadcastToSession() { }, serverNotice() { }, serverSetting() { return undefined; }, getAccounts: () => accounts, getHosts: () => null,
+    broadcastToSession() { calls.bcast++; }, serverNotice() { calls.notice++; }, serverSetting() { return undefined; }, getAccounts: () => accounts, getHosts: () => null,
     getUsageHistory: () => ledger, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
   });
   const harnesses = require(path.join(REPO, 'src/harnesses/index.js'));
@@ -66,7 +67,7 @@ function mkWorld(REPO) {
   const mkRoad = (door = null) => SW.createStreamWallRoad({ harnessOf: (id) => harnesses.get(id), cacheDir, door, now: () => Date.now(), log: (l) => logs.push(l) });
   const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({ engine: eng, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => ({ _cost: () => 0 }) });
   const session = (o) => { const s = { mode: 'chat', host: null, pty: { write() { } }, name: 'turn', ...o }; sessions.set(s._webuiId, s); return s; };
-  return { dir, cacheDir, eng, harnesses, mkRoad, brain, session, logs, setLedger: (uh) => { ledger = uh; }, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } } };
+  return { dir, cacheDir, eng, harnesses, mkRoad, brain, session, logs, calls, setLedger: (uh) => { ledger = uh; }, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } } };
 }
 
 const nowS = () => Math.floor(Date.now() / 1000);
@@ -211,6 +212,48 @@ const DRIVERS = {
         const j = judge(w, 'cxs-1', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' });
         return { green: j.reading && j.ownTime && !j.others.length, why: "the hub's walk files the thread's last statement on its account at the record's time", detail: j };
       },
+      // THE CHECK'S s5 — legs for the edits no suite saw:
+      // a walked «limit reached» is FILED and moves nothing: no pool evaluation (it would list the accounts a tick later), no
+      // notice, no frame; the control shows a kick IS visible here
+      async 'hub/walk-never-acts'(w) {
+        const R = { primary: { used_percent: 100, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus', rate_limit_reached_type: 'primary' };
+        const r = w.eng.fileCodexStatement({ acct: 'cxs-1', ts: Date.now() - 2000, rl: R });
+        const c1 = { ...w.calls }; await sleep(30); const c2 = { ...w.calls };
+        const stored = limitOf(w, 'cxs-1', 'codex');
+        w.eng.kickPoolEval(); await sleep(30); const c3 = { ...w.calls }; // the control: the engine's own kick, seen by the same watch
+        return { green: !!r && r.ok && !!stored && stored.pct === 100 && JSON.stringify(c2) === JSON.stringify(c1) && c2.notice === 0 && c2.bcast === 0 && c3.list > c2.list,
+          why: 'a walked «limit reached» is stored (100 %) and nothing acts on it — no pool evaluation, no notice, no frame (a kick is seen by the same watch)', detail: { r, stored, c1, c2, c3 } };
+      },
+      // the account at the RECORD's time, never the walk's: a thread moved from cxs-1 to cxs-2 between its statement and the walk
+      // files the old statement on cxs-1; one walk reading both sides of the move files each account's own last statement (s2)
+      async 'device/move-between-record-and-walk'(w, REPO) {
+        const tid = 'cccccccc-0000-4000-8000-0000000000e1', t0 = Date.now();
+        const x = walkedRollout(w, REPO, [{ tid, stmts: [{ ago: 30000, used: 91 }, { ago: 5000, used: 7 }] }]);
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: tid, acct: 'cxs-1', ts: t0 - 120000 }); uh.recordAttribution({ sid: tid, acct: 'cxs-2', ts: t0 - 10000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const a = limitOf(w, 'cxs-1', 'codex'), b = limitOf(w, 'cxs-2', 'codex');
+        return { green: !!a && a.pct === 91 && near(a.at, t0 - 30000) && !!b && b.pct === 7 && near(b.at, t0 - 5000), why: "each side of an account move keeps its own last statement, filed on the account at the record's time", detail: { a, b } };
+      },
+      // the hub's walk meets a thread whose session record names ANOTHER machine: no login the hub can name — not tracked
+      async 'hub/walk-host-thread-not-tracked'(w, REPO) {
+        const tid = 'cccccccc-0000-4000-8000-0000000000e2';
+        const x = walkedRollout(w, REPO, [{ tid }], { walk: false });
+        const uh = ledgerOf(w, REPO, x.home);
+        fs.mkdirSync(uh.metaDir, { recursive: true });
+        fs.writeFileSync(path.join(uh.metaDir, 'cx-host.json'), JSON.stringify({ backendSessionId: tid, backend: 'codex', host: 'h9', mode: 'terminal', accountId: null }));
+        await uh.scan({ force: true }); uh.flushCursors();
+        const files = filesIn(w.cacheDir), said = uh._lastStatements || null;
+        return { green: files.length === 0 && !!said && said.untracked === 1 && said.filed === 0, why: "another machine's thread met on the hub's disk files nothing (not tracked) — never the hub's login", detail: { files, said } };
+      },
+      // two threads of ONE account, one limit, in one batch: the newer statement is the account's, whichever thread was met first
+      async 'device/two-threads-one-account'(w, REPO) {
+        const X = 'cccccccc-0000-4000-8000-0000000000e3', Y = 'cccccccc-0000-4000-8000-0000000000e4', t0 = Date.now();
+        const x = walkedRollout(w, REPO, [{ tid: X, stmts: [{ ago: 10000, used: 50 }] }, { tid: Y, stmts: [{ ago: 30000, used: 41 }] }]);
+        const uh = ledgerOf(w, REPO); for (const t of [X, Y]) uh.recordAttribution({ sid: t, acct: 'cxs-1', ts: t0 - 120000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const p = limitOf(w, 'cxs-1', 'codex');
+        return { green: !!p && p.pct === 50 && near(p.at, t0 - 10000), why: "two conversations of one account: the account holds the newer statement (50 %), whichever was met first", detail: { p } };
+      },
       // THE CHECK'S MUST 2: a token_count that states rate limits but books no row — a heartbeat; the last totals again with
       // «limit reached» — is still its statement: filed at its own time (the number the owner sees at a wall), never a ledger row
       async 'device/statement-only-lines'(w, REPO) {
@@ -311,6 +354,20 @@ const DRIVERS = {
         return { green: flushed === 1 && got.n === 1 && got.rows.length === 1 && /usageHistory\.flushTurnRows\(\)/.test(stop) && kept === 1,
           why: 'a turn booked and not yet walked survives the stop (shutdownNow commits the queue) — one row in the next process, none added by its walk', detail: { flushed, n: got.n, kept, wired: /usageHistory\.flushTurnRows\(\)/.test(stop) } };
       },
+      // a walk that FAILS at its commit keeps the queued row for the next (the check's F7: the queue is emptied only once committed)
+      async 'hub/turn-row-failed-walk-keeps-it'(w, REPO) {
+        const uh = ledgerOf(w, REPO);
+        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agf', _accountId: 'agy-1', backendSessionId: 'conv-agf' });
+        const rec = agyUsage(Date.now() - 2000, 'conv-agf');
+        w.eng.noteTurnRow(s, rec);
+        const orig = fs.appendFileSync; let failed = 0;
+        fs.appendFileSync = function (f, ...a) { if (String(f).startsWith(uh.dir + path.sep)) { failed++; throw Object.assign(new Error('ENOSPC (planted)'), { code: 'ENOSPC' }); } return orig.call(this, f, ...a); };
+        const quiet = console.error; console.error = () => { };
+        try { await uh.scan({ force: true }); } finally { fs.appendFileSync = orig; console.error = quiet; }
+        await uh.scan({ force: true }); uh.flushCursors();
+        const got = await agyRowsOf(uh, [`antigravity:conv-agf:${Date.parse(rec.ts)}:1660`]);
+        return { green: failed >= 1 && got.n === 1 && got.rows.length === 1, why: 'a walk whose append failed keeps the turn row queued; the next walk commits it once', detail: { failed, n: got.n } };
+      },
       async 'hub/turn-row-named-only'(w, REPO) {
         const uh = ledgerOf(w, REPO);
         const own = w.session({ backend: 'antigravity', _webuiId: 'w-ago', _accountId: null, backendSessionId: 'conv-ago' });
@@ -402,7 +459,7 @@ export async function runTurnStatements({ REPO, stampWindow = null }) {
         continue;
       }
       legs.push({ id: `${id}/${road}/reading`, green: r.reading && !(r.others || []).length, why: `a stated reading lands on the billed account only (others: ${(r.others || []).join(',') || 'none'})`, detail: r });
-      legs.push({ id: `${id}/${road}/own-time`, green: !!r.ownTime, why: `the stored time is ${ts.stamp === 'record' ? "the record's own" : 'its arrival'}`, detail: r });
+      legs.push({ id: `${id}/${road}/own-time`, green: !!r.ownTime, cause: !!r.reading && !r.ownTime, why: `the stored time is ${ts.stamp === 'record' ? "the record's own" : 'its arrival'}`, detail: r });
     }
     if (ts.cadence === 'wall-only' && D && D.hubPlain) {
       const w = mkWorld(REPO); let r; try { r = await D.hubPlain(w); } finally { w.cleanup(); }
@@ -414,7 +471,7 @@ export async function runTurnStatements({ REPO, stampWindow = null }) {
     }
     if (D && D.replay) {
       const w = mkWorld(REPO); let r; try { r = await D.replay(w); } finally { w.cleanup(); }
-      legs.push({ id: `${id}/hub/replay-reads-once`, green: r.reads === 1, why: `one vendor read per wall across a restart (reads: ${r.reads})`, detail: r });
+      legs.push({ id: `${id}/hub/replay-reads-once`, green: r.reads === 1, cause: r.reads === 2, why: `one vendor read per wall across a restart (reads: ${r.reads})`, detail: r });
     }
   }
   for (const m of [2, 1]) {
@@ -424,7 +481,8 @@ export async function runTurnStatements({ REPO, stampWindow = null }) {
       : { id: 'any/hub/tie-control-refiles', green: !r.err && r.r && r.r.ok === true && r.r.key === 'cxs-2' && r.written.join() === 'cxs-2', why: 'the control: matching ONE other account re-files there (the tie leg is not vacuous)', detail: r });
   }
   // the checker's (b) and (c): driven by pick 4 — named now, red until then (never a skip)
-  legs.push({ id: 'claude/hub/replay-by-request', green: false, why: 'not driven yet: the replay at attach does not exist (pick 4)' });
-  legs.push({ id: 'any/hub/skewed-never-wins', green: false, why: 'not driven yet: the store-at-own-time rule does not exist (pick 4)' });
+  // two owed legs are CONSTANTS until pick 4 drives them (said: their `cause` is the sentence, not a measure)
+  legs.push({ id: 'claude/hub/replay-by-request', green: false, cause: 'not driven', why: 'not driven yet: the replay at attach does not exist (pick 4)' });
+  legs.push({ id: 'any/hub/skewed-never-wins', green: false, cause: 'not driven', why: 'not driven yet: the store-at-own-time rule does not exist (pick 4)' });
   return legs;
 }

@@ -512,6 +512,7 @@ class UsageHistory {
       acct: String(r.acct), atype: ainfo ? ainfo.type : 'unknown', aname: ainfo ? (ainfo.name || null) : null,
       mode: r.mode || null, host: r.host || null, cwd: r.cwd || null, origin: 'main',
       i: r.i || 0, cw5: 0, cw1: 0, cr: r.cr || 0, o: r.o || 0, tier: null,
+      np: 1, // the check's s1: no price table states this harness's tokens — the ledger's readers price it at nothing (_cost)
     };
     const q = this._turnRows || (this._turnRows = []);
     if (q.some((x) => x.rid === ev.rid)) return ev; // the same record read twice before a walk: one row (the commit dedups the ledger's)
@@ -575,13 +576,17 @@ class UsageHistory {
     this.flushTurnTimes(); // the kept count's facts with them (the stop's exit flush writes them too)
     return n;
   }
-  _noteStatement(pending, e, host) {
+  _noteStatement(pending, e, host, attrib = null, meta = null) {
     // `rl` rides the codex rollout rows only (the walker's codex branch states it): a row without one states nothing
     if (!this._statementSink || !e || !e.sid || !e.rl || typeof e.rl !== 'object') return;
     const lim = String(e.rl.limit_id || 'codex');
-    const k = (host || '') + '|' + e.sid + '|' + lim;
-    const ts = Number(e.ts) || 0, cur = pending.get(k);
-    if (!cur || ts >= cur.ts) pending.set(k, { host: host || null, sid: String(e.sid), par: e.par ? String(e.par) : null, ts, limitId: lim, rl: e.rl });
+    const st = { host: host || null, sid: String(e.sid), par: e.par ? String(e.par) : null, ts: Number(e.ts) || 0, limitId: lim, rl: e.rl };
+    // the check's s2: the owner is resolved at the RECORD's time as it is noted — a thread read across an account move keeps
+    // each account's last statement (the last per thread, limit AND owner)
+    const owner = attrib ? this._statementOwner(st, attrib, meta || {}) : undefined;
+    const k = (host || '') + '|' + st.sid + '|' + lim + '|' + (owner === undefined ? '?' : owner ? (owner.acct ? 'a:' + owner.acct : 'own') : 'none');
+    const cur = pending.get(k);
+    if (!cur || st.ts >= cur.ts) pending.set(k, owner === undefined ? st : { ...st, owner });
   }
   _statementOwner(st, attrib, meta) {
     for (const [sid, via] of [[st.sid, 'thread'], [st.par, 'parent']]) {
@@ -601,8 +606,9 @@ class UsageHistory {
     // the newest statement per (owner, limit) is the one the store can take — a cold walk over a long history hands one per
     // account and limit, never one per thread
     const byOwner = new Map();
-    for (const st of pending.values()) {
-      const owner = this._statementOwner(st, attrib || {}, meta || {});
+    for (const st0 of pending.values()) {
+      const { owner: noted, ...st } = st0;
+      const owner = 'owner' in st0 ? noted : this._statementOwner(st, attrib || {}, meta || {});
       if (!owner) { out.untracked++; continue; }
       const k = (owner.acct ? 'a:' + owner.acct : 'own:' + (st.host || '')) + '|' + st.limitId, cur = byOwner.get(k);
       if (!cur || st.ts >= cur.ts) byOwner.set(k, { ...st, ...owner });
@@ -799,7 +805,7 @@ class UsageHistory {
         budgetBytes: this._scanBudgetBytes,
         onBudget: async () => { await this._scanYield(); if (!this._scanForced && this._pausedNow()) throw Object.assign(new Error('paused'), { paused: true }); },
         onEvent: (ev) => {
-          this._noteStatement(statements, ev, null);
+          this._noteStatement(statements, ev, null, attrib, meta);
           if (ev.st) return; // a statement that books no row (the walker's `st`): filed, never a ledger row
           const minfo = meta[ev.sid] || {};
           // A per-request identity override, when one is wired (see
@@ -950,7 +956,7 @@ class UsageHistory {
     for (const line of String(text || '').split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
-      this._noteStatement(statements, e, hostId); // before the row check: a statement-only line (`st`, no rid) states too
+      this._noteStatement(statements, e, hostId, this._attribMap(), {}); // before the row check: a statement-only line (`st`, no rid) states too
       if (!e || !e.rid || !e.ts) continue;
       const ts = Number(e.ts) || Date.now();
       // ── PER-ACCOUNT attribution for remote events (2.294.0, R4 deliverable;
@@ -1173,6 +1179,7 @@ class UsageHistory {
   // rule is decided on the request, never on the part, or the parts stop
   // adding up to the whole. Default: this event's own sum.
   _cost(ev, prompt) {
+    if (ev.np) return 0; // a turn row whose tokens no price table states (usage-every-change, the check's s1): never Sonnet's rates
     const tier = this._tier(ev.model);
     if (tier === '_default' && ev.be === 'codex') this._warnUnpriced(ev.model);
     const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0), ev.model);
