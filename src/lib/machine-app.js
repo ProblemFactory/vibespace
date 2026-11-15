@@ -26,6 +26,7 @@
 //   • lane stream-window-fixes: THE STATS ROW of the whole screen's window (src/lib/stream-stats.js), 「停止串流」 (the window
 //     stays, 「重新串流」), × ends it on the machine too; the picker marks a window a stream shows now, with 「停止」
 import { t } from './i18n.js';
+import { clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads (the lock's «since»)
 import { fetchJson, createModalShell, showToast, uiScale } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
@@ -221,11 +222,11 @@ export function windowStreamText(code, { title = '', machine = '', why = '' } = 
   return t('The stream of “{title}” stopped: {why}', { title, why: why || code || '?' });
 }
 /** THE LOCK (lane mac-locked-capture): what a stream window says while the Mac's screen is locked — its capture waits, the picture
- *  comes back by itself at the unlock (`p` = the stream view's `paused`: { why: 'locked', since } — the machine's clock; shown as a
- *  24-hour HH:MM — no locale import: the suites bundle this file over an i18n stub of `t` alone). */
+ *  comes back by itself at the unlock (`p` = the stream view's `paused`: { why: 'locked', since } — an instant; shown through
+ *  page-time clockOf, the page's one clock: «13:05» on a zh / ja page, the device's own on en, in the page's zone — lane
+ *  ui-language's census ⑦ on 2.369.403. page-time imports i18n as a NAMESPACE, so a suite's stub of `t` alone still builds). */
 export function lockedText(p) {
-  const d = p && Number.isFinite(p.since) ? new Date(p.since) : null;
-  const at = d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : null;
+  const at = p && Number.isFinite(p.since) && p.since > 0 ? clockOf(p.since) : null;
   return at ? t('The Mac is locked (since {time}) — the picture comes back by itself once it is unlocked', { time: at }) : t('The Mac is locked — the picture comes back by itself once it is unlocked');
 }
 

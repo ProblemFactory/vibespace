@@ -12676,7 +12676,6 @@ export default {
   "Choose a key file…": "鍵ファイルを選択…",
   "No file chosen": "ファイルが選択されていません",
   "The key has a passphrase": "鍵にパスフレーズがある",
-  "Set up {name}": "{name} に必要なツールをインストール",
   "This installs what VibeSpace needs on that machine: dtach (keeps sessions alive), Node.js and Claude Code.": "このマシンに VibeSpace が必要とするものをインストールします：dtach（セッションを維持）、Node.js、Claude Code。",
   "Start installing": "インストールを開始",
   "All done — close": "すべて完了 — 閉じる",
