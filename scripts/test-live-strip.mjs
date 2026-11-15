@@ -55,6 +55,31 @@ console.log('— ① the fold (stripFold) at 1400 / 900 / 600 px');
 const L = require(path.join(REPO, MODEL));
 const realFailed = foldLegs(L);
 {
+  // THE CHIP'S WORDS YIELD BEFORE A TAB (the .403 prep mirror, test-browser-multiview at 346 px: «2/3 browsers» folded «Alpha
+  // second» — a person's right-click met nothing): stripFoldChip tries the worded chip, then the bare ratio
+  const rows = [{ ref: 'w', label: 'Alpha work' }, { ref: 's', label: 'Alpha second' }], widths = { w: 139, s: 139 };
+  const at = (avail) => L.stripFoldChip({ rows, widths, avail, shownRef: 'w', chipWordsPx: 85, chipRatioPx: 36, morePx: 44 });
+  const was = L.stripFold({ rows, widths, avail: 334, shownRef: 'w', chipPx: 85, morePx: 44 });
+  ok(J(was.folded) === '["s"]' && J(at(334)) === J({ visible: ['w', 's'], folded: [], words: false }), 'the chip\'s WORDS yield before a tab: at the suite\'s 334 px the worded chip (85) would fold «Alpha second», the bare ratio (36) keeps both tabs', { was, now: at(334) });
+  ok(J(at(600)) === J({ visible: ['w', 's'], folded: [], words: true }), '…with room, the chip keeps its words («2/3 browsers»)', at(600));
+  ok(J(at(250)) === J({ visible: ['w'], folded: ['s'], words: true }), '…and the control the other way: where even the bare ratio leaves no room, the tab folds as before (into the ▾+N menu, which lists every folded tab — browser-live-window stripMoreBtn) and the words stay (nothing to gain by dropping them)', at(250));
+  // NO FLICKER: the chip's text comes from measuring BOTH texts on every call — never from the text that was showing — so two
+  // refolds in a row at one width give one chip, at every width across the edge (a fake button: 7 px a character + 6)
+  let shown = '2/3 browsers';
+  const measure = (txt) => { shown = txt; return txt.length * 7 + 6; };
+  const refold = (avail) => { const r = L.chipFoldText({ rows, widths, avail, shownRef: 'w', words: '2/3 browsers', ratio: '2/3', measure, morePx: 44 }); shown = r.text; return r; };
+  const flips = [];
+  for (let avail = 250; avail <= 600; avail++) { const a1 = refold(avail), a2 = refold(avail); if (a1.text !== a2.text || J(a1.folded) !== J(a2.folded)) flips.push(avail); }
+  const edge = [326, 327, 328, 329, 370, 371, 372].map((w) => refold(w).text).join(' ');
+  // CONTROL: a naive refold that measures only the text SHOWING (words when it fits, else the ratio, judged by the current width)
+  // flips at the edge — the leg above can fail
+  let cur = '2/3 browsers';
+  const naive = (avail) => { const f = L.stripFold({ rows, widths, avail, shownRef: 'w', chipPx: cur.length * 7 + 6, morePx: 44 }); cur = f.folded.length ? '2/3' : '2/3 browsers'; return cur; };
+  const naiveFlips = []; for (let avail = 250; avail <= 600; avail++) { if (naive(avail) !== naive(avail)) naiveFlips.push(avail); }
+  ok(naiveFlips.length > 0, `CONTROL: a refold that measures only the showing text flickers between the two at ${naiveFlips.length} widths (${naiveFlips.slice(0, 3).join(', ')} …) — the leg below can go red`, naiveFlips.length);
+  ok(flips.length === 0, `no flicker: two refolds in a row at the same width give the same chip at every width from 250 to 600 px (${edge} — across both edges)`, flips.slice(0, 10));
+}
+{
   // lane browser-resume C (§3.9, ruling 3): THE TAB ROW folds by the strip's rule — the tab on show never; the ones the viewer
   // can act on (the agent's / his own) outlast another conversation's / nobody's; ties right to left; the row's end always there
   const T = (n) => String(n).padStart(4, '0') + 'C'.repeat(28);

@@ -135,7 +135,7 @@ import { MODAL_OPEN_EVENT } from './utils.js'; // lane dialog-keys: every app mo
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
-import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
+import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
 import { tabRowModel, tabRefusalText, tabGroups, tabsCountText } from '../browser-tabs.js';
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
@@ -1778,7 +1778,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const widths = {};
       for (const b of tabs) widths[b.dataset.ref] = b.offsetWidth + 2;
       const avail = strip.clientWidth - 12;
-      const f = stripFold({ rows: st.rows, widths, avail, shownRef: curRef(), chipPx: capBtn.offsetWidth + 6, morePx: 44 });
+      // the chip's WORDS yield before a tab (live-strip-layout chipFoldText): the button measured worded and bare, every time
+      const measure = (s) => { capBtn.textContent = s; return capBtn.offsetWidth + 6; };
+      const f = chipFoldText({ rows: st.rows, widths, avail, shownRef: curRef(), words: capBtn.dataset.words || capBtn.textContent, ratio: capBtn.dataset.ratio || '', measure, morePx: 44 });
+      capBtn.textContent = f.text;
       st.folded = f.folded;
       for (const b of tabs) b.style.display = f.folded.includes(b.dataset.ref) ? 'none' : '';
       stripMoreBtn.style.display = f.folded.length ? '' : 'none';
@@ -1828,7 +1831,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       stripTabs.appendChild(b);
     }
     // lane ui-language (the walk's browser-live-7): the ratio says what it counts — «1/1» alone was a red mystery
-    capBtn.textContent = chip.full ? t('{own}/{cap} browsers (at the limit)', { own: chip.own, cap: chip.cap }) : t('{own}/{cap} browsers', { own: chip.own, cap: chip.cap });
+    capBtn.dataset.words = chip.full ? t('{own}/{cap} browsers (at the limit)', { own: chip.own, cap: chip.cap }) : t('{own}/{cap} browsers', { own: chip.own, cap: chip.cap });
+    capBtn.dataset.ratio = chip.text;   // the bare «2/3» a narrow strip shows before it folds a tab (its words stay in the title)
+    capBtn.textContent = capBtn.dataset.words;
     capBtn.classList.toggle('full', chip.full);
     capBtn.classList.toggle('machine-full', chip.machineFull);
     capBtn.title = t('{own} of this conversation’s {cap} browsers are running — click to see them or change the limit', { own: chip.own, cap: chip.cap }) + (chip.machineFull ? '\n' + t('Machine ceiling reached') : '');
