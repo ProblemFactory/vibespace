@@ -9,6 +9,12 @@
 // named (src/server/stream-wall.js) — `read(id, { wall: true })`, honoured ONLY where the descriptor declares
 // `onDemand.onWallSignal`; once per account per wall (the caller's ledger), every gate below unchanged (the minute's
 // pace, the setting, the judge's STOP). Still never a timer: the event is the wall.
+// THE THIRD CALLER (lane usage-predict, the owner's ruling «A» 2026-11-14 — «一个 agy 账号上的对话结束一轮、且该账号 5 分钟内没有
+// 新一轮时，读一次 agy 的 /usage；每账号每 30 分钟最多一次；轮次进行中不读；闲置账号不读»): the end of a stretch of work
+// (src/server/after-turn-read.js) — `read(id, { afterTurn: true })`, honoured ONLY where the descriptor declares
+// `onDemand.afterTurn`; every gate below unchanged. Each run of the CLI, by any caller, is counted on disk first
+// (src/door-reads.js: today's count by caller, shown on the account's row, and the last run the after-turn ceiling and the
+// wall's re-read are counted from).
 //   · the CLI = the path the read-time check answers NOW (src/server/cli-cmd.js `check`, forced: a person asked);
 //   · the env = the account's own spawn env (accounts.resolveForSpawn: its HOME root, the session bus disabled) over
 //     the agents' env (ws-handler agentEnv — every harness's credential names dropped), so the CLI reads THAT
@@ -20,6 +26,7 @@
 // Answers { ok, status, … } — the route maps it to HTTP. Spawns nothing at require time; no backend-id branch.
 const path = require('path');
 const { spawn } = require('child_process');
+const doorReads = require('../door-reads.js');
 
 const PACE_MS = 60000;
 const TIMEOUT_MS = 30000;
@@ -53,7 +60,7 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   setting = () => null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS } = {}) {
   const lastAt = new Map();   // account id → when a person last read it (the once-a-minute pace)
   const inflight = new Map(); // account id → the read in flight (two presses share it)
-  async function readOnce(id, a, be, od) {
+  async function readOnce(id, a, be, od, caller) {
     const cmd = await cliCmds.check(be, { force: true });
     if (!cmd) return { ok: false, status: 409, code: 'not-installed', error: `${harnessOf(be)?.label || be} is not installed on this machine` };
     let spawnEnv = null;
@@ -63,6 +70,7 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
     const env = { ...agentEnv(), ...spawnEnv.localEnv };
     for (const k of creds.keyEnvVars || []) delete env[k]; // an ambient key would answer for ANOTHER login
     const at = now();
+    try { doorReads.bumpDoorRead(cacheDir, id, caller, at, usageWrite); } catch (e) { log(`[cli-usage] ${be} ${id}: the read count was not written: ${e.message}`); }
     const r = await runOnce(spawnImpl, cmd, od.argv, { env, cwd: od.cwdOf(spawnEnv.localEnv), timeoutMs });
     if (r.error) return { ok: false, status: 502, code: 'spawn-failed', error: `could not run ${path.basename(cmd)}: ${r.error.message}` };
     const j = od.judge({ code: r.code, stdout: r.stdout, stderr: r.stderr, measuredAt: at });
@@ -80,22 +88,25 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   }
   return {
     PACE_MS: paceMs,
-    /** ONE reading of account `id`, on a person's press (`person`) or a wall its conversation named (`wall`); else refused. */
-    async read(id, { person = false, wall = false } = {}) {
-      if (!person && !wall) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
+    /** ONE reading of account `id`, on a person's press (`person`), a wall its conversation named (`wall`) or the end of a
+     *  stretch of its work (`afterTurn`); else refused. */
+    async read(id, { person = false, wall = false, afterTurn = false } = {}) {
+      const caller = person ? 'person' : wall === true ? 'wall' : afterTurn === true ? 'afterTurn' : null;
+      if (!caller) return { ok: false, status: 403, code: 'agent_forbidden', error: 'human-triggered only' };
       const a = accounts.get(id);
       if (!a) return { ok: false, status: 404, code: 'unknown-account', error: 'unknown account' };
       const be = a.backend || 'claude';
       const od = harnessOf(be)?.quota?.onDemand;
       if (!od || typeof od.judge !== 'function' || !Array.isArray(od.argv)) return { ok: false, status: 400, code: 'no-reading', error: `${harnessOf(be)?.label || be} declares no on-demand usage reading` };
-      if (!person && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
+      if (caller === 'wall' && od.onWallSignal !== true) return { ok: false, status: 400, code: 'no-wall-read', error: `${harnessOf(be)?.label || be} declares no reading on a usage wall` };
+      if (caller === 'afterTurn' && od.afterTurn !== true) return { ok: false, status: 400, code: 'no-after-turn-read', error: `${harnessOf(be)?.label || be} declares no reading after a stretch of work` };
       let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
       if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
       if (inflight.has(id)) return inflight.get(id);
       const since = now() - (lastAt.get(id) || -Infinity);
       if (since < paceMs) return { ok: false, status: 429, code: 'throttled', throttled: true, retryInMs: paceMs - since, error: 'read less than a minute ago' };
       lastAt.set(id, now());
-      const p = readOnce(id, a, be, od).finally(() => inflight.delete(id));
+      const p = readOnce(id, a, be, od, caller).finally(() => inflight.delete(id));
       inflight.set(id, p);
       return p;
     },

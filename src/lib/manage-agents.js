@@ -615,6 +615,15 @@ export function onDemandUsageView(r) {
   return windows.length ? { windows, fetchedAt: r.fetchedAt || null } : null;
 }
 
+/** THE DAY'S READS OF AN ACCOUNT (lane usage-predict, 2026-11-15): how often its CLI was asked for its usage today and by
+ *  whom — a person, a usage wall, the end of a stretch of work. A DETAIL: the usage cell's title, '' when nothing was read today. */
+export function doorReadsLine(r) {
+  const n = Math.max(0, Math.floor(Number(r && r.total) || 0));
+  if (!n) return '';
+  const k = (x) => Math.max(0, Math.floor(Number(x) || 0));
+  return t('Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work', { n, person: k(r.person), wall: k(r.wall), after: k(r.afterTurn) });
+}
+
 // ── THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标") ────────────
 // An account billing paid overage (kind 'inUse') or whose org allows it past
 // 100 % (kind 'credits', B-ad05) wears ONE compact chip on its identity line —
@@ -687,6 +696,8 @@ export function installManageAgents(App, ctx = {}) {
     const maps = { accounts: this._accountUsage, hostOwn: this._hostOwnUsage, hostAccounts: this._hostAccountUsage, codex: this._codexAccountUsage, home: this._homeAccountUsage, rateLimit: this._rateLimit, estimates: this._usageEstimates };
     let n = 0; const lists = new Set();
     for (const cell of cells) {
+      // an on-demand account's reads today ride the cell's title (usage-predict pick 1), patched like the rest
+      if (cell.dataset.usageSrc === 'home' && typeof cell.setAttribute === 'function') { const tl = doorReadsLine(maps.home?.[cell.dataset.usageKey]?.reads); if ((cell.getAttribute('title') || '') !== tl) cell.setAttribute('title', tl); }
       const snap = rosterUsageSnapshot(cell.dataset, maps);
       if (!snap) continue;
       const html = this._acctUsageHtml(snap.u, snap.est, probeNoteOfCell(cell.dataset), snap.backend);
@@ -2200,7 +2211,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}" data-id="${escHtml(a.id)}">
         <span class="acct-type-icon" title="${escHtml(t('{login} account — runs on this machine', { login }))}">${CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}</span></span></span>
-        <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}">${usageOf(a.id)}</span>
+        <span class="acct-usage-cell" data-usage-src="home" data-usage-key="${escHtml(a.id)}" title="${escHtml(doorReadsLine(this._homeAccountUsage?.[a.id]?.reads))}">${usageOf(a.id)}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>

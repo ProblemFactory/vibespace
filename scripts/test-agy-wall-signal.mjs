@@ -426,8 +426,9 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
 console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');
 {
   const src = read('src/lib/settings-schema.js');
-  const OPT = 'Manual (⟳ button) — plus ONE automatic read after a usage wall', DESC = 'Manual = when you click ⟳, and once by itself when an Antigravity conversation hits a usage wall;';
-  ok('the «manual» option and the description name the one automatic read after a wall', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
+  // usage-predict pick 1 (the owner's A, 2026-11-14): the words name the second automatic read too — after a stretch of work
+  const OPT = 'Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work', DESC = 'Manual = when you click ⟳, and by itself for Antigravity only: once when a conversation hits a usage wall, and once when an account’s turn ends and 5 minutes pass with no new turn (at most once per account per 30 minutes; never during a turn, never for an idle account);';
+  ok('the «manual» option and the description name the automatic reads (after a wall, after a stretch of work)', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const dk = Object.keys(zh).find((k) => k.includes(DESC));
   ok('…in zh and ja too (the option, and the description\'s manual clause)', !!zh[OPT] && !!ja[OPT] && !!dk && /Antigravity/.test(zh[dk]) && /Antigravity/.test(ja[dk]), JSON.stringify([zh[OPT], ja[OPT]]));
