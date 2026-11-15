@@ -64,6 +64,7 @@ export const SITES = [
   ['src/usage-history.js «UsageHistory._maybeRebakeAttribution»', 1, 13],
   ['src/usage-history.js «UsageHistory._unreadBytes»', 1, 'a bytes gauge (the warm\'s unread bytes): no row is read'],
   ['src/usage-history.js «UsageHistory._shardFor»', 1, 'the append path\'s file name: a writer, no reader'],
+  ['src/usage-history.js «UsageHistory.flushTurnRows»', 2, 'the stop\'s commit of the waiting turn rows (a writer — usage-every-change, the check\'s must 3): refuses an id the warm ledger holds or a half-done commit left; the queue\'s own dedup covers the same batch'],
   ['src/usage-history.js «UsageHistory._walkAndAppend > push»', 1, 'the local commit (a writer): refuses an id the ledger holds (knows) — the same-batch copy is its gap, read-time dedup absorbs it'],
   ['src/usage-history.js «UsageHistory.ingestRemoteEvents»', 1, 20],
   ['src/usage-hold-road.js «UsageHoldRoad.restorePause»', 1, 'a paused shard\'s name checked: no row is read'],

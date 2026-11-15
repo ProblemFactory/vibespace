@@ -293,6 +293,21 @@ const DRIVERS = {
         return { green: got.n === 1 && got.rows.length === 1 && r.acct === 'agy-1' && r.ts === Date.parse(rec.ts) && r.i === 500 && r.cr === 4000 && r.o === 60 && r.sid === 'conv-agt' && filesIn(w.cacheDir).length === 0,
           why: "one ledger row per finished turn on its named account, at the record's time (the record read three times: one row) — and no reading is made of it", detail: { rows: got.n, r, files: filesIn(w.cacheDir) } };
       },
+      // THE CHECK'S MUST 3: a booked turn row is not lost by a restart — the stop commits the rows that wait (server.js
+      // shutdownNow → UsageHistory.flushTurnRows); the next process's ledger holds it once, and a walk after adds nothing
+      async 'hub/turn-row-survives-restart'(w, REPO) {
+        const uh = ledgerOf(w, REPO);
+        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agr2', _accountId: 'agy-1', backendSessionId: 'conv-agr2' });
+        const rec = agyUsage(Date.now() - 2000, 'conv-agr2');
+        w.eng.noteTurnRow(s, rec);
+        const flushed = uh.flushTurnRows(); // what shutdownNow does — then the process is gone
+        const uh2 = ledgerOf(w, REPO); // the next boot: a new history over the same data folder
+        await uh2.scan({ force: true }); uh2.flushCursors();
+        const got = await agyRowsOf(uh2, [`antigravity:conv-agr2:${Date.parse(rec.ts)}:1660`]);
+        const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), stop = srv.slice(srv.indexOf('function shutdownNow()'), srv.indexOf('\n}\n', srv.indexOf('function shutdownNow()')));
+        return { green: flushed === 1 && got.n === 1 && got.rows.length === 1 && /usageHistory\.flushTurnRows\(\)/.test(stop),
+          why: 'a turn booked and not yet walked survives the stop (shutdownNow commits the queue) — one row in the next process, none added by its walk', detail: { flushed, n: got.n, wired: /usageHistory\.flushTurnRows\(\)/.test(stop) } };
+      },
       async 'hub/turn-row-named-only'(w, REPO) {
         const uh = ledgerOf(w, REPO);
         const own = w.session({ backend: 'antigravity', _webuiId: 'w-ago', _accountId: null, backendSessionId: 'conv-ago' });

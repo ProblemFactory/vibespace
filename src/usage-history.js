@@ -517,6 +517,24 @@ class UsageHistory {
     if (q.length > TURN_ROWS_MAX) q.splice(0, q.length - TURN_ROWS_MAX);
     return ev;
   }
+  /** THE STOP COMMITS THE TURNS THAT WAIT (usage-every-change, the check's must 3 — the tree's law: a store flushes at the
+   *  stop): the rows booked since the last walk's commit are appended now, synchronously, in the commit's own line shape and
+   *  through its id filter (a row the warm ledger holds, or a half-done commit left, is not appended again); the queue is
+   *  then empty. Called by server.js shutdownNow. A kill flushes nothing (a said limit). → rows appended */
+  flushTurnRows() {
+    const q = this._turnRows;
+    if (!q || !q.length) return 0;
+    const knows = this._evCache && !(typeof this.ledgerLoading === 'function' && this.ledgerLoading()) ? (id) => this.ledgerKnowsId(id) : null;
+    const partial = this._partialRids || null, byShard = {};
+    for (const ev of q) {
+      if ((knows && knows(ev.rid)) || (partial && partial.has(ev.rid))) continue;
+      (byShard[this._shardFor(ev.ts)] = byShard[this._shardFor(ev.ts)] || []).push(JSON.stringify(ev));
+    }
+    let n = 0;
+    for (const [shard, lines] of Object.entries(byShard)) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); n += lines.length; }
+    this._turnRows = [];
+    return n;
+  }
   _noteStatement(pending, e, host) {
     // `rl` rides the codex rollout rows only (the walker's codex branch states it): a row without one states nothing
     if (!this._statementSink || !e || !e.sid || !e.rl || typeof e.rl !== 'object') return;

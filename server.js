@@ -1887,6 +1887,7 @@ function shutdownNow() {
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { flushRequestStamps(); } catch {} // each conversation's last model request (lane cache-warmth-tiles r1a′) — read back by boot-restore
+  try { usageHistory.flushTurnRows(); } catch {} // the turn rows waiting for the walk's commit (usage-every-change, the check's must 3)
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { require('./src/server/writes-lost.js').installed()?.stop(); } catch {} // a lost write's warning still held after a failed write (lane cli-2-1-319-records r3)
   try { hosts.flushThrottled(); } catch {} // lane-pairing: the throttled dial facts + exit last-run stamps

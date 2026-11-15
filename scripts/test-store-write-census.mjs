@@ -54,7 +54,7 @@ const PERSIST = new Set(['writeFileSync', 'appendFileSync', 'renameSync', 'copyF
 const HELPER = /\b(writeJsonAtomic|writeBuffersAtomic|_writeAtomic|writePrivateFile)\s*\(/g;
 const CLASSES = new Set(['durable', 'not-main', 'not-a-store', 'exit', 'debt']);
 // a file whose rows are by SCOPE (its other sites fall to '*')
-const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'] };   // lane job-logs-sweep r3: the failed load's fact on disk (durable); r4: a note still owed, written by the exit
+const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'], 'src/usage-history.js': ['UsageHistory.flushTurnRows'] };   // usage-every-change (the check's must 3): the stop's commit of the waiting turn rows —   // lane job-logs-sweep r3: the failed load's fact on disk (durable); r4: a note still owed, written by the exit
 // THE DEBT RATCHET: the sum of n over the debt rows may only fall (lane hub-loop-stalls commit 2: 453 → 451 with session-status
 // moved; + 4 at the .390 rebase — master's new sites, classified here: src/turn-carry.js save ×2 (report-mark-on-ack) and
 // src/server/cli-model-catalog.js saveLedger ×2 (cli-update-needs-nothing) — 455; round 2: + 65 the census could NOT
@@ -210,6 +210,7 @@ const ROWS = [
   ["src/usage-anchors.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/usage-cache-write.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/usage-history.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-history.js","UsageHistory.flushTurnRows",1,"durable","the ledger's own readers (the next process's walk filter, the Usage window, «N turns since this reading»)","NOT idempotent at the stop: a lost turn row is a finished turn missing from its account's ledger and from the turns-since count for as long as that reading stands (the id filter makes a second append nothing)","lane usage-every-change, the check's must 3: the stop commits the turn rows that wait for the walk (server.js shutdownNow)"],
   ["src/usage-hold-road.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/usage-index-worker.js","*",1,"not-main","—","—","the usage index worker thread"],
   ["src/usage-ledger-dedup.js","*",10,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
