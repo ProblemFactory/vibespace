@@ -47,7 +47,7 @@ function assertResumeContract(id, resume) {
 
 /** The quota contract every harness carries (S4): the engine reaches quota
  *  behaviour through this object, never through a backend-id branch. */
-function assertQuotaContract(id, quota) {
+function assertQuotaContract(id, quota, { full = true } = {}) {
   if (!quota || typeof quota !== 'object') throw new Error(`harness '${id}': quota contract missing (use NULL_QUOTA for a harness without quota)`);
   for (const fn of ['normalize', 'signalFromStream', 'classifyAuthFailure']) {
     if (typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function`);
@@ -55,6 +55,12 @@ function assertQuotaContract(id, quota) {
   for (const fn of ['readLive', 'settleLive', 'classifyServeFailure']) { // classifyServeFailure: a LAPSED subscription's closed census (2026-10-08) — optional, the engine asks with ?.
     if (quota[fn] !== undefined && typeof quota[fn] !== 'function') throw new Error(`harness '${id}': quota.${fn} must be a function when declared`);
   }
+  // THE PREDICTION ADAPTER (lane usage-predict pick 3): every harness declares `quota.predict` — its unit and prior, or
+  // `{ none: '<why>' }` (src/usage-predict.js checkPredict)
+  // `{ none: '<why>' }` (src/usage-predict.js checkPredict). A CONTRIBUTED harness (a plugin written before the member) may
+  // omit it — read as none, the safe default; one it does declare is checked like a built-in's
+  const predictErrs = (!full && quota.predict === undefined) ? [] : require('../usage-predict.js').checkPredict(quota.predict);
+  if (predictErrs.length) throw new Error(`harness '${id}': quota.predict — ${predictErrs.join('; ')}`);
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
 }
 
@@ -122,7 +128,7 @@ function validate(h, { full = true } = {}) {
       for (const k of ['wrapper', 'Normalizer', 'store']) if (!h[k]) throw new Error(`harness "${h.id}" is chat-capable but declares no ${k}`);
     }
   }
-  assertQuotaContract(h.id, h.quota);
+  assertQuotaContract(h.id, h.quota, { full });
   assertResumeContract(h.id, h.resume);
   assertRewindContract(h);
   assertSettingsContract(h, { full });

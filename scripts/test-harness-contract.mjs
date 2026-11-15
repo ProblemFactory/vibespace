@@ -101,6 +101,38 @@ ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META ro
   let whole = ''; try { validate({ ...g }); } catch (e) { whole = e.message; }
   ok(!whole, 'POSITIVE control: the whole antigravity descriptor validates', whole);
 }
+// ── THE PREDICTION ADAPTER (lane usage-predict pick 3, 2026-11-15; the owner: «把预测系统做成通用的adapter接在不同的账号来源上»): every
+// harness declares `quota.predict` — its unit and prior, or `{ none: '<why>' }` — checked at registration; the estimator's core
+// reaches a source's adapter WITHOUT the registry (src/harnesses/predict-adapters.js) and the two bindings are the same object.
+{
+  const UP = require(path.join(REPO, 'src/usage-predict.js'));
+  const PA = require(path.join(REPO, 'src/harnesses/predict-adapters.js'));
+  const { validate } = require(path.join(REPO, 'src/harnesses/index.js'));
+  const ids = harnessIds();
+  const rows = ids.map((id) => { const p = HARNESSES[id]?.quota?.predict; return { id, p, errs: UP.checkPredict(p) }; });
+  ok(rows.every((r) => !r.errs.length), `predict: every harness declares it (${rows.map((r) => r.id + '=' + (r.p && r.p.none ? 'none' : r.p && r.p.unit)).join(' · ')})`, JSON.stringify(rows.filter((r) => r.errs.length)));
+  const pr = (id) => HARNESSES[id]?.quota?.predict?.prior;
+  ok(pr('claude') && pr('claude').sevenDay > 0 && pr('claude').fiveHour > 0 && pr('claude').classes5h, 'predict: Claude states its measured prior (5h, 7d, its caps) and its 5h class priors');
+  ok(['codex', 'antigravity'].every((id) => pr(id) && typeof pr(id).none === 'string' && pr(id).none.length > 10), 'predict: codex and Antigravity declare NO prior, and say why (learn first)');
+  ok(rows.filter((r) => r.p && r.p.none).every((r) => !(r.id in PA.ADAPTERS)) && rows.filter((r) => r.p && !r.p.none).every((r) => PA.adapterOf(r.id) === r.p),
+    'predict: the core\'s binding (predict-adapters) IS the descriptor\'s for every source that predicts; a source that states no quota has no row', JSON.stringify(rows.map((r) => [r.id, PA.adapterOf(r.id) === r.p])));
+  const g = HARNESSES.claude;
+  const bad = [[{ ...g, quota: { ...g.quota, predict: undefined } }, 'no predict'], [{ ...g, quota: { ...g.quota, predict: { unit: 'usd-api', prior: { sevenDay: -5 } } } }, 'a negative size'],
+    [{ ...g, quota: { ...g.quota, predict: { unit: 'credits', prior: { none: 'x y z w' } } } }, 'an unknown unit'], [{ ...g, quota: { ...g.quota, predict: { none: '' } } }, 'a none that says no why']];
+  for (const [copy, what] of bad) { let msg = ''; try { validate(copy); } catch (e) { msg = e.message; } ok(/quota\.predict/.test(msg), `RED control: a descriptor with ${what} is refused at registration (${msg.slice(0, 90)})`); }
+  // a CONTRIBUTED harness (a plugin written before the member) may omit it — read as none; one it declares is checked
+  let cOmit = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: undefined } }, { full: false }); } catch (e) { cOmit = e.message; }
+  let cBad = ''; try { validate({ id: 'made-plugin', quota: { ...g.quota, predict: { unit: 'credits', prior: { none: 'x y' } } } }, { full: false }); } catch (e) { cBad = e.message; }
+  ok(!cOmit && /quota\.predict — unit must be one of/.test(cBad), 'predict: a contributed harness that omits it registers (read as none); a malformed one is refused all the same', JSON.stringify([cOmit.slice(0, 80), cBad.slice(0, 80)]));
+  // CONFORMANCE per source: the same made pair, learned under each source's own prior — Claude's rate leans on its prior;
+  // a source with none learns only from its own pairs (no rate under $1 of cost)
+  const E = require(path.join(REPO, 'src/usage-estimator.js'));
+  const T = 4102444800000, a0 = { fetchedAt: T, source: 'statusline', sevenDay: { u: 0.10, resetsAt: T / 1000 + 5 * 86400 } };
+  const a1 = { fetchedAt: T + 3600e3, prevFetchedAt: T, source: 'statusline', sevenDay: { u: 0.101, resetsAt: T / 1000 + 5 * 86400 }, costSince: { total: 0.5, byFamily: {} } };
+  const conf = Object.keys(PA.ADAPTERS).map((src) => { const key = src === 'claude' ? 'org:made' : src + ':acct:made'; const pri = UP.priorsForIdentity(key); const r = E.learnRates([a0, a1], { priors: pri }); return { src, prior: pri ? pri.sevenDay : null, rate: r.sevenDay ? r.sevenDay.priorFullUsd : 'none' }; });
+  ok(conf.every((c) => (c.src === 'claude' ? c.prior === pr('claude').sevenDay && c.rate === pr('claude').sevenDay : c.prior === null && c.rate === 'none')),
+    `predict CONFORMANCE: one made pair per source — Claude learns beside its own prior, codex and Antigravity learn from nothing but their pairs (${JSON.stringify(conf)})`);
+}
 // ── the caps MIRROR (design-harness-features §6 landing discipline): a caps row
 // the client also carries must be BYTE-IDENTICAL to the server's, and a row the
 // client carries ALONE is how §2.13's `review` drifted (client had it, server

@@ -236,7 +236,7 @@ function quotaBackendFor(key, session) {
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // READ-ONLY view of the transition ledger. The single WRITER is accounts.js
 // (every re-point goes through ensureSessionPoolLink / setPoolTarget — spawn,
@@ -332,7 +332,9 @@ const usageEstimator = new UsageEstimator({
   // measured claude Max-20x quota sizes — meaningless for ChatGPT plans);
   // the no-prior fallback needs ≥$1 cost + ≥0.5% observed movement before
   // it emits a rate, which is the honest cold-start for an unmeasured plan.
-  priorsFor: (identityKey) => String(identityKey || '').startsWith('codex:') ? null : CLAUDE_MAX_PRIOR_FULL_USD,
+  // THE SOURCE'S OWN PRIOR (lane usage-predict pick 3): its adapter's (Claude: the measured Max-20x table; codex and
+  // Antigravity: none — before this pick Antigravity's keys were handed Claude's)
+  priorsFor: (identityKey) => require('../usage-predict.js').priorsForIdentity(identityKey),
 });
 app.locals.usageEstimator = usageEstimator;
 // ── OFFLINE-BIAS defense (2.297.0, design §Cross-device aggregation) ──

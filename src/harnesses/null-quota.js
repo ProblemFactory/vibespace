@@ -17,6 +17,7 @@ const NULL_QUOTA = Object.freeze({
   probe: null,
   classifyAuthFailure: () => false,
   classifyServeFailure: () => null,
+  predict: Object.freeze({ none: 'states no quota' }), // the prediction adapter (usage-predict pick 3): nothing to predict
   toLimitSet: ({ identity = null, source = null, fetchedAt = null } = {}) =>
     makeLimitSet({ identity, source, fetchedAt, limits: [] }),
   limitSetFromSnapshot: (_snap, { identity = null, source = null } = {}) =>

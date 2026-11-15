@@ -9,9 +9,9 @@
 // them directly). Zero API calls anywhere (§ban-safety): inputs are the local
 // anchor files + the local usage-history ledger only.
 //
-// PRIORS: seeded from the measured ProblemFactory Max quotas (2026-08-09,
-// odometer method over full windows, 5 anchors self-consistent to ±3%):
-// 5h ≈ $500, 7d ≈ $1730, Fable weekly ≈ $875 API-equivalent. Blended as a
+// PRIORS: a source's own (its adapter's, src/harnesses/<source>-predict.js — lane usage-predict pick 3). Claude's are the
+// measured Max quotas (2026-08-09, odometer method over full windows, 5 anchors self-consistent to ±3%); codex and
+// Antigravity declare none and learn first. Blended as a
 // pseudo-pair with Δu-weight PRIOR_WEIGHT_DU so real observations dominate
 // once an identity has ~15%+ of observed utilization movement. Caveat: these
 // are Max-20x numbers — a Pro account starts ~4-10× off and self-corrects as
@@ -30,17 +30,10 @@ const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS,
 
 // Δu-equivalent weight of the prior pseudo-observation.
 const PRIOR_WEIGHT_DU = 0.15;
-// Measured Max-20x full-quota sizes in API-equivalent USD (see header).
-const CLAUDE_MAX_PRIOR_FULL_USD = { fiveHour: 500, sevenDay: 1730, 'scoped:fable': 875 };
-// 5h TOKEN-CLASS priors (B-536b; 3-class since 2.268.1): the 5h bucket
-// weights each token class differently from our $ pricing — cache WRITES
-// burn ~half per $, cache READS are nearly FREE (incremental caching makes
-// cr-dominated windows: real-data fit cw ~$443 / cr ~$2556 / fresh ~$185).
-// Three pure-class pseudo-pairs seed the regression; real data dominates
-// quickly (PRIOR_WEIGHT_DU each).
-const PRIOR_5H_CW_FULL_USD = 500;
-const PRIOR_5H_CR_FULL_USD = 3000;
-const PRIOR_5H_FRESH_FULL_USD = 200;
+// A SOURCE'S PRIOR IS ITS ADAPTER'S (lane usage-predict pick 3, the owner's «预测系统做成通用的adapter»): the measured full-quota
+// sizes and the 5h token-class priors are Claude's facts (src/harnesses/claude-predict.js); codex and Antigravity declare none
+// (learn first). An identity's prior = its source's (src/usage-predict.js priorsForIdentity); nothing here assumes a source.
+const { SEED_FAMILIES } = require('./model-family.js');   // the ONE model-family vocabulary (B-a612): the scoped buckets' words
 const WEEK_SEC = 7 * 86400;
 
 function normU(u) {
@@ -54,7 +47,7 @@ function scopedKey(name) { return 'scoped:' + String(name || '').trim().toLowerC
 // fable-family column; unknown scope names fall back to total cost).
 function scopedFamily(name) {
   const n = String(name || '').toLowerCase();
-  for (const fam of ['fable', 'opus', 'sonnet', 'haiku']) if (n.includes(fam)) return fam;
+  for (const fam of SEED_FAMILIES) if (n.includes(fam)) return fam;
   return null;
 }
 function costForKey(key, costSince) {
@@ -159,8 +152,9 @@ function* _extractPairsSteps(lines, opts = {}, step = Infinity) {
       // 20% of what the measured Max-20x priors say that movement costs is
       // not rate information. Taint like the anomalous decrease so the
       // recovery pair off this anchor is skipped too.
-      if (du >= 0.05) {
-        const full = CLAUDE_MAX_PRIOR_FULL_USD[key] || CLAUDE_MAX_PRIOR_FULL_USD.sevenDay;
+      // judged by the IDENTITY's own prior (its source's adapter); a source with none (learn first) has no scale to judge by
+      const full = opts.priors ? (Number(opts.priors[key]) || Number(opts.priors.sevenDay) || 0) : 0;
+      if (du >= 0.05 && full > 0) {
         const corroborating = costForKey(key, (liveCost && liveCost.total > 0) ? liveCost : l.costSince);
         if (corroborating != null && corroborating < du * full * 0.2) {
           (tainted[key] = tainted[key] || new Set()).add(l.fetchedAt);
@@ -196,11 +190,12 @@ function* _extractPairsSteps(lines, opts = {}, step = Infinity) {
 // pseudo-pair {du: PRIOR_WEIGHT_DU, cost: PRIOR_WEIGHT_DU × priorFullUsd}.
 // Without a prior, a bucket needs real signal (≥$1 cost AND ≥0.5% movement)
 // before we dare emit a rate at all.
-function learnRates(lines, { priors = null, costFn = null } = {}) { return _fitRates(extractPairs(lines, { costFn }), priors); }
+function learnRates(lines, { priors = null, costFn = null } = {}) { return _fitRates(extractPairs(lines, { costFn, priors }), priors); }
 /** The fit over the extracted pairs (per bucket: the sums; the 5h token-class normal equations) — a fold in the pairs' order,
  *  run whole at the end of a relearn (≈ 10 ns a pair: under a millisecond for the owner's largest identity). */
 function _fitRates(pairs, priors = null) {
-  const keys = new Set([...Object.keys(pairs), ...Object.keys(priors || {})]);
+  const keys = new Set([...Object.keys(pairs), ...Object.keys(priors || {}).filter(UP.isLaneKey)]);   // a prior's own members (classes5h) are no lanes
+  const cls5 = priors && priors.classes5h;   // the 5h token-class priors, where the source's adapter states them (Claude)
   const out = {};
   for (const key of keys) {
     let sumDu = 0, sumCost = 0, n = 0;
@@ -224,14 +219,14 @@ function _fitRates(pairs, priors = null) {
     // squares on class-split pairs + the two pure-class prior pseudo-pairs;
     // the blended rate above stays as DISPLAY/back-compat + the fallback for
     // degenerate data (all pairs same mix ⇒ near-singular normal equations).
-    if (key === 'fiveHour' && prior) {
+    if (key === 'fiveHour' && prior && cls5) {
       const cls = (pairs[key] || []).filter((p) => Number.isFinite(p.cw) && Number.isFinite(p.cr));
       if (cls.length >= 3) {
         const obs = [
           ...cls.map((p) => [p.cw, p.cr, p.ot, p.du]),
-          [PRIOR_WEIGHT_DU * PRIOR_5H_CW_FULL_USD, 0, 0, PRIOR_WEIGHT_DU],
-          [0, PRIOR_WEIGHT_DU * PRIOR_5H_CR_FULL_USD, 0, PRIOR_WEIGHT_DU],
-          [0, 0, PRIOR_WEIGHT_DU * PRIOR_5H_FRESH_FULL_USD, PRIOR_WEIGHT_DU],
+          [PRIOR_WEIGHT_DU * cls5.cw, 0, 0, PRIOR_WEIGHT_DU],
+          [0, PRIOR_WEIGHT_DU * cls5.cr, 0, PRIOR_WEIGHT_DU],
+          [0, 0, PRIOR_WEIGHT_DU * cls5.fresh, PRIOR_WEIGHT_DU],
         ];
         // 3-var normal equations, Cramer solve
         const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], Bv = [0, 0, 0];
@@ -572,7 +567,7 @@ class UsageEstimator {
     // lazy ref; everything here only dereferences at call time.
     this._usageHistory = usageHistory;
     this.resolveIdentity = resolveIdentity; // (accountId|null) → {identityKey} | null
-    this.priorsFor = priorsFor || (() => CLAUDE_MAX_PRIOR_FULL_USD);
+    this.priorsFor = priorsFor || UP.priorsForIdentity;   // the identity's source's prior (pick 3) — none for codex / Antigravity
     this.lagS = lagS == null ? 20 : lagS; // ledger-tail extrapolation seconds (0 = off, exact-math tests)
     this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines} — LRU by file bytes (B-9428, cache-bounds.js)
     this._rateCache = new Map();  // identityKey → {rates, at}
@@ -852,7 +847,7 @@ class UsageEstimator {
       try { f.seq0 = !loading && uh && typeof uh.arrivalSeq === 'function' ? uh.arrivalSeq() : null; } catch { f.seq0 = null; }
       // learn-time LIVE cost recomputation (see extractPairs) — the frozen costSince snapshots under-count fast burns whose ledger
       // events land after the sweep; the live ledger heals them retroactively (while loading: the frozen ones only)
-      f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids) }, RELEARN_CHUNK_LINES);
+      f.steps = _extractPairsSteps(lines, { costFn: loading ? null : this._costFn(f.ids), priors: this.priorsFor(f.key) }, RELEARN_CHUNK_LINES);
       if ((this.wholeReads || 0) !== w0) { let sz = 0; try { sz = RR.stat(this._file(identityKey)).size; } catch { } this._coldSpent(sz); } // this turn's cold reads (a budget of COLD_READ_TURN_BYTES)
     };
     f.late = () => { // round 3 (small 1): a row of its accounts that ARRIVED mid-fold with a ts inside its anchors' span (the hub's own session rows bring no invalidation) — the landing is a mix of two ledger states: stale at once
@@ -1449,7 +1444,7 @@ function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {}, prime = n
 
 module.exports = {
   claimRebase,
-  PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
+  PRIOR_WEIGHT_DU,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
   CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift, wholeLedgerGate,

@@ -53,7 +53,9 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
     /\(ownBe \? ownBe \+ ':' : ''\) \+ identityKeyFor/.test(eng) && /ownBe = gOwner \|\| \(acctRec\?\.backend && globalUsageKey\(acctRec\.backend\) !== '__global__'/.test(eng) && codexOwnKey);
   ok("'__global_codex__' is a pseudo id, not a deleted account",
     /const gOwner = globalKeyOwner\(fn\.slice\(0, -5\)\)/.test(eng) && /accountId = \(fn === '__global__\.json' \|\| gOwner\) \? null/.test(eng) && codexOwnKey);
-  ok('codex identities learn WITHOUT the claude Max priors', /priorsFor: \(identityKey\) => String\(identityKey \|\| ''\)\.startsWith\('codex:'\) \? null : CLAUDE_MAX_PRIOR_FULL_USD/.test(eng));
+  // usage-predict pick 3: the pool asks each source's own adapter (codex declares no prior), never a name test
+  const UPq = require(path.join(REPO, 'src/usage-predict.js'));
+  ok('codex identities learn WITHOUT the claude Max priors', /priorsFor: \(identityKey\) => require\('\.\.\/usage-predict\.js'\)\.priorsForIdentity\(identityKey\)/.test(eng) && UPq.priorsForIdentity('codex:email:a@b') === null && UPq.priorsForIdentity('org:x') && UPq.priorsForIdentity('org:x').sevenDay > 0);
   // (the gate grew a sibling clause in 2026-09-08 — autoCliReady — so the
   // adjacency is bounded to the same line rather than literal; what is pinned
   // is unchanged: the backend test is one of the conditions that `continue`s
