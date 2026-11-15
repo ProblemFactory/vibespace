@@ -426,12 +426,22 @@ console.log('⑨ THE REAL CONSUMER (acp-events) under server.js\'s REAL engine l
 console.log('⑨b the on-demand setting says the truth (the owner\'s ruling A)');
 {
   const src = read('src/lib/settings-schema.js');
-  // usage-predict pick 1 (the owner's A, 2026-11-14): the words name the second automatic read too — after a stretch of work
-  const OPT = 'Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work', DESC = 'Manual = when you click ⟳, and by itself for Antigravity only: once when a conversation hits a usage wall, and once when an account’s turn ends and 5 minutes pass with no new turn (at most once per account per 30 minutes; never during a turn, never for an idle account);';
-  ok('the «manual» option and the description name the automatic reads (after a wall, after a stretch of work)', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
+  // usage-predict pick 1 (the owner's A, 2026-11-14): the words name the second automatic read too — after a stretch of work. The
+  // OPTION names the choice in a few words, the DESCRIPTION says both reads (2.369.404's hosted heavy: a select is as wide as its longest
+  // option, and the long one overflowed the 390 phone — test-settings-row-layout ④)
+  const OPT = 'Manual (⟳ button) — plus Antigravity’s own reads', DESC = 'Manual = when you click ⟳, and by itself for Antigravity only: once when a conversation hits a usage wall, and once when an account’s turn ends and 5 minutes pass with no new turn (at most once per account per 30 minutes; never during a turn, never for an idle account);';
+  ok('the «manual» option names Antigravity\'s own reads, and the description says them both (after a wall, after a stretch of work)', src.includes(`{ value: 'manual', label: t('${OPT}') }`) && src.includes(DESC) && !src.includes('Manual only (⟳ button)') && !src.includes('Manual = only when you click ⟳'));
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const dk = Object.keys(zh).find((k) => k.includes(DESC));
   ok('…in zh and ja too (the option, and the description\'s manual clause)', !!zh[OPT] && !!ja[OPT] && !!dk && /Antigravity/.test(zh[dk]) && /Antigravity/.test(ja[dk]), JSON.stringify([zh[OPT], ja[OPT]]));
+  // the option no longer than the release's in each language (2.369.402's «Manual (⟳ button) — plus ONE automatic read after a usage
+  // wall», which fit the phone): a longer one widens the select past the 390 window
+  const wu = (t) => [...String(t)].reduce((n, c) => n + (/[\u3000-\u9fff\uff00-\uffef]/.test(c) ? 2 : 1), 0);   // width units: a full-width character counts two
+  const REL = { en: wu('Manual (⟳ button) — plus ONE automatic read after a usage wall'), zh: wu('手动（⟳ 按钮）— 另外在撞到用量上限后自动读一次'), ja: wu('手動（⟳ ボタン）— 使用量の上限に達した後に 1 回だけ自動で読み取り') };
+  const NOW = { en: wu(OPT), zh: wu(zh[OPT]), ja: wu(ja[OPT]) };
+  ok('…in a few words: the option is no wider than the release\'s in English, Chinese and Japanese (width units, a full-width character two — the select\'s width is its longest option\'s)', ['en', 'zh', 'ja'].every((l) => NOW[l] <= REL[l]), JSON.stringify({ now: NOW, release: REL }));
+  const LONG = { en: wu('Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work'), zh: wu('手动（⟳ 按钮）— 另外 Antigravity 自己读：撞到用量上限后、一段工作结束后'), ja: wu('手動（⟳ ボタン）— さらに Antigravity は自動で：上限到達後、作業の区切り後') };
+  ok('CONTROL: the words of the hosted heavy run\'s red (the option that overflowed the 390 phone) are wider than the release\'s in every language — the leg above goes RED on them', ['en', 'zh', 'ja'].every((l) => LONG[l] > REL[l]), JSON.stringify({ long: LONG, release: REL }));
   ok('…and the door\'s behaviour is unchanged by the words: «off» still refuses a wall read', /if \(mode === 'off'\) return \{ ok: false, status: 403, code: 'refresh-off'/.test(read('src/server/cli-usage-door.js')));
 }
 

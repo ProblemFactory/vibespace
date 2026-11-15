@@ -1639,7 +1639,7 @@ export default {
   "The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.": "アカウントは CLI 起動時に固定されるため、セッションを再起動します。会話は resume で継続されます。",
   "Switch & restart": "切り替えて再起動",
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "まだ再開できる会話がありません — まずメッセージを送るか、新規セッションでアカウントを選んでください",
-  "Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work": "手動（⟳ ボタン）— さらに Antigravity は自動で：上限到達後、作業の区切り後",
+  "Manual (⟳ button) — plus Antigravity’s own reads": "手動（⟳ ボタン）— Antigravity 自身の読み取りあり",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今日の使用量の取得 {n} 回：手動 {person} 回 · 上限到達後 {wall} 回 · 作業の区切り後 {after} 回",
   "usage read {n}× today": "今日 {n} 回取得",
   "Auto on popup open (when >30 min stale)": "ポップアップを開いた時に自動（30 分以上古い場合のみ）",

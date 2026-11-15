@@ -1640,7 +1640,7 @@ export default {
   "The account is fixed when the CLI starts, so the session restarts and the conversation continues via resume.": "账号在 CLI 启动时固定，所以会话将重启，对话通过 resume 无缝延续。",
   "Switch & restart": "切换并重启",
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "还没有可恢复的对话——先发一条消息，或在新建会话对话框里选账号",
-  "Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work": "手动（⟳ 按钮）— 另外 Antigravity 自己读：撞到用量上限后、一段工作结束后",
+  "Manual (⟳ button) — plus Antigravity’s own reads": "手动（⟳ 按钮）— 另有 Antigravity 自己的读取",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今天读取用量 {n} 次：你手动 {person} 次 · 撞到上限后 {wall} 次 · 一段工作结束后 {after} 次",
   "usage read {n}× today": "今天读取用量 {n} 次",
   "Auto on popup open (when >30 min stale)": "打开弹窗时自动（数据超 30 分钟陈旧才刷）",
