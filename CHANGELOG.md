@@ -8,7 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Website logins: in a named browser profile, chats point to a field and the vault fills it or makes a signup password.
 - Sign-in works on sites that send your password to their own sign-in address, such as login.example.com from www.example.com.
 - Allowing a website login says plainly what it means: that chat can sign in as you there, and our fence stops accidental reads and wrong sites.
-- The fence stops accidental reads only: a site that writes your password into its address, the Back button or a restart can show it again.
+- The fence stops accidental reads only: if a site writes your password into its own address, or after Back or a VibeSpace restart, an agent may read it.
 
 ## 2.369.403 — 2026-11-15
 
