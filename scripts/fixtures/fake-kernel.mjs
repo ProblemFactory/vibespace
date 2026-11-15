@@ -105,7 +105,10 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const objMap = new Map();      // objectId → { target, fid, node, ctxId }
   const pendingFetches = new Map(); // requestId → { targetId, resourceType, resolve }
   newTarget(firstUrl);
-  const frameOf = (t) => ({ id: t.targetId, loaderId: 'L' + t.targetId, url: t.url, domainAndRegistry: '', securityOrigin: originOfUrl(t.url) || 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
+  // lane chrome-157 (vault-login round 32): THE DOCUMENT'S ID as Chrome keeps it — a new loaderId per new document (a navigation,
+  // a reload, a setDom told `newDocument`), the same one across a move inside the document
+  const loaderOf = (t) => 'L' + t.targetId + (t.doc ? '.' + t.doc : '');
+  const frameOf = (t) => ({ id: t.targetId, loaderId: loaderOf(t), url: t.url, domainAndRegistry: '', securityOrigin: originOfUrl(t.url) || 'null', mimeType: 'text/html', adFrameStatus: { adFrameType: 'none' }, secureContextType: 'InsecureScheme', crossOriginIsolatedContextType: 'NotIsolated', gatedAPIFeatures: [] });
   // ── the surface protocol ──
   const onTarget = (tid, fn) => { for (const [sid, s] of sessions) if (s.targetId === tid) fn(sid, s); };
   /** A VibeSpace.* event on every session of the tab that enabled surfaces (Q2: the frame's sessionId + params.targetId). */
@@ -383,9 +386,10 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     all({ method: 'Target.targetInfoChanged', params: { targetInfo: info(t) } });
     return true;
   }
-  function setDom(targetId, { url, origin, elements = [], childFrames = [], axPadBytes = 0 } = {}) {
+  function setDom(targetId, { url, origin, elements = [], childFrames = [], axPadBytes = 0, newDocument = false } = {}) {
     const t = targets.get(targetId) || [...targets.values()][0];
     if (!t) return false;
+    if (newDocument) t.doc = (t.doc || 0) + 1;   // (lane chrome-157: a scene's navigation — a re-render inside the document keeps its id)
     if (url) { t.url = String(url); t.title = String(url); }
     t.domOrigin = origin;
     t.frames.clear();
@@ -585,6 +589,15 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       t.domNodes.set(bid, node);
     }
     topF.doc.activeElement = null;
+    // (lane chrome-157) A re-render INSIDE the document keeps the isolated worlds Chrome made for it: they
+    // see the live DOM, so each is re-bound to the rebuilt frame. A new document ends them (Chrome destroys
+    // the contexts), as does a frame the re-render removed.
+    for (const [cid, c] of isoContexts) {
+      if (c.targetId !== t.targetId) continue;
+      if (newDocument || !t.frames.has(c.frameId)) { isoContexts.delete(cid); continue; }
+      c.sandbox = createWorldSandbox(t, c.frameId);
+      t.frames.get(c.frameId).lastCtxId = cid;
+    }
     return true;
   }
   function createWorldSandbox(t, fid) {
@@ -903,6 +916,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         return {};
       }
       case 'Page.navigate': if (t) {
+        t.doc = (t.doc || 0) + 1;   // (a new document)
         t.url = String(p.url || 'about:blank'); t.title = t.url;
         const want = /#vs-surface=([a-z-]+)(?::([a-z]+))?/.exec(t.url);
         const login = /#vs-login=([a-z-]+)/.exec(t.url), typed = /#vs-typed=([^:#]+):([^#]+)/.exec(t.url); // lane browser-login
@@ -919,7 +933,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
         if (want) setTimeout(() => openSurface(want[1] === 'js-dialog' ? { ...jsDialogSpec(want[2] || 'confirm', { message: 'Leave this page?', origin: 'https://example.test' }), targetId: t.targetId, hold: true } : { kind: want[1], targetId: t.targetId, hold: true }), 30);
         else if (mode.proxy && /^https?:/i.test(t.url)) { const nav = t.url; fetchVia(nav).then((r) => { if (r && t.url === nav) t.title = `egress ${r.status}: ${r.body.trim().split('\n')[0]}`; loaded(t); }); } // lane engine-spi-egress
         else { setTimeout(() => loaded(t), 5); if (login) setTimeout(() => detectCredentialForm({ targetId: t.targetId, kind: login[1] }), 20); if (typed) { const [who, pw] = [typed[1], typed[2]].map(decodeURIComponent); setTimeout(() => submitCredentialForm({ targetId: t.targetId, usernameHint: who, password: pw }), 20); } }
-      } return { frameId: t ? t.targetId : 'F', loaderId: t ? 'L' + t.targetId : 'L' };
+      } return { frameId: t ? t.targetId : 'F', loaderId: t ? loaderOf(t) : 'L' };
       case 'Page.handleJavaScriptDialog': { // agent-browser's own session (surfaces off) answering the native face of a js-dialog surface
         const s = t ? [...surfaces.values()].find((x) => x.targetId === t.targetId && x.kind === 'js-dialog') : null;
         if (!s) return { __error: { code: -32602, message: 'No dialog is showing' } };
@@ -1008,6 +1022,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     triggerWebAuthn, webauthnAnswers: () => waAnswered.slice(), abortWebAuthn, // lane passkey-sink
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
+    loaderIdOf: (targetId) => { const t = targets.get(targetId); return t ? loaderOf(t) : null; },   // (lane chrome-157: the id of a tab's present document, as Page.getFrameTree names it)
     setDom, setTitle, readDomValues, readDomInputCounts, simulateSubmitRequest, // lane vault-login r22/r23: DOM + Fetch simulation for `fill --vault`
     navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; x.domOrigin = undefined; x.frames.clear(); x.domNodes.clear(); loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } },

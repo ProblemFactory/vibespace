@@ -8,7 +8,11 @@
 //     browser-dialogs + routes/browser), both doors read, the expected verdict from the law-written oracle, pruned cells by name;
 //   · the LEGS: the deletions; the RAM stash and THE ONE browser identity (browser-keeper browserIdentityOfRecord); both doors; every
 //     verb admitted on a fenced tab against a page that copies the typed value into its title and address (Q3); a check across a
-//     navigation (law 5); the disk in both directions;
+//     navigation (law 5); the one record kind;
+//   · THE CURES (the owner's B: we defend against mistakes, not against an agent's deliberate attack, unless the defence can be
+//     proven to hold): a check that keeps failing has a bound; the next address checked at the lift (a GET form, a base64 router);
+//     a restart or a reconnect holds by the DOCUMENT; the window before the fences are back answers from the record; a browser that
+//     reuses the process number is another; a restore reads the logins only to re-hydrate the scrub list (by behaviour);
 //   · ONE MUTANT PER LAW, each red by name, each failing by name when its anchor is gone (Q6), and Q7's cell with its mutant.
 // No real site, no profile of the owner's, no real vault: scratch homes and stand-ins only. The values typed are shorter than the
 // mask's floor ON PURPOSE (masking cannot hide a leak), and no failure text carries one (the fixture scrubs every planted value).
@@ -29,7 +33,7 @@ await runR32LoginTable({ repoDir: REPO, ok });
 console.log('— one mutant per law (+ Q7\'s cell)');
 const MUT = mutantCopies('vl-r32-mutants', REPO);
 await runR32Mutants({ repoDir: REPO, ok, MUT });
-for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 12 })) ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 17 })) ok(r.pass, 'mutant-copy census: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

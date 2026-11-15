@@ -12823,6 +12823,8 @@ export default {
   "a filled password could not be cleared on {tab} (VibeSpace can no longer verify what is on the page) — reload it": "无法清除 {tab} 上已填充的密码（VibeSpace 已无法核实页面上的内容）——请刷新该标签页",
   "a filled password could not be cleared on {tab} — reload it": "无法清除 {tab} 上已填充的密码——请刷新该标签页",
   "Open the browser live view or reload that tab so the typed credential leaves the page.": "请打开浏览器实时画面或刷新该标签页，使已键入的凭证离开页面。",
+  "the page on {tab} put a filled password into its own address or title — agents cannot read that tab until it goes to another page": "{tab} 上的页面把已填入的密码放进了自己的地址或标题 — 在它转到别的页面之前，agent 无法读取该标签页",
+  "Open the browser live view and leave that page, or close the tab.": "请打开浏览器实时画面并离开该页面，或关闭该标签页。",
   "Sign-in on {site} was not offered to the vault ({why})": "在 {site} 上的登录未能提议保存到保险库（{why}）",
   "missing credential": "缺少凭据",
   "not an https site": "不是 HTTPS 站点",
