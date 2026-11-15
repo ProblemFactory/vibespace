@@ -1468,7 +1468,8 @@ console.log('\n§ the turn statement — every harness declares how its usage is
   ok(/is a terminal's/.test(c6 || ''), 'CONTROL: an agent declaring «none» THROWS (an agent VibeSpace cannot see is «not-visible»)', c6);
   ok(H.notVisibleQuota('x').turnStatement.cadence === 'not-visible' && !H.hasLimitSignal(H.notVisibleQuota('x')) && throws(() => H.notVisibleQuota('')) !== null, 'notVisibleQuota(reason): its own «not visible» statement, no limit signal, a reason required');
 
-  const legs = await runTurnStatements({ REPO });
+  // the tie legs' window stamps through the ONE writer, from this suite (a tool in scripts/ may not call it — test-oat-identity §9a)
+  const legs = await runTurnStatements({ REPO, stampWindow: (dir, key, stamp) => require(path.join(REPO, 'src/window-stamp.js')).writeWindowStamp(dir, key, stamp, 'login') });
   const legIds = new Set(legs.map((l) => l.id));
   for (const l of legs) {
     if (TURN_OWED[l.id]) ok(!l.green, `OWED (red while owed): ${l.id} — ${TURN_OWED[l.id]}`, l.green ? 'GREEN now — cured: move it off the OWED table in the commit that cured it' : undefined);

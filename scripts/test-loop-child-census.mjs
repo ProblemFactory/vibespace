@@ -74,14 +74,15 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/agentd/agentd.js', 'du', 'walk', 1, OFF, 'the device agent — its OWN process (agentd), never the hub\'s loop'],
     ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree'],
     ['src/server/browser-builds-keeper.js', 'create > treeOf', 'walk', 1, DEBT, 'per second while a build downloads — the builds picker reads its facts every second during a download (each build\'s size, up to 20 000 entries, an lstat each) — and per act (a picker read, an unpacked download\'s file count)'],
-    ['src/usage-routes.js', 'setupUsage > listRecentCodexJsonlFiles', 'walk', 1, DEBT, 'per GET /api/usage — the usage snapshot\'s refresh (about every 30 s while a page shows it), pruned to 14 days of date dirs'],
     // lane job-logs-sweep (.398): the job-logs remover's CHILD — never the hub's process, never its loop
     ['src/job-logs-sweep-worker.js', 'scan', 'walk', 1, OFF, 'the job-logs remover\'s CHILD process (src/job-logs-sweep.js createRemover forks it since round 2; the file throws without its IPC channel, so it never runs in the hub\'s process): scan walks ONE run dir under data/job-logs (lstat only, a link never followed) to age it — bounded by the batch timeout (120 s, then the child is SIGKILLed and the hub starts no second one beside it) and by the pass (at most 500 run dirs)'],
   ];
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 28;
+  // lane usage-every-change pick 2: 28 → 27 — the panel's rollout-tail rung is retired (its walk of the codex sessions dir per
+  // GET /api/usage went with it: the engine files every walked statement, the route reads the store)
+  const DEBT_MAX = 27;
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

@@ -28,7 +28,7 @@
   "src/usage-history.js": 5,
   "src/usage-index-model.js": 1,
   "src/usage-origin-backfill.js": 1,
-  "src/usage-routes.js": 3,
+  "src/usage-routes.js": 1,
   "src/weekly-lanes-unfold.js": 2,
   "src/ws-handler.js": 1
  },

@@ -16,8 +16,6 @@ const require = createRequire(import.meta.url);
 /** THE OWED TABLE — the legs red today, each with the pick that cures it. A cured leg leaves this table in the commit that cures it. */
 export const OWED = Object.freeze({
   'codex/hub/own-time': 'pick 4 — a reading is stored at its record\'s own time (today: its arrival)',
-  'codex/device/reading': 'pick 2 — the three walkers carry rate_limits and the hub files the last one per thread',
-  'codex/device/own-time': 'pick 2 — the walker row carries the record\'s own time',
   'antigravity/hub/replay-reads-once': 'pick 4 — a wall replayed after a restart never fires a second `agy -p /usage` (the one-per-wall ruling)',
   'claude/hub/replay-by-request': 'pick 4 — a replayed statement is filed by the request it answered (the readings-attribution choke point), never a borrowed stamp',
   'any/hub/skewed-never-wins': 'pick 4 — a skewed stream\'s stored reading never beats a newer one (the stream\'s clock offset first)',
@@ -44,6 +42,8 @@ function mkWorld(REPO) {
   const ROSTER = {
     'sub-1': { id: 'sub-1', name: 'Claude A', type: 'subscription', backend: 'claude' },
     'cxs-1': { id: 'cxs-1', name: 'Codex A', type: 'subscription', backend: 'codex' },
+    'cxs-2': { id: 'cxs-2', name: 'Codex B', type: 'subscription', backend: 'codex' },
+    'cxs-3': { id: 'cxs-3', name: 'Codex C', type: 'subscription', backend: 'codex' },
     'agy-1': { id: 'agy-1', name: 'Agy A', type: 'subscription', backend: 'antigravity' },
   };
   const accounts = {
@@ -83,6 +83,56 @@ function judge(w, key, { t0, t1, recAt, stamp }) {
   return { reading, ownTime, at: st && st.at, recAt, others };
 }
 
+/** A fixture codex rollout per thread on a paired machine's disk ({tid, parent?, stmts?: [{ago, used}]}) → its walk (the module
+ *  the device daemon runs): the event lines, how many carried a statement, the newest statement's time. */
+function walkedRollout(w, REPO, threads, { walk = true } = {}) {
+  const home = path.join(w.dir, 'dev-home');
+  const d = path.join(home, '.codex', 'sessions', '2026', '11', '15'); fs.mkdirSync(d, { recursive: true });
+  let recAt = 0;
+  for (const t of threads) {
+    const stmts = t.stmts || [{ ago: 2000, used: 12 }];
+    const t0 = new Date(Date.now() - 10000).toISOString();
+    const meta = { id: t.tid, cwd: '/tmp/turn', cli_version: '0.153.4' };
+    if (t.parent) meta.source = { subagent: { thread_spawn: { parent_thread_id: t.parent, depth: 1 } } };
+    const rows = [{ timestamp: t0, type: 'session_meta', payload: meta }, { timestamp: t0, type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/tmp/turn' } }];
+    let tot = 0;
+    for (const st of stmts) {
+      const at = Date.now() - st.ago; recAt = Math.max(recAt, at); tot += 15;
+      rows.push({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } }, rate_limits: { primary: { used_percent: st.used, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus' } } });
+    }
+    fs.writeFileSync(path.join(d, `rollout-2026-11-15T00-00-00-${t.tid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  }
+  if (!walk) return { home, recAt };
+  const { runUsageWalk } = require(path.join(REPO, 'src/usage-walker.js'));
+  const r = runUsageWalk({ home, cursorFile: path.join(w.dir, 'dev-cursor.json'), codexSessionsDir: path.join(home, '.codex', 'sessions'), projectsDir: path.join(home, '.claude', 'projects') });
+  const lines = (r.events || []).slice();
+  const events = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  return { home, recAt, lines, text: lines.join('\n'), events: events.length, carried: events.filter((e) => e.be === 'codex' && e.rl).length };
+}
+/** The hub's ledger (src/usage-history.js) in the world, its statements handed to the world's engine — server.js's one wiring */
+function ledgerOf(w, REPO, home = null) {
+  const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
+  const uh = new UsageHistory({ dataDir: path.join(w.dir, 'hub-data'), homeDir: home || path.join(w.dir, 'hub-home') });
+  uh.codexSessionsDir = path.join(home || path.join(w.dir, 'hub-home'), '.codex', 'sessions');
+  uh.setStatementSink((st) => w.eng.fileCodexStatement(st));
+  return uh;
+}
+/** «matches 2» (the 02:55Z ruling): a statement whose weekly window contradicts its target and matches TWO other accounts is
+ *  archived — the tie is never broken (no write anywhere). `matches` 1 is the control: the same world re-files to that one.
+ *  `stampWindow(cacheDir, key, stamp)` establishes an account's window: the CALLER's (a suite) — the `.window-` stamp has ONE
+ *  writer and its callers are a census (test-oat-identity §9a) that a tool in scripts/ may not join. */
+function tieLeg(w, REPO, matches, stampWindow) {
+  if (typeof stampWindow !== 'function') throw new Error('no stampWindow given — the tie legs need the suite\'s window stamper');
+  const R1 = nowS() + 2 * 86400, R2 = nowS() + 5 * 86400;
+  for (const k of ['cxs-1', 'cxs-2', 'cxs-3']) fs.writeFileSync(path.join(w.cacheDir, k + '.json'), JSON.stringify({ fetchedAt: 1 }));
+  stampWindow(w.cacheDir, 'cxs-1', { sevenDay: R1 });
+  stampWindow(w.cacheDir, 'cxs-2', { sevenDay: R2 });
+  stampWindow(w.cacheDir, 'cxs-3', { sevenDay: matches === 2 ? R2 : R1 + 86400 });
+  const r = w.eng.fileCodexStatement({ acct: 'cxs-1', ts: Date.now() - 2000, rl: { primary: { used_percent: 33, window_minutes: 10080, resets_at: R2 } } });
+  const fetched = (k) => { try { return JSON.parse(fs.readFileSync(path.join(w.cacheDir, k + '.json'), 'utf8')).fetchedAt; } catch { return null; } };
+  return { r, written: ['cxs-1', 'cxs-2', 'cxs-3'].filter((k) => fetched(k) !== 1) };
+}
+
 /** THE DRIVERS: one stub turn per harness and road → what the store holds. `null` = this harness has no driver (a red leg). */
 const DRIVERS = {
   claude: {
@@ -92,25 +142,64 @@ const DRIVERS = {
   codex: {
     async hub(w) { const s = w.session({ backend: 'codex', _webuiId: 'w-cx', _accountId: 'cxs-1' }); const recAt = Date.now() - 2000; const t0 = Date.now(); await w.eng.recordCodexQuotaSignal(s, codexPayload(), { timestamp: new Date(recAt).toISOString() }); await sleep(30); return judge(w, 'cxs-1', { t0, t1: Date.now(), recAt, stamp: 'record' }); },
     // the paired machine's road for codex is its usage walk (chat on a dial device is refused; terminal mode has no wrapper): a
-    // rollout whose token_count carries rate_limits, walked by the device's walker — does any reading reach the store?
+    // rollout whose token_count carries rate_limits, walked by the device's walker, ingested by the hub's ledger
+    // (ingestRemoteEvents for host 'h1'), its last statement filed by the engine's store-only door (fileCodexStatement)
     async device(w, REPO) {
-      const home = path.join(w.dir, 'dev-home'), tid = 'cccccccc-0000-4000-8000-000000000001';
-      const d = path.join(home, '.codex', 'sessions', '2026', '11', '15'); fs.mkdirSync(d, { recursive: true });
-      const recAt = Date.now() - 2000, ts = new Date(recAt).toISOString();
-      const rl = { primary: { used_percent: 12, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus' };
-      const rows = [
-        { timestamp: ts, type: 'session_meta', payload: { id: tid, cwd: '/tmp/turn', cli_version: '0.153.4' } },
-        { timestamp: ts, type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/tmp/turn' } },
-        { timestamp: ts, type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: 15 } }, rate_limits: rl } },
-      ];
-      fs.writeFileSync(path.join(d, `rollout-2026-11-15T00-00-00-${tid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-      const { runUsageWalk } = require(path.join(REPO, 'src/usage-walker.js'));
-      const r = runUsageWalk({ home, cursorFile: path.join(w.dir, 'dev-cursor.json') });
-      const events = (r.events || []).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-      const carried = events.filter((e) => e.be === 'codex' && (e.rl || e.rateLimits || e.rate_limits));
-      // nothing files a device codex reading today: the store stays empty unless a later pick wires walker → ingest → store
-      const j = judge(w, 'cxs-1-device-none', { t0: recAt, t1: Date.now(), recAt, stamp: 'record' });
-      return { ...j, reading: carried.length > 0 && j.reading, carried: carried.length, events: events.length };
+      const tid = 'cccccccc-0000-4000-8000-000000000001';
+      const x = walkedRollout(w, REPO, [{ tid }]);
+      const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: tid, acct: 'cxs-1', ts: x.recAt - 60000 });
+      await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+      return { ...judge(w, 'cxs-1', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' }), carried: x.carried, events: x.events };
+    },
+    // the owner ladder of a walked statement (law 4), each a leg of its own
+    extra: {
+      // a thread VibeSpace spawned on the machine's OWN login (attributed, acct null) ⇒ THAT machine's login, never the hub's
+      async 'device/host-own-login'(w, REPO) {
+        const tid = 'cccccccc-0000-4000-8000-000000000002';
+        const x = walkedRollout(w, REPO, [{ tid }]);
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: tid, acct: null, ts: x.recAt - 60000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const host = storedOf(w.cacheDir, '__global_codex__.h1'), files = filesIn(w.cacheDir);
+        return { green: !!(host && host.times.some((t) => Math.abs(t - x.recAt) <= NEAR_MS)) && files.length === 1, why: "a machine-login thread's statement is filed on '__global_codex__.h1' at its record's time, and nowhere else", detail: { files } };
+      },
+      // a subagent thread (its session_meta names its parent) ⇒ the parent thread's account
+      async 'device/subagent-to-parent'(w, REPO) {
+        const par = 'cccccccc-0000-4000-8000-00000000000a', kid = 'cccccccc-0000-4000-8000-00000000000b';
+        const x = walkedRollout(w, REPO, [{ tid: kid, parent: par }]);
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: par, acct: 'cxs-2', ts: x.recAt - 60000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const j = judge(w, 'cxs-2', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' });
+        return { green: j.reading && j.ownTime && !j.others.length, why: "a subagent's statement is filed on its parent's account", detail: j };
+      },
+      // a thread VibeSpace never saw (no attribution, no meta) ⇒ not tracked: nothing is filed anywhere (law 6)
+      async 'device/unseen-not-tracked'(w, REPO) {
+        const x = walkedRollout(w, REPO, [{ tid: 'cccccccc-0000-4000-8000-000000000003' }]);
+        const uh = ledgerOf(w, REPO);
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const files = filesIn(w.cacheDir), said = uh._lastStatements || null;
+        return { green: x.carried === 1 && files.length === 0 && !!said && said.untracked === 1 && said.filed === 0, why: 'an unseen thread files nothing and is counted as not tracked', detail: { files, said } };
+      },
+      // the hub's OWN walk over its own disk: the same statement, the same store
+      async 'hub/walk-reading'(w, REPO) {
+        const tid = 'cccccccc-0000-4000-8000-000000000004';
+        const x = walkedRollout(w, REPO, [{ tid }], { walk: false });
+        const uh = ledgerOf(w, REPO, x.home); uh.recordAttribution({ sid: tid, acct: 'cxs-1', ts: x.recAt - 60000 });
+        await uh.scan({ force: true }); uh.flushCursors(); // the cursors on disk before the world is removed (no writer retry outlives it)
+        const j = judge(w, 'cxs-1', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' });
+        return { green: j.reading && j.ownTime && !j.others.length, why: "the hub's walk files the thread's last statement on its account at the record's time", detail: j };
+      },
+      // the LAST statement of a thread is the one filed; a batch sent again (an older one) never moves it back
+      async 'device/last-wins'(w, REPO) {
+        const tid = 'cccccccc-0000-4000-8000-000000000005';
+        const x = walkedRollout(w, REPO, [{ tid, stmts: [{ ago: 5000, used: 10 }, { ago: 2000, used: 30 }] }]);
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: tid, acct: 'cxs-1', ts: x.recAt - 60000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const older = x.lines.filter((l) => /"o":/.test(l)).slice(0, 1).join('\n');
+        await uh.ingestRemoteEvents('h1', 'Host one', older);
+        let o = null; try { o = JSON.parse(fs.readFileSync(path.join(w.cacheDir, 'cxs-1.json'), 'utf8')); } catch { }
+        const pct = o && o.sevenDay ? o.sevenDay.usedPercent : null;
+        return { green: pct === 30 && Math.abs((Number(o && o.fetchedAt) || 0) - x.recAt) <= NEAR_MS, why: "the newest statement by the record's own time stays (30 %, not the resent 10 %)", detail: { pct, fetchedAt: o && o.fetchedAt, recAt: x.recAt } };
+      },
     },
   },
   antigravity: {
@@ -140,7 +229,7 @@ const DRIVERS = {
 };
 
 /** Run every leg; each leg says whether it is green against the harness's own declaration. */
-export async function runTurnStatements({ REPO }) {
+export async function runTurnStatements({ REPO, stampWindow = null }) {
   const legs = [];
   const H = require(path.join(REPO, 'src/harnesses/index.js'));
   const ids = typeof H.ids === 'function' ? H.ids() : Object.keys(H.HARNESSES);
@@ -165,10 +254,20 @@ export async function runTurnStatements({ REPO }) {
       const w = mkWorld(REPO); let r; try { r = await D.hubPlain(w); } finally { w.cleanup(); }
       legs.push({ id: `${id}/hub/no-wall-no-reading`, green: !r.reading, why: 'a turn with no wall states nothing', detail: r });
     }
+    for (const [name, fn] of Object.entries((D && D.extra) || {})) {
+      const w = mkWorld(REPO); let r; try { r = await fn(w, REPO); } catch (e) { r = { green: false, why: 'the driver threw: ' + (e.message || e) }; } finally { w.cleanup(); }
+      legs.push({ id: `${id}/${name}`, green: !!r.green, why: r.why, detail: r.detail });
+    }
     if (D && D.replay) {
       const w = mkWorld(REPO); let r; try { r = await D.replay(w); } finally { w.cleanup(); }
       legs.push({ id: `${id}/hub/replay-reads-once`, green: r.reads === 1, why: `one vendor read per wall across a restart (reads: ${r.reads})`, detail: r });
     }
+  }
+  for (const m of [2, 1]) {
+    const w = mkWorld(REPO); let r; try { r = tieLeg(w, REPO, m, stampWindow); } catch (e) { r = { err: e.message || String(e) }; } finally { w.cleanup(); }
+    legs.push(m === 2
+      ? { id: 'any/hub/tie-never-broken', green: !r.err && r.r && r.r.ok === false && r.r.why === 'archived' && r.written.length === 0, why: 'a window matching TWO other accounts is archived — never written to either, never to the target', detail: r }
+      : { id: 'any/hub/tie-control-refiles', green: !r.err && r.r && r.r.ok === true && r.r.key === 'cxs-2' && r.written.join() === 'cxs-2', why: 'the control: matching ONE other account re-files there (the tie leg is not vacuous)', detail: r });
   }
   // the checker's (b) and (c): driven by pick 4 — named now, red until then (never a skip)
   legs.push({ id: 'claude/hub/replay-by-request', green: false, why: 'not driven yet: the replay at attach does not exist (pick 4)' });

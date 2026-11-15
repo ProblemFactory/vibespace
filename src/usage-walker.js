@@ -386,6 +386,12 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
             cur.forkTs = Date.parse(r.payload.timestamp || r.timestamp) || 0;
             cur.forkOwn = uuid7Ms(r.payload.id);
           }
+          // A SUBAGENT'S PARENT (lane usage-every-change pick 2): its own first line names the thread that spawned it — the
+          // account its statements are filed on (src/usage-history.js). Read from the first line a cursor sees, PERSISTED in
+          // the cursor (a pre-upgrade cursor is past it: no parent, never a guess)
+          const sp = r && r.type === 'session_meta' && r.payload && r.payload.source && r.payload.source.subagent && r.payload.source.subagent.thread_spawn;
+          const par = r && r.type === 'session_meta' && r.payload ? (r.payload.parent_thread_id || (sp && sp.parent_thread_id) || null) : null;
+          if (par) cur.parent = String(par).toLowerCase();
           return;
         }
       }
@@ -424,6 +430,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       const info = r.payload.info;
       const last = info && info.last_token_usage;
       if (!last || !(last.input_tokens || last.output_tokens)) return;
+      const rl = r.payload.rate_limits && typeof r.payload.rate_limits === 'object' ? r.payload.rate_limits : null;
       const ts = Date.parse(r.timestamp) || Date.now();
       const cum = info.total_token_usage ? info.total_token_usage.total_tokens : null;
       const rid = `cx:${sid}:${cum != null ? cum : cur.offset + '-' + ts}`;
@@ -448,6 +455,11 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
         cr: cached,
         o: last.output_tokens || 0,
         tier: null,
+        // THE STATEMENT (lane usage-every-change pick 2): every response's token_count carries codex's own quota numbers
+        // (rate_limits) — carried on the row it already ships, with the subagent's parent, so the hub files the LAST one per
+        // thread at the record's own time (src/usage-history.js). Never stored in the ledger row itself.
+        rl: rl || undefined,
+        par: rl && cur.parent ? cur.parent : undefined,
       });
     });
     cursors[fp] = cur;

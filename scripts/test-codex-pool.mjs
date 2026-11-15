@@ -114,7 +114,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // ── reset-credit COUNT in the usage popup (owner: usage里展示剩余reset) ──
   ok('the wrapper reads limits ONCE at startup (credits only ride rateLimits/read, never the passive push)', /readAccountLimits\(false\); \/\/ surface reset-credit count/.test(w2));
   ok('the codex harness keeps resetCredits on the account snapshot (S4: the engine writes sig.snapshot)', /snapshot\.resetCredits = \{ availableCount:/.test(read('src/harnesses/codex-quota.js')) && /const snap0 = sig\?\.snapshot \|\| null;/.test(eng));
-  ok('…and the sidecar reader merges meta.rateLimitResetCredits', /snap\.resetCredits = \{ availableCount:/.test(read('src/usage-routes.js')));
+  ok('…and the count reaches the store with the engine\'s push — the panel re-reads no sidecar any more (usage-every-change pick 2); the ONE cache writer carries it across a push that states none (R20)', !/snap\.resetCredits = \{ availableCount:/.test(read('src/usage-routes.js')) && /else if \(prevObj && prevObj\.resetCredits && typeof prevObj\.resetCredits === 'object'\) out\.resetCredits = prevObj\.resetCredits;/.test(read('src/usage-cache-write.js')));
   const um2 = read('src/lib/usage-meter.js');
   ok('the popup shows the stored reset-credit count', /Reset credits'\)\)\}<\/span> \$\{Number\(codex\.resetCredits\.availableCount\)/.test(um2));
   ok("…and the codex ⟳ is CAPABILITY-gated (quotaRefresh 'session-rpc'), riding a live session's app-server", /backendFeatureCaps\('codex'\)\.quotaRefresh === 'session-rpc'/.test(um2) && /_refreshCodexQuota\(btn\)/.test(um2) && /fetchJson\('\/api\/usage\/codex-refresh'/.test(um2)); // lane reset-path R4: the press is ANSWERED (the route waits for the session's round trip)
@@ -1221,12 +1221,14 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     if (pre2) { const c = run(0, pre2); ok('R19c r5 NEGATIVE CONTROL: one state for both calls a restart nobody asked for "in flight" — the pending leg sees the difference', c.r.body.code === 'restart_pending' && c.w.sentWs.length === 0); }
   }
   // (20) THE ROSTER CHIP through the REAL usage-routes (low): a live wrapper whose
-  //      startup read failed (sidecar without the count) pushes a newer reading
+  //      startup read failed (its push states no count) pushes a newer reading — filed by the ONE cache writer (the road
+  //      every codex producer takes: the engine's writeCodexReading; the panel's re-read of the wrapper sidecar is retired,
+  //      lane usage-every-change pick 2), and the route reads the store
   {
     const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
     const usageWrite = require(path.join(REPO, 'src/usage-cache-write.js'));
     const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
-    const run = (setup = setupUsage) => {
+    const run = (writer = usageWrite) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-ur-')); worlds.push(root);
       const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(root, 'shared-codex');
       const wam = new AccountManager({ dataDir: path.join(root, 'data') });
@@ -1239,22 +1241,24 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const od = cq.signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', onDemand: true, resetCredits: { availableCount: 3 }, rateLimits: { primary: { used_percent: 50, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } } }).snapshot;
       od.fetchedAt = Date.now() - 5000; od.source = 'codex-rate-limits';
       usageWrite.writeCacheObject({ cacheDir, key: A, obj: od, set: cq.limitSetFromSnapshot(od, { identity: A, source: 'codex-rate-limits' }), source: 'codex-rate-limits', backend: 'codex' });
-      fs.writeFileSync(path.join(buffers, 'cx1.json'), JSON.stringify({ startedAt: Date.now() - 60000, rateLimits: { primary: { used_percent: 55, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null }, rateLimitsFetchedAt: Date.now() }));
+      const push = cq.signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 55, window_minutes: 10080, resets_at: nowS + 3 * 86400 }, secondary: null } } }).snapshot;
+      push.fetchedAt = Date.now(); push.source = 'codex-rate-limits';
+      writer.writeCacheObject({ cacheDir, key: A, obj: push, set: cq.limitSetFromSnapshot(push, { identity: A, source: 'codex-rate-limits' }), source: 'codex-rate-limits', backend: 'codex' });
       const routes = {};
       const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() { }, delete() { }, use() { }, locals: {} };
-      quietly(() => setup({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: new Map([['cx1', { backend: 'codex', mode: 'chat', _accountId: A }]]), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
+      quietly(() => setupUsage({ app, accounts: wam, hosts: null, usageHistory: { scan() { }, warm() { } }, activeSessions: new Map([['cx1', { backend: 'codex', mode: 'chat', _accountId: A }]]), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(root, 'data', 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'data', 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: buffers, apiDerivedWindow: () => null, establishedWindows: () => null }));
       const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } };
       quietly(() => routes['GET /api/usage']({ query: {}, headers: {} }, res));
       return res.body && res.body.codexAccounts && res.body.codexAccounts[A];
     };
     const out = run();
-    ok('R20 the file\'s count survives a newer sidecar push that states none (the wrapper\'s startup read failed): the roster still shows 3, usage from the push', out && out.resetCredits && out.resetCredits.availableCount === 3 && Math.round(out.sevenDay?.usedPercent) === 55, JSON.stringify({ rc: out && out.resetCredits, u: out && out.sevenDay?.usedPercent }));
-    const src = read('src/usage-routes.js');
-    const from = "    if (out.resetCredits === undefined && prev && prev.resetCredits && typeof prev.resetCredits === 'object') out.resetCredits = prev.resetCredits;\n";
-    ok('R20 NEGATIVE CONTROL: the patch hit the product source', src.includes(from));
-    const f = copyPath('src/usage-routes.js', 'nocarry');
+    ok('R20 the file\'s count survives a newer push that states none (the wrapper\'s startup read failed): the roster still shows 3, usage from the push', out && out.resetCredits && out.resetCredits.availableCount === 3 && Math.round(out.sevenDay?.usedPercent) === 55, JSON.stringify({ rc: out && out.resetCredits, u: out && out.sevenDay?.usedPercent }));
+    const src = read('src/usage-cache-write.js');
+    const from = "  if (out.resetCredits === undefined) {\n    if (view.resetCredits !== undefined) out.resetCredits = view.resetCredits;\n    else if (prevObj && prevObj.resetCredits && typeof prevObj.resetCredits === 'object') out.resetCredits = prevObj.resetCredits;\n  }\n";
+    ok('R20 NEGATIVE CONTROL: the patch hit the product source (the cache writer\'s carry)', src.includes(from));
+    const f = copyPath('src/usage-cache-write.js', 'nocarry');
     writeCopy(f, src.replace(from, ''));
-    try { const outN = run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
+    try { const outN = run(require(f)); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
   }
   // (21) lane reset-path — THE AUTO RUNG'S ATTEMPTS ARM THE FLOOR ONLY WHEN THE CONSUME WENT OUT, and it
   //      tries ONE time per limit event whatever the answer (the floor no longer covers a refusal)

@@ -215,8 +215,18 @@ function globalUsageKey(backend) {
   return !c ? '__global__' : (c.legacyGlobalKey || '__global_' + backend + '__');
 }
 function globalKeyOwner(key) {
-  const m = /^__global_([a-z][a-z0-9-]*)__$/.exec(String(key || ''));
-  return m && harnesses.has(m[1]) && globalUsageKey(m[1]) === key ? m[1] : null;
+  const m = /^(__global_([a-z][a-z0-9-]*)__)(?:\.[\w-]+)?$/.exec(String(key || ''));
+  return m && harnesses.has(m[2]) && globalUsageKey(m[2]) === m[1] ? m[2] : null;
+}
+// A HOST'S OWN LOGIN for a harness whose machine identity is not claude's (lane usage-every-change pick 2, law 4): codex's
+// login on a paired machine is THAT machine's, never the hub's '__global_codex__' (the 2026-09-07 r2 misfile, moved — not
+// ended — until now). Claude keeps its per-host form 'host-<id>' (usageCacheKeyFor); every other harness with a login of its
+// own is '<globalUsageKey>.<hostId>' — a FILE-SAFE key (the cache writer turns any byte outside [\w.-] into '_', and the
+// panel's seed reads keys back from file names). globalKeyOwner reads the suffix back to the harness.
+function hostGlobalKey(backend, hostId) {
+  const g = globalUsageKey(backend);
+  if (!hostId) return g;
+  return g === '__global__' ? 'host-' + hostId : g + '.' + hostId;
 }
 // the `-p /usage` / control-channel get_usage rung is gated on the DECLARED probe (caps.quotaProbe), never an id
 function cliUsageRung(backend) { return !!backend && harnesses.has(backend) && capsOf(backend).quotaProbe === 'cli-usage'; }
@@ -1651,7 +1661,11 @@ function noteWindowVerdict(sid, from, to, say) {
 // today, a future harness's tomorrow — passes through untouched.
 function usageCacheKeyFor(session) {
   const key = resolveUsageKey(session);
-  return (session?.host && key === '__global__') ? 'host-' + session.host : key;
+  if (!session?.host) return key;
+  // a machine identity on a paired machine is THAT machine's (pick 2, law 4): claude 'host-<id>', codex '__global_codex__.<id>'
+  const g = globalKeyOwner(key);
+  if (g && key === globalUsageKey(g)) return hostGlobalKey(g, session.host);
+  return key === '__global__' ? 'host-' + session.host : key;
 }
 // Passive quota capture from the CLI's own rate_limit_event records (B-e5c9,
 // 2.289.0) — ONE shared implementation (src/rate-limit-capture.js) for local
@@ -3419,6 +3433,8 @@ function claimColdRestarts(affected, now = Date.now()) {
 // rungs make the OFFICIAL client do the fetch; nothing here touches a vendor.
 function liveQuotaKeyFor(session) {
   let key = session._accountId || globalUsageKey(session.backend);
+  // a paired machine's own login is THAT machine's (pick 2, law 4) — the same key readingSlotFor files under (usageCacheKeyFor)
+  if (!session._accountId && session.host && globalKeyOwner(key)) key = hostGlobalKey(globalKeyOwner(key), session.host);
   // a pool wrapper never owns quota — the reading belongs to the member its
   // app-server HOLDS (stamped at spawn: it cannot hot-switch, see
   // heldPoolMemberFor), else the pool's CURRENT member (no stamp)
@@ -5612,6 +5628,32 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
     }
   } catch { }
   return { key, snap };
+}
+/** A CODEX STATEMENT FROM A WALKED ROLLOUT (lane usage-every-change pick 2, laws 2 + 4): the vendor's own numbers a
+ *  token_count record carried (`rate_limits`), filed at the RECORD's time on the account src/usage-history.js resolved for the
+ *  thread — its attribution, a subagent's parent's, or a machine-login session's own login (the hub's '__global_codex__', a
+ *  host's '__global_codex__.<id>'). Through writeCodexReading (the ONE writer: the window guard, newest-wins on fetchedAt).
+ *  A walked statement is LATE by construction (the walk's cadence): it is STORED and never ACTS — no probe settle, no switch,
+ *  no resume; recordCodexQuotaSignal is the live road. A record stamped in the future (a skewed machine) is filed at now. */
+function fileCodexStatement(st) {
+  if (!st || !st.rl || typeof st.rl !== 'object') return { ok: false, why: 'empty' };
+  const key = st.acct ? String(st.acct) : st.own ? hostGlobalKey('codex', st.host || null) : null;
+  if (!key) return { ok: false, why: 'not-tracked' };
+  const at = Math.min(Number(st.ts) || Date.now(), Date.now());
+  // the store keeps the newest by its own time: a statement no newer than the stored reading is no news (and never reaches the
+  // window guard — a cold walk would otherwise archive a month of old windows)
+  try { const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key); if (cur && (Number(cur.fetchedAt) || 0) >= at) return { ok: true, key, at, stale: true }; } catch { }
+  // an older codex states a window's reset as seconds FROM the record (`resets_in_seconds`): the record's own time makes it a time
+  const rl = { ...st.rl };
+  for (const pos of ['primary', 'secondary']) {
+    const w = rl[pos];
+    if (w && typeof w === 'object' && w.resets_at == null && w.resetsAt == null && Number.isFinite(Number(w.resets_in_seconds))) rl[pos] = { ...w, resets_at: Math.floor(at / 1000) + Number(w.resets_in_seconds) };
+  }
+  let snap = null;
+  try { snap = quotaSourceFor('codex').signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: rl } }, at)?.snapshot || null; } catch { snap = null; }
+  if (!snap) return { ok: false, why: 'unparsed', key };
+  const w = writeCodexReading(snap, 'codex-rollout', { key }); // the transcript producer's own name (lib/usage-source.js)
+  return w && w.key ? { ok: true, key: w.key, at } : { ok: false, why: w && w.archived ? 'archived' : 'refused', key };
 }
 function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = {}) {
   try {
@@ -8105,7 +8147,7 @@ function maybeStopOnFallback(session, id, from, to) {
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
- quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
+ quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, fileCodexStatement, hostGlobalKey, resolveUsageKey,
     refreshCodexForPerson, // lane reset-path R4: the usage menu's codex ⟳, answered at its round trip
     settleResetCreditByRead, settleResetCreditByReading, // verify r1: the unknown consume — a reading settles an unanswered attempt; the session path's read before a press
     resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, cacheFactsOf, noteModelRequest, noteCompacted, persistRequestStamp, flushRequestStamps, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, catchUpResetCreditFromBuffer, // verify r10: the stdout consumer's attach reads the wrapper's buffer file back for this session's open attempts // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs

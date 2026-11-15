@@ -791,21 +791,24 @@ if (!probe) {
   // ② the same host runs a codex session
   w.codexReading(remoteCodex);
   const hostAfter = fs.existsSync(hostFile) ? fs.readFileSync(hostFile, 'utf8') : null;
-  const cxFile = path.join(w.cacheDir, '__global_codex__.json');
+  // lane usage-every-change pick 2 (law 4): a host's own codex login is THAT host's — '__global_codex__.<hostId>' — never
+  // the hub's '__global_codex__' (where .402 filed it: the hub's own codex numbers overwritten by a remote machine's)
+  const cxFile = path.join(w.cacheDir, '__global_codex__.h1.json');
   const cx = (() => { try { return JSON.parse(fs.readFileSync(cxFile, 'utf8')); } catch { return null; } })();
+  const hubCx = fs.existsSync(path.join(w.cacheDir, '__global_codex__.json'));
   cap.done();
-  ok('§11a …and a REMOTE CODEX reading lands on the codex machine identity', !!cx && cx.limitId === 'codex' && Math.abs(cx.sevenDay.utilization - 0.3) < 1e-9, JSON.stringify(cx && { l: cx.limitId, s: cx.sevenDay }));
+  ok('§11a …and a REMOTE CODEX reading lands on THAT HOST\'s codex identity (__global_codex__.h1), never on the hub\'s own codex login', !!cx && cx.limitId === 'codex' && Math.abs(cx.sevenDay.utilization - 0.3) < 1e-9 && !hubCx, JSON.stringify(cx && { l: cx.limitId, s: cx.sevenDay, hubCx }));
   ok('§11a …leaving the host\'s CLAUDE bucket byte-identical (that file has exactly one meaning everywhere it is read)', hostAfter === hostBefore, `${String(hostBefore).slice(0, 80)} → ${String(hostAfter).slice(0, 80)}`);
   // NEGATIVE CONTROL: the pre-fix rule, applied to the very same session,
   // names the file we just proved untouched.
   const preFixKey = (s2) => (s2.host && !s2._accountId) ? 'host-' + s2.host : (s2._accountId || '__global__');
-  ok('§11a NEGATIVE CONTROL: the pre-fix host rule sends that codex snapshot to host-h1 — the claude file, with codex numbers and no `source`', preFixKey(remoteCodex) === 'host-h1' && w.eng.readingSlotFor(remoteCodex).key === '__global_codex__', `pre-fix=${preFixKey(remoteCodex)} now=${w.eng.readingSlotFor(remoteCodex).key}`);
-  ok('§11a …and the reading resolver agrees with the un-pinned codex twin again (readingSlotFor vs liveQuotaKeyFor, which noteWallSignal uses on the same session)', w.eng.readingSlotFor(remoteCodex).key === '__global_codex__' && w.eng.resolveUsageKey(remoteCodex) === '__global_codex__');
+  ok('§11a NEGATIVE CONTROL: the pre-fix host rule sends that codex snapshot to host-h1 — the claude file, with codex numbers and no `source`', preFixKey(remoteCodex) === 'host-h1' && w.eng.readingSlotFor(remoteCodex).key === '__global_codex__.h1', `pre-fix=${preFixKey(remoteCodex)} now=${w.eng.readingSlotFor(remoteCodex).key}`);
+  ok('§11a …and the reading resolver agrees with the cache key a host session is read under (readingSlotFor vs usageCacheKeyFor); the un-host-transformed key stays the machine identity (resolveUsageKey)', w.eng.readingSlotFor(remoteCodex).key === '__global_codex__.h1' && w.eng.usageCacheKeyFor(remoteCodex) === '__global_codex__.h1' && w.eng.resolveUsageKey(remoteCodex) === '__global_codex__');
   // the codex panel's disk seed must actually be able to see it
   const seedLine = read('src/usage-routes.js').split('\n').find((l) => /exec\(fn\)/.test(l) && /cxs/.test(l));
   const lit = seedLine && seedLine.match(/\/(\^\(cxs[^/]+)\//);
   const seedRe = lit ? new RegExp(lit[1]) : null;
-  ok('§11a …so the codex panel\'s own disk seed can read it (a host-<id> file would be invisible to it)', !!seedRe && seedRe.test('__global_codex__.json') && !seedRe.test('host-h1.json'), String(seedLine).trim().slice(0, 120));
+  ok('§11a …so the codex panel\'s own disk seed can read it (a host-<id> file would be invisible to it)', !!seedRe && seedRe.test('__global_codex__.json') && seedRe.test('__global_codex__.h1.json') && !seedRe.test('host-h1.json'), String(seedLine).trim().slice(0, 120));
   // …and the rule is a TRANSFORM OF THE ANSWER, not a backend test: every
   // machine identity except the claude one passes through, so a third harness
   // keeps whatever key it already had (a `backend === 'claude'` spelling would
@@ -1263,7 +1266,7 @@ if (!probe) {
   const cqSrc = read('src/harnesses/codex-quota.js');
   const normBody = cqSrc.slice(cqSrc.indexOf('function normalizeCodexRateLimit'), cqSrc.indexOf('// The typed exhaustion enum'));
   ok('§12c the PURE normalizer still stamps nothing — the channel is named at the WRITE, never inferred from the payload shape', bare.source === undefined && normBody.length > 500 && !/\bsource\b\s*[:=]/.test(normBody), `${normBody.length}B scanned`);
-  ok('§12c WIRING: every codex snapshot writer stamps a source, and the engine takes it as a PARAMETER (one helper, two channels — one of which does not always carry a reading)', /const writeSnap = \(snap, source\) =>/.test(read('src/server/usage-pool-engine.js')) && /snap\.source = source;/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap0, 'codex-rate-limits'\)/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap, 'limit-banner'\)/.test(read('src/server/usage-pool-engine.js')) && /if \(snap\) snap\.source = 'codex-rate-limits';/.test(read('src/usage-routes.js')) && /normalized\.source = 'codex-rollout';/.test(read('src/usage-routes.js')));
+  ok('§12c WIRING: every codex snapshot writer stamps a source, and the engine takes it as a PARAMETER (one helper, two channels — one of which does not always carry a reading)', /const writeSnap = \(snap, source\) =>/.test(read('src/server/usage-pool-engine.js')) && /snap\.source = source;/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap0, 'codex-rate-limits'\)/.test(read('src/server/usage-pool-engine.js')) && /writeSnap\(snap, 'limit-banner'\)/.test(read('src/server/usage-pool-engine.js')) && /writeCodexReading\(snap, 'codex-rollout', \{ key \}\)/.test(read('src/server/usage-pool-engine.js')) && !/\.source = 'codex-(rate-limits|rollout)';/.test(read('src/usage-routes.js'))); // pick 2: the walked statement is the engine's 'codex-rollout' write; the panel writes no codex reading of its own
   // NEGATIVE CONTROL: the verbatim-unknown rule is intact for a producer we
   // have genuinely never met — the fix names OUR writers, it does not bucket.
   ok('§12c NEGATIVE CONTROL: an unmet producer is still reported verbatim, and a MISSING one still says "unknown"', S.readingSource('some-future-writer').key === 'other' && S.readingSource('some-future-writer').label === 'some-future-writer' && S.readingSource(undefined).key === 'unknown');

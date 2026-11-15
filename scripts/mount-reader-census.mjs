@@ -221,7 +221,7 @@ export const ROWS = [
   ['src/usage-cold-walk.js', 'own-tree', 3, null, CLI], // r3: + the sync one-line read (a hash hit's string compare) // B-9428 r2: the ledger's cold rows at their (shard, offset) — the worker's fold, aggregate()/rows(), the popup's one line
   ['src/usage-index-worker.js', 'own-tree', 6, null, CLI],
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
-  ['src/usage-routes.js', 'own-tree', 23, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
+  ['src/usage-routes.js', 'own-tree', 15, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js); usage-every-change pick 2 −8: the wrapper-sidecar + rollout-tail rungs retired
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
   ['src/user-todos.js', 'own-tree', 1, null, DATA],
   ['src/vnc.js', 'own-tree', 3, null, PROC],

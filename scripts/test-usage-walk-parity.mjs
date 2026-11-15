@@ -211,6 +211,59 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(JSON.stringify(modLate) === JSON.stringify(scLate), 'module: identical late event (parity across the boundary)');
 }
 
+// ── THE STATEMENT A ROLLOUT CARRIES (lane usage-every-change pick 2, law 4): every codex token_count with usage carries the
+// account's rate_limits; BOTH walkers ship it on the row as `rl`, with a subagent's parent thread as `par` (read from its
+// first line, kept in the cursor so a later scan still names it) — byte-identical; a heartbeat (no usage) ships nothing.
+// The hub's walk hands the LAST statement per thread to its sink with the owner the ledger billed (here: the parent's
+// account), and neither road stores rl/par in a ledger row. ──
+{
+  const sHome = path.join(dataDir, 'st-home');
+  const KID = 'dddddddd-1111-4222-8333-000000000001', PAR = 'dddddddd-1111-4222-8333-0000000000aa';
+  const dir = path.join(sHome, '.codex', 'sessions', '2026', '11', '15');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(sHome, '.claude', 'projects'), { recursive: true });
+  const at = (s) => new Date(Date.UTC(2026, 10, 15, 1, 0, s)).toISOString();
+  const rl = (pct) => ({ limit_id: 'codex', primary: { used_percent: pct, window_minutes: 10080, resets_at: 1795000000 }, secondary: null, plan_type: 'plus' });
+  const tc = (ts, tot, pct) => ({ timestamp: ts, type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } }, rate_limits: rl(pct) } });
+  const file = path.join(dir, `rollout-2026-11-15T01-00-00-${KID}.jsonl`);
+  fs.writeFileSync(file, [
+    { timestamp: at(0), type: 'session_meta', payload: { id: KID, cwd: '/work/st', cli_version: '0.153.4', source: { subagent: { thread_spawn: { parent_thread_id: PAR, depth: 1 } } } } },
+    { timestamp: at(0), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/work/st' } },
+    tc(at(5), 15, 11),
+    { timestamp: at(6), type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: rl(12) } }, // a heartbeat: no usage
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const scCur = path.join(dataDir, 'st-scan-cursor.json'), modCur = path.join(dataDir, 'st-mod-cursor.json');
+  const scan = () => execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+    encoding: 'utf8', env: { ...process.env, HOME: sHome, CODEX_HOME: path.join(sHome, '.codex'), VIBESPACE_USAGE_CURSOR: scCur }, timeout: 30000,
+  }).split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  const { runUsageWalk: walkS } = require(path.join(REPO, 'src/usage-walker.js'));
+  const modRun = () => {
+    const r = walkS({ home: sHome, cursorFile: modCur, codexSessionsDir: path.join(sHome, '.codex', 'sessions'), projectsDir: path.join(sHome, '.claude', 'projects') });
+    fs.writeFileSync(modCur, JSON.stringify(r.cursors));
+    return r.events.map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  };
+  const sc1 = scan(), m1 = modRun();
+  ok(sc1.length === 1 && sc1[0].rl && sc1[0].rl.primary.used_percent === 11 && sc1[0].par === PAR, 'pick 2: the scanner ships the response\'s statement (rl) and the subagent\'s parent (par); the heartbeat ships nothing', JSON.stringify(sc1.map((e) => [e.rl && e.rl.primary.used_percent, e.par])));
+  ok(JSON.stringify(m1) === JSON.stringify(sc1), 'pick 2: module codex events BYTE-IDENTICAL to the scanner, rl + par included');
+  fs.appendFileSync(file, JSON.stringify(tc(at(9), 30, 14)) + '\n');
+  const sc2 = scan(), m2 = modRun();
+  ok(sc2.length === 1 && sc2[0].rl && sc2[0].rl.primary.used_percent === 14 && sc2[0].par === PAR, 'pick 2: a later scan (its cursor past the first line) still names the parent — the cursor keeps it', JSON.stringify(sc2.map((e) => [e.rl && e.rl.primary.used_percent, e.par])));
+  ok(JSON.stringify(m2) === JSON.stringify(sc2), 'pick 2: module ≡ scanner across the cursor boundary');
+  // the hub's walk: the LAST statement per thread to the sink, on the parent's account; the ledger rows carry neither field
+  const uhS = new UsageHistory({ dataDir: path.join(dataDir, 'st-uh'), homeDir: sHome });
+  uhS.codexSessionsDir = path.join(sHome, '.codex', 'sessions');
+  const got = [];
+  uhS.setStatementSink((st) => { got.push(st); return { ok: true }; });
+  uhS.recordAttribution({ sid: PAR, acct: 'cxs-par', ts: Date.parse(at(0)) - 1000 });
+  await uhS.scan({ force: true }); uhS.flushCursors();
+  ok(got.length === 1 && got[0].acct === 'cxs-par' && got[0].via === 'parent' && got[0].ts === Date.parse(at(9)) && got[0].rl.primary.used_percent === 14 && !got[0].host,
+    'pick 2: the hub\'s walk hands ONE statement — the thread\'s last (14 % at its record\'s time) — on the PARENT\'s account', JSON.stringify(got.map((g) => [g.acct, g.via, g.ts, g.rl && g.rl.primary.used_percent])));
+  await uhS.ingestRemoteEvents('host-st', 'St', sc1.concat(sc2).map((e) => JSON.stringify(e)).join('\n'));
+  ok(got.length === 2 && got[1].host === 'host-st' && got[1].acct === 'cxs-par' && got[1].ts === Date.parse(at(9)), 'pick 2: the remote ingest hands the same machine\'s last statement, named by its host', JSON.stringify(got.slice(1).map((g) => [g.host, g.acct, g.ts])));
+  const rows = fs.readdirSync(uhS.dir).filter((f) => /^events-.*\.ndjson$/.test(f)).map((f) => fs.readFileSync(path.join(uhS.dir, f), 'utf8')).join('');
+  ok(rows.includes(KID) && !/"rl":|"par":/.test(rows), 'pick 2: no ledger row (the walk\'s, the ingest\'s) stores rl or par — a statement is filed, never kept in the ledger', `${rows.length} B of rows`);
+}
+
 // ── CODEX FORK REPLAY (2.369.203): a forked rollout opens by replaying its
 // ancestors' token_counts, all stamped at the fork instant — the same requests,
 // already counted from the parent under ITS thread id. All three walkers skip

@@ -337,6 +337,12 @@ for (const rel of rollouts) {
           cur.forkTs = Date.parse(r.payload.timestamp || r.timestamp) || 0;
           cur.forkOwn = uuid7Ms(r.payload.id);
         }
+        // A SUBAGENT'S PARENT (lane usage-every-change pick 2): its own first line names the thread that spawned it — the
+        // account its statements are filed on (src/usage-history.js). Read from the first line a cursor sees, PERSISTED in
+        // the cursor (a pre-upgrade cursor is past it: no parent, never a guess)
+        const sp = r && r.type === 'session_meta' && r.payload && r.payload.source && r.payload.source.subagent && r.payload.source.subagent.thread_spawn;
+        const par = r && r.type === 'session_meta' && r.payload ? (r.payload.parent_thread_id || (sp && sp.parent_thread_id) || null) : null;
+        if (par) cur.parent = String(par).toLowerCase();
         return;
       }
     }
@@ -374,6 +380,7 @@ for (const rel of rollouts) {
     const info = r.payload.info;
     const last = info && info.last_token_usage;
     if (!last || !(last.input_tokens || last.output_tokens)) return;
+    const rl = r.payload.rate_limits && typeof r.payload.rate_limits === 'object' ? r.payload.rate_limits : null;
     const ts = Date.parse(r.timestamp) || Date.now();
     const cum = info.total_token_usage ? info.total_token_usage.total_tokens : null;
     const rid = 'cx:' + sid + ':' + (cum != null ? cum : cur.offset + '-' + ts);
@@ -397,6 +404,9 @@ for (const rel of rollouts) {
       cr: cached,
       o: last.output_tokens || 0,
       tier: null,
+      // THE STATEMENT (mirror of src/usage-walker.js, lane usage-every-change pick 2)
+      rl: rl || undefined,
+      par: rl && cur.parent ? cur.parent : undefined,
     }));
   });
   cursors[fp] = cur;

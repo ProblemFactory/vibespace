@@ -485,6 +485,54 @@ class UsageHistory {
   // per-request identity channel would be strictly better than the walk; it
   // must arrive with evidence that it names the AUTHORIZING identity.
   setTruthLookup(fn) { this._truthLookup = typeof fn === 'function' ? fn : null; }
+  // ── THE CODEX STATEMENT A ROLLOUT CARRIES (lane usage-every-change pick 2, law 4) — every codex token_count line states the
+  // account's rate limits at that line's own time; the walkers (module, shipped scanner) carry it on the event as `rl` (and the
+  // thread's parent as `par`). The LAST statement per (machine, thread, limit) of a walk is handed to the sink — the engine's
+  // store-only door (fileCodexStatement): it files the reading at its OWN time on the account that thread was billed to, and
+  // acts on nothing. Who owns it is the ledger's own answer, never a guess (law 6): a thread VibeSpace attributed ⇒ its
+  // account at that time; attributed to the machine's login (acct null) ⇒ THAT machine's own login (the hub's, or the host's —
+  // never the hub's for a host); a subagent thread ⇒ its parent's; a thread VibeSpace never saw ⇒ not tracked (said in the
+  // walk's counts, `statements.untracked`). ──
+  setStatementSink(fn) { this._statementSink = typeof fn === 'function' ? fn : null; }
+  _noteStatement(pending, e, host) {
+    // `rl` rides the codex rollout rows only (the walker's codex branch states it): a row without one states nothing
+    if (!this._statementSink || !e || !e.sid || !e.rl || typeof e.rl !== 'object') return;
+    const lim = String(e.rl.limit_id || 'codex');
+    const k = (host || '') + '|' + e.sid + '|' + lim;
+    const ts = Number(e.ts) || 0, cur = pending.get(k);
+    if (!cur || ts >= cur.ts) pending.set(k, { host: host || null, sid: String(e.sid), par: e.par ? String(e.par) : null, ts, limitId: lim, rl: e.rl });
+  }
+  _statementOwner(st, attrib, meta) {
+    for (const [sid, via] of [[st.sid, 'thread'], [st.par, 'parent']]) {
+      if (!sid) continue;
+      const m = meta[sid] || null;
+      if (!((attrib[sid] && attrib[sid].length) || m)) continue;
+      // the hub's walk reads the hub's own disk: a thread whose record names another machine has no login the hub can name
+      if (!st.host && m && m.host) return null;
+      const acct = this._acctAt(sid, st.ts, attrib, m ? m.acct : null);
+      return acct ? { acct, via } : { own: true, via };
+    }
+    return null;
+  }
+  _flushStatements(pending, attrib, meta) {
+    const out = { filed: 0, untracked: 0, refused: 0 };
+    if (!this._statementSink || !pending.size) return out;
+    // the newest statement per (owner, limit) is the one the store can take — a cold walk over a long history hands one per
+    // account and limit, never one per thread
+    const byOwner = new Map();
+    for (const st of pending.values()) {
+      const owner = this._statementOwner(st, attrib || {}, meta || {});
+      if (!owner) { out.untracked++; continue; }
+      const k = (owner.acct ? 'a:' + owner.acct : 'own:' + (st.host || '')) + '|' + st.limitId, cur = byOwner.get(k);
+      if (!cur || st.ts >= cur.ts) byOwner.set(k, { ...st, ...owner });
+    }
+    for (const st of byOwner.values()) {
+      let r = null; try { r = this._statementSink(st); } catch { r = null; }
+      if (r && r.ok) out.filed++; else out.refused++;
+    }
+    this._lastStatements = { ...out, at: Date.now() };
+    return out;
+  }
 
   _loadJson(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return fallback; } }
   // Pricing schema v2: { version, tiers:{opus,sonnet,haiku,fable,_default}, accounts:{ <id>: {discount} | {tiers:{...}} } }.
@@ -659,6 +707,7 @@ class UsageHistory {
       // now; scripts/test-usage-walk-parity.mjs pins it against the shipped
       // scanner (the one remaining, documented copy).
       const cursorsAtStart = this._cursors;
+      const statements = new Map(); // pick 2: the last codex statement per (thread, limit) of this walk
       const walk = await runUsageWalk({
         projectsDir: this.projectsDir,
         codexSessionsDir: this.codexSessionsDir,
@@ -667,6 +716,7 @@ class UsageHistory {
         budgetBytes: this._scanBudgetBytes,
         onBudget: async () => { await this._scanYield(); if (!this._scanForced && this._pausedNow()) throw Object.assign(new Error('paused'), { paused: true }); },
         onEvent: (ev) => {
+          this._noteStatement(statements, ev, null);
           const minfo = meta[ev.sid] || {};
           // A per-request identity override, when one is wired (see
           // setTruthLookup — nothing is, since 2026-09-07). The WALK is the
@@ -710,6 +760,7 @@ class UsageHistory {
         },
       });
       filesTouched = walk.filesTouched;
+      this._flushStatements(statements, attrib, meta);
       // round 3 (smaller 5): THE RE-WALK AFTER A KILL RE-APPENDS NOTHING IT ALREADY APPENDED — a kill between the shard append
       // and the cursor write re-walks those rows (20 kills: 1 128 rows for 152 request ids, compounding). The ledger knows
       // every request id it holds once warm: the walk waits for the warm (its rows are in memory; the checks below re-run
@@ -806,11 +857,12 @@ class UsageHistory {
    *  between two re-sends rows that cost zero bytes), not fsync-durable (the project's appends never fsync). */
   ingestRemoteEvents(hostId, hostName, text, { cursors = null, since = null } = {}) {
     let added = 0;
-    const shardBuffers = {};
+    const shardBuffers = {}, statements = new Map();
     for (const line of String(text || '').split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
       if (!e || !e.rid || !e.ts) continue;
+      this._noteStatement(statements, e, hostId);
       const ts = Number(e.ts) || Date.now();
       // ── PER-ACCOUNT attribution for remote events (2.294.0, R4 deliverable;
       // the owner's live complaint: a remote message's billing row could only
@@ -862,6 +914,9 @@ class UsageHistory {
       (shardBuffers[shard] = shardBuffers[shard] || []).push({ rid: ev.rid, ts: ev.ts, line: JSON.stringify(ev) });
       added++;
     }
+    // pick 2: the statements are facts of the machine, not ledger rows — filed whatever the batch's answer (a re-sent batch files
+    // nothing new: the store keeps the newest by its own time); a remote thread is VibeSpace's only by its attribution entry
+    if (statements.size) this._flushStatements(statements, this._attribMap(), {});
     return this._ingestBatch(hostId, hostName, shardBuffers, added, { cursors, since });
   }
   _appendRemote(shardBuffers, shards) {

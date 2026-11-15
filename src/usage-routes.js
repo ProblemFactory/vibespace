@@ -1256,131 +1256,18 @@ app.post('/api/usage/refresh', async (req, res) => {
   });
 });
 
-function readCodexWrapperRateLimit(sessionId) {
-  if (!sessionId) return null;
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, sessionId + '.json'), 'utf-8'));
-    const snap = normalizeCodexRateLimit(meta?.rateLimits, meta?.rateLimitsFetchedAt || meta?.startedAt || Date.now());
-    // The RUNNING wrapper's own sidecar: the same `rate_limits_updated` push
-    // the engine consumes live, read back off disk — one producer, one name
-    // (2026-09-07 r3).
-    if (snap) snap.source = 'codex-rate-limits';
-    // stored reset-credit count (wrapper reads it once at startup + on ⟳)
-    if (snap && meta?.rateLimitResetCredits) {
-      const rc = meta.rateLimitResetCredits;
-      snap.resetCredits = { availableCount: Number(rc.availableCount ?? rc.available_count ?? rc?.summary?.availableCount) || 0 };
-    }
-    return snap;
-  } catch {
-    return null;
-  }
-}
-
-function readLatestCodexRateLimitFromJsonl(filePath) {
-  try {
-    // Tail read only — we scan from the end anyway, and codex JSONLs can be
-    // many MB; reading them whole blocked the event loop on every fallback
-    const TAIL = 65536;
-    const stat = fs.statSync(filePath);
-    let content;
-    if (stat.size > TAIL) {
-      const fd = fs.openSync(filePath, 'r');
-      try {
-        const buf = Buffer.alloc(TAIL);
-        const n = fs.readSync(fd, buf, 0, TAIL, stat.size - TAIL);
-        content = buf.toString('utf-8', 0, n);
-        content = content.slice(content.indexOf('\n') + 1); // drop the cut-off first line
-      } finally { fs.closeSync(fd); }
-    } else {
-      content = fs.readFileSync(filePath, 'utf-8');
-    }
-    const lines = content.split('\n');
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const line = lines[i].trim();
-      if (!line || !line.includes('"type":"event_msg"') || !line.includes('"type":"token_count"') || !line.includes('"rate_limits"')) continue;
-      const record = JSON.parse(line);
-      const timestamp = record?.timestamp ? Date.parse(record.timestamp) : 0;
-      const rateLimits = record?.payload?.rate_limits || null;
-      const normalized = normalizeCodexRateLimit(rateLimits, Number.isFinite(timestamp) ? timestamp : Date.now());
-      // Mined from a rollout TRANSCRIPT, not from a live stream — a different
-      // producer with a different freshness story, so it says so (2026-09-07
-      // r3: the codex panel used to label every reading "via unknown").
-      if (normalized) { normalized.source = 'codex-rollout'; return normalized; }
-    }
-  } catch {}
-  return null;
-}
-
-function listRecentCodexJsonlFiles(limit = 24) {
-  const files = [];
-  const stack = [CODEX_SESSIONS_DIR];
-  // Rollouts are organized sessions/YYYY/MM/DD/ and this walk runs every ~30s
-  // forever (usage snapshot refresh) — unpruned it is O(all rollouts ever).
-  // Skip date subtrees older than the cutoff; freshest-24 is all we keep anyway.
-  const cutoff = new Date(Date.now() - 14 * 86400000);
-  const cutoffYMD = [cutoff.getFullYear(), cutoff.getMonth() + 1, cutoff.getDate()];
-  const tooOld = (rel) => {
-    const segs = rel.split(path.sep).filter(Boolean).map(Number);
-    for (let i = 0; i < Math.min(segs.length, 3); i++) {
-      if (!Number.isFinite(segs[i])) return false; // not a date layout — keep descending
-      if (segs[i] < cutoffYMD[i]) return true;
-      if (segs[i] > cutoffYMD[i]) return false;
-    }
-    return false;
-  };
-  while (stack.length) {
-    const current = stack.pop();
-    let entries = [];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const fp = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (tooOld(path.relative(CODEX_SESSIONS_DIR, fp))) continue;
-        stack.push(fp);
-        continue;
-      }
-      if (!entry.isFile() || !fp.endsWith('.jsonl')) continue;
-      try {
-        const stat = fs.statSync(fp);
-        files.push({ path: fp, mtimeMs: stat.mtimeMs });
-      } catch {}
-    }
-  }
-  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return files.slice(0, limit);
-}
-
-// threadId → accountId from session-meta (codex quota is PER ACCOUNT — each
-// snapshot must land in the bucket of the account its session billed to).
-let _codexAcctMapCache = null;
-function codexThreadAccountMap() {
-  // META_DIR lives on the (possibly NFS) workspace — same cost class as
-  // usage-history's _metaMap, same fix: 60s TTL (attribution of a snapshot
-  // to an account tolerates a minute of staleness).
-  if (_codexAcctMapCache && Date.now() - _codexAcctMapCache.at < 60000) return _codexAcctMapCache.map;
-  const map = {};
-  let files = [];
-  try { files = fs.readdirSync(META_DIR); } catch {}
-  for (const fn of files) {
-    if (!fn.endsWith('.json')) continue;
-    try {
-      const m = JSON.parse(fs.readFileSync(path.join(META_DIR, fn), 'utf-8'));
-      if ((m.backend || 'claude') === 'codex' && m.backendSessionId) map[m.backendSessionId] = m.accountId || null;
-    } catch {}
-  }
-  _codexAcctMapCache = { at: Date.now(), map };
-  return map;
-}
+// THE TWO RE-READ RUNGS ARE RETIRED (lane usage-every-change pick 2, laws 4 + 6): the panel re-read the running codex
+// wrapper's sidecar (the same `account/rateLimits/updated` push the wrapper RELAYS to the engine, which files it through the
+// window guard) and the newest rollout tails on the hub's own disk (an unattributed thread — a host's, a login the hub never
+// held — was filed on '__global_codex__'; a remote session's on the hub's login). Both wrote past the window guard
+// (writeCacheObject straight from this route). Every codex statement now reaches the store through the engine: the live push
+// (recordCodexQuotaSignal) and every walked rollout's last statement per thread (src/usage-history.js → fileCodexStatement,
+// at the record's own time, on the account the ledger billed). This route reads what the store holds.
 
 // Overall freshest snapshot (back-compat) + per-account buckets keyed by
 // account id / '__global_codex__' (sessions with no VibeSpace account = the
-// machine's own codex login). Sources: live wrapper meta (account = the
-// session's own), then recent rollout tails (account via session-meta lookup
-// on the thread id in the filename).
+// machine's own codex login) / '__global_codex__.<hostId>' (a paired machine's
+// own login). Source: the store — every reading the engine filed (pick 2).
 function summarizeCodexRateLimits() {
   const now = Date.now();
   if (now - _codexRateLimitCacheAt < 30000) return _codexRateLimitCache || { overall: null, byAccount: {} };
@@ -1421,7 +1308,7 @@ function summarizeCodexRateLimits() {
   // identities visible to the anchors sweep / estimator like claude's.
   try {
     for (const fn of fs.readdirSync(USAGE_CACHE_DIR)) {
-      const m = /^(cxs-[\w-]+|__global_codex__)\.json$/.exec(fn);
+      const m = /^(cxs-[\w-]+|__global_codex__(?:\.[\w-]+)?)\.json$/.exec(fn); // + a paired machine's own login (pick 2)
       if (!m) continue;
       try {
         const stored = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
@@ -1436,23 +1323,7 @@ function summarizeCodexRateLimits() {
       } catch {}
     }
   } catch {}
-  for (const [id, session] of activeSessions) {
-    if (session.backend !== 'codex' || session.mode !== 'chat') continue;
-    keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id), 'codex-rate-limits');
-  }
-  {
-    const threadAcct = codexThreadAccountMap();
-    const recentFiles = listRecentCodexJsonlFiles();
-    let freshEnough = 0;
-    for (const entry of recentFiles) {
-      const tm = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(entry.path);
-      const snapshot = readLatestCodexRateLimitFromJsonl(entry.path);
-      if (!snapshot) continue;
-      const acct = tm ? (threadAcct[tm[1].toLowerCase()] || null) : null;
-      keep(acct || '__global_codex__', snapshot, 'codex-rollout');
-      if (snapshot.fetchedAt && (now - snapshot.fetchedAt) < 5 * 60 * 1000 && ++freshEnough >= 3) break;
-    }
-  }
+  // (the wrapper-sidecar and rollout-tail rungs are retired — see above: the engine files every statement, this reads the store)
   let overall = null;
   for (const s of Object.values(byAccount)) if (!overall || (s.fetchedAt || 0) > (overall.fetchedAt || 0)) overall = s;
   // Same-account merge (codex global ↔ linked named account): newest wins both.
@@ -1479,7 +1350,7 @@ function summarizeCodexRateLimits() {
   // the claude device read-back — never let an older snapshot overwrite a
   // newer file (fetchedAt-guarded by `keep` above, which already merged disk).
   for (const [key, snap] of Object.entries(byAccount)) {
-    if (!/^(cxs-[\w-]+|__global_codex__)$/.test(key)) continue;
+    if (!/^(cxs-[\w-]+|__global_codex__(?:\.[\w-]+)?)$/.test(key)) continue;
     const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
     if (cur && (Number(cur.fetchedAt) || 0) >= (Number(snap.fetchedAt) || 0)) continue;
     usageWrite.writeCacheObject({
