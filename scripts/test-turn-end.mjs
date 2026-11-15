@@ -93,13 +93,15 @@ job('— ② «End the command»: its processes end, agy stays, the step ends an
   } finally { await h.stop(); }
 });
 
-/** the REAL watch over a live wrapper; only the clock moves (`skew`) */
+/** the REAL watch over a live wrapper; only the clocks move (`skew`, on the wall AND the steady one — the look's law 1: the
+ *  watch counts only stillness it OBSERVED, a reading a minute; `walk` reads every minute from..to) */
 function watched(h, { setting = () => undefined } = {}) {
   const sessions = new Map([['x', { mode: 'chat', backend: 'antigravity', name: 'live', _isStreaming: true, _normalizer: h.mm, pty: { write: (l) => h.child.stdin.write(l) } }]]);
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(h.dir, 'd-')), onChange: () => { } });
   const W = { skew: 0, ut, sessions };
-  W.w = TWatch.create({ activeSessions: sessions, buffersDir: h.dir, getUserTodos: () => ut, sessionKeyOf: () => 'key:x', serverSetting: setting, adapterOf: () => ({ formatInterrupt: () => '{"type":"interrupt"}', postInterrupt: () => { } }), now: () => Date.now() + W.skew, log: { log: () => { } } });
+  W.w = TWatch.create({ activeSessions: sessions, buffersDir: h.dir, getUserTodos: () => ut, sessionKeyOf: () => 'key:x', serverSetting: setting, adapterOf: () => ({ formatInterrupt: () => '{"type":"interrupt"}', postInterrupt: () => { } }), now: () => Date.now() + W.skew, mono: () => performance.now() + W.skew, log: { log: () => { } } });
   W.at = async (m) => { W.skew = m * MIN; await W.w.sweep(); };
+  W.walk = async (from, to, pause = 0) => { for (let m = from; m <= to; m++) { await W.at(m); if (pause) await sleep(pause); } };
   W.items = () => { const sn = ut.snapshot(); return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.action && i.action.type === 'turn-stuck'); };
   return W;
 }
@@ -111,11 +113,11 @@ job('— ③a the by-itself ending: a command stuck for the second bound is ende
     await h.run('run the hang-command piped now');   // its output through a real pipe (a Go CLI's exec gives one)
     await commandUp(h); await sleep(700);
     const list = await h.tree(); const W = watched(h);
-    await W.at(0); await sleep(300); await W.at(11);
-    ok(W.items().length === 1 && W.items()[0].status === 'open' && W.items()[0].action.endable === true && /ended by itself at/.test(W.items()[0].detail), 'at 11 min: said, with when it would be ended by itself', W.items().map((i) => i.detail));
-    await W.at(29);
+    await W.at(0); await sleep(300); await W.walk(1, 11);
+    ok(W.items().length === 1 && W.items()[0].status === 'open' && W.items()[0].action.endable === true && /ended by itself at/.test(W.items()[0].text), 'at 11 min: said, with when it would be ended by itself — in its headline', W.items().map((i) => i.text));
+    await W.walk(12, 29);
     ok(list.every(aliveAs) && !h.recs.some((r) => r.kind === 'command_ended'), 'at 29 min: not ended');
-    await W.at(31);
+    await W.walk(30, 31);
     const done = await until(() => h.recs.find((r) => r.type === 'acp' && r.kind === 'command_ended'), 8000);
     ok(done && done.ok && done.by === 'by-itself' && done.told === true, 'at 31 min: ended BY ITSELF — the same act as the door (command_ended by-itself; the sentence written to its output)', done);
     ok(await until(() => /VibeSpace ended this command after 30 minutes with no output and nothing it started working\./.test(stepOut(h)), 8000), 'the agent\'s step output carries WHY: «VibeSpace ended this command after 30 minutes with no output and nothing it started working.»', stepOut(h).slice(0, 300));
@@ -125,20 +127,20 @@ job('— ③a the by-itself ending: a command stuck for the second bound is ende
 });
 
 job('— ③b a BUSY command is never ended; «Keep waiting» at 29 keeps a hung one a full bound more', async (ok) => {
-  const b = startAgy({ AGY_STUB_BUSY_MS: '9000' }), k = startAgy();
+  const b = startAgy({ AGY_STUB_BUSY_MS: '20000' }), k = startAgy();
   try {
     await b.run('run the busy-command now'); await k.run('run the hang-command now');
     await commandUp(b); await commandUp(k); await sleep(700);
     const bl = await b.tree(), kl = await k.tree();
     const WB = watched(b), WK = watched(k);
-    for (const [m, gap] of [[0, 400], [11, 400], [29, 400], [31, 400], [45, 400], [61, 0]]) { await WB.at(m); if (gap) await sleep(gap); }
+    await WB.walk(0, 61, 120);   // a reading a (virtual) minute, 120 ms of real time apart: its CPU moves between every two
     ok(bl.every(aliveAs) && !b.recs.some((r) => r.kind === 'command_ended') && WB.items().length === 0, 'busy-command (its CPU moving every reading) for 61 min: never said, never ended');
-    await WK.at(0); await sleep(300); await WK.at(11);
+    await WK.at(0); await sleep(300); await WK.walk(1, 29);
     WK.skew = 29 * MIN; WK.w.keepWaiting('x');
-    await WK.at(31); await WK.at(45);
-    ok(kl.every(aliveAs) && !k.recs.some((r) => r.kind === 'command_ended'), '«Keep waiting» pressed at 29: not ended at 31, nor at 45');
-    await WK.at(60);
-    ok(await until(() => k.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.by === 'by-itself'), 8000), '…ended a FULL thirty minutes after the press (at 60)');
+    await WK.walk(30, 58);
+    ok(kl.every(aliveAs) && !k.recs.some((r) => r.kind === 'command_ended'), '«Keep waiting» pressed at 29: not ended at 30, nor up to 58');
+    await WK.at(59);
+    ok(await until(() => k.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.by === 'by-itself'), 8000), '…ended a FULL thirty observed minutes after the press (at 59)');
   } finally { await b.stop(); await k.stop(); }
 });
 
@@ -149,12 +151,12 @@ job('— ③c «silent» (no command open) is never ended by itself; 0 = never',
   fs.writeFileSync(path.join(dir, 's.json'), JSON.stringify({ pid: 9, childPid: 10, cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }));
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(dir, 'd-')), onChange: () => { } });
   let clock = T0; const reader = { readBelow: async () => ({ readable: true, alive: true, at: clock, cut: false, list: [] }) };
-  const w = TWatch.create({ activeSessions: sessions, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, log: { log: () => { } } });
-  for (let m = 0; m <= 600; m += 5) { clock = T0 + m * MIN; await w.sweep(); }
+  const w = TWatch.create({ activeSessions: sessions, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, now: () => clock, mono: () => clock, log: { log: () => { } } });
+  for (let m = 0; m <= 600; m++) { clock = T0 + m * MIN; await w.sweep(); }
   ok(!writes.some((l) => /end-command/.test(l)), 'ten hours of «silent» (no tool step open): never an end-command');
   const s2 = new Map([['s', { ...sessions.get('s'), _normalizer: { openTool: () => ({ name: 'run_command' }) } }]]);
-  const w2 = TWatch.create({ activeSessions: s2, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, serverSetting: (k) => (k === TWatch.END_SETTING ? 0 : undefined), now: () => clock, log: { log: () => { } } });
-  for (let m = 600; m <= 700; m += 5) { clock = T0 + m * MIN; await w2.sweep(); }
+  const w2 = TWatch.create({ activeSessions: s2, buffersDir: dir, getUserTodos: () => ut, sessionKeyOf: () => 'k', procTree: reader, serverSetting: (k) => (k === TWatch.END_SETTING ? 0 : undefined), now: () => clock, mono: () => clock, log: { log: () => { } } });
+  for (let m = 600; m <= 700; m++) { clock = T0 + m * MIN; await w2.sweep(); }
   ok(!s2.get('s').pty.write.calls && !writes.some((l) => /end-command/.test(l)), 'the setting at 0: a stuck command is said, never ended by itself');
 });
 
@@ -201,16 +203,16 @@ job('— ⑥ a spawn that fails is the exit (the binary gone): said, and the wra
 
 for (const j of jobs) { await j.p; console.log(j.title); for (const [c, n, e] of j.R) ok(c, n, e); }
 
-console.log('— ④ RED CONTROL: a mutant that ends on the WRITTEN silence alone ends a WORKING command');
+console.log('— ④ RED CONTROL: a mutant that counts the WRITTEN silence alone (work below the CLI is not movement) ends a WORKING command');
 {
-  const orig = TL.livenessVerdict;
-  TL.livenessVerdict = (f) => { const v = orig(f); return { ...v, state: v.state === 'busy' && f.openTool ? 'stuck-on-command' : v.state, stillSince: v.stillSince || v.since, endDue: !!f.openTool && f.now - Math.max(f.lastWroteAt || 0, f.openedAt || 0, f.keptAt || 0) >= 30 * MIN }; };
-  const b = startAgy({ AGY_STUB_BUSY_MS: '9000' });
+  const orig = TL.stillnessStep;
+  TL.stillnessStep = (prev, cur, o) => orig(prev, cur && { ...cur, worked: false }, o);
+  const b = startAgy({ AGY_STUB_BUSY_MS: '20000' });
   try {
     await b.run('run the busy-command now'); await commandUp(b); await sleep(700);
-    const W = watched(b); await W.at(0); await sleep(400); await W.at(31);
-    ok(await until(() => b.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.by === 'by-itself'), 8000), 'the mutant ends the busy command at 31 min — ③b\'s leg is what catches it');
-  } finally { TL.livenessVerdict = orig; await b.stop(); }
+    const W = watched(b); await W.walk(0, 31, 60);
+    ok(await until(() => b.recs.some((r) => r.type === 'acp' && r.kind === 'command_ended' && r.by === 'by-itself'), 8000), 'the mutant ends the busy command at 30 min — ③b\'s leg is what catches it');
+  } finally { TL.stillnessStep = orig; await b.stop(); }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

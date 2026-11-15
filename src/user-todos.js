@@ -592,8 +592,11 @@ class UserTodoManager {
    *  redrawRequest) — the ONE open item `pred` names, through THE bounds add() uses: the facts by normalizeCardFacts (the named
    *  cuts, the {dropped} stub), the detail by DETAIL_MAX, the i18n by normalizeI18n (a shape it refuses ⇒ nothing changes).
    *  ONE save + ONE broadcast. → { ok: true, facts } (the facts as stored) | { ok: false, code } */
-  redrawItem(pred, { detail, facts = null, i18n, text = null } = {}) {
-    const it = this._state.items.find((x) => x.status === 'open' && pred(x));
+  // lane turn-never-silent (the look at 99f65d547, law 1 — «a time the card shows is the time it will happen»): `action` = the
+  // producer's own door facts drawn again (the SAME type only, never another row's buttons: «nothing to end» takes «End the
+  // command» away); `{resolved: true}` = a RESOLVED card drawn again too (a kept card whose stated time moved). Opt-in both.
+  redrawItem(pred, { detail, facts = null, i18n, text = null, action = null } = {}, { resolved = false } = {}) {
+    const it = this._state.items.find((x) => (x.status === 'open' || (resolved === true && !x.clearedAt)) && pred(x));
     if (!it) return { ok: false, code: 'not_open' };
     let words;
     try { words = i18n === undefined ? undefined : normalizeI18n(i18n); } catch (e) { return { ok: false, code: 'i18n_refused', error: e.message }; }
@@ -606,6 +609,7 @@ class UserTodoManager {
     if (words !== undefined) { if (words) it.i18n = words; else delete it.i18n; }
     delete it.judged;   // the card's words moved: its place in the list is judged again
     if (typeof text === 'string' && text.trim()) it.text = clip(text.trim(), TEXT_MAX);   // a producer whose ONE item counts what it says (lane paced-wake-retry): this file's own surrogate-safe cut
+    if (action && typeof action === 'object' && !Array.isArray(action) && it.action && action.type === it.action.type) it.action = { ...action };
     this._save(); this._notify();
     return { ok: true, facts: fx.facts, detail: it.detail };
   }

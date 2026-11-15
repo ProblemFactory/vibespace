@@ -124,6 +124,8 @@ function toolContentOf(list) {
   }
   return { output: parts.filter(Boolean).join('\n'), diff };
 }
+/** lane turn-never-silent: a tool input's command, its first line (the turn watch's headline) — or null */
+function firstLineOf(i) { const c = i && i.command; const line = Array.isArray(c) ? c.join(' ') : typeof c === 'string' ? c : ''; return line ? line.split('\n')[0].slice(0, 200) : null; }
 function inputOf(tc) {
   const raw = tc?.rawInput && typeof tc.rawInput === 'object' && !Array.isArray(tc.rawInput) ? { ...tc.rawInput } : (tc?.rawInput != null ? { input: tc.rawInput } : {});
   if (tc?.title && raw.title == null) raw.title = tc.title;
@@ -670,11 +672,12 @@ class AcpMessageManager extends MessageWindow {
     if (emit) this._emit({ op: 'create', message: msg });
   }
   /** lane turn-never-silent (law L1 — the liveness row's `openTool: 'tool-card'`): the conversation's newest tool step still OPEN
-   *  — its card's name — or null. The hub's turn watch asks this, and only this (src/server/turn-watch.js). */
+   *  — its card's name and its command's first line (the look's P2: the headline names the command) — or null. The hub's turn
+   *  watch asks this, and only this (src/server/turn-watch.js). */
   openTool() {
-    let name = null;
-    for (const id of this.toolCards.values()) { const m = this.messageIndex.get(id); if (m && m.status === 'pending' && !(m.taskInfo && m.taskInfo.subId)) name = (m.backendMeta && m.backendMeta.title) || m.toolName || name; }
-    return name ? { name: String(name).slice(0, 80) } : null;
+    let name = null, input = null;
+    for (const id of this.toolCards.values()) { const m = this.messageIndex.get(id); if (m && m.status === 'pending' && !(m.taskInfo && m.taskInfo.subId)) { name = (m.backendMeta && m.backendMeta.title) || m.toolName || name; input = (m.content && m.content[0] && m.content[0].input) || null; } }
+    return name ? { name: String(name).slice(0, 80), cmd: firstLineOf(input) } : null;
   }
   _toolCallUpdate(u, emit) {
     const toolCallId = u.toolCallId;
