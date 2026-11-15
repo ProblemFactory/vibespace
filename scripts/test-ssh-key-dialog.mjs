@@ -46,18 +46,23 @@ const $=(q)=>document.querySelector(q);
 const disp=(el)=>el?getComputedStyle(el).display:"(gone)";
 const passWrap=()=>[...document.querySelectorAll("#mounts-key-dialog .dialog-body > div")].find(d=>d.querySelector("input[type=password]"));
 const ta=()=>$("#mounts-key-paste");
-const statusEl=()=>[...document.querySelectorAll("#mounts-key-dialog .mounts-field-hint")].find(e=>e.previousElementSibling&&e.previousElementSibling.type==="file");
+// lane ui-language (the walk's machines-16): the browser's own «Choose File / No file chosen» spoke the BROWSER's language — the
+// file input is hidden in a .mounts-file-row behind a themed button + a file-name line; the status line follows that row, and the
+// passphrase toggle is a checkbox (.mounts-check), never a full-width .mounts-btn bar
+const statusEl=()=>{ const r=$("#mounts-key-dialog .mounts-file-row"), n=r&&r.nextElementSibling; return n&&n.classList.contains("mounts-field-hint")?n:undefined; };
+const toggle=()=>$("#mounts-key-dialog .mounts-check");
 const submitBtn=()=>$("#mounts-key-dialog .btn-create");
 const sleep=(ms)=>new Promise(r=>setTimeout(r,ms));
 (async()=>{
  try{
   let p=s._askPrivateKey(); await sleep(0);
   ok("fresh open hides the passphrase row", disp(passWrap())==="none", disp(passWrap()));
-  ok("manual toggle is always available", !!$("#mounts-key-dialog .mounts-btn"));
+  ok("manual toggle is always available", !!$("#mounts-key-dialog .mounts-check input[type=checkbox]"));
+  ok("the key file: a themed button in the page's words, the browser's own input hidden behind it", (()=>{ const r=$("#mounts-key-dialog .mounts-file-row"); const b=r&&r.querySelector("button.mounts-btn"), i=r&&r.querySelector("input[type=file]"); return !!b && /key file/.test(b.textContent) && !!i && i.style.display==="none" && /No file chosen/.test(r.querySelector(".mounts-field-hint").textContent); })());
   ta().value=ENC; ta().dispatchEvent(new Event("input"));
   ok("encrypted key reveals the passphrase row", disp(passWrap())!=="none", disp(passWrap()));
   ok("…and says why", /passphrase/i.test(statusEl().textContent), statusEl().textContent);
-  ok("toggle hides once revealed", disp($("#mounts-key-dialog .mounts-btn"))==="none");
+  ok("toggle hides once revealed", disp(toggle())==="none");
   ta().value=PLAIN; ta().dispatchEvent(new Event("input"));
   ok("plain key clears the status", statusEl().textContent==="", statusEl().textContent);
   ok("row STAYS revealed (never yank a field being typed in)", disp(passWrap())!=="none");
