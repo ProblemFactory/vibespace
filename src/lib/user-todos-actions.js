@@ -35,8 +35,9 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
-import { noteHubClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
+import { noteHubClock, settingCardOf, noteSettingPresent, untilClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords, headWordOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
+import { PROPOSABLE, isSettingChange } from '../ask-setting.js'; // PURE (CJS, lane setting-doors pick 2): a held row's default (a hold's `before` null)
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -346,10 +347,49 @@ export function inboxModel(app) {
       sentToast: plan.already ? t('{label} was already open to this conversation — the agent was told', { label }) : t('{label}: this conversation may use it now — the agent was told', { label }),
     });
   };
+  /** lane setting-doors pick 2 — A PROPOSED CHANGE, TAKEN IN ONE PRESS: the owner's page POSTs the change the item carries (its key,
+   *  value and «until» — the hub built them from the schema; never re-typed) with the value the card SHOWED as now (`shown`, the
+   *  button's own, else the card's reading now); the hub judges it again and makes it ONE act (src/server/setting-holds.js press:
+   *  the hold on disk before the value). 409 moved ⇒ said, the card redrawn on the hub's present value — nothing is pressed again
+   *  by itself; any other refusal ⇒ the hub's words, the item stays open; 200 ⇒ the agent is answered on the reply road with what
+   *  was done (the item resolves «by your reply»). A press of the owner's page (fetchJson from the page — its own marks, never a
+   *  bearer). Resolves true when both ran. */
+  const pressSetting = async (rec, { shown } = {}) => {
+    const card = settingCardOf(rec, t);
+    if (!card) return false;
+    const num = (v) => (v === null || v === undefined || v === '' || typeof v === 'boolean' ? NaN : Number(v));   // ask-setting's NUM: an absent field is NO number (Number(null) is 0)
+    const a = rec.action, key = card.key;
+    const showed = Number.isFinite(num(shown)) ? num(shown) : card.now;
+    const body = { key, value: card.value, shown: showed, ...(Number.isFinite(num(a.untilRel)) ? { untilRel: num(a.untilRel) } : Number.isFinite(num(a.untilAt)) ? { untilAt: num(a.untilAt) } : {}) };
+    const r = await fetchJson('/api/setting-holds/press', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!(r && r.ok)) {
+      if (r && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value
+      if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
+      const why = r && r.code === 'same' ? t('It is already {value} — nothing to change', { value: num(r.present) })
+        : r && r.code === 'passed' ? t('That moment ({time}) has passed — change it on the row', { time: Number.isFinite(num(a.untilAt)) ? untilClock(num(a.untilAt), t) : '' })
+        : r && r.code === 'raise-needs-until' ? t('A raise needs its «until» — change it on the row')
+        : r && r.error ? t(String(r.error)) : t('server unreachable');
+      showToast(t('Could not change it: {why}', { why }) + ` — vibespace://settings/${key}`, { type: 'error', duration: 9000 });   // the row's door (a toast draws the link as one)
+      return false;
+    }
+    const value = num(r.value), untilAt = Number.isFinite(num(r.untilAt)) ? num(r.untilAt) : null;
+    const back = Number.isFinite(num(r.before)) ? num(r.before) : PROPOSABLE[key] ? PROPOSABLE[key].def : null;   // `before` null = the row's default
+    const hhmm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    // the agent's words (the reply road — plain English, like a grant's): what the row holds now and, when timed, the moment (the
+    // owner's clock, and the instant itself) and what it returns to by itself
+    const text = untilAt != null
+      ? `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value} until ${hhmm(untilAt)} (then ${back}; ${new Date(untilAt).toISOString().slice(0, 16)}Z)`
+      : `${value > showed ? 'Set' : 'Lowered'} ${key} to ${value}`;
+    return postReply(rec.id, text, {
+      sentToast: untilAt != null ? t('{label}: {value} until {time}, then {back} — the agent was told', { label: card.label, value, time: untilClock(untilAt, t), back })
+        : t('{label}: {value} from now on — the agent was told', { label: card.label, value }),
+    });
+  };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
     if (rec && rec.action && rec.action.type === 'browser-grant') return grantBrowser(rec);
+    if (rec && isSettingChange(rec.action)) return pressSetting(rec, extra);   // lane setting-doors pick 2: the change an ask proposes, in ONE press (`extra.shown` = the value the pressed button drew)
     if (rec && rec.action && rec.action.type === 'browser-takeover') {
       // lane browser-takeover-queue: ONE record — the item IS the request: its live view, the input side offered (the view's
       // Take over; the agent's words in its bar); the request as the app's queue holds it (else the item's own facts)
@@ -728,6 +768,9 @@ export function inboxModel(app) {
     get loaded() { return loaded; },
     byId, sessionFor, displayName, wordsOf, detailOf, recordOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
+    /** lane setting-doors pick 2: every surface draws its rows again on the snapshot it holds — a fact a row reads that is no item's
+     *  changed (a proposed change's value NOW, a hold): the app calls it on the settings store's change and the holds' broadcast */
+    redraw() { if (loaded) emit('todos', todos); },
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
     rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },

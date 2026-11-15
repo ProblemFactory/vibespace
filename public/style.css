@@ -8744,6 +8744,20 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-decide-ico svg { width: 12px; height: 12px; display: block; }
 .ut-action-grant { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane controls-that-lie: the GRANT an ask names — a WORDED button on the 24 px .ut-act icon box, its own width (the exit ask's rule); a long profile label wraps */
 .ut-grant-answer .ut-action-grant { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* lane setting-doors pick 2: AN ASK THAT PROPOSES ONE CHANGE OF ONE SETTING — one box: the row's label and its door, the value NOW
+   (a value that moved since the ask in the warning accent), the proposal with its «until», a standing hold, the ask's age, then
+   ONE worded press (the grant's shape) or why there is none. Theme vars only. */
+.ut-setting-change { margin-top: 4px; padding: 3px 0 3px 8px; border-inline-start: 2px solid var(--accent); font-size: 11px; line-height: 1.45; color: var(--text); min-width: 0; overflow-wrap: anywhere; cursor: default; }
+.ut-sc-label { font-weight: 600; }
+.ut-sc-link { margin-inline-start: 0.3em; }
+.ut-sc-moved, .ut-sc-held { color: var(--warn-text); }
+.ut-sc-asked { color: var(--text-dim); }
+.ut-sc-why { font-size: 11px; color: var(--text-secondary); }
+.ut-action-setting { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
+.ut-setting-answer .ut-action-setting { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.iw-setting { margin-top: 6px; }
+.iw-setting .ut-setting-change { font-size: 12px; }
+.settings-row-held { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 12px; color: var(--warn-text); }
 /* lane vault-paste-request: an agent's request for a secret — the MASKED paste box under its words (the field, 存入保险库, 拒绝)
    and its state line (a locked vault said by name, 解锁… inline); the same box as a dialog over the For-you / Vault window */
 .ut-secret { margin-top: 5px; cursor: default; }
@@ -8807,6 +8821,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   .ut-exit-answer .ut-action-exit, .ut-action-exit { min-height: 36px; min-width: 72px; }
   .ut-proposal-answer .ut-action-proposal, .ut-action-proposal { min-height: 36px; min-width: 72px; }
   .ut-grant-answer .ut-action-grant, .ut-action-grant { min-height: 36px; min-width: 72px; }
+  .ut-setting-answer .ut-action-setting, .ut-action-setting { min-height: 36px; min-width: 72px; } /* lane setting-doors pick 2: the proposed change's one press — the grant's floor */
   .exit-access-dialog .pp-row { min-height: 40px; }
   .exit-access-dialog .pp-chip { min-height: 36px; }
   .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }
