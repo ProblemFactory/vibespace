@@ -1003,7 +1003,10 @@ require('./stream-wall.js').configure({ harnessOf: (id) => { try { return requir
 // named account's conversation ended and 5 minutes passed with no new turn of it ⇒ ONE read through this same door, at most
 // once per account per 30 minutes counted from its last read on disk; only where the descriptor declares `onDemand.afterTurn`
 require('./after-turn-read.js').configure({ harnessOf: (id) => { try { return require('../harnesses').get(id); } catch { return null; } },
-  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor });
+  cacheDir: path.join(rootDir, 'data', 'usage-cache'), door: usageDoor,
+  // «a turn of the account runs» is read from the conversations themselves at the moment of the read — every one the hub
+  // holds, restored ones too (law A1)
+  conversationsOf: (key) => [...activeSessions.values()].filter((s) => s && String(s._accountId || '') === key) });
 app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
   let r;
   try { r = await usageDoor.read(req.params.id, { person: !isAgentBearer(req) }); } catch (e) { r = { ok: false, status: 500, error: e.message }; }

@@ -1642,6 +1642,7 @@ export default {
   "Nothing to resume yet — send a message first, or pick the account in the New Session dialog": "还没有可恢复的对话——先发一条消息，或在新建会话对话框里选账号",
   "Manual (⟳ button) — plus Antigravity’s own reads: after a usage wall, after a stretch of work": "手动（⟳ 按钮）— 另外 Antigravity 自己读：撞到用量上限后、一段工作结束后",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今天读取用量 {n} 次：你手动 {person} 次 · 撞到上限后 {wall} 次 · 一段工作结束后 {after} 次",
+  "usage read {n}× today": "今天读取用量 {n} 次",
   "Auto on popup open (when >30 min stale)": "打开弹窗时自动（数据超 30 分钟陈旧才刷）",
   "Off (never contact Anthropic)": "关闭（绝不主动请求 Anthropic）",
   "On-demand quota refresh (model-scoped limits like Fable)": "按需刷新配额（Fable 等模型级限额）",
