@@ -683,6 +683,33 @@ if (isMain) {
     const w = BSW.whenText(Date.parse('2026-11-13T16:10:00Z'), Date.parse('2026-11-13T15:30:00Z'));   // Shanghai: 11/14 00:10 against 11/13 23:30
     ok(/14/.test(w), 'a session instant past midnight in the PAGE\'s zone carries its date (whenText reads «today» in the zone it prints in)', w);
     PT.setPageZone(null);
+    // THE SPEED CURE (the .403 prep mirror: the 1 758-row Channels panel redrew in 600 ms — page-time built an Intl.DateTimeFormat a
+    // call to read the device's zone). (a) The zone is KEPT FOR A MINUTE — the limit — and a zone change is seen once it is over
+    {
+      const realNow = Date.now, TZ0 = process.env.TZ, t1 = Date.parse('2026-11-14T20:00:00Z');
+      try {
+        process.env.TZ = 'America/Los_Angeles'; PT.setPageZone(null);   // a zone setting's change re-reads the device's zone at once
+        const la = PT.clockOf(t1);
+        process.env.TZ = 'Asia/Shanghai';
+        const kept = PT.clockOf(t1);
+        const later = realNow() + 61000; Date.now = () => later;
+        const seen = PT.clockOf(t1);
+        const sh = new Intl.DateTimeFormat(undefined, { timeZone: 'Asia/Shanghai', hour: 'numeric', minute: '2-digit' }).format(new Date(t1));   // page-time: the control's own reading
+        ok(kept === la && seen !== la && seen === sh, 'page-time keeps the device\'s zone for a minute (THE LIMIT: a device whose zone changes prints the old zone that long) — the new zone is seen once the minute is over', { la, kept, seen, sh });
+      } finally { Date.now = realNow; if (TZ0 === undefined) delete process.env.TZ; else process.env.TZ = TZ0; PT.setPageZone(null); }
+    }
+    // (b) the caches are BOUNDED: a walk over 24 zones × 150 days (four quarter-hours each — past every bound at least once) leaves every one under its bound
+    {
+      const zones = (Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['Asia/Tokyo', 'Europe/Paris']).slice(0, 24), base = Date.parse('2026-01-01T00:00:00Z');
+      let worst = { formats: 0, memo: 0, names: 0 }, sizes = null;
+      for (const z of zones) {
+        PT.setPageZone(z);
+        for (let d = 0; d < 150; d++) for (let q = 0; q < 4; q++) PT.stampAt(base + d * 864e5 + q * 9e5 * 7, { now: base });
+        sizes = PT.stampAt.cacheSizes(); for (const k of Object.keys(worst)) worst[k] = Math.max(worst[k], sizes[k]);
+      }
+      PT.setPageZone(null);
+      ok(sizes && worst.formats <= sizes.formatsMax && worst.memo <= sizes.memoMax && worst.names <= sizes.namesMax && worst.memo > 1000, `page-time's caches stay under their bounds over a walk of ${zones.length} zones × 150 days (formats ${worst.formats} ≤ ${sizes && sizes.formatsMax}, quarter-hours ${worst.memo} ≤ ${sizes && sizes.memoMax}, zone names ${worst.names} ≤ ${sizes && sizes.namesMax})`, worst);
+    }
     // ONE countdown spelling (2.369.403): page-time durationMark({ full }) — the usage popup's «· in 1d10h50m» — and the roster's /
     // the cap ring's fullEta (usage-eta, PURE) are the same function, over every minute of 40 d; the owner's 09-15 form stands
     const UE = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-eta.js')).href);

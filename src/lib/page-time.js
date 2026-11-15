@@ -28,40 +28,77 @@ import { countdownMark } from './usage-eta.js';   // THE countdown's spelling (P
 
 let PAGE_ZONE = null;   // null = the device's own zone
 /** app.js, at boot and when the instance's zone setting changes: the zone the page prints in. */
-export function setPageZone(zone) { PAGE_ZONE = typeof zone === 'string' && zone ? zone : null; }
-const deviceZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; } };
+export function setPageZone(zone) { PAGE_ZONE = typeof zone === 'string' && zone ? zone : null; DZ_AT = -Infinity; }
+// EVERY ROW CALLS THIS FILE (the .403 prep mirror: the 1 758-row Channels panel redrew in 600–1 450 ms against its 40): building
+// an Intl.DateTimeFormat only to read the device's zone cost 34 µs a call, four times a stamp. The zone is KEPT FOR A MINUTE —
+// the LIMIT: a device whose zone changes prints in the old zone for up to a minute (a zone setting's change re-reads it at once).
+const ZONE_KEEP_MS = 60000;
+let DZ = null, DZ_AT = -Infinity;
+const deviceZone = () => {
+  const n = Date.now();
+  if (!(n >= DZ_AT && n - DZ_AT < ZONE_KEEP_MS)) { try { DZ = Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { DZ = null; } DZ_AT = n; }
+  return DZ;
+};
 const zoneOpt = () => (PAGE_ZONE && PAGE_ZONE !== deviceZone() ? { timeZone: PAGE_ZONE } : {});
 const cjk = () => { const l = resolveLang(); return l === 'zh' || l === 'ja'; };
 
-const CACHE = new Map();
-function fmt(opts) {
+const CACHE = new Map(), CACHE_MAX = 64;
+/** A formatter, built once per what it depends on: the locale, the printing zone (the device's too — a formatter is never reused
+ *  across a zone change), the options. */
+const OPT_KEY = new WeakMap();
+const optKey = (opts) => { let k = OPT_KEY.get(opts); if (k === undefined) { k = JSON.stringify(opts); OPT_KEY.set(opts, k); } return k; };
+function fmt(opts, loc = deviceLocale()) {
   const z = zoneOpt();
-  const key = JSON.stringify([deviceLocale() || '', z.timeZone || deviceZone() || '', opts]);   // the device's zone too: a formatter is never reused across a zone change
+  const key = `${loc || ''}|${z.timeZone || deviceZone() || ''}|${optKey(opts)}`;
   let f = CACHE.get(key);
   if (!f) {
-    try { f = new Intl.DateTimeFormat(deviceLocale(), { ...opts, ...z, ...(cjk() && opts.hour ? { hourCycle: 'h23' } : {}) }); } catch { f = new Intl.DateTimeFormat(undefined, opts); }
-    if (CACHE.size > 64) CACHE.clear();
+    try { f = new Intl.DateTimeFormat(loc, { ...opts, ...z, ...(cjk() && opts.hour ? { hourCycle: 'h23' } : {}) }); } catch { f = new Intl.DateTimeFormat(undefined, opts); }
+    if (CACHE.size >= CACHE_MAX) CACHE.clear();
     CACHE.set(key, f);
   }
   return f;
 }
-/** {y, m, d} of `ms` in the page's zone (the near rule compares days in the zone the stamp is printed in). */
+// what a quarter-hour of one zone reads (its day, whether its hour is the repeated one, its zone's name) is worked out once:
+// every zone's offset is a whole number of quarter-hours, so a day's edge (and a DST step) never falls inside a bucket.
+// Bounded: a walk over many zones and days clears it at MEMO_MAX (test-ui-language §1b walks it; a page zone needs three entries a row).
+const MEMO = new Map(), MEMO_MAX = 16384;   // about 2 MB at the most: three kinds for a few thousand rows
+const memo = (kind, ms, f) => {
+  const key = `${kind}|${zoneOpt().timeZone || deviceZone() || ''}|${Math.floor(ms / 900000)}`;
+  let v = MEMO.get(key);
+  if (v === undefined) { v = f(); if (MEMO.size >= MEMO_MAX) MEMO.clear(); MEMO.set(key, v); }
+  return v;
+};
+/** {y, m, d} of `ms` in the page's zone (the near rule compares days in the zone the stamp is printed in) — numbers, read off
+ *  one fixed-format formatter (en-CA «2026-11-04»: format() is a fifth of formatToParts' cost), formatToParts if it reads else. */
+const DAY_ISO = Object.freeze({ year: 'numeric', month: '2-digit', day: '2-digit' }), DAY_NUM = Object.freeze({ year: 'numeric', month: 'numeric', day: 'numeric' });
 function dayParts(ms) {
-  const p = Object.fromEntries(fmt({ year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
-  return { y: p.year, m: p.month, d: p.day };
+  return memo('day', ms, () => {
+    const d = new Date(ms), m = /^(\d+)-(\d+)-(\d+)$/.exec(fmt(DAY_ISO, 'en-CA').format(d));
+    if (m) return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+    const p = Object.fromEntries(fmt(DAY_NUM).formatToParts(d).map((x) => [x.type, x.value]));
+    return { y: Number(p.year), m: Number(p.month), d: Number(p.day) };
+  });
 }
 const valid = (ms) => { const n = Number(ms instanceof Date ? ms.getTime() : ms); return Number.isFinite(n) && n > 0 ? n : null; };
 /** The wall clock to the minute in the printing zone — two instants an hour apart that read the same are the repeated hour of
  *  a fall-back (US 2026-11-01 01:30 PDT and 01:30 PST). */
-const wall = (ms) => fmt({ year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).format(new Date(ms));
-const repeated = (ms) => { const w = wall(ms); return w === wall(ms - 3600e3) || w === wall(ms + 3600e3); };
+const WALL = Object.freeze({ year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }), OFFSET = Object.freeze({ hour: 'numeric', timeZoneName: 'shortOffset' });
+const wall = (ms) => fmt(WALL).format(new Date(ms));
+const repeated = (ms) => memo('rep', ms, () => { const w = wall(ms); return w === wall(ms - 3600e3) || w === wall(ms + 3600e3); });
 /** The zone's words, once: when the page prints in a zone that is not this device's, or when the clock names an hour the zone
  *  lives twice (the closure round: the two US-DST 01:30 instants printed the same). */
-const offsetOf = (ms) => { try { return (fmt({ hour: 'numeric', timeZoneName: 'shortOffset' }).formatToParts(new Date(ms)).find((x) => x.type === 'timeZoneName') || {}).value || ''; } catch { return ''; } };
+const offsetOf = (ms) => { try { return (fmt(OFFSET).formatToParts(new Date(ms)).find((x) => x.type === 'timeZoneName') || {}).value || ''; } catch { return ''; } };
 // the repeated hour is told apart by its OFFSET («GMT-7» / «GMT-8» — a zone's short name is the same for both halves)
-const zoneTail = (ms) => { const rep = repeated(ms); return zoneOpt().timeZone ? ' ' + shortName(PAGE_ZONE, ms) + (rep ? ` (${offsetOf(ms)})` : '') : rep ? ' ' + offsetOf(ms) : ''; };
+// a zone's name changes only with its offset (when-words' shortName builds three formatters a call, 270 µs): asked once per zone + offset
+const NAMES = new Map();
+const nameOf = (ms) => memo('name', ms, () => { const k = `${PAGE_ZONE}|${offsetOf(ms)}`; let v = NAMES.get(k); if (v === undefined) { v = shortName(PAGE_ZONE, ms); if (NAMES.size >= 256) NAMES.clear(); NAMES.set(k, v); } return v; });
+const zoneTail = (ms) => { const rep = repeated(ms); return zoneOpt().timeZone ? ' ' + nameOf(ms) + (rep ? ` (${offsetOf(ms)})` : '') : rep ? ' ' + offsetOf(ms) : ''; };
 
-const TIME = (seconds) => ({ hour: cjk() ? '2-digit' : 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) });
+// the formats' options are CONSTANT objects (a fresh object a call was a fresh key a call): [cjk][seconds], and en's dates
+const TIMES = [false, true].map((c) => [false, true].map((sec) => Object.freeze({ hour: c ? '2-digit' : 'numeric', minute: '2-digit', ...(sec ? { second: '2-digit' } : {}) })));
+const TIME = (seconds) => TIMES[cjk() ? 1 : 0][seconds ? 1 : 0];
+const EN_STAMP = [false, true].map((sameYear) => [false, true].map((sec) => Object.freeze({ ...(sameYear ? {} : { year: 'numeric' }), month: 'short', day: 'numeric', ...TIMES[0][sec ? 1 : 0] })));
+const EN_DATE = [false, true].map((sameYear) => Object.freeze({ ...(sameYear ? {} : { year: 'numeric' }), month: 'short', day: 'numeric' }));
 
 /** A date + time in the near shape. '' for a time that is not one. */
 export function stampAt(ms, { seconds = false, full = false, now = Date.now() } = {}) {
@@ -75,10 +112,12 @@ export function stampAt(ms, { seconds = false, full = false, now = Date.now() } 
     const clock = fmt(TIME(seconds)).format(new Date(n));
     out = sameDay ? clock : sameYear ? `${a.m}/${a.d} ${clock}` : `${a.y}/${a.m}/${a.d} ${clock}`;
   } else {
-    out = fmt(sameDay ? TIME(seconds) : { ...(sameYear ? {} : { year: 'numeric' }), month: 'short', day: 'numeric', ...TIME(seconds) }).format(new Date(n));
+    out = fmt(sameDay ? TIME(seconds) : EN_STAMP[sameYear ? 1 : 0][seconds ? 1 : 0]).format(new Date(n));
   }
   return out + zoneTail(n);
 }
+// the caches' sizes and bounds, for test-ui-language §1b's walk (a property of the stamp, never an export of its own)
+stampAt.cacheSizes = () => ({ formats: CACHE.size, formatsMax: CACHE_MAX, memo: MEMO.size, memoMax: MEMO_MAX, names: NAMES.size, namesMax: 256 });
 /** The date only, the same near rule (today is still a date here: «11/12»). */
 export function dateOf(ms, { full = false, now = Date.now() } = {}) {
   const n = valid(ms);
@@ -86,7 +125,7 @@ export function dateOf(ms, { full = false, now = Date.now() } = {}) {
   const a = dayParts(n), b = dayParts(now);
   const sameYear = !full && a.y === b.y;
   if (cjk()) return sameYear ? `${a.m}/${a.d}` : `${a.y}/${a.m}/${a.d}`;
-  return fmt({ ...(sameYear ? {} : { year: 'numeric' }), month: 'short', day: 'numeric' }).format(new Date(n));
+  return fmt(EN_DATE[sameYear ? 1 : 0]).format(new Date(n));
 }
 /** The time only. */
 export function clockOf(ms, { seconds = false } = {}) {
