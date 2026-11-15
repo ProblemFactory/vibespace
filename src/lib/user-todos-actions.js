@@ -299,7 +299,7 @@ export function inboxModel(app) {
    *  the typing path, quoted. Both outcomes reach the user as a toast; resolves
    *  true when the reply was sent (the caller then clears its box + draft). A
    *  reply to a conversation that ENDED reopens it (`reopened` — its window opens here). */
-  const postReply = async (id, text, { sentToast = null } = {}) => {   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»
+  const postReply = async (id, text, { sentToast = null, failWords = null } = {}) => {   // `failWords(why)` (lane setting-doors pick 2): a press that changed something says it beside the failure   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»
     // fetchJson never throws — a null (network) or an {error, code} body is a
     // FAILURE the user must see (no silent failures); the box keeps its text
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
@@ -312,7 +312,7 @@ export function inboxModel(app) {
     const why = r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
     if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
-    showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : t('Could not reply: {why}', { why }), { type: 'error' });
+    showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : failWords ? failWords(why) : t('Could not reply: {why}', { why }), { type: 'error' });
     return false;
   };
   /** "CLEAR CONTENT…" (2026-09-28): THE verb both surfaces offer on an item's menu —
@@ -371,10 +371,17 @@ export function inboxModel(app) {
     if (!(r && r.ok)) {
       if (r && Number.isFinite(num(r.present))) noteSettingPresent(key, num(r.present));   // the card follows the hub's present value
       if (r && r.code === 'moved') { showToast(t('It changed meanwhile — look again'), { duration: 9000 }); return false; }
-      const why = r && r.code === 'same' ? t('It is already {value} — nothing to change', { value: num(r.present) })
-        : r && r.code === 'passed' ? t('That moment ({time}) has passed — change it on the row', { time: Number.isFinite(num(a.untilAt)) ? untilClock(num(a.untilAt), t) : '' })
-        : r && r.code === 'raise-needs-until' ? t('A raise needs its «until» — change it on the row')
-        : r && r.error ? t(String(r.error)) : t('server unreachable');
+      // worded BY ITS CODE in the page's language (the check's words-6: never the hub's English sentence inside zh / ja)
+      const said = {
+        same: () => t('It is already {value} — nothing to change', { value: num(r.present) }),
+        passed: () => t('That moment ({time}) has passed — change it on the row', { time: Number.isFinite(num(a.untilAt)) ? untilClock(num(a.untilAt), t) : '' }),
+        'raise-needs-until': () => t('A raise needs its «until» — change it on the row'),
+        'raise-over-hold': () => t('{value} would stay above {back}, the value before the hold — a raise needs its «until»; change it on the row', { value: card.value, back: num(r.lasting) }),
+        'not-durable': () => t('the hold could not be written to disk, so nothing changed'),
+        'write-failed': () => t('the setting could not be written, so nothing changed'),
+        spend_row_owner_only: () => t('only your own page can change it — nothing changed'),
+      };
+      const why = !r ? t('server unreachable') : said[r.code] ? said[r.code]() : t('this change cannot be pressed here — change it on the row');
       showToast(t('Could not change it: {why}', { why }) + ` — vibespace://settings/${key}`, { type: 'error', duration: 9000 });   // the row's door (a toast draws the link as one)
       return false;
     }
@@ -389,6 +396,9 @@ export function inboxModel(app) {
     return postReply(rec.id, text, {
       sentToast: untilAt != null ? t('{label}: {value} until {time}, then {back} — the agent was told', { label: card.label, value, time: untilClock(untilAt, t), back })
         : t('{label}: {value} from now on — the agent was told', { label: card.label, value }),
+      // the row DID change: a reply that failed says both (the check's words-8), never a plain failure
+      failWords: (why) => (untilAt != null ? t('{label}: changed to {value} until {time} — but the agent could not be told: {why}', { label: card.label, value, time: untilClock(untilAt, t), why })
+        : t('{label}: changed to {value} — but the agent could not be told: {why}', { label: card.label, value, why })),
     });
   };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's

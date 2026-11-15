@@ -92,7 +92,8 @@ app.post('/api/agent/user-todo', async (req, res) => {
         if (grantFields) return res.status(400).json({ error: 'one ask carries one action — --grant or --propose, not both; nothing was filed', code: 'propose-bad' });
         const AS = require('../ask-setting.js');
         const key0 = String(add.propose).split('=')[0].trim();
-        const v = AS.askVerdict({ propose: add.propose, until: add.until }, { present: AS.isProposable(key0) ? serverSetting(key0) : undefined, tzOffsetMin: Number.isFinite(Number(add.tzOffsetMin)) ? Number(add.tzOffsetMin) : undefined });
+        const held = AS.isProposable(key0) && req.app.locals.settingHolds && typeof req.app.locals.settingHolds.holdOf === 'function' ? req.app.locals.settingHolds.holdOf(key0) : null;   // law A: a live hold's «before» is the row's lasting value
+        const v = AS.askVerdict({ propose: add.propose, until: add.until }, { present: AS.isProposable(key0) ? serverSetting(key0) : undefined, tzOffsetMin: Number.isFinite(Number(add.tzOffsetMin)) ? Number(add.tzOffsetMin) : undefined, lasting: held ? held.lasting : undefined });
         if (!v.ok) return res.status(400).json({ error: v.error, code: v.code });
         proposeFields = { action: v.action };
       } else if (add.until != null) return res.status(400).json({ error: '--until goes with --propose <row>=<value>; nothing was filed', code: 'propose-bad' });

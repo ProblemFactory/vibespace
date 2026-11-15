@@ -593,6 +593,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     // effective from the next turn, local and remote chat sessions alike) ⇒ the
     // verb goes to every running chat session whose ADAPTER has it. Sessions
     // spawned after the flip get it at spawn instead.
+    try { settingHolds.noteSettingsWrite(next, prev); } catch { } // lane setting-doors pick 2 (law B): a hand write of a held row ends its hold HERE, the moment it lands (before the wiring exists there is no hold)
     harnessConfig.onSettingsWrite(next, prev); try { plugins.onSettingsWrite(next, prev); } catch { } // lane plugin-settings-p0: a plugin row that re-applies (frp relay fields, Tailscale mode) moved ⇒ that plugin re-applies (before the plugin wiring exists nothing can have changed)
   } });
 app.use(persistenceRouter);
@@ -1232,7 +1233,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
+const { settingHolds, decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN, syncStores, agentdDialDevices, getAccounts: () => accounts, getChannels: () => channelsWiring.channels, // + lane vault-contents-window: the Vault window lists these two stores

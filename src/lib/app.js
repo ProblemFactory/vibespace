@@ -241,9 +241,15 @@ class App {
     });
     for (const key of proposable) this.settings.on(key, () => { saidNow.delete(key); try { this._inboxModel?.redraw?.(); } catch { } });
     this._setSettingHolds = (holds) => {
+      const was = this._settingHolds || [];
       this._settingHolds = Array.isArray(holds) ? holds.filter((h) => h && typeof h.key === 'string') : [];
       try { this._inboxModel?.redraw?.(); } catch { }
-      this._settingsUI?.redrawOpen?.();
+      // only ENDED holds (a return, End now, a hand change — law B): their held lines leave in place, so a row the owner is typing
+      // in keeps its focus; a new or changed hold redraws the open Settings (its held line and «End now»)
+      const same = (a, b) => a && b && a.value === b.value && a.untilAt === b.untilAt && a.before === b.before;
+      if (this._settingHolds.every((h) => same(h, was.find((x) => x.key === h.key)))) {
+        for (const el of document.querySelectorAll('.settings-row-held[data-held]')) if (!this._settingHolds.some((h) => h.key === el.dataset.held)) el.remove();
+      } else this._settingsUI?.redrawOpen?.();
     };
     this._loadSettingHolds = () => fetchJson('/api/setting-holds').then((d) => { if (d && Array.isArray(d.holds)) this._setSettingHolds(d.holds); });
     this.themeManager = new ThemeManager();
@@ -418,7 +424,9 @@ class App {
         // server log. Key-deduped server-side, once per boot per issue.
         // i18n (2026-09-28): a notice that carries {key, params} is worded by THIS device's t(); `text` is the English
         // (+ an optional `then: {key}` sentence after it — the pin notices' "Restarting the conversation to apply it.")
-        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, msg.i18n.params || {}) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
+        // a param may be WORDS (`{key, params}` — a row's label): said in this language before the sentence fills (lane setting-doors pick 2)
+        const said = (ps) => Object.fromEntries(Object.entries(ps || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key, v.params || undefined) : v]));
+        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, said(msg.i18n.params)) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
       }
       if (msg.type === 'sysinfo-alert') {
         // Event-loop degradation (2.235.0): the "everything is slow but CPU
