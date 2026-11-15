@@ -96,6 +96,7 @@ const ROWS = [
   ["src/device-audit.js", "*", 5, "local-only", "f = <dataDir>/device-audit.jsonl(.1), dataDir = HostManager dataDir = <checkout>/data (server.js new HostManager)"],
   ["src/device-mount.js", "*", 1, "local-only", "statfs runs only when vfsCacheDir is passed — the one caller (machine-mounts _up) never passes it"],
   ["src/discovery-facts.js", "*", 2, "local-only", "readHeadText fp = a codex rollout under ~/.codex/sessions (adapters/codex extractCodexThreadMeta via codex-session-store / harness forkChain); agentd's call runs on the device"],
+  ["src/door-reads.js", "*", 1, "local-only", "cacheDir = <dataDir>/usage-cache at every caller (the door's USAGE_CACHE_DIR, /api/usage, stream-wall, after-turn-read): the `.door-reads-` sidecar, a few dozen bytes"],
   ["src/exit-proxy.js", "ExitProxyManager.audit", 3, "local-only", "f = <dataDir>/AUDIT_FILE (+ .1); dataDir = <checkout>/data (new ExitProxyManager at server.js:1419)."],
   ["src/exit-proxy.js", "ExitProxyManager.auditTail", 2, "local-only", "f = <dataDir>/AUDIT_FILE or its .1; dataDir = <checkout>/data (server.js:1419)."],
   ["src/exit-proxy.js", "ExitProxyManager._localTarget > lstat", 1, "guarded", "physicalPath walks the agent-named pull target (POST /api/agent/exit/pull body.local) and the session's cwd component by component."],
