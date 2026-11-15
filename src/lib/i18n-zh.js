@@ -2745,7 +2745,10 @@ export default {
   "Add via long-lived token": "通过长期 token 添加",
   "est {pct}%": "预计 {pct}%",
   "window reset since last reading": "上次读数后窗口已重置",
-  "Dead-reckoned estimate: last confirmed reading + your local usage since, at learned rates. ⟳ fetches a fresh reading to re-calibrate.": "航位推算估计：最后一次真实读数 + 之后的本地用量按学习速率折算（虚线部分）。点 ⟳ 获取新读数校准。",
+  "up to {pct}%": "最多 {pct}%",
+  "up to {pct}% · from {n} readings": "最多 {pct}% · 依据 {n} 次读数",
+  "Between the last reading (a floor) and the projection: the reading plus this hub's use since, at this account's learned rate.": "介于上次读数（下限）与推算之间：读数加上本机此后的用量，按该账号学到的速率折算。",
+  "{n} requests here since": "此后本机 {n} 次请求",
   "Pooled account — one billing identity auto-switching across your subscriptions": "池化账号 — 一个计费身份在你的订阅之间自动切换",
 
   // ── i18n coverage sweep (missing-key fill, added post-2.265.0 fix campaign) ──

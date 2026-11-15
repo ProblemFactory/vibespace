@@ -7,6 +7,7 @@
  * See CLAUDE.md §9 + accounts.js §ban-safety before changing ANY cadence here.
  */
 const fs = require('fs');
+const UP = require('./usage-predict.js');   // the lanes a screen may draw (usage-predict)
 const { accountLoginState } = require('./login-state.js'); // THE credential-state reader (shared with the pool engine + the repair migration)
 const path = require('path');
 const os = require('os');
@@ -1614,16 +1615,24 @@ app.get('/api/usage', (req, res) => {
         const e = app.locals.usageEstimator;
         if (!e) return {};
         const out = {}; const now = Date.now();
+        // usage-predict P2/P3: a lane is DRAWN only where this instance's verdict for its source is on or provisional
+        // (src/usage-predict.js); every lane says its state, and how much was used here since the reading (the plain line)
+        const screen = (id, est) => {
+          if (!est) return null;
+          const st = typeof e.predictStatesFor === 'function' ? e.predictStatesFor(id, est, now) : {};
+          const drawn = UP.gateEstimate(est, (k) => (st[k] || {}).state, (x) => x === 'on' || x === 'provisional');
+          return { ...(drawn || { estimated: true, anchorAt: est.anchorAt, asOf: est.asOf, fiveHour: null, sevenDay: null, scopedWeekly: [] }), sinceCostUsd: est.sinceCostUsd, sinceRequests: est.sinceRequests ?? null, predict: st };
+        };
         for (const [id, snap] of Object.entries(viewedAccounts)) {
-          const est = e.estimateFor(id, snap, now);
+          const est = screen(id, e.estimateFor(id, snap, now));
           if (est) out[id] = est;
         }
-        const g = e.estimateFor(null, viewedGlobal, now);
+        const g = screen(null, e.estimateFor(null, viewedGlobal, now));
         if (g) out.__global__ = g;
         // codex identities estimate too (P1): same estimator, codex-prefixed
         // identities learned prior-less; keys match `codexAccounts`
         for (const [key, snap] of Object.entries(codexRl.byAccount || {})) {
-          try { const est = e.estimateFor(key, snap, now); if (est) out[key] = est; } catch {}
+          try { const est = screen(key, e.estimateFor(key, snap, now)); if (est) out[key] = est; } catch {}
         }
         return out;
       } catch { return {}; }

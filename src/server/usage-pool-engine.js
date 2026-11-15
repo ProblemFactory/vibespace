@@ -561,7 +561,8 @@ function poolReadCache(poolId, now = Date.now()) {
   return (id) => {
     const raw = reading(id);
     if (rawBasis) return raw;
-    try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
+    // usage-predict P5: only a lane whose verdict is ON on THIS instance is overlaid — a learning, provisional or off lane is the raw reading
+    try { return estOverlayCache(raw, usageEstimator.poolEstimateFor(id, raw, now)); } catch { return raw; }
   };
 }
 // THE READING the overlay starts from — the member's own file or its identity group's freshest — never an estimate.
