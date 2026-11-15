@@ -611,7 +611,9 @@ export function onDemandUsageView(r) {
       windows.push({
         label: String(w.kind || '?').slice(0, 3), kind: w.kind === '5h' ? 'fiveHour' : 'weekly',
         utilization: used / 100, ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}), ...(w.state && w.state !== 'running' ? { state: w.state } : {}),
-        tip: `${l.name || l.limitId} · ${names[`${l.limitId}/${w.kind}`] || w.kind} ${Math.round((100 - used) * 100) / 100}%${since}`,
+        // the clause only on a ring whose own measure is not newer than the count's origin (the reading's time): a wall stamps
+        // its window later than the reading — that ring's number is not «this reading» (the check's F3)
+        tip: `${l.name || l.limitId} · ${names[`${l.limitId}/${w.kind}`] || w.kind} ${Math.round((100 - used) * 100) / 100}%${Number(w.measuredAt) > Number(r.fetchedAt || 0) ? '' : since}`,
       });
     }
   }

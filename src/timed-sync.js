@@ -42,8 +42,9 @@ const STORES = Object.freeze({
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
-  'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
+  'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote', 'flushTurnRows']), // usage-every-change (the check's must 3): + the stop's commit of the waiting turn rows; // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
+  'usage-turn-times.write': row('write', 'usage-history/turn-times', 'src/usage-history.js', ['_turnTimesDirty']),   // the kept turns-since facts, through the store writer (usage-every-change, the check's must 4)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
   'chat-attachments-link.write': row('write', 'chat-attachments/<conversation>/conversation', 'src/server/chat-attachments.js', ['writeLink']),   // through the store writer (lane chat-attachments-persist: which conversation a dropped file's folder belongs to)

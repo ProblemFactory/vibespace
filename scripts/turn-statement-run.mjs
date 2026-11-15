@@ -298,15 +298,18 @@ const DRIVERS = {
       async 'hub/turn-row-survives-restart'(w, REPO) {
         const uh = ledgerOf(w, REPO);
         const s = w.session({ backend: 'antigravity', _webuiId: 'w-agr2', _accountId: 'agy-1', backendSessionId: 'conv-agr2' });
-        const rec = agyUsage(Date.now() - 2000, 'conv-agr2');
+        const since = Date.now(); if (typeof uh.turnsSince === 'function') uh.turnsSince('agy-1', since); // the keeping began; a reading at `since`
+        await sleep(5);
+        const rec = agyUsage(Date.now(), 'conv-agr2');
         w.eng.noteTurnRow(s, rec);
         const flushed = uh.flushTurnRows(); // what shutdownNow does — then the process is gone
         const uh2 = ledgerOf(w, REPO); // the next boot: a new history over the same data folder
         await uh2.scan({ force: true }); uh2.flushCursors();
         const got = await agyRowsOf(uh2, [`antigravity:conv-agr2:${Date.parse(rec.ts)}:1660`]);
         const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), stop = srv.slice(srv.indexOf('function shutdownNow()'), srv.indexOf('\n}\n', srv.indexOf('function shutdownNow()')));
-        return { green: flushed === 1 && got.n === 1 && got.rows.length === 1 && /usageHistory\.flushTurnRows\(\)/.test(stop),
-          why: 'a turn booked and not yet walked survives the stop (shutdownNow commits the queue) — one row in the next process, none added by its walk', detail: { flushed, n: got.n, wired: /usageHistory\.flushTurnRows\(\)/.test(stop) } };
+        const kept = typeof uh2.turnsSince === 'function' ? uh2.turnsSince('agy-1', since) : null; // the kept count crossed the stop too
+        return { green: flushed === 1 && got.n === 1 && got.rows.length === 1 && /usageHistory\.flushTurnRows\(\)/.test(stop) && kept === 1,
+          why: 'a turn booked and not yet walked survives the stop (shutdownNow commits the queue) — one row in the next process, none added by its walk', detail: { flushed, n: got.n, kept, wired: /usageHistory\.flushTurnRows\(\)/.test(stop) } };
       },
       async 'hub/turn-row-named-only'(w, REPO) {
         const uh = ledgerOf(w, REPO);
@@ -318,28 +321,43 @@ const DRIVERS = {
         const got = await agyRowsOf(uh);
         return { green: got.n === 0, why: "the machine's own login (no account VibeSpace can name) and a turn agy could not split book nothing", detail: { rows: got.n } };
       },
-      // THE SCREEN'S FACT through the REAL route: GET /api/usage's homeAccounts row says how many turns ran since the last read
+      // THE SCREEN'S FACT through the REAL route (the check's must 4): GET /api/usage's homeAccounts row says how many turns ran
+      // since the last read — EXACT AT ONCE (the rows that wait for the walk counted), after the walk the same, a new turn at
+      // once, a moved reading counts from itself; two accounts each their own (the check's F4); a reading older than the
+      // keeping says nothing (null)
       async 'hub/turns-since-on-screen'(w, REPO) {
         const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
         const am = new AccountManager({ dataDir: path.join(w.dir, 'am-data') });
-        const a = am.createHomeSubscription('antigravity', { name: 'Agy turns' });
+        const A = am.createHomeSubscription('antigravity', { name: 'Agy turns A' }), B = am.createHomeSubscription('antigravity', { name: 'Agy turns B' });
         const uh = ledgerOf(w, REPO);
-        const readAt = Date.now() - 60000;
-        fs.writeFileSync(path.join(w.cacheDir, a.id + '.json'), JSON.stringify({ fetchedAt: readAt, source: 'cli-usage', limits: [{ limitId: 'gemini', name: 'Gemini Models', windows: [{ kind: '7d', minutes: 10080, usedPct: 30, resetsAt: nowS() + 86400, measuredAt: readAt }] }] }));
-        const s = w.session({ backend: 'antigravity', _webuiId: 'w-agn', _accountId: a.id, backendSessionId: 'conv-agn' });
-        for (const at of [readAt - 30000, readAt + 10000, readAt + 20000]) w.eng.noteTurnRow(s, { ...agyUsage(at, 'conv-agn'), total: { input: 1500, output: 160, thinking: 70, cacheRead: 9000, total: at } });
-        await uh.scan({ force: true }); uh.flushCursors();
+        if (typeof uh.turnsSince === 'function') uh.turnsSince(A.id, Date.now()); // the keeping begins with the hub (production: at its first booking or ask)
+        await sleep(5);
+        const reading = (id, at) => fs.writeFileSync(path.join(w.cacheDir, id + '.json'), JSON.stringify({ fetchedAt: at, source: 'cli-usage', limits: [{ limitId: 'gemini', name: 'Gemini Models', windows: [{ kind: '7d', minutes: 10080, usedPct: 30, resetsAt: nowS() + 86400, measuredAt: at }] }] }));
+        const T = Date.now(); reading(A.id, T); reading(B.id, T);
+        const sA = w.session({ backend: 'antigravity', _webuiId: 'w-agnA', _accountId: A.id, backendSessionId: 'conv-agnA' }), sB = w.session({ backend: 'antigravity', _webuiId: 'w-agnB', _accountId: B.id, backendSessionId: 'conv-agnB' });
+        const book = (s0, at) => w.eng.noteTurnRow(s0, { ...agyUsage(at, s0.backendSessionId), total: { input: 1500, output: 160, thinking: 70, cacheRead: 9000, total: at } });
         const routes = {};
         const app = { get: (p0, h) => { routes['GET ' + p0] = h; }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
         const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
         const quiet = console.log; console.log = () => { };
         try {
           setupUsage({ app, accounts: am, hosts: null, usageHistory: uh, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(w.dir, 'usage-cache.json'), USAGE_CACHE_DIR: w.cacheDir, CODEX_SESSIONS_DIR: path.join(w.dir, 'nocodex'), META_DIR: path.join(w.dir, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(w.dir, 'buffers'), apiDerivedWindow: () => null, establishedWindows: () => null });
-          const get = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; routes['GET /api/usage']({ query: {}, headers: {} }, res); return res.body && res.body.homeAccounts && res.body.homeAccounts[a.id]; };
-          const first = get();
-          let row = first; const until = Date.now() + 3000;
-          while ((!row || row.turnsSince == null) && Date.now() < until) { await sleep(20); row = get(); }
-          return { green: !!first && first.turnsSince === null && !!row && row.turnsSince === 2, why: 'the account\'s row says the turns since its last read — 2 (the one before the read not counted); not counted yet at the first ask (null, never 0)', detail: { first: first && first.turnsSince, now: row && row.turnsSince } };
+          const get = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; routes['GET /api/usage']({ query: {}, headers: {} }, res); const h = (res.body && res.body.homeAccounts) || {}; return [h[A.id] ? h[A.id].turnsSince : undefined, h[B.id] ? h[B.id].turnsSince : undefined]; };
+          const seen = {};
+          seen.none = get();                                              // [0, 0]
+          book(sA, T - 10); book(sA, T + 10); book(sB, T + 15); book(sA, T + 20); // one before the reading; A 2, B 1 after it
+          seen.queued = get();                                            // [2, 1] — no walk yet
+          await uh.scan({ force: true }); uh.flushCursors();
+          seen.walked = get();                                            // [2, 1]
+          book(sA, T + 30);
+          seen.next = get();                                              // [3, 1] — at once
+          reading(A.id, T + 25);
+          seen.moved = get();                                             // [1, 1] — A counts from its new reading
+          reading(B.id, T - 86400000);
+          seen.older = get();                                             // [1, null] — B's reading is older than the keeping
+          const J = (x) => JSON.stringify(x);
+          return { green: J(seen.none) === '[0,0]' && J(seen.queued) === '[2,1]' && J(seen.walked) === '[2,1]' && J(seen.next) === '[3,1]' && J(seen.moved) === '[1,1]' && J(seen.older) === '[1,null]',
+            why: 'the row says the turns since its own reading, exact at every ask (queued, walked, the next turn at once), each account its own; a moved reading counts from itself; one older than the keeping says nothing', detail: seen };
         } finally { console.log = quiet; }
       },
     },

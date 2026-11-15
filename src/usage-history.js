@@ -41,6 +41,7 @@ const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asl
 // what it appends, at most 4 MB a shard (the rows a killed walk appended are the last ones)
 const TAIL_DEDUP_MIN = 256 * 1024, TAIL_DEDUP_MAX = 4 * 1024 * 1024;
 const TURN_ROWS_MAX = 10000; // pick 3: the turn rows a ledger that cannot walk keeps (the newest)
+const TURN_TIMES_MAX = 5000;  // the check's must 4: the booked turns kept per account for the turns-since count (the newest)
 const DEFAULT_PRICING = {
   // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
   // (~30% more tokens per unit of English text), so effective $/word is higher.
@@ -328,6 +329,7 @@ class UsageHistory {
     this.projectsDir = path.join(homeDir, '.claude', 'projects');
     this.codexSessionsDir = path.join(process.env.CODEX_HOME || path.join(homeDir, '.codex'), 'sessions');
     this.cursorsFile = path.join(this.dir, '_cursors.json');
+    this.turnTimesFile = path.join(this.dir, 'turn-times.json'); // the check's must 4: the kept turns-since facts
     this.pricingFile = path.join(this.dir, 'pricing.json');
     this.attribFile = path.join(this.dir, 'attribution.ndjson');
     this._resolveAccount = resolveAccount;
@@ -515,7 +517,44 @@ class UsageHistory {
     if (q.some((x) => x.rid === ev.rid)) return ev; // the same record read twice before a walk: one row (the commit dedups the ledger's)
     q.push(ev);
     if (q.length > TURN_ROWS_MAX) q.splice(0, q.length - TURN_ROWS_MAX);
+    this._keepTurn(ev);
     return ev;
+  }
+  // ── «N TURNS SINCE THIS READING» IS A KEPT COUNT (usage-every-change, the check's must 4 — the tree's law: a census is read off
+  // kept facts): each named account's booked turns ([record ms, row id], deduped by the id — a record read again is one turn),
+  // RAISED at the booking and RESET when the reading moves (the turns at or before it are dropped); exact at once, the rows
+  // that wait for the walk included, no fold per ask. Kept beside the ledger through the store writer (its exit flush at the
+  // stop). `origin` = when this keeping began: a reading older than it has a count nobody kept ⇒ null (said nothing). ──
+  _turnTimesOf() {
+    if (this._turnTimes) return this._turnTimes;
+    let j = null; try { j = JSON.parse(fs.readFileSync(this.turnTimesFile, 'utf8')); } catch { j = null; }
+    const ok = j && j.v === 1 && Number(j.origin) > 0 && j.accts && typeof j.accts === 'object';
+    this._turnTimes = ok ? j : { v: 1, origin: Date.now(), accts: {} };
+    if (!ok) this._turnTimesDirty();
+    return this._turnTimes;
+  }
+  _turnTimesDirty() {
+    try { require('./store-writer.js').storeWriter().dirty(this.turnTimesFile, { name: 'usage-turn-times.write', produce: () => JSON.stringify(this._turnTimes) }); } catch { }
+  }
+  flushTurnTimes() { try { require('./store-writer.js').storeWriter().flushSync([this.turnTimesFile]); } catch { } }
+  _keepTurn(ev) {
+    const tt = this._turnTimesOf(), a = tt.accts[ev.acct] || (tt.accts[ev.acct] = { since: 0, turns: [] });
+    if (ev.ts <= a.since || a.turns.some((x) => x[1] === ev.rid)) return;
+    a.turns.push([ev.ts, ev.rid]);
+    if (a.turns.length > TURN_TIMES_MAX) a.turns.splice(0, a.turns.length - TURN_TIMES_MAX);
+    this._turnTimesDirty();
+  }
+  /** the turns booked on `acct` after `since` (the reading's time) → a number, or null when the reading is older than the
+   *  keeping's origin (or not a time) */
+  turnsSince(acct, since) {
+    since = Number(since);
+    const tt = this._turnTimesOf();
+    if (!(since > 0) || since < tt.origin) return null;
+    const a = tt.accts[acct];
+    if (!a) return 0;
+    if (since > a.since) { a.since = since; const n0 = a.turns.length; a.turns = a.turns.filter((x) => x[0] > since); if (a.turns.length !== n0) this._turnTimesDirty(); }
+    let n = 0; for (const x of a.turns) if (x[0] > since) n++;
+    return n;
   }
   /** THE STOP COMMITS THE TURNS THAT WAIT (usage-every-change, the check's must 3 — the tree's law: a store flushes at the
    *  stop): the rows booked since the last walk's commit are appended now, synchronously, in the commit's own line shape and
@@ -533,6 +572,7 @@ class UsageHistory {
     let n = 0;
     for (const [shard, lines] of Object.entries(byShard)) { timedSync('usage-shards.write', () => fs.appendFileSync(shard, lines.join('\n') + '\n')); n += lines.length; }
     this._turnRows = [];
+    this.flushTurnTimes(); // the kept count's facts with them (the stop's exit flush writes them too)
     return n;
   }
   _noteStatement(pending, e, host) {

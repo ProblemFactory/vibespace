@@ -360,7 +360,7 @@ console.log('② the synchronous flushes the main thread waits on — named debt
 {
   const WAITS = [
     ['src/channel-store.js', 1, 'the index\'s flush() — a person\'s clear-history waits on it (measured 2.3 s at 1.2 s a write, the verifier) and a caller ordering a cursor after its rows'],
-    ['src/usage-history.js', 1, 'flushCursors() — the walk\'s cursors on disk before a caller reads them (a migration, a test, the shutdown hand-over)'],
+    ['src/usage-history.js', 2, 'flushCursors() — the walk\'s cursors on disk before a caller reads them (a migration, a test, the shutdown hand-over); flushTurnTimes() — the kept turns-since facts on disk with the turn rows the stop commits (flushTurnRows, server.js shutdownNow; usage-every-change, the check\'s must 4)'],
     ['src/usage-estimator.js', 1, 'flushRates() / settleRates() — the learned rates on disk before the boot\'s migrations step and a ledger backfill\'s pass completes'],
     ['src/session-status.js', 1, 'flush() — the session-status map before the shutdown hands over and the set routes answer (persisted())'],
     ['src/server/session-stdout.js', 1, 'writeSessionMeta {sync: true} — a meta its caller renames next (boot-restore retireDeadSocket): the write in flight lands, then this one'],

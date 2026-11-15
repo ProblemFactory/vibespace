@@ -183,6 +183,12 @@ const MA = await import(path.join(REPO, 'src/lib/manage-agents.js'));
     /· no turn ran on this account since this reading$/.test(tipOf(0)) && /· 1 turn ran on this account since this reading$/.test(tipOf(1)) && /· 5 turns ran on this account since this reading$/.test(tipOf(5)) && tipOf(null) === v.windows[0].tip && MA.onDemandUsageView({ ...reading, turnsSince: 5 }).turnsSince === 5,
     JSON.stringify([tipOf(0), tipOf(5), tipOf(null)]));
   {
+    // the check's F3: a ring whose OWN measure is newer than the reading (a wall stamped it later) is not «this reading» — no clause
+    const older = { ...reading, fetchedAt: Math.min(...reading.limits.flatMap((l) => l.windows.map((x) => Number(x.measuredAt) || Infinity))) - 60000, turnsSince: 3 };
+    const v2 = MA.onDemandUsageView(older);
+    ok('pick 3 (F3): a ring measured AFTER the reading carries no «turns since» clause; one measured at the reading does', !!v2 && v2.windows.every((x) => !/turns? ran on this account/.test(x.tip)) && /· 3 turns ran on this account since this reading$/.test(tipOf(3)), JSON.stringify(v2 && v2.windows.map((x) => x.tip)));
+  }
+  {
     const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
     const K = ['no turn ran on this account since this reading', '1 turn ran on this account since this reading', '{n} turns ran on this account since this reading'];
     ok('…in zh and ja too ({n} kept)', K.every((k) => zh[k] && ja[k]) && /\{n\}/.test(zh[K[2]]) && /\{n\}/.test(ja[K[2]]), JSON.stringify(K.map((k) => [zh[k], ja[k]])));
