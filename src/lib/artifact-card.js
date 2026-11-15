@@ -40,7 +40,7 @@ export function showInPorts(app, forwardId) {
   };
   find();
 }
-const stamp = (ts) => when(ts);
+const stamp = (ts) => when(ts, { words: true });   // its one use is a sentence («Stopped at {time}»)
 export function artifactMetaText(b) {
   const f = cardFacts(b);
   if (f.kind === 'service') return f.state === 'stopped' ? t('Stopped at {time}', { time: stamp(f.stoppedAt) }) : `${t('Running')} · ${t('since {ago}', { ago: agoText(f.since || f.lastAt, t) })}`;

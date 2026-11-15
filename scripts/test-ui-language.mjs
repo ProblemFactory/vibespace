@@ -191,6 +191,36 @@ export function swallowFindings(src) {
   catch { out.length = 0; try { acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, locations: true, onComment }); } catch { /* unparsable: the build refuses it */ } }
   return out;
 }
+/** ⑦ A DATE INSIDE A SENTENCE (the .403 prep mirror: «…已于 2026/11/12 退出登录…» — the slashed form is a table's): a page-time
+ *  stampAt / dateOf whose value fills a {param} of a t() / tc() / tr() sentence — directly, inside the param's expression, or one
+ *  hop through a local `const x = when(…)` — asks `words: true`. → [{line, text}] */
+export function sentenceDateFindings(src, ast) {
+  const alias = new Set(), out = [], hop = new Map(), wrap = new Set();
+  for (const n of ast.body || []) if (n.type === 'ImportDeclaration' && /(^|\/)page-time\.js$/.test(n.source.value)) for (const sp of n.specifiers) if (sp.imported && /^(stampAt|dateOf)$/.test(sp.imported.name)) alias.add(sp.local.name);
+  if (!alias.size) return out;
+  const wordsOn = (call) => call.arguments.slice(1).some((a) => a && a.type === 'ObjectExpression' && a.properties.some((p) => p.key && (p.key.name || p.key.value) === 'words' && p.value.type === 'Literal' && p.value.value === true));
+  const bare = (x) => x && x.type === 'CallExpression' && x.callee.type === 'Identifier' && alias.has(x.callee.name) && !wordsOn(x);
+  const line = (node) => lineAt(src, node.start);
+  const FN = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  const inside = (x, f) => { if (!x || typeof x.type !== 'string') return; if (FN.has(x.type)) return; f(x); for (const k in x) { const v = x[k]; if (k === 'loc' || k === 'start' || k === 'end') continue; if (Array.isArray(v)) v.forEach((y) => y && typeof y.type === 'string' && inside(y, f)); else if (v && typeof v.type === 'string') inside(v, f); } };
+  const walk = (x) => {
+    if (!x || typeof x.type !== 'string') return;
+    if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && bare(x.init)) hop.set(x.id.name, line(x));
+    // a local wrapper (`const at = (ms) => stampAt(ms, { now })`): a call to it is the stamp's own
+    if (x.type === 'VariableDeclarator' && x.id.type === 'Identifier' && x.init && x.init.type === 'ArrowFunctionExpression' && bare(x.init.body)) wrap.add(x.id.name);
+    if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && /^(t|tc|tr)$/.test(x.callee.name)) {
+      const key = x.arguments[x.callee.name === 'tc' ? 1 : 0], params = x.arguments[x.callee.name === 'tc' ? 2 : 1];
+      if (key && params && params.type === 'ObjectExpression' && !(key.type === 'Literal' && !/\{\w+\}/.test(String(key.value))))   // a params object = a sentence with slots (a key held in a variable too)
+        for (const pr of params.properties) if (pr.value) inside(pr.value, (y) => {
+          if (bare(y) || (y.type === 'Identifier' && hop.has(y.name)) || (y.type === 'CallExpression' && y.callee.type === 'Identifier' && wrap.has(y.callee.name) && !wordsOn(y)))
+            out.push({ line: line(y), text: `${String(key.value || '').slice(0, 60)} ← ${src.slice(y.start, y.end).slice(0, 50)}` });
+        });
+    }
+    for (const k in x) { const v = x[k]; if (k === 'loc') continue; if (Array.isArray(v)) v.forEach((y) => y && typeof y.type === 'string' && walk(y)); else if (v && typeof v.type === 'string') walk(v); }
+  };
+  walk(ast);
+  return out;
+}
 /** The lines of `function <fn>(` … its closing «}» at column 0, or null. */
 export function fnLines(src, fn) {
   const lines = src.split('\n'), i = lines.findIndex((l) => l.startsWith(`function ${fn}(`) || l.startsWith(`export function ${fn}(`));
@@ -383,7 +413,7 @@ export function scanFile(file, src, ast = parse(src)) {
   };
   walk(ast, null);
   for (const sh of shadowFindings(ast)) timeHit({ start: sh.start }, `${sh.name}() where a local «${sh.name}» shadows the page-time import`);
-  return { visible, markup, params, raw, time, caps, swallowed: swallowFindings(src) };
+  return { visible, markup, params, raw, time, caps, swallowed: swallowFindings(src), sentenceDates: sentenceDateFindings(src, ast) };
 }
 
 // ── ②④⑤ the dictionaries ──
@@ -529,13 +559,14 @@ export async function census(repo = REPO) {
     import(pathToFileURL(path.join(repo, 'scripts', 'i18n-extract.mjs')).href).then((m) => [...m.extractKeys(repo + path.sep)]),
     dictOf(repo, DICTS.zh), dictOf(repo, DICTS.ja), setsOf(repo),
   ]);
-  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, clocks = {}, caps = [], swallowed = [];
+  const visible = {}, markup = [], params = [], missed = [], raw = {}, time = [], units = {}, clocks = {}, caps = [], swallowed = [], sentenceDates = [];
   const inUni = new Set(files);
   for (const r of scanned) {
     if (r.visible.length) visible[r.file] = r.visible.map((h) => ({ ...h, text: h.text.slice(0, 160) }));
     if (r.raw.length) raw[r.file] = r.raw;
     for (const h of r.time) if (h.kind === 'unit') (units[r.file] = units[r.file] || []).push(h); else if (h.kind === 'clock') (clocks[r.file] = clocks[r.file] || []).push(h); else time.push(`${r.file}:${h.line} ${h.text} — print it through src/lib/page-time.js (or say \`// page-time: <why>\`)`);
     for (const c of r.swallowed || []) swallowed.push(`${r.file}:${c.line} ${c.text}`);
+    for (const c of r.sentenceDates || []) sentenceDates.push(`${r.file}:${c.line} ${c.text}`);
     for (const c of r.caps) caps.push(`${r.file}:${c.line} ${c.text} — word the value through src/lib/value-words.js (or say \`// ui-words: <why>\` above it)`);
     for (const m of r.markup) markup.push(`${r.file}:${m.line} [${m.sink}] ${m.key.slice(0, 90)}`);
     for (const p of r.params) params.push(`${r.file}:${p.line} {${p.missing.join(', ')}} ${p.key.slice(0, 90)}`);
@@ -550,7 +581,7 @@ export async function census(repo = REPO) {
   const authScan = scanFile('src/auth.js', authSrc).visible.map((h) => `src/auth.js:${h.line} [${h.sink}] ${h.text}`);
   const markLines = scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : (r.markLines || []).map((m) => ({ file: r.file, ...m }))));
   const ptUsed = [...new Set(scanned.flatMap((r) => (r.file === 'src/lib/page-time.js' ? [] : r.ptNames || [])))];
-  return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, swallowed, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
+  return { files: files.length, ptUsed, markLines, visible, raw, time, units, clocks, caps, swallowed, sentenceDates, plugins, sets, login: { rows: Object.keys(lw.LOGIN_WORDS).length, findings: loginRows, page: authScan }, markup, params, missed, heads: { lines: heads.lines.length, table: Object.keys(heads.table).length, missing: headFindings(heads.lines, heads.table) }, dict: dictFindings(keys, { zh, ja }) };
 }
 
 // ── a worker's share (the module is loaded whole first: every table above exists) ──
@@ -572,6 +603,8 @@ if (isMain) {
     ok(worded.visible.length === 0, '① …worded through t(), an id, a brand and a `// ui-words:` line are not', JSON.stringify(worded.visible));
     const sw = swallowFindings("x.appendChild(row({ id: p.id, label: t(p.label),   // a built-in's label is a declared word tone, chip, chipTitle, onChip,\n  sw }));\n// a comment on its own line: tone, chip,\ny.appendChild(row({ id, // its id, then\n  a, b }));\nif (ok) rec.more = more(m);   // lane x: which,\nconst u = 'http://host/a, b,';\n");
     ok(sw.length === 1 && sw[0].line === 1, '⑨ a trailing comment that swallowed a field list (`… // words tone, chip, chipTitle, onChip,`) is named; a comment on its own line, prose after an open line, prose after a whole statement and `//` in a string are not', JSON.stringify(sw));
+    const sd = scanFile('sd.js', "import { stampAt as when, dateOf } from './page-time.js';\na.textContent = t('signed out on {date}', { date: dateOf(x, { full: true }) });\nb.textContent = t('signed out on {date}', { date: dateOf(x, { full: true, words: true }) });\nconst at = when(y);\nc.textContent = t('resumed {time}', { time: at });\nd.title = when(z);\ne.textContent = t('Exported {date}', { date: q ? when(q, { full: true }) : t('(unknown date)') });\nconst w = (ms) => when(ms, { now });\nf.textContent = t('expired {at}', { at: w(k) });\n");
+    ok(sd.sentenceDates.length === 4 && sd.sentenceDates.map((x) => x.line).join() === '2,5,7,9', '⑦ a page-time date filling a t() sentence without `words` is named (directly, one hop through a local, inside a ternary, through a local wrapper); with `words`, and a stamp in a title, are not', JSON.stringify(sd.sentenceDates));
     const frag = scanFile('frag.js', 'x.innerHTML = `<img src="${a}"${b ? ` data-record-src="${b}"` : \'\'}${c ? ` data-kind="codex" data-key="${c}"` : \'\'} alt="">`; y.innerHTML = `<p>${b ? `Plain words for a person` : \'\'}</p>`; z.innerHTML = `<b${b ? ` title="Open the whole file"` : \'\'}>x</b>`;');
     ok(frag.visible.length === 2 && /Plain words/.test(frag.visible[0].text) && /Open the whole file/.test(frag.visible[1].text), '① a piece of an enclosing tag (` data-record-src="${…}"`) is markup; words in the same place, and a title in such a piece, are named', JSON.stringify(frag.visible));
     const nd = scanFile('src/stream-model.js', "function legVerdictOf(h) {\n  return { words: 'the daemon says its leg is up' };\n}\nfunction other() {\n  return { label: 'Words a person reads' };\n}\n");
@@ -660,6 +693,7 @@ if (isMain) {
   }
   ok(v.stale.length === 0, `① no baseline row the tree no longer holds (the list only shrinks — lower it: node scripts/test-ui-language.mjs --lower)`, v.stale.map((h) => `${h.file}: ${h.text}`));
   ok(now.time.length === 0, `⑦ every time and number a person reads goes through src/lib/page-time.js (zero tolerance)`, now.time);
+  ok(now.sentenceDates.length === 0, `⑦ a page-time date inside a SENTENCE asks its words form (\`{ words: true }\`: «11月12日», never the table's «11/12») — zero tolerance`, now.sentenceDates);
   ok(now.swallowed.length === 0, `⑨ no trailing // comment swallowed code in the browser bundle (zero tolerance; the .403 mirror's plugin chip) — the comment goes on its own line`, now.swallowed);
   ok(now.caps.length === 0, `⑥(d) no value capitalised by hand in the browser bundle (zero tolerance) — a theme / an id is worded through src/lib/value-words.js`, now.caps);
   ok(un.fresh.length === 0, `⑦ no NEW English unit template (${count(now.units)} today = the baseline's ${count(base.units || {})}) — say a duration with page-time's span / ago`, un.fresh.map((h) => `${h.file}:${h.line} ${h.text}`));

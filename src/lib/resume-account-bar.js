@@ -10,7 +10,7 @@ import { billingRow } from './agent-meta.js';
 import { resumeAccountWords, candidateLabel } from '../resume-account.js';
 
 const dayOf = (ms) => {
-  return dateOf(ms, { full: true });
+  return dateOf(ms, { full: true, words: true });   // inside the refusal SENTENCE: «2026年11月12日» (the .403 prep mirror)
 };
 const button = (cls, icon, label) => {
   const b = document.createElement('button');

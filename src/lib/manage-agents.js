@@ -166,7 +166,7 @@ const loginLeftText = (ms) => {
 // Short date + short time (no seconds): the chip sits on the row's one extras
 // line, and a second-precision timestamp is noise for a deadline the user acts
 // on in hours. Locale-formatted — the device decides, like every other time here.
-const loginWhenText = (ms) => when(ms, { full: true });
+const loginWhenText = (ms) => when(ms, { full: true, words: true });   // every use is inside a sentence: the words form («2026年11月12日 19:27»)
 /** Why a member's long-lived token is NOT in its folder (lane pool-oat-materialize) —
  *  what to do, in words; '' when there is no refusal to name. */
 function oatFileRefusedText(reason, code = '', { choose = true } = {}) {
@@ -657,7 +657,7 @@ export function resetChipHtml(offer, { key = '', disabledWhy = '' } = {}) {
   if (!offer) return '';
   const label = offer.count === 1 ? t('1 reset credit') : t('{n} reset credits', { n: offer.count });
   let until = '';
-  if (offer.useBySec) { try { until = ' · ' + t('use by {date}', { date: dateOf(offer.useBySec * 1000) }); } catch { until = ''; } }
+  if (offer.useBySec) { try { until = ' · ' + t('use by {date}', { date: dateOf(offer.useBySec * 1000, { words: true }) }); } catch { until = ''; } }
   const tip = offer.canUse
     ? t('Stored rate-limit reset credits on this account — “Use…” spends one now, after a confirmation')
     : (disabledWhy || t('This agent offers no reset-credit interface VibeSpace can use.'));

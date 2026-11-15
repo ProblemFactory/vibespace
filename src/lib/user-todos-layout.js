@@ -95,7 +95,7 @@ function clauseOf(name, v) {
   return name === 'next' ? { ...CLAUSE_DEFAULTS[0], at: v.at } : null;
 }
 export function saidLine(l, t, { now = Date.now() } = {}) {
-  const at = (ms) => stampAt(ms, { now });
+  const at = (ms) => stampAt(ms, { now, words: true });   // a For-you clause is a sentence: «已于 10月24日 05:00 过期» (the .403 prep mirror's rule)
   const word = (name, v) => {
     if (!v || typeof v !== 'object') return v;
     const c = clauseOf(name, v);

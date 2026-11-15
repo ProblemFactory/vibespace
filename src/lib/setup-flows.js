@@ -712,7 +712,7 @@ export function installSetupFlows(App) {
         // (src/loop-hold.js PROFILE_STOPPED / PROFILE_UNSAMPLED — the journal line says the same; zh / ja by i18n-check's key
         // tables); a cause the server did not word draws the neutral sentence, never another cause's
         const top = (l.top || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.frame)}</td></tr>`).join('');
-        return `<h3>${esc(t('Profile — {n} samples, {time}', { n: l.samples, time: when(l.endedAt) }))}</h3>
+        return `<h3>${esc(t('Profile — {n} samples, {time}', { n: l.samples, time: when(l.endedAt, { words: true }) }))}</h3>
         <p>${esc(t('Idle {idle} %, between JavaScript frames (promise jobs) {between} %, no JavaScript frame {nojs} %, not sampled {ns} %, JavaScript {js} %.', { idle: l.idlePct, between: l.betweenPct ?? 0, nojs: l.noJsPct, ns: l.notSampledPct ?? 0, js: l.jsPct }))}</p>
         ${l.notSampledPct ? `<p class="dim">${esc(t(l.notSampledWords || 'Some samples were not taken: the sampler stood down.'))}</p>` : ''}
         ${l.stopped ? `<p class="dim">${esc(t(l.stoppedWords || 'It stopped early.'))}</p>` : ''}
@@ -732,7 +732,7 @@ export function installSetupFlows(App) {
         if (!l) return `<p class="dim">${esc(t('⚙ System → Capture a CPU profile (20 s): which of VibeSpace’s own code is using the processor. One is also taken by itself when the server is slow.'))}</p>${dl}`;
         const sp = l.split || {};
         const rows = (l.rows || []).map((x) => `<tr><td class="n"><b>${esc(String(x.pct))} %</b></td><td>${esc(x.fn)} <span class="dim">· ${esc(x.loc || '')}${x.via ? ` — ${esc(t('{pct} % through {fn}', { pct: x.viaPct, fn: x.via }))}` : ''}</span></td></tr>`).join('');
-        return `<h3>${esc(t('CPU profile — {n} samples over {s} s, {time}', { n: l.samples, s: (l.windowMs / 1000).toFixed(1), time: when(l.endedAt) }))}</h3>
+        return `<h3>${esc(t('CPU profile — {n} samples over {s} s, {time}', { n: l.samples, s: (l.windowMs / 1000).toFixed(1), time: when(l.endedAt, { words: true }) }))}</h3>
         <p class="dim">${esc(l.auto ? t('Taken by itself: the server was slow.') : t('Taken on request.'))}</p>
         <p>${esc(t('JavaScript {js} %, on the processor outside JavaScript {native} %, idle {idle} %.', { js: sp.js ?? 0, native: sp.native ?? 0, idle: sp.idle ?? 0 }))} ${l.gc && l.gc.pct != null ? esc(t('Garbage collection {gc} % of the window.', { gc: l.gc.pct })) : esc(t('Garbage collection not split.'))}</p>
         ${l.stopped ? `<p class="dim">${esc(t('It stopped early.'))}</p>` : ''}

@@ -331,7 +331,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
         else { status.textContent = t('No artboards yet — the agent writes them into {dir}', { dir: d }); status.style.display = ''; }
         lastAt = new Date();
         drawStamp(lastAt);
-        stamp.title = (liveOff ? t('This window is not watching its folder: {why}. Press Reload to re-read it.', { why: liveOff }) + '\n' : '') + t('Last read from {dir} at {time}', { dir: d, time: when(lastAt) }) + (r.warnings.length ? '\n' + r.warnings.map((w) => w.why || w.code).join('\n') : '');
+        stamp.title = (liveOff ? t('This window is not watching its folder: {why}. Press Reload to re-read it.', { why: liveOff }) + '\n' : '') + t('Last read from {dir} at {time}', { dir: d, time: when(lastAt, { words: true }) }) + (r.warnings.length ? '\n' + r.warnings.map((w) => w.why || w.code).join('\n') : '');
       } while (again && !signal.aborted);
     })().finally(() => { loading = null; });
     return loading;

@@ -781,7 +781,7 @@ function authFactText(a) {
   const bits = [];
   bits.push(auth.state === 'connected' ? tr('Signed in') : auth.state === 'expired' ? tr('The sign-in expired or was revoked') : auth.state === 'needs-credentials' ? tr('No usable OAuth client') : tr('Not signed in'));
   if (auth.user && !auth.self) bits.push(String(auth.user));
-  if (auth.expiresAt && Number.isFinite(Number(auth.expiresAt))) bits.push(tr('sign-in valid until {date}', { date: dateOf(Number(auth.expiresAt), { full: true }) }));
+  if (auth.expiresAt && Number.isFinite(Number(auth.expiresAt))) bits.push(tr('sign-in valid until {date}', { date: dateOf(Number(auth.expiresAt), { full: true, words: true }) }));
   if (Array.isArray(auth.scopes) && auth.scopes.length) bits.push(tr('scopes {list}', { list: auth.scopes.join(', ') }));
   return bits.join(' · ');
 }

@@ -140,8 +140,8 @@ function vaultHead() {
     const since = state === 'unlocked' ? f.unlockedSince : state === 'locked' ? f.lockedSince : null;
     // v2: the short form (the mock's 「自 10/19 15:28 起」); the full instant is its help
     const whenEl = (text, at) => { const e = vwEl('span', 'vault-state-when', text); e.title = whenText(at); return e; };
-    if (since) line.append(whenEl(t('since {when}', { when: whenShort(since) }), since));
-    if (f.setUpAt) line.append(whenEl(t('Set up {when}', { when: whenShort(f.setUpAt) }), f.setUpAt));
+    if (since) line.append(whenEl(t('since {when}', { when: when(since, { words: true }) }), since));
+    if (f.setUpAt) line.append(whenEl(t('Set up {when}', { when: when(f.setUpAt, { words: true }) }), f.setUpAt));
     const acts = vwEl('div', 'vault-actions');
     const btn = (label, cls, fn) => { const b = vwEl('button', cls, label); b.type = 'button'; b.onclick = fn; acts.append(b); };
     if (state === 'not_set_up') btn(t('Set a second password…'), 'btn-create vault-do-setup', () => showSetup());
@@ -348,8 +348,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null, run: row.run ? { ...row.run, use: !!row.run.use } : row.run }, autoOf(row), row.store === 'automation' ? !!st.auto : 0, loginOf(row)]);   // lane vault-use-grants: a member moving patches the row's «Who may use it» box in place (an open value stays open)
   // lane vault-key-row-compact: an automation key's 最近使用 is its last USE by a conversation (the head's one — the old extra line went)
   const keyUsed = (row) => { const k = autoOf(row); return k ? (k.lastUsedAt ? whenShort(k.lastUsedAt) : t('Never used')) : null; };
-  const usedText = (row) => keyUsed(row) ?? (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
-  const usedHelp = (row) => { const k = autoOf(row); if (k) return k.lastUsedAt ? t('Last used {when}', { when: whenText(k.lastUsedAt) }) : ''; return row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: whenText(row.lastUsed.at) }) : t('key last used {when} by VibeSpace', { when: whenText(row.lastUsed.at) })) : ''; };
+  const usedText = (row) => keyUsed(row) ?? (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: when(row.lastUsed.at, { words: true }) }) : t('{when} · VibeSpace', { when: when(row.lastUsed.at, { words: true }) })) : '');
+  const usedHelp = (row) => { const k = autoOf(row); if (k) return k.lastUsedAt ? t('Last used {when}', { when: when(k.lastUsedAt, { words: true }) }) : ''; return row.lastUsed ? (row.lastUsed.by === 'human' ? t('last opened {when} by you', { when: when(row.lastUsed.at, { words: true }) }) : t('key last used {when} by VibeSpace', { when: when(row.lastUsed.at, { words: true }) })) : ''; };
   /** lane vault-run-door (design q-043 decision ⑤): «Usable by agent runs» — OFF by default; ON asks 验证是你 FIRST (in the
    *  press's own task), OFF never asks. The hub refuses a row with its own door by name whatever the page sends. */
   async function setRun(row, box) {
@@ -381,7 +381,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (row.detail && row.store !== 'automation' && !(hasWords(row) && row.note && row.note.startsWith(row.detail))) meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // lane vault-entry-description r2: a free entry's detail IS its description — said once, on its own line   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
     meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
-    if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
+    if (row.createdAt) meta.push(t('saved {when}', { when: when(row.createdAt, { words: true }) }));
     if (Array.isArray(row.hosts) && row.hosts.length) meta.push(t('for {hosts}', { hosts: row.hosts.join(', ') }));   // lane vault-use-grants: the hosts its request named
     // lane vault-agent-own: what an agent kept itself says its rule — its own conversation uses it with no switch, no card —
     // on its OWN line under the meta (the meta is one clipped line: words past its width were never read)
@@ -390,7 +390,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const ownRule = ruleWords ? vwEl('div', 'vw-own-rule', pv && pv.actor ? `${ruleWords} · ${t('kept by {name}', { name: pv.actor })}` : ruleWords) : null;
     // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
     // nothing, so the meta line goes; the name's title keeps when it was made
-    if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: whenText(row.createdAt) })}` : labelWord(row);
+    if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: when(row.createdAt, { words: true }) })}` : labelWord(row);
     else main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
     if (ownRule) main.append(ownRule);
     // lane vault-entry-description: its DESCRIPTION under the name (or that it has none), and a mark while an agent's proposal of

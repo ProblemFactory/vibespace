@@ -32,7 +32,7 @@ const EVERYONE_KEY = 'everyone:*';
 const ENTRY_HOSTS = '@entry';
 const ENDS = [['keep', 0], ['none', null], ['8h', 8 * 3600e3], ['30d', 30 * 86400e3], ['90d', 90 * 86400e3]];
 const endWord = (id) => ({ keep: t('As each has it now'), none: t('No end'), '8h': t('8 hours'), '30d': t('30 days'), '90d': t('90 days') })[id];
-const dateOf = (ms) => pageDateOf(ms);
+const dateOf = (ms, o) => pageDateOf(ms, o);   // its options pass through (a sentence asks `words`)
 // round 3 (item 5): a WILDCARD host is said in words — and a multi-tenant base (where unrelated parties share the domain) warns
 const MULTI_TENANT = /^(?:amazonaws\.com|googleapis\.com|github\.io|gitlab\.io|herokuapp\.com|cloudfront\.net|blob\.core\.windows\.net|azurewebsites\.net|web\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app|appspot\.com|firebaseapp\.com)$/i;
 const oneHostWord = (h, entryHosts, tool = null, legacy = false) => {
@@ -193,7 +193,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         const sc = scopesOfM(m);
         const words = el('span', 'vw-use-words');
         words.append(document.createTextNode(`${nameOf(m, app)} · `));
-        sc.forEach((s, k) => { if (k) words.append(document.createTextNode(', ')); const win = s.kind === 'window', liveW = win && !s.expired; const w = el('span', `vw-use-scope${s.expired ? ' vw-use-scope-ended' : ''}${liveW ? ' vw-use-scope-window' : ''}`, win ? windowWords(s) : `${scopeWord(s, u.entryHosts)} · ${leftWord(s)}`); w.title = liveW ? t('A 1-hour approval from a run card: this conversation uses it in any run without asking, each use shows a notice — then it asks again. ✕ takes it back now.') : s.expired ? t('ended {when}', { when: win ? clockOf(s.until) : dateOf(s.until) }) : Number(s.until) > 0 ? t('until {when}', { when: dateOf(s.until) }) : t('no end'); words.append(w); if (liveW) words.append(windowX(r, m, refresh)); });   // r4: EACH scope with its own end; r7: a window «any destination · until HH:MM · N min»; r8: an ENDED window is drawn as the others (its «ended» title, no warning accent), a live one has its OWN ✕
+        sc.forEach((s, k) => { if (k) words.append(document.createTextNode(', ')); const win = s.kind === 'window', liveW = win && !s.expired; const w = el('span', `vw-use-scope${s.expired ? ' vw-use-scope-ended' : ''}${liveW ? ' vw-use-scope-window' : ''}`, win ? windowWords(s) : `${scopeWord(s, u.entryHosts)} · ${leftWord(s)}`); w.title = liveW ? t('A 1-hour approval from a run card: this conversation uses it in any run without asking, each use shows a notice — then it asks again. ✕ takes it back now.') : s.expired ? t('ended {when}', { when: win ? clockOf(s.until) : dateOf(s.until, { words: true }) }) : Number(s.until) > 0 ? t('until {when}', { when: dateOf(s.until, { words: true }) }) : t('no end'); words.append(w); if (liveW) words.append(windowX(r, m, refresh)); });   // r4: EACH scope with its own end; r7: a window «any destination · until HH:MM · N min»; r8: an ENDED window is drawn as the others (its «ended» title, no warning accent), a live one has its OWN ✕
         const bits = [];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (pausedM) bits.push(t('paused by you'));

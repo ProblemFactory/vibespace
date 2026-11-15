@@ -494,9 +494,9 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
         ok(/The next frees at 1:21 AM\.$/.test(ahead) && /The next is free now\.$/.test(gone) && !/1:21/.test(gone),
           'R2 the clause is said at RENDER: «The next frees at 1:21 AM.» while ahead, «The next is free now.» once 7.5 min past (the stored epoch unchanged)', JSON.stringify({ ahead, gone }));
         ok(/const said = \(l\) => saidLine\(l, t\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'))
-          && /const at = \(ms\) => stampAt\(ms, \{ now \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8'))
+          && /const at = \(ms\) => stampAt\(ms, \{ now, words: true \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8'))
           && /if \(Number\.isFinite\(v\.at\)\) return at\(v\.at\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8')),
-          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through page-time stampAt (the date beyond today, the page\'s zone — lane ui-language)');
+          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through page-time stampAt in its SENTENCE form (the date beyond today, the page\'s zone — lane ui-language)');
         const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
         // the reader's round (13:41Z, MUST): a For-you instant beyond today carries its DATE — «已于 周六 05:00 过期» named a weekday
         // for an expiry 20 days back. Driven in a child on a zh PAGE (the page's language is read once, when i18n loads):
@@ -513,8 +513,9 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
               say('expiring', { state: 'expiring', msLeft: 3 * 3600e3, refreshExpiresAt: now + 3 * 3600e3 })]));`;
           let got = null; try { got = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', drive], { encoding: 'utf8', env: { ...process.env, TZ: 'America/Los_Angeles' } }).trim().split('\n').pop()); } catch (e) { got = String(e.stderr || e.message).slice(0, 400); }
           const [past, ahead, today] = Array.isArray(got) ? got : [];
-          ok(Array.isArray(got) && /已于 10\/24 05:00 过期/.test(past) && /11\/22 04:00/.test(ahead) && /（07:00）/.test(today) && !/周[一二三四五六日]/.test(got.join(' ')),
-            'THE READER\'S MUST (F2): a For-you login-expiry instant beyond today says its DATE on a zh page («已于 10/24 05:00 过期», «11/22 04:00»), today its clock («07:00») — never a weekday', got);
+          // (the .403 prep mirror: a date INSIDE a sentence is the words form «10月24日» — the slashed «10/24» is a table's)
+          ok(Array.isArray(got) && /已于 10月24日 05:00 过期/.test(past) && /11月22日 04:00/.test(ahead) && /（07:00）/.test(today) && !/周[一二三四五六日]/.test(got.join(' ')) && !/\d\/\d/.test(got.join(' ')),
+            'THE READER\'S MUST (F2): a For-you login-expiry instant beyond today says its DATE on a zh page — in a sentence the words form («已于 10月24日 05:00 过期», «11月22日 04:00»), today its clock («07:00») — never a weekday, never the table\'s «10/24»', got);
         }
         const keys = new Set([...Object.values(SA.REFUSAL_WORDS).flat(), ...Object.values(SA.NEXT_WORDS).flatMap((x) => [x.key, x.gone]), ...Object.values(SA.LINE_WORDS), ...Object.values(SA.DOOR_WORDS), ...Object.values(SA.SPEND_REASONS).map((r) => r.what)]);
         for (const why of ['hour-cap', 'day-cap', 'instance-cap', 'overage-in-use', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'unknown-reason', 'weird']) for (const ra of [at, 0]) for (const sn of ['build-bot', null]) { const w = SA.refusalI18n({ ...v, why, retryAfter: ra, producers: { 'job-notification': 2, unknown: 1 } }, { sessionName: sn }); keys.add(w.text.key); for (const d of w.detail || []) keys.add(d.key); }
