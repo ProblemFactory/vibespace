@@ -53,11 +53,16 @@ console.log('② the product\'s own sentences carry the row (the Spending family
   const iu = A.refusalI18n ? A.refusalI18n({ why: 'identity-unknown', limits: v.limits, counts: v.counts }, {}) : null;
   ok(iu && (iu.detail || []).some((d) => d.key === A.DOOR_WORDS.wiring), 'a refusal that names no row keeps its words (no link to a row that cannot help)');
   const w = A.noticeText({ identity: { name: 'acct' }, scope: 'day', used: 160, limit: 200, pct: 80 });
-  ok(/The limit: vibespace:\/\/settings\/spend\.unattendedPerIdentityDay$/.test(w) && /vibespace:\/\/settings\/spend\.unattendedPerInstanceDay$/.test(A.noticeText({ scope: 'instance', used: 1, limit: 2, pct: 50 })), 'the 80 % warning names its ceiling\'s row (it named no setting before)', w);
+  ok(/\(80%\) — the limit: vibespace:\/\/settings\/spend\.unattendedPerIdentityDay\./.test(w) && /— the limit: vibespace:\/\/settings\/spend\.unattendedPerInstanceDay\./.test(A.noticeText({ scope: 'instance', used: 1, limit: 2, pct: 50 })), 'the 80 % warning names its ceiling\'s row (it named no setting before) — right after the counts', w);
+  // l2 (主开发 2026-11-15): the For-you question is stored under 300 characters (spend-guard fileInbox); a 27+ character account name
+  // and four producers once cut a link said LAST — said before the producers, the stored question keeps it whole
+  const longW = A.noticeText({ identity: { name: 'a-very-long-account-name-for-the-owner' }, scope: 'day', used: 160, limit: 200, pct: 80, producers: { 'auto-resume': 40, 'stop-nudge': 30, 'job-notification': 20, 'peer-message': 10 } });
+  const stored = String(longW).slice(0, 300);
+  ok(longW.length > 300 - 60 && keysOf(stored).includes('spend.unattendedPerIdentityDay') && /spend\.unattendedPerIdentityDay\./.test(stored) && /slice\(0, 300\)/.test(read('src/server/spend-guard.js')), 'l2: a 38-character account name and four producers — the question as STORED (300 characters) still holds the whole link', { len: longW.length, stored });
   const g = read('src/server/spend-guard.js');
   ok(/Adjust this one in Settings → Spending — vibespace:\/\/settings\/\$\{A\.spendRowOf\(v\)\}/.test(g) && /The limit, to raise or lower it: vibespace:\/\/settings\/\$\{A\.warnRowOf\(r\.warn\)\}/.test(g), 'the guard\'s two For-you notices: the refusal\'s detail and the warning\'s detail carry the row');
   const pr = read('src/routes/persistence.js');
-  ok(/const why = spendWriteWhy\(req\), door = `vibespace:\/\/settings\/\$\{hit\[0\]\}`;/.test(pr), 'the settings door\'s own refusal (pick 0) carries the refused row\'s link');
+  ok(/const why = spendWriteWhy\(req\), door = `vibespace:\/\/settings\/\$\{row \|\| rows\[0\]\}`, noRow = row \? '' : ` \(«\$\{hit\[0\]\}» is no setting\)`;/.test(pr), 'the settings door\'s own refusal (pick 0) carries a REAL row\'s link (f2: a key that is no row names the limits\' first row and says so)');
   ok(/const row = spendRowOf\(\{ why: r && r\.why \}\);[\s\S]{0,400}app\.openSettingAt\(row\)/.test(read('src/lib/stash-strip.js')), 'the hand-over toast\'s door opens the refused ceiling\'s row (was: the Spending section)');
 }
 
@@ -136,6 +141,8 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   const md = (s) => r.renderMarkdown(s).trim();
   ok(md(`raise it here: vibespace://settings/${K}.`) === `<p>raise it here: ${span(K, `vibespace://settings/${K}`)}.</p>`, 'chat: a bare link in an agent\'s message is ONE setting link; the sentence\'s full stop stays outside', md(`raise it here: vibespace://settings/${K}.`));
   ok(md(`[the ceiling](vibespace://settings/${K})`) === `<p>${span(K, 'the ceiling')}</p>` && md(`<vibespace://settings/${K}>`) === `<p>${span(K, `vibespace://settings/${K}`)}</p>`, 'chat: a markdown link and an autolink carry their label (the sanitizer never sees the scheme)');
+  const mdUnk = md('[x](vibespace://settings/spend.nope) and [y](#vs-setting-spend.nope)');
+  ok(!/chat-setting-link|data-setting/.test(mdUnk), 'l3: the markdown road asks the schema at BOTH ends — a link (or a hand-written #vs-setting- anchor) to an unknown key is never the door', mdUnk);
   ok(md(`\`vibespace://settings/${K}\``) === `<p><code>${span(K, `vibespace://settings/${K}`)}</code></p>`, 'chat: written as code, it is still the door');
   const unk = md('unknown: vibespace://settings/spend.nope');
   ok(!/chat-setting-link|chat-link-path|data-path/.test(unk) && /<span class="chat-link-words">vibespace:\/\/settings\/spend\.nope<\/span>/.test(unk), 'chat: an UNKNOWN key stays plain words — and the path pass no longer half-links «//settings/…»', unk);
@@ -145,6 +152,12 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   ok(!/chat-setting-link/.test(inUrl) && /<a href="https:\/\/example\.com\/a\?u=vibespace:\/\/settings\/spend\.unattendedPerInstanceDay">/.test(inUrl), 'chat: inside another URL it is that URL\'s text, not a door', inUrl);
   ok(md(`see «vibespace://settings/${K}»，然后`) === `<p>see «${span(K, `vibespace://settings/${K}`)}»，然后</p>`, 'chat: CJK quotes and a fullwidth comma around it stay outside');
   ok(r.linkifyText(`tool said vibespace://settings/${K}, done`) === `tool said ${span(K, `vibespace://settings/${K}`)}, done`, 'chat: tool output (linkifyText) draws it too');
+  // l1 (主开发 2026-11-15): after a half-width colon it IS a door; the scheme in capitals too; glued to a word it is words — and the path
+  // pass never underlines its tail («//settings/<key>» answered «Not found» as a FILE)
+  const L1 = { cjkColon: `上限在这里:vibespace://settings/${K}`, enColon: `Raise it here:vibespace://settings/${K}`, caps: `VIBESPACE://SETTINGS/${K}`, glued: `herevibespace://settings/${K}` };
+  const l1 = Object.fromEntries(Object.entries(L1).map(([k, v]) => [k, md(v)]));
+  ok(l1.cjkColon.includes(span(K, `vibespace://settings/${K}`)) && l1.enColon.includes(span(K, `vibespace://settings/${K}`)) && l1.caps.includes(`data-setting="${K}"`), 'l1 chat: after a half-width colon (zh and en) and with the scheme in capitals it is the DOOR', l1);
+  ok(Object.values(l1).every((h) => !/chat-link-path|data-path=/.test(h)) && /<span class="chat-link-words">vibespace:\/\/settings\/spend\.unattendedPerInstanceDay<\/span>/.test(l1.glued), 'l1 chat: glued to a word it is WORDS, and no run of the scheme is ever a file path', l1.glued);
   const tgt = { closest: (sel) => (sel === '.chat-setting-link[data-setting]' ? tgt : null), dataset: { setting: K }, classList: { contains: (c) => c === 'chat-setting-link' || c === 'chat-link' } };
   const ev = { target: tgt, preventDefault() { this.dp = 1; }, stopPropagation() { this.sp = 1; }, clientX: 1, clientY: 1 };
   if (list._ls.click) list._ls.click(ev);
@@ -156,6 +169,11 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   const segs = F.segmentText(`raise vibespace://settings/${K}.`, { has: fyHas }).filter((g) => g.t !== 'text');
   ok(segs.length === 1 && segs[0].kind === 'setting' && segs[0].ref === K, 'For you: the ONE grammar has a `setting` kind (known keys only)', segs);
   ok(F.segmentText('vibespace://settings/spend.nope', { has: fyHas }).filter((g) => g.t !== 'text').length === 0, 'For you: an unknown key is words');
+  const fyL1 = Object.fromEntries(Object.entries(L1).map(([k, v]) => [k, F.segmentText(v, { has: fyHas }).filter((g) => g.t !== 'text')]));
+  ok(['cjkColon', 'enColon', 'caps'].every((k) => fyL1[k].length === 1 && fyL1[k][0].kind === 'setting' && fyL1[k][0].ref === K) && Object.values(fyL1).every((gs) => gs.every((g) => g.kind !== 'path')) && fyL1.glued.length === 0,
+    'l1 For you: the door after a colon and in capitals; glued to a word no link at all — never a path', fyL1);
+  const inPath = F.segmentText(`/home/u/vibespace://settings/${K}`, { has: fyHas }).filter((g) => g.t !== 'text');
+  ok(inPath.every((g) => !(g.kind === 'path' && /settings/.test(g.ref))), 'l1 For you: a path that runs into the scheme ends where the run begins (its tail is never a path)', inPath);
   const fyHtml = F.linkedHtml(`x vibespace://settings/${K} y`, { has: fyHas });
   ok(/<span class="fy-link" role="link" tabindex="0" data-fy="setting" data-ref="spend\.unattendedPerInstanceDay">vibespace:\/\/settings\/spend\.unattendedPerInstanceDay<\/span>/.test(fyHtml), 'For you: drawn as a .fy-link (data-fy="setting"), keyboard-reachable', fyHtml);
   ok(JSON.stringify(F.linkTarget('setting', K)) === JSON.stringify({ open: 'setting', key: K }) && F.linkTarget('setting', 'a=b') === null, 'For you: the link\'s target is the row (a value-shaped ref is no target)');
@@ -171,6 +189,8 @@ console.log('④ every place the owner reads words draws it — the REAL chat re
   ok(n === 1 && btn && btn.dataset.setting === K && btn.textContent === `vibespace://settings/${K}` && b2.textContent === `limit reached — vibespace://settings/${K}.`, 'a toast (the server\'s notices ride it): the link is a button built from text nodes, the rest stays text', b2._kids.map((k) => k.className || k.textContent));
   if (btn && typeof btn.onclick === 'function') btn.onclick({ preventDefault() { }, stopPropagation() { } });
   ok(JSON.stringify(toOpen) === JSON.stringify([K]), 'the toast\'s link opens the row through the registered door', toOpen);
+  const b3 = mkEl(), n3 = U.toastWordsInto(b3, 'see vibespace://settings/spend.nope now');
+  ok(n3 === 0 && !b3._kids.some((k) => k.className === 'global-toast-setting') && b3.textContent === 'see vibespace://settings/spend.nope now', 'l3: a toast holding an UNKNOWN key draws no button — it stays words');
   ok(/registerSettingLinks\(\{ has: isSettingKey, open: \(key\) => this\.openSettingAt\(key\) \}\);/.test(read('src/lib/app.js')), 'the app registers the door for toasts at boot');
 }
 
@@ -195,6 +215,8 @@ console.log('⑥ A LINK OPENS, IT NEVER WRITES');
   const focus = ui.slice(ui.indexOf('  _focusRow('), ui.indexOf('  _focusRow(') + 3000);
   ok(ui.includes('  _focusRow(') && !/settings\.set\(|_save\(|fetchJson\(|api\/settings|_setShowAdvanced\(/.test(focus), 'focusing the row writes nothing and never flips the per-device «show advanced» switch (the row is revealed for THIS open)');
   ok(!/[?&=]/.test(SL.KEY_CH.replace(/\\-/g, '')), 'the grammar\'s key alphabet has no `?`, `&` or `=` — a value cannot ride a link');
+  const openSrc = ui.slice(ui.indexOf('  open({ syncId, search, category, focusKey } = {}) {'), ui.indexOf('  _focusRow('));
+  ok(openSrc.length > 500 && !/_setShowAdvanced\(|_showAdvanced = true|setItem\(SHOW_ADVANCED_KEY/.test(openSrc.replace(/advInput\.onchange = \(\) => \{ this\._setShowAdvanced\(advInput\.checked\);/, '')), 'l3: open({ focusKey }) never turns «show advanced» on — the row is revealed for THIS open only (only the switch\'s own toggle writes it)');
 }
 
 console.log(fail ? `✗ test-setting-links: ${pass} passed, ${fail} failed` : `ALL PASS (${pass})`);
