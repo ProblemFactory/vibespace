@@ -158,6 +158,7 @@ export const ROWS = [
   ['src/server/feedback-store.js', 'own-tree', 1, null, `${DATA}; lane agent-feedback: data/feedback.json read once at create`],
   ['src/server/feedback-forward.js', 'own-tree', 1, null, `${DATA}; lane feedback-forward: data/feedback-outbox.json read once at create`],
   ['src/server/proc-tree.js', 'own-tree', 5, null, `${PROC}; lane turn-never-silent: the processes BELOW a session's CLI — each one's own children files, stat and io, fs.promises only`],
+  ['src/server/proc-signal.js', 'own-tree', 1, null, `${PROC}; lane turn-never-silent (the look at 99f65d547): ONE /proc/<pid>/stat read — a process's birth checked at its signal (the agy wrapper's own child process, never the hub's loop)`],
   ['src/server/turn-watch.js', 'own-tree', 1, null, `${DATA}; lane turn-never-silent: a session's sidecar (data/session-buffers/<id>.json — its wrapper's cliWroteAt / turnOpenedAt / childPid), fs.promises only`],
   ['src/server/provider-store.js', 'own-tree', 1, null, `${DATA}; lane provider-record (q-053 P0a): data/providers.json read once at create`],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],

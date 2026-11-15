@@ -240,7 +240,43 @@ job('— ⑥ a spawn that fails is the exit (the binary gone): said, and the wra
   } finally { await h.stop(); }
 });
 
+job('— ⑦ THE KILL PROOFS (the look at 99f65d547): the restart\'s late group SIGKILL is CANCELLED once the old agy has exited', async (ok) => {
+  const h = startAgy({ AGY_WEBUI_KILL_MS: '800' });
+  try {
+    await h.run('run the hang-command now');
+    await commandUp(h); await sleep(400);
+    const old = Number(h.meta().childPid);
+    h.send({ type: 'interrupt' });   // Stop = a restart: the old agy exits at its group's SIGTERM
+    const fresh = await until(() => { const m = h.meta(); return Number(m.childPid) && Number(m.childPid) !== old ? m : null; }, 6000);
+    await sleep(1400);   // past the old one's KILL_MS
+    const wl = (() => { try { return fs.readFileSync(path.join(h.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } })();
+    const sigs = wl.split('\n').filter((l) => new RegExp(`group SIG\\w+ → ${old}\\b`).test(l));
+    ok(Number.isInteger(old) && old > 1 && !!fresh && !birth(old) && sigs.some((l) => /group SIGTERM/.test(l)), 'Stop restarted agy: the old one got its group\'s SIGTERM and exited', sigs);
+    ok(!sigs.some((l) => /group SIGKILL/.test(l)), 'its group\'s late SIGKILL was never sent — cancelled at its exit (a group id may be reused)', sigs);
+  } finally { await h.stop(); }
+});
+
 for (const j of jobs) { await j.p; console.log(j.title); for (const [c, n, e] of j.R) ok(c, n, e); }
+
+console.log('— ⑧ THE KILL PROOFS (the look at 99f65d547): src/server/proc-signal.js — the birth comparison, the floors, never our own group');
+{
+  const PSM = require(path.join(REPO, 'src/server/proc-signal.js'));
+  const sent = [], kill = (pid, sig) => { sent.push([pid, sig]); };
+  const PS = PSM.create({ kill });
+  const c = spawn('sleep', ['30'], { stdio: 'ignore' }); every.add(c.pid);
+  await sleep(150);
+  const st = birth(c.pid);
+  ok(PS.signalOne({ pid: c.pid, startTicks: st.startTicks }, 'SIGCONT') && sent.length === 1 && sent[0][0] === c.pid, 'a process found with its birth: signalled');
+  ok(!PS.signalOne({ pid: c.pid, startTicks: st.startTicks + 1 }, 'SIGCONT') && sent.length === 1, 'the SAME pid with another birth (a reused pid): never signalled — the birth comparison', sent);
+  const init = birth(1), me = birth(process.pid);
+  const floors = [{ pid: 0 }, { pid: 1, startTicks: init && init.startTicks }, { pid: -5, startTicks: 1 }, { pid: process.pid, startTicks: me && me.startTicks }, { pid: 1.5 }, { pid: String(c.pid), startTicks: st.startTicks }];
+  ok(floors.every((p) => !PS.signalOne(p, 'SIGTERM')) && sent.length === 1, 'signalOne\'s floor: never 0, 1 (with init\'s own birth), a negative, our own pid (with our own birth), a fraction, a string', sent);
+  ok([{ pid: 0 }, { pid: 1 }, { pid: -3 }, { pid: process.pid }, { pid: undefined }, null].every((p) => !PS.killGroup(p, 'SIGTERM')) && sent.length === 1, 'killGroup\'s floor: never group 0 (ours), 1, a negative, our own pid, no pid', sent);
+  const G = PSM.create({ kill, readStat: (pid) => (pid === process.pid ? `${pid} (node) S 1 4242 4242 0 -1 4194304` : fs.readFileSync(`/proc/${pid}/stat`, 'utf8')) });
+  ok(!G.killGroup({ pid: 4242 }, 'SIGTERM') && sent.length === 1, 'never OUR OWN group (a handle whose pid is our pgid)', sent);
+  ok(PS.killGroup({ pid: c.pid }, 'SIGTERM') && sent.length === 2 && sent[1][0] === -c.pid, 'a spawned handle above the floor: its group signalled (-pid)', sent);
+  try { c.kill('SIGKILL'); } catch { }
+}
 
 console.log('— ④ RED CONTROL: a mutant that counts the WRITTEN silence alone (work below the CLI is not movement) ends a WORKING command');
 {

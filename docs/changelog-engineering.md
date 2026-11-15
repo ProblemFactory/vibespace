@@ -6,6 +6,26 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.405 — 2026-11-16
 
+### turn-never-silent — the look at 99f65d547, follow-up 3: the proofs the kill law still owed, each a row and a mutant
+- **ONE small module**: NEW src/server/proc-signal.js holds sameBirth → signalOne, killGroup and endTree. data/bin/agy-wrapper.js signals through it alone.
+  - THE FLOOR, both: never pid 0, 1, a negative, a non-integer, our own pid, or (a group) our own process group.
+  - A process is signalled only with the birth (stat starttime) it was found with, and never as a zombie.
+  - A group is signalled only through the handle this process spawned.
+  - Each `process.kill(` stays a literal site with its proof on the line (the pid census rows moved here). `kill` is injectable for the floor legs only, so a floor mutant never reaches a real kill(0).
+- **The restart's late hard signal is CANCELLED** when the old agy exits: both group timers are cleared in its exit handler. A group id may be reused; what stayed below is ended by pid from the tree read before the signals. Every group signal is logged.
+- **The route's person verdict has a leg per branch**: bearer ⇒ human_only, another site's page ⇒ cross_site, the person's own page ⇒ through.
+- **The pins.**
+  - test-turn-end ⑦ (LIVE): Stop restarts agy; the old one gets its group's SIGTERM and exits; its late SIGKILL is never sent.
+  - test-turn-end ⑧: real /proc reads, an injected kill. The SAME pid with another birth is never signalled; the floors hold for init with its own birth and for our own pid with our own birth; never our own group; a spawned handle's group is signalled.
+  - test-turn-watch ⑭: + cross-site, + same-origin.
+  - The census: pid-identity rows for both sites (dropping either one turns §85 red); a mount-reader row for the one stat read (§86).
+  - The mutants: 9 + 2 run, all red:
+    - the birth comparison removed;
+    - signalOne's floor removed; killGroup's floor removed; the own-group test removed;
+    - the late timers not cleared;
+    - each census row dropped;
+    - the route checking bearers only; the route refusing everything; the verdict dropped.
+
 ### turn-never-silent — the look at 99f65d547, follow-up 2: «ended» is said only when something was ended (主开发's law 3, M4 + M5)
 - **The wrapper answers every verb with ONE record** (data/bin/agy-wrapper.js `command_ended`):
   - `{ok: true, ended: [names], survivors: [names]}`;
