@@ -308,17 +308,28 @@ try {
   check('rect census at 390 px: every card and its kind / name / meta inside the viewport, no meta clipped; the chip IN the phone bar\'s ONE row (never folded behind ⋯), readable and counting 4', census.n >= 4 && census.bad.length === 0 && /4/.test(census.chip || ''), census);
   const face = await drawnFace(cdp, '.chat-status-artifacts');
   check(`the leg's face, read back from Chrome: ${face} (${FONT === 'dejavu' ? "the hosted runner's DejaVu Sans" : "this box's own"})`, FONT === 'dejavu' ? face === 'DejaVu Sans' : !!face, face);
-  { // CONTROL (the DejaVu leg — the runner's red): the desk's 24 px mouse floor put back on the phone's chips (its own
-    // specificity, last in the cascade: the 36 px search and ⋯ rules still win, as on the base) folds the
-    // Artifacts chip behind ⋯; taken off, it is back in the row (the bar's own fold re-run each time: a style is no resize)
+  { // CONTROL, RE-MADE (2026-11-15, lane artifacts-by-intent — its premise moved): the desk's 24 px floor (+4 px on goal and auto-continue)
+    // used to eat the DejaVu row's slack and fold the Artifacts chip; since ui-language's model-chip words (2.369.403) the row has more
+    // slack than that, so the floor folds nothing ({fRed:false} on the base 715848950 itself). The floor stays as a READING; the CHECKED
+    // plant takes the room the Artifacts chip is laid into, measured live the way phoneBarFold spends it (room − the never-fold chips
+    // − every chip before Artifacts in bar order, each with its gap — never a chip AFTER it: the box face keeps the lock chip after
+    // Artifacts in the row, and counting it made the «spare» negative and the plant a no-op, 23 px, on 1e085b73a) − Artifacts' own
+    // width + 1 px, on the goal chip ⇒ the Artifacts chip no longer fits and folds behind ⋯; taken off, it is back in the row. Both
+    // faces (the arithmetic is the face's own).
     const nudge = async () => { await evalJs(`(${VIEW})?._statusBar?._fold?.(), true`); await sleep(200); };
     const folded = () => evalJs(`(() => { const c = document.querySelector('.chat-status-artifacts'); return c ? c.classList.contains('chat-status-folded') : null; })()`);
     await evalJs(`(() => { const st = document.createElement('style'); st.id = 'ah-floor-ctl'; st.textContent = '.chat-status-bar .chat-status-clickable { min-width: 24px; }'; document.head.appendChild(st); return true; })()`);
     await nudge(); const fRed = await folded();
     await evalJs(`(document.getElementById('ah-floor-ctl')?.remove(), true)`);
     await nudge(); const fBack = await folded();
-    if (FONT === 'dejavu') check(`CONTROL: the desk's 24 px floor put back on the phone's chips folds the Artifacts chip behind ⋯ (${fRed}); taken off, it is back in the row (${!fBack})`, fRed === true && fBack === false, { fRed, fBack });
-    else console.log(`  · the desk's floor on the phone's chips in this box's face: folded ${fRed}; taken off: folded ${fBack}`);
+    console.log(`  · the desk's floor on the phone's chips (${FONT}): folded ${fRed}; taken off: folded ${fBack} (a reading — the row's slack decides it)`);
+    const spare = await evalJs(`(() => { const a = document.querySelector('.chat-status-artifacts'), bar = a && a.parentElement; if (!bar) return null; const cs = getComputedStyle(bar), gap = parseFloat(cs.columnGap) || 0; const more = [...bar.children].find((e) => e.getAttribute('data-chip') === 'more'); const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0); const NEVER = ['search', 'model', 'turnstate', 'health', 'billing']; let before = 0, seen = false; for (const e of bar.children) { const k = e.getAttribute('data-chip'); if (e === more || !e.offsetWidth || e.classList.contains('chat-status-folded')) continue; if (e === a) { seen = true; continue; } if (NEVER.includes(k) || !seen) before += e.offsetWidth + gap; } const g = [...bar.children].find((e) => e.getAttribute('data-chip') === 'goal'); return { room: Math.round(room), before: Math.round(before), artW: a.offsetWidth, gap, goalW: g ? g.offsetWidth : null }; })()`);
+    const plant = spare && spare.goalW ? Math.ceil(spare.goalW + (spare.room - spare.before - spare.artW) + 1) : null; // the goal chip grown by the room Artifacts would have had beyond its own width, + 1 px
+    await evalJs(`(() => { const st = document.createElement('style'); st.id = 'ah-spare-ctl'; st.textContent = '.chat-status-bar [data-chip="goal"] { min-width: ${plant}px !important; }'; document.head.appendChild(st); return true; })()`);
+    await nudge(); const sRed = await folded();
+    await evalJs(`(document.getElementById('ah-spare-ctl')?.remove(), true)`);
+    await nudge(); const sBack = await folded();
+    check(`CONTROL (${FONT}): the row's own spare room + 1 px planted on the goal chip (${plant} px; room ${spare && spare.room}, before Artifacts ${spare && spare.before}, Artifacts ${spare && spare.artW}) folds the Artifacts chip behind ⋯ (${sRed}); taken off, it is back in the row (${!sBack})`, plant > 0 && sRed === true && sBack === false, { spare, plant, sRed, sBack });
   }
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
