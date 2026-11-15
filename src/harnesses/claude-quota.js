@@ -405,6 +405,7 @@ function classifyServeFailure(info = {}) {
 }
 module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_TYPES,
   normalize,
+  predict: require('./claude-predict.js'), // the prediction adapter (usage-predict pick 3): Claude's priors, its unit
   signalFromStream,
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim

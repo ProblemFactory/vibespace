@@ -381,10 +381,10 @@
    "file": "src/usage-estimator.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "a fixed four-lane split of bucket names + 'other': a new family's bucket is 'other' (no release; it projects nothing)",
+   "road": "a fixed four-lane split of bucket names + 'other': a new family's bucket is 'other' (no release; it projects nothing); the scoped buckets' family words are model-family's SEED_FAMILIES since usage-predict pick 3 (the estimator's own list retired)",
    "suite": "test-claude-update-needs-nothing",
    "match": "family-key",
-   "sites": 3
+   "sites": 2
   },
   {
    "id": "price-table-seed",

@@ -65,4 +65,4 @@ function projectCacheForFamily(cache, fam) {
   }
   return { ...cache, scopedWeekly, spareScoped };
 }
-module.exports = { familyOfModel, familyOfScopedBucket, projectCacheForFamily, setCatalogFamilies };
+module.exports = { familyOfModel, familyOfScopedBucket, projectCacheForFamily, setCatalogFamilies, SEED_FAMILIES: Object.freeze([...SEED_FAMILIES]) };

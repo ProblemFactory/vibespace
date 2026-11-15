@@ -154,6 +154,7 @@ const spawnEnvOf = (dir) => ({ HOME: dir, DBUS_SESSION_BUS_ADDRESS: 'disabled:' 
  *  the account ended and 5 minutes passed with no new one (src/server/after-turn-read.js; ≤ 1 per account per 30 min). */
 const AGY_QUOTA = Object.freeze({
   ...NULL_QUOTA,
+  predict: require('./antigravity-predict.js'), // the prediction adapter (usage-predict pick 3): no prior — learn first
   signalFromStream: AGY_WALL.signalFromStream,
   onDemand: Object.freeze({ argv: AGY_USAGE.USAGE_ARGV, source: AGY_USAGE.USAGE_SOURCE, judge: AGY_USAGE.judgeUsageAnswer, cwdOf: (env) => path.join(env.HOME, LOGIN_CWD), onWallSignal: true, afterTurn: true }),
 });

@@ -497,9 +497,9 @@ function backfillLedgerBySlot({ dataDir, id, transitions = null, members = null,
       const old = {}; for (const k of idents) if (prev[k]) old[k] = prev[k];
       if (Object.keys(old).length) _appendArchive(archiveDir, archiveName, [{ migration: id, at: now, store: 'usage-anchors/rates.json', reason: 'learned from ledger cost that the OTel org had attributed — re-learned from the re-keyed ledger', entry: old }], seen);
       const { UsageHistory } = require('./usage-history.js');
-      const { UsageEstimator, CLAUDE_MAX_PRIOR_FULL_USD } = require('./usage-estimator.js');
+      const { UsageEstimator } = require('./usage-estimator.js');
       const uh = new UsageHistory({ dataDir, homeDir: path.join(dataDir, '.no-home') });
-      const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: (k) => (String(k || '').startsWith('codex:') ? null : CLAUDE_MAX_PRIOR_FULL_USD) });
+      const est = new UsageEstimator({ anchorsDir, usageHistory: uh, resolveIdentity: () => null, lagS: 0, priorsFor: require('./usage-predict.js').priorsForIdentity });   // each source's own prior (usage-predict pick 3)
       for (const k of idents) { try { est.learnNow(k); report.relearned++; } catch (e) { throw new Error(`re-learning ${k} failed: ${e.message}`); } } // the migration's own synchronous road (usage-relearn-stepped: ratesFor folds a slice a turn)
       est.flushRates();   // on disk BEFORE the pass completes (the estimator writes through the store writer)
       est.close(); // usage-relearn-stepped round 2 (small 4): this estimator is let go — it folds and persists nothing more
