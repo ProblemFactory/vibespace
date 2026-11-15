@@ -742,6 +742,7 @@ class UsageHistory {
         onBudget: async () => { await this._scanYield(); if (!this._scanForced && this._pausedNow()) throw Object.assign(new Error('paused'), { paused: true }); },
         onEvent: (ev) => {
           this._noteStatement(statements, ev, null);
+          if (ev.st) return; // a statement that books no row (the walker's `st`): filed, never a ledger row
           const minfo = meta[ev.sid] || {};
           // A per-request identity override, when one is wired (see
           // setTruthLookup — nothing is, since 2026-09-07). The WALK is the
@@ -891,8 +892,8 @@ class UsageHistory {
     for (const line of String(text || '').split('\n')) {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
+      this._noteStatement(statements, e, hostId); // before the row check: a statement-only line (`st`, no rid) states too
       if (!e || !e.rid || !e.ts) continue;
-      this._noteStatement(statements, e, hostId);
       const ts = Number(e.ts) || Date.now();
       // ── PER-ACCOUNT attribution for remote events (2.294.0, R4 deliverable;
       // the owner's live complaint: a remote message's billing row could only

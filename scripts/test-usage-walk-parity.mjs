@@ -213,7 +213,9 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
 
 // ── THE STATEMENT A ROLLOUT CARRIES (lane usage-every-change pick 2, law 4): every codex token_count with usage carries the
 // account's rate_limits; BOTH walkers ship it on the row as `rl`, with a subagent's parent thread as `par` (read from its
-// first line, kept in the cursor so a later scan still names it) — byte-identical; a heartbeat (no usage) ships nothing.
+// first line, kept in the cursor so a later scan still names it) — byte-identical; a token_count that states rate limits but
+// books no row (a heartbeat with no usage; a line repeating the last totals with «limit reached») ships its statement alone
+// (`st: 1`, no rid — the check's must 2).
 // The hub's walk hands the LAST statement per thread to its sink with the owner the ledger billed (here: the parent's
 // account), and neither road stores rl/par in a ledger row. ──
 {
@@ -231,6 +233,7 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     { timestamp: at(0), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/work/st' } },
     tc(at(5), 15, 11),
     { timestamp: at(6), type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: rl(12) } }, // a heartbeat: no usage
+    { ...tc(at(7), 15, 13), payload: { ...tc(at(7), 15, 13).payload, rate_limits: { ...rl(13), rate_limit_reached_type: 'primary' } } }, // the last totals again, «limit reached»
   ].map((r) => JSON.stringify(r)).join('\n') + '\n');
   const scCur = path.join(dataDir, 'st-scan-cursor.json'), modCur = path.join(dataDir, 'st-mod-cursor.json');
   const scan = () => execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
@@ -243,7 +246,10 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     return r.events.map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
   };
   const sc1 = scan(), m1 = modRun();
-  ok(sc1.length === 1 && sc1[0].rl && sc1[0].rl.primary.used_percent === 11 && sc1[0].par === PAR, 'pick 2: the scanner ships the response\'s statement (rl) and the subagent\'s parent (par); the heartbeat ships nothing', JSON.stringify(sc1.map((e) => [e.rl && e.rl.primary.used_percent, e.par])));
+  ok(sc1.length === 3 && sc1[0].rid && sc1[0].rl && sc1[0].rl.primary.used_percent === 11 && sc1[0].par === PAR
+    && sc1[1].st === 1 && !sc1[1].rid && sc1[1].rl.primary.used_percent === 12 && sc1[1].ts === Date.parse(at(6)) && sc1[1].par === PAR
+    && sc1[2].st === 1 && !sc1[2].rid && sc1[2].rl.rate_limit_reached_type === 'primary' && sc1[2].ts === Date.parse(at(7)),
+    'pick 2 + the check\'s must 2: the scanner ships the response\'s statement on its row (rl, par), and the heartbeat\'s and the «limit reached» repeat\'s ALONE (st: 1, no rid — never a row)', JSON.stringify(sc1.map((e) => [e.rid || 'st', e.rl && e.rl.primary.used_percent, e.par])));
   ok(JSON.stringify(m1) === JSON.stringify(sc1), 'pick 2: module codex events BYTE-IDENTICAL to the scanner, rl + par included');
   fs.appendFileSync(file, JSON.stringify(tc(at(9), 30, 14)) + '\n');
   const sc2 = scan(), m2 = modRun();

@@ -475,7 +475,11 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const cxDir = path.join(home, '.codex', 'sessions', '2026', '09', '05');
   fs.mkdirSync(cxDir, { recursive: true });
   fs.writeFileSync(path.join(cxDir, `rollout-2026-09-05T13-26-05-${TID}.jsonl`), window.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  const evs = runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor.json') }).events.map((l) => JSON.parse(l));
+  const all = runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor.json') }).events.map((l) => JSON.parse(l));
+  // usage-every-change (the check's must 2): a duplicate line that states rate limits ships its STATEMENT alone (`st: 1`, no
+  // rid — never a ledger row); the ledger rows are the rest
+  const evs = all.filter((e) => !e.st), stOnly = all.filter((e) => e.st);
+  ok('the duplicate line\'s statement, if it states rate limits, ships alone (st, no rid — never a row)', stOnly.every((e) => !e.rid && e.rl && e.be === 'codex'), JSON.stringify(stOnly.map((e) => [e.rid, !!e.rl])));
   ok('walker emits exactly two events for the window (the duplicate deduped on rid) with the same rids + mids the normalizer stamped', evs.length === 2 && evs[0].rid === exec?.meta?.requestId && evs[0].mid === RESP_A && evs[1].rid === reply?.meta?.requestId && evs[1].mid === RESP_B && evs[1].i === reply.meta.usage.input_tokens && evs[1].o === 31, JSON.stringify(evs.map((e) => [e.rid, e.mid, e.i, e.o])));
   fs.rmSync(home, { recursive: true, force: true });
   // live path: the same duplicate through processLive neither stamps nor advances

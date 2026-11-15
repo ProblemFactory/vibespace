@@ -379,15 +379,17 @@ for (const rel of rollouts) {
     if (r.type !== 'event_msg' || r.payload?.type !== 'token_count') return;
     const info = r.payload.info;
     const last = info && info.last_token_usage;
-    if (!last || !(last.input_tokens || last.output_tokens)) return;
     const rl = r.payload.rate_limits && typeof r.payload.rate_limits === 'object' ? r.payload.rate_limits : null;
     const ts = Date.parse(r.timestamp) || Date.now();
+    // a statement that books no row ships alone (mirror of src/usage-walker.js, the check's must 2)
+    const stOnly = () => { if (rl && !(cur.forkTs && ts <= cur.forkTs + 2000)) emit(JSON.stringify({ st: 1, be: 'codex', ts, sid, rl, par: cur.parent || undefined })); };
+    if (!last || !(last.input_tokens || last.output_tokens)) return stOnly();
     const cum = info.total_token_usage ? info.total_token_usage.total_tokens : null;
     const rid = 'cx:' + sid + ':' + (cum != null ? cum : cur.offset + '-' + ts);
     const pendMid = cur.pendMid || null, pendTotal = cur.pendTotal;
     delete cur.pendMid; delete cur.pendTotal; // consumed by this token_count whether or not it emits
     if (cur.forkTs && ts <= cur.forkTs + 2000) return; // a fork's replay of its ancestors' requests (FORK REPLAY above)
-    if (rid === cur.lastRid) return;
+    if (rid === cur.lastRid) return stOnly();
     cur.lastRid = rid;
     const cached = last.cached_input_tokens || 0;
     const mid = pendMid && (pendTotal == null || typeof last.total_tokens !== 'number' || pendTotal === last.total_tokens) ? pendMid : undefined;

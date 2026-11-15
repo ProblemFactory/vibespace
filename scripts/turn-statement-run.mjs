@@ -98,8 +98,12 @@ function walkedRollout(w, REPO, threads, { walk = true } = {}) {
     const rows = [{ timestamp: t0, type: 'session_meta', payload: meta }, { timestamp: t0, type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/tmp/turn' } }];
     let tot = 0;
     for (const st of stmts) {
-      const at = Date.now() - st.ago; recAt = Math.max(recAt, at); tot += 15;
-      rows.push({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } }, rate_limits: { ...(st.lim ? { limit_id: st.lim } : {}), primary: { used_percent: st.used, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus' } } });
+      const at = Date.now() - st.ago; recAt = Math.max(recAt, at);
+      // `kind`: 'heartbeat' = a token_count with no usage; 'repeat' = the last totals again (both book no row — the check's must 2)
+      if (st.kind !== 'repeat' && st.kind !== 'heartbeat') tot += 15;
+      const rl = { ...(st.lim ? { limit_id: st.lim } : {}), primary: { used_percent: st.used, window_minutes: 10080, resets_at: nowS() + 3 * 86400 }, secondary: null, plan_type: 'plus', ...(st.reached ? { rate_limit_reached_type: 'primary' } : {}) };
+      const info = st.kind === 'heartbeat' ? null : { last_token_usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5, total_tokens: 15 }, total_token_usage: { total_tokens: tot } };
+      rows.push({ timestamp: new Date(at).toISOString(), type: 'event_msg', payload: { type: 'token_count', info, rate_limits: rl } });
     }
     fs.writeFileSync(path.join(d, `rollout-2026-11-15T00-00-00-${t.tid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   }
@@ -206,6 +210,19 @@ const DRIVERS = {
         await uh.scan({ force: true }); uh.flushCursors(); // the cursors on disk before the world is removed (no writer retry outlives it)
         const j = judge(w, 'cxs-1', { t0: x.recAt, t1: Date.now(), recAt: x.recAt, stamp: 'record' });
         return { green: j.reading && j.ownTime && !j.others.length, why: "the hub's walk files the thread's last statement on its account at the record's time", detail: j };
+      },
+      // THE CHECK'S MUST 2: a token_count that states rate limits but books no row — a heartbeat; the last totals again with
+      // «limit reached» — is still its statement: filed at its own time (the number the owner sees at a wall), never a ledger row
+      async 'device/statement-only-lines'(w, REPO) {
+        const H = 'cccccccc-0000-4000-8000-0000000000d1', Q = 'cccccccc-0000-4000-8000-0000000000d2';
+        const t0 = Date.now();
+        const x = walkedRollout(w, REPO, [{ tid: H, stmts: [{ ago: 30000, used: 55 }, { ago: 20000, used: 58, kind: 'heartbeat' }] }, { tid: Q, stmts: [{ ago: 30000, used: 97 }, { ago: 20000, used: 97, kind: 'repeat', reached: true }] }]);
+        const uh = ledgerOf(w, REPO); uh.recordAttribution({ sid: H, acct: 'cxs-1', ts: t0 - 120000 }); uh.recordAttribution({ sid: Q, acct: 'cxs-2', ts: t0 - 120000 });
+        await uh.ingestRemoteEvents('h1', 'Host one', x.text);
+        const h = limitOf(w, 'cxs-1', 'codex'), q = limitOf(w, 'cxs-2', 'codex');
+        const agg = await uh.aggregateAsync({ backend: 'codex' });
+        return { green: !!h && h.pct === 58 && near(h.at, t0 - 20000) && !!q && q.pct === 100 && near(q.at, t0 - 20000) && Number(agg && agg.totals && agg.totals.requests) === 2,
+          why: "a heartbeat's statement (58 %) and a «limit reached» repeat's (100 %) are filed at their own time; the ledger still holds the two requests only", detail: { h, q, rows: agg && agg.totals && agg.totals.requests } };
       },
       // THE CHECK'S MUST 1: one account states TWO limit ids; each limit's last statement is filed at its own time, in BOTH orders
       async 'device/two-limits-both-orders'(w, REPO) {
