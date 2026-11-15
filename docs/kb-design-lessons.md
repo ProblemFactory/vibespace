@@ -342,6 +342,9 @@ A machine where the fences cannot be proven does not run it; the members stay he
 Where a run lives (2.369.395, the incident of 2026-11-11): the CLI and node walk UP from where they run (package.json; CLAUDE.md, AGENTS.md, .claude/, .mcp.json, .git at every ancestor) — so a run placed under the person's home reads the home's files and voids. A run lives in a fresh private folder whose real path is outside the home and the data dir (the runtime dir, else the system temp); none ⇒ it does not run and says so by name.
 
 ### 10. Settings System (Global + Per-Terminal)
+
+**A refusal that names a value carries its row (lane setting-doors pick 1, 2026-11-14):** the 10-08 law «a refusal that names a value names where to change it» now has a door: `vibespace://settings/<key>` (src/setting-links.js), drawn as a link wherever the owner reads words and opened by app `openSettingAt` — it OPENS, it never writes (no value part). The census of every product sentence that names a place in Settings is test-setting-links ③; a sentence naming only a section is a listed debt.
+
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
 
 **Per-terminal settings** (window titlebar ⚙): Same three options, each with a "Default" that follows global. Theme and font have Default as a dropdown option. Font size has a Default checkbox that disables the number input. Overrides stored in `TerminalSession.overrides` and persisted in layout.
