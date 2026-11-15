@@ -255,7 +255,8 @@ console.log('§1 EQUALITY — every interval, rate and estimate is 05082bbd0\'s:
     let bad = 0, n = 0, first = null;
     const both = (fn) => { const x = fn(A), y = fn(B); n++; if (!near(x, y)) { bad++; first = first || { x, y }; } };
     for (const [key] of A.IDS) both((w) => w.est.ratesFor(key));
-    for (const a of ['sub-a', 'sub-b', 'sub-c', 'sub-d', null]) both((w) => { w.est._estMemo.clear(); return w.est.estimateFor(a, null, NOW + 5000); });
+    // the estimate as the released code makes it — `sinceRequests` (usage-predict P2's plain line) is new since, and is not compared
+    for (const a of ['sub-a', 'sub-b', 'sub-c', 'sub-d', null]) both((w) => { w.est._estMemo.clear(); const e = w.est.estimateFor(a, null, NOW + 5000); if (!e) return e; const { sinceRequests, ...rest } = e; return rest; });
     for (let k = 0; k < 80; k++) { const t0 = NOW - (k % 40) * DAY - k * 997, len = [60e3, 3600e3, DAY, 8 * DAY][k % 4]; both((w) => w.UA.costBetweenMulti(w.uh, [['sub-a'], ['sub-b'], [null], ['sub-c', 'sub-d']][k % 4], t0, t0 + len)); }
     ok(bad === 0, `the RELEASED code (a git archive of 05082bbd0) on the same seeds: ${n} rates / estimates / intervals, ${bad} differ`, first);
     fs.rmSync(dd, { recursive: true, force: true });
