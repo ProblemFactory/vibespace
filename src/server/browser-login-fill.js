@@ -1916,6 +1916,39 @@ async function fillVaultElement({
 }
 
 /** Wipe every control that received typed text OR holds a filled value on a tab inside our isolated world (all frames, hidden included). */
+// lane chrome-157 (主开发's L4, 2026-11-15): DOES THE FILLED BOX STILL HOLD THE SECRET? Detect-only — never wipes. In the fill's OWN
+// isolated world (where the fill kept the boxes it typed into, window.vsLoginTouched — the set the wipe reads), each such box is
+// asked whether it is still in the page and still holds a value matching the fill, by the wipe's salted hash matcher (no value goes
+// into the page). → { ok, holding, touched } | { ok:false } (no such world, no such set, nothing touched: cannot tell)
+function filledBoxHoldsExpr(salt, targets) {
+  return `(() => {
+    ${NODE_HELPERS_SRC}
+    ${filledTargetSrc(salt, targets, { maxScanPositions: DEFAULT_MAX_SCAN_POSITIONS })}
+    try {
+      if (!(window.vsLoginTouched instanceof Set)) return { ok: false };
+      let holding = 0, touched = 0;
+      for (const n of window.vsLoginTouched) {
+        if (!n || n.nodeType !== 1) continue;
+        touched++;
+        if (!n.isConnected) continue;
+        const s1 = scanFilledTarget(valOfNode(n));
+        const s2 = scanFilledTarget(attrValOfNode(n));
+        if (s1 === 'match' || s2 === 'match' || s1 === 'cut' || s2 === 'cut') holding++;
+      }
+      return { ok: true, holding, touched };
+    } catch { return { ok: false }; }
+  })()`;
+}
+async function filledBoxHolds({ call, sessionId = undefined, contextId = 0, secretValues = null, wholeOnlyValues = null } = {}) {
+  if (typeof call !== 'function' || !(Number(contextId) > 0)) return { ok: false };
+  const { salt, targets } = buildFilledTargets(secretValues, { wholeOnlyValues });
+  if (!targets.length) return { ok: false };
+  const send = makeSend(call, null, sessionId);
+  const v = valOf(await send('Runtime.evaluate', { expression: filledBoxHoldsExpr(salt, targets), contextId: Number(contextId), returnByValue: true, awaitPromise: false }));
+  if (!v || v.ok !== true || !Number.isFinite(v.holding) || !(Number(v.touched) > 0)) return { ok: false };
+  return { ok: true, holding: Number(v.holding), touched: Number(v.touched) };
+}
+
 async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefined, targetId = null, contextId = 0, secretValues = null, wholeOnlyValues = null, prebuiltTargets = null, allowTypedHeuristic = true, maxScanPositions = DEFAULT_MAX_SCAN_POSITIONS } = {}) {
   if (typeof call !== 'function') return { ok: false, wiped: 0, verifiedEmpty: false };
   const send = makeSend(call, null, sessionId);
@@ -2014,6 +2047,7 @@ module.exports = {
   resolveSnapshotRef,
   fillVaultElement,
   wipeTabTypedInputs,
+  filledBoxHolds,
   buildFilledTargets,
   filledTargetSrc,
   targetsForTab,

@@ -704,6 +704,26 @@ function fillVerdict({ tabOrigin, inFrame = false, spec, entries = [], grantRows
   };
 }
 
+// ── THE CREDENTIAL'S DESTINATION (lane chrome-157, 主开发's L1, 2026-11-15 09:16Z) ─────────────────────────────────────────────
+// While a live fill stands, a request carrying the value may go to the filled page's own SITE, not only its exact origin: a form on
+// www.<site> posting to auth.<site> is an ordinary login, and blocking it stopped the login with no way out for an agent. «Site» is
+// Chrome's OWN registrable domain of the filled document (Page.Frame.domainAndRegistry, computed from Chrome's public-suffix list —
+// the tree keeps no list of its own): the same scheme AND a host equal to that domain or under it («.» + it). With no registrable
+// domain (an address, localhost, a name under no known suffix) it is the exact origin, as before. The FILL keeps its exact-origin
+// rule (the entry's own origin; the phishing refusal and the abort of a fill whose page starts to leave are untouched). PURE.
+function credDestinationOk(fillOrigin, site, reqUrl) {
+  const reqOrigin = originOf(reqUrl);
+  if (!reqOrigin || !fillOrigin) return false;
+  if (reqOrigin === fillOrigin) return true;
+  const reg = typeof site === 'string' ? site.trim().toLowerCase().replace(/\.$/, '') : '';
+  if (!reg || !reg.includes('.')) return false;
+  let u, f;
+  try { u = new URL(String(reqUrl)); f = new URL(String(fillOrigin)); } catch { return false; }
+  if (u.protocol !== f.protocol) return false;
+  const under = (h) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x === reg || x.endsWith('.' + reg); };
+  return under(f.hostname) && under(u.hostname);   // (the filled page's own host is under it too — Chrome named it for that page)
+}
+
 // ── live-fill read fence verdicts ───────────────────────────────────────────
 function liveFillAllowsVerb(verb, argv = []) {
   const v = str(verb).trim().toLowerCase();
@@ -712,15 +732,12 @@ function liveFillAllowsVerb(verb, argv = []) {
     const a = Array.isArray(argv) ? argv.map(String) : [];
     if (a.some((x) => x === '--fn' || x.startsWith('--fn=') || x === '--text' || x.startsWith('--text='))) return false;
   }
-  // lane chrome-157 (vault-login round 32, 主开发's ruling Q3): a fenced tab's SECOND DOOR needs two acts — open a new tab, switch to
-  // another tab. `tab new …` and `tab <id|label>` are admitted; the listing (`tab`, `tab list`) and `tab close` are not (a listing
-  // answers with titles and addresses the fenced document controls). `window` is not admitted at all: the driver's sub-verbs
-  // cannot all be proven free of a read path (its README names only `window new`; a closed binary may carry more).
-  if (v === 'tab') {
-    const a = Array.isArray(argv) ? argv.map(String) : [];
-    const sub = a.slice(1).find((x) => x && !x.startsWith('-'));
-    if (sub === undefined || sub === 'list' || sub === 'close') return false;
-  }
+  // lane chrome-157 (vault-login round 32): every `tab` form is admitted on a fenced tab — `tab new …`, `tab <id|label>`, `tab close`
+  // (主开发 2026-11-15 item 3: closing the tab is the door every hold names; its answer is «Tab closed», nothing of the page) and the
+  // LISTING `tab` / `tab list` (L3, 主开发 09:16Z: the agent finds its other tabs; the listing reaches the driver through the mediated
+  // CDP door, which names a fenced tab by its id and its address at the fill, never its title — browser-dialogs
+  // maskFencedTargetInfos). `window` is not admitted at all: the driver's sub-verbs cannot all be proven free of a read path (its
+  // README names only `window new`; a closed binary may carry more).
   return true;
 }
 
@@ -741,13 +758,13 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
   if (holdReason === HOLD_UNKNOWN_TYPED) {
     return no(
       'login_fill_live',
-      `refused "${cmd}" on ${site} because VibeSpace can no longer verify whether a filled login secret is still on this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
+      `refused "${cmd}" on ${site} because VibeSpace can no longer verify whether a filled login secret is still on this tab — reload or navigate this tab (a reload of an address too long to check keeps it held: go to another page), or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
     );
   }
   if (holdReason === HOLD_AWAIT_VAULT) {
     return no(
       'login_fill_live',
-      `refused "${cmd}" on ${site} because VibeSpace restarted while a filled login secret was on this tab — it checks this tab again once the vault is unlocked; until then open or switch to another tab`
+      `refused "${cmd}" on ${site} — open or switch to another tab: VibeSpace restarted while a filled login secret was on this tab, and it checks this tab again once the vault is unlocked`
     );
   }
   if (holdReason === HOLD_ENTRY_GONE) {
@@ -952,7 +969,7 @@ module.exports = {
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,
-  valueShownVerdict, CHECK_TEXT_CAP, CHECK_PIECE_CAP, CHECK_NODE_CAP,
+  valueShownVerdict, CHECK_TEXT_CAP, CHECK_PIECE_CAP, CHECK_NODE_CAP, credDestinationOk,
   LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN, HOLD_AWAIT_VAULT, HOLD_ENTRY_GONE, HOLD_WORD_OF_REASON, HOLD_WORDS, HOLD_PHASES, isHoldWord,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,

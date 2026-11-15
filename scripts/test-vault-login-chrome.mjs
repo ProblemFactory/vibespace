@@ -207,7 +207,7 @@ async function world(tag) {
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x'), VD = path.join(W, 'vault'), KD = path.join(W, 'data');
   for (const d of [path.join(KH, '.agent-browser'), KXD, VD, KD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', ...(process.env.VS_CHROME && fs.existsSync(process.env.VS_CHROME) ? { executablePath: process.env.VS_CHROME } : {}) }), { mode: 0o600 });   // (lane chrome-157: VS_CHROME — a Chrome for Testing build for the real-browser claim, as the other chrome suites take it)
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox\n--host-resolver-rules=MAP *.example.com 127.0.0.1\n--ignore-certificate-errors', ...(process.env.VS_CHROME && fs.existsSync(process.env.VS_CHROME) ? { executablePath: process.env.VS_CHROME } : {}) }), { mode: 0o600 });   // (lane chrome-157: VS_CHROME — a Chrome for Testing build for the real-browser claim, as the other chrome suites take it)   // (主开发's must-hold, a form posting to a sibling host: *.example.com — IANA's reserved name — resolves to loopback in this scratch browser only, its https served with a certificate the scene makes; no lookup and no request leaves the box)
   const hostBrowsers = path.join(process.env.HOME || '/root', '.agent-browser', 'browsers');
   const localBrowsers = path.join(KH, '.agent-browser', 'browsers');
   if (fs.existsSync(hostBrowsers) && !fs.existsSync(localBrowsers)) {
@@ -798,13 +798,16 @@ try {
           && /cross-origin requests from this page are blocked/i.test(err || '');
 
         const awaitsVault = (err) => /checks this tab again once the vault is unlocked/i.test(err || '') && /open or switch to another tab/i.test(err || '');
+        // 主开发's L2 (2026-11-15): a fence with no values blocks nothing it cannot match — before the unlock the page's own cross-origin
+        // fetch() is NOT blocked (a page sending the value elsewhere by its own script is a said limit); once the vault opens and the
+        // values are back, it is blocked again
         ok(lockedAtBoot === true && unlockedAfter === true
           && !lvLockedBoot.ok && awaitsVault(lvLockedBoot.error)
           && !lvAfterUnlock.ok && twoDoorsAndBlock(lvAfterUnlock.error)
-          && evPreUnlock?.body?.ok === false && evPostUnlock?.body?.ok === false
+          && evPreUnlock?.body?.ok !== false && evPostUnlock?.body?.ok === false
           && followsKind
-          && evilPagesN1.received().length === 0 && wrongChangedNotice === false,
-          'SHAPE S + the persisted hold on real Chrome: a cold restart holds the tab waiting for the vault (its sentence names the vault and the other tab, nothing typed in memory); once the vault opens the tab follows its kind — the same too-much-text hold, both doors named — and the page\'s cross-origin fetch() blocked before and after',
+          && evilPagesN1.received().length === 1 && wrongChangedNotice === false,
+          'SHAPE S + the persisted hold on real Chrome: a cold restart holds the tab waiting for the vault (its sentence names the other tab first, then the vault; nothing typed in memory); with no values the page loads from other hosts (L2 — its own cross-origin fetch() passes: said); once the vault opens the tab follows its kind — the same too-much-text hold, both doors named — and the cross-origin fetch() is blocked again',
           { lockedAtBoot, unlockedAfter, holdLocked, holdUnlocked, followsKind, lvLockedBoot, lvAfterUnlock, evPreUnlock: evPreUnlock?.body, evPostUnlock: evPostUnlock?.body, evilHits: evilPagesN1.received().length, wrongChangedNotice });
 
         dRestart.shutdown();

