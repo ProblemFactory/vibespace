@@ -23,6 +23,7 @@ const WATCH = path.join(REPO, 'src/server/turn-watch.js');
 if (!fs.existsSync(WATCH)) { console.error('  ✗ src/server/turn-watch.js exists (the hub\'s turn watch)'); console.log('\n0 passed, 1 failed'); process.exit(1); }
 const TWatch = require(WATCH);
 const TW = require(path.join(REPO, 'src/turn-stuck-words.js'));
+const F0 = require(path.join(REPO, 'src/foryou-actions.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-turn-watch-'));
 const own = new Set();
@@ -72,7 +73,7 @@ let W = world();
   const it = W.open()[0];
   ok(W.open().length === 1 && it.itemKey === `turn-stuck:a:${T0}:${T0}` && it.sessionKey === 'key:a', 'at the bound OBSERVED (ten readings a minute apart): ONE For-you item, keyed per conversation + turn + STRETCH, filed under the conversation', W.items().map((i) => [i.itemKey, i.status]));
   ok(it.i18n.text.key === TW.TEXT.commandAlive && it.i18n.text.params.tool === 'run_command' && !('cmd' in it.i18n.text.params) && it.i18n.text.params.since.at === T0 && /run_command/.test(it.text), 'it names the open tool and since when (an instant the viewer reads in its own zone)', it.i18n);
-  ok(/ — Antigravity CLI is running\. VibeSpace does not end it by itself\.$/.test(it.text) && it.i18n.text.params.cli === 'Antigravity CLI' && it.i18n.text.params.then.key === TW.THEN.notByItself, 'its HEADLINE says the CLI is running and what happens if nothing is pressed — here: VibeSpace does not end it (its wrapper serves no ending) — never in a fold (P1)', it.text);
+  ok(/ — Antigravity CLI is running\.$/.test(it.text) && it.i18n.text.params.cli === 'Antigravity CLI' && it.i18n.detail[0].key === TW.THEN.notByItself && it.detail === 'VibeSpace does not end it by itself.' && F0.leadLineOf('turn-stuck'), 'its HEADLINE says the CLI is running; its LEAD line (the first detail line, drawn under the headline — the row\'s leadLine) what happens if nothing is pressed — here: VibeSpace does not end it (P1; the closure check: the tray clamps a headline)', [it.text, it.detail]);
   for (let m = 11; m <= 20; m++) await W.at(m);
   ok(W.items().length === 1 && W.open().length === 1, 'ten more readings: still ONE item, never a second beside it');
 }
@@ -111,7 +112,7 @@ W = world();
   W.trees.set(4001, { alive: false, list: [] });
   await W.at(10.5);
   const c2 = W.items().filter((i) => i.action.sessionId === 'c');
-  ok(c2.length === 1 && c2[0].status === 'open' && c2[0].i18n.text.key === TW.TEXT.silentGone && /is not running\. VibeSpace does not end it by itself\.$/.test(c2[0].text) && c2[0].id === it.id, '…patched IN PLACE when its words change (the CLI gone — the same item, its words redrawn)', c2.map((i) => [i.status, i.text]));
+  ok(c2.length === 1 && c2[0].status === 'open' && c2[0].i18n.text.key === TW.TEXT.silentGone && /is not running\.$/.test(c2[0].text) && c2[0].id === it.id, '…patched IN PLACE when its words change (the CLI gone — the same item, its words redrawn)', c2.map((i) => [i.status, i.text]));
   W.session('d'); W.tool('d', 'run_command'); W.sidecar('d', { cliWroteAt: T0, turnOpenedAt: T0, remote: { state: 'connected' } });
   for (let m = 11; m <= 22; m++) await W.at(m);
   const u = W.open().find((i) => i.action.sessionId === 'd');
@@ -259,7 +260,7 @@ console.log('— ⑯ LIVE: the REAL agy wrapper, its records through the REAL me
   };
   const [h, b] = await Promise.all([live('hang'), live('busy')]);
   ok(h.open && h.open.name === 'run_command' && h.open.cmd === 'node driver.mjs', 'the REAL ACP message manager answers openTool(): agy\'s open run_command step and its command\'s first line (the conversation\'s own running tool card)', h.open);
-  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.cmdAlive && h.items[0].i18n.text.params.cmd === 'node driver.mjs' && /^Stuck on a command: run_command «node driver\.mjs» has shown nothing since .* — Antigravity CLI is running\. If nothing changes, the command is ended by itself at .*\.$/.test(h.items[0].text) && h.items[0].i18n.text.params.then.key === TW.THEN.endAt && h.items[0].i18n.text.params.then.at > 0 && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command «node driver.mjs» (P2), Antigravity running, and IN ITS HEADLINE when it is ended by itself (P1)', h.items.map((i) => i.text));
+  ok(h.items.length === 1 && h.items[0].i18n.text.key === TW.TEXT.cmdAlive && h.items[0].i18n.text.params.cmd === 'node driver.mjs' && /^Stuck on a command: run_command «node driver\.mjs» has shown nothing since .* — Antigravity CLI is running\.$/.test(h.items[0].text) && /^If nothing changes, the command is ended by itself at .*\.$/.test(h.items[0].detail) && h.items[0].i18n.detail[0].key === TW.THEN.endAt && h.items[0].i18n.detail[0].params.time.at > 0 && h.items[0].action.endable === true, 'hang-command: ONE item — stuck on run_command «node driver.mjs» (P2), Antigravity running, and IN ITS HEADLINE when it is ended by itself (P1)', h.items.map((i) => i.text));
   ok(b.items.length === 0, 'busy-command: nothing (its command works below agy)', b.items.map((i) => i.text));
 }
 
@@ -275,7 +276,7 @@ console.log('— ⑰ P6 (主开发 04:44Z): «Keep waiting» ends the ATTENTION,
   let it = Wk.items()[0], k = F.keptOf(it);
   ok(r.ok && it.status !== 'open' && it.resolvedBy === 'kept-waiting', 'the press resolves the item — the tray\'s attention goes (a press is attended)', [it.status, it.resolvedBy]);
   ok(k && k.at === T0 + 12 * MIN && k.act === 'end' && k.nextAt === T0 + 42 * MIN, 'the card\'s KEPT fact: when the person chose, the next bound (thirty minutes on) and its act — ended by itself', k);
-  ok(it.i18n.text.params.then === '' && !/ended by itself at/.test(it.text), 'its headline drops the time it had before the press — one time per card, the kept line\'s', it.text);
+  ok(it.i18n.detail.length === 0 && !it.detail && !/ended by itself at/.test(it.text), 'its lead line (the time it had before the press) goes — one time per card, the kept line\'s', [it.text, it.detail]);
   ok(F.buttonsFor({ ...it, status: 'open' }).some((b) => b.answer === 'end-command'), '…and its door «End the command» still applies (the row keeps it: `when` endable)');
   for (let m = 13; m <= 40; m++) await Wk.at(m);
   it = Wk.items()[0];
@@ -325,7 +326,7 @@ function endWorld(id, o = {}) {
   X.sidecar(id, { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); X.trees.set(4001, { list: idle });
   const at0 = X.at; X.at = async (m) => { X.min = m; return at0(m); };
   X.ends = () => X.verbs.filter((v) => v.type === 'end-command');
-  X.thenAt = () => { const i = X.open()[0]; return i && i.i18n.text.params.then && i.i18n.text.params.then.at; };
+  X.thenAt = () => { const i = X.open()[0], l = i && i.i18n.detail && i.i18n.detail[0]; return l && l.params && l.params.time && l.params.time.at; };
   X.keptAt = () => { const k = require(path.join(REPO, 'src/foryou-actions.js')).keptOf(X.items().find((i) => i.resolvedBy === 'kept-waiting') || null); return k && k.nextAt; };
   return X;
 }
@@ -335,7 +336,7 @@ console.log('— ⑱ LAW 1 (M1): a restart — the count starts again at the new
   // the refuter's scene: Keep waiting at 12, the hub restarts at 20 — the base ended it at 30, twelve minutes before the card's 42
   let X = endWorld('k');
   for (let m = 0; m <= 10; m++) await X.at(m);
-  ok(X.thenAt() === T0 + 30 * MIN && /ended by itself at/.test(X.open()[0].text), 'filed at 10 observed minutes, saying it is ended by itself at 10 + 20 more observed = :30', [X.thenAt(), T0 + 30 * MIN]);
+  ok(X.thenAt() === T0 + 30 * MIN && /ended by itself at/.test(X.open()[0].detail), 'filed at 10 observed minutes, saying it is ended by itself at 10 + 20 more observed = :30', [X.thenAt(), T0 + 30 * MIN]);
   X.to(12); X.watch.keepWaiting('k');
   ok(X.keptAt() === T0 + 42 * MIN, 'Keep waiting at 12: the kept card says :42 (thirty observed minutes from the press)', X.keptAt());
   for (let m = 13; m <= 20; m++) await X.at(m);
@@ -457,7 +458,7 @@ console.log('— ㉓ S1: the by-itself ending is gated on the ROW («no bound of
   X.sidecar('c', { cliWroteAt: T0, turnOpenedAt: T0, caps: { endCommand: true } }); X.trees.set(4001, { list: idle });
   for (let m = 0; m <= 45; m++) await X.at(m);
   const it = X.open()[0];
-  ok(it && it.action.endable === true && it.i18n.text.params.then.key === TW.THEN.notByItself && !verbs.some((v) => v.type === 'end-command'), 'a harness whose row bounds its own commands (claude: commandBound «cli»), on a wrapper that advertises the verb: the door is drawn, the card says VibeSpace does not end it, and 45 minutes end nothing', [it && it.i18n.text.params.then, verbs.length]);
+  ok(it && it.action.endable === true && it.i18n.detail[0].key === TW.THEN.notByItself && !verbs.some((v) => v.type === 'end-command'), 'a harness whose row bounds its own commands (claude: commandBound «cli»), on a wrapper that advertises the verb: the door is drawn, the card says VibeSpace does not end it, and 45 minutes end nothing', [it && it.i18n.detail, verbs.length]);
 }
 
 console.log('— ㉔ LAW 3 (M4, M5): «ended» is said only on the wrapper\'s own record that something was ended; «nothing to end» keeps the item, its door Stop; one ending at a time');
@@ -468,7 +469,7 @@ console.log('— ㉔ LAW 3 (M4, M5): «ended» is said only on the wrapper\'s ow
   let X = endWorld('a'); X.trees.set(4001, { list: [] });
   for (let m = 0; m <= 10; m++) await X.at(m);
   let it = X.open()[0];
-  ok(it && it.i18n.text.params.then.key === TW.THEN.nothingToEnd && /There is nothing to end: Antigravity CLI itself waits on a step with no command running\.$/.test(it.text) && it.action.nothingToEnd === true && doorsOf(it) === 'keep-waiting,stop-turn', 'a step open and nothing below the CLI: «there is nothing to end: the CLI itself waits on a step with no command running» — its doors Keep waiting and Stop the turn, no «End the command»', [it && it.text, it && doorsOf(it)]);
+  ok(it && it.i18n.detail[0].key === TW.THEN.nothingToEnd && /^There is nothing to end: Antigravity CLI itself waits on a step with no command running\.$/.test(it.detail) && it.action.nothingToEnd === true && doorsOf(it) === 'keep-waiting,stop-turn', 'a step open and nothing below the CLI: «there is nothing to end: the CLI itself waits on a step with no command running» — its doors Keep waiting and Stop the turn, no «End the command»', [it && it.detail, it && doorsOf(it)]);
   for (let m = 11; m <= 70; m++) await X.at(m);
   ok(X.ends().length === 0 && X.open().length === 1 && X.watch.endCommand('a').code === 'nothing-to-end', 'sixty minutes: never ended by itself, the item STAYS; a press anyway is refused «nothing to end»');
   // the wrapper finds nothing to end (the command left between the reading and the press): the item stays, says so
@@ -476,7 +477,7 @@ console.log('— ㉔ LAW 3 (M4, M5): «ended» is said only on the wrapper\'s ow
   for (let m = 0; m <= 12; m++) await X.at(m);
   const r = X.watch.endCommand('b', 'person');
   it = X.open()[0];
-  ok(r.ok && r.code === 'ending' && it && it.status === 'open' && it.action.nothingToEnd === true && it.i18n.text.params.then.key === TW.THEN.nothingToEnd && doorsOf(it) === 'keep-waiting,stop-turn', 'the press is ASKED («Ending the command…»); the wrapper answers no-command: the item STAYS open, says there is nothing to end, Stop its door', [r, it && it.resolvedBy, it && doorsOf(it)]);
+  ok(r.ok && r.code === 'ending' && it && it.status === 'open' && it.action.nothingToEnd === true && it.i18n.detail[0].key === TW.THEN.nothingToEnd && doorsOf(it) === 'keep-waiting,stop-turn', 'the press is ASKED («Ending the command…»); the wrapper answers no-command: the item STAYS open, says there is nothing to end, Stop its door', [r, it && it.resolvedBy, it && doorsOf(it)]);
   for (let m = 13; m <= 60; m++) await X.at(m);
   ok(X.ends().length === 1 && X.items().length === 1 && X.open().length === 1, 'and it is never ended by itself after it (one verb in all — the person\'s)');
   // the wrapper ended NOTHING (gone on their own) or could end nothing (survivors only): never «ended»
@@ -549,9 +550,19 @@ console.log('— ㉕ S2: the injected line SAYS the by-itself ending — through
   settings['turns.endStuckCommandMin'] = 45; const agy45 = start('antigravity');
   settings['turns.endStuckCommandMin'] = 0; const agyOff = start('antigravity');
   delete settings['turns.endStuckCommandMin']; const cl = start('claude');
-  ok(/\nCOMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own; VibeSpace ends one that has shown nothing, with nothing it started working, for 30 minutes \(the owner's setting\) — even a quiet wait by design; the step fails and the turn goes on\. /.test(agy), 'an agy session\'s SessionStart: the line says the by-itself ending — thirty minutes, the owner\'s setting, even a quiet wait by design', agy.slice(agy.indexOf('COMMANDS'), agy.indexOf('COMMANDS') + 300));
-  ok(/for 45 minutes \(the owner's setting\)/.test(agy45) && /COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own\. Run one/.test(agyOff) && !/VibeSpace ends one/.test(agyOff), 'the setting at 45: «45 minutes»; at 0 (never): the ending is not said');
+  ok(/\nCOMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own; where VibeSpace can read its processes, it ends one that has shown nothing, with nothing it started working, for 30 minutes \(the owner's setting\) — even a quiet wait by design; the step fails and the turn goes on\. /.test(agy), 'an agy session\'s SessionStart: the line says the by-itself ending — thirty minutes, the owner\'s setting, even a quiet wait by design', agy.slice(agy.indexOf('COMMANDS'), agy.indexOf('COMMANDS') + 300));
+  ok(/for 45 minutes \(the owner's setting\)/.test(agy45) && /COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own\. Run one/.test(agyOff) && !/it ends one/.test(agyOff), 'the setting at 45: «45 minutes»; at 0 (never): the ending is not said');
   ok(!/COMMANDS THAT MAY WAIT/.test(cl) && /USAGE WALLS/.test(cl), 'a claude session (its CLI bounds its own commands): no such line');
+}
+
+console.log('— ㉖ the closure check (主开发 10:53Z): the TRAY keeps the line that says WHEN — the item\'s first detail line is the row\'s LEAD, its own line under the clamped headline');
+{
+  const row = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8'), acts = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'), css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  ok(F0.leadLineOf('turn-stuck') === true && F0.leadLineOf('messages-waiting') === false, 'the registry row declares its lead (`leadLine`) — read by a function over the row, never a type branch');
+  ok(row.includes('leadLineOf(i.action.type)') && row.includes('<div class="ut-deadline ut-lead">${escHtml(lead)}</div>') && row.includes("const detail = lead ? leadLines.slice(1).join('\\n') : ctx.detailOf(i);") && acts.includes('rowCtx: { t, nameFor, wordsOf, detailOf, detailLinesOf,'), 'THE row renderer draws that line under the headline (escaped), the rest of the detail stays in the fold; the tray\'s and the chat\'s row context carry detailLinesOf');
+  ok(/:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\) > \.ut-body > \.ut-deadline \{ display: block !important;/.test(css) && /root\.querySelectorAll\('\[data-deadline-at\]'\)/.test(row), 'a FOLDED row keeps a `.ut-deadline` line (the tray, the phone, the chat\'s folded card) — and the deadline ticker touches only lines with a clock, never this one');
+  const w = TW.stuckWords({ state: 'stuck-on-command', tool: 'run_command', cmd: 'node driver.mjs', since: T0, cliAlive: true }, { cli: 'Antigravity CLI', endAt: T0 + 30 * MIN });
+  ok(w.i18n.detail.length === 1 && w.i18n.detail[0].key === TW.THEN.endAt && w.i18n.detail[0].params.time.at === T0 + 30 * MIN && !/ended by itself/.test(w.text), 'the words: the headline says what is stuck; the FIRST detail line says when it is ended by itself (an instant the viewer reads in its own zone)', w);
 }
 
 console.log('— ㉒ P2: the command\'s first words, cut and escaped where they are drawn');
@@ -566,9 +577,9 @@ console.log('— ㉒ P2: the command\'s first words, cut and escaped where they 
   const zh = (k, p) => String(zhOf(k)).replace(/\{(\w+)\}/g, (m, x) => (p && x in p ? p[x] : m));
   const line = L.saidLine(w1.i18n.text, zh, { now: T0, timeZone: 'UTC' });
   const html = R.wordsHtml(line);
-  ok(/^卡在一条命令上：run_command「node driver\.mjs --name "<img src=x onerror=alert\(1\)>"」自 .* 起没有任何输出，它启动的进程也都没在工作——Antigravity CLI 仍在运行。VibeSpace 不会自动结束它。$/.test(line) && !/<img/.test(html) && /&lt;img/.test(html), 'said in the viewer\'s language (the dictionary\'s own zh: no space after 」) — and drawn ESCAPED (THE row renderer\'s words)', [line, html.slice(0, 160)]);
+  ok(/^卡在一条命令上：run_command「node driver\.mjs --name "<img src=x onerror=alert\(1\)>"」自 .* 起没有任何输出，它启动的进程也都没在工作——Antigravity CLI 仍在运行。$/.test(line) && L.saidLine(w1.i18n.detail[0], zh, { now: T0, timeZone: 'UTC' }) === 'VibeSpace 不会自动结束它。' && !/<img/.test(html) && /&lt;img/.test(html), 'said in the viewer\'s language (the dictionary\'s own zh: no space after 」) — and drawn ESCAPED (THE row renderer\'s words)', [line, html.slice(0, 160)]);
   const kw = TW.stuckWords({ ...v, cmd: 'node driver.mjs' }, { cli: 'Antigravity CLI', endAt: T0 + 30 * MIN, kept: true });
-  ok(kw.i18n.text.params.then === '' && /is running\.$/.test(kw.text) && !/ended by itself/.test(kw.text), 'a KEPT headline states no time (the kept line says the one true time)', kw.text);
+  ok(kw.i18n.detail.length === 0 && kw.detail === '' && /is running\.$/.test(kw.text) && !/ended by itself/.test(kw.text), 'a KEPT card states no time of its own beside the kept line (no lead line; the kept line says the one true time)', kw);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

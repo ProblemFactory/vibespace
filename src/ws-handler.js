@@ -413,6 +413,10 @@ function registerWsHandler(wss, ctx) {
       global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
       session._exitAsked = { by: 'terminate', at: Date.now() }; // B-f698: the record names the actor (this case deletes the session before onExit — the belt)
       endTraces(data.sessionId); // r5 N: the conversation's end — its copies leave every desktop's dedup trace
+      // turn-never-silent S6: the agy a killed wrapper left (its recorded identity), read BEFORE the kills; ended below the removal
+      // (proc-signal endLeftGroup). Only a CLI in its own group (row stop 'restart' — agy): every other kill answers as before
+      const ownGroup = ((require('./backend-caps.js').capsOf(session.backend).liveness || {}).stop === 'restart');
+      const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;
       // Cancel any pending delayed-SIGINT from a recent interrupt — after
       // kill, the childPid may be reused by an unrelated process
       if (session._interruptTimer) { clearTimeout(session._interruptTimer); session._interruptTimer = null; }
@@ -438,14 +442,7 @@ function registerWsHandler(wss, ctx) {
       }
       if (session.pty) session.pty.kill();
       if (session.sockName) deleteSessionMeta(session.sockName);
-      // lane turn-never-silent (the look's S6): the agy a wrapper recorded (its pid + birth) is read BEFORE its sidecar goes —
-      // a wrapper killed past its own exit handler leaves agy (its own session) and its command running: ended after a grace
-      // while it is still that process (src/server/proc-signal.js endLeftGroup); the ending never awaited here. ONLY a harness
-      // whose CLI runs in its OWN process group (its liveness row's stop 'restart' — agy) reads it: every other kill answers
-      // exactly as before (a suite's kill waits 20 ms for its answer)
-      const ownGroup = ((require('./backend-caps.js').capsOf(session.backend).liveness || {}).stop === 'restart');
-      const leftAgy = ownGroup ? await require('./server/proc-signal.js').recordedChildOf(path.join(BUFFERS_DIR, `${data.sessionId}.json`)) : null;
-      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: (l) => console.log(`[session] ${data.sessionId}: ${l}`) }).catch(() => { });
+      if (leftAgy) require('./server/proc-signal.js').create().endLeftGroup(leftAgy, { say: (l) => console.log(`[session] ${data.sessionId}: ${l}`) }).catch(() => { });   // lane turn-never-silent S6: the record read before the kills (above)
       // Clean up wrapper buffer files — THE ONE LIST (src/server/wrapper-files.js, lane human-cli r5): .buf, .json, and the
       // .receipts a wrapper killed past its own exit handler leaves (off the loop)
       removeWrapperFiles(BUFFERS_DIR, data.sessionId);

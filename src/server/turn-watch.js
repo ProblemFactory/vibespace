@@ -304,7 +304,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     S.kept = kept;
     // one time per card, the true one: the headline drops its «ended by itself at …» (the kept line says the next time)
     const s = activeSessions.get(id), words = S.said && s ? TW.stuckWords(S.said, { cli: labelOf(s.backend), nothingToEnd: S.nothing, kept: true }) : null;
-    try { getUserTodos().redrawItem((x) => x.id === it.id, { text: words ? words.text : it.text, detail: it.detail || '', i18n: words ? words.i18n : it.i18n, facts: { ...(it.facts || {}), kept }, action: it.action }); } catch { }
+    try { getUserTodos().redrawItem((x) => x.id === it.id, { text: words ? words.text : it.text, detail: words ? words.detail : (it.detail || ''), i18n: words ? words.i18n : it.i18n, facts: { ...(it.facts || {}), kept }, action: it.action }); } catch { }
     end(it, 'kept-waiting');
     return { ok: true, kept };
   }

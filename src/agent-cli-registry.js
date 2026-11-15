@@ -69,7 +69,7 @@ const STANDING_RULES = Object.freeze([
     // toolsFor; 0 = off: not said) — and that a quiet wait BY DESIGN is ended too (the watch cannot tell the two apart)
     text: ({ noCommandBound, commandEndMin, jobs }) => (noCommandBound
       ? 'COMMANDS THAT MAY WAIT: this CLI gives a command no time limit of its own'
-        + (Number(commandEndMin) > 0 ? `; VibeSpace ends one that has shown nothing, with nothing it started working, for ${Math.round(Number(commandEndMin))} minutes (the owner's setting) — even a quiet wait by design; the step fails and the turn goes on` : '')
+        + (Number(commandEndMin) > 0 ? `; where VibeSpace can read its processes, it ends one that has shown nothing, with nothing it started working, for ${Math.round(Number(commandEndMin))} minutes (the owner's setting) — even a quiet wait by design; the step fails and the turn goes on` : '')
         + '. Run one that may wait for input as `timeout <seconds> <command> < /dev/null`'
         + (jobs ? '; a long quiet wait (a server, a watcher, a long test run) goes through Background Work (`vibespace-job run`).' : '.')
       : ''),
@@ -87,11 +87,13 @@ const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'alway
  *    266 B (264 + its blank line: 3 151 → 3 417 B measured in the widest shape, an agy session's; 3 426 B), test-prompt-budget ③
  *    re-judged with it; the look at 99f65d547 (S2) has that line SAY the by-itself ending with the setting's minutes: +185 B in
  *    the widest shape (the setting's widest 1440 minutes: 3 414 → 3 599 B measured; 3 611 B), test-prompt-budget ③ re-judged;
+ *    the closure check (主开发 10:53Z) has it say «where VibeSpace can read its processes» (a hub that reads none ends nothing):
+ *    +33 B (3 599 → 3 632 B measured; 3 644 B), test-prompt-budget ③ re-judged (5 821 / 6 657 / 8 062 B, each whole);
  *  · reminder — the bare line, measured 1 077 B (a manager, several groups, read reach) + room for ONE more segment the size
  *    of the channels one (113 B): the next taught row pays for itself or cuts another — lane agent-feedback's segment and
  *    its `feedback` pointer topic took 101 B (1 178 B — 22 B left);
  *  · summary — one index cell. */
-const CAPS = Object.freeze({ summary: 140, sessionStart: 3611, reminder: 1200 });
+const CAPS = Object.freeze({ summary: 140, sessionStart: 3644, reminder: 1200 });
 
 // ctx: sessionStart { g: the `--group <id> ` prefix ('' single-group), multi, reach, tray } · reminder { multi, reach, topics, tray }
 // (tray = the hub's words for where the owner's tray is — src/tray-words.js trayWords().phrase)

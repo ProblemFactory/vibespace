@@ -6,6 +6,23 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.403 — 2026-11-14
 
+### turn-never-silent — the closure check at 1f61bded7 (主开发 10:53Z: accepted on content, no must): the one small commit
+- **1. The tray keeps WHEN.** The tray clamps a headline, and it cut the sentence before «…ended by itself at HH:MM». That sentence is now the item's FIRST DETAIL LINE (stuckWords: `i18n.detail = [lead]`; the headline keys lose `{then}`), and the registry row declares it its LEAD (`leadLine: true`, read by `leadLineOf`).
+  - THE row renderer draws it as its own line under the headline — a `.ut-deadline ut-lead` line with no clock, so folded rows (tray, phone, the chat's folded card) keep it, and the deadline ticker, which reads only `[data-deadline-at]`, never touches it.
+  - The rest of the detail stays in the fold.
+  - The row context carries `detailLinesOf`.
+  - Keep waiting clears the item's plain detail too.
+- **2. The kill path's order.** The recorded agy is read BEFORE the kills (agy only), so kill and removal stay one step with no await between. The ending starts below the removal and is never awaited. The actor mark keeps its kills within the census's 2500 characters (1930 / 2091).
+- **3. The recorded birth carries the boot.** The agy wrapper records `childIdentity` = proc-identity's `identityOf` ({pid, starttime, bootId}). The hub ends a left agy through `signalIdentity` (its group first), which acts only while `judge()` says it is that very process: another boot, a recycled pid, a zombie or no birth all mean nothing is sent. Our own pid and group stay refused before it.
+  - A sidecar whose record misses its birth or its boot gives NO recorded agy.
+  - The pid census loses `signalRecordedGroup` (the group signal is proc-identity's own row); KILL_DOORS for proc-signal goes 4 → 3.
+- **4. The legs the verifier's mutants found missing** (test-turn-end ⑨):
+  - the hub's own group and its own pid ⇒ refused, nothing sent;
+  - a missing birth, another boot, a recycled pid ⇒ «gone», nothing sent;
+  - CONTROL: the true identity ⇒ its group signalled, SIGTERM then SIGKILL.
+- **5. The said limits** (kb-features, one line each): a card's minute can be one off while readings run slow; a wrapper that never answers is asked again about every three minutes; a hub that cannot read processes ends nothing — the agent's line now says «where VibeSpace can read its processes» (CAPS.sessionStart 3611 → 3644 B by its own 33 B; test-prompt-budget ③ re-judged: 5 821 / 6 657 / 8 062 B); a wrapper that dies by itself leaves its CLI until the conversation is ended; ending a conversation ends the CLI's own group only.
+- **The pins.** test-turn-watch ㉖ (the lead: registry, renderer, folded-row CSS, the words) and its legs moved from the headline to the lead; test-turn-end ⑨ (identity record, the four nothing-sent cases, the own group, the order); test-cli-registry (the new clause).
+
 ### turn-never-silent — the look at 99f65d547, follow-up 5: what the new pictures showed
 - **One time per card, the true one.** The first walk's kept card said TWO times: its headline still ended «…ended by itself at 01:27» while its kept line said «…at 01:30». Keep waiting now redraws the headline without its `{then}` (stuckWords `kept: true` ⇒ `then: ''`); the kept line carries the next time and is patched with the count.
 - **Each language its own spacing.** zh read «run_command「node driver.mjs」 自 00:56» — a space after the bracket, because the command's words were a param of a sentence spaced for a bare tool name. The command form is now its own keys (TEXT.cmd / cmdAlive / cmdGone: `{tool} «{cmd}»`; zh `{tool}「{cmd}」自 …`, ja `{tool}「{cmd}」は …`); the `{what}` words param is gone.

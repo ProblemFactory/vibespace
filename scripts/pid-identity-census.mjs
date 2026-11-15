@@ -41,7 +41,6 @@ export const ROWS = [
   // The look at 99f65d547: the helpers live in ONE module (src/server/proc-signal.js), each with its floor (0, 1, negative, own)
   ['src/server/proc-signal.js', 'try { if (kill) kill(-proc.pid, sig); else process.kill(-proc.pid, sig);', 'handle', 'proc.pid', 'agy\'s own process group (the wrapper\'s spawned child\'s pid = the group), above the floor and never our own group'],
   ['src/server/proc-signal.js', 'function signalOne(p, sig) { if (!sameBirth(p)) return false; try { if (kill) kill(p.pid, sig); else process.kill(p.pid, sig);', 'starttime', 'sameBirth\\(p\\)', 'a process below agy (read through its children files before the signal), its stat starttime checked at the signal, above the floor'],
-  ['src/server/proc-signal.js', 'function signalRecordedGroup(left, sig) { if (!sameBirth(left) || left.pid === myGroup()) return false; try { if (kill) kill(-left.pid, sig); else process.kill(-left.pid, sig);', 'starttime', 'sameBirth\\(left\\)', 'the look\'s S6: the agy a killed wrapper\'s sidecar recorded (childPid + childStart) — its group, only while its leader is still that process'],
   [CI, "process.kill(child.pid, 'SIGKILL'", 'handle', 'child.pid', 'a held gate child'],
   [CI, 'process.kill(o.pid, sig)', 'starttime', 'sameProcess\\(o,', 'the reaper\'s victims (own copy: rows from the same /proc pass; a starttime-less row is never signalled, said — B-5ee1)'],
   [CI, 'const alive = (pid) => { try { process.kill(pid, 0)', 'probe', 'the reaper\'s liveness wait', 'nothing'],

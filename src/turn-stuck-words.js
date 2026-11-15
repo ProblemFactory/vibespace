@@ -10,26 +10,26 @@
 // param `{at}` the client says in the viewer's own zone).
 
 // THE LOOK AT 99f65d547 (主开发 07:49Z), pictures P1 + P2: the headline names WHAT runs — the tool and the command's first
-// words (`{what}`) — and says, where it is seen (never in a fold), what happens if nothing is pressed and when (`{then}`):
-// «it is ended by itself at HH:MM», «VibeSpace does not end it by itself», or law 3's «there is nothing to end».
+// words — and the item says, where it is seen (never in a fold), what happens if nothing is pressed and when: «it is ended
+// by itself at HH:MM», «VibeSpace does not end it by itself», or law 3's «there is nothing to end». The closure check
+// (主开发 10:53Z): the tray clamps a headline, so that sentence is the item's FIRST DETAIL LINE, which the registry row
+// declares its LEAD (`leadLine`): its own short line under the headline, kept in a folded row too.
 const TEXT = Object.freeze({
   // the tool alone (no command words) or the tool AND its command's first words (`cmd*`) — a key each, so each language sets its own spacing
-  command: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working. {then}',
-  cmd: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working. {then}',
-  cmdAlive: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is running. {then}',
-  cmdGone: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is not running. {then}',
-  silent: 'No output since {since}, and no command is open. {then}',
-  unknown: 'No output since {since} — whether its processes are working cannot be read on this machine. {then}',
+  command: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working.',
+  cmd: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working.',
+  cmdAlive: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is running.',
+  cmdGone: 'Stuck on a command: {tool} «{cmd}» has shown nothing since {since}, and nothing it started is working — {cli} is not running.',
+  silent: 'No output since {since}, and no command is open.',
+  unknown: 'No output since {since} — whether its processes are working cannot be read on this machine.',
   // the headline says whether the CLI process runs (the pictures of 11-15: in the fold, nobody saw it) — one key per fact
-  commandAlive: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running. {then}',
-  commandGone: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running. {then}',
-  silentAlive: 'No output since {since}, and no command is open — {cli} is running. {then}',
-  silentGone: 'No output since {since}, and no command is open — {cli} is not running. {then}',
+  commandAlive: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is running.',
+  commandGone: 'Stuck on a command: {tool} has shown nothing since {since}, and nothing it started is working — {cli} is not running.',
+  silentAlive: 'No output since {since}, and no command is open — {cli} is running.',
+  silentGone: 'No output since {since}, and no command is open — {cli} is not running.',
 });
 const THEN = Object.freeze({
-  // an INSTANT CLAUSE (the For-you renderer's `{at, key, gone}`): its clock in the viewer's zone while it is ahead, `gone` after
-  endAt: 'If nothing changes, the command is ended by itself at {time}.',
-  endingNow: 'If nothing changes, the command is ended by itself at the next reading.',
+  endAt: 'If nothing changes, the command is ended by itself at {time}.',   // {time}: an instant, said in the viewer's zone
   notByItself: 'VibeSpace does not end it by itself.',
   nothingToEnd: 'There is nothing to end: {cli} itself waits on a step with no command running.',
 });
@@ -60,14 +60,14 @@ function stuckWords(v, { cli = 'The CLI', endAt = 0, nothingToEnd = false, kept 
   const since = Number(v.since) || 0;
   const ends = v.state === 'stuck-on-command' && !nothingToEnd && Number(endAt) > 0;
   const thenKey = v.state === 'stuck-on-command' && nothingToEnd ? THEN.nothingToEnd : ends ? THEN.endAt : THEN.notByItself;
-  const then = kept ? '' : thenKey === THEN.nothingToEnd ? { key: thenKey, params: { cli: String(cli) } } : ends ? { at: Number(endAt), key: thenKey, gone: THEN.endingNow } : { key: thenKey };
-  const thenText = kept ? '' : fill(thenKey, thenKey === THEN.nothingToEnd ? { cli: String(cli) } : ends ? { time: hhmm(endAt) } : {});
-  const text = fill(key, { tool, cmd, since: hhmm(since), cli: String(cli), then: thenText }).trim();
+  const lead = kept ? null : thenKey === THEN.nothingToEnd ? { key: thenKey, params: { cli: String(cli) } } : ends ? { key: thenKey, params: { time: { at: Number(endAt) } } } : { key: thenKey };
+  const leadText = kept ? '' : fill(thenKey, thenKey === THEN.nothingToEnd ? { cli: String(cli) } : ends ? { time: hhmm(endAt) } : {});
+  const text = fill(key, { tool, cmd, since: hhmm(since), cli: String(cli) });
   const i18n = {
-    text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool, ...(cmd ? { cmd } : {}) } : {}), ...(known ? { cli: String(cli) } : {}), since: { at: since }, then } },
-    detail: [],
+    text: { key, params: { ...(v.state === 'stuck-on-command' ? { tool, ...(cmd ? { cmd } : {}) } : {}), ...(known ? { cli: String(cli) } : {}), since: { at: since } } },
+    detail: lead ? [lead] : [],
   };
-  return { text, detail: '', i18n };
+  return { text, detail: leadText, i18n };
 }
 /** L3: the item's words for a restart whose old process has not exited (the wrapper's sidecar `restartStuck`) */
 function restartWords({ since, state }, { cli = 'The CLI' } = {}) {
