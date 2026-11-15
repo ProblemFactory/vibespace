@@ -345,7 +345,9 @@ export function installUsageMeter(App, ctx = {}) {
     if (sel === 'auto') estSel = (claudeDefId && this._accountUsage?.[claudeDefId]) ? estimates[claudeDefId] : estimates.__global__;
     else if (sel === '__global__') estSel = estimates.__global__;
     else estSel = estimates[sel] || (gl.accountId === sel ? estimates.__global__ : null) || null;
-    estSel = popupEst(estSel);   // the popup alone draws a PROVISIONAL lane (marked by its words); every other surface reads ON lanes
+    // the taskbar row, its rings and the phone's chip read estSel — ON lanes only; the popup's bars and words read estPop, where a
+    // PROVISIONAL lane is merged in and marked by its words (law B4; the closure check's S1: the rings and the chip drew it unmarked)
+    const estPop = popupEst(estSel);
     // Codex mirrors the Claude selection model: per-account quota buckets from
     // /api/usage codexAccounts (key = cxs id / '__global_codex__'), the machine
     // login linked to a named ChatGPT account by email, 'auto' = default account.
@@ -378,7 +380,7 @@ export function installUsageMeter(App, ctx = {}) {
     let cEstSel = null;
     if (cSel === 'auto') cEstSel = (codexDefId && cBuckets[codexDefId]) ? estimates[codexDefId] : estimates.__global_codex__;
     else cEstSel = estimates[cSel] || null;
-    cEstSel = popupEst(cEstSel);
+    const cEstPop = popupEst(cEstSel);
     const hasSwitch = claudeSubs.length > 0;
     const codexHasSwitch = codexSubs.length > 0;
 
@@ -590,6 +592,10 @@ export function installUsageMeter(App, ctx = {}) {
       const color7d = usageColor(pct7d);
       const p5 = estDisplayPair(v5.reading, v5.est);
       const p7 = estDisplayPair(v7.reading, v7.est);
+      // the popup's own views (law B4): a PROVISIONAL lane merged in, marked by its words — never the row's rings or the chip
+      const pv5 = bucketView(quotaModel, rl?.fiveHour, estPop?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });
+      const pv7 = bucketView(quotaModel, rl?.sevenDay, estPop?.sevenDay, Date.now(), { readAt: rl?.fetchedAt });
+      const pp5 = estDisplayPair(pv5.reading, pv5.est), pp7 = estDisplayPair(pv7.reading, pv7.est);
       // THE ROW KEEPS TWO RINGS (lane usage-two-rings, owner 2026-11-05: 「没有 5 hour 的话，你应该还是显示两个饼状图吧」 → 18:40
       // PT 「我是说没有 5h 就显示 7d+fable」): a reading without a 5h window shows the account's OTHER limit — the model-scoped
       // weekly cap (capRing: read / not read) — beside its 7d, in NO5H_RINGS' order; with a 5h window, 5h + 7d.
@@ -638,6 +644,9 @@ export function installUsageMeter(App, ctx = {}) {
         const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });
         const pSc = estDisplayPair(vSc.reading, vSc.est);
         const pctSc = pSc.estPct != null ? pSc.darkPct : Math.round((vSc.reading.utilization || 0) * 100);
+        const scPop = (estPop?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(sc.name || '').toLowerCase()) || null;
+        const vScP = bucketView(quotaModel, sc, scPop, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });
+        const pScP = estDisplayPair(vScP.reading, vScP.est), pctScP = pScP.estPct != null ? pScP.darkPct : pctSc;   // the popup's own (provisional marked)
         // A LIMIT WHOSE WINDOW HAS NOT STARTED (B-8b12): it is shown (the
         // vendor named it, and hiding a limit is its own kind of lie) but it
         // states no reset — its `resetsAt` is `now + duration` on every read —
@@ -656,10 +665,10 @@ export function installUsageMeter(App, ctx = {}) {
         scopedSections.push(`
       <div class="usage-session">
         <div class="usage-session-name">${t('{name} weekly limit', { name: escHtml(sc.name) })}</div>
-        <div class="${barClass(vSc)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctSc}%;background:${colorSc}"></div>${estBar(pSc)}</div>
+        <div class="${barClass(vSc)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pctScP}%;background:${colorSc}"></div>${estBar(pScP)}</div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
-          ${estStat(pSc, estSel, 'scoped:' + String(sc.name || '').trim().toLowerCase())}
+          <span class="usage-stat">${t('{pct}% used', { pct: pctScP })}</span>
+          ${estStat(pScP, estPop, 'scoped:' + String(sc.name || '').trim().toLowerCase())}
           ${resetStat(vSc, scNotStarted ? escHtml(windowNote(sc, { t })) : fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated))}
           ${scNotStarted ? '' : scAge}${scNotStarted ? '' : claimBtn(quotaModel.laneOfBucket(rl, 'scoped', sc.name), vSc, sc.name)}
         </div>
@@ -681,10 +690,10 @@ export function installUsageMeter(App, ctx = {}) {
         ? `<div class="usage-note">${t('No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.')}</div>`
         : `${has5h ? `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="${barClass(v5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
+        <div class="${barClass(v5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pp5.estPct != null ? pp5.darkPct : pct5h}%;background:${color}"></div>${estBar(pp5)}</div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
-          ${estStat(p5, estSel, 'fiveHour')}
+          <span class="usage-stat">${t('{pct}% used', { pct: pp5.estPct != null ? pp5.darkPct : pct5h })}</span>
+          ${estStat(pp5, estPop, 'fiveHour')}
           ${resetStat(v5, fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization))}
           ${laneAge(atOf('plan:5h'))}${claimBtn('plan:5h', v5)}
         </div>
@@ -697,10 +706,10 @@ export function installUsageMeter(App, ctx = {}) {
       </div>`}
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="${barClass(v7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>
+        <div class="${barClass(v7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pp7.estPct != null ? pp7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(pp7)}</div>
         <div class="usage-session-stats">
-          <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
-          ${estStat(p7, estSel, 'sevenDay')}
+          <span class="usage-stat">${t('{pct}% used', { pct: pp7.estPct != null ? pp7.darkPct : pct7d })}</span>
+          ${estStat(pp7, estPop, 'sevenDay')}
           ${resetStat(v7, fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated))}
           ${laneAge(atOf('plan:7d'))}${claimBtn('plan:7d', v7)}
         </div>
@@ -728,6 +737,10 @@ export function installUsageMeter(App, ctx = {}) {
       const color7d = usageColor(pct7d);
       const cp5 = estDisplayPair(cv5.reading, cv5.est);
       const cp7 = estDisplayPair(cv7.reading, cv7.est);
+      // the popup's own codex views (law B4) — the row and the chip keep the ON-only ones above
+      const cpv5 = bucketView(quotaModel, codex?.fiveHour, cEstPop?.fiveHour, Date.now(), { readAt: codex?.fetchedAt });
+      const cpv7 = bucketView(quotaModel, codex?.sevenDay, cEstPop?.sevenDay, Date.now(), { readAt: codex?.fetchedAt });
+      const cpp5 = estDisplayPair(cpv5.reading, cpv5.est), cpp7 = estDisplayPair(cpv7.reading, cpv7.est);
       rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData, [cp5, cp7], [cv5, cv7]));
       if (!cNoData) chipWorst = Math.max(chipWorst, cp5.estPct ?? pct5h, cp7.estPct ?? pct7d);
       // Account switcher — same model as Claude's: merged chip when the machine
@@ -757,19 +770,19 @@ export function installUsageMeter(App, ctx = {}) {
           : `<div class="usage-note">${t('No usage captured yet for this account — run a session on it.')}</div>`)
         : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="${barClass(cv5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cp5)}</div>
+        <div class="${barClass(cv5)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cpp5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
-          ${estStat(cp5, cEstSel, 'fiveHour')}
+          ${estStat(cpp5, cEstPop, 'fiveHour')}
           ${resetStat(cv5, fmtReset(codex.fiveHour?.resetsAt, codex.fiveHour?.utilization))}
         </div>
       </div>
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="${barClass(cv7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cp7)}</div>
+        <div class="${barClass(cv7)}" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cpp7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
-          ${estStat(cp7, cEstSel, 'sevenDay')}
+          ${estStat(cpp7, cEstPop, 'sevenDay')}
           ${resetStat(cv7, fmtReset(codex.sevenDay?.resetsAt, codex.sevenDay?.utilization))}
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
           ${codex.resetCredits ? `<span class="usage-stat" title="${escHtml(t('Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)'))}"><span class="usage-stat-label">${escHtml(t('Reset credits'))}</span> ${Number(codex.resetCredits.availableCount) || 0}</span>` : ''}

@@ -62,8 +62,8 @@ const AGY = require(path.join(REPO, 'src/harnesses/antigravity.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 const am = new AccountManager({ dataDir: DATA });
 const mkAcct = (name) => { const a = am.createHomeSubscription('antigravity', { name }); fs.writeFileSync(path.join(a.dir, AGY.TOKEN_REL), 'LOGIN', { mode: 0o600 }); am.finalizeHomeSubscription(a.id); return a; };
-const NAMES = ['Work', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Mut one', 'Mut two', 'Mut three', 'Mut four', 'Mut five', 'Mut six', 'Mut seven'];
-const [A, B, Cc, D, E5, F6, G7, H8, I9, J10, M1, M2, M3, M4, M5, M6, M7] = NAMES.map(mkAcct);
+const NAMES = ['Work', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Mut one', 'Mut two', 'Mut three', 'Mut four', 'Mut five', 'Mut six', 'Mut seven', 'Mut eight'];
+const [A, B, Cc, D, E5, F6, G7, H8, I9, J10, M1, M2, M3, M4, M5, M6, M7, M8] = NAMES.map(mkAcct);
 const FIX = JSON.parse(read('scripts/fixtures/antigravity-usage-1.4.3.json'));
 const ANSWERS = {
   reading: { code: 0, out: JSON.stringify(FIX.envelope) + '\n' },
@@ -133,6 +133,9 @@ console.log('① the read count on disk (src/door-reads.js)');
   const bad = await DR.bumpDoorRead(dir, 'k', 'afterTurn', next, { writer });
   failWrites = false;
   ok('a write that FAILS answers false (the door refuses on it)', bad === false);
+  const before = DR.todayOf(DR.readDoorReads(dir, 'k'), next).total;
+  const thrown = await DR.bumpDoorRead(dir, 'k', 'afterTurn', next, { writer: { dirty() { throw new Error('made: the writer is gone'); }, durable() { return Promise.resolve(true); } }, log: () => { } });
+  ok('a writer that THROWS at dirty() is a failed write too: false, and the count rolled back (nothing counted in memory)', thrown === false && DR.todayOf(DR.readDoorReads(dir, 'k'), next).total === before);
   let threw = null; try { await DR.bumpDoorRead(dir, 'k', 'timer', next, { writer }); } catch (e) { threw = e.message; }
   ok('an unknown caller is refused by name (a fourth caller has no row)', /unknown caller "timer"/.test(String(threw)), threw);
   W.writeReading({ cacheDir: dir, key: 'k', set: { ...U.judgeUsageAnswer({ code: 0, stdout: JSON.stringify(FIX.envelope), measuredAt: next + 5e3 }).reading, identity: 'k' }, extras: { backend: 'antigravity' }, source: 'cli-usage', backend: 'antigravity' });
@@ -252,6 +255,15 @@ console.log('⑦ A RESTART: nothing is caught up; the ceiling stands; a turn run
   const live = r3.onTurnEnd(restored, { ts: iso(clock.t), kind: 'prompt_end' });
   await pass_(QUIET);
   ok('…the restored turn ends live ⇒ armed, and ONE read 5 quiet minutes later', live && live.armed && runsOf(H8) === 1);
+  // THE BUSY CHECK AT THE MOMENT OF THE READ (the closure check's S3): armed while nothing ran; then a conversation of the account
+  // is running when the wait runs out though the road never heard its start (a turn begun through a road it does not see)
+  await pass_(PACE + 60e3);
+  const r4 = mkRoad(), s4 = sess(H8), unseen = sess(H8);
+  start(r4, s4); const armed4 = end(r4, s4);
+  await pass_(60e3); unseen._isStreaming = true;   // no onTurnStart: only the conversation's own state says it runs
+  await pass_(QUIET);
+  ok('the wait runs out while ANOTHER conversation of the account runs (its start never heard): NO read — «a turn runs» is read at the moment of the read', armed4 && armed4.armed && runsOf(H8) === 1);
+  unseen._isStreaming = false;
 }
 
 console.log('⑧ nothing to arm, and the door\'s own refusals');
@@ -407,6 +419,14 @@ console.log('⑫ RED CONTROLS: the road and the door without each of their rules
     ok('CONTROL ⑫d (A1): with «a turn runs» not read from the conversations, the account is read WHILE its restored turn runs', runsOf(M4) === 1, String(runsOf(M4)));
   }
   {
+    const mod = mutant(F, '    if (busy(key)) return null;\n    const stop =', '    const stop =');   // fire()'s check only; onTurnEnd's kept
+    await pass_(PACE + 60e3);
+    const road = mkRoad({}, mod), a = sess(M8), other = sess(M8);
+    start(road, a); end(road, a); await pass_(60e3); other._isStreaming = true; await pass_(QUIET);
+    ok('CONTROL ⑫g (S3): without the check at the moment of the read, the account is read while a turn of it runs that the road never heard start', runsOf(M8) === 1, String(runsOf(M8)));
+    other._isStreaming = false;
+  }
+  {
     const mod = mutant(F, '    if (steady < paceMs) {', '    if (false) {');
     const road = mkRoad({}, mod), s = sess(M5);
     await stretch(road, s);
@@ -434,7 +454,17 @@ console.log('⑬ the account row says the day\'s reads — as text, for every ac
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   ok('…zh and ja say both, every placeholder kept', [zh[KEY], ja[KEY]].every((s) => typeof s === 'string' && ['{n}', '{person}', '{wall}', '{after}'].every((p) => s.includes(p))) && [zh[NOTE], ja[NOTE]].every((s) => typeof s === 'string' && s.includes('{n}')), JSON.stringify([zh[NOTE], ja[NOTE]]));
   const UR = read('src/usage-routes.js'), MAs = read('src/lib/manage-agents.js');
-  ok('/api/usage serves every account the door read today — one with NO reading too (limits [], its count)', /if \(!has && !reads\.total\) continue;/.test(UR) && /limits: has \? c\.limits : \[\]/.test(UR));
+  // THE FAILED-ONLY ACCOUNT, DRIVEN (the closure check's S5): four reads that all fail, through the real door — no reading on disk,
+  // the count on disk; the row /api/usage serves (homeAccountEntry, the route's own call) and the row's words
+  usageMode = 'auth';
+  const dF = mkDoor();
+  for (let i = 0; i < 4; i++) { clock.t += 2 * 60e3; clock.m += 2 * 60e3; await dF.read(J10.id, { person: true }); }
+  usageMode = 'reading';
+  const readsF = DR.todayOf(DR.readDoorReads(CACHE, J10.id), clock.t), rowF = DR.homeAccountEntry(W.readCacheObject(CACHE, J10.id), readsF);
+  ok('an account whose four reads all FAILED: no reading on disk, its count is (4), and /api/usage serves it a row — limits [], the count — that says «usage read 4× today»',
+    !W.readCacheObject(CACHE, J10.id) && readsF.total === 4 && readsF.person === 4 && rowF && Array.isArray(rowF.limits) && rowF.limits.length === 0 && rowF.reads.total === 4 && MA.doorReadsNote(rowF.reads) === 'usage read 4× today' && /4 by you/.test(MA.doorReadsLine(rowF.reads)), { readsF, rowF });
+  ok('…an account neither read nor counted today gets no row; one with a reading gets its limits', DR.homeAccountEntry(null, DR.todayOf(null, clock.t)) === null && DR.homeAccountEntry({ limits: [{ limitId: 'x' }], fetchedAt: 5 }, DR.todayOf(null, clock.t)).limits.length === 1);
+  ok('/api/usage builds each on-demand account\'s row through that one helper (doorReads.homeAccountEntry)', /const row = doorReads\.homeAccountEntry\(c, reads\);/.test(UR) && /if \(row\) out\[a\.id\] = row;/.test(UR));
   ok('…the roster draws the count as TEXT on the identity line (no badge, no colour), its title the split, patched at every poll', MAs.includes('<span class="acct-key-tail">${ident}${readsNote(a.id)}</span>') && MAs.includes("document.querySelectorAll('.acct-reads[data-reads-key]')") && !/acct-reads[^\n]*(badge|color)/.test(MAs));
 }
 

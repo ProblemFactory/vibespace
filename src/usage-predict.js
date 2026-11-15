@@ -68,11 +68,6 @@ function pairsOf(line, since = -Infinity) {
   }
   return out;
 }
-function q(sorted, p, off = 0, len = sorted.length - off) {
-  if (len <= 0) return null;
-  const k = (len - 1) * p, f = Math.floor(k), c = Math.ceil(k);
-  return f === c ? sorted[off + f] : sorted[off + f] + (sorted[off + c] - sorted[off + f]) * (k - f);
-}
 /** Wirth's selection: after it, a[k] is the k-th smallest, everything before ≤ it, everything after ≥ it (in place, O(n)). */
 function selectK(a, k) {
   let l = 0, m = a.length - 1;
