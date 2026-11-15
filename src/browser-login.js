@@ -95,6 +95,7 @@ const ALL_CHARS = CLASSES.join('');
 const LOCKED = 'the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then (do not ask them to)';
 const HOLD_TOO_MUCH_TEXT = 'too much text to check';
 const HOLD_UNKNOWN_TYPED = 'unknown_typed';
+const HOLD_VALUE_SHOWN = 'value_shown';   // (lane chrome-157, round 32's one check: the page put what was typed into its own address or title)
 
 const str = (v) => (v === undefined || v === null ? '' : String(v));
 const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
@@ -743,6 +744,12 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
       `refused "${cmd}" on ${site} because VibeSpace can no longer verify whether a filled login secret is still on this tab — reload or navigate this tab, or open or switch to another tab (until this tab reloads or navigates, cross-origin requests from this page are blocked)`
     );
   }
+  if (holdReason === HOLD_VALUE_SHOWN) {
+    return no(
+      'login_fill_live',
+      `refused "${cmd}" on ${site} because the page put the filled login secret into its own address or title — navigate this tab to another page (a reload of this address keeps it refused), or open or switch to another tab (until this tab leaves this page, cross-origin credential requests from it are blocked)`
+    );
+  }
   if (holdReason === HOLD_TOO_MUCH_TEXT) {
     return no(
       'login_fill_live',
@@ -755,15 +762,15 @@ function liveFillVerdict({ verb = '', argv = [], batchVerbs = null, origin = '',
   );
 }
 
-/** Pure Law 1 verdict after checking active post-lift guards on a tab:
- *  a guard retirement (`url` moved within document) is NEVER a check, so a `postLiftHeld` fence lifts ONLY when every guard
- *  that armed it was genuinely checked on this pass and verified clean; otherwise it converts to `HOLD_UNKNOWN_TYPED` until navigation. */
-function postLiftOutcomeVerdict({ postLiftHeld = false, heldGuardIds = [], checkedGuardIds = [], refilledGuardIds = [], retiredGuardCount = 0, anyTooMuch = false } = {}) {
+/** Pure Law 1 verdict after checking active post-lift guards on a tab: a `postLiftHeld` fence lifts ONLY when every guard that armed
+ *  it was genuinely checked on this pass and verified clean; otherwise it converts to `HOLD_UNKNOWN_TYPED` until navigation. (A guard
+ *  belongs to its document — an address move inside it retires none — so nothing but a check counts.) */
+function postLiftOutcomeVerdict({ postLiftHeld = false, heldGuardIds = [], checkedGuardIds = [], refilledGuardIds = [], anyTooMuch = false } = {}) {
   const checked = new Set(Array.isArray(checkedGuardIds) ? checkedGuardIds : []);
   const held = Array.isArray(heldGuardIds) ? heldGuardIds.filter((x) => x != null) : [];
   const refilled = Array.isArray(refilledGuardIds) ? refilledGuardIds.filter((x) => x != null) : [];
   const unverifiedHeld = Boolean(postLiftHeld) && (
-    held.length > 0 ? held.some((id) => !checked.has(id)) : (checked.size === 0 || Number(retiredGuardCount) > 0)
+    held.length > 0 ? held.some((id) => !checked.has(id)) : checked.size === 0
   );
   if (unverifiedHeld) {
     return { action: 'hold_unknown', holdReason: HOLD_UNKNOWN_TYPED, heldGuardIds: [] };
@@ -855,7 +862,7 @@ module.exports = {
   PREFIX, DOOR, USER_MAX, GENERATED_LEN, TEXT_MAX, NOTES_MAX, PENDING_REMIND_MS,
   VAULT_FIELDS, TYPED_SLOTS, BY, SOURCES, STRENGTHS, PENDING_KINDS, REFUSALS, LIVE_FILL_ALLOW_VERBS,
   NAME_RE, ORIGIN_RE, ENTRY_GEN_RE, CLASSES, NOTICE,
-  LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED,
+  LOCKED, HOLD_TOO_MUCH_TEXT, HOLD_UNKNOWN_TYPED, HOLD_VALUE_SHOWN,
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
   newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord,

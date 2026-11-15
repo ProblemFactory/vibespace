@@ -1364,27 +1364,21 @@ function normalizeRegistry(doc) {
  *  `targetId`, bounded to 32) keeping ONLY `{targetId, urlAtFill, origin, at, browserKey?}`, plus `scrubs` (`{name, at}`). */
 function normalizeLoginFenceState(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return { fences: [], scrubs: [] };
-  const rawRows = [
-    ...(Array.isArray(v.fences) ? v.fences : []),
-    ...(Array.isArray(v.guards) ? v.guards : []),
-  ];
+  // lane chrome-157 (vault-login round 32, the owner's sentence — 6): ONE record kind is read, {targetId, urlAtFill, docId, origin,
+  // at, browserKey?} — a fence belongs to its DOCUMENT (docId: Chrome's loaderId at the fill); a row of a shape that never shipped
+  // (no docId; the r22–r31 `guards`) is NOT READ. No released version wrote any (measured on master: no fence record at all).
   const byTarget = new Map();
-  for (const f of rawRows) {
+  for (const f of (Array.isArray(v.fences) ? v.fences : [])) {
     if (!f || typeof f !== 'object' || typeof f.targetId !== 'string' || !f.targetId || typeof f.origin !== 'string' || !f.origin) continue;
+    if (typeof f.docId !== 'string' || !f.docId) continue;
     const tid = String(f.targetId).slice(0, 64);
-    const prev = byTarget.get(tid);
-    const urlAtFill = String(f.urlAtFill || (prev && prev.urlAtFill) || '').slice(0, 2048);
-    const origin = String(prev ? prev.origin : f.origin).slice(0, 512);
-    const at = Math.max(Number(prev && prev.at) || 0, Number(f.at) || 0);
-    const bk = typeof (prev && prev.browserKey ? prev.browserKey : f.browserKey) === 'string' && (prev && prev.browserKey ? prev.browserKey : f.browserKey)
-      ? String(prev && prev.browserKey ? prev.browserKey : f.browserKey).slice(0, 40)
-      : '';
     byTarget.set(tid, {
       targetId: tid,
-      urlAtFill,
-      origin,
-      at,
-      ...(bk ? { browserKey: bk } : {}),
+      urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
+      docId: String(f.docId).slice(0, 128),
+      origin: String(f.origin).slice(0, 512),
+      at: Number(f.at) || 0,
+      ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
     });
   }
   const fences = [...byTarget.values()].slice(-32);

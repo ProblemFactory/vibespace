@@ -207,6 +207,21 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
     if (!tid || !loginFence || typeof loginFence.liveFillTarget !== 'function') return null;
     return loginFence.liveFillTarget(profileId, tid) || null;
   }
+  /** lane chrome-157 (vault-login round 32, the one check): a fenced tab's top-frame navigation carries its next address to the
+   *  agent; when the hub finds the typed value in that address the event names the address at the fill, as the listing does (the
+   *  tab stays fenced, so nothing else of the new document is read). Returns the event to send. */
+  function maskShownNav(profileId, tid, ev, lf) {
+    const fr = ev && ev.method === 'Page.frameNavigated' && ev.params && ev.params.frame;
+    if (!fr || fr.parentId || !lf || !loginFence || typeof loginFence.navShowsValue !== 'function') return ev;
+    let shown = false;
+    try { shown = Boolean(loginFence.navShowsValue(profileId, tid, `${fr.url || ''}${fr.urlFragment || ''} ${fr.unreachableUrl || ''}`)); } catch { shown = true; }
+    if (!shown) return ev;
+    const at = String(lf.urlAtFill || '');
+    const frame = { ...fr, url: at };
+    delete frame.urlFragment;
+    if (frame.unreachableUrl) frame.unreachableUrl = at;
+    return { ...ev, params: { ...ev.params, frame } };
+  }
   function resolveCallTarget(p, g, msg, sid) {
     if (p.kind === 'page') return { tid: p.targetId || null, unknownSession: false, wrapped: false, innerMethod: null, innerParams: null, innerParamTid: null };
     if (msg.method === 'Target.sendMessageToTarget') {
@@ -484,25 +499,30 @@ function create({ log = console, now = Date.now, versionRetryMs = VERSION_RETRY_
         return;
       }
       if (msg.id != null) return; // a reply to nothing we forwarded
-      const ev = M.filterEvent(msg, g.scope);
+      let ev = M.filterEvent(msg, g.scope);
       if (!ev) { g.dropped = (g.dropped || 0) + 1; return; }
       if (loginFence) {
         const evSid = ev.sessionId == null ? null : String(ev.sessionId);
         const evTid = conn.kind === 'page' ? conn.targetId : (evSid && g.scope ? g.scope.sessions.get(evSid) || null : null);
         const evUnknownFenced = Boolean(evSid && !evTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
         // lane chrome-157 (round 32, 主开发 item 2): a fenced tab's events pass by the argued list alone (browser-mediation liveFillEventAllowed)
-        if ((liveFillFor(g.profileId, evTid) || evUnknownFenced) && !M.liveFillEventAllowed(ev, evTid)) {
+        const evLf = liveFillFor(g.profileId, evTid);
+        if ((evLf || evUnknownFenced) && !M.liveFillEventAllowed(ev, evTid)) {
           g.dropped = (g.dropped || 0) + 1;
           return;
         }
+        if (evLf) ev = maskShownNav(g.profileId, evTid, ev, evLf);
         if (ev.method === 'Target.receivedMessageFromTarget' && ev.params && typeof ev.params.message === 'string') {
           const innerSid = ev.params.sessionId ? String(ev.params.sessionId) : null;
           const innerTid = innerSid && g.scope ? g.scope.sessions.get(innerSid) || null : (ev.params.targetId ? String(ev.params.targetId) : null);
           const innerUnknownFenced = Boolean(!innerTid && typeof loginFence.hasActiveFillOnProfile === 'function' && loginFence.hasActiveFillOnProfile(g.profileId));
-          if (liveFillFor(g.profileId, innerTid) || innerUnknownFenced) {
+          const innerLf = liveFillFor(g.profileId, innerTid);
+          if (innerLf || innerUnknownFenced) {
             let inner = null;
             try { inner = JSON.parse(ev.params.message); } catch { inner = null; }
             if (!inner || inner.id != null || !M.liveFillEventAllowed(inner, innerTid)) { g.dropped = (g.dropped || 0) + 1; return; }
+            const masked = innerLf ? maskShownNav(g.profileId, innerTid, inner, innerLf) : inner;
+            if (masked !== inner) ev = { ...ev, params: { ...ev.params, message: JSON.stringify(masked) } };
           }
         }
         if (ev.method === 'Tracing.dataCollected') {

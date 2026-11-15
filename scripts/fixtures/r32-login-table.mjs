@@ -18,14 +18,14 @@
  *   - Leg 3 (`R32-Stash`): Same-process RAM stash & browser identity laws — 0 login identity on disk; stash returned
  *     ONLY to the exact same browser instance (`DEVTOOLS_ID` UUID + `keeper.browserOf` PID/starttime), never applied
  *     to a replacement browser; dropped immediately on `disarm`, `removeProfile`, `dropLeaseTabs`, and `shutdown()`;
- *     stale persisted fences dropped on `url-changed` across cold Hub restart.
+ *     a persisted fence whose tab holds a NEW document after a cold Hub restart dropped (by document id, never address).
  *   - Leg 4 (`R32-Doors`): Both exit doors work live on a Shape S fenced tab (`tab new` / `tab <other>` and `reload`
  *     / navigation), while cross-origin requests from the fenced tab are blocked until reload/navigation.
  *   - Leg 5 (`R32-NavSeq`): `fixups-r32` Law 5 — in-flight `recheckPostLiftOnTab` held across `Page.frameNavigated`
  *     never false-fences a reloaded clean document and never hands a stale `{ ok: true }` to a new document's guard.
- *   - Leg 6 (`R32-Compat`): Bidirectional disk compatibility (legacy `{ fences, guards }` -> Shape S fenced; `.399`
- *     `4d63ec1b4` release `normalizeRegistry` driven with Shape S record) + door-level `catch` fail-closed defense.
- *   - Exported `runR32Mutants`: `M1` (`mutate31.py`), `M3` (`mutate31.py`), and `M3b` (sibling-guard clear on retire)
+ *   - Leg 6 (`R32-Compat`): the one record kind — a shape that never shipped is not read (no fence, its scrub names
+ *     stay), the one kind round-trips with exactly its six keys — + door-level `catch` fail-closed defense.
+ *   - Exported `runR32Mutants`: `M1` (`mutate31.py`), `DOC` (an address move retires a guard) and one mutant per law,
  *     all RED on the table's cells & pure law oracle.
  */
 import fs from 'node:fs';
@@ -51,10 +51,11 @@ const scrubbedOk = (ok) => (c, label, detail) => ok(c, scrubText(label), detail 
 
 // ── Law-based pure oracle (`go-shape-s.md` + `fixups-r32.md` #1/#2/#4/#5) ───────────────────────────────────────────
 export function expectedVerdictForCell({ fence, guards, check, page, url, conn }) {
-  const activeGuards = url === 'same' ? guards : (url === 'moved_between' ? 1 : 0);
-  // Stated SPA rule (`fixups-r32` §"记录在案"): a guard protects ONLY its `urlAtFill`; once an unfenced tab
-  // moves URL within the document (`activeGuards === 0 && guards > 0`), a `<8B` value put back at the new URL is readable.
-  const readableAtMovedUrl = fence === 'none' && guards > 0 && activeGuards === 0 && page === 'putback';
+  // lane chrome-157 (the owner's sentence, 2026-11-15): A GUARD BELONGS TO ITS DOCUMENT — an address move inside the document keeps
+  // it, so a value an ordinary single-page app puts back after an in-app move re-arms there as it does at the old address (the
+  // address axis now proves that a move retires nothing; no cell is ever readable with the value in it)
+  const activeGuards = guards;
+  const readableAtMovedUrl = false;
   // Law S1 (Shape S): Hub restart ends all rechecks; any tab with a fence or active guard at stop time fences until top-frame nav.
   if (conn === 'hub_restart') {
     if (fence !== 'none' || activeGuards > 0) {
@@ -551,7 +552,7 @@ export async function executeCellSet(cellsToRun, mods) {   // (exported: a slice
 
         // Re-plant put-back secret if Door 1 (`recheck`) legitimately wiped `#pw` so Door 2 (`cdp-mediator`) faces the exact same DOM state!
         if (!restartUnlockedPass && c.conn !== 'hub_restart' && c.page === 'putback' && c.check === 'mem'
-          && (c.fence === 'none' || c.fence === 'postLiftHeld') && (c.url === 'same' || c.url === 'moved_between') && !c.nothingToCheck) {   // (Q7's cells: a check with nothing to look with cannot wipe — the hold keeps the value unread)
+          && (c.fence === 'none' || c.fence === 'postLiftHeld') && !c.nothingToCheck) {   // (every address — a guard belongs to its document, a move retires nothing; Q7's cells: a check with nothing to look with cannot wipe — the hold keeps the value unread)
           const domAfterR1 = fk.readDomValues(c.tid).pw;
           if (domAfterR1 !== '') {
             results.push({ cell: c, pass: false, detail: { why: 'resolve_did_not_wipe_putback_dom', domAfterR1, r1 } });
@@ -798,8 +799,11 @@ export async function runR32Q3Leg({ mods, ok }) {
       dialogs.noteActiveTab?.({ profileId: PID, browserKey: KEY }, tidF);
       const fill = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'r32q3.example.test#alice/password', targetId: tidF });
       // the page copies what was typed into its title and its address — no navigation, so the fence stands
+      // the page copies what was typed into its TITLE (document.title — no navigation) and into its ADDRESS the way Chrome does it: a
+      // move inside the document (history.pushState) — a live fence lifts there by the SPA rule, and the one check holds it
       fk.setTitle(tidF, `welcome ${PWQ}`, `${U0}?echo=${encodeURIComponent(PWQ)}`);
-      await sleep(40);
+      relay.emitTargetEvent(tidF, 'Page.navigatedWithinDocument', { frameId: tidF, url: `${U0}?echo=${encodeURIComponent(PWQ)}` });
+      await sleep(150);
       const forms = (s) => [s, encodeURIComponent(s)];
       const rawList = await rawWs.call('Target.getTargets', {}, undefined, 800);
       const premise = forms(PWQ).some((s) => JSON.stringify(rawList).includes(s));
@@ -832,7 +836,7 @@ export async function runR32Q3Leg({ mods, ok }) {
       ]) relay.emitTargetEvent(tidF, m, prm);
       // the CLOSED readers of the unjudged classes: refused on the fenced tab
       const closedAnswers = [];
-      for (const [m, prm, viaSession] of [['FindInPage.findFirst', { text: PWQ }, true], ['HeadlessExperimental.beginFrame', { screenshot: { format: 'png' } }, true], ['Cast.startTabMirroring', { sinkName: 'q3-sink' }, true], ['Target.openDevTools', { targetId: tidF }, false]]) {
+      for (const [m, prm, viaSession] of [['FindInPage.findFirst', { text: PWQ }, true], ['FindInPage.findNext', {}, true], ['FindInPage.findPrev', {}, true], ['HeadlessExperimental.beginFrame', { screenshot: { format: 'png' } }, true], ['Cast.startTabMirroring', { sinkName: 'q3-sink' }, true], ['Target.openDevTools', { targetId: tidF }, false]]) {
         const r = await medWs.call(m, prm, viaSession ? sidF : undefined, 600);
         closedAnswers.push({ m, refused: Boolean(r && r.error && /login_fill_live/.test(String(r.error.message || r.error.data || JSON.stringify(r.error)))) });
         answers.push(JSON.stringify(r));
@@ -849,7 +853,8 @@ export async function runR32Q3Leg({ mods, ok }) {
       try { const r = await fetch(`${apiBase}/api/agent/browser/dialog?profile=${encodeURIComponent(PID)}&wait=0`, { headers: { authorization: `Bearer ${TOKEN}` } }); answers.push(await r.text()); } catch (e) { answers.push(String(e && e.message)); }
       answers.push(JSON.stringify(await post('/api/agent/browser/resolve', { profile: PID, handle: PID, wrapper: true, argv: ['click', '@e1'], targetId: tidF })));
       fk.setTitle(tidF, `still ${PWQ}`, `${U0}?again=${encodeURIComponent(PWQ)}`);
-      await sleep(40);
+      relay.emitTargetEvent(tidF, 'Page.navigatedWithinDocument', { frameId: tidF, url: `${U0}?again=${encodeURIComponent(PWQ)}` });
+      await sleep(80);
       const seen = answers.concat(frames).join('\n');
       const leaked = forms(PWQ).filter((s) => seen.includes(s)).length;
       // WHERE (names only, never a value): which answer forms and which frames' methods carried it
@@ -1261,7 +1266,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       // (a) Check disk JSON directly: 0 login identity fields, no `guards` key, both fenced + guard-only merged into `fences`
       const diskRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'browser-profiles.json'), 'utf8'));
       const diskPid = diskRaw?.loginFences?.[PID];
-      const allowedFenceKeys = new Set(['targetId', 'urlAtFill', 'origin', 'at', 'browserKey']);
+      const allowedFenceKeys = new Set(['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey']);   // (the one record kind: its document's id, no login identity)
       const diskZeroIdentity = Boolean(diskPid)
         && !Object.prototype.hasOwnProperty.call(diskPid, 'guards')
         && Array.isArray(diskPid.fences) && diskPid.fences.length === 3
@@ -1271,9 +1276,9 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
       // (`browserOf` chrome PID/starttime changes AND `DEVTOOLS_ID` UUID changes; `tidMovedDown` also navigated to `U_MOVED`)
       relay.dropSockets();
       await sleep(35);
-      browserRec = { state: 'ready', pid: 52001, starttime: '950001', startedAt: clock + 10 };
+      browserRec = { state: 'ready', pid: 41001, starttime: '950001', startedAt: clock + 10 };   // (it REUSES the process number — another browser all the same: item 8)
       relay.state.uuid = 'bbbbbbbb-1111-4222-8333-444444444444';
-      fk.setDom(tidMovedDown, { url: U_MOVED, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });
+      fk.setDom(tidMovedDown, { url: U_MOVED, newDocument: true, elements: [{ id: 'pw', tag: 'input', type: 'password', name: 'Password' }] });   // (it NAVIGATED while down: a new document)
       await rawWs.writePw(tidGuard, '');
       await dialogs.arm(PID);
 
@@ -1295,7 +1300,7 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
           && TWO_DOORS_RE.test(String(rGuardDifferentBrowser.json?.error || ''))
           && rMovedWhileDown.status === 200
           && hadDropSecretsBefore && dropCleared && disarmCleared,
-        'R32-Stash (RAM stash & browser identity laws): 0 login identity on disk, replacement browser never inherits old RAM stash/LF secrets (holds Shape S until nav, drops URL-changed tab), and removeProfile + disarm drop stash/fences immediately',
+        'R32-Stash (RAM stash & browser identity laws): 0 login identity on disk, replacement browser never inherits old RAM stash/LF secrets (holds Shape S until nav, drops a tab whose document changed), and removeProfile + disarm drop stash/fences immediately',
         { diskPid, diskZeroIdentity, lfValuesCleared, rGuardDifferentBrowser, rMovedWhileDown: rMovedWhileDown.status, hadDropSecretsBefore, dropCleared, disarmCleared },
       );
     } finally {
@@ -1350,9 +1355,10 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
     const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), liveKeys: () => new Set([KEY]), log: quiet, now: () => clock, install: false, mediator: med });
     const prof = keeper.createProfile({ label: 'DoorsProf', sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
     const PID = prof.id;
-    // Seed Shape S persisted fence directly on `tid1` (cold restart state, Vault never even created/unlocked!)
+    // Seed Shape S persisted fence directly on `tid1` (cold restart state, Vault never even created/unlocked!) — the one record kind,
+    // its document the tab's present one
     keeper.saveLoginFenceState(PID, {
-      fences: [{ targetId: tid1, urlAtFill: U0, origin: ORIGIN, at: clock - 5000, browserKey: KEY }],
+      fences: [{ targetId: tid1, urlAtFill: U0, docId: fk.loaderIdOf(tid1), origin: ORIGIN, at: clock - 5000, browserKey: KEY }],
       scrubs: [],
     });
     const grant = await med.grantFor({ profileId: PID, browserKey: KEY, upstream: relay.wsUrl(), targetIds: [tid1, tid2], mode: 'scope' });
@@ -1441,78 +1447,33 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
   // ── Leg 5: `fixups-r32` Law 5 — In-flight `recheckPostLiftOnTab` held across `Page.frameNavigated` ─────────────────
   await runR32NavSeqLeg({ mods: { express, WebSocket, WebSocketServer, LF, VE, GS, BK, Lm, CM, Rm, Dm, startFakeKernel }, ok });
 
+  // ── Legs 7–12 (lane chrome-157, round 32 take-over — the owner's B): THE CURES, one scene each (runR32CureLegs above) ──────────
+  await runR32CureLegs({ mods: { req, express, WebSocket, WebSocketServer, LF, VE, GS, BK, Lm, CM, Rm, Dm, startFakeKernel }, ok });
+
   // ── Leg 6: Bidirectional disk compatibility (`go-shape-s.md` #4) + door-level `catch` fail-closed defense ──────────
   try {
-    // (a) Legacy `{ fences, guards }` with extra login identity fields normalizes into Shape S fenced with 0 login identity
+    // (a) lane chrome-157 (the owner's sentence — 6): a record of a shape that never shipped is NOT READ — the r22–r31 rows (no docId)
+    // and their `guards` give no fence at all (the scrub list's names are their own record and stay); the ONE kind round-trips with
+    // exactly its fields. No released version reads a fence record (measured on master: none exists), so no release direction is owed.
     const legacyNormalized = BP.normalizeRegistry({
       profiles: [{ id: 'bp-11223344', label: 'Legacy', createdAt: 1000 }],
       loginFences: {
         'bp-11223344': {
-          fences: [{
-            targetId: 'T-FENCE',
-            urlAtFill: 'https://leg.example.test/login',
-            origin: 'https://leg.example.test',
-            at: 12345,
-            browserKey: 'bk-1',
-            loginId: 'web-login:https://leg.example.test#alice',
-            user: 'alice',
-            typedSlot: 'current',
-            rev: 3,
-            entryGen: 'lg-abcdef012345',
-            also: [{ loginId: 'web-login:https://leg.example.test#bob', rev: 1 }],
-            holdReason: 'post-lift',
-            postLiftHeld: true,
-          }],
-          guards: [{
-            targetId: 'T-GUARD',
-            urlAtFill: 'https://leg.example.test/step2',
-            origin: 'https://leg.example.test',
-            at: 12346,
-            browserKey: 'bk-1',
-            loginId: 'web-login:https://leg.example.test#bob',
-            rev: 2,
-          }],
+          fences: [{ targetId: 'T-FENCE', urlAtFill: 'https://leg.example.test/login', origin: 'https://leg.example.test', at: 12345, browserKey: 'bk-1', loginId: 'web-login:https://leg.example.test#alice', user: 'alice', typedSlot: 'current', rev: 3, postLiftHeld: true }],
+          guards: [{ targetId: 'T-GUARD', urlAtFill: 'https://leg.example.test/step2', origin: 'https://leg.example.test', at: 12346, browserKey: 'bk-1' }],
           scrubs: [{ name: 'web-login:https://leg.example.test#alice', at: 12345 }],
         },
       },
     });
-    const legEntry = legacyNormalized.loginFences?.['bp-11223344'];
-    const allowedKeys = new Set(['targetId', 'urlAtFill', 'origin', 'at', 'browserKey']);
-    const legacyToShapeSOk = Boolean(legEntry)
-      && !Object.prototype.hasOwnProperty.call(legEntry, 'guards')
-      && Array.isArray(legEntry.fences) && legEntry.fences.length === 2
-      && legEntry.fences.some((f) => f.targetId === 'T-FENCE')
-      && legEntry.fences.some((f) => f.targetId === 'T-GUARD')
-      && legEntry.fences.every((f) => Object.keys(f).every((k) => allowedKeys.has(k)));
-
-    // (b) Drive `4d63ec1b4:src/browser-profiles.js` (`.399` release) if git object is available in `repoDir`
-    let release399Ok = true;
-    try {
-      const src399 = execFileSync('git', ['show', '4d63ec1b4:src/browser-profiles.js'], {
-        cwd: repoDir,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const tmpModDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-r32-399-'));
-      try {
-        const p399 = path.join(tmpModDir, 'bp399.cjs');
-        fs.writeFileSync(p399, src399);
-        const BP399 = req(p399);
-        const out399 = BP399.normalizeRegistry({
-          profiles: [{ id: 'bp-11223344', label: 'NewDisk', createdAt: 1000 }],
-          loginFences: {
-            'bp-11223344': {
-              fences: [{ targetId: 'T-NEW', urlAtFill: 'https://new.example.test/login', origin: 'https://new.example.test', at: 20000, browserKey: 'bk-1' }],
-              scrubs: [],
-            },
-          },
-        });
-        // `.399` (`4d63ec1b4`) predates `vault-login` (`loginFences` was not in `.399`), so it preserves profiles cleanly without throwing.
-        release399Ok = Array.isArray(out399.profiles) && out399.profiles.length === 1 && out399.profiles[0].id === 'bp-11223344';
-      } finally {
-        fs.rmSync(tmpModDir, { recursive: true, force: true });
-      }
-    } catch { /* git commit `4d63ec1b4` absent in standalone archive copy */ }
+    const legEntry = legacyNormalized.loginFences?.['bp-11223344'] || { fences: [], scrubs: [] };
+    const oneKind = BP.normalizeRegistry({
+      profiles: [{ id: 'bp-55667788', label: 'OneKind', createdAt: 1000 }],
+      loginFences: { 'bp-55667788': { fences: [{ targetId: 'T-ONE', urlAtFill: 'https://one.example.test/login', docId: 'L-T-ONE.1', origin: 'https://one.example.test', at: 777, browserKey: 'bk-1', user: 'never-kept' }], scrubs: [] } },
+    }).loginFences?.['bp-55667788'];
+    const allowedKeys = ['targetId', 'urlAtFill', 'docId', 'origin', 'at', 'browserKey'];
+    const legacyToShapeSOk = (legEntry.fences || []).length === 0
+      && Array.isArray(legEntry.scrubs) && legEntry.scrubs.length === 1
+      && Boolean(oneKind) && oneKind.fences.length === 1 && JSON.stringify(Object.keys(oneKind.fences[0]).sort()) === JSON.stringify([...allowedKeys].sort()) && oneKind.fences[0].docId === 'L-T-ONE.1';
 
     // (c) Door-level `catch` defense in `cdp-mediator.js` even if `recheckPostLift` itself rejects directly
     const fkDoor = await startFakeKernel({ firstUrl: 'https://doorcatch.example.test/login', mode: { standard: true } });
@@ -1533,9 +1494,9 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
     const doorCatchOk = medRejectRes.ok === false && /login_check_failed/.test(medRejectRes.error) && BM.TOKEN_RE instanceof RegExp;
 
     ok(
-      legacyToShapeSOk && release399Ok && doorCatchOk,
-      'R32-Compat (Disk compatibility & door catch): legacy {fences, guards} merges into Shape S fenced with 0 login identity, 4d63ec1b4 normalizeRegistry loads Shape S disk cleanly, and cdp-mediator rejects fail-closed on direct recheck rejection',
-      { legacyToShapeSOk, legEntry, release399Ok, medRejectRes },
+      legacyToShapeSOk && doorCatchOk,
+      'R32-Compat (the one record kind & door catch): a record of a shape that never shipped gives no fence (its scrub names stay), the one kind {targetId, urlAtFill, docId, origin, at, browserKey} round-trips with no login identity, and cdp-mediator rejects fail-closed on direct recheck rejection',
+      { legacyToShapeSOk, legEntry, oneKind, medRejectRes },
     );
   } catch (e) {
     ok(false, 'R32-Compat (Disk compatibility & door catch)', String(e && e.stack || e));
@@ -1544,7 +1505,346 @@ export async function runR32LoginTable({ repoDir, ok: okRaw }) {
   return tableSummary;
 }
 
-/** In-process mutant kills (`M1`, `M3`, `M3b`) evaluated directly on the generated table's cells & pure law oracle. */
+// ── THE CURES (lane chrome-157, round 32 take-over — the owner's B: «防误操作不防 agent 故意攻击，除非能数学上证明防住», we defend against
+// mistakes, not against an agent's deliberate attack, unless the defence can be proven to hold). One scene per cure; each is a
+// mistake an ordinary site, a restart or a slow page makes BY ITSELF. Every leg answers its own result, so a mutant drives the same
+// leg and must turn it red. ────────────────────────────────────────────────────────────────────────────────────────────────────
+const CURE_PW = 'Cu6!r3';   // (short ON PURPOSE: under the mask's floor, so masking cannot hide a leak)
+const CURE_VPW = 'r32-table-vault-pw';
+const PW_EL = { id: 'pw', tag: 'input', type: 'password', name: 'Password' };
+const b64State = (pw) => Buffer.from(JSON.stringify({ u: 'dana', p: pw })).toString('base64url');
+const valueForms = (pw) => [pw, encodeURIComponent(pw), b64State(pw)];
+
+/** A fake kernel behind a relay, and a hub (mediator, keeper, vault, grants, logins, dialogs, routes) that can be STOPPED and
+ *  started again on the same data — a restart; the For-you notices it files are counted. */
+export async function cureScene(mods, label, KEY) {   // (exported: a reproducer or a measurement drives the same scene)
+  const { express, WebSocket, WebSocketServer, VE, GS, BK, Lm, CM, Rm, Dm, LF, startFakeKernel } = mods;
+  const ORIGIN = `https://${label}.example.test`;
+  const U0 = `${ORIGIN}/login`;
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vs-r32-${label}-`));
+  const dataDir = path.join(tmpRoot, 'd');
+  const homeDir = path.join(tmpRoot, 'h');
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(homeDir, { recursive: true, mode: 0o700 });
+  const clk = { t: 1_769_000_000_000 };
+  const fk = await startFakeKernel({ firstUrl: `${ORIGIN}/seed`, mode: { standard: true, omitFilledPassword: true } });
+  const relay = await startKernelRelay(WebSocket, WebSocketServer, fk);
+  const raw = await openCdpClient(WebSocket, fk.wsUrl);
+  const tid = fk.addTarget(U0);
+  fk.setDom(tid, { url: U0, elements: [PW_EL] });
+  const SID = `sess-r32-${label}`;
+  const TOKEN = `vsst_r32_${label}_` + crypto.randomBytes(6).toString('hex');
+  const notices = [];
+  const forYou = {
+    add: (_pid, item) => { const id = `n${notices.length + 1}`; notices.push({ id, text: String((item && item.text) || ''), resolved: false }); return id; },
+    resolve: (id) => { const n = notices.find((x) => x.id === id); if (n) n.resolved = true; },
+  };
+  let pid = null, prof = null;
+  const hubs = [];
+  async function start({ fresh = false, wrapLogins = null } = {}) {
+    const med = CM.create({ log: quiet });
+    await med.listen();
+    const keeper = BK.create({ dataDir, homeDir, env: () => ({ HOME: homeDir }), liveKeys: () => new Set([KEY]), log: quiet, now: () => clk.t, install: false, mediator: med });
+    const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false, now: () => clk.t });
+    if (fresh) await vault.setup(CURE_VPW);
+    const grants = GS.create({ dataDir, wss: { clients: new Set() }, log: quiet.log });
+    const logins0 = Lm.create({ vault, grants: () => grants, now: () => clk.t, log: quiet.log });
+    if (fresh) {
+      logins0.addOwn({ origin: ORIGIN, username: 'dana', password: CURE_PW }, { who: 'owner' });
+      grants.set('browser-login', `${ORIGIN}#*`, { to: [{ kind: 'everyone' }], except: [] });
+      prof = keeper.createProfile({ label: `R32${label}`, sharing: 'owner' }, { owner: { kind: 'instance', id: null } });
+      pid = prof.id;
+    } else {
+      prof = keeper.profile(pid);
+    }
+    const logins = wrapLogins ? wrapLogins(logins0) : logins0;
+    const grant = await med.grantFor({ profileId: pid, browserKey: KEY, upstream: relay.wsUrl(), targetIds: [tid], mode: 'scope' });
+    const kw = {
+      ...keeper,
+      cdpEndpointFor: async (id) => (id === pid ? { ok: true, url: relay.wsUrl() } : { ok: false }),
+      leasesFor: () => [{ profileId: pid, browserKey: KEY, sessionId: SID }],
+      statusFor: () => ({ ephemeral: null, pin: pid, leases: [{ profileId: pid, alias: 'c1', isDefault: true }] }),
+      setFor: () => ({ defaultId: pid, attachments: [{ profileId: pid, alias: 'c1', label: 'R32', isDefault: true }], handles: ['c1'] }),
+      resolveFor: () => ({ ok: true, kind: 'attachment', handle: 'c1', attachment: { profileId: pid, alias: 'c1', isDefault: true }, handles: ['c1'], isDefault: true }),
+      attach: async () => ({ ok: true, profile: prof, browser: { state: 'ready' }, lease: { profileId: pid, browserKey: KEY, sessionId: SID, since: clk.t }, cdpUrl: grant.url, env: [], pinTab: false, others: 0 }),
+    };
+    const dialogs = Dm.create({ keeper: kw, logins, forYou, now: () => clk.t, holdersOf: () => [{ browserKey: KEY, sessionId: SID }], leaseCountOf: () => 1, log: quiet });
+    Rm.setup({ keeper: kw, activeSessions: new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'Agent R32', cwd: tmpRoot, backendSessionId: `conv-${label}` }]]), dialogs, logins, tasksForSession: () => [] });
+    const app = express(); app.use(express.json()); app.use(Rm.router);
+    const srv = await new Promise((r) => { const sv = app.listen(0, '127.0.0.1', () => r(sv)); });
+    const post = async (u, body) => {
+      const r = await fetch(`http://127.0.0.1:${srv.address().port}${u}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(body) });
+      return { status: r.status, json: await r.json() };
+    };
+    const h = { med, keeper, vault, grants, logins, dialogs, srv, post, grantUrl: grant.url, stopped: false };
+    hubs.push(h);
+    return h;
+  }
+  async function stop(h) {   // the hub's process ends: its memory goes with it
+    if (!h || h.stopped) return;
+    h.stopped = true;
+    try { h.srv.close(); } catch { /* */ }
+    try { h.dialogs.shutdown(); } catch { /* */ }
+    try { h.keeper.shutdown(); } catch { /* */ }
+    try { h.vault.close(); } catch { /* */ }
+    try { await h.med.shutdown(); } catch { /* */ }
+    try { LF.clearAllFilledSecrets?.(); } catch { /* */ }
+  }
+  const bind = (h) => { h.dialogs.bindTab?.({ profileId: pid, browserKey: KEY }, tid); h.dialogs.noteActiveTab?.({ profileId: pid, browserKey: KEY }, tid); };
+  const fill = async (h) => {
+    await h.dialogs.arm(pid);
+    bind(h);
+    return h.post('/api/agent/browser/fill-vault', { profile: pid, target: '#pw', spec: `${label}.example.test#dana/password`, targetId: tid });
+  };
+  const read = (h) => h.post('/api/agent/browser/resolve', { profile: pid, handle: pid, wrapper: true, fenceCheckOnly: true, argv: ['get', 'value', '#pw'], targetId: tid });
+  const medRead = async (h) => { const c = await openCdpClient(WebSocket, h.grantUrl); try { return await c.readPw(tid); } finally { c.close(); } };
+  /** The page goes to `url`: a NEW document (its own loaderId, Page.frameNavigated) or a move INSIDE the document. */
+  const nav = async (url, { newDocument = true, keepValue = false } = {}) => {
+    const cur = keepValue ? (fk.readDomValues(tid).pw || '') : '';
+    fk.setDom(tid, { url, newDocument, elements: [{ ...PW_EL, ...(cur ? { value: cur } : {}) }] });
+    if (newDocument) relay.emitTargetEvent(tid, 'Page.frameNavigated', { frame: { id: tid, loaderId: fk.loaderIdOf(tid), url, securityOrigin: ORIGIN, mimeType: 'text/html' }, type: 'Navigation' });
+    else relay.emitTargetEvent(tid, 'Page.navigatedWithinDocument', { frameId: tid, url });
+    await sleep(150);
+  };
+  const close = async () => {
+    for (const h of hubs) await stop(h);
+    raw.close();
+    await relay.close();
+    await fk.close();
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  };
+  const verdictOf = (r) => ({ status: r.status, code: (r.json && r.json.code) || null, doors: TWO_DOORS_RE.test(String((r.json && r.json.error) || '')), shown: /own address or title/.test(String((r.json && r.json.error) || '')) });
+  return { ORIGIN, U0, KEY, tid, fk, relay, raw, notices, clk, dataDir, start, stop, bind, fill, read, medRead, nav, close, verdictOf, get pid() { return pid; } };
+}
+
+/** item 7 — A CHECK THAT KEEPS FAILING HAS A BOUND: a guard whose page put the value back and never answers the check is «try again»
+ *  a bounded number of times, then held until it navigates (the refusal names both doors); a new document ends the hold. */
+async function cureBound(mods) {
+  const { LF } = mods;
+  const s = await cureScene(mods, 'cbound', 'bk-0000c0a1');
+  try {
+    const h = await s.start({ fresh: true });
+    const fill = await s.fill(h);
+    s.clk.t += 16 * 60_000;
+    h.dialogs.liveFillOnTarget(s.pid, s.tid);   // the ceiling: the fence lifts with its wipe, a guard is born
+    for (let i = 0; i < 200 && h.dialogs.liveFillOnTarget(s.pid, s.tid); i++) await sleep(12);
+    await sleep(60);
+    const guardOnly = !h.dialogs.liveFillOnTarget(s.pid, s.tid) && Boolean(h.dialogs.hasPostLiftGuard(s.pid, s.tid));
+    await s.raw.writePw(s.tid, CURE_PW);   // the page puts the value back…
+    const orig = LF.wipeTabTypedInputs;
+    LF.wipeTabTypedInputs = () => { throw new Error('the page does not answer'); };   // …and never answers a check
+    const reads = [];
+    try {
+      for (let i = 0; i < 6; i++) { s.clk.t += 60_000; reads.push(s.verdictOf(await s.read(h))); }
+    } finally { LF.wipeTabTypedInputs = orig; }
+    const med = await s.medRead(h);
+    const firstHold = reads.findIndex((r) => r.status === 409 && r.code === 'login_fill_live' && r.doors);
+    const bounded = firstHold >= 1 && reads.slice(0, firstHold).every((r) => r.status === 409 && r.code === 'login_check_failed')
+      && reads.slice(firstHold).every((r) => r.status === 409 && r.code === 'login_fill_live' && r.doors);
+    await s.nav(`${s.ORIGIN}/login?again=1`);   // door 1: a new document
+    const afterNav = s.verdictOf(await s.read(h));
+    const ok = fill.status === 200 && guardOnly && bounded && med.ok === false && afterNav.status === 200;
+    return { ok, fill: fill.status, guardOnly, reads, firstHold, medRefused: med.ok === false, afterNav };
+  } finally { await s.close(); }
+}
+
+/** items 1 and 2 — THE ONE CHECK: an ordinary site carries what was typed into its NEXT address by itself (a form that goes by GET; a
+ *  router that keeps its form's state in the address, base64); at the lift, while the hub holds the value, the new address is
+ *  compared with it — found ⇒ the tab stays fenced, the owner is told ONCE, and the navigation event the agent's own session
+ *  receives names the address at the fill; a clean next document lifts it and the notice goes. */
+async function cureNext(mods) {
+  const { WebSocket } = mods;
+  const s = await cureScene(mods, 'cnext', 'bk-0000c0a2');
+  try {
+    const h = await s.start({ fresh: true });
+    const fill = await s.fill(h);
+    const ag = await openCdpClient(WebSocket, h.grantUrl);   // an ordinary agent: its own session on the tab
+    const agFrames = [];
+    ag.ws.on('message', (d) => { if (agFrames.length < 5000) agFrames.push(String(d)); });
+    const att = await ag.call('Target.attachToTarget', { targetId: s.tid, flatten: true });
+    const attached = Boolean(att && att.result && att.result.sessionId);
+    const GET_URL = `${s.ORIGIN}/welcome?pw=${encodeURIComponent(CURE_PW)}`;
+    await s.nav(GET_URL);   // a form that goes by GET
+    const rawList = await s.raw.call('Target.getTargets', {}, undefined, 800);
+    const premise = JSON.stringify(rawList).includes(encodeURIComponent(CURE_PW));
+    const heldGet = Boolean(h.dialogs.liveFillOnTarget(s.pid, s.tid));
+    const readGet = s.verdictOf(await s.read(h));
+    const medGet = await s.medRead(h);
+    const medSaysShown = medGet.ok === false && /own address or title/.test(String(medGet.error || ''));
+    await s.nav(`${s.ORIGIN}/welcome?state=${b64State(CURE_PW)}`);   // a router that keeps its form's state in the address
+    const heldB64 = Boolean(h.dialogs.liveFillOnTarget(s.pid, s.tid));
+    const readB64 = s.verdictOf(await s.read(h));
+    const toldOnce = s.notices.filter((n) => /own address or title/.test(n.text)).length === 1;
+    await s.nav(`${s.ORIGIN}/home`);   // the site's clean next page
+    const readClean = s.verdictOf(await s.read(h));
+    const noticeGone = s.notices.filter((n) => /own address or title/.test(n.text)).every((n) => n.resolved);
+    await sleep(50);
+    ag.close();
+    const navs = agFrames.filter((f) => f.includes('"Page.frameNavigated"'));
+    const leaked = agFrames.filter((f) => valueForms(CURE_PW).some((v) => f.includes(v))).length;
+    const ok = fill.status === 200 && attached && premise && heldGet && readGet.status === 409 && readGet.shown && medSaysShown && heldB64 && readB64.status === 409 && readB64.shown && toldOnce
+      && readClean.status === 200 && noticeGone && navs.length >= 3 && navs[navs.length - 1].includes('/home') && leaked === 0;
+    return { ok, fill: fill.status, attached, premise, heldGet, readGet, medSaysShown, heldB64, readB64, toldOnce, readClean, noticeGone, navEvents: navs.length, leaked };
+  } finally { await s.close(); }
+}
+
+/** item 4 — A RESTART OR A RECONNECT HOLDS BY THE DOCUMENT: a fill is live, the page moves its address INSIDE the document while
+ *  nobody watches (the value still in its box); after a cold restart (the vault locked) and after a same-process reconnect the tab
+ *  is held on both doors; a new document ends it. */
+async function cureRestarts(mods) {
+  const out = {};
+  for (const mode of ['restart-move', 'reconnect-move']) {
+    const s = await cureScene(mods, mode === 'restart-move' ? 'crst' : 'crcn', mode === 'restart-move' ? 'bk-0000c0a3' : 'bk-0000c0a4');
+    try {
+      const h1 = await s.start({ fresh: true });
+      const fill = await s.fill(h1);
+      let h = h1;
+      if (mode === 'restart-move') {
+        await s.stop(h1);
+        await s.nav(`${s.ORIGIN}/login/step2`, { newDocument: false, keepValue: true });   // (nobody watches: no event reaches a hub)
+        s.clk.t += 2000;
+        h = await s.start();
+        await h.dialogs.arm(s.pid);
+        s.bind(h);
+      } else {
+        h1.dialogs.disarm(s.pid, 'the watch changed hands');
+        await s.nav(`${s.ORIGIN}/login/step2`, { newDocument: false, keepValue: true });
+        await h1.dialogs.arm(s.pid);
+        await sleep(60);
+      }
+      const valueInBox = s.fk.readDomValues(s.tid).pw === CURE_PW;
+      const r = s.verdictOf(await s.read(h));
+      const med = await s.medRead(h);
+      await s.nav(`${s.ORIGIN}/login?fresh=1`);   // door 1: a new document
+      const afterNav = s.verdictOf(await s.read(h));
+      out[mode] = { ok: fill.status === 200 && valueInBox && r.status === 409 && r.code === 'login_fill_live' && r.doors && med.ok === false && afterNav.status === 200,
+        fill: fill.status, valueInBox, read: r, medRefused: med.ok === false, afterNav };
+    } finally { await s.close(); }
+  }
+  return { ok: Object.values(out).every((x) => x.ok), ...out };
+}
+
+/** item 5 — THE WINDOW AFTER A RESTART: the watch is open but the fences are not back yet (the browser is slow to list its tabs);
+ *  every road answers from the record meanwhile — the hub's verb and the agent's own CDP read. */
+async function cureWindow(mods) {
+  const s = await cureScene(mods, 'cwin', 'bk-0000c0a5');
+  try {
+    const h1 = await s.start({ fresh: true });
+    const fill = await s.fill(h1);
+    await s.stop(h1);
+    s.clk.t += 2000;
+    const h = await s.start();
+    let held = false;
+    s.relay.state.hook = async (msg, { upWs }) => {
+      if (!held && msg.method === 'Target.getTargets') {
+        held = true;
+        setTimeout(() => { try { upWs.send(JSON.stringify(msg)); } catch { /* */ } }, 2500);
+        return true;
+      }
+      return false;
+    };
+    const armP = h.dialogs.arm(s.pid);
+    await sleep(150);
+    const w = h.dialogs._watches.get(s.pid);
+    const inWindow = Boolean(w && w.state === 'open' && !w.fencesRearmed);
+    const r = s.verdictOf(await s.read(h));
+    const med = await s.medRead(h);
+    const stillWindow = Boolean(w && !w.fencesRearmed);
+    await armP;
+    s.relay.state.hook = null;
+    const ok = fill.status === 200 && held && inWindow && stillWindow && r.status === 409 && r.code === 'login_fill_live' && med.ok === false;
+    return { ok, fill: fill.status, delayed: held, inWindow, stillWindow, read: r, medRefused: med.ok === false, medGotValue: med.ok === true && med.value === CURE_PW };
+  } finally { await s.close(); }
+}
+
+/** item 8 — A REPLACEMENT BROWSER THAT REUSES THE PROCESS NUMBER IS ANOTHER BROWSER (PURE, on THE one identity). */
+function cureIdentity(BKx) {
+  const f = BKx.browserIdentityOfRecord;
+  const same = (a, b) => typeof a === 'string' && a !== '' && a === b;
+  const U1 = 'ws://127.0.0.1:1/devtools/browser/aaaaaaaa-1111-4222-8333-444444444444';
+  const U2 = 'ws://127.0.0.1:1/devtools/browser/bbbbbbbb-1111-4222-8333-444444444444';
+  const UK = 'ws://127.0.0.1:1/kernel';   // (a kernel whose address names no browser id)
+  const old = { state: 'ready', pid: 41001, starttime: '900001', startedAt: 1 };
+  const reuse = { state: 'ready', pid: 41001, starttime: '950001', startedAt: 11 };
+  const rows = {
+    reconnectSame: same(f(old, U1), f(old, U1)),
+    pidReuseOther: !same(f(old, U1), f(reuse, U2)),
+    pidReuseOtherNoUuid: !same(f(old, UK), f(reuse, UK)),
+    stoppedNobodys: f({ ...old, state: 'stopped' }, U1) === null,
+  };
+  return { ok: Object.values(rows).every(Boolean), ...rows };
+}
+
+/** item 9 — ON A RESTORE ONLY THE SCRUB LIST'S RE-HYDRATION READS THE VAULT: every call the restored hub makes into the web logins
+ *  (the vault's one door for it) is recorded by a proxy, with whether hydratePersistedScrubs is on its stack — an alias of the logins
+ *  object is the same proxy, so it is seen; the next fill's read is seen too (the census sees what happens). */
+async function cureVaultReads(mods) {
+  const s = await cureScene(mods, 'cvlt', 'bk-0000c0a6');
+  try {
+    const h1 = await s.start({ fresh: true });
+    const fill = await s.fill(h1);
+    await s.stop(h1);
+    s.clk.t += 2000;
+    // the record names the login whose values the scrub list masks (a value under the mask's floor is never named: one is written,
+    // so the restore's re-hydration really reads)
+    const recFile = path.join(s.dataDir, 'browser-profiles.json');
+    const doc = JSON.parse(fs.readFileSync(recFile, 'utf8'));
+    doc.loginFences[s.pid].scrubs = [{ name: 'web-login:https://cvlt.example.test#dana', at: s.clk.t - 1000 }];
+    fs.writeFileSync(recFile, JSON.stringify(doc));
+    const calls = [];
+    let phase = 'restore';
+    const wrapLogins = (l) => new Proxy(l, {
+      get(t, k, rcv) {
+        const v = Reflect.get(t, k, rcv);
+        if (typeof v !== 'function') return v;
+        return function (...a) { calls.push({ name: String(k), phase, inHydrate: /hydratePersistedScrubs/.test(String(new Error().stack)) }); return v.apply(t, a); };
+      },
+    });
+    const h = await s.start({ wrapLogins });
+    await h.dialogs.arm(s.pid);
+    s.bind(h);
+    await h.vault.unlock(CURE_VPW);
+    await sleep(80);
+    const restoreRead = s.verdictOf(await s.read(h));
+    phase = 'after';
+    await s.nav(`${s.ORIGIN}/login?fresh=1`);
+    const fill2 = await h.post('/api/agent/browser/fill-vault', { profile: s.pid, target: '#pw', spec: `cvlt.example.test#dana/password`, targetId: s.tid });
+    const SUBSCRIPTIONS = new Set(['onVaultOpen', 'onVaultLock']);
+    const outside = calls.filter((c) => c.phase === 'restore' && !SUBSCRIPTIONS.has(c.name) && !c.inHydrate).map((c) => c.name);
+    const seenAfter = calls.some((c) => c.phase === 'after' && c.name === 'resolveFill');
+    const hydrated = calls.some((c) => c.phase === 'restore' && c.inHydrate && c.name === 'scrubSecretsOf');
+    const ok = fill.status === 200 && restoreRead.status === 409 && hydrated && outside.length === 0 && seenAfter;   // (the census's controls: the re-hydration's read and the next fill's are seen)
+    return { ok, fill: fill.status, restoreRead, hydrated, restoreCalls: calls.filter((c) => c.phase === 'restore').map((c) => `${c.name}${c.inHydrate ? '@hydrate' : ''}`), outside, fill2: fill2.status, seenAfter };
+  } finally { await s.close(); }
+}
+
+const CURE_LEGS = {
+  bound: { fn: cureBound, label: (r) => `R32-BOUND (item 7: a check that keeps failing has a bound): a put-back value whose check never answers is «try again» ${r.firstHold} times, then held until it navigates with both doors named (on both doors); a new document ends it` },
+  next: { fn: cureNext, label: (r) => `R32-NEXT (items 1+2, the one check): a GET form and a base64 router carry the typed value into the next address by themselves — the tab stays fenced and both doors say why, the owner is told once, the ${r.navEvents} navigation events the agent's own session got carry it in none of its forms; the clean next page lifts it and the notice goes` },
+  restarts: { fn: cureRestarts, label: () => 'R32-RESTARTS (item 4: held by the DOCUMENT, never the address): a live fill on a page that moved its address inside the document while nobody watched is held after a cold restart (vault locked) and after a reconnect, on both doors; a new document ends it' },
+  window: { fn: cureWindow, label: () => 'R32-WINDOW (item 5): the watch open, the fences not yet back (the browser slow to list its tabs) — the hub\'s verb and the agent\'s own CDP read are answered from the record' },
+  vaultReads: { fn: cureVaultReads, label: (r) => `R32-VAULT-READS (item 9, by behaviour, not by text): on a restore every call into the web logins is a subscription or runs inside hydratePersistedScrubs (${(r.restoreCalls || []).join(', ') || 'none'}); the census sees the next fill's read` },
+};
+
+/** The cure legs (all, or `only` one), each told through `ok` and answered as a result. */
+export async function runR32CureLegs({ mods, ok, only = null }) {
+  const out = {};
+  const ident = cureIdentity(mods.BK);
+  if (!only || only === 'identity') {
+    out.identity = ident;
+    ok(ident.ok, 'R32-IDENTITY (item 8): a replacement browser that reuses the process number is another browser — with a new browser id and with none; a reconnect to the same one is the same; a stopped record is nobody\'s', ident);
+  }
+  for (const [k, leg] of Object.entries(CURE_LEGS)) {
+    if (only && only !== k) continue;
+    let r;
+    try { r = await leg.fn(mods); } catch (e) { r = { ok: false, threw: String((e && e.stack) || e) }; }
+    out[k] = r;
+    ok(Boolean(r.ok), leg.label(r), r);
+  }
+  return out;
+}
+
+/** In-process mutant kills (`M1`, `DOC`, one per law) evaluated directly on the generated table's cells & pure law oracle. */
 export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   const ok = scrubbedOk(okRaw);
   const req = createRequire(path.join(repoDir, 'package.json'));
@@ -1567,7 +1867,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
   // a promise (law 4's cure: browser-dialogs.js, «an exception is could-not-look»), so «the promise registered after the body» harms
   // nothing now. LAW 4 is held by its own mutant: a check that could not look answers as if it had looked, clean.
   {
-    const a4 = "          if (!wr || !wr.ok) {\n            return { ok: false, checkFailed: true, code: 'login_check_failed', error: 'VibeSpace could not check this tab — try again' };\n          }";
+    const a4 = "          if (!wr || !wr.ok) {\n            return failedLook(g.lfSnap);\n          }";
     const src4 = bdSrc.split(a4).length === 2 ? bdSrc.replace(a4, '          if (!wr || !wr.ok) { return { ok: true, refilled: false }; /* MUTANT LAW 4 */ }') : null;
     if (src4) {
       const Dm4 = MUT.load('src/server/browser-dialogs.js', src4, 'r32-law4-could-not-look-reads-as-looked');
@@ -1580,37 +1880,25 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     }
   }
 
-  // MUTANT M3 (`mutate31.py` exact M3: retiring a guard also drops `e.liveFill`)
+  // MUTANT DOC (the cure of the twelve cells, lane chrome-157, round 32 take-over): A GUARD BELONGS TO ITS DOCUMENT. The mutant puts
+  // back the old retirement by address — a guard whose tab moved inside the document is dropped unchecked — so a value the page puts
+  // back after an in-app move is readable there. Replaces M3 (retiring is not a check) and M3b (ending one guard ends the others):
+  // with no retirement left, both laws have no site; this one has, and every moved put-back cell must turn red under it.
   {
-    const m3Src = bdSrc.replace(
-      '    if (!e.postLiftGuards && e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }\n    if (changed && w && w.profileId) syncPersistedLoginFences(w.profileId);',
-      "    if (!e.postLiftGuards && e.postLiftTimer) { clearTimeout(e.postLiftTimer); e.postLiftTimer = null; }\n    if (changed && w && w.profileId) syncPersistedLoginFences(w.profileId);\n    if (e.liveFill) clearLiveFillOnTab(w, e, 'url-changed', { audit: false, persist: true });",
-    );
-    if (m3Src !== bdSrc) {
-      const DmM3 = MUT.load('src/server/browser-dialogs.js', m3Src, 'r32-m3-retire-clears-fence');
-      const sliceM3 = tableSpec.cells.filter((c) => c.conn === 'connected' && c.fence === 'postLiftHeld' && c.url === 'moved');
-      const resM3 = await executeCellSet(sliceM3, { ...baseMods, Dm: DmM3 });
-      const redM3 = resM3.filter((r) => !r.pass).map((r) => r.cell.id);
-      ok(redM3.length === sliceM3.length && redM3.length > 0, `MUTANT M3 RED on R32 table (${redM3.length}/${sliceM3.length} cells RED): ${redM3.join(', ')}`, resM3);
+    const docAnchor = '          // (a guard belongs to its DOCUMENT: an address move inside the document keeps it — it ends with the document)\n';
+    const docSrc = bdSrc.includes(docAnchor) ? bdSrc.replace(
+      docAnchor,
+      docAnchor + "          if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String(g.lfSnap.urlAtFill || '').split('#')[0]) { const rest = e.postLiftGuards.filter((x) => x !== g); e.postLiftGuards = rest.length ? rest : null; continue; }   /* MUTANT DOC: a move retires the guard */\n",
+    ) : bdSrc;
+    if (docSrc !== bdSrc) {
+      const DmDoc = MUT.load('src/server/browser-dialogs.js', docSrc, 'r32-doc-move-retires-guard');
+      const sliceDoc = tableSpec.cells.filter((c) => c.conn === 'connected' && c.url === 'moved' && c.page === 'putback' && c.check === 'mem'
+        && (c.fence === 'none' || c.fence === 'postLiftHeld') && c.guards >= 1 && !c.nothingToCheck);
+      const resDoc = await executeCellSet(sliceDoc, { ...baseMods, Dm: DmDoc });
+      const redDoc = resDoc.filter((r) => !r.pass).map((r) => r.cell.id);
+      ok(redDoc.length === sliceDoc.length && redDoc.length > 0, `MUTANT DOC (an address move inside the document retires a guard) RED on the R32 table (${redDoc.length}/${sliceDoc.length} moved put-back cells RED)`, resDoc);
     } else {
-      ok(false, 'MUTANT M3 RED on R32 table: anchor not found in src/server/browser-dialogs.js');
-    }
-  }
-
-  // MUTANT M3b (`fixups-r32` #2 sibling guard law: retiring ONE guard clears sibling guards on the tab)
-  {
-    const m3bSrc = bdSrc.replace(
-      '    const next = e.postLiftGuards.filter((x) => x !== guard);',
-      '    const next = []; /* MUTANT M3b: sibling guards wiped on single-guard retire */',
-    );
-    if (m3bSrc !== bdSrc) {
-      const DmM3b = MUT.load('src/server/browser-dialogs.js', m3bSrc, 'r32-m3b-retire-clears-sibling-guards');
-      const sliceM3b = tableSpec.cells.filter((c) => c.conn === 'connected' && c.fence === 'none' && c.guards === 2 && c.url === 'moved_between' && c.page === 'putback');
-      const resM3b = await executeCellSet(sliceM3b, { ...baseMods, Dm: DmM3b });
-      const redM3b = resM3b.filter((r) => !r.pass).map((r) => r.cell.id);
-      ok(redM3b.length === sliceM3b.length && redM3b.length > 0, `MUTANT M3b RED on R32 table (${redM3b.length}/${sliceM3b.length} cells RED): ${redM3b.join(', ')}`, resM3b);
-    } else {
-      ok(false, 'MUTANT M3b RED on R32 table: anchor not found in src/server/browser-dialogs.js');
+      ok(false, 'MUTANT DOC: its anchor is gone in src/server/browser-dialogs.js (the guard loop\'s «a guard belongs to its DOCUMENT» line)');
     }
   }
 
@@ -1639,8 +1927,8 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     }
   }
 
-  // ONE MUTANT PER LAW (主开发's ruling Q6, lane chrome-157). M1 (a throw poisons the check — an exception is could-not-look), M3 (retiring
-  // a guard lifts the fence — retiring is not a check) and M3b (ending one guard ends the others) above count where they fit; the laws
+  // ONE MUTANT PER LAW (主开发's ruling Q6, lane chrome-157). M1 (a throw poisons the check — an exception is could-not-look) and DOC (an
+  // address move inside the document retires a guard) above count where they fit; the laws
   // they do not reach get their own here, each RED by name on the table's cells or on the leg that states the law, and each FAILS BY
   // NAME when its anchor is gone.
   const legMods = (DmX) => ({ req, express, WebSocket, WebSocketServer, LF, VE, GS, BK, Lm, CM, Rm, Dm: DmX, startFakeKernel });
@@ -1696,7 +1984,7 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
     if (!src) { ok(false, `MUTANT ${label}: its anchor is gone in ${file}`); return; }
     const X = MUT.load(file, src, tag);
     const r = await runR32Q3Leg({ mods: mods(X), ok: silent });
-    ok(r && r.ok === false && r.premise === true, `MUTANT ${label} RED on the Q3 leg (the value's bytes in ${r ? r.leaked : '?'} of its 2 forms; the closed readers ${r && r.closedAnswers ? r.closedAnswers.filter((x) => x.refused).length : '?'} of 4 refused)`, r);
+    ok(r && r.ok === false && r.premise === true, `MUTANT ${label} RED on the Q3 leg (the value's bytes in ${r ? r.leaked : '?'} of its 2 forms; the closed readers ${r && r.closedAnswers ? r.closedAnswers.filter((x) => x.refused).length : '?'} of 6 refused)`, r);
   };
   await q3Mutant('Q3-EVENTS (a fenced tab\'s events on the old four-event drop)', 'src/server/cdp-mediator.js',
     once(cmSrc, '!M.liveFillEventAllowed(ev, evTid)', "['Runtime.consoleAPICalled', 'Runtime.exceptionThrown', 'Log.entryAdded', 'Audits.issueAdded'].includes(ev.method) /* MUTANT Q3-EVENTS: the old four-name drop */"), 'r32-q3-events-old-drop', (X) => legModsCM(X));
@@ -1713,6 +2001,39 @@ export async function runR32Mutants({ repoDir, ok: okRaw, MUT }) {
       ok(false, 'MUTANT Q3-DIALOG: its anchor is gone in src/server/browser-dialogs.js (agentDialogOf)');
     }
   }
+
+  // THE CURES' MUTANTS (lane chrome-157, round 32 take-over — the owner's B): each cure's law put back as it was, on the cure's own
+  // leg; each FAILS BY NAME when its anchor is gone
+  const cureMutant = async (label, file, src, tag, leg, red) => {
+    if (!src) { ok(false, `MUTANT ${label}: its anchor is gone in ${file}`); return; }
+    const X = MUT.load(file, src, tag);
+    const r = await runR32CureLegs({ mods: file.endsWith('browser-keeper.js') ? { ...legMods(Dm0), BK: X } : legMods(X), ok: silent, only: leg });
+    const got = r[leg];
+    ok(Boolean(got) && red(got), `MUTANT ${label} RED on the ${leg} leg`, got);
+  };
+  const bkSrc = fs.readFileSync(path.join(repoDir, 'src/server/browser-keeper.js'), 'utf8');
+  await cureMutant('BOUND (a check that keeps failing answers «try again» for ever)', 'src/server/browser-dialogs.js',
+    once(bdSrc, '  const FAILED_CHECKS_BOUND = 3;', '  const FAILED_CHECKS_BOUND = Infinity;   /* MUTANT BOUND */'), 'r32-cure-bound-none', 'bound',
+    (r) => r.ok === false && r.guardOnly === true && r.firstHold === -1);
+  await cureMutant('NEXT (the next address is never compared with the value)', 'src/server/browser-dialogs.js',
+    once(bdSrc, '  function valueShownIn(w, e, lf, texts, heldVals = null) {\n    if (!lf) return false;\n', '  function valueShownIn(w, e, lf, texts, heldVals = null) {\n    if (!lf) return false;\n    return false;   /* MUTANT NEXT */\n'),
+    'r32-cure-next-unchecked', 'next', (r) => r.ok === false && r.premise === true && r.heldGet === false && r.leaked > 0);
+  await cureMutant('RESTART-ADDRESS (a restart or a reconnect releases by the address)', 'src/server/browser-dialogs.js',
+    once(once(bdSrc,
+      '        if (!sameDocument(entry.docId, e.docId)) {\n',
+      "        if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String((entry.liveFill && entry.liveFill.urlAtFill) || '').split('#')[0]) { try { LF().clearFilledSecretsForTarget(stashedTid); } catch { /* */ } continue; }   /* MUTANT RESTART-ADDRESS */\n        if (!sameDocument(entry.docId, e.docId)) {\n") || '',
+      '      if (!sameDocument(f.docId, e.docId)) {\n',
+      "      if (String(tabLoginUrlOf(e) || '').split('#')[0] !== String(f.urlAtFill || '').split('#')[0]) continue;   /* MUTANT RESTART-ADDRESS */\n      if (!sameDocument(f.docId, e.docId)) {\n"),
+    'r32-cure-restart-by-address', 'restarts', (r) => r.ok === false && r['restart-move'] && r['restart-move'].ok === false && r['reconnect-move'] && r['reconnect-move'].ok === false);
+  await cureMutant('WINDOW (the state says open before the fences are back)', 'src/server/browser-dialogs.js',
+    once(bdSrc, "  const fencesLive = (w) => Boolean(w && w.state === 'open' && w.fencesRearmed);", "  const fencesLive = (w) => Boolean(w && w.state === 'open');   /* MUTANT WINDOW */"),
+    'r32-cure-window-open', 'window', (r) => r.ok === false && r.inWindow === true && r.medGotValue === true);
+  await cureMutant('IDENTITY (a browser known by its process number alone)', 'src/server/browser-keeper.js',
+    once(bkSrc, "  if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;\n", "  if (rec && rec.state && rec.state !== 'starting' && rec.state !== 'ready') return null;\n  if (rec) return String(rec.pid);   /* MUTANT IDENTITY */\n"),
+    'r32-cure-identity-pid-only', 'identity', (r) => r.ok === false && r.pidReuseOther === false);
+  await cureMutant('VAULT-ALIAS (a restore reads the logins through an alias)', 'src/server/browser-dialogs.js',
+    once(bdSrc, '    const prevStash = stashedTabFencesByProfile.get(w.profileId) || null;\n', "    { const L = logins; try { if (L && typeof L.resolveFill === 'function') L.resolveFill({ origin: '', spec: '' }); } catch { /* */ } }   /* MUTANT VAULT-ALIAS */\n    const prevStash = stashedTabFencesByProfile.get(w.profileId) || null;\n"),
+    'r32-cure-vault-alias', 'vaultReads', (r) => r.ok === false && Array.isArray(r.outside) && r.outside.includes('resolveFill'));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF_PATH)) {
