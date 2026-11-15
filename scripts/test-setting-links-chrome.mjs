@@ -189,6 +189,22 @@ try {
   check('on the phone: the row in view, marked, its section ALONE (the one-section view)', fo5.found && fo5.inView && fo5.marked && fo5.sections.length === 1 && fo5.sections[0] === fo5.section, fo5);
   await shot('zh-phone-settings-row');
   check('not a byte written, after every press', sameBytes(b0, settingsBytes()));
+
+  console.log('⑥ f1 (主开发 2026-11-15, REQUIRED): the «Sign-in is off» line is true while shown — a password set through its own button and the line goes, Settings still open (LAST: the hub signs in from here on)');
+  await cdp('Emulation.clearDeviceMetricsOverride'); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36' });
+  await cdp('Page.reload');
+  check('the desktop page again', !!(await until(`!!(window.app && !app.isMobile && app._authEnabled === false && typeof app.openSettingAt === 'function')`, { timeout: 40000 })));
+  await until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  await evalJs(`app.openSettingAt(${JSON.stringify(K1)}); true`);
+  const line = '.settings-row.settings-spend-signin';
+  check('Settings › Spending says sign-in is off, with its «Set password…» door', !!(await until(`!!document.querySelector(${JSON.stringify(line)})`, { timeout: 10000 })));
+  await shot('zh-signin-off-line');
+  check('a real press on «Set password…»', (await press(`${line} .settings-link-btn`)) === true);
+  check('the password dialog opens', !!(await until(`!!document.querySelector('.cfg-pass-form #pw-new')`, { timeout: 8000 })));
+  await evalJs(`(() => { const f = document.querySelector('.cfg-pass-form'); f.querySelector('#pw-new').value = 'setting-doors-leg-1'; f.querySelector('#pw-conf').value = 'setting-doors-leg-1'; return true; })()`);
+  check('a real press on «Set password»', (await press('.cfg-pass-form button[type=submit]')) === true);
+  check('sign-in is ON now, and the line is GONE from the Settings window that stayed open (redrawn when the flag changed)', !!(await until(`app._authEnabled === true && document.querySelectorAll('.settings-content').length === 1 && !document.querySelector(${JSON.stringify(line)})`, { timeout: 10000 })));
 } catch (e) { failed++; console.error('  ✗ threw:', e && e.stack || e); }
 console.log(failed ? `✗ test-setting-links-chrome: ${passed} passed, ${failed} failed` : `ALL PASS (${passed})`);
 cleanup();

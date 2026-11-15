@@ -618,7 +618,15 @@ app.post('/api/plugins/:id/mode', (req, res) => {
   try { res.json(plugins.setMode(req.params.id, String(req.body?.mode || 'auto'))); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/plugins/:id/config', (req, res) => {
-  try { res.json(plugins.setConfig(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); }
+  // lane setting-doors f4 (主开发 2026-11-15): the judge's daily dollar cap is a SPENDING row — this old door writes it through the
+  // plugin's own settings, so it asks the one verdict too: a change of it that is not the owner's page is refused by name, nothing written
+  const b = req.body || {}, why = req.params.id === 'llm' ? require('../write-origin.js').ownerPageWhy(req) : null;
+  const asked = b.dailyBudgetCents !== undefined ? Number(b.dailyBudgetCents) / 100 : b.dailyBudgetUsd !== undefined ? Number(b.dailyBudgetUsd) : null;
+  const cur = (persistenceRouter.readSettings() || {})['plugin.llm.dailyBudgetUsd'];
+  if (why && asked !== null && asked !== (cur === undefined ? require('../plugin-settings.js').PLUGIN_SETTINGS.llm.rows.find((r) => r.key === 'dailyBudgetUsd').default : Number(cur))) {
+    return res.status(403).json({ error: `plugin.llm.dailyBudgetUsd: the judge's daily dollar cap changes only by the owner's press on the owner's own page (Settings › Spending — vibespace://settings/plugin.llm.dailyBudgetUsd); ${why === 'bearer' ? 'a request carrying a bearer token' : 'a request with no mark of the owner\'s page'} cannot change it; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: ['plugin.llm.dailyBudgetUsd'], door: 'vibespace://settings/plugin.llm.dailyBudgetUsd' });
+  }
+  try { res.json(plugins.setConfig(req.params.id, b)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // "we already offered this plugin" — the first-use dialog is asked ONCE per
 // instance (owner: "Not now" is remembered), so the flag is INSTANCE state
