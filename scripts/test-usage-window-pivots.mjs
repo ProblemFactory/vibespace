@@ -28,7 +28,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
 import { writeUsageShapeLedger } from './usage-shape-fixture.mjs';
 
 const require = createRequire(import.meta.url);
@@ -131,7 +131,7 @@ const PORT = await freePort();
 await new Promise((r) => srv.listen(PORT, '127.0.0.1', r));
 const CDP_PORT = await freePort();
 const chromeDir = scratch('usage-win-pivots-chrome');
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => { try { chrome.kill('SIGKILL'); } catch { } try { srv.close(); } catch { } for (const d of [chromeDir, dir, home, dataDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } };
 const chromeGone = new Promise((r) => chrome.once('exit', r));
 // the profile goes only once chrome has exited (removed under a dying chrome, it re-creates a few files)

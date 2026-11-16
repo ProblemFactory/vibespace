@@ -100,7 +100,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';   // lane browser-login: ⑩'s fixture passwords, built at run time
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, CHROME_STORE } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
@@ -207,7 +207,7 @@ let AB = null;
 async function launchChrome() {
   const port = await freePort();
   const dir = path.join(ROOT, 'chrome'); fs.mkdirSync(dir, { recursive: true });
-  const c = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, '--window-size=1024,768', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true, env: { ...process.env, HOME: CHROME_HOME } });   // (lane chrome-157: a scratch HOME — the person's download place is ITS Downloads, never the runner's)
+  const c = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, '--window-size=1024,768', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true, env: { ...process.env, HOME: CHROME_HOME } });   // (lane chrome-157: a scratch HOME — the person's download place is ITS Downloads, never the runner's)
   procs.add(c);
   let err = ''; c.stderr.on('data', (d) => { if (err.length < 4000) err += d; });
   let ver = null;
@@ -1079,7 +1079,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       await kk.stop(bank.id).catch(() => { });
       const HUMAN = fs.existsSync('/opt/google/chrome/chrome') ? '/opt/google/chrome/chrome' : CHROME;
       const lockPid = (dir) => { try { return Number((/-(\d+)$/.exec(fs.readlinkSync(path.join(dir, 'SingletonLock'))) || [])[1]) || null; } catch { return null; } };
-      const humanOn = async (dir) => { const h = spawn(HUMAN, ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', detached: true }); procs.add(h); for (let i = 0; i < 200 && lockPid(dir) !== h.pid; i++) await sleep(25); return h; };
+      const humanOn = async (dir) => { const h = spawn(HUMAN, [...CHROME_STORE, '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', detached: true }); procs.add(h); for (let i = 0; i < 200 && lockPid(dir) !== h.pid; i++) await sleep(25); return h; };
       const killHuman = async (h) => { try { process.kill(-h.pid, 'SIGKILL'); } catch { try { h.kill('SIGKILL'); } catch { } } for (let i = 0; i < 100 && Ff.pidAlive(h.pid); i++) await sleep(30); procs.delete(h); };
       const h1 = await humanOn(bank.dir);
       let eH = null; try { await kk.start(bank.id, { why: 'the agent\'s next verb' }); } catch (e) { eH = e; }

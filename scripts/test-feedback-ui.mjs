@@ -27,7 +27,7 @@ import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -84,7 +84,7 @@ if (!ok(await until(() => journal.includes('Ready.'), 60000, 100), 'the scratch 
 
 // ── Chrome: one browser, two page targets (client A, client B) ──
 const REAL_MOUSE = '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4';
-const ch = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE,
+const ch = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,800', REAL_MOUSE,
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--lang=en-US', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 procs.add(ch);
 await until(async () => (await fetch(`http://127.0.0.1:${CDP}/json/version`)).ok, 20000, 100);

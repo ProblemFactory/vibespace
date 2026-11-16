@@ -20,7 +20,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
 const REPO = path.resolve(process.env.REPO || new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(REPO, 'package.json'));
@@ -158,7 +158,7 @@ const onOut = (d) => { journal = (journal + d).slice(-200000); };
 srv.stdout.on('data', onOut); srv.stderr.on('data', onOut);
 const proxy = spawn('python3', [proxySrc, String(PROXY), String(PORT), rateFile, proxyLog], { stdio: 'ignore' }); procs.add(proxy);
 const chromeDir = scratch('cno-chrome'); dirs.add(chromeDir);
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=500,1000', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=500,1000', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
 procs.add(chrome);
 if (!await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000)) { console.error(journal.slice(-1500)); throw new Error('the scratch hub never answered'); }
 

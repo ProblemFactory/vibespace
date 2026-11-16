@@ -12,7 +12,7 @@ import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 export const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 export const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME names another Chrome — a Chrome for Testing build the runner has — as test-tailnet-reach-chrome reads it)
@@ -67,7 +67,7 @@ process.stdin.on('end', () => process.exit(0));
   const serverLog = [];
   srv.stdout.on('data', (d) => serverLog.push(String(d))); srv.stderr.on('data', (d) => serverLog.push(String(d)));
   const chromeDir = `${wt}-chrome`;
-  const chrome = !withChrome ? null : spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+  const chrome = !withChrome ? null : spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
     '--disable-background-timer-throttling', '--font-render-hinting=none', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
   const devPids = [];
   let cleaned = false;

@@ -51,7 +51,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -90,7 +90,7 @@ const restartWith = async (items) => {
 // phone under memory pressure keeps none (the existing legs never come back to a cacheable page, so nothing else moves);
 // every leg sets its own device metrics, so the 382×580 window only matters to a discarded tab's restored page
 fs.mkdirSync(chromeDir, { recursive: true }); fs.writeFileSync(path.join(chromeDir, 'Local State'), JSON.stringify({ internal_only_uis_enabled: true }));
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--disable-features=BackForwardCache', '--window-size=382,580', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' }); // the window a phone's: a tab shown again after a discard boots before any emulation reaches it
 const other = spawn(process.execPath, ['-e', `require('http').createServer((q, s) => { s.setHeader('content-type', 'text/html'); s.end(q.url === '/link' ? '<a href="/b" style="display:block;width:100%;height:200px;background:#eee">follow</a>' : '<title>other</title><h1>another site</h1>'); }).listen(${OTHER_PORT}, '127.0.0.1')`], { stdio: 'ignore' }); // G: a cross-site previous entry; /link — a page with one link (G7's embedded page)
 const OTHER = `http://localhost:${OTHER_PORT}/`;
