@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.406 — 2026-11-16
+
+### Fixed
+- With many channel conversations, VibeSpace no longer pauses for seconds when an agent starts a turn or lists its channels.
+
 ## 2.369.405 — 2026-11-16
 
 ### Fixed
