@@ -9,7 +9,7 @@ const OUT = process.env.STORE_SLOW_OUT, TAG = process.env.STORE_SLOW_TAG, TREE =
 if (OUT && TAG && require('worker_threads').isMainThread) {
   const { performance } = require('perf_hooks');
   const loadedAt = Date.now();
-  const orig = {}; for (const k of ['renameSync', 'writeFileSync', 'writeSync', 'openSync', 'fsyncSync', 'fdatasyncSync', 'closeSync']) orig[k] = fs[k];
+  const orig = {}; for (const k of ['renameSync', 'writeFileSync', 'writeSync', 'openSync', 'fsyncSync', 'fdatasyncSync', 'closeSync', 'mkdirSync', 'truncateSync', 'ftruncateSync']) orig[k] = fs[k];
   const now = () => Number(process.hrtime.bigint()) / 1e6;
   const sites = new Map(), calls = [], fdPath = new Map(), gaps = [];
   let lastBeat = now(), loopStartAt = null;
@@ -28,6 +28,11 @@ if (OUT && TAG && require('worker_threads').isMainThread) {
   fs.fsyncSync = function (fd) { return timed('fsyncSync', fdPath.get(fd) || 'fd', () => orig.fsyncSync.call(fs, fd)); };
   fs.fdatasyncSync = function (fd) { return timed('fdatasyncSync', fdPath.get(fd) || 'fd', () => orig.fdatasyncSync.call(fs, fd)); };
   fs.renameSync = function (a, b) { return timed('renameSync', rel(b), () => orig.renameSync.call(fs, a, b)); };
+  // channel-store-off-loop (commit 1): a directory made and a file truncated are timed too (the field's 75 s were an account
+  // directory's mkdir; the poll-stamps journal's fold is a truncate) — timed, never delayed here (strace delays)
+  fs.mkdirSync = function (p, ...a) { return timed('mkdirSync', typeof p === 'string' ? rel(p) : null, () => orig.mkdirSync.call(fs, p, ...a)); };
+  fs.truncateSync = function (p, ...a) { return timed('truncateSync', typeof p === 'string' ? rel(p) : null, () => orig.truncateSync.call(fs, p, ...a)); };
+  fs.ftruncateSync = function (fd, ...a) { return timed('ftruncateSync', fdPath.get(fd) || 'fd', () => orig.ftruncateSync.call(fs, fd, ...a)); };
   setInterval(() => { const t = now(); const g = t - lastBeat; lastBeat = t; if (loopStartAt === null && performance.nodeTiming.loopStart > 0) loopStartAt = performance.timeOrigin + performance.nodeTiming.loopStart; if (g >= 100) { gaps.push({ end: Date.now(), ms: Math.round(g) }); if (gaps.length > 3000) gaps.shift(); } }, 10);
   // round 2 (law C): the store writer's OWN per-file numbers (writes, bytes) — the hub's module when it has loaded one
   const writerStats = () => { try { const k = Object.keys(require.cache).find((x) => x.endsWith('/src/store-writer.js')); const m = k && require.cache[k].exports; if (!m || typeof m.storeWriter !== 'function') return null;

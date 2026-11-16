@@ -3796,7 +3796,7 @@ console.log('§72 every write of a named store is timed (src/timed-sync.js STORE
     if (f === 'src/timed-sync.js') continue;
     const t = strip72(read(f));
     for (const m of t.matchAll(/\btimedSync\(\s*('([^']*)'|[^'\s])/g)) { if (m[2] === undefined) computed.push(f); else calls.push([f, m[2]]); }
-    for (const m of t.matchAll(/\.dirty\([^,()]+,\s*\{\s*name:\s*'([^']+)'/g)) calls.push([f, m[1]]);   // lane hub-loop-stalls commit 2: a hand-off to THE STORE WRITER by the row's name (it records the write's time there)
+    for (const m of t.matchAll(/(?:\.dirty|\bowe)\([^,()]+,\s*\{\s*name:\s*'([^']+)'/g)) calls.push([f, m[1]]);   // lane hub-loop-stalls commit 2: a hand-off to THE STORE WRITER by the row's name (it records the write's time there); channel-store-off-loop: + the channel store's owe(file, {name}) — its one door to W().dirty
   }
   const unknown = calls.filter(([f, n]) => !STORES[n] || STORES[n].file !== f);
   ok(computed.length === 0 && unknown.length === 0 && calls.length >= rows72.length, `§72 ${calls.length} timedSync calls, each a literal row of the table, in that row's own file${computed.length ? ' — computed name in: ' + computed.join(' ') : ''}${unknown.length ? ' — unknown / misplaced: ' + unknown.map((x) => x.join(':')).join(' ') : ''}`);

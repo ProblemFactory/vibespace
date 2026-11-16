@@ -6,7 +6,8 @@
 // (src/store-writer.js — its own thread, a pace stated for the size); EVERY OTHER synchronous persistence write of
 // the main process is a ROW here — the proof is a census, not a memory (the sync-fs census is the model).
 //   ① every persistence write call (writeFileSync · appendFileSync · renameSync · copyFileSync · (f)truncateSync ·
-//      fsyncSync · fdatasyncSync · writeSync · writevSync — scripts/sync-fs-census.mjs's scan of server.js, src/*.js,
+//      fsyncSync · fdatasyncSync · writeSync · writevSync — and, since channel-store-off-loop, mkdirSync · openSync for
+//      write / append · rmSync · unlinkSync — scripts/sync-fs-census.mjs's scan of server.js, src/*.js,
 //      src/server/*.js, src/routes/*.js) and every call of an atomic helper (writeJsonAtomic · writeBuffersAtomic ·
 //      _writeAtomic · writePrivateFile) is claimed by EXACTLY ONE row [file, scope ('*' = the file's others), n, class,
 //      other readers, what a lost last write costs, why] — n EXACT: a new site reds its row, a site in a new file is red
@@ -50,11 +51,21 @@ const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, process.env.CENSUS_ALL ? 1e9 : 1500) : '')); } };
 
-const PERSIST = new Set(['writeFileSync', 'appendFileSync', 'renameSync', 'copyFileSync', 'truncateSync', 'ftruncateSync', 'fsyncSync', 'fdatasyncSync', 'writeSync', 'writevSync']);
+// channel-store-off-loop (commit 1): THE CENSUS LEARNS WHAT IT MISSED — a directory made (mkdirSync), a file opened for
+// write or append (openSync whose flags are not a read's), a tree or a file removed (rmSync, unlinkSync) hold the loop on a
+// slow mount as a write does (the owner's hub: an account directory's mkdir, 19 holds and 75 s in a day, was never a row)
+const PERSIST = new Set(['writeFileSync', 'appendFileSync', 'renameSync', 'copyFileSync', 'truncateSync', 'ftruncateSync', 'fsyncSync', 'fdatasyncSync', 'writeSync', 'writevSync', 'mkdirSync', 'rmSync', 'unlinkSync', 'openSync']);
+/** an openSync's flags: absent or a read's literal ('r', 'rs') ⇒ not a write; a write / append / '+' literal, or flags not
+ *  written as a literal (a constant, a variable) ⇒ counted */
+const opensForWrite = (call) => { const fl = call.arguments[1]; if (!fl) return false; return !(fl.type === 'Literal' && typeof fl.value === 'string' && !/[wa+]/.test(fl.value)); };
 const HELPER = /\b(writeJsonAtomic|writeBuffersAtomic|_writeAtomic|writePrivateFile)\s*\(/g;
 const CLASSES = new Set(['durable', 'not-main', 'not-a-store', 'exit', 'debt']);
 // a file whose rows are by SCOPE (its other sites fall to '*')
-const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'] };   // lane job-logs-sweep r3: the failed load's fact on disk (durable); r4: a note still owed, written by the exit
+const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'],
+  // channel-store-off-loop (commit 1): the channel store's doors BY NAME — the moved ones (adapters, groups, the outbox, the
+  // aliases, people, the poll-stamps snapshot) have no synchronous call left (no row); the journal is the named exception;
+  // every other door is LISTED as its own row, rows that only fall
+  'src/channel-store.js': ['journal', 'foldJournal', 'paceFlush', 'dispatchFlush', 'lruSave', 'lruFlush', 'attachmentPut', 'avatarPut', 'avatarRefuse', 'searchMemoWrite', 'searchMemoDrop', 'feedMissWrite', 'feedMissDrop', 'appendRecords', 'appendLines', 'writeAll', 'prependRecords', 'rewriteRecords', 'trim', 'appendSide', 'trimSide', 'audit', 'outboxPrune', 'dropOutboxFiles'] };   // lane job-logs-sweep r3: the failed load's fact on disk (durable); r4: a note still owed, written by the exit
 // THE DEBT RATCHET: the sum of n over the debt rows may only fall (lane hub-loop-stalls commit 2: 453 → 451 with session-status
 // moved; + 4 at the .390 rebase — master's new sites, classified here: src/turn-carry.js save ×2 (report-mark-on-ack) and
 // src/server/cli-model-catalog.js saveLedger ×2 (cli-update-needs-nothing) — 455; round 2: + 65 the census could NOT
@@ -62,164 +73,208 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta'], 'src/jobs
 // directories never scanned (src/channels, src/harnesses, src/adapters, src/spawn, src/plugins, src/agentd/client.js) —
 // the true count: 520; it falls from here; − 2 with lane hub-sync-holds rank 12a: src/server/auto-update.js DELETED — no boot
 // runs an update — 518)
-const DEBT_MAX = 516;   // lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
+// channel-store-off-loop (commit 1): THE CENSUS LEARNED mkdirSync, openSync for write / append, rmSync and unlinkSync —
+// the true count on 2.369.404 (d7f42cc21) with these rows is 904 (516 + 388 newly seen; the poll-stamps journal's two calls
+// named a durable exception); the moved doors' 11 sites (adapters, the outbox, groups, aliases, people ×2, the stamps
+// snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
+const DEBT_MAX = 893;   // was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
-  ["src/adapters/codex.js","*",2,"debt","—","—","round 2 (newly scanned): the codex adapter's plain copy of a transcript — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/agentd/client.js","*",6,"durable","—","NOT idempotent: the device agent's local token and proof — a lost write is a device that cannot prove itself","round 2 (newly scanned, required by server.js): the local device's token / proof / install — must be on disk before the answer"],
+  ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/app-secrets.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/app-system-serve.js","*",2,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/browser-facts.js","*",3,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/browser-verbs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/claude-oat-trampoline.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/routes/window-targets.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/account-usage-routes.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/apps-ops-door.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-attach-launch.js","*",5,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/sealed-json.js","*",2,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/wrapper-files.js","*",3,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/sock-path.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-estimator.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/ws-handler.js","*",2,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
+  ["src/store-writer.js","*",4,"exit","—","—","channel-store-off-loop (commit 1, newly seen): the store writer's OWN synchronous road — a failed write's temp removed on the main thread (writeHere) and a forgotten store's file removed when the writer has no thread (postUnlink, its two callers)"],
+  ["src/adapters/codex.js","*",5,"debt","—","—","round 2 (newly scanned): the codex adapter's plain copy of a transcript — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/agentd/client.js","*",11,"durable","—","NOT idempotent: the device agent's local token and proof — a lost write is a device that cannot prove itself","round 2 (newly scanned, required by server.js): the local device's token / proof / install — must be on disk before the answer"],
   ["src/channels/fake.js","*",1,"debt","—","—","round 2 (newly scanned): the FAKE channel adapter (suites and a demo account) — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/channels/webhook.js","*",7,"debt","—","—","round 2 (newly scanned): the webhook adapter's own atomic writer (writeJsonAtomic ×3 + its 2 callers) and its queue append — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/harnesses/antigravity.js","*",4,"debt","—","—","round 2 (newly scanned): seeding the CLI's home at a spawn (seedHomeRoot + its 2 callers) — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/channels/webhook.js","*",10,"debt","—","—","round 2 (newly scanned): the webhook adapter's own atomic writer (writeJsonAtomic ×3 + its 2 callers) and its queue append — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/harnesses/antigravity.js","*",16,"debt","—","—","round 2 (newly scanned): seeding the CLI's home at a spawn (seedHomeRoot + its 2 callers) — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/harnesses/claude-home.js","*",3,"debt","—","—","round 2 (newly scanned): a claude home moved / relinked — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/harnesses/claude.js","*",1,"debt","—","—","round 2 (newly scanned): seeding a claude config dir at a spawn — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/harnesses/codex.js","*",1,"debt","—","—","round 2 (newly scanned): seeding a codex config dir at a spawn — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/harnesses/codex.js","*",3,"debt","—","—","round 2 (newly scanned): seeding a codex config dir at a spawn — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/harnesses/codex-models.js","*",2,"debt","—","—","round 2 (newly scanned): the codex model catalog's cache — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/plugins/frp.js","*",6,"debt","—","—","round 2 (newly scanned): the frp plugin's install / config / admin password files — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/plugins/tailscale.js","*",3,"debt","—","—","round 2 (newly scanned): the tailscale plugin's install / state files — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/cli-self-measure.js","*",1,"durable","—","a lost PASS / FAIL record ⇒ the measurement runs again at the next sight of that build (a token member held meanwhile)","lane cli-self-measure (.393; classified at hub-loop-stalls commit 2's rebase): data/cli-self-measure.json — whether a CLI build may use the long-lived token (authority), written synchronously at every transition by its one writer, small"],
-  ["src/server/dropline-oauth.js","*",2,"durable","—","NOT idempotent: an OAuth token — a lost write is a sign-in lost","round 2 (newly seen: a helper-local write): the voice provider's token file — must be on disk before the answer"],
+  ["src/plugins/frp.js","*",16,"debt","—","—","round 2 (newly scanned): the frp plugin's install / config / admin password files — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/plugins/tailscale.js","*",9,"debt","—","—","round 2 (newly scanned): the tailscale plugin's install / state files — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/cli-self-measure.js","*",4,"durable","—","a lost PASS / FAIL record ⇒ the measurement runs again at the next sight of that build (a token member held meanwhile)","lane cli-self-measure (.393; classified at hub-loop-stalls commit 2's rebase): data/cli-self-measure.json — whether a CLI build may use the long-lived token (authority), written synchronously at every transition by its one writer, small"],
+  ["src/server/dropline-oauth.js","*",4,"durable","—","NOT idempotent: an OAuth token — a lost write is a sign-in lost","round 2 (newly seen: a helper-local write): the voice provider's token file — must be on disk before the answer"],
   ["src/spawn/dial.js","*",2,"debt","—","—","round 2 (newly scanned): a spawn's launch script for a dialled host — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/spawn/ssh.js","*",2,"debt","—","—","round 2 (newly scanned): a spawn's launch script over ssh — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/spawn/ssh.js","*",3,"debt","—","—","round 2 (newly scanned): a spawn's launch script over ssh — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/turn-carry.js","*",2,"debt","—","—","2.369.390 (report-mark-on-ack): the outstanding deliveries' table, written whole (tmp + rename) at each mark / clear — a lost write costs the restart line for those conversations; small — onto the store writer when its store is next touched"],
-  ["src/server/cli-model-catalog.js","*",2,"debt","—","—","2.369.390 (cli-update-needs-nothing): the model catalog's ledger, written whole (tmp + rename) — re-read from the installed binary; small — onto the store writer when its store is next touched"],
-  ["server.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/account-material.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","an account's credential files — must be on disk before the answer"],
-  ["src/accounts.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","accounts and their credential links — must be on disk before the answer"],
-  ["src/app-secrets-seal.js","*",2,"not-main","—","—","a child CLI src/secret-service.py runs"],
+  ["src/server/cli-model-catalog.js","*",4,"debt","—","—","2.369.390 (cli-update-needs-nothing): the model catalog's ledger, written whole (tmp + rename) — re-read from the installed binary; small — onto the store writer when its store is next touched"],
+  ["server.js","*",8,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/account-material.js","*",7,"durable","—","NOT idempotent: money / authority / a credential","an account's credential files — must be on disk before the answer"],
+  ["src/accounts.js","*",27,"durable","—","NOT idempotent: money / authority / a credential","accounts and their credential links — must be on disk before the answer"],
+  ["src/app-secrets-seal.js","*",3,"not-main","—","—","a child CLI src/secret-service.py runs"],
   ["src/app-serve.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/browser-serve.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/channel-outbox-files.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/channel-store.js","*",33,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/codex-fork-ledger-purge.js","*",4,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/browser-serve.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/channel-outbox-files.js","*",8,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/channel-store.js","journal",2,"durable","—","a stamp a kill took reads as «never polled» after the restart: a restored window fetches that row at once and a vendor refusal holds every NEW conversation back (the 2.369.203 incident)","channel-store-off-loop: THE NAMED EXCEPTION — the poll-stamps journal's append on its kept descriptor (and its open, once a process) STAYS on the main thread: it survives a process kill in the page cache the moment it returns; the writer's queue would lose it. The field never named it"],
+  ["src/channel-store.js","foldJournal",2,"durable","—","a fold lost replays the same stamps over the side file at the next start (idempotent lines); a fold that cut a newer line would lose that stamp — it runs only when no stamp was set since the side file's bytes were made","channel-store-off-loop: the named exception's second call — the journal truncated on its kept descriptor once the side file holding every line is on disk"],
+  ["src/channel-store.js","paceFlush",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the groups' wake-pace ledger (wake-pace.json), written a moment after a change"],
+  ["src/channel-store.js","dispatchFlush",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the dispatch ledger (dispatch-ledger.json)"],
+  ["src/channel-store.js","lruSave",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: an account's attachment LRU ledger — its directory and its write"],
+  ["src/channel-store.js","lruFlush",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the LRU ledger's coalesced flush (lruSave's caller)"],
+  ["src/channel-store.js","attachmentPut",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a fetched attachment's meta file"],
+  ["src/channel-store.js","avatarPut",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: an avatar's meta file"],
+  ["src/channel-store.js","avatarRefuse",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: an avatar refusal's meta — its directory and its write"],
+  ["src/channel-store.js","searchMemoWrite",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the account's vendor-search memo — its directory and its write"],
+  ["src/channel-store.js","searchMemoDrop",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the vendor-search memo removed with its account"],
+  ["src/channel-store.js","feedMissWrite",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the change feed's miss memo — its directory and its write"],
+  ["src/channel-store.js","feedMissDrop",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the feed-miss memo removed with its account"],
+  ["src/channel-store.js","appendRecords",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a conversation's message log — its directory and the append (appendLines)"],
+  ["src/channel-store.js","appendLines",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the message log's append (open for append)"],
+  ["src/channel-store.js","writeAll",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the message log append's every-byte loop"],
+  ["src/channel-store.js","prependRecords",3,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a backfill's prepend — the log rewritten (directory, temp, rename)"],
+  ["src/channel-store.js","rewriteRecords",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a record rewritten in its log (temp, rename)"],
+  ["src/channel-store.js","trim",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a log trimmed to its retention (temp, rename)"],
+  ["src/channel-store.js","appendSide",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a conversation's side log — its directory and the append"],
+  ["src/channel-store.js","trimSide",2,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a side log compacted (temp, rename)"],
+  ["src/channel-store.js","audit",3,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: the audit log's appends and its daily roll"],
+  ["src/channel-store.js","outboxPrune",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a pruned proposal's files removed inside the outbox's door (dropOutboxFiles)"],
+  ["src/channel-store.js","dropOutboxFiles",1,"debt","—","—","LISTED (channel-store-off-loop, commit 1): a row that only falls — not moved in this unit: a proposal's attachment folder removed (rmSync)"],
+  ["src/channel-store.js","*",9,"debt","—","—","the store's own directories at its creation, a set-aside of an unreadable file at the load, the index's verify line, an account's purge, and writeJsonAtomic's own body — a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/codex-fork-ledger-purge.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/conversation-index.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/desktop-display.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/desktop-serve.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/device-audit.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/exit-proxy.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/fixture-ledger-purge.js","*",11,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/gmail-sync.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/harness-config.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/hosts.js","*",20,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/claude-oat-probe.js","*",17,"not-main","—","—","lane cli-self-measure (+1, lane readings-attribution-2 P0: the mid-turn variants' scratch note in the run's own scratch; .393; classified at hub-loop-stalls commit 2's rebase): the long-lived-token measurement runs only in its OWN process — the release script, or the hub FORKS it (src/server/cli-self-measure.js) — over a scratch HOME · + lane oat-add-door: the mint variant's own scratch dir (runMint: rmSync before, its mkdir) — the variant's scratch like every variant's, in the measurement's own process"],
-  ["src/incident.js","*",8,"not-main","—","—","runs in the incident freeze worker (src/server/incident-freeze-worker.js)"],
-  ["src/job-logs-sweep-worker.js","*",4,"not-main","—","—","lane job-logs-sweep round 2 (r3 §8 +1: a catch-up record that does not parse, set aside by rename; r4 +1: a record store's NOTE <store>.corrupt-unread, written O_EXCL here — never on the hub's main thread): the job-logs remover's CHILD process (src/job-logs-sweep.js forks it; it throws without its IPC channel) — a remover whose hub ended leaves its counts in <dataDir>/jobs-remover-orphan-<pid>-<seq>.json (temp + rename), read and forgotten by the next engine"],
+  ["src/desktop-display.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/desktop-serve.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/device-audit.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/exit-proxy.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/fixture-ledger-purge.js","*",14,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/gmail-sync.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/harness-config.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/hosts.js","*",33,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/claude-oat-probe.js","*",30,"not-main","—","—","lane cli-self-measure (+1, lane readings-attribution-2 P0: the mid-turn variants' scratch note in the run's own scratch; .393; classified at hub-loop-stalls commit 2's rebase): the long-lived-token measurement runs only in its OWN process — the release script, or the hub FORKS it (src/server/cli-self-measure.js) — over a scratch HOME · + lane oat-add-door: the mint variant's own scratch dir (runMint: rmSync before, its mkdir) — the variant's scratch like every variant's, in the measurement's own process"],
+  ["src/incident.js","*",13,"not-main","—","—","runs in the incident freeze worker (src/server/incident-freeze-worker.js)"],
+  ["src/job-logs-sweep-worker.js","*",10,"not-main","—","—","lane job-logs-sweep round 2 (r3 §8 +1: a catch-up record that does not parse, set aside by rename; r4 +1: a record store's NOTE <store>.corrupt-unread, written O_EXCL here — never on the hub's main thread): the job-logs remover's CHILD process (src/job-logs-sweep.js forks it; it throws without its IPC channel) — a remover whose hub ended leaves its counts in <dataDir>/jobs-remover-orphan-<pid>-<seq>.json (temp + rename), read and forgotten by the next engine"],
   ["src/input-inject.js","*",2,"not-main","—","—","runs inside the device agent (src/agentd/agentd.js)"],
-  ["src/jobs.js","*",13,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (lane job-logs-sweep r3 −2: the two loads' set-aside renames moved into JobManager._logsHeldFile, a durable row)"],
+  ["src/jobs.js","*",20,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (lane job-logs-sweep r3 −2: the two loads' set-aside renames moved into JobManager._logsHeldFile, a durable row)"],
   ["src/jobs.js","JobManager._logsHeldFile",2,"durable","—","NOT idempotent: a job record store whose read FAILED — a lost set-aside (rename, else copy) is the job-logs clean-up removing the runs those records listed","lane job-logs-sweep round 3 §1: a records read that failed leaves its bytes ON DISK before the load returns — renamed or copied aside; must be on disk before any write of that store (the load's failure branch only: one per failed load). Round 4: the NOTE (nothing to set aside) moved to the remover's child — this process holds until it lands"],
   ["src/jobs.js","JobManager._logsNoteAtExit",1,"durable","—","NOT idempotent: a lost note is the next start not knowing those records could not be read — its clean-up may remove the runs they listed","lane job-logs-sweep round 4 §1: a note the remover's child had not written by the hub's EXIT — ONE O_EXCL write, before the exit's own write of that store, on a loop that serves nothing any more"],
-  ["src/kept-copies.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/ledger-slot-backfill.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/kept-copies.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/ledger-slot-backfill.js","*",9,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/machine-mounts.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/migration-runner.js","*",4,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/mounts.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/opencode-serve.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/migration-runner.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/mounts.js","*",18,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/opencode-serve.js","*",9,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/opslog.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/plugins.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/port-forward.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/quota-model-migrate.js","*",1,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/reading-repair.js","*",19,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/remote-fs.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/quota-model-migrate.js","*",2,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/reading-repair.js","*",24,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
-  ["src/routes/files.js","*",5,"not-a-store","—","—","a person's own files (the file explorer)"],
-  ["src/routes/persistence.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/safe-fs-worker.js","*",5,"not-main","—","—","the SafeFs worker thread"],
-  ["src/search-index-worker.js","*",1,"not-main","—","—","the search index worker thread"],
-  ["src/secret-box.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
-  ["src/secret-file.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","a secret file (secrets) — must be on disk before the answer"],
-  ["src/server/agent-tool-generators.js","*",17,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/routes/files.js","*",20,"not-a-store","—","—","a person's own files (the file explorer)"],
+  ["src/routes/persistence.js","*",28,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
+  ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
+  ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
+  ["src/secret-file.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a secret file (secrets) — must be on disk before the answer"],
+  ["src/server/agent-tool-generators.js","*",30,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/apps-engine.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/auto-cli-loop.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/auto-cli-loop.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/auto-resume.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/automation-engine.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","automation keys (authority) — must be on disk before the answer"],
-  ["src/server/boot-restore.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched. ROUND 4 (item 7), NAMED DEBT with its measured cost: the .json.stopped copies of dead conversations at a boot — 25 dead = 60 s of main-thread hold at 1.2 s a call (master's code, unchanged here)"],
-  ["src/server/browser-bindings.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-builds-keeper.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-cli-install.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-display-config.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-env.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-installs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-keeper.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-kept.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/browser-logins.js","*",1,"durable","—","a lost reminder mark ⇒ an aged unconfirmed login files its For-you reminder card again at the next unlock","lane vault-login (.399; classified on .398 rebase): data/browser-login-reminders.json — DEK-keyed HMAC marks of aged pending logins already reminded (≤ 4096 × 32-hex, mode 0600), written once when a reminder fires without touching vault.json, small"],
-  ["src/server/browser-trace.js","*",17,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/channel-api-cards.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/channel-api.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/automation-engine.js","*",7,"durable","—","NOT idempotent: money / authority / a credential","automation keys (authority) — must be on disk before the answer"],
+  ["src/server/boot-restore.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched. ROUND 4 (item 7), NAMED DEBT with its measured cost: the .json.stopped copies of dead conversations at a boot — 25 dead = 60 s of main-thread hold at 1.2 s a call (master's code, unchanged here)"],
+  ["src/server/browser-bindings.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-builds-keeper.js","*",19,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-cli-install.js","*",10,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-display-config.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-env.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-installs.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-keeper.js","*",24,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-kept.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/browser-logins.js","*",2,"durable","—","a lost reminder mark ⇒ an aged unconfirmed login files its For-you reminder card again at the next unlock","lane vault-login (.399; classified on .398 rebase): data/browser-login-reminders.json — DEK-keyed HMAC marks of aged pending logins already reminded (≤ 4096 × 32-hex, mode 0600), written once when a reminder fires without touching vault.json, small"],
+  ["src/server/browser-trace.js","*",25,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/channel-api-cards.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/channel-api.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/channels-attention.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/claude-signin.js","*",2,"durable","—","NOT idempotent: money / authority / a credential","a sign-in's credential files — must be on disk before the answer"],
+  ["src/server/claude-signin.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a sign-in's credential files — must be on disk before the answer"],
   ["src/server/cli-env.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/cli-registration.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/cli-registration.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/cli-unmeasured-notice.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/conversation-deliver.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/csp-reports.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/csp-reports.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/decision-engine.js","*",9,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/design-engine.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/desktop-access.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/desktop-app-keeper.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/desktop-app-keeper.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/desktop-handover-engine.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/device-alerts.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/device-upgrade-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/dial-health-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/dial-pairing.js","*",1,"durable","—","NOT idempotent: money / authority / a credential","a pairing secret (authority) — must be on disk before the answer"],
-  ["src/server/doc-engine.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/dial-pairing.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","a pairing secret (authority) — must be on disk before the answer"],
+  ["src/server/doc-engine.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/feedback-forward.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/feedback-store.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/grants-migration.js","*",2,"durable","—","NOT idempotent: money / authority / a credential","grants' one-shot reshape (authority) — must be on disk before the answer"],
-  ["src/server/grants-store.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","grants — who may use a resource (authority) — must be on disk before the answer"],
-  ["src/server/hook-root-watch.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/host-tokens.js","*",1,"durable","—","NOT idempotent: money / authority / a credential","a machine's token (authority) — must be on disk before the answer"],
+  ["src/server/grants-store.js","*",7,"durable","—","NOT idempotent: money / authority / a credential","grants — who may use a resource (authority) — must be on disk before the answer"],
+  ["src/server/hook-root-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/host-tokens.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","a machine's token (authority) — must be on disk before the answer"],
   ["src/server/incident-freeze-worker.js","*",1,"not-main","—","—","the incident freeze worker thread"],
   ["src/server/incident-wiring.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/instance-url.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/integration-store.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/integration-store.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/local-index.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/login-expiry-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/migrations.js","*",34,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/server/mounts-plugins-wiring.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/oat-mint.js","*",1,"durable","—","NOT idempotent: money / authority / a credential","a minted OAuth token (credential) — must be on disk before the answer"],
-  ["src/server/ops-routes.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/otel-ingest.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/plugin-install.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/plugin-loader.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/migrations.js","*",50,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/server/mounts-plugins-wiring.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/oat-mint.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","a minted OAuth token (credential) — must be on disk before the answer"],
+  ["src/server/ops-routes.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/otel-ingest.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/plugin-install.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/plugin-loader.js","*",8,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/provider-store.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/published-pages.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/session-stdout.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/session-stdout.js","writeSessionMeta",2,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
+  ["src/server/published-pages.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/session-stdout.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/session-stdout.js","writeSessionMeta",3,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
   ["src/server/spend-guard.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) — must be on disk before the answer"],
   ["src/server/stash-handover.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/sync-fs-witness-worker.js","*",1,"not-main","—","—","the witness's watchdog thread (its journal line on fd 2)"],
   ["src/store-exit-keeper.js","*",1,"not-main","—","—","round 4 (MUST 2): the writer's exit keeper thread — its ONE line on fd 2 at the exit's bound, then the process ends"],
   ["src/server/tailnet-door.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/tls.js","*",2,"durable","—","NOT idempotent: money / authority / a credential","the TLS certificate + key — must be on disk before the answer"],
-  ["src/server/usage-pool-engine.js","*",8,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/usage-probe-log.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/user-input.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/vault-engine.js","*",12,"durable","—","NOT idempotent: money / authority / a credential","the vault (sealed entries, the DEK wrap) — must be on disk before the answer"],
-  ["src/server/vault-run-door.js","*",9,"durable","—","NOT idempotent: money / authority / a credential","the vault's run door (a use receipt) — must be on disk before the answer"],
-  ["src/server/vault-totp.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","the vault's TOTP seeds — must be on disk before the answer"],
-  ["src/server/vault-use-grants.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","the vault's use grants (authority) — must be on disk before the answer"],
+  ["src/server/tls.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","the TLS certificate + key — must be on disk before the answer"],
+  ["src/server/usage-pool-engine.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/usage-probe-log.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/user-input.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/vault-engine.js","*",26,"durable","—","NOT idempotent: money / authority / a credential","the vault (sealed entries, the DEK wrap) — must be on disk before the answer"],
+  ["src/server/vault-run-door.js","*",22,"durable","—","NOT idempotent: money / authority / a credential","the vault's run door (a use receipt) — must be on disk before the answer"],
+  ["src/server/vault-totp.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","the vault's TOTP seeds — must be on disk before the answer"],
+  ["src/server/vault-use-grants.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","the vault's use grants (authority) — must be on disk before the answer"],
   ["src/server/voice-teach-engine.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/window-targets-engine.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/writes-lost.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/slot-transitions.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/ssh-key.js","*",2,"durable","—","NOT idempotent: money / authority / a credential","an ssh key (credential) — must be on disk before the answer"],
-  ["src/store-writer-worker.js","*",4,"not-main","—","—","the writer's own thread (src/store-writer.js starts it): temp + every byte + close + rename, an append + fsync, an unlink. ROUND 3 (law 2): the main thread never runs it at the exit (the exit WAITS for the thread, bounded — the «exit» class is empty: no store byte is written on the main thread at the exit); it runs writeJob only in the writer's main-only mode — its thread died past RESTARTS_MAX an hour, said once («from now on every store is written ON THE MAIN THREAD»), each such write saying it held the loop"],
-  ["src/sync-store.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/window-targets-engine.js","*",13,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/server/writes-lost.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/slot-transitions.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/ssh-key.js","*",3,"durable","—","NOT idempotent: money / authority / a credential","an ssh key (credential) — must be on disk before the answer"],
+  ["src/store-writer-worker.js","*",11,"not-main","—","—","the writer's own thread (src/store-writer.js starts it): temp + every byte + close + rename, an append + fsync, an unlink. ROUND 3 (law 2): the main thread never runs it at the exit (the exit WAITS for the thread, bounded — the «exit» class is empty: no store byte is written on the main thread at the exit); it runs writeJob only in the writer's main-only mode — its thread died past RESTARTS_MAX an hour, said once («from now on every store is written ON THE MAIN THREAD»), each such write saying it held the loop"],
+  ["src/sync-store.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/sysinfo.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/task-groups.js","*",9,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/telemetry.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/transcript-service.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-anchors.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-cache-write.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-history.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-hold-road.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-index-worker.js","*",1,"not-main","—","—","the usage index worker thread"],
-  ["src/usage-ledger-dedup.js","*",10,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/usage-origin-backfill.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
-  ["src/usage-routes.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/task-groups.js","*",13,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/telemetry.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/transcript-service.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-anchors.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-cache-write.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-history.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-hold-road.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-index-worker.js","*",3,"not-main","—","—","the usage index worker thread"],
+  ["src/usage-ledger-dedup.js","*",19,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/usage-origin-backfill.js","*",7,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
+  ["src/usage-routes.js","*",12,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/user-todos.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/vnc.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/vnc.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/webdav.js","*",2,"not-a-store","—","—","a person's own files (/dav)"],
-  ["src/weekly-lanes-unfold.js","*",2,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"]
+  ["src/weekly-lanes-unfold.js","*",3,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"]
 ];
 
 /** the tree's sites → [{file, scope}] (one per call) */
@@ -266,6 +321,7 @@ function fileSites(src, rel) {
     if (n.callee.type === 'MemberExpression' && ((n.callee.object.type === 'Identifier' && aliases.has(n.callee.object.name)) || isFsReq(n.callee.object))) { fn = propName(n.callee); via = n.callee.computed ? 'computed' : n.callee.object.type === 'Identifier' && n.callee.object.name !== 'fs' ? `alias ${n.callee.object.name}` : null; }
     else if (n.callee.type === 'Identifier' && direct.has(n.callee.name)) { fn = direct.get(n.callee.name); via = `destructured ${n.callee.name}`; }
     if (!fn || !PERSIST.has(fn)) return;
+    if (fn === 'openSync' && !opensForWrite(n)) return;
     sites.push({ line: n.loc.start.line, scope: scopeOf(parents), fn, via });
     // a DERIVED helper: the nearest enclosing named function whose parameter reaches this call's first argument
     for (let i = parents.length - 1; i >= 0; i--) {
@@ -288,8 +344,14 @@ function scan(repo) {
     for (const s0 of r.sites) out.push({ file: f, scope: (SCOPED[f] || []).find((x) => s0.scope === x || s0.scope.endsWith(' > ' + x)) || '*', what: `${f}:${s0.line} «${s0.scope}» ${s0.fn}${s0.via ? ` (${s0.via})` : ''}` });
     for (const h of r.helpers) if (!KNOWN_HELPERS.has(h.name) && !GENERIC.has(h.name)) helperDefs.set(`${f}#${h.name}`, h);
   }
-  // the four named helpers' callers, anywhere (as before) …
+  const scoped = (f, parents) => (SCOPED[f] || []).find((x) => { const sc = scopeOf(parents); return sc === x || sc.endsWith(' > ' + x); }) || '*';
+  // the four named helpers' callers, anywhere (as before) … — channel-store-off-loop (commit 1): in a file whose rows are by
+  // SCOPE, read from its syntax tree, each call claimed by the door it stands in (a listed door is a row of its own)
   for (const f of files) {
+    if (SCOPED[f] && parsed.has(f)) {
+      walk(parsed.get(f).ast, (n, parents) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && KNOWN_HELPERS.has(n.callee.name)) out.push({ file: f, scope: scoped(f, parents), what: `${f}:${n.loc.start.line} «${scopeOf(parents)}» ${n.callee.name}()` }); });
+      continue;
+    }
     const t = fs.readFileSync(path.join(repo, f), 'utf8');
     for (const m of t.matchAll(HELPER)) {
       const ls = t.lastIndexOf('\n', m.index) + 1, pre = t.slice(ls, m.index);
@@ -303,7 +365,7 @@ function scan(repo) {
     walk(r.ast, (n, parents) => {
       if (n.type !== 'CallExpression' || n.callee.type !== 'Identifier' || n.callee.name !== h.name) return;
       if (parents.some((p) => /Function/.test(p.type) && p.loc && p.loc.start.line === h.line)) return;
-      out.push({ file: f, scope: '*', what: `${f}:${n.loc.start.line} ${h.name}() — a helper that writes the path it is given` });
+      out.push({ file: f, scope: scoped(f, parents), what: `${f}:${n.loc.start.line} «${scopeOf(parents)}» ${h.name}() — a helper that writes the path it is given` });
     });
   }
   return out;
@@ -341,6 +403,11 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
 {
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const cs = src('src/channel-store.js'), ss = src('src/server/session-stdout.js'), uh = src('src/usage-history.js'), ue = src('src/usage-estimator.js'), jb = src('src/jobs.js');
+  // channel-store-off-loop (commit 1): the field-named doors and their same-bytes twins hand their bytes to the writer BY NAME
+  const doors = [['adaptersUpdate', "owe(adaptersFile, { name: 'channels-adapters.write'"], ['outboxUpdate', "owe(outboxFile, { name: 'channels-outbox.write'"], ['groupsUpdate', "owe(groupsFile, { name: 'channels-groups.write'"], ['aliasesUpdate', "owe(aliasesFile, { name: 'channels-aliases.write'"], ['peopleWrite', "owe(file, { name: 'channels-people.write'"], ['oweStamps', "owe(stampsFile, { name: 'channels-stamps.write'"]];
+  const bodyOf = (name) => { const i = cs.indexOf(`function ${name}(`); return i < 0 ? '' : cs.slice(i, cs.indexOf('\n  }\n', i)); };
+  const doorMiss = doors.filter(([fn, call]) => { const b = bodyOf(fn); return !b.includes(call) || /writeJsonAtomic\(|fs\.\w+Sync\(/.test(b); }).map(([fn]) => fn);
+  ok(!doorMiss.length && /fs\.mkdirSync\(path\.dirname\(m\.file\), \{ recursive: true/.test(src('src/store-writer-worker.js')), `the channel store's moved doors (${doors.map(([fn]) => fn).join(', ')}) hand their bytes to the writer by name, with no synchronous call of their own; the writer's thread makes a missing parent directory`, doorMiss);
   ok(/W\(\)\.dirty\(indexFile, \{ name: 'channels-index\.write'/.test(cs) && !/writeBuffersAtomic\(indexFile/.test(cs), 'the channels index: markDirty / flush hand it to the store writer — no writeBuffersAtomic(indexFile …) left on the main thread');
   ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'session-meta\.write'/.test(ss) && /if \(!sync && !knownOnDisk\(META_DIR, fp\)\)/.test(ss), 'session-meta: its UPDATES through the writer; only a meta that does not exist ON DISK yet (a socket being born — round 3, law 3) is written synchronously (the durable row)');
   ok(/storeWriter\(\)\.dirty\(this\.cursorsFile, \{ name: 'usage-cursors\.write'/.test(uh) && !/timedSync\('usage-cursors\.write', \(\) => this\._writeAtomic/.test(uh), 'the usage cursors through the writer');
@@ -359,7 +426,7 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
 console.log('② the synchronous flushes the main thread waits on — named debt');
 {
   const WAITS = [
-    ['src/channel-store.js', 1, 'the index\'s flush() — a person\'s clear-history waits on it (measured 2.3 s at 1.2 s a write, the verifier) and a caller ordering a cursor after its rows'],
+    ['src/channel-store.js', 2, 'the index\'s flush() — a person\'s clear-history waits on it (measured 2.3 s at 1.2 s a write, the verifier) and a caller ordering a cursor after its rows; channel-store-off-loop: writeNow() — close() and a change after close, the stamps\' flush() a suite calls (the moved doors\' bytes through the writer, waited for behind a write in flight — test-channel-store-loop-free (d) measures it)'],
     ['src/usage-history.js', 1, 'flushCursors() — the walk\'s cursors on disk before a caller reads them (a migration, a test, the shutdown hand-over)'],
     ['src/usage-estimator.js', 1, 'flushRates() / settleRates() — the learned rates on disk before the boot\'s migrations step and a ledger backfill\'s pass completes'],
     ['src/session-status.js', 1, 'flush() — the session-status map before the shutdown hands over and the set routes answer (persisted())'],

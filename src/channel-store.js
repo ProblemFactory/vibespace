@@ -279,14 +279,6 @@ function writeJsonAtomic(file, obj, { mode = null } = {}) {
   fs.renameSync(tmp, file);
 }
 
-/** Atomic write of pre-serialized parts (tmp + rename) — the incremental index write's door. */
-function writeBuffersAtomic(file, parts) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  const fd = fs.openSync(tmp, 'w');
-  try { for (const b of parts) { let o = 0; while (o < b.length) o += fs.writeSync(fd, b, o, b.length - o); } } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, file);
-}
-
 /** Two lists of buffers joined with `,\n` (the chunk separator) — the same byte stream? (a whole rebuild's equal-bytes
  *  check: chunk boundaries may move, the bytes are what is compared; no concatenated copy is made) */
 function sameJoined(a, b) {
@@ -465,7 +457,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
   }
   let stampsDirty = false;
-  let stampsOwed = false;      // a row's OWN stamps were taken into the map: the side file lands before the next index write
+  // channel-store-off-loop (commit 1): the side file is the WRITER's (paced); `stampSeq` counts the sets, so its write folds
+  // the journal only when no stamp was set since its bytes were made. A row's OWN stamps taken into the map (a heal) are
+  // JOURNALED at once — the kill keeps them whichever of the index and the side file lands first (was: the side file
+  // written synchronously before the index, inside the index's produce)
+  let stampSeq = 0, stampsMadeSeq = -1, healing = null;
   let stampsTimer = null;
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0;
@@ -503,13 +499,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (!st) stampMap.set(key, st = {});
       st[f] = v; took = true;
     }
-    if (took) { stampsDirty = true; stampsOwed = true; stampStats.healed++; }
+    if (took) { stampsDirty = true; stampSeq++; stampStats.healed++; if (healing) healing.push(key); else journal(key); }
     return took;
   }
   {
     const conv = ix.conversations;
     let healed = 0;
+    healing = [];
     for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;
+    const took = healing; healing = null;
+    if (took.length) journal(took);   // channel-store-off-loop: ONE append for the load's heal (the index on disk still holds them)
     if (!psLoad.value) {
       const lost = healed ? 0 : Object.keys(conv).filter((k) => !stampMap.has(k)).length;
       stampStats.lostAtLoad = lost;
@@ -719,8 +718,6 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         buildLayout(conv); parts = [Buffer.from(want, 'utf8')];
       }
     }
-    // a row's own stamps taken into the map land in the side file BEFORE the index that no longer holds them
-    if (stampsOwed) stampsFlush();
     return { parts, top };
   }
   /** THE SWEEP (every interval tick): re-serialize the next SWEEP_CHUNKS cached chunks and compare. A difference is a
@@ -1808,12 +1805,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     peopleCache.set(adapterId, out);
     return out;
   }
+  // channel-store-off-loop (commit 1): PACED — the names an adapter learned (re-learned after a loss); the writer's thread
+  // makes the account's directory (0700) when it is new — the field's 75 s were that mkdir on the main thread
+  const peopleFile = (adapterId) => path.join(dir, safeSeg(adapterId), 'people.json');
   function peopleWrite(adapterId, memo) {
-    const d = path.join(dir, safeSeg(adapterId));
-    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
     const out = { self: memo && typeof memo.self === 'string' ? memo.self : null, people: memo && memo.people && typeof memo.people === 'object' ? memo.people : {} };
-    writeJsonAtomic(path.join(d, 'people.json'), out, { mode: 0o600 });
     peopleCache.set(adapterId, out);
+    const file = peopleFile(adapterId);
+    owe(file, { name: 'channels-people.write', produce: () => (peopleCache.has(adapterId) ? JSON.stringify(peopleCache.get(adapterId), RUNTIME_KEYS, 1) : null), mode: 0o600 });
     return out;
   }
   /** lane search-card-open (.233): THE ACCOUNT'S VENDOR-SEARCH MEMO (`<account>/search-memo.json`, beside people.json) —
@@ -1954,6 +1953,46 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     auditDay = today;
   }
 
+  // ── channel-store-off-loop (commit 1): THE FIELD-NAMED DOORS HAND THEIR BYTES TO THE STORE WRITER, as the index does ──
+  // On the owner's hub (24 h of the witness's lines) 562 holds and 2221 s were this file's writeJsonAtomic (adapters.json
+  // 549, groups.json 12), 19 holds and 75 s an account directory's mkdir (peopleWrite), 15 holds and 51 s the poll-stamps
+  // snapshot's open — a data directory on a mount where a create costs ~4 s. These doors keep their truth in memory and
+  // `owe` the file to the writer (its thread does the mkdir, temp, write and rename); the bytes are made by `produce` when
+  // the write is due (several changes ⇒ one write). TWO COLUMNS, as the index's: a DURABLE door's promise means on disk
+  // (`landed` — only a FAILED write rejects, with its code; a write still QUEUED at the writer's bound is still owed and
+  // waited for again, never a rejection); a PACED door (a bookkeeping stamp) resolves after the change in memory. After
+  // close() — and for a synchronous caller — the bytes go through the writer at once and are waited for (`writeNow`).
+  // NOT MOVED here, rows that only fall (scripts/test-store-write-census.mjs): wake-pace, the dispatch ledger, lru, the
+  // attachment metas, search-memo, feed-miss, the message-log and audit appends, the outbox files' removal; and the
+  // poll-stamps JOURNAL's append and fold (a named exception: a kill must keep every stamp — see the journal's note).
+  const moved = new Set();   // the files this store handed to the writer (close() flushes them through it)
+  function owe(file, { name, produce, mode, act = false, onWritten } = {}) {
+    moved.add(file);
+    W().dirty(file, { name, produce, ...(mode !== undefined ? { mode } : {}), ...(act ? { rank: 0 } : {}), ...(onWritten ? { onWritten } : {}) });
+    if (closed) writeNow(file);
+  }
+  /** the file's bytes through the writer NOW, waited for (bounded by the writer's synchronous bound) — close(), a change
+   *  after close, a suite's synchronous flush; a write that did not land THROWS, as the synchronous write did */
+  function writeNow(file) {
+    const r = W().flushSync([file]);
+    const miss = r.left.find((x) => x.file === file);
+    if (miss) throw Object.assign(new Error(`${path.basename(file)} not written: ${miss.why}`), { code: 'EWRITE' });
+    return r.written.length > 0;
+  }
+  /** A DURABLE door's promise: resolves when the file's bytes holding the change are on disk; rejects ONLY when that
+   *  write FAILED (its own code — the caller's unsaved road, as the synchronous write's throw was). «queued» at the
+   *  writer's bound = still owed: the promise waits on (a channel on a stalled storage pauses; it raises no alarm). */
+  async function landed(file) {
+    for (;;) {
+      if (await W().durable(file)) return;
+      const why = W().whyNotDurable(file);
+      if (why && why.why === 'queued') continue;
+      const code = (why && why.code) || 'EWRITE';
+      throw Object.assign(new Error(`${path.basename(file)} not written (${code})`), { code });
+    }
+  }
+  const jsonOf = (obj) => () => JSON.stringify(obj(), RUNTIME_KEYS, 1);   // the same bytes writeJsonAtomic wrote
+
   // ── adapter records: THE SAME SINGLE OWNER AS THE INDEX (invariant 3, r2) ──
   // Their tokens are encrypted by the caller, never here. Read ONCE, mutated
   // LIVE inside a serialized door, and written by that door only — there is
@@ -1962,13 +2001,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const adLoad = loadJsonFamily(adaptersFile, (v) => v && typeof v === 'object' && Array.isArray(v.adapters), () => ({ v: 1, adapters: [] }));
   let ad = adLoad.value;
   let adChain = Promise.resolve();
-  function adaptersUpdate(fn) {
+  // channel-store-off-loop (commit 1): `{paced: true}` = a bookkeeping stamp (a pass's time, a counter, a cursor after
+  // its rows are durable) — resolves after the change in memory; every other update (a sign-in, a credential, an owner's
+  // act) is DURABLE — its promise means on disk. The chain serializes the change in memory only, never the disk.
+  function adaptersUpdate(fn, { paced = false } = {}) {
     if (adLoad.blocked) return Promise.reject(blockedError(adLoad.blocked));
     // 0600 (2.369.165): the records carry sealed tokens AND an account's own
     // client secret (`credential.appSecretEnc`) — owner-only like the key file.
-    const run = adChain.then(() => fn(ad)).then((r) => { writeJsonAtomic(adaptersFile, ad, { mode: 0o600 }); return r; });
+    const run = adChain.then(() => fn(ad)).then((r) => { owe(adaptersFile, { name: 'channels-adapters.write', produce: jsonOf(() => ad), mode: 0o600, act: !paced }); return r; });
     adChain = run.then(() => {}, () => {});
-    return run;
+    return paced ? run : run.then((r) => landed(adaptersFile).then(() => r));
   }
 
   // ── the outbox (design §9, P3): proposals + their state machine, THE SAME
@@ -1994,11 +2036,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!/^p-[a-z0-9]+-[a-z0-9]+$/.test(String(id))) return;
     try { fs.rmSync(path.join(dir, 'outbox-files', String(id)), { recursive: true, force: true }); } catch { /* the sweep tries again */ }
   }
+  // channel-store-off-loop (commit 1): the outbox is the send's WRITE-AHEAD (the attempt on disk before the send, the
+  // vendor's handle after it) — every update is DURABLE: its promise resolves only once the bytes holding it are on disk
   function outboxUpdate(fn) {
     if (obLoad.blocked) return Promise.reject(blockedError(obLoad.blocked));
-    const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); obSnap = null; writeJsonAtomic(outboxFile, ob); return r; }, (err) => { obSnap = null; throw err; });
+    const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); obSnap = null; owe(outboxFile, { name: 'channels-outbox.write', produce: jsonOf(() => ob), act: true }); return r; }, (err) => { obSnap = null; throw err; });
     obChain = run.then(() => {}, () => {});
-    return run;
+    return run.then((r) => landed(outboxFile).then(() => r));
   }
   // ONE COPY PER WRITE, NOT PER READ (verify r5, 2026-09-27): every reader took a deep copy of the WHOLE outbox to
   // read one record (34 sites in the engine — an approve is ~8 of them), so at the bound with 16 KB texts (16.6 MB on
@@ -2025,11 +2069,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const grLoad = loadJsonFamily(groupsFile, (v) => v && typeof v === 'object' && v.groups && typeof v.groups === 'object' && !Array.isArray(v.groups), () => ({ v: 1, groups: {} }));
   let gr = grLoad.value;
   let grChain = Promise.resolve();
+  // channel-store-off-loop (commit 1): a group verb and a report's marker are acts — DURABLE, the promise means on disk
   function groupsUpdate(fn) {
     if (grLoad.blocked) return Promise.reject(blockedError(grLoad.blocked));
-    const run = grChain.then(() => fn(gr)).then((r) => { writeJsonAtomic(groupsFile, gr); return r; });
+    const run = grChain.then(() => fn(gr)).then((r) => { owe(groupsFile, { name: 'channels-groups.write', produce: jsonOf(() => gr), act: true }); return r; });
     grChain = run.then(() => {}, () => {});
-    return run;
+    return run.then((r) => landed(groupsFile).then(() => r));
   }
   function groupsSnapshot() { return JSON.parse(JSON.stringify(gr)); }
 
@@ -2040,11 +2085,12 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const alLoad = loadJsonFamily(aliasesFile, (v) => v && typeof v === 'object' && v.aliases && typeof v.aliases === 'object' && !Array.isArray(v.aliases), () => ({ v: 1, aliases: {} }));
   let al = alLoad.value;
   let alChain = Promise.resolve();
+  // channel-store-off-loop (commit 1): the owner's names — an owner's act, DURABLE
   function aliasesUpdate(fn) {
     if (alLoad.blocked) return Promise.reject(blockedError(alLoad.blocked));
-    const run = alChain.then(() => fn(al)).then((r) => { writeJsonAtomic(aliasesFile, al); return r; });
+    const run = alChain.then(() => fn(al)).then((r) => { owe(aliasesFile, { name: 'channels-aliases.write', produce: jsonOf(() => al), act: true }); return r; });
     alChain = run.then(() => {}, () => {});
-    return run;
+    return run.then((r) => landed(aliasesFile).then(() => r));
   }
 
   // ── the groups' WAKE PACE ledger (r2): who woke whom when — the PURE rules
@@ -2125,47 +2171,74 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (v > 0) { if (!st) stampMap.set(k, st = {}); st[f] = v; } else if (st) delete st[f];
     }
     if (st && !Object.keys(st).length) stampMap.delete(k);
-    stampsDirty = true;
+    stampsDirty = true; stampSeq++;
     if (closed) { stampsFlush(); return; }
     journal(k);
     armStamps();
   }
   /** THE JOURNAL'S ONE WRITER: the key's whole triple after a change (null = none), one line, appended now (a kept fd,
-   *  O_APPEND). Never throws — a failure is said at most once a minute, and the side file's next write still carries
-   *  the stamp; the next line after a failed one starts on its own line. A BLOCKED family is never written. */
-  function journal(k) {
+   *  O_APPEND) — a list of keys is ONE append (the load's heal). Never throws — a failure is said at most once a minute,
+   *  and the side file's next write still carries the stamp; the next line after a failed one starts on its own line. A
+   *  BLOCKED family is never written.
+   *  channel-store-off-loop (commit 1): A NAMED EXCEPTION — this append (and its fold below) STAYS ON THE MAIN THREAD: a
+   *  stamp a kill took read as «never polled» (the 2.369.203 incident above), and an append on the kept descriptor survives
+   *  a process kill in the page cache the moment it returns; the writer's queue would lose it. The field never named it
+   *  (the 15 holds were the snapshot's open). Pinned by test-channel-store-loop-free and its census row. */
+  function journal(keys) {
     if (closed || psLoad.blocked || ixBlocked) return;
-    const st = stampMap.get(k);
-    const b = Buffer.from(`${journalTorn ? '\n' : ''}${JSON.stringify([k, ...STAMP_KEYS.map((f) => (st && st[f]) || null)])}\n`, 'utf8');
+    const lineOf = (k) => { const st = stampMap.get(k); return `${JSON.stringify([k, ...STAMP_KEYS.map((f) => (st && st[f]) || null)])}\n`; };
+    const b = Buffer.from(`${journalTorn ? '\n' : ''}${Array.isArray(keys) ? keys.map(lineOf).join('') : lineOf(keys)}`, 'utf8');
     try {
       if (journalFd === null) journalFd = fs.openSync(stampsLog, 'a');
       let o = 0;
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
-      journalTorn = false; journalStats.lines++; journalStats.bytes += b.length;
+      journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
     } catch (e) {
       journalTorn = true;
       if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
     }
   }
-  function armStamps() { if (stampsTimer || closed) return; stampsTimer = setTimeout(stampsFlush, STAMPS_FLUSH_MS); if (stampsTimer.unref) stampsTimer.unref(); }
-  /** Write the side file (tmp + rename) when a stamp changed; a key whose row left the index is dropped here. Never
-   *  throws (a failure is said, kept in memory and retried); a BLOCKED family or index is never written. */
-  function stampsFlush() {
-    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
-    if (!stampsDirty) return false;
-    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return false; }
+  /** the journal FOLDED once the side file holding every line it has is on disk (the named exception's second call: the
+   *  kept descriptor truncated — never a line set after the side file's bytes were made: `stampSeq` says so) */
+  function foldJournal() {
+    try { if (journalFd !== null) fs.ftruncateSync(journalFd, 0); else fs.truncateSync(stampsLog, 0); journalTorn = false; }
+    catch (e) { if (e && e.code !== 'ENOENT') warn(`[channels] poll-stamps.log not folded (${e.code || e.message || e}) — replayed over the side file at the next start`); }
+  }
+  function armStamps() { if (stampsTimer || closed) return; stampsTimer = setTimeout(oweStamps, STAMPS_FLUSH_MS); if (stampsTimer.unref) stampsTimer.unref(); }
+  /** the side file's bytes, made when the writer's turn comes (a key whose row left the index is dropped here); null =
+   *  nothing to write. A BLOCKED family or index is never written (said each time). */
+  function produceStamps() {
+    if (!stampsDirty) return null;
+    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return null; }
     const conv = ix.conversations, lines = [];
     for (const [k, st] of stampMap) {
       if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }
       lines.push(`${JSON.stringify(k)}:${JSON.stringify(STAMP_KEYS.map((f) => st[f] || null))}`);
     }
-    try { writeBuffersAtomic(stampsFile, [Buffer.from(`{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`, 'utf8')]); }
+    stampsDirty = false; stampsMadeSeq = stampSeq;
+    return `{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`;
+  }
+  function stampsWritten(ok) {
+    if (!ok) { stampsDirty = true; return; }   // owed: the writer keeps it and retries (its failure said there)
+    stampStats.writes++;
+    if (stampSeq === stampsMadeSeq) foldJournal();   // every line the journal holds is in the file just renamed
+  }
+  /** the side file handed to the WRITER (paced: the 120 s timer, the index's pace) */
+  function oweStamps() {
+    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
+    if (!stampsDirty) return;
+    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });
+  }
+  /** THE SYNCHRONOUS WRITE of the side file (close, a suite): through the writer, waited for. → whether it was written;
+   *  never throws (a failure is said, kept in memory and retried) */
+  function stampsFlush() {
+    if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
+    if (!stampsDirty && !W().pending(stampsFile)) return false;
+    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return false; }
+    moved.add(stampsFile);
+    W().dirty(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });
+    try { return writeNow(stampsFile); }
     catch (e) { warn(`[channels] poll-stamps.json not written (${(e && e.code) || (e && e.message) || e}) — kept in memory, retried`); armStamps(); return false; }
-    stampsDirty = false; stampsOwed = false; stampStats.writes++;
-    // the journal is FOLDED — every line it holds is in the file just renamed (a kill between the two replays them over
-    // it: the same stamps)
-    try { fs.truncateSync(stampsLog, 0); journalTorn = false; } catch (e) { if (e && e.code !== 'ENOENT') warn(`[channels] poll-stamps.log not folded (${e.code || e.message || e}) — replayed over the side file at the next start`); }
-    return true;
   }
 
   interval = setInterval(() => {   // every tick sweeps (B-f32b); a dirty index is the writer's (its pace, its retries)
@@ -2179,6 +2252,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     stampsFlush();
+    // channel-store-off-loop (commit 1): every file this store handed to the writer, through it now (a suite that reads
+    // the file after close reads its last bytes)
+    for (const f of moved) { if (f === stampsFile) continue; try { writeNow(f); } catch (e) { warn(`[channels] ${path.basename(f)} not written at close: ${(e && e.message) || e}`); } }
     if (journalFd !== null) { try { fs.closeSync(journalFd); } catch { } journalFd = null; }
     paceFlush();
     dispatchFlush();

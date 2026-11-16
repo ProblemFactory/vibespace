@@ -42,6 +42,13 @@ const STORES = Object.freeze({
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
+  // channel-store-off-loop (commit 1): the field-named doors through the store writer (it records each write's time here)
+  'channels-adapters.write': row('write', 'channels/adapters', 'src/channel-store.js', ['adaptersUpdate']),
+  'channels-outbox.write': row('write', 'channels/outbox', 'src/channel-store.js', ['outboxUpdate']),
+  'channels-groups.write': row('write', 'channels/groups', 'src/channel-store.js', ['groupsUpdate']),
+  'channels-aliases.write': row('write', 'channels/aliases', 'src/channel-store.js', ['aliasesUpdate']),
+  'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
+  'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
   'usage-rates.write': row('write', 'usage-anchors/rates', 'src/usage-estimator.js', ['_persistRates']),   // through the store writer (lane hub-loop-stalls commit 2; was untimed)
