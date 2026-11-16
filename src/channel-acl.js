@@ -146,12 +146,11 @@ function preparedOf(grant, p) {
   _prepared.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
   return n;
 }
-const _facts = new WeakMap();      // ctx → { id, groups, F }
+const _facts = new WeakMap();      // ctx → its facts as the model last prepared them (the model answers them again while they are the same)
+const NO_GROUPS = Object.freeze([]);
 function factsFor(ctx) {
-  const g = ctx.groups, m = _facts.get(ctx);
-  if (m && m.id === ctx.id && m.groups === g && (!Array.isArray(g) || m.n === g.length)) return m.F;
-  const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(g) ? g : [] });
-  _facts.set(ctx, { id: ctx.id, groups: g, n: Array.isArray(g) ? g.length : -1, F });
+  const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : NO_GROUPS }, _facts.get(ctx));
+  _facts.set(ctx, F);
   return F;
 }
 /** Does a grant's scope cover THIS target (`{key, adapterId}`)? */
