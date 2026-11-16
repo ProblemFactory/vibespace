@@ -23,6 +23,11 @@
 //   ⑭ LAW A (the look of 06:16Z): a turn running across a restart is seen (A1); the ceiling on the steady clock (A2); the count
 //      written first and a failed write refusing the read (A3); one stop for every automatic caller; a paired machine's
 //      conversation; a wait whose conversation is gone; the ruling's arithmetic; each with the scene only its rule decides.
+//   ⑮ THE SPLIT'S TWO LAWS (主开发's bounded check, 2026-11-16): U1 a press on an instance migrated from the shared row's Off
+//      READS — once, counted, paced; U2 an Off the person chose survives every road that can drop the key (a tab from before
+//      the restart saving its whole settings; the import of an older config): a row holding no value reads Off while Claude's
+//      row is Off, at the hub's read and in the Settings window; a person's own «Automatically» is kept as a value. Each leg
+//      with its RED (the door, readRow or the settings store without the rule).
 // Run: node scripts/test-agy-after-turn-read.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -548,6 +553,138 @@ console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity
   ok('…it is a row of the instance\'s one-shot registry (run once under the ledger; its note and its report are the journal lines), handed the live settings store by server.js',
     MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && /id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC) && MIGSRC.includes("const rep = agyReadsFollowClaudeOff(st);") && MIGSRC.includes("if (!st && !peek('settings.json', (d) => d['accounts.onDemandQuotaRefresh'] === 'off' && d['antigravity.autoUsageReads'] === undefined))")
     && /usageHistory = null, settings = null,/.test(MIGSRC) && SRV.includes('settings: { read: () => persistenceRouter.readSettings(), patch: (p) => persistenceRouter.patchSettings(p) }'));
+}
+
+console.log('⑮ THE SPLIT\'S TWO LAWS (主开发\'s bounded check U1 + U2, 2026-11-16) — what a press reads is said; an Off the person chose survives a dropped key');
+{
+  const tick = (ms) => { clock.t += ms; clock.m += ms; };
+  const HCS = require(path.join(REPO, 'src/server/harness-config-sync.js'));
+  const MIG = require(path.join(REPO, 'src/server/migrations.js'));
+  const HSP = require.resolve(path.join(REPO, 'src/harness-settings.js'));
+  const KEY = 'antigravity.autoUsageReads', CLAUDE = 'accounts.onDemandQuotaRefresh';
+  // a door over a settings DOCUMENT, read as the hub reads it: serverSetting = the raw stored value (server.js), harnessSetting =
+  // the typed accessor over it (harness-config-sync accessorsFor); `typed: false` = the door's own fallback (no accessor handed)
+  const docDoor = (getDoc, { doorMod = DOOR, hcs = HCS, typed = true } = {}) => {
+    const serverSetting = (k) => (getDoc() || {})[k];
+    const { harnessSetting } = hcs.accessorsFor({ serverSetting, harnesses });
+    return doorMod.createCliUsageDoor({ accounts: am, harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
+      cliCmds: { check: async (be, o) => (be === 'antigravity' && o && o.force === true ? '/stand-in/agy' : null) },
+      agentEnv: () => ({ PATH: '/usr/bin' }), setting: serverSetting, ...(typed ? { harnessSetting } : {}), now: () => clock.t, log: (l) => logs.push(l) });
+  };
+  const store = (doc) => { const st = { doc: { ...doc } }; return { st, read: () => st.doc, patch: (q) => { st.doc = { ...st.doc, ...q }; } }; };
+  const countOf = (acct, c) => DR.todayOf(DR.readDoorReads(CACHE, acct.id), clock.t)[c];
+  const brief = (x) => JSON.stringify(x, (k, v) => (k === 'error' && typeof v === 'string' ? v.slice(0, 120) : v)).slice(0, 420);
+
+  // ── U1: A CHANGE OF WHAT IS READ IS SAID, AND PINNED. Before the split, a Re-check on an Antigravity account under the shared
+  //    row's Off was REFUSED (403 refresh-off); after it, the press READS — the new row governs the automatic reads only
+  const s1 = store({ [CLAUDE]: 'off' }); MIG.agyReadsFollowClaudeOff(s1);
+  const press = async (acct, doorMod = DOOR) => {
+    const d = docDoor(() => s1.st.doc, { doorMod }); const r0 = runsOf(acct), p0 = countOf(acct, 'person');
+    const a1 = await d.read(acct.id, { person: true }), a2 = await d.read(acct.id, { person: true });
+    tick(61e3); const a3 = await d.read(acct.id, { wall: true });
+    return { a1, a2, a3, runs: runsOf(acct) - r0, counted: countOf(acct, 'person') - p0 };
+  };
+  const law1 = (x) => x.a1.ok === true && x.a2.code === 'throttled' && x.a3.code === 'auto-reads-off' && x.runs === 1 && x.counted === 1;
+  const p1 = await press(mkAcct('Press one'));
+  ok('U1: an instance migrated from the shared row\'s Off (Claude\'s row Off, antigravity.autoUsageReads = off): a person\'s Re-check on an Antigravity account READS — once (one spawn), counted (today\'s person count +1), paced as any press (a second press in the minute: 429 throttled); the row still refuses the wall read',
+    s1.st.doc[KEY] === 'off' && law1(p1), brief(p1));
+  const DOORF = 'src/server/cli-usage-door.js';
+  const pm1 = await press(mkAcct('Press two'), mutant(DOORF, "} else if (caller !== 'person') {", '} else {'));
+  const pm2 = await press(mkAcct('Press three'), mutant(DOORF, "if (h.quota && typeof h.quota.readsRow === 'string') {\n        let mode = 'manual'; try { mode = setting(h.quota.readsRow) || 'manual'; } catch { }",
+    "if (true) {\n        let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }"));
+  ok('RED (U1): the door whose row governs a press too ⇒ the press is refused (auto-reads-off); the door of the old law (Claude\'s row for every vendor) ⇒ refused (refresh-off) — nothing spawned, nothing counted',
+    !law1(pm1) && pm1.a1.code === 'auto-reads-off' && pm1.runs === 0 && pm1.counted === 0 && !law1(pm2) && pm2.a1.code === 'refresh-off' && pm2.runs === 0 && pm2.counted === 0, brief([pm1.a1, pm2.a1]));
+  // the words say it: the door's and the after-turn module's header comments, and the three changelogs
+  const DOORSRC_ALL = read(DOORF), ATRSRC = read('src/server/after-turn-read.js');
+  const CL = ['CHANGELOG.md', 'CHANGELOG.zh.md', 'CHANGELOG.ja.md'].map((f) => { const s = read(f); const i = s.indexOf('\n## 2.369.408'); const j = s.indexOf('\n## ', i + 5); return i < 0 ? '' : s.slice(i, j < 0 ? undefined : j); });
+  ok('U1 said: the door\'s header says a Re-check on an Antigravity account READS while Claude\'s row is Off and was refused before the split (403 refresh-off), and that Claude declares no on-demand reading (the readsRow branch a fence); the after-turn header names the vendor\'s own row; no header promises «never under accounts.onDemandQuotaRefresh = off»',
+    /a Re-check on an Antigravity\n\/\/ account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused\n\/\/ \(403 refresh-off\)/.test(DOORSRC_ALL) && /Claude declares no\n\/\/ on-demand reading today, so that branch is a fence for a later one/.test(DOORSRC_ALL)
+      && /the vendor's own row antigravity\.autoUsageReads — Off refuses\n\/\/ this read and the wall's, never a person's Re-check/.test(ATRSRC) && ![DOORSRC_ALL, ATRSRC].some((s) => /never under `accounts\.onDemandQuotaRefresh = off`|`accounts\.onDemandQuotaRefresh = off`, the judge/.test(s)));
+  ok('U1 said to the person: each of the three changelogs\' 2.369.408 sections says, in the screen\'s words, that Re-check on an Antigravity account now reads even while Claude usage refresh is Off, which refused it before',
+    /Re-check on an Antigravity account now reads its usage even while Claude usage refresh is Off \(that press was refused before\)/.test(CL[0]) && /Antigravity 账号的「重新检查」现在即使在 Claude 用量刷新为「关闭」时也会读取用量（以前这一按会被拒绝）/.test(CL[1])
+      && /Antigravity アカウントの「再チェック」は、Claude の使用量の更新が「オフ」でも読み取ります（以前は拒否されていました）/.test(CL[2]), JSON.stringify(CL.map((s) => s.length)));
+
+  // ── U2: AN OFF THE PERSON CHOSE SURVIVES EVERY ROAD THAT CAN DROP A KEY — the rule holds at the READ
+  const reads = async (acct, getDoc, o = {}) => {
+    const d = docDoor(getDoc, o); const r0 = runsOf(acct);
+    const w = await d.read(acct.id, { wall: true }); tick(61e3); const t = await d.read(acct.id, { afterTurn: true }); tick(61e3);
+    return { w, t, runs: runsOf(acct) - r0 };
+  };
+  const law2 = (x) => x.w.code === 'auto-reads-off' && x.t.code === 'auto-reads-off' && x.runs === 0 && /holds no value of its own, and accounts\.onDemandQuotaRefresh is off/.test(x.w.error);
+  // readRow without its follow (src/harness-settings.js) — the door and the typed accessor compiled over it; the cache restored after
+  const withoutFollow = async (fn) => {
+    const keep = require.cache[HSP].exports;
+    require.cache[HSP].exports = mutant('src/harness-settings.js', 'if (raw === null || raw === undefined) { const u = unsetValue(row, read);', 'if (false) { const u = unsetValue(row, read);');
+    try { return await fn({ doorMod: mutant(DOORF, "require('../harness-settings.js')", "require('../harness-settings.js')"), hcs: mutant('src/server/harness-config-sync.js', "require('../harness-settings')", "require('../harness-settings')") }); }
+    finally { require.cache[HSP].exports = keep; }
+  };
+  // (a) the key erased after the migration — a tab open from before the restart saves its whole settings, this row not among them
+  const s2 = store({ [CLAUDE]: 'off', 'chat.x': 1 }); MIG.agyReadsFollowClaudeOff(s2);
+  const tabSave = { ...s2.st.doc }; delete tabSave[KEY]; s2.st.doc = tabSave;
+  const e1 = await reads(mkAcct('Erased one'), () => s2.st.doc), e2 = await reads(mkAcct('Erased two'), () => s2.st.doc, { typed: false });
+  ok('U2 (a): the key ERASED after the migration with Claude\'s Off stored (a tab from before the restart saved its whole settings): the wall read and the after-turn read are refused — through the typed accessor and through the door\'s own fallback — and the refusal says the row holds no value and follows Claude\'s Off',
+    !(KEY in s2.st.doc) && s2.st.doc[CLAUDE] === 'off' && law2(e1) && law2(e2), brief([e1.w, e2.t]));
+  const em = await withoutFollow((o) => reads(mkAcct('Erased three'), () => s2.st.doc, o));
+  ok('RED (U2 a): readRow without its follow ⇒ the erased key reads as the default «Automatically» — the wall read and the after-turn read RUN', em.w.ok === true && em.t.ok === true && em.runs === 2, brief(em));
+  // (b) the import of a config exported before the split — the real settings store (src/routes/persistence.js) and its import route
+  const PDIR = path.join(ROOT, 'persist'); fs.mkdirSync(PDIR, { recursive: true });
+  const P = require(path.join(REPO, 'src/routes/persistence.js'));
+  P.setup({ dataDir: PDIR, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+  const route = (method, p) => P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]).route.stack[0].handle;
+  P.router.patchSettings({ [CLAUDE]: 'off' });
+  const migr = MIG.agyReadsFollowClaudeOff({ read: () => P.router.readSettings(), patch: (q) => P.router.patchSettings(q) });
+  const wasOff = P.router.readSettings()[KEY];
+  let impCode = 200, impOut = null; const res = { headersSent: false, status(c) { impCode = c; return res; }, json(o) { impOut = o; return res; }, setHeader() { } };
+  route('post', '/api/config/import')({ headers: {}, query: {}, body: { file: { app: 'vibespace-config', sections: { settings: { [CLAUDE]: 'off', 'chat.x': 2 } } }, sections: ['settings'] } }, res);
+  const afterImp = P.router.readSettings();
+  const i1 = await reads(mkAcct('Import one'), () => P.router.readSettings());
+  ok('U2 (b): the import of a config exported before the split replaces the settings whole — the row\'s Off is gone from the file, Claude\'s Off came back with the import — and the wall read and the after-turn read are refused',
+    migr.changed === true && wasOff === 'off' && impCode === 200 && !(KEY in afterImp) && afterImp[CLAUDE] === 'off' && afterImp['chat.x'] === 2 && law2(i1), brief({ impCode, impOut, i1 }));
+  const im = await withoutFollow((o) => reads(mkAcct('Import two'), () => P.router.readSettings(), o));
+  ok('RED (U2 b): readRow without its follow ⇒ after the import both automatic reads RUN', im.w.ok === true && im.t.ok === true && im.runs === 2, brief(im));
+  // (c) a person who chose «Automatically» by hand keeps it: the settings store (src/lib/settings.js — what the Settings window
+  //     saves) keeps this row's default as a VALUE (storeDefault), so the hub tells the person's own On from an absent key
+  const keepLS = globalThis.localStorage; globalThis.localStorage = { getItem: () => null, setItem() { } };
+  const { pathToFileURL } = await import('node:url');
+  const esm = async (pairs) => {
+    let src = read('src/lib/settings.js');
+    for (const [a, b] of [["from './settings-schema.js'", `from '${pathToFileURL(path.join(REPO, 'src/lib/settings-schema.js')).href}'`], ["from '../harness-settings.js'", `from '${pathToFileURL(path.join(REPO, 'src/harness-settings.js')).href}'`], ...pairs]) {
+      if (!src.includes(a)) throw new Error(`esm mutant: src/lib/settings.js no longer holds ${JSON.stringify(a.slice(0, 60))}`);
+      src = src.split(a).join(b);
+    }
+    return (await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'))).SettingsManager;
+  };
+  const pick = async (SM) => {
+    const sm = new SM(); sm._values = { [CLAUDE]: 'off', [KEY]: 'off' };   // as loaded after the migration
+    const seen = []; sm.on(KEY, (v) => seen.push(v));
+    sm.set(KEY, 'on'); clearTimeout(sm._saveTimer); sm._saveTimer = null;
+    const saved = sm.toJSON(); const r = await reads(mkAcct('Pick ' + (++pickN)), () => saved);
+    const fresh = new SM(); fresh._values = { [CLAUDE]: 'off' };   // a row nobody set: the window shows what the hub reads
+    const shownUnset = fresh.get(KEY); const redraw = []; fresh.on(KEY, (v, was) => redraw.push([was, v]));
+    fresh.set(CLAUDE, 'manual'); clearTimeout(fresh._saveTimer); fresh._saveTimer = null;
+    return { saved: saved[KEY], shown: sm.get(KEY), seen, wall: r.w.ok === true, after: r.t.ok === true, runs: r.runs, shownUnset, shownUnsetAfter: fresh.get(KEY), redraw };
+  };
+  let pickN = 0;
+  const SM0 = (await import(path.join(REPO, 'src/lib/settings.js'))).SettingsManager;
+  const k1 = await pick(SM0);
+  const law2c = (x) => x.saved === 'on' && x.shown === 'on' && x.wall && x.after && x.runs === 2;
+  ok('U2 (c): a person who picks «Automatically» by hand while Claude\'s row is Off keeps it — the store keeps \'on\' as a value (storeDefault), the window shows it, the hub reads on: the wall read and the after-turn read RUN',
+    law2c(k1) && JSON.stringify(k1.seen) === '["on"]', brief(k1));
+  ok('…and a row nobody set shows what the hub reads: Claude\'s Off ⇒ «Only when I press Re-check»; Claude\'s row turned to Manual ⇒ the row redraws to «Automatically» (its follower notified)',
+    k1.shownUnset === 'off' && k1.shownUnsetAfter === 'on' && JSON.stringify(k1.redraw) === '[["off","on"]]', brief(k1));
+  const km = await pick(await esm([['(!schema.storeDefault && JSON.stringify(value)', '(JSON.stringify(value)']]));
+  ok('RED (U2 c): the store without storeDefault drops the person\'s own «Automatically» as «the default» ⇒ the key is absent, it follows Claude\'s Off, and both automatic reads are refused — the person\'s choice lost',
+    !law2c(km) && km.saved === undefined && km.shown === 'off' && !km.wall && !km.after && km.runs === 0, brief(km));
+  const kg = await pick(await esm([['const u = schema.unsetFollows ? unsetValue(schema, (p) => this.get(p)) : undefined;', 'const u = undefined;']]));
+  ok('RED (U2 c, the window): get() without the follow shows «Automatically» for a row nobody set under Claude\'s Off — a row that says what is not read', kg.shownUnset === 'on' && kg.redraw.length === 0, brief(kg));
+  globalThis.localStorage = keepLS;
+  // the rule's declaration: a row with unsetFollows must keep its default as a value — checkTable refuses it otherwise, by name
+  const HS = require(HSP); const AGYT = harnesses.get('antigravity').settings;
+  const rowU = AGYT.rows.find((r) => r.key === 'autoUsageReads');
+  const errsOf = (rows) => HS.checkTable({ ...AGYT, rows }).filter((e) => /storeDefault|unsetFollows/.test(e));
+  ok('…the row declares both (storeDefault, unsetFollows → Claude\'s row Off ⇒ off), and checkTable refuses an unsetFollows without storeDefault — by name',
+    rowU.storeDefault === true && JSON.stringify(rowU.unsetFollows) === JSON.stringify({ setting: CLAUDE, when: 'off', value: 'off' }) && errsOf(AGYT.rows).length === 0
+      && errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r))).some((e) => /needs storeDefault: true/.test(e)), JSON.stringify(errsOf(AGYT.rows.map((r) => (r === rowU ? { ...r, storeDefault: undefined } : r)))));
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

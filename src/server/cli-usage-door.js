@@ -4,7 +4,14 @@
 // (antigravity: `agy -p /usage --output-format json`, src/harnesses/antigravity-usage.js) — is read HERE, for ONE named
 // account, when a PERSON presses Re-check in Manage agents. Never a timer (§ban-safety: the one owner-approved usage
 // timer is Claude's auto-cli; this reading is on demand only), never an agent (a vsst_/jbt_ bearer is refused), at most
-// once a minute per account, never under `accounts.onDemandQuotaRefresh = off`.
+// once a minute per account.
+// THE ROWS IT ASKS (lane usage-predict, the row split): a vendor whose descriptor names an instance row (`quota.readsRow`) is
+// refused while that row is off, a press included — Claude's names accounts.onDemandQuotaRefresh, but Claude declares no
+// on-demand reading today, so that branch is a fence for a later one. Every other vendor's AUTOMATIC reads (a wall, a stretch
+// of work) ask its own row, `autoUsageReads` (Antigravity's: antigravity.autoUsageReads — holding no value, it reads Off while
+// Claude's row is Off: src/harness-settings.js readRow), and a PERSON's press asks no row. So a Re-check on an Antigravity
+// account READS while Claude's row is Off — once, counted, paced as any press; before the split that press was refused
+// (403 refresh-off), because Claude's row then governed every vendor.
 // THE SECOND CALLER (lane agy-wall-signal, the owner's ruling «A» 2026-11-02): a usage WALL the account's conversation
 // named (src/server/stream-wall.js) — `read(id, { wall: true })`, honoured ONLY where the descriptor declares
 // `onDemand.onWallSignal`; once per account per wall (the caller's ledger), every gate below unchanged (the minute's
@@ -27,6 +34,7 @@
 const path = require('path');
 const { spawn } = require('child_process');
 const doorReads = require('../door-reads.js');
+const { readRow } = require('../harness-settings.js');
 
 const PACE_MS = 60000;
 // THE RULING'S OWN ARITHMETIC (the owner's A, 2026-11-14: «每账号每 30 分钟最多一次»): a day holds at most 24 h / 30 min = 48
@@ -136,10 +144,17 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
         if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
       } else if (caller !== 'person') {
         const tbl = h.settings && Array.isArray(h.settings.rows) ? h.settings : null;
-        if (!tbl || !tbl.rows.some((r) => r && r.key === AUTO_READS_KEY)) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${harnessOf(be)?.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
+        const row = tbl ? tbl.rows.find((r) => r && r.key === AUTO_READS_KEY) || null : null;
+        if (!row) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${harnessOf(be)?.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
+        // the typed read (readRow: a row holding NO value follows its `unsetFollows` — Antigravity's, Claude's Off — so an Off the
+        // person chose survives a road that drops the key: a tab from before a restart saving its whole settings, an older import)
         let v = 'off';   // an unreadable row reads as off (fail closed)
-        try { v = typeof harnessSetting === 'function' ? harnessSetting(be, AUTO_READS_KEY) : (setting(`${tbl.prefix}.${AUTO_READS_KEY}`) ?? (tbl.rows.find((r) => r.key === AUTO_READS_KEY) || {}).default); } catch { v = 'off'; }
-        if (v === 'off' || v === false) return { ok: false, status: 403, code: 'auto-reads-off', error: `${harnessOf(be)?.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY})` };
+        try { v = typeof harnessSetting === 'function' ? harnessSetting(be, AUTO_READS_KEY) : readRow(tbl, row, setting); } catch { v = 'off'; }
+        if (v === 'off' || v === false) {
+          let own; try { own = setting(`${tbl.prefix}.${AUTO_READS_KEY}`); } catch { own = undefined; }
+          const follows = (own === null || own === undefined) && row.unsetFollows ? ` — it holds no value of its own, and ${row.unsetFollows.setting} is ${row.unsetFollows.when}` : '';
+          return { ok: false, status: 403, code: 'auto-reads-off', error: `${harnessOf(be)?.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY}${follows})` };
+        }
       }
       if (inflight.has(id)) return inflight.get(id);
       const since = now() - (lastAt.get(id) || -Infinity);

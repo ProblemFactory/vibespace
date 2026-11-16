@@ -437,8 +437,27 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
   ok('…and NO word of Antigravity in it — title, choices or description — in English, Chinese or Japanese', inAll(C, /Antigravity/).every((x) => !x) && words(C).every((w) => !!zh[w] && !!ja[w]), JSON.stringify(inAll(C, /Antigravity/)));
   // law 2: Antigravity's two reads have their own row, where Antigravity's settings are
   ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', A && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press Re-check']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
-  ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that Re-check still reads, in three languages',
-    /usage wall/.test(A.description) && /stretch of work ends and 5 minutes pass/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /Re-check in the account's menu still reads it/.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
+  ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that Re-check reads either way, the row deciding only the reads that happen by themselves (U1), in three languages',
+    /usage wall/.test(A.description) && /a turn ends and 5 minutes pass with no new turn on the account/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves\./.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
+  // U3 (主开发's bounded check, 2026-11-16): A ROW PROMISES ONLY WHAT THE CODE DOES — the thirty minutes bound only the read after a
+  // stretch of work (after-turn-read.js PACE_MS); the wall read is once per wall (stream-wall.js's ledger). The clause sits on the
+  // read it bounds, naming it («that read» / «这一次» / «後者は»), after the stretch-of-work read; the wall's clause says once per wall
+  const U3 = {
+    en: { wall: 'usage wall', each: 'once each time', work: 'stretch of work', bound: 'that read comes at most once per account per 30 minutes' },
+    zh: { wall: '用量上限', each: '每撞到一次', work: '一段工作结束', bound: '这一次每账号每 30 分钟最多一次' },
+    ja: { wall: '使用量の上限', each: 'たびに 1 回', work: '作業の区切り', bound: '後者はアカウントごとに 30 分に最大 1 回' },
+  };
+  const bounds = (d, w) => { d = String(d); const a = d.indexOf(w.wall), b = d.indexOf(w.work), c = d.indexOf(w.bound), e = d.indexOf(w.each); return a >= 0 && e >= 0 && b > a && c > b && !d.slice(0, b).includes('30'); };
+  const descOf = { en: A.description, zh: zh[A.description], ja: ja[A.description] };
+  ok('U3: the thirty minutes bound only the read after a stretch of work — the clause comes after that read and names it; the wall read is once each time a wall is hit; no «30» before the stretch of work — in English, Chinese and Japanese',
+    ['en', 'zh', 'ja'].every((l) => bounds(descOf[l], U3[l])), JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(descOf[l], U3[l])]))));
+  // its RED: the words this round replaced (the clause after both reads, bounding the wall read too), as they shipped in the row
+  const BEFORE_U3 = {
+    en: "Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it.",
+    zh: '自动：对话撞到用量上限时读一次；一段工作结束且 5 分钟内没有新一轮时再读一次——每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读；账号菜单里的「重新检查」仍然可以读。',
+    ja: '自動：会話が使用量の上限に達した時に 1 回、作業の区切りが来て 5 分間新しいターンがない時に 1 回読み取ります——アカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。アカウントのメニューの「再チェック」ではいつでも読めます。',
+  };
+  ok('CONTROL (U3): the words before this round fail that leg in every language — the leg goes RED on a clause that bounds both reads', ['en', 'zh', 'ja'].every((l) => !bounds(BEFORE_U3[l], U3[l])) && !zh[BEFORE_U3.en] && !ja[BEFORE_U3.en], JSON.stringify(Object.fromEntries(['en', 'zh', 'ja'].map((l) => [l, bounds(BEFORE_U3[l], U3[l])]))));
   // law 6: the words — what each choice DOES, one sentence each, a few lines
   ok('law 6: each description opens a sentence per choice with the choice\'s own words, and stays a few lines (≤ 560 characters)',
     ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));

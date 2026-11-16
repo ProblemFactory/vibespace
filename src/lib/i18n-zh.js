@@ -1644,7 +1644,7 @@ export default {
   "Antigravity usage reads": "Antigravity 用量读取",
   "Automatically": "自动",
   "Only when I press Re-check": "仅在我按「重新检查」时",
-  "Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it.": "自动：对话撞到用量上限时读一次；一段工作结束且 5 分钟内没有新一轮时再读一次——每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读；账号菜单里的「重新检查」仍然可以读。",
+  "Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves.": "自动：账号的对话每撞到一次用量上限，读一次；一段工作结束、且该账号 5 分钟内没有新一轮时，再读一次——这一次每账号每 30 分钟最多一次，轮次进行中不读，闲置账号不读。仅在我按「重新检查」时：不会自己读。无论选哪项，账号菜单里的「重新检查」都会读：这一行只管自己发生的读取。",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今天读取用量 {n} 次：你手动 {person} 次 · 撞到上限后 {wall} 次 · 一段工作结束后 {after} 次",
   "usage read {n}× today": "今天读取用量 {n} 次",
   "Auto on popup open (when >30 min stale)": "打开弹窗时自动（数据超 30 分钟陈旧才刷）",
