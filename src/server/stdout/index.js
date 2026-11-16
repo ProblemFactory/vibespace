@@ -40,6 +40,13 @@ function createStdoutRegistry(deps) {
     if (mod.protocol !== proto) throw new Error(`stdout consumer registered under '${proto}' declares protocol '${mod.protocol}' — registry key and module must agree`);
     const c = mod.create(deps);
     if (!c || c.protocol !== proto || typeof c.attach !== 'function') throw new Error(`stdout consumer for '${proto}' must return { protocol: '${proto}', attach() } (got ${c && c.protocol})`);
+    // loop-day-report M5: the hour's characters of conversation output handed to a parser — ONE counting listener per attach,
+    // beside the parser's own (a length add)
+    const attach0 = c.attach.bind(c);
+    c.attach = (session, id, ptyProcess, ...rest) => {
+      try { const LC = require('../loop-counts.js'); ptyProcess.onData((o) => LC.inc('parsedChars', o && o.length ? o.length : 0)); } catch { }
+      return attach0(session, id, ptyProcess, ...rest);
+    };
     built.set(proto, c);
   }
   return {

@@ -1893,6 +1893,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
   }
   // the resume-in-flight hold is released however the create ends (created, refused, thrown)
   return Object.assign(async function handleCreate(ws, data, attachedSessions) {
+    try { require('./server/loop-counts.js').inc(data && (data.resumeId || data.resume) ? 'resumes' : 'creates'); } catch { }   // loop-day-report M5
     const held = { release: null };
     try { return await createBody(ws, data, attachedSessions, held); } finally { try { held.release?.(); } catch { } }
   }, { onClientConnected });
