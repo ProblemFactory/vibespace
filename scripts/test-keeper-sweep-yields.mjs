@@ -20,8 +20,11 @@
 //   ⑦ F4 THE WHOLE TURN THE CONVERSATION ENDS IN: a conversation with N leases, N child handles and N records ends at run time
 //      (the tick, past the grace): the one turn that drops its leases and reaps its handles is COUNTED — in-memory acts only
 //      (0 registry writes, 0 broadcasts, 0 child starts in it) — then its records retire one per turn.
-//   ⑧ F5 ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK: 300 removals ⇒ a handful of writes and of broadcasts
-//      (each counted: the rename onto the registry file, the keeper's own broadcast). MUTANT: the batching dropped ⇒ 300, RED.
+//   ⑧ F5 ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK: the writes and the broadcasts (each counted: the rename
+//      onto the registry file, the keeper's own broadcast) are bounded by the PIECES THE WALK SPANNED in this run (its own span
+//      over the keeper's SWEEP_PIECE_MS — a slower machine spans more pieces, never fewer) and stay below the removals. MUTANT:
+//      the batching dropped ⇒ one per record, RED on any machine. K1: an orderly STOP mid-walk (shutdown) writes what memory
+//      holds — the records the walk removed and had not yet written.
 //   ⑤ F1 A CLAIMED LAW HAS A LEG: among 20 orphans, one whose lease comes back before its step is KEPT — its browser record
 //      untouched (nothing of it stopped), no CLI start — and the other 19 go.
 //   ⑥ F2 NOTHING OF A CARRIED CONVERSATION IS ENDED BY THE SWEEP: a stall PLACED in the reap's window (its scan by launch
@@ -95,15 +98,17 @@ async function sweep(Km, dataDir, { how = 'reconcile', onRemoved = null, onWrite
   const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') { closes.push(args.join(' ')); if (closeHook) closeHook(opts); } const c = typeof opts === 'function' ? opts : cb; setImmediate(() => c(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
   const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => new Set(), install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bcasts.push(turn); }, tickMs: 3600e3 });
   kref = k;
-  let maxLate = 0, last = performance.now();
+  let maxLate = 0, last = performance.now(), walkMs = 0;
   const iv = setInterval(() => { const t = performance.now(); maxLate = Math.max(maxLate, t - last - 5); last = t; }, 5);
+  const tw = performance.now();
   try {
     if (how === 'boot') await k.boot();
     else if (how === 'tick') await k.tick();
     else { const r = k.reconcile({ graceMs: 0 }); await r.retired; }
+    walkMs = performance.now() - tw;   // K2: the walk's own span in this run — the pieces it spanned bound its writes
     await new Promise((res) => setTimeout(res, 12));   // the timer fires once more: a hold that ran to the end is read too
   } finally { running = false; clearInterval(iv); fs.renameSync = origRename; try { k.shutdown(); } catch { /* none */ } }
-  return { perTurnMax: Math.max(0, ...perTurn.values()), turnsWithRemovals: perTurn.size, removed: removed.length, closes: closes.length, lateEvidenceMs: Math.round(maxLate), left: onDisk(dataDir), writes: writes.length, writeLog: writes, broadcasts: bcasts.length, k };
+  return { perTurnMax: Math.max(0, ...perTurn.values()), turnsWithRemovals: perTurn.size, removed: removed.length, closes: closes.length, lateEvidenceMs: Math.round(maxLate), left: onDisk(dataDir), writes: writes.length, writeLog: writes, broadcasts: bcasts.length, piecesSpanned: Math.floor(walkMs / K.SWEEP_PIECE_MS) + 1, k };
 }
 let closeHook = null;
 
@@ -241,7 +246,8 @@ console.log('— ⑦ F4: the whole turn in which a conversation ends — its lea
   let turn = 0, running = true; const ticker = () => { turn++; if (running) setImmediate(ticker); }; setImmediate(ticker);
   const perTurn = new Map(); const bump = (t, kind) => { const m = perTurn.get(t) || { lease: 0, handle: 0, record: 0, write: 0, broadcast: 0, start: 0 }; m[kind]++; perTurn.set(t, m); };
   const span = { first: 0, last: 0 };   // evidence only: the drop loop's span on the clock (never asserted — test-ci-gate §2e)
-  const line = (m) => { const x = String(m); if (/\] dropped the lease of /.test(x) || /\] reaped child handle /.test(x)) { const t = performance.now(); if (!span.first) span.first = t; span.last = t; } if (/\] dropped the lease of /.test(x)) bump(turn, 'lease'); else if (/\] reaped child handle /.test(x)) bump(turn, 'handle'); else if (/ephemeral browser record \S+ .* removed with its conversation/.test(x)) bump(turn, 'record'); };
+  const walk = { first: 0, last: 0 };   // the walk's own span (its first and last removal): the pieces it spanned bound its writes (K2)
+  const line = (m) => { const x = String(m); if (/\] dropped the lease of /.test(x) || /\] reaped child handle /.test(x)) { const t = performance.now(); if (!span.first) span.first = t; span.last = t; } if (/\] dropped the lease of /.test(x)) bump(turn, 'lease'); else if (/\] reaped child handle /.test(x)) bump(turn, 'handle'); else if (/ephemeral browser record \S+ .* removed with its conversation/.test(x)) { const t = performance.now(); if (!walk.first) walk.first = t; walk.last = t; bump(turn, 'record'); } };
   const origRename = fs.renameSync; fs.renameSync = function (a, b) { const r = origRename.apply(this, arguments); if (b === file) bump(turn, 'write'); return r; };
   const execFileImpl = (bin, args, opts, cb) => { if (Array.isArray(args) && args[0] === 'close') bump(turn, 'start'); const cbk = typeof opts === 'function' ? opts : cb; setImmediate(() => cbk(null, '{"success":true,"data":{}}', '')); return { on() { }, kill() { } }; };
   const k = K.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv, execFileImpl }), liveKeys: () => live, now: () => clock, install: false, log: { log: line, warn: line, error: line, info: line }, broadcast: (m) => { if (m && m.type === 'browser-profiles-updated') bump(turn, 'broadcast'); }, tickMs: 3600e3 });
@@ -261,13 +267,23 @@ console.log('— ⑦ F4: the whole turn in which a conversation ends — its lea
   const tot = turns.reduce((a, m) => { for (const kk of Object.keys(m)) a[kk] = (a[kk] || 0) + m[kk]; return a; }, {});
   const recMax = Math.max(0, ...turns.map((m) => m.record));
   ok(drop.lease === N && drop.handle === N && drop.write === 0 && drop.broadcast === 0 && drop.start === 0 && drop.record === 0, `the turn the conversation ends in drops its ${N} leases and reaps its ${N} child handles — in-memory acts only: in that turn ${drop.write} registry writes, ${drop.broadcast} broadcasts, ${drop.start} child starts, ${drop.record} records retired (the walk starts at the next turn; evidence: the drop loop spans ${Math.round(span.last - span.first)} ms, a 5 ms timer's worst lateness over the three ticks ${Math.round(maxLate)} ms)`, drop);
-  ok(tot.record === N && recMax === 1 && !tot.start && (tot.write || 0) <= 10 && (tot.broadcast || 0) <= 10, `…then its ${N} records retire ONE per loop turn (most ${recMax}), with ${tot.start || 0} child starts, ${tot.write || 0} registry writes and ${tot.broadcast || 0} broadcasts in all`, tot);
+  const pieces = Math.floor((walk.last - walk.first) / K.SWEEP_PIECE_MS) + 1, TICKS = 3;   // the walk's pieces, + one commit of each tick's own
+  ok(tot.record === N && recMax === 1 && !tot.start && (tot.write || 0) <= pieces + TICKS && (tot.write || 0) < N && (tot.broadcast || 0) <= pieces + TICKS && (tot.broadcast || 0) < N, `…then its ${N} records retire ONE per loop turn (most ${recMax}), with ${tot.start || 0} child starts, ${tot.write || 0} registry writes and ${tot.broadcast || 0} broadcasts in all — at most one per piece the walk spanned (${pieces}) plus each of the ${TICKS} ticks' own, below the ${N} removals`, { ...tot, pieces });
 }
 
 console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the walk, not per record');
 {
   const s = s300;   // ①'s 300-record reconcile, read for its writes and broadcasts
-  ok(s.removed === 300 && s.writes >= 1 && s.writes <= 10 && s.broadcasts >= 1 && s.broadcasts <= 10, `300 removals (①'s reconcile): ${s.writes} registry writes and ${s.broadcasts} broadcasts (one per piece of about a quarter second of walking, plus the last)`, { removed: s.removed, writes: s.writes, broadcasts: s.broadcasts });
+  // K2: a cost claim is a COUNT bounded by the run's own span — the pieces this walk spanned (floor(span / SWEEP_PIECE_MS) + 1:
+  // a slower machine spans more of them, never fewer) — and far below the removals; no ceiling a clock decides
+  ok(s.removed === 300 && s.writes >= 1 && s.writes <= s.piecesSpanned && s.writes < s.removed && s.broadcasts >= 1 && s.broadcasts <= s.piecesSpanned && s.broadcasts < s.removed, `300 removals (①'s reconcile): ${s.writes} registry writes and ${s.broadcasts} broadcasts — at most one per piece the walk spanned in this run (${s.piecesSpanned}), and below the 300 removals`, { removed: s.removed, writes: s.writes, broadcasts: s.broadcasts, piecesSpanned: s.piecesSpanned });
+  // K1: an orderly stop in the middle of a walk writes what memory holds (the removals the walk had deferred)
+  {
+    const dataDir = registry(60);
+    let at = null;
+    await sweep(K, dataDir, { stallMs: 0, onRemoved: (n, k) => { if (n === 10 && at === null) { k.shutdown(); at = { disk: onDisk(dataDir), memory: k._reg().profiles.filter((p) => p.ephemeral).length }; } } });
+    ok(at && at.memory === 50 && at.disk === at.memory, `K1: a stop (the keeper's shutdown) after 10 of 60 removals, inside one piece — the file holds what memory holds: ${at && at.disk} on disk, ${at && at.memory} in memory`, at);
+  }
   const noBatch = ksrc.replace('    if (sweepIds.has(id)) sweepDirty = true; else commit();', '    commit();');
   ok(noBatch !== ksrc, 'MUTANT (the batching dropped): the patch applies');
   if (noBatch !== ksrc) {
