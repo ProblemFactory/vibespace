@@ -51,23 +51,33 @@ const EMPTY = Object.freeze({ to: Object.freeze([]), except: Object.freeze([]) }
  *  agents); a principal the row names by itself is never «left out» of itself. */
 const exceptFor = (e, except) => (e.kind === 'group' || e.kind === 'everyone' ? except : []);
 const UNREADABLE = Object.freeze({ to: Object.freeze([]), except: Object.freeze([]), unreadable: true });
+const NO_GRANTS = Object.freeze([]);
 
 function create({ grants = null, dataDir = null } = {}) {
-  const storeOf = () => (typeof grants === 'function' ? grants() : grants) || (dataDir ? GS.forDir(dataDir) : GS.store());
-  let bound = null, unsub = null;
+  // the store a door handed none resolves ONCE per install (lane grants-read-is-a-lookup: every read asked forDir — its
+  // path.resolve was the hub's top held frame); a getter (`grants` a function) is asked at every read, as before
+  let resolved = null, resolvedAt = -1;
+  const storeOf = () => {
+    const h = typeof grants === 'function' ? grants() : grants;
+    if (h) return h;
+    const g = typeof GS.installGeneration === 'function' ? GS.installGeneration() : -2;
+    if (resolved && resolvedAt === g && g !== -2) return resolved;
+    resolved = dataDir ? GS.forDir(dataDir) : GS.store(); resolvedAt = g;
+    return resolved;
+  };
+  let bound = null, unsub = null, gen = 0;
   const cache = new Map();          // door → {unreadable, rows: Map(resource → {to, except, unknown?})}
   const views = new WeakMap();      // a cached row → its channel-spelling views (built once per row per change)
   const S = () => {
     const s = storeOf();
     if (s !== bound) {
       if (unsub) { try { unsub(); } catch { } }
-      cache.clear(); bound = s;
-      unsub = s && typeof s.onChange === 'function' ? s.onChange(({ door }) => { if (CHANNEL_DOORS.includes(door)) cache.delete(door); }) : null;
+      cache.clear(); bound = s; gen++;
+      unsub = s && typeof s.onChange === 'function' ? s.onChange(({ door }) => { if (CHANNEL_DOORS.includes(door)) { cache.delete(door); gen++; } }) : null;
     }
     return s;
   };
-  function doorIndex(door) {
-    const s = S();
+  function doorIndex(door, s = S()) {
     let ix = cache.get(door);
     if (ix) return ix;
     ix = { unreadable: !s, rows: new Map() };
@@ -91,6 +101,33 @@ function create({ grants = null, dataDir = null } = {}) {
     const ix = doorIndex(door);
     return [...ix.rows.keys()].filter((k) => k.startsWith(prefix));
   }
+  /** THE GENERATION of the channel doors' rows: it moves whenever an index is dropped (a channel row changed, the store
+   *  rebound) — a reader that keeps an answer derived from the rows keeps it for ONE generation (lane grants-read-is-a-lookup). */
+  function generation() { S(); return gen; }
+  /** ONE call per conversation of a walk: the rows' generation when NO reach row of its own names this conversation and no
+   *  rule holds a reach row (its reach is then its account's — channels-access reachFor), -2 when some rule holds one (the
+   *  caller asks the rules), -1 when a row of its own decides it. */
+  function plainGeneration(key) {
+    const ix = doorIndex(DOORS.reach);
+    if (!ix.unreadable && (ix.rows.has(RES.conversation(key)) || ix.rows.has(RES.user(key)) || ix.rows.has(RES.request(key)))) return -1;
+    return ruleIdsOf(ix).size ? -2 : gen;
+  }
+  const ruleIdsOf = (ix) => ix.ruleIds || (ix.ruleIds = new Set([...ix.rows.keys()].filter((k) => k.startsWith('rule:')).map((k) => k.slice(5))));
+  /** Does a reach row of ITS OWN name this conversation (its access, the owner's rows, an approved request)? A conversation
+   *  none names, and no rule's row derives, reaches exactly what its ACCOUNT's rows reach (channels-access reachFor). */
+  function hasConversationRows(key) {
+    const ix = doorIndex(DOORS.reach);
+    if (ix.unreadable) return false;
+    return ix.rows.has(RES.conversation(key)) || ix.rows.has(RES.user(key)) || ix.rows.has(RES.request(key));
+  }
+  /** The rule ids a reach row holds — only these derive a grant on a matching conversation (kept on the door's index). */
+  function ruleIdsWithRows() { return ruleIdsOf(doorIndex(DOORS.reach)); }
+  /** The conversation keys a reach row of their OWN names (kept on the door's index — a walk asks it once). */
+  function ownConversationKeys() {
+    const ix = doorIndex(DOORS.reach);
+    if (!ix.ownKeys) ix.ownKeys = new Set([...ix.rows.keys()].filter((k) => k.startsWith('conversation:')).map((k) => k.slice('conversation:'.length).replace(/#(user|request)$/, '')));
+    return ix.ownKeys;
+  }
   const viewOf = (row, what, build) => {
     let v = views.get(row);
     if (!v) { v = {}; views.set(row, v); }
@@ -113,6 +150,7 @@ function create({ grants = null, dataDir = null } = {}) {
   /** channel-acl grants of ONE row: `{principal, scope, level, origin, at, by, except}` (+ `pattern`/`derived` for a rule's). */
   function grantsOf(res, { scope, origin, level = null }) {
     const r = rowOf(DOORS.reach, res);
+    if (!r.to.length) return NO_GRANTS;   // no row (or an empty one): nothing to view — never a view kept per conversation key on the shared EMPTY row
     return viewOf(r, `g|${scope.kind}:${scope.id}|${origin}`, () => r.to.map((e) => {
       const principal = GM.toChannelPrincipal(e);
       if (!principal) return null;
@@ -276,7 +314,7 @@ function create({ grants = null, dataDir = null } = {}) {
   }
 
   return {
-    DOORS, RES, grainResource, rowOf, resourcesOf, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
+    DOORS, RES, grainResource, rowOf, resourcesOf, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
   };
 }

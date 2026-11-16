@@ -273,19 +273,25 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
 // the process: grants a door writes there are judged by the same model, nothing reaches a disk, and a grant written
 // before nothing was installed is never read from anywhere else (a narrowing, never a widening). A suite that needs a file
 // or isolation constructs its own with `create` and passes it in.
-let current = null;
-function install(s) { current = s; return s; }
+let current = null, installs = 0;
+function install(s) { current = s; installs++; return s; }
+/** How many times a store was installed — a door that keeps the store it resolved keeps it until this moves. */
+function installGeneration() { return installs; }
 function store() { return current || (current = create({ memory: true })); }
 /** The store of a door that knows its data dir but was handed no store: the installed one when it holds that dir (the
  *  instance: every door's dir is data/), else ONE file-backed store per dir for the process (a suite's scratch world —
  *  never two writers on one file). No dir ⇒ `store()`. */
 const byDir = new Map();
+// an ABSOLUTE dir's resolved form, kept (lane grants-read-is-a-lookup: every channel grant read asked forDir, and its
+// path.resolve was the hub's top held frame — 104 s a day); a relative one resolves each time (it follows the process's cwd)
+const resolvedOf = new Map();
 function forDir(dataDir) {
   if (!dataDir) return store();
-  const d = path.resolve(dataDir);
+  let d = typeof dataDir === 'string' && path.isAbsolute(dataDir) ? resolvedOf.get(dataDir) : undefined;
+  if (d === undefined) { d = path.resolve(dataDir); if (typeof dataDir === 'string' && path.isAbsolute(dataDir) && resolvedOf.size < 64) resolvedOf.set(dataDir, d); }
   if (current && current.dataDir === d) return current;
   if (!byDir.has(d)) byDir.set(d, create({ dataDir: d }));
   return byDir.get(d);
 }
 
-module.exports = { create, install, store, forDir, STORE_REFUSALS, AUDIT_ROTATE_BYTES };
+module.exports = { create, install, installGeneration, store, forDir, STORE_REFUSALS, AUDIT_ROTATE_BYTES };

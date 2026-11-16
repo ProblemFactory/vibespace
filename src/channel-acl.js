@@ -128,9 +128,31 @@ function validateGrant(input = {}) {
 function principalApplies(ctx, grant) {
   const p = grant && grant.principal;
   if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return false;
+  const n = preparedOf(grant, p);
+  if (!n) return false;
+  return GM.admits([n], factsFor(ctx)).ok;
+}
+// A CHECK IS A LOOKUP (lane grants-read-is-a-lookup, 主开发 2026-11-16 — the hub's reach walk re-normalised every grant at every
+// check: ~2.5 M normalisations a walk): the grant's one-entry row is normalised ONCE per PRINCIPAL object (the channel door
+// hands the same objects until its store changes — a rule's derived grant is a fresh copy that carries the same principal and
+// the same `except`) and the asker's facts ONCE per ctx object; each memo is re-made the moment the fields it was made from
+// are not the same values any more (a principal, an `except` or a ctx a caller changed in place is judged afresh).
+const _prepared = new WeakMap();   // principal → { x, xn, kind, id, name, n }
+function preparedOf(grant, p) {
+  const x = grant.except, xn = Array.isArray(x) ? x.length : -1, m = _prepared.get(p);
+  if (m && m.x === x && m.xn === xn && m.kind === p.kind && m.id === p.id && m.name === p.name) return m.n;
   const e = GM.fromChannelPrincipal(p);
-  if (!e) return false;
-  return GM.admits([{ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(grant.except) ? grant.except : [] }], { conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : [] }).ok;
+  const n = e ? GM.prepareRow({ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(x) ? x : [] }) : null;
+  _prepared.set(p, { x, xn, kind: p.kind, id: p.id, name: p.name, n });
+  return n;
+}
+const _facts = new WeakMap();      // ctx → { id, groups, F }
+function factsFor(ctx) {
+  const g = ctx.groups, m = _facts.get(ctx);
+  if (m && m.id === ctx.id && m.groups === g && (!Array.isArray(g) || m.n === g.length)) return m.F;
+  const F = GM.prepareFacts({ conversationKey: String(ctx.id), groupIds: Array.isArray(g) ? g : [] });
+  _facts.set(ctx, { id: ctx.id, groups: g, n: Array.isArray(g) ? g.length : -1, F });
+  return F;
 }
 /** Does a grant's scope cover THIS target (`{key, adapterId}`)? */
 function scopeApplies(scope, target) {
