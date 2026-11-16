@@ -1562,24 +1562,9 @@ function windowGroupOf(id) { try { return usageIdentityAccountIds(id).slice().so
  *  compared against a real window is 'differ' every time, so guarding them
  *  would archive every exhaustion mark on the instance. Their identity has its
  *  own protection: the turn-pinned rejection slot plus `slotOk`. */
-function guardReadingTarget(key, readingWindow, { session = null, what = 'reading', entry = null, noRefile = false } = {}) {
-  let d;
-  try {
-    d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
-  } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
-  if (d.action === 'write') return key;
-  // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
-  // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
-  // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
-  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` };
-  const sid = session?._webuiId || session?.claudeSessionId || '-';
-  if (d.action === 'refile') {
-    noteWindowVerdict(sid, key, d.key, () => console.log(`[usage] ${what}: window says these numbers are ${nameOf(d.key)}'s, not ${nameOf(key)}'s — re-filed (${d.reason})`));
-    global.__vsEvent?.('usage-reading-window-refiled', `${key}→${d.key}:${what}`);
-    return d.key;
-  }
-  noteWindowVerdict(sid, key, 'archive', () => console.log(`[usage] ${what}: refusing to write ${nameOf(key)} a reading from another window — archived (${d.reason})`));
-  global.__vsEvent?.('usage-reading-window-archived', `${key}:${what}`);
+/** THE READING ARCHIVE'S ONE WRITER (data/archive/readings-window-mismatch.ndjson): a reading refused by name — the window
+ *  guard's archive, and (lane readings-attribution-2 P2) a model cap no request of the turn asked of the account. */
+function appendReadingArchive(row) {
   try {
     fs.mkdirSync(path.dirname(READING_ARCHIVE), { recursive: true });
     // BOUNDED, and the roll is APPENDED under a per-DAY name: an account whose
@@ -1599,8 +1584,28 @@ function guardReadingTarget(key, readingWindow, { session = null, what = 'readin
     // archived because the account's window genuinely moved (a plan change) is
     // told apart from a mis-filed one by how stale `ownWindow.at` is, and that
     // is the whole diagnosis a human needs from the archive line
-    fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', key, sid, what, reason: d.reason, matched: d.matched, ownWindow: establishedWindows()[key] || null, entry }) + '\n');
+    fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', ...row }) + '\n');
   } catch { }
+}
+function guardReadingTarget(key, readingWindow, { session = null, what = 'reading', entry = null, noRefile = false } = {}) {
+  let d;
+  try {
+    d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
+  } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
+  if (d.action === 'write') return key;
+  // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
+  // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
+  // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
+  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` };
+  const sid = session?._webuiId || session?.claudeSessionId || '-';
+  if (d.action === 'refile') {
+    noteWindowVerdict(sid, key, d.key, () => console.log(`[usage] ${what}: window says these numbers are ${nameOf(d.key)}'s, not ${nameOf(key)}'s — re-filed (${d.reason})`));
+    global.__vsEvent?.('usage-reading-window-refiled', `${key}→${d.key}:${what}`);
+    return d.key;
+  }
+  noteWindowVerdict(sid, key, 'archive', () => console.log(`[usage] ${what}: refusing to write ${nameOf(key)} a reading from another window — archived (${d.reason})`));
+  global.__vsEvent?.('usage-reading-window-archived', `${key}:${what}`);
+  appendReadingArchive({ key, sid, what, reason: d.reason, matched: d.matched, ownWindow: establishedWindows()[key] || null, entry });
   return null;
 }
 // one line per session per (target → verdict) transition: a switching pool
@@ -1983,8 +1988,10 @@ function rejectionSlotFor(session) {
  *  conversation's FIRST re-point after it (its own rows, the same rule lastRepointRow reads), else the link now. This is the
  *  live answer the turn's own requests give — never the walked usage ledger, which lags. Null when no request of this hub's
  *  life is known (a restore before its first request, a producer with no request road): the caller keeps its own ladder. */
-function requestSlotFor(session, at = Date.now()) {
-  const t = Number(session && session._lastRequestOutAt) || 0;
+function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) {
+  // `requestOutAt`: the instant a REPLAYED statement's request left (an attach catch-up reads it off the buffer, lane
+  // usage-every-change) — else the live road's latest request-out
+  const t = Number(requestOutAt != null ? requestOutAt : (session && session._lastRequestOutAt)) || 0;
   if (!(t > 0) || t > at) return null;
   try {
     const poolId = session?._accountId || null;
@@ -2785,7 +2792,7 @@ function noteTurnEnd(session, rec = null) {
     noteLateFact(session, 'turn end', liveFactVerdict(session, rec));
     session._turnWallSigs = []; session._turnWorkAfterSig = 0;
     session._turnLaneDefer = null; session._turnBannerLane = null;
-    session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null;
+    session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null; session._turnAsks = null;
     session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
     return;
   }
@@ -2804,6 +2811,7 @@ function noteTurnEnd(session, rec = null) {
   // the READING pin dies with the turn for exactly the reason the rejection
   // pin does: a re-point reaches the running CLI on its next request, so the
   // next turn is the first one it can be true for (readingSlotFor)
+  session._turnAsks = null; // …and the turn's asks (law 2, lane readings-attribution-2 P2)
   session._turnReadingSlot = null;
   try { noteOatFileGen(session); } catch { } // …and the token FILE the next turn starts on (lane oat-identity-fix, verify r1 F1)
   // …and so does the proven re-file this turn's rejection records established —
@@ -3768,6 +3776,16 @@ function recordRateLimitEventNow(session, msg) {
     }
     // the lane is named on the key it LANDS on (the guard may have moved it)
     if (writeKey !== preKey && (ev.modelCap || (ev.windows && ev.windows.modelCap))) ev = nameCap(writeKey);
+    // LAW 2 (P2): a NAMED model cap this turn never asked this account for is not this account's cap — the lane is archived by
+    // name and the rest of the reading is written (a cap-only record: nothing of it is). The placeholder names no model: unjudged
+    if (ev.status !== 'rejected' && (ev.modelCap || (ev.windows && ev.windows.modelCap)) && ev.modelCapName && !turnAskedFamily(session, writeKey, ev.modelCapName)) {
+      const fam = ev.modelCapName;
+      console.log(`[usage] rate-limit-event: a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request — the lane archived${ev.modelCap ? '' : ', the rest written'}`);
+      global.__vsEvent?.('usage-reading-cap-unasked', `${writeKey}:${fam}`);
+      appendReadingArchive({ key: writeKey, sid: session?._webuiId || '-', what: 'rate-limit-event:model-cap', reason: `a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request`, matched: [], ownWindow: null, entry: { cap: ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : ev.windows.modelCap, asked: (session._turnAsks && session._turnAsks[writeKey]) || [], slot } });
+      if (ev.modelCap) { postCheck(); return; }
+      ev = { ...ev, windows: { ...ev.windows, modelCap: null }, modelCapLane: null, modelCapName: null, modelCapDisplay: null };
+    }
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint, producer: session._webuiId ? 'ev:' + session._webuiId : null });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); postCheck(); return; }
     // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
@@ -4248,6 +4266,28 @@ function resetCreditsLeft(session, key) {
  *  says about the prompt cache (`_cacheFact`: the TTL it wrote, read / created / cold, the tokens — account-pool-auto
  *  recordCacheFact); a sub-agent's request has its own prefix and says nothing about the conversation's. That record
  *  is also the new context's first request after a compaction: the reset (`_compactedAt`, noteCompacted) ends HERE. */
+/** LAW 2 (lane readings-attribution-2 P2, 主开发 2026-11-15: «A MODEL'S CAP IS STATED BY THAT MODEL'S REQUESTS» — measured: a cap
+ *  reading came, all but never otherwise, in hours that served a request of that model). Each answered
+ *  request of the turn — main thread or sub-agent — records its model FAMILY under the account its request went out on
+ *  (requestSlotFor). `_turnAsks` lives exactly as long as the turn's reading pin does (noteTurnEnd, a stop). */
+function noteTurnAsk(session, model) {
+  try {
+    const fam = familyOfModel(model); if (!fam) return;
+    const k = (requestSlotFor(session) || wallSlotFor(session)).key; if (!k) return;
+    const m = session._turnAsks || (session._turnAsks = {});
+    const list = m[k] || (m[k] = []); if (!list.includes(fam)) list.push(fam);
+  } catch { }
+}
+/** Did THIS turn ask `key` for a `fam` request? The answered ones (noteTurnAsk), and the request in flight now: it asks the
+ *  conversation's own model of the account it went out on (a response's quota record can precede its assistant record). */
+function turnAskedFamily(session, key, fam) {
+  try {
+    const asked = (session._turnAsks && session._turnAsks[key]) || [];
+    if (asked.includes(fam)) return true;
+    const req = requestSlotFor(session);
+    return !!(req && req.key === key && familyOfModel(sessionModelFor(session)) === fam);
+  } catch { return true; } // a question we cannot answer refuses nothing
+}
 function noteModelRequest(session, rec, now = Date.now()) {
   if (!session || !rec || rec.type !== 'assistant' || !rec.message || !rec.message.usage) return;
   if (rec.message.model === '<synthetic>') return;
@@ -4255,6 +4295,7 @@ function noteModelRequest(session, rec, now = Date.now()) {
   if (!((Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0))) return;
   if (recordIsLate(session, rec)) return;
   session._lastRequestAt = now;
+  noteTurnAsk(session, rec.message.model); // LAW 2 (P2): which model this turn asked of which account
   session._lastRequestMember = linkMemberOf(session); // WHERE the cache now lives — the member that served it (round 4)
   if (rec.parent_tool_use_id || rec.isSidechain) return; // a sub-agent's prefix is not the conversation's cache
   session._cacheFact = recordCacheFact(u, session._cacheFact); // what this response SAYS about the cache (amendment 1)
@@ -5844,7 +5885,7 @@ function maybePoolAutoSwitch(session, { stop = false, now = null, force: forced 
       && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }));
     // A STOP ENDS THE TURN'S READING PIN (P1, law 1: «EVERY road that ends a turn ends its pins») — the CLI's idle, the attach
     // reconcile and an exit reach here, and noteTurnEnd is not the only end a turn has (a reading after the result re-made it)
-    if (stop && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState })) session._turnReadingSlot = null;
+    if (stop && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState })) { session._turnReadingSlot = null; session._turnAsks = null; }
     maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);
   } catch { }
 }
@@ -7988,6 +8029,7 @@ function maybeStopOnFallback(session, id, from, to) {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
+    requestSlotFor, // law 1's ONE answer to «which account» (lane readings-attribution-2): {key, slotOk, reqAt, movedAt?} or null = unknown
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
