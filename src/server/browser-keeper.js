@@ -646,6 +646,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // 50 whole-digest broadcasts + 50 active-sessions re-publishes to every client, for one Save. Inside `batched(fn)` a
   // commit only marks; the ONE commit runs when the outermost batch ends (nothing ran ⇒ nothing written).
   let batchDepth = 0, batchDirty = false;
+  const sweepIds = new Set(); let sweepDirty = false; // keeper-sweep-yields F5: the ids the orphan walk is retiring now (retireInSteps) — their removals commit with the walk's piece
   function commit() { if (batchDepth > 0) { batchDirty = true; return; } save(); notify(); }
   function batched(fn) {
     batchDepth++;
@@ -1433,7 +1434,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     dropEgress(id); // lane engine-spi-egress: its egress proxy never outlives its record (a conversation's browser on a wrapped engine had one each)
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
     { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
-    commit();
+    if (sweepIds.has(id)) sweepDirty = true; else commit(); // keeper-sweep-yields F5: the walk's own removal is written and broadcast with its PIECE (retireInSteps)
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
     let passkeys = 0; try { passkeys = passkeyDrop ? Number(passkeyDrop(id)) || 0 : 0; } catch (e) { log.warn?.(`[browser] the passkeys of ${id} were not removed — ${e && e.message}`); }
@@ -4002,6 +4003,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
           markEphemeralGone(rec0, 'its retire');
           const rp = reaping.get(profileId); if (rp) { try { await rp; } catch { /* its own journal line */ } }
         } }
+      // keeper-sweep-yields F2: NOTHING OF A CARRIED CONVERSATION IS ENDED BY THE SWEEP — the lease is read again after the
+      // reap's await and before the stop (a conversation resumed meanwhile may have started its browser again)
+      if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
       try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); } catch (e) { log.warn?.(`[browser] ephemeral ${profileId}: stop failed — ${e && e.message}`); }
       if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
       if (B.isLiveBrowser(reg.browsers[profileId])) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": its browser would not stop — the record is kept for the next pass`); return { removed: false, why: 'still running' }; }
@@ -4018,13 +4022,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  where the last process stopped. Its one reason is the conversation's end (test-architecture §54b reads every
    *  retireEphemeral caller's reason as a literal). → the results in order. */
   const yieldLoop = () => new Promise((res) => setImmediate(res));
+  // keeper-sweep-yields F5: ONE REGISTRY WRITE AND ONE BROADCAST PER PIECE OF THE WALK, NOT PER RECORD — a removal the walk
+  // makes (its id in sweepIds) marks sweepDirty instead of committing; the walk commits once per piece (SWEEP_PIECE_MS of the
+  // REAL clock — never the injected now) and at its end. The keeper's batched() is synchronous (its finally runs when fn
+  // returns), so around an async walk it would defer every other conversation's commit too; only the walk's own are deferred.
+  // A restart redoes at most one piece (the file still names the records removed since the last write).
+  const SWEEP_PIECE_MS = 250;
   async function retireInSteps(ids) {
     const out = [];
-    for (const id of ids) {
-      await yieldLoop();
-      if (reg.leases.some((l) => l.profileId === id)) { out.push({ removed: false, kept: true, why: 'its conversation is carried again' }); continue; }
-      out.push(await retireEphemeral(id, 'conversation gone').catch(() => ({ removed: false })));
-    }
+    let pieceAt = Date.now();
+    const flush = () => { if (sweepDirty) { sweepDirty = false; commit(); } pieceAt = Date.now(); };
+    try {
+      for (const id of ids) {
+        await yieldLoop();
+        if (reg.leases.some((l) => l.profileId === id)) { out.push({ removed: false, kept: true, why: 'its conversation is carried again' }); continue; }
+        sweepIds.add(id);
+        try { out.push(await retireEphemeral(id, 'conversation gone').catch(() => ({ removed: false }))); } finally { sweepIds.delete(id); }
+        if (Date.now() - pieceAt >= SWEEP_PIECE_MS) flush();
+      }
+    } finally { flush(); }
     return out;
   }
   /** `browser.headed` as STORED (true | false | null = unset) — the input of the ONE resolution (PURE
