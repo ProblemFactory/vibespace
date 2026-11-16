@@ -211,7 +211,12 @@ function noteTurnFlight(session, now) {
 }
 function noteRequestSent(session, now) {
   if (!session) return;
-  session._turnStartedAt = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState }) ? (Number(now) || null) : null;
+  const inFlight = requestInFlight({ isStreaming: session._isStreaming, turnState: session._turnState });
+  session._turnStartedAt = inFlight ? (Number(now) || null) : null;
+  // THE REQUEST'S INSTANT, KEPT (lane readings-attribution-2 P1): `_turnStartedAt` dies with the flight, this does not — a
+  // reading that trails its request (after the result, after the stop) still names the request it answers, and the engine
+  // reads the account that request went out on off the conversation's own re-point ledger (usage-pool-engine requestSlotFor)
+  if (inFlight && Number(now) > 0) session._lastRequestOutAt = Number(now);
 }
 /** A RECORD THAT SENDS A REQUEST — a main-thread user record that is no local-command echo («<local-command-stdout>Set
  *  model to …» has no turn behind it): the prompt's echo or a tool result, which the CLI sends to the model at once. The
