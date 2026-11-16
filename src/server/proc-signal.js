@@ -35,15 +35,28 @@ function create({ readStat = (pid) => fs.readFileSync(`/proc/${pid}/stat`, 'utf8
     if (!proc || !pidFloor(proc.pid, self) || proc.pid === myGroup()) return false;
     try { if (kill) kill(-proc.pid, sig); else process.kill(-proc.pid, sig); return true; } catch { try { return proc.kill(sig) === true; } catch { return false; } }
   }
-  /** end these processes (each found with its birth): SIGTERM, then SIGKILL after graceMs → {ended: [names], survivors: [names]} */
-  async function endTree(list, { graceMs = 3000 } = {}) {
+  /** end these processes (each found with its birth): SIGTERM, then SIGKILL after graceMs → {ended: [names], survivors: [names],
+   *  lastEnded: [pids]}. THE RACE (the hosted red of 11-16, 主开发 09:00Z — «the kill never outruns the sentence»): `last` are
+   *  the processes a sentence just written must still pass through (the reader of its pipe, the command's own top that its CLI
+   *  waits on). They are signalled only AFTER every other process, once they ended by themselves (their end of input) or
+   *  after `boundMs` — read every `pollMs`, a count of reads, never a clock. They are never spared: SIGTERM at the bound, and
+   *  the hard kill below takes every survivor, them included. `lastEnded` = the kept pids that ended by themselves. */
+  async function endTree(list, { graceMs = 3000, last = [], boundMs = 2000, pollMs = 25 } = {}) {
     const live = (list || []).filter(sameBirth);
-    for (const p of live) signalOne(p, 'SIGTERM');
+    const keep = new Set((last || []).map((p) => p && p.pid));
+    const kept = live.filter((p) => keep.has(p.pid));
+    for (const p of live) if (!keep.has(p.pid)) signalOne(p, 'SIGTERM');
+    const lastEnded = [];
+    if (kept.length) {
+      const reads = Math.ceil(Math.max(0, Number(boundMs) || 0) / Math.max(1, pollMs));
+      for (let i = 0; i < reads && kept.some(sameBirth); i++) await wait(pollMs);
+      for (const p of kept) { if (sameBirth(p)) signalOne(p, 'SIGTERM'); else lastEnded.push(p.pid); }
+    }
     await wait(graceMs);
     for (const p of live) if (sameBirth(p)) signalOne(p, 'SIGKILL');
     await wait(300);
     const survivors = live.filter(sameBirth);
-    return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm) };
+    return { ended: live.filter((p) => !survivors.includes(p)).map((p) => p.comm), survivors: survivors.map((p) => p.comm), lastEnded };
   }
   /** S6 (the look at 99f65d547; the closure check, 主开发 10:53Z): a conversation ended while its wrapper was already killed past
    *  its own exit handler leaves agy (its own session) and its command running. After `graceMs` — the wrapper's own handler ends

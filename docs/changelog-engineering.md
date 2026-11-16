@@ -6,6 +6,20 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.405 — 2026-11-16
 
+### turn-never-silent — the hosted red of 11-16: the kill never outruns the sentence (主开发's law 09:00Z, rulings 09:06Z)
+- **The red.** ci 43834493023 (741ab8250), test-turn-end ③a on a two-core runner: the agent's step said «the command ended (killed by SIGTERM)» and nothing else, while the record said told: true.
+- **Who won.** The stub is a Node CLI: its spawn gives the command a socket pair, so the wrapper wrote the sentence into the pipeline's own pipe (node → cat). In the same synchronous run endTree SIGTERMed cat. With no idle core, cat died before it forwarded the line. `told` counted the write.
+- **The law** (data/bin/agy-wrapper.js sayToCommand, src/server/proc-signal.js endTree):
+  - a pipe agy ITSELF reads is looked for first, judged by its READ end (fdinfo flags); before, any other holder counted;
+  - else a pipeline's pipe, the one nearest agy. Its reader and the command's top (the process agy waits on) are signalled LAST: after every other process, once they ended by themselves (their end of input) or after `AGY_WEBUI_READER_BOUND_MS` (2 000 ms). The wait is a timer of counted reads, never a clock; the wrapper keeps relaying meanwhile, and its own write end is closed before it. The 3 s hard kill then takes every survivor;
+  - `told` = the arrival: agy's own pipe, or every reader ended by itself.
+- **Told false ⇒ the agent's NEXT turn** (src/server/turn-watch.js tellEnded): one keyed stash line through P7's door (`ENDED_SLOT`, once per ending; never a wake, never a billed turn, the spend guard untouched). It reads «(VibeSpace) Your command «…» was ended at <owner-facts when>: <why> Its own output could not carry this.» The record now carries `why`.
+- **The legs** (test-turn-end):
+  - ③a′: the placed pause, a pipeline reader that holds each line 500 ms (stub `AGY_STUB_SLOW_READER`). It is kept until it ends by itself, so told is true and the step carries why. At a 300 ms bound: told false, nothing spared, the stash line filed; told true files nothing.
+  - ③a″: THE ROAD A REAL CLI WALKS. The stub hands its command a REAL anonymous pipe it reads itself (`ownpipe`: a helper's pipe opened through /proc) and reads it to its end. On that road told is true even with the slow reader and the 300 ms bound. `moved` (the top's output sent away) is where the old breadth-first «any holder» judgment wrote into the inner pipe.
+- **Red controls** (the new legs against 741ab8250's product, 3 of 3): ③a′ why, ③a′ told false, ③a′ stash, ③a″ moved — red. The plain own-pipe shape is green on both: the two judgments coincide there.
+- **Said limits** (kb-features): the told-false turn sees «killed by SIGTERM» alone until its next turn; a reader that filters leaves told true with no sentence; a writer that ignores the first signal makes told false though the sentence arrived (a harmless second telling).
+
 ### turn-never-silent — the closure check at 1f61bded7 (主开发 10:53Z: accepted on content, no must): the one small commit
 - **1. The tray keeps WHEN.** The tray clamps a headline, and it cut the sentence before «…ended by itself at HH:MM». That sentence is now the item's FIRST DETAIL LINE (stuckWords: `i18n.detail = [lead]`; the headline keys lose `{then}`), and the registry row declares it its LEAD (`leadLine: true`, read by `leadLineOf`).
   - THE row renderer draws it as its own line under the headline — a `.ut-deadline ut-lead` line with no clock, so folded rows (tray, phone, the chat's folded card) keep it, and the deadline ticker, which reads only `[data-deadline-at]`, never touches it.

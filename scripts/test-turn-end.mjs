@@ -95,15 +95,15 @@ job('— ② «End the command»: its processes end, agy stays, the step ends an
 
 /** the REAL watch over a live wrapper; only the clocks move (`skew`, on the wall AND the steady one — the look's law 1: the
  *  watch counts only stillness it OBSERVED, a reading a minute; `walk` reads every minute from..to) */
-function watched(h, { setting = () => undefined } = {}) {
-  const sessions = new Map([['x', { mode: 'chat', backend: 'antigravity', name: 'live', _isStreaming: true, _normalizer: h.mm, buffer: '', pty: { write: (l) => h.child.stdin.write(l) } }]]);
+function watched(h, { setting = () => undefined, deliver = null, cid = null } = {}) {
+  const sessions = new Map([['x', { mode: 'chat', backend: 'antigravity', name: 'live', _isStreaming: true, _normalizer: h.mm, buffer: '', ...(cid ? { backendSessionId: cid } : {}), pty: { write: (l) => h.child.stdin.write(l) } }]]);
   // the wrapper's stdout ALSO goes through the hub's REAL acp-events consumer — the one door its command_ended record reaches the watch by
   const ACP = require(path.join(REPO, 'src/server/stdout/acp-events.js'));
   ACP.create({ engine: { noteTurnEnd: () => { }, sessionModelFor: () => null }, noteHarnessModels: () => { }, deliverRef: null, permissionRulesRef: null })
     .attach(sessions.get('x'), 'x', { onData: (cb) => h.taps.push(cb) }, { feedLive: () => { }, broadcastToSession: () => { }, broadcastActiveSessions: () => { }, readSessionMeta: () => null, writeSessionMeta: () => true, updateSessionTodos: () => { } });
   const ut = new UserTodoManager({ dataDir: fs.mkdtempSync(path.join(h.dir, 'd-')), onChange: () => { } });
   const W = { skew: 0, ut, sessions };
-  W.w = TWatch.create({ activeSessions: sessions, buffersDir: h.dir, getUserTodos: () => ut, sessionKeyOf: () => 'key:x', serverSetting: setting, adapterOf: () => ({ formatInterrupt: () => '{"type":"interrupt"}', postInterrupt: () => { } }), now: () => Date.now() + W.skew, mono: () => performance.now() + W.skew, log: { log: () => { } } });
+  W.w = TWatch.create({ activeSessions: sessions, buffersDir: h.dir, getUserTodos: () => ut, getDeliver: () => deliver, sessionKeyOf: () => 'key:x', serverSetting: setting, adapterOf: () => ({ formatInterrupt: () => '{"type":"interrupt"}', postInterrupt: () => { } }), now: () => Date.now() + W.skew, mono: () => performance.now() + W.skew, log: { log: () => { } } });
   W.at = async (m) => { W.skew = m * MIN; await W.w.sweep(); };
   W.walk = async (from, to, pause = 0) => { for (let m = from; m <= to; m++) { await W.at(m); if (pause) await sleep(pause); } };
   W.items = () => { const sn = ut.snapshot(); return [...(sn.open || []), ...(sn.resolved || [])].filter((i) => i.action && i.action.type === 'turn-stuck'); };
@@ -128,6 +128,61 @@ job('— ③a the by-itself ending: a command stuck for the second bound is ende
     ok(W.items()[0].status !== 'open' && W.items()[0].resolvedBy === 'ended-by-itself', 'the For-you item ends «the command was ended by itself»', W.items()[0].resolvedBy);
     ok(await until(() => h.has('prompt_end'), 8000) && await until(() => h.has('notice', (r) => r.noticeKind === 'command-ended' && /ended by itself/.test(r.text)), 4000) && h.count('notice', (r) => r.noticeKind === 'command-ended') === 1, 'the turn goes on to its end, and the conversation says it once («The command was ended by itself …»)');
   } finally { await h.stop(); }
+});
+
+/** THE RACE (the hosted red of 11-16 on a two-core runner: the step said «the command ended (killed by SIGTERM)» alone; 主开发's law
+ *  09:00Z — «the sentence is said only where the kill cannot take its reader»). The stub is a Node CLI: its spawn gives the command a
+ *  socket pair, so the sentence goes into the pipeline's own pipe (node → its reader) — the placed pause: that reader takes each
+ *  line and waits 500 ms before writing it on (AGY_STUB_SLOW_READER), the window the runner lost it in. Before the law: red every
+ *  time. The by-itself verb is sent directly (③a walks the watch to it). */
+const WHY_30 = /VibeSpace ended this command after 30 minutes with no output and nothing it started working\./;
+job('— ③a′ THE RACE: the reader of the pipe the sentence went into is signalled LAST — the kill never outruns the sentence', async (ok) => {
+  const a = startAgy({ AGY_STUB_SLOW_READER: '500' }), b = startAgy({ AGY_STUB_SLOW_READER: '500', AGY_WEBUI_READER_BOUND_MS: '300' });
+  const filed = { a: [], b: [] }, stashOf = (k) => ({ stashSlot: (cid, slot, env, o) => { filed[k].push({ cid, slot, ...env, set: o && o.set }); return { filed: true, removed: false }; } });
+  const CA = 'cccccccc-0000-4000-8000-00000000000a', CB = 'cccccccc-0000-4000-8000-00000000000b';
+  try {
+    await Promise.all([a.run('run the hang-command piped now'), b.run('run the hang-command piped now')]);
+    await Promise.all([commandUp(a), commandUp(b)]); await sleep(700);
+    const la = await a.tree(), lb = await b.tree();
+    const WA = watched(a, { deliver: stashOf('a'), cid: CA }), WB = watched(b, { deliver: stashOf('b'), cid: CB });
+    await Promise.all([WA.at(0), WB.at(0)]); await sleep(300);
+    await Promise.all([WA.walk(1, 31), WB.walk(1, 31)]);   // the by-itself ending at 30, asked by the REAL watch
+    const ended = (h) => until(() => h.recs.find((r) => r.type === 'acp' && r.kind === 'command_ended'), 9000);
+    const [da, db] = await Promise.all([ended(a), ended(b)]);
+    ok(da && da.ok === true && da.by === 'by-itself' && da.told === true && da.survivors.length === 0, 'a reader that holds each line 500 ms: kept until it ended by itself at its end of input — told TRUE (the sentence passed)', da);
+    ok(await until(() => WHY_30.test(stepOut(a)), 8000), 'the agent\'s step output carries WHY through that slow reader — the hosted red had «the command ended (killed by SIGTERM)» alone', stepOut(a));
+    ok(la.every((p) => !aliveAs(p)), 'every process of the command has ended, the reader included', la.filter(aliveAs).map((p) => p.comm));
+    ok(db && db.ok === true && db.told === false && db.survivors.length === 0, 'a reader still holding the sentence at the bound (300 ms): signalled THEN, ended with the rest — told FALSE: the write is not the arrival', db);
+    ok(lb.every((p) => !aliveAs(p)) && !WHY_30.test(stepOut(b)), '…it is never spared (every process of that command ended), and its step did not carry the sentence — told false is the truth', { alive: lb.filter(aliveAs).map((p) => p.comm), step: stepOut(b) });
+    await until(() => WB.items()[0] && WB.items()[0].status !== 'open', 4000);
+    ok(filed.b.length === 1 && filed.b[0].cid === CB && filed.b[0].slot === TWatch.ENDED_SLOT + CB && filed.b[0].fromName === 'VibeSpace'
+      && /^\(VibeSpace\) Your command «node driver\.mjs» was ended at .+: VibeSpace ended this command after 30 minutes with no output and nothing it started working\. Its own output could not carry this\.$/.test(filed.b[0].text)
+      && JSON.stringify(filed.b[0].set) === JSON.stringify(['ended:1']),
+    'told FALSE ⇒ the agent is told why at its NEXT turn: ONE keyed stash line (P7\'s door — never a wake, never a billed turn), the command named, the time in the hub\'s agent-facing form', filed.b);
+    ok(filed.a.length === 0, 'told TRUE ⇒ nothing is filed (the step already carried it)', filed.a);
+  } finally { await a.stop(); await b.stop(); }
+});
+
+/** THE ROAD A REAL CLI WALKS (主开发 09:06Z — «a change on the real road with no leg is the one thing I will not take»): the stub
+ *  hands its command a REAL anonymous pipe it reads itself (`ownpipe` — a Go CLI's exec), reads it to its end, and the same slow
+ *  reader sits in the pipeline with a bound (300 ms) it cannot meet. On this road the sentence goes into agy's OWN pipe, so no
+ *  reader is waited for and told is TRUE. `moved`: the top's own output sent away (`exec 3>&1 >/dev/null`), the pipeline's last
+ *  stage writing to agy's pipe — the RED CONTROL: the old judgment («any other holder counts», breadth-first) wrote into the
+ *  inner pipe node → reader and signalled that reader with the rest: the step without why. */
+job('— ③a″ THE ROAD A REAL CLI WALKS: a pipe agy itself reads — looked for FIRST, judged by its READ end', async (ok) => {
+  const env = { AGY_STUB_SLOW_READER: '500', AGY_WEBUI_READER_BOUND_MS: '300' };
+  const a = startAgy(env), b = startAgy(env);
+  try {
+    await Promise.all([a.run('run the hang-command ownpipe piped now'), b.run('run the hang-command ownpipe moved piped now')]);
+    await Promise.all([commandUp(a), commandUp(b)]); await sleep(700);
+    const la = await a.tree(), lb = await b.tree();
+    for (const h of [a, b]) h.send({ type: 'end-command', by: 'by-itself', afterMin: 30 });
+    const ended = (h) => until(() => h.recs.find((r) => r.type === 'acp' && r.kind === 'command_ended'), 9000);
+    const [da, db] = await Promise.all([ended(a), ended(b)]);
+    ok(da && da.ok === true && da.told === true && da.survivors.length === 0 && await until(() => WHY_30.test(stepOut(a)), 8000), 'agy\'s OWN pipe at the top of the command (a Go CLI\'s exec): the sentence goes there — told TRUE though the pipeline\'s reader could not meet the bound, and the step carries why', { rec: da, step: stepOut(a) });
+    ok(db && db.ok === true && db.told === true && db.survivors.length === 0 && await until(() => WHY_30.test(stepOut(b)), 8000), 'the top\'s output sent away, the LAST stage writing to agy\'s pipe: that pipe is found by its read end, before the inner one — told TRUE, the step carries why (the old judgment wrote into node → reader: red)', { rec: db, step: stepOut(b) });
+    ok([...la, ...lb].every((p) => !aliveAs(p)), 'every process of both commands has ended', [...la, ...lb].filter(aliveAs).map((p) => p.comm));
+  } finally { await a.stop(); await b.stop(); }
 });
 
 job('— ③b a BUSY command is never ended; «Keep waiting» at 29 keeps a hung one a full bound more', async (ok) => {

@@ -159,6 +159,10 @@ function noteCliWrote() {
 const PT = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'server', 'proc-tree.js')).createProcTree(); } catch { return null; } })();
 const TLV = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'turn-liveness.js')); } catch { return null; } })();
 const END_GRACE_MS = Math.max(50, Number(process.env.AGY_WEBUI_END_GRACE_MS) || 3000);   // SIGTERM → SIGKILL for a command's processes
+// THE RACE (hosted red 11-16, 主开发 09:00Z): how long the processes a sentence must still pass through (its pipe's reader, the
+// command's own top) are waited for before their SIGTERM — a reader forwards a line within microseconds once it runs; the bound
+// only covers a loaded machine's scheduling, and is spent only when the reader does not end by itself
+const READER_BOUND_MS = Math.max(0, Number(process.env.AGY_WEBUI_READER_BOUND_MS) || 2000);
 const RESTART_BOUND_MS = Math.max(100, Number(process.env.AGY_WEBUI_RESTART_BOUND_MS) || 15000);   // a restart not done by then is said
 const KILL_MS = Math.max(500, Number(process.env.AGY_WEBUI_KILL_MS) || 5000);   // a restart's SIGTERM → SIGKILL (the suites shorten it)
 async function treeBelow(pid) { if (!PT || !pid) return []; try { const r = await PT.readBelow(pid, { parent: process.pid }); return r.readable ? r.list : []; } catch { return []; } }
@@ -167,7 +171,7 @@ async function treeBelow(pid) { if (!PT || !pid) return []; try { const r = awai
 const PS = (() => { try { return require(path.join(__dirname, '..', '..', 'src', 'server', 'proc-signal.js')).create(); } catch { return null; } })();
 const sameBirth = (p) => !!PS && PS.sameBirth(p);
 /** end these processes (SIGTERM, then SIGKILL after END_GRACE_MS) → {ended: [names], survivors: [names]} */
-async function endTree(list) { return PS ? PS.endTree(list, { graceMs: END_GRACE_MS }) : { ended: [], survivors: (list || []).map((p) => p.comm) }; }
+async function endTree(list, o = {}) { return PS ? PS.endTree(list, { graceMs: END_GRACE_MS, boundMs: READER_BOUND_MS, ...o }) : { ended: [], survivors: (list || []).map((p) => p.comm), lastEnded: [] }; }
 const namesOf = (names) => { const c = new Map(); for (const n of names) c.set(n, (c.get(n) || 0) + 1); return [...c].map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(', '); };
 // `proc` is ONLY the child this wrapper spawned itself (startChild: spawn(…, { detached: true })) — its pgid IS its pid, the group is
 // agy's; every group signal is logged (the restart's suite reads that none is sent after the old agy exited)
@@ -176,24 +180,41 @@ function killGroup(proc, sig) {
   log(`group ${sig} → ${proc && proc.pid}${sent ? '' : ' (not sent)'}`);
   return sent;
 }
-/** the command's own output (its fd 1 or 2) when it is a PIPE that agy's own tree reads — agy itself, or a process below it (a
- *  pipeline): a sentence written there is the step's output, so the agent reads why. Never a file, a terminal or a pipe out of
- *  the tree. A socket pair (what a Node CLI's own spawn gives a child) cannot be opened from outside: then nothing is written,
- *  the agent sees the command's failure, and the conversation carries the sentence (the notice). → whether it was written */
+/** the command's own output (its fd 1 or 2) when it is a PIPE whose READ end agy or a process of the command holds: a sentence
+ *  written there is the step's output, so the agent reads why. Never a file, a terminal or a pipe out of the tree. A socket pair
+ *  (what a Node CLI's own spawn gives a child) cannot be opened from outside: then nothing is written, the agent sees the
+ *  command's failure, and the conversation carries the sentence (the notice).
+ *  THE RACE (the hosted red of 11-16 — a two-core runner; 主开发's law 09:00Z: «the sentence is said only where the kill cannot
+ *  take its reader»): a pipe agy ITSELF reads is looked for FIRST — the kill cannot take its reader. Else a pipe a process of the
+ *  command reads (a pipeline's), the one nearest agy (its reader's own output leaves the tree): that reader — and the command's
+ *  top, the process agy waits on — must outlive the write: they are returned as `keep`, for endTree to signal LAST.
+ *  → {written, own (agy's own pipe), keep: [processes]} */
+const pipeReadsOf = (pid) => {
+  const out = new Set();
+  try {
+    for (const fd of fs.readdirSync(`/proc/${pid}/fd`)) {
+      try {
+        const l = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); if (!l.startsWith('pipe:')) continue;
+        const m = /^flags:\s*([0-7]+)/m.exec(fs.readFileSync(`/proc/${pid}/fdinfo/${fd}`, 'utf8'));   // a READ end: O_RDONLY (the access bits 0)
+        if (m && (parseInt(m[1], 8) & 3) === 0) out.add(l);
+      } catch { }
+    }
+  } catch { }
+  return out;
+};
 function sayToCommand(list, agyPid, text) {
-  const pipesOf = (pid) => { const out = new Set(); try { for (const fd of fs.readdirSync(`/proc/${pid}/fd`)) { try { const l = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); if (l.startsWith('pipe:')) out.add(l); } catch { } } } catch { } return out; };
-  const held = new Map([[agyPid, pipesOf(agyPid)], ...list.map((p) => [p.pid, pipesOf(p.pid)])]);
-  for (const p of list) for (const fd of [1, 2]) {
-    try {
-      const l = fs.readlinkSync(`/proc/${p.pid}/fd/${fd}`);
-      if (!l.startsWith('pipe:') || !sameBirth(p)) continue;
-      if (![...held].some(([pid, set]) => pid !== p.pid && set.has(l))) continue;   // the other end is in the tree (or agy)
-      const h = fs.openSync(`/proc/${p.pid}/fd/${fd}`, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
-      try { fs.writeSync(h, '\n' + text + '\n'); } finally { fs.closeSync(h); }
-      return true;
-    } catch { }
-  }
-  return false;
+  const reads = new Map([[agyPid, pipeReadsOf(agyPid)], ...list.map((p) => [p.pid, pipeReadsOf(p.pid)])]);
+  const outs = [];   // every (process, fd) of the command whose output is a pipe
+  for (const p of list) for (const fd of [1, 2]) { try { const l = fs.readlinkSync(`/proc/${p.pid}/fd/${fd}`); if (l.startsWith('pipe:') && sameBirth(p)) outs.push({ p, fd, l }); } catch { } }
+  const write = (o) => { const h = fs.openSync(`/proc/${o.p.pid}/fd/${o.fd}`, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); try { fs.writeSync(h, '\n' + text + '\n'); } finally { fs.closeSync(h); } };
+  for (const o of outs) if (reads.get(agyPid).has(o.l)) { try { write(o); return { written: true, own: true, keep: [] }; } catch { } }
+  const readersOf = (o) => list.filter((q) => q.pid !== o.p.pid && reads.get(q.pid).has(o.l));
+  const leavesTree = (q) => { try { const l = fs.readlinkSync(`/proc/${q.pid}/fd/1`); return !l.startsWith('pipe:') || !list.some((x) => x.pid !== q.pid && reads.get(x.pid).has(l)); } catch { return false; } };
+  const inner = outs.map((o) => ({ o, r: readersOf(o) })).filter((x) => x.r.length);
+  inner.sort((a, b) => Number(b.r.every(leavesTree)) - Number(a.r.every(leavesTree)));   // the pipe nearest agy first (stable)
+  const tops = list.filter((p) => Number(p.ppid) === Number(agyPid));
+  for (const { o, r } of inner) { try { write(o); return { written: true, own: false, keep: [...new Set([...r, ...tops])], readers: r }; } catch { } }
+  return { written: false, own: false, keep: [] };
 }
 // LAW 3 OF THE LOOK AT 99f65d547 (主开发 07:49Z): «ended» is said only when something was ended — every verb is answered by
 // ONE `command_ended` record that says what happened: {ok: true, ended: [names], survivors: [names]} — the hub says «ended»
@@ -212,9 +233,11 @@ async function endCommand(by, afterMin) {
     const why = by === 'by-itself'
       ? `VibeSpace ended this command${min ? ` after ${min} minutes` : ''} with no output and nothing it started working.`
       : 'VibeSpace ended this command at the person\'s request.';
-    const told = sayToCommand(list, child.pid, why);
-    const r = await endTree(list);
-    record('command_ended', { ok: true, by, ended: r.ended, survivors: r.survivors, told });
+    const wrote = sayToCommand(list, child.pid, why);
+    const r = await endTree(list, { last: wrote.keep });   // the processes the sentence must still pass through: signalled LAST
+    // «told» is the ARRIVAL, never the write: agy's own pipe, or a reader that ended by itself (its end of input — the sentence passed)
+    const told = wrote.written && (wrote.own || (wrote.readers || []).every((q) => (r.lastEnded || []).includes(q.pid)));
+    record('command_ended', { ok: true, by, ended: r.ended, survivors: r.survivors, told, why });   // `why`: the hub tells it at the next turn when told is false
     const said = by === 'by-itself' ? 'The command was ended by itself' : 'The command was ended';
     if (!r.ended.length && r.survivors.length) notice('error', `The command could not be ended: ${r.survivors.length} of its processes are still running: ${namesOf(r.survivors)}.`, 'command-ended');
     else if (r.survivors.length) notice('error', `${said}, but ${r.survivors.length} of its processes could not be ended: ${namesOf(r.survivors)}.`, 'command-ended');

@@ -161,7 +161,10 @@ Day one asks ONE thing — what to work on — and lands in a chat on the folder
     - a long quiet wait by design is ended too — the agent is told so;
     - a process that left the tree before Stop (a double fork) is not seen, so not ended;
     - a paired machine's turn reads «unknown» (its processes are not here), never «stuck»;
-    - the WHY sentence reaches the step's output only through a real pipe in agy's tree (a socket pair cannot be opened) — otherwise the step just fails and the conversation's notice carries the sentence;
+    - the WHY sentence reaches the step's output through a pipe: agy's OWN pipe first (the kill cannot take its reader); else a pipeline's pipe inside the command, whose reader — and the command's top, the process agy waits on — are signalled LAST, after they end by themselves at their end of input or after 2 s (`AGY_WEBUI_READER_BOUND_MS`); the 3 s hard kill then takes every survivor. `told` is the sentence's arrival, never the write;
+    - when the output cannot carry it (a socket pair, which cannot be opened; a reader past the bound — told false), the running turn sees its CLI's own ending text («killed by SIGTERM») alone; the agent learns why at its NEXT turn (one keyed stash line — never a wake, never a billed turn), and the conversation's notice says it at once;
+    - a pipeline reader that filters or never forwards what it reads (`| grep x`, `| head -1`) leaves told true with no sentence in the output;
+    - a writer that ignores the first signal makes told false though the sentence arrived — the agent is told a second time at its next turn, harmless;
     - a wrapper killed past its own exit handler leaves agy (its own session); the hub's kill path ends it by its recorded identity (`childIdentity`, proc-identity's {pid, starttime, bootId}), unless agy itself exited first and left its command;
     - the minute a card shows can be one off while readings run slow (the projection assumes a reading a minute; a slower one lands the act a reading later);
     - a wrapper that never answers an ending is let go after two minutes, so the by-itself ending asks it again about every three minutes while the command stays stuck;

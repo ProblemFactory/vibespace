@@ -47,6 +47,7 @@ const ITEM_KEY = 'turn-stuck:';                 // the producer's identity (the 
 const OWN_ENDS = Object.freeze(['moved', 'turn-ended', 'kept-waiting', 'gone', 'command-ended', 'ended-by-itself', 'restarted']);   // the ends THIS producer writes
 const BOUND_SETTING = 'turns.stuckAfterMin';     // the told bound (minutes; default ten)
 const SLOT = 'stuck-turn:';   // P7: the keyed stash slot that tells a waiting sender, one per stuck conversation
+const ENDED_SLOT = 'command-ended:';   // the race's hold 1 (主开发 09:06Z): the keyed stash slot that tells the AGENT why its command was ended
 const END_SETTING = 'turns.endStuckCommandMin';  // the by-itself ending (minutes; default thirty; 0 = never) — the owner's word «可以», 2026-11-15
 const GONE_AFTER_MS = 5 * 60 * 1000;             // S4: an item whose conversation is not here ends «gone» only after this long in THIS life (a boot restores the live set after the watch's first reading)
 const minuteOf = (t) => Math.floor(Number(t) / 60000) * 60000;   // a time a card SHOWS (HH:MM): stored to the minute, so a reading's own jitter never redraws it
@@ -60,7 +61,8 @@ function noteCommandEnded(session, rec) {
   if (!session || !rec || typeof rec !== 'object') return;
   const prev = session._commandEnded;
   session._commandEnded = { n: ((prev && Number(prev.n)) || 0) + 1, ok: rec.ok === true, by: rec.by === 'by-itself' ? 'by-itself' : 'person', code: typeof rec.code === 'string' ? rec.code.slice(0, 40) : null,
-    ended: Array.isArray(rec.ended) ? rec.ended.length : 0, survivors: Array.isArray(rec.survivors) ? rec.survivors.length : 0 };
+    ended: Array.isArray(rec.ended) ? rec.ended.length : 0, survivors: Array.isArray(rec.survivors) ? rec.survivors.length : 0,
+    told: rec.told === true ? true : rec.told === false ? false : null, why: typeof rec.why === 'string' ? rec.why.slice(0, 300) : null };
   for (const w of LIVE) { try { w._settleSession(session); } catch { } }
 }
 
@@ -337,6 +339,7 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     const by = w.ending.by, S = w.stretch;
     w.ending = null;
     if (f.ok && f.ended > 0) {
+      if (f.told === false) tellEnded(id, s, S, f);   // the race's hold 1: its step could not carry why — the agent's NEXT turn does
       endOpen(id, by === 'by-itself' ? 'ended-by-itself' : 'command-ended');   // (a kept card ends with it)
       w.stretch = null; if (w.prev) w.prev = { ...w.prev, stillMs: 0 };   // law 2: after an ending, the next stuck stretch is its own
       say(`[turn-watch] ${id}: the command was ended (${by}; ${f.ended} process(es)${f.survivors ? `, ${f.survivors} still running` : ''})`);
@@ -350,6 +353,25 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
     }
     say(`[turn-watch] ${id}: the command was not ended (${f.code || (f.survivors ? `${f.survivors} process(es) still running` : 'nothing was running')}) — the item stays`);
     return true;
+  }
+  /** THE RACE, HOLD 1 (主开发 09:06Z): an ending whose sentence did not reach the agent's step (`told` false — the command's output
+   *  a socket pair, or a pipeline's reader that did not end by itself within the bound) is told at the agent's NEXT turn, through
+   *  the door P7 uses: a keyed stash line — never a wake, never a billed turn (the spend guard is not touched) — once per ending
+   *  (the slot's set is the ending's count). Its time in the hub's one agent-facing form, the zone named (owner-facts when —
+   *  an agent has no clock of the person's); the command's text bounded. The running turn sees its CLI's own ending text alone.
+   *  → whether it was filed */
+  function tellEnded(id, s, S, f) {
+    const d = getDeliver();
+    const cid = (s && (s.backendSessionId || s.claudeSessionId)) || null;
+    if (!cid || !d || typeof d.stashSlot !== 'function') return false;
+    const cmd = S && S.said && S.said.cmd ? agentText(String(S.said.cmd), { max: 120, kind: 'line' }) : '';
+    const why = f.why ? agentText(String(f.why), { max: 300, kind: 'line' }) : '';
+    const text = `(VibeSpace) Your command${cmd ? ` «${cmd}»` : ''} was ended at ${OF.when(now())}${why ? `: ${why}` : '.'} Its own output could not carry this.`;
+    try {
+      const r = d.stashSlot(cid, ENDED_SLOT + cid, { source: 'agent', fromName: 'VibeSpace', text }, { set: [`ended:${f.n}`] });
+      if (r && r.filed) { say(`[turn-watch] ${id}: why the command was ended is told at the agent's next turn (its output could not carry it)`); return true; }
+    } catch (e) { say(`[turn-watch] ${id}: why the command was ended was not filed — ${e && e.message}`); }
+    return false;
   }
   /** «Start it again anyway» (L3): the old CLI process never exited — the wrapper starts a new one without it */
   function restartAnyway(id) {
@@ -384,4 +406,4 @@ function create({ activeSessions, buffersDir, getUserTodos = () => null, getGrou
 
 function install(deps) { const w = create(deps); w.start(); return w; }
 
-module.exports = { create, install, noteCommandEnded, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING, SLOT, ENDING_WAIT_MS };
+module.exports = { create, install, noteCommandEnded, ITEM_KEY, OWN_ENDS, BOUND_SETTING, END_SETTING, SLOT, ENDED_SLOT, ENDING_WAIT_MS };

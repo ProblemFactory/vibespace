@@ -27,7 +27,12 @@
 //                                   (the stream's provenance is 'docs'). Each child's pid → $AGY_STUB_LOG {commandPid}: like
 //                                   the real CLI, the stub never ends what its command started (a suite does). With `escape`
 //                                   too, one more grandchild in a SESSION of its own (setsid — it leaves the group). With
-//                                   `piped`, its output goes through a REAL pipe (`… | cat`), as a Go CLI's exec gives a command.
+//                                   `piped`, its output goes through a pipeline (`… | cat`) — under THIS stub's own spawn, a
+//                                   socket pair at the top: the wrapper's fallback road (the race of 11-16). With `ownpipe`,
+//                                   the command's output is a REAL anonymous pipe whose read end the stub itself holds — the
+//                                   road a real (Go) CLI's exec gives a command; `ownpipe moved` = the top's own output sent
+//                                   away, the pipeline's last stage writing to the stub's pipe (where the old «any other
+//                                   holder counts» judgment wrote into the inner pipe instead).
 //       text naming `subagent`    → an invoke_subagent tool step (ACTIVE, parameters {Role, TypeName} — what the owner's
 //                                   journal recorded, lane agy-subagent-cards) at step $AGY_STUB_SPAWN_STEP (the fixture
 //                                   store's task names it), then the subagent_info update DONE on the same step (shape:
@@ -113,11 +118,36 @@ function modelCall(i) { const input = 40 + 2 * i, cacheRead = ctx, output = 9; c
 const running = () => ({ input_tokens: run.input, output_tokens: run.output, thinking_tokens: run.thinking, cache_read_tokens: run.cacheRead, total_tokens: run.input + run.output });
 const fail = (error, code) => { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error, duration_seconds: 0, num_turns: turns, usage: usage(turns) } }); process.exit(code); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function commandWork(busyShape, busyMs, escape = false, piped = false) {
+/** THE ROAD A REAL CLI WALKS (the race, 主开发 09:06Z): a REAL anonymous pipe whose READ end this process holds — what a Go CLI's
+ *  exec.Cmd hands its command (Node's own spawn hands a socket pair). Made without a native step: a helper `sleep | sleep` holds
+ *  a pipe, its two ends are opened here through /proc, the helper leaves. → {w: the command's end, r: ours} */
+async function realPipe() {
+  const cp = require('child_process'), lk = (pid, fd) => { try { return fs.readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { return ''; } };
+  const h = cp.spawn('/bin/sh', ['-c', 'sleep 60 | sleep 60'], { stdio: 'ignore' });
+  let kids = [];
+  for (let i = 0; i < 300 && kids.length < 2; i++) { await sleep(10); try { kids = fs.readFileSync(`/proc/${h.pid}/task/${h.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { } }
+  const wp = kids.find((k) => lk(k, 1).startsWith('pipe:')), rp = kids.find((k) => lk(k, 0).startsWith('pipe:'));
+  const w = fs.openSync(`/proc/${wp}/fd/1`, fs.constants.O_WRONLY), r = fs.openSync(`/proc/${rp}/fd/0`, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  h.kill('SIGKILL'); for (const k of kids) { try { process.kill(k, 'SIGKILL'); } catch { } }   // the helper leaves: only the command and this process hold the pipe
+  return { w, r };
+}
+async function commandWork(busyShape, busyMs, escape = false, piped = false, own = false) {
   const script = busyShape
     ? `const end = Date.now() + ${Math.max(100, Number(busyMs) || 120000)}; const t = setInterval(() => { const s = Date.now(); while (Date.now() - s < 20) { } if (Date.now() > end) clearInterval(t); }, 200);`
     : "require('child_process').spawn('sleep', ['86400'], { stdio: 'ignore' }); " + (escape ? "require('child_process').spawn('sleep', ['86401'], { stdio: 'ignore', detached: true }).unref(); " : '') + "setInterval(() => { }, 1 << 30);";   // escape: one grandchild in a session of its own (it leaves the group)
-  if (piped) return require('child_process').spawn('/bin/sh', ['-c', 'exec 2>&1; "$0" -e "$1" | cat', process.execPath, script], { stdio: ['ignore', 'pipe', 'pipe'] });   // its output through a REAL pipe (to cat)
+  // AGY_STUB_SLOW_READER=<ms> (turn-never-silent, the race's placed pause): the pipeline's reader takes each line, then waits <ms>
+  // before writing it on — the window the hosted red of 11-16 lost the sentence in (its reader signalled before it forwarded)
+  const ms = Number(process.env.AGY_STUB_SLOW_READER) || 0;
+  const reader = ms > 0 ? `while IFS= read -r l; do sleep ${ms / 1000}; printf '%s\\n' "$l"; done` : 'cat';
+  if (own) {   // the command's output = a REAL pipe this process reads itself (a Go CLI's exec)
+    const { w, r } = await realPipe();
+    const sh = own === 'moved' ? `exec 3>&1 >/dev/null 2>&1; "$0" -e "$1" 2>&1 | ${reader} >&3` : `exec 2>&1; "$0" -e "$1" | ${reader}`;
+    const c = piped ? require('child_process').spawn('/bin/sh', ['-c', sh, process.execPath, script], { stdio: ['ignore', w, w] }) : require('child_process').spawn(process.execPath, ['-e', script], { stdio: ['ignore', w, w] });
+    fs.closeSync(w);   // only the command holds the write end: its end of input comes when its processes are gone
+    c.ownOut = new (require('net').Socket)({ fd: r, readable: true, writable: false });
+    return c;
+  }
+  if (piped) return require('child_process').spawn('/bin/sh', ['-c', 'exec 2>&1; "$0" -e "$1" | ' + reader, process.execPath, script], { stdio: ['ignore', 'pipe', 'pipe'] });   // a pipeline (to cat) under this stub's socket pair
   return require('child_process').spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });   // its output is the step's (a real CLI reads its command's pipes)
 }
 async function turn(text) {
@@ -181,11 +211,14 @@ async function turn(text) {
     const i = step++; modelCall(i);
     const p = { CommandLine: cw[1] === 'busy' ? 'node build-and-test.mjs' : 'node driver.mjs' };
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: p } } });
-    const c = commandWork(cw[1] === 'busy', process.env.AGY_STUB_BUSY_MS, /\bescape\b/.test(text), /\bpiped\b/.test(text));
-    logLine({ commandPid: c.pid, shape: cw[0] });
-    let said = ''; c.stdout.on('data', (d) => { said += d; }); c.stderr.on('data', (d) => { said += d; });
+    const own = /\bownpipe\b/.test(text) ? (/\bmoved\b/.test(text) ? 'moved' : true) : false;
+    const c = await commandWork(cw[1] === 'busy', process.env.AGY_STUB_BUSY_MS, /\bescape\b/.test(text), /\bpiped\b/.test(text), own);
+    logLine({ commandPid: c.pid, shape: cw[0], own });
+    let said = ''; for (const o of c.ownOut ? [c.ownOut] : [c.stdout, c.stderr]) o.on('data', (d) => { said += d; });
     const t0 = Date.now();
+    const outEnd = c.ownOut ? new Promise((r) => { c.ownOut.once('close', r); setTimeout(r, 10000).unref(); }) : null;   // its own pipe read to its END (Go's Wait)
     const st = await new Promise((r) => c.on('exit', (code, sig) => r(sig ? `killed by ${sig}` : `exit ${code}`)));
+    if (outEnd) await outEnd;
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', duration_seconds: (Date.now() - t0) / 1000, tool_info: { name: 'run_command', parameters: p, output: `${said.trim() ? said.trim() + '\n' : ''}the command ended (${st})` } } });
   }
   if (/\bstuck\b/.test(text)) { const i = step++; modelCall(i); out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: { CommandLine: 'node driver.mjs' } } } }); await new Promise(() => { }); }
