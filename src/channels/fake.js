@@ -493,6 +493,17 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     const mailDir = String((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_MAIL_DIR || '');
     // lane channel-threads: the NAMED big-room seam (read HERE only) — one room of n messages
     const bigRoom = Number((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_BIG) || 0;
+    // channel-store-off-loop cure r1: the NAMED seam `VIBESPACE_CHANNELS_FAKE_ROTATE=<file>` (its CONTENTS read at each
+    // pass's sign-in check, `auth.state()`) — a vendor that ROTATES the sign-in: when the file names a refresh token the
+    // account does not hold, the check writes it through the engine's token door first, as a real refresh does (a failed
+    // write fails the check)
+    async function rotateSignin() {
+      const rotate = String((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_ROTATE || '');
+      if (!rotate || !deps.tokens) return;
+      let want = ''; try { want = fs.readFileSync(rotate, 'utf8').trim(); } catch { /* no file: nothing rotates */ }
+      const held = want ? deps.tokens.read().token : null;
+      if (want && !(held && held.refresh_token === want)) await deps.tokens.write({ access_token: `fake-${want}`, refresh_token: want }, {});
+    }
     let world = null;
     /** lane lark-threads: a root the topics file names carries its topic from now on (the vendor's later listing). */
     const withTopic = (r) => {
@@ -567,6 +578,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       ...(revisionsFile && receive === 'poll' && sendAs.length ? { recall } : {}),
       auth: {
         async state() {
+          await rotateSignin();   // channel-store-off-loop cure r1: a vendor's refresh rotates here (the seam above)
           if (resolveIntegration) {
             let r = null;
             try { r = resolveIntegration('fake'); } catch (e) { return { state: 'unknown', expiresAt: null, scopes: [], why: `integration lookup failed: ${(e && e.message) || e}` }; }

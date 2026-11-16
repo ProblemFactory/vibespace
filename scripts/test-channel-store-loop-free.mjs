@@ -17,7 +17,8 @@
 //       the file.
 //   (d) WHAT CAN STILL HOLD: a synchronous flush (close(), the stamps' flush()) behind a write in flight waits for it —
 //       measured; at the writer's synchronous bound it returns with the store named as held (bounded). (d3) the
-//       poll-stamps journal is folded only when no stamp was set after the side file's bytes were made.
+//       poll-stamps journal keeps every stamp set after the side file's bytes were made (folded down to them — cure r1;
+//       the bound across many snapshots is test-channel-store-writer-laws (h)).
 //   (e) close() writes every moved file through the writer; (f) the key-mint check reads the store's live records.
 // Run: node scripts/test-channel-store-loop-free.mjs
 import fs from 'node:fs';
@@ -94,31 +95,11 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
   eng.stop();
 }
 
-// ── a stand-in writer thread: the REAL writeJob, after the ms in `<dir>/hold-<basename>` (if any); `<dir>/fail-<basename>`
-//    = that file's write fails (EIO) ──
-const T = path.join(ROOT, 'stand'); fs.mkdirSync(T, { recursive: true });
-const STAND = path.join(T, 'stand.cjs');
-fs.writeFileSync(STAND, `'use strict';
-const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const path = require('path');
-const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
-const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4)), CTL = ${JSON.stringify(T)};
-parentPort.on('message', (m) => {
-  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
-  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
-  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b);
-  if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);
-  if (fs.existsSync(path.join(CTL, 'fail-' + b))) err = { code: 'EIO', message: 'the storage failed' };
-  else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
-  else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
-  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else Atomics.store(S, 3, 0);
-  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
-  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
-});
-`);
-const hold = (base, ms) => fs.writeFileSync(path.join(T, 'hold-' + base), String(ms));
-const unhold = (base) => { try { fs.unlinkSync(path.join(T, 'hold-' + base)); } catch { } };
-const failOn = (base, on) => { const f = path.join(T, 'fail-' + base); if (on) fs.writeFileSync(f, '1'); else try { fs.unlinkSync(f); } catch { } };
+// ── a stand-in writer thread (scripts/fixtures/store-stand-writer.cjs): the REAL writeJob, after the ms in
+//    `<dir>/hold-<basename>` (if any); `<dir>/fail-<basename>` = that file's write fails (EIO) ──
+const T = path.join(ROOT, 'stand');
+const SAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(T);
+const STAND = SAND.path, hold = SAND.hold, unhold = SAND.unhold, failOn = SAND.failOn;
 const hasRec = (file, id, field, v) => { const j = readJson(file); return !!(j && (j.adapters || []).some((x) => x.id === id && x[field] === v)); };
 
 // ═══ (b) A SLOW WRITER: the two columns ═══
@@ -203,7 +184,8 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   unhold('adapters.json');
   for (let k = 0; k < 600 && (w.pending(st.adaptersFile) || w.pending(st.stamps.file)); k++) await sleep(10);
   // d3: THE JOURNAL'S FOLD — the side file's own write in flight (held past the bound), a stamp set meanwhile: when that
-  // write lands the journal is NOT truncated (it holds a line the file does not) — a kill then keeps the newer stamp
+  // write lands the journal is folded DOWN to the line set since (cure r1 — it holds a line the file does not) — a kill
+  // then keeps the newer stamp
   hold('poll-stamps.json', BOUND * 2);
   st.stamps.set('acct/c1', { lastPollAt: 200 });
   const d3 = st.stamps.flush();   // returns at the bound, its write still in flight
@@ -213,7 +195,7 @@ console.log('(d) a synchronous flush behind a flying write: it waits — measure
   const onDisk = readJson(st.stamps.file), journal = (() => { try { return fs.readFileSync(st.stamps.log, 'utf8'); } catch { return ''; } })();
   const reborn = CS.createChannelStore({ dir: path.join(ROOT, 'd'), log: quiet, writer: SW.create({ log: quiet, workerPath: STAND }) });   // the store a kill leaves (no close)
   const seen = (reborn.stamps.get('acct/c1') || {}).lastPollAt;
-  ok(d3 === false && JSON.stringify(onDisk).includes('200') && journal.includes('201') && seen === 201, `(d3) the side file landed holding 200 while 201 was set after its bytes were made: the journal is NOT folded (it holds 201) — the store a kill leaves reads ${seen}`, { d3, journal: journal.slice(-120), seen });
+  ok(d3 === false && JSON.stringify(onDisk).includes('200') && journal.includes('201') && seen === 201, `(d3) the side file landed holding 200 while 201 was set after its bytes were made: the journal keeps 201 (cure r1: folded DOWN to the stamps set since the bytes were made — never emptied of them) — the store a kill leaves reads ${seen}`, { d3, journal: journal.slice(-120), seen });
   w.stop();
 }
 
@@ -234,6 +216,7 @@ console.log('(e) close() writes every moved file through the writer; (f) the key
   const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
   ok(/holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(dataDir, 'channels', 'adapters\.json'\)\]/.test(eng), '(f) the key-mint check (holdsCiphertext) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
 }
+
 
 try { SW.storeWriter().stop(); } catch { }
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
