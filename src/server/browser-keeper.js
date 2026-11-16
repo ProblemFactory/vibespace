@@ -3992,6 +3992,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const pr = (async () => {
       const p = profile(profileId);
       if (!p || !isEph(p)) return { removed: false, why: 'not an ephemeral record' };
+      // keeper-sweep-yields L2 (measured: the stop's `close --all` under the record's own session was ONE browser-CLI start
+      // per record — a start forks the whole hub and holds its main thread until the child execs, the field's second per
+      // record): a record whose daemon is already GONE (dead, recycled, never recorded) has nothing for the CLI to close. It
+      // is recorded stopped and the browser its dead daemon left is ended by identity — the tick's own act for a gone daemon
+      // (markEphemeralGone, then its reap awaited) — with no CLI start. A daemon that runs is still closed by the CLI.
+      { const rec0 = reg.browsers[profileId];
+        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonGone(rec0)) {
+          markEphemeralGone(rec0, 'its retire');
+          const rp = reaping.get(profileId); if (rp) { try { await rp; } catch { /* its own journal line */ } }
+        } }
       try { if (B.isLiveBrowser(reg.browsers[profileId])) await stop(profileId, { why }); } catch (e) { log.warn?.(`[browser] ephemeral ${profileId}: stop failed — ${e && e.message}`); }
       if (reg.leases.some((l) => l.profileId === profileId)) return { removed: false, kept: true, why: 'its conversation is carried again' };
       if (B.isLiveBrowser(reg.browsers[profileId])) { log.warn?.(`[browser] ephemeral ${profileId} "${p.label}": its browser would not stop — the record is kept for the next pass`); return { removed: false, why: 'still running' }; }
@@ -4000,6 +4010,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     })();
     retiring.set(profileId, pr);
     return pr.finally(() => { if (retiring.get(profileId) === pr) retiring.delete(profileId); });
+  }
+  /** keeper-sweep-yields L1: THE ORPHAN SWEEP IN BOUNDED STEPS — one record per step, the main loop given back before each
+   *  (setImmediate), so no loop turn holds more than one record's retire whatever the count (kb-design-lessons §19: no step
+   *  holds the loop 250 ms); at boot and on the tick alike. A record whose conversation is carried again by the time its step
+   *  comes is kept (no stop, no removal). Each removal commits the registry (removeProfile), so a restart resumes the sweep
+   *  where the last process stopped. Its one reason is the conversation's end (test-architecture §54b reads every
+   *  retireEphemeral caller's reason as a literal). → the results in order. */
+  const yieldLoop = () => new Promise((res) => setImmediate(res));
+  async function retireInSteps(ids) {
+    const out = [];
+    for (const id of ids) {
+      await yieldLoop();
+      if (reg.leases.some((l) => l.profileId === id)) { out.push({ removed: false, kept: true, why: 'its conversation is carried again' }); continue; }
+      out.push(await retireEphemeral(id, 'conversation gone').catch(() => ({ removed: false })));
+    }
+    return out;
   }
   /** `browser.headed` as STORED (true | false | null = unset) — the input of the ONE resolution (PURE
    *  browser-display.resolveHeaded, lane hooks-create H5), made where the display is probed: this keeper's launch fact
@@ -7145,7 +7171,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lease) is stopped and REMOVED by itself; a named profile never is
     const orphanEph = reg.profiles.filter((p) => isEph(p) && !reg.leases.some((l) => l.profileId === p.id));
     for (const p of orphanEph) log.log?.(`[browser] ephemeral ${p.id} "${p.label}": no live session carries ${p.owner.id} — stopping it and removing the record`);
-    r.retired = Promise.all(orphanEph.map((p) => retireEphemeral(p.id, 'conversation gone').catch(() => ({ removed: false }))));
+    r.retired = retireInSteps(orphanEph.map((p) => p.id)); // keeper-sweep-yields L1: bounded steps, never one loop turn
     r.retiring = orphanEph.map((p) => p.id);
     return r;
   }
