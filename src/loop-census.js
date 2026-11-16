@@ -13,11 +13,11 @@
  * (src/cpu-capture.js tickOf — the main thread's kernel state first: asleep in its own loop's poll with the beat fresh is
  * IDLE and never asked; a hold open is HELD; stopped; another ask out, a capture or a profile running is NOT SAMPLED);
  * else ONE ask, or booked on the census's own ask in flight. An answer books its ticks (bookOf) on the FAMILY of the
- * innermost JavaScript frame inside the install — node_modules, Node's internals, built-ins and eval'd code skipped, the
+ * nearest JavaScript frame inside the install that a NAMED family owns, walking outward from the innermost (cure r1) — node_modules, Node's internals, built-ins and eval'd code skipped, the
  * instrument's own frames trimmed (src/loop-hold.js instrumentTrim) — so time inside a native call, a parse, a
  * synchronous system call is counted on its JavaScript CALLER (an ask lands at the first JavaScript); 'rest' when no
- * frame of the stack is the install's; 'native' when the stack has no JavaScript frame. A helper's OWN time is its
- * family's (a shared module that no rule names is 'rest'), never its caller's. COUNTS ONLY: no frame, path or name is kept.
+ * frame of the stack belongs to a named family; 'native' when the stack has no JavaScript frame. A shared helper that no rule
+ * names is booked on the nearest NAMED family that called it (cure r1). COUNTS ONLY: no frame, path or name is kept.
  * ITS PRIORITY IS THE LOWEST: it asks only when no ask is in flight and no capture or profile runs, and a hold, a capture or
  * a profile that finds its ask in flight TAKES it as its own (the watchdog's takeCensusAsk) — none waits behind it.
  * THE COST, bounded and said in the take: each ask's own run on the main thread (the note's µs, as a capture sums it)
@@ -31,7 +31,12 @@ const LH = require('./loop-hold.js');
 const CENSUS_EVERY_MS = 1000;   // one tick a second on average: ≤ 3600 an hour, an ask only when the loop is not idle
 const CENSUS_FLOOR_MS = 8000;   // a halved rate goes no slower than one tick per 8 s
 const ASK_BOUND_MS = CC.ASK_BOUND_MS;   // one ask's own run past this (4 ms, the capture's bound) ⇒ the rate halves
-const TAKE_WAIT_MS = 2000;      // the main side waits this long for the watchdog thread's take, then answers null
+const TAKE_WAIT_MS = 2000;
+// cure r1 (R1): THE PRICE THE MAIN THREAD PAYS for one ask beyond its own run — the inspector's dispatch of Runtime.evaluate (the
+// message, the compile of the constant expression, the answer's serialization), MEASURED (ldr/census/results.txt: ABBA, the main
+// thread's schedstat with the census on and off, a 6 MB and a 1 GB heap): 0.40–0.43 ms paid a piece of which 0.11–0.16 ms is the
+// ask's own run ⇒ 0.27–0.33 ms of dispatch, taken at 0.3 ms. The own run is measured LIVE, ask by ask; the dispatch is this constant.
+const DISPATCH_MS = 0.3;      // the main side waits this long for the watchdog thread's take, then answers null
 
 // THE FAMILIES — ordered rules on the INSTALL-RELATIVE path (the first that matches names it; none ⇒ 'rest'). `dir`: a
 // folder of src/ whose files are all the family's; `lead`: the file's name begins with one of these words; `word`: one of
@@ -44,11 +49,11 @@ const FAMILIES = Object.freeze([
   { id: 'channels', words: 'the channels engine and its store', rules: [/^src\/channels\//, lead('channels?|outbox|webhook|groups|msg-acl')] },
   { id: 'pool', words: 'the account pool and usage', rules: [lead('accounts?|spend|otel|rate-limit|reset-credit|auto-cli|cost|catalog-pricing|reading'), word('usage|quota|ledger')] },
   // before parse: the hook routes' own marks (seen-marks, turn-carry — «turn» is parse's word) and the context table every injection renders
-  { id: 'hook', words: 'the prompt hook and the agent routes', rules: [/^src\/agent-routes(?:\/|\.js$)/, lead('hooks|task-context|seen-marks|turn-carry')] },
-  { id: 'parse', words: 'the parse of conversations’ output and the message state', rules: [/^src\/server\/stdout\//, word('message|transcripts?|events|stream-json|session-store|session-stdout|normalizers|output-belt|turn|agy-store')] },
+  { id: 'hook', words: 'the prompt hook and the agent routes', rules: [/^src\/agent-routes(?:\/|\.js$)/, lead('hooks|hook-root|exit-hook|task-context|seen-marks|turn-carry')] },
+  { id: 'parse', words: 'the parse of conversations’ output and the message state', rules: [/^src\/server\/stdout\//, word('session-brain|message|transcripts?|events|stream-json|session-store|session-stdout|normalizers|output-belt|turn|agy-store')] },
   { id: 'browser', words: 'the browser keeper', rules: [/^src\/browser-backends\//, lead('browser|cdp')] },
   { id: 'jobs', words: 'jobs', rules: [lead('jobs?')] },
-  { id: 'page', words: 'the page protocol and its fan-out', rules: [lead('ws|sync-store|sync-arrival|static'), word('broadcast|fanout')] },
+  { id: 'page', words: 'the page protocol and its fan-out', rules: [lead('ws-handler|ws-heartbeat|ws-keepalive|sync-store|sync-arrival|static'), word('broadcast')] },   // cure r1: a session's creation (ws-create) and the Task Groups' fan-out (task-fanout) are not the page protocol
 ].map((f) => Object.freeze({ ...f, rules: Object.freeze(f.rules) })));
 const REST = Object.freeze({ id: 'rest', words: 'the rest of the hub’s own code (or no frame of it on the stack)' });
 const NATIVE_WORDS = 'on the CPU outside JavaScript (no JavaScript frame on the stack)';
@@ -69,10 +74,14 @@ function bookOf(text, root) {
   if (r.form !== 'calls' && r.form !== 'string') return null;
   const frames = LH.instrumentTrim(r.frames, root);
   if (!frames.length) return 'native';
+  // cure r1 (R6): the NEAREST frame, walking OUTWARD from the innermost, that belongs to a NAMED family — time an engine spends
+  // inside a shared helper no rule names is the engine's, not the rest's; 'rest' only for a stack with no named family
   for (const f of frames) {
     if (f.evalish) continue;
     const at = CC.relOf(f.file, root);
-    if (at.kind === 'install' && !CC.packageOf(at.rel)) return familyOf(at.rel);
+    if (at.kind !== 'install' || CC.packageOf(at.rel)) continue;
+    const fam = familyOf(at.rel);
+    if (fam !== REST.id) return fam;
   }
   return REST.id;
 }
@@ -111,9 +120,9 @@ function censusFold(take) {
     native: { ticks: native, share: of(native, busy), words: NATIVE_WORDS },
     idle: { ticks: idle, share: of(idle, sampled) }, held: { ticks: held, share: of(held, sampled) }, stopped: { ticks: stopped, share: of(stopped, sampled) },
     notSampled: { ticks: n(tk.notSampled) + n(tk.paused), paused: n(tk.paused), pausedBy: { ...(t.pausedBy || {}) } },
-    cost: { asks, ownMs, meanMs: asks ? ownMs / asks : null, maxMs: n(t.askMaxMs), halved: t.halved || null },
+    cost: { asks, ownMs, meanMs: asks ? ownMs / asks : null, maxMs: n(t.askMaxMs), halved: t.halved || null, dispatchMs: asks * DISPATCH_MS, paidMs: ownMs + asks * DISPATCH_MS },
     words: TICK_WORDS,
   };
 }
 
-module.exports = { FAMILIES, REST, IDS, NATIVE_WORDS, TICK_WORDS, familyOf, bookOf, slowerAfter, emptyTicks, censusFold, CENSUS_EVERY_MS, CENSUS_FLOOR_MS, ASK_BOUND_MS, TAKE_WAIT_MS };
+module.exports = { FAMILIES, REST, IDS, NATIVE_WORDS, TICK_WORDS, familyOf, bookOf, slowerAfter, emptyTicks, censusFold, CENSUS_EVERY_MS, CENSUS_FLOOR_MS, ASK_BOUND_MS, TAKE_WAIT_MS, DISPATCH_MS };

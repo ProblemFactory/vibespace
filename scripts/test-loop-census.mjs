@@ -39,7 +39,10 @@ console.log('① PURE — the families table, one answer booked, the rate, one t
     ['src/server/stdout/claude-stream-json.js', 'parse'], ['src/message-manager.js', 'parse'], ['src/server/session-stdout.js', 'parse'],
     ['src/server/browser-keeper.js', 'browser'], ['src/browser-backends/cdp.js', 'browser'],
     ['src/jobs.js', 'jobs'], ['src/server/jobs-wiring.js', 'jobs'],
-    ['src/ws-handler.js', 'page'], ['src/server/session-broadcast.js', 'page'], ['src/server/task-fanout.js', 'page'],
+    ['src/ws-handler.js', 'page'], ['src/server/session-broadcast.js', 'page'], ['src/server/ws-heartbeat.js', 'page'],
+    // cure r1 (R6, the verifier's misfiles): the live-output consumer is parse; the Task Groups' fan-out and a session's creation are
+    // NOT the page protocol; the hook root's watch and the exit hook are the hook family
+    ['src/server/session-brain.js', 'parse'], ['src/server/task-fanout.js', 'rest'], ['src/ws-create.js', 'rest'], ['src/server/exit-hook.js', 'hook'], ['src/server/hook-root-watch.js', 'hook'],
     ['src/turn-carry.js', 'hook'], ['src/agy-turn-usage.js', 'pool'],   // «turn» is parse's word too: the table's ORDER decides these two
     ['src/server/loop-blame.js', 'rest'], ['server.js', 'rest'], ['src/desktop-browser-app.js', 'rest'], ['src/server/sync-fs-witness.js', 'rest'],
     ['node_modules/ws/lib/websocket.js', 'rest'], ['data/plugins/x/index.js', 'rest'], ['', 'rest'],
@@ -58,6 +61,10 @@ console.log('① PURE — the families table, one answer booked, the rate, one t
     [C([{ file: `${R}/src/jobs.js`, ev: true }, { file: `${R}/src/ws-handler.js` }]), 'page', 'an eval\'d frame is never the install\'s'],
     [C([{ file: '' }, { file: 'node:internal/timers' }, { file: '/elsewhere/plugin.js' }]), 'rest', 'no frame of the install: the rest'],
     [C([]), 'native', 'no JavaScript frame: native'],
+    // cure r1 (R6): the NEAREST frame, walking outward, that a NAMED family owns — a shared helper no rule names is its caller's engine
+    [C([{ file: `${R}/src/lib/utils.js` }, { file: `${R}/src/server/loop-blame.js`, fn: 'x' }, { file: `${R}/src/server/stdout/claude-stream-json.js` }, { file: `${R}/src/server/channels-engine.js` }]), 'parse', 'a shared helper inside the output parse: booked on the parse (the nearest named family outward), never the rest'],
+    [C([{ file: `${R}/src/lib/utils.js` }, { file: `${R}/server.js` }]), 'rest', 'a stack with no named family: the rest'],
+    [C([{ file: `${R}/src/server/session-brain.js` }, { file: `${R}/src/ws-handler.js` }]), 'parse', 'the live-output consumer (session-brain) is the parse, before the page protocol that called it'],
     [S(['    at f0 (/srv/hub/src/x.js:1:1)', '    at f (/srv/hub/src/jobs.js:3:4)', '    at g (/srv/hub/src/ws-handler.js:5:6)']), 'jobs', 'the string form (locations only) books the same way'],
     ['D', null, 'a debugger\'s stand-down: not sampled'], ['A', null, 'an accessor\'s stand-down: not sampled'], [S(['garbage']), null, 'frames unreadable: not sampled'], [null, null, 'no text: not sampled'],
   ];
@@ -73,7 +80,7 @@ console.log('① PURE — the families table, one answer booked, the rate, one t
   const WANT = { fromM: 1000, toM: 3601000, everyMs: 1000, sampledTicks: 2890, busyTicks: 1360, busyShare: 1360 / 2890,
     shares: [row('channels', 600), row('pool', 300), row('parse', 150), row('page', 150), row('rest', 100), row('hook', 0), row('browser', 0), row('jobs', 0)],
     native: { ticks: 60, share: 60 / 1360, words: LC.NATIVE_WORDS }, idle: { ticks: 1500, share: 1500 / 2890 }, held: { ticks: 30, share: 30 / 2890 }, stopped: { ticks: 0, share: 0 },
-    notSampled: { ticks: 20, paused: 8, pausedBy: { heap: 8 } }, cost: { asks: 1290, ownMs: 258, meanMs: 0.2, maxMs: 1.75, halved: null }, words: LC.TICK_WORDS };
+    notSampled: { ticks: 20, paused: 8, pausedBy: { heap: 8 } }, cost: { asks: 1290, ownMs: 258, meanMs: 0.2, maxMs: 1.75, halved: null, dispatchMs: 1290 * LC.DISPATCH_MS, paidMs: 258 + 1290 * LC.DISPATCH_MS }, words: LC.TICK_WORDS };
   const F = LC.censusFold(TAKE);
   ok(JSON.stringify(F) === JSON.stringify(WANT) && Math.abs(F.shares.reduce((s, x) => s + x.share, 0) + F.native.share - 1) < 1e-12,
     'censusFold of a FIXED take ⇒ a FIXED result: every family a share of the BUSY ticks (larger first, a tie in the table\'s order, a family id it does not know is the rest\'s), native beside them — together 1; idle / held of the sampled; paused counted not sampled; the asks\' cost', F);

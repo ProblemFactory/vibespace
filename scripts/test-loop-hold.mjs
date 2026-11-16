@@ -693,15 +693,18 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
       hold(d0 + DAY, 5000, `${BLOCKED} · (tomorrow)`),                                  // after today: counted nowhere
       { ts: now - 1000, kind: 'metric', name: 'srv-loop-canary-ms', value: 7000 },       // another metric: not a hold row
       { ts: now - 1000, kind: 'event', name: 'srv-loop-hold-ms', value: 7000, detail: `${BLOCKED} · x` },   // not a metric
+      hold(now - 45000, 9000, `${JS} · boot (server.js:1) · (the boot)`),               // the BOOT's own hold (loop-day-report R5): apart, never a cause
     ];
   };
   const c = (cause, ms, count) => ({ cause, ms, count });
   const expect = (now) => {
     const day = (ms) => new Date(ms).toISOString().slice(0, 10), d0 = Math.floor(now / DAY) * DAY;
     return { cut: 'UTC',
-      today: { from: day(d0), to: day(d0), ms: 6500, count: 3, causes: [c(BLOCKED, 4000, 1), c(JS, 1500, 1), c('(no cause recorded)', 1000, 1)] },
-      yesterday: { from: day(d0 - DAY), to: day(d0 - DAY), ms: 3200, count: 2, causes: [c(BLOCKED, 2000, 1), c(WAIT, 1200, 1)] },
-      week: { from: day(d0 - 6 * DAY), to: day(d0), ms: 12700, count: 6, causes: [c(BLOCKED, 9000, 3), c(JS, 1500, 1), c(WAIT, 1200, 1), c('(no cause recorded)', 1000, 1)] } };
+      // loop-day-report R5: THE CAUSE = the hourly report's key — the hub's code location in the frame, else the verdict;
+      // the boot's own hold apart (`boot`), in no total and no cause
+      today: { from: day(d0), to: day(d0), ms: 6500, count: 3, boot: { ms: 9000, count: 1 }, causes: [c('src/channel-store.js:275', 4000, 1), c('src/x.js:9', 1500, 1), c('(no cause recorded)', 1000, 1)] },
+      yesterday: { from: day(d0 - DAY), to: day(d0 - DAY), ms: 3200, count: 2, boot: { ms: 0, count: 0 }, causes: [c('src/channel-store.js:1813', 2000, 1), c(WAIT, 1200, 1)] },
+      week: { from: day(d0 - 6 * DAY), to: day(d0), ms: 12700, count: 6, boot: { ms: 9000, count: 1 }, causes: [c('src/channel-store.js:275', 4000, 1), c('src/channel-store.js:285', 3000, 1), c('src/channel-store.js:1813', 2000, 1), c('src/x.js:9', 1500, 1), c(WAIT, 1200, 1), c('(no cause recorded)', 1000, 1)] } };
   };
   const J = (x) => JSON.stringify(x);
   const NOW = Date.UTC(2026, 10, 16, 10, 0, 0);   // 2026-11-16T10:00:00Z
@@ -737,7 +740,7 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
     const s1 = tel.summary({ days: 1, now: NOW2 }), s14 = tel.summary({ days: 14, now: NOW2 });
     ok(J(s1.loopHeld) === J(expect(NOW2)) && J(s14.loopHeld) === J(expect(NOW2)) && J(shards) === J(['events-2026-10.ndjson', 'events-2026-11.ndjson']) && s1.loopHeld?.week?.from === '2026-10-27',
       `(3) GET /api/telemetry/summary's loopHeld = the rows' number, read from ${shards.join(' + ')}, the same with days=1 and days=14 (the summary's own window never cuts the seven days)`, s1.loopHeld);
-    ok(s14.metrics['srv-loop-hold-ms'] && s14.metrics['srv-loop-hold-ms'].count === 8 && s14.byName['metric:srv-loop-hold-ms'] === 8 && s14.byName['event:srv-loop-hold-ms'] === 1,
+    ok(s14.metrics['srv-loop-hold-ms'] && s14.metrics['srv-loop-hold-ms'].count === 9 && s14.byName['metric:srv-loop-hold-ms'] === 9 && s14.byName['event:srv-loop-hold-ms'] === 1,
       '(3) the summary\'s other tables are unchanged by it (srv-loop-hold-ms still a metric with its percentiles)', s14.metrics['srv-loop-hold-ms']);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   // (4) THE SITE: the sync-fs held row says the call's site — the witness's src/ frame, file:line and the function
@@ -758,13 +761,14 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
   const words = (html) => html.replace(/<\/(td|p|h3)>/g, ' | ').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
   const en = words(draw(got, { t: tOf(null), esc }));
   const WANT = `Held per day, by cause | Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is 2026-11-16. | `
-    + `cause | today | yesterday | 7 days | ${BLOCKED} | 4.0 s (1) | 2.0 s (1) | 9.0 s (3) | ${JS} | 1.5 s (1) | — | 1.5 s (1) | ${WAIT} | — | 1.2 s (1) | 1.2 s (1) | `
-    + `(no cause recorded) | 1.0 s (1) | — | 1.0 s (1) | all causes | 6.5 s (3) | 3.2 s (2) | 12.7 s (6) |`;
+    + `cause | today | yesterday | 7 days | src/channel-store.js:275 | 4.0 s (1) | — | 4.0 s (1) | src/channel-store.js:285 | — | — | 3.0 s (1) | src/channel-store.js:1813 | — | 2.0 s (1) | 2.0 s (1) | `
+    + `src/x.js:9 | 1.5 s (1) | — | 1.5 s (1) | ${WAIT} | — | 1.2 s (1) | 1.2 s (1) | (no cause recorded) | 1.0 s (1) | — | 1.0 s (1) | all causes | 6.5 s (3) | 3.2 s (2) | 12.7 s (6) | `
+    + `the boot (apart — not in all causes) | 9.0 s (1) | — | 9.0 s (1) |`;
   ok(en === WANT, `(5) the table's words (en): ${en}`, { want: WANT });
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const keys = [...SF.slice(a, b).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
   const zhW = words(draw(got, { t: tOf(zh), esc })), jaW = words(draw(got, { t: tOf(ja), esc }));
-  ok(keys.length === 8 && keys.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string' && zh[k] !== k && ja[k] !== k)
+  ok(keys.length === 9 && keys.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string' && zh[k] !== k && ja[k] !== k)
     && zhW.startsWith('每天卡住的时间（按原因） | 主循环被卡住的秒数') && zhW.includes('今天是 2026-11-16') && zhW.includes('原因 | 今天 | 昨天 | 7 天 |') && zhW.includes('全部原因 | 6.5 s (3) | 3.2 s (2) | 12.7 s (6)')
     && jaW.startsWith('日ごとの停止（原因別） | メインループが止まっていた秒数') && jaW.includes('今日は 2026-11-16') && jaW.includes('原因 | 今日 | 昨日 | 7日間 |') && jaW.includes('すべての原因 | 6.5 s (3)'),
     `(5) every word it says has a zh and a ja row (${keys.length} keys) — zh: ${zhW.slice(0, 60)}… ja: ${jaW.slice(0, 60)}…`, { keys: keys.filter((k) => !(zh[k] && ja[k])), zhW, jaW });
@@ -772,8 +776,8 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
   const evil = draw(HD([hold(NOW - 5, 1000, '<img src=x onerror=1> · y')], NOW), { t: tOf(null), esc });
   let zonedDraw = ''; try { process.env.TZ = 'Asia/Shanghai'; zonedDraw = draw(got, { t: tOf(null), esc }); } finally { if (tz0 === undefined) delete process.env.TZ; else process.env.TZ = tz0; }
   ok(empty.endsWith('| No hold of a second or more in the last seven days. |') && draw(undefined, { t: tOf(null), esc }) === '' && draw({}, { t: tOf(null), esc }) === ''
-    && !evil.includes('<img') && evil.includes('&lt;img src=x onerror=1&gt;') && words(zonedDraw) === en,
-    '(5) no hold in the seven days ⇒ the one sentence; a server older than the field ⇒ nothing; a cause is escaped; the drawing reads no zone (+08:00 draws the same words)', { empty });
+    && !evil.includes('<img') && !evil.includes('onerror') && evil.includes('(other)') && words(zonedDraw) === en,
+    '(5) no hold in the seven days ⇒ the one sentence; a server older than the field ⇒ nothing; a cause outside the fixed key prints «(other)» (nothing of its text reaches the page); the drawing reads no zone (+08:00 draws the same words)', { empty });
   ok(/\$\{heldDaysTable\(d\.loopHeld, \{ t, esc \}\)\}/.test(SF.slice(SF.indexOf("<h2>${esc(t('Main loop held'))}</h2>"), SF.indexOf("const pf = lh.profile || {};"))),
     '(5) ⚙ Diagnostics «Main loop held» draws it from the summary it already fetched (d.loopHeld), inside its own section');
 }
