@@ -38,7 +38,10 @@
 // THE RED CONTROL (default on): the same busy legs on the tree BEFORE the store writer — `git archive` of the parent of the
 // commit that added src/store-writer.js (HEAD while it is uncommitted; a clone without that object SKIPS the control, said): (a) and (b) are red there.
 //   --tree <dir>   run the legs against ANOTHER tree only (no expectations — a report)   --no-control   skip the control
-//   STORE_SLOW_LEGS=k,i   a maintainer's subset (b a d g D i k j h control) — the gate runs every leg
+//   (o) channel-store-off-loop (commit 1): THE FAKE ADAPTER ON A SLOW MOUNT at 500 ms per call — its passes' stamps and
+//       the channel store's moved doors (adapters, groups, the outbox, the aliases, people, the poll-stamps snapshot) are
+//       the writer thread's: none of their files is written, made or opened for write on the main thread;
+//   STORE_SLOW_LEGS=k,i   a maintainer's subset (b a d g D i k j h o control) — the gate runs every leg
 // Out: STORE_SLOW_OUT (default a scratch dir, kept on failure): table.json, hub-*.log, strace-*.log.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,7 +55,7 @@ const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const argv = process.argv.slice(2);
 const ti = argv.indexOf('--tree'), OTHER = ti >= 0 ? path.resolve(argv[ti + 1]) : null;
 const CONTROL = !OTHER && !argv.includes('--no-control');
-// a maintainer's subset (STORE_SLOW_LEGS=k,i — b a d g D i k j h control); the gate runs every leg
+// a maintainer's subset (STORE_SLOW_LEGS=k,i — b a d g D i k j h o control); the gate runs every leg
 const LEGS = String(process.env.STORE_SLOW_LEGS || '').split(',').filter(Boolean), leg = (x) => !LEGS.length || LEGS.includes(x);
 const DELAY = 500, DELAY_KILL = 1100, BUSY_MS = +(process.env.STORE_SLOW_BUSY_MS || 30000), CONVS = 2032, RECENT = 40;
 const CALLS = 'rename,renameat,renameat2,fsync,fdatasync';
@@ -557,6 +560,31 @@ if (!OTHER && leg('h')) {
     ok(!!ix && ix.writes >= 2 && ix.stretchMs != null && ix.stretchMs <= ixBound, `(h) LAW 1 (b): under 5 acts a second at ${DH} ms per call the busy index is written ${ix && ix.writes} times; the longest stretch between two of its writes ${ix && ix.stretchMs} ms ≤ its gap + ${PW.pacedBoundWrites(nPaced)} writes (${nPaced} paced files) = ${ixBound} ms`, ix);
     ok(!ix || ix.mbPerMin <= 250, `(h) the busy index at ${DH} ms per call: ${ix ? `${ix.writes} whole writes, ${ix.mbPerMin} MB a minute` : 'no whole write in the minute'} (≤ 250 MB)`);
     await stopHub(h);
+  }
+}
+
+// ── (o) channel-store-off-loop (commit 1): THE FAKE ADAPTER ON A SLOW MOUNT at 500 ms per call — the channel store's moved
+//    doors never write on the main thread; the writer's own numbers say it wrote them ──
+if (!OTHER && leg('o')) {
+  console.log('— (o) the fake adapter\'s passes at 500 ms per call: adapters / groups / the outbox / aliases / people / the stamps snapshot never on the main thread');
+  if (guard()) { ok(false, `thermal stop: ${guard()}`); process.exit(1); }
+  const h = await boot('fake500', TREE, DELAY, { VIBESPACE_CHANNELS_FAKE: '1' });
+  loadNow('fake500');
+  if (!h.readyAt || !h.hub) { ok(false, '(o) the hub became ready', fs.readFileSync(h.logf, 'utf8').slice(-800)); await stopHub(h, 'SIGKILL', 2000); }
+  else {
+    // the fake accounts' passes run on their own schedule: wait for the writer's OWN word that adapters.json was written
+    const MOVED = /channels\/(adapters|groups|outbox|aliases|poll-stamps)\.json|channels\/[^/]+\/people\.json/;
+    const adWrites = (sl) => ((sl && sl.writer) || []).filter((r) => /channels\/adapters\.json$/.test(r.file)).reduce((n, r) => n + r.writes, 0);
+    let sl = null; const t0 = Date.now();
+    while (Date.now() - t0 < 180000) { sl = slowOf(h); if (adWrites(sl) >= 2) break; await sleep(1000); }
+    await sleep(3000); sl = slowOf(h);
+    const onMain = ((sl && sl.sites) || []).filter((r) => /^src\/channel-store\.js:/.test(r.site) && Object.keys(r.files || {}).some((f) => MOVED.test(f))).map((r) => `${r.site} ${r.fn} ×${r.n}`);
+    const holds = ((sl && sl.calls) || []).filter((c) => MOVED.test(c.file || '') && c.ms >= 250).map((c) => `${c.site} ${c.fn} ${Math.round(c.ms)} ms`);
+    const journal = ((sl && sl.sites) || []).filter((r) => Object.keys(r.files || {}).some((f) => /channels\/poll-stamps\.log$/.test(f))).reduce((n, r) => n + r.n, 0);
+    table.runs.fake500 = { adaptersWrites: adWrites(sl), onMain, holds, journalCalls: journal }; save();
+    info(`(o) the writer wrote adapters.json ${adWrites(sl)} time(s); on the main thread: ${onMain.length ? onMain.join(' · ') : 'none of the moved doors\' files'}; the journal (the named exception) ${journal} call(s)`);
+    ok(adWrites(sl) >= 1 && !onMain.length && !holds.length, `(o) at 500 ms per call the fake adapter's passes wrote adapters.json through the writer (${adWrites(sl)}×) and NO moved door's file was written, made or opened for write on the main thread (no hold ≥ 250 ms at them)`, { onMain, holds });
+    await stopHub(h, 'SIGTERM', 60000);
   }
 }
 

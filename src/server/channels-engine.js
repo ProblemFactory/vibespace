@@ -560,7 +560,9 @@ function create(deps = {}) {
   }
   // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while adapters.json and every account's own
   // callers.json hold no ciphertext — else `key-missing` (the account card's why), never a key that opens nothing
-  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ files: [path.join(dataDir, 'channels', 'adapters.json')], each: [{ dir: path.join(dataDir, 'channels'), file: 'callers.json' }] }) });
+  // channel-store-off-loop (commit 1): adapters.json is the store writer's now and may lag memory — the check reads the
+  // store's LIVE records first (a token sealed in memory a moment ago holds a ciphertext the file may not show yet)
+  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ values: [store.adapters.live()], files: [path.join(dataDir, 'channels', 'adapters.json')], each: [{ dir: path.join(dataDir, 'channels'), file: 'callers.json' }] }) });
   /** lane vault-e2e-password-fix-r2: the vault holds this store's key and is LOCKED — every account's sign-in (and every
    *  app credential the integrations store seals) is closed until a person unlocks: a STATE of its own, never "expired" */
   const vaultLocked = () => { try { const r = box.refusal(); return !!(r && r.code === VAULT_LOCKED_CODE); } catch { return false; } };
@@ -791,7 +793,7 @@ function create(deps = {}) {
   function stateFor(rec) {
     return {
       read: () => ({ ...((rec.state && typeof rec.state === 'object') ? rec.state : {}) }),
-      write: (patch) => store.adapters.update(() => { rec.state = { ...((rec.state && typeof rec.state === 'object') ? rec.state : {}), ...(patch || {}) }; }),
+      write: (patch) => store.adapters.update(() => { rec.state = { ...((rec.state && typeof rec.state === 'object') ? rec.state : {}), ...(patch || {}) }; }, { paced: true }),   // channel-store-off-loop: an adapter's cursor after its rows (appended, on disk) — paced
     };
   }
 
@@ -1606,7 +1608,7 @@ function create(deps = {}) {
       f.window = null;
       log.warn(`[channels] ${rec.id}: the change feed failed (${code}) — parked for 24 h`);
     }
-    await store.adapters.update(() => {});
+    await store.adapters.update(() => {}, { paced: true });
     notify([]);
     return { skip };
   }
@@ -1636,7 +1638,7 @@ function create(deps = {}) {
     } else if (!f.lastRunAt || t - Number(f.lastRunAt) >= opts.everySec * 1000) {
       const w = Feed.window(f, t, decl, { overlapSec: feedOverlapOf(rec) });
       f.lastRunAt = t;
-      if (w.act === 'none') { log.warn(`[channels] ${rec.id}: the clock is behind the change feed's cursor — no page this tick`); await store.adapters.update(() => {}); return { noCall: true }; }
+      if (w.act === 'none') { log.warn(`[channels] ${rec.id}: the clock is behind the change feed's cursor — no page this tick`); await store.adapters.update(() => {}, { paced: true }); return { noCall: true }; }
       kind = 'steady'; win = { from: w.from, to: w.to };
       f.window = { from: w.from, to: w.to, pages: 0 };
       // lane gmail-feed-gap: a long stop's older span is DECLARED a gap — no window of the feed searched it, so the coverage
@@ -1703,7 +1705,7 @@ function create(deps = {}) {
       f.window = null; e.feedTokens.steady = null; e.feedTokens.catchUp = null;
       if (f.catchUp && !f.catchUp.done) f.catchUp = { ...f.catchUp, done: true, parked: true };
       log.warn(`[channels] ${rec.id}: the change feed is parked — ${verdict.why}; each conversation is polled on its own (retried in 24 h)`);
-      await store.adapters.update(() => {});
+      await store.adapters.update(() => {}, { paced: true });
       notify([]);
       return { skip: verdict.park };
     }
@@ -1730,7 +1732,7 @@ function create(deps = {}) {
       f.refused = { at: t, code: 'shape', requiredScopes: [], retryAt: t + 24 * 3600e3, fields: sv.fields };
       f.window = null; e.feedTokens.steady = null; e.feedTokens.catchUp = null; f.shapeRun = null;
       log.warn(`[channels] ${rec.id}: the change feed is parked — ${sv.run.malformed} of ${sv.run.items} search items have a shape this version does not read (missing or unreadable: ${sv.fields.map((l) => l.join(' + ')).join(' | ')}); each conversation is polled on its own (retried in 24 h)`);
-      await store.adapters.update(() => {});
+      await store.adapters.update(() => {}, { paced: true });
       notify([]);
       return { skip: 'shape' };
     }
@@ -1837,7 +1839,7 @@ function create(deps = {}) {
     f.counters.births += born.length;
     f.counters.unlistedHits += fold.unlisted;
     f.counters.threadOwedDropped += threadDropped;
-    await store.adapters.update(() => {});
+    await store.adapters.update(() => {}, { paced: true });
     // NAME what was born (≤ DESCRIBE_MAX per feed tick, best effort, paced + metered through the gate) — never the raw id
     await describeFeedBorn(rec, e, born);
     // lane lark-threads (A4): the hits a chat read did not find, read by id (≤ BYID_PER_TICK per feed tick)
@@ -1899,7 +1901,7 @@ function create(deps = {}) {
       const mins = Math.max(1, Math.round((Number(gap.gapMs) || 0) / 60e3));
       log.log(`[channels] ${rec.id}: the change feed resumed after ${mins} min — ${pages} history page${pages === 1 ? '' : 's'}, ${changed.length} conversation${changed.length === 1 ? '' : 's'} touched, 0 per-row reads`);
     }
-    await store.adapters.update(() => {});
+    await store.adapters.update(() => {}, { paced: true });
     const due = [];
     for (const id of changed) {
       const en = store.index.peek(`${rec.id}/${id}`);
@@ -2400,7 +2402,7 @@ function create(deps = {}) {
         // lane gmail-quota-share: THE BUDGET LEARNS FROM THE REFUSAL — a burst's first strike halves the account's ceiling
         // (the pace follows), the later strikes only restart its quiet clock; persisted in the record's own write
         const learnt = rate ? stepBudget(rec, 'refused', { burstStart: e.rateStrikes === 1 }) : null;
-        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: false, code, error: String((err && err.message) || err).slice(0, 400) }; rec.consecutiveFailures = e.failures; if (learnt && learnt.changed) rec.budgetLearned = learnt.state; });
+        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: false, code, error: String((err && err.message) || err).slice(0, 400) }; rec.consecutiveFailures = e.failures; if (learnt && learnt.changed) rec.budgetLearned = learnt.state; }, { paced: true });
         if (learnt && learnt.halved) log.warn(`[channels] ${rec.id}: the vendor refused the rate — polling slowed to ${learnt.state.ceiling} of ${learnt.state.setting} a minute`);
         if (learnt && learnt.loud) await speakSlowed(rec, learnt.state);
         // A failing loop MUST reach the user (fence 8): the adapter row goes
@@ -2544,7 +2546,7 @@ function create(deps = {}) {
             else if (act.type === 'scanHost') {
               e.chargeBy = 'timer';
               const hf = await vendor(rec, e, () => e.adapter.scanHost((rec.scan && rec.scan.hostId) || null));
-              await store.adapters.update(() => { if (!rec.scan) rec.scan = EMPTY_SCAN(); rec.scan.hostFacts = hf; });
+              await store.adapters.update(() => { if (!rec.scan) rec.scan = EMPTY_SCAN(); rec.scan.hostFacts = hf; }, { paced: true });
               result = {};
             } else throw new Error(`channels: the drain named an unknown action ${act.type}`);
             vendorOk++;
@@ -2575,7 +2577,7 @@ function create(deps = {}) {
         e.nextAt = 0;
         e.rateStrikes = 0; e.backoffKind = null; e.retryAfterSec = null;
         const quiet = rec.budgetLearned ? stepBudget(rec, 'quiet-minute') : null;   // lane gmail-quota-share: the creep back to the setting
-        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; if (quiet && quiet.changed) rec.budgetLearned = quiet.state; });
+        await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; if (quiet && quiet.changed) rec.budgetLearned = quiet.state; }, { paced: true });
         if (quiet && quiet.full) await retractSlowed(rec);
         await retractFailure(rec);
         if (rec.signinDead && !(st && (st.state === 'needs-reauth' || st.state === 'needs-credentials'))) await retractSignin(rec, 'a pass went through');   // lane channel-reauth-visible
@@ -4308,7 +4310,7 @@ function create(deps = {}) {
     if (prev !== p.state) {
       log.log(`[channels] ${rec.id}: push lane ${p.state}${p.lastStateWhy ? ` (${p.lastStateWhy})` : ''}`);
       if (!stopped) {
-        store.adapters.update(() => {}).catch((err) => log.warn('[channels] adapters write failed:', err && err.message));
+        store.adapters.update(() => {}, { paced: true }).catch((err) => log.warn('[channels] adapters write failed:', err && err.message));
         notify([]);
       }
     }
@@ -4459,7 +4461,7 @@ function create(deps = {}) {
     p.demotedAt = now(); p.demotedWhy = 'miss-rate';
     p.demoted = { rate: v.rate, total: v.total, missed: v.missed, threshold: v.threshold, at: p.demotedAt, claim: p.claimedExclusive };
     syncContentSince(rec);
-    await store.adapters.update(() => {});
+    await store.adapters.update(() => {}, { paced: true });
     log.warn(`[channels] ${rec.id}: push is not exclusive here — ${v.missed} of ${v.total} records (${(v.rate * 100).toFixed(1)}%) were first seen by the reconciliation poll; fell back to cursor kicks, polling returned to the fast cadence. Re-declare exclusivity from the Channels panel (Push…) to retry.`);
     if (!stopped) notify([]);
     return true;
@@ -6553,7 +6555,7 @@ function create(deps = {}) {
         b.queries++; b.of += m.of; b.holding += m.holding;
       }
       x.firstAt = x.firstAt || t; x.lastAt = t;
-    })).catch((err) => log.warn(`[channels] ${rec.id}: the full search's measurement was not written: ${(err && err.message) || err}`));
+    }, { paced: true })).catch((err) => log.warn(`[channels] ${rec.id}: the full search's measurement was not written: ${(err && err.message) || err}`));
     const k = `${rec.id}\0${m.around ? 'around' : 'search'}`;
     if (fullSearchSaid.has(k)) return;
     fullSearchSaid.add(k);
@@ -6684,7 +6686,7 @@ function create(deps = {}) {
       if (code === 'rate-limited') {
         const until = now() + Math.max(5, Number(err.detail && err.detail.retryAfterSec) || 60) * 1000;
         e.searchBackoffUntil = Math.max(Number(e.searchBackoffUntil) || 0, until);
-        if (feedDecl(rec)) await store.adapters.update(() => { const f = feedRow(rec); if (!(Number(f.backoffUntil) >= until)) { f.backoffUntil = until; f.backoffWhy = 'rate-limited'; } }).catch(() => {});
+        if (feedDecl(rec)) await store.adapters.update(() => { const f = feedRow(rec); if (!(Number(f.backoffUntil) >= until)) { f.backoffUntil = until; f.backoffWhy = 'rate-limited'; } }, { paced: true }).catch(() => {});
         failure = { ok: false, code: 'backoff', error: `the vendor is limiting its search for this account — try again in ${Math.ceil((until - now()) / 1000)} s`, retryAfterSec: Math.max(1, Math.ceil((until - now()) / 1000)) };
       } else if (code === 'forbidden') failure = { ok: false, code: 'needs-scope', error: `the vendor refused this account's search (${String((err && err.message) || err).slice(0, 200)}) — Re-authorize it` };
       else failure = { ok: false, code: code === 'account-changed' ? 'account-changed' : 'vendor-failed', error: `the vendor's search did not answer: ${String((err && err.message) || err).slice(0, 200)}` };
@@ -8693,7 +8695,7 @@ function create(deps = {}) {
     try {
       let healed = 0;
       for (const rec of adapterRecords().adapters) if (feedReaderHeal(rec)) healed++;
-      if (healed) store.adapters.update(() => {}).then(() => notify([])).catch((err) => log.warn(`[channels] boot feed-reader heal write failed: ${(err && err.message) || err}`));
+      if (healed) store.adapters.update(() => {}, { paced: true }).then(() => notify([])).catch((err) => log.warn(`[channels] boot feed-reader heal write failed: ${(err && err.message) || err}`));
     } catch (err) { log.warn(`[channels] boot feed-reader heal failed: ${(err && err.message) || err}`); }
     // P4: a proposal the previous process died on mid-send is `unknown`, not
     // "not sent" — and never re-sent.

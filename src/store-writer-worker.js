@@ -61,7 +61,16 @@ function writeJob(m, fs = FS) {
     return;
   }
   sweepTemps(fs, m.file);
-  const fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
+  // channel-store-off-loop (commit 1): A MISSING PARENT DIRECTORY IS MADE HERE, on the writer's thread — a store whose
+  // directory is new (an account's people.json) never makes it on the main thread (the field: an account directory's
+  // mkdir held the owner's loop 75 s in a day on a mount where a create costs ~4 s). Owner-only, as the store's own file.
+  let fd;
+  try { fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode); }
+  catch (e) {
+    if (!e || e.code !== 'ENOENT') throw e;
+    fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 });
+    fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
+  }
   let err = null;
   try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }
   try { fs.closeSync(fd); } catch (e) { if (!err) err = e; }   // an error at close (an NFS server's ENOSPC) is the write's

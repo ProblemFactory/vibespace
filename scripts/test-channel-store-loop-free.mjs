@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// test-channel-store-loop-free — channel-store-off-loop, commit 1 (the owner's root ask: the hub's main process stops
+// being held). On the owner's hub, 24 h of the witness's own lines: 562 holds and 2221 s at src/channel-store.js's
+// writeJsonAtomic (adapters.json 549, groups.json 12), 19 holds / 75 s at peopleWrite's account-directory mkdir, 15 holds /
+// 51 s at the poll-stamps snapshot's open — a data directory on a mount where a create costs ~4 s. Those doors and their
+// same-bytes twins (the outbox, the aliases) now hand their bytes to the store writer's thread. FAST, in process:
+//   (a) THE PLACED STALL: the real store, the real writer thread, a scratch dir; scripts/fixtures/fs-stall.cjs holds the
+//       main thread STALL_MS in EVERY synchronous write-family fs call under the store's dir (the doors this unit LISTS,
+//       not moves, are counted by name and not stalled; the poll-stamps journal is the named exception). The drive is one
+//       real pass of the fake adapter (append, stamp, journal) plus the doors' own calls (a group verb, an alias, an
+//       outbox attempt, a new account's people, wake pace, dispatch, audit, the stamps' flush). The measure: a 10 ms
+//       timer's lateness and the stalled calls by name. RED on d7f42cc21 (2.369.404): the moved doors' calls stall it.
+//   (b) A SLOW WRITER (a stand-in thread that holds a write): a PACED stamp resolves at once (its bytes not on disk yet);
+//       a DURABLE act resolves only when its bytes are on disk; «queued» at the writer's bound never rejects; a FAILED
+//       write rejects with its code; five sequential paced stamps are at most two writes.
+//   (c) THE OUTBOX'S WRITE-AHEAD: a child kills itself right after outbox.update's promise resolved — the attempt is in
+//       the file.
+//   (d) WHAT CAN STILL HOLD: a synchronous flush (close(), the stamps' flush()) behind a write in flight waits for it —
+//       measured; at the writer's synchronous bound it returns with the store named as held (bounded). (d3) the
+//       poll-stamps journal is folded only when no stamp was set after the side file's bytes were made.
+//   (e) close() writes every moved file through the writer; (f) the key-mint check reads the store's live records.
+// Run: node scripts/test-channel-store-loop-free.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
+import { scratch } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+const CS = require(path.join(REPO, 'src/channel-store.js'));
+const SW = require(path.join(REPO, 'src/store-writer.js'));
+const P = require(path.join(REPO, 'src/store-pace.js'));
+const STALL = require(path.join(REPO, 'scripts/fixtures/fs-stall.cjs'));
+
+let pass = 0, fail = 0;
+const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
+const info = (l) => console.log('  · ' + l);
+const ROOT = scratch('csol-loop-free');
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } };
+process.on('exit', cleanup);
+fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
+const quiet = { log() { }, warn() { }, error() { } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+const STALL_MS = 400, TICK_MS = 10;
+/** the worst lateness of a TICK_MS interval timer between start and stop */
+function lateMeter() { let last = performance.now(), worst = 0; const t = setInterval(() => { const n = performance.now(); worst = Math.max(worst, n - last - TICK_MS); last = n; }, TICK_MS); return { stop() { clearInterval(t); return Math.round(worst); } }; }
+// THE ROWS THIS UNIT LISTS (not moved — scripts/test-store-write-census.mjs names each) and the named exception, by path
+const LISTED = [[/^msgs\//, 'message logs'], [/^audit\.ndjson$|^archive\//, 'audit'], [/^wake-pace\.json/, 'wake pace'], [/^dispatch-ledger\.json/, 'dispatch ledger'],
+  [/^attachments\//, 'lru / attachment metas'], [/\/search-memo\.json/, 'search memo'], [/\/feed-misses\.json/, 'feed miss'], [/^outbox-files\//, 'outbox files'], [/^poll-stamps\.log$/, 'THE JOURNAL (the named exception)']];
+const rowOf = (dir) => (p) => { const r = path.relative(dir, p); const hit = LISTED.find(([re]) => re.test(r)); return hit ? hit[1] : null; };
+
+// ═══ (a) THE PLACED STALL over one real pass of the fake adapter and the doors' own calls ═══
+console.log('(a) a stall placed in every main-thread synchronous write under the store\'s dir — one real pass of the fake adapter + the doors');
+const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+{
+  const dataDir = path.join(ROOT, 'a'), dir = path.join(dataDir, 'channels');
+  const eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => { }, log: quiet });
+  const st = eng.store;
+  await eng.pass('fake-poll', { force: true });   // the accounts and their rows exist (unmeasured)
+  const S = STALL.install({ under: dir, ms: STALL_MS, exempt: rowOf(dir) });
+  const meter = lateMeter();
+  let r = {};
+  try {
+    await eng.pass('fake-poll', { force: true });   // THE PASS: its appends, its stamps (journal), its pass stamp (adapters, paced)
+    await st.groups.update((g) => { g.groups['g-loop'] = { id: 'g-loop', name: 'loop', members: [], at: 1 }; });
+    r.groupsOnResolve = readJson(st.groupsFile);
+    await st.aliases.update((a) => { a.aliases['fake-poll'] = { u1: { alias: 'One', at: 1 } }; });
+    await st.outbox.update((o) => { o.proposals['p-loop-1'] = { id: 'p-loop-1', state: 'sending', attemptAt: 77, adapterId: 'fake-poll' }; });
+    r.outboxOnResolve = readJson(st.outboxFile);
+    await st.adapters.update((a) => { const x = a.adapters.find((y) => y.id === 'fake-poll'); if (x) x.label = 'loop-free'; });
+    r.adaptersOnResolve = readJson(st.adaptersFile);
+    st.peopleWrite('fake-new-acct', { self: 'me', people: { u1: { name: 'One' } } });
+    st.pace.set({ v: 1, pairs: { a: 1 }, senders: {} }); st.pace.flush();
+    st.dispatch.set({ v: 1, entries: { d: { at: 1 } } }); st.dispatch.flush();
+    st.audit({ at: Date.now(), kind: 'loop-free', who: 'suite' });
+    st.stamps.set('fake-poll/fake-poll-ops', { lastPollAt: 1234 }); st.stamps.flush();
+    await sleep(300);   // the writer's paced writes (people, the pass stamp) land on its thread while the meter runs
+  } finally { r.late = meter.stop(); S.restore(); }
+  const stalled = S.calls.filter((c) => c.stalled), listed = S.calls.filter((c) => c.row);
+  const byRow = {}; for (const c of listed) byRow[c.row] = (byRow[c.row] || 0) + 1;
+  const names = [...new Set(stalled.map((c) => `${c.fn} ${c.path}`))];
+  info(`the timer's worst lateness ${r.late} ms (a stall is ${STALL_MS} ms); ${S.calls.filter((c) => c.kind === 'write').length} write-family calls under the dir — stalled ${stalled.length}, listed ${listed.length} ${JSON.stringify(byRow)}; ${S.calls.filter((c) => c.kind === 'read').length} reads counted`);
+  ok(stalled.length === 0, `(a) NO main-thread synchronous call of a moved door under the store's dir (adapters, groups, the outbox, the aliases, a new account's people + its directory, the poll-stamps snapshot)${stalled.length ? ` — STALLED: ${names.slice(0, 12).join(' · ')}` : ''}`, names);
+  ok(r.late < STALL_MS, `(a) the timer was never held a stall's length: worst lateness ${r.late} ms < ${STALL_MS} ms (one stall)`, { late: r.late });
+  ok(byRow['message logs'] > 0 && byRow['THE JOURNAL (the named exception)'] > 0 && byRow['wake pace'] > 0 && byRow['dispatch ledger'] > 0 && byRow.audit > 0, '(a) the drive was real: the pass appended records, its stamps reached the journal, wake pace / dispatch / audit wrote — each a LISTED row, counted by name', byRow);
+  const gOk = r.groupsOnResolve && r.groupsOnResolve.groups && r.groupsOnResolve.groups['g-loop'], oOk = r.outboxOnResolve && r.outboxOnResolve.proposals && r.outboxOnResolve.proposals['p-loop-1'] && r.outboxOnResolve.proposals['p-loop-1'].attemptAt === 77;
+  const aOk = r.adaptersOnResolve && (r.adaptersOnResolve.adapters || []).some((x) => x.id === 'fake-poll' && x.label === 'loop-free');
+  ok(!!(gOk && oOk && aOk), '(a) each awaited DURABLE update\'s file holds its change when its promise resolves (a group verb, an outbox attempt, an adapter record)', { gOk: !!gOk, oOk: !!oOk, aOk: !!aOk });
+  let people = null; for (let k = 0; k < 100 && !people; k++) { people = readJson(path.join(dir, 'fake-new-acct', 'people.json')); if (!people) await sleep(20); }
+  const dmode = (() => { try { return fs.statSync(path.join(dir, 'fake-new-acct')).mode & 0o777; } catch { return null; } })();
+  ok(!!(people && people.self === 'me') && dmode === 0o700, `(a) a new account's people.json lands with its directory made by the WRITER's thread (0${dmode != null ? dmode.toString(8) : '?'})`, { people, dmode });
+  eng.stop();
+}
+
+// ── a stand-in writer thread: the REAL writeJob, after the ms in `<dir>/hold-<basename>` (if any); `<dir>/fail-<basename>`
+//    = that file's write fails (EIO) ──
+const T = path.join(ROOT, 'stand'); fs.mkdirSync(T, { recursive: true });
+const STAND = path.join(T, 'stand.cjs');
+fs.writeFileSync(STAND, `'use strict';
+const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const path = require('path');
+const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
+const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4)), CTL = ${JSON.stringify(T)};
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
+  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b);
+  if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);
+  if (fs.existsSync(path.join(CTL, 'fail-' + b))) err = { code: 'EIO', message: 'the storage failed' };
+  else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
+  else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else Atomics.store(S, 3, 0);
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+});
+`);
+const hold = (base, ms) => fs.writeFileSync(path.join(T, 'hold-' + base), String(ms));
+const unhold = (base) => { try { fs.unlinkSync(path.join(T, 'hold-' + base)); } catch { } };
+const failOn = (base, on) => { const f = path.join(T, 'fail-' + base); if (on) fs.writeFileSync(f, '1'); else try { fs.unlinkSync(f); } catch { } };
+const hasRec = (file, id, field, v) => { const j = readJson(file); return !!(j && (j.adapters || []).some((x) => x.id === id && x[field] === v)); };
+
+// ═══ (b) A SLOW WRITER: the two columns ═══
+console.log('(b) a slow writer: paced resolves at once, durable only on disk, «queued» never rejects, a failed write rejects');
+{
+  const DURABLE_MS = 80, HOLD = 600;
+  const dir = path.join(ROOT, 'b'); fs.mkdirSync(dir, { recursive: true });
+  const w = SW.create({ log: quiet, workerPath: STAND, durableMs: DURABLE_MS });
+  const st = CS.createChannelStore({ dir, log: quiet, writer: w });
+  await st.adapters.update((a) => { a.adapters.push({ id: 'acct', kind: 'fake', lastPass: null }); });
+  hold('adapters.json', HOLD);
+  // b1 — PACED: resolves after the change in memory; its bytes are not on disk yet
+  await st.adapters.update((a) => { a.adapters[0].lastPass = { at: 1 }; }, { paced: true });
+  const b1Disk = (readJson(st.adaptersFile).adapters[0] || {}).lastPass;
+  ok(st.adapters.live().adapters[0].lastPass && st.adapters.live().adapters[0].lastPass.at === 1 && !b1Disk && w.pending(st.adaptersFile), '(b1) a PACED stamp resolves after the change in memory — its bytes not on disk when it resolves (the writer still owes them)', { disk: b1Disk });
+  // b2 + b3 — DURABLE behind a write that outlasts durable()'s bound (×7): «queued» is still owed, never a rejection
+  let rejected = null; const t0 = performance.now();
+  try { await st.adapters.update((a) => { a.adapters[0].label = 'durable'; }); } catch (e) { rejected = (e && e.code) || String(e); }
+  const waited = Math.round(performance.now() - t0), b2Disk = hasRec(st.adaptersFile, 'acct', 'label', 'durable');
+  ok(rejected === null && b2Disk, `(b2) a DURABLE act resolves only when its bytes are on disk — the file holds it at the resolve (waited ${waited} ms)`, { rejected, b2Disk });
+  ok(rejected === null && waited >= DURABLE_MS, `(b3) «queued» at the writer's bound (${DURABLE_MS} ms) is STILL OWED: the promise waited on (${waited} ms) and resolved — never a rejection`, { rejected, waited });
+  unhold('adapters.json');
+  // b4 — a FAILED write rejects with its code (a durable act); a PACED one resolves (memory holds it; the writer retries)
+  failOn('adapters.json', true);
+  let code = null; try { await st.adapters.update((a) => { a.adapters[0].label = 'refused'; }); } catch (e) { code = (e && e.code) || 'threw'; }
+  let pacedThrew = null; try { await st.adapters.update((a) => { a.adapters[0].lastPass = { at: 2 }; }, { paced: true }); } catch (e) { pacedThrew = (e && e.code) || 'threw'; }
+  ok(code === 'EIO' && st.adapters.live().adapters[0].label === 'refused' && pacedThrew === null, `(b4) a FAILED write rejects a durable act with its own code (${code}) — the change stays in memory, owed; a paced stamp resolves`, { code, pacedThrew });
+  failOn('adapters.json', false);
+  for (let k = 0; k < 400 && w.pending(st.adaptersFile); k++) await sleep(10);
+  // b5 — five sequential paced stamps: at most two writes
+  hold('adapters.json', 200);
+  const before = (w.stats().find((x) => x.file === st.adaptersFile) || {}).writes || 0;
+  for (let i = 0; i < 5; i++) await st.adapters.update((a) => { a.adapters[0].lastPass = { at: 10 + i }; }, { paced: true });
+  for (let k = 0; k < 600 && w.pending(st.adaptersFile); k++) await sleep(10);
+  const writes = ((w.stats().find((x) => x.file === st.adaptersFile) || {}).writes || 0) - before;
+  ok(writes >= 1 && writes <= 2 && (readJson(st.adaptersFile).adapters[0].lastPass || {}).at === 14, `(b5) five sequential PACED stamps coalesce: ${writes} write(s), the last stamp on disk`, { writes });
+  unhold('adapters.json');
+  w.stop();
+}
+
+// ═══ (c) THE OUTBOX'S WRITE-AHEAD survives a kill right after the resolve ═══
+console.log('(c) the outbox: a kill right after outbox.update resolved finds the attempt in the file');
+{
+  const dir = path.join(ROOT, 'c'); fs.mkdirSync(dir, { recursive: true });
+  const child = `const CS = require(${JSON.stringify(path.join(REPO, 'src/channel-store.js'))});
+const st = CS.createChannelStore({ dir: ${JSON.stringify(dir)}, log: { log() {}, warn() {}, error() {} } });
+st.outbox.update((o) => { o.proposals['p-kill-1'] = { id: 'p-kill-1', state: 'sending', attemptAt: 4242, adapterId: 'acct' }; })
+  .then(() => process.kill(process.pid, 'SIGKILL'), (e) => { console.error('REJECTED', e && e.code); process.exit(3); });`;
+  const r = spawnSync(process.execPath, ['-e', child], { encoding: 'utf8', timeout: 60000 });
+  const ob = readJson(path.join(dir, 'outbox.json'));
+  const att = ob && ob.proposals && ob.proposals['p-kill-1'] ? ob.proposals['p-kill-1'].attemptAt : null;
+  ok(r.signal === 'SIGKILL' && att === 4242, `(c) the attempt is ON DISK when outbox.update resolves — the child killed itself right after; the file holds attemptAt ${att} (the send's write-ahead keeps its order)`, { signal: r.signal, status: r.status, err: (r.stderr || '').slice(0, 300), att });
+}
+
+// ═══ (d) WHAT CAN STILL HOLD: a synchronous flush behind a write in flight ═══
+console.log('(d) a synchronous flush behind a flying write: it waits — measured — and returns at the writer\'s bound');
+{
+  const GRACE = 1500, BOUND = P.syncBoundMs(GRACE);
+  const dir = path.join(ROOT, 'd'); fs.mkdirSync(dir, { recursive: true });
+  const w = SW.create({ log: quiet, workerPath: STAND, graceMs: GRACE });
+  const st = CS.createChannelStore({ dir, log: quiet, writer: w });
+  await st.adapters.update((a) => { a.adapters.push({ id: 'acct', kind: 'fake' }); });
+  await st.index.update(() => { st.index.entry('acct', 'c1', { create: true }); });   // the stamp's row (a key whose row left the index is dropped)
+  // d1: the write in flight ends inside the bound — the flush waits for it, then its own bytes land
+  hold('adapters.json', Math.round(BOUND / 2));
+  st.adapters.update((a) => { a.adapters[0].lastPass = { at: 1 }; }, { paced: true });
+  for (let k = 0; k < 300 && !(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight; k++) await sleep(5);
+  st.stamps.set('acct/c1', { lastPollAt: 99 });
+  let t0 = performance.now(); const d1 = st.stamps.flush(); const d1Ms = Math.round(performance.now() - t0);
+  const d1Disk = readJson(st.stamps.file);
+  ok(d1 === true && d1Disk && JSON.stringify(d1Disk).includes('99'), `(d1) a flush behind a flying write WAITS for it, then writes (the main thread held ${d1Ms} ms — the write in flight's remainder; the bound is ${BOUND} ms)`, { d1, d1Ms });
+  unhold('adapters.json');
+  for (let k = 0; k < 400 && w.pending(st.adaptersFile); k++) await sleep(10);
+  // d2: the write in flight outlasts the bound — the flush returns AT the bound, the store named as held (bounded)
+  hold('adapters.json', BOUND * 3);
+  st.adapters.update((a) => { a.adapters[0].lastPass = { at: 2 }; }, { paced: true });
+  for (let k = 0; k < 300 && !(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight; k++) await sleep(5);
+  st.stamps.set('acct/c1', { lastPollAt: 100 });
+  t0 = performance.now(); const d2 = st.stamps.flush(); const d2Ms = Math.round(performance.now() - t0);
+  const stillFlying = !!(w.stats().find((x) => x.file === st.adaptersFile) || {}).inflight;
+  ok(d2 === false && stillFlying && d2Ms >= BOUND, `(d2) a flush behind a write that outlasts the writer's synchronous bound returns AT the bound (${d2Ms} ms ≥ ${BOUND} ms, the write still in flight) — not written, kept, retried; THIS is what can still hold the loop: up to the bound (a third of the stop grace)`, { d2, d2Ms, stillFlying });
+  unhold('adapters.json');
+  for (let k = 0; k < 600 && (w.pending(st.adaptersFile) || w.pending(st.stamps.file)); k++) await sleep(10);
+  // d3: THE JOURNAL'S FOLD — the side file's own write in flight (held past the bound), a stamp set meanwhile: when that
+  // write lands the journal is NOT truncated (it holds a line the file does not) — a kill then keeps the newer stamp
+  hold('poll-stamps.json', BOUND * 2);
+  st.stamps.set('acct/c1', { lastPollAt: 200 });
+  const d3 = st.stamps.flush();   // returns at the bound, its write still in flight
+  st.stamps.set('acct/c1', { lastPollAt: 201 });   // after the side file's bytes were made: the journal's line only
+  for (let k = 0; k < 600 && (w.stats().find((x) => x.file === st.stamps.file) || {}).inflight; k++) await sleep(10);
+  unhold('poll-stamps.json');
+  const onDisk = readJson(st.stamps.file), journal = (() => { try { return fs.readFileSync(st.stamps.log, 'utf8'); } catch { return ''; } })();
+  const reborn = CS.createChannelStore({ dir: path.join(ROOT, 'd'), log: quiet, writer: SW.create({ log: quiet, workerPath: STAND }) });   // the store a kill leaves (no close)
+  const seen = (reborn.stamps.get('acct/c1') || {}).lastPollAt;
+  ok(d3 === false && JSON.stringify(onDisk).includes('200') && journal.includes('201') && seen === 201, `(d3) the side file landed holding 200 while 201 was set after its bytes were made: the journal is NOT folded (it holds 201) — the store a kill leaves reads ${seen}`, { d3, journal: journal.slice(-120), seen });
+  w.stop();
+}
+
+// ═══ (e) close() flushes the moved files through the writer; (f) the key-mint check reads memory ═══
+console.log('(e) close() writes every moved file through the writer; (f) the key-mint check reads the live records');
+{
+  const dir = path.join(ROOT, 'e'); fs.mkdirSync(dir, { recursive: true });
+  const w = SW.create({ log: quiet, workerPath: STAND });
+  const st = CS.createChannelStore({ dir, log: quiet, writer: w });
+  await st.adapters.update((a) => { a.adapters.push({ id: 'acct', kind: 'fake' }); });
+  await st.adapters.update((a) => { a.adapters[0].lastPass = { at: 31 }; }, { paced: true });   // owed, not on disk
+  const before = ((readJson(st.adaptersFile) || {}).adapters || [])[0] || {};
+  st.peopleWrite('acct-e', { self: 'me', people: {} });
+  st.close();
+  const after = ((readJson(st.adaptersFile) || {}).adapters || [])[0] || {};
+  ok(!before.lastPass && after.lastPass && after.lastPass.at === 31 && !!readJson(path.join(dir, 'acct-e', 'people.json')), '(e) close() writes every moved file through the writer: a paced stamp and a new account\'s people owed at close are on disk after it', { before: before.lastPass || null, after: after.lastPass || null });
+  w.stop();
+  const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  ok(/holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(dataDir, 'channels', 'adapters\.json'\)\]/.test(eng), '(f) the key-mint check (holdsCiphertext) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
+}
+
+try { SW.storeWriter().stop(); } catch { }
+console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);
