@@ -33,6 +33,8 @@ const PACE_MS = 60000;
 // after-turn reads of one account. More is a BUG somewhere upstream — refused here, and said in a log line (never a notice)
 const AFTER_TURN_DAY_MAX = Math.floor((24 * 60) / 30);
 const TIMEOUT_MS = 30000;
+// the key of a vendor's OWN row for its automatic usage reads, in its harness settings table (Antigravity's: antigravity.autoUsageReads)
+const AUTO_READS_KEY = 'autoUsageReads';
 const STDOUT_CAP = 262144;
 
 /** Run `cmd argv` once with `env`/`cwd`; resolves { code, stdout, stderr, error }. stdin is a closed pipe. */
@@ -60,7 +62,7 @@ function runOnce(spawnImpl, cmd, argv, { env, cwd, timeoutMs = TIMEOUT_MS }) {
  *  @param {(k:string)=>any} [o.setting]  a server setting
  *  @param {Function} [o.spawnImpl] @param {()=>number} [o.now] @param {(l:string)=>void} [o.log] */
 function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite = require('../usage-cache-write.js'), agentEnv = () => ({ ...process.env }),
-  setting = () => null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS,
+  setting = () => null, harnessSetting = null, spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), paceMs = PACE_MS, timeoutMs = TIMEOUT_MS,
   mono = () => performance.now(), countWriter = () => require('../store-writer.js').storeWriter() } = {}) {
   const lastAt = new Map();   // account id → when a person last read it (the once-a-minute pace)
   const inflight = new Map(); // account id → the read in flight (two presses share it)
@@ -121,8 +123,24 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
         const today = doorReads.todayOf(doorReads.readDoorReads(cacheDir, id), now());
         if (today.afterTurn >= AFTER_TURN_DAY_MAX) { log(`[cli-usage] ${be} ${id}: A BUG — ${today.afterTurn} after-turn reads today already, the ruling allows ${AFTER_TURN_DAY_MAX}; refused`); return { ok: false, status: 429, code: 'over-ruling', error: `${today.afterTurn} after-turn reads today: the ruling allows ${AFTER_TURN_DAY_MAX}` }; }
       }
-      let mode = 'manual'; try { mode = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { }
-      if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
+      // THE ROW OF THE VENDOR WHOSE ACCOUNT IT IS (lane usage-predict, 2026-11-16 — the owner looked at the quota row and asked
+      // «fable是antigravity吗？»: ONE row, Claude's, governed Antigravity's reads too). A vendor whose reads answer to an instance
+      // row (`quota.readsRow` — Claude's accounts.onDemandQuotaRefresh) is refused here while that row is off, a person's press
+      // included: «Off (never contact Anthropic)» is a promise, and this door is its last fence. Every other vendor answers to its
+      // OWN row: an automatic read (a wall, a stretch of work) asks `autoUsageReads` of the account's harness table; a person's
+      // press asks no row. A harness that declares an automatic read and has no such row is refused BY NAME — fail closed: a later
+      // harness gets no automatic read without a row of its own. Each row varies alone.
+      const h = harnessOf(be) || {};
+      if (h.quota && typeof h.quota.readsRow === 'string') {
+        let mode = 'manual'; try { mode = setting(h.quota.readsRow) || 'manual'; } catch { }
+        if (mode === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'on-demand usage refresh is turned off in Settings' };
+      } else if (caller !== 'person') {
+        const tbl = h.settings && Array.isArray(h.settings.rows) ? h.settings : null;
+        if (!tbl || !tbl.rows.some((r) => r && r.key === AUTO_READS_KEY)) return { ok: false, status: 403, code: 'no-auto-reads-row', error: `${h.label || be} has no row of its own for automatic usage reads in Settings — none runs without one` };
+        let v = 'off';   // an unreadable row reads as off (fail closed)
+        try { v = typeof harnessSetting === 'function' ? harnessSetting(be, AUTO_READS_KEY) : (setting(`${tbl.prefix}.${AUTO_READS_KEY}`) ?? (tbl.rows.find((r) => r.key === AUTO_READS_KEY) || {}).default); } catch { v = 'off'; }
+        if (v === 'off' || v === false) return { ok: false, status: 403, code: 'auto-reads-off', error: `${h.label || be}'s automatic usage reads are off in Settings (${tbl.prefix}.${AUTO_READS_KEY})` };
+      }
       if (inflight.has(id)) return inflight.get(id);
       const since = now() - (lastAt.get(id) || -Infinity);
       if (since < paceMs) return { ok: false, status: 429, code: 'throttled', throttled: true, retryInMs: paceMs - since, error: 'read less than a minute ago' };
@@ -134,4 +152,4 @@ function createCliUsageDoor({ accounts, harnessOf, cliCmds, cacheDir, usageWrite
   };
 }
 
-module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS, AFTER_TURN_DAY_MAX };
+module.exports = { createCliUsageDoor, PACE_MS, TIMEOUT_MS, AFTER_TURN_DAY_MAX, AUTO_READS_KEY };
