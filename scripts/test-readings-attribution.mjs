@@ -1730,10 +1730,12 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     w.sessions.set(SID2, s2);                                   // no per-session link: the DEFAULT decides for it
     const cap = quiet();
     w.am.setPoolTarget(w.P, w.SPARE, { why: 'pool-switch' });    // only the default moves
-    w.eng.recordRateLimitEvent(s2, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.88, resets_at: w.WIN[w.LINK], resetsAt: w.WIN[w.LINK] } });
+    // (its value a RISE over the member's stored number: a same-window fall from a conversation the pool just moved is what
+    //  law 3 holds unconfirmed — lane readings-attribution-2 P3 — and this leg is about which re-point explains the reading)
+    w.eng.recordRateLimitEvent(s2, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.99, resets_at: w.WIN[w.LINK], resetsAt: w.WIN[w.LINK] } });
     const lines = cap.done();
     ok('§14 a conversation with NO link of its own is shadowed by the POOL DEFAULT\'s move (that is what decides for it)',
-      Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.88) < 1e-9 && lines.some((l) => /after the link moved to/.test(l)), JSON.stringify(w.readCache(w.LINK).sevenDay));
+      Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.99) < 1e-9 && lines.some((l) => /after the link moved to/.test(l)), JSON.stringify(w.readCache(w.LINK).sevenDay));
     // …and the session that HAS its own link is not explained by that same row
     const w2 = mkIncidentWorld();
     const cap2 = quiet();

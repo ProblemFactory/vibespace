@@ -12442,6 +12442,7 @@ export default {
   "{name}: the reset you marked for {what} is confirmed by its reading ({pct}% used)": "{name}：你标记的{what}重置已被读数证实（已用 {pct}%）",
   "{name}: the reset you marked for {what} is not confirmed — its reading still says {pct}% used": "{name}：你标记的{what}重置未被证实——读数仍显示已用 {pct}%",
   "{name} was refused by Anthropic — asked again after 10 minutes": "{name} 被 Anthropic 拒绝——10 分钟后会再问",
+  "{name}: {what} fell from {before}% to {after}% in one reading — not confirmed yet; it counts as {before}% until a reading confirms it": "{name} 的{what}在一次读数里从 {before}% 降到 {after}%——尚未确认；在读数确认之前仍按 {before}% 计",
   "{name}: {what} has been reset — a reading shows it ({before}% → {after}%)": "{name} 的{what}已重置——读数显示了这一点（{before}% → {after}%）",
   "read {age} ago": "{age}前读取",
   "the 5-hour limit": "5 小时上限",

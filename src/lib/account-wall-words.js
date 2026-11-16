@@ -82,6 +82,7 @@ export function outcomeText(o, { t = id, name = null, capName = null } = {}) {
   const what = laneWords(o.lane, { t, capName });
   const who = name || t('This account');
   if (o.state === 'reset-seen') return t('{name}: {what} has been reset — a reading shows it ({before}% → {after}%)', { name: who, what, before: Math.round(o.before), after: Math.round(o.usedPct) });
+  if (o.state === 'fall-unconfirmed') return t('{name}: {what} fell from {before}% to {after}% in one reading — not confirmed yet; it counts as {before}% until a reading confirms it', { name: who, what, before: Math.round(o.before), after: Math.round(o.usedPct) });
   if (o.state === 'contradicted') return t('{name}: the reset you marked for {what} is not confirmed — its reading still says {pct}% used', { name: who, what, pct: Math.round(o.usedPct) });
   if (o.state === 'confirmed') return t('{name}: the reset you marked for {what} is confirmed by its reading ({pct}% used)', { name: who, what, pct: Math.round(o.usedPct) });
   return '';
