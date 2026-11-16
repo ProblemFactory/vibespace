@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.406 — 2026-11-16
+
+### Fixed
+- When a chat that used many helper browsers ends, VibeSpace stays responsive while it clears them; it could stop answering for minutes.
+
 ## 2.369.405 — 2026-11-16
 
 ### Fixed
