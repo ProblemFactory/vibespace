@@ -1,0 +1,185 @@
+#!/usr/bin/env node
+// THE READING'S TRUTH (lane readings-attribution-2, 主开发 2026-11-15) — a quota reading is never filed on an account the
+// conversation was not using. The owner's requirement: «它的数字至少要一直是准确的，也就是每次发生变动（当然我自己脱离 vibespace
+// 用不算）都必须能跟踪新的用量是多少». Every change made THROUGH VibeSpace is tracked, on the right account.
+//
+// LAW 1 — ONE ANSWER TO «WHICH ACCOUNT». MEASURED (P0, scripts/fixtures/claude-cred-read-midturn-2.1.322.json): a running
+// claude spends a re-pointed credential on its NEXT REQUEST, inside a turn too. So a reading's account is the account its
+// REQUEST went out on (usage-pool-engine requestSlotFor: the link at the conversation's latest request-out), every road that
+// ends a turn ends its pins, and a reading whose window contradicts its request's account is ARCHIVED BY NAME, never re-filed.
+//
+// THE PROOF: an INVENTED episode of the shape the owner's instance showed (no real id, instant or figure: scripts/fixtures/
+// reading-truth-episode.json), replayed through the REAL engine and the REAL account manager — a pool of two members that share
+// one weekly reset instant, the pool's move at a stop, the next turn's readings: the first member's number never moves.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
+import { endScratchAtExit } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+let pass = 0, fail = 0;
+const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+const J = JSON.stringify;
+const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+const ENG = 'src/server/usage-pool-engine.js';
+const realEng = require(path.join(REPO, ENG));
+const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+const TS = require(path.join(REPO, 'src/turn-state.js'));
+const readingLag = require(path.join(REPO, 'src/reading-lag.js'));
+const MUT = mutantCopies('reading-truth', REPO);
+const FX = JSON.parse(read('scripts/fixtures/reading-truth-episode.json'));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const quiet = (fn) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = o; console.warn = w; } };
+const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
+
+/** A real pool: MA and MB share ONE weekly reset instant (two members can), MC has its own. The session runs
+ *  on MA. Auto is OFF: the suite drives the move the pool made (accounts.ensureSessionPoolLink — the ledger row included). */
+function mkWorld(engMod = realEng) {
+  const root = endScratchAtExit(fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rtruth-')));
+  const dataDir = path.join(root, 'data');
+  const am = new AccountManager({ dataDir });
+  if (!am.poolSupported()) return null;
+  const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
+  const MA = am.createSubscription({ name: 'Member A' }).id; login(MA);
+  const MB = am.createSubscription({ name: 'Member B' }).id; login(MB);
+  const MC = am.createSubscription({ name: 'Member C' }).id; login(MC);
+  const P = am.createPool({ name: 'all' }).id;
+  am.setPoolTarget(P, MA); am.updatePool(P, { hot: true }); am.get(P).auto = false; am._save();
+  const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+  const nowS = Math.floor(Date.now() / 1000);
+  const R7 = nowS + 6 * 86400, R7MC = nowS + 2 * 86400 + 7 * 3600, R5 = nowS + 2 * 3600;
+  const cache = (u7, r7) => ({ fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: R5 }, sevenDay: { utilization: u7, resetsAt: r7 } });
+  const writeCache = (id, c) => fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify(c));
+  const readCache = (id) => { try { return JSON.parse(fs.readFileSync(path.join(cacheDir, id + '.json'), 'utf8')); } catch { return null; } };
+  writeCache(MA, cache(FX.before.MA, R7)); writeCache(MB, cache(FX.before.MB, R7)); writeCache(MC, cache(0.5, R7MC));
+  for (const [id, r] of [[MA, R7], [MB, R7], [MC, R7MC]]) fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(id)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
+  const sessions = new Map();
+  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const eng = engMod.create({
+    app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
+    serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
+    recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
+  });
+  const SID = 'sess-rt-1';
+  const session = { backend: 'claude', mode: 'chat', host: null, _webuiId: SID, claudeSessionId: 'cid-rt-1', _accountId: P, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'w' };
+  sessions.set(SID, session);
+  am.ensureSessionPoolLink(P, SID, MA, { why: 'spawn' });
+  const archive = () => { try { return fs.readFileSync(path.join(root, 'data', 'archive', 'readings-window-mismatch.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  const u7 = (id) => readCache(id)?.sevenDay?.utilization;
+  // the stream's own roads, driven as the parse drives them
+  const W = {
+    root, am, eng, session, P, MA, MB, MC, R7, R7MC, readCache, u7, archive,
+    out: () => { session._isStreaming = true; session._turnState = 'running'; TS.noteRequestSent(session, Date.now()); },   // a request leaves (the prompt's echo or a tool result)
+    reading: (u, r7 = R7) => quiet(() => eng.recordRateLimitEvent(session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resetsAt: r7 } })),
+    result: () => quiet(() => eng.noteTurnEnd(session, { type: 'result' })),
+    idle: () => { session._isStreaming = false; session._turnState = 'idle'; TS.noteTurnFlight(session, Date.now()); quiet(() => eng.noteTurnStopped(session)); },   // the CLI's idle = the STOP
+    reconcile: () => { session._isStreaming = false; TS.noteTurnFlight(session, Date.now()); quiet(() => eng.maybePoolAutoSwitch(session, { stop: true })); },   // the attach reconcile
+    move: (to) => am.ensureSessionPoolLink(P, SID, to, { why: 'per-session-switch' }),   // the pool's move (its ledger row)
+  };
+  return W;
+}
+const probe = mkWorld();
+if (!probe) { console.log('  · SKIP (pooled accounts are unsupported here)'); console.log('\nALL PASS (0)'); process.exit(0); }
+
+/** THE EPISODE'S REPLAY, step by step from the fixture. `kind` ∈ out | reading | result | idle | reconcile | move. */
+async function replay(W, steps) {
+  const seen = [];
+  for (const s of steps) {
+    if (s.kind === 'out') W.out();
+    else if (s.kind === 'reading' || s.kind === 'trailing') W.reading(s.u);
+    else if (s.kind === 'result') W.result();
+    else if (s.kind === 'idle') W.idle();
+    else if (s.kind === 'reconcile') W.reconcile();
+    else if (s.kind === 'move') W.move(W[s.to]);
+    await sleep(3);   // the records' order, one instant each (a request that left before a move is BEFORE it)
+    if (s.kind === 'reading' || s.kind === 'trailing') seen.push({ at: s.at, u: s.u, MA: W.u7(W.MA), MB: W.u7(W.MB) });
+  }
+  return seen;
+}
+
+console.log('LAW 1 — the shared-phase episode, replayed through the real engine (two members, one weekly reset instant)');
+{
+  const W = mkWorld();
+  const seen = await replay(W, FX.steps);
+  const pmAfter = W.u7(W.MA), cxAfter = W.u7(W.MB);
+  const moved = seen.filter((x) => x.at > FX.moveAt);
+  ok(`the first member's number never moves: ${FX.before.MA} before, ${pmAfter} after the move and the next turn's readings (the second member's numbers never shown as the first's)`, pmAfter === FX.before.MA && seen.every((x) => x.MA === FX.before.MA), J(seen));
+  ok(`…the next turn's readings (the second member's numbers) land on the second member: ${moved.map((x) => x.u).join(' → ')}`, cxAfter === moved[moved.length - 1].u && moved.every((x) => x.MB === x.u), J(moved));
+  ok('…and nothing was archived: no reading had to be refused to keep the numbers right', W.archive().length === 0, J(W.archive()));
+}
+{
+  // the other road the code had: no `result` at all — the attach reconcile is the stop
+  const W = mkWorld();
+  const steps = FX.steps.filter((s) => s.kind !== 'result' && s.kind !== 'idle').map((s) => (s.kind === 'trailing' ? { ...s, kind: 'reading' } : s));
+  const at = steps.findIndex((s) => s.kind === 'move');
+  steps.splice(at, 0, { kind: 'reconcile', at: FX.moveAt - 4 });
+  const seen = await replay(W, steps);
+  ok('…the same with no turn end at all (the attach reconcile is the stop): the first member still never moves', W.u7(W.MA) === FX.before.MA && W.u7(W.MB) === seen[seen.length - 1].u, J({ MA: W.u7(W.MA), MB: W.u7(W.MB), seen }));
+}
+{
+  // P0's measured shape: the link moves while a request is IN FLIGHT — that request's reading is the old member's, the next one's the new
+  const W = mkWorld();
+  W.out(); await sleep(3); W.move(W.MB); await sleep(3);
+  W.reading(0.902);                  // the answer to the request that left BEFORE the move
+  const inFlight = { MA: W.u7(W.MA), MB: W.u7(W.MB) };
+  W.out(); await sleep(3); W.reading(0.133);    // the next request of the SAME turn left after the move
+  ok('MID-TURN (P0: the next request): the reading of the request in flight at the move lands on the OLD member, the next request\'s on the NEW one — inside one turn', inFlight.MA === 0.902 && inFlight.MB === FX.before.MB && W.u7(W.MB) === 0.133 && W.u7(W.MA) === 0.902, J({ inFlight, after: { MA: W.u7(W.MA), MB: W.u7(W.MB) } }));
+}
+{
+  // a disagreement: the request went out on MA, the reading's window is MC's — ARCHIVED BY NAME, written nowhere
+  const W = mkWorld();
+  W.out(); await sleep(3);
+  const before = { MA: W.u7(W.MA), MC: W.u7(W.MC) };
+  W.reading(0.33, W.R7MC);
+  const a = W.archive();
+  ok('A DISAGREEMENT IS ARCHIVED BY NAME, NEVER RE-FILED: the request went out on one member, the reading\'s window names another ⇒ written on neither, archived «the reading and its request disagree»',
+    W.u7(W.MA) === before.MA && W.u7(W.MC) === before.MC && a.length === 1 && /the reading and its request disagree/.test(a[0].reason) && a[0].entry?.slot?.slotReason === 'request-stamped', J({ before, after: { MA: W.u7(W.MA), MC: W.u7(W.MC) }, a: a.map((x) => x.reason) }));
+}
+{
+  // a conversation whose request this hub never saw (a restore before its first request): the ladder it had — filed on the link
+  const W = mkWorld();
+  W.reading(0.77);
+  ok('…a conversation with no known request keeps the ladder it had (filed on its link)', W.u7(W.MA) === 0.77, J({ MA: W.u7(W.MA) }));
+}
+{
+  // EVERY road that ends a turn ends its pins: a stop, and a move of a conversation not in a turn
+  const src = read(ENG);
+  ok('EVERY ROAD THAT ENDS A TURN ENDS ITS PINS: a stop of a conversation no longer in a turn clears the reading pin, and so does a move of one not in a turn',
+    /if \(stop && !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\) session\._turnReadingSlot = null;/.test(src)
+      && /if \(!conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)\) s2\._turnReadingSlot = null;/.test(src));
+  ok('…and the request\'s instant is kept by turn-state\'s ONE request-out writer, never cleared by a pause or the turn\'s end', /if \(inFlight && Number\(now\) > 0\) session\._lastRequestOutAt = Number\(now\);/.test(read('src/turn-state.js')) && !/_lastRequestOutAt = null/.test(read('src/turn-state.js')));
+}
+console.log('THE EPISODE ROWS (invented, each of a shape the owner\'s instance showed) — law 1\'s');
+{
+  // ROW A — a pool switch moves a conversation INSIDE a turn (a hard move); the member it moves onto has JUST reset, and its
+  // first low number lands on the member being left for hours. The shape: the turn pin kept the left member while the next
+  // requests already spent the new one's credential (P0) — and the left member had no established window for the guard.
+  const W = mkWorld();
+  fs.rmSync(path.join(W.root, 'data', 'usage-cache', readingLag.windowSidecarName(W.MA)), { force: true });   // no evidence on the left member
+  W.out(); await sleep(3); W.reading(0.61);              // its own number, this turn
+  W.move(W.MC); await sleep(3);                          // the hard move, mid-turn (the conversation still streams)
+  W.out(); await sleep(3); W.reading(0.04, W.R7MC);      // the next request of the same turn: the new member's just-reset number
+  ok('ROW A (plan week): a move INSIDE a turn — the next request\'s reading lands on the member the request went out on, never on the one the turn began on', W.u7(W.MA) === 0.61 && W.u7(W.MC) === 0.04, J({ left: W.u7(W.MA), new: W.u7(W.MC) }));
+}
+console.log('MUTANTS — law 1, each red by name');
+{
+  const src = read(ENG);
+  const REQ = '  const req = requestSlotFor(session, at);\n';
+  const STOP = '    if (stop && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState })) session._turnReadingSlot = null;\n';
+  const MOVE = '        if (!conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState })) s2._turnReadingSlot = null;\n';
+  const mut = (edits, tag) => { let t = src; for (const [a, b] of edits) { if (!t.includes(a)) return null; t = t.split(a).join(b); } return require(MUT.write(ENG, t, tag)); };
+  // (a) the request stamp alone gone: the reading of the request IN FLIGHT at a move lands on the member the link names NOW
+  const ma = mut([[REQ, '  const req = null;\n']], 'no-request');
+  let a = null;
+  if (ma) { const W = mkWorld(ma); W.out(); await sleep(3); W.move(W.MB); await sleep(3); W.reading(0.902); a = { MA: W.u7(W.MA), MB: W.u7(W.MB) }; }
+  ok('MUTANT (law 1, the request): the reading filed by the link NOW instead of its request\'s account ⇒ the answer to the request in flight at a move lands on the NEW member', !!a && a.MB === 0.902 && a.MA !== 0.902, J(a));
+  // (b) d64075ba4's road whole — no request stamp and no turn-ending road clears the pin: the second member's numbers land on the first
+  const mb = mut([[REQ, '  const req = null;\n'], [STOP, ''], [MOVE, '']], 'pin-only');
+  const W = mb ? mkWorld(mb) : null;
+  if (W) await replay(W, FX.steps);
+  ok('MUTANT (law 1, the pins): readings filed by a turn pin that a trailing reading re-made and no stop ended ⇒ the episode\'s replay files the second member\'s numbers on the first', !!W && W.u7(W.MA) === 0.15, J(W && { MA: W.u7(W.MA), MB: W.u7(W.MB) }));
+}
+console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
+process.exit(fail ? 1 : 0);
