@@ -12,6 +12,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - «Resume all» after a restart now resumes one conversation at a time, after the one before has started, so large conversations no longer overload the server.
 - A Task Group's resume-all button now resumes its stopped conversations one at a time too.
 - With many channel conversations, VibeSpace no longer pauses for seconds when an agent starts a turn or lists its channels.
+- After the pool moves a conversation, its usage readings land on the account it now runs on; the account it left no longer shows the other one's numbers.
+- An account's Fable cap is read only from its own Fable requests, never from another model's request or one answered after a move.
+- A usage reading that falls sharply right after the pool moved a conversation is held as unconfirmed: the account keeps its number until a reading confirms it.
 
 ## 2.369.405 — 2026-11-16
 
