@@ -4,22 +4,27 @@
  * A measurement release reads what the hub's main loop did per hour and per day WITHOUT opening the page: on a fleet pod
  * the journal is all there is. So once an hour (and once at exit) the ORCH half (src/server/loop-day-report.js) folds what
  * it kept in memory into ONE line of a fixed shape a grep can count:
- *   [loop-hour] hour=<UTC hour>Z span=<s> held=<s> holds=<n> longest=<s> boot-held=<s> boot-holds=<n> busy=<%>
- *     top="<cause> <s>; …" engines="channels <%>; pool; parse; browser; jobs; page; hook; rest; native" census-ticks=<n>
- *     busy-ticks=<n> not-sampled=<n> census-asks=<n> census-paid=<s> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB>
- *     browser=<n>/<MB> agentd=<n>/<MB> other=<n>/<MB> procs-by=<service|container|tree> conversations=<n> running=<n>
- *     waiting=<n> idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> browsers-ready=<n>
- *     browsers-idle-1h=<n> page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n>
- *     resumes=<n> writes=<n> write-max=<s>
- * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot
- * (an hour no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; busy = the
- * loop's utilization between the two cuts; engines = each family's share of the census's BUSY ticks, «native» the ticks
- * with no JavaScript frame — the nine add to 100 %; census-ticks = every tick of the census in the hour, busy-ticks = those
- * booked on a family or native, not-sampled = those it could not ask (another ask out, a capture, paused); census-asks /
- * census-paid = the census's own cost: its asks, and the main thread's time PAID for them — each ask's own run (measured
- * live) + the inspector's dispatch of the ask (DISPATCH_MS a piece, measured: src/loop-census.js); procs-by = how the hub's
- * processes were told apart (src/server/loop-day-report.js howOf); running … turn-unknown = the live conversations by turn and
- * idle age; browsers-ready / browsers-idle-1h = the keeper's live browsers and those with no command for over an hour.
+ *   [loop-hour] hour=<UTC hour>Z span=<s> held=<s> holds=<n> longest=<s> boot-held=<s> boot-holds=<n> lost-holds=<n> busy=<%>
+ *     top="<cause> <s>; …" engines="interface <%>; vault; channels; money; workspace; machines; conversation; native; outside"
+ *     census-ticks=<n> busy-ticks=<n> held-ticks=<n> idle-ticks=<n> stopped-ticks=<n> not-sampled=<n> via-helper=<n> deep=<n>
+ *     census-asks=<n> census-paid=<s> hub-up=<h> hub-heap=<MB>/<MB> hub-rss=<MB> cli=<n>/<MB> wrapper=<n>/<MB> browser=<n>/<MB>
+ *     agentd=<n>/<MB> other=<n>/<MB> procs-by=<service|container|tree> conversations=<n> turn-running=<n> turn-waiting=<n>
+ *     idle-under-1h=<n> idle-1-2h=<n> idle-2-4h=<n> idle-over-4h=<n> turn-unknown=<n> browsers-ready=<n> browsers-idle-1h=<n>
+ *     page-sockets=<n> device-links=<n> ws-in=<n> ws-out=<n> parsed=<M chars> creates=<n> resumes=<n> writes=<n> write-max=<s>
+ * EACH FIELD COUNTS WHAT ITS NAME SAYS: held / holds / longest / top = the hour's holds of a second or more AFTER the boot (an hour
+ * no watchdog watched prints «?» — never a clean hour); boot-held / boot-holds = the boot's own, apart; lost-holds = holds the
+ * watchdog's ring dropped before the hour's book read them; busy = the loop's utilization between the two cuts. ENGINES = each
+ * FUTURE OWNER's share of the census's BUSY ticks (src/loop-census.js: the owner of the nearest frame of an owned file), «native»
+ * the ticks with no JavaScript frame, «outside» the ticks whose stack holds no owned file — they add to 100 %; THEY LEAVE OUT
+ * HELD TIME: a tick inside a hold is a held tick (the census does not ask then) and its seconds are named by the holds (held,
+ * top). The census's ticks add up: census-ticks = busy + held + idle + stopped + not-sampled; via-helper = busy ticks booked on an
+ * owner through a shared helper; deep = busy ticks whose sample's frame list was full (an owner may lie beyond it).
+ * census-asks / census-paid = the census's own cost: its asks, and the main thread's time PAID for them — each ask's own run
+ * (measured live) + the inspector's dispatch of the ask (DISPATCH_MS a piece, measured: src/loop-census.js). hub-up = the hub's
+ * own uptime in hours (an idle age can never be older than the record it is read from — see below). procs-by = how the hub's
+ * processes were told apart (src/server/loop-day-report.js howOf); turn-running … turn-unknown = the live conversations by their
+ * turn and, idle, by the age of their OUTPUT FILE (its mtime — it survives a restart of the hub); browsers-ready /
+ * browsers-idle-1h = the keeper's live browsers and those with no command for over an hour.
  * ([loop-exit] = the same shape over the part of the hour before the stop; nothing is read at exit — the engines print «?»
  * and the process table is the last one the hour read.) COUNTS AND CODE PATHS ONLY: a hold's cause is a
  * code location of the hub's own (`src/…:line`, `server.js:line`) or ONE of the hold verdict's fixed words — anything else
@@ -36,11 +41,11 @@ const VERDICTS = Object.freeze([   // src/loop-hold.js V — the hold verdict's 
 const NO_CAUSE = '(no cause recorded)';
 const OTHER = '(other)';
 const TOP_N = 3;
-const KIDS = Object.freeze(['cli', 'browser', 'agentd', 'other']);
-const ENGINES = Object.freeze(['channels', 'pool', 'parse', 'browser', 'jobs', 'page', 'hook', 'rest']);
+const KIDS = Object.freeze(['cli', 'wrapper', 'browser', 'agentd', 'other']);
+const ENGINES = Object.freeze(['interface', 'vault', 'channels', 'money', 'workspace', 'machines', 'conversation']);   // src/loop-census.js OWNERS, in its order
 const HOUR_MS = 3600000;
-const ENGINE_FIELDS = Object.freeze([...ENGINES, 'native']);
-const AGES = Object.freeze(['running', 'waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown']);
+const ENGINE_FIELDS = Object.freeze([...ENGINES, 'native', 'outside']);
+const AGES = Object.freeze(['turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown']);
 
 /** a hold's CAUSE: the hub's own code location in its frame (`src/x.js:12`), else its verdict (one of the fixed words) */
 function causeOf({ verdict = null, frame = null } = {}) {
@@ -50,7 +55,7 @@ function causeOf({ verdict = null, frame = null } = {}) {
   return NO_CAUSE;
 }
 /** an empty hour from `fromMs` (wall clock) */
-function newHour(fromMs, { watched = true } = {}) { return { fromMs, watched: !!watched, holds: 0, heldMs: 0, longestMs: 0, by: {}, boot: { holds: 0, heldMs: 0 } }; }
+function newHour(fromMs, { watched = true } = {}) { return { fromMs, watched: !!watched, holds: 0, heldMs: 0, longestMs: 0, by: {}, boot: { holds: 0, heldMs: 0 }, lost: null }; }
 /** a hold (ms, and its verdict / frame) into the hour */
 function holdAdd(h, { ms, verdict = null, frame = null, boot = false } = {}) {
   if (!h || !(Number(ms) >= 0)) return h;
@@ -69,25 +74,29 @@ const mb = (b) => (Number.isFinite(b) ? `${Math.round(b / 1048576)}MB` : '?');
 const int = (n) => (Number.isFinite(n) ? String(Math.round(n)) : '?');
 const hourOf = (ms) => (Number.isFinite(ms) ? `${new Date(ms).toISOString().slice(0, 13)}Z` : '?');
 
-/** THE ENGINES' SHARES from a census fold (src/loop-census.js censusFold, or null): each family's share of the BUSY ticks and
- *  native's — nine numbers that add to 100 % (rounding aside); the census's ticks, its asks and what it paid */
+/** THE ENGINES' SHARES from a census fold (src/loop-census.js censusFold, or null): each owner's share of the BUSY ticks, native's
+ *  and outside's — they add to 100 % (rounding aside); the census's ticks by kind (they add to census-ticks), its asks and what it
+ *  paid. An hour whose census was PAUSED (or never asked) has no engines to say: «?», never «none» */
 function censusWords(c) {
-  if (!c || !Array.isArray(c.shares) || !Number.isFinite(c.busyTicks)) return { words: '?', ticks: null, busy: null, notSampled: null, asks: null, paidMs: null };
+  const none = { words: '?', ticks: null, busy: null, held: null, idle: null, stopped: null, notSampled: null, viaHelper: null, deep: null, asks: null, paidMs: null };
+  if (!c || !Array.isArray(c.shares) || !Number.isFinite(c.busyTicks)) return none;
   const by = new Map(c.shares.map((s) => [s.family, s.share]));
-  const native = c.native && Number.isFinite(c.native.share) ? c.native.share : 0;
-  const words = c.busyTicks > 0 ? ENGINE_FIELDS.map((f) => `${f} ${((f === 'native' ? native : (by.get(f) || 0)) * 100).toFixed(0)}%`).join('; ') : 'none';
+  const extra = (k) => (c[k] && Number.isFinite(c[k].share) ? c[k].share : (by.get(k) || 0));
+  const t = (k) => (c[k] && Number.isFinite(c[k].ticks) ? c[k].ticks : null);
   const ns = c.notSampled && Number.isFinite(c.notSampled.ticks) ? c.notSampled.ticks : null;
+  const words = c.busyTicks > 0 ? ENGINE_FIELDS.map((f) => `${f} ${((f === 'native' || f === 'outside' ? extra(f) : (by.get(f) || 0)) * 100).toFixed(0)}%`).join('; ') : '?';
   const all = Number.isFinite(c.sampledTicks) && ns != null ? c.sampledTicks + ns : null;
   const cost = c.cost || {};
-  return { words, ticks: all, busy: c.busyTicks, notSampled: ns, asks: Number.isFinite(cost.asks) ? cost.asks : null, paidMs: Number.isFinite(cost.paidMs) ? cost.paidMs : null };
+  return { words, ticks: all, busy: c.busyTicks, held: t('held'), idle: t('idle'), stopped: t('stopped'), notSampled: ns, viaHelper: t('viaHelper'), deep: t('deep'),
+    asks: Number.isFinite(cost.asks) ? cost.asks : null, paidMs: Number.isFinite(cost.paidMs) ? cost.paidMs : null };
 }
 
 /**
- * THE LINE. `rep` = { kind: 'hour' | 'exit', hour: newHour()+holdAdd, toMs, busy (0..1 | null), engines (a census fold | null),
- * mem: { heapUsed, heapLimit, rss, kids: { cli: {n, rss}, browser, agentd, other, how } | null } | null,
- * turns: { running, waiting, 'idle-1h', 'idle-2h', 'idle-4h', 'idle-over-4h', 'turn-unknown' } | null,
- * browsers: { ready, idle1h } | null,
- * sizes: { conversations, pageSockets, deviceLinks, wsIn, wsOut, parsedChars, creates, resumes, writes, writeMaxMs } }
+ * THE LINE. `rep` = { kind: 'hour' | 'exit', hour: newHour()+holdAdd (+ `lost`), toMs, busy (0..1 | null), engines (a census fold |
+ * null), upMs, mem: { heapUsed, heapLimit, rss, kids: { cli: {n, rss}, wrapper, browser, agentd, other, how } | null } | null,
+ * turns: { 'turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown' } | null,
+ * browsers: { ready, idle1h } | null, sizes: { conversations, pageSockets, deviceLinks, wsIn, wsOut, parsedChars, creates, resumes,
+ * writes, writeMaxMs } }
  */
 function line(rep = {}) {
   const h = rep.hour || newHour(null);
@@ -100,9 +109,11 @@ function line(rep = {}) {
   const how = k && ['service', 'container', 'tree'].includes(k.how) ? k.how : '?';
   return [`[loop-${rep.kind === 'exit' ? 'exit' : 'hour'}]`, `hour=${hourOf(h.fromMs)}`, `span=${span == null ? '?' : `${Math.round(span / 1000)}s`}`,
     `held=${w ? s1(h.heldMs) : '?'}`, `holds=${w ? h.holds : '?'}`, `longest=${w ? s1(h.longestMs) : '?'}`,
-    `boot-held=${w ? s1(h.boot ? h.boot.heldMs : 0) : '?'}`, `boot-holds=${w ? (h.boot ? h.boot.holds : 0) : '?'}`, `busy=${pct(rep.busy)}`, `top="${top}"`,
-    `engines="${e.words}"`, `census-ticks=${int(e.ticks)}`, `busy-ticks=${int(e.busy)}`, `not-sampled=${int(e.notSampled)}`,
+    `boot-held=${w ? s1(h.boot ? h.boot.heldMs : 0) : '?'}`, `boot-holds=${w ? (h.boot ? h.boot.holds : 0) : '?'}`, `lost-holds=${int(h.lost)}`, `busy=${pct(rep.busy)}`, `top="${top}"`,
+    `engines="${e.words}"`, `census-ticks=${int(e.ticks)}`, `busy-ticks=${int(e.busy)}`, `held-ticks=${int(e.held)}`, `idle-ticks=${int(e.idle)}`, `stopped-ticks=${int(e.stopped)}`,
+    `not-sampled=${int(e.notSampled)}`, `via-helper=${int(e.viaHelper)}`, `deep=${int(e.deep)}`,
     `census-asks=${int(e.asks)}`, `census-paid=${Number.isFinite(e.paidMs) ? `${(e.paidMs / 1000).toFixed(2)}s` : '?'}`,
+    `hub-up=${Number.isFinite(rep.upMs) ? `${(rep.upMs / 3600000).toFixed(1)}h` : '?'}`,
     `hub-heap=${mb(m.heapUsed)}/${mb(m.heapLimit)}`, `hub-rss=${mb(m.rss)}`, ...KIDS.map((n) => `${n}=${kid(n)}`), `procs-by=${how}`,
     `conversations=${int(z.conversations)}`, ...AGES.map((a) => `${a}=${int(tu ? tu[a] : null)}`),
     `browsers-ready=${int(br ? br.ready : null)}`, `browsers-idle-1h=${int(br ? br.idle1h : null)}`,
@@ -111,11 +122,11 @@ function line(rep = {}) {
     `creates=${int(z.creates)}`, `resumes=${int(z.resumes)}`, `writes=${int(z.writes)}`, `write-max=${s1(z.writeMaxMs)}`].join(' ');
 }
 
-/** THE LINE'S OWN CHECK (the suite's and the ORCH's): every field present, in its order; nothing but the fixed words */
 const N = '(\\d+|\\?)', S = '(\\d+\\.\\ds|\\?)';
 const LINE_RE = new RegExp('^\\[loop-(hour|exit)\\] hour=(\\d{4}-\\d\\d-\\d\\dT\\d\\dZ|\\?) span=(\\d+s|\\?)'
-  + ` held=${S} holds=${N} longest=${S} boot-held=${S} boot-holds=${N} busy=(\\d+\\.\\d%|\\?) top="[^"]*" engines="[^"]*"`
-  + ` census-ticks=${N} busy-ticks=${N} not-sampled=${N} census-asks=${N} census-paid=(\\d+\\.\\d\\ds|\\?)`
+  + ` held=${S} holds=${N} longest=${S} boot-held=${S} boot-holds=${N} lost-holds=${N} busy=(\\d+\\.\\d%|\\?) top="[^"]*" engines="[^"]*"`
+  + ` census-ticks=${N} busy-ticks=${N} held-ticks=${N} idle-ticks=${N} stopped-ticks=${N} not-sampled=${N} via-helper=${N} deep=${N}`
+  + ` census-asks=${N} census-paid=(\\d+\\.\\d\\ds|\\?) hub-up=(\\d+\\.\\dh|\\?)`
   + ' hub-heap=(\\d+MB|\\?)\\/(\\d+MB|\\?) hub-rss=(\\d+MB|\\?)' + KIDS.map((n) => ` ${n}=${N}\\/(\\d+MB|\\?)`).join('') + ' procs-by=(service|container|tree|\\?)'
   + ` conversations=${N}` + AGES.map((a) => ` ${a}=${N}`).join('') + ` browsers-ready=${N} browsers-idle-1h=${N}`
   + ` page-sockets=${N} device-links=${N} ws-in=${N} ws-out=${N} parsed=(\\d+\\.\\dM|\\?) creates=${N} resumes=${N} writes=${N} write-max=${S}$`);
@@ -131,7 +142,7 @@ function causesOk(text) {
 function enginesOk(text) {
   const m = /engines="([^"]*)"/.exec(String(text || ''));
   if (!m) return false;
-  if (m[1] === '?' || m[1] === 'none') return true;
+  if (m[1] === '?') return true;
   const parts = m[1].split('; ');
   return parts.length === ENGINE_FIELDS.length && parts.every((p, i) => new RegExp(`^${ENGINE_FIELDS[i]} \\d+%$`).test(p));
 }
@@ -142,7 +153,8 @@ function dayFold(hours = []) {
   let busyW = 0, busyS = 0;
   for (const r of hours) {
     const h = r && r.hour; if (!h) continue;
-    out.hours++; if (h.watched === false) out.unwatched++;
+    out.hours++;
+    if (h.watched === false) { out.unwatched++; continue; }   // left OUT of the day's sums — the day says how many hours that was
     out.heldMs += h.heldMs; out.holds += h.holds; out.longestMs = Math.max(out.longestMs, h.longestMs);
     if (h.boot) { out.boot.holds += h.boot.holds; out.boot.heldMs += h.boot.heldMs; }
     for (const [c, ms] of Object.entries(h.by || {})) out.by[c] = (out.by[c] || 0) + ms;

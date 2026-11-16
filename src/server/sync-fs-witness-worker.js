@@ -619,9 +619,11 @@ async function finishCapture(c) {
 // Over the WHOLE hour, never a profiler: a tick every everyMs (1 s) on average, each interval drawn between half and one and
 // a half of it (as the capture's), classed EXACTLY as a capture's tick (CC.tickOf: the kernel state first — idle is never
 // asked; a hold open = held; stopped; another ask out, a capture or a profile running = not sampled); else ONE ask (commit
-// 1's road, the one in flight) or booked on its own ask in flight. An answer books its ticks on LC.bookOf (the family of
-// the innermost frame inside the install — native time on its JavaScript caller; 'rest'; 'native'). COUNTS ONLY: a tick
-// is a count, an answer's text is read and dropped. ITS PRIORITY IS THE LOWEST: it posts only when no ask is in flight,
+// 1's road, the one in flight) or booked on its own ask in flight. An answer books its ticks on LC.bookOf — the OWNER of
+// the first owned frame walking outward from the innermost, passing only shared helpers, libraries and Node's internals
+// (native time on its JavaScript caller; 'outside'; 'native') — into families[owner], and counts the same ticks in
+// viaHelper (reached through a helper) and deep (a full frame list with no owned frame). COUNTS ONLY: a tick is a count,
+// an answer's text is read and dropped. ITS PRIORITY IS THE LOWEST: it posts only when no ask is in flight,
 // and a hold, a capture or a profile that finds its ask in flight TAKES it (takeCensusAsk) — none waits behind it; the
 // ticks the census had waiting on it are booked not sampled. Its own cost: each ask's own run (the note's µs) summed and its
 // largest kept; one past LC.ASK_BOUND_MS halves its rate (no slower than one per LC.CENSUS_FLOOR_MS). Paused (its ticks
@@ -629,7 +631,7 @@ async function finishCapture(c) {
 // and resets them and the rate.
 const LC = require('../loop-census.js');
 let census = null;
-function censusReset(s, now) { s.fromM = now; s.ticks = LC.emptyTicks(); s.pausedBy = {}; s.families = {}; s.asks = 0; s.ownUs = 0; s.maxUs = 0; s.halved = null; s.curEveryMs = s.everyMs; }
+function censusReset(s, now) { s.fromM = now; s.ticks = LC.emptyTicks(); s.pausedBy = {}; s.families = {}; s.viaHelper = 0; s.deep = 0; s.asks = 0; s.ownUs = 0; s.maxUs = 0; s.halved = null; s.curEveryMs = s.everyMs; }
 function startCensus(everyMs, now = mono()) {
   if (census || !I || !(Number(everyMs) > 0)) return;
   const s = census = { everyMs: Math.max(5, Number(everyMs)), timer: null };
@@ -664,8 +666,9 @@ function censusAnswered(q, a) {
   s.asks++;
   const own = Number.isInteger(q.ownUs) && q.ownUs >= 0 ? q.ownUs : null;
   if (own != null) { s.ownUs += own; if (own > s.maxUs) s.maxUs = own; }
-  const to = q.text != null ? LC.bookOf(q.text, rootDir) : a && a.kind === 'js' && !a.empty ? null : 'native';
-  if (to === null) s.ticks.notSampled += q.asker.pending; else s.families[to] = (s.families[to] || 0) + q.asker.pending;
+  const b = q.text != null ? LC.bookOf(q.text, rootDir) : a && a.kind === 'js' && !a.empty ? null : LC.NATIVE_BOOK;
+  if (b === null) s.ticks.notSampled += q.asker.pending;
+  else { s.families[b.owner] = (s.families[b.owner] || 0) + q.asker.pending; if (b.viaHelper) s.viaHelper += q.asker.pending; if (b.deep) s.deep += q.asker.pending; }
   q.asker.pending = 0;
   // ITS OWN COST, bounded: one ask past its bound halves the rate (no slower than one per CENSUS_FLOOR_MS) — said in the take
   const slower = own != null ? LC.slowerAfter(s.curEveryMs, own / 1000) : null;
@@ -680,7 +683,7 @@ function takeCensus(msg = {}, now = mono()) {
   else {
     if (inflight && inflight.asker.kind === 'census') { s.ticks.notSampled += inflight.asker.pending; inflight.asker.pending = 0; }
     out = { ev: 'census', id: msg.id, fromM: s.fromM, toM: now, everyMs: s.everyMs, ticks: { ...s.ticks }, pausedBy: { ...s.pausedBy }, families: { ...s.families },
-      asks: s.asks, askOwnMs: s.ownUs / 1000, askMaxMs: s.maxUs / 1000, halved: s.halved };
+      viaHelper: s.viaHelper, deep: s.deep, asks: s.asks, askOwnMs: s.ownUs / 1000, askMaxMs: s.maxUs / 1000, halved: s.halved };
     censusReset(s, now);
   }
   try { parentPort && parentPort.postMessage(out); } catch { }

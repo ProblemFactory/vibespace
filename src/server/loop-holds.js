@@ -302,7 +302,7 @@ function create({ log = console, record = () => {}, now = mono, wallNow = () => 
   }
   function stop() { try { obs && obs.disconnect(); } catch { } clearInterval(timer); clearInterval(trigT); stopGc(); }
 
-  const api = { onHold, onLost, onEach, setHourly, watching: () => watchdogAlive(), startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
+  const api = { onHold, onLost, onEach, setHourly, watching: () => watchdogAlive(), lostCount: () => counts.lost, startProfile, report, register, stop, eluNow, gcRing: () => gc.slice(), ring: () => ring.slice(), table: () => LH.tableRows(table),
     startCapture, onCaptured, checkTrigger, captureReport };
   return api;
 }

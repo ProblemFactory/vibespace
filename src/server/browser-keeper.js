@@ -7745,6 +7745,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const api = {
     /** lane hub-loop-stalls «loop-day-report» M6: the browsers this keeper holds READY (a live record) and how many had no command for
      *  over an hour (their profile's last verb) — counts only, read in memory; null before the registry was loaded (never a load) */
+    /** loop-day-report (cure r2, S3): the main pids of the live browsers this keeper runs — every engine, whatever its program is
+     *  called — so the hour counts them (and the processes under them) as browsers by what they are; in memory, null before a load */
+    browserPids: () => { if (!loaded) return []; const out = []; for (const r of Object.values(reg.browsers || {})) if (B.isLiveBrowser(r) && Number.isInteger(r.pid)) out.push(r.pid); return out; },
     readyCounts: (t = now()) => {
       if (!loaded) return null;
       let ready = 0, idle1h = 0;

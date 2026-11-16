@@ -763,12 +763,12 @@ console.log('⑬ the number — the held seconds per day by cause, from the tele
   const WANT = `Held per day, by cause | Seconds the main loop was held, and in brackets how many holds — from the telemetry this server keeps. The days are UTC days; today is 2026-11-16. | `
     + `cause | today | yesterday | 7 days | src/channel-store.js:275 | 4.0 s (1) | — | 4.0 s (1) | src/channel-store.js:285 | — | — | 3.0 s (1) | src/channel-store.js:1813 | — | 2.0 s (1) | 2.0 s (1) | `
     + `src/x.js:9 | 1.5 s (1) | — | 1.5 s (1) | ${WAIT} | — | 1.2 s (1) | 1.2 s (1) | (no cause recorded) | 1.0 s (1) | — | 1.0 s (1) | all causes | 6.5 s (3) | 3.2 s (2) | 12.7 s (6) | `
-    + `the boot (apart — not in all causes) | 9.0 s (1) | — | 9.0 s (1) |`;
+    + `the boot (apart — not in all causes) | 9.0 s (1) | — | 9.0 s (1) | A boot’s own holds are apart from 2.369.407 on; rows written before carry no mark and count among the causes. |`;
   ok(en === WANT, `(5) the table's words (en): ${en}`, { want: WANT });
   const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
   const keys = [...SF.slice(a, b).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
   const zhW = words(draw(got, { t: tOf(zh), esc })), jaW = words(draw(got, { t: tOf(ja), esc }));
-  ok(keys.length === 9 && keys.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string' && zh[k] !== k && ja[k] !== k)
+  ok(keys.length === 10 && keys.every((k) => typeof zh[k] === 'string' && typeof ja[k] === 'string' && zh[k] !== k && ja[k] !== k)
     && zhW.startsWith('每天卡住的时间（按原因） | 主循环被卡住的秒数') && zhW.includes('今天是 2026-11-16') && zhW.includes('原因 | 今天 | 昨天 | 7 天 |') && zhW.includes('全部原因 | 6.5 s (3) | 3.2 s (2) | 12.7 s (6)')
     && jaW.startsWith('日ごとの停止（原因別） | メインループが止まっていた秒数') && jaW.includes('今日は 2026-11-16') && jaW.includes('原因 | 今日 | 昨日 | 7日間 |') && jaW.includes('すべての原因 | 6.5 s (3)'),
     `(5) every word it says has a zh and a ja row (${keys.length} keys) — zh: ${zhW.slice(0, 60)}… ja: ${jaW.slice(0, 60)}…`, { keys: keys.filter((k) => !(zh[k] && ja[k])), zhW, jaW });
