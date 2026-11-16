@@ -240,7 +240,7 @@ console.log('⑩ A CONTROL SAYS WHAT IT DOES — filter / sort, For-you buttons,
   ok(!/\.ut-actions \{[^}]*opacity: 0\.35/.test(CSS) && /\.ut-act\[data-label\]:is\(:hover, :focus-visible\)::after \{ content: attr\(data-label\);/.test(CSS) && /\.ut-detail-exp > summary \{ font-size: inherit;/.test(CSS),
     'For-you: the row\'s buttons at the theme\'s contrast (no 35 % dimming), each says its word on hover / focus, «▸ 详情» at the body size'); }
 { const MN = read('src/lib/mobile-nav.js');
-  ok(/moreBtn\.onclick = \(e\) => \{ e\.stopPropagation\(\); const r = moreBtn\.getBoundingClientRect\(\); showWindowContextMenu\(this\.app, win\.id,/.test(MN) && /item\.append\(icon, label, moreBtn, closeBtn\)/.test(MN),
+  ok(/moreBtn\.onclick = \(e\) => \{ e\.stopPropagation\(\); const r = moreBtn\.getBoundingClientRect\(\); showWindowContextMenu\(this\.app, win\.id,/.test(MN) && /item\.append\((?:\.\.\.\[)?icon, label, (?:billChip, )?(?:splitBtn, )?moreBtn, closeBtn/.test(MN),   // the .407 move: phone-six's split door stands beside the ⋯ in one row list
     'the phone switcher: a visible ⋯ on each row opens the window\'s own menu (the long press stays)'); }
 { const FE = read('src/lib/file-explorer.js');
   ok(/btnUpload\.innerHTML = UI_ICONS\.upload;/.test(FE) && !/'\\u2B06'/.test(FE) && /const fold = createBarFold\(toolbar, \{/.test(FE) && /compactClass: 'ftw-compact'/.test(FE) && /w\.className = 'ftw-word'; w\.textContent = word;/.test(FE),
