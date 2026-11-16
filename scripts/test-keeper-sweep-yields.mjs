@@ -33,6 +33,10 @@
 //      re-read removed ⇒ the browser the conversation just started is closed, RED.
 //   F3 THE FIELD'S SHAPE (in ②): 30 records left `ready` with a scratch DIRECTORY and a launch MARK each — each pays the
 //      reap's own road (the directory's lock read, the /proc walk by mark, counted) — still no child start, one per turn.
+//   ⑨ FOR A RETIRE, «GONE» IS A FACT THE KEEPER HAS SEEN: a recorded pid that is not there, or is another process now by its
+//      start time. A LIVE daemon whose fact is missing — no pid recorded, or a pid with no recorded start time — cannot be told
+//      gone, so the retire closes it by the CLI as before (1 start, the daemon ended); without the law it would be skipped and
+//      left running, a browser nobody ends. MUTANT: the tick's wider judgment (an absent fact read as «gone») ⇒ no close, RED.
 //   ⑩ THE RETIRE'S CONTRACT (the 2.369.406 union's red, test-browser-mediation-chrome ⑧b): a record its conversation still holds
 //      is KEPT by a retire — the record AND its browser (F2: nothing of a carried conversation is ended; on 2.369.405 the browser
 //      was stopped first) — and the product's own road, a detach and then the retire, ends it (1 CLI close, the daemon ended).
@@ -164,7 +168,7 @@ console.log('— ② L2: a record whose daemon is GONE starts no browser-CLI chi
   ok(st != null && c.removed === 4 && c.closes === 1 && procGone, `CONTROL: beside 3 gone daemons, ONE whose daemon runs (pid ${proc.pid}, its start time recorded) is still closed by the browser CLI — 1 start in all — and ended; all 4 records removed`, { st, removed: c.removed, closes: c.closes, procGone });
   try { proc.kill('SIGKILL'); } catch { /* gone */ }
   // MUTANT: the gone-daemon judgment removed (every live-looking record goes to the CLI's close)
-  const noJudge = ksrc.replace("        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonGone(rec0)) {", '        if (false) {');
+  const noJudge = ksrc.replace("        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonSeenGone(rec0)) {", '        if (false) {');
   ok(noJudge !== ksrc, 'MUTANT (the gone-daemon judgment removed): the patch applies');
   if (noJudge !== ksrc) {
     const Kj = M.load('src/server/browser-keeper.js', noJudge, 'no-judge');
@@ -292,6 +296,33 @@ console.log('— ⑧ F5: one registry write and one broadcast per PIECE of the w
   if (noBatch !== ksrc) {
     const sm = await sweep(M.load('src/server/browser-keeper.js', noBatch, 'no-batch'), registry(300), { stallMs: 0 });
     ok(sm.writes >= 300 && sm.broadcasts >= 300, `MUTANT (the batching dropped) is RED on the law: ${sm.writes} registry writes and ${sm.broadcasts} broadcasts for 300 removals`, { writes: sm.writes, broadcasts: sm.broadcasts });
+  }
+}
+
+console.log('— ⑨ «gone» is a fact the keeper has SEEN: a live daemon whose fact is missing is still closed by the CLI');
+const unseen = async (Km, shape) => {
+  const proc = spawn('sleep', ['30'], { stdio: 'ignore' });
+  await new Promise((res) => setTimeout(res, 50));
+  const id = 'bp-1ffffffd', key = `${PARENT}.997`;
+  const facts = shape === 'no pid' ? { pid: null, starttime: null } : { pid: proc.pid, starttime: null };
+  const extra = [{ profile: B.newProfileRecord({ id, label: '(ephemeral) Chat child unseen', dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: 1790000000000 }), browser: { profileId: id, state: 'ready', ...facts, cdpUrl: null, ns: 'vs-' + key, startedAt: 1790000000000 } }];
+  closeHook = () => { try { process.kill(proc.pid, 'SIGTERM'); } catch { /* gone */ } };   // the CLI's own close ends its daemon
+  try {
+    const s = await sweep(Km, registry(0, { live: true, extra }), { stallMs: 0 });
+    const ended = await new Promise((r) => { if (proc.exitCode !== null || proc.signalCode) return r(true); proc.once('exit', () => r(true)); setTimeout(() => r(false), 1500); });
+    return { closes: s.closes, removed: s.removed, ended };
+  } finally { closeHook = null; try { proc.kill('SIGKILL'); } catch { /* gone */ } }
+};
+{
+  for (const shape of ['no pid', 'no start time']) {
+    const u = await unseen(K, shape);
+    ok(u.closes === 1 && u.ended && u.removed === 1, `a LIVE daemon whose record has ${shape === 'no pid' ? 'no pid' : 'its pid but no start time'}: the retire cannot see it gone, so it closes it by the CLI as before — ${u.closes} start, the daemon ${u.ended ? 'ended' : 'LEFT RUNNING'}, the record removed`, u);
+  }
+  const oldJudge = ksrc.replace('!stopping.has(profileId) && daemonSeenGone(rec0)) {', '!stopping.has(profileId) && daemonGone(rec0)) {');
+  ok(oldJudge !== ksrc, 'MUTANT (an absent fact read as «gone», the old judgment): the patch applies');
+  if (oldJudge !== ksrc) {
+    const um = await unseen(M.load('src/server/browser-keeper.js', oldJudge, 'absent-is-gone'), 'no pid');
+    ok(um.closes === 0 && !um.ended, `MUTANT (the old judgment) is RED on the law: ${um.closes} CLI starts, the live daemon ${um.ended ? 'ended' : 'left running'} — a live browser nobody ends`, um);
   }
 }
 
