@@ -25,6 +25,36 @@ This file is the engineers' record of every release: the lanes, the verification
 - P6, the bounded check (主开发 13:21Z): a conversation's CREATION is no re-point — `heldFallOf` answers «not moved» for a ledger row whose why is the spawn (a new or resumed conversation's link row from the pool's default member), so its first reading's fall is taken at once. Smalls: law 2's archive reason says what is known («a turn in which this hub saw no {fam} request to {account}»); test-reading-truth mints its root where the scratch helper expects (any TMPDIR), and gains the must's leg, law 3's end on a skewed clock (past its until, past the ten minutes, across a store reload), the sub-agent stamp leaving the turn start alone and the resume edge handed the record without its held lane (38 legs); the kb says the limits taken.
 - P7–P10, the fresh slot (主开发 16:41Z; test-auto-resume-loop's census, red on 0dd356ceb): `noteTurnAsk` records a model request's ask only under requestSlotFor's account — its fallback to the fresh slot was a per-record resolution (with no request known it keyed each ask to the link NOW). test-reading-truth drives it both ways (a restart with no request known: no ask, the cap filed; after the first stamp the conversation's own family judged asked; the moved conversation's other-family cap not taken) with its mutant; test-auto-resume-loop's census names the fresh slot's readers, a ninth red; the kb's sub-agent limit made exact.
 
+### resume-all-paced — L1: a bulk resume never floods the hub (主开发 2026-11-16 18:13Z; a field incident, twice in one day on one fleet instance)
+- **What happened.** After a restart the boot offer's «Resume all» (layout.js _resumeAll) fired one resume every 400 ms on a fixed clock, whatever the hub had answered: 68 conversations created in five minutes, about forty of them with transcripts of 100–184 MB. The hub's loop was held 10–139 s, its memory went from 2.3 to 18 GiB, the sign-in page went unanswered for five minutes, and the liveness probe restarted it — every conversation just resumed died again. The sidebar group's ▶ fired every resume in ONE synchronous loop.
+- **The law.** NEW src/lib/resume-pacer.js: ONE create in flight; the next when the previous one's create has ENDED. createSession gains `onCreateEnd(how, msg)`, said once from `settled(how)`: 'created' / 'refused' (the matched answer), 'error' (an error naming no request), 'lost' (a reconnect that will not re-send it), 'closed' (its window). NEVER at the 15 s reply watchdog: a hub too slow to answer is a hub not to feed. resumeSession passes it through.
+- **Why one in flight, not a few.** The hub does each resume's pre-resume read and continuity check on its main thread (L2 measures them), so two in flight hold the loop twice as long and save the person nothing.
+- **What the person sees.**
+  - ONE progress toast «Resuming i of n…», updated in place, with Stop: the in-flight create finishes and nothing follows; «Stopped: d of n resumed — the other k were not started.»
+  - A refusal or failure of one is collected and said at the end, with names and the hub's why; the rest go on.
+  - The sidebar's button goes through `resumeGroup`: live members attached and tmux ones opened at once, the stopped ones paced.
+- **The legs** (NEW test-resume-all-paced, fast, 3.2 s — the REAL page and resume door over a stand-in hub that answers each create after a placed 420 ms, longer than the old clock):
+  - ① 3 creates, never two in flight; ONE progress line, updated, gone at the end, with Stop;
+  - ② a refusal said by name and why, the next create still sent;
+  - ③ Stop with create 1 in flight: nothing after its answer, said;
+  - ④ the watchdog fired: create 2 NOT sent until the answer;
+  - ⑤ the group button: the live member attached at once, three creates one in flight at a time; the button calls resumeGroup;
+  - ⑥ RED CONTROLS — the master's _resumeAll verbatim (the 400 ms clock): in flight at each send [1, 2, 2]; a pacer that never waits: a flood on the group button.
+- **On master d7f42cc21** (the new suite copied onto its product): ① red — creates in flight [1, 2, 2], no progress line.
+- **test-layout-dup-storm.** Its §PR rig (prResumeAll) is now a stand-in hub that answers each create. §PR (a) sets the progress line apart from «no other toast» and pins it (ONE line, «Resuming 3 of 3…» last, gone at the end). Seven mutant patterns follow createSession's `settled(<how>)` lines. 290/290.
+- **FAST_SUM_CAP_MS** 1101 → 1104 s by arithmetic: 1100.089 s + the new row 3.2 s = 1103.289 s over 589.
+- **主开发's look at b10ddda89 (19:11Z, «not taken yet»), the cure:**
+  - M1 — every end of a create is seen: the watchdog settle no longer unregisters the lost-socket watch. For a harness whose resume is not re-sent on reconnect, that watch is the only thing that can say «lost».
+  - M2 — only the press acts as a press: a group's first stopped member as the press, every later one `stay` (quiet, no desktop switch).
+  - M3 — test-layout-dup-storm's (owe) leg drives its order over the real request contract: the bulk in flight when the person switches desktop, each create answered ONCE after it. Its «ONE save» became «each owed recipe carried once»: paced answers come one at a time, so one save per answer that owed one.
+  - M4 — `whyNotResumed`: a sentence of ours (zh + ja) for every end without the hub's text.
+  - S1 — Stop answered at once («Stopping after the conversation now starting…»).
+  - S2 — the stopped line's numbers add up.
+  - S3 — the failure line bounded (≤ 3 names, 40 + 60 characters); `pressResumeGroup` says a throw.
+  - New legs ⑦–⑪ in test-resume-all-paced, each RED on b10ddda89, green on the cure. The suite takes 3.6 s alone (the sum 1103.689 s stays under the 1104 s cap).
+- **The fast list's one red (cured, test-only):** test-contributions' census pins the one declared error release line of session-lifecycle verbatim; it is now `settled('error', msg)` (the create's end is named for the bulk resume), and the census follows it.
+- kb-features, kb-patterns («Resume-all boot popup»), kb-file-structure (INDEX + essay).
+
 ## 2.369.405 — 2026-11-16
 
 ### vault-login hotfix — a vault fill and a verb of our own are the hub's own act: no local check of the browser program refuses them (`data/bin/vibespace-browser`)
