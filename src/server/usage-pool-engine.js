@@ -1562,12 +1562,16 @@ function windowGroupOf(id) { try { return usageIdentityAccountIds(id).slice().so
  *  compared against a real window is 'differ' every time, so guarding them
  *  would archive every exhaustion mark on the instance. Their identity has its
  *  own protection: the turn-pinned rejection slot plus `slotOk`. */
-function guardReadingTarget(key, readingWindow, { session = null, what = 'reading', entry = null } = {}) {
+function guardReadingTarget(key, readingWindow, { session = null, what = 'reading', entry = null, noRefile = false } = {}) {
   let d;
   try {
     d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
   } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
   if (d.action === 'write') return key;
+  // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
+  // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
+  // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
+  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` };
   const sid = session?._webuiId || session?.claudeSessionId || '-';
   if (d.action === 'refile') {
     noteWindowVerdict(sid, key, d.key, () => console.log(`[usage] ${what}: window says these numbers are ${nameOf(d.key)}'s, not ${nameOf(key)}'s — re-filed (${d.reason})`));
@@ -1924,6 +1928,9 @@ function wallKeyFor(session) { return wallSlotFor(session).key; }
  *  pin is exactly one turn wide; a turn whose end record never arrives degrades
  *  exactly the way the wall machine already does (the next turn's real work
  *  classifies it NORMAL and clears the signals).
+ *  [MEASURED 2026-11-15, lane readings-attribution-2 P0: on claude 2.1.322 / 2.1.321 a re-point DOES reach a running CLI, on
+ *  its next request, inside a turn too — the readings moved to the request (requestSlotFor); this rejection pin awaits its
+ *  own ruling]
  *  `slotOk` rides the pin for the same reason it rides the signal: it is only
  *  true AT THE MOMENT THE REJECTION ARRIVED. */
 function rejectionSlotFor(session) {
@@ -1968,7 +1975,45 @@ function rejectionSlotFor(session) {
  *  lifetimes would re-create the two-answers-one-question shape this change
  *  exists to remove, and a time box would be a cliff (2.369.63's lesson). If
  *  this ever needs a belt, it belongs on noteTurnEnd — one bound, both pins. */
+/** THE ACCOUNT A READING'S REQUEST WENT OUT ON (lane readings-attribution-2 P1, 主开发 2026-11-15 law 1: «a reading lands only on
+ *  the account that the request which produced it was billed to»). MEASURED (P0, scripts/fixtures/claude-cred-read-midturn-
+ *  2.1.322.json): a running claude 2.1.322 / 2.1.321 spends a re-pointed credential on its NEXT REQUEST — inside a turn too;
+ *  the request in flight at the move is the old member's. So the request is the conversation's LATEST request-out
+ *  (`_lastRequestOutAt`, turn-state noteRequestSent) and its account is the link AT THAT INSTANT: the `from` of this
+ *  conversation's FIRST re-point after it (its own rows, the same rule lastRepointRow reads), else the link now. This is the
+ *  live answer the turn's own requests give — never the walked usage ledger, which lags. Null when no request of this hub's
+ *  life is known (a restore before its first request, a producer with no request road): the caller keeps its own ladder. */
+function requestSlotFor(session, at = Date.now()) {
+  const t = Number(session && session._lastRequestOutAt) || 0;
+  if (!(t > 0) || t > at) return null;
+  try {
+    const poolId = session?._accountId || null;
+    if (!poolId || accounts.get(poolId)?.type !== 'pooled') { const w = wallSlotFor(session); return { key: w.key, slotOk: !!w.slotOk, reqAt: t }; }
+    const sid = session?._webuiId || null;
+    const hasOwnLink = sessionHasOwnLink(poolId, sid);
+    const rows = slotTransitions.all();
+    let first = null; // rows ascend: walking back from the newest, the last row seen after the request is the FIRST move after it
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (r.at > at) continue;
+      if (r.at <= t) break;
+      if (poolId && r.poolId && r.poolId !== poolId) continue;
+      if (hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId) first = r;
+    }
+    if (first && first.from && first.from !== first.to) {
+      let ok = false; try { ok = !!validateBillingSlot(poolId, first.from).ok; } catch { }
+      return { key: first.from, slotOk: ok, reqAt: t, movedAt: first.at };
+    }
+    const w = wallSlotFor(session);
+    return { key: w.key, slotOk: !!w.slotOk, reqAt: t };
+  } catch { return null; }
+}
 function readingSlotFor(session, at = Date.now(), opts = {}) {
+  // ⓪ THE REQUEST (P1): the account the reading's request went out on — before the turn pin, which it replaces wherever a
+  // request is known (the shape the owner's instance showed: a pin re-made by a reading that trailed the turn's result outlived the turn,
+  // the deferred move fired at its stop, and the next turn's readings — the new member's — were filed on the old one)
+  const req = requestSlotFor(session, at);
+  if (req && req.key) return { key: req.key, slotOk: !!req.slotOk, slotReason: 'request-stamped', at, reqAt: req.reqAt, ...(req.movedAt ? { movedAt: req.movedAt } : {}) };
   try {
     const pin = session && session._turnReadingSlot;
     if (pin && pin.key) return { key: pin.key, slotOk: !!pin.slotOk, slotReason: 'turn-pinned', at: pin.at };
@@ -2001,6 +2046,9 @@ function readingSlotFor(session, at = Date.now(), opts = {}) {
  *  session, or null. Shared by the lag shadow (which then reads the windows)
  *  and by the ⟳ route's eligibility test (which only needs to know a shadow is
  *  open). */
+/** Does this conversation have its OWN pool link (then its own ledger rows decide for it, never the pool default)? The ONE
+ *  reader of that fact for lastRepointRow and requestSlotFor (lane readings-attribution-2). */
+function sessionHasOwnLink(poolId, sid) { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } }
 function recentRepointRow(session, at = Date.now()) { return lastRepointRow(session, { at, minAt: at - readingLag.SHADOW_MS }); }
 /** The newest re-point of THIS conversation at or before `at` and not older
  *  than `minAt`, or null. The witness eligibility test asks it with `minAt` =
@@ -2017,7 +2065,7 @@ function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHAD
     // default is irrelevant to it; one without a link is decided by the
     // default. Deciding on "whichever row is newest" would let another
     // session's pool-wide move explain a reading it had nothing to do with.
-    const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
+    const hasOwnLink = sessionHasOwnLink(poolId, sid);
     // BOUNDED SCAN: rows are ascending, so walking back and stopping at the
     // horizon (the shadow's 10 minutes, or the turn pin's age) is O(that
     // span), not O(the whole 20k ledger) on every reading — and a row older
@@ -3662,7 +3710,7 @@ function recordRateLimitEventNow(session, msg) {
     // row's window is seen by the check of the same reading — ONE call, three exits (archived, re-filed, written)
     const postCheck = () => { if (win) { try { oatIdentity.onReading(slotKey, { window: win, at: Date.now() - (Number(liveFactVerdict(session, msg).lateMs) || 0), viaToken: () => road().viaToken, gen: () => road().gen, eligible: witness, sid: session._webuiId || null }); } catch { } } };
     if (win) {
-      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness } });
+      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness }, noRefile: !!(slot && slot.slotReason === 'request-stamped') });
       if (!target) {                             // archived with a reason — never written where it provably does not belong
         if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived', producer: producer() });
         postCheck();
@@ -5794,6 +5842,9 @@ function maybePoolAutoSwitch(session, { stop = false, now = null, force: forced 
     // …and the pre-fire gate's re-decision on the fresh probe (acceptance r2): its first decision just closed the gate
     const force = forced || (stop
       && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }));
+    // A STOP ENDS THE TURN'S READING PIN (P1, law 1: «EVERY road that ends a turn ends its pins») — the CLI's idle, the attach
+    // reconcile and an exit reach here, and noteTurnEnd is not the only end a turn has (a reading after the result re-made it)
+    if (stop && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState })) session._turnReadingSlot = null;
     maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);
   } catch { }
 }
@@ -7689,6 +7740,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         _warmHoldLogAt.delete(poolId + ':' + sid); _warmHoldLogAt.delete(poolId + ':' + sid + ':soft'); // a re-point ends this conversation's deferral episode (LOW-3)
         _warmHoldLogAt.delete(poolId + ':' + sid + ':prio'); // …and its priority-return episode
         _warmHoldLogAt.delete(poolId + ':' + sid + ':pin'); // …and its pin-return episode
+        // a conversation moved while NOT in a turn carries no reading pin (P1): its next reading names its own request's account
+        if (!conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState })) s2._turnReadingSlot = null;
         try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
         const toName = memberWord(poolId, ds.to); // (q-053 P0b) with its provider when the pool mixes providers
         // a same-target re-point (observed ≠ linked, the link was already on
