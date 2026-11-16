@@ -9,6 +9,7 @@ import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, re
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
+import { resumePaced } from './resume-pacer.js'; // lane resume-all-paced (L1): a bulk resume never floods the hub — one create in flight
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -1926,8 +1927,8 @@ class LayoutManager {
   }
 
   // Bulk-resume the sessions that restored stopped (2.250.0). resumeSession
-  // already replaces the matching read-only window, so we just fire them
-  // staggered to avoid a create storm on a fleet server.
+  // already replaces the matching read-only window; the resumes go ONE AT A TIME,
+  // each when the previous one's create has ended (resume-pacer.js — never a clock).
   async _offerResumeAll(stopped) {
     const { showConfirmDialog } = await import('./utils.js');
     // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
@@ -1942,16 +1943,15 @@ class LayoutManager {
     return this._resumeAll(stopped);
   }
 
-  /** The resume-all's resumes, staggered (400 ms) — → the number re-opened in their own rows (said once). */
+  /** The resume-all's resumes, PACED (lane resume-all-paced, L1 — the field incident of 2026-11-16: a fixed 400 ms clock fired 68
+   *  creates in five minutes whatever the hub answered, and held its loop 10–139 s): src/lib/resume-pacer.js — ONE create in
+   *  flight, the next when the previous one's create has ENDED; «Resuming i of n…» with Stop; a refusal or a failure of one said,
+   *  the rest go on. → the number re-opened in their own rows (said once). */
   async _resumeAll(stopped) {
-    let kept = 0;
-    for (let i = 0; i < stopped.length; i++) {
-      const d = stopped[i];
-      // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1): each conversation in its own row — its window id, box, z
-      // and group, on its own desktop, whatever this viewport can show; `stay`: a bulk resume switches nothing
-      try { const r = this.app.resumeSession(d.sessionId, d.cwd, d.name, { ...(d.opts || {}), stay: true }); if (r && r.row) kept++; } catch {}
-      if (i < stopped.length - 1) await new Promise((r) => setTimeout(r, 400));
-    }
+    // A RESUME RE-OPENS ITS ROW (lane phone-resume-keeps-layout, LAW 1): each conversation in its own row — its window id, box, z
+    // and group, on its own desktop, whatever this viewport can show; `stay`: a bulk resume switches nothing
+    const r = await resumePaced(this.app, stopped, { extra: { stay: true } });
+    const kept = r.rows;
     // NOTHING SILENT (LAW 3): the conversations re-opened in their own rows are said once
     if (kept) showToast(kept === 1 ? t('Resumed 1 conversation where it was') : t('Resumed {n} conversations where they were', { n: kept }), { type: 'info', duration: 5000 });
     return kept;

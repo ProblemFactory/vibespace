@@ -6,6 +6,7 @@ import { valueWord } from './value-words.js'; // lane ui-language: the board's s
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
+import { resumeGroup } from './resume-pacer.js'; // lane resume-all-paced (L1): the group's button paces its resumes
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -1000,22 +1001,9 @@ export function installSidebarTasks(SidebarClass) {
       resumeAllBtn.title = tr('Resume all sessions in "{title}"', { title: task.title });
       resumeAllBtn.onclick = (e) => {
         e.stopPropagation();
-        for (const s of taskSessions) {
-          const agentOpts = {
-            backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId,
-            agentKind: s.agentKind || 'primary', agentRole: s.agentRole || '',
-            agentNickname: s.agentNickname || '', sourceKind: s.sourceKind || '',
-            parentThreadId: s.parentThreadId || null,
-            hostId: s.host || undefined, keeperSid: s.keeperSid || undefined, // remote members resume ON their host
-          };
-          if (s.status === 'stopped') {
-            this.app.resumeSession(s.sessionId, s.cwd, this.getCustomName(s) || s.name, agentOpts);
-          } else if (s.status === 'live' && s.webuiId) {
-            this.app.attachSession(s.webuiId, s.webuiName || s.name, s.cwd, { mode: s.webuiMode, ...agentOpts });
-          } else if (s.status === 'tmux') {
-            this.app.attachTmuxSession(s.tmuxTarget, s.name, s.cwd);
-          }
-        }
+        // lane resume-all-paced (L1): the live members attached and the tmux ones opened at once; the STOPPED ones resumed ONE AT A
+        // TIME, each when the previous one's create has ended — never every create in one synchronous loop (resume-pacer.js)
+        resumeGroup(this.app, taskSessions, { nameOf: (s) => this.getCustomName(s) || s.name });
       };
       header.appendChild(resumeAllBtn);
 
