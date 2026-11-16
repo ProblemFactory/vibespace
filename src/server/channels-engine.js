@@ -2582,7 +2582,10 @@ function create(deps = {}) {
         await retractFailure(rec);
         if (rec.signinDead && !(st && (st.state === 'needs-reauth' || st.state === 'needs-credentials'))) await retractSignin(rec, 'a pass went through');   // lane channel-reauth-visible
         if (rec.signinVerifying && vendorOk > 0 && !(e.passLanding && Number(rec.signinVerifying.since) !== e.passLanding)) await verifiedSignin(rec);   // lane lark-refresh-stall r2: «works again» only after a request with the new sign-in answered (r3: THAT landing's)
-        retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
+        // verify r6: a write that LANDED the whole file puts the sign-in on disk. Cure r1 (C1): this pass's update is PACED (a
+        // promise of memory, not disk), so the warning is withdrawn only when the adapters file has landed — a write that
+        // fails again keeps it open (a restart before a landing would boot on the retired token)
+        if (unsavedItems.has(rec.id)) store.adapters.landed().then(() => retractUnsaved(rec), () => { /* still not on disk: the item stays */ });
         retryHotConvCaps(rec);   // lane gmail-reply-known: an open window's refused send row asks again now
         notify(changed.filter((k) => !early.has(k)), { full: false });
         try { await revisionsPass(rec, e); } catch (err) { log.warn(`[channels] ${rec.id}: the revisions recheck failed (the next pass asks again): ${(err && err.message) || err}`); }   // lane channel-record-revisions
@@ -6958,7 +6961,8 @@ function create(deps = {}) {
    *  the live record BEFORE the file write (the process keeps using the vendor's token; the disk lags until the next
    *  successful adapters write), so the ONE thing nothing on disk can know is what a restart before that means — under
    *  Lark's rotation the disk holds a RETIRED token and the next boot's refresh is `invalid_grant`. ONE open item per
-   *  account, in memory (the store is what failed), retracted by the next write that lands (a token write, a passing pass). */
+   *  account, in memory (the store is what failed), retracted by the next write that lands (a token write, a passing pass —
+   *  channel-store-off-loop cure r1: a pass's paced update waits for `store.adapters.landed()`, never its own resolve). */
   const unsavedItems = new Map();   // rec.id -> {id, text}
   function speakUnsaved(rec, err) {
     const why = String((err && err.message) || err || 'write refused').slice(0, 200);

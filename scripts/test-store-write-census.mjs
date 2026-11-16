@@ -406,8 +406,19 @@ console.log('② the moved stores hand their bytes to the writer by name; nothin
   // channel-store-off-loop (commit 1): the field-named doors and their same-bytes twins hand their bytes to the writer BY NAME
   const doors = [['adaptersUpdate', "owe(adaptersFile, { name: 'channels-adapters.write'"], ['outboxUpdate', "owe(outboxFile, { name: 'channels-outbox.write'"], ['groupsUpdate', "owe(groupsFile, { name: 'channels-groups.write'"], ['aliasesUpdate', "owe(aliasesFile, { name: 'channels-aliases.write'"], ['peopleWrite', "owe(file, { name: 'channels-people.write'"], ['oweStamps', "owe(stampsFile, { name: 'channels-stamps.write'"]];
   const bodyOf = (name) => { const i = cs.indexOf(`function ${name}(`); return i < 0 ? '' : cs.slice(i, cs.indexOf('\n  }\n', i)); };
-  const doorMiss = doors.filter(([fn, call]) => { const b = bodyOf(fn); return !b.includes(call) || /writeJsonAtomic\(|fs\.\w+Sync\(/.test(b); }).map(([fn]) => fn);
-  ok(!doorMiss.length && /fs\.mkdirSync\(path\.dirname\(m\.file\), \{ recursive: true/.test(src('src/store-writer-worker.js')), `the channel store's moved doors (${doors.map(([fn]) => fn).join(', ')}) hand their bytes to the writer by name, with no synchronous call of their own; the writer's thread makes a missing parent directory`, doorMiss);
+  // cure r1 (C3): a door that WAITS holds the loop as surely as one that writes — a writeNow / a flush / an Atomics.wait in a
+  // door's body is red by name (the writer thread's create is ~4 s on the field's mount; the stall leg cannot see a wait)
+  const WAITS_RE = /writeJsonAtomic\(|fs\.\w+Sync\(|writeNow\(|\w*[fF]lush\w*\(|Atomics\.wait\(/;
+  const doorBad = (fn, b) => !b.includes(doors.find((d) => d[0] === fn)[1]) || WAITS_RE.test(b);
+  const doorMiss = doors.filter(([fn]) => doorBad(fn, bodyOf(fn))).map(([fn]) => fn);
+  {   // the census can go red: a door given a synchronous wait «for durability» (the sequence the verifier named)
+    const b = bodyOf('adaptersUpdate'), waited = b.replace('return paced ? run', 'writeNow(adaptersFile);\n    return paced ? run');
+    ok(b !== waited && !doorBad('adaptersUpdate', b) && doorBad('adaptersUpdate', waited), 'NEGATIVE CONTROL (cure r1, C3): adaptersUpdate given a synchronous writeNow(adaptersFile) is a door that WAITS — red by name');
+    const oweB = bodyOf('owe'), landedB = bodyOf('landed');
+    ok((oweB.match(/writeNow\(/g) || []).length === 1 && /\n    if \(closed\) writeNow\(file\);/.test(oweB) && /async function landed\(/.test(cs) && landedB && !WAITS_RE.test(landedB),
+      'owe() writes through the writer synchronously ONLY after close() (`if (closed) writeNow(file)` — its one wait), and a durable door\'s landed() is ASYNC (no synchronous wait inside it)', { oweB, landedB: landedB.slice(0, 300) });
+  }
+  ok(!doorMiss.length && /if \(!e \|\| e\.code !== 'ENOENT' \|\| !m\.makeDir\) throw e;\n\s*fs\.mkdirSync\(path\.dirname\(m\.file\), \{ recursive: true/.test(src('src/store-writer-worker.js')), `the channel store's moved doors (${doors.map(([fn]) => fn).join(', ')}) hand their bytes to the writer by name, with no synchronous call AND no synchronous wait of their own; the writer's thread makes a missing parent directory ONLY for a write that asks (makeDir — the people door)`, doorMiss);
   ok(/W\(\)\.dirty\(indexFile, \{ name: 'channels-index\.write'/.test(cs) && !/writeBuffersAtomic\(indexFile/.test(cs), 'the channels index: markDirty / flush hand it to the store writer — no writeBuffersAtomic(indexFile …) left on the main thread');
   ok(/storeWriter\(\)\.dirty\(fp, \{ name: 'session-meta\.write'/.test(ss) && /if \(!sync && !knownOnDisk\(META_DIR, fp\)\)/.test(ss), 'session-meta: its UPDATES through the writer; only a meta that does not exist ON DISK yet (a socket being born — round 3, law 3) is written synchronously (the durable row)');
   ok(/storeWriter\(\)\.dirty\(this\.cursorsFile, \{ name: 'usage-cursors\.write'/.test(uh) && !/timedSync\('usage-cursors\.write', \(\) => this\._writeAtomic/.test(uh), 'the usage cursors through the writer');

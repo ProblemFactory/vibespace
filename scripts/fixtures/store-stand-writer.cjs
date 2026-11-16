@@ -1,0 +1,40 @@
+'use strict';
+// A STAND-IN STORE-WRITER THREAD for in-process suites (channel-store-off-loop: test-channel-store-loop-free and
+// test-channel-store-writer-laws). It runs the REAL writeJob (src/store-writer-worker.js) after the milliseconds named in
+// `<ctl>/hold-<basename>` (if that file exists); `<ctl>/fail-<basename>` = that file's write fails (EIO, the storage
+// refusing). `make(ctl)` writes the worker script into `ctl` and returns its path with the switches:
+//   const S = make(dir); SW.create({ workerPath: S.path, ... }); S.hold('adapters.json', 600); S.unhold(...); S.failOn(..., true)
+const fs = require('fs');
+const path = require('path');
+const WORKER = path.join(__dirname, '..', '..', 'src', 'store-writer-worker.js');
+
+function make(ctl) {
+  fs.mkdirSync(ctl, { recursive: true });
+  const file = path.join(ctl, 'stand.cjs');
+  fs.writeFileSync(file, `'use strict';
+const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const path = require('path');
+const { writeJob } = require(${JSON.stringify(WORKER)});
+const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4)), CTL = ${JSON.stringify(ctl)};
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
+  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b);
+  if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);
+  if (fs.existsSync(path.join(CTL, 'fail-' + b))) err = { code: 'EIO', message: 'the storage failed' };
+  else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
+  else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else Atomics.store(S, 3, 0);
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+});
+`);
+  return {
+    path: file,
+    hold: (base, ms) => fs.writeFileSync(path.join(ctl, 'hold-' + base), String(ms)),
+    unhold: (base) => { try { fs.unlinkSync(path.join(ctl, 'hold-' + base)); } catch { } },
+    failOn: (base, on) => { const f = path.join(ctl, 'fail-' + base); if (on) fs.writeFileSync(f, '1'); else try { fs.unlinkSync(f); } catch { } },
+  };
+}
+
+module.exports = { make };
