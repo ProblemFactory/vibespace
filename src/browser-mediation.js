@@ -835,10 +835,10 @@ function loginFillChannelVerdict(road, { proxy = true, external = false, remote 
   let reason;
   if (remoteSession) {
     why = 'remote-session';
-    reason = 'this conversation runs on another machine — Vault login fills run only on a local mediated named browser profile on this Hub.';
+    reason = 'this conversation runs on another machine — Vault login fills run only on a local mediated named browser profile on this Hub — ask the user to run this sign-in from a conversation on this Hub.';
   } else if (proxy === false || why0 === 'no-proxy') {
     why = 'no-proxy';
-    reason = 'this server has no mediating CDP proxy running — Vault login fills require a local mediated browser channel.';
+    reason = 'this server has no mediating CDP proxy running — Vault login fills require a local mediated browser channel — ask the user to restart VibeSpace: the proxy starts with it, and the server log says why it did not.';
   } else if (why0 === 'ephemeral') {
     why = 'ephemeral';
     reason = 'this is the conversation\'s own temporary browser — Vault does not fill logins here (its CDP channel is unmediated, and any sign-in is lost when the temporary browser closes).';
