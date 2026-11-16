@@ -58,7 +58,7 @@ const SYSCALLS = { 0: 'read', 1: 'write', 2: 'open', 3: 'close', 4: 'stat', 5: '
   262: 'newfstatat', 263: 'unlinkat', 264: 'renameat', 267: 'readlinkat', 269: 'faccessat', 271: 'ppoll', 281: 'epoll_pwait', 316: 'renameat2', 332: 'statx', 439: 'faccessat2' };
 
 const { sab, noteSab = null, profileSab = null, gapSab = null, fns = [], stores = [], pid, liveMs = LH.LIVE_MS, rootDir = null, beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS,
-  noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD, bootAt = null, startedAt = null, procRoot = '/proc' } = workerData || {};
+  noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD, bootAt = null, startedAt = null, procRoot = '/proc', censusEveryMs = 0 } = workerData || {};
 /** EVERY LENGTH FROM A CLOCK THAT CANNOT STEP: the process's monotonic clock (uv_hrtime — ONE clock for both threads); the
  *  wall clock only dates a hold once, when it is said (a +2 s or −1 h step of the date invents no hold and moves none). */
 const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
@@ -254,7 +254,7 @@ function settleAsk(now) {
     return;
   }
   if (!q.late && now - q.at > noAnswerMs) { q.late = true; unanswered(q); }
-  if (q.late && !q.enteredSeenAt && Atomics.load(I, 3) - q.beat0 >= 3) { inflight = null; if (q.asker.kind === 'capture') captureDropped(q); }   // the loop turned 3 times and it never ran: dropped
+  if (q.late && !q.enteredSeenAt && Atomics.load(I, 3) - q.beat0 >= 3) { inflight = null; if (q.asker.kind === 'capture') captureDropped(q); else if (q.asker.kind === 'census') censusDropped(q); }   // the loop turned 3 times and it never ran: dropped
 }
 /** an answer → what it says (the check's condition 3): frames; «the stack was nearly full (deep recursion)»; «between
  *  JavaScript frames» for a stack with no JavaScript frame; «frames unreadable (inside the program's own stack
@@ -271,6 +271,7 @@ function textAnswer(text, readers = NO_READ) {
 function answered(q, a, beat, at) {
   if (q.asker && q.asker.kind === 'hold' && Number.isInteger(q.ownUs) && q.ownUs >= 0) { askSpent.push({ at: mono(), ms: q.ownUs / 1000 }); if (askSpent.length > 20000) askSpent.shift(); }   // the budget: what this ask cost the main thread
   if (q.asker.kind === 'capture') return captureAnswered(q, a);
+  if (q.asker.kind === 'census') return censusAnswered(q, a);
   if (q.asker.kind === 'profile') {
     const latency = at != null && q.postedAt != null ? at - q.postedAt : null;
     return profileAnswered(q, a, latency != null ? latency <= noAnswerMs : !q.late);   // a deep sample has no time: at the point unless it was already late
@@ -285,7 +286,7 @@ function answered(q, a, beat, at) {
 /** unanswered at noAnswerMs: its facts stay as they are (no answer yet) — the PURE judgement says what the instant was
  *  by the thread's state at the post (asleep ⇒ the kernel, on the CPU ⇒ native, unread ⇒ not JavaScript) */
 function unanswered(q) {
-  if (q.asker.kind === 'capture') return;   // commit 3: a capture's ask waits — every tick it waits for is booked on its answer
+  if (q.asker.kind === 'capture' || q.asker.kind === 'census') return;   // commit 3: a capture's ask waits — every tick it waits for is booked on its answer (the census's too)
   if (q.asker.kind === 'profile') return profileUnanswered(q);
   q.result = 'late';
   q.asker.h.last = withGlobals(null, fullReading(mono()));
@@ -361,13 +362,13 @@ function tell(h, named, why, unread) {
   try { parentPort && parentPort.postMessage({ ev: 'hold', hold: facts }); } catch { }
 }
 function stepHold(h, now) {
-  if (h.unsampled || h.standDown || inflight) return;   // nothing more is asked while ANY ask is in flight (an abandoned one: until it ran)
+  if (h.unsampled || h.standDown || (inflight && inflight.asker.kind !== 'census')) return;   // nothing more is asked while ANY other ask is in flight (an abandoned one: until it ran); the census's is TAKEN
   // round 4: the switch and a debugger are RE-READ at every step — sampling turned off mid-hold asks nothing more
   const why = LH.stepRefusalOf(Atomics.load(I, 6));   // FLAG_SAMPLING 1, FLAG_DEBUGGER 2, FLAG_KNOWN 8
   if (why) { if (!h.asks.length) h.unsampled = why; else h.standDown = why; return; }
   if (LH.sampleDue(h.k, now - h.fromM, holdMs, samplesPerHold)) {
     if (h.k >= 1 && !LH.budgetAllows(askSpent, now, askBudgetMs)) { h.budgetSpent = true; return; }   // the first sample is always asked; the later ones within the hour's budget
-    h.k++; const q = ask({ kind: 'hold', h }); if (q) h.asks.push(q); else if (!inspector) h.unsampled = 'inspector'; else if (!h.asks.length) h.unsampled = 'failed'; else h.standDown = 'failed'; }
+    h.k++; const q = takeCensusAsk({ kind: 'hold', h }) || ask({ kind: 'hold', h }); if (q) h.asks.push(q); else if (!inspector) h.unsampled = 'inspector'; else if (!h.asks.length) h.unsampled = 'failed'; else h.standDown = 'failed'; }
 }
 /** the main thread's gap entries since the last read, oldest first (a ring of GAPS: more than that unread ⇒ the oldest are
  *  counted lost, never invented) */
@@ -442,6 +443,7 @@ function stepProfile(now) {
   const turning = now - T[1] <= 2 * beatMs + noAnswerMs;
   if (sys !== 'running' && wchan === 'ep_poll' && turning) { pr.samples++; pr.idle++; return; }
   if (sys !== 'running' && wchan && wchan !== '0') { pr.samples++; pr.noJs++; return; }
+  if (!hold && takeCensusAsk({ kind: 'profile', pr, pq: { countedTo: now, counted: false } })) return;   // the census's ask in flight answers this tick (never a wait behind it)
   if (inflight) { if (inflight.late) { pr.samples++; pr.noJs++; } return; }   // a HOLD's ask is out (one in flight): unanswered past noAnswerMs ⇒ no JavaScript frame; else this interval is not asked
   ask({ kind: 'profile', pr, pq: { countedTo: now, counted: false } });
 }
@@ -485,6 +487,7 @@ function stepCapture(c, now) {
   if (stop) { c.stopped = stop; return endCapture(c, now); }
   if (now >= c.untilM) return endCapture(c, now);
   const wchan = readProc(task('wchan')), sys = readProc(task('syscall')), state = LH.stateOf(readProc(task('stat')));
+  if (!hold) takeCensusAsk({ kind: 'capture', c, pending: [] });   // the census's ask in flight is the capture's from now on (never a wait behind it)
   const mine = !!(inflight && inflight.asker.kind === 'capture' && inflight.asker.c === c);
   const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: !!hold, mine, other: !!inflight && !mine });
   const tk = { t: now, k: null };
@@ -612,6 +615,77 @@ async function finishCapture(c) {
   tellCapture(out);
 }
 
+// ── unit loop-day-report M3: THE CENSUS — what the loop spends itself on, by engine (PURE src/loop-census.js) ─────────
+// Over the WHOLE hour, never a profiler: a tick every everyMs (1 s) on average, each interval drawn between half and one and
+// a half of it (as the capture's), classed EXACTLY as a capture's tick (CC.tickOf: the kernel state first — idle is never
+// asked; a hold open = held; stopped; another ask out, a capture or a profile running = not sampled); else ONE ask (commit
+// 1's road, the one in flight) or booked on its own ask in flight. An answer books its ticks on LC.bookOf (the family of
+// the innermost frame inside the install — native time on its JavaScript caller; 'rest'; 'native'). COUNTS ONLY: a tick
+// is a count, an answer's text is read and dropped. ITS PRIORITY IS THE LOWEST: it posts only when no ask is in flight,
+// and a hold, a capture or a profile that finds its ask in flight TAKES it (takeCensusAsk) — none waits behind it; the
+// ticks the census had waiting on it are booked not sampled. Its own cost: each ask's own run (the note's µs) summed and its
+// largest kept; one past LC.ASK_BOUND_MS halves its rate (no slower than one per LC.CENSUS_FLOOR_MS). Paused (its ticks
+// counted, nothing asked) by the gates that stop a capture. The take ({ev: 'census-take', id}) answers the hour's counts
+// and resets them and the rate.
+const LC = require('../loop-census.js');
+let census = null;
+function censusReset(s, now) { s.fromM = now; s.ticks = LC.emptyTicks(); s.pausedBy = {}; s.families = {}; s.asks = 0; s.ownUs = 0; s.maxUs = 0; s.halved = null; s.curEveryMs = s.everyMs; }
+function startCensus(everyMs, now = mono()) {
+  if (census || !I || !(Number(everyMs) > 0)) return;
+  const s = census = { everyMs: Math.max(5, Number(everyMs)), timer: null };
+  censusReset(s, now);
+  const next = () => { s.timer = setTimeout(() => { stepCensus(s, mono()); next(); }, s.curEveryMs * (0.5 + Math.random())); s.timer.unref?.(); };
+  next();
+}
+function stepCensus(s, now) {
+  const why = capRefusal(Atomics.load(I, 6), false);   // the capture's own gates: the setting not read / off, a debugger, the heap near its limit, no inspector
+  if (why) { s.ticks.paused++; s.pausedBy[why] = (s.pausedBy[why] || 0) + 1; return; }
+  const wchan = readProc(task('wchan')), sys = readProc(task('syscall')), state = LH.stateOf(readProc(task('stat')));
+  const own = !!(inflight && inflight.asker.kind === 'census');
+  const k = CC.tickOf({ state, wchan, sys, beatAgeMs: now - T[1], freshMs: 2 * beatMs + noAnswerMs, holdOpen: !!hold, mine: own, other: (!!inflight && !own) || !!cap || !!prof });
+  if (k === 'booked') { inflight.asker.pending++; return; }
+  if (k === 'ask') { if (!ask({ kind: 'census', s, pending: 1 })) s.ticks.notSampled++; return; }
+  s.ticks[k === 'unsampled' ? 'notSampled' : k]++;
+}
+/** a hold, a capture or a profile that finds the census's ask in flight TAKES it: the one ask out answers for it (posted
+ *  on the same road — its kernel state at the post, its session by that state); the census's waiting ticks are not
+ *  sampled. → the ask, or null (no census ask in flight) */
+function takeCensusAsk(asker) {
+  const q = inflight;
+  if (!q || q.asker.kind !== 'census') return null;
+  q.asker.s.ticks.notSampled += q.asker.pending;
+  q.asker = asker;
+  if (q.late) unanswered(q);   // already past noAnswerMs: what its new owner does with a late ask (a hold: «late»; a profile: no JavaScript frame)
+  return q;
+}
+function censusAnswered(q, a) {
+  const { s } = q.asker;
+  q.result = 'answered';
+  s.asks++;
+  const own = Number.isInteger(q.ownUs) && q.ownUs >= 0 ? q.ownUs : null;
+  if (own != null) { s.ownUs += own; if (own > s.maxUs) s.maxUs = own; }
+  const to = q.text != null ? LC.bookOf(q.text, rootDir) : a && a.kind === 'js' && !a.empty ? null : 'native';
+  if (to === null) s.ticks.notSampled += q.asker.pending; else s.families[to] = (s.families[to] || 0) + q.asker.pending;
+  q.asker.pending = 0;
+  // ITS OWN COST, bounded: one ask past its bound halves the rate (no slower than one per CENSUS_FLOOR_MS) — said in the take
+  const slower = own != null ? LC.slowerAfter(s.curEveryMs, own / 1000) : null;
+  if (slower) { s.curEveryMs = slower; s.halved = { askMs: own / 1000, everyMs: slower, times: (s.halved ? s.halved.times : 0) + 1 }; }
+}
+function censusDropped(q) { const { s } = q.asker; s.ticks.notSampled += q.asker.pending; q.asker.pending = 0; }
+/** THE TAKE: the hour's counts, then they start again (its own ask in flight closes whole: its ticks not sampled) */
+function takeCensus(msg = {}, now = mono()) {
+  const s = census;
+  let out;
+  if (!s) out = { ev: 'census', id: msg.id, off: true };
+  else {
+    if (inflight && inflight.asker.kind === 'census') { s.ticks.notSampled += inflight.asker.pending; inflight.asker.pending = 0; }
+    out = { ev: 'census', id: msg.id, fromM: s.fromM, toM: now, everyMs: s.everyMs, ticks: { ...s.ticks }, pausedBy: { ...s.pausedBy }, families: { ...s.families },
+      asks: s.asks, askOwnMs: s.ownUs / 1000, askMaxMs: s.maxUs / 1000, halved: s.halved };
+    censusReset(s, now);
+  }
+  try { parentPort && parentPort.postMessage(out); } catch { }
+}
+
 function check(now = mono()) {
   if (!I) return null;
   const late = Math.max(0, now - lastCheckAt - beatMs);   // this thread's OWN lateness (a starved or stopped watchdog) — monotonic
@@ -673,10 +747,12 @@ if (parentPort && sab) {
   if (GI) gapRead = Atomics.load(GI, 0);
   base = baseReading(); keepBase(base);   // a baseline from the start (the boot's hold is measured from it, not from its first stale check)
   setInterval(check, beatMs);
+  startCensus(censusEveryMs);   // unit loop-day-report M3: the census starts with the watchdog
   parentPort.on('message', (msg) => {
     if (answerMemory(msg, parentPort)) return; // the memory census (src/worker-memory.js)
     if (msg && msg.ev === 'profile') startProfile(msg);   // law L: the owner pressed «Profile the server for 10 minutes»
     if (msg && msg.ev === 'capture') startCapture(msg);   // commit 3: a CPU capture — the trigger's or the owner's door
+    if (msg && msg.ev === 'census-take') takeCensus(msg);   // M3: the hour's census, taken (and started again)
   });
 }
 

@@ -43,6 +43,7 @@ const SP = require('../storage-path.js');
 const LB = require('./loop-blame.js');
 const LH = require('../loop-hold.js');
 const TS = require('../timed-sync.js'); // lane ledger-dedup-law r8: the store a call is made for, armed before it (timedSync)
+const LC = require('../loop-census.js'); // unit loop-day-report M3: the census's rate and the take's wait (PURE)
 
 const RING_KEEP = 32;
 const RING_MS = 50;
@@ -108,7 +109,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   readMountinfo = () => fs.readFileSync('/proc/self/mountinfo', 'utf8'), registry = () => [], guardOn = () => true,
   now = mono, armed = null, live = true, liveMs = LIVE_MS, ringMs = RING_MS, heldMs = HELD_MS, fresh = false,
   beatMs = LH.BEAT_MS, holdMs = LH.HOLD_MS, noAnswerMs = LH.NO_ANSWER_MS, askBudgetMs = LH.ASK_BUDGET_MS, samplesPerHold = LH.SAMPLES_PER_HOLD,
-  samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc' } = {}) {
+  samplingOn = () => true, holdsOptions = {}, profileEveryMs = LH.PROFILE_EVERY_MS, heapStats = () => { const v8 = require('v8'), f = LH.heapFillOf({ stats: v8.getHeapStatistics(), spaces: v8.getHeapSpaceStatistics(), argv: LH.nodeArgv(), nodeMajor: Number(process.versions.node.split('.')[0]) }); return { used_heap_size: f.used, heap_size_limit: f.limit }; }, procRoot = '/proc', censusEveryMs = LC.CENSUS_EVERY_MS } = {}) {
   if (one && !fresh) return one;
   let roots = [], busy = false, cur = null, isArmed = armed === null ? false : !!armed, ownMount = null;
   const ring = [], fdPaths = new Map(), saidSites = new Map();
@@ -232,6 +233,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   }
 
   let timer = null, beat = null, worker = null, holds = null, dbgSaid = false, beats = 0, heapHigh = false, started = false, workerGone = false, inBeat = false;
+  let censusSeq = 0;
+  const censusWaits = new Map();   // M3: a take asked of the watchdog thread → its answer's resolver
   // the main thread's side of the sample (src/loop-hold.js HOOK_KEY), installed ONCE here: `dbg()` (a debugger port open
   // NOW — the sample checks it on the main thread, also inside a hold the beat cannot see), `note(out)` (THE way an answer
   // leaves: the watchdog closed its session as it posted), `z` (the sample's ENTERED cell + the beat count then — plain
@@ -321,13 +324,14 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         // ordinary hold timed from now — never minutes of «boot» a process spent before the witness existed
         const beforeLoop = (() => { try { return require('perf_hooks').performance.nodeTiming.loopStart < 0; } catch { return false; } })();
         const startedAt = now(), bootAt = beforeLoop ? startedAt - process.uptime() * 1000 : null;
-        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, noteSab, profileSab, gapSab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir, beatMs, holdMs, noAnswerMs, askBudgetMs, samplesPerHold, bootAt, startedAt, procRoot, internals: (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)) }, env: process.env, stdout: false, stderr: false });
+        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, noteSab, profileSab, gapSab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir, beatMs, holdMs, noAnswerMs, askBudgetMs, samplesPerHold, bootAt, startedAt, procRoot, censusEveryMs, internals: (process.moduleLoadList || []).filter((x) => x.startsWith('NativeModule ')).map((x) => x.slice(13)) }, env: process.env, stdout: false, stderr: false });
         require('../worker-memory').trackWorker('sync-fs-witness', worker);
         worker.on('message', (m) => {   // the census's answer, or a hold the watchdog measured (one turn later: the collections are in)
           if (m && m.ev === 'memory') return;
           if (m && m.ev === 'hold' && holds) setImmediate(() => { try { holds.onHold(m.hold); } catch { } });
           if (m && m.ev === 'holdsLost' && holds && typeof holds.onLost === 'function') { try { holds.onLost(m.n); } catch { } }
           if (m && m.ev === 'captured' && holds && typeof holds.onCaptured === 'function') { try { holds.onCaptured(m.c); } catch { } }   // commit 3: a CPU capture's result
+          if (m && m.ev === 'census' && censusWaits.has(m.id)) { const done = censusWaits.get(m.id); censusWaits.delete(m.id); done(m); }   // M3: the hour's census
         });
         worker.on('error', (e) => { workerGone = true; try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
         worker.on('exit', () => { workerGone = true; });
@@ -361,6 +365,17 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
     slot: sab,
     /** the book of holds (src/server/loop-holds.js) — null without the watchdog thread */
     holds: () => holds,
+    /** unit loop-day-report M3: THE HOUR'S CENSUS — what the loop spent itself on, by engine (src/loop-census.js; fold it
+     *  with censusFold) — taken from the watchdog thread, which starts the next hour's counts. → a Promise of the take
+     *  {fromM, toM, everyMs, ticks, pausedBy, families, asks, askOwnMs, askMaxMs, halved}, or null: no watchdog thread, the
+     *  census off, no answer within `waitMs` (that hour's counts are gone — the thread started the next). */
+    census: (waitMs = LC.TAKE_WAIT_MS) => new Promise((resolve) => {
+      if (!worker || workerGone) { resolve(null); return; }
+      const id = ++censusSeq;
+      const t = setTimeout(() => { censusWaits.delete(id); resolve(null); }, waitMs);   // kept: the take settles even when nothing else holds the loop (an exit line)
+      censusWaits.set(id, (m) => { clearTimeout(t); resolve(m && !m.off ? m : null); });
+      try { worker.postMessage({ ev: 'census-take', id }); } catch { censusWaits.delete(id); clearTimeout(t); resolve(null); }
+    }),
     /** the main loop's held time inside [fromM, toM] (monotonic ms): the beat's own gap ring + the gap open now */
     loopHeld: (fromM, toM = now()) => {
       const pairs = []; const n = Math.min(GAPS, Atomics.load(GI, 0));
