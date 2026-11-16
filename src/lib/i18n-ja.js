@@ -1675,7 +1675,7 @@ export default {
   "Antigravity usage reads": "Antigravity の使用量読み取り",
   "Automatically": "自動",
   "Only when I press Re-check": "「再チェック」を押した時だけ",
-  "Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it.": "自動：会話が使用量の上限に達した時に 1 回、作業の区切りが来て 5 分間新しいターンがない時に 1 回読み取ります——アカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。アカウントのメニューの「再チェック」ではいつでも読めます。",
+  "Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves.": "自動：アカウントの会話が使用量の上限に達するたびに 1 回、作業の区切りが来てそのアカウントに 5 分間新しいターンがない時に 1 回読み取ります——後者はアカウントごとに 30 分に最大 1 回、ターン中は読まず、アイドルのアカウントも読みません。「再チェック」を押した時だけ：自動では読みません。どちらを選んでも、アカウントのメニューの「再チェック」は読み取ります：この行が決めるのは自動の読み取りだけです。",
   "Usage read {n}× today: {person} by you · {wall} after a usage wall · {after} after a stretch of work": "今日の使用量の取得 {n} 回：手動 {person} 回 · 上限到達後 {wall} 回 · 作業の区切り後 {after} 回",
   "usage read {n}× today": "今日 {n} 回取得",
   "Auto on popup open (when >30 min stale)": "ポップアップを開いた時に自動（30 分以上古い場合のみ）",

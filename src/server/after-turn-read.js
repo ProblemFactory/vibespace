@@ -6,7 +6,8 @@
 // So: a turn of a conversation on a NAMED account whose harness declares `quota.onDemand.afterTurn` ends (the wrapper's
 // `prompt_end`, src/server/stdout/acp-events.js) ⇒ a quiet wait of QUIET_MS for that account; any turn START of the account
 // cancels it; when it runs out with no turn of the account running, ONE `door.read(key, { afterTurn: true })` — the door
-// third caller (src/server/cli-usage-door.js: its 60 s pace, `accounts.onDemandQuotaRefresh = off`, the judge's STOP).
+// third caller (src/server/cli-usage-door.js: its 60 s pace; the vendor's own row antigravity.autoUsageReads — Off refuses
+// this read and the wall's, never a person's Re-check; holding no value, it reads Off while Claude's row is Off; the judge's STOP).
 //   · THE CEILING: none within PACE_MS of the account's last read by ANY caller, as kept on disk (src/door-reads.js
 //     lastReadAt) — a hub restart adds no read. It is a ceiling, never a cadence: nothing is read because time passed.
 //   · AN IDLE ACCOUNT is never read: no turn ended since its last read ⇒ nothing (the read must follow work).

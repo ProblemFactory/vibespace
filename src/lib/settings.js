@@ -1,4 +1,5 @@
 import { SETTINGS_SCHEMA } from './settings-schema.js';
+import { unsetValue } from '../harness-settings.js';
 
 /**
  * SettingsManager — centralized settings with server persistence and live change events.
@@ -103,11 +104,13 @@ class SettingsManager {
     } catch {}
   }
 
-  /** Get a setting value. Returns the stored override or the schema default. */
+  /** Get a setting value. Returns the stored override or the schema default — for a row nobody set that declares
+   *  `unsetFollows` (Antigravity's automatic usage reads), the followed answer first: the value the server reads
+   *  (src/harness-settings.js unsetValue, ONE rule for both halves). */
   get(path) {
     if (path in this._values) return this._values[path];
     const schema = SETTINGS_SCHEMA[path];
-    if (schema) return schema.default;
+    if (schema) { const u = schema.unsetFollows ? unsetValue(schema, (p) => this.get(p)) : undefined; return u !== undefined ? u : schema.default; }
     return undefined;
   }
 
@@ -117,9 +120,12 @@ class SettingsManager {
     if (!schema) return;
 
     const old = this.get(path);
+    // the rows nobody set that follow this one (unsetFollows) redraw with it
+    const followers = Object.keys(SETTINGS_SCHEMA).filter((p) => SETTINGS_SCHEMA[p] && SETTINGS_SCHEMA[p].unsetFollows && SETTINGS_SCHEMA[p].unsetFollows.setting === path).map((p) => [p, this.get(p)]);
 
-    // If value equals default, remove the override (sparse storage)
-    if (value === undefined || JSON.stringify(value) === JSON.stringify(schema.default)) {
+    // If value equals default, remove the override (sparse storage) — EXCEPT a `storeDefault` row: a person's own pick of
+    // its default is kept as a value, told apart from a row nobody set (which may follow another: unsetFollows)
+    if (value === undefined || (!schema.storeDefault && JSON.stringify(value) === JSON.stringify(schema.default))) {
       delete this._values[path];
     } else {
       this._values[path] = value;
@@ -129,6 +135,7 @@ class SettingsManager {
     if (JSON.stringify(old) !== JSON.stringify(now)) {
       this._notify(path, now, old);
     }
+    for (const [p, was] of followers) { const is = this.get(p); if (JSON.stringify(was) !== JSON.stringify(is)) this._notify(p, is, was); }
     this._dirty.add(path); this._failed.delete(path); this._saved.delete(path);
     this._scheduleSave();
     this._emitSave([path]);
