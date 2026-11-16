@@ -142,8 +142,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     // (an error naming no request), 'lost' (a socket that will not re-send it), 'closed' (its window) — never the 15 s watchdog: a
     // create still in the hub's hands has not ended, and a bulk resume (src/lib/resume-pacer.js) waits for it before the next one
     let endSaid = false;
+    // M1 (主开发's look at L1, 19:11Z): the watchdog releases the join-wait ONLY — the lost-socket watch stays armed after it, because for
+    // a harness whose resume is not re-sent on reconnect (resumeResend false) that watch is the ONLY thing that can say «lost»
     const settled = (how = null, msg = null) => {
-      if (lostWatch) { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey);
+      if (lostWatch && how !== 'watchdog') { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey);
       if (how && how !== 'watchdog' && !endSaid) { endSaid = true; try { onCreateEnd?.(how, msg); } catch { } }
     };
     this._placeCarried(winInfo, winBounds); // the place the window takes from the one it replaces (box, z, maximize, desktop)

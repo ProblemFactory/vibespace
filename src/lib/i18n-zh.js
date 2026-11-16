@@ -12833,8 +12833,16 @@ export default {
   "missing username": "缺少用户名",
   "You submitted a password during takeover, but no save-login card could be created. Add or update the login manually in Vault → Web logins if you want VibeSpace to keep it.": "你在接管期间提交了密码，但未能生成保存登录卡片。若希望 VibeSpace 保管该登录，请在「保险库 → 网站登录」中手动添加或更新。",
   // lane resume-all-paced (L1): the bulk resume's progress, its stop and its failures
+  "{name} ({why})": "{name}（{why}）",
+  "Stopping after the conversation now starting…": "正在停止：当前正在启动的会话完成后就停止…",
+  "Stopped: {r} of {n} resumed, {x} not resumed, {left} not started.": "已停止：{n} 个会话中已恢复 {r} 个，{x} 个未能恢复，{left} 个没有开始。",
+  "the connection dropped before the server answered": "服务器回复前连接已断开",
+  "the server reported an error without a reason": "服务器报告了错误，但没有说明原因",
+  "the server refused it without a reason": "服务器拒绝了，但没有说明原因",
+  "it could not be started on this page": "无法在此页面上启动",
+  "it was not resumed": "没有恢复",
+  "Resuming the group stopped early because of an error on this page.": "因为此页面出错，恢复该组提前停止。",
   "Resuming {i} of {n}…": "正在恢复第 {i} 个会话，共 {n} 个…",
   "Resuming {i} of {n} — {f} could not be resumed": "正在恢复第 {i} 个会话，共 {n} 个——{f} 个无法恢复",
   "{f} of {n} conversations could not be resumed: {list}": "{n} 个会话中有 {f} 个无法恢复：{list}",
-  "Stopped: {done} of {n} resumed — the other {left} were not started.": "已停止：{n} 个会话中已恢复 {done} 个——其余 {left} 个没有开始。",
 };
