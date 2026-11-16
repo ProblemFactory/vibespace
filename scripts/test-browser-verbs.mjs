@@ -739,6 +739,10 @@ const server = http.createServer((req, res) => {
     if (req.url === '/api/agent/browser/audit') return send(200, auditAnswer);
     if (req.url === '/api/agent/browser/tab') return send(tabAnswer._status || 200, tabAnswer);
     if (req.url === '/api/agent/browser/new-child') return send(200, { handle: 'bk-0000000a.1', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.1', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a.1'], unset: [], handles: [] });
+    // hotfix 2.369.405 (lane vault-login): the hub's own verbs a leg below drives from a HOME the product moved — a vault fill
+    // (its prepare, then the fill: the hub fills through its own CDP socket) and `site-reset` (a verb of our own)
+    if (req.url === '/api/agent/browser/fill-vault') return send(200, j && j.prepare ? { ok: true, fillTicket: 'vft-hf405' } : { ok: true, text: 'filled from the vault: shop.example.test password (receipt vr-hf405)', receipt: 'vr-hf405' });
+    if (req.url === '/api/agent/browser/site-reset') return send(200, { ok: true, text: `cleared ${j && j.host} for this profile`, cleared: { host: j && j.host } });
     if (req.url === '/api/agent/browser/use') return send(200, { profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 0, alias: 'work', created: true, env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a'], attachments: [{}] });
     send(404, { error: 'no such route', code: 'not-found' });
   });
@@ -986,7 +990,7 @@ try {
     // CONTROL: a CLI copy with the pre-fix env line (`{ ...process.env }`) lets them through — the leg can go red
     const src = fs.readFileSync(CLI, 'utf8');
     const CTL = path.join(ROOT, 'vibespace-browser-prefix');
-    const patched = src.replace(/const built = V\.childEnv\([^\n]*\n/, 'const built = { env: { ...process.env, ...Object.fromEntries((r.env || []).map((kv) => [kv.slice(0, kv.indexOf(\'=\')), kv.slice(kv.indexOf(\'=\') + 1)])) }, dropped: [] };\n');
+    const patched = src.replace(/const built = (?:startsNothing \? null : )?V\.childEnv\([^\n]*\n/, 'const built = { env: { ...process.env, ...Object.fromEntries((r.env || []).map((kv) => [kv.slice(0, kv.indexOf(\'=\')), kv.slice(kv.indexOf(\'=\') + 1)])) }, dropped: [] };\n');
     fs.writeFileSync(CTL, patched, { mode: 0o755 });
     fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ROOT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT, 'cli-call.js'));
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
@@ -1032,7 +1036,7 @@ try {
     ok(r4.status === 1 && /\[config_unavailable\]/.test(r4.stderr) && r4.stderr.includes(path.join(BAD, 'agent-browser.json')) && realCalls().length === n2c, 'r3: an agent-browser.json that does not parse ⇒ config_unavailable naming it, nothing run', r4.stderr);
     // NEGATIVE CONTROL: the r2 CLI (no compose) in a patched copy hands the binary NO config — it would search the directory
     const csrc = fs.readFileSync(CLI, 'utf8');
-    const cpre = csrc.replace('  if (built.needsConfig) {', '  if (false) {');
+    const cpre = csrc.replace(/  if \((?:built && )?built\.needsConfig\) \{/, '  if (false) {');
     const D3 = path.join(ROOT, 'r2-cfgctl'); fs.mkdirSync(D3, { recursive: true });
     fs.writeFileSync(path.join(D3, 'vibespace-browser'), cpre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D3, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D3, 'cli-call.js'));
     r4 = await nodeCli(path.join(D3, 'vibespace-browser'), ['snapshot'], { env: baseEnv, cwd: DIRTY });
@@ -1322,6 +1326,41 @@ try {
     const composed = lc2 && lc2.env.AGENT_BROWSER_CONFIG && fs.existsSync(lc2.env.AGENT_BROWSER_CONFIG) ? fs.readFileSync(lc2.env.AGENT_BROWSER_CONFIG, 'utf8') : '';
     ok(r3 !== src && r6.status === 0 && /hometrick/.test(composed) && /dumpH\.sh/.test(composed), 'r4 NEGATIVE CONTROL: the r3 home rule (patched copy) composes the agent-written file — its executablePath and args ride the sanctioned road', JSON.stringify({ st: r6.status, composed, err: r6.stderr.slice(0, 200) }));
     fs.rmSync(FAKEHOME, { recursive: true, force: true });
+  }
+  // hotfix 2.369.405 (lane vault-login): A VERB THAT STARTS NO BROWSER PROGRAM IS THE HUB'S OWN ACT. The conversation's HOME
+  // is an account folder the PRODUCT set (an Antigravity account spawns with HOME=<its own root>: src/harnesses/antigravity.js
+  // spawnEnvOf) and the resolve names no config (a server-side vault fill's answer leaves the environment basis out on purpose:
+  // routes/browser.js). The vault fill and a verb of our own are answered by the hub — nothing of the browser program built,
+  // checked or refused; a verb that STARTS the program keeps the HOME fence (the CONTROL). RED on 2.369.404 (d7f42cc21): the
+  // fill and the verb were refused config_unavailable before the hub was asked.
+  {
+    const ACCT = path.join(ROOT, 'acct-root-antigravity'); fs.mkdirSync(ACCT, { recursive: true });
+    const movedEnv = { ...baseEnv, HOME: ACCT };
+    auditAnswer = { ok: true };
+    resolveAnswer = { ok: true, kind: 'attachment', handle: 'work', env: [], unset: [], handles: [], pinTab: false, profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: 1790000000000 }, others: 0 };
+    const nr = realCalls().length;
+    const n0 = calls.length;
+    const vf = await cli(['fill', '#npw', '--vault', 'shop.example.test/password'], movedEnv);
+    const vfCalls = calls.slice(n0).filter((x) => x.path === '/api/agent/browser/fill-vault');
+    ok(vf.status === 0 && /filled from the vault/.test(vf.stdout) && !/config_unavailable/.test(vf.stderr) && vfCalls.length === 2 && vfCalls[0].body.prepare === true && !vfCalls[1].body.prepare && vfCalls[1].body.spec === 'shop.example.test/password' && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+      'hotfix .405: HOME moved by the product (an Antigravity account root), no config from the server — `fill --vault` is answered by the HUB (its prepare, then the fill), no browser program run, nothing composed or refused', JSON.stringify({ status: vf.status, out: vf.stdout.slice(-200), err: vf.stderr.slice(-400), fills: vfCalls.length }));
+    // the JOB road (routes/browser.js resolveForJob leaves the environment basis out the same way): a job's token, the job's answer
+    const jobEnv = { ...movedEnv, VIBESPACE_JOB_TOKEN: 'vsjt_fake' }; delete jobEnv.VIBESPACE_SESSION_TOKEN;
+    resolveAnswer = { ...resolveAnswer, job: true, isDefault: true };
+    const nj = calls.length;
+    const vj = await cli(['fill', '#npw', '--vault', 'shop.example.test/password'], jobEnv);
+    const vjCalls = calls.slice(nj).filter((x) => x.path === '/api/agent/browser/fill-vault');
+    ok(vj.status === 0 && /filled from the vault/.test(vj.stdout) && !/config_unavailable/.test(vj.stderr) && vjCalls.length === 2 && calls.slice(nj).every((x) => x.auth === 'Bearer vsjt_fake') && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+      'hotfix .405: …and on the JOB road (a job\'s token, the job resolve\'s answer): the vault fill is answered by the hub, nothing composed or refused', JSON.stringify({ status: vj.status, out: vj.stdout.slice(-200), err: vj.stderr.slice(-400), auth: [...new Set(calls.slice(nj).map((x) => x.auth))] }));
+    resolveAnswer = { ...resolveAnswer, job: undefined, isDefault: undefined };
+    const n1 = calls.length;
+    const sr = await cli(['site-reset', 'shop.example.test'], movedEnv);
+    ok(sr.status === 0 && /cleared shop\.example\.test/.test(sr.stdout) && !/config_unavailable/.test(sr.stderr) && calls.slice(n1).some((x) => x.path === '/api/agent/browser/site-reset' && x.body && x.body.host === 'shop.example.test') && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+      'hotfix .405: …the same for a verb of our own (`site-reset`): answered by the hub, nothing of the browser program built, checked or refused', JSON.stringify({ status: sr.status, out: sr.stdout.slice(-200), err: sr.stderr.slice(-400) }));
+    const op = await cli(['open', 'about:blank'], movedEnv);
+    ok(op.status === 1 && /\[config_unavailable\]/.test(op.stderr) && op.stderr.includes(ACCT) && realCalls().length === nr && !fs.existsSync(path.join(ACCT, '.vibespace')),
+      'hotfix .405 CONTROL: the same moved HOME and the same answer — `open` (a verb that STARTS the browser program) is still refused config_unavailable by the HOME fence, nothing run', op.stderr);
+    fs.rmSync(ACCT, { recursive: true, force: true });
   }
   // r4 (takeover finding 4) end to end: an OLDER server's answer (no spawnEnv, no config) — the shell's config is
   // not the child's; the CLI composes one
