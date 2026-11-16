@@ -1344,7 +1344,7 @@ console.log('⑥ THE NEED-WORD NET (reader #5: a sentence that says something fa
   ok(N.fresh.length === 0, `every sentence the need net catches is a row, a non-need with its reason, or an entry of the frozen NEED_DEBT — a NEW one is red by its words (${N.caught})`, N.fresh.slice(0, 12));
   const stale = DEBT.filter((p) => !N.debt.has(p)).concat(SHAPES.filter((r) => !N.debt.has(String(r))).map(String));
   ok(stale.length === 0, 'the NEED_DEBT is current — an entry whose sentence is gone or now claimed by a row is taken out (the list only shrinks)', stale.slice(0, 12));
-  const NEED_DEBT_CEILING = 390;   // the list when the net landed (reader follow-up of picks 1–2) — it may only go DOWN
+  const NEED_DEBT_CEILING = 361;   // re-frozen at the move onto 2.369.405 (70efb5e10) — it may only go DOWN
   ok(DEBT.length > 0 && DEBT.length <= NEED_DEBT_CEILING, `the NEED_DEBT never grows (${DEBT.length} ≤ ${NEED_DEBT_CEILING})`);
   // CONTROL: the reader's planted sentences (logs-reader/planted.log) — three need sentences the r.399 nets let through, and a direction
   const PLANTED = ['Sign-in failed — the token has expired.', 'This machine needs a key before it can connect.', 'Turn it on in the Advanced section of the settings window.', 'Enable it with the switch below.'];
@@ -1392,7 +1392,7 @@ console.log('⑥ WINDOWS, DIALOGS AND MACHINE ROWS (lane ui-needs-a-button pick 
     'machines-27: installed but not dialed in ⇒ «Reinstall…» (the install form again) is the primary, «Remove dial-out» a secondary danger');
   ok(/_offlineMountNeed\(h\) \{[\s\S]{0,400}rs\.state === 'connected'\) return;[\s\S]{0,200}ctx\.body\.prepend\(needLine/.test(SM) && /this\._offlineMountNeed\(h\); \/\/ lane ui-needs-a-button \(storage-5\)/.test(SM),
     'storage-5: a mount onto a dial machine that is not connected says so first, with its pairing sheet on the line (Mount stays live)');
-  ok(/if \(e && e\.code === 'host-name-taken'\) e\.door = this\._hostRowDoor\(v\.name, close\)/.test(SM) && /e\.door && typeof e\.door\.run === 'function'\) err\.append\(' ', needDoorButton\(e\.door\)\)/.test(src('src/lib/mounts-dialog.js')),
+  ok(/if \(e && e\.code === 'host-name-taken'\) e\.door = this\._hostRowDoor\(v\.name, close\)/.test(SM) && /const door = e && e\.door && typeof e\.door\.run === 'function' \? e\.door : null; err\.replaceChildren\(e\.message \|\| tr\('Failed'\), \.\.\.\(door \? \[' ', needDoorButton\(door\)\] : \[\]\)\)/.test(src('src/lib/mounts-dialog.js')),
     'machines-12: a name already taken (ui-language\'s code host-name-taken) carries «Open that machine» on the error line');
   // agents-accounts-6 / -8
   const MA = src('src/lib/manage-agents.js');

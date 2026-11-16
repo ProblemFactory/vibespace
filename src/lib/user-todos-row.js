@@ -162,6 +162,7 @@ const reconnectHtml = (i, t) => (signinItem(i)
 // lane ui-needs-a-button pick 6: A POINTER'S DOOR its registry row declares (foryou-actions doorOf — never a branch per type):
 // ONE button with words on its own line under the sentence — «Open the Outbox» — the item's own door (the model's jump, as the
 // row's body); its closers stay where they are. The house button (need-line's classes), in the answers' container
+// ui-words: the door's verb is an i18nKey its registry row declares (foryou-actions.js open-outbox `door`), never a stored value
 const doorHtml = (i, t) => { const d = doorOf(i); return d ? `<div class="ut-exit-answer ut-door-answer"><button type="button" class="mounts-btn mounts-btn-primary need-door ut-door" data-door="${escHtml(d.opens)}" title="${escHtml(t(d.title || d.verb))}">${escHtml(t(d.verb))}</button></div>` : ''; };
 // lane browser-takeover-queue: an assistant needs the person in its browser — its live view (the same producer-action click)
 const takeoverBtnHtml = (i, t) => (i && i.action && i.action.type === 'browser-takeover' && i.action.requestId
@@ -670,6 +671,7 @@ function partsOf(entry, ctx) {
   // («Open the Outbox») and the same jump; the conversation door stays for every other row
   const parkedGo = isParkedAsk(i) ? t('Open the conversation and answer') : '';
   const rowDoor = doorOf(i);
+  // ui-words: the door's verb is an i18nKey its registry row declares (foryou-actions.js open-outbox `door`), never a stored value
   const go = (notice || entry.band) && rowDoor ? `<button type="button" class="ut-go ut-go-door" title="${escHtml(t(rowDoor.title || rowDoor.verb))}" aria-label="${escHtml(t(rowDoor.verb))}" data-label="${escHtml(t(rowDoor.verb))}">${UI_ICONS.external}</button>`
     : notice || entry.band ? `<button type="button" class="ut-go${parkedGo ? ' ut-go-answer' : ''}" title="${escHtml(parkedGo || t('Go to this session'))}" aria-label="${escHtml(parkedGo || t('Go to this session'))}" data-label="${escHtml(parkedGo || tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question

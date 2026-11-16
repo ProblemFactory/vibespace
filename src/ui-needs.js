@@ -30,6 +30,7 @@ const PATHS_LABEL = Object.freeze([
     "Open Settings → Spending",
     "Open in Settings",
     "Open in Settings…",
+    "Change the scale for every app in Settings…",   // ui-controls-and-bugs (desktop-app-launcher.js): the menu row that opens the setting
 ]);
 // a path in the VENDOR's own console (Lark developer console, Nextcloud) — VibeSpace draws nothing there
 const PATHS_VENDOR = Object.freeze([
@@ -143,6 +144,10 @@ const MACHINE_OS = Object.freeze([
     "Set up once on the Mac: System Settings → General → Sharing → tu",
     "Turn it on in Settings → System → Remote Desktop; no firewall op",
     "Windows HDR is captured by TightVNC as it is, with no tone mappi",
+    // machine-needs-at-pairing (machine-settings-door.js): the pane a machine's settings door names, on that machine's own OS
+    "System Settings › General › Sharing",
+    "Settings › System › Remote Desktop",
+    "Settings › System › Sound",
   ]);
 const NEEDS = Object.freeze([
   // ── pick 1: the walk's seven majors ──

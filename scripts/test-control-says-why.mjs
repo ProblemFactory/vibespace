@@ -108,7 +108,7 @@ const STATE_LEDGER = {
   'src/lib/app-install-dialog.js': 1, 'src/lib/app.js': 1, 'src/lib/browser-build-dialog.js': 1, 'src/lib/browser-live-window.js': 9,
   'src/lib/browser-new-profile.js': 4, 'src/lib/browser-proposal-card.js': 2, 'src/lib/browser-replay-window.js': 3, 'src/lib/browser-trace-view.js': 3,
   'src/lib/channel-api-dialog.js': 1, 'src/lib/channel-filter-editor.js': 2, 'src/lib/channel-group-dialogs.js': 1, 'src/lib/channel-outbox.js': 1,
-  'src/lib/channel-webhook.js': 2, 'src/lib/chat-renderers.js': 2, 'src/lib/desktop-app-launcher.js': 14, 'src/lib/desktop-app-window.js': 1,
+  'src/lib/channel-webhook.js': 1, 'src/lib/chat-renderers.js': 2, 'src/lib/desktop-app-launcher.js': 14, 'src/lib/desktop-app-window.js': 1,
   'src/lib/desktop-picker.js': 1, 'src/lib/doc-window-ui.js': 2, 'src/lib/docx-viewer.js': 1, 'src/lib/file-explorer.js': 1,
   'src/lib/inbox-window.js': 3, 'src/lib/integrations-window.js': 1, 'src/lib/learn-card.js': 1, 'src/lib/machine-desktop-handover.js': 1,
   'src/lib/machine-desktop.js': 6, 'src/lib/manage-agents.js': 2, 'src/lib/mounts-dialog.js': 4, 'src/lib/plugins-ui.js': 1,

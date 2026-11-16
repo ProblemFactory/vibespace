@@ -362,6 +362,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     copy: () => actBtn('copy', UI_ICONS.copy, t('Copy'), t('Copy the whole item')),
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
     // lane ui-needs-a-button pick 6: a pointer's DOOR its registry row declares («Open the Outbox») — the model's jump opens it
+    // ui-words: the door's verb is an i18nKey its registry row declares (foryou-actions.js open-outbox `door`), never a stored value
     door: (it) => { const d = doorOf(it) || { verb: '', title: '' }; return actBtn('door', UI_ICONS.external, t(d.verb), t(d.title || d.verb), 'iw-act-primary'); },
     // "Clear content…" (verify r2: the verb had no visible door, only a right-click) — THE model's verb, the one dialog
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
