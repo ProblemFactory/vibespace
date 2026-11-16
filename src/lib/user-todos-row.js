@@ -136,9 +136,9 @@ export function resolvedByText(by, t, item = null) {
   // a row's DECLARED end words (lane queued-is-not-woke: the messages-waiting item's ends — never a raw code in any language)
   const ew = item && item.action ? endWordsOf(item.action.type) : null;
   if (ew && typeof by === 'string' && ew[by]) {
-    // lane turn-never-silent: an end word that names its {time} — the item's own resolution instant, in this device's clock
-    const at = Number(item.resolvedAt); const d = at > 0 ? new Date(at) : null;
-    return t(ew[by], d ? { time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') } : { time: '' });
+    // lane turn-never-silent: an end word that names its {time} — the item's own resolution instant, in the page's one format
+    const at = Number(item.resolvedAt);
+    return t(ew[by], { time: at > 0 ? stampAt(at, { words: true }) : '' });
   }
   return by && by !== 'user' ? by : '';
 }
@@ -179,13 +179,14 @@ const exitAskHtml = (i, t) => (i && i.action && i.action.type === 'exit-run-ask'
     + (i.action.askId ? `<div class="ut-exit-answer"><button type="button" class="ut-act ut-action-exit ut-exit-allow" data-answer="allow">${escHtml(t('Allow'))}</button><button type="button" class="ut-act ut-action-exit ut-exit-deny" data-answer="deny">${escHtml(t('Deny'))}</button></div>` : '')
     + `<div class="ut-exit-note">${escHtml(t('Nothing runs until you answer. After 60 s it is refused.'))}</div>` : '');
 /** lane turn-never-silent P6: a KEPT card's body (foryou-actions keptOf) — the person's choice and when, the next bound and what
- *  happens then, the full time (this device's clock); and its door where it applies (`when`), named by the moment and the act */
-const hhmmOf = (at) => { const d = new Date(Number(at) || 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+ *  happens then, each time in the page's one format (today «19:27», beyond today with its date); and its door where it applies
+ *  (`when`), named by the moment and the act */
+const keptAt = (at) => stampAt(Number(at) || 0, { words: true });
 const keptHtml = (i, t) => {
   const k = keptOf(i); if (!k) return '';
   // the look's P4: the two sentences are ONE dictionary entry per act — each language joins its own (no stray blank in zh / ja)
-  const words = k.act === 'end' ? t('You chose to keep waiting at {time}. If nothing changes, the command is ended by itself at {next}.', { time: hhmmOf(k.at), next: hhmmOf(k.nextAt) })
-    : t('You chose to keep waiting at {time}. If nothing changes, you are asked again at {next}.', { time: hhmmOf(k.at), next: hhmmOf(k.nextAt) });
+  const words = k.act === 'end' ? t('You chose to keep waiting at {time}. If nothing changes, the command is ended by itself at {next}.', { time: keptAt(k.at), next: keptAt(k.nextAt) })
+    : t('You chose to keep waiting at {time}. If nothing changes, you are asked again at {next}.', { time: keptAt(k.at), next: keptAt(k.nextAt) });
   const door = (buttonsFor({ ...i, status: 'open' }) || []).find((b) => b.answer === 'end-command');
   return `<div class="ut-kept"><div class="ut-kept-words">${escHtml(words)}</div>`
     + (door ? `<div class="ut-exit-answer ut-row-buttons"><button type="button" class="ut-act ut-action-exit" data-answer="end-command" title="${escHtml(t(door.title))}">${escHtml(t('End the command now'))}</button></div>` : '') + '</div>';
