@@ -698,7 +698,7 @@ console.log('⑩ round 2 — THE SHELL RUNS FOR A PERSON\'S PRESS ONLY: the usag
   const DOOR = require(path.join(REPO, 'src/server/cli-usage-door.js'));
   const door = DOOR.createCliUsageDoor({
     accounts: { get: (id) => ({ id, backend: 'antigravity' }), resolveForSpawn: () => { throw new Error('stub: no login in this leg'); } },
-    harnessOf: () => ({ label: 'Antigravity', quota: { onDemand: { judge: () => ({ verdict: 'reading' }), argv: ['-p', '/usage'], onWallSignal: true, cwdOf: () => DIR } } }),
+    harnessOf: () => ({ label: 'Antigravity', quota: { onDemand: { judge: () => ({ verdict: 'reading' }), argv: ['-p', '/usage'], onWallSignal: true, cwdOf: () => DIR } }, settings: { prefix: 'antigravity', rows: [{ key: 'autoUsageReads', default: 'on' }] } }),   // its own row for automatic reads (a harness without one is refused by name)
     cliCmds: reg, cacheDir: DIR, setting: () => 'manual', log: () => { }, paceMs: 0,
   });
   const w0 = await door.read('acct-wall', { wall: true });

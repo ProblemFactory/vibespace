@@ -407,6 +407,10 @@ module.exports = { projectReset, WEEK_SEC, unscopedWeeklyTypes: UNSCOPED_WEEKLY_
   normalize,
   predict: require('./claude-predict.js'), // the prediction adapter (usage-predict pick 3): Claude's priors, its unit
   signalFromStream,
+  // THE ROW ITS READS ANSWER TO (lane usage-predict, 2026-11-16 — one row per vendor): every Claude usage read (the ⟳, the popup's
+  // refresh, the CLI's background refresh) answers to this instance row; its «off» («never contact Anthropic») refuses them all,
+  // a person's press included — src/server/cli-usage-door.js reads it as the vendor's row for any account of this harness
+  readsRow: 'accounts.onDemandQuotaRefresh',
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim
   classifyServeFailure, SERVE_CENSUS, // a LAPSED subscription (durable) vs a transient auth failure (the 10-min mark)

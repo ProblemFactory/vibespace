@@ -128,9 +128,9 @@ async function doorLegs(DoorMod) {
   leg('an AGENT\'s call (no person) is refused 403 and agy never runs', a0.status === 403 && a0.code === 'agent_forbidden' && runs().length === 0, JSON.stringify(a0));
   const s0 = await door.read(off.id, { person: true });
   leg('a signed-out account: 409 login-needed, agy never runs', s0.status === 409 && s0.loginNeeded === true && runs().length === 0, JSON.stringify(s0));
-  setting = 'off';
-  const o0 = await door.read(acct.id, { person: true });
-  leg('the on-demand refresh setting OFF: 403, agy never runs', o0.status === 403 && o0.code === 'refresh-off' && runs().length === 0, JSON.stringify(o0));
+  setting = 'off';   // every row Off, Antigravity's own among them (one row per vendor, lane usage-predict 2026-11-16): an AUTOMATIC read is refused by Antigravity's row
+  const o0 = await door.read(acct.id, { wall: true });
+  leg('Antigravity\'s own row OFF (antigravity.autoUsageReads): an automatic (wall) read is refused 403 auto-reads-off, agy never runs — a person\'s press asks no row (test-agy-after-turn-read ⑭)', o0.status === 403 && o0.code === 'auto-reads-off' && runs().length === 0, JSON.stringify(o0));
   setting = 'manual';
   installed = false;
   const n0 = await door.read(acct.id, { person: true });

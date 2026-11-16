@@ -1502,13 +1502,15 @@ const SETTINGS_SCHEMA = {
   'accounts.onDemandQuotaRefresh': {
     type: 'enum', default: 'manual',
     options: [
-      { value: 'manual', label: t('Manual (⟳ button) — plus Antigravity’s own reads') },
+      { value: 'manual', label: t('Manual (⟳ button)') },
       { value: 'auto', label: t('Auto on popup open (when >30 min stale)') },
       { value: 'auto-cli', label: t('Auto via the CLI (burn-aware background refresh)') },
       { value: 'off', label: t('Off (never contact Anthropic)') },
     ],
-    label: t('On-demand quota refresh (model-scoped limits like Fable)'),
-    description: t('The passive statusline feed only carries the 5h/7d windows — model-scoped weekly limits (e.g. Fable) can ONLY come from asking Anthropic’s usage endpoint with the account’s own login token. This is the same non-billable call the CLI makes when you run /usage, throttled to ≥60s per account and honoring rate-limit backoff, and it NEVER runs on a timer. It is user-initiated traffic, categorically different from the background polling that has gotten accounts banned — but it is still an off-CLI request with a subscription token, so it is your call: Manual = when you click ⟳, and by itself for Antigravity only: once when a conversation hits a usage wall, and once when an account’s turn ends and 5 minutes pass with no new turn (at most once per account per 30 minutes; never during a turn, never for an idle account); Auto = also once when you open the quota popup and the data is stale; Off = never (the ⟳ button disappears and scoped limits stay unknown); Auto via the CLI = a background loop spawns “claude -p /usage” (the official binary makes the fetch — this app never calls the endpoint itself) with a BURN-AWARE cadence: refreshes within minutes when the dead-reckoner sees real spending drift, 45min-with-jitter staleness cap for active accounts, and idle accounts are never polled.'),
+    label: t('Claude usage refresh (model-scoped limits like Fable)'),
+    // ONE VENDOR (lane usage-predict, 2026-11-16 — the owner's «fable是antigravity吗？»): this row governs Claude's reads only;
+    // Antigravity's automatic reads have their own row (antigravity.autoUsageReads, src/harness-settings.js)
+    description: t('Reads each Claude account’s limits from Anthropic — the only source of model-scoped weekly limits like Fable, which the passive statusline feed does not carry. Manual: only when you press ⟳, at most once a minute per account. Auto on popup open: also once when you open the quota popup and its reading is over 30 minutes old. Auto via the CLI: the official claude CLI reads /usage in the background — sooner while an account burns quota, never for an idle one. Off: never contacts Anthropic, and the ⟳ button is hidden.'),
     category: t('Session'), liveApply: true,
   },
   'usage.dashboard': {

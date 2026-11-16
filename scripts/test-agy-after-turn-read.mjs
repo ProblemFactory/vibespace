@@ -13,7 +13,8 @@
 //   ⑦ A RESTART: a turn end stamped before the hub started arms nothing; the ceiling survives (it is on disk);
 //   ⑧ nothing to arm: the machine's own login, claude / codex, a harness that does not declare `onDemand.afterTurn`;
 //      the door refuses an after-turn read the descriptor does not declare (400) and a caller it does not know (403);
-//   ⑨ the judge's STOP disarms the account until the hub restarts; ⑩ `accounts.onDemandQuotaRefresh = off` refuses it;
+//   ⑨ the judge's STOP disarms the account until the hub restarts; ⑩ ONE ROW PER VENDOR: Claude's row Off stops no Antigravity
+//      read, Antigravity's own row Off refuses its automatic reads (⑭: the door asks the row of the vendor whose account it is);
 //   ⑪ THE WALL'S RESTART RE-READ (the research's finding): a wall replayed after a restart reads nothing more — the rule
 //      on disk; its RED control is stream-wall without that line;
 //   ⑫ RED CONTROLS: the road without its replay guard, its ceiling, its idle check or its busy check, each driven;
@@ -73,7 +74,7 @@ const ANSWERS = {
 const T0 = Date.parse('2026-11-14T10:00:00.000Z');
 const clock = { t: T0, m: 1e6 };   // the wall clock and the steady clock — the suite's own; a «step» moves only the wall
 const iso = (ms) => new Date(ms).toISOString();
-let usageMode = 'reading', setting = 'manual';
+let usageMode = 'reading', setting = 'manual', agyRow = 'on';   // Claude's row (accounts.onDemandQuotaRefresh) and Antigravity's own (antigravity.autoUsageReads)
 const spawned = [];
 const fakeSpawn = (cmd, argv, opts) => {
   spawned.push({ cmd, argv, home: opts.env.HOME, bus: opts.env.DBUS_SESSION_BUS_ADDRESS, cwd: opts.cwd, at: clock.t });
@@ -90,7 +91,7 @@ const logs = [];
 const mkDoor = (harnessOf = (id) => harnesses.get(id)) => DOOR.createCliUsageDoor({
   accounts: am, harnessOf, cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
   cliCmds: { check: async (be, o) => (be === 'antigravity' && o && o.force === true ? '/stand-in/agy' : null) },
-  agentEnv: () => ({ PATH: '/usr/bin' }), setting: () => setting, now: () => clock.t, log: (l) => logs.push(l),
+  agentEnv: () => ({ PATH: '/usr/bin' }), setting: (k) => (k === 'antigravity.autoUsageReads' ? agyRow : setting), now: () => clock.t, log: (l) => logs.push(l),
 });
 let door = mkDoor();
 const timers = [];
@@ -305,13 +306,22 @@ console.log('⑨ the judge\'s STOP — one stop for every automatic caller; ⑩ 
   ok('…a later stretch of that account reads NOTHING: the press\'s stop holds every automatic caller, said once', runsOf(Cc) === 1 && logs.slice(n0).filter((l) => /the automatic reads stopped/.test(l)).length === 1, logs.slice(n0).join(' | '));
   const wl = await door.read(Cc.id, { wall: true });
   ok('…and a wall\'s read of it is refused the same (409 stopped); a person may still press', wl.status === 409 && wl.code === 'stopped' && (await door.read(Cc.id, { person: true })).ok === true && runsOf(Cc) === 2);
+  // ⑩ ONE ROW PER VENDOR (lane usage-predict, 2026-11-16 — the owner looked at the quota row and asked «fable是antigravity吗？»):
+  // Claude's row Off stops no Antigravity read; Antigravity's own row Off refuses its automatic reads (an account of its own here)
+  const V0 = mkAcct('Row zero');
   setting = 'off';
   await pass_(PACE + 60e3);
-  const r2 = mkRoad(), sB = sess(B);
+  const r2 = mkRoad(), sV = sess(V0);
   const n1 = logs.length;
-  await stretch(r2, sB);
-  ok('`accounts.onDemandQuotaRefresh = off` ⇒ the door refuses the after-turn read (nothing spawned, said)', runsOf(B) === 1 && logs.slice(n1).some((l) => /read nothing \(refresh-off/.test(l)), logs.slice(n1).join(' | '));
-  setting = 'manual';
+  await stretch(r2, sV);
+  ok('law 3: Claude\'s row OFF (accounts.onDemandQuotaRefresh = off) stops NO Antigravity read — its after-turn read runs', runsOf(V0) === 1 && !logs.slice(n1).some((l) => /refresh-off/.test(l)), logs.slice(n1).join(' | '));
+  setting = 'manual'; agyRow = 'off';
+  await pass_(PACE + 60e3);
+  const r2b = mkRoad(), sV2 = sess(V0);
+  const n1b = logs.length;
+  await stretch(r2b, sV2);
+  ok('…the other way: Antigravity\'s own row OFF (antigravity.autoUsageReads = off) ⇒ the door refuses its after-turn read by name (auto-reads-off), nothing spawned', runsOf(V0) === 1 && logs.slice(n1b).some((l) => /read nothing \(auto-reads-off/.test(l)), logs.slice(n1b).join(' | '));
+  agyRow = 'on';
   // THE COUNT FIRST, FAIL CLOSED (law A3 b)
   await pass_(PACE + 60e3);
   failWrites = true;
@@ -435,6 +445,16 @@ console.log('⑫ RED CONTROLS: the road and the door without each of their rules
     ok('CONTROL ⑫e (A2): without the steady clock a 25-minute wall-clock step lets a second read go 6 minutes later', runsOf(M5) === 2, String(runsOf(M5)));
   }
   {
+    {
+      // CONTROL ⑫law3: the door with the SHARED check put back (Claude's row read for every account, before the vendor's row) —
+      // an Antigravity wall read under Claude's row Off is refused, the one switch for two vendors the owner could not read
+      const DOORs = mutant('src/server/cli-usage-door.js', "      const h = harnessOf(be) || {};\n", "      const h = harnessOf(be) || {}; { let m0 = 'manual'; try { m0 = setting('accounts.onDemandQuotaRefresh') || 'manual'; } catch { } if (m0 === 'off') return { ok: false, status: 403, code: 'refresh-off', error: 'shared' }; }\n");
+      const VC = mkAcct('Row control');
+      const ds = DOORs.createCliUsageDoor({ accounts: am, harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
+        cliCmds: { check: async () => '/stand-in/agy' }, agentEnv: () => ({ PATH: '/usr/bin' }), setting: (k) => (k === 'antigravity.autoUsageReads' ? 'on' : 'off'), now: () => clock.t, log: (l) => logs.push(l) });
+      const rs = await ds.read(VC.id, { wall: true });
+      ok('CONTROL ⑫law3: with the shared check put back, Claude\'s row Off refuses an Antigravity wall read (refresh-off) — RED as it must; the shipped door reads it (⑭)', rs.code === 'refresh-off' && runsOf(VC) === 0, JSON.stringify(rs).slice(0, 160));
+    }
     const DOORm = mutant('src/server/cli-usage-door.js', '    if (!counted) {', '    if (false) {');
     const dm = DOORm.createCliUsageDoor({ accounts: am, harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
       cliCmds: { check: async () => '/stand-in/agy' }, agentEnv: () => ({ PATH: '/usr/bin' }), setting: () => 'manual', now: () => clock.t, log: (l) => logs.push(l) });
@@ -466,6 +486,67 @@ console.log('⑬ the account row says the day\'s reads — as text, for every ac
   ok('…an account neither read nor counted today gets no row; one with a reading gets its limits', DR.homeAccountEntry(null, DR.todayOf(null, clock.t)) === null && DR.homeAccountEntry({ limits: [{ limitId: 'x' }], fetchedAt: 5 }, DR.todayOf(null, clock.t)).limits.length === 1);
   ok('/api/usage builds each on-demand account\'s row through that one helper (doorReads.homeAccountEntry)', /const row = doorReads\.homeAccountEntry\(c, reads\);/.test(UR) && /if \(row\) out\[a\.id\] = row;/.test(UR));
   ok('…the roster draws the count as TEXT on the identity line (no badge, no colour), its title the split, patched at every poll', MAs.includes('<span class="acct-key-tail">${ident}${readsNote(a.id)}</span>') && MAs.includes("document.querySelectorAll('.acct-reads[data-reads-key]')") && !/acct-reads[^\n]*(badge|color)/.test(MAs));
+}
+
+console.log('⑭ ONE ROW PER VENDOR (the owner 2026-11-16: «fable是antigravity吗？») — the door asks the row of the vendor whose account it is');
+{
+  const tick = (ms) => { clock.t += ms; clock.m += ms; };   // the door's own 60 s pace passes; no road's wait is armed here
+  const AGYH = harnesses.get('antigravity');
+  const V1 = mkAcct('Row one'), V2 = mkAcct('Row two'), V3 = mkAcct('Row three'), V4 = mkAcct('Row four');
+  // (a1) a vendor whose reads answer to an INSTANCE row (quota.readsRow — Claude's accounts.onDemandQuotaRefresh): its Off refuses
+  //      at the door, a person's press included («Off (never contact Anthropic)» is a promise; the door is its last fence)
+  const claudeRowed = { ...AGYH, label: 'A Claude-row CLI', quota: { ...AGYH.quota, readsRow: 'accounts.onDemandQuotaRefresh' } };
+  const dC = mkDoor((id) => (id === 'antigravity' ? claudeRowed : harnesses.get(id)));
+  setting = 'off';
+  const c1 = await dC.read(V1.id, { person: true }), c2 = await dC.read(V1.id, { wall: true });
+  ok('(a) an account whose vendor answers to Claude\'s row: its Off refuses at the door — a person\'s press AND an automatic read (refresh-off), nothing spawned', c1.code === 'refresh-off' && c2.code === 'refresh-off' && runsOf(V1) === 0, JSON.stringify([c1.code, c2.code]));
+  setting = 'manual'; agyRow = 'off';
+  const c3 = await dC.read(V1.id, { wall: true });
+  ok('…law 3 the other way: Antigravity\'s row OFF stops no read of a vendor on Claude\'s row — its wall read runs', c3.ok === true && runsOf(V1) === 1, JSON.stringify(c3).slice(0, 160));
+  agyRow = 'on';
+  // (a2) an Antigravity account: an automatic read asks antigravity.autoUsageReads; a press asks no row
+  setting = 'off';
+  const g1 = await door.read(V2.id, { wall: true });
+  ok('(a) an Antigravity account under Claude\'s row OFF: its wall read RUNS — Claude\'s row is not its vendor\'s (law 3)', g1.ok === true && runsOf(V2) === 1, JSON.stringify(g1).slice(0, 160));
+  setting = 'manual'; agyRow = 'off'; tick(61e3);
+  const g2 = await door.read(V2.id, { wall: true }), g3 = await door.read(V2.id, { afterTurn: true });
+  ok('…its own row OFF: the wall read and the after-turn read are refused BY NAME (auto-reads-off, the row named), nothing spawned', g2.code === 'auto-reads-off' && g3.code === 'auto-reads-off' && runsOf(V2) === 1 && /antigravity\.autoUsageReads/.test(g2.error || ''), JSON.stringify([g2, g3]).slice(0, 300));
+  const g4 = await door.read(V2.id, { person: true });
+  ok('…and a PERSON\'s press of it READS (law 5: the ⟳ is the person\'s own act — it asks no row)', g4.ok === true && runsOf(V2) === 2, JSON.stringify(g4).slice(0, 160));
+  agyRow = 'on';
+  // (a3) a harness that declares an automatic read and has NO row of its own: refused BY NAME — fail closed
+  const rowless = { ...AGYH, label: 'A row-less CLI', settings: undefined };
+  const dN = mkDoor((id) => (id === 'antigravity' ? rowless : harnesses.get(id)));
+  const n1 = await dN.read(V3.id, { wall: true }), n2 = await dN.read(V3.id, { afterTurn: true }), n3 = await dN.read(V3.id, { person: true });
+  ok('(a) a harness that declares a wall / after-turn read with NO row of its own: both refused BY NAME (no-auto-reads-row) — no automatic read without a row; a press still reads', n1.code === 'no-auto-reads-row' && n2.code === 'no-auto-reads-row' && /A row-less CLI has no row of its own/.test(n1.error || '') && n3.ok === true && runsOf(V3) === 1, JSON.stringify([n1.code, n2.code, n3.ok]));
+  // (a4) the production road: the TYPED accessor asked with the account's own harness id; an accessor that throws reads as off
+  const calls = [];
+  const dT = DOOR.createCliUsageDoor({ accounts: am, harnessOf: (id) => harnesses.get(id), cacheDir: CACHE, spawnImpl: fakeSpawn, countWriter: () => writer, mono: () => clock.m,
+    cliCmds: { check: async () => '/stand-in/agy' }, agentEnv: () => ({ PATH: '/usr/bin' }), setting: () => 'manual', now: () => clock.t, log: (l) => logs.push(l),
+    harnessSetting: (id, k) => { calls.push(id + '.' + k); if (calls.length > 1) throw new Error('unreadable'); return 'off'; } });
+  const t1 = await dT.read(V4.id, { wall: true }), t2 = await dT.read(V4.id, { afterTurn: true });
+  ok('(a) the door asks harnessSetting(<the account\'s harness>, autoUsageReads): off ⇒ refused; an accessor that THROWS reads as off (fail closed)', calls.join() === 'antigravity.autoUsageReads,antigravity.autoUsageReads' && t1.code === 'auto-reads-off' && t2.code === 'auto-reads-off' && runsOf(V4) === 0, JSON.stringify({ calls, t1: t1.code, t2: t2.code }));
+  // the rows themselves
+  const row = (AGYH.settings.rows || []).find((r) => r.key === 'autoUsageReads');
+  ok('the row: antigravity.autoUsageReads in Antigravity\'s own table — on / off, default on, a server row (the door)', AGYH.settings.prefix === 'antigravity' && !!row && row.type === 'enum' && row.default === 'on' && JSON.stringify(row.options.map((o) => o.value)) === '["on","off"]' && row.apply.kind === 'server', JSON.stringify(row));
+  ok('…and Claude\'s descriptor names the row its reads answer to (quota.readsRow — the door reads it, never a literal harness id)', harnesses.get('claude').quota.readsRow === 'accounts.onDemandQuotaRefresh' && !AGYH.quota.readsRow);
+  // law 3 by census: the door names neither row's key; no reader of Claude's row names Antigravity's
+  const DOORSRC = read('src/server/cli-usage-door.js').replace(/\/\/[^\n]*/g, '');
+  const CLAUDE_READERS = ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/usage-routes.js', 'src/server/auto-cli-loop.js', 'src/server/usage-pool-engine.js'];
+  ok('law 3 by census: the door\'s code names no row key (it asks the vendor\'s: quota.readsRow, or its own table\'s autoUsageReads) and none of Claude\'s readers names Antigravity\'s row', !/accounts\.onDemandQuotaRefresh/.test(DOORSRC) && /h\.quota\.readsRow/.test(DOORSRC) && CLAUDE_READERS.every((f) => !/autoUsageReads/.test(read(f))), CLAUDE_READERS.filter((f) => /autoUsageReads/.test(read(f))));
+  // law 4: the migration
+  const MIG = require(path.join(REPO, 'src/server/migrations.js'));
+  let mi = 0;
+  const mf = (doc) => { const f = path.join(ROOT, 'mig-' + (++mi) + '.json'); if (doc !== null) fs.writeFileSync(f, JSON.stringify(doc)); return f; };
+  const rdj = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+  const f1 = mf({ 'accounts.onDemandQuotaRefresh': 'off', 'chat.x': 1 }), r1 = MIG.agyReadsFollowClaudeOff(f1), r1b = MIG.agyReadsFollowClaudeOff(f1);
+  const f2 = mf({ 'accounts.onDemandQuotaRefresh': 'auto' }), r2 = MIG.agyReadsFollowClaudeOff(f2);
+  const f3 = mf({ 'accounts.onDemandQuotaRefresh': 'off', 'antigravity.autoUsageReads': 'on' }), r3 = MIG.agyReadsFollowClaudeOff(f3);
+  const f4 = mf(null), r4 = MIG.agyReadsFollowClaudeOff(f4);
+  ok('law 4, the migration: Claude\'s row Off ⇒ antigravity.autoUsageReads = off, nothing else touched; a second run changes nothing', r1.changed === true && rdj(f1)['antigravity.autoUsageReads'] === 'off' && rdj(f1)['chat.x'] === 1 && r1b.changed === false, JSON.stringify([r1, r1b]));
+  ok('…Claude\'s row not Off ⇒ left as it is (the default on stands); a value of its own is never overwritten; no settings file ⇒ nothing written', !r2.changed && rdj(f2)['antigravity.autoUsageReads'] === undefined && !r3.changed && rdj(f3)['antigravity.autoUsageReads'] === 'on' && !r4.changed && !fs.existsSync(f4), JSON.stringify([r2.why, r3.why, r4.why]));
+  const MIGSRC = read('src/server/migrations.js');
+  ok('…it is a row of the instance\'s one-shot registry (run once under the ledger; its note and its report are the journal lines)', MIG.AGY_READS_MIGRATION_ID === '2026-11-agy-reads-follow-claude-off' && /id: AGY_READS_MIGRATION_ID,\s*\n\s*note: "ONE ROW PER VENDOR/.test(MIGSRC) && MIGSRC.includes("const rep = agyReadsFollowClaudeOff(path.join(dataDir, 'settings.json'));"));
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
