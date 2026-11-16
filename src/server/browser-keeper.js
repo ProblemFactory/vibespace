@@ -2135,6 +2135,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  carries no starttime on a machine that reads them (the tick, judgeEphemeral, a view's port and a start decide by
    *  this); `stop()` still signals only a pid proven `ours`. */
   const daemonGone = (rec) => ['gone', 'recycled', 'unrecorded'].includes(livenessOf(rec));
+  /** keeper-sweep-yields: for a RETIRE, «gone» is a fact the keeper has SEEN — a RECORDED pid that is not there, or is another
+   *  process now by its start time. A record with no pid or with no recorded start time cannot be told: its daemon may run, so the
+   *  retire closes it by the CLI as before — the absence of a fact is never read as «gone» (the tick's wider daemonGone would skip
+   *  the close and leave a live daemon and its browser running, nobody ending them). After a restart the recorded pids are simply
+   *  not there — seen gone — so the fast road keeps its zero program starts. */
+  const daemonSeenGone = (rec) => !!rec && Number.isInteger(rec.pid) && rec.pid > 0 && ['gone', 'recycled'].includes(livenessOf(rec));
   /** r5 MAJOR 1 (iii): did THIS launch bring a browser up on `dir`? (its DevToolsActivePort / SingletonLock written anew
    *  since `stamp0`, on a machine that reads process facts) — the evidence that makes "no browser identified" a closure. */
   const launchEvidenced = (dir, stamp0) => !!dir && F.startsReadable() && F.launchStampMoved(stamp0, F.dirLaunchStamp(dir));
@@ -3997,11 +4003,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!p || !isEph(p)) return { removed: false, why: 'not an ephemeral record' };
       // keeper-sweep-yields L2 (measured: the stop's `close --all` under the record's own session was ONE browser-CLI start
       // per record — a start forks the whole hub and holds its main thread until the child execs, the field's second per
-      // record): a record whose daemon is already GONE (dead, recycled, never recorded) has nothing for the CLI to close. It
+      // record): a record whose daemon is SEEN gone (its recorded pid is not there, or is another process now) has nothing for the CLI to close. It
       // is recorded stopped and the browser its dead daemon left is ended by identity — the tick's own act for a gone daemon
       // (markEphemeralGone, then its reap awaited) — with no CLI start. A daemon that runs is still closed by the CLI.
       { const rec0 = reg.browsers[profileId];
-        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonGone(rec0)) {
+        if (B.isLiveBrowser(rec0) && isLocalRec(rec0) && !starting.has(profileId) && !stopping.has(profileId) && daemonSeenGone(rec0)) {
           markEphemeralGone(rec0, 'its retire');
           const rp = reaping.get(profileId); if (rp) { try { await rp; } catch { /* its own journal line */ } }
         } }
