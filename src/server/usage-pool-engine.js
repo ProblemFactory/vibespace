@@ -79,7 +79,7 @@ const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-ca
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
 // the two panels ask the same function.
 const { overageState } = require('../spend-authorizer.js');
-const { captureRateLimitEvent, resolveModelCapLane, lanesSnapshot } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
+const { captureRateLimitEvent, resolveModelCapLane, lanesSnapshot, lanesOf } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
 // ── THE harness registry (S4, docs/design-harness-plugins.md §2.4): each
 // harness declares its QuotaSignalSource = normalize / signalFromStream /
 // probe rung / classifyAuthFailure. The engine asks the registry, never a
@@ -1996,6 +1996,9 @@ function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) 
   try {
     const poolId = session?._accountId || null;
     if (!poolId || accounts.get(poolId)?.type !== 'pooled') { const w = wallSlotFor(session); return { key: w.key, slotOk: !!w.slotOk, reqAt: t }; }
+    // A PROCESS THAT HOLDS ITS SPAWN LOGIN (a non-hot pool — codex) sends every request on that login whatever the link says
+    // (the closure look, M1): the link's history is not its requests' account — the held member is, as wallSlotFor answers it
+    if (heldPoolMemberFor(session, poolId)) { const w = wallSlotFor(session); return { key: w.key, slotOk: !!w.slotOk, reqAt: t }; }
     const sid = session?._webuiId || null;
     const hasOwnLink = sessionHasOwnLink(poolId, sid);
     const rows = slotTransitions.all();
@@ -2005,6 +2008,7 @@ function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) 
       if (r.at > at) continue;
       if (r.at <= t) break;
       if (poolId && r.poolId && r.poolId !== poolId) continue;
+      if (!r.from || r.from === r.to) continue;   // a row that moved nothing (a re-link to the same member) is no move: walk on to the first that did
       if (hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId) first = r;
     }
     if (first && first.from && first.from !== first.to) {
@@ -3777,14 +3781,16 @@ function recordRateLimitEventNow(session, msg) {
     // the lane is named on the key it LANDS on (the guard may have moved it)
     if (writeKey !== preKey && (ev.modelCap || (ev.windows && ev.windows.modelCap))) ev = nameCap(writeKey);
     // LAW 2 (P2): a NAMED model cap this turn never asked this account for is not this account's cap — the lane is archived by
-    // name and the rest of the reading is written (a cap-only record: nothing of it is). The placeholder names no model: unjudged
+    // name and the rest of the record is written, the representative too when it is the cap (a 2.1.274+ record states every
+    // window: its plan 5h and week are a reading of their own — the closure look, M2); a record that states nothing else is
+    // archived whole. The placeholder names no model: unjudged
     if (ev.status !== 'rejected' && (ev.modelCap || (ev.windows && ev.windows.modelCap)) && ev.modelCapName && !turnAskedFamily(session, writeKey, ev.modelCapName)) {
       const fam = ev.modelCapName;
-      console.log(`[usage] rate-limit-event: a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request — the lane archived${ev.modelCap ? '' : ', the rest written'}`);
+      console.log(`[usage] rate-limit-event: a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request — the lane archived, whatever else the record states written`);
       global.__vsEvent?.('usage-reading-cap-unasked', `${writeKey}:${fam}`);
       appendReadingArchive({ key: writeKey, sid: session?._webuiId || '-', what: 'rate-limit-event:model-cap', reason: `a ${fam} model cap on a turn that asked ${nameOf(writeKey)} for no ${fam} request`, matched: [], ownWindow: null, entry: { cap: ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : ev.windows.modelCap, asked: (session._turnAsks && session._turnAsks[writeKey]) || [], slot } });
-      if (ev.modelCap) { postCheck(); return; }
-      ev = { ...ev, windows: { ...ev.windows, modelCap: null }, modelCapLane: null, modelCapName: null, modelCapDisplay: null };
+      ev = { ...ev, ...(ev.modelCap ? { repWithheld: true } : {}), windows: { ...ev.windows, modelCap: null }, modelCapLane: null, modelCapName: null, modelCapDisplay: null };
+      if (!statesALane(ev)) { postCheck(); return; }
     }
     // LAW 3 (P3): A FALL IS NOT A RESET UNTIL SOMETHING CONFIRMS IT — a lane of this record that fell 3 points or more under an
     // unchanged reset, from a conversation the pool re-pointed inside the shadow time, is held: not written (the account keeps
@@ -3795,7 +3801,7 @@ function recordRateLimitEventNow(session, msg) {
       if (held) {
         try { resetClaimsStore().noteFallHeld(writeKey, held.falls, { name: nameOf(writeKey), movedAgoS: held.agoS }); } catch { }
         global.__vsEvent?.('usage-reading-fall-held', `${writeKey}:${held.falls.map((f) => f.lane).join(',')}`);
-        if (held.whole) { postCheck(); return; }
+        if (!statesALane(held.ev)) { postCheck(); return; }   // the record states nothing but what fell: held whole
         ev = held.ev;
       }
     }
@@ -4293,8 +4299,12 @@ function noteTurnAsk(session, model) {
 }
 /** LAW 3's test (P3): the lanes of ONE parsed record that fell FALL_HOLD_MIN_DROP points or more under an unchanged, still-ahead
  *  reset against the account's stored reading, IF the producing conversation was re-pointed inside the shadow time. → null (no
- *  hold) | { falls, whole } (the representative fell: the record is held whole) | { falls, ev } (the rest of the record) */
+ *  hold) | { falls, agoS, ev } — `ev` = the record without the lanes that fell (its representative WITHHELD when it is one of
+ *  them: the record's other lanes did not fall and are written — the closure look, M2). A lane a person claimed reset is not
+ *  held: the press IS law 3's confirmation, and the reading settles the claim (M4: «it counts as N %» was false under one) */
 const FALL_HOLD_MIN_DROP = 3;
+/** Does a (law 2 / law 3 trimmed) record still state any lane — a number, a reset or a refusal? */
+function statesALane(ev) { try { return lanesOf(ev).some((l) => l.dead || l.utilization != null || Number(l.resetsAt) > 0); } catch { return false; } }
 function heldFallOf(session, key, ev, now = Date.now()) {
   try {
     const row = lastRepointRow(session, { at: now, minAt: now - readingLag.SHADOW_MS });
@@ -4306,7 +4316,9 @@ function heldFallOf(session, key, ev, now = Date.now()) {
     const cap = ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.modelCap);
     if (cap && cap.utilization != null && ev.modelCapName) lanes.push({ lane: 'model:' + ev.modelCapName, u: cap.utilization, r: cap.resetsAt, rep: !!ev.modelCap, win: 'modelCap' });
     const falls = [];
+    let claimed = {}; try { claimed = (resetClaimsStore().get(key) || {}).lanes || {}; } catch { }
     for (const x of lanes) {
+      if (claimed[x.lane]) continue;   // a person's press confirms this lane's fall
       const s = stored.get(x.lane);
       if (!s || s.usedPct == null || s.resetsAt == null || !(Number(x.r) > 0)) continue;
       if (Math.abs(Number(x.r) - s.resetsAt) > 60 || !(Number(x.r) * 1000 > now)) continue;   // its window moved, or its reset passed: no fall
@@ -4316,9 +4328,8 @@ function heldFallOf(session, key, ev, now = Date.now()) {
     }
     if (!falls.length) return null;
     const agoS = Math.round((now - row.at) / 1000);
-    if (falls.some((f) => f.rep)) return { falls, whole: true, agoS };
     const windows = { ...(ev.windows || {}) }; for (const f of falls) windows[f.win] = null;
-    return { falls, agoS, ev: { ...ev, windows, ...(falls.some((f) => f.win === 'modelCap') ? { modelCapLane: null, modelCapName: null, modelCapDisplay: null } : {}) } };
+    return { falls, agoS, ev: { ...ev, windows, ...(falls.some((f) => f.rep) ? { repWithheld: true } : {}), ...(falls.some((f) => f.win === 'modelCap') ? { modelCapLane: null, modelCapName: null, modelCapDisplay: null } : {}) } };
   } catch { return null; }
 }
 /** Did THIS turn ask `key` for a `fam` request? The answered ones (noteTurnAsk), and the request in flight now: it asks the
@@ -4328,7 +4339,8 @@ function turnAskedFamily(session, key, fam) {
     const asked = (session._turnAsks && session._turnAsks[key]) || [];
     if (asked.includes(fam)) return true;
     const req = requestSlotFor(session);
-    return !!(req && req.key === key && familyOfModel(sessionModelFor(session)) === fam);
+    if (!req) return true;   // no request of this hub's life is known (a restart mid-turn keeps neither the asks nor the request's instant): unjudged (the closure look, M2)
+    return !!(req.key === key && familyOfModel(sessionModelFor(session)) === fam);
   } catch { return true; } // a question we cannot answer refuses nothing
 }
 function noteModelRequest(session, rec, now = Date.now()) {

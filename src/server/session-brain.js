@@ -9,7 +9,7 @@ const path = require('path');
 
 const { mk } = require('./lazy.js');
 const { titleFromRecord } = require('../discovery-facts.js'); // lane session-title-record: ONE title rule (discovery too)
-const { noteRequestSent, sendsRequest } = require('../turn-state.js'); // PURE: a request's send instant (lane cache-warmth-tiles r4)
+const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = require('../turn-state.js'); // PURE: a request's send instant (lane cache-warmth-tiles r4)
 
 function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory,
   // design-unknown-records (2026-09-21) — the chrome-signal consumers' deps, ALL lazy/optional so the
@@ -199,6 +199,7 @@ function claudeSideEffects(session, sid, msg) {
     }
     try { noteModelRequest?.(session, msg); } catch { } // the conversation's LAST MODEL REQUEST (lane cache-warmth-tiles) — the parse's twin call
     try { noteCompacted?.(session, msg); } catch { } // a compaction's END resets the cache fact (lane cache-warmth-compact) — the parse's twin call
+    if (sendsSubRequest(msg) && !recordIsLate?.(session, msg)) noteSubRequestSent(session, Date.now()); // a SUB-AGENT's request-out: its instant only (lane readings-attribution-2) — the parse's twin
     if (sendsRequest(msg) && !recordIsLate?.(session, msg)) noteRequestSent(session, Date.now()); // a prompt's echo or a TOOL RESULT sends a request; a backlog's proves nothing about now — the parse's twin (lane cache-warmth-tiles r4)
     if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId) && !recordIsLate?.(session, msg)) {
       try {

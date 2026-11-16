@@ -195,7 +195,9 @@ function lanesOf(ev) {
   // (the teardown settle re-drives a wall signal as {kind:'scoped', scopedName})
   const isCap = !!ev.modelCap || (ev.kind === 'scoped' && lower(ev.scopedName) === phKey);
   const lanes = [];
-  if (ev.kind === 'fiveHour' || ev.kind === 'sevenDay' || (ev.kind === 'scoped' && (ev.scopedName || ev.modelCap))) {
+  // `repWithheld` (the engine's law 2 / law 3, lane readings-attribution-2): the representative lane is disputed — it and its own
+  // window are left out, every other window of the record is a reading of its own
+  if (!ev.repWithheld && (ev.kind === 'fiveHour' || ev.kind === 'sevenDay' || (ev.kind === 'scoped' && (ev.scopedName || ev.modelCap)))) {
     lanes.push({
       kind: ev.kind,
       scopedName: ev.kind !== 'scoped' ? null : (isCap ? capName : lower(ev.scopedName)),
