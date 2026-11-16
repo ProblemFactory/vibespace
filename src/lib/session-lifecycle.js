@@ -63,7 +63,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin, quiet = false }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -138,7 +138,14 @@ export function installSessionLifecycle(App, ctx = {}) {
     const resumeKey = resumeId && !fork && winInfo ? `${backend}:${backendSessionId || resumeId}` : null;
     if (resumeKey) { (this._resumeWins ??= new Map()).set(resumeKey, winInfo); this._markResume(winInfo.id); }
     let lostWatch = null;
-    const settled = () => { if (lostWatch) { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey); };
+    // THE CREATE'S END, ONCE (lane resume-all-paced, L1): `onCreateEnd(how, msg)` — 'created' / 'refused' (the hub's answer), 'error'
+    // (an error naming no request), 'lost' (a socket that will not re-send it), 'closed' (its window) — never the 15 s watchdog: a
+    // create still in the hub's hands has not ended, and a bulk resume (src/lib/resume-pacer.js) waits for it before the next one
+    let endSaid = false;
+    const settled = (how = null, msg = null) => {
+      if (lostWatch) { this.ws.offStateChange?.(lostWatch); lostWatch = null; } if (resumeKey && this._resumeWins?.get(resumeKey) === winInfo) this._resumeWins.delete(resumeKey);
+      if (how && how !== 'watchdog' && !endSaid) { endSaid = true; try { onCreateEnd?.(how, msg); } catch { } }
+    };
     this._placeCarried(winInfo, winBounds); // the place the window takes from the one it replaces (box, z, maximize, desktop)
     // Correlation id: concurrent creates (e.g. group resume-all) must each
     // match their OWN 'created' reply — an untagged match binds the ChatView
@@ -230,18 +237,18 @@ export function installSessionLifecycle(App, ctx = {}) {
     // QUEUED (sent while down) goes out at the open: that one is in flight on the new socket.
     if (resumeKey && !(uiRow(backend).resumeResend && !!resumeId && !fork) && this.ws.onStateChange) {
       let out = this.ws.connected !== false, lost = false;
-      lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled(); else out = true; };
+      lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled('lost'); else out = true; };
       this.ws.onStateChange(lostWatch);
     }
     const cancelReq = this.ws.request(createMsg, (msg) => {
       // an error that names NO request (ws-create's «Failed to spawn session» / «Unknown host»): it may be this create's end — the
       // pending resume is released (r4 N2; a press after it creates again), the request stays armed for a late answer
-      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled();
+      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled('error', msg);
       // Server refused the create (e.g. remote subscription-shipping policy):
       // surface it — without this the window stayed BLANK forever with no
       // feedback and no openSpec (found reproducing the remote-blank report).
       if (msg.type === 'error' && msg.reqId === reqId) {
-        pending.remove(); settled();
+        pending.remove(); settled('refused', msg);
         if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(false, msg); } catch { }
         // Resume guard (2.179.0): the conversation is ALREADY live — attach
@@ -384,7 +391,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         return true;
       }
       if (msg.type === 'created' && msg.reqId === reqId) {
-        pending.remove(); settled();
+        pending.remove(); settled('created', msg);
         if (resumeKey) this._markResume(winInfo.id); // the answer's own turn is the resume's too (r4 N5)
         try { onCreateResult?.(true, msg); } catch { }
         // Non-fatal server warning (2.271.0 T1-2): the pre-resume writer sweep
@@ -521,10 +528,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       }
       return false;
     }, {
-      isAlive: () => this._winIs(winInfo) || (settled(), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)
+      isAlive: () => this._winIs(winInfo) || (settled('closed'), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)
       timeoutMs: 15000,
       onTimeout: () => {
-        settled(); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window
+        settled('watchdog'); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window
         try { track('event', 'ws-reply-timeout:create', backend + ':' + sessionMode); } catch { }
         // A slow REMOTE create is not a broken connection — the old wording
         // invited a reload, which abandons the create (fresh creates are not
@@ -538,7 +545,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // THE WATCHES DIE WITH THEIR WINDOW (r5 N1 — the r4 acceptance: closed before its answer, the window's lostWatch stayed registered
     // until the next reconnect, holding the closed window, and removed itself there mid-notify — the listener after it was skipped):
     // the window's close releases the wait, the reconnect watch and the request's own handlers at once (a re-made window: isAlive above)
-    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled(); cancelReq?.(); }, { once: true });
+    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });
   },
 
   _wireTerminalWindow(winInfo, term, sessionId, { killOnClose = true, ephemeral = false, backend = 'claude' } = {}) {
@@ -1047,7 +1054,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     return win;
   },
 
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, initialMessage, stay = false, fromWin = null, unattended = false } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false } = {}) {
     const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
@@ -1183,6 +1190,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       taskId: contextTask?.id,
       winBounds,
       onCreateResult,
+      onCreateEnd, // lane resume-all-paced: the bulk resume waits for this create's END before the next one
       initialMessage, // lane door-signin-card: the chat's «Send my message again» re-sends the waiting turn on resume
     });
     if (row) {

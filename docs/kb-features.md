@@ -1102,6 +1102,8 @@ impossible rather than a review promise.
 - Loading screen: inline splash with animated progress bar, waits for workspace restore to complete before fading out
 - pointer-events:none on window content during drag (prevents iframe/terminal stealing mouse events)
 
+- **«Resume all» goes one at a time (lane resume-all-paced, 2026-11-16 — a fleet hub was flooded twice in one day):** the boot offer's «Resume all {n}» and a Task Group's ▶ («Resume all sessions in …») resume ONE conversation at a time — the next when the hub has answered the one before (or its window was closed, or the connection dropped it), never on a clock. A line says «Resuming 12 of 68…» as it goes, with Stop (the one starting finishes; the rest are not started, and that is said). A conversation the hub refuses is named with its reason at the end; the others go on. A live member of the group is attached at once. ⇒ kb-file-structure «src/lib/resume-pacer.js»
+
 ### Session Management
 
 - **Session Properties = the Task Group window's body shape (lane session-props-scroll, .351).** Root `.task-detail session-props` → ONE scrolling `.task-detail-body` (built once) → every section: padding 10 / 12, 10 px between sections, a 72 px label column (`flex: 0 0 72px`; a longer label wraps, the row aligns on its first baseline). A re-render refills the BODY, keeps its scroll offset, and the history / steps lists hold their old height until their refetch paints. The `.task-detail-body` class IS the contract: never padding / overflow on a window's own root (census test-task-detail-body; Chrome leg in test-task-detail-chrome).

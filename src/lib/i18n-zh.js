@@ -12831,4 +12831,9 @@ export default {
   "missing username or password": "缺少用户名或密码",
   "missing username": "缺少用户名",
   "You submitted a password during takeover, but no save-login card could be created. Add or update the login manually in Vault → Web logins if you want VibeSpace to keep it.": "你在接管期间提交了密码，但未能生成保存登录卡片。若希望 VibeSpace 保管该登录，请在「保险库 → 网站登录」中手动添加或更新。",
+  // lane resume-all-paced (L1): the bulk resume's progress, its stop and its failures
+  "Resuming {i} of {n}…": "正在恢复第 {i} 个会话，共 {n} 个…",
+  "Resuming {i} of {n} — {f} could not be resumed": "正在恢复第 {i} 个会话，共 {n} 个——{f} 个无法恢复",
+  "{f} of {n} conversations could not be resumed: {list}": "{n} 个会话中有 {f} 个无法恢复：{list}",
+  "Stopped: {done} of {n} resumed — the other {left} were not started.": "已停止：{n} 个会话中已恢复 {done} 个——其余 {left} 个没有开始。",
 };

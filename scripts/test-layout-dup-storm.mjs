@@ -621,10 +621,13 @@ function prPage(H, install, { DM = RealDM, LM = RealLM, phone = true, on = 'desk
   const ro = P.wins.get('v-r1'); if (ro) Object.assign(ro, { type: 'chat', gridBounds: phone ? { left: 0, top: 0, width: 1, height: 1 } : PRGB(1), _attached: true, _readOnly: true, _openSpec: { action: 'attachSession', serverId: 'dead-1', backend: 'claude', backendSessionId: PRC(1), cwd: '/srv/p1', mode: 'chat', name: 'Conv 1' } });
   return P;
 }
-// the resume-all's 400 ms stagger runs at 0 here (the fast tier's clock); the loop suite's §14 runs it on the page's real timing
+// the resume-all is PACED (lane resume-all-paced, L1): one create in flight, the next when the previous one's create has ended — so
+// the rig is a stand-in HUB that answers each create (`created`) a tick after it is sent; the 400 ms of a pre-pace copy runs at 0
 const prResumeAll = async (P, stopped) => {
   const st = globalThis.setTimeout; globalThis.setTimeout = (f, ms, ...a) => st(f, ms === 400 ? 0 : ms, ...a);
-  try { return await (P.lm._resumeAll ? P.lm._resumeAll(stopped) : (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(0); } return null; })()); } finally { globalThis.setTimeout = st; }
+  let answered = 0, on = true;
+  const hubLoop = (async () => { while (on) { while (answered < P.creates.length) { const i = answered++, m = P.creates[i]; await tick(0); P.answers[i]?.({ type: 'created', sessionId: 'pr-' + i, cwd: m && m.cwd, mode: 'chat', reqId: m && m.reqId }); } await tick(2); } })();
+  try { return await (P.lm._resumeAll ? P.lm._resumeAll(stopped) : (async () => { for (const d of stopped) { P.app.resumeSession(d.sessionId, d.cwd, d.name, d.opts); await tick(0); } return null; })()); } finally { on = false; await hubLoop; globalThis.setTimeout = st; }
 };
 const rowsOf = (doc, d) => ((doc.desktops[d] && doc.desktops[d].autoSave.windows) || []).map((w) => [w.winId, w.gridBounds ? J(w.gridBounds) : null]);
 async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require(MODEL), WSH = null, quiet = false, legs = null } = {}) {
@@ -643,13 +646,14 @@ async function prLegs({ DM = RealDM, LM = RealLM, install = null, PURE = require
     const same = ['desk-v', 'desk-x', 'desk-y'].every((d) => J(rowsOf(after, d)) === J(rowsOf(before, d)));
     const minted = [...P.wins.keys()].filter((id) => !['v-r1', 'v-f', 'x-r2', 'y-r3'].includes(id));
     const retired = ev.filter((e) => ['v-r1', 'x-r2', 'y-r3'].includes(e.id) && (e.why === 'closed' || e.why === 'replaced' || e.why === 'dup'));
-    const said = toasts(t0).map(toastText);
+    const all = toasts(t0), prog = all.filter((e) => e.dataset && e.dataset.progress === 'resume-all'), said = all.filter((e) => !prog.includes(e)).map(toastText);
     leg(P.creates.length === 3 && same && !minted.length && !retired.length && !refusals(P.sock()).length && sent.length >= 3,
       '§PR (a) a PHONE page resumes 3 stopped conversations held on desktops V (built read-only) / X / Y (never visited) ⇒ every record keeps the SAME window ids and boxes (z too), 0 rows closed or replaced, 0 windows minted for a held conversation, 0 refusals',
       { creates: P.creates.length, minted, retired, before: ['desk-v', 'desk-x', 'desk-y'].map((d) => rowsOf(before, d)), after: ['desk-v', 'desk-x', 'desk-y'].map((d) => rowsOf(after, d)), refused: refusals(P.sock()).length });
     const zs = ['desk-x', 'desk-y'].map((d) => after.desktops[d].autoSave.windows[0].zIndex);
     leg(J(zs) === J([202, 203]), '§PR (a) …each re-opened row keeps its z (the desktop\'s stacking)', zs);
     leg(kept === 3 && J(said) === J(['Resumed 3 conversations where they were']), '§PR (a) NOTHING SILENT: the resume-all says once «Resumed 3 conversations where they were» — no other toast', { kept, said });
+    leg(prog.length === 1 && toastText(prog[0]) === 'Resuming 3 of 3…' && prog[0].removed === true, '§PR (a) …and its progress was ONE line updated in place (lane resume-all-paced: «Resuming 3 of 3…» at the last), gone at the end', prog.map((e) => [toastText(e), !!e.removed]));
   }
   if (want('a2') && install) {
     // (a2) ANY OTHER PHONE OPEN of a held conversation (a card, a sidebar row — no place named): the row is re-opened as ITSELF on its
@@ -1879,7 +1883,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     }
   }
   {
-    const a = '      isAlive: () => this._winIs(winInfo) || (settled(), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait\'s watches (r5 N1)\n';
+    const a = '      isAlive: () => this._winIs(winInfo) || (settled(\'closed\'), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait\'s watches (r5 N1)\n';
     if (ok(LSRC.includes(a), 'mutant pr3-id-alive: the patched line exists in session-lifecycle.js')) {
       const f = await pr3Legs({ install: await loadLifecycle(LSRC.replace(a, '      isAlive: () => this.wm.windows.has(winInfo.id),\n')), quiet: true, legs: ['inst'] });
       ok(f.length === 1 && f[0].startsWith('§PR3 (inst)'), `mutant pr3-id-alive (d159c081b's create: alive while ANY window holds its id): (inst) RED (${f.length})`);
@@ -1959,9 +1963,9 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     }
   }
   for (const [tag, a, b, road, want, why] of [
-    ['pr4-timeout-holds', '        settled(); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window\n', '', 'rel', /^§PR4 \(rel\) N2 RELEASED AT THE WATCHDOG/, "5033f0a06's watchdog: a toast only — the press joins the dead wait"],
-    ['pr4-reqless-holds', "      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled();\n", '', 'rel', /^§PR4 \(rel\) N2 RELEASED AT AN ERROR NAMING NO REQUEST/, "5033f0a06's request: an error naming no request ends nothing"],
-    ['pr4-reconnect-holds', '      lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled(); else out = true; };\n', '      lostWatch = () => {};\n', 'rel', /^§PR4 \(rel\) N2 RELEASED AT A RECONNECT/, "5033f0a06's create: a frame lost with its socket waits for ever"],
+    ['pr4-timeout-holds', '        settled(\'watchdog\'); // the watchdog ends the WAIT (r4 N2): a press after it creates again — a late answer still binds in this window\n', '', 'rel', /^§PR4 \(rel\) N2 RELEASED AT THE WATCHDOG/, "5033f0a06's watchdog: a toast only — the press joins the dead wait"],
+    ['pr4-reqless-holds', "      if (msg.type === 'error' && !msg.reqId && !msg.sessionId) settled('error', msg);\n", '', 'rel', /^§PR4 \(rel\) N2 RELEASED AT AN ERROR NAMING NO REQUEST/, "5033f0a06's request: an error naming no request ends nothing"],
+    ['pr4-reconnect-holds', '      lostWatch = (up) => { if (!up) { if (out) lost = true; } else if (lost) settled(\'lost\'); else out = true; };\n', '      lostWatch = () => {};\n', 'rel', /^§PR4 \(rel\) N2 RELEASED AT A RECONNECT/, "5033f0a06's create: a frame lost with its socket waits for ever"],
     ['pr4-close-holds', '    if (!this._winIs(w)) { this._resumeWins.delete(k); return null; }\n', '', 'rel', /^§PR4 \(rel\) N2 RELEASED AT THE PERSON'S CLOSE/, 'the wait outlives its window — neither the join\'s instance check nor (r5) the close\'s own release'],
     ['pr4-join-silent', " showToast(t('Still resuming this conversation — its window is waiting for the session to start'));", '', 'rel', /^§PR4 \(rel\) N2 A PRESS WHILE THE CREATE IS LIVE/, "5033f0a06's join: focused, said nothing"],
     ['pr4-respawn-pressed', "excludeWebuiId: sess.serverId || undefined, unattended: true });", 'excludeWebuiId: sess.serverId || undefined });', 'z2', /^§PR4 \(z2\) N3 ONLY A PRESS LANDS ON TOP — THE EXIT RESPAWN/, "5033f0a06's respawn: a resume as a press — on top, focused"],
@@ -1970,7 +1974,7 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     ['pr4-second-view-any', '    if (other) { this._fenceSays(', '    if (false) { this._fenceSays(', 'f5', /^§PR4 \(f5\) N5 A SECOND VIEW IS OF THE CONVERSATION/, "5033f0a06's _closeSecondView: any id it is handed"],
   ]) {
     if (ok(LSRC.includes(a), `mutant ${tag}: the patched line exists in session-lifecycle.js`)) {
-      const src = tag === 'pr4-close-holds' ? LSRC.replace("    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled(); cancelReq?.(); }, { once: true });\n", '') : LSRC; // r5 N1: the close releases the wait itself too
+      const src = tag === 'pr4-close-holds' ? LSRC.replace("    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });\n", '') : LSRC; // r5 N1: the close releases the wait itself too
       const f = await pr4Legs({ install: await loadLifecycle(src.replace(a, b)), quiet: true, legs: [road], ends: road === 'rel' ? [{ 'pr4-timeout-holds': 'timeout', 'pr4-reqless-holds': 'reqless', 'pr4-reconnect-holds': 'reconnect', 'pr4-close-holds': 'closed', 'pr4-join-silent': 'join' }[tag]] : null });
       const n = tag === 'pr4-loud-bulk' ? 3 : tag === 'pr4-fence-unmarked' ? 2 : 1;
       ok(f.length === n && f.every((x) => want.test(x)), `mutant ${tag} (${why}): (${road}) RED${n > 1 ? ' ×' + n : ''} (${f.length})`, f);
@@ -2013,8 +2017,8 @@ await section('§6 PR MUTANTS (lane phone-resume-keeps-layout) — each fix remo
     // r5 N1: the window's close no longer releases the watches (the abort line) / the re-make no longer does (isAlive) / the r4 tip (both,
     // and ws.js walking the live array) / the ws client's notify over the live array
     const L5 = read('src/lib/session-lifecycle.js'), WJ = read('src/lib/ws.js');
-    const ab = "    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled(); cancelReq?.(); }, { once: true });\n";
-    const al = "      isAlive: () => this._winIs(winInfo) || (settled(), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)\n";
+    const ab = "    winInfo?._listenerCtl?.signal?.addEventListener?.('abort', () => { settled('closed'); cancelReq?.(); }, { once: true });\n";
+    const al = "      isAlive: () => this._winIs(winInfo) || (settled('closed'), false), // the window INSTANCE (r3 N2): one re-made under the same id is another window — its end releases the wait's watches (r5 N1)\n";
     const tipAl = '      isAlive: () => this._winIs(winInfo), // the window INSTANCE (r3 N2): one re-made under the same id is another window\n';
     const nl = '  _notifyState(connected) { const live = this._stateListeners; for (const h of [...live]) if (live.includes(h)) h(connected); }\n';
     const tipNl = '  _notifyState(connected) { for (const h of this._stateListeners) h(connected); }\n';
