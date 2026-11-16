@@ -453,10 +453,10 @@ const HARNESS_SETTINGS = {
       type: "enum", default: "on",
       options: [
         { value: "on", label: t("Automatically") },
-        { value: "off", label: t("Only when I press ⟳") },
+        { value: "off", label: t("Only when I press Re-check") },
       ],
       label: t("Antigravity usage reads"),
-      description: t("Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press ⟳: nothing is read by itself; the ⟳ on the account's row still reads it."),
+      description: t("Automatically: an account's usage is read once when a conversation hits a usage wall, and once when its stretch of work ends and 5 minutes pass with no new turn — at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself; Re-check in the account's menu still reads it."),
       apply: { kind: 'server', how: 'the CLI usage door — the wall read and the after-turn read' },
     },
     {

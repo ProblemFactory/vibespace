@@ -6545,7 +6545,7 @@ function noteMemberServeFailure(memberId, info = {}, { source = 'a turn', backen
         const item = !pooled ? null : todos && typeof todos.add === 'function' ? todos.add('webui:pool-serve', mode === 'off' ? {
           origin: 'pool', kind: 'notice', urgency: 'normal',
           text: `${name}'s subscription is no longer active (since ${sinceText}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly`,
-          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. On-demand quota refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
+          detail: `The CLI answered «${v.why}» (${source}). The account stays in its pools with its note and readings; nothing is placed on it until it answers again. Claude usage refresh is Off in Settings, so nothing can ask it — Re-check is refused while it is Off; turn it on and press Re-check on its row, or run a turn on the account directly after renewing.`,
           i18n: { text: { key: i18nKey('{account}\'s subscription is no longer active (since {since}): the pool skips it until it answers again — usage refresh is Off in Settings: turn it on to Re-check, or run a turn on it directly'), params: { account: name, since: sinceText } } },
         } : auto ? {
           origin: 'pool', kind: 'notice', urgency: 'normal',

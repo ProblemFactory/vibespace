@@ -436,12 +436,30 @@ console.log('⑨b THE TWO ROWS SAY THE TRUTH — one vendor each (the owner 2026
     C.label === 'Claude usage refresh (model-scoped limits like Fable)' && JSON.stringify(C.options.map((o) => o.label)) === JSON.stringify(['Manual (⟳ button)', 'Auto on popup open (when >30 min stale)', 'Auto via the CLI (burn-aware background refresh)', 'Off (never contact Anthropic)']) && C.default === 'manual', JSON.stringify(C.options));
   ok('…and NO word of Antigravity in it — title, choices or description — in English, Chinese or Japanese', inAll(C, /Antigravity/).every((x) => !x) && words(C).every((w) => !!zh[w] && !!ja[w]), JSON.stringify(inAll(C, /Antigravity/)));
   // law 2: Antigravity's two reads have their own row, where Antigravity's settings are
-  ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', A && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press ⟳']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
-  ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that the ⟳ still reads, in three languages',
-    /usage wall/.test(A.description) && /stretch of work ends and 5 minutes pass/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /the ⟳ on the account's row still reads it/.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
+  ok('law 2: Antigravity\'s row sits in its own section (Antigravity CLI), on / off, on by default', A && A.category === S.SETTINGS_SCHEMA['antigravity.defaultModel'].category && A.default === 'on' && JSON.stringify(A.options.map((o) => [o.value, o.label])) === JSON.stringify([['on', 'Automatically'], ['off', 'Only when I press Re-check']]), JSON.stringify(A && { cat: A.category, opts: A.options }));
+  ok('…its description says when each read fires and its bounds — a usage wall; a stretch of work + 5 minutes; once per account per 30 minutes; never during a turn; never idle — and that Re-check still reads, in three languages',
+    /usage wall/.test(A.description) && /stretch of work ends and 5 minutes pass/.test(A.description) && /at most once per account per 30 minutes/.test(A.description) && /never during a turn/.test(A.description) && /never for an idle account/.test(A.description) && /Re-check in the account's menu still reads it/.test(A.description) && words(A).every((w) => !!zh[w] && !!ja[w]), A.description);
   // law 6: the words — what each choice DOES, one sentence each, a few lines
   ok('law 6: each description opens a sentence per choice with the choice\'s own words, and stays a few lines (≤ 560 characters)',
-    ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press ⟳:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
+    ['Manual:', 'Auto on popup open:', 'Auto via the CLI:', 'Off:'].every((c) => C.description.includes(c)) && ['Automatically:', 'Only when I press Re-check:'].every((c) => A.description.includes(c)) && C.description.length <= 560 && A.description.length <= 560, JSON.stringify([C.description.length, A.description.length]));
+  // THE WORDS NAME THE CONTROL THE PERSON WILL FIND (主开发 2026-11-16 09:46Z): an Antigravity account's row draws no ⟳ — its own
+  // read is its menu's «Re-check» (manage-agents' home rows: doRecheck, the sign-in check then the usage read through the door).
+  // The row says that word, and in each language it is the menu item's OWN dictionary word, so the two cannot drift apart
+  const MA_SRC = read('src/lib/manage-agents.js');
+  const offW = A.options.find((o) => o.value === 'off').label;
+  ok('…the Antigravity row names the control the person will find: «Re-check» in the account\'s menu — the menu item\'s own word in English, Chinese and Japanese (its off choice and its description)',
+    MA_SRC.includes("{ label: t('Re-check'), action: doRecheck },") && !/⟳/.test(offW) && !/⟳/.test(A.description)
+      && [[(x) => x, 'Re-check'], [(x) => zh[x], zh['Re-check']], [(x) => ja[x], ja['Re-check']]].every(([tr, word]) => !!word && String(tr(offW)).includes(word) && String(tr(A.description)).includes(word)),
+    JSON.stringify({ zh: [zh['Re-check'], zh[offW]], ja: [ja['Re-check'], ja[offW]] }));
+  // …and Claude's Off sentence says what is true in BOTH places: the popup hides its ⟳; the Agents panel keeps «Refresh all», which
+  // answers Off with a toast naming the row by its title
+  ok('…Claude\'s «Off» sentence is true in both places: the popup hides its ⟳ under Off, and «Refresh all» stays and says it is off (its toast names «Claude usage refresh») — the button\'s own word in each language',
+    C.description.includes('Off: never contacts Anthropic; the popup hides its ⟳, and Refresh all says it is off.') && /const refreshBtn = odMode === 'off' \? '' :/.test(read('src/lib/usage-meter.js'))
+      && MA_SRC.includes("showToast(t('Claude usage refresh is Off in Settings'), { type: 'error' });") && MA_SRC.includes("refreshAll.innerHTML = `${UI_ICONS.refresh}<span>${t('Refresh all')}</span>`;")
+      && String(zh[C.description]).includes(zh['Refresh all']) && String(ja[C.description]).includes(ja['Refresh all']) && !!zh['Claude usage refresh is Off in Settings'] && !!ja['Claude usage refresh is Off in Settings'],
+    JSON.stringify([zh['Refresh all'], ja['Refresh all']]));
+  ok('…and no word anywhere names the old title «On-demand quota refresh» (the explainer, the toast, the pool\'s notice name «Claude usage refresh»)',
+    ['src/lib/usage-meter.js', 'src/lib/manage-agents.js', 'src/server/usage-pool-engine.js'].every((f) => !/On-demand quota refresh/.test(read(f).replace(/\/\/[^\n]*/g, ''))) && Object.keys(zh).every((k) => !/On-demand quota refresh/.test(k)));
   // the select's width: every option of both rows no wider than the release's manual option (which fit the 390 phone)
   const wu = (t) => [...String(t)].reduce((n, c) => n + (/[　-鿿＀-￯]/.test(c) ? 2 : 1), 0);   // width units: a full-width character counts two
   const REL = { en: wu('Manual (⟳ button) — plus ONE automatic read after a usage wall'), zh: wu('手动（⟳ 按钮）— 另外在撞到用量上限后自动读一次'), ja: wu('手動（⟳ ボタン）— 使用量の上限に達した後に 1 回だけ自動で読み取り') };
