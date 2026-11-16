@@ -372,6 +372,42 @@ console.log('THE BOUNDED CHECK (主开发 13:21Z) — a conversation\'s creation
   const o = W.outcomesOf(W.MA).find((x) => x.lane === 'plan:7d');
   ok('…the moved conversation\'s reading past its ten minutes is taken (91 → 13 %, a reset a reading shows), never held', W.u7(W.MA) === 0.13 && !!o && o.state === 'reset-seen', J({ u7: W.u7(W.MA), o }));
 }
+console.log('THE ASK (主开发 16:41Z) — a model request\'s ask is recorded only under a KNOWN request\'s account');
+// three scenes on one engine: a stand-in restart with no request known; the over-defence control after the first stamp; and the
+// unit's own complaint (the pool moved the conversation, an answer of another family came before the first stamp)
+const askLeg = async (engMod) => {
+  const r = {};
+  {
+    const W = mkWorld(engMod); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP);
+    W.session._isStreaming = true; W.session._turnState = 'running';   // restored running: no request of this hub's life is known
+    W.answer('claude-fable-5');
+    r.asks = W.session._turnAsks || null;
+    r.noAsk = !r.asks || !Object.keys(r.asks).length;
+    W.capReading(0.93, W.R7, 0.71, RCAP); r.filedUnjudged = W.capOf(W.MA) === 0.71 && W.archive().length === 0;
+  }
+  {
+    const W = mkWorld(engMod); const RCAP = W.R7 - 3600; W.stampCap(W.MA, W.R7, RCAP);
+    W.session._isStreaming = true; W.session._turnState = 'running';
+    W.out(); await sleep(3);   // the first stamped request: the conversation's own model (Fable) on the request's account
+    W.capReading(0.93, W.R7, 0.71, RCAP); r.ownFamilyFiled = W.capOf(W.MA) === 0.71 && W.archive().length === 0;
+  }
+  {
+    const W = mkWorld(engMod); const RCAP = W.R7 - 3600; W.stampCap(W.MB, W.R7, RCAP);
+    W.session._servedModel = 'claude-opus-5'; W.session._isStreaming = true; W.session._turnState = 'running';
+    W.move(W.MB); await sleep(3);    // the pool moved the conversation while no request was known
+    W.answer('claude-fable-5');      // an answer of ANOTHER family (in flight on the member left) before the first stamp
+    W.out(); await sleep(3);         // the first stamped request leaves on MB
+    W.capReading(0.93, W.R7, 0.71, RCAP); r.capOnMoved = W.capOf(W.MB);
+    r.notTakenOnMoved = r.capOnMoved === null;
+  }
+  return r;
+};
+{
+  const r = await askLeg(realEng);
+  ok('THE ASK (a stand-in restart, no request known): an answered request records NO ask, and a cap reading of that family is filed (unjudged, as the release files it)', r.noAsk && r.filedUnjudged, J(r));
+  ok('…the over-defence control: after the first stamped request the conversation\'s own family is judged asked — its cap filed, nothing archived', r.ownFamilyFiled, J(r));
+  ok('…and an answer of another family before the first stamp keys no ask to the member the pool moved to — that family\'s cap is not taken there', r.notTakenOnMoved, J(r));
+}
 console.log('MUTANTS — law 1, each red by name');
 {
   const src = read(ENG);
@@ -405,6 +441,13 @@ console.log('MUTANTS — law 1, each red by name');
   let got = null;
   if (m) { const W = mkWorld(m); W.move(W.MC); await sleep(3); W.move(W.MA); await sleep(3); W.out(); await sleep(3); W.reading(0.13); got = W.u7(W.MA); }
   ok('MUTANT (law 3, red by name): every fall taken at once ⇒ the moved conversation\'s 13 % becomes the account\'s number («the weekly limit was reset»)', got === 0.13, J({ got }));
+}
+{
+  const src = read(ENG);
+  const CURE = "    const k = (requestSlotFor(session) || {}).key; if (!k) return;\n";
+  const m = src.includes(CURE) ? require(MUT.write(ENG, src.split(CURE).join("    const k = (requestSlotFor(session) || wallSlotFor(session)).key; if (!k) return;\n"), 'ask-fallback')) : null;
+  const r = m ? await askLeg(m) : null;
+  ok('MUTANT (the ask\'s fresh-slot fallback back, red by name): with no request known the answered request\'s ask is keyed to the link NOW — recorded, and the moved conversation\'s other-family cap is taken on the member it was moved to', !!r && !r.noAsk && !r.notTakenOnMoved, J(r));
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);
